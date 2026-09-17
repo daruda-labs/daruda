@@ -15,6 +15,7 @@ fn status_label(status: Status) -> String {
         Status::Connected => s::remote_connected(),
         Status::Retrying => s::remote_retrying(),
         Status::Failed => s::remote_failed(),
+        Status::HeldElsewhere => s::remote_held_elsewhere(),
     }
 }
 
@@ -211,6 +212,7 @@ mod tests {
             Status::Connecting,
             Status::Connected,
             Status::Retrying,
+            Status::HeldElsewhere,
         ]
         .map(super::status_label);
         assert_eq!(

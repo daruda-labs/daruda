@@ -441,9 +441,9 @@ Interactive Markdown has two independent rendering stacks. The file viewer uses 
 
 **Why this is called out explicitly:** four separate places independently re-derived a `daruda`/`.daruda` path instead of calling the shared resolver — `daruda_config::config_path`, `daruda_config::project::project_config_dir`, `daruda_agent::hooks::status_file::default_dir`, and `workspace::sync::limits::activity_paths`'s cache path — so a debug build silently read and overwrote a real release install's `config.toml`, hook-status files, and activity cache. A fifth case (the Telegram bridge's Keychain-stored bot token sharing one service name across profiles) caused two profiles to 409-conflict polling Telegram with the same token, since Telegram's `getUpdates` rejects a second concurrent poller on one token. Each was fixed independently before the pattern was named — this section and the guardrails below exist so the next one is caught before it ships, not after a live incident.
 
-**The deliberate exceptions, and what makes one.** Two paths under
-`daruda_store::persistence` are profile-**independent** on purpose, and both
-are named there with their reasoning:
+**The deliberate exceptions, and what makes one.** Three paths under
+`daruda_store::persistence` are profile-**independent** on purpose, and each
+is named there with its reasoning:
 
 - `node_install_dir()` — a pinned Node.js runtime is tens of MB and the same
   bytes for every profile, so one install serves all of them.
@@ -451,13 +451,18 @@ are named there with their reasoning:
   mutex on something every profile shares, the user's working tree. A release
   build and a debug build running flows in one checkout have to exclude each
   other, so isolating the lock per profile would defeat it.
+- `remote_lock_root()` — the same shape, one layer out: a claim on the bot
+  account, which is not daruda's either. Telegram serves `getUpdates` to one
+  poller per token and Slack hands each event to one of an app's open sockets,
+  so a release install and a debug build pointed at one bot must exclude each
+  other or the user's replies get split between two routing tables.
 
 The test is what the path *is*, not where it lives: state daruda writes and
 reads back is profile-scoped, and a claim on a resource outside daruda is not.
-Adding a third means adding it to `clippy.toml`'s allow reasoning too.
+Adding a fourth means adding it to `clippy.toml`'s allow reasoning too.
 
 **Enforcement:**
-- `clippy.toml`'s `disallowed-methods` bans a bare `dirs::config_dir` call outside `daruda_store::persistence`'s own two call sites (each marked `#[allow(clippy::disallowed_methods)]` with a comment).
+- `clippy.toml`'s `disallowed-methods` bans a bare `dirs::config_dir` call outside `daruda_store::persistence`'s own call sites (each marked `#[allow(clippy::disallowed_methods)]` with a comment).
 - `scripts/lint-daruda-path-literals.sh` greps for a hand-rolled `.join("daruda")` / `.join(".daruda")` outside the canonical files (`persistence.rs`, `profile.rs`, `observability/log_writer.rs`) and a short, explicit allow-list of genuinely non-profile-scoped exceptions (the per-repo `.daruda/task-*.md` files, the single global `~/.daruda/hooks/notify.sh`).
 - Neither tool catches a hardcoded Keychain/OS-credential-store service name (not a directory path) — review any new one by hand against `crates/app/src/telegram/keychain.rs`'s `service_name()`.
 

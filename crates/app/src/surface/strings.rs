@@ -6794,6 +6794,11 @@ pub fn remote_retrying() -> String {
     rust_i18n::t!("remote_channel.retrying").into_owned()
 }
 
+/// Status shown when another running daruda holds this bot's claim, so this
+/// one neither polls it nor sends through it.
+pub fn remote_held_elsewhere() -> String {
+    rust_i18n::t!("remote.held_elsewhere").into_owned()
+}
 pub fn remote_failed() -> String {
     rust_i18n::t!("remote_channel.failed").into_owned()
 }

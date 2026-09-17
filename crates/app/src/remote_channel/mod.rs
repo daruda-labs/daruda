@@ -5,6 +5,7 @@ pub(crate) mod command;
 pub(crate) mod dispatch;
 pub mod global;
 pub mod keychain;
+pub(crate) mod lock;
 mod pairing;
 pub(crate) mod runtime;
 pub(crate) mod settings;

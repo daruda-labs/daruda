@@ -52,6 +52,27 @@ fn ping() -> BridgePing {
     }
 }
 
+/// A bot another daruda is serving is not this one's to speak into: two
+/// instances both sending would double every ping, and each would remember
+/// only its own as the chat a plain reply belongs to.
+#[gpui::test]
+fn a_channel_another_daruda_holds_sends_nothing(cx: &mut gpui::TestAppContext) {
+    cx.update(|cx| {
+        let mut receiver = setup(cx);
+        cx.global_mut::<RemoteChannels>()
+            .connections
+            .get_mut("personal")
+            .expect("the always-relaying channel")
+            .status = Status::HeldElsewhere;
+
+        assert!(
+            !RemoteChannels::send_ping(ping(), Delivery::Presence { away: false }, cx),
+            "nothing was queued, so nothing was sent"
+        );
+        assert!(receiver.next().now_or_never().is_none());
+    });
+}
+
 #[gpui::test]
 fn presence_is_per_connection_and_revocation_cancels_queued_work(cx: &mut gpui::TestAppContext) {
     cx.update(|cx| {

@@ -35,6 +35,7 @@ use crate::surface::strings as s;
 /// cadence.
 pub(super) fn spawn_poll_task(cx: &mut App) {
     cx.spawn(async move |cx| {
+        let lock_root = daruda_store::persistence::remote_lock_root();
         loop {
             let (enabled, chat_id, token, offset) = cx.update(|cx| {
                 let cfg = SettingsStore::global(cx).user_arc();
@@ -54,14 +55,25 @@ pub(super) fn spawn_poll_task(cx: &mut App) {
             // resynced every iteration, so only its transitions are traced.
             trace::gate_change(enabled, chat_id, token.is_some());
 
-            if !enabled {
-                cx.background_executor().timer(IDLE_RECHECK).await;
-                continue;
-            }
-            let Some(token) = token else {
+            let Some(token) = token.filter(|_| enabled) else {
+                // Let go of the bot on the way out: a daruda that is switched
+                // off, or has lost its token, must not keep the next one from
+                // serving the phone.
+                release_bot(cx);
                 cx.background_executor().timer(IDLE_RECHECK).await;
                 continue;
             };
+
+            // One daruda per bot. Telegram serves `getUpdates` to whichever
+            // poller asked last and answers the rest with a 409, so a second
+            // instance both steals replies and has no routing table to place
+            // them with — the reply lands on whatever chat it happens to be
+            // showing. Asked every iteration rather than once, so the claim is
+            // picked up when the holder quits.
+            if !claim_bot(&lock_root, &token, cx) {
+                cx.background_executor().timer(IDLE_RECHECK).await;
+                continue;
+            }
 
             // Run the blocking `ureq` long-poll off the foreground thread —
             // it can hang for up to POLL_TIMEOUT_SECS and must never stall
@@ -196,6 +208,38 @@ pub(super) fn spawn_poll_task(cx: &mut App) {
         }
     })
     .detach();
+}
+
+/// Take or renew this daruda's claim on the bot, answering whether it may
+/// serve. Only re-asks while the claim is not already ours, so a held lock
+/// costs nothing per iteration.
+fn claim_bot(lock_root: &std::path::Path, token: &str, cx: &mut gpui::AsyncApp) -> bool {
+    use crate::remote_channel::lock::{self, Claim};
+
+    cx.update(|cx| {
+        let bridge = cx.global_mut::<TelegramBridge>();
+        if matches!(bridge.claim, Claim::Ours { .. }) {
+            return true;
+        }
+        bridge.claim = lock::claim(lock_root, token);
+        let serving = bridge.claim.serves();
+        trace::state("bot.claim", || format!("serving={serving}"));
+        serving
+    })
+}
+
+/// Drop the claim, so the bot is free for whichever daruda is still
+/// configured for it.
+fn release_bot(cx: &mut gpui::AsyncApp) {
+    use crate::remote_channel::lock::Claim;
+
+    cx.update(|cx| {
+        let bridge = cx.global_mut::<TelegramBridge>();
+        if matches!(bridge.claim, Claim::Ours { .. }) {
+            trace::state("bot.claim", || "serving=released".to_string());
+        }
+        bridge.claim = Claim::Unavailable;
+    });
 }
 
 /// Answer a tapped callback with a toast, then rewrite the tapped message to

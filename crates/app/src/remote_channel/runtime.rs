@@ -1,7 +1,7 @@
 //! Background gateway ownership. Dropping a worker revokes its event generation.
 
 use super::{
-    keychain,
+    keychain, lock,
     transport::{self, Credentials, Incoming},
 };
 use daruda_config::remote::{ChannelConfig, ChannelKind};
@@ -23,6 +23,9 @@ pub enum Status {
     Connected,
     Retrying,
     Failed,
+    /// Another daruda holds this bot's claim and is the one serving it. Not a
+    /// failure: the user's phone still works, through the other instance.
+    HeldElsewhere,
 }
 
 pub struct WorkerEvent {
@@ -67,6 +70,7 @@ pub fn start(
                         })
                         .is_ok()
             };
+            let lock_root = daruda_store::persistence::remote_lock_root();
             let mut gateway = transport::discord::Gateway::default();
             while !cancelled.load(Ordering::Relaxed) {
                 let service = keychain::channel_service(&config.id);
@@ -86,9 +90,22 @@ pub fn start(
                         continue;
                     }
                 };
-                if !emit(WorkerPayload::Credentials(credentials.clone()))
-                    || !emit(WorkerPayload::Status(Status::Connecting))
-                {
+                if !emit(WorkerPayload::Credentials(credentials.clone())) {
+                    return;
+                }
+                // Held for as long as this iteration's session: one daruda per
+                // bot, or Slack splits the user's replies between whichever
+                // sockets happen to be open. Asked here rather than once at
+                // startup so the claim is picked up when the holder quits.
+                let claim = lock::claim(&lock_root, &credentials.bot);
+                if !claim.serves() {
+                    if !emit(WorkerPayload::Status(Status::HeldElsewhere)) {
+                        return;
+                    }
+                    wait(&cancelled);
+                    continue;
+                }
+                if !emit(WorkerPayload::Status(Status::Connecting)) {
                     return;
                 }
                 let publish = |incoming: Incoming| {
@@ -109,6 +126,9 @@ pub fn start(
                         gateway.session(&credentials, &cancelled, publish, ready)
                     }
                 };
+                // Explicit: the claim is what the session ran under, and the
+                // next iteration must ask for it again rather than inherit it.
+                drop(claim);
                 if cancelled.load(Ordering::Relaxed) {
                     return;
                 }

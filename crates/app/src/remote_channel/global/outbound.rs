@@ -27,7 +27,7 @@ pub(super) struct Prepared {
 
 pub(super) fn prepare(pending: &Pending, cx: &mut App) -> Option<Prepared> {
     let connection = cx.global::<RemoteChannels>().live(&pending.id, cx)?;
-    if connection.generation != pending.generation {
+    if connection.generation != pending.generation || !connection.can_send() {
         return None;
     }
     let recipient = connection.config.recipient.clone()?;

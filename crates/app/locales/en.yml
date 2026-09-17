@@ -1722,3 +1722,4 @@ remote_channel:
   connected: "Connected"
   retrying: "Reconnecting"
   failed: "Connection rejected: check bot permissions"
+  held_elsewhere: "Another daruda is connected to this bot"

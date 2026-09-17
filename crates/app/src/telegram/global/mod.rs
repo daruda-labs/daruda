@@ -19,6 +19,7 @@ use super::bridge::{BridgeCore, BridgePing, Outbound, OutboundMsg, PaneRef, Tele
 use super::client;
 use super::keychain;
 use super::trace;
+use crate::remote_channel::lock::Claim;
 use crate::settings_store::SettingsStore;
 use crate::surface::strings as s;
 
@@ -49,6 +50,13 @@ pub struct TelegramBridge {
     // `Workspace::relay_to_telegram` sends into this via
     // `cx.try_global::<TelegramBridge>()`.
     outbound_tx: UnboundedSender<Outbound>,
+    /// Whether this daruda is the one serving the bot. Taken and refreshed by
+    /// the poll loop, read here by everything that would send: Telegram hands
+    /// `getUpdates` to one poller per token, so a second instance that kept
+    /// sending would put its pings in a conversation it cannot hear the
+    /// answers to. Starts [`Claim::Unavailable`] — serving — because until the
+    /// loop has asked, no other instance is known to be.
+    claim: Claim,
 }
 
 impl Global for TelegramBridge {}
@@ -60,12 +68,19 @@ impl TelegramBridge {
         self.core.command_state_mut()
     }
 
-    /// Whether a message can actually go out: the feature is on and someone
-    /// has paired. The same conditions `Workspace::telegram_bridge` asks, kept
-    /// in one place so the two answers cannot drift apart.
+    /// Whether a message can actually go out: the feature is on, someone has
+    /// paired, and this daruda is the one serving the bot. The first two are
+    /// the conditions `Workspace::telegram_bridge` asks, kept in one place so
+    /// the two answers cannot drift apart; the third is enforced again inside
+    /// [`Self::send`] and [`Self::send_notice`], which every relay reaches
+    /// without passing here.
     fn deliverable(cx: &App) -> bool {
         let cfg = SettingsStore::global(cx).user_arc();
-        cfg.telegram.enabled && cfg.telegram.authorized_chat_id.is_some()
+        cfg.telegram.enabled
+            && cfg.telegram.authorized_chat_id.is_some()
+            && cx
+                .try_global::<TelegramBridge>()
+                .is_some_and(|bridge| bridge.claim.serves())
     }
 
     /// Introduce a chat the phone approved opening, and make it the phone's
@@ -88,6 +103,12 @@ impl TelegramBridge {
     }
     /// Queue a pane-attributed ping for the outbound send loop.
     pub(crate) fn send(&self, ping: BridgePing) {
+        if !self.claim.serves() {
+            trace::delivery("send.dropped", || {
+                format!("reason=bot_held_elsewhere pane={}", trace::pane(ping.pane))
+            });
+            return;
+        }
         let (pane, permission) = (ping.pane, ping.permission.is_some());
         let text = trace::is_on().then(|| trace::tail_digest(&ping.tail));
         match self.outbound_tx.unbounded_send(Outbound::Ping(ping)) {
@@ -111,6 +132,12 @@ impl TelegramBridge {
     /// Queue a standalone notice — text owed to a command the phone sent,
     /// belonging to no pane. See [`Outbound`] for why the distinction matters.
     pub(crate) fn send_notice(&self, text: String) {
+        if !self.claim.serves() {
+            trace::delivery("send.dropped", || {
+                "reason=bot_held_elsewhere kind=notice".to_string()
+            });
+            return;
+        }
         let digest = trace::is_on().then(|| trace::digest(&text));
         match self.outbound_tx.unbounded_send(Outbound::Notice(text)) {
             Ok(()) => trace::delivery("queue.notice", || {
@@ -197,6 +224,13 @@ impl TelegramBridge {
     }
 }
 
+/// Seed the bridge with a claim another daruda holds, so a test can drive the
+/// only state the poll loop reaches by asking the filesystem.
+#[cfg(test)]
+pub(crate) fn hold_bot_elsewhere_for_test(cx: &mut App) {
+    cx.global_mut::<TelegramBridge>().claim = crate::remote_channel::lock::Claim::Theirs;
+}
+
 #[cfg(test)]
 pub(crate) fn install_for_test(
     enabled: bool,
@@ -213,6 +247,7 @@ pub(crate) fn install_for_test(
         core,
         persisted_offset: 0,
         outbound_tx,
+        claim: Claim::Unavailable,
     });
     outbound_rx
 }
@@ -250,6 +285,7 @@ pub fn install(cx: &mut App) {
         persisted_offset: core.current_offset(),
         core,
         outbound_tx,
+        claim: Claim::Unavailable,
     });
 
     spawn_poll_task(cx);
@@ -336,15 +372,28 @@ fn spawn_send_task(
             // agent response queued before an unpair to be addressed to the
             // chat the user just revoked. Config is the single source of
             // truth for where a ping may go; this is where it is asked.
-            let (enabled, chat_id) = cx.update(|cx| {
+            let (enabled, chat_id, serving) = cx.update(|cx| {
                 let cfg = SettingsStore::global(cx).user_arc();
                 let bridge = cx.global_mut::<TelegramBridge>();
                 bridge.core.set_enabled(cfg.telegram.enabled);
                 bridge
                     .core
                     .set_authorized_chat_id(cfg.telegram.authorized_chat_id);
-                (cfg.telegram.enabled, cfg.telegram.authorized_chat_id)
+                (
+                    cfg.telegram.enabled,
+                    cfg.telegram.authorized_chat_id,
+                    bridge.claim.serves(),
+                )
             });
+            // The last gate, for the same reason config is re-read here: a
+            // message queued while this daruda still held the bot must not go
+            // out after another one took it over.
+            if !serving {
+                trace::delivery("send.dropped", || {
+                    "reason=bot_held_elsewhere stage=drain".to_string()
+                });
+                continue;
+            }
             // A token is in hand by here, so `has_token` is not in question —
             // shares the poll loop's dedup slot, which reports the real value.
             trace::gate_change(enabled, chat_id, true);
@@ -549,6 +598,36 @@ mod tests {
     use gpui::TestAppContext;
 
     use super::*;
+
+    /// A bot another daruda is serving is not this one's to speak into: the phone
+    /// already has a daruda answering it, and a second sender doubles every ping
+    /// while remembering only its own as the chat a plain reply belongs to.
+    #[gpui::test]
+    async fn a_bot_another_daruda_holds_queues_nothing(cx: &mut gpui::TestAppContext) {
+        use futures::{FutureExt as _, StreamExt as _};
+
+        cx.update(|cx| {
+            let mut outbound = install_for_test(true, Some(42), cx);
+            hold_bot_elsewhere_for_test(cx);
+            let pane = PaneRef {
+                workspace: Default::default(),
+                pane: 7,
+            };
+
+            cx.global::<TelegramBridge>().send(BridgePing {
+                pane,
+                header: "daruda/main".into(),
+                tail: TelegramTail::Plain("done".into()),
+                permission: None,
+            });
+            cx.global::<TelegramBridge>().send_notice("hello".into());
+
+            assert!(
+                outbound.next().now_or_never().is_none(),
+                "nothing goes out on a bot this daruda is not serving"
+            );
+        });
+    }
 
     /// The announcement both points the phone at the new chat and tells it
     /// so, as a ping attributed to that chat — a reply to it reaches the chat.

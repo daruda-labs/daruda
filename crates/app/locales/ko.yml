@@ -1721,3 +1721,4 @@ remote_channel:
   connected: "연결됨"
   retrying: "재연결 중"
   failed: "연결 거부됨: 봇 권한 확인 필요"
+  held_elsewhere: "다른 daruda가 이 봇에 연결되어 있습니다"

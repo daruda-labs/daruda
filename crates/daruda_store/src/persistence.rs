@@ -232,6 +232,34 @@ pub fn flow_lock_root() -> PathBuf {
     base.join("daruda").join("flow-locks")
 }
 
+/// Where the per-bot connection locks live: `<config>/daruda/remote-locks`.
+///
+/// Profile-**independent**, the third of the deliberate exceptions and for the
+/// same reason as [`flow_lock_root`]: this is not daruda's own state but a
+/// mutex on something outside it that every profile shares — the bot account
+/// itself. Telegram serves `getUpdates` to one poller per token and Slack
+/// hands each event to one of an app's open sockets, so a release install and
+/// a debug build pointed at one bot have to exclude each other. A per-profile
+/// lock root would have both see a free bot and split the user's replies
+/// between them, which is the failure it exists to stop.
+///
+/// Honors `DARUDA_DATA_DIR` so tests and portable installs stay isolated —
+/// two suites pointed at different data directories are not sharing a bot
+/// either.
+pub fn remote_lock_root() -> PathBuf {
+    if let Some(dir) = process_env::DATA_DIR.read_utf8().ok().as_deref() {
+        let trimmed = dir.trim();
+        if !trimmed.is_empty() {
+            return PathBuf::from(trimmed).join("remote-locks");
+        }
+    }
+    // The fourth allowed exception to the `disallowed-methods`
+    // `dirs::config_dir` entry, for the reason in the doc above.
+    #[allow(clippy::disallowed_methods)]
+    let base = dirs::config_dir().unwrap_or_else(|| PathBuf::from("."));
+    base.join("daruda").join("remote-locks")
+}
+
 /// Pure layout resolver — no env reads, no fs reads. Returns the
 /// path that `default_data_dir()` would produce for the given inputs.
 /// Crate-visible so unit tests drive every branch deterministically.

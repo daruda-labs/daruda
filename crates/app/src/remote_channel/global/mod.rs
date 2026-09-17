@@ -41,6 +41,21 @@ pub enum Delivery {
     Presence { away: bool },
 }
 
+impl Connection {
+    /// Whether a message may go out on this connection.
+    ///
+    /// Three conditions, in one place because they are asked from three: the
+    /// foreground gate that decides whether to queue, the bridge-wide "can
+    /// anything be delivered", and `prepare` at the last step before the wire.
+    /// The third is what a ping queued while the worker was still connecting
+    /// meets once the claim comes back held elsewhere.
+    pub(crate) fn can_send(&self) -> bool {
+        self.credentials.is_some()
+            && self.config.recipient.is_some()
+            && self.status != Status::HeldElsewhere
+    }
+}
+
 impl RemoteChannels {
     pub fn status(id: &str, cx: &App) -> Status {
         cx.try_global::<Self>()
@@ -62,11 +77,10 @@ impl RemoteChannels {
 
     pub fn has_recipient(cx: &App) -> bool {
         cx.try_global::<Self>().is_some_and(|bridge| {
-            bridge.connections.keys().any(|id| {
-                bridge
-                    .live(id, cx)
-                    .is_some_and(|c| c.config.recipient.is_some() && c.credentials.is_some())
-            })
+            bridge
+                .connections
+                .keys()
+                .any(|id| bridge.live(id, cx).is_some_and(Connection::can_send))
         })
     }
 
@@ -109,11 +123,7 @@ impl RemoteChannels {
             bridge
                 .connections
                 .keys()
-                .filter(|id| {
-                    bridge
-                        .live(id, cx)
-                        .is_some_and(|c| c.config.recipient.is_some() && c.credentials.is_some())
-                })
+                .filter(|id| bridge.live(id, cx).is_some_and(Connection::can_send))
                 .cloned()
                 .collect()
         };
@@ -147,7 +157,7 @@ impl RemoteChannels {
     }
 
     fn enqueue(&self, connection: &Connection, outbound: Outbound) -> bool {
-        if connection.credentials.is_none() || connection.config.recipient.is_none() {
+        if !connection.can_send() {
             return false;
         }
         let result = self.outbound.unbounded_send(Pending {
@@ -176,11 +186,7 @@ impl RemoteChannels {
         let ids: Vec<_> = bridge
             .connections
             .keys()
-            .filter(|key| {
-                bridge
-                    .live(key, cx)
-                    .is_some_and(|c| c.config.recipient.is_some() && c.credentials.is_some())
-            })
+            .filter(|key| bridge.live(key, cx).is_some_and(Connection::can_send))
             .cloned()
             .collect();
         let bridge = cx.global_mut::<Self>();
