@@ -24,7 +24,7 @@ use super::status_icon::status_icon_with_age;
 use super::tail_row::call_boundary_label;
 use crate::surface::strings as s;
 use crate::ui::theme;
-use crate::ui::{Icon, IconName, Sizable as _};
+use crate::ui::{Icon, IconName, IconNamed as _, Sizable as _};
 use crate::workspace::main_area::agent_chat_pane::agent_chat_helpers::{
     TurnBoundary, diff_editor_key, fold_context_at, renders_raw_input,
     renders_subagent_instructions, suppresses_live_subagent_output, tool_fold_key, tool_image_key,
@@ -149,7 +149,7 @@ pub(super) fn tool_card(
                     .flex_row()
                     .items_center()
                     .gap(px(theme::GAP_SM))
-                    .child(Icon::new(tool_kind_icon(tc.kind)).xsmall().text_color(fg))
+                    .child(Icon::empty().path(tool_icon(tc)).xsmall().text_color(fg))
                     .child(div().flex_none().text_color(fg).text_size(font_size).child(
                         SharedString::from(tool_header_label(tc.tool_name.as_deref(), tc.kind)),
                     ))
@@ -737,22 +737,40 @@ fn tool_kind_label(kind: ToolKindView) -> String {
     }
 }
 
-/// Map a tool kind to a leading header icon, so a tool call's type reads at a
-/// glance (terminal vs read vs edit …), mirroring zed's kind-based icon.
-pub(super) fn tool_kind_icon(kind: ToolKindView) -> IconName {
+/// Material Symbols "psychology" — the reasoning mark. The vendored lucide set
+/// carries no such glyph, so `Think` reaches outside it (see [`tool_icon`]).
+const ICON_THINK: &str = "icons/ui/psychology.svg";
+
+/// The asset behind a tool call's leading header icon, mirroring zed's
+/// kind-based icon. The subagent question comes first because the kind cannot
+/// answer it: a spawned agent arrives as [`ToolKindView::Think`] like any
+/// reasoning tool, so keying on kind alone drew a running subagent and a plain
+/// think-kind call with one glyph. Returns a path rather than an `IconName`
+/// because two glyph families meet here — lucide is named, Material is not.
+pub(super) fn tool_icon(tc: &ToolCallItem) -> SharedString {
+    if tc.is_subagent_launch() {
+        return IconName::Bot.path();
+    }
+    tool_kind_icon(tc.kind)
+}
+
+/// The kind half of [`tool_icon`], for a caller that has a kind and no call —
+/// the group bar, which maps its category to a representative kind so a bar and
+/// the cards under it never disagree.
+pub(super) fn tool_kind_icon(kind: ToolKindView) -> SharedString {
     // The vendored `IconName` set has no pencil/edit glyph, so Edit falls back
     // to `File` (Read already uses `Eye`, so no visual collision).
     match kind {
-        ToolKindView::Read => IconName::Eye,
-        ToolKindView::Edit => IconName::File,
-        ToolKindView::Delete => IconName::Delete,
-        ToolKindView::Move => IconName::ArrowRight,
-        ToolKindView::Search => IconName::Search,
-        ToolKindView::Execute => IconName::SquareTerminal,
-        ToolKindView::Think => IconName::Bot,
-        ToolKindView::Fetch => IconName::Globe,
-        ToolKindView::SwitchMode => IconName::Refresh,
-        ToolKindView::Other => IconName::Settings2,
+        ToolKindView::Read => IconName::Eye.path(),
+        ToolKindView::Edit => IconName::File.path(),
+        ToolKindView::Delete => IconName::Delete.path(),
+        ToolKindView::Move => IconName::ArrowRight.path(),
+        ToolKindView::Search => IconName::Search.path(),
+        ToolKindView::Execute => IconName::SquareTerminal.path(),
+        ToolKindView::Think => ICON_THINK.into(),
+        ToolKindView::Fetch => IconName::Globe.path(),
+        ToolKindView::SwitchMode => IconName::Refresh.path(),
+        ToolKindView::Other => IconName::Settings2.path(),
     }
 }
 
@@ -906,6 +924,44 @@ fn permission_button(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn think_call(raw_input: Option<serde_json::Value>) -> ToolCallItem {
+        ToolCallItem {
+            id: "t".into(),
+            title: "Guardian Review".into(),
+            kind: ToolKindView::Think,
+            tool_name: None,
+            status: ToolStatusView::Completed,
+            diffs: Vec::new(),
+            output: Vec::new(),
+            raw_input,
+            parent_tool_id: None,
+            locations: Vec::new(),
+            exit: None,
+        }
+    }
+
+    /// Both arrive as `Think`, so the kind alone cannot tell a spawned agent
+    /// from a reasoning tool — the glyph is what carries the difference.
+    #[test]
+    fn a_subagent_launch_and_a_plain_think_call_take_different_glyphs() {
+        let subagent = think_call(Some(serde_json::json!({ "subagent_type": "explorer" })));
+        let plain = think_call(None);
+        assert_eq!(tool_icon(&subagent), IconName::Bot.path());
+        assert_eq!(tool_icon(&plain).as_ref(), ICON_THINK);
+    }
+
+    /// The subagent question only reroutes `Think`; every other kind still
+    /// reads straight off the kind table, including a subagent-shaped input on
+    /// a kind that is not `Think`.
+    #[test]
+    fn a_non_think_kind_reads_off_the_kind_table() {
+        let call = ToolCallItem {
+            kind: ToolKindView::Execute,
+            ..think_call(None)
+        };
+        assert_eq!(tool_icon(&call), tool_kind_icon(ToolKindView::Execute));
+    }
 
     #[test]
     fn header_label_prefers_tool_name_over_kind() {

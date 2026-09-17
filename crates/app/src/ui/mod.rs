@@ -104,7 +104,7 @@ pub use gpui_component::text::{
     SelectMode, TextSelectionHandle, active_text_selection, select_mode_for_click_count,
 };
 pub use gpui_component::{ActiveTheme, Disableable, Root, Selectable, Sizable, WindowExt};
-pub use gpui_component::{Icon, IconName};
+pub use gpui_component::{Icon, IconName, IconNamed};
 
 #[cfg(test)]
 mod word_range_tests {

@@ -464,10 +464,18 @@ fn disclosure_row(
     // where only the glyph does. Lighting the row for a chevron-only header
     // would promise a hit area that is not there.
     let hover = theme::dim_toward_gray(theme::agent_chat_hover_tint(cx), dim);
+    // A text line's worth of height even when the header has no text. Most
+    // headers carry a label and already clear it, so this reaches only the ones
+    // that are a bare chevron — the conclusion of a restored turn, whose facts
+    // were never measured in this process. Without it that row stands at the
+    // glyph's own height and reads as a seam rather than as a row.
     let row = div()
         .id((base.clone(), "row"))
         .w_full()
         .min_w_0()
+        .min_h(px(
+            theme::agent_chat_font_size(cx) * theme::agent_chat_line_height(cx)
+        ))
         .flex()
         .flex_row()
         .items_center()

@@ -263,7 +263,7 @@ mod tests {
             ("read", "1 file read"),
             ("edit", "1 file edited"),
             ("search", "1 search"),
-            ("run", "1 command run"),
+            ("run", "1 command"),
             ("other", "1 other call"),
         ] {
             let key = format!("agent_chat.group_{category}_one");

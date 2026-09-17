@@ -810,7 +810,12 @@ fn category_segments(
                 .gap(px(theme::GAP_SM))
                 .text_color(fg)
                 .text_size(font_size)
-                .child(Icon::new(category_icon(category)).xsmall().text_color(fg))
+                .child(
+                    Icon::empty()
+                        .path(category_icon(category))
+                        .xsmall()
+                        .text_color(fg),
+                )
                 .child(SharedString::from(s::agent_chat_group_category(
                     category.token(),
                     count,
@@ -827,7 +832,7 @@ fn category_segments(
 
 /// The glyph for one tool category. Reuses the per-call kind mapping through a
 /// representative kind, so a category and the cards under it never disagree.
-fn category_icon(category: crate::transcript::tool_category::ToolCategory) -> IconName {
+fn category_icon(category: crate::transcript::tool_category::ToolCategory) -> SharedString {
     use crate::transcript::tool_category::ToolCategory;
     tool::tool_kind_icon(match category {
         ToolCategory::Read => daruda_acp::ToolKindView::Read,

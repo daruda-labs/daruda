@@ -12,8 +12,16 @@ use super::mermaid::mermaid_code_block_render;
 use crate::surface::strings as s;
 use crate::ui::ButtonVariants as _;
 use crate::ui::theme;
+use crate::ui::{Icon, Sizable as _};
 use crate::workspace::main_area::agent_chat_pane::fold::FoldKey;
 use crate::workspace::main_area::agent_chat_pane::view::AgentChatView;
+
+/// The answer's mark — the turn's work, settled. It gives the conclusion row
+/// something beside its chevron, which the row otherwise lacks: it carries no
+/// label, and on a restored turn no trailing facts either. Distinct from the
+/// status rollup's `check-circle` by weight and placement — outline and muted
+/// at the row's head, against a filled green mark at its tail.
+const ICON_ANSWER: &str = "icons/ui/task-alt.svg";
 
 #[derive(Clone, Copy)]
 pub(super) struct MarkdownRender<'a> {
@@ -136,7 +144,16 @@ pub(super) fn conclusion_block(
     markdown: MarkdownRender<'_>,
     cx: &mut Context<AgentChatView>,
 ) -> AnyElement {
-    let mut header = FoldHeader::with_summary(|| SummaryLine::from_markdown(text));
+    let mut header = FoldHeader::with_summary(|| SummaryLine::from_markdown(text)).leading(
+        Icon::empty()
+            .path(ICON_ANSWER)
+            .xsmall()
+            .text_color(theme::dim_toward_gray(
+                theme::agent_chat_fg_muted(cx),
+                markdown.dim,
+            ))
+            .into_any_element(),
+    );
     if let Some(stats) = stats {
         header = header.trailing(stats);
     }

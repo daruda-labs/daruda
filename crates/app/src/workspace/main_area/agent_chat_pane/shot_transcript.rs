@@ -334,6 +334,22 @@ pub(in crate::workspace) fn subagent_transcript() -> Vec<ChatItem> {
             exit: None,
         }));
     }
+    // A think-kind call that is *not* a subagent launch — codex's Guardian
+    // Review is the live shape. Sits beside the `Task` launch above so one
+    // capture holds both glyphs `Think` resolves to (`render::tool::tool_icon`).
+    items.push(ChatItem::ToolCall(ToolCallItem {
+        id: "guardian-review".to_string(),
+        title: "Guardian Review".to_string(),
+        kind: ToolKindView::Think,
+        tool_name: None,
+        status: ToolStatusView::Completed,
+        diffs: Vec::new(),
+        output: Vec::new(),
+        raw_input: None,
+        locations: Vec::new(),
+        parent_tool_id: None,
+        exit: None,
+    }));
     items.push(assistant(
         "`SerializedLane::last_active_lane_id` is the snap target: `restore_workspace` \
          reads it back and `activate_lane` writes it on every switch.",
