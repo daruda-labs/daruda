@@ -31,6 +31,10 @@ impl Workspace {
     ) {
         self.refresh_tracking(target, cx);
         self.refresh_worktree_status(target, cx);
+        // Wanting both axes current is also the moment this lane's git dirs
+        // are worth watching — this is the one call every path that opens or
+        // activates a git lane already makes.
+        self.sync_git_watchers(cx);
     }
 
     /// Kick off a background `git for-each-ref` for `target` and update the

@@ -6,7 +6,8 @@
 //! repo-root), [`file_view`] (pane-area file viewer), [`index`]
 //! (stage/unstage/discard), [`history`] (commit/amend/push/pull/fetch),
 //! [`nav`] (keyboard cursor + dir collapse), [`init`] (`git init`), [`lock`]
-//! (the exclusive-op locks every one of them claims).
+//! (the exclusive-op locks every one of them claims), [`watch`] (the git-dir
+//! watchers that catch writes daruda did not make).
 
 pub(in crate::workspace) mod file_view;
 pub(in crate::workspace) mod history;
@@ -15,6 +16,7 @@ pub(in crate::workspace) mod init;
 pub(in crate::workspace) mod lock;
 pub(in crate::workspace) mod nav;
 pub(in crate::workspace) mod status;
+pub(in crate::workspace) mod watch;
 
 /// Map a git status character to a single-letter display symbol. Shared by
 /// the Git Changes dock and the Files view so both badges match.

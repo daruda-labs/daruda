@@ -362,6 +362,44 @@ pub fn list_worktrees(repo_root: &Path) -> Result<Vec<GitWorktreeInfo>, GitError
     parse_worktree_list(&stdout)
 }
 
+/// Absolute paths to the two git directories a lane's state lives in.
+///
+/// They differ for a linked worktree: `index` and `HEAD` are per-worktree,
+/// while `refs/` and `packed-refs` are shared, so a fetch in one lane moves
+/// state every lane of the repo reads.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GitDirs {
+    /// This lane's own git dir — `<main>/.git/worktrees/<name>` for a
+    /// linked worktree, `<root>/.git` for the main one.
+    pub git_dir: PathBuf,
+    /// The git dir every lane of the repository shares.
+    pub common_dir: PathBuf,
+}
+
+/// `git rev-parse --git-dir --git-common-dir` — both paths in one call.
+/// Git answers with paths relative to `path` for the main worktree, so
+/// they are resolved here and the caller always gets absolute ones.
+pub fn git_dirs(path: &Path) -> Result<GitDirs, GitError> {
+    let out = run_git(path, ["rev-parse", "--git-dir", "--git-common-dir"])?;
+    let mut lines = out.lines();
+    let (Some(git_dir), Some(common_dir)) = (lines.next(), lines.next()) else {
+        return Err(GitError::Parse(out));
+    };
+    let canonical = |p: &str| {
+        let p = Path::new(p.trim());
+        let absolute = if p.is_absolute() {
+            p.to_path_buf()
+        } else {
+            path.join(p)
+        };
+        std::fs::canonicalize(&absolute).unwrap_or(absolute)
+    };
+    Ok(GitDirs {
+        git_dir: canonical(git_dir),
+        common_dir: canonical(common_dir),
+    })
+}
+
 /// Aggregated repo probe: combines `has_git` + `is_git_repo` +
 /// `repo_root` + `list_worktrees` into one call. Returns `None` when
 /// git is unusable or the path isn't a repo, so callers can branch on

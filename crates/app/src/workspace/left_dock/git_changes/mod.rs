@@ -195,6 +195,20 @@ pub(in crate::workspace) fn render(snap: &LeftDockSnapshot, cx: &mut Context<Doc
 // Header — branch label + remote action buttons
 // ----------------------------------------------------------------
 
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum RemotePrimaryAction {
+    Fetch,
+    Pull,
+}
+
+fn remote_primary_action(behind: u32) -> RemotePrimaryAction {
+    if behind > 0 {
+        RemotePrimaryAction::Pull
+    } else {
+        RemotePrimaryAction::Fetch
+    }
+}
+
 fn view_header(
     _lane_id: LaneId,
     branch: &str,
@@ -205,7 +219,7 @@ fn view_header(
 
     let label = app_strings::git_changes_header(branch);
     let workspace_refresh = snap.workspace.clone();
-    let workspace_fetch = snap.workspace.clone();
+    let workspace_remote = snap.workspace.clone();
     let workspace_push = snap.workspace.clone();
     let in_flight = snap.git_op_in_flight;
     let active_ref = snap.active;
@@ -242,15 +256,26 @@ fn view_header(
     }
     let header_actions = header_actions.child(refresh_icon);
 
-    let fetch_btn = button("git-fetch", app_strings::git_fetch_btn())
-        .xsmall()
-        .loading(in_flight)
-        .disabled(in_flight)
-        .on_click(cx.listener(move |_dock, _: &ClickEvent, _window, cx| {
-            if let Some(ws) = workspace_fetch.upgrade() {
-                ws.update(cx, |ws, cx| ws.on_fetch(cx));
-            }
-        }));
+    let remote_btn = match remote_primary_action(behind) {
+        RemotePrimaryAction::Fetch => button("git-fetch", app_strings::git_fetch_btn())
+            .xsmall()
+            .loading(in_flight)
+            .disabled(in_flight)
+            .on_click(cx.listener(move |_dock, _: &ClickEvent, _window, cx| {
+                if let Some(ws) = workspace_remote.upgrade() {
+                    ws.update(cx, |ws, cx| ws.on_fetch(cx));
+                }
+            })),
+        RemotePrimaryAction::Pull => button("git-pull", app_strings::git_pull_btn())
+            .xsmall()
+            .loading(in_flight)
+            .disabled(in_flight)
+            .on_click(cx.listener(move |_dock, _: &ClickEvent, _window, cx| {
+                if let Some(ws) = workspace_remote.upgrade() {
+                    ws.update(cx, |ws, cx| ws.on_pull(cx));
+                }
+            })),
+    };
 
     let push_btn = button("git-push", app_strings::git_push_btn())
         .xsmall()
@@ -269,7 +294,7 @@ fn view_header(
         .justify_end()
         .gap(px(theme::GIT_REMOTE_BTN_GAP))
         .pt(px(theme::GIT_HEADER_PAD_Y / 2.0))
-        .child(fetch_btn)
+        .child(remote_btn)
         .child(push_btn);
 
     div()
@@ -284,6 +309,17 @@ fn view_header(
                 .actions(header_actions),
         )
         .child(actions_row)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{RemotePrimaryAction, remote_primary_action};
+
+    #[test]
+    fn remote_primary_action_pulls_once_fetch_finds_remote_work() {
+        assert_eq!(remote_primary_action(0), RemotePrimaryAction::Fetch);
+        assert_eq!(remote_primary_action(1), RemotePrimaryAction::Pull);
+    }
 }
 
 // ----------------------------------------------------------------

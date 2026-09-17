@@ -828,6 +828,9 @@ pub const AGENT_CHAT_SUMMARY_GAP: f32 = GAP_STANDARD;
 /// the status mark beside it are two separate facts, and at the tight
 /// `AGENT_CHAT_MSG_GAP` they touch and read as one.
 pub const AGENT_CHAT_TRAILING_GAP: f32 = GAP_STANDARD;
+/// Right inset for status marks on borderless fold/group bars, matching the
+/// visible status mark inside a bordered tool card.
+pub const AGENT_CHAT_FOLD_STATUS_INSET: f32 = AGENT_CHAT_INPUT_INNER_PAD_X + 1.0;
 /// Agent chat message list gap (px).
 pub const AGENT_CHAT_LIST_GAP: f32 = GAP_LG;
 /// Gap (px) between the tail window's boundary rule and the label it frames.

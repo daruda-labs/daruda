@@ -730,6 +730,7 @@ git:
   stage_all: "모두 스테이지"
   unstage_all: "모두 언스테이지"
   fetch_btn: "페치"
+  pull_btn: "풀"
 
 # Settings panel
 settings:
@@ -1242,6 +1243,8 @@ error:
   git_restore_staged_paths_failed: "git restore --staged (경로) 실패"
   git_status_failed: "git status 실패"
   git_tracking_failed: "브랜치 추적 정보 읽기 실패"
+  git_watcher_error: "git 디렉터리 감시에서 오류가 보고되었습니다"
+  git_watcher_init_failed: "git 디렉터리 감시 시작 실패"
   lane_path_not_found: "워크트리 경로를 찾을 수 없습니다"
   lane_create_busy: "다른 워크트리를 생성 중입니다"
   lane_create_failed: "워크트리 생성 실패"

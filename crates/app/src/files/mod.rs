@@ -6,6 +6,7 @@
 //! `workspace::file_tree_ops`, and the renderer lives in
 //! `workspace::dock::files`.
 
+pub mod git_watcher;
 pub mod gitignore;
 pub mod icons;
 pub mod load;

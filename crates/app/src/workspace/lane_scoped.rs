@@ -7,7 +7,7 @@ use std::sync::Arc;
 use crate::files::gitignore::GitignoreSet;
 use crate::files::tree::FileTree;
 use crate::files::watcher::FileTreeWatcher;
-use crate::lane::git::{GitTracking, GitWorktreeStatus};
+use crate::lane::git::{GitDirs, GitTracking, GitWorktreeStatus};
 use crate::lane::history::HistoryBuffer;
 use crate::workspace::left_dock::file_tree_ops::{FilesReloadQueue, VisibleEntry};
 
@@ -65,6 +65,21 @@ impl RefreshSlot {
     }
 }
 
+/// Result of the one-shot `rev-parse` that locates a lane's git dirs.
+/// A separate state rather than an `Option`, so a probe already running and
+/// a probe that failed cannot be mistaken for one never started — the
+/// difference decides whether the next poll spawns another subprocess.
+#[derive(Default, Debug, Clone, PartialEq, Eq)]
+pub(in crate::workspace) enum GitDirsState {
+    #[default]
+    Unknown,
+    Probing,
+    Known(GitDirs),
+    /// The probe failed. Watching is skipped; every daruda-run op still
+    /// refreshes through the git lock.
+    Unavailable,
+}
+
 /// The two git read axes are cached and refreshed independently: a ref
 /// move (fetch, push, branch switch) invalidates only `tracking`, a
 /// working-tree edit only `worktree`.
@@ -76,6 +91,8 @@ pub(in crate::workspace) struct GitLaneState {
     pub worktree: Option<GitWorktreeStatus>,
     pub tracking_refresh: RefreshSlot,
     pub worktree_refresh: RefreshSlot,
+    /// Where this lane's git state lives on disk — needed to watch it.
+    pub dirs: GitDirsState,
     /// Lane-relative directory groups, kept only for this app session.
     pub collapsed_dirs: HashSet<String>,
     /// Repo-root-relative path so refreshes keep the cursor on the same file.

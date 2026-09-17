@@ -314,14 +314,11 @@ impl Workspace {
             }
             return;
         }
-        // Decide whether to refresh git status *before* the match
-        // consumes `ev`. Pure-`.git/` events are skipped: `git status`
-        // writes `.git/index`, which would re-fire fsevents into a
-        // self-sustaining poll loop (~3.5% idle CPU). Meaningful git
-        // activity (commit, checkout) also touches the working tree, so
-        // this doesn't blind us; a rare `.git/HEAD`-only change is
-        // recovered via the manual "Refresh Git Status" command.
-        let should_refresh_git_status = event_has_non_git_path(&ev);
+        // Decide whether to refresh *before* the match consumes `ev`. This
+        // watcher never carries `.git/` paths (`classify` drops them, and
+        // `git_ops::watch` owns them instead), so every event but a watcher
+        // failure is a real working-tree change.
+        let should_refresh_git_status = !matches!(ev, DebouncedEvent::Error(_));
         let root = self.lane_file_tree(wt_ref).map(|t| t.root.clone());
         let bulk_pending = self
             .lane_scoped
@@ -411,11 +408,11 @@ impl Workspace {
             }
         }
         self.kick_files_reload(wt_ref, cx);
-        // Watcher events also stale the Git Changes view. The refresh's
-        // in-flight guard collapses bursts; the `should_refresh_git_status`
-        // gate skips pure `.git/` noise so it never re-triggers itself.
+        // Watcher events also stale the Git Changes view. Only the working
+        // tree moved here, so the refs half stays as it is; the refresh's
+        // in-flight guard collapses bursts.
         if should_refresh_git_status {
-            self.refresh_git_status(wt_ref, cx);
+            self.refresh_worktree_status(wt_ref, cx);
         }
     }
 
@@ -961,20 +958,5 @@ pub(in crate::workspace) use walker::{VisibleEntry, build_status_index};
 /// True if any path in `ev` lies *outside* a `.git/` directory.
 /// Bulk events default to true (path set unknown). Error events
 /// never trigger a git refresh.
-fn event_has_non_git_path(ev: &DebouncedEvent) -> bool {
-    match ev {
-        DebouncedEvent::Bulk => true,
-        DebouncedEvent::Error(_) => false,
-        DebouncedEvent::Changed { paths } | DebouncedEvent::Removed { paths } => {
-            paths.iter().any(|p| !path_is_inside_git_dir(p))
-        }
-    }
-}
-
-fn path_is_inside_git_dir(path: &Path) -> bool {
-    path.components()
-        .any(|c| c.as_os_str() == std::ffi::OsStr::new(".git"))
-}
-
 #[cfg(test)]
 mod tests;

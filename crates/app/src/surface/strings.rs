@@ -3490,6 +3490,10 @@ pub fn git_unstage_all() -> String {
 pub fn git_fetch_btn() -> String {
     rust_i18n::t!("git.fetch_btn").into_owned()
 }
+/// Button label for the pull action in the git remote bar.
+pub fn git_pull_btn() -> String {
+    rust_i18n::t!("git.pull_btn").into_owned()
+}
 /// Context menu — stage a single file.
 pub fn ctx_git_stage() -> String {
     rust_i18n::t!("ctx.git_stage").into_owned()
@@ -6091,6 +6095,11 @@ error_string!(
 );
 error_string!(error_git_status_failed, "error.git_status_failed");
 error_string!(error_git_tracking_failed, "error.git_tracking_failed");
+error_string!(error_git_watcher_error, "error.git_watcher_error");
+error_string!(
+    error_git_watcher_init_failed,
+    "error.git_watcher_init_failed"
+);
 error_string!(error_lane_path_not_found, "error.lane_path_not_found");
 error_string!(error_lane_create_busy, "error.lane_create_busy");
 error_string!(error_lane_create_failed, "error.lane_create_failed");

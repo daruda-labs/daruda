@@ -642,14 +642,14 @@ fn response_bar(
             cx,
         ));
     }
-    let header = header.trailing(rollup_glyph(
+    let header = header.trailing(fold_group_status_icon(rollup_glyph(
         Rollup::of_kept_run(&this.items, run, &this.live_units, |item| {
             filter_revealed || this.filter_matches.matches(item)
         }),
         t,
         this.dim_amount,
         cx,
-    ));
+    )));
     // Borderless section bar, matching the block headers — section headers stay
     // light; only content cards (`tool_card`) carry box chrome.
     FoldRow::section(
@@ -693,6 +693,14 @@ fn trailing_label(label: String, this: &AgentChatView, cx: &Context<AgentChatVie
         .text_color(this.dim(theme::agent_chat_fg_subtle(cx)))
         .text_size(px(theme::agent_chat_font_size(cx)))
         .child(SharedString::from(label))
+        .into_any_element()
+}
+
+fn fold_group_status_icon(icon: AnyElement) -> AnyElement {
+    div()
+        .flex_none()
+        .pr(px(theme::AGENT_CHAT_FOLD_STATUS_INSET))
+        .child(icon)
         .into_any_element()
 }
 
@@ -899,8 +907,10 @@ fn tool_group_bar(
     // than a bare call count: the group is a run of adjacent calls, so its
     // members are mixed in practice, and "5 tool calls" says nothing about what
     // happened. What it counts is the part of the span the display filter keeps.
-    let header = FoldHeader::with_title(group_category_title(this, run, filter_revealed, cx))
-        .trailing(rollup_glyph(rollup, t, this.dim_amount, cx));
+    let header =
+        FoldHeader::with_title(group_category_title(this, run, filter_revealed, cx)).trailing(
+            fold_group_status_icon(rollup_glyph(rollup, t, this.dim_amount, cx)),
+        );
     // Borderless section bar, same as the response bar.
     FoldRow::section(
         SharedString::from(format!("agent-chat-toolgroup-{gid}")),

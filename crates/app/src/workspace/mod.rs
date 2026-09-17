@@ -596,6 +596,18 @@ pub struct Workspace {
     ///
     /// [`GitLock::Index`]: left_dock::git_ops::lock::GitLock::Index
     pub(in crate::workspace) git_stage_in_flight: bool,
+    /// One watcher per git directory in the workspace, keyed by that
+    /// directory. Keyed rather than lane-scoped because every lane of a
+    /// repository shares one common dir: a fetch writes there once, and N
+    /// watchers over it would mean N times the work for one event.
+    pub(in crate::workspace) git_watchers:
+        std::collections::HashMap<std::path::PathBuf, crate::files::git_watcher::GitDirWatcher>,
+    /// Git dirs whose watcher failed to attach. Retained while a lane still
+    /// needs the dir so the poll does not retry and toast every 250 ms.
+    pub(in crate::workspace) git_watch_failures: std::collections::HashSet<std::path::PathBuf>,
+    /// Drains `git_watchers`; started with the first watcher, dropped with
+    /// the workspace.
+    pub(in crate::workspace) git_watch_poll: Option<gpui::Task<()>>,
     /// Focus handle for the Git Changes panel body. Bound to
     /// `key_context("GitChanges")` so the four arrow / Space / Enter
     /// keybindings only fire when the panel holds focus — otherwise
@@ -1280,6 +1292,9 @@ impl Workspace {
             git_op_in_flight: false,
             commit_mode: CommitMode::Normal,
             git_stage_in_flight: false,
+            git_watchers: std::collections::HashMap::new(),
+            git_watch_failures: std::collections::HashSet::new(),
+            git_watch_poll: None,
             git_changes_panel_focus: cx.focus_handle(),
             panels: main_area::bottom_dock::macro_ops::load_or_seed_panels(&data_dir),
             agent_vocabulary,

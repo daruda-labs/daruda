@@ -825,3 +825,45 @@ fn run_git_returns_timeout_error_when_child_runs_past_deadline() {
         "timeout took too long: {elapsed:?}"
     );
 }
+
+// ----------------------------------------------------------------
+// git dirs — where a lane's state actually lives
+// ----------------------------------------------------------------
+
+/// The split this probe exists for. A linked worktree keeps `index` and
+/// `HEAD` to itself while sharing `refs/`, so watching only one of the two
+/// directories misses either the staging or the fetch.
+#[test]
+fn git_dirs_separate_a_linked_worktree_from_the_shared_repository() {
+    if !require_git() {
+        return;
+    }
+    let dir = unique_tmpdir("git_dirs");
+    init(&dir).unwrap();
+    commit_initial(&dir);
+    let linked = dir.join("side-wt");
+    add_lane(&dir, &linked, Some("side"), None).unwrap();
+
+    let main = git_dirs(&dir).unwrap();
+    assert!(
+        main.git_dir.is_absolute(),
+        "relative paths must be resolved"
+    );
+    assert_eq!(
+        main.git_dir, main.common_dir,
+        "the main worktree's own dir is the shared one"
+    );
+
+    let side = git_dirs(&linked).unwrap();
+    assert_ne!(
+        side.git_dir, side.common_dir,
+        "a linked worktree keeps its own index and HEAD"
+    );
+    assert_eq!(
+        side.common_dir, main.common_dir,
+        "both lanes share the refs a fetch moves"
+    );
+    assert!(side.git_dir.starts_with(&side.common_dir));
+
+    teardown(&dir);
+}

@@ -731,6 +731,7 @@ git:
   stage_all: "Stage All"
   unstage_all: "Unstage All"
   fetch_btn: "Fetch"
+  pull_btn: "Pull"
 
 # Settings panel
 settings:
@@ -1243,6 +1244,8 @@ error:
   git_restore_staged_paths_failed: "git restore --staged (paths) failed"
   git_status_failed: "git status failed"
   git_tracking_failed: "reading branch tracking info failed"
+  git_watcher_error: "Git directory watcher reported error"
+  git_watcher_init_failed: "watching the git directory failed"
   lane_path_not_found: "Worktree path not found"
   lane_create_busy: "Another worktree is already being created"
   lane_create_failed: "Worktree create failed"
