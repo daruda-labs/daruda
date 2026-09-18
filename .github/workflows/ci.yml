@@ -90,6 +90,12 @@ jobs:
           ./scripts/lint-env-literals.sh --self-test
           ./scripts/lint-env-literals.sh
 
+      - name: Lint — no silent update swallowing
+        run: ./scripts/lint-no-silent-update.sh
+
+      - name: Lint — single agent-activity source
+        run: ./scripts/lint-agent-activity.sh
+
       - name: Doc links
         run: RUSTDOCFLAGS="-D warnings" cargo doc --no-deps -p daruda_flow -p daruda_core -p daruda_update -p ghostty_vt_sys
 
