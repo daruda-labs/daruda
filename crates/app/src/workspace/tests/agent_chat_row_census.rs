@@ -142,12 +142,10 @@ fn row_reach(kind: &RowKind) -> Option<usize> {
         RowKind::ResponseHeader { run_start, .. } | RowKind::TailMore { run_start, .. } => {
             Some(*run_start)
         }
-        // A group header stands for `count` items starting at `first_ix`, so its
-        // reach is the last of them, not the first.
-        RowKind::ToolGroupHeader {
-            first_ix, count, ..
-        }
-        | RowKind::ThinkingGroupHeader {
+        // A group header stands for several items, so its reach is the last of
+        // them, not the first.
+        RowKind::ToolGroupHeader { calls, .. } => calls.last().copied(),
+        RowKind::ThinkingGroupHeader {
             first_ix, count, ..
         } => Some(first_ix + count.saturating_sub(1)),
         RowKind::ToolGroupTailMore { .. } | RowKind::WorkingIndicator => None,

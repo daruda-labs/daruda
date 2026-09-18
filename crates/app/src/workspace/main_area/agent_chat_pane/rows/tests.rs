@@ -763,6 +763,45 @@ fn a_pending_permission_outlives_every_fold_that_encloses_it() {
     assert!(!visible(&rows, 3), "so is the call the window left out");
 }
 
+/// Background subagents run at once, so each one's children land in `items`
+/// between the launches. The children own no row, so the launches are adjacent
+/// on screen — and they belong to one group, with only the launches as members.
+#[test]
+fn consecutive_subagent_launches_form_one_group() {
+    use ToolStatusView::Completed;
+    let items = vec![
+        ChatItem::UserText("q".into()),
+        asst("delegating"),
+        subagent_launch("A", Completed),
+        child_of("a1", "A", Completed),
+        subagent_launch("B", Completed),
+        child_of("b1", "B", Completed),
+        subagent_launch("C", Completed),
+        child_of("c1", "C", Completed),
+    ];
+    let rows = project_all(&items);
+    let headers: Vec<_> = rows
+        .iter()
+        .filter_map(|r| match &r.kind {
+            RowKind::ToolGroupHeader { gid, calls, .. } => Some((gid.as_str(), calls.len())),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(headers, vec![("A", 3)], "one group over the three launches");
+    let calls: Vec<_> = rows
+        .iter()
+        .filter_map(|r| match r.kind {
+            RowKind::AgentItem(ix) => Some(ix),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(
+        calls,
+        vec![1, 2, 4, 6],
+        "the prose and the launches, no child"
+    );
+}
+
 #[test]
 fn subagent_child_tool_calls_get_no_row() {
     use ToolStatusView::Completed;
@@ -1307,8 +1346,7 @@ fn every_row_kind_declares_a_distinct_slot() {
         },
         RowKind::ToolGroupHeader {
             gid: "g".into(),
-            first_ix: 0,
-            count: 0,
+            calls: Vec::new(),
             collapsed: false,
         },
         RowKind::ThinkingGroupHeader {
@@ -1336,8 +1374,7 @@ fn same_slot_compares_key_not_hidden_or_payload() {
     let a = RenderRow::at(
         RowKind::ToolGroupHeader {
             gid: "g".into(),
-            first_ix: 1,
-            count: 2,
+            calls: vec![1, 2],
             collapsed: false,
         },
         false,
@@ -1346,8 +1383,7 @@ fn same_slot_compares_key_not_hidden_or_payload() {
     let b = RenderRow::at(
         RowKind::ToolGroupHeader {
             gid: "g".into(),
-            first_ix: 5,
-            count: 3,
+            calls: vec![5, 6, 7],
             collapsed: true,
         },
         true,
@@ -1511,9 +1547,7 @@ fn prose_in_front_of_a_run_stays_a_row_of_its_own() {
     let group = rows
         .iter()
         .find_map(|r| match &r.kind {
-            RowKind::ToolGroupHeader {
-                first_ix, count, ..
-            } => Some((*first_ix, *count)),
+            RowKind::ToolGroupHeader { calls, .. } => Some((calls[0], calls.len())),
             _ => None,
         })
         .expect("two consecutive calls earn a group");
@@ -1554,7 +1588,7 @@ fn consecutive_runs_each_get_their_own_group() {
     let starts: Vec<usize> = rows
         .iter()
         .filter_map(|r| match &r.kind {
-            RowKind::ToolGroupHeader { first_ix, .. } => Some(*first_ix),
+            RowKind::ToolGroupHeader { calls, .. } => Some(calls[0]),
             _ => None,
         })
         .collect();
@@ -1629,15 +1663,34 @@ fn every_run_earns_a_group_however_short() {
     );
 }
 
-/// `tool_run_end` stops at a nested child, so two top-level calls with one
-/// between them are two 1-length runs and neither earns a group bar — even
-/// though the child renders inside the first call's card, which leaves the two
-/// looking adjacent on screen. The tail window's run tally advances by the same
-/// `tool_run_end`, so the group walk and the tally cannot drift. Both real
-/// captures (`acp-wire-codex-acp.log`, `acp-wire-claude.log`) hold zero nested
-/// tool calls, so this split is unexercised in practice.
+/// The bar speaks for its calls, so it has to name them. A span cannot: the run
+/// covers items that own no row, so `first..first + count` would pick up a
+/// nested child and drop the call the group actually ends on.
 #[test]
-fn a_nested_child_between_two_calls_leaves_them_two_separate_groups() {
+fn a_group_header_names_the_calls_it_speaks_for() {
+    use ToolStatusView::Completed;
+    let items = [
+        ChatItem::UserText("q".into()),
+        tool("a", Completed),
+        child_of("mid", "a", Completed),
+        tool("b", Completed),
+    ];
+    let header = project_all(&items)
+        .into_iter()
+        .find_map(|r| match r.kind {
+            RowKind::ToolGroupHeader { calls, .. } => Some(calls),
+            _ => None,
+        })
+        .expect("the run earns a bar");
+    assert_eq!(header, vec![1, 3], "the two top-level calls, not the child");
+}
+
+/// A nested child renders inside the first call's card, so the two top-level
+/// calls look adjacent on screen — and the run spans the child rather than
+/// ending at it, so they read as one group. Native subagent sessions make this
+/// the ordinary shape: each launch's own calls arrive before the next launch.
+#[test]
+fn a_nested_child_between_two_calls_leaves_them_in_one_group() {
     use ToolStatusView::Completed;
     let items = [
         ChatItem::UserText("q".into()),
@@ -1649,49 +1702,34 @@ fn a_nested_child_between_two_calls_leaves_them_two_separate_groups() {
         ToolHierarchy::build(&items).is_nested_child(&tool_of(&items, "mid")),
         "the fixture says nothing unless the middle call really nests"
     );
-    assert_eq!(
-        kinds(&project_all(&items)),
-        vec![
-            ("user", false),
-            ("response", false),
-            ("tail", true),
-            ("group", false), // a — its own run
-            ("grouptail", true),
-            ("item", false),
-            ("group", false), // b — the nested child split them, so two bars
-            ("grouptail", true),
-            ("item", false),
-        ]
-    );
+    let one_group = vec![
+        ("user", false),
+        ("response", false),
+        ("tail", true),
+        ("group", false),
+        ("grouptail", true),
+        ("item", true), // settled members collapsed
+        ("item", true),
+    ];
+    assert_eq!(kinds(&project_all(&items)), one_group);
 
-    // The same two calls with nothing between them are one run of two.
+    // The same two calls with nothing between them project identically: what
+    // the reader sees is what decides the grouping.
     let adjacent = [
         ChatItem::UserText("q".into()),
         tool("a", Completed),
         tool("b", Completed),
     ];
-    assert_eq!(
-        kinds(&project_all(&adjacent)),
-        vec![
-            ("user", false),
-            ("response", false),
-            ("tail", true),
-            ("group", false),
-            ("grouptail", true),
-            ("item", true),
-            ("item", true),
-        ]
-    );
+    assert_eq!(kinds(&project_all(&adjacent)), one_group);
 
-    // The window's tally splits the same way: with room for one run it covers
-    // the first call and keeps the second.
+    // The step tally counts the same way — one run, so nothing to cover.
     let rows = project_tail(&items, StepWindow::uniform(TailWindow::Last(1)));
     match tail_row(&rows).kind {
         RowKind::TailMore {
             hidden_steps,
             kept_steps,
             ..
-        } => assert_eq!((hidden_steps, kept_steps), (1, 1), "two runs, one covered"),
+        } => assert_eq!((hidden_steps, kept_steps), (0, 1), "one run"),
         _ => unreachable!(),
     }
 }
@@ -1720,10 +1758,8 @@ fn the_running_group_expands_while_its_settled_sibling_folds() {
         rows.iter()
             .find_map(|r| match &r.kind {
                 RowKind::ToolGroupHeader {
-                    first_ix,
-                    collapsed,
-                    ..
-                } if *first_ix == first => Some(*collapsed),
+                    calls, collapsed, ..
+                } if calls[0] == first => Some(*collapsed),
                 _ => None,
             })
             .expect("group header present")
@@ -1775,6 +1811,52 @@ fn tail_row(rows: &[RenderRow]) -> &RenderRow {
         .expect("a run with tool calls gets a tail row")
 }
 
+/// The same rule with an item the run only *spans*: a bodyless chunk owns no
+/// row and is not a member, so it must not be what keeps an emptied run in the
+/// window's population.
+#[test]
+fn a_spanned_bodyless_chunk_does_not_keep_an_emptied_run_in_the_window() {
+    use ToolStatusView::Completed;
+    let mut items = vec![ChatItem::UserText("q".into())];
+    for i in 0..6 {
+        let edits = i % 2 == 1;
+        let kind = if edits {
+            ToolKindView::Edit
+        } else {
+            ToolKindView::Read
+        };
+        items.push(asst(&format!("run {i}")));
+        items.push(kinded_tool(&format!("t{i}a"), kind, Completed));
+        if edits {
+            items.push(asst(""));
+        }
+        items.push(kinded_tool(&format!("t{i}b"), kind, Completed));
+    }
+    items.push(asst("done"));
+
+    let rows = project(
+        &items,
+        &FoldState::default(),
+        false,
+        &LiveSubagentUnits::of(&items),
+        StepWindow::uniform(TailWindow::Last(2)),
+        &DisplayFilter::from_tokens(["prose", "tool_read"]),
+    );
+    let shown: Vec<usize> = rows
+        .iter()
+        .filter(|r| !r.hidden)
+        .filter_map(|r| match &r.kind {
+            RowKind::ToolGroupHeader { calls, .. } => Some(calls[0]),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(
+        shown.len(),
+        2,
+        "a window of 2 puts two runs on screen: {shown:?}"
+    );
+}
+
 /// A run the filter empties must not spend a slot in the tail window. The
 /// window is what the reader asked to see, so counting runs that render nothing
 /// makes `Recent steps: 3` put one run on screen and silently drop the other
@@ -1810,7 +1892,7 @@ fn the_window_counts_runs_the_filter_leaves_something_to_show() {
         .iter()
         .filter(|r| !r.hidden)
         .filter_map(|r| match &r.kind {
-            RowKind::ToolGroupHeader { first_ix, .. } => Some(*first_ix),
+            RowKind::ToolGroupHeader { calls, .. } => Some(calls[0]),
             _ => None,
         })
         .collect();

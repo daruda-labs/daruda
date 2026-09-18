@@ -443,19 +443,10 @@ fn render_row(
         } => tool_group_tail_more_bar(this, gid, *hidden_calls, *kept_calls, *collapsed, cx),
         RowKind::ToolGroupHeader {
             gid,
-            first_ix,
-            count,
+            calls,
             collapsed,
-        } => tool_group_bar(
-            this,
-            gid,
-            *first_ix..*first_ix + *count,
-            *collapsed,
-            row.filter_revealed,
-            t,
-            cx,
-        )
-        .into_any_element(),
+        } => tool_group_bar(this, gid, calls, *collapsed, row.filter_revealed, t, cx)
+            .into_any_element(),
         RowKind::ThinkingGroupHeader {
             first_ix,
             count,
@@ -751,13 +742,13 @@ fn abbreviate_tokens(n: u64) -> String {
 /// a clip and not an ellipsis.
 fn group_category_title(
     this: &AgentChatView,
-    run: std::ops::Range<usize>,
+    calls: &[usize],
     filter_revealed: bool,
     cx: &Context<AgentChatView>,
 ) -> AnyElement {
     let tally = crate::transcript::tool_category::tally_categories(kept_tool_calls(
         this,
-        run,
+        calls.iter().copied(),
         filter_revealed,
     ));
     category_segments(this, &tally, cx)
@@ -853,10 +844,10 @@ fn category_icon(category: crate::transcript::tool_category::ToolCategory) -> Sh
 /// tally is taken in the projection, where the hierarchy already exists.
 fn kept_tool_calls(
     this: &AgentChatView,
-    run: std::ops::Range<usize>,
+    indices: impl Iterator<Item = usize>,
     filter_revealed: bool,
 ) -> impl Iterator<Item = &daruda_acp::ToolCallItem> {
-    run.filter_map(move |k| match this.items.get(k) {
+    indices.filter_map(move |k| match this.items.get(k) {
         Some(ChatItem::ToolCall(tc)) if filter_revealed || this.filter_matches.keeps_tool(tc) => {
             Some(tc)
         }
@@ -884,22 +875,25 @@ fn kept_thoughts(
 fn tool_group_bar(
     this: &AgentChatView,
     gid: &str,
-    run: std::ops::Range<usize>,
+    calls: &[usize],
     collapsed: bool,
     filter_revealed: bool,
     t: &theme::DarudaTheme,
     cx: &mut Context<AgentChatView>,
 ) -> AnyElement {
-    let rollup = Rollup::of_kept_run(&this.items, run.clone(), &this.live_units, |item| {
-        filter_revealed || this.filter_matches.matches(item)
-    });
+    let rollup = Rollup::of_kept_run(
+        &this.items,
+        calls.iter().copied(),
+        &this.live_units,
+        |item| filter_revealed || this.filter_matches.matches(item),
+    );
     // The title is the group's own identity, not a preview of folded content, so
     // it shows in both states. It names each *category* the group holds rather
-    // than a bare call count: the group is a run of adjacent calls, so its
-    // members are mixed in practice, and "5 tool calls" says nothing about what
-    // happened. What it counts is the part of the span the display filter keeps.
+    // than a bare call count: a run's members are mixed in practice, and "5 tool
+    // calls" says nothing about what happened. What it counts is the part of the
+    // group's calls the display filter keeps.
     let header =
-        FoldHeader::with_title(group_category_title(this, run, filter_revealed, cx)).trailing(
+        FoldHeader::with_title(group_category_title(this, calls, filter_revealed, cx)).trailing(
             fold_group_status_icon(rollup_glyph(rollup, t, this.dim_amount, cx)),
         );
     // Borderless section bar, same as the response bar.

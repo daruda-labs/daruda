@@ -64,8 +64,12 @@ enum GroupFilter {
 }
 
 impl GroupFilter {
-    fn of(run: std::ops::Range<usize>, items: &[ChatItem], filter: &FilterMatchIndex) -> Self {
-        if run.into_iter().any(|j| filter.matches(&items[j])) {
+    fn of(
+        calls: impl Iterator<Item = usize>,
+        items: &[ChatItem],
+        filter: &FilterMatchIndex,
+    ) -> Self {
+        if calls.into_iter().any(|j| filter.matches(&items[j])) {
             Self::Kept
         } else {
             Self::Emptied
@@ -137,8 +141,10 @@ pub(in crate::workspace) enum RowKind {
     },
     ToolGroupHeader {
         gid: String,
-        first_ix: usize,
-        count: usize,
+        /// The calls the bar speaks for, in transcript order. A list rather
+        /// than a span: the run covers items that own no row, and the bar
+        /// counts and summarizes its calls alone.
+        calls: Vec<usize>,
         collapsed: bool,
     },
     /// Keyed on the run's first item rather than a message id: a thought carries
@@ -489,7 +495,7 @@ impl<'a> RunRows<'a> {
     fn push_group_children(
         &mut self,
         context: ProjectionContext<'_>,
-        run: std::ops::Range<usize>,
+        calls: impl Iterator<Item = usize>,
         structural: bool,
         indent: u8,
         group: GroupFilter,
@@ -497,7 +503,7 @@ impl<'a> RunRows<'a> {
     ) {
         let items = context.items;
         let filter = context.filter;
-        for j in run {
+        for j in calls {
             let kind = RowKind::AgentItem(j);
             let filtered = !filter.matches(&items[j]);
             // A running call stays on screen through its group's shut boundary,
@@ -670,20 +676,24 @@ impl UnitWindow {
             }
             let span = context.structure().tool_run(k, run.end);
             k = span.end;
-            units.push((
-                span.end,
-                span.clone().any(|j| context.filter.matches(&items[j])),
-            ));
+            // The span's own calls decide, not everything it covers: an item
+            // the run only passes over is not what the run has to show.
+            let shows = context
+                .structure()
+                .group_calls(span.clone())
+                .any(|j| context.filter.matches(&items[j]));
+            units.push((span.end, shows));
         }
         Self::of_units(units.iter().copied(), run.start, context.tail.steps)
     }
 
-    /// One group's window: one unit per call it holds. A group is a contiguous
-    /// range, so its units are derived on the fly.
-    fn over_group_calls(group: std::ops::Range<usize>, context: ProjectionContext<'_>) -> Self {
-        let start = group.start;
+    /// One group's window: one unit per call it holds — the items it spans that
+    /// own no row are not units, so they cannot spend a slot.
+    fn over_group_calls(calls: &[usize], start: usize, context: ProjectionContext<'_>) -> Self {
         Self::of_units(
-            group.map(move |j| (j + 1, context.filter.matches(&context.items[j]))),
+            calls
+                .iter()
+                .map(move |&j| (j + 1, context.filter.matches(&context.items[j]))),
             start,
             context.tail.calls,
         )
@@ -806,9 +816,7 @@ impl<'items, 'rows> RunProjector<'items, 'rows> {
 
         let mut k = run.start;
         while k < run.end {
-            if is_bodyless(&items[k])
-                || matches!(&items[k], ChatItem::ToolCall(tool) if hierarchy.is_nested_child(tool))
-            {
+            if !context.structure().owns_a_row(k) {
                 k += 1;
                 continue;
             }
@@ -822,36 +830,41 @@ impl<'items, 'rows> RunProjector<'items, 'rows> {
                 // each other, and the bar is where the run's fold and its
                 // summary live. A run always holds at least the call that
                 // started it, so there is no shorter case to branch on.
-                let grun = TranscriptStructure::new(items, hierarchy).tool_run(k, run.end);
+                let structure = TranscriptStructure::new(items, hierarchy);
+                let grun = structure.tool_run(k, run.end);
                 k = grun.end;
-                let group = GroupFilter::of(grun.clone(), items, filter);
-                let group_live = run_is_live(items, grun.clone(), live_units);
+                // Resolved once: past this line the group is its calls, and
+                // `grun` is only the walk's cursor. Reading the span where a
+                // member was meant is what put a nested child in two tallies.
+                let calls: Vec<usize> = structure.group_calls(grun.clone()).collect();
+                let group = GroupFilter::of(calls.iter().copied(), items, filter);
+                let group_live = run_is_live(items, calls.iter().copied(), live_units);
                 {
                     let gid = tool_id(&items[grun.start]);
                     let group_key = FoldKey::ToolGroup(gid.clone());
                     // A run of one: collapsing would leave the bar standing over
                     // nothing, so its default keeps the call on screen. The bar
                     // and its fold still exist — a deliberate fold still shuts it.
-                    // Liveness is read off the run this walk already resolved,
-                    // hierarchy and all. `fold_context_at` would rescan from
-                    // `grun.start` without that hierarchy, so a nested child
-                    // running inside one of these cards would read as a member.
-                    let group_active = grun.clone().any(|k| is_active(&items[k]));
+                    //
+                    // Liveness is read off the members this walk resolved.
+                    // `fold_context_at` would rescan from `grun.start` without
+                    // the hierarchy, so a nested child running inside one of
+                    // these cards would read as a member.
+                    let group_active = calls.iter().any(|&k| is_active(&items[k]));
                     let group_collapsed = !fold.is_expanded(
                         &group_key,
                         FoldContext::new(boundary.at(grun.start), group_active),
-                    ) && (grun.len() > 1 || fold.is_overridden(&group_key));
+                    ) && (calls.len() > 1 || fold.is_overridden(&group_key));
                     let group_tail_key = FoldKey::ToolGroupTail(gid.clone());
                     let group_tail_revealed = fold.is_expanded(
                         &group_tail_key,
                         fold_context_at(&group_tail_key, grun.start, items, boundary),
                     );
-                    let group_cut = UnitWindow::over_group_calls(grun.clone(), context);
+                    let group_cut = UnitWindow::over_group_calls(&calls, grun.start, context);
                     out.push(
                         RowKind::ToolGroupHeader {
                             gid: gid.clone(),
-                            first_ix: grun.start,
-                            count: grun.len(),
+                            calls: calls.clone(),
                             collapsed: group_collapsed,
                         },
                         folded && !group_live,
@@ -874,7 +887,7 @@ impl<'items, 'rows> RunProjector<'items, 'rows> {
                     );
                     out.push_group_children(
                         context,
-                        grun,
+                        calls.into_iter(),
                         folded || group_collapsed,
                         base_indent,
                         group,
@@ -979,10 +992,10 @@ pub(super) fn is_bodyless(item: &ChatItem) -> bool {
 /// different subjects; they are not one rule stated twice.
 fn run_is_live(
     items: &[ChatItem],
-    run: std::ops::Range<usize>,
+    calls: impl Iterator<Item = usize>,
     live_units: &LiveSubagentUnits,
 ) -> bool {
-    run.into_iter().any(
+    calls.into_iter().any(
         |j| matches!(&items[j], ChatItem::ToolCall(tc) if tool_or_subtree_live(tc, live_units)),
     )
 }

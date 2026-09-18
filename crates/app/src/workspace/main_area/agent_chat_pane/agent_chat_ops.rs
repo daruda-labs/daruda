@@ -1162,6 +1162,15 @@ impl Workspace {
                 TailWindow::Last(SHOT_GROUP_TAIL_WINDOW),
                 cx,
             );
+            // The launch shares a group with the call after it, and a settled
+            // group of two defaults collapsed — which takes the card's own row
+            // with it.
+            v.set_fold_for_shot(
+                FoldKey::ToolGroup(SUBAGENT_PARENT_ID.to_string()),
+                true,
+                window,
+                cx,
+            );
             // A launch card defaults collapsed, and its children are only on
             // screen once it is open — the boundary lives among them.
             v.set_fold_for_shot(

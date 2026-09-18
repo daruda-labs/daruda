@@ -215,12 +215,12 @@ impl Rollup {
     /// reason for being there.
     pub(in crate::workspace) fn of_kept_run(
         items: &[daruda_acp::ChatItem],
-        range: std::ops::Range<usize>,
+        indices: impl Iterator<Item = usize>,
         live_units: &LiveSubagentUnits,
         keep: impl Fn(&daruda_acp::ChatItem) -> bool,
     ) -> Self {
         Self::of_items(
-            range.filter_map(|k| items.get(k)),
+            indices.filter_map(|k| items.get(k)),
             |tc| effective_tool_status(tc, live_units),
             keep,
         )
@@ -737,23 +737,20 @@ fn fold_active_at(key: &FoldKey, ix: usize, items: &[daruda_acp::ChatItem]) -> b
         // run it cut, and a scan that stopped only at the next prompt read the
         // turn after a Stop as part of this one.
         FoldKey::Response(_) => run_active(items, response_run(items, ix)),
-        // A nested child renders inside its parent's card rather than joining
-        // the run, so a group's liveness must not read one — otherwise a call
-        // that belongs to an inner card holds the group force-expanded.
+        // A nested child is spanned by the run but is not a member of it, so a
+        // group's liveness must not read one — otherwise a call that belongs to
+        // an inner card holds the group force-expanded.
         //
         // The hierarchy is built here rather than passed in because no
         // paint-path caller reaches this arm: `render` and `reconcile` ask only
         // about `Assistant` / `Thinking` / `Tool` / `Subagent` / tail keys,
         // leaving projection and the click path, neither of which repaints.
         FoldKey::ToolGroup(_) => {
-            // Built here rather than passed in because no paint-path caller
-            // reaches this arm: `render` and `reconcile` ask only about
-            // `Assistant` / `Thinking` / `Tool` / `Subagent` / tail keys, and
-            // projection answers its own group bars from the run it already
-            // walked. That leaves the click path, which does not repaint.
             let hierarchy = ToolHierarchy::build(items);
             let structure = TranscriptStructure::new(items, &hierarchy);
-            run_active(items, structure.tool_run(ix, items.len()))
+            structure
+                .group_calls(structure.tool_run(ix, items.len()))
+                .any(|k| is_active(&items[k]))
         }
         FoldKey::ThinkingGroup(_) => items.get(ix..).is_some_and(|rest| {
             rest.iter()
