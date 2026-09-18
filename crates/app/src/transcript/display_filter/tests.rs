@@ -402,6 +402,7 @@ fn one_tool_category_is_one_hidden_facet() {
             "tool_read",
             "tool_search",
             "tool_run",
+            "tool_agent",
             "tool_other"
         ]
     );
@@ -748,11 +749,45 @@ fn plain_other() -> ToolCallItem {
     tc
 }
 
-/// Narrowing the tool axis to a category selects which of the subagent's calls
-/// show; it must not decide whether the subagent shows. The launch classifies
-/// as `Other`, so every one of these would otherwise take the card with it.
+/// The section switch takes the launch with everything else — the card's whole
+/// contents are tool calls, so keeping it would leave an empty card standing
+/// under a chip that says tool calls are hidden.
 #[test]
-fn a_category_narrowing_never_cuts_a_subagent_launch() {
+fn turning_the_whole_tool_section_off_takes_the_launch_too() {
+    let off = DisplayFilter::from_tokens(["prose"]);
+    assert_eq!(off.section_state(FilterFacet::Tools), SectionState::Off);
+    assert!(!off.matches_tool(&launch()));
+    assert!(
+        DisplayFilter::default().matches_tool(&launch()),
+        "and All keeps it"
+    );
+}
+
+/// Every category earns a row of its own. A category a bar can count but the
+/// panel cannot list is one the reader sees and cannot act on.
+#[test]
+fn every_tool_category_has_a_filter_row() {
+    for category in ToolCategory::ALL {
+        assert!(
+            FilterFacet::ALL
+                .iter()
+                .any(|facet| facet.category() == Some(category)),
+            "no filter row names {category:?}"
+        );
+    }
+}
+
+/// A launch has a category of its own now, so the tool axis decides it like any
+/// other row: picking `tool_agent` keeps the card, picking only the file-work
+/// categories takes it — and everything inside it, which is the point.
+#[test]
+fn the_agent_row_decides_whether_a_launch_shows() {
+    let keeps = DisplayFilter::from_tokens(["tools", "tool_agent"]);
+    assert!(keeps.matches_tool(&launch()));
+    assert!(
+        !keeps.matches_tool(&plain_other()),
+        "and an ordinary think-kind call is not an agent"
+    );
     for tokens in [
         vec!["tools", "tool_read"],
         vec!["tools", "tool_edit"],
@@ -760,23 +795,8 @@ fn a_category_narrowing_never_cuts_a_subagent_launch() {
         vec!["tools", "tool_search"],
     ] {
         let filter = DisplayFilter::from_tokens(tokens.clone());
-        assert!(filter.matches_tool(&launch()), "{tokens:?}");
-        assert!(
-            !filter.matches_tool(&plain_other()),
-            "an ordinary Other-kind call is still cut: {tokens:?}"
-        );
+        assert!(!filter.matches_tool(&launch()), "{tokens:?}");
     }
-}
-
-/// The exemption is scoped to *narrowing*, not to the section switch. Turning
-/// tool calls off entirely takes the launch with everything else — the card's
-/// whole contents are tool calls, so keeping it would leave an empty card
-/// standing under a chip that says tool calls are hidden.
-#[test]
-fn turning_the_whole_tool_section_off_takes_the_launch_too() {
-    let off = DisplayFilter::from_tokens(["prose"]);
-    assert_eq!(off.section_state(FilterFacet::Tools), SectionState::Off);
-    assert!(!off.matches_tool(&launch()));
     assert!(
         DisplayFilter::default().matches_tool(&launch()),
         "and All keeps it"

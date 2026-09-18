@@ -150,9 +150,13 @@ pub(super) fn tool_card(
                     .items_center()
                     .gap(px(theme::GAP_SM))
                     .child(Icon::empty().path(tool_icon(tc)).xsmall().text_color(fg))
-                    .child(div().flex_none().text_color(fg).text_size(font_size).child(
-                        SharedString::from(tool_header_label(tc.tool_name.as_deref(), tc.kind)),
-                    ))
+                    .child(
+                        div()
+                            .flex_none()
+                            .text_color(fg)
+                            .text_size(font_size)
+                            .child(SharedString::from(tool_header_label(tc))),
+                    )
                     .into_any_element(),
             );
     // Detached shell command (`run_in_background: true`): the tool completes
@@ -710,14 +714,21 @@ fn tool_title_summary(title: &str) -> String {
 
 /// The header's primary label. Prefers the agent's own tool name (`Bash`,
 /// `Grep`, …) — the vocabulary the user knows from the agent's CLI and more
-/// specific than the normalized kind — falling back to the fixed-vocabulary
-/// kind label when the agent surfaced no tool name. The leading icon already
-/// conveys the kind, so the specific name here adds information rather than
-/// duplicating the icon.
-fn tool_header_label(tool_name: Option<&str>, kind: ToolKindView) -> String {
-    tool_name
-        .map(str::to_owned)
-        .unwrap_or_else(|| tool_kind_label(kind))
+/// specific than the normalized kind — falling back to a fixed-vocabulary label
+/// when the agent surfaced no tool name. The leading icon already conveys the
+/// kind, so the specific name here adds information rather than duplicating it.
+///
+/// The launch question comes before the kind for the same reason it does in
+/// [`tool_icon`]: a spawned agent arrives as [`ToolKindView::Think`], so the
+/// kind label alone calls a delegated run "Think".
+fn tool_header_label(tc: &ToolCallItem) -> String {
+    tc.tool_name.clone().unwrap_or_else(|| {
+        if tc.is_subagent_launch() {
+            s::agent_chat_tool_kind_subagent()
+        } else {
+            tool_kind_label(tc.kind)
+        }
+    })
 }
 
 /// Map a tool kind to its short, fixed-vocabulary header label (Read/Edit/
@@ -967,10 +978,12 @@ mod tests {
     fn header_label_prefers_tool_name_over_kind() {
         // The agent's own tool name wins: "Bash" reads better than the generic
         // "Execute" kind, and the leading icon still carries the kind.
-        assert_eq!(
-            tool_header_label(Some("Bash"), ToolKindView::Execute),
-            "Bash"
-        );
+        let call = ToolCallItem {
+            tool_name: Some("Bash".into()),
+            kind: ToolKindView::Execute,
+            ..think_call(None)
+        };
+        assert_eq!(tool_header_label(&call), "Bash");
     }
 
     #[test]
@@ -978,10 +991,41 @@ mod tests {
         // No tool name (e.g. an adapter that omits it) → the kind label, same as
         // before this feature. Locale-independent: compare against the kind label
         // rather than a hardcoded string.
+        let call = ToolCallItem {
+            kind: ToolKindView::Execute,
+            ..think_call(None)
+        };
         assert_eq!(
-            tool_header_label(None, ToolKindView::Execute),
+            tool_header_label(&call),
             tool_kind_label(ToolKindView::Execute)
         );
+    }
+
+    /// A native launch carries no tool name, and its `Think` kind is the one
+    /// label that misreads — the card holds a delegated agent, not reasoning.
+    #[test]
+    fn header_label_names_a_nameless_launch_a_subagent() {
+        let launch = think_call(Some(
+            serde_json::json!({ "subagent_type": "code-reviewer" }),
+        ));
+        assert!(launch.is_subagent_launch(), "the fixture must be a launch");
+        assert_eq!(
+            tool_header_label(&launch),
+            s::agent_chat_tool_kind_subagent()
+        );
+        assert_ne!(
+            tool_header_label(&launch),
+            tool_kind_label(ToolKindView::Think),
+            "the kind label is what this replaces"
+        );
+        // An adapter that names the tool itself keeps its own word for it.
+        let named = ToolCallItem {
+            tool_name: Some("Task".into()),
+            ..think_call(Some(
+                serde_json::json!({ "subagent_type": "code-reviewer" }),
+            ))
+        };
+        assert_eq!(tool_header_label(&named), "Task");
     }
 
     #[test]

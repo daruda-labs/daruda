@@ -153,6 +153,7 @@ fn facet_label(facet: FilterFacet) -> String {
         FilterFacet::ToolEdit => s::agent_chat_filter_tool_edit(),
         FilterFacet::ToolSearch => s::agent_chat_filter_tool_search(),
         FilterFacet::ToolRun => s::agent_chat_filter_tool_run(),
+        FilterFacet::ToolAgent => s::agent_chat_filter_tool_agent(),
         FilterFacet::ToolOther => s::agent_chat_filter_tool_other(),
     }
 }

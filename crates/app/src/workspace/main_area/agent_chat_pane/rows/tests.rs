@@ -3795,22 +3795,25 @@ fn the_stop_marker_is_always_a_top_level_row() {
     }
 }
 
-/// The launch is the card its children render inside, so no *category* choice
-/// can take it off screen — not even one that excludes every child it made.
-/// Turning the whole section off is the other question, pinned next door in
-/// `turning_the_whole_tool_section_off_takes_the_launch_too`.
+/// The launch answers to its own category row, and taking it takes the card its
+/// children render inside. A category that matches a child still keeps the
+/// launch, because a match has to stay reachable through the card that holds
+/// it — that is the ancestor rule, not an exemption.
 #[test]
-fn a_category_narrowing_never_cuts_a_subagent_launch_out_of_the_index() {
-    let items = turn_with_subagent(3, false);
+fn the_agent_row_decides_whether_a_launch_is_in_the_index() {
+    let items = turn_with_subagent(3, false); // children are Edit-kind
     let launch = tool_of(&items, "task");
-    for tokens in [
-        vec!["tools", "tool_read"],
-        vec!["tools", "tool_run"],
-        vec!["tools", "tool_search"],
-    ] {
+    let kept = FilterMatchIndex::of(&items, DisplayFilter::from_tokens(["tools", "tool_agent"]));
+    assert!(kept.keeps_tool(&launch), "its own row keeps it");
+    for tokens in [vec!["tools", "tool_read"], vec!["tools", "tool_search"]] {
         let index = FilterMatchIndex::of(&items, DisplayFilter::from_tokens(tokens.clone()));
-        assert!(index.keeps_tool(&launch), "{tokens:?}");
+        assert!(!index.keeps_tool(&launch), "{tokens:?}");
     }
+    let by_child = FilterMatchIndex::of(&items, DisplayFilter::from_tokens(["tools", "tool_edit"]));
+    assert!(
+        by_child.keeps_tool(&launch),
+        "a matching child drags its card back in"
+    );
 }
 
 /// The other half: what the launch does *not* protect is the work it did. Each
@@ -3837,12 +3840,13 @@ fn a_subagents_own_calls_are_filtered_on_their_own_category() {
 /// their number instead.
 #[test]
 fn the_runs_tally_counts_what_the_filter_took_from_inside_a_card() {
-    // Two prose rows and nothing else: the launch is exempt, so this is the
-    // whole tally a delegating run starts from.
-    let childless = project_filtered(&turn_with_subagent(0, false), &only_reads());
+    // Two prose rows and nothing else: the filter keeps the launch's own row,
+    // so this is the whole tally a delegating run starts from.
+    let keeps_the_card = DisplayFilter::from_tokens(["tools", "tool_agent"]);
+    let childless = project_filtered(&turn_with_subagent(0, false), &keeps_the_card);
     assert_eq!(filtered_count(&childless), 2);
 
-    let rows = project_filtered(&turn_with_subagent(3, false), &only_reads());
+    let rows = project_filtered(&turn_with_subagent(3, false), &keeps_the_card);
     assert_eq!(
         filtered_count(&rows),
         5,

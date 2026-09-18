@@ -130,7 +130,7 @@ use tool::{CardContext, permission_card, tool_card};
 use crate::surface::strings as s;
 use crate::ui::theme;
 use crate::ui::theme::PaneSurfaceTokens;
-use crate::ui::{Icon, IconName, Sizable as _, StatusPulseClock, button_bare};
+use crate::ui::{Icon, IconName, IconNamed as _, Sizable as _, StatusPulseClock, button_bare};
 use crate::workspace::main_area::agent_chat_pane::agent_chat_helpers::{
     DiffStat, Rollup, TurnBoundary, fold_context_at,
 };
@@ -825,12 +825,17 @@ fn category_segments(
 /// representative kind, so a category and the cards under it never disagree.
 fn category_icon(category: crate::transcript::tool_category::ToolCategory) -> SharedString {
     use crate::transcript::tool_category::ToolCategory;
+    // A launch has no kind to borrow from: it arrives as `Think`, which is the
+    // one glyph it must not share (see `tool::tool_icon`).
+    if matches!(category, ToolCategory::Agent) {
+        return IconName::Bot.path();
+    }
     tool::tool_kind_icon(match category {
         ToolCategory::Read => daruda_acp::ToolKindView::Read,
         ToolCategory::Edit => daruda_acp::ToolKindView::Edit,
         ToolCategory::Search => daruda_acp::ToolKindView::Search,
         ToolCategory::Run => daruda_acp::ToolKindView::Execute,
-        ToolCategory::Other => daruda_acp::ToolKindView::Other,
+        ToolCategory::Agent | ToolCategory::Other => daruda_acp::ToolKindView::Other,
     })
 }
 

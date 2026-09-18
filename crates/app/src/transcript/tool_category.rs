@@ -8,12 +8,24 @@ pub(crate) enum ToolCategory {
     Edit,
     Search,
     Run,
+    /// A delegated agent. Sits beside the file-work categories rather than
+    /// under [`Self::Other`]: the card holds a whole run of someone else's
+    /// work, which is the one thing a reader scans a turn for.
+    Agent,
     Other,
 }
 
 impl ToolCategory {
-    pub(crate) const ALL: [Self; 5] =
-        [Self::Read, Self::Edit, Self::Search, Self::Run, Self::Other];
+    /// [`Self::Other`] stays last: it is the catch-all, so a new category
+    /// takes the slot before it rather than displacing the tail.
+    pub(crate) const ALL: [Self; 6] = [
+        Self::Read,
+        Self::Edit,
+        Self::Search,
+        Self::Run,
+        Self::Agent,
+        Self::Other,
+    ];
 
     pub(crate) const fn index(self) -> usize {
         match self {
@@ -21,7 +33,8 @@ impl ToolCategory {
             Self::Edit => 1,
             Self::Search => 2,
             Self::Run => 3,
-            Self::Other => 4,
+            Self::Agent => 4,
+            Self::Other => 5,
         }
     }
 
@@ -31,6 +44,7 @@ impl ToolCategory {
             Self::Edit => "edit",
             Self::Search => "search",
             Self::Run => "run",
+            Self::Agent => "agent",
             Self::Other => "other",
         }
     }
@@ -113,8 +127,13 @@ fn category_for_kind(kind: ToolKindView) -> ToolCategory {
     }
 }
 
-/// Resolve one category from diffs, then tool name, then ACP kind.
+/// Resolve one category: a launch first, then diffs, then tool name, then ACP
+/// kind. The launch question comes first because nothing below can answer it —
+/// a spawned agent arrives as `Think` like any reasoning tool.
 pub(crate) fn classify_tool(tc: &ToolCallItem) -> ToolCategory {
+    if tc.is_subagent_launch() {
+        return ToolCategory::Agent;
+    }
     if !tc.diffs.is_empty() {
         return ToolCategory::Edit;
     }
@@ -170,6 +189,22 @@ mod tests {
             parent_tool_id: None,
             exit: None,
         }
+    }
+
+    /// A launch carries the delegated agent, not a category of file work, and
+    /// its `Think` kind says nothing about what the agent went on to do — so
+    /// the launch itself is the category.
+    #[test]
+    fn a_subagent_launch_is_its_own_category() {
+        let mut launch = tool(None, ToolKindView::Think);
+        launch.raw_input = Some(serde_json::json!({ "subagent_type": "code-reviewer" }));
+        assert!(launch.is_subagent_launch(), "the fixture must be a launch");
+        assert_eq!(classify_tool(&launch).token(), "agent");
+        assert_eq!(
+            classify_tool(&tool(None, ToolKindView::Think)).token(),
+            "other",
+            "a plain think-kind call is still Other"
+        );
     }
 
     #[test]

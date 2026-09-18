@@ -2243,6 +2243,8 @@ pub fn agent_chat_group_category(category: &str, count: usize) -> String {
         ("search", false) => rust_i18n::t!("agent_chat.group_search", count = count),
         ("run", true) => rust_i18n::t!("agent_chat.group_run_one"),
         ("run", false) => rust_i18n::t!("agent_chat.group_run", count = count),
+        ("agent", true) => rust_i18n::t!("agent_chat.group_agent_one"),
+        ("agent", false) => rust_i18n::t!("agent_chat.group_agent", count = count),
         (_, true) => rust_i18n::t!("agent_chat.group_other_one"),
         (_, false) => rust_i18n::t!("agent_chat.group_other", count = count),
     }
@@ -2361,6 +2363,16 @@ pub fn agent_chat_filter_tool_search() -> String {
 
 pub fn agent_chat_filter_tool_run() -> String {
     rust_i18n::t!("agent_chat.filter_tool_run").into_owned()
+}
+
+/// The header label for a launch the adapter gave no tool name — its `Think`
+/// kind is the one label that misreads, so the card says what it holds.
+pub fn agent_chat_tool_kind_subagent() -> String {
+    rust_i18n::t!("agent_chat.tool_kind_subagent").into_owned()
+}
+
+pub fn agent_chat_filter_tool_agent() -> String {
+    rust_i18n::t!("agent_chat.filter_tool_agent").into_owned()
 }
 
 pub fn agent_chat_filter_tool_other() -> String {

@@ -349,6 +349,7 @@ fn tool_category_label(category: ToolCategory) -> String {
         ToolCategory::Edit => s::agent_chat_filter_tool_edit(),
         ToolCategory::Search => s::agent_chat_filter_tool_search(),
         ToolCategory::Run => s::agent_chat_filter_tool_run(),
+        ToolCategory::Agent => s::agent_chat_filter_tool_agent(),
         ToolCategory::Other => s::agent_chat_filter_tool_other(),
     }
 }

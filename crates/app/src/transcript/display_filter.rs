@@ -52,11 +52,12 @@ pub(crate) enum FilterFacet {
     ToolEdit,
     ToolSearch,
     ToolRun,
+    ToolAgent,
     ToolOther,
 }
 
 impl FilterFacet {
-    pub(crate) const ALL: [FilterFacet; 10] = [
+    pub(crate) const ALL: [FilterFacet; 11] = [
         Self::Thinking,
         Self::Prose,
         Self::ProseAnswer,
@@ -66,6 +67,7 @@ impl FilterFacet {
         Self::ToolEdit,
         Self::ToolSearch,
         Self::ToolRun,
+        Self::ToolAgent,
         Self::ToolOther,
     ];
 
@@ -81,6 +83,7 @@ impl FilterFacet {
             | Self::ToolEdit
             | Self::ToolSearch
             | Self::ToolRun
+            | Self::ToolAgent
             | Self::ToolOther => FilterAxis::Tool,
         }
     }
@@ -105,6 +108,7 @@ impl FilterFacet {
             Self::ToolEdit => Some(ToolCategory::Edit),
             Self::ToolSearch => Some(ToolCategory::Search),
             Self::ToolRun => Some(ToolCategory::Run),
+            Self::ToolAgent => Some(ToolCategory::Agent),
             Self::ToolOther => Some(ToolCategory::Other),
         }
     }
@@ -121,6 +125,7 @@ impl FilterFacet {
             Self::ToolEdit => "tool_edit",
             Self::ToolSearch => "tool_search",
             Self::ToolRun => "tool_run",
+            Self::ToolAgent => "tool_agent",
             Self::ToolOther => "tool_other",
         }
     }
@@ -477,12 +482,6 @@ impl DisplayFilter {
         match self.tools {
             ToolSelection::Excluded => false,
             ToolSelection::All => true,
-            // A launch is the card its children render inside, and its own kind
-            // says nothing about what the subagent went on to do — so picking
-            // categories picks what shows *within* the card, never whether the
-            // card shows. Turning the section off above still takes it, since
-            // then its whole contents are going too.
-            ToolSelection::Some(_) if tc.is_subagent_launch() => true,
             ToolSelection::Some(categories) => categories.contains(classify_tool(tc)),
         }
     }
