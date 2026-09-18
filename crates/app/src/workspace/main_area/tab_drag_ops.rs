@@ -174,7 +174,7 @@ impl Workspace {
     /// *different* `tab_id` restarts the delay. Overwriting
     /// `tab_hover_switch` drops the previous `Task`, which cancels it
     /// (mirrors GPUI's own tooltip-delay mechanism). Exposed at
-    /// `pub(in crate::workspace)` (rather than private) so the
+    /// `pub(super)` (rather than private) so the
     /// stale-timer-cancellation guarantee is directly testable — the
     /// `DragMoveEvent` this is normally reached through cannot be
     /// constructed outside `gpui` itself (private fields), so tests must

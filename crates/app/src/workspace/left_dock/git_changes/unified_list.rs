@@ -11,10 +11,10 @@ use crate::lane::git::GitFileEntry;
 use crate::lane::paths::LanePaths;
 use crate::path_ext::PathExt;
 
-pub(in crate::workspace) struct UnifiedEntry {
-    pub(in crate::workspace) path: PathBuf,
-    pub(in crate::workspace) staged: Option<GitFileEntry>,
-    pub(in crate::workspace) unstaged: Option<GitFileEntry>,
+pub(super) struct UnifiedEntry {
+    pub(super) path: PathBuf,
+    pub(super) staged: Option<GitFileEntry>,
+    pub(super) unstaged: Option<GitFileEntry>,
 }
 
 pub(super) fn build_unified_list(
@@ -97,7 +97,7 @@ pub(super) fn group_by_dir(
 /// chrome wrapped around a group. Keeping the tree as nested groups forced the
 /// view to build an element per changed file on every render, which is linear
 /// in the change set (measured 6.8 ms at 200 files, 32 ms at 1000).
-pub(in crate::workspace) enum GitChangesRow {
+pub(super) enum GitChangesRow {
     DirHeader(GitDirHeaderRow),
     File(UnifiedEntry),
 }
@@ -105,23 +105,23 @@ pub(in crate::workspace) enum GitChangesRow {
 /// A directory group's header row. Carries everything the header needs to
 /// draw and act, because the group's entries are no longer adjacent to it in
 /// a nested structure.
-pub(in crate::workspace) struct GitDirHeaderRow {
+pub(super) struct GitDirHeaderRow {
     /// Lane-relative directory path, as displayed and as keyed in the
     /// collapsed-dirs set.
-    pub(in crate::workspace) dir: String,
-    pub(in crate::workspace) collapsed: bool,
-    pub(in crate::workspace) state: DirStageState,
+    pub(super) dir: String,
+    pub(super) collapsed: bool,
+    pub(super) state: DirStageState,
     /// Repo-root-relative paths the header's checkbox acts on — already
     /// narrowed by `state`, since which side of the index a click moves
     /// depends on it. Always the git-status form so they round-trip into
     /// `git_add` / `git_restore_staged`.
-    pub(in crate::workspace) stage_paths: Vec<PathBuf>,
+    pub(super) stage_paths: Vec<PathBuf>,
 }
 
 /// The rows the dock draws, in draw order, with collapsed groups' files left
 /// out — one pass over the change set, shared by the renderer and the keyboard
 /// cursor so the two can never disagree about order.
-pub(in crate::workspace) fn build_rows(
+pub(super) fn build_rows(
     status: &crate::lane::git::GitWorktreeStatus,
     collapsed: &std::collections::HashSet<String>,
     wt_paths: &LanePaths<'_>,
@@ -207,7 +207,7 @@ pub(super) fn count_conflicts(unstaged: &[GitFileEntry]) -> usize {
 
 /// Aggregate staging state of a directory group.
 #[derive(Clone, Copy, PartialEq, Eq)]
-pub(in crate::workspace) enum DirStageState {
+pub(super) enum DirStageState {
     /// Every file in the dir is fully staged (no working-tree leftover).
     AllStaged,
     /// No file in the dir has any staged change.

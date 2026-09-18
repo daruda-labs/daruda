@@ -15,7 +15,7 @@ use gpui::{AnyWindowHandle, App, AppContext as _, Window};
 ///
 /// Naming both ways in one type is what keeps that distinction at the call site:
 /// a new caller has to say which world it is in.
-pub(in crate::workspace) enum WindowAccess<'a> {
+pub(super) enum WindowAccess<'a> {
     /// Already inside the window's update cycle — use this borrow.
     Live(&'a mut Window),
     /// Outside any window update — re-enter by handle.
@@ -25,7 +25,7 @@ pub(in crate::workspace) enum WindowAccess<'a> {
 impl WindowAccess<'_> {
     /// Run `f` against a live window. `Err` only when the handle no longer
     /// resolves, which [`Self::Live`] cannot produce.
-    pub(in crate::workspace) fn with<R>(
+    pub(super) fn with<R>(
         &mut self,
         cx: &mut App,
         f: impl FnOnce(&mut Window, &mut App) -> R,

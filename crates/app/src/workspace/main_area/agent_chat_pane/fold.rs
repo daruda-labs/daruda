@@ -89,7 +89,7 @@ fn natural_default(policy: FoldPolicy, active: bool) -> bool {
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub(in crate::workspace) struct FoldContext {
+pub(super) struct FoldContext {
     active: bool,
     position: TurnPosition,
     tool_category: Option<ToolCategory>,
@@ -97,7 +97,7 @@ pub(in crate::workspace) struct FoldContext {
 
 impl FoldContext {
     #[cfg(test)]
-    pub(in crate::workspace) fn past(active: bool) -> Self {
+    pub(super) fn past(active: bool) -> Self {
         Self {
             active,
             position: TurnPosition::Past,
@@ -106,7 +106,7 @@ impl FoldContext {
     }
 
     #[cfg(test)]
-    pub(in crate::workspace) fn last(active: bool) -> Self {
+    pub(super) fn last(active: bool) -> Self {
         Self {
             active,
             position: TurnPosition::Last,
@@ -114,7 +114,7 @@ impl FoldContext {
         }
     }
 
-    pub(in crate::workspace) fn new(position: TurnPosition, active: bool) -> Self {
+    pub(super) fn new(position: TurnPosition, active: bool) -> Self {
         Self {
             active,
             position,
@@ -122,7 +122,7 @@ impl FoldContext {
         }
     }
 
-    pub(in crate::workspace) fn with_tool_category(mut self, category: ToolCategory) -> Self {
+    pub(super) fn with_tool_category(mut self, category: ToolCategory) -> Self {
         self.tool_category = Some(category);
         self
     }
@@ -160,12 +160,12 @@ impl FoldState {
 
     /// The mode together with whether it is still config's. The Activity Bar
     /// reads both — the label from one, the overridden mark from the other.
-    pub(in crate::workspace) fn mode_choice(&self) -> PaneChoice<FoldMode> {
+    pub(super) fn mode_choice(&self) -> PaneChoice<FoldMode> {
         self.mode
     }
 
     /// Follow a reloaded config default. A mode the user picked is untouched.
-    pub(in crate::workspace) fn reseed_mode(&mut self, mode: FoldMode) {
+    pub(super) fn reseed_mode(&mut self, mode: FoldMode) {
         self.mode.reseed(mode);
     }
 
@@ -174,7 +174,7 @@ impl FoldState {
     }
 
     /// Drop the pane's own mode and follow the configured default again.
-    pub(in crate::workspace) fn reset_mode(&mut self, mode: FoldMode) {
+    pub(super) fn reset_mode(&mut self, mode: FoldMode) {
         self.decide_mode(PaneChoice::Seeded(mode));
     }
 
@@ -190,7 +190,7 @@ impl FoldState {
     /// release the hold with `None`. Ranks below a user override and above the
     /// mode default, and replaces any previous hold — only the newest response
     /// is ever held.
-    pub(in crate::workspace) fn hold_response(&mut self, run_start: Option<usize>) {
+    pub(super) fn hold_response(&mut self, run_start: Option<usize>) {
         self.held_response = run_start;
     }
 
@@ -214,7 +214,7 @@ impl FoldState {
         }
     }
 
-    pub(in crate::workspace) fn is_expanded(&self, key: &FoldKey, ctx: FoldContext) -> bool {
+    pub(super) fn is_expanded(&self, key: &FoldKey, ctx: FoldContext) -> bool {
         if let Some(expanded) = self.overrides.get(key) {
             return *expanded;
         }
@@ -224,12 +224,12 @@ impl FoldState {
         natural_default(self.policy_for(key, ctx), ctx.active)
     }
 
-    pub(in crate::workspace) fn toggle(&mut self, key: FoldKey, ctx: FoldContext) {
+    pub(super) fn toggle(&mut self, key: FoldKey, ctx: FoldContext) {
         let cur = self.is_expanded(&key, ctx);
         self.overrides.insert(key, !cur);
     }
 
-    pub(in crate::workspace) fn clear_overrides(&mut self) {
+    pub(super) fn clear_overrides(&mut self) {
         self.overrides.clear();
         // The anchor is an item index, invalid once the conversation is dropped.
         self.held_response = None;
@@ -240,7 +240,7 @@ impl FoldState {
     /// and each subagent card's. Changing a window invalidates every reveal it
     /// granted — and only those, so narrowing the steps leaves a group the user
     /// opened by hand still open.
-    pub(in crate::workspace) fn clear_tail_reveals(&mut self, level: TailLevel) -> bool {
+    pub(super) fn clear_tail_reveals(&mut self, level: TailLevel) -> bool {
         self.clear_matching_overrides(|key| match level {
             TailLevel::Steps => matches!(key, FoldKey::Tail(_)),
             TailLevel::Calls => {
@@ -249,7 +249,7 @@ impl FoldState {
         })
     }
 
-    pub(in crate::workspace) fn clear_filter_reveals(&mut self) -> bool {
+    pub(super) fn clear_filter_reveals(&mut self) -> bool {
         self.clear_matching_overrides(|key| matches!(key, FoldKey::Filtered(_)))
     }
 
@@ -259,11 +259,7 @@ impl FoldState {
         self.overrides.len() != old_len
     }
 
-    pub(in crate::workspace) fn set_all(
-        &mut self,
-        keys: impl IntoIterator<Item = FoldKey>,
-        expanded: bool,
-    ) {
+    pub(super) fn set_all(&mut self, keys: impl IntoIterator<Item = FoldKey>, expanded: bool) {
         for key in keys {
             self.overrides.insert(key, expanded);
         }

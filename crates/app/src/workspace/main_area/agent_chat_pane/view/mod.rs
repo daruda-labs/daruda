@@ -254,11 +254,11 @@ impl ActivitySpan {
 /// recorded together at the busy→idle settle edge — the one point that answers
 /// "when did this finish" for everything else in the pane.
 #[derive(Clone, Copy, Debug, PartialEq)]
-pub(in crate::workspace) struct TurnRecord {
-    pub(in crate::workspace) worked_for: std::time::Duration,
-    pub(in crate::workspace) finished_at: chrono::DateTime<chrono::Local>,
+pub(super) struct TurnRecord {
+    pub(super) worked_for: std::time::Duration,
+    pub(super) finished_at: chrono::DateTime<chrono::Local>,
     /// `None` for an agent that reports no usage.
-    pub(in crate::workspace) output_tokens: Option<u64>,
+    pub(super) output_tokens: Option<u64>,
 }
 
 /// Terminal outcome of an activity span, captured when the turn/session ends
@@ -305,7 +305,7 @@ impl ChatContentWidth {
         matches!(self, Self::Reading)
     }
 
-    pub(in crate::workspace) fn toggle(self) -> Self {
+    pub(super) fn toggle(self) -> Self {
         match self {
             Self::Full => Self::Reading,
             Self::Reading => Self::Full,
@@ -448,10 +448,10 @@ pub(in crate::workspace) struct AssetCache {
     /// Fingerprint each `diff_editors` entry was built from. Lets
     /// `reconcile_diff_editors` detect a replaced diff (streaming growth from
     /// a partial snapshot) and rebuild instead of leaving it stale.
-    pub(in crate::workspace) diff_editor_sources: HashMap<String, u64>,
+    pub(super) diff_editor_sources: HashMap<String, u64>,
     /// Added/removed line counts per tool-call diff, same keys as
     /// `diff_editors`. Runtime cache; never serialized.
-    pub(in crate::workspace) diff_stats: DiffStats,
+    pub(super) diff_stats: DiffStats,
     /// Read-only editor entities for verbatim tool-output blocks, keyed by
     /// `"{tool_call_id}#{block_index}"`. Built by `reconcile_output_editors`;
     /// `render` only embeds them, never creates one.
@@ -459,34 +459,34 @@ pub(in crate::workspace) struct AssetCache {
     /// Fingerprint each `output_editors` entry was built from, so a streamed
     /// output that grew is rebuilt rather than left frozen on a partial
     /// snapshot.
-    pub(in crate::workspace) output_editor_sources: HashMap<String, u64>,
+    pub(super) output_editor_sources: HashMap<String, u64>,
     /// Rendered mermaid diagrams by fence-source hash, filled async by
     /// `reconcile_mermaid`. Shared `Arc<Mutex<…>>` so gpui's texture cache
     /// hits instead of re-uploading the bitmap every frame.
-    pub(in crate::workspace) mermaid_images: MermaidImages,
+    pub(super) mermaid_images: MermaidImages,
     /// Source hashes with a rasterization currently spawned, so
     /// `reconcile_mermaid` doesn't re-spawn while one is still rendering.
-    pub(in crate::workspace) mermaid_inflight: HashSet<u64>,
+    pub(super) mermaid_inflight: HashSet<u64>,
     /// Decoded tool-output images by content hash. `Some` = decoded; `None` =
     /// cached decode failure (renders a label once, never re-spawned). Filled
     /// async by `reconcile_tool_images`.
-    pub(in crate::workspace) tool_images: ToolImages,
+    pub(super) tool_images: ToolImages,
     /// Content hashes with a decode currently spawned, so
     /// `reconcile_tool_images` doesn't re-spawn one still decoding.
-    pub(in crate::workspace) tool_image_inflight: HashSet<u64>,
+    pub(super) tool_image_inflight: HashSet<u64>,
     /// Decoded local image resources by `"{tool_call_id}#{block_index}"`.
-    pub(in crate::workspace) resource_images: ResourceImages,
+    pub(super) resource_images: ResourceImages,
     /// Fingerprint of the resource URI + MIME currently represented by each
     /// cache entry, so a replaced streamed block invalidates the old bitmap.
-    pub(in crate::workspace) resource_image_sources: HashMap<String, u64>,
+    pub(super) resource_image_sources: HashMap<String, u64>,
     /// Least-recently reconciled to most-recently reconciled resource keys.
     /// Keeps the decoded cache bounded even when a transcript contains many
     /// expanded image-producing tools.
-    pub(in crate::workspace) resource_image_order: VecDeque<String>,
+    pub(super) resource_image_order: VecDeque<String>,
     /// Fingerprint currently being read for each resource block. Storing the
     /// value as well as the key prevents a late old task overwriting a newer
     /// source at the same block index.
-    pub(in crate::workspace) resource_image_inflight: HashMap<String, u64>,
+    pub(super) resource_image_inflight: HashMap<String, u64>,
 }
 
 impl AssetCache {
@@ -539,7 +539,7 @@ pub(in crate::workspace) struct ActivityTracker {
     /// top-level one can outlast the edge). A replay is skipped at the insert: a
     /// restored call's real start is long before the reconnect, so timing it
     /// from there would be a lie.
-    pub(in crate::workspace) tool_started_at: HashMap<String, std::time::Instant>,
+    pub(super) tool_started_at: HashMap<String, std::time::Instant>,
     /// The busy span as of the last `reconcile_activity` tick: both the
     /// edge-detection memory that turns the `is_busy` level signal into
     /// idle→busy / busy→idle transitions, and the wall-clock anchor the
@@ -552,7 +552,7 @@ pub(in crate::workspace) struct ActivityTracker {
     pub(in crate::workspace) pending_completion: Option<TurnOutcome>,
     /// What each settled run cost, keyed by the run's first item — the same key
     /// the run's fold uses, so a record and the bar above it name one thing.
-    pub(in crate::workspace) turn_records: HashMap<usize, TurnRecord>,
+    pub(super) turn_records: HashMap<usize, TurnRecord>,
 }
 
 /// Native ACP (Agent Client Protocol) chat pane, owned as `Entity<AgentChatView>`.
@@ -590,7 +590,7 @@ impl ActivityOptionsTab {
 
 pub(in crate::workspace) struct AgentChatView {
     /// The owning pane's id — keys element ids, log dedup tags, and pane lookup.
-    pub(in crate::workspace) pane_id: PaneId,
+    pub(super) pane_id: PaneId,
     /// The workspace window this view renders in, captured at construction so
     /// diff-editor / `InputState` creation can re-enter the workspace window.
     /// Also the way back to the owning `Workspace` for render-time actions
@@ -598,7 +598,7 @@ pub(in crate::workspace) struct AgentChatView {
     /// view" / "open externally") — resolved on demand via
     /// `WindowRegistry::workspace_for_window`, the same lookup this view's own
     /// pane context-menu builder already uses (`render/mod.rs`).
-    pub(in crate::workspace) window_handle: AnyWindowHandle,
+    pub(super) window_handle: AnyWindowHandle,
     /// Pane-level focus handle for `Cmd+W` close routing. The view's `render`
     /// tracks it (like `TerminalView`), so `wrapper_focus_handle` returns
     /// `None` for this content kind.
@@ -614,13 +614,13 @@ pub(in crate::workspace) struct AgentChatView {
     /// Bare adapter command used by the current connection. Vocabulary events
     /// are attributed to this frozen source rather than the live catalog,
     /// which may be edited while the old process is still connected.
-    pub(in crate::workspace) agent_vocabulary_source: Option<String>,
+    pub(super) agent_vocabulary_source: Option<String>,
     /// What the connected agent called itself at `initialize`. Decides the ACP
     /// dialect the pane reads traffic with; `None` until a connect reports one,
     /// which leaves [`agent_id`](Self::agent_id) to decide. Not persisted — the
     /// agent re-reports it on every connect, and a restored pane has no traffic
     /// to map until it reconnects.
-    pub(in crate::workspace) agent_program: Option<String>,
+    pub(super) agent_program: Option<String>,
     /// Display name for `agent_id`, refreshed on config reload. Used as the
     /// activity-bar title fallback before the session reports its own title.
     pub(in crate::workspace) agent_name: String,
@@ -680,7 +680,7 @@ pub(in crate::workspace) struct AgentChatView {
     briefing: Option<String>,
     /// GPUI-side pump that drains the `AcpEvent` receiver and folds events into
     /// `items` / `status`. Dropped with the view, ending the loop.
-    pub(in crate::workspace) _event_pump: Option<Task<()>>,
+    pub(super) _event_pump: Option<Task<()>>,
     /// Outstanding permission-card request ids, mirroring items with
     /// unresolved cards. Updated in lockstep at every touch site
     /// (`PermissionRequested` / `respond_permission` / teardown); holds every
@@ -710,15 +710,15 @@ pub(in crate::workspace) struct AgentChatView {
     /// The fold editor's own state — the turn column it shows and the matrix
     /// its `Custom` segment restores. Session-only: the mode itself is
     /// persisted, so only "press a preset then come back" is scoped here.
-    pub(in crate::workspace) fold_editor: FoldEditorState,
+    pub(super) fold_editor: FoldEditorState,
     /// Active section in the compact Activity Bar's combined options popover.
-    pub(in crate::workspace) activity_options_tab: ActivityOptionsTab,
+    pub(super) activity_options_tab: ActivityOptionsTab,
     #[cfg(feature = "screenshot")]
-    pub(in crate::workspace) screenshot_filter_open: bool,
+    pub(super) screenshot_filter_open: bool,
     #[cfg(feature = "screenshot")]
-    pub(in crate::workspace) screenshot_fold_open: bool,
+    pub(super) screenshot_fold_open: bool,
     #[cfg(feature = "screenshot")]
-    pub(in crate::workspace) screenshot_options_open: bool,
+    pub(super) screenshot_options_open: bool,
     /// Per-pane content-column width mode, seeded from
     /// `agent.use_reading_width` and persisted only once the pane's own toggle
     /// has moved it (see `SerializedAgentChatContent::content_width`).
@@ -754,16 +754,16 @@ pub(in crate::workspace) struct AgentChatView {
     /// indicator can go stale with no model change to trigger a rebuild. Keeping
     /// the key lets [`Self::reproject_if_activity_changed`] restore the
     /// projection whichever path moved the level.
-    pub(in crate::workspace) rows_activity: ActivityState,
+    pub(super) rows_activity: ActivityState,
     /// Which subagent units still have work running, derived from `items` in one
     /// pass. Read by the projection *and* by every tool card's badge, so it is
     /// cached here rather than recomputed per query. Derived cache — rebuilt in
     /// [`Self::rebuild_rows`] alongside `rows`, its single update site.
-    pub(in crate::workspace) live_units: LiveSubagentUnits,
+    pub(super) live_units: LiveSubagentUnits,
     /// Cached subtree-aware display-filter matches.
-    pub(in crate::workspace) filter_matches: FilterMatchIndex,
+    pub(super) filter_matches: FilterMatchIndex,
     /// Cached start of the newest turn.
-    pub(in crate::workspace) turn_boundary: super::agent_chat_helpers::TurnBoundary,
+    pub(super) turn_boundary: super::agent_chat_helpers::TurnBoundary,
     /// Workspace-resolved syntax-highlight theme id for this pane's diff embeds.
     /// The Workspace owns the resolved value (user + project config layers), so
     /// it cannot be derived here — it is seeded at construction and re-pushed on
@@ -786,14 +786,14 @@ pub(in crate::workspace) struct AgentChatView {
     /// Optional session methods the agent advertised at connect (`load` /
     /// `list` / `resume` / `close`), consumed by resume gating. Re-read each
     /// connect; default = baseline agent (nothing extra).
-    pub(in crate::workspace) session_capabilities: SessionCapabilitiesView,
+    pub(super) session_capabilities: SessionCapabilitiesView,
     /// Live context-window / cost accounting from `UsageChanged`. Drives the
     /// context meter — distinct from the cumulative Usage tab. Cleared on a
     /// fresh session.
-    pub(in crate::workspace) session_usage: Option<UsageView>,
+    pub(super) session_usage: Option<UsageView>,
     /// The agent's live execution plan (`PlanChanged`); full-replaced each
     /// update. Runtime-only; never serialized.
-    pub(in crate::workspace) plan: Vec<PlanEntryView>,
+    pub(super) plan: Vec<PlanEntryView>,
     /// Agent-provided session title (`SessionInfoChanged`); `None` = fallback
     /// label.
     pub(in crate::workspace) session_title: Option<String>,
@@ -802,25 +802,25 @@ pub(in crate::workspace) struct AgentChatView {
     pub(in crate::workspace) session_updated_at: Option<String>,
     /// Whether the bottom plan region is collapsed to its header. Defaults to
     /// `false` (expanded); toggled via [`Self::toggle_plan_collapsed`].
-    pub(in crate::workspace) plan_collapsed: bool,
+    pub(super) plan_collapsed: bool,
     /// Latches once this pane has logged a `dropped_terminal_output` warning,
     /// so a systemic adapter mismatch (every command in the session would
     /// trip it) logs one line instead of one per command. Reset alongside
     /// `plan`/`session_title`/`session_usage` on a fresh (non-resumed) session.
-    pub(in crate::workspace) warned_dropped_terminal_output: bool,
+    pub(super) warned_dropped_terminal_output: bool,
     /// Scroll position of the expanded plan checklist, backing its 4px daruda
     /// thumb overlay. Runtime-only; never serialized.
-    pub(in crate::workspace) plan_scroll: ScrollHandle,
+    pub(super) plan_scroll: ScrollHandle,
     /// Window-space bounds of the scrolling list viewport, captured each
     /// paint. Read by the drag-selection autoscroll poll to detect the cursor
     /// leaving the viewport. `None` until the first paint.
     pub(in crate::workspace) list_bounds: Option<Bounds<Pixels>>,
     /// Width of the pane root, captured each paint.
-    pub(in crate::workspace) pane_width: Option<Pixels>,
+    pub(super) pane_width: Option<Pixels>,
     /// Drag-selection autoscroll poll task (mirrors
     /// `TerminalView::autoscroll_task`). Replace-and-cancel on each new drag;
     /// `None` when idle.
-    pub(in crate::workspace) autoscroll_task: Option<Task<()>>,
+    pub(super) autoscroll_task: Option<Task<()>>,
     /// Drag-selection-in-progress signal, set on mouse-down and cleared via
     /// `end_selection_drag`. Independent of the selected block's paint
     /// lifetime, so the autoscroll poll still stops on mouse-release even if
@@ -842,7 +842,7 @@ pub(in crate::workspace) struct AgentChatView {
 
 mod activity_ops;
 mod apply_event;
-pub(in crate::workspace) mod list_sync;
+pub(super) mod list_sync;
 mod queue_ops;
 mod session_ops;
 
@@ -852,7 +852,7 @@ impl AgentChatView {
     /// restore doesn't spin up an agent process per pane. `status` is decided
     /// by the caller (Idle when a cwd is present, Error otherwise).
     #[allow(clippy::too_many_arguments)] // Restore/create seed values — bundling them into a struct only wraps callers.
-    pub(in crate::workspace) fn new(
+    pub(super) fn new(
         pane_id: PaneId,
         window_handle: AnyWindowHandle,
         cwd: Option<PaneCwd>,
@@ -1008,7 +1008,7 @@ impl AgentChatView {
 
     /// Enter the `Connecting` status and repaint. Self-notifying so the event
     /// pump can't advance the connection state without dirtying the pane.
-    pub(in crate::workspace) fn set_connecting(&mut self, cx: &mut Context<Self>) {
+    pub(super) fn set_connecting(&mut self, cx: &mut Context<Self>) {
         self.status = AgentSessionStatus::Connecting;
         cx.notify();
     }
@@ -1058,11 +1058,7 @@ impl AgentChatView {
     /// Enter the `PreparingRuntime` status at `phase` and repaint.
     /// Self-notifying so the runtime-progress drain can't advance the banner
     /// without dirtying the pane.
-    pub(in crate::workspace) fn set_preparing(
-        &mut self,
-        phase: RuntimePrepPhase,
-        cx: &mut Context<Self>,
-    ) {
+    pub(super) fn set_preparing(&mut self, phase: RuntimePrepPhase, cx: &mut Context<Self>) {
         self.status = AgentSessionStatus::PreparingRuntime(phase);
         cx.notify();
     }
@@ -1071,11 +1067,7 @@ impl AgentChatView {
     /// `apply_event` only while still `Connecting`/`Handshaking` — a
     /// `ConnectProgress` arriving after `Connected`/`Error` is stale and must
     /// not resurrect the connecting banner.
-    pub(in crate::workspace) fn set_handshaking(
-        &mut self,
-        phase: ConnectPhase,
-        cx: &mut Context<Self>,
-    ) {
+    pub(super) fn set_handshaking(&mut self, phase: ConnectPhase, cx: &mut Context<Self>) {
         self.status = AgentSessionStatus::Handshaking(phase);
         cx.notify();
     }
@@ -1083,7 +1075,7 @@ impl AgentChatView {
     /// Blend `c` toward gray by the current dim amount, alpha preserved. The
     /// render wraps every color it applies with this so an unfocused pane
     /// grays like an inactive terminal while keeping window translucency.
-    pub(in crate::workspace) fn dim(&self, c: gpui::Hsla) -> gpui::Hsla {
+    pub(super) fn dim(&self, c: gpui::Hsla) -> gpui::Hsla {
         crate::ui::theme::dim_toward_gray(c, self.dim_amount)
     }
 
@@ -1091,7 +1083,7 @@ impl AgentChatView {
     /// terminal-mirrored chat background, not the surrounding UI theme, so a
     /// light UI shell with a dark terminal preset still gets dark-surface
     /// Mermaid colors and cache keys.
-    pub(in crate::workspace) fn host_is_dark(cx: &App) -> bool {
+    pub(super) fn host_is_dark(cx: &App) -> bool {
         !crate::ui::theme::agent_chat_syntax_is_light(cx)
     }
 }

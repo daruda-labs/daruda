@@ -37,14 +37,14 @@ impl AgentChatView {
 
     /// Test-only hook: whether a Stop's cancel window is still open.
     #[cfg(test)]
-    pub(in crate::workspace) fn turn_awaiting_cancel_ack(&self) -> bool {
+    pub(super) fn turn_awaiting_cancel_ack(&self) -> bool {
         self.queue.turn.awaiting_cancel_ack()
     }
 
     /// Test-only hook: run the model half of the queued-prompt drain without a
     /// live ACP handle, as `pump_pending_prompt` does before sending.
     #[cfg(test)]
-    pub(in crate::workspace) fn drain_next_queued_prompt_for_test(
+    pub(super) fn drain_next_queued_prompt_for_test(
         &mut self,
         cx: &mut Context<Self>,
     ) -> Option<String> {
@@ -439,7 +439,7 @@ impl AgentChatView {
     /// the queue (FIFO), forwards it, marks the turn in flight, and echoes it
     /// (it was NOT echoed when buffered). Drains one prompt per
     /// turn-completion, so the view never tracks more than one turn at a time.
-    pub(in crate::workspace) fn pump_pending_prompt(&mut self, cx: &mut Context<Self>) {
+    pub(super) fn pump_pending_prompt(&mut self, cx: &mut Context<Self>) {
         // Hold the queue until the session is fully connected and while a cancel
         // is still outstanding (`cancel_in_flight`): a handle exists before the
         // ACP handshake/load has completed, but prompt delivery is only safe once
@@ -482,7 +482,7 @@ impl AgentChatView {
     }
 
     #[cfg(test)]
-    pub(in crate::workspace) fn wire_text_for_test(&mut self, text: &str) -> String {
+    pub(super) fn wire_text_for_test(&mut self, text: &str) -> String {
         self.wire_text(text)
     }
 

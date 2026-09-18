@@ -225,7 +225,7 @@ impl Workspace {
     }
 
     /// Drop the scratch slot if `tab_idx` holds it.
-    pub(in crate::workspace) fn release_preview_tab(&mut self, tab_idx: usize) {
+    pub(super) fn release_preview_tab(&mut self, tab_idx: usize) {
         let Some(tab_id) = self.active_runtime().tabs.get(tab_idx).map(|t| t.id) else {
             return;
         };
@@ -784,11 +784,7 @@ impl Workspace {
     /// never offers Changes, and a pane left open across an edit or a commit
     /// keeps whatever the opening click happened to see. The open path stamps
     /// the same value from the same index — see [`Self::git_status_for_path`].
-    pub(in crate::workspace) fn sync_file_pane_statuses(
-        &mut self,
-        target: LaneRef,
-        cx: &mut Context<Self>,
-    ) {
+    pub(super) fn sync_file_pane_statuses(&mut self, target: LaneRef, cx: &mut Context<Self>) {
         let Some(lane_root) = self.lane_for(target).map(|w| w.path.clone()) else {
             return;
         };

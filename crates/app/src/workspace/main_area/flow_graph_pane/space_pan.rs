@@ -115,14 +115,14 @@ impl PanArmed {
     /// Move the pointer the way the plugin does, for a test about what the view
     /// makes of it.
     #[cfg(test)]
-    pub(in crate::workspace) fn set_hovering_for_test(&self, over: bool) {
+    pub(super) fn set_hovering_for_test(&self, over: bool) {
         self.set_hovering(over);
     }
 
     /// Write `held` the way the plugin does, for a test about what the view
     /// makes of it. A headless window has no canvas to press a key on.
     #[cfg(test)]
-    pub(in crate::workspace) fn set_held_for_test(&self, held: bool) {
+    pub(super) fn set_held_for_test(&self, held: bool) {
         self.set_held(held);
     }
 

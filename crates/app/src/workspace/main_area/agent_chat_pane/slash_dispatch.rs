@@ -15,14 +15,14 @@ pub(in crate::workspace) const CLEAR_COMMAND_NAME: &str = "clear";
 /// A daruda-local slash command — handled entirely on the client side and
 /// never sent to the agent.
 #[derive(Debug, PartialEq, Eq)]
-pub(in crate::workspace) enum LocalSlashCommand {
+pub(super) enum LocalSlashCommand {
     /// Reset the current agent-chat session (`/clear`).
     Clear,
 }
 
 /// Where a submitted chat input should go.
 #[derive(Debug, PartialEq, Eq)]
-pub(in crate::workspace) enum SlashDispatch {
+pub(super) enum SlashDispatch {
     /// Forward the text to the agent unchanged.
     Forward,
     /// Handle locally; never sent to the agent.
@@ -35,7 +35,7 @@ pub(in crate::workspace) enum SlashDispatch {
 /// whitespace-delimited token is a recognized daruda-local command (`/clear`).
 /// Everything else — plain text, unrecognized slash commands, or a bare
 /// `/` — forwards to the agent.
-pub(in crate::workspace) fn classify_slash(text: &str) -> SlashDispatch {
+pub(super) fn classify_slash(text: &str) -> SlashDispatch {
     let trimmed = text.trim();
     let Some(rest) = trimmed.strip_prefix('/') else {
         return SlashDispatch::Forward;

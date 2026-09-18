@@ -28,7 +28,7 @@ use super::tool_hierarchy::ToolHierarchy;
 /// ran and the marker stays a top-level row instead of folding away with the
 /// response. An empty range when `start` is past the end, so a prompt with no
 /// reply yet is not a special case.
-pub(in crate::workspace) fn response_run(items: &[ChatItem], start: usize) -> Range<usize> {
+pub(super) fn response_run(items: &[ChatItem], start: usize) -> Range<usize> {
     let end = items
         .iter()
         .skip(start)
@@ -41,7 +41,7 @@ pub(in crate::workspace) fn response_run(items: &[ChatItem], start: usize) -> Ra
 /// [`FoldPolicy::ExpandedWhileActive`].
 ///
 /// [`FoldPolicy::ExpandedWhileActive`]: super::fold::FoldPolicy::ExpandedWhileActive
-pub(in crate::workspace) fn is_active(item: &ChatItem) -> bool {
+pub(super) fn is_active(item: &ChatItem) -> bool {
     match item {
         ChatItem::AssistantText { streaming, .. } | ChatItem::Thinking { streaming, .. } => {
             *streaming
@@ -56,7 +56,7 @@ pub(in crate::workspace) fn is_active(item: &ChatItem) -> bool {
 
 /// Whether anything in `run` is active. Out-of-range indices read inactive
 /// rather than panicking, so a stale key resolves to "settled".
-pub(in crate::workspace) fn run_active(items: &[ChatItem], run: Range<usize>) -> bool {
+pub(super) fn run_active(items: &[ChatItem], run: Range<usize>) -> bool {
     items.get(run).is_some_and(|run| run.iter().any(is_active))
 }
 
@@ -65,28 +65,25 @@ pub(in crate::workspace) fn run_active(items: &[ChatItem], run: Range<usize>) ->
 /// Two shared borrows, so it is `Copy`: a query can hand its own value to an
 /// iterator it returns without tying that iterator to a temporary.
 #[derive(Clone, Copy)]
-pub(in crate::workspace) struct TranscriptStructure<'a> {
+pub(super) struct TranscriptStructure<'a> {
     items: &'a [ChatItem],
     hierarchy: &'a ToolHierarchy<'a>,
 }
 
 impl<'a> TranscriptStructure<'a> {
-    pub(in crate::workspace) fn new(
-        items: &'a [ChatItem],
-        hierarchy: &'a ToolHierarchy<'a>,
-    ) -> Self {
+    pub(super) fn new(items: &'a [ChatItem], hierarchy: &'a ToolHierarchy<'a>) -> Self {
         Self { items, hierarchy }
     }
 
     /// Whether the item at `ix` is a tool call that earns a row of its own.
-    pub(in crate::workspace) fn top_level_tool(&self, ix: usize) -> bool {
+    pub(super) fn top_level_tool(&self, ix: usize) -> bool {
         matches!(self.items.get(ix), Some(ChatItem::ToolCall(tc)) if !self.hierarchy.is_nested_child(tc))
     }
 
     /// Whether the item at `ix` earns a row of its own at all. A nested child
     /// renders inside its parent's card and an empty streaming chunk renders
     /// nothing, so the row walk passes over both.
-    pub(in crate::workspace) fn owns_a_row(&self, ix: usize) -> bool {
+    pub(super) fn owns_a_row(&self, ix: usize) -> bool {
         match self.items.get(ix) {
             Some(ChatItem::ToolCall(tc)) => !self.hierarchy.is_nested_child(tc),
             Some(item) => !is_bodyless(item),
@@ -101,7 +98,7 @@ impl<'a> TranscriptStructure<'a> {
     ///
     /// The range is what to walk, not what the group holds: ask
     /// [`Self::group_calls`] for the members.
-    pub(in crate::workspace) fn tool_run(&self, start: usize, limit: usize) -> Range<usize> {
+    pub(super) fn tool_run(&self, start: usize, limit: usize) -> Range<usize> {
         let mut k = start + 1;
         while k < limit && (!self.owns_a_row(k) || self.top_level_tool(k)) {
             k += 1;
@@ -111,17 +108,14 @@ impl<'a> TranscriptStructure<'a> {
 
     /// The calls a run's group holds — every row-owning item it spans, which by
     /// [`Self::tool_run`]'s boundary is exactly its top-level tool calls.
-    pub(in crate::workspace) fn group_calls(
-        self,
-        run: Range<usize>,
-    ) -> impl Iterator<Item = usize> + Clone + 'a {
+    pub(super) fn group_calls(self, run: Range<usize>) -> impl Iterator<Item = usize> + Clone + 'a {
         run.filter(move |&ix| self.top_level_tool(ix))
     }
 
     /// How many separate top-level tool runs `run` holds. One run means the
     /// group bar below carries the whole tally, which is what the turn bar
     /// checks before deciding whether repeating it would say anything.
-    pub(in crate::workspace) fn top_level_tool_runs(&self, run: Range<usize>) -> usize {
+    pub(super) fn top_level_tool_runs(&self, run: Range<usize>) -> usize {
         let limit = run.end;
         let mut runs = 0;
         let mut k = run.start;
@@ -138,7 +132,7 @@ impl<'a> TranscriptStructure<'a> {
 
     /// The `items` index of the call that owns a row for `id` — itself when its
     /// parent is absent from `items`, else the nearest present ancestor.
-    pub(in crate::workspace) fn owning_item(&self, id: &str) -> Option<usize> {
+    pub(super) fn owning_item(&self, id: &str) -> Option<usize> {
         self.hierarchy.owning_row_index(id)
     }
 }

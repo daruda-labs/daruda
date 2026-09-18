@@ -49,10 +49,7 @@ const PROBE_PREFIX: &str = "daruda-mermaid-label";
 /// it wraps the text usvg will paint. Returns `svg` unchanged when there is
 /// nothing to correct, when a label cannot be measured, or when the document
 /// does not parse.
-pub(in crate::workspace) fn align_label_backgrounds(
-    svg: &str,
-    options: &usvg::Options<'_>,
-) -> String {
+pub(super) fn align_label_backgrounds(svg: &str, options: &usvg::Options<'_>) -> String {
     let labels = scan_labels(svg);
     if labels.is_empty() {
         return svg.to_owned();

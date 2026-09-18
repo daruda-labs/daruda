@@ -15,7 +15,7 @@ use crate::ui::PopupMenuItem;
 use crate::workspace::render::ws_popup_menu_item;
 use crate::workspace::{MoveActiveProjectToGroup, RenameActiveProject, Workspace};
 
-pub(in crate::workspace) fn build_project_menu_items(
+pub(super) fn build_project_menu_items(
     project_id: ProjectId,
     last_active_lane_id: LaneId,
     ws: WeakEntity<Workspace>,

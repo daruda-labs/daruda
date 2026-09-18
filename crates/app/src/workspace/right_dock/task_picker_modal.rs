@@ -47,7 +47,7 @@ impl TaskPickAction {
     /// Modal title shown by the dialog. Reads naturally as "Start
     /// Task", "Cancel Task", … so the user knows which dispatch they
     /// are about to commit to.
-    pub(in crate::workspace) fn modal_title(self) -> String {
+    pub(super) fn modal_title(self) -> String {
         match self {
             Self::Start => strings::task_picker_title_start(),
             Self::Cancel => strings::task_picker_title_cancel(),

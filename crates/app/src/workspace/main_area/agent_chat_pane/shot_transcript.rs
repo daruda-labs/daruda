@@ -221,7 +221,7 @@ fn cycles() -> Vec<Cycle> {
 
 /// Build the seeded conversation: one user prompt, then every cycle as
 /// prose + tool run, closed by the conclusion.
-pub(in crate::workspace) fn sample_transcript() -> Vec<ChatItem> {
+pub(super) fn sample_transcript() -> Vec<ChatItem> {
     let mut items = vec![ChatItem::UserText(PROMPT.to_string())];
     let mut next_id = 0usize;
     for cycle in cycles() {
@@ -248,7 +248,7 @@ pub(in crate::workspace) fn sample_transcript() -> Vec<ChatItem> {
 /// fold: the conclusion escape keeps that block on screen through the bar. So
 /// the bare chevron is the only control the turn has, and whether it reads as
 /// one is a question only a capture answers.
-pub(in crate::workspace) fn sole_reply_transcript() -> Vec<ChatItem> {
+pub(super) fn sole_reply_transcript() -> Vec<ChatItem> {
     vec![
         ChatItem::UserText(USAGE_PROMPT.to_string()),
         assistant(USAGE_REPLY, MessagePhase::Answer),
@@ -268,7 +268,7 @@ const USAGE_REPLY: &str = "## Usage\n\n> Claude team subscription usage\n\n### L
 /// The seeded conversation cut by a Stop: the run loses its conclusion and is
 /// closed by the marker, then the user asks again. Shows the marker between two
 /// turns, which is the only place it ever appears.
-pub(in crate::workspace) fn interrupted_transcript() -> Vec<ChatItem> {
+pub(super) fn interrupted_transcript() -> Vec<ChatItem> {
     let mut items = sample_transcript();
     // Drop the conclusion — a stopped run never reached one.
     items.pop();
@@ -282,7 +282,7 @@ pub(in crate::workspace) fn interrupted_transcript() -> Vec<ChatItem> {
 const REPROMPT: &str = "Stop there — just show me the lane lookup, not the whole module.";
 
 /// The parent call every [`subagent_transcript`] child names.
-pub(in crate::workspace) const SUBAGENT_PARENT_ID: &str = "shot-subagent";
+pub(super) const SUBAGENT_PARENT_ID: &str = "shot-subagent";
 /// More children than the capture's window keeps, so the card's own boundary
 /// has something to hold back.
 const SUBAGENT_CHILDREN: [(&str, ToolKindView); 7] = [
@@ -374,7 +374,7 @@ pub(in crate::workspace) fn subagent_transcript() -> Vec<ChatItem> {
 /// answer yet, so the run's last prose is a preamble rather than a conclusion.
 /// Derived from the settled seed rather than assembled again, so the two cannot
 /// drift apart.
-pub(in crate::workspace) fn working_transcript() -> Vec<ChatItem> {
+pub(super) fn working_transcript() -> Vec<ChatItem> {
     let mut items = sample_transcript();
     items.pop();
     items

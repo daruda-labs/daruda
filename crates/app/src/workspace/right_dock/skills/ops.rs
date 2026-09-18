@@ -11,15 +11,11 @@ use crate::agent::skills::SkillScope;
 use crate::workspace::Workspace;
 
 impl Workspace {
-    pub(in crate::workspace) fn open_create_skill(
-        &mut self,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
+    pub(super) fn open_create_skill(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         super::open_create_skill_modal(self, None, window, cx);
     }
 
-    pub(in crate::workspace) fn open_edit_skill(
+    pub(super) fn open_edit_skill(
         &mut self,
         dir: PathBuf,
         window: &mut Window,
@@ -28,7 +24,7 @@ impl Workspace {
         super::open_edit_skill_modal(self, dir, window, cx);
     }
 
-    pub(in crate::workspace) fn open_delete_skill_confirm(
+    pub(super) fn open_delete_skill_confirm(
         &mut self,
         scope: SkillScope,
         dir: PathBuf,
@@ -38,11 +34,7 @@ impl Workspace {
         super::open_delete_skill_confirm(self, scope, dir, window, cx);
     }
 
-    pub(in crate::workspace) fn clear_skill_search(
-        &mut self,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
+    pub(super) fn clear_skill_search(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let input = self.skill_search_input.clone();
         input.update(cx, |inp, cx_state| {
             inp.set_value("".to_string(), window, cx_state);

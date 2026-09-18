@@ -21,10 +21,10 @@ use crate::transcript::fold_mode::FoldMode;
 /// column reads is a property of the reader rather than of the agent.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub(in crate::workspace) struct TranscriptDefaults {
-    pub(in crate::workspace) tail: StepWindow,
-    pub(in crate::workspace) fold_mode: FoldMode,
-    pub(in crate::workspace) filter: DisplayFilter,
-    pub(in crate::workspace) content_width: ChatContentWidth,
+    pub(super) tail: StepWindow,
+    pub(super) fold_mode: FoldMode,
+    pub(super) filter: DisplayFilter,
+    pub(super) content_width: ChatContentWidth,
 }
 
 impl TranscriptDefaults {

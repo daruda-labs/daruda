@@ -27,7 +27,7 @@ use super::status_pill;
 use crate::surface::strings;
 use crate::ui::{Badge, button, button_primary};
 
-pub(in crate::workspace) fn render(snap: &RightDockSnapshot, cx: &mut Context<Dock>) -> AnyElement {
+pub(super) fn render(snap: &RightDockSnapshot, cx: &mut Context<Dock>) -> AnyElement {
     // Pipeline: state filter → search filter → newest-first sort.
     // The search filter is a no-op when the query is blank, so empty
     // searches still go through `filter_by_state` unchanged.

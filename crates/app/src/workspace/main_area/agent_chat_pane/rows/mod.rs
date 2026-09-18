@@ -1,7 +1,7 @@
 //! Projects the flat chat model into stable virtual-list rows. Folding changes
 //! `hidden` flags instead of removing rows so scroll positions remain stable.
 
-pub(in crate::workspace) mod subagent;
+pub(super) mod subagent;
 pub(in crate::workspace) mod tail;
 
 use std::collections::HashSet;
@@ -22,7 +22,7 @@ use crate::transcript::display_filter::DisplayFilter;
 use crate::transcript::tool_category::{ToolCategory, tally_categories};
 use tail::{StepWindow, TailWindow};
 
-pub(in crate::workspace) mod foldable_keys;
+pub(super) mod foldable_keys;
 pub(in crate::workspace) use foldable_keys::collect_foldable_keys;
 
 /// What the display filter dropped from one run and the reveal can put back.
@@ -35,7 +35,7 @@ pub(in crate::workspace) use foldable_keys::collect_foldable_keys;
 #[derive(Clone, Copy, Default, PartialEq, Eq, Debug)]
 pub(in crate::workspace) struct FilteredAway {
     /// Blocks the filter took out of this run.
-    pub(in crate::workspace) revealable: usize,
+    pub(super) revealable: usize,
 }
 
 impl FilteredAway {
@@ -46,7 +46,7 @@ impl FilteredAway {
     /// exactly the row that survives a collapsed response and can still be
     /// filtered out of it, leaving the turn showing nothing but its bar; a
     /// second collapse check erased the one control that leads back.
-    pub(in crate::workspace) fn offers_reveal(self) -> bool {
+    pub(super) fn offers_reveal(self) -> bool {
         self.revealable > 0
     }
 }
@@ -167,7 +167,7 @@ pub(in crate::workspace) struct RenderRow {
     /// The per-run filter disclosure is open, so rows rejected by the active
     /// display filter are visible again. Header counts, rollups, and nested tool
     /// cards must all use this same answer as the row projection.
-    pub(in crate::workspace) filter_revealed: bool,
+    pub(super) filter_revealed: bool,
 }
 
 impl RenderRow {
@@ -192,13 +192,13 @@ impl RenderRow {
 /// drags its ancestors in — so narrowing to one leaves a subagent card standing
 /// with only that category's calls inside it, reachable through the card.
 #[derive(Default)]
-pub(in crate::workspace) struct FilterMatchIndex {
+pub(super) struct FilterMatchIndex {
     filter: DisplayFilter,
     tool_ids: HashSet<String>,
 }
 
 impl FilterMatchIndex {
-    pub(in crate::workspace) fn build<'a>(
+    pub(super) fn build<'a>(
         hierarchy: &ToolHierarchy<'a>,
         items: &'a [ChatItem],
         filter: DisplayFilter,
@@ -243,7 +243,7 @@ impl FilterMatchIndex {
 /// Deliberately carries no payload and no `hidden` flag — those change freely
 /// within one slot.
 #[derive(PartialEq, Eq)]
-pub(in crate::workspace) enum RowSlot<'a> {
+pub(super) enum RowSlot<'a> {
     User(usize),
     Interrupted(usize),
     Response(usize),
@@ -308,7 +308,7 @@ pub(in crate::workspace) fn project(
 
 /// [`project`] with a caller-owned hierarchy and filter index shared with
 /// nested cards.
-pub(in crate::workspace) fn project_with_filter_index<'a>(
+pub(super) fn project_with_filter_index<'a>(
     items: &'a [ChatItem],
     hierarchy: &'a ToolHierarchy<'a>,
     fold: &FoldState,

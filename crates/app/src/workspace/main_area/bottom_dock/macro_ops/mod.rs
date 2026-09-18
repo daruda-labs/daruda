@@ -317,7 +317,7 @@ impl Workspace {
     /// equals memory) and skips re-registration — without this hook,
     /// a shortcut just edited via the UI would not take effect until
     /// daruda restarted.
-    pub(in crate::workspace) fn save_panels(&mut self, cx: &mut Context<Self>) {
+    pub(super) fn save_panels(&mut self, cx: &mut Context<Self>) {
         if let Err(e) = daruda_store::panels::save_panels_in(&self.data_dir, &self.panels) {
             let report = ErrorReport::new(crate::surface::strings::error_panels_save_failed())
                 .severity(ErrorSeverity::Error)
@@ -345,7 +345,7 @@ impl Workspace {
     ///
     /// The new tab starts empty; users add macros via the `[+]` tile
     /// (`MacroEditModal`) or by editing `panels.json` directly.
-    pub(in crate::workspace) fn add_panel_tab(&mut self, name: String, cx: &mut Context<Self>) {
+    pub(super) fn add_panel_tab(&mut self, name: String, cx: &mut Context<Self>) {
         let Some(tab) = build_new_tab(&name, &self.panels.tabs) else {
             return;
         };
@@ -359,7 +359,7 @@ impl Workspace {
     /// Rename a tab. No-op when the rename rules in `rename_in_place`
     /// reject the change (see that function for the full set of
     /// guards).
-    pub(in crate::workspace) fn rename_panel_tab(
+    pub(super) fn rename_panel_tab(
         &mut self,
         tab_id: TabId,
         new_name: String,
@@ -377,7 +377,7 @@ impl Workspace {
     /// with anything, the modal does so with `new_widget_id()` already
     /// for clarity but this guard makes Create-via-import safe too).
     /// No-op when `tab_id` is missing.
-    pub(in crate::workspace) fn add_widget(
+    pub(super) fn add_widget(
         &mut self,
         tab_id: TabId,
         mut btn: ButtonWidget,
@@ -396,7 +396,7 @@ impl Workspace {
     /// definition (preserving the id). No-op when either id is missing
     /// or the widget is not a Button (Unknown widgets are not
     /// editable; users edit `panels.json` to remove them).
-    pub(in crate::workspace) fn update_widget(
+    pub(super) fn update_widget(
         &mut self,
         tab_id: TabId,
         widget_id: WidgetId,
@@ -411,7 +411,7 @@ impl Workspace {
     }
 
     /// Delete a widget by id. No-op when either id is missing.
-    pub(in crate::workspace) fn delete_widget(
+    pub(super) fn delete_widget(
         &mut self,
         tab_id: TabId,
         widget_id: WidgetId,
@@ -429,7 +429,7 @@ impl Workspace {
     /// `order` field). Renumbers `order` 0..n on every remaining
     /// tab so subsequent reorders stay deterministic. No-op when
     /// either id is missing or both are the same.
-    pub(in crate::workspace) fn reorder_panel_tab(
+    pub(super) fn reorder_panel_tab(
         &mut self,
         from_id: TabId,
         to_id: TabId,
@@ -447,7 +447,7 @@ impl Workspace {
     ///   * the closest tab with a higher order, or
     ///   * the closest tab with a lower order, or
     ///   * `None` when this was the only tab.
-    pub(in crate::workspace) fn delete_panel_tab(&mut self, tab_id: TabId, cx: &mut Context<Self>) {
+    pub(super) fn delete_panel_tab(&mut self, tab_id: TabId, cx: &mut Context<Self>) {
         let Some(removed) = remove_tab(&mut self.panels.tabs, &tab_id) else {
             return;
         };
@@ -461,11 +461,7 @@ impl Workspace {
     /// Switch the active panel tab and persist. No-op if `tab_id` is
     /// not present (e.g. the tab was just deleted on another window).
     /// Deactivates the built-in Input panel if it was active.
-    pub(in crate::workspace) fn set_active_panel_tab(
-        &mut self,
-        tab_id: TabId,
-        cx: &mut Context<Self>,
-    ) {
+    pub(super) fn set_active_panel_tab(&mut self, tab_id: TabId, cx: &mut Context<Self>) {
         if !self.panels.tabs.iter().any(|t| t.id == tab_id) {
             return;
         }
@@ -685,7 +681,7 @@ impl Workspace {
     /// types are silent no-ops (the JSON survives via
     /// `MacroKey::Unknown` round-trip; the click simply does nothing
     /// until a daruda version that understands the type loads it).
-    pub(in crate::workspace) fn run_widget(
+    pub(super) fn run_widget(
         &mut self,
         tab_id: TabId,
         widget_id: WidgetId,

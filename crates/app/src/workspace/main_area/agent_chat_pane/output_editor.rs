@@ -17,10 +17,10 @@ use crate::workspace::main_area::pane_tree::PaneId;
 
 /// A tool-output block's verbatim body plus the language it can be highlighted
 /// as. Borrowed from the block.
-pub(in crate::workspace) struct OutputEditorSource<'a> {
-    pub(in crate::workspace) text: &'a str,
+pub(super) struct OutputEditorSource<'a> {
+    pub(super) text: &'a str,
     /// Registry language name; `None` renders un-highlighted.
-    pub(in crate::workspace) language: Option<&'a str>,
+    pub(super) language: Option<&'a str>,
 }
 
 /// The verbatim body of `block`, when the whole block is one — raw shell bytes,
@@ -34,9 +34,7 @@ pub(in crate::workspace) struct OutputEditorSource<'a> {
 /// markdown. The other two arms are typed as verbatim upstream, which is what
 /// lets a read of a fence-bearing markdown file embed instead of being rejected
 /// as ambiguous.
-pub(in crate::workspace) fn output_editor_source(
-    block: &ToolOutputBlock,
-) -> Option<OutputEditorSource<'_>> {
+pub(super) fn output_editor_source(block: &ToolOutputBlock) -> Option<OutputEditorSource<'_>> {
     match block {
         // Never passed through the adapter's markdown escaping, so its bytes
         // are literal by definition — and no fence carries a language.
@@ -137,7 +135,7 @@ fn is_closing_fence(line: &str, open_ticks: usize) -> bool {
 }
 
 /// Cache key for a tool call's `ix`-th output block's editor.
-pub(in crate::workspace) fn output_editor_key(tool_id: &str, ix: usize) -> String {
+pub(super) fn output_editor_key(tool_id: &str, ix: usize) -> String {
     format!("{tool_id}#{ix}")
 }
 
@@ -146,7 +144,7 @@ pub(in crate::workspace) fn output_editor_key(tool_id: &str, ix: usize) -> Strin
 /// collision would only skip a rebuild, the same trade
 /// [`diff_build_fingerprint`](super::agent_chat_helpers::diff_build_fingerprint)
 /// accepts.
-pub(in crate::workspace) fn output_source_fingerprint(src: &OutputEditorSource<'_>) -> u64 {
+pub(super) fn output_source_fingerprint(src: &OutputEditorSource<'_>) -> u64 {
     use std::hash::{Hash, Hasher};
     let mut hasher = std::collections::hash_map::DefaultHasher::new();
     src.text.hash(&mut hasher);
@@ -158,7 +156,7 @@ pub(in crate::workspace) fn output_source_fingerprint(src: &OutputEditorSource<'
 /// the value [`bounded_embed_height`] caps and the content extent the embed's
 /// vertical thumb measures against, so the thumb appears exactly when the cap
 /// engaged.
-pub(in crate::workspace) fn embed_text_height(rows: usize, row_height: f32) -> Pixels {
+pub(super) fn embed_text_height(rows: usize, row_height: f32) -> Pixels {
     px(rows.max(1) as f32 * row_height)
 }
 
@@ -206,7 +204,7 @@ fn without_trailing_terminator(mut text: String) -> String {
 /// than borrowing. `language` is a fence tag or the name a `SourceText` block
 /// carries; `None` (or one the registry cannot colour) renders un-highlighted.
 /// Returns `None` if the owning window is gone.
-pub(in crate::workspace) fn create_output_editor(
+pub(super) fn create_output_editor(
     cx: &mut Context<AgentChatView>,
     access: &mut WindowAccess<'_>,
     pane_id: PaneId,

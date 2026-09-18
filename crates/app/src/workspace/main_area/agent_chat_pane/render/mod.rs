@@ -18,7 +18,7 @@ mod links;
 mod mermaid;
 /// Reachable from `workspace::screenshot_scenario` so the
 /// `mermaid-lightbox` capture scenario can drive it directly.
-pub(in crate::workspace) mod mermaid_lightbox;
+pub(super) mod mermaid_lightbox;
 mod plan;
 mod status_icon;
 mod tail_row;
@@ -36,25 +36,23 @@ use gpui::{
 /// crate::workspace)` rather than `pub(super)`: `AgentChatView::assets`
 /// (`view/mod.rs`) uses this as its field type too, so both the owning cache
 /// and its read-only render-side view share one definition.
-pub(in crate::workspace) type DiffEditors =
-    std::collections::HashMap<String, Entity<crate::ui::InputState>>;
+pub(super) type DiffEditors = std::collections::HashMap<String, Entity<crate::ui::InputState>>;
 
 /// Read-only editor entities for verbatim tool-output blocks keyed by
 /// `"{tool_call_id}#{block_index}"` (built in the ops layer; this view only
-/// embeds them). `pub(in crate::workspace)` rather than `pub(super)` for the
+/// embeds them). `pub(super)` rather than `pub(super)` for the
 /// same reason as [`DiffEditors`]: `AgentChatView::assets` uses it as a field
 /// type too.
-pub(in crate::workspace) type OutputEditors =
-    std::collections::HashMap<String, Entity<crate::ui::InputState>>;
+pub(super) type OutputEditors = std::collections::HashMap<String, Entity<crate::ui::InputState>>;
 
 /// Per-diff `+N −M` line counts keyed by `"{tool_call_id}#{diff_index}"`
 /// (built in the ops layer; this view only reads them for the collapsed
 /// diff summary).
-pub(in crate::workspace) type DiffStats = std::collections::HashMap<String, DiffStat>;
+pub(super) type DiffStats = std::collections::HashMap<String, DiffStat>;
 
 /// Rendered mermaid diagrams keyed by source hash. Shared so the cached
 /// markdown code-block hook can see async image arrivals after parse.
-pub(in crate::workspace) type MermaidImages = std::sync::Arc<
+pub(super) type MermaidImages = std::sync::Arc<
     std::sync::Mutex<
         std::collections::HashMap<
             u64,
@@ -67,7 +65,7 @@ pub(in crate::workspace) type MermaidImages = std::sync::Arc<
 /// `Some` = decoded & GPU-ready; `None` = a cached decode failure. Shared so
 /// `output_block_view` sees async decode arrivals landed by
 /// `reconcile_tool_images`.
-pub(in crate::workspace) type ToolImages = std::sync::Arc<
+pub(super) type ToolImages = std::sync::Arc<
     std::sync::Mutex<
         std::collections::HashMap<
             u64,
@@ -80,7 +78,7 @@ pub(in crate::workspace) type ToolImages = std::sync::Arc<
 /// `Some` = decoded & GPU-ready; `None` = a cached read/decode failure. Kept
 /// separate from `ToolImages` because the source is a mutable path rather than
 /// immutable inline base64 content.
-pub(in crate::workspace) type ResourceImages = std::sync::Arc<
+pub(super) type ResourceImages = std::sync::Arc<
     std::sync::Mutex<
         std::collections::HashMap<
             String,
@@ -146,10 +144,7 @@ use crate::workspace::main_area::agent_chat_pane::view::{
 use crate::workspace::main_area::pane_tree::PaneId;
 
 /// Build the element tree for an Agent chat pane.
-pub(in crate::workspace) fn render(
-    view: &AgentChatView,
-    cx: &mut Context<AgentChatView>,
-) -> impl IntoElement {
+pub(super) fn render(view: &AgentChatView, cx: &mut Context<AgentChatView>) -> impl IntoElement {
     let pane_id = view.pane_id;
     let content = view;
     // Own the palette so the render body can use `cx` mutably (listener

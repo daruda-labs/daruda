@@ -99,7 +99,7 @@ fn refresh_before_write(
 
 impl Workspace {
     /// Flip the `disabled` flag on the named server in `scope`.
-    pub(in crate::workspace) fn toggle_mcp_server(
+    pub(super) fn toggle_mcp_server(
         &mut self,
         scope: McpScope,
         name: &str,
@@ -145,7 +145,7 @@ impl Workspace {
     }
 
     /// Add a new server to `scope`.
-    pub(in crate::workspace) fn add_mcp_server(
+    pub(super) fn add_mcp_server(
         &mut self,
         scope: McpScope,
         draft: McpServerDraft,
@@ -169,7 +169,7 @@ impl Workspace {
     }
 
     /// Replace the entry at `(scope, draft.name)`.
-    pub(in crate::workspace) fn update_mcp_server(
+    pub(super) fn update_mcp_server(
         &mut self,
         scope: McpScope,
         draft: McpServerDraft,
@@ -198,7 +198,7 @@ impl Workspace {
 
     /// Remove the named server from `scope`. Caller is the
     /// delete-confirm modal, which already gated on user confirmation.
-    pub(in crate::workspace) fn delete_mcp_server_internal(
+    pub(super) fn delete_mcp_server_internal(
         &mut self,
         scope: McpScope,
         name: &str,

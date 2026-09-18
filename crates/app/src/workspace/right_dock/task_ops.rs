@@ -28,7 +28,7 @@ impl Workspace {
     /// Cycle the Tasks tab filter through `All → Backlog → Running →
     /// Done → All`. Used by the header chip until a `Select` widget
     /// lands.
-    pub(in crate::workspace) fn cycle_task_filter(&mut self, cx: &mut Context<Self>) {
+    pub(super) fn cycle_task_filter(&mut self, cx: &mut Context<Self>) {
         self.task_filter = match self.task_filter {
             daruda_store::tasks::TaskFilter::All => daruda_store::tasks::TaskFilter::Backlog,
             daruda_store::tasks::TaskFilter::Backlog => daruda_store::tasks::TaskFilter::Running,
@@ -40,11 +40,7 @@ impl Workspace {
 
     /// Clear the Tasks tab search input (the in-field `✕` overlay).
     /// Extracted so the View closure can dispatch in one line.
-    pub(in crate::workspace) fn clear_task_search(
-        &mut self,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
+    pub(super) fn clear_task_search(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let input = self.task_search_input.clone();
         input.update(cx, |inp, cx_state| {
             inp.set_value("".to_string(), window, cx_state);
@@ -55,7 +51,7 @@ impl Workspace {
     /// Set the Tasks-tab filter directly. Called by future `Select`
     /// widget subscriptions once it replaces the cycle chip.
     #[allow(dead_code)]
-    pub(in crate::workspace) fn set_task_filter(
+    pub(super) fn set_task_filter(
         &mut self,
         filter: daruda_store::tasks::TaskFilter,
         cx: &mut Context<Self>,
@@ -375,7 +371,7 @@ impl Workspace {
     /// only exposed on Error rows, but defensive guarding keeps the
     /// dispatcher honest if a race lets the state flip between menu
     /// open and click.
-    pub(in crate::workspace) fn open_task_error_dialog(
+    pub(super) fn open_task_error_dialog(
         &mut self,
         task_id: &str,
         window: &mut Window,
@@ -403,7 +399,7 @@ impl Workspace {
     /// Show a Danger-styled `ConfirmModal` before invoking
     /// [`Workspace::delete_task`]. Routed to from the row's `[Delete]`
     /// button and the palette's `Delete Task` entry.
-    pub(in crate::workspace) fn open_delete_task_confirm(
+    pub(super) fn open_delete_task_confirm(
         &mut self,
         task_id: &str,
         window: &mut Window,

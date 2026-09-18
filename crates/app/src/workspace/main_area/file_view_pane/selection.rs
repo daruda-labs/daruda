@@ -47,11 +47,7 @@ impl CharSelection {
     ///
     /// `row_len` is `VisualRow::content.len()`. Bytes are clamped to `row_len`
     /// so out-of-bounds anchors from a previous content update are harmless.
-    pub(in crate::workspace) fn byte_range_for_row(
-        &self,
-        row: usize,
-        row_len: usize,
-    ) -> Option<Range<usize>> {
+    pub(super) fn byte_range_for_row(&self, row: usize, row_len: usize) -> Option<Range<usize>> {
         let (start, end) = self.ordered();
         if row < start.row || row > end.row {
             return None;
@@ -96,12 +92,12 @@ impl SelectionDrag {
     }
 
     /// The fixed end of the current selection, or `None` when there is none.
-    pub(in crate::workspace) fn anchor(&self) -> Option<CharPos> {
+    pub(super) fn anchor(&self) -> Option<CharPos> {
         self.char_selection().map(|s| s.anchor)
     }
 
     /// True while the left button is held (drag-select in progress).
-    pub(in crate::workspace) fn is_in_progress(&self) -> bool {
+    pub(super) fn is_in_progress(&self) -> bool {
         matches!(self, Self::InProgress(_))
     }
 }
@@ -202,7 +198,7 @@ impl PaneFileView {
     /// Block-level mouse-down for the Markdown preview (selection is row-granular,
     /// `byte` is always 0). `shift=true` extends from the retained anchor and
     /// completes immediately; otherwise it starts a fresh in-progress drag.
-    pub(in crate::workspace) fn handle_block_mouse_down(&mut self, block_idx: usize, shift: bool) {
+    pub(super) fn handle_block_mouse_down(&mut self, block_idx: usize, shift: bool) {
         let pos = CharPos {
             row: block_idx,
             byte: 0,
@@ -224,11 +220,7 @@ impl PaneFileView {
     /// Block-level mouse-move for the Markdown preview. While the left button is
     /// held the active end tracks `block_idx`; once released the drag settles via
     /// [`Self::end_selection_drag`]. Returns `true` when state changed.
-    pub(in crate::workspace) fn handle_block_mouse_move(
-        &mut self,
-        block_idx: usize,
-        left_pressed: bool,
-    ) -> bool {
+    pub(super) fn handle_block_mouse_move(&mut self, block_idx: usize, left_pressed: bool) -> bool {
         if !self.selection_drag.is_in_progress() {
             return false;
         }
@@ -251,7 +243,7 @@ impl PaneFileView {
     }
 
     /// Number of selectable units. Used by Cmd+A select-all.
-    pub(in crate::workspace) fn visible_row_count(&self) -> usize {
+    pub(super) fn visible_row_count(&self) -> usize {
         if let PaneFileContent::LoadedMarkdown { blocks, .. } = &self.content
             && self.view_mode == FileViewMode::Preview
         {

@@ -10,7 +10,7 @@
 //! query is case-insensitive, but a single uppercase letter makes the
 //! whole query case-sensitive against the Title-Case labels.
 
-pub(in crate::workspace) mod entries;
+pub(super) mod entries;
 
 /// Re-exported so the command table keeps the path the 4-point chain rule
 /// names (`command::palette::PALETTE_ENTRIES`, `crates/app/src/CLAUDE.md`).
@@ -95,14 +95,13 @@ impl CommandPaletteState {
 /// Renders an empty invisible div when the palette is closed.
 #[derive(IntoElement)]
 pub(in crate::workspace) struct CommandPaletteOverlay {
-    pub(in crate::workspace) state: CommandPaletteState,
+    pub(super) state: CommandPaletteState,
     #[allow(clippy::type_complexity)]
-    pub(in crate::workspace) on_close:
-        Box<dyn Fn(&MouseDownEvent, &mut Window, &mut App) + 'static>,
+    pub(super) on_close: Box<dyn Fn(&MouseDownEvent, &mut Window, &mut App) + 'static>,
     /// Activate the row at this visible index. `Rc` because every row needs
     /// its own handle to it.
     #[allow(clippy::type_complexity)]
-    pub(in crate::workspace) on_pick: Rc<dyn Fn(&usize, &mut Window, &mut App) + 'static>,
+    pub(super) on_pick: Rc<dyn Fn(&usize, &mut Window, &mut App) + 'static>,
 }
 
 impl CommandPaletteOverlay {

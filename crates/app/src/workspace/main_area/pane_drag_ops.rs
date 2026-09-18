@@ -34,7 +34,7 @@ pub(in crate::workspace) struct PaneHeaderDrag {
 /// `PathDrag`. GPUI anchors the ghost's top-left at `cursor - offset` (the
 /// grab point within the header); padding the inner pill back by `offset`
 /// re-pins it to the cursor so it doesn't drift away from the pointer.
-pub(in crate::workspace) struct PaneHeaderDragGhost {
+pub(super) struct PaneHeaderDragGhost {
     pub title: SharedString,
     pub offset: Point<Pixels>,
 }
@@ -173,7 +173,7 @@ impl Workspace {
 
     /// Called from a pane's `on_drop`. Uses the stored hover (target + half)
     /// to move the dragged leaf next to the target via the pure transform.
-    pub(in crate::workspace) fn drop_pane_onto(
+    pub(super) fn drop_pane_onto(
         &mut self,
         dragged: PaneId,
         window: &mut Window,

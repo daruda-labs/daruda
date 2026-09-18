@@ -14,7 +14,7 @@ pub(in crate::workspace) const DIVIDER_PX: f32 = 1.0;
 
 /// Minimum fraction of an axis a single pane may occupy. Prevents dividers
 /// from being dragged into an unusable state. 5% matches iTerm2's lower bound.
-pub(in crate::workspace) const MIN_RATIO: f32 = 0.05;
+pub(super) const MIN_RATIO: f32 = 0.05;
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub(in crate::workspace) enum SplitDirection {
@@ -35,7 +35,7 @@ pub(in crate::workspace) enum DropHalf {
 }
 
 impl DropHalf {
-    pub(in crate::workspace) fn direction(self) -> SplitDirection {
+    pub(super) fn direction(self) -> SplitDirection {
         match self {
             // West/East = panes side-by-side (children along X) = Horizontal
             DropHalf::West | DropHalf::East => SplitDirection::Horizontal,
@@ -45,7 +45,7 @@ impl DropHalf {
     }
 
     /// New pane is inserted BEFORE the target when dropped on its left/top half.
-    pub(in crate::workspace) fn before(self) -> bool {
+    pub(super) fn before(self) -> bool {
         matches!(self, DropHalf::West | DropHalf::North)
     }
 }
@@ -53,7 +53,7 @@ impl DropHalf {
 /// Score threshold = active strip width from each edge (40% of the axis).
 /// Leaves a central (1 - 2×0.4) = 20%×20% rectangle as a dead-zone (None).
 /// Matches iTerm2's SplitSelectionView.
-pub(in crate::workspace) const DROP_DEAD_ZONE: f32 = 0.4;
+pub(super) const DROP_DEAD_ZONE: f32 = 0.4;
 
 /// `(x, y)` is the cursor position local to a pane of size `(w, h)`.
 /// Precondition: 0.0 <= x <= w and 0.0 <= y <= h (caller bounds-checks).
@@ -240,7 +240,7 @@ fn try_insert_node_at(
 /// Insert `new_node` (a leaf or an arbitrary subtree) next to `target`. See
 /// `try_insert_node_at` for the case-by-case rules. Returns true when the
 /// target was found and the subtree inserted.
-pub(in crate::workspace) fn insert_node_at(
+pub(super) fn insert_node_at(
     layout: &mut PaneLayout,
     target: PaneId,
     direction: SplitDirection,
@@ -266,7 +266,7 @@ pub(in crate::workspace) fn insert_split_at(
 /// in the half indicated by `half`. Pure tree transform: remove then
 /// re-insert. Returns false on no-op (dragged == target) or if either id
 /// is absent. Does NOT create/destroy panes — only edits the layout.
-pub(in crate::workspace) fn rearrange_pane(
+pub(super) fn rearrange_pane(
     layout: &mut PaneLayout,
     dragged: PaneId,
     target: PaneId,
@@ -433,9 +433,9 @@ pub(in crate::workspace) fn collect_pane_sizes(
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub(in crate::workspace) struct PaneRect {
-    pub(in crate::workspace) id: PaneId,
+    pub(super) id: PaneId,
     pub(in crate::workspace) x: f32,
-    pub(in crate::workspace) y: f32,
+    pub(super) y: f32,
     pub(in crate::workspace) w: f32,
     pub(in crate::workspace) h: f32,
 }

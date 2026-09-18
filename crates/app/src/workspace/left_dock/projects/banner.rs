@@ -10,7 +10,7 @@ use crate::ui::dialog::ButtonVariant;
 use crate::workspace::layout::{Dock, LeftDockSnapshot};
 
 /// "Agent integration disabled" banner. Click → install action.
-pub(in crate::workspace) fn agent_install_banner(
+pub(super) fn agent_install_banner(
     snap: &LeftDockSnapshot,
     cx: &mut Context<Dock>,
 ) -> impl IntoElement + use<> {

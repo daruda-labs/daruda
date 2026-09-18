@@ -65,7 +65,7 @@ impl AgentChatView {
     /// which, and the reader must not move". Distinct from
     /// [`ListSync::EveryRow`] in the anchor it keeps, which is the whole reason
     /// this is spelled out rather than left to each caller.
-    pub(in crate::workspace) fn resync_all_row_heights(&mut self, reason: &str) {
+    pub(super) fn resync_all_row_heights(&mut self, reason: &str) {
         let n = self.rows.len();
         if n > 0 {
             self.apply_list_sync(ListSync::Rows(0..n), reason);

@@ -206,7 +206,7 @@ impl PhoneTurn {
     /// The completion relay bounds its scan to it, so a turn that produced no
     /// text of its own reports exactly that instead of handing the sender an
     /// earlier turn's answer as if it were this one's.
-    pub(in crate::workspace) fn items_anchor(&self) -> usize {
+    pub(super) fn items_anchor(&self) -> usize {
         match &self.0 {
             State::Waiting {
                 items_len_at_start, ..
@@ -223,7 +223,7 @@ impl PhoneTurn {
     /// An unnamed message never matches: without identity the honest answer is
     /// "cannot tell", and repeating an answer is the lesser failure against
     /// swallowing one.
-    pub(in crate::workspace) fn already_sent(&self, message_id: Option<&str>) -> bool {
+    pub(super) fn already_sent(&self, message_id: Option<&str>) -> bool {
         match (&self.0, message_id) {
             (
                 State::Answered {

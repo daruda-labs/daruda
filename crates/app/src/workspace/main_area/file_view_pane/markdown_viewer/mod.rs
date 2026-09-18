@@ -122,11 +122,7 @@ pub(in crate::workspace) enum MdBlock {
 
 /// Parse `text` into a `Vec<MdBlock>`. Code fences are syntax-highlighted
 /// using `syntax_theme` (falls back to the bundled default on unknown names).
-pub(in crate::workspace) fn parse_markdown(
-    text: &str,
-    syntax_theme: &str,
-    is_light: bool,
-) -> Vec<MdBlock> {
+pub(super) fn parse_markdown(text: &str, syntax_theme: &str, is_light: bool) -> Vec<MdBlock> {
     let mut opts = Options::empty();
     opts.insert(Options::ENABLE_STRIKETHROUGH);
     opts.insert(Options::ENABLE_TABLES);

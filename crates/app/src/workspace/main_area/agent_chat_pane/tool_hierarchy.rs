@@ -11,9 +11,9 @@ use std::collections::HashMap;
 use daruda_acp::{ChatItem, ToolCallItem};
 
 /// Bounds malformed or cyclic subagent parent links.
-pub(in crate::workspace) const SUBAGENT_NEST_DEPTH_CAP: usize = 8;
+pub(super) const SUBAGENT_NEST_DEPTH_CAP: usize = 8;
 
-pub(in crate::workspace) struct ToolHierarchy<'a> {
+pub(super) struct ToolHierarchy<'a> {
     /// Tool-call id → its index in `items`. First occurrence wins.
     index_of: HashMap<&'a str, usize>,
     /// Tool-call id → its declared parent, present in `items` or not.
@@ -23,7 +23,7 @@ pub(in crate::workspace) struct ToolHierarchy<'a> {
 }
 
 impl<'a> ToolHierarchy<'a> {
-    pub(in crate::workspace) fn build(items: &'a [ChatItem]) -> Self {
+    pub(super) fn build(items: &'a [ChatItem]) -> Self {
         let mut index_of: HashMap<&'a str, usize> = HashMap::new();
         let mut parent_of: HashMap<&'a str, &'a str> = HashMap::new();
         let mut children_of: HashMap<&'a str, Vec<&'a str>> = HashMap::new();
@@ -46,14 +46,14 @@ impl<'a> ToolHierarchy<'a> {
     }
 
     /// Whether `items` holds a tool call with this id.
-    pub(in crate::workspace) fn contains(&self, id: &str) -> bool {
+    pub(super) fn contains(&self, id: &str) -> bool {
         self.index_of.contains_key(id)
     }
 
     /// Whether this call renders inside a parent's card instead of earning a
     /// row of its own. A dangling parent id keeps it top-level, so a child of
     /// a call `items` never carried cannot vanish.
-    pub(in crate::workspace) fn is_nested_child(&self, tc: &ToolCallItem) -> bool {
+    pub(super) fn is_nested_child(&self, tc: &ToolCallItem) -> bool {
         tc.parent_tool_id
             .as_deref()
             .is_some_and(|pid| self.contains(pid))
@@ -63,26 +63,20 @@ impl<'a> ToolHierarchy<'a> {
     /// [`SUBAGENT_NEST_DEPTH_CAP`] hops so a cycle terminates. Yields ancestors
     /// absent from `items` too: presence decides row ownership
     /// ([`Self::is_nested_child`]), not membership in a chain.
-    pub(in crate::workspace) fn with_ancestors(
-        &self,
-        start: &'a str,
-    ) -> impl Iterator<Item = &'a str> + '_ {
+    pub(super) fn with_ancestors(&self, start: &'a str) -> impl Iterator<Item = &'a str> + '_ {
         std::iter::successors(Some(start), move |cur| self.parent_of.get(*cur).copied())
             .take(SUBAGENT_NEST_DEPTH_CAP + 1)
     }
 
     /// [`Self::with_ancestors`] without `start` itself.
-    pub(in crate::workspace) fn ancestors(
-        &self,
-        start: &'a str,
-    ) -> impl Iterator<Item = &'a str> + '_ {
+    pub(super) fn ancestors(&self, start: &'a str) -> impl Iterator<Item = &'a str> + '_ {
         self.with_ancestors(start).skip(1)
     }
 
     /// The `items` index of the call that owns a row for `id`: itself when its
     /// parent is absent from `items`, else the nearest present ancestor.
     /// `None` when `id` is unknown or the walk exceeds the depth cap.
-    pub(in crate::workspace) fn owning_row_index(&self, id: &str) -> Option<usize> {
+    pub(super) fn owning_row_index(&self, id: &str) -> Option<usize> {
         let mut current = id;
         for _ in 0..SUBAGENT_NEST_DEPTH_CAP {
             let ix = *self.index_of.get(current)?;
@@ -100,11 +94,7 @@ impl<'a> ToolHierarchy<'a> {
     ///
     /// Bounded by [`SUBAGENT_NEST_DEPTH_CAP`] the way the card's own recursion
     /// is, so the count names exactly the children that would have rendered.
-    pub(in crate::workspace) fn cut_below(
-        &self,
-        root: &str,
-        keeps: impl Fn(&str) -> bool,
-    ) -> usize {
+    pub(super) fn cut_below(&self, root: &str, keeps: impl Fn(&str) -> bool) -> usize {
         let mut cut = 0;
         let mut frontier = vec![(root, 0usize)];
         while let Some((id, depth)) = frontier.pop() {

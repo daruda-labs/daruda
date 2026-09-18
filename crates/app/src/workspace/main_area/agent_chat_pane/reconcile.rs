@@ -49,7 +49,7 @@ use crate::workspace::main_area::file_view_pane::visual;
 /// conversation buys nothing and makes a long turn quadratic: every chunk
 /// re-hashed every diff the turn had produced so far.
 #[derive(Debug)]
-pub(in crate::workspace) enum ReconcileScope {
+pub(super) enum ReconcileScope {
     /// Every tool call. Required whenever `items` moved as a whole (connect,
     /// `session/load` catch-up) or every card's fold moved at once (expand-all /
     /// collapse-all) — only a full pass can see that a call left the
@@ -245,7 +245,7 @@ impl AgentChatView {
     /// inside the window's own update cycle and has to hand over the borrow it
     /// already holds, while the config-reload path fires from `flush_effects`
     /// and resolves one from the stored handle — see [`WindowAccess`].
-    pub(in crate::workspace) fn reconcile_embeds_after_fold(
+    pub(super) fn reconcile_embeds_after_fold(
         &mut self,
         scope: &ReconcileScope,
         access: &mut WindowAccess<'_>,
@@ -264,7 +264,7 @@ impl AgentChatView {
     /// caller that swaps the entire transcript has neither a call to scope to
     /// nor an event flag to gate on, so it owes the full pass.
     #[cfg(feature = "devtools")]
-    pub(in crate::workspace) fn reconcile_all_embeds(
+    pub(super) fn reconcile_all_embeds(
         &mut self,
         access: &mut WindowAccess<'_>,
         cx: &mut Context<Self>,
@@ -327,7 +327,7 @@ impl AgentChatView {
     /// (the diff box then undersizes and its tail visually merges into the
     /// tool card's Output section). A cached key this pass doesn't claim is
     /// dropped from all three maps — see [`stale_keys`].
-    pub(in crate::workspace) fn reconcile_diff_editors(
+    pub(super) fn reconcile_diff_editors(
         &mut self,
         syntax_theme: &str,
         is_light: bool,
@@ -443,7 +443,7 @@ impl AgentChatView {
     /// key with growing text. A key whose fingerprint moved is rebuilt; a cached
     /// key the walk no longer visits is dropped, which covers both a block that
     /// stopped qualifying and an index a shrunken `output` vec no longer reaches.
-    pub(in crate::workspace) fn reconcile_output_editors(
+    pub(super) fn reconcile_output_editors(
         &mut self,
         scope: &ReconcileScope,
         access: &mut WindowAccess<'_>,
@@ -601,11 +601,7 @@ impl AgentChatView {
     /// A decode failure caches `None` under the key rather than leaving it
     /// absent, so malformed content is not retried forever. Inline images show
     /// their media descriptor; resource images retain their original link.
-    pub(in crate::workspace) fn reconcile_tool_images(
-        &mut self,
-        scope: &ReconcileScope,
-        cx: &mut Context<Self>,
-    ) {
+    pub(super) fn reconcile_tool_images(&mut self, scope: &ReconcileScope, cx: &mut Context<Self>) {
         // Collect the not-yet-cached, not-in-flight images first; the spawn
         // re-enters the view, which can't happen while the `items` borrow is
         // live.

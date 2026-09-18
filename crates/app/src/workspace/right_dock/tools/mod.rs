@@ -9,14 +9,14 @@
 //!   dispatches through those wrappers.
 //! - This `mod.rs` re-exports the openers so callers stay one-liners.
 
-pub(in crate::workspace) mod add_modal;
-pub(in crate::workspace) mod delete_confirm;
-pub(in crate::workspace) mod edit_modal;
+pub(super) mod add_modal;
+pub(super) mod delete_confirm;
+pub(super) mod edit_modal;
 mod modal_shared;
 mod ops;
-pub(in crate::workspace) mod render;
+pub(super) mod render;
 
-pub(in crate::workspace) use add_modal::open_add_mcp_server_modal;
-pub(in crate::workspace) use delete_confirm::open_delete_mcp_server_confirm;
-pub(in crate::workspace) use edit_modal::open_edit_mcp_server_modal;
+pub(super) use add_modal::open_add_mcp_server_modal;
+pub(super) use delete_confirm::open_delete_mcp_server_confirm;
+pub(super) use edit_modal::open_edit_mcp_server_modal;
 pub(in crate::workspace) use render::render;

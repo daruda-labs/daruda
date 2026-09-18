@@ -20,7 +20,7 @@ impl Workspace {
     /// current vector of open indices on every change, so daruda
     /// computes the corresponding `plugin_id` set in the renderer and
     /// hands it back here verbatim.
-    pub(in crate::workspace) fn set_skill_plugin_expanded(
+    pub(super) fn set_skill_plugin_expanded(
         &mut self,
         expanded: std::collections::HashSet<String>,
         cx: &mut Context<Self>,

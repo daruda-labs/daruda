@@ -224,7 +224,7 @@ impl AgentChatView {
     /// Reads the same source `toggle_fold` reads, so it is exact rather than a
     /// guess about the configured default.
     #[cfg(feature = "screenshot")]
-    pub(in crate::workspace) fn set_fold_for_shot(
+    pub(super) fn set_fold_for_shot(
         &mut self,
         key: FoldKey,
         expanded: bool,
@@ -451,7 +451,7 @@ impl AgentChatView {
     /// `items`; without the embed pass a seeded pane renders diffs and verbatim
     /// output through fallbacks no live session takes.
     #[cfg(feature = "devtools")]
-    pub(in crate::workspace) fn seed_transcript(
+    pub(super) fn seed_transcript(
         &mut self,
         items: Vec<daruda_acp::ChatItem>,
         window: &mut Window,
@@ -485,7 +485,7 @@ impl AgentChatView {
 
     /// Reproject after a capture-only model edit.
     #[cfg(feature = "screenshot")]
-    pub(in crate::workspace) fn reproject_for_shot(&mut self, cx: &mut Context<Self>) {
+    pub(super) fn reproject_for_shot(&mut self, cx: &mut Context<Self>) {
         self.reproject(cx);
     }
 
@@ -493,7 +493,7 @@ impl AgentChatView {
     /// `age` so the badge shows a real number. Model-only: the caller opens the
     /// fold the card needs and reprojects.
     #[cfg(feature = "screenshot")]
-    pub(in crate::workspace) fn start_last_tool_for_shot(&mut self, age: std::time::Duration) {
+    pub(super) fn start_last_tool_for_shot(&mut self, age: std::time::Duration) {
         let Some(id) = self.items.iter_mut().rev().find_map(|item| match item {
             ChatItem::ToolCall(tc) => {
                 tc.status = daruda_acp::ToolStatusView::InProgress;
@@ -512,7 +512,7 @@ impl AgentChatView {
     /// Seed the plan region for a capture, expanded so its entries are on
     /// screen (a settled seed would otherwise arrive collapsed).
     #[cfg(feature = "screenshot")]
-    pub(in crate::workspace) fn seed_plan(
+    pub(super) fn seed_plan(
         &mut self,
         plan: Vec<daruda_acp::PlanEntryView>,
         cx: &mut Context<Self>,
@@ -524,7 +524,7 @@ impl AgentChatView {
 
     /// Seed a transcript captured while the foreground turn is still active.
     #[cfg(feature = "screenshot")]
-    pub(in crate::workspace) fn seed_working_transcript(
+    pub(super) fn seed_working_transcript(
         &mut self,
         items: Vec<daruda_acp::ChatItem>,
         window: &mut Window,
@@ -537,7 +537,7 @@ impl AgentChatView {
     }
 
     /// Both levels' resolved windows, as the projection takes them.
-    pub(in crate::workspace) fn step_windows(&self) -> StepWindow {
+    pub(super) fn step_windows(&self) -> StepWindow {
         StepWindow {
             steps: self.tail_steps.value(),
             calls: self.tail_calls.value(),
@@ -547,10 +547,7 @@ impl AgentChatView {
     /// One level's choice, by level — the tests assert per level, and a match
     /// duplicated there could disagree with the one below.
     #[cfg(test)]
-    pub(in crate::workspace) fn tail_choice_for_test(
-        &self,
-        level: TailLevel,
-    ) -> PaneChoice<TailWindow> {
+    pub(super) fn tail_choice_for_test(&self, level: TailLevel) -> PaneChoice<TailWindow> {
         match level {
             TailLevel::Steps => self.tail_steps,
             TailLevel::Calls => self.tail_calls,

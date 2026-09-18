@@ -14,7 +14,7 @@ use daruda_flow::model::{AgentFail, Flow, GateFail, NodeKind, Prompt};
 
 /// Nodes and the two kinds of line between them.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(in crate::workspace) struct FlowGraphModel {
+pub(super) struct FlowGraphModel {
     pub nodes: Vec<GraphNode>,
     /// `deps` — execution order. Drawn as the canvas's own edges.
     pub deps: Vec<GraphEdge>,
@@ -181,10 +181,7 @@ pub(in crate::workspace) fn apply_run_event(states: &mut NodeRunStates, event: &
 }
 
 impl FlowGraphModel {
-    pub(in crate::workspace) fn from_flow(
-        flow: &Flow,
-        issues: Vec<daruda_flow::error::ValidationIssue>,
-    ) -> Self {
+    pub(super) fn from_flow(flow: &Flow, issues: Vec<daruda_flow::error::ValidationIssue>) -> Self {
         let mut deps = Vec::new();
         let mut rerun = Vec::new();
         let nodes = flow

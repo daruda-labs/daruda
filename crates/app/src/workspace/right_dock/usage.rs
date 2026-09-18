@@ -36,7 +36,7 @@ use crate::workspace::main_area::pane::AccountDomain;
 /// switcher only appears when focus doesn't already say which (a terminal
 /// pane, or an agent daruda can't resolve a domain for) and there is more
 /// than one to choose from.
-pub(in crate::workspace) fn render(snap: &RightDockSnapshot, cx: &mut Context<Dock>) -> AnyElement {
+pub(super) fn render(snap: &RightDockSnapshot, cx: &mut Context<Dock>) -> AnyElement {
     if snap.usage.is_empty() {
         return no_provider_body(cx);
     }

@@ -18,10 +18,7 @@ use crate::workspace::Workspace;
 
 const POLL_INTERVAL: Duration = Duration::from_millis(100);
 
-pub(in crate::workspace) fn spawn(
-    events: Receiver<SkillsEvent>,
-    cx: &mut Context<Workspace>,
-) -> Task<()> {
+pub(super) fn spawn(events: Receiver<SkillsEvent>, cx: &mut Context<Workspace>) -> Task<()> {
     cx.spawn(async move |this, cx| {
         'outer: loop {
             cx.background_executor().timer(POLL_INTERVAL).await;
@@ -50,11 +47,7 @@ impl Workspace {
     /// pump never scans against a stale `project_root`. The result
     /// lands in the `SkillsState` Global, where every other open
     /// Workspace picks it up through `observe_global`.
-    pub(in crate::workspace) fn apply_skills_event(
-        &mut self,
-        event: SkillsEvent,
-        cx: &mut Context<Self>,
-    ) {
+    pub(super) fn apply_skills_event(&mut self, event: SkillsEvent, cx: &mut Context<Self>) {
         let SkillsEvent::Reloaded(scope) = event;
         let lane = self.active_lane_root();
         let personal = scan::skills_personal_dir();

@@ -30,14 +30,14 @@ impl TailWindow {
     }
 
     /// Number of leading steps outside the window.
-    pub(in crate::workspace) fn hidden_steps(self, step_count: usize) -> usize {
+    pub(super) fn hidden_steps(self, step_count: usize) -> usize {
         match self {
             Self::All => 0,
             Self::Last(n) => step_count.saturating_sub(n),
         }
     }
 
-    pub(in crate::workspace) fn hides(self, step_ix: usize, step_count: usize) -> bool {
+    pub(super) fn hides(self, step_ix: usize, step_count: usize) -> bool {
         step_ix < self.hidden_steps(step_count)
     }
 }

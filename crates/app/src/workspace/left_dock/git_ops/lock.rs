@@ -69,7 +69,7 @@ impl Workspace {
     /// code put it (`flag = false` was every continuation's first statement).
     /// Returns nothing on purpose: the task is detached here, so no caller can
     /// drop it and strand the lock held.
-    pub(in crate::workspace) fn spawn_locked_git_work<T, E, F, G>(
+    pub(super) fn spawn_locked_git_work<T, E, F, G>(
         &mut self,
         lock: GitLock,
         target: LaneRef,

@@ -21,10 +21,7 @@ use crate::workspace::{Workspace, flow_paths};
 
 const POLL_INTERVAL: Duration = Duration::from_millis(100);
 
-pub(in crate::workspace) fn spawn(
-    events: Receiver<FlowsEvent>,
-    cx: &mut Context<Workspace>,
-) -> Task<()> {
+pub(super) fn spawn(events: Receiver<FlowsEvent>, cx: &mut Context<Workspace>) -> Task<()> {
     cx.spawn(async move |this, cx| {
         'outer: loop {
             cx.background_executor().timer(POLL_INTERVAL).await;

@@ -37,7 +37,7 @@ impl DiffColors {
     /// colours with [`Self::from_file_viewer_surface`] or
     /// [`Self::from_agent_chat_surface`] so baked `@@` rows do not keep a stale
     /// UI surface background.
-    pub(in crate::workspace) fn from_theme(t: &crate::ui::theme::DarudaTheme) -> Self {
+    pub(super) fn from_theme(t: &crate::ui::theme::DarudaTheme) -> Self {
         Self {
             add_bg: t.file_diff_add_bg,
             del_bg: t.file_diff_del_bg,

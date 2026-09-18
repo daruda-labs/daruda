@@ -42,11 +42,7 @@ impl Workspace {
     ///
     /// This is the axis a fetch, push or branch switch moves, and it reads
     /// refs only — cheap enough to run for every lane of a repo at once.
-    pub(in crate::workspace) fn refresh_tracking(
-        &mut self,
-        target: LaneRef,
-        cx: &mut Context<Self>,
-    ) {
+    pub(super) fn refresh_tracking(&mut self, target: LaneRef, cx: &mut Context<Self>) {
         let Some(lane) = self.lane_for(target) else {
             return;
         };
@@ -103,7 +99,7 @@ impl Workspace {
     /// Re-read tracking for every lane of `project`. Remote-tracking refs and
     /// branch tips live in the repository's common git dir, so one fetch or
     /// push changes what every lane of that repo would report.
-    pub(in crate::workspace) fn refresh_tracking_across_repo(
+    pub(super) fn refresh_tracking_across_repo(
         &mut self,
         project: daruda_store::project::ProjectId,
         cx: &mut Context<Self>,

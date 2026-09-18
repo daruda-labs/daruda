@@ -23,10 +23,7 @@ use crate::workspace::Workspace;
 
 const POLL_INTERVAL: Duration = Duration::from_millis(100);
 
-pub(in crate::workspace) fn spawn(
-    events: Receiver<McpEvent>,
-    cx: &mut Context<Workspace>,
-) -> Task<()> {
+pub(super) fn spawn(events: Receiver<McpEvent>, cx: &mut Context<Workspace>) -> Task<()> {
     cx.spawn(async move |this, cx| {
         'outer: loop {
             cx.background_executor().timer(POLL_INTERVAL).await;
@@ -60,11 +57,7 @@ impl Workspace {
     /// changed an MCP server. `~/.claude.json` can be multi-megabyte and
     /// Claude Code rewrites it on nearly every interaction; without this
     /// gate every unrelated write would repaint the workspace.
-    pub(in crate::workspace) fn apply_mcp_event(
-        &mut self,
-        event: McpEvent,
-        cx: &mut Context<Self>,
-    ) {
+    pub(super) fn apply_mcp_event(&mut self, event: McpEvent, cx: &mut Context<Self>) {
         let lane = self.active_lane_root();
         let project_dirs = self.mcp_project_dirs.clone();
         let (label, display_label) = match event {
@@ -140,7 +133,7 @@ impl Workspace {
 
     /// The focused terminal pane's live working directory (OSC 7).
     /// `None` when no focused pane reports a cwd.
-    pub(in crate::workspace) fn active_mcp_cwd(&self) -> Option<PathBuf> {
+    pub(super) fn active_mcp_cwd(&self) -> Option<PathBuf> {
         self.active_runtime()
             .panes
             .iter()
@@ -190,7 +183,7 @@ impl Workspace {
     /// for `~/.claude.json` plus every Project `.mcp.json` directory
     /// ([`Workspace::mcp_project_dirs`]). Also called when the focused
     /// terminal's cwd changes so a new cwd's chain is picked up live.
-    pub(in crate::workspace) fn respawn_mcp_watcher(&mut self, cx: &mut Context<Self>) {
+    pub(super) fn respawn_mcp_watcher(&mut self, cx: &mut Context<Self>) {
         self._mcp_watcher = None;
         self._mcp_event_pump = None;
 

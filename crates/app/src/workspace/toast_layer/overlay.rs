@@ -34,32 +34,32 @@ use crate::workspace::error::toast::ToastId;
 /// fields only — the renderer never touches the live `ErrorReport`
 /// inside the queue.
 #[derive(Clone)]
-pub(in crate::workspace) struct ToastSnapshot {
+pub(super) struct ToastSnapshot {
     /// Stable id captured at snapshot time. The dismiss click handler
     /// uses this rather than a positional index so a concurrent
     /// auto-expire that shifts the queue can't redirect the click to
     /// a different toast.
-    pub(in crate::workspace) id: ToastId,
-    pub(in crate::workspace) title: SharedString,
-    pub(in crate::workspace) message: SharedString,
-    pub(in crate::workspace) repeat_count: u32,
-    pub(in crate::workspace) severity: ErrorSeverity,
+    pub(super) id: ToastId,
+    pub(super) title: SharedString,
+    pub(super) message: SharedString,
+    pub(super) repeat_count: u32,
+    pub(super) severity: ErrorSeverity,
     /// Plain-text rendering captured at snapshot time. Pasted on
     /// `[Copy]` click — capturing it here means the click handler
     /// stays `'static` without reaching back into the workspace.
-    pub(in crate::workspace) plain_text: SharedString,
+    pub(super) plain_text: SharedString,
     /// Full report captured at snapshot time. The `[Details]` click
     /// handler hands this to [`open_error_report_dialog`] so the modal
     /// stays consistent even if the source toast auto-expires before
     /// the user clicks.
-    pub(in crate::workspace) report: ErrorReport,
+    pub(super) report: ErrorReport,
 }
 
 /// Top-level overlay element. Renders nothing when `toasts` is empty.
 #[derive(IntoElement)]
-pub(in crate::workspace) struct ErrorToastOverlay {
-    pub(in crate::workspace) toasts: Vec<ToastSnapshot>,
-    pub(in crate::workspace) workspace: WeakEntity<Workspace>,
+pub(super) struct ErrorToastOverlay {
+    pub(super) toasts: Vec<ToastSnapshot>,
+    pub(super) workspace: WeakEntity<Workspace>,
 }
 
 impl RenderOnce for ErrorToastOverlay {

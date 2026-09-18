@@ -45,7 +45,7 @@ impl RasterImage {
 
 /// Rasterize an SVG document to a [`RasterImage`] at [`RASTER_SCALE`]× its
 /// intrinsic size, so the bitmap stays crisp when painted on HiDPI displays.
-pub(in crate::workspace) fn rasterize_svg(svg: &str) -> anyhow::Result<RasterImage> {
+pub(super) fn rasterize_svg(svg: &str) -> anyhow::Result<RasterImage> {
     let tree = resvg::usvg::Tree::from_str(svg, &usvg_options())?;
     let size = tree.size();
     let width = ((size.width() * RASTER_SCALE).ceil() as u32).clamp(1, MAX_DIM);
@@ -76,7 +76,7 @@ pub(in crate::workspace) fn rasterize_svg(svg: &str) -> anyhow::Result<RasterIma
 /// rasterized through exactly one text stack. Anything that inspects geometry
 /// before rasterizing (see `mermaid_label_geometry`) must parse with these too,
 /// or it measures a different font than the one that gets painted.
-pub(in crate::workspace) fn usvg_options() -> resvg::usvg::Options<'static> {
+pub(super) fn usvg_options() -> resvg::usvg::Options<'static> {
     let mut options = resvg::usvg::Options {
         fontdb: shared_fontdb(),
         ..Default::default()
@@ -277,7 +277,7 @@ pub(in crate::workspace) fn render_mermaid_raster(
 /// merman's SVG for `source`, with every option the app renders diagrams under.
 /// Split out so anything inspecting the diagram (tests, the label geometry pass)
 /// sees exactly what ships.
-pub(in crate::workspace) fn render_mermaid_svg(
+pub(super) fn render_mermaid_svg(
     source: &str,
     palette: &super::mermaid_theme::MermaidPalette,
 ) -> Option<String> {
@@ -313,10 +313,7 @@ pub(in crate::workspace) fn render_mermaid_svg(
 /// Policy (locked): only local files (resolved relative to `base_dir`) and
 /// `data:` URIs are loaded. Remote `http(s)` references are refused — a local
 /// file viewer must not fetch from the network.
-pub(in crate::workspace) fn load_image_source(
-    url: &str,
-    base_dir: &Path,
-) -> anyhow::Result<Vec<u8>> {
+pub(super) fn load_image_source(url: &str, base_dir: &Path) -> anyhow::Result<Vec<u8>> {
     if let Some(rest) = url.strip_prefix("data:") {
         let (meta, payload) = rest
             .split_once(',')

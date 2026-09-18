@@ -130,7 +130,7 @@ impl Workspace {
 
     /// Deliver `input` to the currently focused pane. Thin wrapper over
     /// [`Self::deliver_text_to_pane`].
-    pub(in crate::workspace) fn deliver_text_to_focused_pane(
+    pub(super) fn deliver_text_to_focused_pane(
         &mut self,
         input: PaneTextInput,
         window: &mut Window,

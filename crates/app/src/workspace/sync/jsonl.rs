@@ -28,10 +28,7 @@ const POLL_INTERVAL: Duration = Duration::from_millis(100);
 /// is held by Workspace as `_jsonl_event_pump`. The watcher itself is held
 /// by `_jsonl_watcher` (a `DirWatcher`); dropping that stops the watch, which
 /// disconnects the forward thread and then `events`, unwinding the pipeline.
-pub(in crate::workspace) fn spawn(
-    events: Receiver<JsonlEvent>,
-    cx: &mut Context<Workspace>,
-) -> Task<()> {
+pub(super) fn spawn(events: Receiver<JsonlEvent>, cx: &mut Context<Workspace>) -> Task<()> {
     cx.spawn(async move |this, cx| {
         'outer: loop {
             cx.background_executor().timer(POLL_INTERVAL).await;

@@ -304,7 +304,7 @@ impl NodeForm {
 
     /// Put a refusal on the form, or clear it. Cleared at the start of every
     /// save attempt, so what is shown is always about the latest one.
-    pub(in crate::workspace) fn set_banner(&mut self, message: Option<String>) {
+    pub(super) fn set_banner(&mut self, message: Option<String>) {
         self.banner = message;
     }
 
@@ -313,7 +313,7 @@ impl NodeForm {
     /// A note about the agent override opens that block: it is closed by default,
     /// and a capture found the pointer hidden behind it — which is the same as
     /// not pointing.
-    pub(in crate::workspace) fn set_notes(&mut self, notes: Vec<notes::FieldNote>) {
+    pub(super) fn set_notes(&mut self, notes: Vec<notes::FieldNote>) {
         if notes
             .iter()
             .any(|note| note.field == notes::FormField::Agent)
@@ -350,7 +350,7 @@ impl NodeForm {
         self.agent_open
     }
 
-    pub(in crate::workspace) fn toggle_agent_open(&mut self) {
+    pub(super) fn toggle_agent_open(&mut self) {
         self.agent_open = !self.agent_open;
     }
 

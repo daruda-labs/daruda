@@ -83,7 +83,7 @@ impl DeleteRequest {
     /// Report the key the way the plugin does, for a test about what the view
     /// makes of it. A headless window has no canvas to press a key on.
     #[cfg(test)]
-    pub(in crate::workspace) fn ask_for_test(&self) {
+    pub(super) fn ask_for_test(&self) {
         self.0.set(true);
     }
 }

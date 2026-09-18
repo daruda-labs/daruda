@@ -20,7 +20,7 @@ use super::tool_status::{LiveSubagentUnits, effective_tool_status};
 // Re-exported so the callers and tests that reach these through this module
 // keep one path; `transcript_structure` is where the rules live.
 use super::transcript_structure::{TranscriptStructure, run_active};
-pub(in crate::workspace) use super::transcript_structure::{is_active, response_run};
+pub(super) use super::transcript_structure::{is_active, response_run};
 use super::view::AgentChatView;
 use super::window_access::WindowAccess;
 use crate::path_ext::PathExt as _;
@@ -58,7 +58,7 @@ pub(in crate::workspace) fn failure_message(failure: &daruda_acp::AcpFailure) ->
 /// the end. `None` when fewer than two modes are advertised (nothing to cycle).
 /// If `current` is not in the list, cycling starts from the first mode. Pure
 /// logic for `Workspace::cycle_agent_mode` (Shift+Tab).
-pub(in crate::workspace) fn next_mode_id(modes: &daruda_acp::ModeStateView) -> Option<String> {
+pub(super) fn next_mode_id(modes: &daruda_acp::ModeStateView) -> Option<String> {
     if modes.available.len() < 2 {
         return None;
     }
@@ -123,13 +123,13 @@ pub(in crate::workspace) fn renders_subagent_instructions(tc: &daruda_acp::ToolC
 /// subagent's actual result once the call settles (`fold_output`'s replace
 /// semantics — see [`daruda_acp::ToolCallItem::subagent_prompt`]'s doc). Once
 /// settled, `output` holds the distinct result summary and renders normally.
-pub(in crate::workspace) fn suppresses_live_subagent_output(tc: &daruda_acp::ToolCallItem) -> bool {
+pub(super) fn suppresses_live_subagent_output(tc: &daruda_acp::ToolCallItem) -> bool {
     tc.is_subagent_launch() && tc.status.is_live()
 }
 
 /// Cache key for a tool call's `di`-th diff editor: one editor per file. Shared
 /// with the renderer so the embed lookup matches the insert key.
-pub(in crate::workspace) fn diff_editor_key(tool_call_id: &str, di: usize) -> String {
+pub(super) fn diff_editor_key(tool_call_id: &str, di: usize) -> String {
     format!("{tool_call_id}#{di}")
 }
 
@@ -147,7 +147,7 @@ pub(in crate::workspace) fn diff_editor_key(tool_call_id: &str, di: usize) -> St
 ///
 /// Not cryptographic — a same-key collision would only skip a rebuild it should
 /// have done, an acceptable cost for a `DefaultHasher` over ordinary diff sizes.
-pub(in crate::workspace) fn diff_build_fingerprint(diff: &DiffView, theme: u64) -> u64 {
+pub(super) fn diff_build_fingerprint(diff: &DiffView, theme: u64) -> u64 {
     use std::hash::{Hash, Hasher};
     let mut hasher = std::collections::hash_map::DefaultHasher::new();
     diff.path.hash(&mut hasher);
@@ -168,7 +168,7 @@ pub(in crate::workspace) fn diff_build_fingerprint(diff: &DiffView, theme: u64) 
 /// cannot follow a theme swap the way an output embed does; only a rebuild moves
 /// it. Folding this into [`diff_build_fingerprint`] is what makes the swap look
 /// like any other staleness to the reconciler.
-pub(in crate::workspace) fn diff_theme_fingerprint(
+pub(super) fn diff_theme_fingerprint(
     syntax_theme: &str,
     is_light: bool,
     colors: &DiffColors,
@@ -191,7 +191,7 @@ pub(in crate::workspace) fn diff_theme_fingerprint(
 /// for. Single source shared by the response bar, the tool-group bar, and a
 /// top-level assistant block, so the three can never disagree on treatment.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(in crate::workspace) enum Rollup {
+pub(super) enum Rollup {
     /// At least one child still in progress / streaming (not settled).
     Running,
     /// All children succeeded.
@@ -213,7 +213,7 @@ impl Rollup {
     /// (`group_live` ignores the filter too), so
     /// a glyph that settled while the work continued would deny its own row's
     /// reason for being there.
-    pub(in crate::workspace) fn of_kept_run(
+    pub(super) fn of_kept_run(
         items: &[daruda_acp::ChatItem],
         indices: impl Iterator<Item = usize>,
         live_units: &LiveSubagentUnits,
@@ -353,7 +353,7 @@ fn normalize_prompt_title(text: &str) -> String {
 /// newline on each soft/hard break and block end, so the "first line" is the
 /// first non-empty *rendered* line even when an emphasis run wraps across a
 /// source newline. Returns `None` when there is no visible content.
-pub(in crate::workspace) fn summary_preview_line(text: &str) -> Option<String> {
+pub(super) fn summary_preview_line(text: &str) -> Option<String> {
     use pulldown_cmark::{Event, Options, Parser, TagEnd};
 
     let mut opts = Options::empty();
@@ -388,7 +388,7 @@ pub(in crate::workspace) fn summary_preview_line(text: &str) -> Option<String> {
 /// render hook (`mermaid_code_block_render`) can show it — a text source
 /// missing here never gets its diagram cached, no matter how the renderer is
 /// wired.
-pub(in crate::workspace) fn chat_item_mermaid_texts(item: &daruda_acp::ChatItem) -> Vec<&str> {
+pub(super) fn chat_item_mermaid_texts(item: &daruda_acp::ChatItem) -> Vec<&str> {
     match item {
         daruda_acp::ChatItem::AssistantText { text, .. }
         | daruda_acp::ChatItem::Thinking { text, .. } => vec![text],
@@ -416,7 +416,7 @@ pub(in crate::workspace) fn chat_item_mermaid_texts(item: &daruda_acp::ChatItem)
 /// themed to the host appearance (`mermaid_host_theme_profile`): without it a cached
 /// raster would keep its old colours after a light/dark toggle. `DefaultHasher`
 /// is process-stable, which is all the in-memory cache needs.
-pub(in crate::workspace) fn mermaid_key(source: &str, dark: bool) -> u64 {
+pub(super) fn mermaid_key(source: &str, dark: bool) -> u64 {
     use std::hash::{Hash as _, Hasher as _};
     let mut hasher = std::collections::hash_map::DefaultHasher::new();
     source.hash(&mut hasher);
@@ -429,7 +429,7 @@ pub(in crate::workspace) fn mermaid_key(source: &str, dark: bool) -> u64 {
 /// (`output_block_view`, lookup) so the embed matches what was cached.
 /// `DefaultHasher` is process-stable, which is all the in-memory cache needs —
 /// not cryptographic, so a collision would at worst reuse a cached texture.
-pub(in crate::workspace) fn tool_image_key(data: &str) -> u64 {
+pub(super) fn tool_image_key(data: &str) -> u64 {
     use std::hash::{Hash as _, Hasher as _};
     let mut hasher = std::collections::hash_map::DefaultHasher::new();
     data.hash(&mut hasher);
@@ -445,7 +445,7 @@ pub(in crate::workspace) fn tool_image_key(data: &str) -> u64 {
 /// (optionally with trailing spaces) and closes on the next line whose trimmed
 /// content is ```` ``` ````. Leading indentation on the fence lines is tolerated;
 /// the captured source keeps the lines between the fences verbatim.
-pub(in crate::workspace) fn mermaid_sources(text: &str) -> Vec<String> {
+pub(super) fn mermaid_sources(text: &str) -> Vec<String> {
     let mut sources = Vec::new();
     let mut lines = text.lines();
     while let Some(line) = lines.next() {
@@ -477,8 +477,8 @@ pub(in crate::workspace) fn mermaid_sources(text: &str) -> Vec<String> {
 /// in `AgentChatView.diff_stats`, keyed by [`diff_editor_key`].
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub(in crate::workspace) struct DiffStat {
-    pub(in crate::workspace) added: usize,
-    pub(in crate::workspace) removed: usize,
+    pub(super) added: usize,
+    pub(super) removed: usize,
 }
 
 /// Language id for an editor's syntax tree, from the diff's file extension.
@@ -507,7 +507,7 @@ pub(in crate::workspace) fn diff_editor_language(diff: &DiffView) -> gpui::Share
 /// `old_text`/`new_text`, so its diff would be numbered from 1 regardless of
 /// where in the file the edit lands (the ACP `Diff` carries no line offset) —
 /// those numbers would mislead, so they are hidden.
-pub(in crate::workspace) fn build_diff_view_model(
+pub(super) fn build_diff_view_model(
     diff: &DiffView,
     syntax_theme: &str,
     is_light: bool,
@@ -565,7 +565,7 @@ fn diff_stat_from_hunks(
 /// than `WindowRegistry::handle_for_workspace(cx.entity_id())` because after the
 /// pane became its own entity `cx.entity_id()` is the view, not the Workspace,
 /// so the registry would no longer resolve the window.
-pub(in crate::workspace) fn create_diff_editor(
+pub(super) fn create_diff_editor(
     cx: &mut Context<AgentChatView>,
     access: &mut WindowAccess<'_>,
     pane_id: PaneId,
@@ -629,10 +629,10 @@ pub(in crate::workspace) fn has_conversation(items: &[daruda_acp::ChatItem]) -> 
 
 /// Cached start index of the newest turn.
 #[derive(Clone, Copy, Default, PartialEq, Eq, Debug)]
-pub(in crate::workspace) struct TurnBoundary(usize);
+pub(super) struct TurnBoundary(usize);
 
 impl TurnBoundary {
-    pub(in crate::workspace) fn of(items: &[daruda_acp::ChatItem]) -> Self {
+    pub(super) fn of(items: &[daruda_acp::ChatItem]) -> Self {
         use daruda_acp::ChatItem;
         Self(
             items
@@ -642,7 +642,7 @@ impl TurnBoundary {
         )
     }
 
-    pub(in crate::workspace) fn at(self, ix: usize) -> TurnPosition {
+    pub(super) fn at(self, ix: usize) -> TurnPosition {
         if ix >= self.0 {
             TurnPosition::Last
         } else {
@@ -652,10 +652,7 @@ impl TurnBoundary {
 }
 
 /// Resolve a key's activity and turn position from the conversation.
-pub(in crate::workspace) fn fold_context(
-    key: &FoldKey,
-    items: &[daruda_acp::ChatItem],
-) -> FoldContext {
+pub(super) fn fold_context(key: &FoldKey, items: &[daruda_acp::ChatItem]) -> FoldContext {
     match fold_key_index(key, items) {
         Some(ix) => fold_context_at(key, ix, items, TurnBoundary::of(items)),
         None => FoldContext::new(TurnPosition::Past, false),
@@ -663,7 +660,7 @@ pub(in crate::workspace) fn fold_context(
 }
 
 /// Resolve fold context when the item index and turn boundary are already known.
-pub(in crate::workspace) fn fold_context_at(
+pub(super) fn fold_context_at(
     key: &FoldKey,
     ix: usize,
     items: &[daruda_acp::ChatItem],
@@ -700,10 +697,7 @@ fn fold_key_index(key: &FoldKey, items: &[daruda_acp::ChatItem]) -> Option<usize
 }
 
 #[cfg(test)]
-pub(in crate::workspace) fn fold_turn(
-    key: &FoldKey,
-    items: &[daruda_acp::ChatItem],
-) -> TurnPosition {
+pub(super) fn fold_turn(key: &FoldKey, items: &[daruda_acp::ChatItem]) -> TurnPosition {
     match fold_key_index(key, items) {
         Some(ix) => TurnBoundary::of(items).at(ix),
         None => TurnPosition::Past,
@@ -718,7 +712,7 @@ fn tool_item_index(items: &[daruda_acp::ChatItem], tool_id: &str) -> Option<usiz
 }
 
 #[cfg(test)]
-pub(in crate::workspace) fn fold_active(key: &FoldKey, items: &[daruda_acp::ChatItem]) -> bool {
+pub(super) fn fold_active(key: &FoldKey, items: &[daruda_acp::ChatItem]) -> bool {
     match fold_key_index(key, items) {
         Some(ix) => fold_active_at(key, ix, items),
         None => false,
@@ -778,10 +772,7 @@ fn fold_active_at(key: &FoldKey, ix: usize, items: &[daruda_acp::ChatItem]) -> b
 /// changed (the diff-collapse clipping bug). `Response` / `ToolGroup` /
 /// `ThinkingGroup` collapse instead hides their child rows, which the
 /// hidden-range diff already catches correctly, so they resolve to `None` here.
-pub(in crate::workspace) fn fold_key_item_index(
-    key: &FoldKey,
-    items: &[daruda_acp::ChatItem],
-) -> Option<usize> {
+pub(super) fn fold_key_item_index(key: &FoldKey, items: &[daruda_acp::ChatItem]) -> Option<usize> {
     // Built only for the keys that ask a hierarchy question; nested subagent
     // children render inside their parent's card and earn no row of their own.
     let owner = |id: &str| {
@@ -811,7 +802,7 @@ pub(in crate::workspace) fn fold_key_item_index(
 /// one. Found by id, not by position: several permissions can be outstanding at
 /// once (parallel tool calls), so the trailing card is not necessarily the one
 /// being answered.
-pub(in crate::workspace) fn permission_card_mut(
+pub(super) fn permission_card_mut(
     view: &mut AgentChatView,
     id: u64,
 ) -> Option<&mut daruda_acp::PermissionItem> {
@@ -829,7 +820,7 @@ pub(in crate::workspace) fn permission_card_mut(
 /// ACP requires the client to resolve a pending permission with a cancelled
 /// outcome on `session/cancel`; this also runs when a turn ends or errors before
 /// the user decided, so no card is left stuck with live buttons.
-pub(in crate::workspace) fn cancel_pending_permission(view: &mut AgentChatView) {
+pub(super) fn cancel_pending_permission(view: &mut AgentChatView) {
     if view.pending_permissions.is_empty() {
         return;
     }
@@ -855,10 +846,7 @@ pub(in crate::workspace) fn cancel_pending_permission(view: &mut AgentChatView) 
 /// slot. `Unchanged` leaves the slot as-is (the update omitted the field);
 /// `Cleared` resets it to `None`; `Set` overwrites it. Shared by the title and
 /// last-activity fields so both honour the protocol's per-field tri-state.
-pub(in crate::workspace) fn apply_info_field(
-    slot: &mut Option<String>,
-    change: daruda_acp::InfoFieldChange,
-) {
+pub(super) fn apply_info_field(slot: &mut Option<String>, change: daruda_acp::InfoFieldChange) {
     match change {
         daruda_acp::InfoFieldChange::Unchanged => {}
         daruda_acp::InfoFieldChange::Cleared => *slot = None,

@@ -20,7 +20,7 @@ use daruda_store::observability::error_report::ErrorReport;
 
 /// Default capacity (D3). Public so tests can pin the value
 /// without copying the literal.
-pub(in crate::workspace) const TOAST_CAP: usize = 3;
+pub(super) const TOAST_CAP: usize = 3;
 
 /// Stable identifier for a live toast. Allocated by the queue at push
 /// time and never reused within the queue's lifetime. The renderer
@@ -42,7 +42,7 @@ pub(in crate::workspace) struct ErrorToast {
     /// Wall-clock instant after which the toast auto-dismisses. Set
     /// to `last_push_time + severity.auto_dismiss_after()`. Refreshed
     /// on every dedup hit so a busy error keeps its toast on screen.
-    pub(in crate::workspace) expires_at: Instant,
+    pub(super) expires_at: Instant,
 }
 
 /// Bounded FIFO of [`ErrorToast`]s. Capacity-stable across pushes —
@@ -61,7 +61,7 @@ impl Default for ErrorToastQueue {
 }
 
 impl ErrorToastQueue {
-    pub(in crate::workspace) fn new(capacity: usize) -> Self {
+    pub(super) fn new(capacity: usize) -> Self {
         Self {
             toasts: Vec::with_capacity(capacity),
             capacity,

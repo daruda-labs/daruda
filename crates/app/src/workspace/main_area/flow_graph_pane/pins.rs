@@ -24,16 +24,16 @@ pub(in crate::workspace) struct PinSet {
 }
 
 impl PinSet {
-    pub(in crate::workspace) fn contains(&self, node: &NodeId) -> bool {
+    pub(super) fn contains(&self, node: &NodeId) -> bool {
         self.nodes.contains(node)
     }
 
-    pub(in crate::workspace) fn is_empty(&self) -> bool {
+    pub(super) fn is_empty(&self) -> bool {
         self.nodes.is_empty()
     }
 
     /// Every pinned node, sorted. What a run is handed.
-    pub(in crate::workspace) fn to_vec(&self) -> Vec<NodeId> {
+    pub(super) fn to_vec(&self) -> Vec<NodeId> {
         self.nodes.iter().cloned().collect()
     }
 
@@ -42,7 +42,7 @@ impl PinSet {
     /// One gesture for both directions, and "all of them" rather than "any of
     /// them" is what makes a marquee over a half-pinned group finish the job
     /// instead of undoing the half that was done.
-    pub(in crate::workspace) fn toggle(&mut self, nodes: &[NodeId]) {
+    pub(super) fn toggle(&mut self, nodes: &[NodeId]) {
         if nodes.iter().all(|node| self.nodes.contains(node)) {
             for node in nodes {
                 self.nodes.remove(node);
@@ -52,11 +52,11 @@ impl PinSet {
         }
     }
 
-    pub(in crate::workspace) fn remove(&mut self, node: &NodeId) {
+    pub(super) fn remove(&mut self, node: &NodeId) {
         self.nodes.remove(node);
     }
 
-    pub(in crate::workspace) fn clear(&mut self) {
+    pub(super) fn clear(&mut self) {
         self.nodes.clear();
     }
 

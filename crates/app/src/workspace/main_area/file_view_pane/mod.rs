@@ -9,22 +9,22 @@
 pub(in crate::workspace) mod diff_editor;
 mod diff_parser;
 pub(in crate::workspace) mod file_content;
-pub(in crate::workspace) mod highlighter;
+pub(super) mod highlighter;
 pub(in crate::workspace) mod images;
-pub(in crate::workspace) mod line_diff;
-pub(in crate::workspace) mod markdown_viewer;
+pub(super) mod line_diff;
+pub(super) mod markdown_viewer;
 mod mermaid_contrast;
-pub(in crate::workspace) mod mermaid_host_theme;
+pub(super) mod mermaid_host_theme;
 mod mermaid_label_geometry;
 mod mermaid_label_stroke;
 mod mermaid_node_contrast;
 mod mermaid_text_measurer;
 pub(in crate::workspace) mod mermaid_theme;
-pub(in crate::workspace) mod search_ops;
+pub(super) mod search_ops;
 mod search_state;
 mod selection;
 pub(in crate::workspace) mod visual;
-pub(in crate::workspace) mod word_diff;
+pub(super) mod word_diff;
 
 pub mod render;
 
@@ -178,11 +178,7 @@ pub(in crate::workspace) enum PaneFileContent {
 }
 
 impl PaneFileContent {
-    pub(in crate::workspace) fn visible_rows(
-        &self,
-        mode: FileViewMode,
-        hide_unchanged: bool,
-    ) -> &[VisualRow] {
+    pub(super) fn visible_rows(&self, mode: FileViewMode, hide_unchanged: bool) -> &[VisualRow] {
         match self {
             PaneFileContent::LoadedRaw => &[],
             PaneFileContent::LoadedDiff {
@@ -337,7 +333,7 @@ fn spans_to_row_spans(spans: &[HighlightedSpan]) -> Vec<HighlightedSpan> {
 }
 
 /// Count added and removed lines across all hunks.
-pub(in crate::workspace) fn count_diff_stats(hunks: &[DiffHunk]) -> (usize, usize) {
+pub(super) fn count_diff_stats(hunks: &[DiffHunk]) -> (usize, usize) {
     let mut added = 0usize;
     let mut removed = 0usize;
     for hunk in hunks {
@@ -357,7 +353,7 @@ pub(in crate::workspace) fn count_diff_stats(hunks: &[DiffHunk]) -> (usize, usiz
 // ----------------------------------------------------------------
 
 impl PaneFileView {
-    pub(in crate::workspace) fn loading(
+    pub(super) fn loading(
         lane_id: LaneId,
         path: PathBuf,
         staged: bool,

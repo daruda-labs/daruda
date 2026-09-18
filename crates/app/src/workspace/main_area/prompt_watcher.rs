@@ -23,7 +23,7 @@ const DEBOUNCE: Duration = Duration::from_millis(50);
 
 /// Caller-side handle. Dropping it drops the `DirWatcher` (stops the watch);
 /// the debounce thread then exits once the raw channel disconnects.
-pub(in crate::workspace) struct PromptFileWatcherHandle {
+pub(super) struct PromptFileWatcherHandle {
     _watcher: crate::dir_watch::DirWatcher,
 }
 
@@ -34,7 +34,7 @@ pub(in crate::workspace) struct PromptFileWatcherHandle {
 /// files that didn't exist at spawn time (vim's `.swp` → rename
 /// pattern). Events whose path doesn't canonicalise to `path` are
 /// filtered out by `classify`.
-pub(in crate::workspace) fn spawn(path: PathBuf) -> (mpsc::Receiver<()>, PromptFileWatcherHandle) {
+pub(super) fn spawn(path: PathBuf) -> (mpsc::Receiver<()>, PromptFileWatcherHandle) {
     use notify::RecursiveMode;
 
     let (event_tx, event_rx) = mpsc::channel::<()>();

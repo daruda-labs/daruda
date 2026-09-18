@@ -55,7 +55,7 @@ impl Workspace {
     /// second one fail fast with a user-visible error rather than
     /// risk a half-created lane.
     ///
-    /// `pub(in crate::workspace)` because the race is a property of the
+    /// `pub(super)` because the race is a property of the
     /// repository, not of this path: an agent-requested creation
     /// (`control_lane_ops`) has to take the same lock or it can interleave
     /// with the user's own.
@@ -90,7 +90,7 @@ impl Workspace {
     /// — guarantees the bytes land in the pane the caller intends,
     /// which matters for task dispatch where focus may shift between
     /// `finalize_create_lane` and the actual write.
-    pub(in crate::workspace) fn send_to_pane(
+    pub(super) fn send_to_pane(
         &self,
         pane_id: crate::workspace::main_area::pane_tree::PaneId,
         bytes: &[u8],
@@ -424,7 +424,7 @@ impl Workspace {
     /// Lazily transitions to `Error { "lane gone" }` when the
     /// path no longer exists on disk, so a deleted-from-the-
     /// outside checkout doesn't dangle in `Running` forever.
-    pub(in crate::workspace) fn focus_task_lane(
+    pub(super) fn focus_task_lane(
         &mut self,
         task_id: &str,
         window: &mut Window,
@@ -499,7 +499,7 @@ impl Workspace {
 
     /// `Reopen` + `start_task` in one click — for the `[Retry]`
     /// affordance on `Error` rows.
-    pub(in crate::workspace) fn retry_task(
+    pub(super) fn retry_task(
         &mut self,
         task_id: &str,
         window: &mut Window,
@@ -735,7 +735,7 @@ impl Workspace {
     /// reflects *why* daruda decided to escalate (e.g.
     /// `tool_use_failure x5`) rather than the generic "session error"
     /// fallback.
-    pub(in crate::workspace) fn escalate_task_session_to_error(
+    pub(super) fn escalate_task_session_to_error(
         &mut self,
         session_id: &str,
         message: String,
@@ -897,7 +897,7 @@ impl Workspace {
 /// updates. Self-terminates as soon as the global task list contains
 /// no `Running` row, so the workspace doesn't burn wakeups while
 /// every task is idle.
-pub(in crate::workspace) fn spawn_task_live_tick(cx: &mut Context<Workspace>) -> gpui::Task<()> {
+pub(super) fn spawn_task_live_tick(cx: &mut Context<Workspace>) -> gpui::Task<()> {
     let interval = Duration::from_millis(theme::RIGHT_PANEL_TASK_LIVE_TICK_MS);
     cx.spawn(async move |this, cx| {
         loop {

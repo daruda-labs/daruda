@@ -8,7 +8,7 @@ pub(in crate::workspace) enum PaneChoice<T> {
 }
 
 impl<T: Copy> PaneChoice<T> {
-    pub(in crate::workspace) fn value(self) -> T {
+    pub(super) fn value(self) -> T {
         match self {
             Self::Seeded(value) | Self::Chosen(value) => value,
         }
@@ -24,14 +24,14 @@ impl<T: Copy> PaneChoice<T> {
     /// Whether the pane still tracks config. The reset affordance reads this
     /// rather than comparing values: a pane sitting on `Chosen(default)` is
     /// overridden, it merely happens to agree.
-    pub(in crate::workspace) fn is_following(self) -> bool {
+    pub(super) fn is_following(self) -> bool {
         matches!(self, Self::Seeded(_))
     }
 
     /// Follow a new config default. A pane the user has already decided for
     /// keeps its own value — that is what makes `Seeded` mean "still following
     /// config" rather than "happens to equal the old config".
-    pub(in crate::workspace) fn reseed(&mut self, value: T) {
+    pub(super) fn reseed(&mut self, value: T) {
         if matches!(self, Self::Seeded(_)) {
             *self = Self::Seeded(value);
         }
@@ -40,7 +40,7 @@ impl<T: Copy> PaneChoice<T> {
     /// Drop this pane's own decision and follow `value` again. The inverse of
     /// a `Chosen` write: it is the *absence* of a choice, so the pane moves
     /// with every later [`reseed`](Self::reseed).
-    pub(in crate::workspace) fn reset(&mut self, value: T) {
+    pub(super) fn reset(&mut self, value: T) {
         *self = Self::Seeded(value);
     }
 }

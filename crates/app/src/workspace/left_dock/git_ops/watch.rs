@@ -33,7 +33,7 @@ impl Workspace {
     /// Idempotent and cheap when nothing changed, which is what lets the
     /// poll below call it every tick instead of every lane lifecycle edge
     /// needing to remember to.
-    pub(in crate::workspace) fn sync_git_watchers(&mut self, cx: &mut Context<Self>) {
+    pub(super) fn sync_git_watchers(&mut self, cx: &mut Context<Self>) {
         self.probe_missing_git_dirs(cx);
 
         let desired: HashSet<PathBuf> = self

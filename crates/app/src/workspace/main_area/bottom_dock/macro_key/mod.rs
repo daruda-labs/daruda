@@ -4,4 +4,4 @@
 //! kinds (Text, Bar, Gauge, …) get their own sibling file and dispatch
 //! through the `MacroKey` enum match in `bottom_panel::render_body`.
 
-pub(in crate::workspace) mod button;
+pub(super) mod button;

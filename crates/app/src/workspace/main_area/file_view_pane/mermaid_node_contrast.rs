@@ -119,10 +119,7 @@ impl Box2 {
 
 /// Rewrite `svg` so every custom-fill node's label text is contrast-safe.
 /// Returns `svg` unchanged when no node carries an author-declared fill.
-pub(in crate::workspace) fn force_node_label_contrast(
-    svg: &str,
-    options: &usvg::Options<'_>,
-) -> String {
+pub(super) fn force_node_label_contrast(svg: &str, options: &usvg::Options<'_>) -> String {
     let nodes = scan_custom_fill_nodes(svg);
     if nodes.is_empty() {
         return svg.to_owned();

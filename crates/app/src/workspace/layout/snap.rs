@@ -177,7 +177,7 @@ impl LeftDockSnapshot {
     /// lets this diff decide. (The status pulse is the one exception: it
     /// dirties the dock directly to animate badges, whose frames are not part
     /// of this snapshot.)
-    pub(in crate::workspace) fn content_differs(&self, prev: &Self) -> bool {
+    pub(super) fn content_differs(&self, prev: &Self) -> bool {
         self != prev
     }
 }
@@ -490,7 +490,7 @@ pub(in crate::workspace) enum DockSnapshot {
 impl DockSnapshot {
     /// Whether `other` is the same variant carrying the same *content* — the
     /// question [`Dock::stage`] asks to decide whether to repaint.
-    pub(in crate::workspace) fn same_content_as(&self, other: &Self) -> bool {
+    pub(super) fn same_content_as(&self, other: &Self) -> bool {
         match (self, other) {
             (Self::Left(a), Self::Left(b)) => !b.content_differs(a),
             (Self::Bottom(a), Self::Bottom(b)) => a == b,

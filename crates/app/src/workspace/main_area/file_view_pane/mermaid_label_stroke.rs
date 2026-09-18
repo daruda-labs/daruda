@@ -32,7 +32,7 @@ const RULE: &str = "tspan,text{stroke:none !important;}";
 
 /// Rewrite `svg` so no label text renders a stroke, creating a `<style>`
 /// block right after the root `<svg>` tag if none exists.
-pub(in crate::workspace) fn suppress_label_text_stroke(svg: &str) -> String {
+pub(super) fn suppress_label_text_stroke(svg: &str) -> String {
     if let Some(pos) = svg.rfind("</style>") {
         let mut out = String::with_capacity(svg.len() + RULE.len());
         out.push_str(&svg[..pos]);

@@ -171,7 +171,7 @@ impl Workspace {
     /// once. [`Self::close_phone_turn`] is what ends the turn, and
     /// `fire_activity_completion` calls it whether or not this returned
     /// something to send.
-    pub(in crate::workspace) fn telegram_completion_parts(
+    pub(super) fn telegram_completion_parts(
         &self,
         pane_id: PaneId,
         cx: &Context<Self>,
@@ -229,7 +229,7 @@ impl Workspace {
     /// [`Self::telegram_completion_parts`] because that one is a question and
     /// this is the effect: composing a ping must not be what retires the turn,
     /// or a second reader of the same question would silently retire it.
-    pub(in crate::workspace) fn close_phone_turn(&self, pane_id: PaneId, cx: &mut Context<Self>) {
+    pub(super) fn close_phone_turn(&self, pane_id: PaneId, cx: &mut Context<Self>) {
         let Some(view) = self.agent_chat_view(pane_id).cloned() else {
             return;
         };
@@ -251,7 +251,7 @@ impl Workspace {
     /// `tool_title`, `raw_input_summary`, or the "waiting" label is
     /// agent-authored markdown — see [`TelegramTail`]'s doc comment for why
     /// that matters.
-    pub(in crate::workspace) fn relay_permission_wait_to_telegram(
+    pub(super) fn relay_permission_wait_to_telegram(
         &mut self,
         pane_id: PaneId,
         perm_id: u64,
@@ -356,7 +356,7 @@ impl Workspace {
     ///
     /// Returns whether the ping went out, so a caller tracking a live state
     /// (an outstanding permission) knows whether the phone has been told.
-    pub(in crate::workspace) fn relay_when_presence_allows(
+    pub(super) fn relay_when_presence_allows(
         &mut self,
         pane_id: PaneId,
         header: String,
@@ -446,7 +446,7 @@ impl Workspace {
     /// `main.rs` opens the first window before calling
     /// `telegram::global::install` — a `Workspace` can theoretically exist
     /// for a brief window before the `TelegramBridge` global is registered.
-    pub(in crate::workspace) fn relay_to_telegram(
+    pub(super) fn relay_to_telegram(
         &self,
         pane_id: PaneId,
         header: String,
@@ -559,11 +559,7 @@ impl Workspace {
     /// agent yet and there is nothing to watch a first response for. Plain
     /// tail (fixed i18n copy). Goes through [`Self::relay_to_telegram`], so
     /// the bridge gate applies but presence does not.
-    pub(in crate::workspace) fn relay_queued_notice_to_telegram(
-        &self,
-        pane_id: PaneId,
-        cx: &Context<Self>,
-    ) {
+    pub(super) fn relay_queued_notice_to_telegram(&self, pane_id: PaneId, cx: &Context<Self>) {
         let header = self.telegram_header(pane_id, cx);
         self.relay_to_telegram(
             pane_id,
@@ -577,11 +573,7 @@ impl Workspace {
     /// Send the "queue is full" notice. Same shape as the queued notice next
     /// door, but a different fact: that one says "later", this one says "not
     /// at all".
-    pub(in crate::workspace) fn relay_queue_full_notice_to_telegram(
-        &self,
-        pane_id: PaneId,
-        cx: &Context<Self>,
-    ) {
+    pub(super) fn relay_queue_full_notice_to_telegram(&self, pane_id: PaneId, cx: &Context<Self>) {
         let header = self.telegram_header(pane_id, cx);
         self.relay_to_telegram(
             pane_id,
@@ -598,7 +590,7 @@ impl Workspace {
     /// (calls `relay_to_telegram` directly) — the whole point of this relay is
     /// a phone-originated interaction, so instant delivery is what the sender
     /// wants regardless of whether the app happens to be foreground right now.
-    pub(in crate::workspace) fn relay_first_response_to_telegram(
+    pub(super) fn relay_first_response_to_telegram(
         &self,
         pane_id: PaneId,
         outcome: FirstResponseOutcome,
@@ -622,7 +614,7 @@ impl Workspace {
     /// appeared at all. Plain tail (fixed i18n copy, not agent-authored
     /// markdown) — the same copy the old always-immediate ack used. Gated by
     /// `relay_to_telegram`.
-    pub(in crate::workspace) fn relay_first_response_fallback_to_telegram(
+    pub(super) fn relay_first_response_fallback_to_telegram(
         &self,
         pane_id: PaneId,
         cx: &Context<Self>,
@@ -675,7 +667,7 @@ impl Workspace {
     /// watch. Local-only slash commands never reach the agent, so they receive
     /// the fixed fallback ack immediately. A `pub(crate)` entry point for
     /// `crate::telegram::global`'s poll loop to call into (which lives outside
-    /// `workspace/` and can't reach the `pub(in crate::workspace)` version).
+    /// `workspace/` and can't reach the `pub(super)` version).
     /// `false` means the pane is gone. Reported rather than swallowed: the
     /// caller resolves the target from a *remembered* selection or last-pinged
     /// pane, either of which can name a pane the user has since closed — and a

@@ -15,7 +15,7 @@ use daruda_store::project::{GroupId, LaneRef, ProjectId};
 /// label is purely for the ghost preview; the identifier carries the
 /// actual move semantics.
 #[derive(Clone, Debug)]
-pub(in crate::workspace) enum DragPayload {
+pub(super) enum DragPayload {
     Lane {
         target: LaneRef,
         label: SharedString,
@@ -31,7 +31,7 @@ pub(in crate::workspace) enum DragPayload {
 }
 
 impl DragPayload {
-    pub(in crate::workspace) fn label(&self) -> SharedString {
+    pub(super) fn label(&self) -> SharedString {
         match self {
             DragPayload::Lane { label, .. }
             | DragPayload::Project { label, .. }

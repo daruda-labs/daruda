@@ -11,7 +11,7 @@
 //! `Workspace::*` methods so this module stays free of business
 //! logic.
 
-pub(in crate::workspace) mod task_edit_ops;
+pub(super) mod task_edit_ops;
 
 use crate::ui::theme;
 use daruda_store::tasks::SubTask;

@@ -9,7 +9,7 @@ use crate::ui::InputState;
 use crate::workspace::Workspace;
 
 impl Workspace {
-    pub(in crate::workspace) fn clear_file_view_search(
+    pub(super) fn clear_file_view_search(
         &mut self,
         input: Entity<InputState>,
         window: &mut Window,
@@ -21,7 +21,7 @@ impl Workspace {
         cx.notify();
     }
 
-    pub(in crate::workspace) fn close_file_view_search(
+    pub(super) fn close_file_view_search(
         &mut self,
         input: Entity<InputState>,
         window: &mut Window,

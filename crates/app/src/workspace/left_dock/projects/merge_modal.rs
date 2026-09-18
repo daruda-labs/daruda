@@ -33,7 +33,7 @@ use crate::workspace::Workspace;
 // Data types
 // ----------------------------------------------------------------
 
-pub(in crate::workspace) struct TargetOption {
+pub(super) struct TargetOption {
     pub wt_id: LaneId,
     pub branch: String,
     pub wt_path: PathBuf,
@@ -52,7 +52,7 @@ enum MergeState {
 // Modal entity
 // ----------------------------------------------------------------
 
-pub(in crate::workspace) struct MergeModal {
+pub(super) struct MergeModal {
     /// The project both lanes belong to — captured from the lane row the
     /// menu was opened for, NOT the workspace's active project. Lane ids
     /// restart per project, so resolving source/target against the active
@@ -80,7 +80,7 @@ impl MergeModal {
     /// surface a transient error instead of opening this modal when
     /// the list would be empty.
     #[allow(clippy::too_many_arguments)]
-    pub(in crate::workspace) fn new(
+    pub(super) fn new(
         project: ProjectId,
         source_wt_id: LaneId,
         source_branch: String,

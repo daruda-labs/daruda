@@ -21,7 +21,7 @@ pub(in crate::workspace) struct SessionConfig {
     /// connects, or when the agent does not advertise modes. Replaced wholesale
     /// on `ModeChanged` — `daruda_acp` reconciles the protocol's two mode
     /// channels so this is the host's only mode mirror.
-    pub(in crate::workspace) modes: Option<ModeStateView>,
+    pub(super) modes: Option<ModeStateView>,
     /// Select config options advertised by the agent, replaced wholesale on
     /// `ConfigOptionsChanged`. Never carries a `Mode`-category option:
     /// `daruda_acp` strips it, since [`Self::modes`] already holds that fact.
@@ -66,7 +66,7 @@ impl SessionConfig {
     }
 
     /// `id` of the mode the session is in, when the agent advertises modes.
-    pub(in crate::workspace) fn current_mode_id(&self) -> Option<&str> {
+    pub(super) fn current_mode_id(&self) -> Option<&str> {
         self.modes.as_ref().map(|m| m.current.as_str())
     }
 
@@ -84,14 +84,14 @@ impl SessionConfig {
 
     /// The mode the Shift+Tab cycle advances to, or `None` when there is
     /// nothing to cycle (fewer than two advertised modes).
-    pub(in crate::workspace) fn next_mode_id(&self) -> Option<String> {
+    pub(super) fn next_mode_id(&self) -> Option<String> {
         self.modes.as_ref().and_then(next_mode_id)
     }
 
     /// Point the chip at `mode_id` before the agent confirms, so the selection
     /// reads as immediate; a `ModeChanged` replaces the whole state if the
     /// agent disagrees. No-op for an agent without modes.
-    pub(in crate::workspace) fn set_current_mode_optimistically(&mut self, mode_id: String) {
+    pub(super) fn set_current_mode_optimistically(&mut self, mode_id: String) {
         if let Some(m) = &mut self.modes {
             m.current = mode_id;
         }
@@ -100,7 +100,7 @@ impl SessionConfig {
     /// The config-option counterpart of [`Self::set_current_mode_optimistically`]:
     /// show the picked value before the agent replies with the updated set.
     /// No-op when the agent advertises no such option.
-    pub(in crate::workspace) fn set_option_value_optimistically(
+    pub(super) fn set_option_value_optimistically(
         &mut self,
         config_id: &str,
         value: &ConfigValueView,

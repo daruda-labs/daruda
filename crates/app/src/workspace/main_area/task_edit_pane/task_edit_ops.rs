@@ -27,7 +27,7 @@ use crate::workspace::main_area::pane_tree::{PaneId, PaneLayout};
 /// Validate a branch-input string, reporting which rule it broke so the
 /// form can show a precise red label. An empty field is not an error — Save
 /// derives the branch from the title at submit time.
-pub(in crate::workspace) fn validate_branch(text: &str) -> BranchValidation {
+pub(super) fn validate_branch(text: &str) -> BranchValidation {
     match daruda_core::git::validate_branch_name(text) {
         Ok(_) => BranchValidation::Valid,
         Err(daruda_core::git::BranchNameRule::Empty) => BranchValidation::Empty,
@@ -85,7 +85,7 @@ impl Workspace {
     /// Return the `PaneId` of the existing TaskEdit pane tied to
     /// `task_id`, if any. Drafts (`task_id = None`) are never
     /// deduplicated — each `[+ New]` click is a fresh draft.
-    pub(in crate::workspace) fn find_task_edit_pane(&self, task_id: &str) -> Option<PaneId> {
+    pub(super) fn find_task_edit_pane(&self, task_id: &str) -> Option<PaneId> {
         self.active_runtime()
             .panes
             .iter()
@@ -313,7 +313,7 @@ impl Workspace {
     /// Auto-derive branch from title — fires from the title input's
     /// `Changed` event. No-op once the user has manually edited the
     /// branch (`branch_override = true`).
-    pub(in crate::workspace) fn refresh_task_edit_branch(
+    pub(super) fn refresh_task_edit_branch(
         &mut self,
         pane_id: PaneId,
         window: &mut Window,
@@ -355,11 +355,7 @@ impl Workspace {
     /// User typed into the branch input directly — flip
     /// `branch_override` so subsequent title edits stop overwriting
     /// the user's value, and re-validate.
-    pub(in crate::workspace) fn on_task_edit_branch_typed(
-        &mut self,
-        pane_id: PaneId,
-        cx: &mut Context<Self>,
-    ) {
+    pub(super) fn on_task_edit_branch_typed(&mut self, pane_id: PaneId, cx: &mut Context<Self>) {
         let branch_text = match self.active_runtime().panes.iter().find(|p| p.id == pane_id) {
             Some(p) => match p.task_edit_content() {
                 Some(te) => te.branch_input.read(cx).text().to_string(),
@@ -385,7 +381,7 @@ impl Workspace {
     /// Public counterpart used by the renderer's click handlers (e.g.
     /// the auto-execute checkbox) to flip a field on the focused pane
     /// without going through a private helper.
-    pub(in crate::workspace) fn task_edit_content_mut_for_pane(
+    pub(super) fn task_edit_content_mut_for_pane(
         &mut self,
         pane_id: PaneId,
     ) -> Option<&mut TaskEditContent> {
@@ -396,10 +392,7 @@ impl Workspace {
     /// `pane_id`, if any. Used by listeners that only need to read a
     /// field (e.g. the prompt-header "Open file" button reading
     /// `task_id` to dispatch `open_task_prompt_file`).
-    pub(in crate::workspace) fn task_edit_content_for_pane(
-        &self,
-        pane_id: PaneId,
-    ) -> Option<&TaskEditContent> {
+    pub(super) fn task_edit_content_for_pane(&self, pane_id: PaneId) -> Option<&TaskEditContent> {
         let pane = self
             .active_runtime()
             .panes
@@ -454,7 +447,7 @@ impl Workspace {
     /// start fresh. No-op for draft panes — subtasks attach to
     /// persisted tasks only — drafts show a "save
     /// first" hint in place of the list.
-    pub(in crate::workspace) fn submit_new_subtask(
+    pub(super) fn submit_new_subtask(
         &mut self,
         pane_id: PaneId,
         window: &mut Window,
@@ -484,7 +477,7 @@ impl Workspace {
     /// rename input with the current title and routes focus to it so
     /// the user can edit immediately. Only one rename can be active at
     /// a time (single shared input).
-    pub(in crate::workspace) fn enter_rename_subtask(
+    pub(super) fn enter_rename_subtask(
         &mut self,
         pane_id: PaneId,
         subtask_id: String,
@@ -519,11 +512,7 @@ impl Workspace {
     /// Commit the inline rename — flushes the input's text into
     /// `rename_subtask` and clears the editing state. Empty / unchanged
     /// titles are dropped by `rename_subtask` itself.
-    pub(in crate::workspace) fn commit_rename_subtask(
-        &mut self,
-        pane_id: PaneId,
-        cx: &mut Context<Self>,
-    ) {
+    pub(super) fn commit_rename_subtask(&mut self, pane_id: PaneId, cx: &mut Context<Self>) {
         let Some(pane) = self.active_runtime().panes.iter().find(|p| p.id == pane_id) else {
             return;
         };
@@ -548,11 +537,7 @@ impl Workspace {
     /// subtask. Reached from the TaskEdit pane's outer Esc handler —
     /// `gpui_component::Input` doesn't emit a Cancel event of its own,
     /// so Escape routing lives one level up in `task_edit_pane::render`.
-    pub(in crate::workspace) fn cancel_rename_subtask(
-        &mut self,
-        pane_id: PaneId,
-        cx: &mut Context<Self>,
-    ) {
+    pub(super) fn cancel_rename_subtask(&mut self, pane_id: PaneId, cx: &mut Context<Self>) {
         if let Some(te) = self.task_edit_content_mut_for(pane_id) {
             te.editing_subtask = None;
         }
@@ -669,7 +654,7 @@ impl Workspace {
     /// Close the TaskEdit pane without saving. The full dirty-prompt
     /// flow lives on `close_pane_by_id`; this is the explicit Discard
     /// path the form footer dispatches to.
-    pub(in crate::workspace) fn discard_task_edit_pane(
+    pub(super) fn discard_task_edit_pane(
         &mut self,
         pane_id: PaneId,
         window: &mut Window,
@@ -742,7 +727,7 @@ struct TaskEditFormSnapshot {
 /// CRLF → LF for dirty-comparison snapshots. External editors (vim,
 /// VS Code on Windows) may rewrite the prompt file with CRLF; we
 /// don't want that to register as a user edit.
-pub(in crate::workspace) fn normalize_newlines(s: &str) -> String {
+pub(super) fn normalize_newlines(s: &str) -> String {
     s.replace("\r\n", "\n")
 }
 
@@ -823,7 +808,7 @@ impl Workspace {
     /// silently when the pane is clean; surfaces a conflict prompt
     /// (Use disk version / Keep my version / Diff) when the pane is
     /// dirty.
-    pub(in crate::workspace) fn handle_prompt_file_changed(
+    pub(super) fn handle_prompt_file_changed(
         &mut self,
         pane_id: PaneId,
         path: std::path::PathBuf,
@@ -964,7 +949,7 @@ impl Workspace {
     /// manual delete) silently bail rather than open a viewer onto a
     /// non-existent file. The button itself is disabled in those
     /// states so this is defensive only.
-    pub(in crate::workspace) fn open_task_prompt_file(
+    pub(super) fn open_task_prompt_file(
         &mut self,
         task_id: &str,
         window: &mut Window,

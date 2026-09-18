@@ -27,7 +27,7 @@ impl FlowGraphView {
     }
 
     /// Open or close the inspector's agent-override block.
-    pub(in crate::workspace) fn toggle_agent_section(&mut self, cx: &mut Context<Self>) {
+    pub(super) fn toggle_agent_section(&mut self, cx: &mut Context<Self>) {
         if let Some(form) = self.form.as_mut() {
             form.toggle_agent_open();
             cx.notify();

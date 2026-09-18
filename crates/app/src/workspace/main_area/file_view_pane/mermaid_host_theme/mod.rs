@@ -16,7 +16,7 @@ use super::mermaid_theme::MermaidPalette;
 ///
 /// Applied unconditionally — skipping the profile to honour an author's theme
 /// also drops [`resvg_compatible_profile`], which blanks every label.
-pub(in crate::workspace) fn mermaid_render_profile(
+pub(super) fn mermaid_render_profile(
     source: &str,
     palette: &MermaidPalette,
 ) -> merman::render::HostThemeProfile {
@@ -72,7 +72,7 @@ fn mermaid_author_theme_profile() -> merman::render::HostThemeProfile {
 /// translucent-tint design language of agent-chat cards. Node/label fills
 /// stay opaque (`MermaidPalette` flattens them against `canvas`) so text
 /// keeps a solid backing.
-pub(in crate::workspace) fn mermaid_host_theme_profile(
+pub(super) fn mermaid_host_theme_profile(
     palette: &MermaidPalette,
 ) -> merman::render::HostThemeProfile {
     resvg_compatible_profile()
@@ -134,7 +134,7 @@ pub(in crate::workspace) fn mermaid_host_theme_profile(
         .build()
 }
 
-pub(in crate::workspace) fn mermaid_svg_render_options() -> merman::render::SvgRenderOptions {
+pub(super) fn mermaid_svg_render_options() -> merman::render::SvgRenderOptions {
     merman::render::SvgRenderOptions {
         viewbox_padding: MERMAID_VIEWBOX_PADDING,
         ..merman::render::SvgRenderOptions::default()

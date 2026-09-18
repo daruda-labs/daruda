@@ -42,7 +42,7 @@ use crate::ui::theme;
 /// is rounded up to whole multiples of it. It is the agent-chat font size (not a
 /// true text line height), so a slightly-outside cursor advances by one glyph-row
 /// increment per tick rather than a single pixel.
-pub(in crate::workspace) fn autoscroll_step(
+pub(super) fn autoscroll_step(
     mouse_y: f32,
     list_top: f32,
     list_bottom: f32,
@@ -93,7 +93,7 @@ impl AgentChatView {
     /// `step_granularity_px` is captured now (while `window`/`cx` are available)
     /// so the async task uses the agent-chat font metric at drag-start rather
     /// than a value that could shift mid-drag.
-    pub(in crate::workspace) fn start_selection_autoscroll(
+    pub(super) fn start_selection_autoscroll(
         &mut self,
         window: &mut Window,
         cx: &mut Context<Self>,
@@ -136,7 +136,7 @@ impl AgentChatView {
     /// silently missed by one of the two release paths. Invoked from the
     /// always-painted list container's mouse-up (in-bounds release) and its
     /// mouse-move (release-outside-window re-entry — see `on_selection_drag_move`).
-    pub(in crate::workspace) fn end_selection_drag(&mut self) {
+    pub(super) fn end_selection_drag(&mut self) {
         self.selection_drag_active = false;
         self.autoscroll_task = None;
     }
@@ -147,7 +147,7 @@ impl AgentChatView {
     /// container's `on_mouse_up` never fires (`hitbox.is_hovered` is false out of
     /// bounds). Treat re-entry without the button as an implicit mouse-up and end
     /// the drag, so the poll terminates even for an off-window release.
-    pub(in crate::workspace) fn on_selection_drag_move(
+    pub(super) fn on_selection_drag_move(
         &mut self,
         event: &MouseMoveEvent,
         _cx: &mut Context<Self>,

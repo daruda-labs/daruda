@@ -15,33 +15,33 @@
 //! - [`telegram_ops`] — Telegram relay: outbound pings and inbound
 //!   phone-relayed replies / permission decisions routed back into a pane.
 
-pub(in crate::workspace) mod agent_chat_connect_ops;
+pub(super) mod agent_chat_connect_ops;
 pub(in crate::workspace) mod agent_chat_helpers;
 pub(in crate::workspace) mod agent_chat_ops;
-pub(in crate::workspace) mod agent_chat_queue_ops;
-pub(in crate::workspace) mod autoscroll_ops;
-pub(in crate::workspace) mod config_chip;
+pub(super) mod agent_chat_queue_ops;
+pub(super) mod autoscroll_ops;
+pub(super) mod config_chip;
 /// Which rows a pane has folded, and the mode those defaults come from.
 pub(in crate::workspace) mod fold;
-pub(in crate::workspace) mod mode_chip;
+pub(super) mod mode_chip;
 pub(in crate::workspace) mod output_editor;
 /// A pane-local view preference plus whether the user or config set it.
 pub(in crate::workspace) mod pane_choice;
-pub(in crate::workspace) mod reconcile;
+pub(super) mod reconcile;
 pub(in crate::workspace) mod render;
 pub(in crate::workspace) mod rows;
-pub(in crate::workspace) mod session_config;
+pub(super) mod session_config;
 /// The fixed conversation the `--screenshot` agent-chat scenarios seed.
 #[cfg(feature = "screenshot")]
-pub(in crate::workspace) mod shot_transcript;
-pub(in crate::workspace) mod slash_dispatch;
+pub(super) mod shot_transcript;
+pub(super) mod slash_dispatch;
 pub(in crate::workspace) mod telegram_ops;
 /// Parent/child structure of a conversation's tool calls — the one place the
 /// nesting rules live.
-pub(in crate::workspace) mod tool_hierarchy;
-pub(in crate::workspace) mod tool_status;
+pub(super) mod tool_hierarchy;
+pub(super) mod tool_status;
 /// The `[agent]` transcript defaults a pane follows until the user chooses.
 pub(in crate::workspace) mod transcript_defaults;
-pub(in crate::workspace) mod transcript_structure;
+pub(super) mod transcript_structure;
 pub(in crate::workspace) mod view;
-pub(in crate::workspace) mod window_access;
+pub(super) mod window_access;

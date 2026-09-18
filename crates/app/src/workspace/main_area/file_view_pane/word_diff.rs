@@ -147,10 +147,7 @@ fn tokenize(s: &str) -> Vec<&str> {
 /// Returns `(old_changes, new_changes)` where each `WordChange` is a byte
 /// range within its respective string that should be highlighted.
 /// Adjacent changed tokens are coalesced into a single range.
-pub(in crate::workspace) fn compute_word_diff(
-    old: &str,
-    new: &str,
-) -> (Vec<WordChange>, Vec<WordChange>) {
+pub(super) fn compute_word_diff(old: &str, new: &str) -> (Vec<WordChange>, Vec<WordChange>) {
     let old_tokens = tokenize(old);
     let new_tokens = tokenize(new);
 

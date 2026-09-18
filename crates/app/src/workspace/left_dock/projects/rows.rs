@@ -29,7 +29,7 @@ use crate::workspace::dnd_ops::TopRow;
 /// (`↑N ↓N [total]`). `None` means "show nothing" (clean tree + no
 /// divergence, or no status cached yet).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(in crate::workspace) struct GitBadgeData {
+pub(super) struct GitBadgeData {
     /// Modified + staged + untracked, rolled up into a single count so the
     /// GH-Desktop pill stays narrow.
     pub total: u32,
@@ -44,7 +44,7 @@ pub(in crate::workspace) struct GitBadgeData {
 /// `id` from the cached git status. Returns `None` when no status is
 /// cached yet or the lane is fully clean (no changes + no
 /// divergence) so the row stays uncluttered.
-pub(in crate::workspace) fn git_badge_for(
+pub(super) fn git_badge_for(
     snap: &LeftDockSnapshot,
     project_id: ProjectId,
     id: LaneId,
@@ -156,7 +156,7 @@ fn branch_chip(
 /// `is_collapsed`; an optional color dot renders when `group.color`
 /// parses as a hex RGBA. Clicking the row toggles the group's collapse
 /// flag on the workspace.
-pub(in crate::workspace) fn group_header_row(
+pub(super) fn group_header_row(
     group: &GroupSnapshot,
     snap: &LeftDockSnapshot,
     cx: &mut Context<Dock>,
@@ -315,7 +315,7 @@ pub(in crate::workspace) fn group_header_row(
 /// flags, collapsed flag, and the snap-target lane) grouped at the
 /// call site so the header signature stays readable as additional
 /// per-project flags accumulate.
-pub(in crate::workspace) struct ProjectHeaderArgs {
+pub(super) struct ProjectHeaderArgs {
     pub project_id: ProjectId,
     pub name: SharedString,
     pub is_ungrouped: bool,
@@ -347,7 +347,7 @@ pub(in crate::workspace) struct ProjectHeaderArgs {
 /// and `ChevronRight` (collapsed). The chevron carries its own click
 /// handler that toggles the flag; the rest of the row stays bound to
 /// `activate_lane(last_active)` so a header click still snaps the focus.
-pub(in crate::workspace) fn project_header_row(
+pub(super) fn project_header_row(
     args: ProjectHeaderArgs,
     snap: &LeftDockSnapshot,
     cx: &mut Context<Dock>,
@@ -573,7 +573,7 @@ pub(in crate::workspace) fn project_header_row(
         })
 }
 
-pub(in crate::workspace) fn section_header(
+pub(super) fn section_header(
     _any_git: bool,
     snap: &LeftDockSnapshot,
     _cx: &mut Context<Dock>,
@@ -684,7 +684,7 @@ fn git_badge_view(
         })
 }
 
-pub(in crate::workspace) fn worktree_row(
+pub(super) fn worktree_row(
     wt: &Lane,
     project_id: ProjectId,
     is_active: bool,
@@ -976,7 +976,7 @@ pub(in crate::workspace) fn worktree_row(
     row
 }
 
-pub(in crate::workspace) fn non_git_placeholder(cx: &gpui::App) -> impl IntoElement {
+pub(super) fn non_git_placeholder(cx: &gpui::App) -> impl IntoElement {
     let t = theme::current(cx);
     let hint_color = t.text_subtle;
     let init_color = t.text_muted;

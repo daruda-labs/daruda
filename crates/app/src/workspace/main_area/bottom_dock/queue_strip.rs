@@ -26,10 +26,7 @@ use crate::workspace::layout::{BottomDockSnapshot, Dock};
 
 /// Build the queued-prompt strip, or `None` when the focused pane has no queued
 /// prompts (the strip is then not rendered).
-pub(in crate::workspace) fn render(
-    snap: &BottomDockSnapshot,
-    cx: &mut Context<Dock>,
-) -> Option<AnyElement> {
+pub(super) fn render(snap: &BottomDockSnapshot, cx: &mut Context<Dock>) -> Option<AnyElement> {
     let (pane_id, prompts) = snap.queued_prompts.as_ref()?;
     let pane_id = *pane_id;
     let t = theme::current(cx);

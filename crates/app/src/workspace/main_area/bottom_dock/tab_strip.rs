@@ -70,7 +70,7 @@ pub(in crate::workspace::main_area::bottom_dock) fn nearest_row_preset(size: f32
 /// scope for the entire drag — `label` powers the floating ghost
 /// without re-reading `panels.tabs`.
 #[derive(Clone, Debug)]
-pub(in crate::workspace) struct DraggedPanelTab {
+pub(super) struct DraggedPanelTab {
     pub id: TabId,
     pub label: SharedString,
 }

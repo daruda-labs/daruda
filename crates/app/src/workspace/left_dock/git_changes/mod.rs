@@ -5,7 +5,7 @@
 //! Checking/unchecking stages or unstages the file without changing its
 //! position in the list.
 
-pub(in crate::workspace) mod unified_list;
+pub(super) mod unified_list;
 
 use std::path::PathBuf;
 

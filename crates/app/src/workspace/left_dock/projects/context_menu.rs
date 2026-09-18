@@ -19,7 +19,7 @@ use crate::workspace::render::ws_popup_menu_item;
 /// the lane-row call site stays readable as per-lane flags accumulate
 /// (mirrors `rows::ProjectHeaderArgs`). Every field is owned so the
 /// resulting `PopupMenuItem` closures are `'static`.
-pub(in crate::workspace) struct CtxMenuArgs {
+pub(super) struct CtxMenuArgs {
     pub project_id: ProjectId,
     pub wt_id: LaneId,
     pub path_str: String,
@@ -46,7 +46,7 @@ pub(in crate::workspace) struct CtxMenuArgs {
 
 /// Build the context menu item list for a lane row right-click.
 /// Captures path / id by value so the closures are `'static`.
-pub(in crate::workspace) fn build_context_menu_items(args: CtxMenuArgs) -> Vec<PopupMenuItem> {
+pub(super) fn build_context_menu_items(args: CtxMenuArgs) -> Vec<PopupMenuItem> {
     let CtxMenuArgs {
         project_id,
         wt_id,

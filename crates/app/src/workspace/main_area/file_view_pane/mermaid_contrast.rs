@@ -38,12 +38,12 @@ use std::borrow::Cow;
 /// `DIAGRAM_SURFACE_ALT_ALPHA` sibling tier (daruda's own diff-row tint
 /// strength), so a highlighted box reads the same "subtle tint, not a
 /// competing fill" as the rest of the app's translucent surfaces.
-pub(in crate::workspace) const MAX_ALPHA: f64 = 0.12;
+pub(super) const MAX_ALPHA: f64 = 0.12;
 
 /// Rewrite `source` so every sequence `rect`/`box` background is capped to
 /// [`MAX_ALPHA`]. Zero-copy (borrows `source` unchanged) when no line needs
 /// rewriting.
-pub(in crate::workspace) fn ensure_text_contrast(source: &str) -> Cow<'_, str> {
+pub(super) fn ensure_text_contrast(source: &str) -> Cow<'_, str> {
     let mut changed = false;
     let mut out = String::with_capacity(source.len());
     for (i, line) in source.split('\n').enumerate() {
@@ -118,7 +118,7 @@ fn split_color_token(rest: &str) -> (&str, &str) {
 /// alpha exceeds [`MAX_ALPHA`]; `None` when it's already at/below the cap, or
 /// isn't a recognized shape (a named CSS color — out of scope, left as the
 /// diagram author wrote it).
-pub(in crate::workspace) fn cap_alpha(expr: &str) -> Option<String> {
+pub(super) fn cap_alpha(expr: &str) -> Option<String> {
     let (r, g, b, a) = parse_color_with_alpha(expr)?;
     (a > MAX_ALPHA).then(|| format!("rgba({r}, {g}, {b}, {MAX_ALPHA})"))
 }
@@ -126,7 +126,7 @@ pub(in crate::workspace) fn cap_alpha(expr: &str) -> Option<String> {
 /// Parse `rgb(r,g,b)`, `rgba(r,g,b,a)`, `#RRGGBB`, `#RGB`, or `#RRGGBBAA` into
 /// `(r, g, b, alpha)`. A form with no alpha channel is opaque (`alpha = 1.0`).
 /// `None` for a named CSS color or malformed input.
-pub(in crate::workspace) fn parse_color_with_alpha(expr: &str) -> Option<(u8, u8, u8, f64)> {
+pub(super) fn parse_color_with_alpha(expr: &str) -> Option<(u8, u8, u8, f64)> {
     let expr = expr.trim();
     if let Some(inner) = expr.strip_prefix("rgba(").and_then(|s| s.strip_suffix(')')) {
         let mut parts = inner.split(',').map(str::trim);
@@ -149,7 +149,7 @@ pub(in crate::workspace) fn parse_color_with_alpha(expr: &str) -> Option<(u8, u8
 /// Parse a `#RRGGBB`, `#RGB`, or `#RRGGBBAA` hex color into `(r, g, b, alpha)`
 /// (`alpha = 1.0` for the two forms with no alpha byte). `None` for anything
 /// else.
-pub(in crate::workspace) fn parse_hex_color(value: &str) -> Option<(u8, u8, u8, f64)> {
+pub(super) fn parse_hex_color(value: &str) -> Option<(u8, u8, u8, f64)> {
     let hex = value.strip_prefix('#')?;
     let byte = |i: usize| u8::from_str_radix(&hex[i * 2..i * 2 + 2], 16).ok();
     match hex.len() {

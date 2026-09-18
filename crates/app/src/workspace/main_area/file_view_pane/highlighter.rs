@@ -130,7 +130,7 @@ pub(in crate::workspace) fn highlight_hunks(
 /// All rows are parsed as a single document so multi-line tokens are
 /// coloured correctly throughout the file. Unknown extensions leave rows
 /// un-highlighted.
-pub(in crate::workspace) fn highlight_raw_rows(
+pub(super) fn highlight_raw_rows(
     rows: &mut [VisualRow],
     lang: LanguageHint<'_>,
     theme_name: &str,

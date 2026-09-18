@@ -9,15 +9,11 @@ use crate::agent::mcp::McpScope;
 use crate::workspace::Workspace;
 
 impl Workspace {
-    pub(in crate::workspace) fn open_add_mcp_server(
-        &mut self,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
+    pub(super) fn open_add_mcp_server(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         super::open_add_mcp_server_modal(self, None, window, cx);
     }
 
-    pub(in crate::workspace) fn open_edit_mcp_server(
+    pub(super) fn open_edit_mcp_server(
         &mut self,
         scope: McpScope,
         name: String,
@@ -27,7 +23,7 @@ impl Workspace {
         super::open_edit_mcp_server_modal(self, scope, name, window, cx);
     }
 
-    pub(in crate::workspace) fn open_delete_mcp_server_confirm(
+    pub(super) fn open_delete_mcp_server_confirm(
         &mut self,
         scope: McpScope,
         name: String,

@@ -44,7 +44,7 @@ impl PaneFileView {
 
     /// Append a character to the search query and recompute matches.
     #[allow(dead_code)]
-    pub(in crate::workspace) fn search_insert_char(&mut self, ch: char) {
+    pub(super) fn search_insert_char(&mut self, ch: char) {
         if let Some(s) = &mut self.search {
             s.query.push(ch);
         }
@@ -53,7 +53,7 @@ impl PaneFileView {
 
     /// Remove the last character from the search query and recompute matches.
     #[allow(dead_code)]
-    pub(in crate::workspace) fn search_backspace(&mut self) {
+    pub(super) fn search_backspace(&mut self) {
         if let Some(s) = &mut self.search {
             s.query.pop();
         }
@@ -74,7 +74,7 @@ impl PaneFileView {
     }
 
     /// Move the focused match to the previous one (wraps around).
-    pub(in crate::workspace) fn search_prev_match(&mut self) {
+    pub(super) fn search_prev_match(&mut self) {
         if let Some(s) = &mut self.search {
             if s.matches.is_empty() {
                 return;
@@ -89,7 +89,7 @@ impl PaneFileView {
 
     /// Clear the search query and all match state without closing the panel.
     #[allow(dead_code)]
-    pub(in crate::workspace) fn search_clear(&mut self) {
+    pub(super) fn search_clear(&mut self) {
         if let Some(s) = &mut self.search {
             s.query.clear();
             s.matches.clear();

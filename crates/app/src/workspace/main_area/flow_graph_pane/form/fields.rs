@@ -48,7 +48,7 @@ pub(in crate::workspace) struct AgentFields {
 
 impl AgentFields {
     /// The file's shape, or nothing when the node overrides no axis.
-    pub(in crate::workspace) fn to_override(&self) -> Option<daruda_flow::parse::AgentOverride> {
+    pub(super) fn to_override(&self) -> Option<daruda_flow::parse::AgentOverride> {
         if self.is_empty() {
             return None;
         }

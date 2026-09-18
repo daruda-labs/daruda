@@ -64,7 +64,7 @@ fn sits_between(a: &PaneRect, b: &PaneRect, c: &PaneRect, dir: NavDirection) -> 
 }
 
 /// Find the best neighbor of `from` in the given direction.
-pub(in crate::workspace) fn pane_in_direction(
+pub(super) fn pane_in_direction(
     rects: &[PaneRect],
     from: PaneId,
     dir: NavDirection,

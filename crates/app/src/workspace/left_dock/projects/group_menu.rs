@@ -16,7 +16,7 @@ use crate::workspace::group_ops::group_color_presets;
 use crate::workspace::render::ws_popup_menu_item;
 
 /// Build the flat menu for a group header.
-pub(in crate::workspace) fn build_group_menu_items(
+pub(super) fn build_group_menu_items(
     group_id: GroupId,
     current_name: SharedString,
     is_collapsed: bool,

@@ -175,11 +175,7 @@ impl Workspace {
     /// Manual retry for the Error banner: connect `pane_id` iff parked in
     /// [`AgentSessionStatus::Error`]. Like [`Self::maybe_connect_agent_chat`]
     /// but keeps `session_id` so it resumes via `session/load`.
-    pub(in crate::workspace) fn retry_agent_chat_connect(
-        &mut self,
-        pane_id: PaneId,
-        cx: &mut Context<Self>,
-    ) {
+    pub(super) fn retry_agent_chat_connect(&mut self, pane_id: PaneId, cx: &mut Context<Self>) {
         let (cwd, resume) = {
             let Some(view) = self.agent_chat_view(pane_id) else {
                 return;
@@ -542,7 +538,7 @@ impl Workspace {
     /// event-pump task on its view; closing the pane drops both. `resume`
     /// carries the persisted session id: `Some` branches `session/load`,
     /// `None` starts a fresh `session/new`. A failed resume retries once fresh.
-    pub(in crate::workspace) fn connect_agent_chat(
+    pub(super) fn connect_agent_chat(
         &mut self,
         pane_id: PaneId,
         cwd: PaneCwd,

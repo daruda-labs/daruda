@@ -155,7 +155,7 @@ enum PaneCwdOutcome {
 /// Why a fresh pane has nowhere to attach. Two variants because they are
 /// fixed in different places, and the blocked pane has to say which.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(in crate::workspace) enum PaneCwdBlocked {
+pub(super) enum PaneCwdBlocked {
     /// A legacy `Raw` + `{{cwd}}` launch with no remote path to substitute.
     NoRemotePath,
     /// The lane's session host holds a value the launch quoting cannot carry.
@@ -364,8 +364,8 @@ impl Workspace {
 
     /// The pane's display title for a notification: its live session title, or
     /// the static tab-title fallback before the session reports one. Stays
-    /// `pub(in crate::workspace)` because `telegram_ops` also reads it.
-    pub(in crate::workspace) fn pane_title(&self, pane_id: PaneId, cx: &Context<Self>) -> String {
+    /// `pub(super)` because `telegram_ops` also reads it.
+    pub(super) fn pane_title(&self, pane_id: PaneId, cx: &Context<Self>) -> String {
         self.agent_chat_view(pane_id)
             .and_then(|v| v.read(cx).session_title.clone())
             .unwrap_or_else(s::agent_chat_tab_title)
@@ -714,7 +714,7 @@ impl Workspace {
     /// Resolve `Local` vs. `Remote` cwd for a fresh pane under `agent_id`,
     /// via [`resolve_new_pane_cwd_core`]. An id no longer in the catalog falls
     /// back to an empty `AgentLaunch::Raw` (uses `local_cwd`).
-    pub(in crate::workspace) fn resolve_new_pane_cwd(
+    pub(super) fn resolve_new_pane_cwd(
         &self,
         agent_id: &str,
         local_cwd: Option<PathBuf>,
@@ -803,7 +803,7 @@ impl Workspace {
 
     /// Seed failure copy and its remedy before focus can start a real adapter.
     #[cfg(feature = "screenshot")]
-    pub(in crate::workspace) fn open_agent_chat_failure_for_shot(
+    pub(super) fn open_agent_chat_failure_for_shot(
         &mut self,
         failure: daruda_acp::AcpFailure,
         window: &mut Window,
@@ -833,7 +833,7 @@ impl Workspace {
 
     /// Open an empty agent-chat pane with view options open.
     #[cfg(feature = "screenshot")]
-    pub(in crate::workspace) fn open_agent_chat_empty_for_shot(
+    pub(super) fn open_agent_chat_empty_for_shot(
         &mut self,
         window: &mut Window,
         cx: &mut Context<Self>,
@@ -853,7 +853,7 @@ impl Workspace {
     /// transcript axis off its default so the gear's own selected state is
     /// visible alongside the panel.
     #[cfg(feature = "screenshot")]
-    pub(in crate::workspace) fn open_agent_chat_options_for_shot(
+    pub(super) fn open_agent_chat_options_for_shot(
         &mut self,
         tab: super::view::ActivityOptionsTab,
         window: &mut Window,
@@ -882,7 +882,7 @@ impl Workspace {
 
     /// Open a seeded agent-chat transcript for screenshots.
     #[cfg(feature = "screenshot")]
-    pub(in crate::workspace) fn open_agent_chat_transcript_for_shot(
+    pub(super) fn open_agent_chat_transcript_for_shot(
         &mut self,
         window: &mut Window,
         cx: &mut Context<Self>,
@@ -902,7 +902,7 @@ impl Workspace {
     /// such a turn has. The response bar cannot stand in for it: the conclusion
     /// escape keeps a sole reply on screen through that fold.
     #[cfg(feature = "screenshot")]
-    pub(in crate::workspace) fn open_agent_chat_sole_reply_for_shot(
+    pub(super) fn open_agent_chat_sole_reply_for_shot(
         &mut self,
         window: &mut Window,
         cx: &mut Context<Self>,
@@ -940,7 +940,7 @@ impl Workspace {
     /// `Cancelled` — the pair is what shows whether the four status icons read
     /// apart by shape.
     #[cfg(feature = "screenshot")]
-    pub(in crate::workspace) fn open_agent_chat_plan_for_shot(
+    pub(super) fn open_agent_chat_plan_for_shot(
         &mut self,
         stopped: bool,
         window: &mut Window,
@@ -961,7 +961,7 @@ impl Workspace {
     /// shape no settled seed reaches, since the marker is pushed by the Stop
     /// path rather than by anything the agent sends.
     #[cfg(feature = "screenshot")]
-    pub(in crate::workspace) fn open_agent_chat_interrupted_transcript_for_shot(
+    pub(super) fn open_agent_chat_interrupted_transcript_for_shot(
         &mut self,
         window: &mut Window,
         cx: &mut Context<Self>,
@@ -979,7 +979,7 @@ impl Workspace {
     /// Open the seeded transcript mid-turn — the agent's answer not yet
     /// written, so its last prose is a preamble rather than a conclusion.
     #[cfg(feature = "screenshot")]
-    pub(in crate::workspace) fn open_agent_chat_working_transcript_for_shot(
+    pub(super) fn open_agent_chat_working_transcript_for_shot(
         &mut self,
         window: &mut Window,
         cx: &mut Context<Self>,
@@ -996,7 +996,7 @@ impl Workspace {
 
     /// Open the seeded transcript with filtering, tail, and filter panel active.
     #[cfg(feature = "screenshot")]
-    pub(in crate::workspace) fn open_agent_chat_narrowed_transcript_for_shot(
+    pub(super) fn open_agent_chat_narrowed_transcript_for_shot(
         &mut self,
         window: &mut Window,
         cx: &mut Context<Self>,
@@ -1037,7 +1037,7 @@ impl Workspace {
     /// floating over the transcript, so the boundary row itself is what the
     /// capture shows. `reveal` opens it.
     #[cfg(feature = "screenshot")]
-    pub(in crate::workspace) fn open_agent_chat_tail_boundary_for_shot(
+    pub(super) fn open_agent_chat_tail_boundary_for_shot(
         &mut self,
         reveal: bool,
         window: &mut Window,
@@ -1070,7 +1070,7 @@ impl Workspace {
     /// group and that group expanded, so the boundary the group's own window
     /// puts among its calls is what the capture shows. `reveal` opens it.
     #[cfg(feature = "screenshot")]
-    pub(in crate::workspace) fn open_agent_chat_group_tail_boundary_for_shot(
+    pub(super) fn open_agent_chat_group_tail_boundary_for_shot(
         &mut self,
         reveal: bool,
         window: &mut Window,
@@ -1109,7 +1109,7 @@ impl Workspace {
     /// so a capture shows the one badge state no settled seed reaches: the live
     /// mark with its age beside it.
     #[cfg(feature = "screenshot")]
-    pub(in crate::workspace) fn open_agent_chat_running_tool_for_shot(
+    pub(super) fn open_agent_chat_running_tool_for_shot(
         &mut self,
         window: &mut Window,
         cx: &mut Context<Self>,
@@ -1134,7 +1134,7 @@ impl Workspace {
     /// count and the card expanded, so the boundary the card's own window puts
     /// among its children is what the capture shows. `reveal` opens it.
     #[cfg(feature = "screenshot")]
-    pub(in crate::workspace) fn open_agent_chat_subagent_tail_boundary_for_shot(
+    pub(super) fn open_agent_chat_subagent_tail_boundary_for_shot(
         &mut self,
         reveal: bool,
         window: &mut Window,
@@ -1190,7 +1190,7 @@ impl Workspace {
 
     /// Open the seeded transcript with a custom fold matrix and editor.
     #[cfg(feature = "screenshot")]
-    pub(in crate::workspace) fn open_agent_chat_fold_editor_for_shot(
+    pub(super) fn open_agent_chat_fold_editor_for_shot(
         &mut self,
         window: &mut Window,
         cx: &mut Context<Self>,
@@ -1355,7 +1355,7 @@ impl Workspace {
     /// split: it parks the pane out of `Idle` before focus would otherwise send
     /// `maybe_connect_agent_chat` off to spawn a real adapter behind it.
     #[cfg(feature = "devtools")]
-    pub(in crate::workspace) fn open_agent_chat_pane_seeded(
+    pub(super) fn open_agent_chat_pane_seeded(
         &mut self,
         agent_id: Option<&str>,
         seed: impl FnOnce(&mut AgentChatView, &mut Window, &mut Context<AgentChatView>),
@@ -1405,7 +1405,7 @@ impl Workspace {
     /// Switch the active session mode. Shim for the mode chip: routes the
     /// chosen id into the view, which optimistically updates and sends
     /// `session/set_mode`. No-op when `pane_id` isn't an Agent chat pane.
-    pub(in crate::workspace) fn set_agent_mode(
+    pub(super) fn set_agent_mode(
         &mut self,
         pane_id: PaneId,
         mode_id: String,
@@ -1474,10 +1474,7 @@ impl Workspace {
     /// `is_light` judges the pane's actual paint surface (`agent_chat_bg`),
     /// not the UI theme's light/dark bit, so diffs stay legible even when the
     /// terminal preset and UI theme disagree.
-    pub(in crate::workspace) fn agent_chat_theme_params(
-        &self,
-        cx: &Context<Self>,
-    ) -> (String, bool) {
+    pub(super) fn agent_chat_theme_params(&self, cx: &Context<Self>) -> (String, bool) {
         let is_light = crate::ui::theme::agent_chat_syntax_is_light(cx);
         (self.syntax_theme.clone(), is_light)
     }
@@ -1507,7 +1504,7 @@ impl Workspace {
     }
 
     /// Keep both the owning slot and any visible wrapper's cwd cache current.
-    pub(in crate::workspace) fn update_agent_chat_cwd(&mut self, pane_id: PaneId, cwd: PaneCwd) {
+    pub(super) fn update_agent_chat_cwd(&mut self, pane_id: PaneId, cwd: PaneCwd) {
         if let Some(chat) = self
             .orchestrator_chat
             .as_mut()
@@ -1601,7 +1598,7 @@ impl Workspace {
     /// file viewer. Returns `false` for normal URLs so the caller can fall back
     /// to the platform URL opener. Handles the file-link shape this app emits
     /// in chat (`/abs/path:line`) by stripping the line suffix before opening.
-    pub(in crate::workspace) fn open_agent_chat_markdown_file_link(
+    pub(super) fn open_agent_chat_markdown_file_link(
         &mut self,
         pane_id: PaneId,
         link: &str,

@@ -30,10 +30,7 @@ impl LiveSubagentUnits {
         })
     }
 
-    pub(in crate::workspace) fn build<'a>(
-        hierarchy: &ToolHierarchy<'a>,
-        items: &'a [ChatItem],
-    ) -> Self {
+    pub(super) fn build<'a>(hierarchy: &ToolHierarchy<'a>, items: &'a [ChatItem]) -> Self {
         if Self::nested_live(items).next().is_none() {
             return Self::default();
         }

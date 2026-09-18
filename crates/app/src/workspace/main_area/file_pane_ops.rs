@@ -307,7 +307,7 @@ impl Workspace {
     /// Coordinate-to-byte conversion is done in the View; the state
     /// transition lives on `PaneFileView::handle_mouse_down`. No-op
     /// when no file viewer is focused.
-    pub(in crate::workspace) fn file_view_mouse_down(
+    pub(super) fn file_view_mouse_down(
         &mut self,
         hit: CharPos,
         shift: bool,
@@ -323,7 +323,7 @@ impl Workspace {
     /// View-dispatched mouse-move/drag handler. State transition lives
     /// on `PaneFileView::handle_mouse_drag`; we only forward the result
     /// to `cx.notify()` when the model actually changed.
-    pub(in crate::workspace) fn file_view_mouse_drag(
+    pub(super) fn file_view_mouse_drag(
         &mut self,
         active: CharPos,
         still_pressed: bool,

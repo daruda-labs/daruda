@@ -8,13 +8,13 @@
 //!     button at the end of the sequence. Click handlers on widgets
 //!     call back into `Workspace::run_widget`.
 
-pub(in crate::workspace) mod macro_edit_modal;
-pub(in crate::workspace) mod macro_key;
+pub(super) mod macro_edit_modal;
+pub(super) mod macro_key;
 pub(in crate::workspace) mod macro_ops;
-pub(in crate::workspace) mod queue_strip;
+pub(super) mod queue_strip;
 pub(in crate::workspace) mod slash_command;
 pub(in crate::workspace) mod tab_strip;
-pub(in crate::workspace) mod terminal_input;
+pub(super) mod terminal_input;
 
 use crate::{surface::strings as s, ui::theme};
 use daruda_store::panels::{MacroKey, TabId};
@@ -33,7 +33,7 @@ use crate::workspace::layout::Dock;
 /// inert for that single child, and the cell sits inside the padding so
 /// `overflow_hidden` never clips it. The centered empty-state
 /// `placeholder` is deliberately separate.
-pub(in crate::workspace) fn bottom_panel_body() -> Div {
+pub(super) fn bottom_panel_body() -> Div {
     div()
         .flex_1()
         .flex()

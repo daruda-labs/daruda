@@ -22,9 +22,9 @@ use super::DockPosition;
 pub(in crate::workspace) struct DividerDrag {
     pub(in crate::workspace) left_first_leaf: PaneId,
     pub(in crate::workspace) direction: SplitDirection,
-    pub(in crate::workspace) axis_size_px: f32,
-    pub(in crate::workspace) anchor_px: f32,
-    pub(in crate::workspace) start_left_ratio: f32,
+    pub(super) axis_size_px: f32,
+    pub(super) anchor_px: f32,
+    pub(super) start_left_ratio: f32,
 }
 
 /// The open right-click menu, if any. Every menu in the app deploys here
@@ -43,8 +43,8 @@ pub(in crate::workspace) struct PopupMenuDeploy {
 #[derive(Clone, Copy, Debug)]
 pub(in crate::workspace) struct DockDrag {
     pub(in crate::workspace) position: DockPosition,
-    pub(in crate::workspace) anchor_px: f32,
-    pub(in crate::workspace) start_size: f32,
+    pub(super) anchor_px: f32,
+    pub(super) start_size: f32,
 }
 
 /// Pure height formula for the bottom dock auto-grow path.
@@ -62,7 +62,7 @@ pub(in crate::workspace) struct DockDrag {
 /// outside the per-row loop — it is not repeated with more lines.
 ///
 /// Extracted as a free function so it can be unit-tested without a GPUI context.
-pub(in crate::workspace) fn bottom_dock_height_for_rows(rows: usize) -> f32 {
+pub(super) fn bottom_dock_height_for_rows(rows: usize) -> f32 {
     use crate::ui::theme::{
         DOCK_BOTTOM_INPUT_ACTION_ROW_H, DOCK_BOTTOM_INPUT_EXTRA_LINE_H,
         DOCK_BOTTOM_INPUT_TEXT_PAD_H, PANEL_BODY_PAD_Y, TAB_BAR_HEIGHT,

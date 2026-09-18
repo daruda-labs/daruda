@@ -28,10 +28,7 @@ use self::files::{flow_row, new_flow_button};
 use self::live::{empty_state, run_row};
 use self::past::{past_row, retention_note};
 
-pub(in crate::workspace) fn render(
-    snap: &RightDockSnapshot,
-    cx: &mut gpui::Context<Dock>,
-) -> AnyElement {
+pub(super) fn render(snap: &RightDockSnapshot, cx: &mut gpui::Context<Dock>) -> AnyElement {
     // The dock root sets no text colour or size, so each panel states its
     // own — every sibling here does, and the two spots that did not
     // rendered near-black against the dock.

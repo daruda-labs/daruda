@@ -27,7 +27,7 @@ const FLOW_ROW_GAP: f32 = 10.0;
 // The row lives with the ops that build it: this segment and the Flows panel
 // read the same shape, and a type owned by one of its two consumers would make
 // the other import across surfaces.
-pub(in crate::workspace) use crate::workspace::flow_rows::FlowRunRow;
+pub(super) use crate::workspace::flow_rows::FlowRunRow;
 
 /// `None` when nothing is running: the chip disappears rather than
 /// reading `0`, because unlike ports there is no "currently none" state a

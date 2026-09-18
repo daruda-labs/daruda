@@ -13,10 +13,7 @@ use crate::workspace::layout::Dock;
 use crate::workspace::path_drag::PathDrag;
 
 /// Build the terminal input panel body.
-pub(in crate::workspace) fn render_body(
-    snap: &BottomDockSnapshot,
-    cx: &mut Context<Dock>,
-) -> AnyElement {
+pub(super) fn render_body(snap: &BottomDockSnapshot, cx: &mut Context<Dock>) -> AnyElement {
     let state = snap.terminal_input.clone();
     let state_for_path = state.clone();
     let state_for_external = state.clone();

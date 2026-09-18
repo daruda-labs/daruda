@@ -32,7 +32,7 @@ use crate::ui::{DropdownMenu as _, PopupMenu, PopupMenuItem, button};
 /// padding, and inline gap come from the `xsmall()` factory in
 /// [`crate::ui::button`]; the pill sets only corner radius and a
 /// state-tinted background.
-pub(in crate::workspace) fn status_pill(
+pub(super) fn status_pill(
     task: &Task,
     snap: &RightDockSnapshot,
     state_label: SharedString,

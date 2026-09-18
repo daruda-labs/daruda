@@ -25,8 +25,8 @@ use crate::workspace::ModalView;
 /// pre-formatted label so [`FilteredItem::label`] is a cheap clone.
 #[derive(Clone)]
 pub(in crate::workspace) struct CommandHistoryItem {
-    pub(in crate::workspace) start_row: u32,
-    pub(in crate::workspace) label: SharedString,
+    pub(super) start_row: u32,
+    pub(super) label: SharedString,
     /// The lower-cased command text, kept around for substring filter
     /// without re-allocating per keystroke.
     match_haystack: SharedString,

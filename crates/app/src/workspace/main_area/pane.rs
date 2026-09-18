@@ -83,24 +83,24 @@ pub(in crate::workspace) struct FlowGraphContent {
 pub(in crate::workspace) struct TerminalContent {
     pub(in crate::workspace) view: Entity<TerminalView>,
     /// `None` when the pane was created via stub (test builds).
-    pub(in crate::workspace) master: Option<Arc<dyn MasterPty + Send>>,
-    pub(in crate::workspace) cached_title: SharedString,
+    pub(super) master: Option<Arc<dyn MasterPty + Send>>,
+    pub(super) cached_title: SharedString,
     /// Cached cwd (OSC 7) — `None` until the shell first reports it.
-    pub(in crate::workspace) cached_cwd: Option<PathBuf>,
-    pub(in crate::workspace) _stdout_task: Task<()>,
+    pub(super) cached_cwd: Option<PathBuf>,
+    pub(super) _stdout_task: Task<()>,
     /// Listens for `TerminalViewEvent`s emitted by the view (e.g. OSC
     /// 1337 attention requests) and dispatches them to platform APIs
     /// gated by `[notifications]` config. Dropped with the pane.
-    pub(in crate::workspace) _view_event_subscription: Subscription,
+    pub(super) _view_event_subscription: Subscription,
     /// Outgoing channel into the PTY's writer thread, cloned from `stdin_tx`
     /// so `Workspace::send_to_pane` (skills, macros) can write into the same
     /// channel as the user's keystrokes. `None` for stub panes.
-    pub(in crate::workspace) pty_input_tx: Option<mpsc::Sender<Vec<u8>>>,
+    pub(super) pty_input_tx: Option<mpsc::Sender<Vec<u8>>>,
     /// Wakes the stdout poll out of its idle backoff (see
     /// `stdout_poll_interval`) so output following a PTY write is
     /// drained at the fast interval. Poked by the keyboard path
     /// (`TerminalInput` closure) and by `Pane::send_input`.
-    pub(in crate::workspace) poke_tx: UnboundedSender<()>,
+    pub(super) poke_tx: UnboundedSender<()>,
     /// Account this pane's shell was spawned under (see
     /// [`daruda_store::accounts::AccountSelection`]). Cached here (it never
     /// changes after construction) purely so the layout serializer can
@@ -125,10 +125,10 @@ pub(in crate::workspace) struct FileContent {
     /// Pane-level focus handle. Used for `Cmd+W` close routing and
     /// non-search key handling. The find-panel uses the input's own
     /// focus handle when open.
-    pub(in crate::workspace) focus_handle: FocusHandle,
+    pub(super) focus_handle: FocusHandle,
     /// Keeps the per-pane `InputEvent` subscription alive; dropped
     /// with the pane.
-    pub(in crate::workspace) _search_subscription: Subscription,
+    pub(super) _search_subscription: Subscription,
     /// Tab title — file basename. Set at construction.
     pub(in crate::workspace) cached_title: SharedString,
     /// Code-editor state for raw file editing.
@@ -156,8 +156,8 @@ pub(in crate::workspace) struct TaskEditContent {
     /// `true` once the user has manually edited the branch field —
     /// further title changes stop auto-deriving the branch so we
     /// don't trample the override.
-    pub(in crate::workspace) branch_override: bool,
-    pub(in crate::workspace) branch_validation: BranchValidation,
+    pub(super) branch_override: bool,
+    pub(super) branch_validation: BranchValidation,
     /// Dropdown mapping lane picks to `Task::base_worktree_path`. The
     /// empty-string sentinel means "no explicit base — branch from the
     /// active lane at run time"; every other value is the absolute path of a
@@ -168,28 +168,28 @@ pub(in crate::workspace) struct TaskEditContent {
     /// `crate::ui::markdown_editor(&state)`.
     pub(in crate::workspace) prompt_state: Entity<gpui_component::input::InputState>,
     pub(in crate::workspace) notes_state: Entity<gpui_component::input::InputState>,
-    pub(in crate::workspace) auto_execute: bool,
+    pub(super) auto_execute: bool,
     /// Execution surface the task will run on when started — mirrors
     /// `Task::agent_surface`. Terminal CLI (default) or in-app Agent
     /// chat (ACP). Flipped in-place by the form's surface selector, the
     /// same plain-data pattern as `auto_execute`.
-    pub(in crate::workspace) agent_surface: TaskAgentSurface,
-    pub(in crate::workspace) focus_handle: FocusHandle,
-    pub(in crate::workspace) cached_title: SharedString,
+    pub(super) agent_surface: TaskAgentSurface,
+    pub(super) focus_handle: FocusHandle,
+    pub(super) cached_title: SharedString,
     /// Baseline snapshot for dirty comparison. Reset to
     /// `current_snapshot()` after every successful save.
-    pub(in crate::workspace) saved_snapshot: TaskEditSnapshot,
-    pub(in crate::workspace) _subscriptions: Vec<Subscription>,
+    pub(super) saved_snapshot: TaskEditSnapshot,
+    pub(super) _subscriptions: Vec<Subscription>,
     /// FS watcher on `<lane>/.daruda/task-<branch>.md`. `None`
     /// when the task is still in `Backlog` (no lane yet) or the
     /// file didn't exist at pane-open time. Dropped with the pane —
     /// `PromptFileWatcherHandle` shuts down the underlying threads.
-    pub(in crate::workspace) _prompt_watcher:
+    pub(super) _prompt_watcher:
         Option<crate::workspace::main_area::prompt_watcher::PromptFileWatcherHandle>,
     /// GPUI-side pump that polls the watcher's debounced channel and
     /// dispatches `handle_prompt_file_changed`. Dropped with
     /// the pane.
-    pub(in crate::workspace) _prompt_pump: Option<Task<()>>,
+    pub(super) _prompt_pump: Option<Task<()>>,
     /// Trailing `[+ Add subtask…]` row input. `Submit` (Enter)
     /// dispatches `Workspace::add_subtask` and clears the buffer for
     /// the next entry; the input stays focused so the user can chain
@@ -198,20 +198,20 @@ pub(in crate::workspace) struct TaskEditContent {
     /// `Some(subtask_id)` while that row is in inline-rename mode (Enter /
     /// blur commits, Escape cancels). One shared rename input is reused
     /// across rows to avoid IME composition-state churn when switching rows.
-    pub(in crate::workspace) editing_subtask: Option<String>,
-    pub(in crate::workspace) editing_subtask_input: Entity<crate::ui::InputState>,
+    pub(super) editing_subtask: Option<String>,
+    pub(super) editing_subtask_input: Entity<crate::ui::InputState>,
     /// Scroll handle for the form-body absolute scroll container.
     /// `vertical_scrollbar(&handle)` on the relative parent renders
     /// the visible thumb; `track_scroll(&handle)` on the scroll
     /// container hooks up cursor + wheel + scrollbar drag together.
-    pub(in crate::workspace) body_scroll_handle: ScrollHandle,
+    pub(super) body_scroll_handle: ScrollHandle,
 }
 
 /// Result of running `validate_branch` over the current branch-input
 /// text. Drives the disabled state of `[Save Draft]` / `[Start]` and
 /// the inline red-border + reason label under the field.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub(in crate::workspace) enum BranchValidation {
+pub(super) enum BranchValidation {
     /// Empty input → Save will auto-derive from title at submit time.
     Empty,
     /// Passes git ref-name rules.
@@ -241,17 +241,17 @@ impl BranchValidation {
 /// because of line-ending differences.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub(in crate::workspace) struct TaskEditSnapshot {
-    pub(in crate::workspace) title: String,
-    pub(in crate::workspace) branch: String,
-    pub(in crate::workspace) prompt: String,
-    pub(in crate::workspace) notes: String,
-    pub(in crate::workspace) auto_execute: bool,
-    pub(in crate::workspace) agent_surface: TaskAgentSurface,
+    pub(super) title: String,
+    pub(super) branch: String,
+    pub(super) prompt: String,
+    pub(super) notes: String,
+    pub(super) auto_execute: bool,
+    pub(super) agent_surface: TaskAgentSurface,
     /// Empty string ↔ `Task::base_worktree_path == None`; non-empty ↔
     /// `Some(PathBuf::from(s))`. Plain `String` (not `Option<String>`)
     /// keeps the dirty-comparison `==` path trivial — the user-facing
     /// sentinel is `""` either way.
-    pub(in crate::workspace) base_value: String,
+    pub(super) base_value: String,
 }
 
 /// CRLF → LF normaliser used by both the renderer's snapshot builder
@@ -328,7 +328,7 @@ pub(in crate::workspace) struct Pane {
 /// Cache key capturing all view settings that affect `cell_dimensions()`.
 /// Adding a new font attribute here forces the cache lookup to account for it.
 #[derive(Hash, PartialEq, Eq)]
-pub(in crate::workspace) struct FontMetricsKey {
+pub(super) struct FontMetricsKey {
     font_size_bits: u32,
     v_spacing_bits: u32,
     h_spacing_bits: u32,
@@ -336,7 +336,7 @@ pub(in crate::workspace) struct FontMetricsKey {
 }
 
 impl FontMetricsKey {
-    pub(in crate::workspace) fn from_view(v: &TerminalView) -> Self {
+    pub(super) fn from_view(v: &TerminalView) -> Self {
         use std::hash::{Hash, Hasher};
         let mut h = std::collections::hash_map::DefaultHasher::new();
         let font = v.font();
@@ -460,7 +460,7 @@ impl Pane {
         cwd_basename(self.cwd())
     }
 
-    pub(in crate::workspace) fn is_terminal(&self) -> bool {
+    pub(super) fn is_terminal(&self) -> bool {
         matches!(self.content, PaneContent::Terminal(_))
     }
 
@@ -468,7 +468,7 @@ impl Pane {
         matches!(self.content, PaneContent::File(_))
     }
 
-    pub(in crate::workspace) fn is_agent_chat(&self) -> bool {
+    pub(super) fn is_agent_chat(&self) -> bool {
         matches!(self.content, PaneContent::AgentChat(_))
     }
 
@@ -709,7 +709,7 @@ impl Pane {
     }
 
     /// True when the pane's `save` path is meaningful for the user.
-    pub(in crate::workspace) fn can_save(&self, cx: &App) -> bool {
+    pub(super) fn can_save(&self, cx: &App) -> bool {
         match &self.content {
             PaneContent::Terminal(_) | PaneContent::FlowGraph(_) => false,
             PaneContent::File(f) => {
@@ -747,7 +747,7 @@ impl Pane {
     /// cached field changed so the caller can guard `cx.notify` and
     /// avoid spamming the render tree on idempotent OSC repeats.
     /// No-op when the pane is not a terminal.
-    pub(in crate::workspace) fn update_cached_terminal(
+    pub(super) fn update_cached_terminal(
         &mut self,
         new_title: String,
         new_cwd: Option<PathBuf>,
@@ -765,7 +765,7 @@ impl Pane {
     /// transport. Per-content dispatch — Terminal resizes the PTY +
     /// view; File content has no grid to resize and returns `true`
     /// (counts as "measured") so workspace doesn't keep retrying.
-    pub(in crate::workspace) fn resize(
+    pub(super) fn resize(
         &self,
         avail_w: f32,
         avail_h: f32,
@@ -943,7 +943,7 @@ fn handle_view_event(
 }
 
 /// Last path component (basename) of a filesystem path.
-pub(in crate::workspace) fn cwd_basename(cwd: Option<&std::path::Path>) -> Option<SharedString> {
+pub(super) fn cwd_basename(cwd: Option<&std::path::Path>) -> Option<SharedString> {
     let cwd = cwd?;
     let name = cwd.file_name()?.to_string_lossy().into_owned();
     if name.is_empty() {

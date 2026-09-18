@@ -152,7 +152,7 @@ impl Workspace {
     /// gone missing between sessions) and `apply_dir_load_result`
     /// (watcher-driven, catches an active lane going missing mid-session,
     /// which `ensure_file_tree` never reaches once a tree exists).
-    pub(in crate::workspace) fn teardown_unavailable_lane_state(&mut self, wt_ref: LaneRef) {
+    pub(super) fn teardown_unavailable_lane_state(&mut self, wt_ref: LaneRef) {
         if let Some(state) = self.lane_scoped.get_mut(&wt_ref) {
             // Stop the watcher before discarding data from the unavailable root.
             state.files.watcher = None;
@@ -197,7 +197,7 @@ impl Workspace {
         }
     }
 
-    pub(in crate::workspace) fn kick_dir_load(
+    pub(super) fn kick_dir_load(
         &mut self,
         wt_ref: LaneRef,
         parent_id: EntryId,
@@ -217,7 +217,7 @@ impl Workspace {
     /// Rebuild the gitignore matcher for `wt_ref` on a background thread.
     /// The existing entry stays in place until the new one is ready, so
     /// filtering never lapses during the build.
-    pub(in crate::workspace) fn kick_gitignore_build(
+    pub(super) fn kick_gitignore_build(
         &mut self,
         wt_ref: LaneRef,
         root: PathBuf,
@@ -242,7 +242,7 @@ impl Workspace {
     /// Create a `FileTreeWatcher` for `wt_ref` and start (or reuse) the
     /// workspace-level polling task that drains every watcher's
     /// `events_rx` once per tick.
-    pub(in crate::workspace) fn spawn_files_watcher(
+    pub(super) fn spawn_files_watcher(
         &mut self,
         wt_ref: LaneRef,
         root: PathBuf,
@@ -285,7 +285,7 @@ impl Workspace {
     /// Called once per polling tick. Drains every watcher's queue
     /// without blocking, dispatching each debounced event into the
     /// per-lane reload queue.
-    pub(in crate::workspace) fn drain_files_watcher_events(&mut self, cx: &mut Context<Self>) {
+    pub(super) fn drain_files_watcher_events(&mut self, cx: &mut Context<Self>) {
         let mut events: Vec<(LaneRef, DebouncedEvent)> = Vec::new();
         for (wt_ref, state) in &self.lane_scoped {
             let Some(watcher) = &state.files.watcher else {
@@ -420,11 +420,7 @@ impl Workspace {
     /// Drive the reload queue for `wt_ref`. Idempotent — calling
     /// while a drain task is already running is a no-op (the running
     /// task picks up the new entries on its next iteration).
-    pub(in crate::workspace) fn kick_files_reload(
-        &mut self,
-        wt_ref: LaneRef,
-        cx: &mut Context<Self>,
-    ) {
+    pub(super) fn kick_files_reload(&mut self, wt_ref: LaneRef, cx: &mut Context<Self>) {
         let q = self
             .lane_scoped_mut(wt_ref)
             .files

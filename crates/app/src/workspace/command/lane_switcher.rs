@@ -70,14 +70,13 @@ impl LaneSwitcherState {
 /// Renders an empty invisible div when the switcher is closed.
 #[derive(IntoElement)]
 pub(in crate::workspace) struct LaneSwitcherOverlay {
-    pub(in crate::workspace) state: LaneSwitcherState,
+    pub(super) state: LaneSwitcherState,
     #[allow(clippy::type_complexity)]
-    pub(in crate::workspace) on_close:
-        Box<dyn Fn(&MouseDownEvent, &mut Window, &mut App) + 'static>,
+    pub(super) on_close: Box<dyn Fn(&MouseDownEvent, &mut Window, &mut App) + 'static>,
     /// Activate the row at this visible index. `Rc` because every row needs
     /// its own handle to it.
     #[allow(clippy::type_complexity)]
-    pub(in crate::workspace) on_pick: Rc<dyn Fn(&usize, &mut Window, &mut App) + 'static>,
+    pub(super) on_pick: Rc<dyn Fn(&usize, &mut Window, &mut App) + 'static>,
 }
 
 impl LaneSwitcherOverlay {

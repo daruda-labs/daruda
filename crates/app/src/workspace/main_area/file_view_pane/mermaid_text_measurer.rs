@@ -39,7 +39,7 @@ const PROBE_FONT_SIZE: f64 = 100.0;
 const PROBE_SYLLABLE: &str = "가";
 
 /// The measurer merman should lay diagrams out with.
-pub(in crate::workspace) fn host_text_measurer() -> std::sync::Arc<dyn TextMeasurer + Send + Sync> {
+pub(super) fn host_text_measurer() -> std::sync::Arc<dyn TextMeasurer + Send + Sync> {
     std::sync::Arc::new(HangulCorrectedMeasurer::default())
 }
 

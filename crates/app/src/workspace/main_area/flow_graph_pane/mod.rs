@@ -17,7 +17,7 @@ mod frame;
 pub(in crate::workspace) mod model;
 mod node_ids;
 mod overlay;
-pub(in crate::workspace) mod pins;
+pub(super) mod pins;
 mod policy;
 mod port_drag;
 mod render;
@@ -640,7 +640,7 @@ impl FlowGraphView {
     /// The flow's node ids in the order the file declares them — what a
     /// scripted capture walks to put one card in each state.
     #[cfg(feature = "screenshot")]
-    pub(in crate::workspace) fn node_ids_for_shot(&self) -> Vec<NodeId> {
+    pub(super) fn node_ids_for_shot(&self) -> Vec<NodeId> {
         match &self.state {
             FlowGraphState::Graph { model, .. } => {
                 model.nodes.iter().map(|n| n.id.clone()).collect()

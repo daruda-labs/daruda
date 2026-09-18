@@ -64,7 +64,7 @@ impl FlowGraphView {
 
     /// Select a node so a capture can show the inspector.
     #[cfg(feature = "screenshot")]
-    pub(in crate::workspace) fn select_node_for_shot(
+    pub(super) fn select_node_for_shot(
         &mut self,
         node: &NodeId,
         window: &mut Window,

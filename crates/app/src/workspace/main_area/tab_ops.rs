@@ -242,7 +242,7 @@ impl Workspace {
     /// lazily connects an idle Agent chat session — is deliberately excluded:
     /// opening a menu is not activating the pane, and the menu takes keyboard
     /// focus anyway.
-    pub(in crate::workspace) fn set_menu_target_pane(
+    pub(super) fn set_menu_target_pane(
         &mut self,
         id: PaneId,
         window: &mut Window,
@@ -526,7 +526,7 @@ impl Workspace {
     /// that tab is gone (closed mid-drag) or already active. Skips history
     /// for the same reason the preview hops do — the unwind is part of the
     /// look-ahead, not navigation the user performed.
-    pub(in crate::workspace) fn restore_active_tab_by_id(&mut self, tab_id: u64) -> bool {
+    pub(super) fn restore_active_tab_by_id(&mut self, tab_id: u64) -> bool {
         let Some(index) = self
             .active_runtime()
             .tabs
@@ -1229,7 +1229,7 @@ impl Workspace {
 
     /// Public close entry point that walks pane content through the
     /// dirty-prompt before delegating to `close_pane_by_id`.
-    pub(in crate::workspace) fn request_close_pane(
+    pub(super) fn request_close_pane(
         &mut self,
         pane_id: PaneId,
         window: &mut Window,
