@@ -1248,3 +1248,48 @@ fn a_rollup_still_reads_running_when_the_live_call_is_filtered_away() {
         "the hidden command is still running, and the row is on screen because of it"
     );
 }
+
+/// The fold matrix's tool rows fold calls keyed [`FoldKey::Tool`]. A launch is
+/// keyed [`FoldKey::Subagent`] and folded by the Subagent row instead, so its
+/// category must not earn a row of its own — a rule nothing can reach renders
+/// as a control that silently does nothing.
+#[test]
+fn the_tool_matrix_covers_exactly_the_categories_a_tool_card_carries() {
+    use crate::transcript::tool_category::{ToolCategory, classify_tool};
+    use daruda_acp::{ToolKindView, ToolStatusView::Completed};
+
+    let of_kind = |kind| ToolCallItem {
+        kind,
+        ..tool_call("c", Completed, 0)
+    };
+    for (category, call) in [
+        (ToolCategory::Read, of_kind(ToolKindView::Read)),
+        (ToolCategory::Edit, of_kind(ToolKindView::Edit)),
+        (ToolCategory::Delete, of_kind(ToolKindView::Delete)),
+        (ToolCategory::Search, of_kind(ToolKindView::Search)),
+        (ToolCategory::Run, of_kind(ToolKindView::Execute)),
+        (ToolCategory::Fetch, of_kind(ToolKindView::Fetch)),
+        (ToolCategory::Other, of_kind(ToolKindView::Other)),
+        (
+            ToolCategory::Mcp,
+            ToolCallItem {
+                tool_name: Some("mcp__obsidian__obsidian_put_content".to_owned()),
+                ..of_kind(ToolKindView::Other)
+            },
+        ),
+        (
+            ToolCategory::Agent,
+            ToolCallItem {
+                raw_input: Some(serde_json::json!({ "subagent_type": "code-reviewer" })),
+                ..of_kind(ToolKindView::Think)
+            },
+        ),
+    ] {
+        assert_eq!(classify_tool(&call), category, "fixture for {category:?}");
+        assert_eq!(
+            category.folds_as_a_tool_card(),
+            matches!(tool_fold_key(&call), FoldKey::Tool(_)),
+            "{category:?}"
+        );
+    }
+}

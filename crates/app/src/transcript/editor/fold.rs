@@ -60,6 +60,7 @@ pub(crate) fn fold_editor(
             rows.extend(
                 ToolCategory::ALL
                     .into_iter()
+                    .filter(|category| category.folds_as_a_tool_card())
                     .map(|category| tool_rule_row(mode, turn, category, id_prefix, &actions, cx)),
             );
         }

@@ -74,6 +74,14 @@ impl ToolCategory {
             .find(|category| category.token() == token)
     }
 
+    /// Whether the fold matrix's tool rows cover this category. A launch is
+    /// keyed `FoldKey::Subagent` and folded by its own block row, so its
+    /// category never reaches `FoldMode::tool_rule` — listing it would render a
+    /// rule nothing can apply.
+    pub(crate) const fn folds_as_a_tool_card(self) -> bool {
+        !matches!(self, Self::Agent)
+    }
+
     pub(crate) const fn bit(self) -> u16 {
         1 << self.index()
     }
