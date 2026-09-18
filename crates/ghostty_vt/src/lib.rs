@@ -547,6 +547,8 @@ impl Terminal {
     /// capture watermark. Useful when a mid-feed observer needs to ask
     /// "how many rows scrolled out since the last capture" without
     /// consuming the count the end-of-feed capture loop will read.
+    ///
+    /// [`take_scrolled_rows`]: Self::take_scrolled_rows
     pub fn peek_scrolled_rows(&self) -> u32 {
         // SAFETY: `self.ptr` upholds invariant #1.
         unsafe { ghostty_vt_sys::ghostty_vt_terminal_peek_scrolled_rows(self.ptr.as_ptr()) }

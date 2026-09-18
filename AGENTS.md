@@ -75,7 +75,8 @@ cargo test -p ghostty_vt -p ghostty_vt_sys -p daruda_terminal -p daruda \
 ./scripts/lint-acp-air-gate.sh
 ./scripts/lint-comment-length.sh
 RUSTDOCFLAGS="-D warnings" cargo doc --no-deps \
-  -p daruda_flow -p daruda_core -p daruda_update -p ghostty_vt_sys
+  -p daruda_flow -p daruda_core -p daruda_update -p ghostty_vt_sys \
+  -p ghostty_vt -p daruda_agent
 cargo run -p gen_acp_presets -- --check
 ```
 
@@ -223,17 +224,19 @@ scripts/lint-declarative-context-menu.sh
 scripts/lint-acp-air-gate.sh
 scripts/lint-comment-length.sh
 RUSTDOCFLAGS="-D warnings" cargo doc --no-deps \
-  -p daruda_flow -p daruda_core -p daruda_update -p ghostty_vt_sys
+  -p daruda_flow -p daruda_core -p daruda_update -p ghostty_vt_sys \
+  -p ghostty_vt -p daruda_agent
 cargo run -p gen_acp_presets -- --check
 ```
 
 Note: `.github/workflows/ci.yml` gates fmt, the clippy list above, the 7 lint scripts through `lint-viewport-row-scroll.sh`, `lint-env-literals.sh` with its self-test, `lint-no-silent-update.sh`, `lint-agent-activity.sh`, the `cargo doc` link check, and the package-scoped `cargo test` list above.
 
-The doc-link gate covers four crates rather than all of them: clippy does not
+The doc-link gate covers six crates rather than all of them: clippy does not
 read intra-doc links, so a deleted item leaves a dangling `[`Name`]` in the
-prose that explains the module. These four are clean today; the rest carry a
-backlog (126 broken links at the time of writing) and join the list a crate at
-a time as that is worked off. `lint-daruda-path-literals.sh`, `lint-file-size.sh`, `lint-mark-dirty-direct-call.sh`, `lint-fold-header.sh`, `lint-agent-list-sync.sh`, `lint-declarative-context-menu.sh`, `lint-acp-air-gate.sh`, `lint-comment-length.sh`, and `gen_acp_presets -- --check` are local/reviewer checks not yet wired into CI.
+prose that explains the module. These six are clean today; the rest carry a
+backlog and join the list a crate at a time as that is worked off. Measured
+2026-09-18: `daruda_config` 8, `daruda_store` 8, `daruda_terminal` 11,
+`daruda_acp` 16, `daruda` 85 — the app crate is most of what is left. `lint-daruda-path-literals.sh`, `lint-file-size.sh`, `lint-mark-dirty-direct-call.sh`, `lint-fold-header.sh`, `lint-agent-list-sync.sh`, `lint-declarative-context-menu.sh`, `lint-acp-air-gate.sh`, `lint-comment-length.sh`, and `gen_acp_presets -- --check` are local/reviewer checks not yet wired into CI.
 
 `gen_acp_presets -- --check` is the ACP preset drift gate: it regenerates the `// BEGIN GENERATED` block of `crates/daruda_config/src/agent/preset.rs` from the committed `tools/gen_acp_presets/registry-snapshot.json` and fails on any difference. It is offline; `scripts/sync-acp-registry.sh` is the separate path that refreshes the snapshot from the live registry.
 

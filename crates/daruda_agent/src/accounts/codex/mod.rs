@@ -104,7 +104,7 @@ impl AccountRecipe for CodexRecipe {
     }
 
     /// INVARIANT: `dir` holds symlinks into the user's real `~/.codex`, and
-    /// [`remove_account_dir`] unlinks them rather than following them. Any
+    /// `remove_account_dir` unlinks them rather than following them. Any
     /// replacement must keep that property or it deletes user data.
     fn cleanup(&self, dir: &Path) {
         remove_account_dir(

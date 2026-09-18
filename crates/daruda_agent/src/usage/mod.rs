@@ -62,7 +62,7 @@ impl UsageWindow {
 #[derive(Clone, Debug, PartialEq)]
 pub struct ProviderUsage {
     pub recipe: AccountRecipeId,
-    /// Ascending by [`UsageWindow::sort_key`]. Empty when the provider
+    /// Ascending by `UsageWindow::sort_key`. Empty when the provider
     /// reported no window at all — a valid answer, not an error.
     pub windows: Vec<UsageWindow>,
     /// Subscription metadata, from the local credential store rather than the

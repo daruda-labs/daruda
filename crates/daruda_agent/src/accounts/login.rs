@@ -160,7 +160,7 @@ const DENIAL_MARKERS: &[&str] = &[
 ];
 
 /// Pure OAuth-denial check over already-captured process output. See
-/// [`DENIAL_MARKERS`] for the marker list and its orca source.
+/// `DENIAL_MARKERS` for the marker list and its orca source.
 pub fn is_oauth_denied(output: &str) -> bool {
     let lower = output.to_lowercase();
     DENIAL_MARKERS.iter().any(|marker| lower.contains(marker))
@@ -423,7 +423,7 @@ impl LoginProcess {
 
     /// Blocks until `policy`'s completion signal fires or `timeout` elapses
     /// (then: cancel + [`LoginOutcome::TimedOut`]), polling at
-    /// [`POLL_INTERVAL`]. Consumes `self` so the piped `stdin` — never
+    /// `POLL_INTERVAL`. Consumes `self` so the piped `stdin` — never
     /// taken/closed — stays open for the process's entire run.
     ///
     /// Once credentials have landed the overall `timeout` no longer applies:
