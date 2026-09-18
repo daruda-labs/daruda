@@ -1254,7 +1254,7 @@ fn a_lone_tool_call_gets_its_own_group() {
             ("item", false),     // "x"
             ("group", false),    // one call is still a run, so it earns a bar
             ("grouptail", true), // nothing behind the bar
-            ("item", false),     // the call stays — a bar over nothing is worse
+            ("item", true),      // and the bar's fold shuts over it, as on any run
             ("item", false),     // "y" = conclusion, never folded away
         ],
         "one call earns the bar that carries its fold, like any other run"
@@ -1474,7 +1474,7 @@ fn leading_run_without_a_user_anchor_still_gets_a_bar() {
             ("item", false),
             ("group", false),
             ("grouptail", true),
-            ("item", false)
+            ("item", true)
         ]
     );
 }
@@ -1660,6 +1660,64 @@ fn every_run_earns_a_group_however_short() {
             asst("done"),
         ]),
         1
+    );
+}
+
+/// A group of one takes the same default as a group of many: the fold setting
+/// decides, and nothing about the member count overrides it. Auto shuts a
+/// settled group; the Expanded setting opens the newest turn's.
+#[test]
+fn a_group_of_one_follows_the_fold_setting_like_any_other() {
+    use ToolStatusView::Completed;
+    let items = [ChatItem::UserText("q".into()), tool("a", Completed)];
+    let collapsed_under = |fold: &FoldState| {
+        project_under(&items, fold)
+            .into_iter()
+            .find_map(|r| match r.kind {
+                RowKind::ToolGroupHeader { collapsed, .. } => Some(collapsed),
+                _ => None,
+            })
+            .expect("the run earns a bar")
+    };
+    assert!(collapsed_under(&FoldState::default()), "auto shuts it");
+    assert!(
+        !collapsed_under(&FoldState::with_mode(FoldPreset::Expanded.mode())),
+        "the expanded setting opens it"
+    );
+    assert!(
+        project_under(&items, &FoldState::default())
+            .iter()
+            .any(|r| matches!(r.kind, RowKind::AgentItem(1)) && r.hidden),
+        "the only call goes behind the bar with it"
+    );
+}
+
+/// A subagent launch settles the moment its SDK call returns, while the work it
+/// delegated keeps running inside its card. A shut bar must not take those
+/// launches off screen mid-run.
+#[test]
+fn a_running_member_stays_on_screen_under_its_collapsed_group() {
+    use ToolStatusView::{Completed, InProgress};
+    let items = vec![
+        ChatItem::UserText("q".into()),
+        asst("delegating"),
+        subagent_launch("A", Completed),
+        child_of("a1", "A", InProgress),
+        subagent_launch("B", Completed),
+        child_of("b1", "B", InProgress),
+    ];
+    let visible: Vec<usize> = project_all(&items)
+        .iter()
+        .filter(|r| !r.hidden)
+        .filter_map(|r| match r.kind {
+            RowKind::AgentItem(ix) => Some(ix),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(
+        visible,
+        vec![1, 2, 4],
+        "the prose and both working launches"
     );
 }
 
@@ -3305,8 +3363,8 @@ fn an_empty_message_is_never_the_conclusion() {
         .collect();
     assert_eq!(
         visible_items,
-        vec![1, 2],
-        "the real reply and the call it introduced, which its bar keeps visible"
+        vec![1],
+        "the real reply — the call it introduced sits behind its own group bar"
     );
     assert!(
         !rows

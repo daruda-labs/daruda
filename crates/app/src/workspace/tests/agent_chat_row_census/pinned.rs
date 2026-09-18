@@ -22,15 +22,15 @@ use crate::workspace::main_area::agent_chat_pane::rows::{LiveSubagentUnits, proj
 const CODEX_AUTO: [usize; 3] = [167, 4, 37];
 const CODEX_TAIL: [usize; 3] = [20, 4, 22];
 const CODEX_SUMMARY: [usize; 3] = [3, 2, 3];
-/// Every run earns a bar, one call included, and a run of one keeps its call
-/// visible under it — so a lone call now costs its bar on top of its own row.
-/// That is what lifted `AUTO`, `TAIL`, `SETTLED` and the two `EXPANDED` ceilings
-/// below; a group of two or more is unchanged.
+/// Every run earns a bar, one call included, and the bar's fold is the only
+/// thing that decides whether its calls show — a run of one included. That is
+/// what the `AUTO`, `TAIL`, `SETTLED` and `EXPANDED` ceilings below price: the
+/// bar costs a row, and a shut one takes its calls off the count.
 const CODEX_EXPANDED: [usize; 3] = [420, 4, 71];
 /// The ceiling with the step axis engaged. Codex's cut is the response-level
 /// one: its runs are short, so most of what goes is whole steps.
 const CODEX_EXPANDED_TAIL: [usize; 3] = [42, 4, 35];
-const CODEX_SETTLED: [usize; 3] = [3, 2, 37];
+const CODEX_SETTLED: [usize; 3] = [3, 2, 33];
 
 /// Claude rows per turn under each projection mode. Turn 0 is the one turn
 /// with no tools and a single block; it costs one row for the response bar
@@ -43,7 +43,7 @@ const CLAUDE_EXPANDED: [usize; 3] = [3, 70, 87];
 /// window is measured by. Turn 1 is the shape that motivated it; see
 /// [`the_step_window_reaches_inside_a_long_tool_group`].
 const CLAUDE_EXPANDED_TAIL: [usize; 3] = [3, 27, 22];
-const CLAUDE_SETTLED: [usize; 3] = [3, 3, 55];
+const CLAUDE_SETTLED: [usize; 3] = [3, 3, 47];
 const CLAUDE_EDITS_ONLY: [usize; 3] = [2, 2, 2];
 
 /// Project through the fresh-pane defaults without a named test lens.

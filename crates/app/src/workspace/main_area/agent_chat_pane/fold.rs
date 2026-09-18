@@ -224,15 +224,6 @@ impl FoldState {
         natural_default(self.policy_for(key, ctx), ctx.active)
     }
 
-    /// Whether the user has decided this block's state by hand.
-    ///
-    /// Read where a caller's *default* differs from the key's own — a run of one
-    /// keeps its only call visible unless someone shut it deliberately. Without
-    /// this the caller cannot tell "never touched" from "folded on purpose".
-    pub(in crate::workspace) fn is_overridden(&self, key: &FoldKey) -> bool {
-        self.overrides.contains_key(key)
-    }
-
     pub(in crate::workspace) fn toggle(&mut self, key: FoldKey, ctx: FoldContext) {
         let cur = self.is_expanded(&key, ctx);
         self.overrides.insert(key, !cur);

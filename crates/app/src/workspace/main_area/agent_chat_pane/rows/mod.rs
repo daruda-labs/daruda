@@ -489,14 +489,12 @@ struct RunRows<'a> {
 impl<'a> RunRows<'a> {
     /// A group header's children, one indent deeper. Identical for every group
     /// kind, so extracting it is what keeps the tool and thinking branches from
-    /// drifting on the fold and filter terms. `structural` is the enclosing
-    /// fold and the group's own collapse together — the children cannot tell
-    /// them apart.
+    /// drifting on the fold and filter terms.
     fn push_group_children(
         &mut self,
         context: ProjectionContext<'_>,
         calls: impl Iterator<Item = usize>,
-        structural: bool,
+        folds: GroupFolds,
         indent: u8,
         group: GroupFilter,
         window: GroupWindow,
@@ -506,13 +504,14 @@ impl<'a> RunRows<'a> {
         for j in calls {
             let kind = RowKind::AgentItem(j);
             let filtered = !filter.matches(&items[j]);
-            // A running call stays on screen through its group's shut boundary,
-            // the same escape a live run gets from the response's.
+            // A running call stays on screen through its group's shut bar and
+            // shut boundary alike — a launch settles while the work inside its
+            // card goes on, so collapsing the group would hide live work.
             let live = matches!(
                 &items[j],
                 ChatItem::ToolCall(tc) if tool_or_subtree_live(tc, context.live_units)
             );
-            let structural = structural || (window.withholds(j) && !live);
+            let structural = folds.enclosing || (!live && (folds.collapsed || window.withholds(j)));
             match group {
                 GroupFilter::Kept => self.push(kind, structural, filtered, indent + 1),
                 // The header already stands for the whole cut; tallying the
@@ -705,6 +704,14 @@ impl UnitWindow {
     }
 }
 
+/// The two folds a group's children answer to. Kept apart rather than or-ed:
+/// a running call escapes the group's own collapse, never the fold above it.
+#[derive(Clone, Copy)]
+struct GroupFolds {
+    enclosing: bool,
+    collapsed: bool,
+}
+
 /// What the step axis makes of one group's children.
 #[derive(Clone, Copy)]
 enum GroupWindow {
@@ -842,9 +849,9 @@ impl<'items, 'rows> RunProjector<'items, 'rows> {
                 {
                     let gid = tool_id(&items[grun.start]);
                     let group_key = FoldKey::ToolGroup(gid.clone());
-                    // A run of one: collapsing would leave the bar standing over
-                    // nothing, so its default keeps the call on screen. The bar
-                    // and its fold still exist — a deliberate fold still shuts it.
+                    // The fold setting is the only term: how many calls
+                    // happened to land in one run must not change what the
+                    // chip's rule for this block says.
                     //
                     // Liveness is read off the members this walk resolved.
                     // `fold_context_at` would rescan from `grun.start` without
@@ -854,7 +861,7 @@ impl<'items, 'rows> RunProjector<'items, 'rows> {
                     let group_collapsed = !fold.is_expanded(
                         &group_key,
                         FoldContext::new(boundary.at(grun.start), group_active),
-                    ) && (calls.len() > 1 || fold.is_overridden(&group_key));
+                    );
                     let group_tail_key = FoldKey::ToolGroupTail(gid.clone());
                     let group_tail_revealed = fold.is_expanded(
                         &group_tail_key,
@@ -888,7 +895,10 @@ impl<'items, 'rows> RunProjector<'items, 'rows> {
                     out.push_group_children(
                         context,
                         calls.into_iter(),
-                        folded || group_collapsed,
+                        GroupFolds {
+                            enclosing: folded,
+                            collapsed: group_collapsed,
+                        },
                         base_indent,
                         group,
                         GroupWindow::Divided {
@@ -929,7 +939,10 @@ impl<'items, 'rows> RunProjector<'items, 'rows> {
                     out.push_group_children(
                         context,
                         grun,
-                        folded || group_collapsed,
+                        GroupFolds {
+                            enclosing: folded,
+                            collapsed: group_collapsed,
+                        },
                         base_indent,
                         group,
                         GroupWindow::Undivided,
