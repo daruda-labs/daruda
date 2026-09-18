@@ -122,6 +122,8 @@ command:
   switch_lane: "Switch Worktree…"
   switch_lane_placeholder: "Switch to worktree..."
   toggle_bottom_panel: "Toggle Bottom Panel"
+  toggle_files_focus: "Focus Files Panel"
+  toggle_git_changes_focus: "Focus Git Changes Panel"
   toggle_left_dock: "Toggle Left Dock"
   toggle_right_dock: "Toggle Right Dock"
   type_command_placeholder: "Type a command..."

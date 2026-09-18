@@ -116,7 +116,7 @@ impl Workspace {
             git_changes_cursor: self
                 .lane_scoped
                 .get(&self.active)
-                .and_then(|state| state.git.cursor.clone()),
+                .and_then(|state| state.git.cursor.as_ref().map(|c| c.path.clone())),
             git_changes_panel_focus: Handle(self.git_changes_panel_focus.clone()),
             focused_file_selection: self
                 .focused_file_view()

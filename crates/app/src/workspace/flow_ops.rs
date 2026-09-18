@@ -549,6 +549,7 @@ impl Workspace {
             report.to_path_buf(),
             /* staged = */ false,
             super::main_area::file_view_pane::FileViewMode::Preview,
+            super::main_area::tab_ops::OpenIntent::Enter,
             window,
             cx,
         );

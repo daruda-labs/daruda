@@ -84,6 +84,11 @@ pub const SHORTCUT_FOCUS_PANE_DOWN: &str = "cmd-alt-down";
 // Docks
 // ============================================================================
 pub const SHORTCUT_TOGGLE_LEFT_DOCK: &str = "cmd-b";
+/// Jump into the left dock's Git Changes panel — and back out on a second
+/// press. Matches zed's `git_panel::ToggleFocus`.
+pub const SHORTCUT_TOGGLE_GIT_CHANGES_FOCUS: &str = "ctrl-shift-g";
+/// Same door for the Files panel. Matches zed's `project_panel::ToggleFocus`.
+pub const SHORTCUT_TOGGLE_FILES_FOCUS: &str = "cmd-shift-e";
 pub const SHORTCUT_TOGGLE_BOTTOM_DOCK: &str = "cmd-j";
 pub const SHORTCUT_TOGGLE_RIGHT_DOCK: &str = "cmd-shift-b";
 

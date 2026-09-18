@@ -516,6 +516,7 @@ impl Workspace {
         }
 
         let runtime = LaneRuntime {
+            preview_tab_id: None,
             tabs: vec![tab],
             panes: vec![pane],
             active_tab_index: 0,

@@ -24,7 +24,8 @@ use crate::workspace::{
     GitChangesToggleStage, InvokeSkillPalette, MinimizeWindow, MoveActiveProjectToGroup,
     MoveTabLeft, MoveTabRight, NewGroup, NewTab, NextTab, OpenCommandHistory, OpenSettings,
     PrevTab, RenameActiveProject, SaveFilePane, SplitDown, SplitRight, ToggleBottomDock,
-    ToggleCommandPalette, ToggleFullScreen, ToggleLaneSwitcher, ToggleLeftDock, ToggleRightDock,
+    ToggleCommandPalette, ToggleFilesFocus, ToggleFullScreen, ToggleGitChangesFocus,
+    ToggleLaneSwitcher, ToggleLeftDock, ToggleRightDock,
 };
 use crate::{
     CloseProject, NewEmptyWindow, OpenDarudaHelp, OpenFolder, OpenFolderInNewWindow,
@@ -66,6 +67,14 @@ pub(crate) fn register_static_bindings(cx: &mut App) {
         KeyBinding::new(k::SHORTCUT_PREV_TAB, PrevTab, None),
         // Dock toggles
         KeyBinding::new(k::SHORTCUT_TOGGLE_LEFT_DOCK, ToggleLeftDock, None),
+        // Global on purpose: these are the only keyboard way *into* a
+        // left-dock panel, so they must fire from wherever focus is.
+        KeyBinding::new(
+            k::SHORTCUT_TOGGLE_GIT_CHANGES_FOCUS,
+            ToggleGitChangesFocus,
+            None,
+        ),
+        KeyBinding::new(k::SHORTCUT_TOGGLE_FILES_FOCUS, ToggleFilesFocus, None),
         KeyBinding::new(k::SHORTCUT_TOGGLE_BOTTOM_DOCK, ToggleBottomDock, None),
         KeyBinding::new(k::SHORTCUT_TOGGLE_RIGHT_DOCK, ToggleRightDock, None),
         // Command palette

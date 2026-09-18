@@ -17,6 +17,7 @@ mod error_modal;
 mod error_ops;
 mod files;
 mod flow;
+mod git_changes_nav;
 mod git_changes_virtualized;
 mod git_remote;
 mod left_dock_pulse;

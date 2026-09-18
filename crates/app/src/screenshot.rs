@@ -520,6 +520,7 @@ fn apply_scenario(scenario: ScreenshotScenario, cx: &mut App) -> Option<AnyWindo
         | ScreenshotScenario::LaneSwitcher
         | ScreenshotScenario::ErrorModal
         | ScreenshotScenario::Toast
+        | ScreenshotScenario::ScratchTab
         | ScreenshotScenario::PaneContextMenu
         | ScreenshotScenario::MermaidLightbox
         | ScreenshotScenario::FlowGraph

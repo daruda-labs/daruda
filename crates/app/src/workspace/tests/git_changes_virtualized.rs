@@ -27,7 +27,7 @@ fn changed_files(n: usize) -> Vec<crate::lane::git::GitFileEntry> {
 
 /// Open a workspace whose left dock shows Git Changes for a git lane, with
 /// `files` already in the status cache. Returns the window and workspace.
-fn dock_showing_changes(
+pub(super) fn dock_showing_changes(
     cx: &mut TestAppContext,
     files: Vec<crate::lane::git::GitFileEntry>,
 ) -> (gpui::WindowHandle<Workspace>, gpui::Entity<Workspace>) {

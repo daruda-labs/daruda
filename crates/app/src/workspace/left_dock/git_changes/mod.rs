@@ -26,6 +26,7 @@ use crate::ui::{
 use crate::workspace::layout::Dock;
 use crate::workspace::layout::LeftDockSnapshot;
 use crate::workspace::left_dock::git_ops::git_status_color;
+use crate::workspace::main_area::tab_ops::OpenIntent;
 use crate::workspace::path_drag::PathDrag;
 use crate::workspace::root_menu::RootContextMenuExt as _;
 use unified_list::{
@@ -33,7 +34,7 @@ use unified_list::{
     tracking_indicator_text,
 };
 
-pub(in crate::workspace) use unified_list::ordered_visible_paths;
+pub(in crate::workspace) use unified_list::visible_file_rows;
 
 // ----------------------------------------------------------------
 // Entry point
@@ -625,7 +626,6 @@ fn unified_file_row(
     let workspace = snap.workspace.clone();
     let workspace_for_checkbox = snap.workspace.clone();
     let workspace_for_ctx = snap.workspace.clone();
-    let panel_focus = snap.git_changes_panel_focus.clone();
     let in_flight = snap.git_stage_in_flight;
 
     // Snapshot every row chrome colour from the live theme.
@@ -714,18 +714,17 @@ fn unified_file_row(
         // drop its path elsewhere doesn't also open the diff view.
         .on_click(cx.listener(move |_dock, ev: &ClickEvent, window, cx| {
             if let Some(ws) = workspace.upgrade() {
-                let fh = panel_focus.clone();
                 let click_count = ev.click_count();
-                let abs_path = abs_path_for_open.clone();
                 let cursor_path = path_for_cursor.clone();
                 ws.update(cx, |ws, cx| {
-                    if click_count >= 2 {
-                        ws.open_file_externally(lane_id, abs_path, cx);
-                    } else {
-                        ws.set_git_changes_cursor(lane_id, cursor_path, cx);
-                        ws.open_git_file_diff(lane_id, abs_path, is_staged, window, cx);
-                        fh.focus(window, cx);
-                    }
+                    ws.on_git_changes_row_click(
+                        lane_id,
+                        cursor_path,
+                        is_staged,
+                        click_count,
+                        window,
+                        cx,
+                    )
                 });
             }
         }))
@@ -838,10 +837,13 @@ fn unified_file_row(
                     move |_, window, cx| {
                         if let Some(w) = ws_diff.upgrade() {
                             w.update(cx, |ws, cx| {
+                                // The context menu is a deliberate pick, so
+                                // the tab it opens is not a skim's to reuse.
                                 ws.open_git_file_diff(
                                     lane_id,
                                     path_diff.clone(),
                                     is_staged,
+                                    OpenIntent::Commit,
                                     window,
                                     cx,
                                 )

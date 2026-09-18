@@ -378,6 +378,11 @@ command_string!(
 );
 command_string!(command_toggle_bottom_panel, "command.toggle_bottom_panel");
 command_string!(command_toggle_left_dock, "command.toggle_left_dock");
+command_string!(
+    command_toggle_git_changes_focus,
+    "command.toggle_git_changes_focus"
+);
+command_string!(command_toggle_files_focus, "command.toggle_files_focus");
 command_string!(command_toggle_right_dock, "command.toggle_right_dock");
 command_string!(
     command_type_command_placeholder,

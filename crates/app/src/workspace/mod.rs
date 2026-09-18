@@ -202,6 +202,8 @@ actions!(
         ActivateTab8,
         ActivateTab9,
         ToggleLeftDock,
+        ToggleGitChangesFocus,
+        ToggleFilesFocus,
         ToggleBottomDock,
         ToggleRightDock,
         ToggleCommandPalette,
@@ -613,6 +615,10 @@ pub struct Workspace {
     /// keybindings only fire when the panel holds focus — otherwise
     /// they fall through to terminal panes.
     pub(in crate::workspace) git_changes_panel_focus: gpui::FocusHandle,
+    /// Debounce for the left dock's arrow-key preview, shared by the Git and
+    /// Files panels. Holds at most one armed timer; re-arming drops it, which
+    /// cancels the row the cursor left.
+    pub(in crate::workspace) left_dock_preview: Option<gpui::Task<()>>,
     /// Directory where state files are written by `persist_state()`.
     /// Injected at construction time: production passes `default_data_dir()`,
     /// tests pass a per-test temp directory.
@@ -1296,6 +1302,7 @@ impl Workspace {
             git_watch_failures: std::collections::HashSet::new(),
             git_watch_poll: None,
             git_changes_panel_focus: cx.focus_handle(),
+            left_dock_preview: None,
             panels: main_area::bottom_dock::macro_ops::load_or_seed_panels(&data_dir),
             agent_vocabulary,
             _agent_vocabulary_global_subscription: cx
@@ -2012,6 +2019,12 @@ impl Workspace {
                 "next_tab" => self.on_next_tab(&NextTab, window, cx),
                 "prev_tab" => self.on_prev_tab(&PrevTab, window, cx),
                 "toggle_left_dock" => self.on_toggle_left_dock(&ToggleLeftDock, window, cx),
+                "toggle_git_changes_focus" => {
+                    self.on_toggle_git_changes_focus(&ToggleGitChangesFocus, window, cx);
+                }
+                "toggle_files_focus" => {
+                    self.on_toggle_files_focus(&ToggleFilesFocus, window, cx);
+                }
                 "toggle_bottom_dock" => self.on_toggle_bottom_dock(&ToggleBottomDock, window, cx),
                 "toggle_right_dock" => self.on_toggle_right_dock(&ToggleRightDock, window, cx),
                 "toggle_command_palette" => {

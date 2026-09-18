@@ -191,6 +191,16 @@ pub(in crate::workspace) const PALETTE_ENTRIES: &[PaletteEntry] = &[
         shortcut: "Cmd+B",
     },
     PaletteEntry {
+        id: "toggle_git_changes_focus",
+        label: s::command_toggle_git_changes_focus,
+        shortcut: "Ctrl+Shift+G",
+    },
+    PaletteEntry {
+        id: "toggle_files_focus",
+        label: s::command_toggle_files_focus,
+        shortcut: "Cmd+Shift+E",
+    },
+    PaletteEntry {
         id: "toggle_bottom_dock",
         label: s::command_toggle_bottom_panel,
         shortcut: "Cmd+J",

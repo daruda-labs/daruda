@@ -29,6 +29,53 @@ enum TabHistory {
     Skip,
 }
 
+/// Whether activating a pane also moves the user into it.
+///
+/// Splitting this out is what keeps "put this file on screen" from carrying
+/// "and start typing at it": [`Workspace::focus_pane`] surfaces the bottom
+/// dock's Input panel and takes keyboard focus, which is right for a pane the
+/// user walked into and wrong for one a left-dock row is previewing.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub(in crate::workspace) enum PaneEntry {
+    /// Keyboard focus and the bottom input follow the pane.
+    Enter,
+    /// The tab and the focused pane change; the user stays where they are.
+    Preview,
+}
+
+/// What a caller is doing when it opens a file, over the two axes that
+/// differ: who ends up with keyboard focus, and whether the tab is the
+/// replaceable preview slot. zed carries these as `focus_item` and
+/// `allow_preview`; only three of the four combinations are real, so naming
+/// them keeps the fourth from being expressible.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub(in crate::workspace) enum OpenIntent {
+    /// A left-dock row the cursor is resting on: the file appears, the user
+    /// stays in the panel, and the tab is the slot a later skim may reuse.
+    Preview,
+    /// A left-dock row the user pressed Enter on: the file keeps its tab, but
+    /// the user still stays in the panel so the arrows keep working.
+    Commit,
+    /// Navigation into the file from anywhere else — a flow, an agent link, a
+    /// skill: the pane takes focus and keeps its tab.
+    Enter,
+}
+
+impl OpenIntent {
+    /// Whether the user moves into the opened pane.
+    pub(in crate::workspace) fn pane_entry(self) -> PaneEntry {
+        match self {
+            Self::Enter => PaneEntry::Enter,
+            Self::Preview | Self::Commit => PaneEntry::Preview,
+        }
+    }
+
+    /// Whether the opened tab becomes the replaceable preview slot.
+    pub(in crate::workspace) fn claims_preview_slot(self) -> bool {
+        matches!(self, Self::Preview)
+    }
+}
+
 impl Workspace {
     /// Set the user-visible window title (Window > Edit Window Title…).
     /// `None` clears the override so the title falls back to the
@@ -415,6 +462,18 @@ impl Workspace {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        self.activate_tab_as(index, PaneEntry::Enter, window, cx);
+    }
+
+    /// [`Self::activate_tab`], with `entry` deciding whether the user moves
+    /// into the tab's pane or only sees it. See [`PaneEntry`].
+    pub(in crate::workspace) fn activate_tab_as(
+        &mut self,
+        index: usize,
+        entry: PaneEntry,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         let Some(focused) = self.switch_active_tab_index(index, TabHistory::Record) else {
             return;
         };
@@ -424,7 +483,9 @@ impl Workspace {
         self.set_focused_pane(focused, window, cx);
         self.mutate_durable_in(window, cx, |ws, window, cx| {
             ws.bump_activity(focused);
-            ws.focus_pane(focused, window, cx);
+            if entry == PaneEntry::Enter {
+                ws.focus_pane(focused, window, cx);
+            }
         });
         cx.notify();
     }

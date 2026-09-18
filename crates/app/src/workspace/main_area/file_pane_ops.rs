@@ -1,4 +1,4 @@
-use gpui::{AppContext as _, Context, Window};
+use gpui::{App, AppContext as _, Context, Window};
 
 use daruda_store::observability::error_report::{ErrorReport, ErrorSeverity};
 
@@ -39,6 +39,44 @@ impl Workspace {
             .and_then(|p| p.terminal_view())
     }
 
+    /// Step into the already-open viewer when `path` is the file the focused
+    /// pane is showing; `false` when it is not, leaving the caller to open it.
+    ///
+    /// This is what gives a left-dock panel's Enter two stages: the first
+    /// opens the file and keeps the panel focused so the arrows keep working,
+    /// the second walks into the viewer. Without it the panel's focus rule
+    /// leaves no keyboard way in at all. Mirrors zed's `git_panel::open_diff`,
+    /// which focuses the ProjectDiff when it already shows the selected entry.
+    pub(in crate::workspace) fn step_into_open_file_view(
+        &mut self,
+        path: Option<std::path::PathBuf>,
+        staged: bool,
+        window: &mut gpui::Window,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        let Some(path) = path else {
+            return false;
+        };
+        let open = self
+            .focused_file_view()
+            .map(|fv| (fv.lane_id, fv.path.clone(), fv.staged));
+        let Some((lane_id, open_path, open_staged)) = open else {
+            return false;
+        };
+        // `staged` is part of the identity for the same reason
+        // `find_existing_file_tab` keys on it: the staged diff and the working
+        // copy of one path are two different panes, and Enter on one must not
+        // walk into the other.
+        if lane_id != self.active.lane || open_path != path || open_staged != staged {
+            return false;
+        }
+        let pane = self.active_runtime().focused_pane_id;
+        // Entering is a commit — see `release_preview_tab_for_pane`.
+        self.release_preview_tab_for_pane(pane);
+        self.focus_pane(pane, window, cx);
+        true
+    }
+
     pub(in crate::workspace) fn focused_file_view_mut(&mut self) -> Option<&mut PaneFileView> {
         let id = self.active_runtime().focused_pane_id;
         self.active_runtime_mut()
@@ -66,22 +104,51 @@ impl Workspace {
             .and_then(|p| p.file_content_mut())
     }
 
-    /// Find any single-pane tab whose pane holds a file viewer.
-    /// Returns `(tab_index, pane_id)` when found. Used by
-    /// `open_pane_file_view` in preview-tab mode.
-    pub(in crate::workspace) fn find_any_file_tab(&self) -> Option<(usize, PaneId)> {
-        for (i, tab) in self.active_runtime().tabs.iter().enumerate() {
-            if let PaneLayout::Pane(pane_id) = tab.layout
-                && self
-                    .active_runtime()
-                    .panes
-                    .iter()
-                    .any(|p| p.id == pane_id && p.file_view().is_some())
-            {
-                return Some((i, pane_id));
-            }
-        }
-        None
+    /// Index of the scratch tab — the one a left-dock preview opened and a
+    /// later one may take over. `None` when there is none.
+    ///
+    /// Two things read this and must never disagree: the reuse decision in
+    /// `open_pane_file_view`, and the tab strip, which renders this tab in
+    /// italics so the user can see which one is about to be taken over.
+    ///
+    /// Unsaved edits take a tab out of the slot. That single rule does both
+    /// jobs: skimming past an edited tab opens beside it instead of throwing
+    /// the edits away, and the italic drops the moment the user types — so
+    /// what the strip shows is exactly what the reuse will do.
+    pub(in crate::workspace) fn preview_tab_index(&self, cx: &App) -> Option<usize> {
+        let (i, pane_id) = self.preview_tab_slot()?;
+        let pane = self
+            .active_runtime()
+            .panes
+            .iter()
+            .find(|p| p.id == pane_id)?;
+        (!pane.is_dirty(cx)).then_some(i)
+    }
+
+    /// The recorded slot, before the unsaved-edits veto. Private on purpose —
+    /// every consumer wants [`Self::preview_tab_index`]'s answer.
+    fn preview_tab_slot(&self) -> Option<(usize, PaneId)> {
+        let preview_id = self.active_runtime().preview_tab_id?;
+        let (i, tab) = self
+            .active_runtime()
+            .tabs
+            .iter()
+            .enumerate()
+            .find(|(_, t)| t.id == preview_id)?;
+        let PaneLayout::Pane(pane_id) = tab.layout else {
+            return None;
+        };
+        self.active_runtime()
+            .panes
+            .iter()
+            .any(|p| p.id == pane_id && p.file_view().is_some())
+            .then_some((i, pane_id))
+    }
+
+    /// The scratch tab and its pane, for `open_pane_file_view`'s reuse branch.
+    pub(in crate::workspace) fn find_preview_file_tab(&self, cx: &App) -> Option<(usize, PaneId)> {
+        self.preview_tab_index(cx)?;
+        self.preview_tab_slot()
     }
 
     /// Find an existing single-pane tab showing the given file

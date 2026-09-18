@@ -30,6 +30,7 @@ use crate::files::watcher::{DebouncedEvent, FileTreeWatcher};
 use crate::lane::availability::{LaneAvailability, classify_dir};
 use crate::workspace::Workspace;
 use crate::workspace::main_area::file_view_pane::FileViewMode;
+use crate::workspace::main_area::tab_ops::OpenIntent;
 
 /// Distinguishes the two `apply_dir_load_result` call sites so the
 /// watcher-driven path can stay silent on `NotFound` (a directory
@@ -581,10 +582,15 @@ impl Workspace {
     /// default; Markdown in Preview). Re-clicking the same `(lane, path)`
     /// reactivates the existing tab. Delegates to `open_pane_file_view`,
     /// which derives the pane's git `file_status` itself.
+    ///
+    /// `intent` is passed through rather than fixed here: the Files panel's
+    /// own rows preview or commit, while opening a task's prompt file is
+    /// navigation into that file.
     pub(in crate::workspace) fn open_files_entry(
         &mut self,
         wt_ref: LaneRef,
         path: PathBuf,
+        intent: OpenIntent,
         window: &mut gpui::Window,
         cx: &mut Context<Self>,
     ) {
@@ -593,6 +599,23 @@ impl Workspace {
             path,
             /* staged = */ false,
             FileViewMode::Raw,
+            intent,
+            window,
+            cx,
+        );
+    }
+
+    /// Wired to `ToggleFilesFocus` — the only keyboard way into this panel,
+    /// and the way back out.
+    pub(in crate::workspace) fn toggle_files_focus(
+        &mut self,
+        window: &mut gpui::Window,
+        cx: &mut Context<Self>,
+    ) {
+        let panel = self.file_tree.files_panel_focus.clone();
+        self.toggle_left_dock_panel_focus(
+            daruda_store::project::LeftDockView::Files,
+            panel,
             window,
             cx,
         );
@@ -800,6 +823,7 @@ impl Workspace {
     pub(in crate::workspace) fn move_files_selection(
         &mut self,
         delta: isize,
+        window: &mut gpui::Window,
         cx: &mut Context<Self>,
     ) {
         let wt_ref = self.active_ref();
@@ -811,21 +835,7 @@ impl Workspace {
             .file_tree
             .files_selection
             .and_then(|sel| visible.iter().position(|v| v.entry_id == sel));
-        let new_index = match cur {
-            Some(i) => {
-                let len = visible.len() as isize;
-                let mut next = (i as isize) + delta;
-                next = next.rem_euclid(len);
-                next as usize
-            }
-            None => {
-                if delta >= 0 {
-                    0
-                } else {
-                    visible.len() - 1
-                }
-            }
-        };
+        let new_index = crate::workspace::left_dock::wrap_step(cur, delta, visible.len());
         let new_id = visible[new_index].entry_id;
         if self.file_tree.files_selection != Some(new_id) {
             self.file_tree.files_selection = Some(new_id);
@@ -833,17 +843,92 @@ impl Workspace {
             self.file_tree
                 .files_scroll_handle
                 .scroll_to_item(new_index, ScrollStrategy::Nearest);
+            let panel = self.file_tree.files_panel_focus.clone();
+            self.arm_left_dock_preview(panel, window, cx, |ws, window, cx| {
+                ws.preview_files_selection(window, cx)
+            });
             cx.notify();
         }
     }
 
+    /// Open the cursor row's file in the viewer without entering it — the
+    /// settled end of the arrow-key preview. A directory has nothing to show,
+    /// so it is left to Enter / click to expand.
+    fn preview_files_selection(&mut self, window: &mut gpui::Window, cx: &mut Context<Self>) {
+        let wt_ref = self.active_ref();
+        let Some(sel) = self.file_tree.files_selection else {
+            return;
+        };
+        let Some((kind, abs)) = self.lane_file_tree(wt_ref).and_then(|tree| {
+            let entry = tree.entry(sel)?;
+            Some((entry.kind, tree.root.join(&entry.path)))
+        }) else {
+            return;
+        };
+        if kind.is_dir() {
+            return;
+        }
+        self.open_files_entry(wt_ref, abs, OpenIntent::Preview, window, cx);
+    }
+
+    /// A click on a Files row. Owns the whole transition — cursor, cache,
+    /// and what the click means — so the row's closure stays a one-line
+    /// dispatch and the behaviour is reachable by a test without a synthetic
+    /// mouse event.
+    ///
+    /// Double click opens in the external editor; Alt on an expanded
+    /// directory collapses its whole subtree; otherwise a directory toggles
+    /// and a file previews.
+    #[allow(clippy::too_many_arguments)]
+    pub(in crate::workspace) fn on_files_row_click(
+        &mut self,
+        wt_ref: LaneRef,
+        entry_id: EntryId,
+        abs_path: PathBuf,
+        kind: EntryKind,
+        click_count: usize,
+        alt: bool,
+        window: &mut gpui::Window,
+        cx: &mut Context<Self>,
+    ) {
+        // A click landed in this panel, so this panel takes keyboard focus —
+        // stated once here, ahead of the branches, because only one of them
+        // opens a pane and the other two would otherwise just inherit
+        // whatever had focus before. The opening branch passes
+        // `OpenIntent::Preview`, which is what stops the new pane undoing this.
+        self.file_tree.files_panel_focus.clone().focus(window, cx);
+        self.file_tree.files_selection = Some(entry_id);
+        self.invalidate_visible_files_cache(wt_ref);
+
+        if click_count >= 2 {
+            if !kind.is_dir() {
+                self.open_file_externally(wt_ref.lane, abs_path, cx);
+            }
+            return;
+        }
+        if kind.is_dir() {
+            if alt {
+                self.collapse_files_subtree(wt_ref, entry_id, cx);
+            } else {
+                self.toggle_files_expand(wt_ref, entry_id, cx);
+            }
+            return;
+        }
+        self.open_files_entry(wt_ref, abs_path, OpenIntent::Preview, window, cx);
+    }
+
     /// Enter on the cursor row: file → open in `PaneFileView::Raw`,
-    /// directory → toggle expand. Mirrors single-click semantics.
+    /// directory → toggle expand. Mirrors single-click semantics, except for
+    /// the second Enter on a row already open, which steps into the viewer —
+    /// see [`Workspace::step_into_open_file_view`].
     pub(in crate::workspace) fn activate_files_selection(
         &mut self,
         window: &mut gpui::Window,
         cx: &mut Context<Self>,
     ) {
+        // The user asked for this row now; letting the timer fire afterwards
+        // would re-open the same file as a replaceable preview.
+        self.left_dock_preview = None;
         let wt_ref = self.active_ref();
         let Some(sel) = self.file_tree.files_selection else {
             return;
@@ -863,7 +948,16 @@ impl Workspace {
             // Absolutize like the row's click handler does: `open_pane_file_view`
             // dedupes on `fv.path`, so opening the same file by Enter and by
             // click must produce the same path or it lands in a second tab.
-            self.open_files_entry(wt_ref, tree_root.join(&path), window, cx);
+            let abs = tree_root.join(&path);
+            if self.step_into_open_file_view(
+                Some(abs.clone()),
+                /* staged = */ false,
+                window,
+                cx,
+            ) {
+                return;
+            }
+            self.open_files_entry(wt_ref, abs, OpenIntent::Commit, window, cx);
         }
     }
 

@@ -685,10 +685,14 @@ impl Pane {
         }
     }
 
-    /// True when the pane holds unsaved user edits. Terminal / File
-    /// panes are never dirty — `false` rules them out of the close
-    /// prompt entirely. TaskEdit panes diff the form
-    /// state against `saved_snapshot`.
+    /// True when the pane holds unsaved user edits. A File pane in Raw mode
+    /// diffs its editor against the text it loaded, and a TaskEdit pane diffs
+    /// the form against `saved_snapshot`; Terminal, FlowGraph and AgentChat
+    /// panes have no buffer to lose, so `false` rules them out of the close
+    /// prompt entirely.
+    ///
+    /// Also what takes a tab out of the left dock's replaceable scratch slot —
+    /// see [`crate::workspace::Workspace::preview_tab_index`].
     pub(in crate::workspace) fn is_dirty(&self, cx: &App) -> bool {
         match &self.content {
             // A graph is a view of a file, never a buffer over it.

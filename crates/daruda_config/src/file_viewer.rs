@@ -10,10 +10,12 @@ pub struct FileViewerConfig {
     /// choices: "daruda" (recommended default), "one-dark", "tokyo-night",
     /// "catppuccin-mocha". Unknown / legacy names fall back to "daruda".
     pub syntax_theme: String,
-    /// When true (default), clicking a file in the left dock reuses the
-    /// existing file-viewer tab instead of opening a new one. The tab
-    /// content is replaced in place; Cmd+W still closes it.
-    /// Set to false to open a separate tab for every file.
+    /// When true (default), browsing files in the left dock reuses one
+    /// scratch tab instead of opening a new one per file: the tab content is
+    /// replaced in place, and Cmd+W still closes it. Only that scratch tab is
+    /// reused — pressing Enter on a row, or opening a file from a flow, an
+    /// agent or a skill, gives it a tab of its own that later browsing leaves
+    /// alone. Set to false to open a separate tab for every file.
     pub preview_tab: bool,
 }
 

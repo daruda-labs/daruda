@@ -309,7 +309,8 @@ impl Render for Workspace {
         // back to cwd basename, then PTY title — iTerm2's "Show profile
         // name → working directory" preference.
         //
-        // Each entry: (index, tab_id, is_active, display_label, file_abs_path, worktree_root)
+        // Each entry: (index, tab_id, is_active, display_label, file_abs_path,
+        // worktree_root, is_scratch)
         // tab_id is the stable TabEntry id (drag payload identity, survives
         // reorder). file_abs_path / worktree_root are Some only for File
         // panes and drive the right-click "Copy File Path" / "Copy Relative
@@ -322,63 +323,71 @@ impl Render for Workspace {
             SharedString,
             Option<std::path::PathBuf>,
             Option<std::path::PathBuf>,
-        )> = self
-            .active_runtime()
-            .tabs
-            .iter()
-            .enumerate()
-            .map(|(i, tab)| {
-                let pane = self
-                    .active_runtime()
-                    .panes
-                    .iter()
-                    .find(|p| p.id == tab.last_focused_pane);
-                let base_label = self
-                    .is_orchestrator_tab(tab)
-                    .then(|| crate::surface::strings::orchestrator_label().into())
-                    .or_else(|| tab.user_label.clone())
-                    .or_else(|| {
-                        pane.and_then(|p| {
-                            // File panes: filename is the tab identity; the parent
-                            // directory is shown in the toolbar, not the tab.
-                            (!p.is_file()).then(|| p.display_cwd()).flatten()
+            bool,
+        )> = {
+            // The tab a left-dock preview may take over. Resolved once rather than
+            // per tab: it reads every pane's dirty state, and the answer is one
+            // index either way.
+            let scratch_tab = self.preview_tab_index(cx);
+            self.active_runtime()
+                .tabs
+                .iter()
+                .enumerate()
+                .map(|(i, tab)| {
+                    let pane = self
+                        .active_runtime()
+                        .panes
+                        .iter()
+                        .find(|p| p.id == tab.last_focused_pane);
+                    let base_label = self
+                        .is_orchestrator_tab(tab)
+                        .then(|| crate::surface::strings::orchestrator_label().into())
+                        .or_else(|| tab.user_label.clone())
+                        .or_else(|| {
+                            pane.and_then(|p| {
+                                // File panes: filename is the tab identity; the parent
+                                // directory is shown in the toolbar, not the tab.
+                                (!p.is_file()).then(|| p.display_cwd()).flatten()
+                            })
                         })
-                    })
-                    .or_else(|| pane.map(|p| p.title(cx)))
-                    .unwrap_or_else(|| "shell".into());
-                // Prefix the dirty dot so the user can spot unsaved
-                // TaskEdit panes in the tab bar at a glance. Terminal /
-                // File panes always read `false` here.
-                let label: SharedString = if pane.map(|p| p.tab_dirty_dot(cx)).unwrap_or(false) {
-                    SharedString::from(format!(
-                        "{}{}",
-                        crate::surface::strings::TAB_TITLE_DIRTY_DOT,
+                        .or_else(|| pane.map(|p| p.title(cx)))
+                        .unwrap_or_else(|| "shell".into());
+                    // Prefix the dirty dot so the user can spot unsaved edits
+                    // in the tab bar at a glance — File panes in Raw mode and
+                    // TaskEdit panes both report them.
+                    let label: SharedString = if pane.map(|p| p.tab_dirty_dot(cx)).unwrap_or(false)
+                    {
+                        SharedString::from(format!(
+                            "{}{}",
+                            crate::surface::strings::TAB_TITLE_DIRTY_DOT,
+                            base_label
+                        ))
+                    } else {
                         base_label
-                    ))
-                } else {
-                    base_label
-                };
-                let (file_path, worktree_root) = match pane.and_then(|p| p.file_identity()) {
-                    Some((path, wt_id)) => {
-                        let root = self
-                            .active_lanes()
-                            .iter()
-                            .find(|wt| wt.id == wt_id)
-                            .map(|wt| wt.path.clone());
-                        (Some(path), root)
-                    }
-                    None => (None, None),
-                };
-                (
-                    i,
-                    tab.id,
-                    i == self.active_runtime().active_tab_index,
-                    label,
-                    file_path,
-                    worktree_root,
-                )
-            })
-            .collect();
+                    };
+                    let (file_path, worktree_root) = match pane.and_then(|p| p.file_identity()) {
+                        Some((path, wt_id)) => {
+                            let root = self
+                                .active_lanes()
+                                .iter()
+                                .find(|wt| wt.id == wt_id)
+                                .map(|wt| wt.path.clone());
+                            (Some(path), root)
+                        }
+                        None => (None, None),
+                    };
+                    (
+                        i,
+                        tab.id,
+                        i == self.active_runtime().active_tab_index,
+                        label,
+                        file_path,
+                        worktree_root,
+                        scratch_tab == Some(i),
+                    )
+                })
+                .collect()
+        };
 
         // Window title — user override (Window > Edit Window Title…) wins;
         // otherwise show `<project> · <branch>` for the active lane
@@ -530,7 +539,7 @@ impl Render for Workspace {
             .bg(tab_bar_bg)
             .items_center()
             .children(tab_titles.into_iter().map(
-                |(i, tab_id, is_active, display, file_path, worktree_root)| {
+                |(i, tab_id, is_active, display, file_path, worktree_root, is_scratch)| {
                     let is_orchestrator = self
                         .active_runtime()
                         .tabs
@@ -800,6 +809,11 @@ impl Render for Workspace {
                                 .flex_1()
                                 .overflow_hidden()
                                 .whitespace_nowrap()
+                                // Italic marks the scratch tab — the one the
+                                // next left-dock preview replaces. Same
+                                // convention as VS Code and zed, and it drops
+                                // the moment the tab stops being replaceable.
+                                .when(is_scratch, |d| d.italic())
                                 .child(display)
                         })
                         .child(close_button)
@@ -1266,6 +1280,8 @@ impl Render for Workspace {
         let workspace_root = crate::lane_slot_table!(@register_listeners cx, workspace_root);
         workspace_root
             .on_action(cx.listener(Self::on_toggle_left_dock))
+            .on_action(cx.listener(Self::on_toggle_git_changes_focus))
+            .on_action(cx.listener(Self::on_toggle_files_focus))
             .on_action(cx.listener(Self::on_toggle_bottom_dock))
             .on_action(cx.listener(Self::on_toggle_right_dock))
             .on_action(cx.listener(Self::on_toggle_command_palette))

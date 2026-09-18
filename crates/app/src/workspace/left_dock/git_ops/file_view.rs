@@ -16,7 +16,8 @@ use crate::workspace::main_area::file_view_pane::file_content::LoadOutcome;
 use crate::workspace::main_area::file_view_pane::mermaid_theme::MermaidPalette;
 use crate::workspace::main_area::file_view_pane::{FileViewMode, PaneFileContent, PaneFileView};
 use crate::workspace::main_area::pane::FileContent;
-use crate::workspace::main_area::pane_tree::PaneId;
+use crate::workspace::main_area::pane_tree::{PaneId, PaneLayout};
+use crate::workspace::main_area::tab_ops::{OpenIntent, PaneEntry};
 
 fn line_to_editor_position(line: usize) -> gpui_component::input::Position {
     let row = line.saturating_sub(1);
@@ -206,6 +207,50 @@ impl Workspace {
             .copied()
     }
 
+    /// Record whether the tab at `tab_idx` is the replaceable scratch one.
+    /// A preview claims the slot; anything else releases it, which is how a
+    /// file the user committed to stops being something a later skim can take.
+    ///
+    /// Only for the open that actually *filled* the tab — see
+    /// [`Self::release_preview_tab`] for why re-activating one must not claim.
+    fn mark_preview_tab(&mut self, tab_idx: usize, intent: OpenIntent) {
+        if !intent.claims_preview_slot() {
+            self.release_preview_tab(tab_idx);
+            return;
+        }
+        let Some(tab_id) = self.active_runtime().tabs.get(tab_idx).map(|t| t.id) else {
+            return;
+        };
+        self.active_runtime_mut().preview_tab_id = Some(tab_id);
+    }
+
+    /// Drop the scratch slot if `tab_idx` holds it.
+    pub(in crate::workspace) fn release_preview_tab(&mut self, tab_idx: usize) {
+        let Some(tab_id) = self.active_runtime().tabs.get(tab_idx).map(|t| t.id) else {
+            return;
+        };
+        let rt = self.active_runtime_mut();
+        if rt.preview_tab_id == Some(tab_id) {
+            rt.preview_tab_id = None;
+        }
+    }
+
+    /// Walking into a pane is a commit: the tab holding it stops being the
+    /// scratch one. Without this a row the arrow preview opened and the user
+    /// then entered stays replaceable, and the next arrow key takes the file
+    /// they had walked into.
+    pub(in crate::workspace) fn release_preview_tab_for_pane(&mut self, pane_id: PaneId) {
+        let Some(idx) = self
+            .active_runtime()
+            .tabs
+            .iter()
+            .position(|t| matches!(t.layout, PaneLayout::Pane(p) if p == pane_id))
+        else {
+            return;
+        };
+        self.release_preview_tab(idx);
+    }
+
     /// The `owner: LaneRef` for a file pane that is pushed into (or already
     /// lives in) `self.active_runtime_mut()`. Single construction site for
     /// that pairing — see [`debug_assert_owner_is_active`] for why `lane_id`
@@ -220,15 +265,30 @@ impl Workspace {
 
     /// Select a file in the Git Changes view: open the pane-area file viewer
     /// in a new tab (or activate the existing tab if the file is already open).
+    ///
+    /// `intent` is never [`OpenIntent::Enter`]: every way to reach this is a
+    /// panel row, and a panel row that moved the user into the pane would take
+    /// its own arrow keys with it. The caller still chooses between resting on
+    /// the row ([`OpenIntent::Preview`]) and picking it ([`OpenIntent::Commit`]).
     pub(in crate::workspace) fn open_git_file_diff(
         &mut self,
         lane_id: LaneId,
         path: PathBuf,
         staged: bool,
+        intent: OpenIntent,
         window: &mut gpui::Window,
         cx: &mut Context<Self>,
     ) {
-        self.open_pane_file_view(lane_id, path, staged, FileViewMode::Changes, window, cx);
+        debug_assert_ne!(intent, OpenIntent::Enter, "a git row never enters the pane");
+        self.open_pane_file_view(
+            lane_id,
+            path,
+            staged,
+            FileViewMode::Changes,
+            intent,
+            window,
+            cx,
+        );
     }
 
     /// Open the pane-area file viewer for `path`.
@@ -250,15 +310,23 @@ impl Workspace {
     ///
     /// The pane's `file_status` is derived here via
     /// [`Self::git_status_for_path`], never supplied by the caller.
+    ///
+    /// `intent` says who ends up focused and whether the tab is replaceable;
+    /// see [`OpenIntent`].
+    // Every argument is an independent axis of what to open; bundling them
+    // into a struct would tax all eight call sites to satisfy the lint.
+    #[allow(clippy::too_many_arguments)]
     pub(in crate::workspace) fn open_pane_file_view(
         &mut self,
         lane_id: LaneId,
         path: PathBuf,
         staged: bool,
         initial_mode: FileViewMode,
+        intent: OpenIntent,
         window: &mut gpui::Window,
         cx: &mut Context<Self>,
     ) {
+        let entry = intent.pane_entry();
         let owner = self.owner_lane_ref(lane_id);
         let file_status = self.git_status_for_path(owner, &path);
 
@@ -273,7 +341,15 @@ impl Workspace {
                 fc.view.file_status = file_status;
                 cx.notify();
             }
-            self.activate_tab(tab_idx, window, cx);
+            // Re-activating a tab that already holds this file: a deliberate
+            // open releases the slot, but a preview must not claim it. Skimming
+            // back across a row the user opened with Enter would otherwise make
+            // it replaceable again (zed's `set_up_existing_item` likewise only
+            // ever un-previews).
+            if !intent.claims_preview_slot() {
+                self.release_preview_tab(tab_idx);
+            }
+            self.activate_tab_as(tab_idx, entry, window, cx);
             return;
         }
 
@@ -281,7 +357,7 @@ impl Workspace {
 
         // Preview-tab mode: reuse the existing file-viewer tab when available.
         if self.file_viewer_preview_tab
-            && let Some((tab_idx, pane_id)) = self.find_any_file_tab()
+            && let Some((tab_idx, pane_id)) = self.find_preview_file_tab(cx)
         {
             let project = self.active.project;
             // Replace the pane's view in place; keep its scroll handle,
@@ -324,8 +400,11 @@ impl Workspace {
             if let Some(tab) = self.active_runtime_mut().tabs.get_mut(tab_idx) {
                 tab.user_label = None;
             }
-            self.activate_tab(tab_idx, window, cx);
-            self.focus_pane(pane_id, window, cx);
+            self.mark_preview_tab(tab_idx, intent);
+            self.activate_tab_as(tab_idx, entry, window, cx);
+            if entry == PaneEntry::Enter {
+                self.focus_pane(pane_id, window, cx);
+            }
             if let Some(prev_id) = prev_lane {
                 self.invalidate_visible_files_cache(daruda_store::project::LaneRef {
                     project,
@@ -369,9 +448,12 @@ impl Workspace {
         self.active_runtime_mut().tab_history.push(cur_tab);
         let last_tab = self.active_runtime().tabs.len() - 1;
         self.active_runtime_mut().active_tab_index = last_tab;
+        self.mark_preview_tab(last_tab, intent);
         self.set_focused_pane(pane_id, window, cx);
         self.bump_activity(pane_id);
-        self.focus_pane(pane_id, window, cx);
+        if entry == PaneEntry::Enter {
+            self.focus_pane(pane_id, window, cx);
+        }
 
         // Selection moved — the dock row picks up its selected background.
         self.invalidate_visible_files_cache(daruda_store::project::LaneRef {

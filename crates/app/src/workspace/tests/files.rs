@@ -138,7 +138,13 @@ async fn clicking_file_opens_raw_viewer_dedupes_and_selection_moves_independentl
 
     cx.update_window(wh.into(), |_, window, cx| {
         ws.update(cx, |ws, cx| {
-            ws.open_files_entry(id, std::path::PathBuf::from("a.txt"), window, cx);
+            ws.open_files_entry(
+                id,
+                std::path::PathBuf::from("a.txt"),
+                crate::workspace::main_area::tab_ops::OpenIntent::Enter,
+                window,
+                cx,
+            );
         });
     })
     .unwrap();
@@ -168,7 +174,13 @@ async fn clicking_file_opens_raw_viewer_dedupes_and_selection_moves_independentl
 
     cx.update_window(wh.into(), |_, window, cx| {
         ws.update(cx, |ws, cx| {
-            ws.open_files_entry(id, std::path::PathBuf::from("a.txt"), window, cx);
+            ws.open_files_entry(
+                id,
+                std::path::PathBuf::from("a.txt"),
+                crate::workspace::main_area::tab_ops::OpenIntent::Enter,
+                window,
+                cx,
+            );
         });
     })
     .unwrap();
@@ -193,7 +205,10 @@ async fn clicking_file_opens_raw_viewer_dedupes_and_selection_moves_independentl
     });
 
     // Arrow-down: cursor moves off a.txt.
-    ws.update(cx, |ws, cx| ws.move_files_selection(1, cx));
+    cx.update_window(wh.into(), |_, window, cx| {
+        ws.update(cx, |ws, cx| ws.move_files_selection(1, window, cx));
+    })
+    .unwrap();
 
     ws.update(cx, |ws, _cx| {
         let visible = ws.cached_or_rebuild_visible(id);
@@ -495,7 +510,10 @@ async fn keyboard_selection_moves_activates_and_collapses(cx: &mut TestAppContex
 
     // None → first row.
     let v1: Arc<_> = ws.update(cx, |ws, _cx| ws.cached_or_rebuild_visible(id));
-    ws.update(cx, |ws, cx| ws.move_files_selection(1, cx));
+    cx.update_window(wh.into(), |_, window, cx| {
+        ws.update(cx, |ws, cx| ws.move_files_selection(1, window, cx));
+    })
+    .unwrap();
     let v2: Arc<_> = ws.update(cx, |ws, _cx| ws.cached_or_rebuild_visible(id));
     assert!(
         !Arc::ptr_eq(&v1, &v2),
@@ -508,7 +526,10 @@ async fn keyboard_selection_moves_activates_and_collapses(cx: &mut TestAppContex
     // Down again → next row.
     let visible = ws.update(cx, |ws, _| ws.cached_or_rebuild_visible(id));
     let second_id = visible[1].entry_id;
-    ws.update(cx, |ws, cx| ws.move_files_selection(1, cx));
+    cx.update_window(wh.into(), |_, window, cx| {
+        ws.update(cx, |ws, cx| ws.move_files_selection(1, window, cx));
+    })
+    .unwrap();
     ws.read_with(cx, |ws, _| {
         assert_eq!(ws.file_tree.files_selection, Some(second_id));
     });
@@ -1076,7 +1097,13 @@ async fn raw_file_load_feeds_editor_text(cx: &mut TestAppContext) {
 
     cx.update_window(wh.into(), |_, window, cx| {
         ws.update(cx, |ws, cx| {
-            ws.open_files_entry(id, std::path::PathBuf::from("a.txt"), window, cx);
+            ws.open_files_entry(
+                id,
+                std::path::PathBuf::from("a.txt"),
+                crate::workspace::main_area::tab_ops::OpenIntent::Enter,
+                window,
+                cx,
+            );
         });
     })
     .unwrap();
@@ -1175,6 +1202,7 @@ async fn toggle_hide_unchanged_swaps_diff_context_in_the_toggled_pane(cx: &mut T
                 lane_id,
                 std::path::PathBuf::from("f.txt"),
                 false,
+                crate::workspace::main_area::tab_ops::OpenIntent::Preview,
                 window,
                 cx,
             );
@@ -1316,6 +1344,7 @@ async fn toggle_hide_unchanged_for_pane_targets_the_clicked_pane_not_the_focused
                 lane_id,
                 std::path::PathBuf::from("f.txt"),
                 false,
+                crate::workspace::main_area::tab_ops::OpenIntent::Preview,
                 window,
                 cx,
             );
@@ -1417,6 +1446,7 @@ async fn open_pane_file_view_asserts_lane_id_matches_active_lane(cx: &mut TestAp
                 std::path::PathBuf::from("a.txt"),
                 false,
                 crate::workspace::main_area::file_view_pane::FileViewMode::Raw,
+                crate::workspace::main_area::tab_ops::OpenIntent::Enter,
                 window,
                 cx,
             );
@@ -1489,7 +1519,13 @@ async fn git_status_refresh_re_derives_open_file_panes_status(cx: &mut TestAppCo
     let (wh, ws, id, root, abs, _temp) = build_committed_git_workspace(cx);
     cx.update_window(wh.into(), |_, window, cx| {
         ws.update(cx, |ws, cx| {
-            ws.open_files_entry(id, abs.clone(), window, cx);
+            ws.open_files_entry(
+                id,
+                abs.clone(),
+                crate::workspace::main_area::tab_ops::OpenIntent::Enter,
+                window,
+                cx,
+            );
         });
     })
     .unwrap();
@@ -1565,7 +1601,15 @@ async fn enter_and_click_open_the_same_files_row_into_one_tab(cx: &mut TestAppCo
     let after_enter = ws.read_with(cx, |ws, _| ws.active_runtime().tabs.len());
 
     cx.update_window(wh.into(), |_, window, cx| {
-        ws.update(cx, |ws, cx| ws.open_files_entry(id, abs, window, cx));
+        ws.update(cx, |ws, cx| {
+            ws.open_files_entry(
+                id,
+                abs,
+                crate::workspace::main_area::tab_ops::OpenIntent::Enter,
+                window,
+                cx,
+            )
+        });
     })
     .unwrap();
     assert_eq!(
@@ -1601,7 +1645,15 @@ async fn opening_a_changed_file_without_git_context_still_resolves_its_status(
     // The shape every context-free opener uses (agent chat / skills / tasks).
     cx.update_window(wh.into(), |_, window, cx| {
         ws.update(cx, |ws, cx| {
-            ws.open_pane_file_view(id.lane, abs.clone(), false, FileViewMode::Raw, window, cx);
+            ws.open_pane_file_view(
+                id.lane,
+                abs.clone(),
+                false,
+                FileViewMode::Raw,
+                crate::workspace::main_area::tab_ops::OpenIntent::Enter,
+                window,
+                cx,
+            );
         });
     })
     .unwrap();
@@ -1623,7 +1675,15 @@ async fn opening_a_changed_file_without_git_context_still_resolves_its_status(
     });
     cx.update_window(wh.into(), |_, window, cx| {
         ws.update(cx, |ws, cx| {
-            ws.open_pane_file_view(id.lane, abs.clone(), false, FileViewMode::Raw, window, cx);
+            ws.open_pane_file_view(
+                id.lane,
+                abs.clone(),
+                false,
+                FileViewMode::Raw,
+                crate::workspace::main_area::tab_ops::OpenIntent::Enter,
+                window,
+                cx,
+            );
         });
     })
     .unwrap();
@@ -1655,7 +1715,13 @@ async fn installing_content_releases_the_previous_image_table(cx: &mut TestAppCo
 
     cx.update_window(wh.into(), |_, window, cx| {
         ws.update(cx, |ws, cx| {
-            ws.open_files_entry(id, std::path::PathBuf::from("a.txt"), window, cx);
+            ws.open_files_entry(
+                id,
+                std::path::PathBuf::from("a.txt"),
+                crate::workspace::main_area::tab_ops::OpenIntent::Enter,
+                window,
+                cx,
+            );
         });
     })
     .unwrap();
@@ -1698,4 +1764,466 @@ async fn installing_content_releases_the_previous_image_table(cx: &mut TestAppCo
         });
     })
     .unwrap();
+}
+
+/// Enter in the Files panel opens the file, and `open_pane_file_view` focuses
+/// the pane it opened. Without handing focus back the panel loses
+/// `key_context("FilesPanel")`, so the next arrow key never reaches
+/// `FilesSelectNext` and keyboard browsing stops after one file. The row-click
+/// path already restores it; this is the same affordance by keyboard.
+#[gpui::test]
+async fn enter_opens_the_file_and_keeps_the_files_panel_focused(cx: &mut TestAppContext) {
+    let (wh, ws, _temp) = build_workspace_with_temp_project(cx);
+    let id = ws.read_with(cx, |ws, _| ws.active_ref());
+    ws.update(cx, |ws, cx| ws.ensure_file_tree(id, cx));
+    cx.run_until_parked();
+
+    let a_id = child_id_by_name(&ws, cx, "a.txt");
+    cx.update_window(wh.into(), |_, window, cx| {
+        ws.update(cx, |ws, cx| {
+            ws.file_tree.files_panel_focus.clone().focus(window, cx);
+            ws.file_tree.files_selection = Some(a_id);
+            ws.activate_files_selection(window, cx);
+        });
+    })
+    .unwrap();
+    cx.run_until_parked();
+
+    ws.read_with(cx, |ws, _| {
+        assert!(ws.focused_file_view().is_some(), "Enter must open the file");
+    });
+    let focused = cx
+        .update_window(wh.into(), |_, window, cx| {
+            ws.read(cx).file_tree.files_panel_focus.is_focused(window)
+        })
+        .unwrap();
+    assert!(
+        focused,
+        "Enter handed the panel's focus to the file viewer, so the next arrow \
+         key no longer reaches key_context(\"FilesPanel\")"
+    );
+}
+
+/// A single click previews: it opens the file and the panel keeps keyboard
+/// focus, so the arrow keys keep working. The row handler already focused the
+/// panel *before* opening, which `open_pane_file_view` then undid — ordering
+/// is exactly what made the intent silently ineffective, so this pins the
+/// outcome rather than the sequence.
+#[gpui::test]
+async fn a_files_row_click_previews_and_leaves_the_panel_focused(cx: &mut TestAppContext) {
+    let (wh, ws, temp) = build_workspace_with_temp_project(cx);
+    let id = ws.read_with(cx, |ws, _| ws.active_ref());
+    ws.update(cx, |ws, cx| ws.ensure_file_tree(id, cx));
+    cx.run_until_parked();
+
+    let a_id = child_id_by_name(&ws, cx, "a.txt");
+    let abs = temp.path().join("a.txt");
+    cx.update_window(wh.into(), |_, window, cx| {
+        ws.update(cx, |ws, cx| {
+            ws.on_files_row_click(id, a_id, abs.clone(), EntryKind::File, 1, false, window, cx);
+        });
+    })
+    .unwrap();
+    cx.run_until_parked();
+
+    ws.read_with(cx, |ws, _| {
+        let fv = ws.focused_file_view().expect("a click opens the file");
+        assert_eq!(fv.path, abs);
+        assert_eq!(
+            ws.file_tree.files_selection,
+            Some(a_id),
+            "the clicked row becomes the keyboard cursor"
+        );
+    });
+    let focused = cx
+        .update_window(wh.into(), |_, window, cx| {
+            ws.read(cx).file_tree.files_panel_focus.is_focused(window)
+        })
+        .unwrap();
+    assert!(
+        focused,
+        "the click handed focus to the file viewer, so the arrow keys that \
+         follow it never reach key_context(\"FilesPanel\")"
+    );
+}
+
+/// Whatever a click means — open externally, expand a directory, preview —
+/// it happened *in* the panel, so the panel ends up holding focus. Only the
+/// preview branch opens a pane, so the other two would silently depend on
+/// where focus already was.
+#[gpui::test]
+async fn every_files_row_click_leaves_the_panel_focused(cx: &mut TestAppContext) {
+    let (wh, ws, temp) = build_workspace_with_temp_project(cx);
+    let id = ws.read_with(cx, |ws, _| ws.active_ref());
+    ws.update(cx, |ws, cx| ws.ensure_file_tree(id, cx));
+    cx.run_until_parked();
+
+    let a_id = child_id_by_name(&ws, cx, "a.txt");
+    let sub_id = child_id_by_name(&ws, cx, "sub");
+    let cases = [
+        (
+            a_id,
+            temp.path().join("a.txt"),
+            EntryKind::File,
+            2usize,
+            "double click",
+        ),
+        (
+            sub_id,
+            temp.path().join("sub"),
+            EntryKind::Dir,
+            1,
+            "directory expand",
+        ),
+    ];
+
+    for (entry_id, abs, kind, clicks, label) in cases {
+        // Park focus outside the panel so a pass cannot come from focus
+        // simply never having moved.
+        cx.update_window(wh.into(), |_, window, cx| {
+            ws.update(cx, |ws, cx| {
+                ws.git_changes_panel_focus.clone().focus(window, cx);
+                ws.on_files_row_click(id, entry_id, abs, kind, clicks, false, window, cx);
+            });
+        })
+        .unwrap();
+        cx.run_until_parked();
+
+        let focused = cx
+            .update_window(wh.into(), |_, window, cx| {
+                ws.read(cx).file_tree.files_panel_focus.is_focused(window)
+            })
+            .unwrap();
+        assert!(focused, "{label} left focus outside the Files panel");
+    }
+}
+
+/// The Files panel needs the same keyboard door the Git panel does, and for
+/// the same reason: nothing else focuses it, so its seven bindings are only
+/// reachable after a click.
+#[gpui::test]
+async fn toggling_files_focus_switches_the_view_opens_the_dock_and_round_trips(
+    cx: &mut TestAppContext,
+) {
+    let (wh, ws, _temp) = build_workspace_with_temp_project(cx);
+    cx.update_window(wh.into(), |_, window, cx| {
+        ws.update(cx, |ws, cx| {
+            ws.set_left_dock_view(daruda_store::project::LeftDockView::Lanes, cx);
+            ws.left_dock.update(cx, |d, cx| {
+                d.is_open = false;
+                cx.notify();
+            });
+            ws.add_tab(window, cx);
+        });
+    })
+    .unwrap();
+    cx.run_until_parked();
+
+    cx.update_window(wh.into(), |_, window, cx| {
+        ws.update(cx, |ws, cx| ws.toggle_files_focus(window, cx));
+    })
+    .unwrap();
+    cx.run_until_parked();
+
+    let state = cx
+        .update_window(wh.into(), |_, window, cx| {
+            let r = ws.read(cx);
+            (
+                r.left_dock.read(cx).is_open,
+                r.left_dock_view,
+                r.file_tree.files_panel_focus.is_focused(window),
+            )
+        })
+        .unwrap();
+    assert!(state.0, "the dock must open");
+    assert_eq!(state.1, daruda_store::project::LeftDockView::Files);
+    assert!(state.2, "the panel must take keyboard focus");
+
+    cx.update_window(wh.into(), |_, window, cx| {
+        ws.update(cx, |ws, cx| ws.toggle_files_focus(window, cx));
+    })
+    .unwrap();
+    cx.run_until_parked();
+    let still = cx
+        .update_window(wh.into(), |_, window, cx| {
+            ws.read(cx).file_tree.files_panel_focus.is_focused(window)
+        })
+        .unwrap();
+    assert!(!still, "a second press must return focus to the pane");
+}
+
+/// Same two-stage Enter in the Files panel: the first opens and keeps the
+/// panel focused, the second steps into the viewer.
+#[gpui::test]
+async fn a_second_enter_on_the_open_files_row_steps_into_the_viewer(cx: &mut TestAppContext) {
+    let (wh, ws, _temp) = build_workspace_with_temp_project(cx);
+    let id = ws.read_with(cx, |ws, _| ws.active_ref());
+    ws.update(cx, |ws, cx| ws.ensure_file_tree(id, cx));
+    cx.run_until_parked();
+
+    let a_id = child_id_by_name(&ws, cx, "a.txt");
+    cx.update_window(wh.into(), |_, window, cx| {
+        ws.update(cx, |ws, cx| {
+            ws.file_tree.files_panel_focus.clone().focus(window, cx);
+            ws.file_tree.files_selection = Some(a_id);
+            ws.activate_files_selection(window, cx);
+        });
+    })
+    .unwrap();
+    cx.run_until_parked();
+    let after_first = cx
+        .update_window(wh.into(), |_, window, cx| {
+            ws.read(cx).file_tree.files_panel_focus.is_focused(window)
+        })
+        .unwrap();
+    assert!(after_first, "the first Enter stays in the panel");
+
+    cx.update_window(wh.into(), |_, window, cx| {
+        ws.update(cx, |ws, cx| ws.activate_files_selection(window, cx));
+    })
+    .unwrap();
+    cx.run_until_parked();
+    let after_second = cx
+        .update_window(wh.into(), |_, window, cx| {
+            ws.read(cx).file_tree.files_panel_focus.is_focused(window)
+        })
+        .unwrap();
+    assert!(
+        !after_second,
+        "a second Enter on the row already open must step into the viewer"
+    );
+}
+
+/// The two left-dock panels answer the same keys, so they must answer them
+/// the same way: a rested cursor previews in Files exactly as it does in Git
+/// Changes, on the same debounce, without entering the pane.
+#[gpui::test]
+async fn files_arrow_navigation_previews_the_cursor_file(cx: &mut TestAppContext) {
+    let (wh, ws, temp) = build_workspace_with_temp_project(cx);
+    let id = ws.read_with(cx, |ws, _| ws.active_ref());
+    ws.update(cx, |ws, cx| ws.ensure_file_tree(id, cx));
+    cx.run_until_parked();
+
+    // Park the cursor one row above a.txt, wherever the sort puts it, so the
+    // arrow under test lands on a file rather than on whichever directory
+    // happens to sort first.
+    let before_a = ws.update(cx, |ws, _| {
+        let visible = ws.cached_or_rebuild_visible(id);
+        let pos = visible
+            .iter()
+            .position(|e| e.name == "a.txt")
+            .expect("fixture has a.txt");
+        (pos > 0).then(|| visible[pos - 1].entry_id)
+    });
+    cx.update_window(wh.into(), |_, window, cx| {
+        ws.update(cx, |ws, cx| {
+            ws.file_tree.files_panel_focus.clone().focus(window, cx);
+            ws.file_tree.files_selection = before_a;
+            ws.move_files_selection(1, window, cx);
+        });
+    })
+    .unwrap();
+    cx.run_until_parked();
+    ws.read_with(cx, |ws, _| {
+        assert!(
+            ws.focused_file_view().is_none(),
+            "the preview must wait out the debounce, not open on the keystroke"
+        );
+    });
+
+    cx.executor()
+        .advance_clock(std::time::Duration::from_millis(400));
+    cx.run_until_parked();
+
+    ws.read_with(cx, |ws, _| {
+        let fv = ws
+            .focused_file_view()
+            .expect("a settled cursor must preview its file");
+        assert_eq!(fv.path, temp.path().join("a.txt"));
+    });
+    let focused = cx
+        .update_window(wh.into(), |_, window, cx| {
+            ws.read(cx).file_tree.files_panel_focus.is_focused(window)
+        })
+        .unwrap();
+    assert!(focused, "the preview must not take the panel's focus");
+    assert!(
+        !ws.read_with(cx, |ws, _| ws.terminal_input_visible),
+        "and must not surface the input of a pane nobody entered"
+    );
+
+    // A directory row has nothing to show, so it must leave the previous
+    // preview alone rather than blanking or replacing it. Step *onto* it from
+    // the row above — `move_files_selection` only arms when the selection
+    // actually changes, so seeding the selection and moving by zero would
+    // never reach the code under test.
+    let sub_id = child_id_by_name(&ws, cx, "sub");
+    let before_sub = ws.update(cx, |ws, _| {
+        let visible = ws.cached_or_rebuild_visible(id);
+        let pos = visible
+            .iter()
+            .position(|e| e.entry_id == sub_id)
+            .expect("fixture has a `sub` directory");
+        (pos > 0).then(|| visible[pos - 1].entry_id)
+    });
+    cx.update_window(wh.into(), |_, window, cx| {
+        ws.update(cx, |ws, cx| {
+            ws.file_tree.files_panel_focus.clone().focus(window, cx);
+            ws.file_tree.files_selection = before_sub;
+            ws.move_files_selection(1, window, cx);
+        });
+    })
+    .unwrap();
+    ws.read_with(cx, |ws, _| {
+        assert_eq!(
+            ws.file_tree.files_selection,
+            Some(sub_id),
+            "the step must actually land on the directory row"
+        );
+    });
+    cx.executor()
+        .advance_clock(std::time::Duration::from_millis(400));
+    cx.run_until_parked();
+    ws.read_with(cx, |ws, _| {
+        assert_eq!(
+            ws.focused_file_view().map(|fv| fv.path.clone()),
+            Some(temp.path().join("a.txt")),
+            "resting on a directory must not disturb what is on screen"
+        );
+    });
+}
+
+/// Seed `text` into the focused file pane's editor, as typing would.
+fn type_into_focused_file_pane(
+    wh: gpui::WindowHandle<Workspace>,
+    ws: &gpui::Entity<Workspace>,
+    cx: &mut TestAppContext,
+    text: &str,
+) {
+    let text = text.to_string();
+    cx.update_window(wh.into(), |_, window, cx| {
+        ws.update(cx, |ws, cx| {
+            let pane_id = ws.active_runtime().focused_pane_id;
+            let state = ws
+                .active_runtime()
+                .panes
+                .iter()
+                .find(|p| p.id == pane_id)
+                .and_then(|p| p.file_content())
+                .map(|fc| fc.editor_state.clone())
+                .expect("focused pane is a file viewer");
+            state.update(cx, |s, cx| s.set_value(text.as_str(), window, cx));
+        });
+    })
+    .unwrap();
+    cx.run_until_parked();
+}
+
+fn preview_file(
+    wh: gpui::WindowHandle<Workspace>,
+    ws: &gpui::Entity<Workspace>,
+    cx: &mut TestAppContext,
+    id: daruda_store::project::LaneRef,
+    path: std::path::PathBuf,
+) {
+    cx.update_window(wh.into(), |_, window, cx| {
+        ws.update(cx, |ws, cx| {
+            ws.open_files_entry(
+                id,
+                path,
+                crate::workspace::main_area::tab_ops::OpenIntent::Preview,
+                window,
+                cx,
+            );
+        });
+    })
+    .unwrap();
+    cx.run_until_parked();
+}
+
+/// Unsaved edits must not be thrown away by browsing. Closing a tab already
+/// asks the user what to do with them; overwriting the same tab while
+/// skimming asked nothing and simply dropped them. Typing into the scratch
+/// tab takes it out of the scratch slot, so the next preview opens beside it.
+#[gpui::test]
+async fn skimming_past_an_edited_scratch_tab_does_not_discard_the_edits(cx: &mut TestAppContext) {
+    let (wh, ws, temp) = build_workspace_with_temp_project(cx);
+    // The test constructor skips WindowRegistry registration, which the
+    // load-completion handler needs to seed the editor — without it a loaded
+    // file reads as dirty and this test would pass for the wrong reason.
+    cx.update(|cx| {
+        crate::window_registry::WindowRegistry::register(wh.into(), ws.downgrade(), cx);
+    });
+    let id = ws.read_with(cx, |ws, _| ws.active_ref());
+    ws.update(cx, |ws, cx| ws.ensure_file_tree(id, cx));
+    cx.run_until_parked();
+
+    preview_file(wh, &ws, cx, id, temp.path().join("a.txt"));
+    type_into_focused_file_pane(wh, &ws, cx, "EDITED, NOT SAVED");
+    ws.read_with(cx, |ws, cx| {
+        let pane_id = ws.active_runtime().focused_pane_id;
+        assert!(
+            ws.active_runtime()
+                .panes
+                .iter()
+                .find(|p| p.id == pane_id)
+                .expect("pane")
+                .is_dirty(cx),
+            "the fixture must actually have unsaved edits"
+        );
+    });
+
+    preview_file(wh, &ws, cx, id, temp.path().join("b.txt"));
+
+    let panes: Vec<_> = ws.read_with(cx, |ws, _| {
+        ws.active_runtime()
+            .panes
+            .iter()
+            .filter_map(|p| p.file_view())
+            .map(|fv| fv.path.clone())
+            .collect()
+    });
+    assert!(
+        panes.contains(&temp.path().join("a.txt")),
+        "the edited file was replaced by the next preview, taking the unsaved \
+         edits with it; open now: {panes:?}"
+    );
+    assert!(panes.contains(&temp.path().join("b.txt")));
+}
+
+/// The tab strip renders the scratch tab differently so the user can see which
+/// one the next arrow key will take over. Both that italic and the protection
+/// above read one answer, so they can never disagree: typing removes the tab
+/// from the scratch slot, and the italic goes with it.
+#[gpui::test]
+async fn the_scratch_tab_is_identifiable_until_it_is_edited(cx: &mut TestAppContext) {
+    let (wh, ws, temp) = build_workspace_with_temp_project(cx);
+    // The test constructor skips WindowRegistry registration, which the
+    // load-completion handler needs to seed the editor — without it a loaded
+    // file reads as dirty and this test would pass for the wrong reason.
+    cx.update(|cx| {
+        crate::window_registry::WindowRegistry::register(wh.into(), ws.downgrade(), cx);
+    });
+    let id = ws.read_with(cx, |ws, _| ws.active_ref());
+    ws.update(cx, |ws, cx| ws.ensure_file_tree(id, cx));
+    cx.run_until_parked();
+
+    preview_file(wh, &ws, cx, id, temp.path().join("a.txt"));
+    ws.read_with(cx, |ws, cx| {
+        assert_eq!(
+            ws.preview_tab_index(cx),
+            Some(ws.active_runtime().active_tab_index),
+            "a previewed file's tab must be marked as the scratch one"
+        );
+    });
+
+    type_into_focused_file_pane(wh, &ws, cx, "EDITED, NOT SAVED");
+    ws.read_with(cx, |ws, cx| {
+        assert_eq!(
+            ws.preview_tab_index(cx),
+            None,
+            "typing must clear the scratch marking, so the italic drops the \
+             moment the tab stops being replaceable"
+        );
+    });
 }

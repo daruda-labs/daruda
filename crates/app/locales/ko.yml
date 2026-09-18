@@ -121,6 +121,8 @@ command:
   switch_lane: "워크트리 전환…"
   switch_lane_placeholder: "워크트리로 전환..."
   toggle_bottom_panel: "하단 패널 전환"
+  toggle_files_focus: "파일 패널 포커스"
+  toggle_git_changes_focus: "Git 변경사항 패널 포커스"
   toggle_left_dock: "왼쪽 독 전환"
   toggle_right_dock: "오른쪽 독 전환"
   type_command_placeholder: "명령 입력..."

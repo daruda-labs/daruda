@@ -1582,6 +1582,7 @@ impl Workspace {
             path,
             false,
             crate::workspace::main_area::file_view_pane::FileViewMode::Raw,
+            crate::workspace::main_area::tab_ops::OpenIntent::Enter,
             window,
             cx,
         );
@@ -1625,6 +1626,7 @@ impl Workspace {
             target.path,
             false,
             crate::workspace::main_area::file_view_pane::FileViewMode::Raw,
+            crate::workspace::main_area::tab_ops::OpenIntent::Enter,
             window,
             cx,
         );

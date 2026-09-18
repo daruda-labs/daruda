@@ -11,6 +11,7 @@
 use gpui::{App, Entity, Point, Window, px};
 
 use super::main_area::agent_chat_pane::view::ActivityOptionsTab;
+use super::main_area::tab_ops::OpenIntent;
 use super::{ToggleCommandPalette, Workspace, dialog_helpers};
 use daruda_config::BuiltinSection;
 use daruda_store::observability::error_report::{ErrorReport, ErrorSeverity};
@@ -23,6 +24,7 @@ const NAME_LANE_SWITCHER: &str = "lane-switcher";
 const NAME_ERROR_MODAL: &str = "error-modal";
 /// CLI token for the error-toast scenario.
 const NAME_TOAST: &str = "toast";
+const NAME_SCRATCH_TAB: &str = "scratch-tab";
 /// CLI token for the Settings-window scenario. Bare opens the default section;
 /// `settings:<slug>` opens a specific section (e.g. `settings:font`).
 const NAME_SETTINGS: &str = "settings";
@@ -144,6 +146,10 @@ pub(crate) enum ScreenshotScenario {
     ErrorModal,
     /// Push a synthetic error toast.
     Toast,
+    /// Two file tabs side by side — one committed, one the replaceable
+    /// scratch tab. The scratch one renders in italics, which is the whole
+    /// affordance and the one thing a unit test cannot see.
+    ScratchTab,
     /// Open the Settings window at the given section.
     Settings(BuiltinSection),
     /// The same window with an action's failure banner up. Every Settings
@@ -234,17 +240,17 @@ pub(crate) enum ScreenshotScenario {
     /// with [`Self::AgentChatTailOpen`] is the only way to judge the one thing
     /// the row exists to say — whether its two states are distinguishable —
     /// since `agent-chat-narrowed` covers it with the filter popover and no
-    /// state test can look at a rule, an inset label, or a rail.
+    /// state test can look at a rule, an inset label, or an indent.
     AgentChatTail,
-    /// The boundary open: the label anchors left and the rows it revealed carry
-    /// the rail.
+    /// The boundary open: the label anchors left and the rows it revealed sit at
+    /// the response's indent.
     AgentChatTailOpen,
     /// The same boundary one level in: a tool group holding more calls than the
     /// window keeps, open, so the row the group's own window puts inside it is
     /// on screen. Its indent and rule are what say it belongs to the group
     /// rather than to the response — nothing a state test can check.
     AgentChatGroupTail,
-    /// The in-group boundary open, with the calls it revealed railed.
+    /// The in-group boundary open, with the calls it revealed indented.
     AgentChatGroupTailOpen,
     /// The same boundary a third level in: a subagent card whose flattened
     /// children outnumber the window, expanded. Those children own no row, so
@@ -296,6 +302,7 @@ impl ScreenshotScenario {
             NAME_LANE_SWITCHER => Some(Self::LaneSwitcher),
             NAME_ERROR_MODAL => Some(Self::ErrorModal),
             NAME_TOAST => Some(Self::Toast),
+            NAME_SCRATCH_TAB => Some(Self::ScratchTab),
             NAME_SETTINGS => Some(Self::Settings(BuiltinSection::default())),
             NAME_SETTINGS_ERROR => Some(Self::SettingsError),
             NAME_PANE_CONTEXT_MENU => Some(Self::PaneContextMenu),
@@ -416,6 +423,29 @@ pub(crate) fn drive(
         }
         ScreenshotScenario::Toast => {
             workspace.update(cx, |ws, cx| ws.report_error(sample_report(), cx));
+        }
+        ScreenshotScenario::ScratchTab => {
+            workspace.update(cx, |ws, cx| {
+                let lane = ws.active_ref();
+                let Some(root) = ws.lane_for(lane).map(|w| w.path.clone()) else {
+                    return;
+                };
+                // Two real files from the lane root, so the tab labels are the
+                // names the running app would show.
+                let mut names: Vec<std::path::PathBuf> = std::fs::read_dir(&root)
+                    .into_iter()
+                    .flatten()
+                    .flatten()
+                    .filter(|e| e.path().is_file())
+                    .map(|e| e.path())
+                    .collect();
+                names.sort();
+                let (Some(kept), Some(scratch)) = (names.first(), names.get(1)) else {
+                    return;
+                };
+                ws.open_files_entry(lane, kept.clone(), OpenIntent::Commit, window, cx);
+                ws.open_files_entry(lane, scratch.clone(), OpenIntent::Preview, window, cx);
+            });
         }
         ScreenshotScenario::Settings(section) => {
             // The same refresh the `OpenSettings` action takes. Without it the

@@ -1010,7 +1010,13 @@ impl Workspace {
             project: self.active.project,
             lane: wt_id,
         };
-        self.open_files_entry(wt_ref, path, window, cx);
+        self.open_files_entry(
+            wt_ref,
+            path,
+            crate::workspace::main_area::tab_ops::OpenIntent::Enter,
+            window,
+            cx,
+        );
     }
 
     /// Helper used by the conflict prompt's `[Diff]` branch.

@@ -2,7 +2,7 @@
 //!
 //! Builds the single sorted staged+unstaged list, groups it by directory,
 //! and derives the per-directory staging state and per-row affordance gates.
-//! The render layer in the parent module consumes these; `ordered_visible_paths`
+//! The render layer in the parent module consumes these; `visible_file_rows`
 //! is the single source of truth for the keyboard cursor's navigation order.
 
 use std::path::PathBuf;
@@ -160,18 +160,23 @@ pub(in crate::workspace) fn build_rows(
 }
 
 /// Repo-root-relative paths in the same order the left dock renders them,
-/// minus any rows hidden inside a collapsed dir group. Single source of
-/// truth for the keyboard cursor's navigation order — it reads the same
-/// [`build_rows`] the renderer does, so the two cannot disagree about order.
-pub(in crate::workspace) fn ordered_visible_paths(
+/// minus any rows hidden inside a collapsed dir group, each paired with the
+/// row index [`build_rows`] drew it at. Single source of truth for the
+/// keyboard cursor's navigation order — it reads the same [`build_rows`] the
+/// renderer does, so the two cannot disagree about order.
+///
+/// The row index is not the file's position in this list: a directory header
+/// owns a row too, so scrolling the cursor into view has to carry it.
+pub(in crate::workspace) fn visible_file_rows(
     status: &crate::lane::git::GitWorktreeStatus,
     collapsed: &std::collections::HashSet<String>,
     wt_paths: &LanePaths<'_>,
-) -> Vec<PathBuf> {
+) -> Vec<(usize, PathBuf)> {
     build_rows(status, collapsed, wt_paths)
         .into_iter()
-        .filter_map(|row| match row {
-            GitChangesRow::File(e) => Some(e.path),
+        .enumerate()
+        .filter_map(|(ix, row)| match row {
+            GitChangesRow::File(e) => Some((ix, e.path)),
             GitChangesRow::DirHeader(_) => None,
         })
         .collect()
@@ -270,6 +275,19 @@ mod tests {
     /// dir-group key. For tests we set `wt_path == repo_root` so the
     /// repo-root-relative input round-trips back to the same string the
     /// render pipeline groups by.
+    /// Path-only projection of [`visible_file_rows`] — the row indices are
+    /// pinned separately, and ordering reads clearer without them.
+    fn ordered_visible_paths(
+        status: &GitWorktreeStatus,
+        collapsed: &HashSet<String>,
+        wt_paths: &LanePaths<'_>,
+    ) -> Vec<PathBuf> {
+        visible_file_rows(status, collapsed, wt_paths)
+            .into_iter()
+            .map(|(_, path)| path)
+            .collect()
+    }
+
     fn paths_for(root: &Path) -> LanePaths<'_> {
         LanePaths {
             wt_path: root,
@@ -368,6 +386,28 @@ mod tests {
                 "{msg}: ({is_staged}, {has_unstaged})"
             );
         }
+    }
+
+    /// A directory header owns a row of its own, so the cursor's position in
+    /// the file-only list is not the row the list draws it at. Scrolling to
+    /// the former lands short by one row per group above the cursor.
+    #[test]
+    fn visible_file_rows_carry_the_row_index_the_list_draws_at() {
+        let root = Path::new("/repo");
+        let status = GitWorktreeStatus {
+            staged: vec![],
+            unstaged: vec![entry(' ', 'M', "src/a.rs"), entry(' ', 'M', "Cargo.toml")],
+            ..Default::default()
+        };
+        let collapsed: HashSet<String> = HashSet::new();
+        assert_eq!(
+            visible_file_rows(&status, &collapsed, &paths_for(root)),
+            vec![
+                (1, PathBuf::from("src/a.rs")),
+                (2, PathBuf::from("Cargo.toml")),
+            ],
+            "row 0 is the `src` directory header"
+        );
     }
 
     #[test]

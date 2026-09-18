@@ -237,7 +237,7 @@ pub(in crate::workspace) fn render(
         // Virtualized conversation: `list` renders only visible rows, so draw
         // cost is bounded by the viewport, not the conversation length. The
         // closure indexes the projected `rows` (see `rows::project`) and
-        // `render_row` dispatches by kind with per-row padding + nesting rail.
+        // `render_row` dispatches by kind with per-row padding + nesting indent.
         let t_items = t.clone();
         // The first and last *visible* rows carry the list's outer `PAD_Y` (vs
         // `LIST_GAP` between rows); hidden rows are zero-height so they don't
@@ -503,23 +503,14 @@ fn render_row(
     // A new turn (a `User` row past the first) gets extra top space so
     // consecutive turns read as distinct exchanges.
     let turn_break = ix != visible.first && matches!(row.kind, RowKind::User(_));
-    // The turn's rail. One rule at a fixed x for every nested row, not one per
-    // level: a second line a pad-unit in reads as noise rather than as depth,
-    // and depth is already carried by the indent. It owns the row's bottom
-    // padding so the rule spans the gap to the next row — the list virtualizes
-    // each row separately, so a rule that stopped at the content would come out
-    // dashed. Turn breaks use a margin, which no rule crosses, so the rail ends
-    // where the turn does.
-    let rail = theme::dim_toward_gray(theme::agent_chat_border_tint(cx), this.dim_amount);
     let body = div()
         .w_full()
         .min_w_0()
         .pb(px(bottom))
-        // Nest one content-pad unit per level (group members sit under their bar).
+        // Depth is carried by the indent alone — one content-pad unit per level
+        // (group members sit under their bar), no rule down the left.
         .when(row.indent > 0, |d| {
-            d.border_l_1()
-                .border_color(rail)
-                .pl(px(theme::AGENT_CHAT_PAD_X * row.indent as f32))
+            d.pl(px(theme::AGENT_CHAT_PAD_X * row.indent as f32))
         })
         .child(inner);
     let row_el = div()

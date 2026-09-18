@@ -35,6 +35,18 @@ pub(in crate::workspace) struct LaneRuntime {
     /// session-only convenience; starts empty on every app launch.
     pub tab_history: Vec<usize>,
     pub focused_pane_id: pane_tree::PaneId,
+    /// Id of the tab a left-dock preview opened, if one is still open. The
+    /// *only* tab a later preview may replace — anything the user committed
+    /// to by entering it (Enter, a flow, an agent link) is not this one, and
+    /// so survives skimming. One `Option` rather than a flag per tab, like
+    /// zed's `Pane::preview_item_id`: two preview tabs is not a state that
+    /// needs representing.
+    ///
+    /// Not serialized, for the reason `tab_history` is not: previewing is a
+    /// thing the user is doing right now, and a restored session is not in
+    /// the middle of it. A restored tab is simply committed, so the first
+    /// skim after a restart opens one new tab and reuses it from then on.
+    pub preview_tab_id: Option<u64>,
 }
 
 impl Workspace {
@@ -531,6 +543,7 @@ impl Workspace {
                 };
 
                 let runtime = LaneRuntime {
+                    preview_tab_id: None,
                     tabs,
                     panes: scratch,
                     active_tab_index: wt_active_tab,

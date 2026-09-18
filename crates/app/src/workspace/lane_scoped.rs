@@ -95,8 +95,21 @@ pub(in crate::workspace) struct GitLaneState {
     pub dirs: GitDirsState,
     /// Lane-relative directory groups, kept only for this app session.
     pub collapsed_dirs: HashSet<String>,
-    /// Repo-root-relative path so refreshes keep the cursor on the same file.
-    pub cursor: Option<PathBuf>,
+    pub cursor: Option<GitCursor>,
+}
+
+/// Where the Git Changes keyboard cursor sits.
+pub(in crate::workspace) struct GitCursor {
+    /// Repo-root-relative path of the file the cursor is on — its identity,
+    /// not its position. Space and Enter resolve through this, so a background
+    /// refresh that inserts a file above cannot make them act on a different
+    /// file than the highlighted one.
+    pub path: PathBuf,
+    /// Position `path` held among the visible files the last time it was one
+    /// of them. Read only once `path` has left the list — discarded, reverted
+    /// by an agent, hidden under a collapsed group — so the next arrow key
+    /// resumes at the row that took its place instead of jumping to the top.
+    pub index: usize,
 }
 
 #[cfg(test)]

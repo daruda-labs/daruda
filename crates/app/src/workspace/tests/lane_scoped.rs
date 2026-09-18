@@ -18,7 +18,10 @@ fn seed_git_state(ws: &mut Workspace, target: LaneRef) {
     git.tracking_refresh.claim();
     git.worktree_refresh.claim();
     git.collapsed_dirs.insert("src".into());
-    git.cursor = Some("src/main.rs".into());
+    git.cursor = Some(crate::workspace::lane_scoped::GitCursor {
+        path: "src/main.rs".into(),
+        index: 3,
+    });
 }
 
 fn seed_files_state(ws: &mut Workspace, target: LaneRef) {
@@ -76,8 +79,8 @@ fn assert_git_state_retained(ws: &Workspace, target: LaneRef) {
     );
     assert!(git.collapsed_dirs.contains("src"));
     assert_eq!(
-        git.cursor.as_deref(),
-        Some(std::path::Path::new("src/main.rs"))
+        git.cursor.as_ref().map(|c| (c.path.as_path(), c.index)),
+        Some((std::path::Path::new("src/main.rs"), 3))
     );
 }
 

@@ -27,8 +27,8 @@ use super::{
     NextTab, OpenAgentChat, OpenCommandHistory, OpenProjectConfig, OpenSettings, PrevTab,
     PullChanges, RefreshGitStatus, ShowLeftDockFiles, ShowLeftDockGit, ShowLeftDockLanes,
     SplitDown, SplitRight, SwitchRightPanelFlows, SwitchRightPanelSkills, SwitchRightPanelTasks,
-    SwitchRightPanelTools, SwitchRightPanelUsage, ToggleCommandPalette, ToggleFullScreen,
-    ToggleZoomPane, UninstallAgentHooks, ZoomWindow,
+    SwitchRightPanelTools, SwitchRightPanelUsage, ToggleCommandPalette, ToggleFilesFocus,
+    ToggleFullScreen, ToggleGitChangesFocus, ToggleZoomPane, UninstallAgentHooks, ZoomWindow,
 };
 use crate::workspace::main_area::nav::NavDirection;
 use crate::workspace::main_area::pane_tree::SplitDirection;
@@ -380,19 +380,19 @@ impl Workspace {
     pub(in crate::workspace) fn on_files_select_next(
         &mut self,
         _: &FilesSelectNext,
-        _window: &mut Window,
+        window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        self.move_files_selection(1, cx);
+        self.move_files_selection(1, window, cx);
     }
 
     pub(in crate::workspace) fn on_files_select_prev(
         &mut self,
         _: &FilesSelectPrev,
-        _window: &mut Window,
+        window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        self.move_files_selection(-1, cx);
+        self.move_files_selection(-1, window, cx);
     }
 
     pub(in crate::workspace) fn on_files_activate(
@@ -832,22 +832,40 @@ impl Workspace {
 
     // ---- Git Changes keyboard navigation ----
 
+    pub(in crate::workspace) fn on_toggle_git_changes_focus(
+        &mut self,
+        _: &ToggleGitChangesFocus,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.toggle_git_changes_focus(window, cx);
+    }
+
+    pub(in crate::workspace) fn on_toggle_files_focus(
+        &mut self,
+        _: &ToggleFilesFocus,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.toggle_files_focus(window, cx);
+    }
+
     pub(in crate::workspace) fn on_git_changes_select_next(
         &mut self,
         _: &GitChangesSelectNext,
-        _window: &mut Window,
+        window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        self.move_git_changes_cursor(1, cx);
+        self.move_git_changes_cursor(1, window, cx);
     }
 
     pub(in crate::workspace) fn on_git_changes_select_prev(
         &mut self,
         _: &GitChangesSelectPrev,
-        _window: &mut Window,
+        window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        self.move_git_changes_cursor(-1, cx);
+        self.move_git_changes_cursor(-1, window, cx);
     }
 
     pub(in crate::workspace) fn on_git_changes_toggle_stage(

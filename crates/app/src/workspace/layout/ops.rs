@@ -88,6 +88,46 @@ impl Workspace {
         cx.notify();
     }
 
+    /// Go to a left-dock panel: switch the dock to `view`, open it if it is
+    /// shut, and give `panel` keyboard focus. Pressing the same binding again
+    /// while that panel already holds focus goes back to the pane, so one key
+    /// round-trips between the panel and the work.
+    ///
+    /// Without this there is no keyboard way into a left-dock panel at all —
+    /// [`Self::on_toggle_left_dock`] opens the dock but focuses nothing, and
+    /// the view tab strip is a click. Mirrors zed's
+    /// `Workspace::toggle_panel_focus`, including activating the panel before
+    /// deciding: pressing the Git binding while Files holds focus goes to Git
+    /// rather than bouncing out to the pane.
+    pub(in crate::workspace) fn toggle_left_dock_panel_focus(
+        &mut self,
+        view: daruda_store::project::LeftDockView,
+        panel: gpui::FocusHandle,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        // The dock has to be open for the user to actually be there: GPUI
+        // leaves a focus handle focused when its element unmounts, so a panel
+        // whose dock was shut with Cmd+B still reports itself focused.
+        let already_there = self.left_dock_view == view
+            && self.left_dock.read(cx).is_open
+            && panel.is_focused(window);
+        if already_there {
+            let pane = self.active_runtime().focused_pane_id;
+            self.focus_pane(pane, window, cx);
+            return;
+        }
+        self.set_left_dock_view(view, cx);
+        if !self.left_dock.read(cx).is_open {
+            self.mutate_durable(cx, |ws, cx| {
+                ws.left_dock.update(cx, |d, _| d.is_open = true);
+                ws.main_area.pending_resize = true;
+            });
+        }
+        panel.focus(window, cx);
+        cx.notify();
+    }
+
     pub(in crate::workspace) fn on_toggle_bottom_dock(
         &mut self,
         _: &ToggleBottomDock,
