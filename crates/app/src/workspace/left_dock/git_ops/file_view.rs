@@ -16,7 +16,7 @@ use crate::workspace::main_area::file_view_pane::file_content::LoadOutcome;
 use crate::workspace::main_area::file_view_pane::mermaid_theme::MermaidPalette;
 use crate::workspace::main_area::file_view_pane::{FileViewMode, PaneFileContent, PaneFileView};
 use crate::workspace::main_area::pane::FileContent;
-use crate::workspace::main_area::pane_tree::{PaneId, PaneLayout};
+use crate::workspace::main_area::pane_tree::PaneId;
 use crate::workspace::main_area::tab_ops::{OpenIntent, PaneEntry};
 
 fn line_to_editor_position(line: usize) -> gpui_component::input::Position {
@@ -244,7 +244,10 @@ impl Workspace {
             .active_runtime()
             .tabs
             .iter()
-            .position(|t| matches!(t.layout, PaneLayout::Pane(p) if p == pane_id))
+            // `pane_ids` walks the split tree, not just a one-leaf tab: a pane
+            // can be split and collapsed back onto the same `TabEntry`, and the
+            // slot has to be released for the tab that actually holds it.
+            .position(|t| t.layout.pane_ids().contains(&pane_id))
         else {
             return;
         };

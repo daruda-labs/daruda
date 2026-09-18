@@ -532,6 +532,12 @@ async fn skimming_back_over_a_committed_row_does_not_make_it_replaceable(cx: &mu
         "the row opened with Enter was taken over after the cursor passed back \
          across it; open now: {open:?}"
     );
+    assert_eq!(
+        open.len(),
+        2,
+        "the two skimmed rows must still share one scratch tab beside it — \
+         otherwise this passes with the scratch mechanism dead; open: {open:?}"
+    );
 }
 
 /// Walking into a pane is a commit. A row the arrow preview opened and the
@@ -677,4 +683,29 @@ async fn closing_the_scratch_tab_leaves_the_next_preview_intact(cx: &mut TestApp
     let open = open_file_paths(&ws, cx);
     assert_eq!(open.len(), 1, "the next preview opens its own tab");
     assert!(open[0].ends_with("b.rs"), "opened {:?}", open[0]);
+}
+
+/// With `preview_tab = false` every file gets its own tab, so nothing is ever
+/// replaceable — and the tab strip must not italicise one as if it were.
+#[gpui::test]
+async fn multi_tab_mode_marks_no_scratch_tab(cx: &mut TestAppContext) {
+    let (w, ws) = dock_showing_changes(cx, vec![entry("a.rs"), entry("b.rs")]);
+    ws.update(cx, |ws, _| ws.file_viewer_preview_tab = false);
+
+    arrow(w, &ws, cx, 1);
+    arrow(w, &ws, cx, 1);
+
+    assert_eq!(
+        open_file_paths(&ws, cx).len(),
+        2,
+        "multi-tab mode opens a tab per file"
+    );
+    ws.read_with(cx, |ws, cx| {
+        assert_eq!(
+            ws.preview_tab_index(cx),
+            None,
+            "no tab is replaceable in multi-tab mode, so none may be shown as \
+             the scratch one"
+        );
+    });
 }

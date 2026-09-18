@@ -116,6 +116,11 @@ impl Workspace {
     /// the edits away, and the italic drops the moment the user types — so
     /// what the strip shows is exactly what the reuse will do.
     pub(in crate::workspace) fn preview_tab_index(&self, cx: &App) -> Option<usize> {
+        // Multi-tab mode never reuses a tab, so nothing is replaceable and the
+        // strip must not italicise one as though it were.
+        if !self.file_viewer_preview_tab {
+            return None;
+        }
         let (i, pane_id) = self.preview_tab_slot()?;
         let pane = self
             .active_runtime()

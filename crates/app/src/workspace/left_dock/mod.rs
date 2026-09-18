@@ -42,6 +42,13 @@ impl Workspace {
     /// re-checked when the timer elapses: a preview opens a file *and switches
     /// the active tab*, so firing for a panel the user has already left would
     /// move them somewhere they walked away from.
+    ///
+    /// `contains_focused`, not `is_focused`: the panel's own header buttons are
+    /// `gpui_component::Button`s, which `track_focus` their own handle, and
+    /// GPUI's focusable mouse-down handler `prevent_default()`s so the ancestor
+    /// panel does not get it back. The arrow keys still reach the panel's key
+    /// context from there, so an exact-handle test would walk the cursor with
+    /// nothing ever opening.
     pub(in crate::workspace) fn arm_left_dock_preview(
         &mut self,
         panel: gpui::FocusHandle,
@@ -53,7 +60,7 @@ impl Workspace {
         self.left_dock_preview = Some(cx.spawn_in(window, async move |this, cx| {
             cx.background_executor().timer(PREVIEW_DELAY).await;
             this.update_in(cx, |ws, window, cx| {
-                if ws.active == armed_for && panel.is_focused(window) {
+                if ws.active == armed_for && panel.contains_focused(window, cx) {
                     open(ws, window, cx);
                 }
             })
