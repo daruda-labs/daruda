@@ -465,7 +465,7 @@ impl DisplayFilter {
             .filter(|facet| !self.contains(*facet))
             // A parent stands for its whole section, so exactly one of the two
             // speaks for it: the parent when the section is entirely off ("Tool
-            // calls", not all five categories), the rows when it is partly on.
+            // calls", not every category under it), the rows when it is partly on.
             .filter(|facet| match facet.axis().parent() {
                 Some(parent) if *facet == parent => self.section_state(parent) == SectionState::Off,
                 Some(parent) => self.section_state(parent) != SectionState::Off,

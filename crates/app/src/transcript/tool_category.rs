@@ -367,8 +367,12 @@ mod tests {
         for (category, expected) in [
             ("read", "1 file read"),
             ("edit", "1 file edited"),
+            ("delete", "1 file deleted"),
             ("search", "1 search"),
             ("run", "1 command"),
+            ("fetch", "1 web call"),
+            ("mcp", "1 MCP call"),
+            ("agent", "1 agent"),
             ("other", "1 other call"),
         ] {
             let key = format!("agent_chat.group_{category}_one");

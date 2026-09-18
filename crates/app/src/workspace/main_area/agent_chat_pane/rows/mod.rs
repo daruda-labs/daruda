@@ -188,9 +188,9 @@ impl RenderRow {
 
 /// Filter matches, plus the ancestors needed to reach a matching nested tool.
 ///
-/// Every call answers for its own category however deeply it nests, so
-/// narrowing to one leaves a subagent card standing with only that category's
-/// calls inside it — the launch itself is exempt in [`DisplayFilter::matches_tool`].
+/// Every call answers for its own category however deeply it nests, and a match
+/// drags its ancestors in — so narrowing to one leaves a subagent card standing
+/// with only that category's calls inside it, reachable through the card.
 #[derive(Default)]
 pub(in crate::workspace) struct FilterMatchIndex {
     filter: DisplayFilter,

@@ -244,8 +244,9 @@ fn an_unnamed_tool_falls_back_to_its_kind() {
 
 #[test]
 fn a_name_the_build_does_not_know_falls_back_to_its_kind() {
-    // `Skill`, `WebSearch`, `Task`, `mcp__*` … are not in the name table,
-    // so the ACP kind decides rather than being discarded for `ToolOther`.
+    // `Skill`, `WebSearch`, `Task` … are not in the name table, so the ACP
+    // kind decides rather than being discarded for `ToolOther`. (An `mcp__*`
+    // name never reaches the table — its own prefix answers first.)
     let skill = || {
         call(
             Some("Skill"),
@@ -777,12 +778,11 @@ fn turning_the_whole_tool_section_off_takes_the_launch_too() {
 #[test]
 fn every_tool_category_has_a_filter_row() {
     for category in ToolCategory::ALL {
-        assert!(
-            FilterFacet::ALL
-                .iter()
-                .any(|facet| facet.category() == Some(category)),
-            "no filter row names {category:?}"
-        );
+        let rows = FilterFacet::ALL
+            .iter()
+            .filter(|facet| facet.category() == Some(category))
+            .count();
+        assert_eq!(rows, 1, "{category:?} must have exactly one filter row");
     }
 }
 

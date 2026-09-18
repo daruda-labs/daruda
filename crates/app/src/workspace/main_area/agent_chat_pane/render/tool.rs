@@ -23,6 +23,7 @@ use super::mermaid::{mermaid_code_block_render, mermaid_fence_element};
 use super::status_icon::status_icon_with_age;
 use super::tail_row::call_boundary_label;
 use crate::surface::strings as s;
+use crate::transcript::tool_category::{ToolCategory, is_mcp_tool_name};
 use crate::ui::theme;
 use crate::ui::{Icon, IconName, IconNamed as _, Sizable as _};
 use crate::workspace::main_area::agent_chat_pane::agent_chat_helpers::{
@@ -713,14 +714,10 @@ fn tool_title_summary(title: &str) -> String {
 }
 
 /// The header's primary label. Prefers the agent's own tool name (`Bash`,
-/// `Grep`, …) — the vocabulary the user knows from the agent's CLI and more
-/// specific than the normalized kind — falling back to a fixed-vocabulary label
-/// when the agent surfaced no tool name. The leading icon already conveys the
-/// kind, so the specific name here adds information rather than duplicating it.
-///
-/// The launch question comes before the kind for the same reason it does in
-/// [`tool_icon`]: a spawned agent arrives as [`ToolKindView::Think`], so the
-/// kind label alone calls a delegated run "Think".
+/// `Grep`, …) — the vocabulary the user knows from its CLI — over the
+/// normalized kind, which the leading icon already conveys. A nameless launch
+/// falls back to "Subagent" rather than the kind, which would call a delegated
+/// run "Think".
 fn tool_header_label(tc: &ToolCallItem) -> String {
     tc.tool_name.clone().unwrap_or_else(|| {
         if tc.is_subagent_launch() {
@@ -752,31 +749,41 @@ fn tool_kind_label(kind: ToolKindView) -> String {
 /// carries no such glyph, so `Think` reaches outside it (see [`tool_icon`]).
 const ICON_THINK: &str = "icons/ui/psychology.svg";
 
+/// The category a call's *name* answers for, when no ACP kind can: a launch
+/// arrives as [`ToolKindView::Think`] and an MCP tool as [`ToolKindView::Other`],
+/// each sharing that kind with something else.
+fn name_keyed_category(tc: &ToolCallItem) -> Option<ToolCategory> {
+    if tc.is_subagent_launch() {
+        return Some(ToolCategory::Agent);
+    }
+    tc.tool_name
+        .as_deref()
+        .is_some_and(is_mcp_tool_name)
+        .then_some(ToolCategory::Mcp)
+}
+
+/// The glyph for a category [`name_keyed_category`] answers for; `None` when
+/// the kind answers instead. One home, so a card and its group bar cannot pick
+/// two different glyphs for the same question.
+pub(super) fn name_keyed_icon(category: ToolCategory) -> Option<SharedString> {
+    match category {
+        ToolCategory::Agent => Some(IconName::Bot.path()),
+        ToolCategory::Mcp => Some(IconName::ExternalLink.path()),
+        _ => None,
+    }
+}
+
 /// The asset behind a tool call's leading header icon, mirroring zed's
-/// kind-based icon. The two name-keyed questions come first because the kind
-/// cannot answer either: a spawned agent arrives as [`ToolKindView::Think`] and
-/// an MCP tool as [`ToolKindView::Other`], each sharing that kind with
-/// something else. Returns a path rather than an `IconName` because two glyph
+/// kind-based icon. Returns a path rather than an `IconName` because two glyph
 /// families meet here — lucide is named, Material is not.
 pub(super) fn tool_icon(tc: &ToolCallItem) -> SharedString {
-    if tc.is_subagent_launch() {
-        return IconName::Bot.path();
-    }
-    // Same shape one step out: an MCP server's tool arrives as `Other` like
-    // any unknown call, so only its name says where it came from.
-    if tc
-        .tool_name
-        .as_deref()
-        .is_some_and(crate::transcript::tool_category::is_mcp_tool_name)
-    {
-        return IconName::ExternalLink.path();
-    }
-    tool_kind_icon(tc.kind)
+    name_keyed_category(tc)
+        .and_then(name_keyed_icon)
+        .unwrap_or_else(|| tool_kind_icon(tc.kind))
 }
 
 /// The kind half of [`tool_icon`], for a caller that has a kind and no call —
-/// the group bar, which maps its category to a representative kind so a bar and
-/// the cards under it never disagree.
+/// the group bar, which maps its category to a representative kind.
 pub(super) fn tool_kind_icon(kind: ToolKindView) -> SharedString {
     // The vendored `IconName` set has no pencil/edit glyph, so Edit falls back
     // to `File` (Read already uses `Eye`, so no visual collision).

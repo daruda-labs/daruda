@@ -130,7 +130,7 @@ use tool::{CardContext, permission_card, tool_card};
 use crate::surface::strings as s;
 use crate::ui::theme;
 use crate::ui::theme::PaneSurfaceTokens;
-use crate::ui::{Icon, IconName, IconNamed as _, Sizable as _, StatusPulseClock, button_bare};
+use crate::ui::{Icon, IconName, Sizable as _, StatusPulseClock, button_bare};
 use crate::workspace::main_area::agent_chat_pane::agent_chat_helpers::{
     DiffStat, Rollup, TurnBoundary, fold_context_at,
 };
@@ -821,24 +821,26 @@ fn category_segments(
         .into_any_element()
 }
 
-/// The glyph for one tool category. A category the ACP kind can name borrows
-/// the per-call mapping through a representative kind; the two that no kind can
-/// name — a launch and an MCP tool, both of which arrive under a kind they
-/// share with something else — take the same glyph `tool::tool_icon` gives
-/// their cards, so a bar and the cards under it never disagree.
+/// The glyph for one tool category. A category an ACP kind can name borrows the
+/// per-call mapping through a representative kind; the two no kind can name go
+/// through [`tool::name_keyed_icon`], the same source their cards use.
 fn category_icon(category: crate::transcript::tool_category::ToolCategory) -> SharedString {
     use crate::transcript::tool_category::ToolCategory;
-    match category {
-        ToolCategory::Agent => IconName::Bot.path(),
-        ToolCategory::Mcp => IconName::ExternalLink.path(),
-        ToolCategory::Read => tool::tool_kind_icon(daruda_acp::ToolKindView::Read),
-        ToolCategory::Edit => tool::tool_kind_icon(daruda_acp::ToolKindView::Edit),
-        ToolCategory::Delete => tool::tool_kind_icon(daruda_acp::ToolKindView::Delete),
-        ToolCategory::Search => tool::tool_kind_icon(daruda_acp::ToolKindView::Search),
-        ToolCategory::Run => tool::tool_kind_icon(daruda_acp::ToolKindView::Execute),
-        ToolCategory::Fetch => tool::tool_kind_icon(daruda_acp::ToolKindView::Fetch),
-        ToolCategory::Other => tool::tool_kind_icon(daruda_acp::ToolKindView::Other),
+    if let Some(icon) = tool::name_keyed_icon(category) {
+        return icon;
     }
+    tool::tool_kind_icon(match category {
+        ToolCategory::Read => daruda_acp::ToolKindView::Read,
+        ToolCategory::Edit => daruda_acp::ToolKindView::Edit,
+        ToolCategory::Delete => daruda_acp::ToolKindView::Delete,
+        ToolCategory::Search => daruda_acp::ToolKindView::Search,
+        ToolCategory::Run => daruda_acp::ToolKindView::Execute,
+        ToolCategory::Fetch => daruda_acp::ToolKindView::Fetch,
+        // Answered above; the kind they share names something else.
+        ToolCategory::Agent | ToolCategory::Mcp | ToolCategory::Other => {
+            daruda_acp::ToolKindView::Other
+        }
+    })
 }
 
 /// Tool calls in `run` that the current projection displays — filter matches
@@ -1090,13 +1092,14 @@ fn render_item(
 mod tests {
     use super::*;
 
-    /// A bar names its calls, so its glyph has to be the one those cards show.
-    /// The two categories no ACP kind can name are where that can drift: both
-    /// are keyed off the call instead, and this is what holds the two keys
-    /// together.
+    /// A bar names its calls, so for the two categories no ACP kind can name
+    /// its glyph has to be the one those cards show. Scoped to those two: a
+    /// category the kind names is a coarser question than a card's own kind
+    /// (Edit covers Move), so the two are not the same glyph by design.
     #[test]
     fn a_name_keyed_category_shows_the_glyph_its_cards_do() {
         use crate::transcript::tool_category::classify_tool;
+        use crate::ui::IconNamed as _;
         use daruda_acp::{ToolCallItem, ToolKindView, ToolStatusView};
 
         let call = |tool_name: Option<&str>, raw_input| ToolCallItem {
@@ -1126,6 +1129,26 @@ mod tests {
                 tc.tool_name
             );
         }
+
+        // The one place the two part: a reported diff is what the call *did*,
+        // which is what a bar tallies, while the card still names which tool it
+        // was. Pinned so the split stays a decision rather than a drift.
+        let mut edited = call(Some("mcp__obsidian__obsidian_put_content"), None);
+        edited.diffs.push(daruda_acp::DiffView {
+            path: "/tmp/x".into(),
+            old_text: None,
+            new_text: "changed".into(),
+        });
+        assert_eq!(
+            category_icon(classify_tool(&edited)),
+            tool::tool_kind_icon(ToolKindView::Edit),
+            "the bar tallies the edit"
+        );
+        assert_eq!(
+            tool::tool_icon(&edited),
+            IconName::ExternalLink.path(),
+            "the card still names the tool"
+        );
     }
 
     /// Covers both consumers — the working indicator's run timer and a tool

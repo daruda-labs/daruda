@@ -175,9 +175,9 @@ impl ToolCallItem {
     /// Whether this call is shaped like a subagent launch at all — either
     /// input field is enough, since an adapter is not guaranteed to send both.
     /// The single source for "does this card get subagent-card treatment":
-    /// today a default-collapsed fold, and exemption from the display filter's
-    /// category narrowing (the card holds work of kinds its own kind does not
-    /// name). Keeping it one predicate is what stops those from drifting apart.
+    /// its own fold key, its own display category, and the glyph both the card
+    /// and its group bar key off. Keeping it one predicate is what stops those
+    /// from drifting apart.
     pub fn is_subagent_launch(&self) -> bool {
         self.subagent_type().is_some() || self.subagent_prompt().is_some()
     }

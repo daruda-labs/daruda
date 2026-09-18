@@ -194,11 +194,23 @@ fn cycles() -> Vec<Cycle> {
                 Call::new("cargo fmt --all -- --check", ToolKindView::Execute, Some("Bash")),
             ],
         },
+        // The seed's widest run: one call per category the bar names with a
+        // glyph of its own, so a capture can judge the segments side by side.
         Cycle {
-            thinking: "**Last pass** — record the floor in the docs that promise it, \
-                       then run the suite once more.",
-            prose: "Recording the rule and re-running the suite.",
+            thinking: "**Last pass** — cite the release the floor comes from, record \
+                       it where the team reads it, then run the suite once more.",
+            prose: "Citing the release, recording the rule, re-running the suite.",
             tools: vec![
+                Call::new(
+                    "Fetch https://blog.rust-lang.org/2026/01/09/Rust-1.95.0.html",
+                    ToolKindView::Fetch,
+                    Some("WebFetch"),
+                ),
+                Call::new(
+                    "Append References/Rust-toolchain-floor.md",
+                    ToolKindView::Other,
+                    Some("mcp__obsidian__obsidian_append_content"),
+                ),
                 Call::new("Edit crates/daruda_terminal/CLAUDE.md", ToolKindView::Edit, Some("Edit")),
                 Call::new("Read scripts/lint-file-size.sh", ToolKindView::Read, Some("Read")),
                 Call::new("cargo test -p daruda_terminal", ToolKindView::Execute, Some("Bash")),
@@ -412,6 +424,7 @@ fn tool_call(ix: usize, call: Call) -> ChatItem {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::transcript::tool_category::{ToolCategory, classify_tool};
 
     /// One cycle earns one tool run, and the tail window can only be looked at
     /// when there is more history than the largest offered window keeps.
@@ -488,8 +501,17 @@ mod tests {
             ToolKindView::Edit,
             ToolKindView::Search,
             ToolKindView::Execute,
+            ToolKindView::Fetch,
         ] {
             assert!(calls.iter().any(|c| c.kind == kind), "missing {kind:?}");
+        }
+        // A capture is the only place the bar's own segments can be judged, so
+        // the seed has to hold one call per category the bar can name.
+        for category in [ToolCategory::Fetch, ToolCategory::Mcp] {
+            assert!(
+                calls.iter().any(|c| classify_tool(c) == category),
+                "missing {category:?}"
+            );
         }
         assert!(calls.iter().any(|c| c.tool_name.is_some()));
         assert!(calls.iter().any(|c| c.tool_name.is_none()));
