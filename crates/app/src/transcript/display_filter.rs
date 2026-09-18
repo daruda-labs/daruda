@@ -50,14 +50,17 @@ pub(crate) enum FilterFacet {
     Tools,
     ToolRead,
     ToolEdit,
+    ToolDelete,
     ToolSearch,
     ToolRun,
+    ToolFetch,
+    ToolMcp,
     ToolAgent,
     ToolOther,
 }
 
 impl FilterFacet {
-    pub(crate) const ALL: [FilterFacet; 11] = [
+    pub(crate) const ALL: [FilterFacet; 14] = [
         Self::Thinking,
         Self::Prose,
         Self::ProseAnswer,
@@ -65,8 +68,11 @@ impl FilterFacet {
         Self::Tools,
         Self::ToolRead,
         Self::ToolEdit,
+        Self::ToolDelete,
         Self::ToolSearch,
         Self::ToolRun,
+        Self::ToolFetch,
+        Self::ToolMcp,
         Self::ToolAgent,
         Self::ToolOther,
     ];
@@ -81,8 +87,11 @@ impl FilterFacet {
             Self::Tools
             | Self::ToolRead
             | Self::ToolEdit
+            | Self::ToolDelete
             | Self::ToolSearch
             | Self::ToolRun
+            | Self::ToolFetch
+            | Self::ToolMcp
             | Self::ToolAgent
             | Self::ToolOther => FilterAxis::Tool,
         }
@@ -106,8 +115,11 @@ impl FilterFacet {
             | Self::Tools => None,
             Self::ToolRead => Some(ToolCategory::Read),
             Self::ToolEdit => Some(ToolCategory::Edit),
+            Self::ToolDelete => Some(ToolCategory::Delete),
             Self::ToolSearch => Some(ToolCategory::Search),
             Self::ToolRun => Some(ToolCategory::Run),
+            Self::ToolFetch => Some(ToolCategory::Fetch),
+            Self::ToolMcp => Some(ToolCategory::Mcp),
             Self::ToolAgent => Some(ToolCategory::Agent),
             Self::ToolOther => Some(ToolCategory::Other),
         }
@@ -123,8 +135,11 @@ impl FilterFacet {
             Self::Tools => "tools",
             Self::ToolRead => "tool_read",
             Self::ToolEdit => "tool_edit",
+            Self::ToolDelete => "tool_delete",
             Self::ToolSearch => "tool_search",
             Self::ToolRun => "tool_run",
+            Self::ToolFetch => "tool_fetch",
+            Self::ToolMcp => "tool_mcp",
             Self::ToolAgent => "tool_agent",
             Self::ToolOther => "tool_other",
         }

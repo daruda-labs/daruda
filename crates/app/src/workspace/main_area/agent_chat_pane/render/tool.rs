@@ -753,14 +753,23 @@ fn tool_kind_label(kind: ToolKindView) -> String {
 const ICON_THINK: &str = "icons/ui/psychology.svg";
 
 /// The asset behind a tool call's leading header icon, mirroring zed's
-/// kind-based icon. The subagent question comes first because the kind cannot
-/// answer it: a spawned agent arrives as [`ToolKindView::Think`] like any
-/// reasoning tool, so keying on kind alone drew a running subagent and a plain
-/// think-kind call with one glyph. Returns a path rather than an `IconName`
-/// because two glyph families meet here — lucide is named, Material is not.
+/// kind-based icon. The two name-keyed questions come first because the kind
+/// cannot answer either: a spawned agent arrives as [`ToolKindView::Think`] and
+/// an MCP tool as [`ToolKindView::Other`], each sharing that kind with
+/// something else. Returns a path rather than an `IconName` because two glyph
+/// families meet here — lucide is named, Material is not.
 pub(super) fn tool_icon(tc: &ToolCallItem) -> SharedString {
     if tc.is_subagent_launch() {
         return IconName::Bot.path();
+    }
+    // Same shape one step out: an MCP server's tool arrives as `Other` like
+    // any unknown call, so only its name says where it came from.
+    if tc
+        .tool_name
+        .as_deref()
+        .is_some_and(crate::transcript::tool_category::is_mcp_tool_name)
+    {
+        return IconName::ExternalLink.path();
     }
     tool_kind_icon(tc.kind)
 }

@@ -310,15 +310,21 @@ fn a_shell_written_file_is_invisible_to_the_edit_facet() {
     )));
 }
 
+/// A move rewrites where a file lives, so it answers to the edit row. A delete
+/// leaves nothing to read back and answers to its own.
 #[test]
-fn delete_and_move_are_edits() {
-    let f = filter(&["tool_edit"]);
-    for kind in [ToolKindView::Edit, ToolKindView::Delete, ToolKindView::Move] {
+fn a_move_is_an_edit_and_a_delete_is_not() {
+    let edits = filter(&["tool_edit"]);
+    for kind in [ToolKindView::Edit, ToolKindView::Move] {
         assert!(
-            f.matches(&call(None, kind, ToolStatusView::Completed)),
+            edits.matches(&call(None, kind, ToolStatusView::Completed)),
             "{kind:?}"
         );
     }
+    assert!(!edits.matches(&call(None, ToolKindView::Delete, ToolStatusView::Completed)));
+    let deletes = filter(&["tool_delete"]);
+    assert!(deletes.matches(&call(None, ToolKindView::Delete, ToolStatusView::Completed)));
+    assert!(!deletes.matches(&call(None, ToolKindView::Move, ToolStatusView::Completed)));
 }
 
 #[test]
@@ -400,8 +406,11 @@ fn one_tool_category_is_one_hidden_facet() {
             "prose",
             "tools",
             "tool_read",
+            "tool_delete",
             "tool_search",
             "tool_run",
+            "tool_fetch",
+            "tool_mcp",
             "tool_agent",
             "tool_other"
         ]

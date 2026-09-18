@@ -2243,6 +2243,12 @@ pub fn agent_chat_group_category(category: &str, count: usize) -> String {
         ("search", false) => rust_i18n::t!("agent_chat.group_search", count = count),
         ("run", true) => rust_i18n::t!("agent_chat.group_run_one"),
         ("run", false) => rust_i18n::t!("agent_chat.group_run", count = count),
+        ("delete", true) => rust_i18n::t!("agent_chat.group_delete_one"),
+        ("delete", false) => rust_i18n::t!("agent_chat.group_delete", count = count),
+        ("fetch", true) => rust_i18n::t!("agent_chat.group_fetch_one"),
+        ("fetch", false) => rust_i18n::t!("agent_chat.group_fetch", count = count),
+        ("mcp", true) => rust_i18n::t!("agent_chat.group_mcp_one"),
+        ("mcp", false) => rust_i18n::t!("agent_chat.group_mcp", count = count),
         ("agent", true) => rust_i18n::t!("agent_chat.group_agent_one"),
         ("agent", false) => rust_i18n::t!("agent_chat.group_agent", count = count),
         (_, true) => rust_i18n::t!("agent_chat.group_other_one"),
@@ -2369,6 +2375,18 @@ pub fn agent_chat_filter_tool_run() -> String {
 /// kind is the one label that misreads, so the card says what it holds.
 pub fn agent_chat_tool_kind_subagent() -> String {
     rust_i18n::t!("agent_chat.tool_kind_subagent").into_owned()
+}
+
+pub fn agent_chat_filter_tool_delete() -> String {
+    rust_i18n::t!("agent_chat.filter_tool_delete").into_owned()
+}
+
+pub fn agent_chat_filter_tool_fetch() -> String {
+    rust_i18n::t!("agent_chat.filter_tool_fetch").into_owned()
+}
+
+pub fn agent_chat_filter_tool_mcp() -> String {
+    rust_i18n::t!("agent_chat.filter_tool_mcp").into_owned()
 }
 
 pub fn agent_chat_filter_tool_agent() -> String {
@@ -6886,6 +6904,35 @@ mod tests {
             }
         } else {
             out.insert(prefix.to_string());
+        }
+    }
+
+    /// Every category the bar can count needs phrasing of its own. A missing
+    /// match arm falls through to "other" silently, and a key the locales never
+    /// got renders as the key itself — neither fails anywhere else.
+    #[test]
+    fn every_tool_category_has_its_own_group_label() {
+        use crate::transcript::tool_category::ToolCategory;
+        let other = agent_chat_group_category(ToolCategory::Other.token(), 3);
+        for category in ToolCategory::ALL {
+            for count in [1, 3] {
+                let label = agent_chat_group_category(category.token(), count);
+                assert!(
+                    !label.contains("agent_chat."),
+                    "{category:?} renders a raw key: {label}"
+                );
+                assert!(
+                    label.contains(&count.to_string()),
+                    "{category:?} drops the count: {label}"
+                );
+            }
+            if category != ToolCategory::Other {
+                assert_ne!(
+                    agent_chat_group_category(category.token(), 3),
+                    other,
+                    "{category:?} falls through to the catch-all"
+                );
+            }
         }
     }
 

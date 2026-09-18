@@ -347,8 +347,11 @@ fn tool_category_label(category: ToolCategory) -> String {
     match category {
         ToolCategory::Read => s::agent_chat_filter_tool_read(),
         ToolCategory::Edit => s::agent_chat_filter_tool_edit(),
+        ToolCategory::Delete => s::agent_chat_filter_tool_delete(),
         ToolCategory::Search => s::agent_chat_filter_tool_search(),
         ToolCategory::Run => s::agent_chat_filter_tool_run(),
+        ToolCategory::Fetch => s::agent_chat_filter_tool_fetch(),
+        ToolCategory::Mcp => s::agent_chat_filter_tool_mcp(),
         ToolCategory::Agent => s::agent_chat_filter_tool_agent(),
         ToolCategory::Other => s::agent_chat_filter_tool_other(),
     }

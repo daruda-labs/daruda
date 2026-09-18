@@ -6,8 +6,18 @@ use daruda_acp::{ToolCallItem, ToolKindView};
 pub(crate) enum ToolCategory {
     Read,
     Edit,
+    /// A removal. Split from [`Self::Edit`] because it is the one file change
+    /// that cannot be read back from what replaced it.
+    Delete,
     Search,
     Run,
+    /// A call that left the machine — ACP's own `fetch` kind.
+    Fetch,
+    /// A tool an MCP server provided, named `mcp__<server>__<tool>` on the
+    /// wire. Keyed on that spelling because the kind cannot say it: every
+    /// adapter reports these as `other`. The same prefix is read in
+    /// `daruda_agent::jsonl::permissions`.
+    Mcp,
     /// A delegated agent. Sits beside the file-work categories rather than
     /// under [`Self::Other`]: the card holds a whole run of someone else's
     /// work, which is the one thing a reader scans a turn for.
@@ -18,11 +28,14 @@ pub(crate) enum ToolCategory {
 impl ToolCategory {
     /// [`Self::Other`] stays last: it is the catch-all, so a new category
     /// takes the slot before it rather than displacing the tail.
-    pub(crate) const ALL: [Self; 6] = [
+    pub(crate) const ALL: [Self; 9] = [
         Self::Read,
         Self::Edit,
+        Self::Delete,
         Self::Search,
         Self::Run,
+        Self::Fetch,
+        Self::Mcp,
         Self::Agent,
         Self::Other,
     ];
@@ -31,10 +44,13 @@ impl ToolCategory {
         match self {
             Self::Read => 0,
             Self::Edit => 1,
-            Self::Search => 2,
-            Self::Run => 3,
-            Self::Agent => 4,
-            Self::Other => 5,
+            Self::Delete => 2,
+            Self::Search => 3,
+            Self::Run => 4,
+            Self::Fetch => 5,
+            Self::Mcp => 6,
+            Self::Agent => 7,
+            Self::Other => 8,
         }
     }
 
@@ -42,8 +58,11 @@ impl ToolCategory {
         match self {
             Self::Read => "read",
             Self::Edit => "edit",
+            Self::Delete => "delete",
             Self::Search => "search",
             Self::Run => "run",
+            Self::Fetch => "fetch",
+            Self::Mcp => "mcp",
             Self::Agent => "agent",
             Self::Other => "other",
         }
@@ -55,17 +74,17 @@ impl ToolCategory {
             .find(|category| category.token() == token)
     }
 
-    pub(crate) const fn bit(self) -> u8 {
+    pub(crate) const fn bit(self) -> u16 {
         1 << self.index()
     }
 }
 
 /// Compact set used by the filter's partial Tool selection.
 #[derive(Clone, Copy, Default, PartialEq, Eq, Debug)]
-pub(crate) struct ToolCategorySet(u8);
+pub(crate) struct ToolCategorySet(u16);
 
 impl ToolCategorySet {
-    const ALL_BITS: u8 = (1 << ToolCategory::ALL.len()) - 1;
+    const ALL_BITS: u16 = (1 << ToolCategory::ALL.len()) - 1;
 
     pub(crate) fn all() -> Self {
         Self(Self::ALL_BITS)
@@ -107,6 +126,15 @@ const TOOL_NAME_CATEGORIES: [(&str, ToolCategory); 12] = [
     ("killshell", ToolCategory::Run),
 ];
 
+/// How every agent spells a tool an MCP server provided. Also read by
+/// `daruda_agent::jsonl::permissions`, which matches allow-patterns on it.
+const MCP_TOOL_PREFIX: &str = "mcp__";
+
+/// Whether `name` is an MCP server's tool.
+pub(crate) fn is_mcp_tool_name(name: &str) -> bool {
+    name.starts_with(MCP_TOOL_PREFIX)
+}
+
 fn category_for_name(name: &str) -> Option<ToolCategory> {
     TOOL_NAME_CATEGORIES
         .iter()
@@ -117,25 +145,32 @@ fn category_for_name(name: &str) -> Option<ToolCategory> {
 fn category_for_kind(kind: ToolKindView) -> ToolCategory {
     match kind {
         ToolKindView::Read => ToolCategory::Read,
-        ToolKindView::Edit | ToolKindView::Delete | ToolKindView::Move => ToolCategory::Edit,
+        // A move rewrites where a file lives, which is a change to read back;
+        // a delete leaves nothing to read, so it answers for itself.
+        ToolKindView::Edit | ToolKindView::Move => ToolCategory::Edit,
+        ToolKindView::Delete => ToolCategory::Delete,
         ToolKindView::Search => ToolCategory::Search,
         ToolKindView::Execute => ToolCategory::Run,
-        ToolKindView::Think
-        | ToolKindView::Fetch
-        | ToolKindView::SwitchMode
-        | ToolKindView::Other => ToolCategory::Other,
+        ToolKindView::Fetch => ToolCategory::Fetch,
+        ToolKindView::Think | ToolKindView::SwitchMode | ToolKindView::Other => ToolCategory::Other,
     }
 }
 
-/// Resolve one category: a launch first, then diffs, then tool name, then ACP
-/// kind. The launch question comes first because nothing below can answer it —
-/// a spawned agent arrives as `Think` like any reasoning tool.
+/// Resolve one category: a launch first, then diffs, then the MCP prefix, then
+/// tool name, then ACP kind. The launch and the prefix come before the kind
+/// because nothing below can answer them — a spawned agent arrives as `Think`
+/// like any reasoning tool, and every adapter reports an MCP tool as `other`.
+/// A reported diff still wins over the prefix: it is evidence of what the call
+/// did, which outranks where it came from.
 pub(crate) fn classify_tool(tc: &ToolCallItem) -> ToolCategory {
     if tc.is_subagent_launch() {
         return ToolCategory::Agent;
     }
     if !tc.diffs.is_empty() {
         return ToolCategory::Edit;
+    }
+    if tc.tool_name.as_deref().is_some_and(is_mcp_tool_name) {
+        return ToolCategory::Mcp;
     }
     tc.tool_name
         .as_deref()
@@ -207,6 +242,33 @@ mod tests {
         );
     }
 
+    /// Three kinds the catch-all used to swallow. Each already has its own ACP
+    /// kind or a name the wire spells one way, so the bar can name it too.
+    #[test]
+    fn a_distinct_kind_or_an_mcp_name_is_its_own_category() {
+        assert_eq!(
+            classify_tool(&tool(Some("WebFetch"), ToolKindView::Fetch)).token(),
+            "fetch"
+        );
+        assert_eq!(
+            classify_tool(&tool(None, ToolKindView::Delete)).token(),
+            "delete"
+        );
+        assert_eq!(
+            classify_tool(&tool(
+                Some("mcp__obsidian__obsidian_put_content"),
+                ToolKindView::Other
+            ))
+            .token(),
+            "mcp"
+        );
+        assert_eq!(
+            classify_tool(&tool(None, ToolKindView::Move)).token(),
+            "edit",
+            "a move mutates a file rather than removing it, so it stays an edit"
+        );
+    }
+
     #[test]
     fn a_known_name_corrects_a_generic_kind() {
         assert_eq!(
@@ -256,7 +318,7 @@ mod tests {
                 (ToolCategory::Run, 3),
                 (ToolCategory::Read, 1),
                 (ToolCategory::Search, 1),
-                (ToolCategory::Other, 1),
+                (ToolCategory::Fetch, 1),
             ],
             "count descending, then declaration order so ties do not shuffle"
         );

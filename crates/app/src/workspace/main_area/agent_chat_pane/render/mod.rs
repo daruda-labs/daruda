@@ -821,22 +821,24 @@ fn category_segments(
         .into_any_element()
 }
 
-/// The glyph for one tool category. Reuses the per-call kind mapping through a
-/// representative kind, so a category and the cards under it never disagree.
+/// The glyph for one tool category. A category the ACP kind can name borrows
+/// the per-call mapping through a representative kind; the two that no kind can
+/// name — a launch and an MCP tool, both of which arrive under a kind they
+/// share with something else — take the same glyph `tool::tool_icon` gives
+/// their cards, so a bar and the cards under it never disagree.
 fn category_icon(category: crate::transcript::tool_category::ToolCategory) -> SharedString {
     use crate::transcript::tool_category::ToolCategory;
-    // A launch has no kind to borrow from: it arrives as `Think`, which is the
-    // one glyph it must not share (see `tool::tool_icon`).
-    if matches!(category, ToolCategory::Agent) {
-        return IconName::Bot.path();
+    match category {
+        ToolCategory::Agent => IconName::Bot.path(),
+        ToolCategory::Mcp => IconName::ExternalLink.path(),
+        ToolCategory::Read => tool::tool_kind_icon(daruda_acp::ToolKindView::Read),
+        ToolCategory::Edit => tool::tool_kind_icon(daruda_acp::ToolKindView::Edit),
+        ToolCategory::Delete => tool::tool_kind_icon(daruda_acp::ToolKindView::Delete),
+        ToolCategory::Search => tool::tool_kind_icon(daruda_acp::ToolKindView::Search),
+        ToolCategory::Run => tool::tool_kind_icon(daruda_acp::ToolKindView::Execute),
+        ToolCategory::Fetch => tool::tool_kind_icon(daruda_acp::ToolKindView::Fetch),
+        ToolCategory::Other => tool::tool_kind_icon(daruda_acp::ToolKindView::Other),
     }
-    tool::tool_kind_icon(match category {
-        ToolCategory::Read => daruda_acp::ToolKindView::Read,
-        ToolCategory::Edit => daruda_acp::ToolKindView::Edit,
-        ToolCategory::Search => daruda_acp::ToolKindView::Search,
-        ToolCategory::Run => daruda_acp::ToolKindView::Execute,
-        ToolCategory::Agent | ToolCategory::Other => daruda_acp::ToolKindView::Other,
-    })
 }
 
 /// Tool calls in `run` that the current projection displays — filter matches
@@ -1087,6 +1089,44 @@ fn render_item(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A bar names its calls, so its glyph has to be the one those cards show.
+    /// The two categories no ACP kind can name are where that can drift: both
+    /// are keyed off the call instead, and this is what holds the two keys
+    /// together.
+    #[test]
+    fn a_name_keyed_category_shows_the_glyph_its_cards_do() {
+        use crate::transcript::tool_category::classify_tool;
+        use daruda_acp::{ToolCallItem, ToolKindView, ToolStatusView};
+
+        let call = |tool_name: Option<&str>, raw_input| ToolCallItem {
+            id: "t".into(),
+            title: "t".into(),
+            kind: ToolKindView::Other,
+            tool_name: tool_name.map(str::to_owned),
+            status: ToolStatusView::Completed,
+            diffs: Vec::new(),
+            output: Vec::new(),
+            raw_input,
+            locations: Vec::new(),
+            parent_tool_id: None,
+            exit: None,
+        };
+        for tc in [
+            call(Some("mcp__obsidian__obsidian_put_content"), None),
+            call(
+                None,
+                Some(serde_json::json!({ "subagent_type": "code-reviewer" })),
+            ),
+        ] {
+            assert_eq!(
+                category_icon(classify_tool(&tc)),
+                tool::tool_icon(&tc),
+                "{:?}",
+                tc.tool_name
+            );
+        }
+    }
 
     /// Covers both consumers — the working indicator's run timer and a tool
     /// call's age — since they call this one function.
