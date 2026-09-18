@@ -45,10 +45,16 @@ TEST_BUDGET=2000
 
 # Per-path overrides — pure-data files where the budget doesn't apply.
 # Match by suffix (file path ends with the listed string).
+#
+# Each is one flat table the reader jumps into by symbol rather than reads
+# through, so splitting it buys navigation nothing and costs a lookup step.
+# `palette.rs` is the same shape as `ux/theme.rs` one crate over: 600-odd
+# colour constants plus the functions that assemble them into themes.
 WAIVED_PATHS=(
     "crates/daruda_terminal/src/ux/theme.rs"
     "crates/daruda_terminal/src/ux/strings.rs"
     "crates/app/src/surface/strings.rs"
+    "crates/app/src/ui/theme/palette.rs"
 )
 
 # Skip directories — vendored crates and target builds aren't ours.
