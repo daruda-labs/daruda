@@ -122,6 +122,10 @@ notify = { version = "7", default-features = false }
 
 [dev-dependencies]
 agent-client-protocol = "2.0"
+# `test-support` swaps the PTY spawn for a stub. Declared here rather than on
+# the normal dependency so only test targets get it: a workspace test that
+# opens a tab would otherwise fork a real login shell.
+daruda_terminal = { path = "../daruda_terminal", features = ["test-support"] }
 gpui = { workspace = true, features = ["test-support"] }
 serde_json = "1"
 # Tokenizes an assembled launch command the way the ACP launcher does, so a

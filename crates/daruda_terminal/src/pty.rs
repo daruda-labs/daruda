@@ -150,13 +150,18 @@ impl PtyHandle {
 
 /// Spawn a PTY session with the given configuration.
 ///
-/// In test builds this delegates to [`spawn_pty_stub`] so that tests
-/// that merely construct a `Workspace` do not incur a real shell
-/// start-up (~1 s each). Tests that exercise real PTY I/O should call
+/// Under test this delegates to [`spawn_pty_stub`] so that tests which
+/// merely construct a `Workspace` do not incur a real shell start-up
+/// (~0.5 s each). Tests that exercise real PTY I/O should call
 /// [`spawn_pty_real`] directly.
 ///
+/// Keyed on the `test-support` feature as well as `cfg(test)`: a dependent
+/// crate's test build compiles this one *without* `cfg(test)`, so the gate
+/// that names only `test` leaves every app-side workspace test spawning a
+/// real shell — which is where the cost this stub exists to remove lives.
+///
 /// In production builds this is identical to [`spawn_pty_real`].
-#[cfg(test)]
+#[cfg(any(test, feature = "test-support"))]
 pub fn spawn_pty(_config: &PtyConfig) -> Result<PtyHandle, PtyError> {
     spawn_pty_stub()
 }
@@ -296,26 +301,28 @@ pub fn spawn_pty_real(config: &PtyConfig) -> Result<PtyHandle, PtyError> {
     })
 }
 
-/// Production entry point — calls `spawn_pty_real`. Only compiled for
-/// non-test builds so `spawn_pty` in tests always resolves to the stub
-/// above without an ambiguity conflict.
-#[cfg(not(test))]
+/// Production entry point — calls `spawn_pty_real`. Only compiled when the
+/// stub above is not, so `spawn_pty` never has two definitions.
+#[cfg(not(any(test, feature = "test-support")))]
 pub fn spawn_pty(config: &PtyConfig) -> Result<PtyHandle, PtyError> {
     spawn_pty_real(config)
 }
 
-/// Zero-cost stub used by workspace tests. Returns disconnected channels
-/// and no underlying subprocess — shell startup cost is eliminated.
-/// The `exit_rx` fires immediately so the pane's stdout-poll loop exits
-/// cleanly without a 16 ms delay.
-#[cfg(test)]
+/// Zero-cost stub used by dependent crates' tests. Returns live but silent
+/// channels and no underlying subprocess — shell startup cost is eliminated
+/// while the pane still reads as a running shell.
+///
+/// The senders are deliberately never dropped: a pane treats a signalled
+/// *or* a disconnected `exit_rx` as shell termination, so letting them fall
+/// out of scope would close every tab a test opens. One small leak per
+/// stubbed pane, in test builds only.
+#[cfg(any(test, feature = "test-support"))]
 pub fn spawn_pty_stub() -> Result<PtyHandle, PtyError> {
     let (stdin_tx, _stdin_rx) = mpsc::channel::<Vec<u8>>();
-    let (_stdout_tx, stdout_rx) = mpsc::channel::<Vec<u8>>();
+    let (stdout_tx, stdout_rx) = mpsc::channel::<Vec<u8>>();
     let (exit_tx, exit_rx) = mpsc::channel::<()>();
-    let (_error_tx, error_rx) = mpsc::channel::<ErrorReport>();
-    // Signal exit immediately so the pane's waiter stops polling.
-    let _ = exit_tx.send(());
+    let (error_tx, error_rx) = mpsc::channel::<ErrorReport>();
+    std::mem::forget((stdout_tx, exit_tx, error_tx));
     Ok(PtyHandle {
         stdin_tx,
         stdout_rx,
