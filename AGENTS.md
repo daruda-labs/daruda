@@ -229,6 +229,13 @@ RUSTDOCFLAGS="-D warnings" cargo doc --no-deps \
 cargo run -p gen_acp_presets -- --check
 ```
 
+While iterating, `cargo test -p daruda -- --skip workspace::tests` is the
+same suite minus the one module that dominates it: measured 2026-09-18,
+`workspace::tests` is 388 of 2,863 app tests (13%) but ~74% of the wall time
+(109s → 29s when skipped), because those tests build a real `Workspace` and
+each tab they open spawns an actual shell. It is an iteration loop, not a
+gate — the [pre-commit checks](#pre-commit-checks) still run everything.
+
 Note: `.github/workflows/ci.yml` gates fmt, the clippy list above, the 7 lint scripts through `lint-viewport-row-scroll.sh`, `lint-env-literals.sh` with its self-test, `lint-no-silent-update.sh`, `lint-agent-activity.sh`, the `cargo doc` link check, and the package-scoped `cargo test` list above.
 
 The doc-link gate covers six crates rather than all of them: clippy does not
