@@ -19,7 +19,9 @@ use daruda_flow::runner::{AcpRunner, CancelToken, ProcessRunner, Runners};
 use daruda_flow::schedule::{RunOutcome, execute};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+#[cfg(unix)]
+use std::time::Duration;
+use std::time::{SystemTime, UNIX_EPOCH};
 
 /// Long enough to watch a real agent work, short enough that a hung one does
 /// not run all night. The app reads this from config.

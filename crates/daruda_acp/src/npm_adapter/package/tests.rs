@@ -31,6 +31,10 @@ fn publishes_once_and_reuses_a_readable_non_executable_entry() {
             use std::os::unix::fs::PermissionsExt;
             fs::set_permissions(entry, fs::Permissions::from_mode(0o644)).unwrap();
         }
+        // Executability is a mode bit only on unix; elsewhere the entry is
+        // already what the test wants it to be.
+        #[cfg(not(unix))]
+        let _ = entry;
         assert!(!dest.exists());
         Ok(())
     })

@@ -286,6 +286,7 @@ mod tests {
         )
     }
 
+    #[cfg(unix)]
     use daruda_core::process::is_alive as process_is_alive;
 
     /// The kill is asynchronous and the grandchild is reparented before it
