@@ -114,8 +114,13 @@ nodes:
     // is handed — a contract block in here would be run as a command.
     let gate = calls.iter().find(|c| c.node == "gate").expect("gate ran");
     assert_eq!(
-        gate.text,
-        format!("grep -q x '{}'", run_dir.join("design.md").display()),
+        shlex::split(&gate.text).unwrap(),
+        [
+            "grep",
+            "-q",
+            "x",
+            &run_dir.join("design.md").to_string_lossy()
+        ],
         "a command must be quoted, or the space splits the argument"
     );
 }

@@ -7,9 +7,9 @@ set -euo pipefail
 # Allowed files: definition + wrappers. Anything else with a
 # mark_dirty_and_save reference (other than the fn signature itself) is
 # a violation.
-offenders=$(rg -n --type rust "mark_dirty_and_save" crates/app/src \
+offenders=$(rg -n --type rust --glob '!**/workspace/{mod,durable}.rs' \
+    "mark_dirty_and_save" crates/app/src \
     | rg -v "fn mark_dirty_and_save" \
-    | rg -v "^crates/app/src/workspace/(mod|durable)\.rs:" \
     | rg -v "^\S+:\d+:\s*(//[!/]?|///?)") || true
 
 if [ -n "$offenders" ]; then

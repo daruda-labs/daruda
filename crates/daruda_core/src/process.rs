@@ -7,14 +7,34 @@
 
 use std::ffi::OsStr;
 
+/// The OS-provided archive extractor. Windows' bsdtar understands Node's ZIP
+/// archives; a Git installation's GNU tar may shadow it on PATH.
+pub fn archive_command() -> std::process::Command {
+    #[cfg(windows)]
+    {
+        let root = std::env::var_os("SystemRoot").expect("Windows system directory");
+        command(std::path::PathBuf::from(root).join("System32/tar.exe"))
+    }
+    #[cfg(not(windows))]
+    {
+        command("tar")
+    }
+}
+
 /// Build a command through the one gate every spawn goes through.
 ///
-/// Today this only names the gate. Windows needs two things here that no
-/// caller should have to remember — `CREATE_NO_WINDOW`, without which a GUI
-/// app flashes a console per child, and PATHEXT resolution, without which
-/// `npx` (really `npx.cmd`) is found by `which` and then not spawned.
+/// Windows console subprocesses stay hidden when launched by the GUI.
+/// The caller still supplies an executable, not a shell command line.
 pub fn command(program: impl AsRef<OsStr>) -> std::process::Command {
-    std::process::Command::new(program)
+    let command = std::process::Command::new(program);
+    #[cfg(windows)]
+    let command = {
+        use std::os::windows::process::CommandExt as _;
+        let mut command = command;
+        command.creation_flags(windows_sys::Win32::System::Threading::CREATE_NO_WINDOW);
+        command
+    };
+    command
 }
 
 /// Make the child lead its own process group, so a later [`kill_tree`]
@@ -65,15 +85,38 @@ pub fn kill_tree(pid: u32) {
 /// someone else, so this answers "is something there", not "is *that* still
 /// there".
 pub fn is_alive(pid: u32) -> bool {
+    // Zero names a Unix process group or the Windows idle process, never
+    // a child that can hold a daruda run lock.
+    if pid == 0 {
+        return false;
+    }
     #[cfg(unix)]
     {
         // SAFETY: any value is a valid pid argument, and signal 0 has no
         // effect beyond the existence check.
-        unsafe { libc::kill(pid as libc::pid_t, 0) == 0 }
+        unsafe {
+            libc::kill(pid as libc::pid_t, 0) == 0
+                || std::io::Error::last_os_error().raw_os_error() == Some(libc::EPERM)
+        }
     }
-    #[cfg(not(unix))]
+    #[cfg(windows)]
     {
-        pid == std::process::id()
+        use windows_sys::Win32::Foundation::{CloseHandle, ERROR_INVALID_PARAMETER, WAIT_OBJECT_0};
+        use windows_sys::Win32::System::Threading::{
+            OpenProcess, PROCESS_SYNCHRONIZE, WaitForSingleObject,
+        };
+        // SAFETY: the handle is used only for a zero-time wait and closed
+        // exactly once. Failure to inspect a process must not reclaim its lock.
+        unsafe {
+            let process = OpenProcess(PROCESS_SYNCHRONIZE, 0, pid);
+            if process.is_null() {
+                return std::io::Error::last_os_error().raw_os_error()
+                    != Some(ERROR_INVALID_PARAMETER as i32);
+            }
+            let alive = WaitForSingleObject(process, 0) != WAIT_OBJECT_0;
+            CloseHandle(process);
+            alive
+        }
     }
 }
 
@@ -84,6 +127,19 @@ mod tests {
     #[test]
     fn this_process_is_alive() {
         assert!(is_alive(std::process::id()));
+        assert!(!is_alive(0));
+    }
+
+    #[test]
+    fn another_live_process_is_not_mistaken_for_a_stale_lock() {
+        let mut child = command(test_process::executable())
+            .args(["--sleep-ms", "30000"])
+            .spawn()
+            .unwrap();
+        let alive = is_alive(child.id());
+        child.kill().unwrap();
+        child.wait().unwrap();
+        assert!(alive);
     }
 
     #[test]

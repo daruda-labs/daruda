@@ -49,7 +49,7 @@ pub(crate) fn resolve(
         debug_assert!(matches!(runtime, NodeRuntime::Managed { .. }));
     }
     context.check()?;
-    probe(&directory.join("bin/node"), env, strip_env, context)
+    probe(&super::node_binary(&directory), env, strip_env, context)
 }
 
 fn runtime_error(error: NodeError) -> PreparationError {
@@ -123,7 +123,12 @@ fn from_identity(identity: serde_json::Value) -> Result<ResolvedNode, Preparatio
 
 fn npm_entry(bin: &Path) -> Result<PathBuf, PreparationError> {
     // Do not pair this Node with an unrelated npm installation found elsewhere.
-    let npm = daruda_core::path::canonicalize(bin.join("npm")).map_err(configuration)?;
+    let entry = if cfg!(windows) {
+        "node_modules/npm/bin/npm-cli.js"
+    } else {
+        "npm"
+    };
+    let npm = daruda_core::path::canonicalize(bin.join(entry)).map_err(configuration)?;
     if npm.file_name().is_none_or(|name| name != "npm-cli.js") {
         return Err(configuration(
             "npm-cli.js not found alongside the selected Node runtime",

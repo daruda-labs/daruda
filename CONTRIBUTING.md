@@ -26,7 +26,7 @@ daruda locally. For a short product overview and first run instructions, see
 |---|---|
 | macOS | 12.0 Monterey or later; Apple Silicon and Intel supported |
 | Linux | Builds and tests pass; GUI runtime still needs desktop verification; requires system `libfontconfig` and `libxcb` |
-| Windows | Not ported yet |
+| Windows | Experimental native MSVC build; GUI runtime still needs desktop verification |
 | Rust | 1.95+; CI pins the floor to 1.95 |
 | Zig | 0.14.1; `./scripts/bootstrap-zig.sh` installs the pinned version on macOS |
 | Xcode Command Line Tools | Required on macOS |
@@ -45,26 +45,92 @@ cd daruda
 git submodule update --init --recursive
 ```
 
-On macOS, install the pinned Zig version:
+On macOS and Linux, install the pinned Zig version:
 
 ```bash
 ./scripts/bootstrap-zig.sh
 ```
 
-On Linux, skip the bootstrap script. Install Zig 0.14.1 manually and either
-put `zig` on `PATH` or export `ZIG` with the absolute path to the executable.
+Alternatively, install Zig 0.14.1 manually and either put `zig` on `PATH` or
+export `ZIG` with the absolute path to the executable.
 
-On either platform, fetch dependencies, apply the GPUI patches, and build:
+For a Windows native build, install Git for Windows, Rust (MSVC toolchain),
+Visual Studio 2022 Build Tools with the C++ workload and Windows SDK, and
+Zig 0.14.1. These tools can be installed from PowerShell:
 
-```bash
-cargo fetch && ./scripts/apply-gpui-patch.sh
-cargo build -p daruda
-cargo run -p daruda
+```powershell
+winget install --id Microsoft.VisualStudio.2022.BuildTools --exact --source winget --override "--wait --norestart --add Microsoft.VisualStudio.Workload.VCTools --includeRecommended"
+winget install --id Rustlang.Rustup --exact --source winget
+winget install --id zig.zig --version 0.14.1 --exact --source winget
 ```
 
-`scripts/apply-gpui-patch.sh` patches the Cargo git checkout for
-daruda-specific GPUI fixes. It is idempotent and only clears stale GPUI build
-artifacts when a patch was freshly applied.
+Open a new PowerShell session so the updated PATH is available, then run:
+
+```powershell
+./scripts/build-windows.ps1
+./target/debug/daruda.exe
+```
+
+The Windows script runs `cargo build --locked -p daruda`; ordinary Cargo
+commands work on every supported host. Set `ZIG` to the executable path if
+Zig is not on PATH. Pass `-Release` to build `target/release/daruda.exe`.
+No symlink privileges or source-tree preparation are required.
+
+The full test suite does create symlinks: enable Windows Developer Mode or
+use a shell with the symlink privilege before running it. Use Git for Windows
+2.28 or newer and include its `bin` and `usr/bin` directories on the test PATH.
+Runtime shell flows and ACP environment filtering also require Git for Windows;
+daruda resolves its POSIX tools relative to `git.exe` when needed.
+
+On macOS and Linux:
+
+```bash
+cargo build --locked -p daruda
+cargo run --locked -p daruda
+```
+
+Ghostty stages its inputs in Cargo's `OUT_DIR` and builds for Cargo's target,
+while its Unicode generators run on the build host. Zig version, target ABI,
+and submodule availability are checked before compilation. Changes to Zig or
+Ghostty sources invalidate the native build, including custom target directories.
+This target mapping does not install cross-compilation SDKs or linkers for the
+rest of the application.
+
+GPUI's patched crate is checked in under `vendor/zed`, selected for all consumers
+by Cargo's `[patch]` table. Ordinary builds never modify the shared Cargo cache.
+The remaining Zed crates stay pinned to the same revision in `Cargo.toml`.
+
+To verify the vendored source after fetching dependencies:
+
+```bash
+cargo fetch --locked
+cargo run --locked -p vendor_gpui -- --check
+cargo test --locked -p vendor_gpui
+```
+
+To update GPUI, change the pinned Zed revision consistently, fetch dependencies,
+and generate into a new directory:
+
+```bash
+cargo run -p vendor_gpui -- <zed-checkout> --output <new-directory>
+```
+
+Replace `vendor/zed` with that output and review source and lockfile changes
+together. The tool reads pristine Git objects, applies the three patches in
+`patches/`, retains upstream licenses and test fonts, and materializes the Apache
+license symlink as a regular file on every OS. Git and tar are required for this
+maintenance check; no patching step is required before building.
+`scripts/apply-gpui-patch.sh` remains a read-only verification entry point.
+
+Windows CI gates the native app build, all app target compilation (including
+`screenshot`), Clippy, Ghostty tests, vendor tool tests, platform adapters, and MCP tests.
+The full Windows runtime suite still reports experimental diagnostics;
+macOS and Linux retain their full required checks. GUI runtime requires a real
+desktop check on each platform.
+
+Windows runtime gaps remain: OS credential storage and listening-port discovery
+are unavailable, and subprocess cancellation does not yet terminate descendant
+processes as Unix process groups do.
 
 ---
 
@@ -122,6 +188,32 @@ Package a DMG:
 brew install create-dmg
 ./scripts/build-dmg.sh
 ```
+
+Build a portable Windows x86_64 ZIP (including MSVC runtime DLLs):
+
+```powershell
+./scripts/bootstrap-zig.ps1
+./scripts/package-windows.ps1
+```
+
+The package is written to `target/packages/daruda-<version>-windows-x86_64.zip`.
+Extract the entire archive and run `daruda.exe`; keep its DLLs beside it.
+This is an unsigned portable build, with experimental Windows GUI support.
+To package an existing debug build for testing, use
+`./scripts/package-windows.ps1 -Profile debug -SkipBuild`.
+
+GitHub Actions produces Windows downloads in two ways:
+
+- **CI** (push, pull request, or **Run workflow**): the Windows job uploads
+  `daruda-windows-x86_64-debug` under the run's **Artifacts**, retained for 14 days.
+- **Release**: pushing a `v<version>` tag matching `Cargo.toml` builds the macOS
+  DMG and Windows release ZIP, then publishes both in one GitHub Release after
+  both builds succeed. **Run workflow** builds downloadable release artifacts
+  without publishing a GitHub Release.
+
+Both Windows workflows use the same Zig installer and package script as local
+builds. The installer verifies the pinned archive's SHA256. Missing package
+files fail the workflow instead of producing an empty download.
 
 ---
 

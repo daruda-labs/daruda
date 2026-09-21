@@ -1,6 +1,7 @@
 name: CI
 
 on:
+  workflow_dispatch:
   push:
     branches: [main]
     paths-ignore:
@@ -55,14 +56,17 @@ jobs:
       - name: Add Zig to PATH
         run: echo "$GITHUB_WORKSPACE/.context/zig/0.14.1" >> "$GITHUB_PATH"
 
-      - name: Fetch dependencies and apply GPUI patch
-        run: cargo fetch && ./scripts/apply-gpui-patch.sh
+      - name: Fetch locked dependencies
+        run: cargo fetch --locked
+
+      - name: Verify vendored GPUI
+        run: cargo run --locked -p vendor_gpui -- --check
 
       - name: Format
         run: cargo fmt --all -- --check
 
       - name: Clippy
-        run: cargo clippy -p ghostty_vt -p ghostty_vt_sys -p daruda_terminal -p daruda -p daruda_config -p daruda_store -p daruda_agent -p daruda_update -p daruda_acp -p daruda_core -p daruda_flow -p ferrum_flow --all-targets -- -D warnings
+        run: cargo clippy --locked -p ghostty_vt -p ghostty_vt_sys -p daruda_terminal -p daruda -p daruda_config -p daruda_store -p daruda_agent -p daruda_update -p daruda_acp -p daruda_core -p daruda_flow -p ferrum_flow -p vendor_gpui -p test_process --all-targets -- -D warnings
 
       - name: Lint — inline literals
         run: ./scripts/lint-inline-literals.sh
@@ -100,10 +104,10 @@ jobs:
         run: ./scripts/lint-agent-activity.sh
 
       - name: Doc links
-        run: RUSTDOCFLAGS="-D warnings" cargo doc --no-deps -p daruda_flow -p daruda_core -p daruda_update -p ghostty_vt_sys -p ghostty_vt -p daruda_agent
+        run: RUSTDOCFLAGS="-D warnings" cargo doc --locked --no-deps -p daruda_flow -p daruda_core -p daruda_update -p ghostty_vt_sys -p ghostty_vt -p daruda_agent
 
       - name: Test
-        run: cargo test -p ghostty_vt -p ghostty_vt_sys -p daruda_terminal -p daruda -p daruda_config -p daruda_store -p daruda_agent -p daruda_update -p daruda_acp -p daruda_core -p daruda_flow -p ferrum_flow -p gpui_component
+        run: cargo test --locked -p ghostty_vt -p ghostty_vt_sys -p daruda_terminal -p daruda -p daruda_config -p daruda_store -p daruda_agent -p daruda_update -p daruda_acp -p daruda_core -p daruda_flow -p ferrum_flow -p gpui_component -p vendor_gpui -p test_process
 
   linux:
     name: Linux — build and test
@@ -168,8 +172,11 @@ jobs:
       - name: Add Zig to PATH
         run: echo "$GITHUB_WORKSPACE/.context/zig/0.14.1" >> "$GITHUB_PATH"
 
-      - name: Fetch dependencies and apply GPUI patch
-        run: cargo fetch && ./scripts/apply-gpui-patch.sh
+      - name: Fetch locked dependencies
+        run: cargo fetch --locked
+
+      - name: Verify vendored GPUI
+        run: cargo run --locked -p vendor_gpui -- --check
 
       # No lint steps: those read source, not platform, and the macOS job
       # already ran them. What is unproven here is whether this tree
@@ -181,12 +188,12 @@ jobs:
       # them. (`--no-fail-fast` is `cargo test`'s spelling; `cargo clippy`
       # takes this one.)
       - name: Clippy
-        run: cargo clippy --keep-going -p ghostty_vt -p ghostty_vt_sys -p daruda_terminal -p daruda -p daruda_config -p daruda_store -p daruda_agent -p daruda_update -p daruda_acp -p daruda_core -p daruda_flow -p ferrum_flow --all-targets -- -D warnings
+        run: cargo clippy --locked --keep-going -p ghostty_vt -p ghostty_vt_sys -p daruda_terminal -p daruda -p daruda_config -p daruda_store -p daruda_agent -p daruda_update -p daruda_acp -p daruda_core -p daruda_flow -p ferrum_flow -p vendor_gpui -p test_process --all-targets -- -D warnings
 
       # `--no-fail-fast` so one early failure does not hide the rest —
       # the point of the first run is the whole list.
       - name: Test
-        run: cargo test --no-fail-fast -p ghostty_vt -p ghostty_vt_sys -p daruda_terminal -p daruda -p daruda_config -p daruda_store -p daruda_agent -p daruda_update -p daruda_acp -p daruda_core -p daruda_flow -p ferrum_flow -p gpui_component
+        run: cargo test --locked --no-fail-fast -p ghostty_vt -p ghostty_vt_sys -p daruda_terminal -p daruda -p daruda_config -p daruda_store -p daruda_agent -p daruda_update -p daruda_acp -p daruda_core -p daruda_flow -p ferrum_flow -p gpui_component -p vendor_gpui -p test_process
 
   windows:
     name: Windows — build and test
@@ -195,11 +202,6 @@ jobs:
     # from scratch on top. Raise rather than let a real failure read as a
     # timeout.
     timeout-minutes: 60
-
-    # Measures before it gates, the way the `linux` job did: no Windows machine
-    # is available, so what actually breaks is unknown until a run says so.
-    # Drop this once the list is empty.
-    continue-on-error: true
 
     steps:
       - name: Checkout
@@ -230,44 +232,61 @@ jobs:
           path: .context/zig
           key: zig-0.14.1-${{ runner.os }}-${{ runner.arch }}
 
-      # `bootstrap-zig.sh` refuses Windows on purpose — Git Bash carries no
-      # dependable unzip. PowerShell has `Expand-Archive` and `Get-FileHash`,
-      # so the shasum the script insists on is kept rather than dropped.
-      # URL and digest are from ziglang.org's download index for 0.14.1.
       - name: Install Zig 0.14.1
-        shell: pwsh
-        run: |
-          $dest = "$env:GITHUB_WORKSPACE\.context\zig\0.14.1"
-          if (Test-Path "$dest\zig.exe") { "Zig 0.14.1 already installed"; exit 0 }
-          $url = "https://ziglang.org/download/0.14.1/zig-x86_64-windows-0.14.1.zip"
-          $want = "554f5378228923ffd558eac35e21af020c73789d87afeabf4bfd16f2e6feed2c"
-          $zip = "$env:RUNNER_TEMP\zig.zip"
-          Invoke-WebRequest -Uri $url -OutFile $zip
-          $got = (Get-FileHash $zip -Algorithm SHA256).Hash.ToLower()
-          if ($got -ne $want) { throw "sha256 mismatch: got $got, want $want" }
-          Expand-Archive -Path $zip -DestinationPath "$env:RUNNER_TEMP\zigout" -Force
-          # Glob the extracted directory rather than spelling its name, so a
-          # rename upstream surfaces as a missing zig.exe, not a wrong path.
-          $inner = Get-ChildItem "$env:RUNNER_TEMP\zigout" -Directory | Select-Object -First 1
-          New-Item -ItemType Directory -Force -Path (Split-Path $dest) | Out-Null
-          Move-Item $inner.FullName $dest
-          & "$dest\zig.exe" version
+        run: ./scripts/bootstrap-zig.ps1
 
       - name: Add Zig to PATH
         shell: pwsh
         run: Add-Content $env:GITHUB_PATH "$env:GITHUB_WORKSPACE\.context\zig\0.14.1"
 
-      # Git Bash: the patch script is bash, and three of its six patches target
-      # platform-neutral gpui code, so Windows needs them as much as macOS.
-      - name: Fetch dependencies and apply GPUI patch
-        shell: bash
-        run: cargo fetch && ./scripts/apply-gpui-patch.sh
+      - name: Fetch locked dependencies
+        run: cargo fetch --locked
 
-      # No lint steps and no fmt, for the reason the `linux` job gives: those
-      # read source, not platform. `--keep-going` / `--no-fail-fast` so one
-      # early break does not hide the rest — the whole list is the point.
+      - name: Verify vendored GPUI
+        run: cargo run --locked -p vendor_gpui -- --check
+
+      - name: Build native application
+        run: ./scripts/build-windows.ps1
+
+      - name: Check all app targets and screenshot feature
+        run: cargo check --locked -p daruda --all-targets --features screenshot
+
+      - name: Add Git shell tools for runtime fixtures
+        shell: pwsh
+        run: |
+          $gitRoot = Split-Path (Split-Path (Get-Command git.exe).Source -Parent) -Parent
+          $tools = Join-Path $gitRoot 'usr/bin'
+          if (-not (Test-Path (Join-Path $tools 'sh.exe'))) {
+            throw 'Git for Windows POSIX tools are required by the runtime tests'
+          }
+          Add-Content $env:GITHUB_PATH $tools
+
+      - name: Test native build contracts
+        run: cargo test --locked -p ghostty_vt -p ghostty_vt_sys -p vendor_gpui -p test_process
+
+      - name: Test Windows platform adapters
+        run: 'cargo test --locked -p daruda platform::'
+
+      - name: Test MCP transport and protocol
+        run: 'cargo test --locked -p daruda control::mcp::'
+
+      - name: Package Windows test build
+        id: package
+        run: ./scripts/package-windows.ps1 -Profile debug -SkipBuild
+
+      - name: Upload Windows test build
+        uses: actions/upload-artifact@v7
+        with:
+          name: daruda-windows-x86_64-debug
+          path: ${{ steps.package.outputs.archive }}
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 14
+
       - name: Clippy
-        run: cargo clippy --keep-going -p ghostty_vt -p ghostty_vt_sys -p daruda_terminal -p daruda -p daruda_config -p daruda_store -p daruda_agent -p daruda_update -p daruda_acp -p daruda_core -p daruda_flow -p ferrum_flow --all-targets -- -D warnings
+        run: cargo clippy --locked --keep-going -p ghostty_vt -p ghostty_vt_sys -p daruda_terminal -p daruda -p daruda_config -p daruda_store -p daruda_agent -p daruda_update -p daruda_acp -p daruda_core -p daruda_flow -p ferrum_flow -p vendor_gpui -p test_process --all-targets -- -D warnings
 
-      - name: Test
-        run: cargo test --no-fail-fast -p ghostty_vt -p ghostty_vt_sys -p daruda_terminal -p daruda -p daruda_config -p daruda_store -p daruda_agent -p daruda_update -p daruda_acp -p daruda_core -p daruda_flow -p ferrum_flow -p gpui_component
+      # Full runtime tests still require validation on the hosted runner.
+      - name: Test (experimental Windows runtime)
+        continue-on-error: true
+        run: cargo test --locked --no-fail-fast -p ghostty_vt -p ghostty_vt_sys -p daruda_terminal -p daruda -p daruda_config -p daruda_store -p daruda_agent -p daruda_update -p daruda_acp -p daruda_core -p daruda_flow -p ferrum_flow -p gpui_component -p vendor_gpui -p test_process

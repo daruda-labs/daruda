@@ -95,15 +95,20 @@ const MAX_RESOURCE_IMAGE_DIMENSION: u32 = 4096;
 const MAX_RESOURCE_IMAGE_ALLOC_BYTES: u64 = 64 * 1024 * 1024;
 
 fn resource_image_path(uri: &str, mime: Option<&str>, cwd: &Path) -> Option<PathBuf> {
-    let path = match url::Url::parse(uri) {
-        Ok(url) if url.scheme() == "file" => url.to_file_path().ok()?,
-        Ok(_) => return None,
-        Err(_) => {
-            let path = Path::new(uri);
-            if path.is_absolute() {
-                path.to_path_buf()
-            } else {
-                cwd.join(path)
+    // A Windows drive letter is also syntactically a URL scheme.
+    let path = if Path::new(uri).is_absolute() {
+        PathBuf::from(uri)
+    } else {
+        match url::Url::parse(uri) {
+            Ok(url) if url.scheme() == "file" => url.to_file_path().ok()?,
+            Ok(_) => return None,
+            Err(_) => {
+                let path = Path::new(uri);
+                if path.is_absolute() {
+                    path.to_path_buf()
+                } else {
+                    cwd.join(path)
+                }
             }
         }
     };
@@ -162,9 +167,8 @@ fn authorized_resource_image_path(path: &Path, cwd: &Path) -> Option<PathBuf> {
         return Some(path);
     }
 
-    let mut temp_roots = vec![std::env::temp_dir()];
-    #[cfg(unix)]
-    temp_roots.push(PathBuf::from("/tmp"));
+    let temp_roots =
+        std::iter::once(std::env::temp_dir()).chain(cfg!(unix).then(|| PathBuf::from("/tmp")));
     temp_roots
         .into_iter()
         .filter_map(|root| daruda_core::path::canonicalize(root).ok())
@@ -847,8 +851,8 @@ mod tests {
     use super::super::view::tests::make_test_view;
     use super::super::window_access::WindowAccess;
     use super::{
-        MAX_RESOURCE_IMAGE_BYTES, MAX_RESOURCE_IMAGE_PREVIEWS, ReconcileScope,
-        authorized_resource_image_path, load_resource_image, mermaid_key, resource_image_path,
+        MAX_RESOURCE_IMAGE_BYTES, MAX_RESOURCE_IMAGE_PREVIEWS, ReconcileScope, load_resource_image,
+        mermaid_key, resource_image_path,
     };
     use crate::transcript::fold_mode::{FoldMode, FoldPreset};
     use crate::workspace::main_area::file_view_pane::diff_editor::DiffColors;
@@ -1051,7 +1055,7 @@ mod tests {
 
         #[cfg(unix)]
         assert!(
-            authorized_resource_image_path(std::path::Path::new("/etc/hosts"), dir.path())
+            super::authorized_resource_image_path(std::path::Path::new("/etc/hosts"), dir.path())
                 .is_none()
         );
     }

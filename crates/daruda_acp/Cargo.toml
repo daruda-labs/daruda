@@ -10,6 +10,9 @@ description = "ACP (Agent Client Protocol) client core — spawns an ACP agent a
 [lints]
 workspace = true
 
+[dev-dependencies]
+test_process = { path = "../../tools/test_process" }
+
 [dependencies]
 daruda_core = { path = "../daruda_core" }
 # `unstable_auth_methods` is what makes the agent advertise its terminal login

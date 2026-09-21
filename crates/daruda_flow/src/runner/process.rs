@@ -112,7 +112,7 @@ impl ProcessRunner {
         log: std::fs::File,
     ) -> std::io::Result<smol::process::Child> {
         let errors = log.try_clone()?;
-        let mut cmd = daruda_core::process::command(SHELL);
+        let mut cmd = daruda_core::process::command(daruda_core::shell::posix_tool(SHELL));
         cmd.arg("-c")
             .arg(run)
             .current_dir(ctx.cwd)
@@ -279,6 +279,7 @@ mod tests {
     /// A shell line that records the pid of a *grandchild* — the process a
     /// `child.kill()` would leave behind — and then blocks for far longer
     /// than any test would wait.
+    #[cfg(unix)]
     fn long_running_tree(pid_file: &Path) -> String {
         format!(
             "{SHELL} -c 'echo $$ > {}; sleep 30' & wait",

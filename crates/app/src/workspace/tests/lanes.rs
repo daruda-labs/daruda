@@ -1295,9 +1295,13 @@ async fn a_flow_another_process_runs_here_blocks_removing_the_lane(cx: &mut Test
             .expect("the lane resolves")
     });
     std::fs::create_dir_all(&lock_dir).expect("lock dir");
+    let holder_process = test_process::sleeping();
     std::fs::write(
         lock_dir.join(".lock"),
-        "pid: 1\nrun_id: someone-elses\nstarted_unix_secs: 1\n",
+        format!(
+            "pid: {}\nrun_id: someone-elses\nstarted_unix_secs: 1\n",
+            holder_process.id()
+        ),
     )
     .expect("plant a lock");
 
@@ -1305,7 +1309,7 @@ async fn a_flow_another_process_runs_here_blocks_removing_the_lane(cx: &mut Test
         assert_eq!(
             ws.validate_remove_lane(target)
                 .expect_err("another process's run blocks removal"),
-            crate::surface::strings::remove_lane_err_flow_elsewhere(1),
+            crate::surface::strings::remove_lane_err_flow_elsewhere(holder_process.id()),
         );
     });
 }

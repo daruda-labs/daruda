@@ -170,8 +170,12 @@ mod tests {
         );
         assert_eq!(
             text,
-            "write /repo/.daruda/flow-runs/01J/design.md, having read \
-             /repo/.daruda/flow-runs/01J/implement.md under /repo/.daruda/flow-runs/01J"
+            format!(
+                "write {}, having read {} under {}",
+                own.display(),
+                run_dir.join("implement.md").display(),
+                run_dir.display()
+            )
         );
     }
 
@@ -193,8 +197,13 @@ mod tests {
             Surface::Shell,
         );
         assert_eq!(
-            text,
-            "grep -q '^VERDICT: PASS' '/Users/me/my repo/.daruda/flow-runs/01J/review.md'"
+            shlex::split(&text).unwrap(),
+            [
+                "grep",
+                "-q",
+                "^VERDICT: PASS",
+                &run_dir.join("review.md").to_string_lossy()
+            ]
         );
     }
 
@@ -215,7 +224,13 @@ mod tests {
             &ctx,
             Surface::Prompt,
         );
-        assert_eq!(text, "{{unknown}} then /repo/run/review.md");
+        assert_eq!(
+            text,
+            format!(
+                "{{{{unknown}}}} then {}",
+                run_dir.join("review.md").display()
+            )
+        );
     }
 
     #[test]

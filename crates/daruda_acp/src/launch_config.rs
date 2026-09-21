@@ -9,6 +9,16 @@ use std::path::PathBuf;
 /// process's environment. Absolute on both supported targets (macOS, Linux).
 pub(crate) const ENV_BIN: &str = "/usr/bin/env";
 
+pub(crate) fn env_program() -> PathBuf {
+    // WORKAROUND: the ACP SDK cannot remove inherited environment entries.
+    // Git for Windows supplies env(1) until the SDK exposes that capability.
+    if cfg!(windows) {
+        daruda_core::shell::posix_tool("env")
+    } else {
+        ENV_BIN.into()
+    }
+}
+
 /// `env(1)`'s remove-a-variable flag.
 pub(crate) const ENV_UNSET_FLAG: &str = "-u";
 
@@ -104,7 +114,8 @@ pub(crate) fn prefix_with_env_unsets(command: &str, strip_env: &[String]) -> Str
         return command.to_string();
     }
     format!(
-        "{ENV_BIN} {} {command}",
+        "{} {} {command}",
+        shell_words::quote(&env_program().to_string_lossy()),
         env_unset_args(strip_env).join(" ")
     )
 }
@@ -126,7 +137,7 @@ pub(crate) fn with_env_unsets_argv(
     let mut argv = env_unset_args(strip_env);
     argv.push(launcher.to_string_lossy().into_owned());
     argv.extend(args);
-    (PathBuf::from(ENV_BIN), argv)
+    (env_program(), argv)
 }
 
 #[cfg(test)]
@@ -141,7 +152,7 @@ mod tests {
         ] {
             let config = parse_json_launch(json).unwrap();
             let prepared = finalize_config(config, &["SECRET".into()]);
-            assert_eq!(prepared.command(), std::path::Path::new(ENV_BIN));
+            assert_eq!(prepared.command(), env_program());
             assert_eq!(prepared.arguments(), ["-u", "SECRET", "node", "entry.js"]);
             assert_eq!(prepared.environment()["TEST"], "value");
         }

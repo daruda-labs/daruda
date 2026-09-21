@@ -67,8 +67,8 @@ impl Server {
         use gpui::AppContext as _;
         let ownership = Ownership::acquire(dir)?;
         let runtime_id = new_runtime_id();
-        let listener =
-            smol::net::unix::UnixListener::bind(ownership.socket()).map_err(SocketError::Io)?;
+        let listener = crate::platform::local_socket::Listener::bind(ownership.socket())
+            .map_err(SocketError::Io)?;
         // Before publishing, so no shim can connect during the window where
         // the socket is bound but still world-reachable.
         restrict_socket(ownership.socket())?;
@@ -128,7 +128,7 @@ impl Server {
 /// an approval, and a read loop that awaited each reply would relay nothing in
 /// the meantime — not a `ping`, not a cancellation, not the next call.
 pub(super) async fn serve(
-    stream: smol::net::unix::UnixStream,
+    stream: crate::platform::local_socket::Stream,
     gate: &TokenGate,
     runtime_id: &str,
     inbound: &smol::channel::Sender<Inbound>,

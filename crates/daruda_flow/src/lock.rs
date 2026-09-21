@@ -197,9 +197,8 @@ impl AsRef<Path> for CanonicalTree {
 /// stable across Rust versions, and a lock whose name moved on upgrade
 /// would be invisible to the run holding it.
 ///
-/// A prefix becomes a component of its own rather than being dropped —
-/// nothing on unix produces one, but dropping it would map `C:\a` and
-/// `D:\a` onto one directory. Untested; Windows is not a target yet.
+/// Windows prefixes retain their identity in a filename-safe component;
+/// ordinary and verbatim spellings of the same volume share that component.
 pub fn lock_dir_for(root: &Path, tree: &CanonicalTree) -> PathBuf {
     let mut out = root.to_path_buf();
     // The root component is dropped so the result stays under `root`:
@@ -208,16 +207,7 @@ pub fn lock_dir_for(root: &Path, tree: &CanonicalTree) -> PathBuf {
         use std::path::Component as C;
         match part {
             C::Normal(name) => out.push(name),
-            // `:` and `\` are not filename characters on the platform that
-            // produces a prefix, so the raw form cannot be a directory
-            // name. Folded rather than dropped: what matters is that two
-            // prefixes stay two names.
-            C::Prefix(prefix) => out.push(
-                prefix
-                    .as_os_str()
-                    .to_string_lossy()
-                    .replace([':', '\\', '/'], "-"),
-            ),
+            C::Prefix(prefix) => out.push(prefix_component(prefix.kind())),
             // A canonical path has neither of these, and the root must go
             // for the result to stay under `root`.
             C::RootDir | C::CurDir | C::ParentDir => {}
@@ -225,6 +215,38 @@ pub fn lock_dir_for(root: &Path, tree: &CanonicalTree) -> PathBuf {
     }
     out
 }
+
+fn prefix_component(prefix: std::path::Prefix<'_>) -> String {
+    use std::path::Prefix;
+    let encode = |name: &std::ffi::OsStr| {
+        #[cfg(windows)]
+        {
+            use std::os::windows::ffi::OsStrExt as _;
+            name.encode_wide()
+                .map(|unit| format!("{unit:04x}"))
+                .collect::<String>()
+        }
+        #[cfg(not(windows))]
+        name.as_encoded_bytes()
+            .iter()
+            .map(|byte| format!("{byte:02x}"))
+            .collect::<String>()
+    };
+    match prefix {
+        Prefix::Disk(drive) | Prefix::VerbatimDisk(drive) => {
+            format!("drive-{}", char::from(drive.to_ascii_uppercase()))
+        }
+        Prefix::UNC(server, share) | Prefix::VerbatimUNC(server, share) => {
+            format!("unc-{}-{}", encode(server), encode(share))
+        }
+        Prefix::DeviceNS(name) => format!("device-{}", encode(name)),
+        Prefix::Verbatim(name) => format!("verbatim-{}", encode(name)),
+    }
+}
+
+#[cfg(all(test, windows))]
+#[path = "lock/windows_tests.rs"]
+mod windows_tests;
 
 /// Create the lock file, holder and all, or fail with `AlreadyExists`.
 ///

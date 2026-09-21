@@ -290,6 +290,20 @@ fn sort_host_for_address(address: &str) -> String {
         .to_string()
 }
 
+/// Scan failures produce `Unavailable`; an empty successful scan is available.
+fn scan() -> PortScanResult {
+    #[cfg(target_os = "macos")]
+    let ports = macos::scan();
+    #[cfg(target_os = "linux")]
+    let ports = linux::scan();
+    #[cfg(not(any(target_os = "macos", target_os = "linux")))]
+    let ports = None;
+    ports
+        .map(dedupe_listening_ports)
+        .map(PortScanResult::available)
+        .unwrap_or_else(PortScanResult::unavailable)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -376,30 +390,6 @@ mod tests {
             kind,
         }
     }
-}
-
-/// Scan the current OS for listening TCP ports. Command/procfs failures
-/// produce `Unavailable`; a successful scan with no listeners produces
-/// `Available` with an empty row list.
-#[cfg(target_os = "macos")]
-fn scan() -> PortScanResult {
-    macos::scan()
-        .map(dedupe_listening_ports)
-        .map(PortScanResult::available)
-        .unwrap_or_else(PortScanResult::unavailable)
-}
-
-#[cfg(target_os = "linux")]
-fn scan() -> PortScanResult {
-    linux::scan()
-        .map(dedupe_listening_ports)
-        .map(PortScanResult::available)
-        .unwrap_or_else(PortScanResult::unavailable)
-}
-
-#[cfg(not(any(target_os = "macos", target_os = "linux")))]
-fn scan() -> PortScanResult {
-    PortScanResult::unavailable()
 }
 
 #[cfg(target_os = "macos")]

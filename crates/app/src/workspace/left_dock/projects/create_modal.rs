@@ -605,8 +605,8 @@ mod tests {
             let plan = m.validate(cx).unwrap();
             assert_eq!(plan.branch, "feat/sidebar");
             assert_eq!(
-                plan.new_path.to_string_lossy(),
-                "/Users/dev/repo-feat-sidebar"
+                plan.new_path,
+                std::path::Path::new("/Users/dev/repo-feat-sidebar")
             );
         });
     }

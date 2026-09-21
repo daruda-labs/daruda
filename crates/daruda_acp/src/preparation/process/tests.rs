@@ -3,8 +3,8 @@ use super::*;
 #[test]
 fn reports_exit_stderr_without_echoing_environment() {
     let error = output(
-        Command::new("/bin/sh")
-            .args(["-c", "echo broken >&2; exit 126"])
+        Command::new(test_process::executable())
+            .args(["--stderr", "broken", "--exit", "126"])
             .env("TEST_SECRET", "hidden"),
         &PreparationContext::default(),
     )
@@ -17,7 +17,7 @@ fn reports_exit_stderr_without_echoing_environment() {
 #[test]
 fn hung_command_is_bounded() {
     let error = output_with_timeout(
-        Command::new("/bin/sh").args(["-c", "sleep 10 & wait"]),
+        Command::new(test_process::executable()).args(["--sleep-ms", "10000"]),
         &PreparationContext::default(),
         Duration::from_millis(30),
     )
@@ -31,7 +31,7 @@ fn cancellation_interrupts_a_running_process() {
     let canceled = || started.elapsed() > Duration::from_millis(30);
     let context = PreparationContext::new(&canceled, &|_| {});
     let error = output(
-        Command::new("/bin/sh").args(["-c", "sleep 10 & wait"]),
+        Command::new(test_process::executable()).args(["--sleep-ms", "10000"]),
         &context,
     )
     .unwrap_err();
@@ -47,9 +47,13 @@ fn classifies_structured_npm_errors() {
         ("ETARGET", PreparationKind::Configuration),
     ] {
         let json = serde_json::json!({"error": {"code": code}});
-        let script = format!("printf '%s' '{json}'; exit 1");
         let error = output(
-            Command::new("/bin/sh").args(["-c", &script]),
+            Command::new(test_process::executable()).args([
+                "--stdout",
+                &json.to_string(),
+                "--exit",
+                "1",
+            ]),
             &PreparationContext::default(),
         )
         .unwrap_err();
@@ -60,7 +64,7 @@ fn classifies_structured_npm_errors() {
 #[test]
 fn output_is_bounded_while_the_child_runs() {
     let error = output(
-        Command::new("/bin/sh").args(["-c", "yes output"]),
+        Command::new(test_process::executable()).arg("--flood"),
         &PreparationContext::default(),
     )
     .unwrap_err();

@@ -16,7 +16,8 @@ use super::SocketError;
 /// A unix socket's file mode *is* its access control — Darwin enforces it on
 /// `connect` — and the default umask leaves it world-connectable, which would
 /// put all nine app-driving tools behind nothing but the token.
-pub(super) const OWNER_ONLY_FILE: u32 = 0o600;
+#[cfg(all(test, unix))]
+pub(super) use crate::platform::local_socket::OWNER_ONLY_FILE;
 
 /// macOS `sun_path` is 104 bytes (`sys/un.h`); Linux allows 108. Truncation
 /// would bind a different path than the one written to the runtime file, so it
@@ -153,10 +154,7 @@ impl Drop for Ownership {
 /// socket world-connectable. Since the mode is the only access control a unix
 /// socket has, this is what stands between another local user and every tool.
 pub(super) fn restrict_socket(path: &Path) -> Result<(), SocketError> {
-    use std::os::unix::fs::PermissionsExt as _;
-
-    std::fs::set_permissions(path, std::fs::Permissions::from_mode(OWNER_ONLY_FILE))
-        .map_err(SocketError::Io)
+    crate::platform::local_socket::restrict(path).map_err(SocketError::Io)
 }
 
 pub(crate) fn validate_socket_path(path: &Path) -> Result<(), SocketError> {

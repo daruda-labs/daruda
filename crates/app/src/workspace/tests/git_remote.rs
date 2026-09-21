@@ -188,7 +188,7 @@ fn external_commit_refreshes_linked_lane_through_the_git_dir_watcher(cx: &mut Te
     ws.update(cx, |ws, cx| ws.reconcile_bootstrapped_lanes(cx));
     cx.run_until_parked();
 
-    let linked = std::fs::canonicalize(&linked).unwrap();
+    let linked = daruda_core::path::canonicalize(&linked).unwrap();
     let target = ws.read_with(cx, |ws, _| {
         let project = &ws.projects[0];
         let lane = project

@@ -253,7 +253,7 @@ impl NodeRuntime {
                     .iter()
                     .any(|(name, _)| name == "npm_config_cache");
                 let launcher = tokens.first().cloned().unwrap_or_default();
-                let abs_launcher = bin_dir.join(&launcher);
+                let abs_launcher = managed_launcher(node_dir, &launcher);
                 let args = tokens.into_iter().skip(1).collect::<Vec<_>>();
                 let path = prepend_to_path(&bin_dir);
                 let mut config = AcpAgentConfig::new(abs_launcher)
@@ -437,6 +437,7 @@ pub(crate) fn node_platform() -> Result<(&'static str, &'static str), NodeError>
     let os = match std::env::consts::OS {
         "macos" => "darwin",
         "linux" => "linux",
+        "windows" => "win32",
         other => return Err(NodeError::UnsupportedPlatform(format!("os: {other}"))),
     };
     let arch = match std::env::consts::ARCH {
@@ -496,6 +497,7 @@ fn prefix_with_host_arch_env(command: &str, install_root: &Path) -> String {
 
 /// `node-<ver>-<os>-<arch>` — the distribution folder / archive stem.
 fn managed_folder_name(os: &str, arch: &str) -> String {
+    let os = if os == "win32" { "win" } else { os };
     format!("node-{MANAGED_NODE_VERSION}-{os}-{arch}")
 }
 
@@ -535,7 +537,11 @@ fn npx_cache_dir(install_root: &Path) -> PathBuf {
 /// does not use `bin/` everywhere, so the arm for that belongs here and
 /// nowhere else.
 pub fn bin_dir(node_dir: &Path) -> PathBuf {
-    node_dir.join("bin")
+    if cfg!(windows) {
+        node_dir.to_path_buf()
+    } else {
+        node_dir.join("bin")
+    }
 }
 
 /// `PATH` with a managed runtime's executables in front of it.
@@ -550,7 +556,16 @@ pub fn path_with_node(node_dir: &Path) -> String {
 
 /// The `node` binary inside an extracted managed node directory.
 fn node_binary(node_dir: &Path) -> PathBuf {
-    bin_dir(node_dir).join("node")
+    managed_launcher(node_dir, "node")
+}
+
+pub(crate) fn managed_launcher(node_dir: &Path, launcher: &str) -> PathBuf {
+    let name = match (cfg!(windows), launcher) {
+        (true, "node") => "node.exe",
+        (true, "npx") => "npx.cmd",
+        _ => launcher,
+    };
+    bin_dir(node_dir).join(name)
 }
 
 /// `true` if a managed install exists and its `node` runs. Cheap validity gate
@@ -632,7 +647,8 @@ fn install_managed_with_context(
         return Ok(NodeRuntime::Managed { node_dir });
     }
 
-    let file_name = format!("{}.tar.gz", managed_folder_name(os, arch));
+    let extension = if os == "win32" { "zip" } else { "tar.gz" };
+    let file_name = format!("{}.{extension}", managed_folder_name(os, arch));
     let archive_url = format!("{NODE_DIST_BASE}/{MANAGED_NODE_VERSION}/{file_name}");
     let shasums_url = format!("{NODE_DIST_BASE}/{MANAGED_NODE_VERSION}/SHASUMS256.txt");
 
@@ -694,7 +710,7 @@ fn publish_managed(
     node_dir: &Path,
     context: &PreparationContext<'_>,
 ) -> Result<(), NodeError> {
-    extract_tar_gz_with_context(archive, staging, context)?;
+    extract_archive_with_context(archive, staging, context)?;
     publish_extracted(
         &staging.join(managed_folder_name(os, arch)),
         node_dir,
@@ -794,26 +810,23 @@ fn prepend_to(bin_dir: &Path, existing: Option<std::ffi::OsString>) -> String {
     }
 }
 
-/// Extract a gzip tarball (`bytes`) into `dest` via the system `tar`. macOS and
-/// Linux both ship a `tar` with gzip support; shelling out avoids pulling a
-/// `tar`/`flate2` crate for the one extraction, mirroring the blocking git-CLI
-/// layer. The bytes are staged to a temp file (same filesystem as `dest`) since
-/// `tar` reads a path.
+/// Extract Node's platform archive (ZIP on Windows, gzip tarball on Unix).
+/// The system extractor detects the format from the staged bytes.
 #[cfg(test)]
-fn extract_tar_gz(bytes: &[u8], dest: &Path) -> Result<(), NodeError> {
-    extract_tar_gz_with_context(bytes, dest, &PreparationContext::default())
+fn extract_archive(bytes: &[u8], dest: &Path) -> Result<(), NodeError> {
+    extract_archive_with_context(bytes, dest, &PreparationContext::default())
 }
 
-fn extract_tar_gz_with_context(
+fn extract_archive_with_context(
     bytes: &[u8],
     dest: &Path,
     context: &PreparationContext<'_>,
 ) -> Result<(), NodeError> {
-    let tmp = dest.join(format!(".node-download-{}.tar.gz", std::process::id()));
+    let tmp = dest.join(format!(".node-download-{}.archive", std::process::id()));
     std::fs::write(&tmp, bytes).map_err(|e| NodeError::Extract(format!("staging archive: {e}")))?;
     let result = output(
-        daruda_core::process::command("tar")
-            .arg("-xzf")
+        daruda_core::process::archive_command()
+            .arg("-xf")
             .arg(&tmp)
             .arg("-C")
             .arg(dest),
@@ -970,7 +983,7 @@ mod tests {
         let install_root = test_install_root();
         let expected = format!(
             "npm_config_cpu={arch} npm_config_os={os} npm_config_cache={} {cmd}",
-            install_root.join("npx-cache").display()
+            shell_words::quote(&install_root.join("npx-cache").to_string_lossy())
         );
         assert_eq!(
             NodeRuntime::System.wrap_command(cmd, &install_root).0,
@@ -1082,11 +1095,11 @@ mod tests {
         // path, the adapter package args, and a PATH env prepending the bin dir.
         let agent = AcpAgent::from_str(&command.0).expect("managed command parses");
         let config = agent.into_config();
-        assert_eq!(config.command(), node_dir.join("bin").join("npx"));
+        assert_eq!(config.command(), managed_launcher(&node_dir, "npx"));
         assert_eq!(config.arguments(), vec!["-y", ADAPTER_NPM_PACKAGE]);
         let path = config.environment().get("PATH").expect("PATH env present");
         assert!(
-            path.starts_with(&node_dir.join("bin").to_string_lossy().into_owned()),
+            path.starts_with(&bin_dir(&node_dir).to_string_lossy().into_owned()),
             "PATH must start with the managed bin dir, got {path}"
         );
     }
@@ -1144,7 +1157,7 @@ mod tests {
         .wrap_command("node /path/adapter.js --flag", &test_install_root());
         let agent = AcpAgent::from_str(&command.0).expect("managed node command parses");
         let config = agent.into_config();
-        assert_eq!(config.command(), node_dir.join("bin").join("node"));
+        assert_eq!(config.command(), managed_launcher(&node_dir, "node"));
         assert_eq!(config.arguments(), vec!["/path/adapter.js", "--flag"]);
     }
 
@@ -1160,7 +1173,7 @@ mod tests {
         );
         let agent = AcpAgent::from_str(&command.0).expect("managed env command parses");
         let config = agent.into_config();
-        assert_eq!(config.command(), node_dir.join("bin").join("npx"));
+        assert_eq!(config.command(), managed_launcher(&node_dir, "npx"));
         assert_eq!(
             config.arguments(),
             vec!["-y", "@augmentcode/auggie@0.32.0", "--acp"]
@@ -1205,7 +1218,7 @@ mod tests {
         .wrap_command(&cmd, &test_install_root());
         let agent = AcpAgent::from_str(&command.0).expect("command with spaces parses");
         let config = agent.into_config();
-        assert_eq!(config.command(), node_dir.join("bin").join("npx"));
+        assert_eq!(config.command(), managed_launcher(&node_dir, "npx"));
     }
 
     #[test]
@@ -1237,7 +1250,12 @@ mod tests {
             dir,
             root.join(format!("node-{MANAGED_NODE_VERSION}-darwin-arm64"))
         );
-        assert_eq!(node_binary(&dir), dir.join("bin").join("node"));
+        let relative = if cfg!(windows) {
+            "node.exe"
+        } else {
+            "bin/node"
+        };
+        assert_eq!(node_binary(&dir), dir.join(relative));
     }
 
     #[test]
@@ -1278,10 +1296,17 @@ cccc3333  node-v24.11.0-linux-x64.tar.xz
     fn prepend_to_path_puts_bin_dir_first() {
         let result = prepend_to(
             Path::new("/managed/bin"),
-            Some(std::ffi::OsString::from("/usr/bin:/bin")),
+            Some(std::env::join_paths(["/usr/bin", "/bin"]).unwrap()),
         );
 
-        assert_eq!(result, "/managed/bin:/usr/bin:/bin");
+        assert_eq!(
+            std::env::split_paths(&result).collect::<Vec<_>>(),
+            [
+                PathBuf::from("/managed/bin"),
+                PathBuf::from("/usr/bin"),
+                PathBuf::from("/bin")
+            ]
+        );
     }
 
     #[test]
@@ -1316,7 +1341,7 @@ cccc3333  node-v24.11.0-linux-x64.tar.xz
     }
 
     #[test]
-    fn extract_tar_gz_unpacks_a_real_archive() {
+    fn extract_archive_unpacks_a_real_archive() {
         let dir = tempfile::tempdir().unwrap();
         let src = dir.path().join("src");
         std::fs::create_dir(&src).unwrap();
@@ -1337,7 +1362,7 @@ cccc3333  node-v24.11.0-linux-x64.tar.xz
 
         let dest = dir.path().join("dest");
         std::fs::create_dir(&dest).unwrap();
-        extract_tar_gz(&bytes, &dest).expect("extraction succeeds");
+        extract_archive(&bytes, &dest).expect("extraction succeeds");
         assert_eq!(std::fs::read(dest.join("hello.txt")).unwrap(), b"hi");
     }
 
@@ -1416,8 +1441,30 @@ cccc3333  node-v24.11.0-linux-x64.tar.xz
         match runtime {
             NodeRuntime::Managed { node_dir } => {
                 assert!(node_binary(&node_dir).exists(), "node binary extracted");
-                assert!(node_dir.join("bin").join("npx").exists(), "npx extracted");
+                assert!(managed_launcher(&node_dir, "npx").exists(), "npx extracted");
                 assert!(managed_cache_valid(&node_dir), "extracted node runs");
+                for launcher in ["node", "npx"] {
+                    let prepared = crate::launch_config::finalize_command(
+                        NodeRuntime::Managed {
+                            node_dir: node_dir.clone(),
+                        }
+                        .wrap_command(&format!("{launcher} --version"), dir.path()),
+                        &["TEST_STRIPPED".into()],
+                    );
+                    let config = AcpAgent::from_str(&prepared.0).unwrap().into_config();
+                    let output = daruda_core::process::command(config.command())
+                        .args(config.arguments())
+                        .envs(config.environment())
+                        .env("TEST_STRIPPED", "hidden")
+                        .output()
+                        .unwrap();
+                    assert!(
+                        output.status.success(),
+                        "{launcher}: {}",
+                        String::from_utf8_lossy(&output.stderr)
+                    );
+                    assert!(!output.stdout.is_empty());
+                }
             }
             other => panic!("expected managed runtime, got {other:?}"),
         }

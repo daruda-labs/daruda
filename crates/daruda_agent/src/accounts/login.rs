@@ -524,27 +524,24 @@ mod tests {
         spawn_login(command, &[], &[], timeout).expect("spawn the test child")
     }
 
-    /// Whether `pid` is still a live (non-reaped) process. `ps -p` exits
-    /// non-zero once the process is gone, and `wait`'s cancel path reaps the
-    /// child, so a killed child leaves no zombie for `ps` to find.
+    fn spawn_fixture(args: &[&str], timeout: Duration) -> LoginProcess {
+        spawn_for_test(&test_process::command_line(args), timeout)
+    }
+
+    /// The cancel path reaps the child before this liveness assertion.
     fn process_is_running(pid: u32) -> bool {
-        daruda_core::process::command("/bin/ps")
-            .arg("-p")
-            .arg(pid.to_string())
-            .output()
-            .map(|out| out.status.success())
-            .unwrap_or(false)
+        daruda_core::process::is_alive(pid)
     }
 
     #[test]
     fn on_exit_reports_success_for_a_zero_exit() {
-        let process = spawn_for_test("/usr/bin/true", TEST_LONG_TIMEOUT);
+        let process = spawn_fixture(&["--exit", "0"], TEST_LONG_TIMEOUT);
         assert_eq!(process.wait(WaitPolicy::OnExit), LoginOutcome::Success);
     }
 
     #[test]
     fn on_exit_reports_failed_for_a_nonzero_exit() {
-        let process = spawn_for_test("/usr/bin/false", TEST_LONG_TIMEOUT);
+        let process = spawn_fixture(&["--exit", "1"], TEST_LONG_TIMEOUT);
         assert!(matches!(
             process.wait(WaitPolicy::OnExit),
             LoginOutcome::Failed(_)
@@ -553,7 +550,7 @@ mod tests {
 
     #[test]
     fn on_exit_times_out_when_the_process_never_exits() {
-        let process = spawn_for_test("/bin/sleep 30", TEST_TIMEOUT);
+        let process = spawn_fixture(&["--sleep-ms", "30000"], TEST_TIMEOUT);
         let pid = process.child_pid();
         assert_eq!(process.wait(WaitPolicy::OnExit), LoginOutcome::TimedOut);
         assert!(!process_is_running(pid), "the timed-out child must be gone");
@@ -569,7 +566,7 @@ mod tests {
             std::fs::write(&writer, b"{}").expect("write credentials");
         });
 
-        let process = spawn_for_test("/bin/sh -c 'sleep 0.4'", TEST_LONG_TIMEOUT);
+        let process = spawn_fixture(&["--sleep-ms", "400"], TEST_LONG_TIMEOUT);
         let landed = || auth.exists();
         assert_eq!(
             process.wait(WaitPolicy::OnCredentials {
@@ -590,7 +587,7 @@ mod tests {
             std::fs::write(&writer, b"{}").expect("write credentials");
         });
 
-        let process = spawn_for_test("/bin/sleep 30", TEST_LONG_TIMEOUT);
+        let process = spawn_fixture(&["--sleep-ms", "30000"], TEST_LONG_TIMEOUT);
         let pid = process.child_pid();
         let landed = || auth.exists();
         let started = Instant::now();
@@ -613,7 +610,7 @@ mod tests {
 
     #[test]
     fn on_credentials_times_out_when_credentials_never_land() {
-        let process = spawn_for_test("/bin/sleep 30", TEST_TIMEOUT);
+        let process = spawn_fixture(&["--sleep-ms", "30000"], TEST_TIMEOUT);
         let pid = process.child_pid();
         let landed = || false;
         assert_eq!(
@@ -628,7 +625,7 @@ mod tests {
 
     #[test]
     fn on_credentials_lets_an_earlier_exit_decide_the_outcome() {
-        let process = spawn_for_test("/usr/bin/false", TEST_LONG_TIMEOUT);
+        let process = spawn_fixture(&["--exit", "1"], TEST_LONG_TIMEOUT);
         let landed = || false;
         assert!(matches!(
             process.wait(WaitPolicy::OnCredentials {
@@ -641,7 +638,7 @@ mod tests {
 
     #[test]
     fn on_credentials_lets_an_earlier_denial_decide_the_outcome() {
-        let process = spawn_for_test("/bin/sh -c 'echo access_denied 1>&2; exit 1'", TEST_TIMEOUT);
+        let process = spawn_fixture(&["--stderr", "access_denied", "--exit", "1"], TEST_TIMEOUT);
         let landed = || false;
         assert_eq!(
             process.wait(WaitPolicy::OnCredentials {
@@ -800,11 +797,18 @@ mod tests {
         assert!(matches!(err, LoginError::EmptyCommand));
     }
 
-    /// Shell probe exiting 0 only when `want`'s variable holds `expected`
+    /// Native probe exiting 0 only when `want`'s variable holds `expected`
     /// and `avoid`'s does not — the cross-domain leak being pinned is a
     /// second, wrong-domain variable carrying the same config dir.
     fn env_probe(want: &str, avoid: &str, expected: &str) -> String {
-        format!(r#"/bin/sh -c 'test "${want}" = "{expected}" && test "${avoid}" != "{expected}"'"#)
+        test_process::command_line(&[
+            "--require-env",
+            want,
+            expected,
+            "--reject-env-value",
+            avoid,
+            expected,
+        ])
     }
 
     /// `inject_env` in the shape the production caller builds it: one pair

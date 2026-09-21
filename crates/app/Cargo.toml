@@ -121,12 +121,15 @@ x11rb = { version = "0.13.1", features = ["screensaver", "allow-unsafe-code"] }
 notify = { version = "7", default-features = false }
 
 [target.'cfg(target_os = "windows")'.dependencies]
+uds_windows = "1.2.1"
+windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Security_Authorization", "Win32_System_SystemInformation", "Win32_UI_Input_KeyboardAndMouse", "Win32_UI_WindowsAndMessaging"] }
 # Same reasoning as Linux: ReadDirectoryChangesW is unconditional, so there is
 # no feature to opt into — only `macos_fsevent` is gated. Without this section
 # the app has no `notify` at all on Windows and does not compile.
 notify = { version = "7", default-features = false }
 
 [dev-dependencies]
+test_process = { path = "../../tools/test_process" }
 agent-client-protocol = "2.0"
 # `test-support` swaps the PTY spawn for a stub. Declared here rather than on
 # the normal dependency so only test targets get it: a workspace test that

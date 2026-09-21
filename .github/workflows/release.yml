@@ -1,16 +1,42 @@
 name: Release
 
 on:
+  workflow_dispatch:
   push:
     tags:
       - "v*"
 
 permissions:
-  contents: write
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
 
 jobs:
+  metadata:
+    name: Validate release version
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@v6
+      - name: Read and validate version
+        id: version
+        shell: bash
+        run: |
+          VERSION=$(grep -A20 '^\[workspace\.package\]' Cargo.toml \
+            | grep '^version' | head -1 | sed 's/version = "\(.*\)"/\1/')
+          test -n "$VERSION"
+          if [ "$GITHUB_EVENT_NAME" = "push" ] && [ "$GITHUB_REF_NAME" != "v$VERSION" ]; then
+            echo "Tag $GITHUB_REF_NAME does not match Cargo.toml version $VERSION" >&2
+            exit 1
+          fi
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+
   build-dmg:
     name: Build macOS dmg
+    needs: metadata
     runs-on: macos-14  # Apple Silicon runner
     timeout-minutes: 30
 
@@ -48,31 +74,11 @@ jobs:
       - name: Add Zig to PATH
         run: echo "$GITHUB_WORKSPACE/.context/zig/0.14.1" >> "$GITHUB_PATH"
 
-      - name: Fetch dependencies and apply GPUI patch
-        run: cargo fetch && ./scripts/apply-gpui-patch.sh
-
-      - name: Verify tag matches Cargo.toml version
-        run: |
-          CARGO_VERSION=$(grep -A20 '^\[workspace\.package\]' Cargo.toml \
-            | grep '^version' | head -1 \
-            | sed 's/version = "\(.*\)"/\1/')
-          TAG_VERSION="${GITHUB_REF_NAME#v}"
-          if [ "$CARGO_VERSION" != "$TAG_VERSION" ]; then
-            echo "❌ Tag $GITHUB_REF_NAME does not match Cargo.toml version $CARGO_VERSION"
-            exit 1
-          fi
-          echo "✅ Tag and Cargo.toml version match: $CARGO_VERSION"
+      - name: Fetch locked dependencies and verify GPUI source
+        run: cargo fetch --locked && cargo run --locked -p vendor_gpui -- --check
 
       - name: Build .app bundle
         run: ./scripts/build-app.sh
-
-      - name: Read version
-        id: version
-        run: |
-          VERSION=$(grep -A20 '^\[workspace\.package\]' Cargo.toml \
-            | grep '^version' | head -1 \
-            | sed 's/version = "\(.*\)"/\1/')
-          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
 
       - name: Install create-dmg
         run: brew install create-dmg
@@ -86,33 +92,114 @@ jobs:
             --icon "daruda.app" 150 180 \
             --app-drop-link 390 180 \
             --no-internet-enable \
-            "daruda-${{ steps.version.outputs.version }}.dmg" \
+            "daruda-${{ needs.metadata.outputs.version }}.dmg" \
             "target/release/daruda.app"
+
+      - name: Upload macOS package
+        uses: actions/upload-artifact@v7
+        with:
+          name: release-macos
+          path: daruda-${{ needs.metadata.outputs.version }}.dmg
+          if-no-files-found: error
+          compression-level: 0
+
+  build-windows:
+    name: Build Windows x86_64 ZIP
+    needs: metadata
+    runs-on: windows-latest
+    timeout-minutes: 90
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          submodules: recursive
+
+      - name: Cache rustup toolchain
+        uses: actions/cache@v5
+        with:
+          path: ~/.rustup/toolchains
+          key: rustup-1.95-${{ runner.os }}-${{ runner.arch }}
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: "1.95"
+
+      - name: Cache Rust build
+        uses: Swatinem/rust-cache@v2.9.1
+        with:
+          key: release-windows
+
+      - name: Cache Zig
+        uses: actions/cache@v5
+        with:
+          path: .context/zig
+          key: zig-0.14.1-${{ runner.os }}-${{ runner.arch }}
+
+      - name: Install Zig 0.14.1
+        run: ./scripts/bootstrap-zig.ps1
+
+      - name: Add Zig to PATH
+        run: Add-Content $env:GITHUB_PATH "$env:GITHUB_WORKSPACE/.context/zig/0.14.1"
+
+      - name: Fetch locked dependencies
+        run: cargo fetch --locked
+
+      - name: Verify vendored GPUI
+        run: cargo run --locked -p vendor_gpui -- --check
+
+      - name: Build and package Windows application
+        id: package
+        run: ./scripts/package-windows.ps1
+
+      - name: Upload Windows package
+        uses: actions/upload-artifact@v7
+        with:
+          name: release-windows
+          path: ${{ steps.package.outputs.archive }}
+          if-no-files-found: error
+          compression-level: 0
+
+  publish:
+    name: Publish platform packages
+    needs: [metadata, build-dmg, build-windows]
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Download platform packages
+        uses: actions/download-artifact@v8
+        with:
+          pattern: release-*
+          merge-multiple: true
+          path: packages
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v3
         with:
-          name: "daruda v${{ steps.version.outputs.version }}"
+          name: "daruda v${{ needs.metadata.outputs.version }}"
           draft: false
-          prerelease: ${{ contains(steps.version.outputs.version, '-') }}
-          files: daruda-${{ steps.version.outputs.version }}.dmg
+          prerelease: ${{ contains(needs.metadata.outputs.version, '-') }}
+          fail_on_unmatched_files: true
+          files: |
+            packages/daruda-${{ needs.metadata.outputs.version }}.dmg
+            packages/daruda-${{ needs.metadata.outputs.version }}-windows-x86_64.zip
           body: |
-            ## Install
+            ## macOS
 
-            ```bash
-            # Download daruda-${{ steps.version.outputs.version }}.dmg and open it,
-            # then drag daruda.app to Applications.
+            Download `daruda-${{ needs.metadata.outputs.version }}.dmg`, open it,
+            and drag daruda.app to Applications.
+            First launch: right-click daruda.app and select Open.
+            If macOS still refuses, run `xattr -cr /Applications/daruda.app`.
 
-            # First launch: right-click daruda.app → Open (bypasses Gatekeeper once).
-            # If macOS still refuses, clear extended attributes recursively:
-            xattr -cr /Applications/daruda.app
-            ```
+            ## Windows (x86_64, experimental)
+
+            Download `daruda-${{ needs.metadata.outputs.version }}-windows-x86_64.zip`,
+            extract the entire archive, and run `daruda.exe`.
+            Keep the included runtime DLLs beside the executable.
+            This portable build is unsigned; no installer is required.
 
             ## Build from source
 
-            ```bash
-            git clone --recurse-submodules https://github.com/daruda-labs/daruda
-            cd daruda
-            ./scripts/bootstrap-zig.sh
-            ./scripts/build-app.sh
-            ```
+            See [contributor setup](https://github.com/daruda-labs/daruda/blob/${{ github.ref_name }}/CONTRIBUTING.md#setup).

@@ -1,5 +1,6 @@
 //! Profile-scoped OS credential storage. Secrets never enter config or logs.
 
+#[cfg(any(target_os = "macos", target_os = "linux"))]
 use std::process::{Command, Stdio};
 
 pub fn service(base: &str) -> String {
@@ -36,9 +37,13 @@ pub fn read(service: &str, account: &str) -> Option<String> {
         .then(|| normalize(&output.stdout))
         .flatten();
     #[cfg(not(any(target_os = "macos", target_os = "linux")))]
-    None
+    {
+        let _ = (service, account);
+        None
+    }
 }
 
+#[cfg(any(test, target_os = "macos", target_os = "linux"))]
 fn normalize(bytes: &[u8]) -> Option<String> {
     let value = std::str::from_utf8(bytes).ok()?.trim();
     (!value.is_empty()).then(|| value.to_owned())
@@ -95,9 +100,12 @@ pub fn write(service: &str, account: &str, value: &str) -> std::io::Result<()> {
         ))
     };
     #[cfg(not(any(target_os = "macos", target_os = "linux")))]
-    Err(std::io::Error::other(
-        "OS credential storage is unavailable",
-    ))
+    {
+        let _ = (service, account, value);
+        Err(std::io::Error::other(
+            "OS credential storage is unavailable",
+        ))
+    }
 }
 
 pub fn delete(service: &str, account: &str) -> std::io::Result<()> {
@@ -127,9 +135,12 @@ pub fn delete(service: &str, account: &str) -> std::io::Result<()> {
         ))
     };
     #[cfg(not(any(target_os = "macos", target_os = "linux")))]
-    Err(std::io::Error::other(
-        "OS credential storage is unavailable",
-    ))
+    {
+        let _ = (service, account);
+        Err(std::io::Error::other(
+            "OS credential storage is unavailable",
+        ))
+    }
 }
 
 #[cfg(test)]

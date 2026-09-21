@@ -96,7 +96,13 @@ mod tests {
             .unwrap();
         assert_eq!(command.get_program(), runtime.node);
         assert_eq!(command.get_current_dir(), Some(Path::new("/install")));
-        assert_eq!(runtime.env["PATH"], "/runtime/bin:/custom/bin");
+        assert_eq!(
+            std::env::split_paths(&runtime.env["PATH"]).collect::<Vec<_>>(),
+            [
+                std::path::PathBuf::from("/runtime/bin"),
+                std::path::PathBuf::from("/custom/bin")
+            ]
+        );
         let env: BTreeMap<_, _> = command.get_envs().collect();
         assert_eq!(env[std::ffi::OsStr::new("TEST_SECRET")], None);
         assert_eq!(

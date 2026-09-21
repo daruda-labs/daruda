@@ -516,13 +516,16 @@ fn only_the_host_window_shows_a_chip_once_a_session_exists(cx: &mut TestAppConte
 fn clicking_the_chip_starts_a_session_from_inside_the_windows_dispatch(cx: &mut TestAppContext) {
     use gpui::BorrowAppContext as _;
 
-    let (window, workspace) = build_workspace(cx);
+    let mut config = daruda_config::Config::default();
+    let mut agent = config.resolved_agents().remove(0);
+    agent.launch = daruda_config::AgentLaunch::Raw(test_process::command_line(&["--exit", "1"]));
+    config.agents = vec![daruda_config::AgentEntry::Custom(agent)];
+    config.orchestrator.enabled = true;
+    let (window, workspace) = build_workspace_with(cx, &config, None);
     cx.update(|cx| {
         crate::settings_store::SettingsStore::init(cx);
         cx.update_global::<crate::settings_store::SettingsStore, _>(|store, _| {
-            let mut cfg = (*store.user()).clone();
-            cfg.orchestrator.enabled = true;
-            store.set_user_for_testing(cfg);
+            store.set_user_for_testing(config.clone());
         });
         crate::orchestrator::seed_control_surface_for_test(cx);
         crate::window_registry::WindowRegistry::register(window.into(), workspace.downgrade(), cx);

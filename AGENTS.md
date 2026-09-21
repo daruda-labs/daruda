@@ -181,16 +181,17 @@ daruda/
 │   ├── gen_licenses/          # generates third-party license manifest
 │   └── vt_dump/               # diagnostic CLI
 ├── vendor/ghostty/           # Ghostty v1.2.3 submodule
+├── vendor/zed/               # patched GPUI; regenerate with tools/vendor_gpui
 └── scripts/
 ```
 
 ### Requirements
 
 - **Rust**: 2024 edition (1.95.0+). The floor is declared once in `[workspace.package]` and every first-party crate inherits it with `rust-version.workspace = true`, so clippy's `incompatible_msrv` catches a newer std API at the call site. CI pins the toolchain to exactly 1.95, which is what actually enforces the floor — develop on a newer toolchain freely. The three vendored `gpui_component*` crates deliberately stay undeclared to keep the re-vendor diff a file copy; `ferrum_flow` does declare it, because its manifest is daruda-authored either way and the declaration is what arms `incompatible_msrv` there.
-- **Zig**: 0.14.1 (`./scripts/bootstrap-zig.sh` on macOS; on Linux install manually and set `ZIG=<path>` or put `zig` on `PATH`)
+- **Zig**: 0.14.1 (`./scripts/bootstrap-zig.sh` on macOS/Linux, `./scripts/bootstrap-zig.ps1` on Windows x86_64; alternatively set `ZIG=<path>` or put `zig` on `PATH`)
 - **macOS**: Apple Silicon or Intel + Xcode Command Line Tools — the primary, fully-verified target.
 - **Linux**: built and tested by the `linux` CI job, which gates like the macOS one — the claim is green, not merely measured. GUI runtime (window/menu/tray) is still unverified on a real desktop, since CI has no one to look at the window. Needs system `libfontconfig`/`libxcb` and real fonts (the job installs them).
-- **Windows**: not yet ported.
+- **Windows**: native MSVC build via `cargo build --locked -p daruda` or `scripts/build-windows.ps1`. CI gates the build, app target compilation, Clippy, and native/platform tests; full runtime tests remain experimental. GUI runtime still needs desktop verification.
 
 ### Build
 

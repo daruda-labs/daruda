@@ -320,10 +320,7 @@ mod tests {
     fn project_dir_concatenates_under_home() {
         let home = Path::new("/Users/x");
         let dir = project_dir_for(home, Path::new("/Users/x/proj"));
-        assert_eq!(
-            dir.to_str().unwrap(),
-            "/Users/x/.claude/projects/-Users-x-proj"
-        );
+        assert_eq!(dir, home.join(".claude/projects/-Users-x-proj"));
     }
 
     /// Build an `assistant` JSONL line with a known uuid. Single-line

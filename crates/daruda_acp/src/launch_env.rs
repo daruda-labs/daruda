@@ -149,16 +149,17 @@ mod tests {
         // One `-u` per var, ahead of every `NAME=value` operand: `env` stops
         // option parsing at the first operand.
         assert!(
-            wrapped.0.starts_with(
-                "/usr/bin/env -u ANTHROPIC_API_KEY -u CLAUDE_CODE_OAUTH_TOKEN npm_config_cpu="
-            ),
+            wrapped.0.starts_with(&format!(
+                "{} -u ANTHROPIC_API_KEY -u CLAUDE_CODE_OAUTH_TOKEN npm_config_cpu=",
+                shell_words::quote(&env_program().to_string_lossy())
+            )),
             "{}",
             wrapped.0
         );
         assert!(wrapped.0.ends_with(&cmd), "{}", wrapped.0);
 
         let config = config_of(&wrapped);
-        assert_eq!(config.command(), PathBuf::from("/usr/bin/env"));
+        assert_eq!(config.command(), env_program());
         assert_eq!(
             &config.arguments()[..4],
             ["-u", "ANTHROPIC_API_KEY", "-u", "CLAUDE_CODE_OAUTH_TOKEN"]
@@ -178,7 +179,7 @@ mod tests {
         let install_root = test_install_root();
         let expected = format!(
             "npm_config_cpu={arch} npm_config_os={os} npm_config_cache={} {cmd}",
-            install_root.join("npx-cache").display()
+            shell_words::quote(&install_root.join("npx-cache").to_string_lossy())
         );
         assert_eq!(
             wrap_and_strip(&NodeRuntime::System, &plain(cmd), &install_root).0,
@@ -200,7 +201,7 @@ mod tests {
         );
 
         let config = config_of(&command);
-        assert_eq!(config.command(), PathBuf::from("/usr/bin/env"));
+        assert_eq!(config.command(), env_program());
         assert_eq!(
             config.arguments(),
             vec![
@@ -208,9 +209,7 @@ mod tests {
                 "ANTHROPIC_API_KEY".to_string(),
                 "-u".to_string(),
                 "AWS_BEARER_TOKEN_BEDROCK".to_string(),
-                node_dir
-                    .join("bin")
-                    .join("npx")
+                crate::node::managed_launcher(&node_dir, "npx")
                     .to_string_lossy()
                     .into_owned(),
                 "-y".to_string(),
@@ -244,7 +243,10 @@ mod tests {
         assert!(!command.0.contains("/usr/bin/env"), "{}", command.0);
         assert!(!command.0.contains("\"-u\""), "{}", command.0);
         let config = config_of(&command);
-        assert_eq!(config.command(), node_dir.join("bin").join("npx"));
+        assert_eq!(
+            config.command(),
+            crate::node::managed_launcher(&node_dir, "npx")
+        );
         assert_eq!(config.arguments(), vec!["-y", ADAPTER_NPM_PACKAGE]);
     }
 
@@ -275,12 +277,14 @@ mod tests {
         let prepared = prepared(&launch, &test_install_root());
         assert_eq!(
             prepared.0,
-            "/usr/bin/env -u ANTHROPIC_API_KEY -u CLAUDE_CODE_OAUTH_TOKEN \
-             /usr/local/bin/claude-agent-acp --acp"
+            format!(
+                "{} -u ANTHROPIC_API_KEY -u CLAUDE_CODE_OAUTH_TOKEN /usr/local/bin/claude-agent-acp --acp",
+                shell_words::quote(&env_program().to_string_lossy())
+            )
         );
 
         let config = config_of(&prepared);
-        assert_eq!(config.command(), PathBuf::from(ENV_BIN));
+        assert_eq!(config.command(), env_program());
         assert_eq!(
             config.arguments(),
             [
@@ -302,7 +306,7 @@ mod tests {
         let launch = spec(&command, &["ANTHROPIC_API_KEY"]);
         let config = config_of(&prepared(&launch, &test_install_root()));
 
-        assert_eq!(config.command(), PathBuf::from(ENV_BIN));
+        assert_eq!(config.command(), env_program());
         assert_eq!(
             config.arguments(),
             [
@@ -386,16 +390,13 @@ mod tests {
             let config = config_of(&stripped);
             assert_eq!(
                 config.command(),
-                PathBuf::from(ENV_BIN),
+                env_program(),
                 "unstripped launch: {}",
                 stripped.0
             );
             assert_eq!(&config.arguments()[..2], ["-u", "ANTHROPIC_API_KEY"]);
         }
     }
-
-    /// Shell probe that exits 0 only when `ANTHROPIC_API_KEY` is absent.
-    const STRIP_PROBE: &str = r#"/bin/sh -c 'test -z "${ANTHROPIC_API_KEY+set}"'"#;
 
     /// Run `config` for real with `ANTHROPIC_API_KEY` set on the child, and
     /// report whether it exited 0 — i.e. whether the var was removed.
@@ -417,17 +418,19 @@ mod tests {
         let strip = ["ANTHROPIC_API_KEY"];
 
         // Bash-string shape, with a leading assignment the `-u` must precede.
-        let bash = spec(&format!("KEEP=1 {STRIP_PROBE}"), &strip);
+        let probe_args = ["--absent-env", "ANTHROPIC_API_KEY"];
+        let probe = test_process::command_line(&probe_args);
+        let bash = spec(&format!("KEEP=1 {probe}"), &strip);
         assert!(probe_sees_no_key(&config_of(&prepared(&bash, &root))));
 
         // JSON config shape — the unsets are argv entries, not a shell prefix.
-        let probe_args = ["-c", r#"test -z "${ANTHROPIC_API_KEY+set}""#];
-        let json = spec(&json_stdio("/bin/sh", &probe_args), &strip);
+        let program = test_process::executable().to_str().unwrap();
+        let json = spec(&json_stdio(program, &probe_args), &strip);
         assert!(probe_sees_no_key(&config_of(&prepared(&json, &root))));
 
         // Control: without a strip the probe really does see the var, so the
         // two assertions above are testing the unsets and not a dud probe.
-        let unstripped = spec(&json_stdio("/bin/sh", &probe_args), &[]);
+        let unstripped = spec(&json_stdio(program, &probe_args), &[]);
         assert!(!probe_sees_no_key(&config_of(&prepared(
             &unstripped,
             &root
@@ -471,7 +474,7 @@ mod tests {
         );
         let wrapped = wrap_and_strip(&NodeRuntime::System, &launch, &test_install_root());
         let config = config_of(&wrapped);
-        assert_eq!(config.command(), PathBuf::from("/usr/bin/env"));
+        assert_eq!(config.command(), env_program());
 
         let unset_at = config
             .arguments()
@@ -503,15 +506,13 @@ mod tests {
         );
 
         let config = config_of(&command);
-        assert_eq!(config.command(), PathBuf::from("/usr/bin/env"));
+        assert_eq!(config.command(), env_program());
         assert_eq!(
             config.arguments(),
             vec![
                 "-u".to_string(),
                 "ANTHROPIC_API_KEY".to_string(),
-                node_dir
-                    .join("bin")
-                    .join("npx")
+                crate::node::managed_launcher(&node_dir, "npx")
                     .to_string_lossy()
                     .into_owned(),
                 "-y".to_string(),

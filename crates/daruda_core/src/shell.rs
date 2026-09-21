@@ -8,6 +8,26 @@ pub mod quote;
 
 pub use quote::Shell;
 
+/// Resolve a POSIX utility supplied by Git for Windows without requiring
+/// its private `usr/bin` directory on the GUI's PATH. Unix uses normal lookup.
+pub fn posix_tool(name: &str) -> std::path::PathBuf {
+    #[cfg(windows)]
+    {
+        if let Ok(program) = which::which(name) {
+            return program;
+        }
+        if let Ok(git) = which::which("git") {
+            for parent in git.ancestors().skip(1).take(3) {
+                let candidate = parent.join("usr/bin").join(format!("{name}.exe"));
+                if candidate.is_file() {
+                    return candidate;
+                }
+            }
+        }
+    }
+    name.into()
+}
+
 /// The arguments that make `program` a login shell.
 ///
 /// `-l` is POSIX: `pwsh.exe` rejects it and `cmd.exe` reads it as a

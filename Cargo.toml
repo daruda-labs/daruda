@@ -1,6 +1,10 @@
 [workspace]
 resolver = "2"
 members = ["crates/*", "tools/*"]
+exclude = ["vendor/zed"]
+
+[patch."https://github.com/zed-industries/zed"]
+gpui = { path = "vendor/zed/crates/gpui" }
 
 [workspace.package]
 version = "0.2.15"

@@ -42,58 +42,6 @@ use super::{
 /// trivial, single-use UI-timing constant not worth centralizing.
 const TELEGRAM_PAIR_COPY_LABEL_DURATION: std::time::Duration = std::time::Duration::from_secs(1);
 
-/// Build a `file://` URL from `path`, percent-encoding any byte that is
-/// not safe in a URL path segment (RFC 3986 §3.3). Handles spaces in
-/// paths like `~/Library/Application Support/…`.
-fn path_to_file_url(path: &std::path::Path) -> String {
-    use std::os::unix::ffi::OsStrExt;
-    let bytes = path.as_os_str().as_bytes();
-    let mut encoded = String::with_capacity(bytes.len() + 8);
-    for &b in bytes {
-        match b {
-            b'A'..=b'Z'
-            | b'a'..=b'z'
-            | b'0'..=b'9'
-            | b'-'
-            | b'_'
-            | b'.'
-            | b'~'
-            | b'/'
-            | b':'
-            | b'@'
-            | b'!'
-            | b'$'
-            | b'&'
-            | b'\''
-            | b'('
-            | b')'
-            | b'*'
-            | b'+'
-            | b','
-            | b';'
-            | b'=' => {
-                encoded.push(b as char);
-            }
-            _ => {
-                encoded.push('%');
-                let hi = b >> 4;
-                let lo = b & 0xF;
-                encoded.push(if hi < 10 {
-                    (b'0' + hi) as char
-                } else {
-                    (b'A' + hi - 10) as char
-                });
-                encoded.push(if lo < 10 {
-                    (b'0' + lo) as char
-                } else {
-                    (b'A' + lo - 10) as char
-                });
-            }
-        }
-    }
-    format!("file://{encoded}")
-}
-
 fn font_domain_label(label: impl Into<gpui::SharedString>, cx: &gpui::App) -> impl IntoElement {
     let t = theme::current(cx);
     div()
@@ -845,7 +793,27 @@ impl SettingsWindow {
             );
             return false;
         }
-        cx.open_url(&path_to_file_url(&path));
+        let url = match url::Url::from_file_path(&path) {
+            Ok(url) => url,
+            Err(()) => {
+                let error = std::io::Error::new(
+                    std::io::ErrorKind::InvalidInput,
+                    "Config path cannot be represented as a file URL",
+                );
+                self.report_section_error(
+                    s::settings_err_open_config(&error.to_string()),
+                    ErrorReport::new("Config file URL could not be created")
+                        .severity(ErrorSeverity::Warning)
+                        .from_error(&error)
+                        .at(file!(), line!())
+                        .with_context("path", redact_home(&path))
+                        .dedup("config.file_url"),
+                    cx,
+                );
+                return false;
+            }
+        };
+        cx.open_url(url.as_str());
         true
     }
 }

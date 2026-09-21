@@ -167,7 +167,14 @@ fn set_executable(_path: &Path) -> Result<(), InstallerError> {
 
 /// Per-event command string; Claude Code does not forward event args itself.
 fn command_for_event(notify_script: &Path, event: &str) -> String {
-    format!("\"{}\" {event}", notify_script.display())
+    // Hooks run in Bash, which accepts forward-slash paths on every host.
+    let path = notify_script.to_string_lossy();
+    let path = if cfg!(windows) {
+        path.replace('\\', "/")
+    } else {
+        path.into_owned()
+    };
+    format!("\"{path}\" {event}")
 }
 
 // -----------------------------------------------------------------------
@@ -311,7 +318,7 @@ fn matcher_contains_daruda_command(matcher: &Value) -> bool {
     hooks_array.iter().any(|h| {
         h.get("command")
             .and_then(|c| c.as_str())
-            .is_some_and(|s| s.contains(MARKER_PATH_FRAGMENT))
+            .is_some_and(|s| s.replace('\\', "/").contains(MARKER_PATH_FRAGMENT))
     })
 }
 

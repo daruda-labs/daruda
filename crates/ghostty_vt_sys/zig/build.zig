@@ -3,6 +3,11 @@ const std = @import("std");
 pub fn build(b: *std.Build) void {
     const optimize = b.standardOptimizeOption(.{});
     const target = b.standardTargetOptions(.{});
+    const ghostty_source = b.option([]const u8, "ghostty-source", "Absolute Ghostty src directory") orelse
+        @panic("-Dghostty-source is required");
+    const sources = b.addWriteFiles();
+    const ghostty = sources.addCopyDirectory(.{ .cwd_relative = ghostty_source }, "ghostty_src", .{});
+    const wrapper = sources.addCopyFile(b.path("lib.zig"), "lib.zig");
 
     const ziglyph_host = b.dependency("ziglyph", .{
         .target = b.graph.host,
@@ -17,7 +22,7 @@ pub fn build(b: *std.Build) void {
     const props_exe = b.addExecutable(.{
         .name = "props-unigen",
         .root_module = b.createModule(.{
-            .root_source_file = b.path("ghostty_src/unicode/props.zig"),
+            .root_source_file = ghostty.path(b, "unicode/props.zig"),
             .target = b.graph.host,
             .optimize = optimize,
         }),
@@ -27,7 +32,7 @@ pub fn build(b: *std.Build) void {
     const symbols_exe = b.addExecutable(.{
         .name = "symbols-unigen",
         .root_module = b.createModule(.{
-            .root_source_file = b.path("ghostty_src/unicode/symbols.zig"),
+            .root_source_file = ghostty.path(b, "unicode/symbols.zig"),
             .target = b.graph.host,
             .optimize = optimize,
         }),
@@ -42,7 +47,7 @@ pub fn build(b: *std.Build) void {
     const lib = b.addLibrary(.{
         .name = "ghostty_vt",
         .root_module = b.createModule(.{
-            .root_source_file = b.path("lib.zig"),
+            .root_source_file = wrapper,
             .target = target,
             .optimize = optimize,
         }),

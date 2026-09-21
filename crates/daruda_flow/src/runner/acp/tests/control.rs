@@ -33,7 +33,7 @@ fn permission_answer(
 fn a_turn_over_its_timeout_is_cancelled_then_dropped() {
     let (_probe, seen) = probe("cancel.seen");
     let mut fixture = Fixture::with_script(&parking_adapter(&seen, ""));
-    fixture.timeout = Duration::from_millis(200);
+    fixture.timeout = Duration::from_secs(2);
     fixture.grace = Duration::from_millis(400);
 
     let started = Instant::now();
@@ -61,12 +61,19 @@ fn a_turn_over_its_timeout_is_cancelled_then_dropped() {
 fn a_cancel_answered_within_the_grace_ends_the_turn_early() {
     let (_probe, seen) = probe("cancel.seen");
     let mut fixture = Fixture::with_script(&parking_adapter(&seen, ANSWERS_THE_CANCEL));
-    fixture.timeout = Duration::from_millis(200);
+    // The node budget also includes starting the real adapter process.
+    fixture.timeout = Duration::from_secs(2);
     fixture.grace = Duration::from_secs(3);
 
-    let started = Instant::now();
     let result = fixture.run(&spec(AGENT));
-    let elapsed = started.elapsed();
+    // Measure from the adapter receiving cancellation, excluding process
+    // startup and the ACP handshake on loaded CI machines.
+    let elapsed = std::fs::metadata(&seen)
+        .expect("the adapter received cancellation")
+        .modified()
+        .unwrap()
+        .elapsed()
+        .unwrap();
 
     assert!(
         matches!(result.outcome, Err(NodeFailure::Timeout { .. })),
@@ -74,7 +81,7 @@ fn a_cancel_answered_within_the_grace_ends_the_turn_early() {
         result.outcome
     );
     assert!(
-        elapsed < fixture.grace,
+        elapsed < fixture.grace / 2,
         "the turn had already ended and the runner waited anyway: {elapsed:?}"
     );
 }
@@ -87,12 +94,18 @@ fn a_user_cancel_reports_a_cancel_not_a_timeout() {
     let fixture = Fixture::with_script(&parking_adapter(&seen, ANSWERS_THE_CANCEL));
 
     let cancel = fixture.cancel.clone();
-    std::thread::spawn(move || {
-        std::thread::sleep(Duration::from_millis(200));
+    let ready = seen.with_extension("ready");
+    let stopper = std::thread::spawn(move || {
+        let started = Instant::now();
+        while !ready.exists() && started.elapsed() < Duration::from_secs(10) {
+            std::thread::sleep(Duration::from_millis(10));
+        }
         cancel.cancel();
+        assert!(ready.exists(), "the adapter never received its prompt");
     });
 
     let result = fixture.run(&spec(AGENT));
+    stopper.join().unwrap();
     let Err(NodeFailure::SessionError(message)) = &result.outcome else {
         panic!("expected a stopped session, got {:?}", result.outcome);
     };
@@ -295,10 +308,12 @@ fn a_person_who_walks_away_releases_the_agent() {
 fn a_wait_longer_than_the_node_s_budget_does_not_time_it_out() {
     let (_probe, answered) = probe("answer.json");
     let mut fixture = Fixture::with_script(&permission_adapter(ALLOW_ONCE_OPTION, &answered));
-    fixture.timeout = Duration::from_millis(150);
+    // Leave room for process startup; the permission wait must still exceed
+    // the complete node budget, independent of the host's spawn latency.
+    fixture.timeout = Duration::from_secs(2);
 
     // A person is slow. The node's budget is for the agent's work.
-    let (result, _) = fixture.run_answered(&spec(AGENT), Duration::from_millis(600), |_| {
+    let (result, _) = fixture.run_answered(&spec(AGENT), fixture.timeout * 4, |_| {
         Person::Answers(PermissionDecision::Allow {
             option_id: "once".to_string(),
         })
@@ -310,7 +325,7 @@ fn a_wait_longer_than_the_node_s_budget_does_not_time_it_out() {
         "the node was killed for the time a person took"
     );
     assert!(
-        result.waiting.total >= Duration::from_millis(500),
+        result.waiting.total >= fixture.timeout * 3,
         "the wait was not accounted for: {:?}",
         result.waiting.total
     );

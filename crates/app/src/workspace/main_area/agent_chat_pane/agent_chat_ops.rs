@@ -255,46 +255,11 @@ fn markdown_file_link_target(link: &str, cwd: Option<&Path>) -> Option<MarkdownF
 }
 
 fn file_url_path(link: &str) -> Option<PathBuf> {
-    let rest = link.strip_prefix("file://")?;
-    let path = if let Some(path) = rest.strip_prefix("localhost/") {
-        format!("/{path}")
-    } else if rest.starts_with('/') {
-        rest.to_string()
-    } else {
+    let url = url::Url::parse(link).ok()?;
+    if url.scheme() != "file" || url.host_str().is_some_and(|host| host != "localhost") {
         return None;
-    };
-    Some(PathBuf::from(percent_decode_path(&path)?))
-}
-
-fn percent_decode_path(path: &str) -> Option<String> {
-    if !path.as_bytes().contains(&b'%') {
-        return Some(path.to_string());
     }
-
-    let bytes = path.as_bytes();
-    let mut out = Vec::with_capacity(bytes.len());
-    let mut i = 0;
-    while i < bytes.len() {
-        if bytes[i] == b'%' {
-            let hi = hex_value(*bytes.get(i + 1)?)?;
-            let lo = hex_value(*bytes.get(i + 2)?)?;
-            out.push((hi << 4) | lo);
-            i += 3;
-        } else {
-            out.push(bytes[i]);
-            i += 1;
-        }
-    }
-    String::from_utf8(out).ok()
-}
-
-fn hex_value(b: u8) -> Option<u8> {
-    match b {
-        b'0'..=b'9' => Some(b - b'0'),
-        b'a'..=b'f' => Some(b - b'a' + 10),
-        b'A'..=b'F' => Some(b - b'A' + 10),
-        _ => None,
-    }
+    url.to_file_path().ok()
 }
 
 /// Whether a markdown link points outside the filesystem — the same test
@@ -2167,10 +2132,10 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("with space.rs");
         std::fs::write(&path, "fn main() {}\n").unwrap();
-        let encoded = path.to_string_lossy().replace(' ', "%20");
+        let encoded = url::Url::from_file_path(&path).unwrap();
 
         assert_eq!(
-            markdown_file_link_target(&format!("file://{encoded}:75"), None),
+            markdown_file_link_target(&format!("{encoded}:75"), None),
             Some(MarkdownFileLinkTarget {
                 path,
                 line: Some(75)

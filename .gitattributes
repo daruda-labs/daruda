@@ -5,7 +5,7 @@
 #
 #   - cargo writes core.autocrlf=false into the git checkouts it makes
 #     ("Ensure libgit2 won't mess with newlines when we vendor"), so the
-#     gpui tree `scripts/apply-gpui-patch.sh` patches stays LF. A CRLF
+#     pristine gpui tree used by `vendor_gpui` stays LF. A CRLF
 #     patch against an LF target makes `git apply` fail outright — and
 #     `--ignore-whitespace` is the worse outcome, since it succeeds while
 #     injecting a literal CR into every line it touched.

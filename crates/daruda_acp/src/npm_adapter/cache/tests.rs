@@ -58,7 +58,20 @@ fn quarantine_has_a_bounded_retention_count() {
         fs::create_dir(root.path().join(format!(".invalid-{i}"))).unwrap();
     }
     sweep(root.path(), &PreparationContext::default()).unwrap();
-    assert_eq!(fs::read_dir(root.path()).unwrap().count(), KEEP_INVALID);
+    assert_eq!(
+        fs::read_dir(root.path())
+            .unwrap()
+            .filter(|entry| {
+                entry
+                    .as_ref()
+                    .unwrap()
+                    .file_name()
+                    .to_string_lossy()
+                    .starts_with(INVALID_PREFIX)
+            })
+            .count(),
+        KEEP_INVALID
+    );
 }
 
 #[cfg(unix)]

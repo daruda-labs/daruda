@@ -53,14 +53,14 @@ fn settings_adapter(advertised: &[String], journal: &Path, replies: &str) -> Str
     let advertised = advertised.join(",");
     format!(
         r#"while IFS= read -r line; do
-  id=$(printf '%s' "$line" | sed -n 's/.*"id":"\([^"]*\)".*/\1/p')
+  id=${{line#*\"id\":\"}}; id=${{id%%\"*}}
   case "$line" in
 {INITIALIZE}
 *'"method":"session/new"'*)
   printf '{{"jsonrpc":"2.0","id":"%s","result":{{"sessionId":"{SESSION}","configOptions":[{advertised}]}}}}\n' "$id" ;;
 *'"method":"session/set_config_option"'*)
-  cfg=$(printf '%s' "$line" | sed -n 's/.*"configId":"\([^"]*\)".*/\1/p')
-  want=$(printf '%s' "$line" | sed -n 's/.*"value":"\([^"]*\)".*/\1/p')
+  cfg=${{line#*\"configId\":\"}}; cfg=${{cfg%%\"*}}
+  want=${{line#*\"value\":\"}}; want=${{want%%\"*}}
   printf 'set %s=%s\n' "$cfg" "$want" >> "{journal}"
   {replies} ;;
 *'"method":"session/prompt"'*)
@@ -319,7 +319,7 @@ fn adapter_in_mode(current: &str, available: &[&str]) -> String {
         .collect();
     format!(
         r#"while IFS= read -r line; do
-  id=$(printf '%s' "$line" | sed -n 's/.*"id":"\([^"]*\)".*/\1/p')
+  id=${{line#*\"id\":\"}}; id=${{id%%\"*}}
   case "$line" in
 {INITIALIZE}
     *'"method":"session/new"'*)

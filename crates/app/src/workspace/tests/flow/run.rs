@@ -221,10 +221,13 @@ async fn a_run_owned_by_another_process_is_not_offered_a_stop_button(cx: &mut Te
             .expect("the lane resolves")
     });
     std::fs::create_dir_all(&lock_dir).expect("create the lock dir");
-    // pid 1 is alive on every unix and is emphatically not this process.
+    let holder_process = test_process::sleeping();
     std::fs::write(
         lock_dir.join(".lock"),
-        "pid: 1\nrun_id: someone-elses\nstarted_unix_secs: 1\n",
+        format!(
+            "pid: {}\nrun_id: someone-elses\nstarted_unix_secs: 1\n",
+            holder_process.id()
+        ),
     )
     .expect("plant a lock");
 
@@ -279,16 +282,23 @@ async fn a_lock_at_its_new_home_is_found_with_nothing_left_inside_the_tree(
             .expect("the lane resolves")
     });
     std::fs::create_dir_all(&lock_dir).expect("create the lock dir");
-    // pid 1 is alive on every unix and is emphatically not this process.
+    let holder_process = test_process::sleeping();
     std::fs::write(
         lock_dir.join(".lock"),
-        "pid: 1\nrun_id: someone-elses\nstarted_unix_secs: 1\n",
+        format!(
+            "pid: {}\nrun_id: someone-elses\nstarted_unix_secs: 1\n",
+            holder_process.id()
+        ),
     )
     .expect("plant a lock");
 
     let holder = ws.update(cx, |ws, _| ws.lane_holder(lane.path()));
 
-    assert_eq!(holder.map(|h| h.pid), Some(1), "{lock_dir:?}");
+    assert_eq!(
+        holder.map(|h| h.pid),
+        Some(holder_process.id()),
+        "{lock_dir:?}"
+    );
     assert!(
         !crate::workspace::flow_paths::runs_dir(lane.path())
             .join(".lock")
@@ -1115,11 +1125,13 @@ async fn the_run_button_on_a_row_does_not_also_open_the_graph(cx: &mut TestAppCo
             .expect("the lane resolves")
     });
     std::fs::create_dir_all(&lock_dir).expect("lock dir");
-    // pid 1 is the init process on every platform this builds for, so it is
-    // both alive and not us.
+    let holder_process = test_process::sleeping();
     std::fs::write(
         lock_dir.join(".lock"),
-        "pid: 1\nrun_id: 0000000000000001-00000001-0001\nstarted_unix_secs: 1\n",
+        format!(
+            "pid: {}\nrun_id: 0000000000000001-00000001-0001\nstarted_unix_secs: 1\n",
+            holder_process.id()
+        ),
     )
     .expect("lock");
 

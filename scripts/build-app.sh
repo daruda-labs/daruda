@@ -11,11 +11,7 @@ DARUDA_VERSION=$(grep -A20 '^\[workspace\.package\]' Cargo.toml \
   | sed 's/version = "\(.*\)"/\1/')
 
 echo "Building daruda ${DARUDA_VERSION} (release)..."
-# Ensure the vendored gpui patches are present and their compiled artifacts are
-# invalidated before the release build. Cargo treats git checkouts as immutable
-# and would otherwise link a stale, unpatched gpui (cheap no-op when up to date).
-"$ROOT_DIR/scripts/apply-gpui-patch.sh"
-cargo build -p daruda --release
+cargo build --locked -p daruda --release
 
 APP_DIR="target/release/daruda.app"
 rm -rf "$APP_DIR"

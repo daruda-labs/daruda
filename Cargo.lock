@@ -1706,16 +1706,19 @@ dependencies = [
  "sys-locale",
  "sysinfo 0.32.1",
  "tempfile",
+ "test_process",
  "toml 0.8.23",
  "tree-sitter",
  "tree-sitter-highlight",
  "tree-sitter-yaml",
  "tungstenite",
+ "uds_windows",
  "unicode-segmentation",
  "ureq",
  "url",
  "uuid",
  "which",
+ "windows-sys 0.61.2",
  "x11rb",
  "yaml_serde",
 ]
@@ -1735,6 +1738,7 @@ dependencies = [
  "shell-words",
  "smol",
  "tempfile",
+ "test_process",
  "thiserror 2.0.18",
  "ureq",
  "which",
@@ -1755,6 +1759,7 @@ dependencies = [
  "sha2",
  "shell-words",
  "tempfile",
+ "test_process",
  "thiserror 2.0.18",
  "ureq",
 ]
@@ -1779,8 +1784,12 @@ dependencies = [
 name = "daruda_core"
 version = "0.2.15"
 dependencies = [
+ "dunce",
  "libc",
  "tempfile",
+ "test_process",
+ "which",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -2970,7 +2979,6 @@ dependencies = [
 [[package]]
 name = "gpui"
 version = "0.2.2"
-source = "git+https://github.com/zed-industries/zed?rev=193b55aa3aa71accf0dcd78709ee164a8ca42d54#193b55aa3aa71accf0dcd78709ee164a8ca42d54"
 dependencies = [
  "anyhow",
  "async-channel 2.5.0",
@@ -7603,6 +7611,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "test_process"
+version = "0.2.15"
+dependencies = [
+ "shell-words",
+]
+
+[[package]]
 name = "thiserror"
 version = "1.0.69"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -8613,6 +8628,16 @@ dependencies = [
  "sval_json",
  "sval_ref",
  "sval_serde",
+]
+
+[[package]]
+name = "vendor_gpui"
+version = "0.2.15"
+dependencies = [
+ "anyhow",
+ "serde_json",
+ "tempfile",
+ "toml 0.9.12+spec-1.1.0",
 ]
 
 [[package]]

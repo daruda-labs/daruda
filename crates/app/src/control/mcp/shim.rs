@@ -183,7 +183,7 @@ fn connect_and_relay() -> Result<(), ShimError> {
     let dir = data_dir();
     let runtime = load_endpoint(&dir)?;
 
-    let stream = std::os::unix::net::UnixStream::connect(&runtime.socket)
+    let stream = crate::platform::local_socket::BlockingStream::connect(&runtime.socket)
         .map_err(|e| ShimError::Io(e.to_string()))?;
     let mut writer = stream
         .try_clone()

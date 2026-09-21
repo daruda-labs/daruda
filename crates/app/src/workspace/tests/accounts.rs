@@ -328,7 +328,7 @@ fn finish_codex_login(
     // A real (near-instant) child process is the only way to build a
     // `LoginProcessHandle` — it has no other public constructor.
     let login = daruda_agent::accounts::spawn_login(
-        "/usr/bin/true",
+        &test_process::command_line(&[]),
         &[],
         &[],
         std::time::Duration::from_secs(5),

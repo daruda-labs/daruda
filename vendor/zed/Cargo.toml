@@ -1,0 +1,197 @@
+[workspace]
+members = ["crates/gpui"]
+resolver = "2"
+
+[workspace.dependencies]
+anyhow = "1.0.86"
+async-channel = "2.5.0"
+backtrace = "0.3"
+bitflags = "2.6.0"
+cocoa = "=0.26.0"
+cocoa-foundation = "=0.2.0"
+core-foundation = "=0.10.0"
+core-foundation-sys = "0.8.6"
+ctor = "1.0.6"
+env_logger = "0.11"
+futures = "0.3.32"
+futures-concurrency = "7.7.1"
+hdrhistogram = "7"
+image = "0.25.1"
+inventory = "0.3.19"
+itertools = "0.14.0"
+mach2 = "0.5"
+metal = "0.33"
+objc = "0.2"
+parking_lot = "0.12.1"
+pollster = "0.4.0"
+profiling = "1"
+rand = "0.9"
+regex = "1.5"
+slotmap = "1.0.6"
+stacksafe = "0.1"
+thiserror = "2.0.12"
+unicode-segmentation = "1.10"
+url = "2.2"
+wasm-bindgen = "0.2.120"
+web-time = "1.1.0"
+
+[workspace.dependencies.chrono]
+features = ["serde"]
+version = "0.4"
+
+[workspace.dependencies.collections]
+git = "https://github.com/zed-industries/zed"
+rev = "193b55aa3aa71accf0dcd78709ee164a8ca42d54"
+version = "0.1.0"
+
+[workspace.dependencies.core-video]
+features = ["metal"]
+version = "0.5.2"
+
+[workspace.dependencies.derive_more]
+features = [
+    "add",
+    "add_assign",
+    "deref",
+    "deref_mut",
+    "display",
+    "from_str",
+    "mul",
+    "mul_assign",
+    "not",
+]
+version = "2.1.1"
+
+[workspace.dependencies.gpui_macros]
+git = "https://github.com/zed-industries/zed"
+rev = "193b55aa3aa71accf0dcd78709ee164a8ca42d54"
+
+[workspace.dependencies.gpui_platform]
+default-features = false
+git = "https://github.com/zed-industries/zed"
+rev = "193b55aa3aa71accf0dcd78709ee164a8ca42d54"
+
+[workspace.dependencies.gpui_shared_string]
+git = "https://github.com/zed-industries/zed"
+rev = "193b55aa3aa71accf0dcd78709ee164a8ca42d54"
+
+[workspace.dependencies.gpui_util]
+git = "https://github.com/zed-industries/zed"
+rev = "193b55aa3aa71accf0dcd78709ee164a8ca42d54"
+
+[workspace.dependencies.gpui_web]
+git = "https://github.com/zed-industries/zed"
+rev = "193b55aa3aa71accf0dcd78709ee164a8ca42d54"
+
+[workspace.dependencies.http_client]
+git = "https://github.com/zed-industries/zed"
+rev = "193b55aa3aa71accf0dcd78709ee164a8ca42d54"
+
+[workspace.dependencies.log]
+features = [
+    "kv_unstable_serde",
+    "serde",
+]
+version = "0.4.16"
+
+[workspace.dependencies.media]
+git = "https://github.com/zed-industries/zed"
+rev = "193b55aa3aa71accf0dcd78709ee164a8ca42d54"
+
+[workspace.dependencies.postage]
+features = ["futures-traits"]
+version = "0.5"
+
+[workspace.dependencies.proptest]
+features = ["attr-macro"]
+git = "https://github.com/proptest-rs/proptest"
+rev = "3dca198a8fef1b32e3a66f1e1897c955b4dc5b5b"
+
+[workspace.dependencies.refineable]
+git = "https://github.com/zed-industries/zed"
+rev = "193b55aa3aa71accf0dcd78709ee164a8ca42d54"
+
+[workspace.dependencies.reqwest_client]
+git = "https://github.com/zed-industries/zed"
+rev = "193b55aa3aa71accf0dcd78709ee164a8ca42d54"
+
+[workspace.dependencies.scap]
+default-features = false
+git = "https://github.com/zed-industries/scap"
+package = "zed-scap"
+rev = "4afea48c3b002197176fb19cd0f9b180dd36eaac"
+version = "0.0.8-zed"
+
+[workspace.dependencies.scheduler]
+git = "https://github.com/zed-industries/zed"
+rev = "193b55aa3aa71accf0dcd78709ee164a8ca42d54"
+
+[workspace.dependencies.schemars]
+features = ["indexmap2"]
+version = "1.0"
+
+[workspace.dependencies.serde]
+features = [
+    "derive",
+    "rc",
+]
+version = "1.0.221"
+
+[workspace.dependencies.serde_json]
+features = [
+    "preserve_order",
+    "raw_value",
+]
+version = "1.0.144"
+
+[workspace.dependencies.smallvec]
+features = [
+    "union",
+    "const_new",
+]
+version = "1.6"
+
+[workspace.dependencies.strum]
+features = ["derive"]
+version = "0.27.2"
+
+[workspace.dependencies.sum_tree]
+git = "https://github.com/zed-industries/zed"
+rev = "193b55aa3aa71accf0dcd78709ee164a8ca42d54"
+
+[workspace.dependencies.util_macros]
+git = "https://github.com/zed-industries/zed"
+rev = "193b55aa3aa71accf0dcd78709ee164a8ca42d54"
+
+[workspace.dependencies.uuid]
+features = [
+    "v4",
+    "v5",
+    "v7",
+    "serde",
+]
+version = "1.1.2"
+
+[workspace.lints.clippy]
+dbg_macro = "deny"
+declare_interior_mutable_const = "deny"
+disallowed_methods = "deny"
+large_enum_variant = "allow"
+let_underscore_future = "allow"
+nonminimal_bool = "allow"
+redundant_clone = "deny"
+single_range_in_vec_init = "allow"
+todo = "deny"
+too_many_arguments = "allow"
+type_complexity = "allow"
+
+[workspace.lints.clippy.style]
+level = "allow"
+priority = -1
+
+[workspace.lints.rust.unexpected_cfgs]
+level = "allow"
+
+[workspace.package]
+edition = "2024"
+publish = false

@@ -1,5 +1,7 @@
 use super::auth::handshake_reply;
-use super::files::{OWNER_ONLY_FILE, SOCKET_FILE, validate_socket_path};
+#[cfg(unix)]
+use super::files::OWNER_ONLY_FILE;
+use super::files::{SOCKET_FILE, validate_socket_path};
 use super::frame::read_frame;
 use super::server::{HANDSHAKE_TIMEOUT, serve};
 use super::*;
@@ -141,15 +143,15 @@ async fn within<T>(f: impl Future<Output = T>) -> Option<T> {
 fn drive_serve(
     token: &str,
     client: impl FnOnce(
-        futures::io::Lines<futures::io::BufReader<smol::net::unix::UnixStream>>,
-        smol::net::unix::UnixStream,
+        futures::io::Lines<futures::io::BufReader<crate::platform::local_socket::Stream>>,
+        crate::platform::local_socket::Stream,
         smol::channel::Receiver<Inbound>,
     ) -> std::pin::Pin<Box<dyn Future<Output = ()>>>,
 ) {
     use futures::AsyncBufReadExt as _;
-    let (a, b) = std::os::unix::net::UnixStream::pair().expect("pair");
-    let server_side = smol::net::unix::UnixStream::try_from(a).expect("async");
-    let client_side = smol::net::unix::UnixStream::try_from(b).expect("async");
+    let (a, b) = crate::platform::local_socket::BlockingStream::pair().expect("pair");
+    let server_side = crate::platform::local_socket::Stream::try_from(a).expect("async");
+    let client_side = crate::platform::local_socket::Stream::try_from(b).expect("async");
     let (inbound_tx, inbound_rx) = smol::channel::unbounded();
     let gate = TokenGate::holding(token);
 
@@ -226,9 +228,13 @@ fn a_client_with_the_wrong_token_is_answered_once_and_dropped() {
             assert_eq!(v["ok"], false);
 
             let _ = writer.write_all(b"hello\n").await;
+            let closed = lines.next().await;
+            // Writing after rejection can surface as a reset on Windows AF_UNIX.
             assert!(
-                lines.next().await.is_none(),
-                "the connection closes rather than allowing a retry"
+                closed.is_none()
+                    || matches!(&closed, Some(Err(error))
+                        if error.kind() == std::io::ErrorKind::ConnectionReset),
+                "the connection closes rather than allowing a retry: {closed:?}"
             );
             assert!(inbound.is_empty(), "an unauthorized frame never arrives");
         })
@@ -328,9 +334,9 @@ fn a_connection_outliving_its_token_stops_being_served() {
     use futures::AsyncWriteExt as _;
     use futures::StreamExt as _;
 
-    let (a, b) = std::os::unix::net::UnixStream::pair().expect("pair");
-    let server_side = smol::net::unix::UnixStream::try_from(a).expect("async");
-    let client_side = smol::net::unix::UnixStream::try_from(b).expect("async");
+    let (a, b) = crate::platform::local_socket::BlockingStream::pair().expect("pair");
+    let server_side = crate::platform::local_socket::Stream::try_from(a).expect("async");
+    let client_side = crate::platform::local_socket::Stream::try_from(b).expect("async");
     let (inbound_tx, inbound_rx) = smol::channel::unbounded();
     let gate = TokenGate::holding("tok");
     let rotating = gate.clone();
@@ -374,9 +380,9 @@ fn a_connection_outliving_its_token_stops_being_served() {
 /// connection — the accept loop is serial.
 #[test]
 fn a_silent_peer_is_dropped_after_the_handshake_deadline() {
-    let (a, b) = std::os::unix::net::UnixStream::pair().expect("pair");
-    let server_side = smol::net::unix::UnixStream::try_from(a).expect("async");
-    let _client_side = smol::net::unix::UnixStream::try_from(b).expect("async");
+    let (a, b) = crate::platform::local_socket::BlockingStream::pair().expect("pair");
+    let server_side = crate::platform::local_socket::Stream::try_from(a).expect("async");
+    let _client_side = crate::platform::local_socket::Stream::try_from(b).expect("async");
     let (inbound_tx, _inbound_rx) = smol::channel::bounded(4);
 
     smol::block_on(async move {
@@ -417,6 +423,7 @@ fn an_endless_line_is_refused_rather_than_buffered() {
 /// The socket's file mode *is* its access control — Darwin enforces it on
 /// `connect` — and the default umask would leave it world-connectable.
 #[gpui::test]
+#[cfg(unix)]
 async fn the_socket_is_reachable_only_by_its_owner(cx: &mut gpui::TestAppContext) {
     use std::os::unix::fs::PermissionsExt as _;
 

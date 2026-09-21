@@ -14,3 +14,5 @@ target/
 **/*.orig
 .superpowers
 docs
+!vendor/zed/crates/gpui/docs/
+!vendor/zed/crates/gpui/docs/**

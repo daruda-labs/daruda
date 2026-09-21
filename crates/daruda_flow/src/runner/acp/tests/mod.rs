@@ -51,7 +51,7 @@ fn prepared_launch_is_reused_without_resolving_the_catalog_again() {
 fn adapter_script(pre_prompt: &str, reply: &str) -> String {
     format!(
         r#"while IFS= read -r line; do
-  id=$(printf '%s' "$line" | sed -n 's/.*"id":"\([^"]*\)".*/\1/p')
+  id=${{line#*\"id\":\"}}; id=${{id%%\"*}}
   case "$line" in
 *'"method":"initialize"'*)
   printf '{{"jsonrpc":"2.0","id":"%s","result":{{"protocolVersion":1,"agentCapabilities":{{}}}}}}\n' "$id" ;;
@@ -85,14 +85,17 @@ const NEW_SESSION: &str = r#"*'"method":"session/new"'*)
 /// Either way it records that the cancel reached the wire.
 fn parking_adapter(cancel_seen: &Path, on_cancel: &str) -> String {
     let seen = cancel_seen.display();
+    let ready = cancel_seen.with_extension("ready");
+    let ready = ready.display();
     format!(
         r#"while IFS= read -r line; do
-  id=$(printf '%s' "$line" | sed -n 's/.*"id":"\([^"]*\)".*/\1/p')
+  id=${{line#*\"id\":\"}}; id=${{id%%\"*}}
   case "$line" in
 {INITIALIZE}
 {NEW_SESSION}
 *'"method":"session/prompt"'*)
-  prompt_id="$id" ;;
+  prompt_id="$id"
+  : > "{ready}" ;;
 *'"method":"session/cancel"'*)
   : > "{seen}"
   {on_cancel} ;;
@@ -114,7 +117,7 @@ fn permission_adapter(options: &str, answer_file: &Path) -> String {
     let answer = answer_file.display();
     format!(
         r#"while IFS= read -r line; do
-  id=$(printf '%s' "$line" | sed -n 's/.*"id":"\([^"]*\)".*/\1/p')
+  id=${{line#*\"id\":\"}}; id=${{id%%\"*}}
   case "$line" in
 {INITIALIZE}
 {NEW_SESSION}
@@ -186,7 +189,8 @@ impl Fixture {
         let dir = tempfile::tempdir().expect("tempdir");
         let path = dir.path().join("adapter.sh");
         std::fs::write(&path, script).expect("write the adapter");
-        Self::with_command(dir, format!("/bin/sh {}", path.display()))
+        let command = serde_json::json!({ "command": "sh", "args": [path] }).to_string();
+        Self::with_command(dir, command)
     }
 
     /// A fixture whose adapter script has to name the fixture's own output

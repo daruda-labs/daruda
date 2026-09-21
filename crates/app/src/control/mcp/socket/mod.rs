@@ -1,10 +1,8 @@
 //! The socket the `daruda --mcp` shim connects back through.
 //!
-//! `smol::net::UnixListener` rather than a blocking std listener plus a
-//! thread: `smol` is already a direct dependency and re-exports `async-net`,
-//! and flow execution already bridges background work into GPUI with
-//! `smol::channel` + `cx.spawn` — this reuses that shape rather than inventing
-//! a second one.
+//! The platform socket adapter uses smol readiness on Unix and Windows.
+//! Flow execution already bridges background work into GPUI with
+//! `smol::channel` + `cx.spawn`; this reuses that shape.
 //!
 //! Four parts: [`files`] owns what sits on disk, [`auth`] decides who may
 //! speak, [`server`] binds and serves the one connection allowed at a time,

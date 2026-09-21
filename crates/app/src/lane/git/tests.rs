@@ -18,7 +18,7 @@ fn unique_tmpdir(prefix: &str) -> PathBuf {
     // Resolve symlinks (on macOS `/tmp` → `/private/tmp`) so
     // direct PathBuf comparisons against git's resolved output
     // don't break.
-    std::fs::canonicalize(&dir).unwrap()
+    daruda_core::path::canonicalize(&dir).unwrap()
 }
 
 fn teardown(path: &Path) {

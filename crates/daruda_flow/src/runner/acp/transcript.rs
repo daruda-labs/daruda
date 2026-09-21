@@ -226,7 +226,10 @@ mod tests {
     /// otherwise fine, and must not name a file nothing wrote.
     #[test]
     fn an_unwritable_transcript_reports_nothing_and_swallows_its_writes() {
-        let mut t = Transcript::create(Path::new("/proc/nonexistent-dir"), &"design".into(), 1, 7);
+        let dir = tempfile::tempdir().unwrap();
+        let blocked = dir.path().join("file-not-directory");
+        std::fs::write(&blocked, b"occupied").unwrap();
+        let mut t = Transcript::create(&blocked.join("transcripts"), &"design".into(), 1, 7);
         t.prompt("still fine");
         assert!(t.artifacts().is_empty());
     }

@@ -288,8 +288,9 @@ pub fn spawn_pty_real(config: &PtyConfig) -> Result<PtyHandle, PtyError> {
                     break;
                 }
             };
-            if stdout_tx.send(buf[..n].to_vec()).is_err() {
-                // Receiver dropped — pane went away. Quiet shutdown.
+            // ConPTY close waits for its output pipe to drain. Keep reading
+            // to EOF even after the pane drops its receiver, or teardown hangs.
+            if stdout_tx.send(buf[..n].to_vec()).is_err() && !cfg!(windows) {
                 break;
             }
         }
@@ -353,6 +354,30 @@ pub fn compute_grid_size(
 mod tests {
     use super::*;
 
+    fn test_shell() -> &'static str {
+        if cfg!(windows) { "cmd.exe" } else { "sh" }
+    }
+
+    fn spawn_test_pty(config: &PtyConfig) -> PtyHandle {
+        let handle = spawn_pty_real(config).expect("spawn_pty_real failed");
+        if cfg!(windows) {
+            // portable-pty enables cursor inheritance. Unlike the real VT,
+            // this raw-I/O fixture must answer ConPTY's startup query itself.
+            let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+            let mut output = Vec::new();
+            while !output.windows(4).any(|bytes| bytes == b"\x1b[6n") {
+                let remaining = deadline.saturating_duration_since(std::time::Instant::now());
+                let bytes = handle
+                    .stdout_rx
+                    .recv_timeout(remaining)
+                    .expect("ConPTY cursor query");
+                output.extend_from_slice(&bytes);
+            }
+            handle.write(b"\x1b[1;1R").expect("answer cursor query");
+        }
+        handle
+    }
+
     #[test]
     fn test_pty_config_default() {
         let config = PtyConfig::default();
@@ -390,14 +415,14 @@ mod tests {
         let config = PtyConfig {
             cols: 80,
             rows: 24,
-            shell: "/bin/sh".into(),
+            shell: test_shell().into(),
             env: vec![("TERM".into(), "dumb".into())],
             cwd: None,
         };
-        let handle = spawn_pty_real(&config).expect("spawn_pty_real failed");
+        let handle = spawn_test_pty(&config);
 
         // Send a command
-        handle.write(b"echo DARUDA_TEST\n").expect("write failed");
+        handle.write(b"echo PTY_ECHO_OK\r").expect("write failed");
 
         // Read output (with timeout)
         let mut output = String::new();
@@ -405,15 +430,15 @@ mod tests {
         while start.elapsed() < std::time::Duration::from_secs(3) {
             if let Ok(bytes) = handle.stdout_rx.try_recv() {
                 output.push_str(&String::from_utf8_lossy(&bytes));
-                if output.contains("DARUDA_TEST") {
+                if output.contains("PTY_ECHO_OK") {
                     break;
                 }
             }
             std::thread::sleep(std::time::Duration::from_millis(50));
         }
         assert!(
-            output.contains("DARUDA_TEST"),
-            "Expected DARUDA_TEST in output, got: {output}"
+            output.contains("PTY_ECHO_OK"),
+            "Expected PTY_ECHO_OK in output, got: {output}"
         );
     }
 
@@ -422,11 +447,11 @@ mod tests {
         let config = PtyConfig {
             cols: 80,
             rows: 24,
-            shell: "/bin/sh".into(),
+            shell: test_shell().into(),
             env: vec![("TERM".into(), "dumb".into())],
             cwd: None,
         };
-        let handle = spawn_pty_real(&config).expect("spawn_pty_real failed");
+        let handle = spawn_test_pty(&config);
         // Resize should not error
         handle.resize(120, 40).expect("resize failed");
     }
@@ -476,13 +501,13 @@ mod tests {
         let config = PtyConfig {
             cols: 80,
             rows: 24,
-            shell: "/bin/sh".into(),
+            shell: test_shell().into(),
             env: vec![("TERM".into(), "dumb".into())],
             cwd: None,
         };
-        let handle = spawn_pty_real(&config).expect("spawn_pty_real failed");
+        let handle = spawn_test_pty(&config);
         // Ask the shell to terminate. `exit` is a shell builtin in sh.
-        handle.write(b"exit\n").expect("write failed");
+        handle.write(b"exit\r").expect("write failed");
 
         let start = std::time::Instant::now();
         let mut got_exit = false;

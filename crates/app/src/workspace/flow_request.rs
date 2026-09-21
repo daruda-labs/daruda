@@ -564,14 +564,7 @@ fn budget_from(config: &daruda_config::flow::FlowConfig) -> Budget {
 /// The engine never asks the OS whether a pid is alive; the host answers.
 /// The picker asks the same question of the lock holder.
 pub(in crate::workspace) fn process_is_alive(pid: u32) -> bool {
-    let mut system = sysinfo::System::new();
-    let pid = sysinfo::Pid::from_u32(pid);
-    system.refresh_processes_specifics(
-        sysinfo::ProcessesToUpdate::Some(&[pid]),
-        true,
-        sysinfo::ProcessRefreshKind::new(),
-    );
-    system.process(pid).is_some()
+    daruda_core::process::is_alive(pid)
 }
 
 /// The working tree at `cwd`, as `git status --porcelain` sees it.

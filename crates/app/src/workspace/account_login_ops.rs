@@ -1576,8 +1576,13 @@ mod tests {
         use super::*;
 
         fn in_progress(target: LoginTarget, attempt: LoginAttempt) -> PendingLogin {
-            let login = spawn_login("/usr/bin/true", &[], &[], Duration::from_secs(5))
-                .expect("spawn a trivial process for the test handle");
+            let login = spawn_login(
+                &test_process::command_line(&[]),
+                &[],
+                &[],
+                Duration::from_secs(5),
+            )
+            .expect("spawn a trivial process for the test handle");
             PendingLogin::InProgress {
                 target,
                 attempt,
@@ -1759,8 +1764,13 @@ mod tests {
         // A real (near-instant, no-op) child process is the only way to
         // build a `LoginProcessHandle` — it has no public constructor
         // other than `LoginProcess::handle()`.
-        let login = spawn_login("/usr/bin/true", &[], &[], Duration::from_secs(5))
-            .expect("spawn a trivial process for the test handle");
+        let login = spawn_login(
+            &test_process::command_line(&[]),
+            &[],
+            &[],
+            Duration::from_secs(5),
+        )
+        .expect("spawn a trivial process for the test handle");
         let pending = PendingLogin::InProgress {
             target: LoginTarget::Managed {
                 id: AccountId::new(),

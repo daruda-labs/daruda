@@ -12,6 +12,7 @@ const LOCK_TIMEOUT: Duration = Duration::from_secs(180);
 const LOCK_POLL: Duration = Duration::from_millis(25);
 const KEEP_INSTALLATIONS: usize = 3;
 const KEEP_INVALID: usize = 1;
+#[cfg(not(windows))]
 const LEASE: &str = ".lease";
 const LAST_USED: &str = ".last-used";
 pub(super) const VERSION_PREFIX: &str = "version-";
@@ -35,7 +36,7 @@ impl Drop for FileLock {
 
 impl InstallationLease {
     pub(super) fn acquire(directory: &Path) -> Result<Self, PreparationError> {
-        let file = lock_file(&directory.join(LEASE))?;
+        let file = lease_file(directory)?;
         file.lock_shared()?;
         let file = FileLock(file);
         fs::write(directory.join(LAST_USED), [])?;
@@ -80,11 +81,29 @@ pub(super) fn lock_package(
 
 /// Held by the package installer while replacing a damaged version.
 pub(super) fn exclusive_lease(directory: &Path) -> Result<Option<FileLock>, PreparationError> {
-    let file = lock_file(&directory.join(LEASE))?;
+    let file = lease_file(directory)?;
     match file.try_lock() {
         Ok(()) => Ok(Some(FileLock(file))),
         Err(TryLockError::WouldBlock) => Ok(None),
         Err(TryLockError::Error(error)) => Err(error.into()),
+    }
+}
+
+fn lease_file(directory: &Path) -> Result<File, PreparationError> {
+    #[cfg(windows)]
+    {
+        // An open file inside the installation prevents Windows from renaming
+        // its parent. A stable sibling lock also survives quarantine and eviction.
+        let root = directory
+            .parent()
+            .expect("installation parent")
+            .join(".leases");
+        fs::create_dir_all(&root)?;
+        lock_file(&root.join(directory.file_name().expect("installation name")))
+    }
+    #[cfg(not(windows))]
+    {
+        lock_file(&directory.join(LEASE))
     }
 }
 

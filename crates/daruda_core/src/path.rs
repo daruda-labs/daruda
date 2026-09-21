@@ -8,12 +8,18 @@ use std::path::{Path, PathBuf};
 
 /// Resolve `path` to an absolute form with symlinks followed.
 ///
-/// [`std::fs::canonicalize`], except on Windows it returns a UNC path
-/// (`\\?\C:\…`) that compares unequal to the same path spelled normally and
-/// does not round-trip through a config file. Every caller wants it gone;
-/// none should have to know that.
+/// On Windows, simplify extended paths when a regular path names the same
+/// object. Keep the extended form where removing it changes the meaning
+/// or prevents access, such as paths exceeding the legacy length limit.
 pub fn canonicalize(path: impl AsRef<Path>) -> io::Result<PathBuf> {
-    std::fs::canonicalize(path)
+    #[cfg(windows)]
+    {
+        dunce::canonicalize(path)
+    }
+    #[cfg(not(windows))]
+    {
+        std::fs::canonicalize(path)
+    }
 }
 
 /// [`canonicalize`], falling back to the path exactly as given.

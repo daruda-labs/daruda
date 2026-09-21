@@ -22,7 +22,14 @@
 //! reality of the dock, and matches iTerm2's
 //! `iTermController -cancelUserAttentionRequest`.
 
+#[cfg(not(windows))]
 use daruda_terminal::AttentionKind;
+
+#[cfg(windows)]
+#[path = "attention_windows.rs"]
+mod windows;
+#[cfg(windows)]
+pub use windows::{apply, is_app_active, system_idle_seconds};
 
 /// True when the daruda window is currently the focused app.
 /// Used by notification gating: the "skip the focused pane" rule
