@@ -1361,6 +1361,11 @@ cccc3333  node-v24.11.0-linux-x64.tar.xz
     /// Executable shell script standing in for `node -e "process.stdout
     /// .write(process.arch)"`, so arch-matching can be tested without
     /// depending on a real Node.js or the test host's own arch.
+    // WORKAROUND: `node_platform` has no Windows arm yet, so the true case
+    // cannot even name an expected arch there — and this stub is a POSIX
+    // shell script. Both lift together when the managed-node Windows layout
+    // (.zip, node.exe at the root) lands; the stub becomes a .cmd then.
+    #[cfg(unix)]
     fn write_fake_node_reporting(path: &Path, output: &str) {
         use std::os::unix::fs::PermissionsExt;
         std::fs::write(path, format!("#!/bin/sh\nprintf '%s' '{output}'\n")).unwrap();
@@ -1369,6 +1374,7 @@ cccc3333  node-v24.11.0-linux-x64.tar.xz
         std::fs::set_permissions(path, perms).unwrap();
     }
 
+    #[cfg(unix)]
     #[test]
     fn system_node_arch_matches_host_true_when_reported_arch_matches() {
         let (_, expected) = node_platform().expect("supported test platform");
@@ -1378,6 +1384,7 @@ cccc3333  node-v24.11.0-linux-x64.tar.xz
         assert!(system_node_arch_matches_host(&fake_node));
     }
 
+    #[cfg(unix)]
     #[test]
     fn system_node_arch_matches_host_false_on_arch_mismatch() {
         let dir = tempfile::tempdir().unwrap();
