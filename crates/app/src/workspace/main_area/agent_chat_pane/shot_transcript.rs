@@ -221,7 +221,7 @@ fn cycles() -> Vec<Cycle> {
 
 /// Build the seeded conversation: one user prompt, then every cycle as
 /// prose + tool run, closed by the conclusion.
-pub(super) fn sample_transcript() -> Vec<ChatItem> {
+pub(in crate::workspace) fn sample_transcript() -> Vec<ChatItem> {
     let mut items = vec![ChatItem::UserText(PROMPT.to_string())];
     let mut next_id = 0usize;
     for cycle in cycles() {

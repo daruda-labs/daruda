@@ -806,7 +806,7 @@ impl Workspace {
 
     /// Seed failure copy and its remedy before focus can start a real adapter.
     #[cfg(feature = "screenshot")]
-    pub(super) fn open_agent_chat_failure_for_shot(
+    pub(in crate::workspace) fn open_agent_chat_failure_for_shot(
         &mut self,
         failure: daruda_acp::AcpFailure,
         window: &mut Window,
@@ -836,7 +836,7 @@ impl Workspace {
 
     /// Open an empty agent-chat pane with view options open.
     #[cfg(feature = "screenshot")]
-    pub(super) fn open_agent_chat_empty_for_shot(
+    pub(in crate::workspace) fn open_agent_chat_empty_for_shot(
         &mut self,
         window: &mut Window,
         cx: &mut Context<Self>,
@@ -856,7 +856,7 @@ impl Workspace {
     /// transcript axis off its default so the gear's own selected state is
     /// visible alongside the panel.
     #[cfg(feature = "screenshot")]
-    pub(super) fn open_agent_chat_options_for_shot(
+    pub(in crate::workspace) fn open_agent_chat_options_for_shot(
         &mut self,
         tab: super::view::ActivityOptionsTab,
         window: &mut Window,
@@ -885,7 +885,7 @@ impl Workspace {
 
     /// Open a seeded agent-chat transcript for screenshots.
     #[cfg(feature = "screenshot")]
-    pub(super) fn open_agent_chat_transcript_for_shot(
+    pub(in crate::workspace) fn open_agent_chat_transcript_for_shot(
         &mut self,
         window: &mut Window,
         cx: &mut Context<Self>,
@@ -905,7 +905,7 @@ impl Workspace {
     /// such a turn has. The response bar cannot stand in for it: the conclusion
     /// escape keeps a sole reply on screen through that fold.
     #[cfg(feature = "screenshot")]
-    pub(super) fn open_agent_chat_sole_reply_for_shot(
+    pub(in crate::workspace) fn open_agent_chat_sole_reply_for_shot(
         &mut self,
         window: &mut Window,
         cx: &mut Context<Self>,
@@ -943,7 +943,7 @@ impl Workspace {
     /// `Cancelled` — the pair is what shows whether the four status icons read
     /// apart by shape.
     #[cfg(feature = "screenshot")]
-    pub(super) fn open_agent_chat_plan_for_shot(
+    pub(in crate::workspace) fn open_agent_chat_plan_for_shot(
         &mut self,
         stopped: bool,
         window: &mut Window,
@@ -964,7 +964,7 @@ impl Workspace {
     /// shape no settled seed reaches, since the marker is pushed by the Stop
     /// path rather than by anything the agent sends.
     #[cfg(feature = "screenshot")]
-    pub(super) fn open_agent_chat_interrupted_transcript_for_shot(
+    pub(in crate::workspace) fn open_agent_chat_interrupted_transcript_for_shot(
         &mut self,
         window: &mut Window,
         cx: &mut Context<Self>,
@@ -982,7 +982,7 @@ impl Workspace {
     /// Open the seeded transcript mid-turn — the agent's answer not yet
     /// written, so its last prose is a preamble rather than a conclusion.
     #[cfg(feature = "screenshot")]
-    pub(super) fn open_agent_chat_working_transcript_for_shot(
+    pub(in crate::workspace) fn open_agent_chat_working_transcript_for_shot(
         &mut self,
         window: &mut Window,
         cx: &mut Context<Self>,
@@ -999,7 +999,7 @@ impl Workspace {
 
     /// Open the seeded transcript with filtering, tail, and filter panel active.
     #[cfg(feature = "screenshot")]
-    pub(super) fn open_agent_chat_narrowed_transcript_for_shot(
+    pub(in crate::workspace) fn open_agent_chat_narrowed_transcript_for_shot(
         &mut self,
         window: &mut Window,
         cx: &mut Context<Self>,
@@ -1040,7 +1040,7 @@ impl Workspace {
     /// floating over the transcript, so the boundary row itself is what the
     /// capture shows. `reveal` opens it.
     #[cfg(feature = "screenshot")]
-    pub(super) fn open_agent_chat_tail_boundary_for_shot(
+    pub(in crate::workspace) fn open_agent_chat_tail_boundary_for_shot(
         &mut self,
         reveal: bool,
         window: &mut Window,
@@ -1073,7 +1073,7 @@ impl Workspace {
     /// group and that group expanded, so the boundary the group's own window
     /// puts among its calls is what the capture shows. `reveal` opens it.
     #[cfg(feature = "screenshot")]
-    pub(super) fn open_agent_chat_group_tail_boundary_for_shot(
+    pub(in crate::workspace) fn open_agent_chat_group_tail_boundary_for_shot(
         &mut self,
         reveal: bool,
         window: &mut Window,
@@ -1112,7 +1112,7 @@ impl Workspace {
     /// so a capture shows the one badge state no settled seed reaches: the live
     /// mark with its age beside it.
     #[cfg(feature = "screenshot")]
-    pub(super) fn open_agent_chat_running_tool_for_shot(
+    pub(in crate::workspace) fn open_agent_chat_running_tool_for_shot(
         &mut self,
         window: &mut Window,
         cx: &mut Context<Self>,
@@ -1137,7 +1137,7 @@ impl Workspace {
     /// count and the card expanded, so the boundary the card's own window puts
     /// among its children is what the capture shows. `reveal` opens it.
     #[cfg(feature = "screenshot")]
-    pub(super) fn open_agent_chat_subagent_tail_boundary_for_shot(
+    pub(in crate::workspace) fn open_agent_chat_subagent_tail_boundary_for_shot(
         &mut self,
         reveal: bool,
         window: &mut Window,
@@ -1193,7 +1193,7 @@ impl Workspace {
 
     /// Open the seeded transcript with a custom fold matrix and editor.
     #[cfg(feature = "screenshot")]
-    pub(super) fn open_agent_chat_fold_editor_for_shot(
+    pub(in crate::workspace) fn open_agent_chat_fold_editor_for_shot(
         &mut self,
         window: &mut Window,
         cx: &mut Context<Self>,

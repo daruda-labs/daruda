@@ -40,7 +40,7 @@ fn lightbox_margin_top(viewport_height: f32) -> f32 {
     viewport_height * (1.0 - theme::MERMAID_LIGHTBOX_VIEWPORT_FRACTION) / 2.0
 }
 
-pub(super) fn open(image: &CachedImage, window: &mut Window, cx: &mut App) {
+pub(in crate::workspace) fn open(image: &CachedImage, window: &mut Window, cx: &mut App) {
     let viewport = window.viewport_size();
     let width = lightbox_width(image.logical_width(), f32::from(viewport.width));
     let margin_top = lightbox_margin_top(f32::from(viewport.height));

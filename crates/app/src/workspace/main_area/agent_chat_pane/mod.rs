@@ -33,7 +33,7 @@ pub(in crate::workspace) mod rows;
 pub(super) mod session_config;
 /// The fixed conversation the `--screenshot` agent-chat scenarios seed.
 #[cfg(feature = "screenshot")]
-pub(super) mod shot_transcript;
+pub(in crate::workspace) mod shot_transcript;
 pub(super) mod slash_dispatch;
 pub(in crate::workspace) mod telegram_ops;
 /// Parent/child structure of a conversation's tool calls — the one place the

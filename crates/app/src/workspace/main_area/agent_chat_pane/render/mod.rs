@@ -18,7 +18,7 @@ mod links;
 mod mermaid;
 /// Reachable from `workspace::screenshot_scenario` so the
 /// `mermaid-lightbox` capture scenario can drive it directly.
-pub(super) mod mermaid_lightbox;
+pub(in crate::workspace) mod mermaid_lightbox;
 mod plan;
 mod status_icon;
 mod tail_row;
