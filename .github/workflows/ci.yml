@@ -129,6 +129,12 @@ jobs:
       # fontconfig. Trimmed from zed's `script/linux` list — daruda has no
       # livekit (no libasound/libva) and shells out to git rather than
       # linking libgit2.
+      # The `fonts-*` packages are not for the GUI — they are for the tests.
+      # `libfontconfig-dev` is the library, not any actual font, and a runner
+      # with none makes merman emit label groups with no glyphs in them: the
+      # mermaid geometry, stroke, contrast and measurer suites then fail on
+      # text that was never rasterized. `noto-cjk` specifically, because the
+      # measurer probes a Hangul advance from the real font stack.
       - name: Install system dependencies
         run: |
           sudo apt-get update
@@ -137,7 +143,9 @@ jobs:
             libwayland-dev \
             libx11-xcb-dev \
             libxkbcommon-x11-dev \
-            libglib2.0-dev
+            libglib2.0-dev \
+            fonts-dejavu-core \
+            fonts-noto-cjk
 
       - name: Cache rustup toolchain
         uses: actions/cache@v5
