@@ -274,7 +274,7 @@ mod tests {
 
             // The lanes carry canonical paths, so the expectations must too
             // — on macOS the raw tempdir is the `/var` alias of `/private/var`.
-            let canonical = std::fs::canonicalize(&root).unwrap();
+            let canonical = daruda_core::path::canonicalize(&root).unwrap();
             let common = crate::lane::git::git_dirs(&canonical).unwrap().common_dir;
             let side = crate::lane::git::git_dirs(&linked).unwrap().git_dir;
             let mut expected = vec![common, side];

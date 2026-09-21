@@ -1,5 +1,5 @@
 use super::auth::handshake_reply;
-use super::files::{OWNER_ONLY_DIR, OWNER_ONLY_FILE, SOCKET_FILE, validate_socket_path};
+use super::files::{OWNER_ONLY_FILE, SOCKET_FILE, validate_socket_path};
 use super::frame::read_frame;
 use super::server::{HANDSHAKE_TIMEOUT, serve};
 use super::*;
@@ -430,8 +430,10 @@ async fn the_socket_is_reachable_only_by_its_owner(cx: &mut gpui::TestAppContext
         OWNER_ONLY_FILE,
         "another local user must not be able to connect"
     );
+    // The directory's mode is `daruda_core::path`'s to choose; what this
+    // asserts is that the socket's parent actually came out owner-only.
     let created = std::fs::metadata(&dir).expect("dir");
-    assert_eq!(created.permissions().mode() & 0o777, OWNER_ONLY_DIR);
+    assert_eq!(created.permissions().mode() & 0o777, 0o700);
 }
 
 /// A frame past the cap ends the connection rather than being silently

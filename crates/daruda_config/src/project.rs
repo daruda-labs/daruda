@@ -63,9 +63,9 @@ impl ProjectConfig {
 /// different paths produce different ids with overwhelming probability
 /// (≈2⁻³² collision chance from FNV-1a truncated to 64 bits).
 pub fn project_id(repo_root: &Path) -> String {
-    let canonical = repo_root
-        .canonicalize()
-        .unwrap_or_else(|_| repo_root.to_path_buf());
+    // The id *is* this string's hash, so anything that changes how a path
+    // resolves renames every project directory on disk with it.
+    let canonical = daruda_core::path::canonicalize_or_self(repo_root);
     let bytes = canonical.to_string_lossy();
     format!("{:016x}", fnv1a_64(bytes.as_bytes()))
 }

@@ -247,7 +247,7 @@ impl NodeRuntime {
             }
             NodeRuntime::System => AdapterCommand(command.to_string()),
             NodeRuntime::Managed { node_dir } if command_needs_node(command) => {
-                let bin_dir = node_dir.join("bin");
+                let bin_dir = bin_dir(node_dir);
                 let (env_assignments, tokens) = split_env_prefixed_tokens(command);
                 let has_cache_override = env_assignments
                     .iter()
@@ -388,7 +388,10 @@ fn detect_system_node_with_context(context: &PreparationContext<'_>) -> bool {
     if which::which("npx").is_err() {
         return false;
     }
-    let Ok(version) = output(std::process::Command::new(&node).arg("--version"), context) else {
+    let Ok(version) = output(
+        daruda_core::process::command(&node).arg("--version"),
+        context,
+    ) else {
         return false;
     };
     let version_ok = match parse_node_version(&version) {
@@ -415,7 +418,7 @@ fn system_node_arch_matches_host_with_context(
         return false;
     };
     let Ok(arch) = output(
-        std::process::Command::new(node).args(["-e", "process.stdout.write(process.arch)"]),
+        daruda_core::process::command(node).args(["-e", "process.stdout.write(process.arch)"]),
         context,
     ) else {
         return false;
@@ -526,9 +529,28 @@ fn npx_cache_dir(install_root: &Path) -> PathBuf {
     install_root.join("npx-cache")
 }
 
+/// The directory holding a managed runtime's executables.
+///
+/// The one place this layout is written down — a nodejs.org distribution
+/// does not use `bin/` everywhere, so the arm for that belongs here and
+/// nowhere else.
+pub fn bin_dir(node_dir: &Path) -> PathBuf {
+    node_dir.join("bin")
+}
+
+/// `PATH` with a managed runtime's executables in front of it.
+///
+/// Callers hand this straight to a child's environment. Going through here
+/// rather than formatting the string keeps two things right that are easy to
+/// get wrong: the separator is the platform's, and the layout above stays in
+/// one place.
+pub fn path_with_node(node_dir: &Path) -> String {
+    prepend_to_path(&bin_dir(node_dir))
+}
+
 /// The `node` binary inside an extracted managed node directory.
 fn node_binary(node_dir: &Path) -> PathBuf {
-    node_dir.join("bin").join("node")
+    bin_dir(node_dir).join("node")
 }
 
 /// `true` if a managed install exists and its `node` runs. Cheap validity gate
@@ -544,7 +566,10 @@ fn managed_cache_valid_with_context(
     context: &PreparationContext<'_>,
 ) -> Result<bool, NodeError> {
     let node = node_binary(node_dir);
-    let result = output(std::process::Command::new(&node).arg("--version"), context);
+    let result = output(
+        daruda_core::process::command(&node).arg("--version"),
+        context,
+    );
     checkpoint(context)?;
     match result {
         Err(error) if error.kind == crate::preparation::PreparationKind::Canceled => {
@@ -749,7 +774,14 @@ fn sha256_hex(bytes: &[u8]) -> String {
 /// `bin_dir:$PATH`, or just `bin_dir` when `PATH` is unset. Uses OS path joining
 /// so a `bin_dir` with a separator-conflicting char is handled correctly.
 fn prepend_to_path(bin_dir: &Path) -> String {
-    match std::env::var_os("PATH") {
+    prepend_to(bin_dir, std::env::var_os("PATH"))
+}
+
+/// The pure half, so a test states the `PATH` it means instead of setting
+/// one: `set_var` is unsound once the process has other threads, and a test
+/// binary always does.
+fn prepend_to(bin_dir: &Path, existing: Option<std::ffi::OsString>) -> String {
+    match existing {
         Some(existing) => {
             let joined = std::iter::once(bin_dir.to_path_buf())
                 .chain(std::env::split_paths(&existing))
@@ -780,7 +812,7 @@ fn extract_tar_gz_with_context(
     let tmp = dest.join(format!(".node-download-{}.tar.gz", std::process::id()));
     std::fs::write(&tmp, bytes).map_err(|e| NodeError::Extract(format!("staging archive: {e}")))?;
     let result = output(
-        std::process::Command::new("tar")
+        daruda_core::process::command("tar")
             .arg("-xzf")
             .arg(&tmp)
             .arg("-C")
@@ -1244,17 +1276,43 @@ cccc3333  node-v24.11.0-linux-x64.tar.xz
 
     #[test]
     fn prepend_to_path_puts_bin_dir_first() {
-        // SAFETY: single-threaded test; restored right after reading.
-        let saved = std::env::var_os("PATH");
-        unsafe {
-            std::env::set_var("PATH", "/usr/bin:/bin");
-        }
-        let result = prepend_to_path(Path::new("/managed/bin"));
-        match saved {
-            Some(v) => unsafe { std::env::set_var("PATH", v) },
-            None => unsafe { std::env::remove_var("PATH") },
-        }
+        let result = prepend_to(
+            Path::new("/managed/bin"),
+            Some(std::ffi::OsString::from("/usr/bin:/bin")),
+        );
+
         assert_eq!(result, "/managed/bin:/usr/bin:/bin");
+    }
+
+    #[test]
+    fn prepend_to_an_unset_path_is_just_the_bin_dir() {
+        let result = prepend_to(Path::new("/managed/bin"), None);
+
+        assert_eq!(result, "/managed/bin");
+    }
+
+    /// The separator is the platform's, not a `:` someone typed. This is what
+    /// the hand-rolled `format!("{}:{existing}")` in the app got wrong, and
+    /// routing that caller through here is what this asserts is enough.
+    #[test]
+    fn path_with_node_joins_with_the_platform_separator() {
+        let result = prepend_to(
+            &bin_dir(Path::new("/managed")),
+            Some(std::ffi::OsString::from("/usr/bin")),
+        );
+
+        let sep = if cfg!(windows) { ';' } else { ':' };
+        let (first, rest) = result.split_once(sep).expect("two entries");
+        assert_eq!(Path::new(first), bin_dir(Path::new("/managed")));
+        assert_eq!(rest, "/usr/bin");
+    }
+
+    /// Layout lives in one accessor, so everything derived from it agrees.
+    #[test]
+    fn the_node_binary_sits_in_the_bin_dir() {
+        let root = Path::new("/managed");
+
+        assert!(node_binary(root).starts_with(bin_dir(root)));
     }
 
     #[test]
@@ -1266,7 +1324,7 @@ cccc3333  node-v24.11.0-linux-x64.tar.xz
 
         // Build a gzip tarball with the system tar, then extract it back.
         let tarball = dir.path().join("out.tar.gz");
-        let status = std::process::Command::new("tar")
+        let status = daruda_core::process::command("tar")
             .arg("-czf")
             .arg(&tarball)
             .arg("-C")

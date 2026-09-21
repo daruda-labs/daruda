@@ -167,7 +167,7 @@ impl CanonicalTree {
     /// denied read as "no such directory" sends the reader looking for the
     /// wrong thing.
     pub fn resolve(tree: &Path) -> std::io::Result<Self> {
-        tree.canonicalize().map(Self)
+        daruda_core::path::canonicalize(tree).map(Self)
     }
 
     /// Take a path already known to be resolved. The caller owes that.

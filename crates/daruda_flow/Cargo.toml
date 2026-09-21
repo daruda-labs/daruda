@@ -33,11 +33,10 @@ smol = { workspace = true }
 thiserror = "2"
 yaml_serde = "0.10"
 
-# Only for killing a command node's process group: `async_process` exposes
-# no `process_group`/`pre_exec`, and killing the shell alone orphans the
-# gate's real work.
-[target.'cfg(unix)'.dependencies]
-libc = "0.2"
-
 [dev-dependencies]
 tempfile = "3"
+
+# Only for the example's SIGINT handler — a demo binary wanting Ctrl+C, not
+# a capability. Everything else goes through `daruda_core::process`.
+[target.'cfg(unix)'.dev-dependencies]
+libc = "0.2"

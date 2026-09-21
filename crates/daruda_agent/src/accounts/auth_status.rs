@@ -144,17 +144,14 @@ fn field(v: &serde_json::Value, names: &[&str]) -> Option<String> {
 /// The command routinely forks (`npx` → the CLI), and the child leads its own
 /// group, so its pid doubles as a group id. Reaped afterwards so the handle is
 /// not dropped on a live child.
+///
+/// Only call this where the child is known unreaped — the deadline path. A
+/// caller that cannot tell must kill the direct child instead; see the
+/// contract on [`daruda_core::process::kill_tree`].
 fn kill_probe_tree(child: &mut std::process::Child) {
-    #[cfg(unix)]
-    {
-        let pgid = child.id() as libc::pid_t;
-        // SAFETY: the child led its own group from the spawn above and has not
-        // been reaped, so the pid is still this process's to name and the
-        // negative form reaches that group alone.
-        unsafe {
-            libc::kill(-pgid, libc::SIGKILL);
-        }
-    }
+    // Unreaped — the `wait` below is the reap — so the pid is still this
+    // process's to name, which is what `kill_tree` requires.
+    daruda_core::process::kill_tree(child.id());
     let _ = child.kill();
     let _ = child.wait();
 }
@@ -178,7 +175,7 @@ pub fn read_auth_status(
     let tokens = shell_words::split(command).ok()?;
     let (program, args) = tokens.split_first()?;
 
-    let mut cmd = std::process::Command::new(program);
+    let mut cmd = daruda_core::process::command(program);
     cmd.args(args);
     for name in strip_env {
         cmd.env_remove(name);
@@ -194,11 +191,7 @@ pub fn read_auth_status(
     cmd.stderr(std::process::Stdio::piped());
     // Own group, so a probe that hangs can be torn down whole — the command
     // routinely forks (`npx` → the CLI), exactly as the login path does.
-    #[cfg(unix)]
-    {
-        use std::os::unix::process::CommandExt as _;
-        cmd.process_group(0);
-    }
+    daruda_core::process::lead_own_group(&mut cmd);
 
     let mut child = cmd.spawn().ok()?;
     let deadline = std::time::Instant::now() + timeout;
@@ -207,10 +200,15 @@ pub fn read_auth_status(
             Ok(Some(_)) => break,
             Ok(None) => {}
             // Cannot tell whether it exited, so it may still be running:
-            // tear it down rather than dropping the handle on a live child,
-            // which would leave the tree — and its pid — behind.
+            // tear it down rather than dropping the handle on a live child.
+            //
+            // The direct child only. `try_wait` most often fails with ECHILD,
+            // meaning the child was already reaped — and `kill_tree` requires
+            // an unreaped pid precisely because a reaped one may already name
+            // someone else's group.
             Err(_) => {
-                kill_probe_tree(&mut child);
+                let _ = child.kill();
+                let _ = child.wait();
                 return None;
             }
         }

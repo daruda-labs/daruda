@@ -8,7 +8,7 @@
 //! `--yes` is mandatory for uninstall since stdin is never a TTY here.
 //! Scope defaults to `user`, mirroring the CLI.
 
-use std::process::{Command, Output};
+use std::process::Output;
 
 /// Which CLI subcommand to invoke — an enum so both verbs share the
 /// same spawn/output plumbing.
@@ -91,7 +91,7 @@ pub fn run_plugin_action(
 ) -> Result<String, PluginOpError> {
     // Pre-spawn guard for a clear "claude not found" error.
     which::which("claude").map_err(|_| PluginOpError::NotFound)?;
-    let mut cmd = Command::new("claude");
+    let mut cmd = daruda_core::process::command("claude");
     cmd.arg("plugin")
         .arg(action.verb())
         .arg(plugin_id)

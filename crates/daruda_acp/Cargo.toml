@@ -20,7 +20,6 @@ daruda_core = { path = "../daruda_core" }
 agent-client-protocol = { version = "2.0", features = ["unstable_auth_methods", "unstable_end_turn_token_usage"] }
 anyhow = { workspace = true }
 futures = "0.3"
-libc = "0.2"
 semver = "1"
 serde = { workspace = true }
 serde_json = { workspace = true }

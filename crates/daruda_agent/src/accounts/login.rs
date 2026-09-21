@@ -29,7 +29,7 @@
 //! [`LoginProcess::wait`] off the render thread.
 
 use std::io::Read;
-use std::process::{Child, ChildStderr, ChildStdout, Command, ExitStatus, Stdio};
+use std::process::{Child, ChildStderr, ChildStdout, ExitStatus, Stdio};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread;
@@ -268,15 +268,8 @@ impl LoginProcessHandle {
             // well have exited already — `npx` forks and goes — and that is
             // precisely when the descendants need the signal. A zombie keeps
             // its pid until we reap it, so the group id stays ours to name.
-            #[cfg(unix)]
             if !self.reaped.load(Ordering::Acquire) {
-                let pgid = child.id() as libc::pid_t;
-                // SAFETY: the child led its own group from `spawn_login`, so the
-                // negative form reaches that group and nothing else. Not yet
-                // reaped (checked above), so the pid cannot have been reused.
-                unsafe {
-                    libc::kill(-pgid, libc::SIGKILL);
-                }
+                daruda_core::process::kill_tree(child.id());
             }
             let _ = child.kill();
         }
@@ -297,7 +290,7 @@ pub fn spawn_login(
     let tokens = tokenize(command);
     let (program, args) = tokens.split_first().ok_or(LoginError::EmptyCommand)?;
 
-    let mut cmd = Command::new(program);
+    let mut cmd = daruda_core::process::command(program);
     cmd.args(args);
     for name in strip_env {
         cmd.env_remove(name);
@@ -314,11 +307,7 @@ pub fn spawn_login(
     // stop at the boundary, and the child's pid doubles as a group id that
     // `LoginProcessHandle::cancel` can signal to reach the descendants an
     // `npx`-wrapped login forks.
-    #[cfg(unix)]
-    {
-        use std::os::unix::process::CommandExt;
-        cmd.process_group(0);
-    }
+    daruda_core::process::lead_own_group(&mut cmd);
 
     let mut child = cmd.spawn().map_err(|e| LoginError::Spawn(e.to_string()))?;
 
@@ -539,7 +528,7 @@ mod tests {
     /// non-zero once the process is gone, and `wait`'s cancel path reaps the
     /// child, so a killed child leaves no zombie for `ps` to find.
     fn process_is_running(pid: u32) -> bool {
-        Command::new("/bin/ps")
+        daruda_core::process::command("/bin/ps")
             .arg("-p")
             .arg(pid.to_string())
             .output()
@@ -703,7 +692,7 @@ mod tests {
     fn gone_within(pid: &str, budget: Duration) -> bool {
         let deadline = std::time::Instant::now() + budget;
         while std::time::Instant::now() < deadline {
-            let alive = std::process::Command::new("kill")
+            let alive = daruda_core::process::command("kill")
                 .args(["-0", pid])
                 .stdout(Stdio::null())
                 .stderr(Stdio::null())

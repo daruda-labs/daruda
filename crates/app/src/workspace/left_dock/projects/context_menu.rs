@@ -79,7 +79,7 @@ pub(super) fn build_context_menu_items(args: CtxMenuArgs) -> Vec<PopupMenuItem> 
                     let result = cx
                         .background_executor()
                         .spawn(async move {
-                            std::process::Command::new("open")
+                            daruda_core::process::command("open")
                                 .args(["-R", &reveal_path])
                                 .spawn()
                                 .map(|_| ())

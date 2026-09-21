@@ -2,12 +2,13 @@
 //!
 //! Owns the visual layout and button-click handler; keyboard handling lives in
 //! `workspace::mod.rs` on the shared `InputState`. Dropped paths are quoted via
-//! [`shell_quote`] using the focused pane's shell flavour before insertion.
+//! [`daruda_core::shell::quote`] using the focused pane's shell flavour before
+//! insertion.
 
 use crate::ui::theme;
+use daruda_core::shell::quote::{format_paths_for_drop, quote_path};
 use gpui::{AnyElement, ClickEvent, Context, ExternalPaths, IntoElement, div, prelude::*, px};
 
-use crate::shell_quote::{format_paths_for_drop, quote_path};
 use crate::workspace::layout::BottomDockSnapshot;
 use crate::workspace::layout::Dock;
 use crate::workspace::path_drag::PathDrag;

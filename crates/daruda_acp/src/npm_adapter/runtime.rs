@@ -52,7 +52,7 @@ impl NpmRuntime {
         let (os, arch) = crate::node::node_platform().map_err(|error| {
             PreparationError::new(PreparationKind::Configuration, error.to_string())
         })?;
-        let mut command = Command::new(&self.node);
+        let mut command = daruda_core::process::command(&self.node);
         // App-managed dependencies do not consume an arbitrary workspace .npmrc.
         // User/global npm settings and explicit launch environment still apply.
         command.arg(&self.npm).current_dir(root).envs(&self.env);

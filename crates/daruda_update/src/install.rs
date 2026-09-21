@@ -12,7 +12,6 @@
 
 use crate::UpdateError;
 use std::path::{Path, PathBuf};
-use std::process::Command;
 
 /// RAII guard that detaches the mounted disk image when dropped, so a
 /// failure partway through installation never leaves a stray mount behind.
@@ -24,7 +23,7 @@ impl Drop for MountGuard {
     fn drop(&mut self) {
         // Best-effort cleanup: detach failures here have no good recovery
         // path and would just mask whatever error is already propagating.
-        let _ = Command::new("hdiutil")
+        let _ = daruda_core::process::command("hdiutil")
             .arg("detach")
             .arg(&self.mount_path)
             .output();
@@ -37,7 +36,7 @@ impl Drop for MountGuard {
 pub fn install_dmg(dmg: &Path, running_app: &Path) -> Result<(), UpdateError> {
     let tmp_root = tempfile::tempdir().map_err(|e| UpdateError::Io(e.to_string()))?;
 
-    let output = Command::new("hdiutil")
+    let output = daruda_core::process::command("hdiutil")
         .arg("attach")
         .arg("-nobrowse")
         .arg("-mountroot")
@@ -72,7 +71,10 @@ pub fn install_dmg(dmg: &Path, running_app: &Path) -> Result<(), UpdateError> {
                 for entry in entries.flatten() {
                     let path = entry.path();
                     if path.is_dir() {
-                        let _ = Command::new("hdiutil").arg("detach").arg(&path).output();
+                        let _ = daruda_core::process::command("hdiutil")
+                            .arg("detach")
+                            .arg(&path)
+                            .output();
                     }
                 }
             }
@@ -105,7 +107,7 @@ pub fn install_dmg(dmg: &Path, running_app: &Path) -> Result<(), UpdateError> {
     let mut dest = running_app.as_os_str().to_os_string();
     dest.push("/");
 
-    let output = Command::new("rsync")
+    let output = daruda_core::process::command("rsync")
         .arg("-av")
         .arg("--delete")
         .arg(&source)
@@ -121,7 +123,10 @@ pub fn install_dmg(dmg: &Path, running_app: &Path) -> Result<(), UpdateError> {
     // Defensive quarantine clear: non-fatal if it fails (ureq-downloaded
     // DMGs typically carry no quarantine attribute in the first place, since
     // they didn't come through a browser download).
-    let _ = Command::new("xattr").arg("-cr").arg(running_app).output();
+    let _ = daruda_core::process::command("xattr")
+        .arg("-cr")
+        .arg(running_app)
+        .output();
 
     Ok(())
 }
@@ -140,7 +145,7 @@ pub fn relaunch(app_path: &Path) -> Result<(), UpdateError> {
     // interpolated into the script text, so a path containing shell
     // metacharacters (`"`, `` ` ``, `$`, `\`) is passed through as an opaque
     // `OsStr` and never re-parsed by the shell.
-    Command::new("/bin/sh")
+    daruda_core::process::command("/bin/sh")
         .arg("-c")
         .arg(r#"while kill -0 "$1" 2>/dev/null; do sleep 0.1; done; open "$2""#)
         .arg("sh") // $0

@@ -141,10 +141,8 @@ impl Lane {
     /// Returns `None` when the probe yielded no usable (non-bare)
     /// lanes, so the caller can fall back to a `Default`.
     fn from_repo_probe(project_root: &std::path::Path, probe: git::RepoProbe) -> Option<Vec<Lane>> {
-        // Try to canonicalize the project_root so comparisons against
-        // git's resolved paths succeed on macOS (/tmp → /private/tmp).
-        let canonical_target =
-            std::fs::canonicalize(project_root).unwrap_or_else(|_| project_root.to_path_buf());
+        // Canonicalize so comparisons against git's own resolved paths line up.
+        let canonical_target = daruda_core::path::canonicalize_or_self(project_root);
 
         let mut lanes: Vec<Lane> = probe
             .lanes
@@ -496,7 +494,7 @@ mod tests {
             std::env::temp_dir().join(format!("daruda_boot_git_single_{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
-        let dir = std::fs::canonicalize(&dir).unwrap();
+        let dir = daruda_core::path::canonicalize(&dir).unwrap();
         git::init(&dir).unwrap();
         std::process::Command::new("git")
             .current_dir(&dir)
@@ -529,7 +527,7 @@ mod tests {
             std::env::temp_dir().join(format!("daruda_boot_git_multi_{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
-        let dir = std::fs::canonicalize(&dir).unwrap();
+        let dir = daruda_core::path::canonicalize(&dir).unwrap();
         git::init(&dir).unwrap();
         let _ = std::process::Command::new("git")
             .current_dir(&dir)

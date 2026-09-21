@@ -1475,13 +1475,10 @@ pub(in crate::workspace) fn resolve_node_path_env(command: &str) -> Option<(Stri
     }
     let node_install_dir = daruda_store::persistence::node_install_dir();
     match daruda_acp::ensure_node(&node_install_dir, &mut |_| {}) {
-        Ok(daruda_acp::NodeRuntime::Managed { node_dir }) => {
-            let existing_path = std::env::var("PATH").unwrap_or_default();
-            Some((
-                "PATH".to_string(),
-                format!("{}:{existing_path}", node_dir.join("bin").display()),
-            ))
-        }
+        Ok(daruda_acp::NodeRuntime::Managed { node_dir }) => Some((
+            "PATH".to_string(),
+            daruda_acp::node::path_with_node(&node_dir),
+        )),
         Ok(daruda_acp::NodeRuntime::System) | Err(_) => None,
     }
 }

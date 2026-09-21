@@ -19,7 +19,7 @@ use std::process::Command;
 
 /// A `git` command rooted at `cwd`, configured for machine reading.
 pub(crate) fn git_command(cwd: &Path) -> Command {
-    let mut command = Command::new("git");
+    let mut command = daruda_core::process::command("git");
     command
         .current_dir(cwd)
         .args(["-c", "core.fsmonitor=false"])

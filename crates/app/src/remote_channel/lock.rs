@@ -21,10 +21,6 @@ use std::path::Path;
 /// directory, short enough to read in a directory listing.
 const DIGEST_CHARS: usize = 32;
 
-/// Lock directories are created owner-only: the file name is a digest, but
-/// which bots a machine talks to is still nobody else's business.
-const OWNER_ONLY_DIR: u32 = 0o700;
-
 /// What asking for a credential's claim answered.
 pub(crate) enum Claim {
     /// Ours, until this is dropped. The lock itself is a drop guard — nothing
@@ -89,7 +85,9 @@ pub(crate) struct CredentialLock {
 pub(crate) fn claim(dir: &Path, credential: &str) -> Claim {
     use fs4::fs_std::FileExt;
 
-    if let Err(error) = create_owner_only_dir(dir) {
+    // Owner-only: the file name is a digest, but which bots a machine talks
+    // to is still nobody else's business.
+    if let Err(error) = daruda_core::path::create_owner_only_dir(dir) {
         unavailable(&error, "remote.lock.dir");
         return Claim::Unavailable;
     }
@@ -149,18 +147,6 @@ fn digest_of(credential: &str) -> String {
 
 fn lock_file_name(credential: &str) -> String {
     format!("bot-{}.lock", digest_of(credential))
-}
-
-fn create_owner_only_dir(dir: &Path) -> std::io::Result<()> {
-    use std::os::unix::fs::DirBuilderExt as _;
-
-    if dir.is_dir() {
-        return Ok(());
-    }
-    std::fs::DirBuilder::new()
-        .recursive(true)
-        .mode(OWNER_ONLY_DIR)
-        .create(dir)
 }
 
 #[cfg(test)]

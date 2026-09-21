@@ -20,6 +20,8 @@ use std::path::{Path, PathBuf};
 use std::sync::mpsc::{self, RecvTimeoutError};
 use std::time::Duration;
 
+use daruda_core::path::canonicalize_or_self;
+
 use crate::agent::skills::SkillScope;
 
 /// Coalescing window. Atomic-rename saves emit a burst (delete +
@@ -212,14 +214,6 @@ fn flush(pending: &ScopeFlags, tx: &mpsc::Sender<SkillsEvent>) -> bool {
         return false;
     }
     true
-}
-
-/// Resolve `path` to its canonical form (resolving symlinks, including
-/// the `/var → /private/var` redirect on macOS). Returns the original
-/// path on failure so the caller can still attempt to watch it later
-/// once it exists.
-fn canonicalize_or_self(path: &Path) -> PathBuf {
-    std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf())
 }
 
 /// Walk up at most `max_ascend` levels from `target` until we find a

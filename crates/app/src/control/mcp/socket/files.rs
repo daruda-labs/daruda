@@ -17,7 +17,6 @@ use super::SocketError;
 /// `connect` — and the default umask leaves it world-connectable, which would
 /// put all nine app-driving tools behind nothing but the token.
 pub(super) const OWNER_ONLY_FILE: u32 = 0o600;
-pub(super) const OWNER_ONLY_DIR: u32 = 0o700;
 
 /// macOS `sun_path` is 104 bytes (`sys/un.h`); Linux allows 108. Truncation
 /// would bind a different path than the one written to the runtime file, so it
@@ -68,7 +67,9 @@ impl Ownership {
     /// Take the lock and clear anything a previous run left behind.
     pub(crate) fn acquire(dir: &Path) -> Result<Self, SocketError> {
         use fs4::fs_std::FileExt;
-        create_owner_only_dir(dir)?;
+        // Owner-only because the socket inside is reachable by anyone who can
+        // traverse the path, and a unix socket's mode *is* its access control.
+        daruda_core::path::create_owner_only_dir(dir).map_err(SocketError::Io)?;
         let file = std::fs::OpenOptions::new()
             .create(true)
             .read(true)
@@ -144,24 +145,6 @@ impl Drop for Ownership {
             }
         }
     }
-}
-
-/// Create `dir` (and its parents) so only the owner may traverse it.
-///
-/// The mode matters because the socket inside it is reachable by anyone who
-/// can traverse the path. Existing directories are left alone: this must not
-/// silently re-permission a user's data directory.
-fn create_owner_only_dir(dir: &Path) -> Result<(), SocketError> {
-    use std::os::unix::fs::DirBuilderExt as _;
-
-    if dir.is_dir() {
-        return Ok(());
-    }
-    std::fs::DirBuilder::new()
-        .recursive(true)
-        .mode(OWNER_ONLY_DIR)
-        .create(dir)
-        .map_err(SocketError::Io)
 }
 
 /// Restrict a freshly bound socket to its owner.
