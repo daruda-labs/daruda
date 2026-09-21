@@ -211,12 +211,10 @@ fn validate_entry(
         .as_str()
         .or_else(|| bin.get(adapter.bin).and_then(serde_json::Value::as_str))
         .context("installed adapter has no supported bin entry")?;
-    let entry = package
-        .join(relative)
-        .canonicalize()
+    let entry = daruda_core::path::canonicalize(package.join(relative))
         .context("resolving adapter entry")?;
     ensure!(
-        entry.starts_with(package.canonicalize()?),
+        entry.starts_with(daruda_core::path::canonicalize(package)?),
         "adapter entry escapes its package directory"
     );
     ensure!(

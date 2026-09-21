@@ -1091,7 +1091,7 @@ fn open_with_preset(
         .unwrap_or_default();
     let mut last_err = None;
     for (command, args) in &candidates {
-        match std::process::Command::new(command)
+        match daruda_core::process::command(command)
             .args(args)
             .stdin(Stdio::null())
             .stdout(Stdio::null())

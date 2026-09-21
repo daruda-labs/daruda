@@ -22,7 +22,7 @@ pub use status::*;
 
 use std::ffi::OsStr;
 use std::path::{Path, PathBuf};
-use std::process::{Command, Stdio};
+use std::process::Stdio;
 use std::time::{Duration, Instant};
 
 /// Lane entry parsed from `git worktree list --porcelain`.
@@ -116,12 +116,15 @@ where
     // of an opaque spawn failure when git isn't installed.
     which::which("git").map_err(|_| GitError::NotFound)?;
 
-    let mut child = git_command(cwd)
+    let mut command = git_command(cwd);
+    command
         .args(args)
         .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .map_err(GitError::Spawn)?;
+        .stderr(Stdio::piped());
+    // git forks helpers of its own (ssh, askpass, credential) — a timeout has
+    // to reach those, not just git.
+    daruda_core::process::lead_own_group(&mut command);
+    let mut child = command.spawn().map_err(GitError::Spawn)?;
 
     // Drain stdout/stderr concurrently so the child never blocks on a
     // full pipe buffer while we're polling `try_wait`. Each handle
@@ -147,15 +150,15 @@ where
             Ok(Some(s)) => break s,
             Ok(None) => {
                 if started.elapsed() >= timeout {
-                    // SIGKILL the parent. Grandchildren (ssh, askpass,
-                    // network helpers) may hold the stdout/stderr pipes
-                    // open after the parent dies, which would block a
-                    // `join()` here for as long as the OS takes to
-                    // notice. Detach the drain threads instead — the OS
-                    // reaps them when the parent process exits. The
-                    // caller gets `Timeout` immediately.
+                    // The whole tree, so no helper is left holding the pipes
+                    // the drain threads read. Unreaped until the `wait`
+                    // below, so the pid is still ours to name.
+                    daruda_core::process::kill_tree(child.id());
                     let _ = child.kill();
                     let _ = child.wait();
+                    // Still detached rather than joined: a timeout is already
+                    // a failure path and the caller gets `Timeout` now, not
+                    // after the OS has finished tearing the pipes down.
                     drop(stdout_thread);
                     drop(stderr_thread);
                     return Err(GitError::Timeout(timeout));
@@ -189,7 +192,7 @@ pub fn git_init(path: &Path) -> Result<(), GitError> {
 /// decide whether to show the "Initialize Git Repo" button vs. hide
 /// the lane UI entirely.
 pub fn has_git() -> bool {
-    Command::new("git")
+    daruda_core::process::command("git")
         .arg("--version")
         .output()
         .map(|o| o.status.success())
@@ -392,7 +395,7 @@ pub fn git_dirs(path: &Path) -> Result<GitDirs, GitError> {
         } else {
             path.join(p)
         };
-        std::fs::canonicalize(&absolute).unwrap_or(absolute)
+        daruda_core::path::canonicalize_or_self(absolute)
     };
     Ok(GitDirs {
         git_dir: canonical(git_dir),

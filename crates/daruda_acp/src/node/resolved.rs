@@ -2,7 +2,6 @@
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
-use std::process::Command;
 
 use super::{
     NodeError, NodeProgress, NodeRuntime, managed_cache_valid_with_context, managed_node_dir,
@@ -85,7 +84,7 @@ fn probe(
     strip_env: &[String],
     context: &PreparationContext<'_>,
 ) -> Result<ResolvedNode, PreparationError> {
-    let mut command = Command::new(node);
+    let mut command = daruda_core::process::command(node);
     command.args(["-p", IDENTITY]).envs(env);
     for name in strip_env {
         command.env_remove(name);
@@ -124,7 +123,7 @@ fn from_identity(identity: serde_json::Value) -> Result<ResolvedNode, Preparatio
 
 fn npm_entry(bin: &Path) -> Result<PathBuf, PreparationError> {
     // Do not pair this Node with an unrelated npm installation found elsewhere.
-    let npm = bin.join("npm").canonicalize().map_err(configuration)?;
+    let npm = daruda_core::path::canonicalize(bin.join("npm")).map_err(configuration)?;
     if npm.file_name().is_none_or(|name| name != "npm-cli.js") {
         return Err(configuration(
             "npm-cli.js not found alongside the selected Node runtime",

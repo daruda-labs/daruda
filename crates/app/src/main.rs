@@ -32,7 +32,6 @@ mod screenshot;
 pub mod settings_store;
 pub mod settings_window;
 mod shell_env;
-pub(crate) mod shell_quote;
 mod slot_actions;
 pub mod surface;
 mod telegram;

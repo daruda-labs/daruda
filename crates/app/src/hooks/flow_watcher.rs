@@ -22,6 +22,8 @@ use std::path::{Path, PathBuf};
 use std::sync::mpsc::{self, RecvTimeoutError};
 use std::time::Duration;
 
+use daruda_core::path::canonicalize_or_self;
+
 /// Coalescing window. Same value as the other watchers — an atomic-rename save
 /// emits its burst well inside it, and the graph still reads as live.
 const DEBOUNCE: Duration = Duration::from_millis(100);
@@ -60,7 +62,7 @@ pub fn spawn(
     let anchors: Vec<PathBuf> = dirs
         .iter()
         .filter(|d| d.is_dir())
-        .map(|d| canonicalize_or_self(d))
+        .map(canonicalize_or_self)
         .collect();
 
     let matches = anchors.clone();
@@ -124,10 +126,6 @@ fn is_flow_in(path: &Path, dirs: &[PathBuf], extensions: &[&str]) -> bool {
     path.extension()
         .and_then(|e| e.to_str())
         .is_some_and(|ext| extensions.iter().any(|want| ext.eq_ignore_ascii_case(want)))
-}
-
-fn canonicalize_or_self(path: &Path) -> PathBuf {
-    std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf())
 }
 
 #[cfg(test)]

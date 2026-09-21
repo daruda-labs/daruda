@@ -516,6 +516,12 @@ Z-order — **do not paint in reverse**:
 
 ## Keybindings (`mod.rs::ensure_key_bindings`)
 
+Written below as a macOS user presses them. In source most are spelled
+`secondary-`, which gpui reads as cmd here and ctrl elsewhere. Three carry
+an explicit `cfg!(target_os = "macos")` instead: fullscreen names both
+modifiers, and find-again would land on the Git Changes panel's global
+`ctrl-shift-g` once translated.
+
 | Key | Action |
 |-----|--------|
 | `tab` / `shift-tab` | Tab / TabPrev |

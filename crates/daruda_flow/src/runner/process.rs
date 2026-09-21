@@ -112,7 +112,7 @@ impl ProcessRunner {
         log: std::fs::File,
     ) -> std::io::Result<smol::process::Child> {
         let errors = log.try_clone()?;
-        let mut cmd = std::process::Command::new(SHELL);
+        let mut cmd = daruda_core::process::command(SHELL);
         cmd.arg("-c")
             .arg(run)
             .current_dir(ctx.cwd)
@@ -124,8 +124,7 @@ impl ProcessRunner {
         }
         // The child leads its own group so a stop reaches its whole tree.
         // `async_process` exposes no equivalent, hence the std detour.
-        #[cfg(unix)]
-        std::os::unix::process::CommandExt::process_group(&mut cmd, 0);
+        daruda_core::process::lead_own_group(&mut cmd);
 
         // Stdio must be set *after* the conversion: `From` clears the three
         // flags `spawn` reads, and spawn then overwrites anything std had
@@ -173,18 +172,13 @@ async fn watch_cancel(cancel: &CancelToken) -> Stop {
 /// The reap afterwards is what keeps a night of repeated timeouts from
 /// accumulating zombies.
 async fn kill_tree(pid: u32, child: &mut smol::process::Child) {
-    #[cfg(unix)]
-    {
-        // SAFETY: `process_group(0)` made this pid the leader of a group
-        // containing only this node's tree, and the child is unreaped here
-        // so the OS cannot have reused the id.
-        unsafe { libc::killpg(pid as libc::pid_t, libc::SIGKILL) };
-    }
-    #[cfg(not(unix))]
-    {
-        let _ = pid;
-        let _ = child.kill();
-    }
+    // The child is unreaped here — the reap is the line below — so the pid is
+    // still this process's to name, which is what `kill_tree` requires.
+    daruda_core::process::kill_tree(pid);
+    // Where there was no group to signal, this is the only reach; where there
+    // was, it is a no-op on a child already gone. Same order every caller of
+    // `kill_tree` uses.
+    let _ = child.kill();
     let _ = child.status().await;
 }
 
@@ -292,14 +286,7 @@ mod tests {
         )
     }
 
-    /// Asks the OS about one pid. Signal 0 performs the permission and
-    /// existence checks without delivering anything.
-    #[cfg(unix)]
-    fn process_is_alive(pid: u32) -> bool {
-        // SAFETY: signal 0 delivers nothing; it only reports whether the pid
-        // is claimed. Any pid value is a valid argument.
-        unsafe { libc::kill(pid as libc::pid_t, 0) == 0 }
-    }
+    use daruda_core::process::is_alive as process_is_alive;
 
     /// The kill is asynchronous and the grandchild is reparented before it
     /// is reaped, so "gone" is a bounded wait rather than an instant.

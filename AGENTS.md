@@ -28,6 +28,7 @@ subsystem's real constraints are written down.
 | **Where a new file or crate goes** | [Crate dependency graph](#crate-dependency-graph) · [File-structure rules](#file-structure-rules) · [Change-impact discipline](#change-impact-discipline) |
 | **A daruda-owned environment variable** | `daruda_core::process_env` · [`lint-env-literals.sh`](./scripts/lint-env-literals.sh) |
 | **Anything written to disk or keyed per profile** | [Cross-profile data isolation](#cross-profile-data-isolation) |
+| **Spawning a process, resolving a path or shell** | [Platform capability boundary](#platform-capability-boundary) · [`lint-platform-boundary.sh`](./scripts/lint-platform-boundary.sh) |
 | **A failure path — error, toast, log** | [Error reporting](#error-reporting) |
 | **Checking a change actually renders** | [Visual verification](#visual-verification) · [Driving the captured state](#driving-the-captured-state) |
 | **GPUI entity lifecycle, async re-entry** | [Pitfalls](#pitfall-prevention-rules) 5 (reentrancy), 10 (render cost) · zed at the pinned rev (Pitfall 6) |
@@ -59,6 +60,7 @@ cargo clippy -p ghostty_vt -p ghostty_vt_sys -p daruda_terminal -p daruda \
 ./scripts/lint-direct-ferrum-flow.sh
 ./scripts/lint-no-eprintln.sh
 ./scripts/lint-viewport-row-scroll.sh
+./scripts/lint-platform-boundary.sh
 cargo test -p ghostty_vt -p ghostty_vt_sys -p daruda_terminal -p daruda \
   -p daruda_config -p daruda_store -p daruda_agent -p daruda_update \
   -p daruda_acp -p daruda_core -p daruda_flow -p ferrum_flow -p gpui_component
@@ -184,7 +186,7 @@ daruda/
 - **Rust**: 2024 edition (1.95.0+). The floor is declared once in `[workspace.package]` and every first-party crate inherits it with `rust-version.workspace = true`, so clippy's `incompatible_msrv` catches a newer std API at the call site. CI pins the toolchain to exactly 1.95, which is what actually enforces the floor — develop on a newer toolchain freely. The three vendored `gpui_component*` crates deliberately stay undeclared to keep the re-vendor diff a file copy; `ferrum_flow` does declare it, because its manifest is daruda-authored either way and the declaration is what arms `incompatible_msrv` there.
 - **Zig**: 0.14.1 (`./scripts/bootstrap-zig.sh` on macOS; on Linux install manually and set `ZIG=<path>` or put `zig` on `PATH`)
 - **macOS**: Apple Silicon or Intel + Xcode Command Line Tools — the primary, fully-verified target.
-- **Linux**: builds and tests pass; GUI runtime (window/menu/tray) not yet verified on a real desktop. Needs system `libfontconfig`/`libxcb`.
+- **Linux**: built and tested by the `linux` CI job. That job is `continue-on-error` until the first run's failures are worked off — until then the claim is "measured", not "green". GUI runtime (window/menu/tray) is still unverified on a real desktop, since CI has no one to look at the window. Needs system `libfontconfig`/`libxcb` (the job installs them).
 - **Windows**: not yet ported.
 
 ### Build
@@ -208,6 +210,7 @@ scripts/lint-direct-gpui-component.sh
 scripts/lint-direct-ferrum-flow.sh
 scripts/lint-no-eprintln.sh
 scripts/lint-viewport-row-scroll.sh
+scripts/lint-platform-boundary.sh
 cargo test -p ghostty_vt -p ghostty_vt_sys -p daruda_terminal -p daruda \
   -p daruda_config -p daruda_store -p daruda_agent -p daruda_update \
   -p daruda_acp -p daruda_core -p daruda_flow -p ferrum_flow -p gpui_component
@@ -236,7 +239,9 @@ same suite minus the one module that dominates it: measured 2026-09-18,
 each tab they open spawns an actual shell. It is an iteration loop, not a
 gate — the [pre-commit checks](#pre-commit-checks) still run everything.
 
-Note: `.github/workflows/ci.yml` gates fmt, the clippy list above, the 7 lint scripts through `lint-viewport-row-scroll.sh`, `lint-env-literals.sh` with its self-test, `lint-no-silent-update.sh`, `lint-agent-activity.sh`, the `cargo doc` link check, and the package-scoped `cargo test` list above.
+`ci.yml` has a second job, `linux`, which builds and tests the same package list on `ubuntu-latest`. It runs no lint scripts — those read source rather than platform, and the macOS job already ran them. It is `continue-on-error` while its first failures are worked off, so a red Linux run does not block a macOS-only change; drop that once the list is empty.
+
+Note: `.github/workflows/ci.yml` gates fmt, the clippy list above, the 8 lint scripts through `lint-platform-boundary.sh`, `lint-env-literals.sh` with its self-test, `lint-no-silent-update.sh`, `lint-agent-activity.sh`, the `cargo doc` link check, and the package-scoped `cargo test` list above.
 
 The doc-link gate covers six crates rather than all of them: clippy does not
 read intra-doc links, so a deleted item leaves a dangling `[`Name`]` in the
@@ -445,7 +450,7 @@ Interactive Markdown has two independent rendering stacks. The file viewer uses 
 
 `daruda_config` and `daruda_agent` both depend on `daruda_store` for `persistence::default_data_dir()` (see Cross-profile data isolation below).
 
-`daruda_core` sits below everything so knowledge needed on both sides of the GPUI boundary has one home — the app can reach every crate, but the GPUI-free crates cannot reach the app. Admission is deliberately narrow (a "core" name otherwise becomes a junk drawer). Because every consumer points here and this crate points at none of them, the dependency rule is **directional, not a count**: no `daruda_*` dependency (that inverts the layering), and never `gpui` (which would put the crate back out of reach of the GPUI-free crates it exists to serve). Weigh any other external dependency against the fact that every consumer inherits it and `daruda_acp` is deliberately light — today only `serde` would qualify, and it stays out until something here needs it. Modules are **pure by default**: values in, values out, no filesystem/network I/O or hidden caches. The explicit process-boundary exception is `process_env`: its opaque `Key` type permits reads of registered daruda-owned names only. It does not write or cache values; bootstrap writes stay where the caller can prove the process is single-threaded, because `set_var` is unsafe once other threads may access the environment. `scripts/lint-env-literals.sh` enforces single spelling in first-party Rust, including examples and tests. Current contents: `process_env` — the environment-name registry and read boundary; `language` — file extension → source language *identity*, shared by the file viewer's highlighter and the ACP adapter's fenced-output rewriter; `text` — UTF-8 word / logical-line expansion and the selection cell hit-test, shared by the vendored editor widget and the app; `git` — ref-naming rules as pure predicates, shared by the task store's silent filter and the app form's inline diagnostic. Whether a language can actually be highlighted is a separate, registry-dependent question the app answers in `crate::ui::highlighter`.
+`daruda_core` sits below everything so knowledge needed on both sides of the GPUI boundary has one home — the app can reach every crate, but the GPUI-free crates cannot reach the app. Admission is deliberately narrow (a "core" name otherwise becomes a junk drawer). Because every consumer points here and this crate points at none of them, the dependency rule is **directional, not a count**: no `daruda_*` dependency (that inverts the layering), and never `gpui` (which would put the crate back out of reach of the GPUI-free crates it exists to serve). Weigh any other external dependency against the fact that every consumer inherits it and `daruda_acp` is deliberately light — prefer a target-gated one, which costs the platforms that do not need it nothing (`libc` is here on `cfg(unix)` for that reason); `serde` would qualify on weight alone and stays out until something here needs it. Modules are **pure by default**: values in, values out, no filesystem/network I/O or hidden caches — with two named exceptions. `process_env` is a read boundary: its opaque `Key` type permits reads of registered daruda-owned names only, and it never writes or caches, because `set_var` is unsafe once other threads may access the environment (bootstrap writes stay where the caller can prove the process is single-threaded). The **platform capability** modules call the OS, because containing those calls is what they exist for — see [Platform capability boundary](#platform-capability-boundary). `scripts/lint-env-literals.sh` enforces single spelling in first-party Rust, including examples and tests. Current contents: `process_env` — the environment-name registry and read boundary; `language` — file extension → source language *identity*, shared by the file viewer's highlighter and the ACP adapter's fenced-output rewriter; `text` — UTF-8 word / logical-line expansion and the selection cell hit-test, shared by the vendored editor widget and the app; `git` — ref-naming rules as pure predicates, shared by the task store's silent filter and the app form's inline diagnostic; `process`, `path`, `shell` — the platform capability gates. Whether a language can actually be highlighted is a separate, registry-dependent question the app answers in `crate::ui::highlighter`.
 
 #### Cross-profile data isolation
 
@@ -477,6 +482,31 @@ Adding a fourth means adding it to `clippy.toml`'s allow reasoning too.
 - `clippy.toml`'s `disallowed-methods` bans a bare `dirs::config_dir` call outside `daruda_store::persistence`'s own call sites (each marked `#[allow(clippy::disallowed_methods)]` with a comment).
 - `scripts/lint-daruda-path-literals.sh` greps for a hand-rolled `.join("daruda")` / `.join(".daruda")` outside the canonical files (`persistence.rs`, `profile.rs`, `observability/log_writer.rs`) and a short, explicit allow-list of genuinely non-profile-scoped exceptions (the per-repo `.daruda/task-*.md` files, the single global `~/.daruda/hooks/notify.sh`).
 - Neither tool catches a hardcoded Keychain/OS-credential-store service name (not a directory path) — review any new one by hand against `crates/app/src/telegram/keychain.rs`'s `service_name()`.
+
+#### Platform capability boundary
+
+**Rule: an OS call that differs by platform lives in exactly one place, and domain code calls it by name.**
+
+| Instead of | Call |
+|---|---|
+| `Command::new` | `daruda_core::process::command` |
+| `libc::kill*` / `process_group` | `daruda_core::process::{lead_own_group, kill_tree}` |
+| `fs::canonicalize` | `daruda_core::path::{canonicalize, canonicalize_or_self}` |
+| `env::var("SHELL")` | `daruda_core::shell::interactive` |
+
+**Why this is called out explicitly:** the same call kept being written out per crate. Killing a child's process tree was spelled four times across `daruda_acp`, `daruda_agent` (twice) and `daruda_flow`, in two spellings of one POSIX call (`killpg(pid)` and `kill(-pid)`); `create_owner_only_dir` existed verbatim in two files; the skills, flow and MCP watchers had each defined their own `canonicalize_or_self`; and `account_login_ops.rs` rebuilt a `PATH` with a hardcoded `:` next to a correct `join_paths` helper ten lines away in the crate it was calling. Each was fine alone. Together they meant a second platform would be written four times, which is [Shotgun Surgery](#change-impact-discipline) — the seam being wrong rather than the work being doubled.
+
+**The two allowed regions:**
+- `daruda_core`'s capability modules (`process`, `path`, `shell`) — the gates. `daruda_core` is otherwise pure-by-default; these are the named exception, stated in its `lib.rs`.
+- `crates/app/src/platform/` — capabilities needing a window handle, which a GPUI-free crate cannot hold.
+
+Plus three files that are gates of their own, each the single door to its capability: `app/src/remote_channel/keychain.rs` (daruda's own secrets), `daruda_agent/src/accounts/credentials.rs` (an entry *another program* owns), `app/src/shell_env.rs` (a macOS-only `.app`-launch PATH problem, not the "which shell" question).
+
+**Prefer a value over a `cfg`.** `#[cfg(windows)]` code never compiles on a macOS dev machine, so it is only ever checked by CI. Decide the platform once at the boundary with `cfg!()` and pass the answer down as a value — `daruda_core::shell::login_args_for(program)` answers "does this shell take `-l`?" from the program name, so a Windows shell's rules are asserted from macOS. Reserve `#[cfg]` attributes for the leaf that actually calls the OS.
+
+**Adding a platform** = adding an arm inside the boundary. If it means touching domain crates, the capability is in the wrong place.
+
+**Enforcement:** `scripts/lint-platform-boundary.sh`. Deliberately a grep rather than `clippy.toml` — `disallowed-methods` has no per-file exception, so under `--all-targets` it would also catch test fixtures spawning `git init`, which have no reason to go through the gate.
 
 #### UI component hierarchy
 

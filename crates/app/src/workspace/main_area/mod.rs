@@ -33,8 +33,8 @@ use gpui::{
     MouseDownEvent, SharedString, StyleRefinement, div, prelude::*, px,
 };
 
-use crate::shell_quote::{Shell, format_paths_for_drop, quote_path};
 use crate::workspace::path_drag::PathDrag;
+use daruda_core::shell::quote::{Shell, format_paths_for_drop, quote_path};
 
 use self::file_view_pane::render::render_pane_file_viewer;
 use self::pane::Pane;

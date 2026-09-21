@@ -167,24 +167,12 @@ fn describe(event: &FlowEvent) -> String {
     }
 }
 
-/// What the app answers with `sysinfo`. Signal 0 delivers nothing — it only
-/// reports whether the pid is claimed.
-#[cfg(unix)]
-fn process_is_alive(pid: u32) -> bool {
-    // SAFETY: any pid value is a valid argument to `kill`; signal 0 has no
-    // effect beyond the existence check.
-    unsafe { libc::kill(pid as libc::pid_t, 0) == 0 }
-}
-
-#[cfg(not(unix))]
-fn process_is_alive(pid: u32) -> bool {
-    pid == std::process::id()
-}
+use daruda_core::process::is_alive as process_is_alive;
 
 /// The engine deliberately does not manage the working tree, so it records
 /// what the tree looked like instead. `None` when this is not a git repo.
 fn git_status(cwd: &Path) -> Option<String> {
-    let out = std::process::Command::new("git")
+    let out = daruda_core::process::command("git")
         .args(["status", "--porcelain"])
         .current_dir(cwd)
         .output()

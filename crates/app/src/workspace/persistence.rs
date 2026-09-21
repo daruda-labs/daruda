@@ -1013,7 +1013,7 @@ fn anchor_lane_paths_to_project_root(
     lanes: &mut [crate::lane::Lane],
     project_root: &std::path::Path,
 ) {
-    if let Ok(canonical) = std::fs::canonicalize(project_root) {
+    if let Ok(canonical) = daruda_core::path::canonicalize(project_root) {
         for wt in lanes.iter_mut() {
             if canonical.starts_with(&wt.path) && canonical != wt.path {
                 wt.path = canonical;

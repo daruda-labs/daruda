@@ -468,10 +468,8 @@ fn check_file(
         return;
     }
 
-    let root = flow_dir
-        .canonicalize()
-        .unwrap_or_else(|_| flow_dir.to_path_buf());
-    let canonical = path.canonicalize().unwrap_or_else(|_| path.clone());
+    let root = daruda_core::path::canonicalize_or_self(flow_dir);
+    let canonical = daruda_core::path::canonicalize_or_self(&path);
     if !canonical.starts_with(&root) {
         issues.push(ValidationIssue {
             node: Some(node.clone()),

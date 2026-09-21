@@ -406,12 +406,11 @@ fn scan() -> PortScanResult {
 mod macos {
     use std::collections::HashMap;
     use std::path::PathBuf;
-    use std::process::Command;
 
     use super::ListeningPort;
 
     pub(super) fn scan() -> Option<Vec<ListeningPort>> {
-        let Ok(listen_output) = Command::new("lsof")
+        let Ok(listen_output) = daruda_core::process::command("lsof")
             .args(["-nP", "-iTCP", "-sTCP:LISTEN", "-F", "pcn"])
             .output()
         else {
@@ -431,14 +430,14 @@ mod macos {
             .collect::<Vec<_>>()
             .join(",");
 
-        let cwd_by_pid = Command::new("lsof")
+        let cwd_by_pid = daruda_core::process::command("lsof")
             .args(["-a", "-p", &pid_list, "-d", "cwd", "-Fn"])
             .output()
             .ok()
             .map(|out| parse_cwd_entries(&String::from_utf8_lossy(&out.stdout)))
             .unwrap_or_default();
 
-        let command_by_pid = Command::new("ps")
+        let command_by_pid = daruda_core::process::command("ps")
             .args(["-p", &pid_list, "-o", "pid=", "-o", "command="])
             .output()
             .ok()

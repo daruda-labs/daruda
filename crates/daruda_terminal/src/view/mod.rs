@@ -92,16 +92,47 @@ fn ensure_key_bindings(cx: &mut App) {
         cx.bind_keys([
             KeyBinding::new("tab", Tab, Some(KEY_CONTEXT)),
             KeyBinding::new("shift-tab", TabPrev, Some(KEY_CONTEXT)),
-            KeyBinding::new("cmd-=", ZoomIn, Some(KEY_CONTEXT)),
-            KeyBinding::new("cmd--", ZoomOut, Some(KEY_CONTEXT)),
-            KeyBinding::new("cmd-0", ResetZoom, Some(KEY_CONTEXT)),
-            KeyBinding::new("cmd-ctrl-f", ToggleFullscreen, Some(KEY_CONTEXT)),
-            KeyBinding::new("cmd-k", ClearBuffer, Some(KEY_CONTEXT)),
-            KeyBinding::new("cmd-shift-k", ClearScrollback, Some(KEY_CONTEXT)),
-            KeyBinding::new("cmd-end", ScrollToBottom, Some(KEY_CONTEXT)),
-            KeyBinding::new("cmd-f", SearchOpen, Some(KEY_CONTEXT)),
-            KeyBinding::new("cmd-g", SearchNext, Some(KEY_CONTEXT)),
-            KeyBinding::new("cmd-shift-g", SearchPrev, Some(KEY_CONTEXT)),
+            KeyBinding::new("secondary-=", ZoomIn, Some(KEY_CONTEXT)),
+            KeyBinding::new("secondary--", ZoomOut, Some(KEY_CONTEXT)),
+            KeyBinding::new("secondary-0", ResetZoom, Some(KEY_CONTEXT)),
+            // Spelled the same way as `surface::keybindings`'s
+            // SHORTCUT_TOGGLE_FULL_SCREEN, which registers this action
+            // globally — the app crate cannot be imported from here, so the
+            // two are kept in step by hand.
+            KeyBinding::new(
+                if cfg!(target_os = "macos") {
+                    "ctrl-cmd-f"
+                } else {
+                    "f11"
+                },
+                ToggleFullscreen,
+                Some(KEY_CONTEXT),
+            ),
+            KeyBinding::new("secondary-k", ClearBuffer, Some(KEY_CONTEXT)),
+            KeyBinding::new("secondary-shift-k", ClearScrollback, Some(KEY_CONTEXT)),
+            KeyBinding::new("secondary-end", ScrollToBottom, Some(KEY_CONTEXT)),
+            KeyBinding::new("secondary-f", SearchOpen, Some(KEY_CONTEXT)),
+            KeyBinding::new(
+                if cfg!(target_os = "macos") {
+                    "cmd-g"
+                } else {
+                    "f3"
+                },
+                SearchNext,
+                Some(KEY_CONTEXT),
+            ),
+            // Off macOS `secondary-shift-g` is `ctrl-shift-g`, which the app
+            // registers globally for the Git Changes panel. F3 is the
+            // find-again convention there anyway.
+            KeyBinding::new(
+                if cfg!(target_os = "macos") {
+                    "cmd-shift-g"
+                } else {
+                    "shift-f3"
+                },
+                SearchPrev,
+                Some(KEY_CONTEXT),
+            ),
             KeyBinding::new("escape", SearchClose, Some(SEARCH_KEY_CONTEXT)),
             KeyBinding::new("enter", SearchNext, Some(SEARCH_KEY_CONTEXT)),
             KeyBinding::new("shift-enter", SearchPrev, Some(SEARCH_KEY_CONTEXT)),
@@ -114,13 +145,21 @@ fn ensure_key_bindings(cx: &mut App) {
             // iTerm2 convention — Cmd+Up / Cmd+Down conflict with macOS
             // document-navigation defaults on some focused elements, so
             // use the shift variant to match iTerm2's "Mark Navigation".
-            KeyBinding::new("cmd-shift-up", PromptJumpPrev, Some(KEY_CONTEXT)),
-            KeyBinding::new("cmd-shift-down", PromptJumpNext, Some(KEY_CONTEXT)),
+            KeyBinding::new("secondary-shift-up", PromptJumpPrev, Some(KEY_CONTEXT)),
+            KeyBinding::new("secondary-shift-down", PromptJumpNext, Some(KEY_CONTEXT)),
             // Navigate between executed commands (FTCS C boundaries).
-            KeyBinding::new("cmd-shift-alt-up", CommandJumpPrev, Some(KEY_CONTEXT)),
-            KeyBinding::new("cmd-shift-alt-down", CommandJumpNext, Some(KEY_CONTEXT)),
+            KeyBinding::new("secondary-shift-alt-up", CommandJumpPrev, Some(KEY_CONTEXT)),
+            KeyBinding::new(
+                "secondary-shift-alt-down",
+                CommandJumpNext,
+                Some(KEY_CONTEXT),
+            ),
             // Copy the last command's output (FTCS E/F or C/D fallback).
-            KeyBinding::new("cmd-shift-c", CopyLastCommandOutput, Some(KEY_CONTEXT)),
+            KeyBinding::new(
+                "secondary-shift-c",
+                CopyLastCommandOutput,
+                Some(KEY_CONTEXT),
+            ),
         ]);
     });
 }

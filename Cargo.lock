@@ -1728,7 +1728,6 @@ dependencies = [
  "anyhow",
  "daruda_core",
  "futures",
- "libc",
  "semver",
  "serde",
  "serde_json",
@@ -1747,10 +1746,10 @@ version = "0.2.15"
 dependencies = [
  "base64",
  "chrono",
+ "daruda_core",
  "daruda_store",
  "dirs",
  "fs4",
- "libc",
  "serde",
  "serde_json",
  "sha2",
@@ -1764,6 +1763,7 @@ dependencies = [
 name = "daruda_config"
 version = "0.2.15"
 dependencies = [
+ "daruda_core",
  "daruda_store",
  "dirs",
  "serde",
@@ -1778,6 +1778,10 @@ dependencies = [
 [[package]]
 name = "daruda_core"
 version = "0.2.15"
+dependencies = [
+ "libc",
+ "tempfile",
+]
 
 [[package]]
 name = "daruda_flow"
@@ -1842,6 +1846,7 @@ dependencies = [
 name = "daruda_update"
 version = "0.2.15"
 dependencies = [
+ "daruda_core",
  "semver",
  "serde",
  "serde_json",

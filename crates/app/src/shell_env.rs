@@ -20,14 +20,16 @@ pub fn hydrate_path_from_login_shell() {
     if std::io::stdout().is_terminal() {
         return;
     }
-    let Ok(shell) = std::env::var("SHELL") else {
+    let Some(shell) = daruda_core::shell::login_shell() else {
         return;
     };
-    // `-l -i` covers both login and interactive rc files; Homebrew/nvm often
-    // extend PATH from one of them.
+    // Login *and* interactive rc files — Homebrew/nvm often extend PATH from
+    // one or the other. The login flag comes from the shell being run; `-i`
+    // and `-c` are this function's own.
     let script = format!("printf '%s%s%s' '{PATH_START}' \"$PATH\" '{PATH_END}'");
-    let output = std::process::Command::new(&shell)
-        .args(["-l", "-i", "-c", &script])
+    let output = daruda_core::process::command(&shell)
+        .args(daruda_core::shell::login_args_for(&shell))
+        .args(["-i", "-c", &script])
         .output();
     let Ok(output) = output else {
         return;

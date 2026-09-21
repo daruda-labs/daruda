@@ -293,7 +293,7 @@ fn resolved_target(path: &Path) -> PathBuf {
     let mut remainder: Vec<std::ffi::OsString> = Vec::new();
     let mut probe = path;
     loop {
-        if let Ok(real) = std::fs::canonicalize(probe) {
+        if let Ok(real) = daruda_core::path::canonicalize(probe) {
             return remainder
                 .iter()
                 .rev()

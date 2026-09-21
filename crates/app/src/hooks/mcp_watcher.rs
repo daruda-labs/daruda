@@ -20,6 +20,8 @@ use std::path::{Path, PathBuf};
 use std::sync::mpsc::{self, RecvTimeoutError};
 use std::time::Duration;
 
+use daruda_core::path::canonicalize_or_self;
+
 /// Coalescing window. Same value as Skills — atomic-rename bursts
 /// finish within this much, the panel still reads as live.
 const DEBOUNCE: Duration = Duration::from_millis(100);
@@ -189,10 +191,6 @@ fn flush(pending: &FileFlags, tx: &mpsc::Sender<McpEvent>) -> bool {
         return false;
     }
     true
-}
-
-fn canonicalize_or_self(path: &Path) -> PathBuf {
-    std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf())
 }
 
 /// Walk up at most `max_ascend` levels from `target` until we find a

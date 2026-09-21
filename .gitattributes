@@ -1,0 +1,16 @@
+# Line endings are decided here, not by the machine doing the checkout.
+#
+# Git for Windows installs with core.autocrlf=true at system scope, so a
+# fresh clone there rewrites every file. Two things break when it does:
+#
+#   - cargo writes core.autocrlf=false into the git checkouts it makes
+#     ("Ensure libgit2 won't mess with newlines when we vendor"), so the
+#     gpui tree `scripts/apply-gpui-patch.sh` patches stays LF. A CRLF
+#     patch against an LF target makes `git apply` fail outright — and
+#     `--ignore-whitespace` is the worse outcome, since it succeeds while
+#     injecting a literal CR into every line it touched.
+#   - `scripts/*.sh` grow trailing CRs that `grep -q 'foo$'` and
+#     `sed -i.bak` carry through without saying anything.
+#
+# `text=auto` still lets git detect binaries and leave them alone.
+* text=auto eol=lf

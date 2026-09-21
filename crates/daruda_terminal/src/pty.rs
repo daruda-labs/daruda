@@ -52,11 +52,10 @@ pub struct PtyConfig {
 
 impl Default for PtyConfig {
     fn default() -> Self {
-        let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/zsh".to_string());
         Self {
             cols: 80,
             rows: 24,
-            shell,
+            shell: daruda_core::shell::interactive(),
             env: vec![
                 ("TERM".into(), "xterm-256color".into()),
                 ("COLORTERM".into(), "truecolor".into()),
@@ -185,7 +184,12 @@ pub fn spawn_pty_real(config: &PtyConfig) -> Result<PtyHandle, PtyError> {
     let master: Arc<dyn MasterPty + Send> = Arc::from(pty_pair.master);
 
     let mut cmd = CommandBuilder::new(&config.shell);
-    cmd.arg("-l");
+    // Login args belong to the shell being run — `-l` is POSIX, and handing
+    // it to a Windows shell is an error rather than a no-op. The config may
+    // name a different shell than the default, so ask about that one.
+    for arg in daruda_core::shell::login_args_for(&config.shell) {
+        cmd.arg(arg);
+    }
     for (key, value) in &config.env {
         cmd.env(key, value);
     }

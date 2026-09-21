@@ -269,7 +269,7 @@ pub(in crate::workspace) struct BottomDockSnapshot {
     /// Shell flavour of the focused pane's PTY. Drives drag-and-drop path
     /// quoting in the terminal input — Posix backslash/single-quote rules,
     /// fish, PowerShell, and cmd.exe all differ.
-    pub shell: crate::shell_quote::Shell,
+    pub shell: daruda_core::shell::quote::Shell,
     pub workspace: Handle<WeakEntity<Workspace>>,
 }
 

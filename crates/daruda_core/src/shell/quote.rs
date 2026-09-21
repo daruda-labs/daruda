@@ -1,12 +1,8 @@
-//! Shell-aware path quoting for drag-and-drop into the terminal input.
+//! Shell-aware quoting — a path dropped into the terminal input has to
+//! reach the shell as one token, spaces and metacharacters included.
 //!
-//! When a path is dropped into the input area it must reach the shell as a
-//! single token even when it contains spaces or shell metacharacters. The
-//! correct quoting depends on the shell flavour the focused pane is running,
-//! so this module sniffs the shell's executable name from `PtyConfig::shell`
-//! and applies the matching escape rules.
-//!
-//! Pure data / algorithm — no GPUI imports.
+//! Which rules apply is read from the shell's own name, so the caller passes
+//! whichever shell it spawned rather than asking what platform it is on.
 
 use std::path::{Path, PathBuf};
 
@@ -14,7 +10,7 @@ use std::path::{Path, PathBuf};
 /// programs so a typo or custom wrapper still produces a quoted token.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 #[allow(clippy::enum_variant_names)] // PowerShell is the product name; renaming to Pwsh hurts readability
-pub(crate) enum Shell {
+pub enum Shell {
     /// `bash`, `zsh`, `sh`, `dash`, `ksh` — POSIX rules. Inside `'…'` an
     /// embedded `'` is escaped as `'\''`.
     #[default]
@@ -40,7 +36,7 @@ impl Shell {
     ///   Unix and would otherwise glue the whole string into one filename.
     /// - Programs carrying arguments (`/bin/bash -l`, `fish --no-config`)
     ///   — the first whitespace-delimited token is treated as the program.
-    pub(crate) fn detect_from_program(program: &str) -> Self {
+    pub fn detect_from_program(program: &str) -> Self {
         let program = program.split_ascii_whitespace().next().unwrap_or(program);
         let basename = program.rsplit(['/', '\\']).next().unwrap_or("");
         let stem = basename
@@ -57,12 +53,12 @@ impl Shell {
 }
 
 /// Quote `path` so the active shell receives it as a single token.
-pub(crate) fn quote_path(path: &Path, shell: Shell) -> String {
+pub fn quote_path(path: &Path, shell: Shell) -> String {
     quote_str(&path.to_string_lossy(), shell)
 }
 
 /// Quote an arbitrary string using [`Shell`]-specific rules.
-pub(crate) fn quote_str(s: &str, shell: Shell) -> String {
+pub fn quote_str(s: &str, shell: Shell) -> String {
     match shell {
         Shell::Posix => quote_posix(s),
         Shell::Fish => quote_fish(s),
@@ -74,7 +70,7 @@ pub(crate) fn quote_str(s: &str, shell: Shell) -> String {
 /// Format multiple dropped paths for insertion at the cursor. Paths are
 /// quoted individually and joined with a single space so the shell tokenizer
 /// sees them as separate arguments.
-pub(crate) fn format_paths_for_drop(paths: &[PathBuf], shell: Shell) -> String {
+pub fn format_paths_for_drop(paths: &[PathBuf], shell: Shell) -> String {
     paths
         .iter()
         .map(|p| quote_path(p, shell))

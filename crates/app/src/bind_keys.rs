@@ -308,3 +308,91 @@ pub(crate) fn register_global_actions(cx: &mut App, config: std::sync::Arc<darud
         cx.stop_propagation();
     });
 }
+
+#[cfg(test)]
+mod tests {
+    use gpui::Keystroke;
+
+    /// The catalogue, read rather than listed.
+    ///
+    /// A hand-written list covers the constants someone remembered to add to
+    /// it, which is the wrong set — the one that matters is the constant
+    /// added without it. Reading the source covers a new chord the moment it
+    /// exists, and picks up *both* arms of `per_platform`, including the
+    /// spelling this host will never resolve and so could never typo-check.
+    const CATALOGUE: &str = include_str!("surface/keybindings.rs");
+
+    /// Every chord literal in the catalogue, in source order.
+    fn chords() -> Vec<String> {
+        let mut out = Vec::new();
+        let mut pending = String::new();
+        for line in CATALOGUE.lines() {
+            if pending.is_empty() && !line.starts_with("pub const SHORTCUT_") {
+                continue;
+            }
+            pending.push_str(line);
+            // A `per_platform(...)` initializer may wrap onto a second line.
+            if !line.trim_end().ends_with(';') {
+                continue;
+            }
+            let mut rest = pending.as_str();
+            while let Some(open) = rest.find('"') {
+                let after = &rest[open + 1..];
+                let Some(close) = after.find('"') else { break };
+                out.push(after[..close].to_owned());
+                rest = &after[close + 1..];
+            }
+            pending.clear();
+        }
+        out
+    }
+
+    /// A shortcut is a plain string until startup hands it to gpui, so a
+    /// typo is silent: the binding never fires and nothing says why.
+    #[test]
+    fn every_chord_in_the_catalogue_parses() {
+        let chords = chords();
+
+        assert!(
+            chords.len() >= 80,
+            "found only {} chords — has the catalogue moved?",
+            chords.len()
+        );
+        for chord in &chords {
+            assert!(
+                Keystroke::parse(chord).is_ok(),
+                "`{chord}` is not a keystroke gpui can parse"
+            );
+        }
+    }
+
+    /// `secondary` *is* ctrl off macOS, so a chord naming both resolves to
+    /// `ctrl-ctrl-…`. Those carry two spellings through `per_platform`; this
+    /// is what stops one being written by hand instead.
+    #[test]
+    fn no_chord_names_both_secondary_and_ctrl() {
+        for chord in chords() {
+            assert!(
+                !(chord.contains("secondary") && chord.contains("ctrl")),
+                "`{chord}` would resolve to ctrl-ctrl off macOS"
+            );
+        }
+    }
+
+    /// The claim `secondary-` rests on: on this host it is the platform key,
+    /// so every converted binding still fires on the keys it used to.
+    #[test]
+    fn secondary_is_the_platform_key_here() {
+        let secondary = Keystroke::parse("secondary-c").expect("parses");
+        let expected = if cfg!(target_os = "macos") {
+            "cmd-c"
+        } else {
+            "ctrl-c"
+        };
+
+        assert_eq!(
+            secondary.modifiers,
+            Keystroke::parse(expected).expect("parses").modifiers
+        );
+    }
+}

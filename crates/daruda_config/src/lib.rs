@@ -888,7 +888,7 @@ fn parse_config_text(text: &str) -> Result<Config, SettingsPatchApplyError> {
 
 fn config_write_path(path: &std::path::Path) -> Result<PathBuf, String> {
     match std::fs::symlink_metadata(path) {
-        Ok(metadata) if metadata.file_type().is_symlink() => std::fs::canonicalize(path)
+        Ok(metadata) if metadata.file_type().is_symlink() => daruda_core::path::canonicalize(path)
             .map_err(|e| format!("failed to resolve config symlink: {e}")),
         Ok(_) => Ok(path.to_path_buf()),
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(path.to_path_buf()),

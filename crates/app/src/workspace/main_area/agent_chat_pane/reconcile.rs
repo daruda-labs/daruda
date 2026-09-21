@@ -156,8 +156,8 @@ fn resource_image_source(uri: &str, mime: Option<&str>) -> u64 {
 /// and OS temp roots keeps an untrusted resource link from turning the GUI into
 /// an arbitrary local-file reader; Codex `view_image` outputs live in temp.
 fn authorized_resource_image_path(path: &Path, cwd: &Path) -> Option<PathBuf> {
-    let path = path.canonicalize().ok()?;
-    let cwd = cwd.canonicalize().ok()?;
+    let path = daruda_core::path::canonicalize(path).ok()?;
+    let cwd = daruda_core::path::canonicalize(cwd).ok()?;
     if path.starts_with(cwd) {
         return Some(path);
     }
@@ -167,7 +167,7 @@ fn authorized_resource_image_path(path: &Path, cwd: &Path) -> Option<PathBuf> {
     temp_roots.push(PathBuf::from("/tmp"));
     temp_roots
         .into_iter()
-        .filter_map(|root| root.canonicalize().ok())
+        .filter_map(|root| daruda_core::path::canonicalize(root).ok())
         .any(|root| path.starts_with(root))
         .then_some(path)
 }

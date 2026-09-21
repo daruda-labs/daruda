@@ -39,11 +39,10 @@ pub(super) fn spawn(path: PathBuf) -> (mpsc::Receiver<()>, PromptFileWatcherHand
 
     let (event_tx, event_rx) = mpsc::channel::<()>();
 
-    // Canonicalise once (resolves /var/folders → /private/var/folders
-    // on macOS). When the target doesn't exist yet, fall back to the
-    // raw path; the watcher can still detect create events on the
-    // parent dir and the comparison will line up on the first save.
-    let canonical_target = std::fs::canonicalize(&path).unwrap_or_else(|_| path.clone());
+    // Canonicalise once. When the target doesn't exist yet the fallback keeps
+    // the raw path; the watcher still sees create events on the parent dir and
+    // the comparison lines up on the first save.
+    let canonical_target = daruda_core::path::canonicalize_or_self(&path);
     let target_for_thread = canonical_target.clone();
     let parent = path
         .parent()
@@ -58,7 +57,7 @@ pub(super) fn spawn(path: PathBuf) -> (mpsc::Receiver<()>, PromptFileWatcherHand
             return vec![];
         }
         for p in &event.paths {
-            let canon = std::fs::canonicalize(p).unwrap_or_else(|_| p.clone());
+            let canon = daruda_core::path::canonicalize_or_self(p);
             if canon == target_for_thread {
                 return vec![()];
             }

@@ -25,12 +25,8 @@ fn output_with_timeout(
     timeout: Duration,
 ) -> Result<String, PreparationError> {
     context.check()?;
-    #[cfg(unix)]
-    {
-        use std::os::unix::process::CommandExt;
-        command.process_group(0);
-    }
-    let replacement = Command::new(command.get_program());
+    daruda_core::process::lead_own_group(command);
+    let replacement = daruda_core::process::command(command.get_program());
     let mut command = smol::process::Command::from(std::mem::replace(command, replacement));
     let mut child = command
         .stdin(Stdio::null())
@@ -90,14 +86,10 @@ struct ProcessGroup(Option<u32>);
 
 impl ProcessGroup {
     fn kill(&mut self) {
+        // Taking the pid disarms the guard: the child is unreaped while this
+        // runs, which is what makes the id still ours to name.
         if let Some(pid) = self.0.take() {
-            #[cfg(unix)]
-            // SAFETY: this child started its own process group, never the host's.
-            unsafe {
-                libc::killpg(pid as libc::pid_t, libc::SIGKILL);
-            }
-            #[cfg(not(unix))]
-            let _ = pid;
+            daruda_core::process::kill_tree(pid);
         }
     }
 }

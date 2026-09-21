@@ -185,7 +185,7 @@ impl Workspace {
         let shell = self
             .shell_program
             .as_deref()
-            .map(crate::shell_quote::Shell::detect_from_program)
+            .map(daruda_core::shell::quote::Shell::detect_from_program)
             .unwrap_or_default();
         let bottom_dock_size = self.bottom_dock.read(cx).size;
         // When the focused pane is an Agent chat pane that is busy (a turn in
