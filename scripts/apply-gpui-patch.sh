@@ -51,7 +51,8 @@ find_gpui_checkout() {
     # Cargo stores git checkouts under ~/.cargo/git/checkouts/<repo-hash>/<short-rev>/
     local short_rev="${rev:0:7}"
     local checkout
-    checkout=$(find "$HOME/.cargo/git/checkouts" -maxdepth 2 -type d -name "${short_rev}*" 2>/dev/null | head -1)
+    cargo_home="${CARGO_HOME:-$HOME/.cargo}"
+    checkout=$(find "$cargo_home/git/checkouts" -maxdepth 2 -type d -name "${short_rev}*" 2>/dev/null | head -1)
 
     if [ -z "$checkout" ]; then
         echo "ERROR: GPUI checkout not found. Run 'cargo fetch' first." >&2
