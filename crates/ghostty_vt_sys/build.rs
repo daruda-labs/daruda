@@ -77,7 +77,13 @@ to install Zig 0.14.1 into .context/zig/zig"
         prefix.join("lib").display()
     );
     println!("cargo:rustc-link-lib=static=ghostty_vt");
-    println!("cargo:rustc-link-lib=c");
+    // MSVC has no `c` to link — the Rust target pulls the UCRT in itself, and
+    // naming a library that does not exist fails the link outright. Read the
+    // *target*: a build script is compiled for the host, so `cfg!` here would
+    // answer about the wrong machine.
+    if std::env::var("CARGO_CFG_TARGET_OS").as_deref() != Ok("windows") {
+        println!("cargo:rustc-link-lib=c");
+    }
 }
 
 fn find_zig(workspace_root: &std::path::Path) -> PathBuf {
