@@ -63,6 +63,10 @@ const NAME_AGENT_CHAT_NARROWED: &str = "agent-chat-narrowed";
 /// CLI token for the transcript with the custom fold editor open.
 const NAME_AGENT_CHAT_FOLD: &str = "agent-chat-fold";
 const NAME_AGENT_CHAT_INTERRUPTED: &str = "agent-chat-interrupted";
+/// CLI token for the queued-prompt strip holding a queue a Stop parked.
+const NAME_AGENT_CHAT_QUEUE_PARKED: &str = "agent-chat-queue-parked";
+/// CLI token for the same strip once an empty Enter armed the resume gesture.
+const NAME_AGENT_CHAT_QUEUE_ARMED: &str = "agent-chat-queue-armed";
 /// CLI token for a transcript of prose-only replies and their own folds.
 const NAME_AGENT_CHAT_SOLE_REPLY: &str = "agent-chat-sole-reply";
 const NAME_AGENT_CHAT_PLAN: &str = "agent-chat-plan";
@@ -218,6 +222,13 @@ pub(crate) enum ScreenshotScenario {
     /// it — and it is the one row whose whole job is to read as an edge rather
     /// than a message, which only a capture can confirm.
     AgentChatInterrupted,
+    /// The queued-prompt strip holding a queue a Stop parked. The strip is
+    /// reachable no other way — a restored pane has no queue — and its Resume
+    /// button now shares a line with the key hint for the keyboard path.
+    AgentChatQueueParked,
+    /// The same strip after one empty-composer Enter armed the resume gesture,
+    /// where the count gives way to the sentence asking for the second press.
+    AgentChatQueueArmed,
     /// Prose-only replies — the `/usage` shape — with the first reply's own
     /// fold shut and the second open. Such a turn renders one block, which the
     /// response bar cannot fold (the conclusion escape keeps it on screen), so
@@ -327,6 +338,8 @@ impl ScreenshotScenario {
             NAME_AGENT_CHAT_NARROWED => Some(Self::AgentChatNarrowed),
             NAME_AGENT_CHAT_FOLD => Some(Self::AgentChatFold),
             NAME_AGENT_CHAT_INTERRUPTED => Some(Self::AgentChatInterrupted),
+            NAME_AGENT_CHAT_QUEUE_PARKED => Some(Self::AgentChatQueueParked),
+            NAME_AGENT_CHAT_QUEUE_ARMED => Some(Self::AgentChatQueueArmed),
             NAME_AGENT_CHAT_SOLE_REPLY => Some(Self::AgentChatSoleReply),
             NAME_AGENT_CHAT_PLAN => Some(Self::AgentChatPlan),
             NAME_AGENT_CHAT_RUNNING_TOOL => Some(Self::AgentChatRunningTool),
@@ -569,6 +582,16 @@ pub(crate) fn drive(
                 ws.open_agent_chat_interrupted_transcript_for_shot(window, cx)
             });
         }
+        ScreenshotScenario::AgentChatQueueParked => {
+            workspace.update(cx, |ws, cx| {
+                ws.open_agent_chat_parked_queue_for_shot(false, window, cx)
+            });
+        }
+        ScreenshotScenario::AgentChatQueueArmed => {
+            workspace.update(cx, |ws, cx| {
+                ws.open_agent_chat_parked_queue_for_shot(true, window, cx)
+            });
+        }
         ScreenshotScenario::AgentChatSoleReply => {
             workspace.update(cx, |ws, cx| {
                 ws.open_agent_chat_sole_reply_for_shot(window, cx)
@@ -743,6 +766,14 @@ mod tests {
         assert_eq!(
             ScreenshotScenario::from_cli_name("agent-chat-working"),
             Some(ScreenshotScenario::AgentChatWorking)
+        );
+        assert_eq!(
+            ScreenshotScenario::from_cli_name("agent-chat-queue-parked"),
+            Some(ScreenshotScenario::AgentChatQueueParked)
+        );
+        assert_eq!(
+            ScreenshotScenario::from_cli_name("agent-chat-queue-armed"),
+            Some(ScreenshotScenario::AgentChatQueueArmed)
         );
         assert_eq!(
             ScreenshotScenario::from_cli_name("agent-chat-narrowed"),

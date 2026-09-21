@@ -488,6 +488,27 @@ impl AgentChatView {
         self.wire_text(text)
     }
 
+    /// Seed a queue a Stop parked, optionally with the resume gesture already
+    /// armed. Goes through the real enqueue + park move so the capture shows
+    /// what the Stop path produces, not a hand-built queue.
+    #[cfg(feature = "screenshot")]
+    pub(in crate::workspace) fn seed_parked_queue_for_shot(
+        &mut self,
+        armed: bool,
+        cx: &mut Context<Self>,
+    ) {
+        for text in super::super::shot_transcript::parked_prompts() {
+            self.enqueue_prompt(text, PromptOrigin::InApp);
+        }
+        self.queue
+            .paused_prompts
+            .append(&mut self.queue.pending_prompts);
+        if armed {
+            self.handle_empty_submit(cx);
+        }
+        cx.notify();
+    }
+
     /// Resolve what an empty-composer submit should do and apply it: with a
     /// parked queue, the first call arms the resume gesture and the second
     /// performs it. Paired with [`Self::handle_escape`], which discards the

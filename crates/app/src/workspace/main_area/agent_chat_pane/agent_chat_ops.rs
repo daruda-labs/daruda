@@ -979,6 +979,28 @@ impl Workspace {
         );
     }
 
+    /// Open the interrupted transcript with the queue that Stop parked, either
+    /// waiting or with the resume gesture armed. The strip's key hint and its
+    /// confirmation sentence share a line with the Resume button and the count,
+    /// so whether they read as one control is a question only a capture answers.
+    #[cfg(feature = "screenshot")]
+    pub(in crate::workspace) fn open_agent_chat_parked_queue_for_shot(
+        &mut self,
+        armed: bool,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.open_agent_chat_pane_seeded(
+            None,
+            move |v, window, cx| {
+                v.seed_transcript(super::shot_transcript::interrupted_transcript(), window, cx);
+                v.seed_parked_queue_for_shot(armed, cx);
+            },
+            window,
+            cx,
+        );
+    }
+
     /// Open the seeded transcript mid-turn — the agent's answer not yet
     /// written, so its last prose is a preamble rather than a conclusion.
     #[cfg(feature = "screenshot")]

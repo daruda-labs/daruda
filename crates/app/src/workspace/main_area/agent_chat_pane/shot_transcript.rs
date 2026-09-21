@@ -307,6 +307,17 @@ const SUBAGENT_CHILDREN: [(&str, ToolKindView); 7] = [
 /// Its own seed rather than another cycle in [`sample_transcript`]: those
 /// children own no row, so they would change nothing in the transcript's list —
 /// the parent's card is the only place they appear.
+/// The prompts a Stop parked, for the queued-prompt strip's capture. Two rows,
+/// one long enough to truncate — the strip's header shares its line with the
+/// Resume button and its key hint, so both the count and the armed sentence
+/// have to hold beside them.
+pub(super) fn parked_prompts() -> Vec<String> {
+    vec![
+        "run the migration against the staging database".to_string(),
+        "then summarize what changed in the schema and post it to the release notes".to_string(),
+    ]
+}
+
 pub(in crate::workspace) fn subagent_transcript() -> Vec<ChatItem> {
     let mut items = vec![
         ChatItem::UserText("how does a lane get its last active session back?".to_string()),
