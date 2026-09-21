@@ -88,7 +88,7 @@ fn link_system_entry(source: &Path, dest: &Path, name: &str) {
     if std::fs::symlink_metadata(&src).is_err() || std::fs::symlink_metadata(&dst).is_ok() {
         return;
     }
-    if let Err(e) = std::os::unix::fs::symlink(&src, &dst)
+    if let Err(e) = daruda_core::path::symlink(&src, &dst)
         && e.kind() != io::ErrorKind::AlreadyExists
     {
         log_mirror_failure("Failed to link a system Codex resource", name, &e);

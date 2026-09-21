@@ -125,7 +125,7 @@ mod tests {
         std::fs::create_dir_all(source.path().join("skills")).expect("skills");
         std::fs::write(source.path().join("skills").join("a.md"), b"skill").expect("skill file");
         let dir = tempfile::tempdir().expect("dest").keep();
-        std::os::unix::fs::symlink(source.path().join("skills"), dir.join("skills"))
+        daruda_core::path::symlink(source.path().join("skills"), dir.join("skills"))
             .expect("symlink");
 
         CodexRecipe.cleanup(&dir);

@@ -299,7 +299,7 @@ fn a_link_where_the_output_belongs_is_not_asked_again() {
     // Somebody else's work, which a size check would have accepted.
     let elsewhere = fixture.cwd.join("elsewhere.md");
     std::fs::write(&elsewhere, "work this node did not do\n").expect("write");
-    std::os::unix::fs::symlink(&elsewhere, &fixture.output).expect("symlink");
+    daruda_core::path::symlink(&elsewhere, &fixture.output).expect("symlink");
 
     let result = fixture.run(&spec(AGENT));
 

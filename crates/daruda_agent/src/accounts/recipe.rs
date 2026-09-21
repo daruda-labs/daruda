@@ -170,7 +170,7 @@ mod tests {
         let source = tempfile::tempdir().expect("source");
         std::fs::write(source.path().join("real.md"), b"user data").expect("source file");
         let dir = tempfile::tempdir().expect("dest").keep();
-        std::os::unix::fs::symlink(source.path(), dir.join("linked")).expect("symlink");
+        daruda_core::path::symlink(source.path(), dir.join("linked")).expect("symlink");
 
         remove_account_dir(&dir, "test", "test.remove_dir");
 

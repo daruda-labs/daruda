@@ -67,7 +67,7 @@ impl NodeRunner for Linker {
         prompt: &'a str,
     ) -> Pin<Box<dyn Future<Output = RunResult> + 'a>> {
         if let Some(output) = ctx.output {
-            std::os::unix::fs::symlink(&self.target, output).expect("symlink");
+            daruda_core::path::symlink(&self.target, output).expect("symlink");
         }
         self.inner.run_agent(ctx, agent, prompt)
     }
@@ -105,7 +105,7 @@ impl NodeRunner for Planter {
         run: &'a str,
     ) -> Pin<Box<dyn Future<Output = RunResult> + 'a>> {
         std::fs::create_dir_all(&self.outside).expect("mkdir");
-        std::os::unix::fs::symlink(&self.outside, ctx.run_dir.join("reports")).expect("symlink");
+        daruda_core::path::symlink(&self.outside, ctx.run_dir.join("reports")).expect("symlink");
         self.inner.run_command(ctx, run)
     }
 }

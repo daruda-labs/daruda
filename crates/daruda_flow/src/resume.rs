@@ -291,7 +291,7 @@ mod tests {
             ("to_a_directory", a_directory.clone()),
         ] {
             let output = dir.path().join(format!("{name}.md"));
-            std::os::unix::fs::symlink(&target, &output).expect("symlink");
+            daruda_core::path::symlink(&target, &output).expect("symlink");
 
             let warnings = archive_unclaimed_outputs(
                 dir.path(),

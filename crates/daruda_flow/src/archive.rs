@@ -319,7 +319,7 @@ mod tests {
         let elsewhere = run_dir.join("elsewhere.md");
         write(&elsewhere, "someone else's work");
         let output = run_dir.join("review.md");
-        std::os::unix::fs::symlink(&elsewhere, &output).expect("symlink");
+        daruda_core::path::symlink(&elsewhere, &output).expect("symlink");
 
         let error = archive_attempt(
             &log_dir,

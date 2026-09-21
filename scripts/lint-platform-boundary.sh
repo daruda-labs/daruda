@@ -18,6 +18,7 @@
 # | `libc::kill*` / `process_group`| `daruda_core::process::{lead_own_group,kill_tree}` |
 # | `fs::canonicalize`            | `daruda_core::path::canonicalize`      |
 # | `env::var("SHELL")`           | `daruda_core::shell::interactive`      |
+# | `std::os::unix::fs::symlink`  | `daruda_core::path::symlink`           |
 #
 # Tests are exempt: a fixture spawning `git init` is not the app's
 # behaviour on a user's machine, and forcing it through the gate buys
@@ -166,6 +167,9 @@ for file in "${FILES[@]}"; do
         }
         if (/env::var(_os)?\(\s*"SHELL"/) {
             print "$ARGV:$.: \$SHELL -> daruda_core::shell::interactive\n";
+        }
+        if (/\bstd::os::unix::fs::symlink\b/) {
+            print "$ARGV:$.: unix symlink -> daruda_core::path::symlink\n";
         }
     ' "$file" || true)
     if [ -n "$hit" ]; then

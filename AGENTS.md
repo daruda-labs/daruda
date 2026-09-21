@@ -503,6 +503,7 @@ Adding a fourth means adding it to `clippy.toml`'s allow reasoning too.
 | `libc::kill*` / `process_group` | `daruda_core::process::{lead_own_group, kill_tree}` |
 | `fs::canonicalize` | `daruda_core::path::{canonicalize, canonicalize_or_self}` |
 | `env::var("SHELL")` | `daruda_core::shell::interactive` |
+| `std::os::unix::fs::symlink` | `daruda_core::path::symlink` |
 
 **Why this is called out explicitly:** the same call kept being written out per crate. Killing a child's process tree was spelled four times across `daruda_acp`, `daruda_agent` (twice) and `daruda_flow`, in two spellings of one POSIX call (`killpg(pid)` and `kill(-pid)`); `create_owner_only_dir` existed verbatim in two files; the skills, flow and MCP watchers had each defined their own `canonicalize_or_self`; and `account_login_ops.rs` rebuilt a `PATH` with a hardcoded `:` next to a correct `join_paths` helper ten lines away in the crate it was calling. Each was fine alone. Together they meant a second platform would be written four times, which is [Shotgun Surgery](#change-impact-discipline) — the seam being wrong rather than the work being doubled.
 

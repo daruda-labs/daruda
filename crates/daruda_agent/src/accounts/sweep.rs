@@ -164,7 +164,7 @@ mod tests {
         let data_dir = tmp.path();
         let orphan = account_config_dir(data_dir, daruda_store::accounts::AccountId::new());
         std::fs::create_dir_all(&orphan).expect("create orphan dir");
-        std::os::unix::fs::symlink(system_home.path(), orphan.join("linked")).expect("symlink");
+        daruda_core::path::symlink(system_home.path(), orphan.join("linked")).expect("symlink");
 
         sweep_orphan_dirs(data_dir, &[], Duration::ZERO);
 

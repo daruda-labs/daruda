@@ -307,7 +307,7 @@ fn one_directory_spelled_two_ways_is_still_one_directory() {
 fn two_names_for_one_directory_through_a_symlink_are_still_one() {
     let dir = tempfile::tempdir().expect("tempdir");
     std::fs::create_dir_all(dir.path().join("a")).expect("mkdir");
-    std::os::unix::fs::symlink(dir.path().join("a"), dir.path().join("link")).expect("symlink");
+    daruda_core::path::symlink(dir.path().join("a"), dir.path().join("link")).expect("symlink");
 
     let flow = "\
 version: 1

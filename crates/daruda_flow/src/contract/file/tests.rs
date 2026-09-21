@@ -61,7 +61,7 @@ fn a_linked_parent_is_refused_and_the_refusal_names_the_target() {
     let (dir, run_dir, _) = fixture();
     let outside = dir.path().join("outside");
     std::fs::create_dir_all(&outside).expect("mkdir");
-    std::os::unix::fs::symlink(&outside, run_dir.join("reports")).expect("symlink");
+    daruda_core::path::symlink(&outside, run_dir.join("reports")).expect("symlink");
 
     let output = run_dir.join("reports/out.md");
     let Err(NodeFailure::OutputEscapes { expected, resolved }) = preflight(&run_dir, &output)
@@ -90,7 +90,7 @@ fn a_linked_output_is_refused_as_not_a_file_wherever_it_points() {
     std::fs::write(&inside, "another node's work\n").expect("write");
     for target in [&elsewhere, &inside] {
         let output = run_dir.join("design.md");
-        std::os::unix::fs::symlink(target, &output).expect("symlink");
+        daruda_core::path::symlink(target, &output).expect("symlink");
         assert_eq!(
             preflight(&run_dir, &output),
             Err(NodeFailure::OutputNotAFile {
@@ -138,7 +138,7 @@ fn a_plain_file_under_a_linked_directory_escapes_the_run() {
     let (dir, run_dir, _) = fixture();
     let outside = dir.path().join("outside");
     std::fs::create_dir_all(&outside).expect("mkdir");
-    std::os::unix::fs::symlink(&outside, run_dir.join("reports")).expect("symlink");
+    daruda_core::path::symlink(&outside, run_dir.join("reports")).expect("symlink");
     let output = run_dir.join("reports/out.md");
     std::fs::write(&output, "outside the run\n").expect("write");
 
@@ -225,7 +225,7 @@ fn a_missing_file_is_missing_rather_than_misshapen() {
             expected: output.clone()
         })
     );
-    std::os::unix::fs::symlink(run_dir.join("elsewhere.json"), &output).expect("symlink");
+    daruda_core::path::symlink(run_dir.join("elsewhere.json"), &output).expect("symlink");
     std::fs::write(run_dir.join("elsewhere.json"), r#"{"verdict": "pass"}"#).expect("write");
     assert_eq!(
         met_shaped(&run_dir, &output, VERDICT),
@@ -241,7 +241,7 @@ fn a_missing_file_is_missing_rather_than_misshapen() {
 fn a_run_directory_reached_through_a_link_is_not_an_escape() {
     let (_dir, run_dir, _) = fixture();
     let linked_root = run_dir.parent().expect("parent").join("linked");
-    std::os::unix::fs::symlink(&run_dir, &linked_root).expect("symlink");
+    daruda_core::path::symlink(&run_dir, &linked_root).expect("symlink");
     let output = linked_root.join("design.md");
     std::fs::write(&output, "the design\n").expect("write");
     assert_eq!(met(&linked_root, &output), Ok(()));
@@ -268,7 +268,7 @@ fn a_parent_swapped_for_a_link_to_a_sibling_output_is_not_this_nodes_work() {
 
     // During the turn: swapped for a link at the parent.
     std::fs::remove_dir(&planted).expect("rmdir");
-    std::os::unix::fs::symlink("reports", &planted).expect("symlink");
+    daruda_core::path::symlink("reports", &planted).expect("symlink");
 
     let output = planted.join("summary.md");
     assert!(

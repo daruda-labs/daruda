@@ -49,6 +49,32 @@ pub fn create_owner_only_dir(dir: &Path) -> io::Result<()> {
     builder.create(dir)
 }
 
+/// Create `link` pointing at `target`, which need not exist yet.
+///
+/// Windows fixes file-or-directory at creation and cannot change its mind, so
+/// the kind is read from the target — resolved against the link's own
+/// directory, since a relative target is relative to the link, not to us.
+/// Creating one there also needs Developer Mode or elevation.
+pub fn symlink(target: impl AsRef<Path>, link: impl AsRef<Path>) -> io::Result<()> {
+    let (target, link) = (target.as_ref(), link.as_ref());
+    #[cfg(unix)]
+    {
+        std::os::unix::fs::symlink(target, link)
+    }
+    #[cfg(windows)]
+    {
+        let resolved = match link.parent() {
+            Some(parent) if target.is_relative() => parent.join(target),
+            _ => target.to_path_buf(),
+        };
+        if resolved.is_dir() {
+            std::os::windows::fs::symlink_dir(target, link)
+        } else {
+            std::os::windows::fs::symlink_file(target, link)
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -137,5 +163,70 @@ mod tests {
 
         let mode = std::fs::metadata(&dir).unwrap().permissions().mode();
         assert_eq!(mode & 0o777, OWNER_ONLY_DIR);
+    }
+
+    fn is_symlink(path: &Path) -> bool {
+        std::fs::symlink_metadata(path)
+            .map(|m| m.file_type().is_symlink())
+            .unwrap_or(false)
+    }
+
+    #[test]
+    fn a_link_to_a_directory_resolves_through_it() {
+        let temp = tempfile::tempdir().unwrap();
+        let dir = temp.path().join("d");
+        std::fs::create_dir(&dir).unwrap();
+        std::fs::write(dir.join("f"), b"x").unwrap();
+        let link = temp.path().join("link");
+
+        symlink(&dir, &link).unwrap();
+
+        assert!(is_symlink(&link));
+        assert_eq!(std::fs::read(link.join("f")).unwrap(), b"x");
+    }
+
+    #[test]
+    fn a_link_to_a_file_reads_as_the_file() {
+        let temp = tempfile::tempdir().unwrap();
+        let file = temp.path().join("f");
+        std::fs::write(&file, b"x").unwrap();
+        let link = temp.path().join("link");
+
+        symlink(&file, &link).unwrap();
+
+        assert!(is_symlink(&link));
+        assert_eq!(std::fs::read(&link).unwrap(), b"x");
+    }
+
+    /// Callers plant links ahead of the file they point at, so a target that
+    /// does not exist yet must still get its link.
+    #[test]
+    fn a_dangling_link_is_still_created() {
+        let temp = tempfile::tempdir().unwrap();
+        let link = temp.path().join("link");
+
+        symlink(temp.path().join("never-written"), &link).unwrap();
+
+        assert!(is_symlink(&link));
+        assert!(
+            !link.exists(),
+            "`exists` follows the link, which goes nowhere"
+        );
+    }
+
+    /// A relative target is relative to the link's directory — which is also
+    /// where the platform that has to pick a kind must look.
+    #[test]
+    fn a_relative_target_resolves_against_the_link_s_directory() {
+        let temp = tempfile::tempdir().unwrap();
+        let dir = temp.path().join("d");
+        std::fs::create_dir(&dir).unwrap();
+        std::fs::write(dir.join("f"), b"x").unwrap();
+        let link = temp.path().join("rel");
+
+        symlink("d", &link).unwrap();
+
+        assert_eq!(std::fs::read_link(&link).unwrap(), Path::new("d"));
+        assert_eq!(std::fs::read(link.join("f")).unwrap(), b"x");
     }
 }
