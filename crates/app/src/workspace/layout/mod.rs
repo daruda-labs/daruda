@@ -13,7 +13,7 @@ pub(in crate::workspace) mod snap;
 // without reaching into the `snap` submodule directly.
 pub(in crate::workspace) use self::snap::{
     BottomDockSnapshot, DockSnapshot, GroupSnapshot, LeftDockSnapshot, ProjectSnapshot,
-    QueuedPromptView, RightDockSnapshot,
+    QueuedPromptView, QueuedPromptsSnapshot, RightDockSnapshot,
 };
 
 use crate::ui::theme;

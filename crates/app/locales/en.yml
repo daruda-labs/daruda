@@ -661,6 +661,8 @@ bottom_dock:
   queue_editing: "Editing…"
   queue_resume: "Resume"
   queue_paused: "Paused"
+  queue_resume_shortcut: "⏎⏎"
+  queue_resume_armed: "Press Enter again to resume %{n}"
 
 # Projects view
 projects:

@@ -274,10 +274,16 @@ impl Workspace {
                         });
                     }
                 }
-                out
+                (out, view.resume_armed())
             })
-            .filter(|q| !q.is_empty())
-            .map(|q| (focused_id, q));
+            .filter(|(q, _)| !q.is_empty())
+            .map(
+                |(prompts, resume_armed)| crate::workspace::layout::QueuedPromptsSnapshot {
+                    pane_id: focused_id,
+                    prompts,
+                    resume_armed,
+                },
+            );
         BottomDockSnapshot {
             terminal_input_visible: self.terminal_input_visible,
             active_tab_id,

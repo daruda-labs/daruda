@@ -404,6 +404,19 @@ pub(in crate::workspace) enum EscapeOutcome {
     Ignored,
 }
 
+/// What an empty-composer submit resolved to for a focused Agent chat pane.
+/// The `Workspace` shim needs the distinction only for tests today; the strip
+/// reads `resume_armed()` instead. Shaped after [`EscapeOutcome`], the gesture
+/// on the other side of the same parked queue.
+pub(in crate::workspace) enum EmptySubmitOutcome {
+    /// First Enter — the strip now asks for a second one before resuming.
+    Armed,
+    /// Second Enter — the parked queue went back to the front of the live one.
+    Resumed,
+    /// Nothing parked, so the gesture has nothing to act on.
+    Ignored,
+}
+
 /// Prompt-send sequencing: the buffered/parked queues plus the in-flight-turn
 /// tracking that gates draining them, always read/mutated together by the
 /// queue ops. One field on `AgentChatView` instead of four, and keeps `turn`
@@ -426,6 +439,11 @@ pub(in crate::workspace) struct PromptQueue {
     /// by `begin_edit`, cleared on send/cancel/drain. While `Some`, a send
     /// replaces its text instead of enqueuing a new prompt. Runtime-only.
     pub(in crate::workspace) editing_prompt: Option<PromptId>,
+    /// Whether a second empty-composer Enter resumes `paused_prompts`. Set by
+    /// the first such Enter, cleared by a composer change and by every path
+    /// that mutates the parked queue. Read only through `resume_armed()`, which
+    /// also requires a non-empty parked queue. Runtime-only; never serialized.
+    resume_armed: bool,
     /// Whether a prompt turn is in flight, carrying its start instant.
     /// Module-private: this is prompt-queue sequencing, not the pane's
     /// activity signal — external code must read `is_busy` / `activity_state`

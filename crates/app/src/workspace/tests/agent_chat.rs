@@ -443,26 +443,34 @@ async fn bottom_dock_snapshot_reflects_active_agent_queue(cx: &mut TestAppContex
             ws.send_agent_prompt_text(second_id, "active second".to_string(), cx);
 
             let snap = ws.prepare_bottom_dock_snapshot(cx);
-            let (pane_id, queued) = snap
+            let queue = snap
                 .queued_prompts
                 .as_ref()
                 .expect("active agent queue is projected into the bottom snapshot");
-            assert_eq!(*pane_id, second_id);
+            assert_eq!(queue.pane_id, second_id);
             assert_eq!(
-                queued.iter().map(|q| q.text.clone()).collect::<Vec<_>>(),
+                queue
+                    .prompts
+                    .iter()
+                    .map(|q| q.text.clone())
+                    .collect::<Vec<_>>(),
                 vec!["active first".to_string(), "active second".to_string()],
                 "only the focused agent pane's queue is projected"
             );
 
             ws.active_runtime_mut().focused_pane_id = first_id;
             let snap = ws.prepare_bottom_dock_snapshot(cx);
-            let (pane_id, queued) = snap
+            let queue = snap
                 .queued_prompts
                 .as_ref()
                 .expect("newly active agent queue is projected");
-            assert_eq!(*pane_id, first_id);
+            assert_eq!(queue.pane_id, first_id);
             assert_eq!(
-                queued.iter().map(|q| q.text.clone()).collect::<Vec<_>>(),
+                queue
+                    .prompts
+                    .iter()
+                    .map(|q| q.text.clone())
+                    .collect::<Vec<_>>(),
                 vec!["inactive".to_string()]
             );
         });
@@ -2337,4 +2345,114 @@ async fn a_time_driven_settle_drops_the_working_indicator(cx: &mut TestAppContex
         });
     })
     .expect("window is live");
+}
+
+/// The empty-composer Enter gesture end to end through the Workspace funnel:
+/// two presses on a parked queue resume it, and neither press reaches the
+/// per-lane input history (an empty entry there would poison ↑ recall).
+#[gpui::test]
+async fn empty_composer_enter_twice_resumes_the_parked_queue(cx: &mut TestAppContext) {
+    let (window_handle, workspace) = build_workspace(cx);
+    cx.run_until_parked();
+
+    let tmp = std::env::temp_dir();
+    cx.update_window(window_handle.into(), |_, window, cx| {
+        workspace.update(cx, |ws, cx| {
+            let pane = ws.create_agent_chat_pane(
+                Some(PaneCwd::Local(tmp.clone())),
+                None,
+                daruda_config::AgentDefinition::claude_default().id,
+                None,
+                window,
+                cx,
+            );
+            let pane_id = pane.id;
+            ws.active_runtime_mut().panes.push(pane);
+            ws.active_runtime_mut().focused_pane_id = pane_id;
+
+            // Park a queue the way a Stop does: prompts buffered behind a turn,
+            // then cancelled.
+            let view = agent_view(ws, pane_id);
+            view.update(cx, |v, _| v.set_turn_in_flight());
+            ws.send_agent_prompt_text(pane_id, "one".to_string(), cx);
+            ws.send_agent_prompt_text(pane_id, "two".to_string(), cx);
+            view.update(cx, |v, cx| v.cancel_turn(cx));
+            assert!(
+                queue_texts(view.read(cx)).is_empty(),
+                "the Stop moved both prompts out of the live queue"
+            );
+
+            ws.send_terminal_input(window, cx);
+            assert!(
+                view.read(cx).resume_armed(),
+                "the first empty Enter arms the resume gesture"
+            );
+            assert!(
+                queue_texts(view.read(cx)).is_empty(),
+                "arming alone must not put anything back on the live queue"
+            );
+
+            ws.send_terminal_input(window, cx);
+            assert_eq!(
+                queue_texts(view.read(cx)),
+                vec!["one".to_string(), "two".to_string()],
+                "the second empty Enter resumed the parked queue in order"
+            );
+
+            let lane_ref = ws.active_ref();
+            assert!(
+                !ws.lane_scoped[&lane_ref].input_history.has_entries(),
+                "an empty submit must not push an entry onto the input history"
+            );
+        });
+    })
+    .unwrap();
+}
+
+/// A queued-prompt edit outranks the resume gesture: clearing the composer and
+/// pressing Enter reverts the "Editing…" row rather than arming, so the strip
+/// never shows both states at once.
+#[gpui::test]
+async fn empty_composer_enter_cancels_a_queued_edit_before_arming(cx: &mut TestAppContext) {
+    let (window_handle, workspace) = build_workspace(cx);
+    cx.run_until_parked();
+
+    let tmp = std::env::temp_dir();
+    cx.update_window(window_handle.into(), |_, window, cx| {
+        workspace.update(cx, |ws, cx| {
+            let pane = ws.create_agent_chat_pane(
+                Some(PaneCwd::Local(tmp.clone())),
+                None,
+                daruda_config::AgentDefinition::claude_default().id,
+                None,
+                window,
+                cx,
+            );
+            let pane_id = pane.id;
+            ws.active_runtime_mut().panes.push(pane);
+            ws.active_runtime_mut().focused_pane_id = pane_id;
+
+            let view = agent_view(ws, pane_id);
+            view.update(cx, |v, _| v.set_turn_in_flight());
+            ws.send_agent_prompt_text(pane_id, "parked".to_string(), cx);
+            view.update(cx, |v, cx| v.cancel_turn(cx));
+            let parked_id = view.read(cx).queue.paused_prompts[0].id;
+            ws.begin_edit_queued_prompt(pane_id, parked_id, window, cx);
+            // `begin_edit_queued_prompt` filled the composer; clearing it is what
+            // makes the next Enter an empty submit.
+            ws.terminal_input
+                .update(cx, |s, cx_state| s.set_value("", window, cx_state));
+
+            ws.send_terminal_input(window, cx);
+            assert!(
+                view.read(cx).queue.editing_prompt.is_none(),
+                "the empty Enter cancelled the edit"
+            );
+            assert!(
+                !view.read(cx).resume_armed(),
+                "cancelling an edit must not also arm the resume gesture"
+            );
+        });
+    })
+    .unwrap();
 }

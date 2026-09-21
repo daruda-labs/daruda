@@ -27,8 +27,8 @@ use crate::workspace::layout::{BottomDockSnapshot, Dock};
 /// Build the queued-prompt strip, or `None` when the focused pane has no queued
 /// prompts (the strip is then not rendered).
 pub(super) fn render(snap: &BottomDockSnapshot, cx: &mut Context<Dock>) -> Option<AnyElement> {
-    let (pane_id, prompts) = snap.queued_prompts.as_ref()?;
-    let pane_id = *pane_id;
+    let queue = snap.queued_prompts.as_ref()?;
+    let (pane_id, prompts) = (queue.pane_id, &queue.prompts);
     let t = theme::current(cx);
     let border = t.border;
     let bg = theme::agent_chat_tint(cx);
@@ -53,18 +53,37 @@ pub(super) fn render(snap: &BottomDockSnapshot, cx: &mut Context<Dock>) -> Optio
             }))
     };
     // A parked queue (kept by a Stop) shows a Resume button that drains it back
-    // into the live queue. Absent when nothing is parked (normal live queue).
+    // into the live queue, plus the key hint for its keyboard path. Absent when
+    // nothing is parked (normal live queue). Once an empty-composer Enter has
+    // armed that path, the button reads as the primary action.
     let has_paused = prompts.iter().any(|qp| qp.paused);
+    let armed = queue.resume_armed;
     let resume = has_paused.then(|| {
         let workspace = snap.workspace.clone();
-        crate::ui::button("agent-queue-resume", s::bottom_input_queue_resume())
-            .ghost()
+        let button = crate::ui::button("agent-queue-resume", s::bottom_input_queue_resume())
             .xsmall()
             .on_click(cx.listener(move |_dock, _: &ClickEvent, _window, cx| {
                 if let Some(ws) = workspace.upgrade() {
                     ws.update(cx, |ws, cx| ws.resume_queued_prompts(pane_id, cx));
                 }
-            }))
+            }));
+        let button = if armed {
+            button.primary()
+        } else {
+            button.ghost()
+        };
+        div()
+            .flex()
+            .flex_row()
+            .items_center()
+            .gap(px(theme::AGENT_QUEUE_STRIP_GAP))
+            .child(button)
+            .child(
+                div()
+                    .text_size(px(theme::FONT_SIZE_SM))
+                    .text_color(header_color)
+                    .child(SharedString::from(s::bottom_input_queue_resume_shortcut())),
+            )
     });
     let header = div()
         .flex()
@@ -75,9 +94,11 @@ pub(super) fn render(snap: &BottomDockSnapshot, cx: &mut Context<Dock>) -> Optio
             div()
                 .text_size(px(theme::FONT_SIZE_SM))
                 .text_color(header_color)
-                .child(SharedString::from(s::bottom_input_queued_count(
-                    prompts.len(),
-                ))),
+                .child(SharedString::from(if armed {
+                    s::bottom_input_queue_resume_armed(prompts.len())
+                } else {
+                    s::bottom_input_queued_count(prompts.len())
+                })),
         )
         .child(
             div()

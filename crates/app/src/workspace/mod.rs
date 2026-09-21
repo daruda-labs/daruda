@@ -1110,6 +1110,9 @@ impl Workspace {
                 }
                 crate::ui::InputEvent::Change => {
                     this.adapt_dock_to_input_lines(window, cx);
+                    // The composer no longer holds what the resume gesture was
+                    // armed against, so the next Enter sends rather than confirms.
+                    this.disarm_queue_resume(cx);
                 }
                 _ => {}
             },

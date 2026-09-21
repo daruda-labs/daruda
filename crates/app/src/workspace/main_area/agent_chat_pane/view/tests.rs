@@ -650,6 +650,142 @@ fn resume_queue_moves_parked_to_front_of_live(cx: &mut gpui::TestAppContext) {
         .unwrap();
 }
 
+/// The empty-composer Enter gesture: the first press arms, the second resumes.
+/// The confirmation step is what keeps a stray Enter from firing the whole
+/// parked queue, mirroring Esc-twice on the discard side.
+#[gpui::test]
+fn empty_submit_arms_then_resumes_parked_queue(cx: &mut gpui::TestAppContext) {
+    let window = make_test_view(cx);
+    window
+        .update(cx, |view, _window, cx| {
+            view.queue.paused_prompts.push(queued(1, "p1"));
+            view.queue.paused_prompts.push(queued(2, "p2"));
+            assert!(!view.resume_armed(), "a parked queue starts unarmed");
+
+            assert!(
+                matches!(
+                    view.handle_empty_submit(cx),
+                    super::EmptySubmitOutcome::Armed
+                ),
+                "the first empty Enter arms rather than resuming"
+            );
+            assert!(view.resume_armed(), "the strip now asks for a second Enter");
+            assert!(
+                view.queue.pending_prompts.is_empty(),
+                "arming moves nothing — the queue is still parked"
+            );
+
+            assert!(
+                matches!(
+                    view.handle_empty_submit(cx),
+                    super::EmptySubmitOutcome::Resumed
+                ),
+                "the second empty Enter resumes"
+            );
+            assert_eq!(
+                texts(&view.queue.pending_prompts),
+                vec!["p1".to_string(), "p2".to_string()],
+                "the parked queue went back to the live queue in order"
+            );
+            assert!(!view.resume_armed(), "resuming leaves nothing armed");
+        })
+        .unwrap();
+}
+
+/// With nothing parked the gesture is inert: an empty Enter must not arm a
+/// state the strip would then have no parked rows to explain.
+#[gpui::test]
+fn empty_submit_ignored_without_parked_prompts(cx: &mut gpui::TestAppContext) {
+    let window = make_test_view(cx);
+    window
+        .update(cx, |view, _window, cx| {
+            view.queue.pending_prompts.push(queued(1, "live"));
+
+            assert!(
+                matches!(
+                    view.handle_empty_submit(cx),
+                    super::EmptySubmitOutcome::Ignored
+                ),
+                "a live-only queue is not the parked queue the gesture resumes"
+            );
+            assert!(!view.resume_armed());
+        })
+        .unwrap();
+}
+
+/// The armed flag is only ever read through `resume_armed`, which also requires
+/// a parked queue — so a queue emptied under an armed gesture can never leave a
+/// second Enter pointing at nothing.
+#[gpui::test]
+fn resume_armed_requires_a_parked_queue(cx: &mut gpui::TestAppContext) {
+    let window = make_test_view(cx);
+    window
+        .update(cx, |view, _window, cx| {
+            view.queue.paused_prompts.push(queued(1, "a"));
+            view.handle_empty_submit(cx);
+            assert!(view.resume_armed());
+
+            view.remove_queued(super::PromptId(1), cx);
+            assert!(
+                !view.resume_armed(),
+                "removing the last parked row disarms without a separate clear"
+            );
+        })
+        .unwrap();
+}
+
+/// A composer change means the next Enter is a new prompt, not a confirmation.
+#[gpui::test]
+fn composer_change_disarms_the_resume_gesture(cx: &mut gpui::TestAppContext) {
+    let window = make_test_view(cx);
+    window
+        .update(cx, |view, _window, cx| {
+            view.queue.paused_prompts.push(queued(1, "a"));
+            view.handle_empty_submit(cx);
+            assert!(view.resume_armed());
+
+            view.disarm_resume(cx);
+            assert!(!view.resume_armed());
+            assert!(
+                matches!(
+                    view.handle_empty_submit(cx),
+                    super::EmptySubmitOutcome::Armed
+                ),
+                "after disarming, the gesture starts over at arm"
+            );
+        })
+        .unwrap();
+}
+
+/// Every path that mutates the parked queue leaves it unarmed, so a later Stop
+/// cannot park into a pre-armed queue that one Enter would fire. `cancel_turn`
+/// matters most: Telegram and macro prompts start turns without a composer
+/// change to disarm.
+#[gpui::test]
+fn parked_queue_mutations_leave_the_gesture_unarmed(cx: &mut gpui::TestAppContext) {
+    let window = make_test_view(cx);
+    window
+        .update(cx, |view, _window, cx| {
+            view.queue.paused_prompts.push(queued(1, "a"));
+            view.handle_empty_submit(cx);
+            view.clear_queue(cx);
+            view.queue.paused_prompts.push(queued(2, "b"));
+            assert!(!view.resume_armed(), "clear-all disarmed");
+
+            view.handle_empty_submit(cx);
+            view.resume_queue(cx);
+            view.queue.paused_prompts.push(queued(3, "c"));
+            assert!(!view.resume_armed(), "a resume disarmed");
+
+            view.handle_empty_submit(cx);
+            view.set_turn_in_flight();
+            view.queue.pending_prompts.push(queued(4, "d"));
+            view.cancel_turn(cx);
+            assert!(!view.resume_armed(), "a Stop parks into an unarmed queue");
+        })
+        .unwrap();
+}
+
 /// The per-item remove (×) and clear-all reach parked prompts too — the
 /// strip renders those affordances on parked rows, so they must act on
 /// `paused_prompts`, not just the live queue.

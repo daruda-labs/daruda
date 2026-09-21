@@ -507,6 +507,19 @@ impl Workspace {
         let raw = self.terminal_input.read(cx).value().to_string();
         let trimmed = raw.trim_end_matches(['\n', '\r']);
         if trimmed.is_empty() {
+            // An empty submit carries no text but is still a gesture the focused
+            // agent pane reads (cancel a queued-prompt edit, arm/resume a parked
+            // queue), so it goes through the same funnel. No history entry, and
+            // no `set_value`: that emits `Change` even for identical text, which
+            // would disarm the gesture this very Enter just armed.
+            self.deliver_text_to_focused_pane(
+                PaneTextInput {
+                    body: String::new(),
+                    intent: PaneTextIntent::Command { submit: true },
+                },
+                window,
+                cx,
+            );
             return;
         }
         // Push to per-lane history before routing so both agent prompts and

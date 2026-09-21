@@ -107,7 +107,12 @@ impl Workspace {
                         .is_some_and(|v| v.read(cx).queue.editing_prompt.is_some());
                     if editing {
                         self.cancel_edit_queued_prompt(pane_id, window, cx);
+                        return true;
                     }
+                    // Nothing being edited: the empty submit is the resume
+                    // gesture instead — first Enter arms a parked queue, second
+                    // resumes it. Inert when nothing is parked.
+                    self.handle_agent_empty_submit(pane_id, cx);
                     return true;
                 }
                 self.send_agent_prompt_text(pane_id, trimmed.to_string(), cx);

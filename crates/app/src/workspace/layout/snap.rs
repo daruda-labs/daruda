@@ -208,6 +208,19 @@ pub(in crate::workspace) struct QueuedPromptView {
     pub paused: bool,
 }
 
+/// The focused Agent chat pane's queued-prompt strip, as the bottom dock sees
+/// it: which pane to route the row buttons back to, the rows themselves, and
+/// whether the resume gesture is armed. One struct rather than a tuple plus a
+/// sibling flag, so "armed" cannot exist without the rows it describes.
+#[derive(Clone, PartialEq)]
+pub(in crate::workspace) struct QueuedPromptsSnapshot {
+    pub pane_id: crate::workspace::main_area::pane_tree::PaneId,
+    pub prompts: Vec<QueuedPromptView>,
+    /// Mirrors `AgentChatView::resume_armed()` — an empty-composer Enter has
+    /// armed the parked queue and the header asks for a second one.
+    pub resume_armed: bool,
+}
+
 /// Point-in-time copy of `Workspace` fields consumed by the bottom
 /// dock's `impl Render`.
 ///
@@ -262,10 +275,7 @@ pub(in crate::workspace) struct BottomDockSnapshot {
     /// each removal / clear-all back to that pane. `None` for a terminal-pane
     /// focus, an agent pane with an empty queue, or the Welcome state — the
     /// strip is then not rendered.
-    pub queued_prompts: Option<(
-        crate::workspace::main_area::pane_tree::PaneId,
-        Vec<QueuedPromptView>,
-    )>,
+    pub queued_prompts: Option<QueuedPromptsSnapshot>,
     /// Shell flavour of the focused pane's PTY. Drives drag-and-drop path
     /// quoting in the terminal input — Posix backslash/single-quote rules,
     /// fish, PowerShell, and cmd.exe all differ.

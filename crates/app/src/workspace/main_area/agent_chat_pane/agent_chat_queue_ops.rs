@@ -10,7 +10,9 @@ use gpui::{Context, Window};
 use daruda_store::observability::error_report::{ErrorReport, ErrorSeverity};
 
 use super::slash_dispatch::{LocalSlashCommand, SlashDispatch, classify_slash};
-use super::view::{EscapeOutcome, PhoneAckEffect, PromptDispatch, PromptId, PromptOrigin};
+use super::view::{
+    EmptySubmitOutcome, EscapeOutcome, PhoneAckEffect, PromptDispatch, PromptId, PromptOrigin,
+};
 use crate::surface::strings as s;
 use crate::workspace::Workspace;
 use crate::workspace::main_area::pane_tree::PaneId;
@@ -214,6 +216,32 @@ impl Workspace {
     ) {
         if let Some(view) = self.agent_chat_view(pane_id).cloned() {
             view.update(cx, |v, cx| v.resume_queue(cx));
+        }
+    }
+
+    /// Route an empty-composer submit to `pane_id`'s parked queue: the first
+    /// Enter arms the resume gesture, the second performs it. Shim for the
+    /// keyboard counterpart of the strip's Resume button (one-way data flow —
+    /// the pane's own state machine decides). [`EmptySubmitOutcome::Ignored`]
+    /// when `pane_id` is gone, is not an Agent chat pane, or nothing is parked.
+    pub(in crate::workspace) fn handle_agent_empty_submit(
+        &mut self,
+        pane_id: PaneId,
+        cx: &mut Context<Self>,
+    ) -> EmptySubmitOutcome {
+        let Some(view) = self.agent_chat_view(pane_id).cloned() else {
+            return EmptySubmitOutcome::Ignored;
+        };
+        view.update(cx, |v, cx| v.handle_empty_submit(cx))
+    }
+
+    /// Drop the focused Agent chat pane's armed resume gesture — the composer
+    /// changed, so the next Enter sends what was typed instead of confirming.
+    /// No-op when the focused pane is not an Agent chat pane.
+    pub(in crate::workspace) fn disarm_queue_resume(&mut self, cx: &mut Context<Self>) {
+        let focused = self.active_runtime().focused_pane_id;
+        if let Some(view) = self.agent_chat_view(focused).cloned() {
+            view.update(cx, |v, cx| v.disarm_resume(cx));
         }
     }
 

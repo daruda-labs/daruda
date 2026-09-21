@@ -11,8 +11,8 @@ use super::super::agent_chat_helpers::fold_context;
 use super::super::fold::FoldKey;
 use super::super::telegram_ops::PhoneTurn;
 use super::{
-    AgentChatView, AgentSessionStatus, EscapeOutcome, FirstResponseOutcome, PhoneAckEffect,
-    PromptDispatch, PromptId, PromptOrigin, QueuedPrompt,
+    AgentChatView, AgentSessionStatus, EmptySubmitOutcome, EscapeOutcome, FirstResponseOutcome,
+    PhoneAckEffect, PromptDispatch, PromptId, PromptOrigin, QueuedPrompt,
 };
 
 impl AgentChatView {
@@ -314,6 +314,7 @@ impl AgentChatView {
         let mut resumed = std::mem::take(&mut self.queue.paused_prompts);
         resumed.append(&mut self.queue.pending_prompts);
         self.queue.pending_prompts = resumed;
+        self.queue.resume_armed = false;
         // Dispatch the first one now if the session can prompt; a no-op offline
         // (the queue just sits in `pending_prompts` and drains on connect).
         self.pump_pending_prompt(cx);
@@ -395,6 +396,7 @@ impl AgentChatView {
         self.queue.pending_prompts.clear();
         self.queue.paused_prompts.clear();
         self.queue.editing_prompt = None;
+        self.queue.resume_armed = false;
         // Queue-only change: the transcript rows are unaffected, so notify
         // re-stages the strip without a transcript reproject.
         cx.notify();
@@ -484,6 +486,47 @@ impl AgentChatView {
     #[cfg(test)]
     pub(super) fn wire_text_for_test(&mut self, text: &str) -> String {
         self.wire_text(text)
+    }
+
+    /// Resolve what an empty-composer submit should do and apply it: with a
+    /// parked queue, the first call arms the resume gesture and the second
+    /// performs it. Paired with [`Self::handle_escape`], which discards the
+    /// same queue.
+    pub(in crate::workspace) fn handle_empty_submit(
+        &mut self,
+        cx: &mut Context<Self>,
+    ) -> EmptySubmitOutcome {
+        if self.queue.paused_prompts.is_empty() {
+            return EmptySubmitOutcome::Ignored;
+        }
+        if self.queue.resume_armed {
+            // `resume_queue` empties the parked queue and drops the flag.
+            self.resume_queue(cx);
+            return EmptySubmitOutcome::Resumed;
+        }
+        self.queue.resume_armed = true;
+        cx.notify();
+        EmptySubmitOutcome::Armed
+    }
+
+    /// Whether a second empty Enter would resume the parked queue — what the
+    /// strip renders its confirmation prompt from.
+    ///
+    /// INVARIANT: the flag alone is not the answer. Requiring a non-empty
+    /// parked queue here means a queue emptied under an armed gesture (× on
+    /// the last row, clear-all, a drain) can never be observed as armed, so
+    /// the invariant lives on this one read instead of at every mutation site.
+    pub(in crate::workspace) fn resume_armed(&self) -> bool {
+        self.queue.resume_armed && !self.queue.paused_prompts.is_empty()
+    }
+
+    /// Drop the armed resume gesture — the composer changed, so the next Enter
+    /// is a new prompt rather than a confirmation. No-op when not armed.
+    pub(in crate::workspace) fn disarm_resume(&mut self, cx: &mut Context<Self>) {
+        if self.queue.resume_armed {
+            self.queue.resume_armed = false;
+            cx.notify();
+        }
     }
 
     /// Resolve what Escape should do and apply it, in priority order:

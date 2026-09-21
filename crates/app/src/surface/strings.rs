@@ -3209,6 +3209,16 @@ pub fn bottom_input_queue_resume() -> String {
 pub fn bottom_input_queue_paused() -> String {
     rust_i18n::t!("bottom_dock.queue_paused").into_owned()
 }
+/// Queued-prompt strip header — key hint beside Resume: an empty composer takes
+/// Enter twice to resume the parked queue.
+pub fn bottom_input_queue_resume_shortcut() -> String {
+    rust_i18n::t!("bottom_dock.queue_resume_shortcut").into_owned()
+}
+/// Queued-prompt strip header — replaces the count once the first empty Enter
+/// has armed the resume gesture, asking for the confirming second press.
+pub fn bottom_input_queue_resume_armed(n: usize) -> String {
+    rust_i18n::t!("bottom_dock.queue_resume_armed", n = n).into_owned()
+}
 
 // ----------------------------------------------------------------
 // Projects view — section header + empty state

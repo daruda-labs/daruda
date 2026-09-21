@@ -108,6 +108,10 @@ impl AgentChatView {
             .paused_prompts
             .append(&mut self.queue.pending_prompts);
         self.queue.editing_prompt = None;
+        // A park always starts unarmed: a Telegram or macro prompt can start the
+        // turn this Stop cancels without any composer change to disarm a gesture
+        // an earlier park left set, and one Enter would then fire the new queue.
+        self.queue.resume_armed = false;
         // `settle_turn` mutated items (streaming → done, running tools →
         // cancelled, pending card → resolved), changing fold visibility and row
         // heights, so reproject and remeasure before notifying.
