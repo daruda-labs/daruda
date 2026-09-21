@@ -174,8 +174,14 @@ jobs:
       # No lint steps: those read source, not platform, and the macOS job
       # already ran them. What is unproven here is whether this tree
       # compiles and passes at all on Linux.
+      # `--keep-going`: the first run stopped at the first crate that would
+      # not compile, leaving every independent one after it unmeasured. No
+      # Linux machine is available to find the rest locally, so a run that
+      # reports one error costs the same wall clock as one reporting all of
+      # them. (`--no-fail-fast` is `cargo test`'s spelling; `cargo clippy`
+      # takes this one.)
       - name: Clippy
-        run: cargo clippy -p ghostty_vt -p ghostty_vt_sys -p daruda_terminal -p daruda -p daruda_config -p daruda_store -p daruda_agent -p daruda_update -p daruda_acp -p daruda_core -p daruda_flow -p ferrum_flow --all-targets -- -D warnings
+        run: cargo clippy --keep-going -p ghostty_vt -p ghostty_vt_sys -p daruda_terminal -p daruda -p daruda_config -p daruda_store -p daruda_agent -p daruda_update -p daruda_acp -p daruda_core -p daruda_flow -p ferrum_flow --all-targets -- -D warnings
 
       # `--no-fail-fast` so one early failure does not hide the rest —
       # the point of the first run is the whole list.

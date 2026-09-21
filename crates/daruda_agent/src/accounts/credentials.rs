@@ -11,8 +11,6 @@
 use std::path::Path;
 
 use crate::http::FetchError;
-use daruda_store::observability::error_report::{ErrorReport, ErrorSeverity};
-use daruda_store::observability::log_writer::LogWriter;
 use serde_json::Value;
 
 /// Keychain service holding the ambient Claude login — the entry the CLI
@@ -212,6 +210,8 @@ pub fn system_credentials_digest() -> Option<String> {
 /// removal this runs alongside.
 #[cfg(target_os = "macos")]
 pub fn delete_scoped_credentials(config_dir: &Path) {
+    use daruda_store::observability::error_report::{ErrorReport, ErrorSeverity};
+    use daruda_store::observability::log_writer::LogWriter;
     use std::process::{Command, Stdio};
 
     let service = scoped_keychain_service(config_dir);
