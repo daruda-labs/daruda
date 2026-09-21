@@ -189,7 +189,7 @@ daruda/
 - **Rust**: 2024 edition (1.95.0+). The floor is declared once in `[workspace.package]` and every first-party crate inherits it with `rust-version.workspace = true`, so clippy's `incompatible_msrv` catches a newer std API at the call site. CI pins the toolchain to exactly 1.95, which is what actually enforces the floor — develop on a newer toolchain freely. The three vendored `gpui_component*` crates deliberately stay undeclared to keep the re-vendor diff a file copy; `ferrum_flow` does declare it, because its manifest is daruda-authored either way and the declaration is what arms `incompatible_msrv` there.
 - **Zig**: 0.14.1 (`./scripts/bootstrap-zig.sh` on macOS; on Linux install manually and set `ZIG=<path>` or put `zig` on `PATH`)
 - **macOS**: Apple Silicon or Intel + Xcode Command Line Tools — the primary, fully-verified target.
-- **Linux**: built and tested by the `linux` CI job. That job is `continue-on-error` until the first run's failures are worked off — until then the claim is "measured", not "green". GUI runtime (window/menu/tray) is still unverified on a real desktop, since CI has no one to look at the window. Needs system `libfontconfig`/`libxcb` (the job installs them).
+- **Linux**: built and tested by the `linux` CI job, which gates like the macOS one — the claim is green, not merely measured. GUI runtime (window/menu/tray) is still unverified on a real desktop, since CI has no one to look at the window. Needs system `libfontconfig`/`libxcb` and real fonts (the job installs them).
 - **Windows**: not yet ported.
 
 ### Build
@@ -245,7 +245,7 @@ same suite minus the one module that dominates it: measured 2026-09-18,
 each tab they open spawns an actual shell. It is an iteration loop, not a
 gate — the [pre-commit checks](#pre-commit-checks) still run everything.
 
-`ci.yml` has a second job, `linux`, which builds and tests the same package list on `ubuntu-latest`. It runs no lint scripts — those read source rather than platform, and the macOS job already ran them. It is `continue-on-error` while its first failures are worked off, so a red Linux run does not block a macOS-only change; drop that once the list is empty.
+`ci.yml` has a second job, `linux`, which builds and tests the same package list on `ubuntu-latest`. It runs no lint scripts — those read source rather than platform, and the macOS job already ran them. What it does carry is the `#[cfg]` arms the macOS job can never compile: its first three runs turned up two unused imports and a font-resolution defect that left every mermaid label blank on Linux, none of which macOS could have seen.
 
 Note: `.github/workflows/ci.yml` gates fmt, the clippy list above, the 8 lint scripts through `lint-platform-boundary.sh`, `lint-env-literals.sh` with its self-test, `lint-no-silent-update.sh`, `lint-agent-activity.sh`, the `cargo doc` link check, and the package-scoped `cargo test` list above.
 

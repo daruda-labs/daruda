@@ -112,13 +112,6 @@ jobs:
     # runner. Raise rather than let a real failure look like a timeout.
     timeout-minutes: 45
 
-    # This job measures before it gates. AGENTS.md has claimed "Linux:
-    # builds and tests pass" with nothing checking it, so the Linux arms
-    # in attention.rs and sync/ports.rs have never been compiled — what
-    # breaks here is genuinely unknown. Drop this once the list is empty;
-    # until then a red Linux run must not block a macOS-only change.
-    continue-on-error: true
-
     steps:
       - name: Checkout
         uses: actions/checkout@v6
