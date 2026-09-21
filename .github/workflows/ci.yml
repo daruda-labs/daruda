@@ -129,12 +129,11 @@ jobs:
       # fontconfig. Trimmed from zed's `script/linux` list — daruda has no
       # livekit (no libasound/libva) and shells out to git rather than
       # linking libgit2.
-      # The `fonts-*` packages are not for the GUI — they are for the tests.
-      # `libfontconfig-dev` is the library, not any actual font, and a runner
-      # with none makes merman emit label groups with no glyphs in them: the
-      # mermaid geometry, stroke, contrast and measurer suites then fail on
-      # text that was never rasterized. `noto-cjk` specifically, because the
-      # measurer probes a Hangul advance from the real font stack.
+      # `fonts-noto-cjk` is not for the GUI — the mermaid measurer probes a
+      # Hangul advance from the real font stack, and no font in the base image
+      # covers Hangul. Latin faces are already there (`fonts-dejavu-core`
+      # reports "already the newest version"), named anyway so the suite does
+      # not silently depend on what the runner image happens to carry.
       - name: Install system dependencies
         run: |
           sudo apt-get update

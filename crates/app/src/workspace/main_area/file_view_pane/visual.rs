@@ -213,9 +213,134 @@ fn shared_fontdb() -> Arc<resvg::usvg::fontdb::Database> {
         .get_or_init(|| {
             let mut db = resvg::usvg::fontdb::Database::new();
             db.load_system_fonts();
+            adopt_installed_generic_families(&mut db);
             Arc::new(db)
         })
         .clone()
+}
+
+/// Candidate faces behind each CSS generic family, most-preferred first. The
+/// Microsoft core names lead because a document asking for `sans-serif` on
+/// macOS or Windows should keep getting the face it has always been painted
+/// with; the rest are what a Linux install actually ships.
+const GENERIC_FAMILY_CANDIDATES: [(GenericFamily, &[&str]); 5] = [
+    (
+        GenericFamily::SansSerif,
+        &[
+            "Arial",
+            "Helvetica",
+            "Liberation Sans",
+            "DejaVu Sans",
+            "Noto Sans",
+            "FreeSans",
+        ],
+    ),
+    (
+        GenericFamily::Serif,
+        &[
+            "Times New Roman",
+            "Times",
+            "Liberation Serif",
+            "DejaVu Serif",
+            "Noto Serif",
+            "FreeSerif",
+        ],
+    ),
+    (
+        GenericFamily::Monospace,
+        &[
+            "Courier New",
+            "Menlo",
+            "Liberation Mono",
+            "DejaVu Sans Mono",
+            "Noto Sans Mono",
+            "FreeMono",
+        ],
+    ),
+    (
+        GenericFamily::Cursive,
+        &[
+            "Comic Sans MS",
+            "Comic Neue",
+            "URW Chancery L",
+            "DejaVu Sans",
+        ],
+    ),
+    (
+        GenericFamily::Fantasy,
+        &["Impact", "Papyrus", "Ultra", "DejaVu Sans"],
+    ),
+];
+
+/// Which generic a candidate list stands for. `fontdb` exposes the five as
+/// setters rather than a value, so this is what lets one loop drive them.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum GenericFamily {
+    SansSerif,
+    Serif,
+    Monospace,
+    Cursive,
+    Fantasy,
+}
+
+/// Point every generic family at a face the database actually holds.
+///
+/// `fontdb` defaults them to Arial / Times New Roman / Courier New, which no
+/// ordinary Linux install has — so every mermaid stack, all of which end in
+/// `sans-serif`, missed and usvg dropped the `<text>`. One already naming an
+/// installed face is left alone: the platform's own or a fontconfig alias.
+fn adopt_installed_generic_families(db: &mut resvg::usvg::fontdb::Database) {
+    for (generic, candidates) in GENERIC_FAMILY_CANDIDATES {
+        let current = current_generic_family(db, generic);
+        if is_installed(db, &current) {
+            continue;
+        }
+        let Some(replacement) = first_installed(db, candidates) else {
+            continue;
+        };
+        let replacement = replacement.to_owned();
+        match generic {
+            GenericFamily::SansSerif => db.set_sans_serif_family(replacement),
+            GenericFamily::Serif => db.set_serif_family(replacement),
+            GenericFamily::Monospace => db.set_monospace_family(replacement),
+            GenericFamily::Cursive => db.set_cursive_family(replacement),
+            GenericFamily::Fantasy => db.set_fantasy_family(replacement),
+        }
+    }
+}
+
+fn current_generic_family(db: &resvg::usvg::fontdb::Database, generic: GenericFamily) -> String {
+    use resvg::usvg::fontdb::Family;
+    let family = match generic {
+        GenericFamily::SansSerif => Family::SansSerif,
+        GenericFamily::Serif => Family::Serif,
+        GenericFamily::Monospace => Family::Monospace,
+        GenericFamily::Cursive => Family::Cursive,
+        GenericFamily::Fantasy => Family::Fantasy,
+    };
+    db.family_name(&family).to_owned()
+}
+
+/// The first candidate naming a face in `db`, or `None` when it holds none of
+/// them — a database with no fonts at all included.
+fn first_installed<'a>(
+    db: &resvg::usvg::fontdb::Database,
+    candidates: &[&'a str],
+) -> Option<&'a str> {
+    candidates
+        .iter()
+        .copied()
+        .find(|candidate| is_installed(db, candidate))
+}
+
+/// Case-insensitively, matching how CSS compares family names — see
+/// [`case_insensitive_font_selector`].
+fn is_installed(db: &resvg::usvg::fontdb::Database, family: &str) -> bool {
+    db.faces().any(|face| {
+        face.families
+            .iter()
+            .any(|(name, _)| name.eq_ignore_ascii_case(family))
+    })
 }
 
 /// Convert premultiplied-alpha RGBA (tiny-skia's pixmap format) to straight
@@ -480,6 +605,91 @@ mod tests {
             &[0, 0, 255, 255],
             "opaque red must land as B=0, G=0, R=255 in BGRA order"
         );
+    }
+
+    /// The defect this guards: `fontdb` defaults every generic family to a
+    /// Microsoft core font, so on a host without them `sans-serif` resolved to
+    /// nothing and usvg dropped the text. Fails on such a host before the fix
+    /// and passes on every host after it — it cannot fail on macOS, where Arial
+    /// is installed either way.
+    #[test]
+    fn every_generic_family_names_a_face_that_is_installed() {
+        let db = shared_fontdb();
+
+        for (generic, _) in GENERIC_FAMILY_CANDIDATES {
+            let name = current_generic_family(&db, generic);
+            assert!(
+                is_installed(&db, &name),
+                "{generic:?} resolves to {name:?}, which this host does not have"
+            );
+        }
+    }
+
+    /// The repair path itself, driven on any host: point the generics at a name
+    /// nothing declares — which is the state a Linux box is already in, since
+    /// it has no Arial — and the mermaid stack must resolve again afterwards.
+    #[test]
+    fn a_generic_naming_nothing_is_repaired_and_text_lays_out_again() {
+        use resvg::usvg::fontdb;
+
+        let mut db = fontdb::Database::new();
+        db.load_system_fonts();
+        for set in [
+            fontdb::Database::set_sans_serif_family as fn(&mut _, String),
+            fontdb::Database::set_serif_family,
+            fontdb::Database::set_monospace_family,
+        ] {
+            set(&mut db, "No Such Face At All".to_owned());
+        }
+        let broken = db
+            .query(&fontdb::Query {
+                families: &[fontdb::Family::SansSerif, fontdb::Family::Serif],
+                ..Default::default()
+            })
+            .is_none();
+        assert!(broken, "the fixture must reproduce the miss first");
+
+        adopt_installed_generic_families(&mut db);
+
+        assert!(
+            db.query(&fontdb::Query {
+                families: &[fontdb::Family::SansSerif],
+                ..Default::default()
+            })
+            .is_some(),
+            "`sans-serif` — where every mermaid label's stack ends — still misses"
+        );
+    }
+
+    /// What picks the replacement, asserted without needing a host that is
+    /// missing anything: an absent candidate is skipped for a present one.
+    #[test]
+    fn the_generic_picker_skips_candidates_the_host_lacks() {
+        let db = shared_fontdb();
+        let installed = db
+            .faces()
+            .find_map(|face| face.families.first().map(|(name, _)| name.clone()))
+            .expect("the host has at least one font");
+
+        assert_eq!(
+            first_installed(&db, &["No Such Face At All", &installed]),
+            Some(installed.as_str()),
+            "the absent candidate should have been skipped"
+        );
+        assert_eq!(first_installed(&db, &["No Such Face At All"]), None);
+    }
+
+    /// Case-insensitively, because the lookup the fix feeds is.
+    #[test]
+    fn an_installed_face_is_matched_whatever_its_case() {
+        let db = shared_fontdb();
+        let installed = db
+            .faces()
+            .find_map(|face| face.families.first().map(|(name, _)| name.clone()))
+            .expect("the host has at least one font");
+
+        assert!(is_installed(&db, &installed.to_uppercase()));
+        assert!(is_installed(&db, &installed.to_lowercase()));
     }
 
     #[test]
