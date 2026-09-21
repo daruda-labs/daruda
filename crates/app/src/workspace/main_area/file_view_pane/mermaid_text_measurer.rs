@@ -320,8 +320,13 @@ mod tests {
         }
     }
 
+    /// The ink box is the independent oracle: reserve less and the label runs
+    /// past its node. A sum of advances lands a side bearing above it, and how
+    /// far above is the face's business (Noto Sans CJK's run three times
+    /// Apple's) — hence a one-advance bound, not a ratio. The two tests below
+    /// pin magnitude.
     #[test]
-    fn hangul_is_widened_towards_what_the_rasterizer_paints() {
+    fn the_correction_covers_the_glyphs_the_rasterizer_paints() {
         let corrected = HangulCorrectedMeasurer::default();
         let plain = VendoredFontMetricsTextMeasurer::default();
         let label = "스케줄 틱 발생";
@@ -332,15 +337,21 @@ mod tests {
                 .expect("probe lays out"),
         ) / PROBE_FONT_SIZE
             * style().font_size;
-        // The corrected width is a sum of advances while `painted` is the ink
-        // box, so the corrected value sits a side bearing above it — closing the
-        // gap most of the way is the goal, not landing exactly on it.
-        let was_off = (before - painted).abs();
-        let now_off = (after - painted).abs();
+
         assert!(
-            now_off < was_off / 4.0 && now_off < 2.0,
-            "correction should close the gap to the painted {painted}px: \
-             was off by {was_off}px ({before}), now off by {now_off}px ({after})"
+            before < painted,
+            "fixture must reproduce the overflow: merman reserved {before}px \
+             for {painted}px of painted ink"
+        );
+        assert!(
+            after >= painted,
+            "corrected to {after}px, still short of the {painted}px painted"
+        );
+        let advance = corrected.assumed_syllable_advance_px(&style());
+        assert!(
+            after - painted <= advance,
+            "corrected {after}px clears the {painted}px painted by more than one \
+             syllable ({advance}px) — side bearings do not explain that"
         );
     }
 
