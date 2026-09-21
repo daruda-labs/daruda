@@ -474,6 +474,9 @@ impl Element for DockElement {
         // When any mouse up, stop dragging
         window.on_mouse_event({
             let view = self.view.clone();
+            // ANY-BUTTON: a drag left installed is the worse failure, so any
+            // release ends it. The drag itself can only start from a left one
+            // (`on_drag`, gpui's left-only press machinery).
             move |_: &MouseUpEvent, phase, window, cx| {
                 if phase.bubble() {
                     view.update(cx, |view, cx| view.done_resizing(window, cx));

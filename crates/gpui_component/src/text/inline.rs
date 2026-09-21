@@ -6,7 +6,7 @@ use std::{
 
 use gpui::{
     App, BorderStyle, Bounds, CursorStyle, Edges, Element, ElementId, GlobalElementId, Half,
-    HighlightStyle, Hitbox, HitboxBehavior, InspectorElementId, IntoElement, LayoutId,
+    HighlightStyle, Hitbox, HitboxBehavior, InspectorElementId, IntoElement, LayoutId, MouseButton,
     MouseDownEvent, MouseMoveEvent, MouseUpEvent, Pixels, Point, SharedString, StyledText,
     TextLayout, TextRun, TextStyle, Window, point, px, quad,
 };
@@ -487,6 +487,10 @@ impl Element for Inline {
             // Hitbox-gated, so a press an `occlude()`d overlay covers records
             // nothing. The only place that gate is needed: the release below
             // trusts this record instead of re-testing the geometry.
+            //
+            // Left-only: navigation is the primary button's gesture, and a raw
+            // `window.on_mouse_event` hears every button. A non-left press also
+            // clears any record, so a right click mid-drag leaves none behind.
             window.on_mouse_event({
                 let links = self.links.clone();
                 let text_layout = text_layout.clone();
@@ -497,9 +501,11 @@ impl Element for Inline {
                     if !phase.bubble() {
                         return;
                     }
-                    let pressed = (hitbox.is_hovered(window) && bounds.contains(&event.position))
-                        .then(|| Self::link_for_position(&text_layout, &links, event.position))
-                        .flatten();
+                    let pressed = (event.button == MouseButton::Left
+                        && hitbox.is_hovered(window)
+                        && bounds.contains(&event.position))
+                    .then(|| Self::link_for_position(&text_layout, &links, event.position))
+                    .flatten();
                     if let Ok(mut state) = state.lock() {
                         state.pressed_link = pressed;
                     }
@@ -514,7 +520,7 @@ impl Element for Inline {
                 let state = self.state.clone();
 
                 move |event: &MouseUpEvent, phase, window, cx| {
-                    if !phase.bubble() {
+                    if !phase.bubble() || event.button != MouseButton::Left {
                         return;
                     }
                     let Some(pressed) = state.lock().ok().and_then(|mut s| s.pressed_link.take())

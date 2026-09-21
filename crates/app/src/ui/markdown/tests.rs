@@ -478,9 +478,13 @@ impl Render for LinkProbe {
     }
 }
 
-/// Release over the link and report whether it was opened. The link fires on
-/// mouse-*up*, so this is a full click.
-fn click_opens_the_link(cx: &mut TestAppContext, occluded: bool) -> bool {
+/// Open a window on the link probe, settle it, and hand the driver a live
+/// context. Three tests drive the same probe; only the gesture differs.
+fn with_link_probe<R>(
+    cx: &mut TestAppContext,
+    occluded: bool,
+    drive: impl FnOnce(&mut VisualTestContext) -> R,
+) -> (R, Rc<Cell<bool>>) {
     init_gpui_component(cx);
     let opened = Rc::new(Cell::new(false));
     let bounds = Bounds::new(point(px(0.), px(0.)), size(px(600.), px(400.)));
@@ -501,59 +505,57 @@ fn click_opens_the_link(cx: &mut TestAppContext, occluded: bool) -> bool {
     vcx.update(|window, _| window.refresh());
     vcx.run_until_parked();
 
-    vcx.simulate_click(point(px(8.), px(8.)), Modifiers::default());
+    let result = drive(&mut vcx);
     vcx.run_until_parked();
+    (result, opened)
+}
 
+/// Where the probe paints its link.
+fn on_link() -> gpui::Point<gpui::Pixels> {
+    point(px(8.), px(8.))
+}
+
+fn press(vcx: &mut VisualTestContext, at: gpui::Point<gpui::Pixels>, button: MouseButton) {
+    vcx.simulate_event(MouseDownEvent {
+        position: at,
+        modifiers: Modifiers::default(),
+        button,
+        click_count: 1,
+        first_mouse: false,
+    });
+}
+
+fn release(vcx: &mut VisualTestContext, at: gpui::Point<gpui::Pixels>, button: MouseButton) {
+    vcx.simulate_event(gpui::MouseUpEvent {
+        position: at,
+        modifiers: Modifiers::default(),
+        button,
+        click_count: 1,
+    });
+}
+
+/// Press and release over the link with `button` and report whether it was
+/// opened. The link fires on mouse-*up*, so this is a full click.
+fn click_opens_the_link(cx: &mut TestAppContext, occluded: bool, button: MouseButton) -> bool {
+    let (_, opened) = with_link_probe(cx, occluded, |vcx| {
+        press(vcx, on_link(), button);
+        release(vcx, on_link(), button);
+    });
     opened.get()
 }
 
 /// Press somewhere that is not the link, drag onto it, release. Reports
 /// whether the link opened.
 fn drag_onto_link_opens_it(cx: &mut TestAppContext, from: gpui::Point<gpui::Pixels>) -> bool {
-    init_gpui_component(cx);
-    let opened = Rc::new(Cell::new(false));
-    let bounds = Bounds::new(point(px(0.), px(0.)), size(px(600.), px(400.)));
-    let opts = WindowOptions {
-        window_bounds: Some(WindowBounds::Windowed(bounds)),
-        ..Default::default()
-    };
-    let window = cx
-        .update(|cx| {
-            let opened = opened.clone();
-            cx.open_window(opts, |_window, cx| {
-                cx.new(|_cx| LinkProbe {
-                    occluded: false,
-                    opened,
-                })
-            })
-        })
-        .expect("window opens");
-    let mut vcx = VisualTestContext::from_window(window.into(), cx);
-    vcx.run_until_parked();
-    vcx.update(|window, _| window.refresh());
-    vcx.run_until_parked();
-
-    let onto = point(px(8.), px(8.));
-    vcx.simulate_event(MouseDownEvent {
-        position: from,
-        modifiers: Modifiers::default(),
-        button: MouseButton::Left,
-        click_count: 1,
-        first_mouse: false,
+    let (_, opened) = with_link_probe(cx, false, |vcx| {
+        press(vcx, from, MouseButton::Left);
+        vcx.simulate_event(gpui::MouseMoveEvent {
+            position: on_link(),
+            modifiers: Modifiers::default(),
+            pressed_button: Some(MouseButton::Left),
+        });
+        release(vcx, on_link(), MouseButton::Left);
     });
-    vcx.simulate_event(gpui::MouseMoveEvent {
-        position: onto,
-        modifiers: Modifiers::default(),
-        pressed_button: Some(MouseButton::Left),
-    });
-    vcx.simulate_event(gpui::MouseUpEvent {
-        position: onto,
-        modifiers: Modifiers::default(),
-        button: MouseButton::Left,
-        click_count: 1,
-    });
-    vcx.run_until_parked();
-
     opened.get()
 }
 
@@ -573,8 +575,24 @@ fn a_drag_that_merely_ends_on_a_link_does_not_open_it(cx: &mut TestAppContext) {
 #[gpui::test]
 fn a_click_on_a_link_opens_it(cx: &mut TestAppContext) {
     assert!(
-        click_opens_the_link(cx, false),
+        click_opens_the_link(cx, false, MouseButton::Left),
         "a plain click no longer opens a link at all"
+    );
+}
+
+/// Navigation is the *primary* button's gesture. `Inline` reads the press and
+/// release through raw `window.on_mouse_event`s, which — unlike gpui's own
+/// `on_click`, left-only by construction — hear every button, so the filter
+/// has to be written out.
+#[gpui::test]
+fn a_non_primary_click_on_a_link_does_not_open_it(cx: &mut TestAppContext) {
+    assert!(
+        !click_opens_the_link(cx, false, MouseButton::Right),
+        "a right click opened the link instead of leaving the gesture to the context menu"
+    );
+    assert!(
+        !click_opens_the_link(cx, false, MouseButton::Middle),
+        "a middle click opened the link"
     );
 }
 
@@ -583,7 +601,7 @@ fn a_click_on_a_link_opens_it(cx: &mut TestAppContext) {
 #[gpui::test]
 fn a_click_inside_an_occluding_panel_does_not_open_the_link_under_it(cx: &mut TestAppContext) {
     assert!(
-        !click_opens_the_link(cx, true),
+        !click_opens_the_link(cx, true, MouseButton::Left),
         "the click reached the link under the occluding panel and opened it"
     );
 }

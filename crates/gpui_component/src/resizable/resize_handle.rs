@@ -2,8 +2,8 @@ use std::{cell::Cell, rc::Rc};
 
 use gpui::{
     AnyElement, App, Axis, Element, ElementId, Entity, GlobalElementId, InteractiveElement,
-    IntoElement, MouseDownEvent, MouseUpEvent, ParentElement as _, Pixels, Point, Render,
-    StatefulInteractiveElement, Styled as _, Window, div, prelude::FluentBuilder as _, px,
+    IntoElement, MouseButton, MouseDownEvent, MouseUpEvent, ParentElement as _, Pixels, Point,
+    Render, StatefulInteractiveElement, Styled as _, Window, div, prelude::FluentBuilder as _, px,
 };
 
 use crate::{ActiveTheme as _, AxisExt as _, dock::DockPlacement};
@@ -196,8 +196,14 @@ impl<T: 'static, E: 'static + Render> Element for ResizeHandle<T, E> {
 
             window.on_mouse_event({
                 let state = state.clone();
+                // Left-only: this is the handle's pressed styling, and the
+                // resize it stands for can only be dragged with the left
+                // button, so no other one should look like it is resizing.
                 move |ev: &MouseDownEvent, phase, window, _| {
-                    if bounds.contains(&ev.position) && phase.bubble() {
+                    if ev.button == MouseButton::Left
+                        && bounds.contains(&ev.position)
+                        && phase.bubble()
+                    {
                         state.set_active(true);
                         window.refresh();
                     }
@@ -206,6 +212,8 @@ impl<T: 'static, E: 'static + Render> Element for ResizeHandle<T, E> {
 
             window.on_mouse_event({
                 let state = state.clone();
+                // ANY-BUTTON: clearing the pressed style on any release is
+                // what keeps it from sticking.
                 move |_: &MouseUpEvent, _, window, _| {
                     if state.is_active() {
                         state.set_active(false);

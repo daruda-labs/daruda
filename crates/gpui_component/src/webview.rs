@@ -219,6 +219,8 @@ impl Element for WebViewElement {
         let bounds = hitbox.clone().map(|h| h.bounds).unwrap_or(bounds);
         window.with_content_mask(Some(ContentMask { bounds }), |window| {
             let webview = self.view.clone();
+            // ANY-BUTTON: a press anywhere outside blurs the embedded input,
+            // which is true of every button.
             window.on_mouse_event(move |event: &MouseDownEvent, _, _, _| {
                 if !bounds.contains(&event.position) {
                     // Click white space to blur the input focus

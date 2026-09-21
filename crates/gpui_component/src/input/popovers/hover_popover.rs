@@ -276,6 +276,8 @@ impl Element for Popover {
 
         let open_state = request_layout.state.clone();
         // Mouse down out to hide.
+        // ANY-BUTTON: any press outside the popover dismisses it — which
+        // button the user pressed says nothing about that.
         window.on_mouse_event(move |event: &MouseDownEvent, _, _, cx| {
             if !bounds.contains(&event.position) {
                 open_state.update(cx, |open, cx| {

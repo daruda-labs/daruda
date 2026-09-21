@@ -406,6 +406,8 @@ impl Element for ResizePanelGroupElement {
             let state = self.state.clone();
             let current_ix = state.read(cx).resizing_panel_ix;
             let on_resize = self.on_resize.clone();
+            // ANY-BUTTON: same as the dock's — a resize left installed is the
+            // worse failure, and only a left press can have started it.
             move |_: &MouseUpEvent, phase, window, cx| {
                 if current_ix.is_none() {
                     return;

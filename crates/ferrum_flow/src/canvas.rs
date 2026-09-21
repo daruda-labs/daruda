@@ -563,7 +563,11 @@ impl Render for FlowCanvas {
             move |_: Bounds<Pixels>, _: (), window: &mut Window, _: &mut App| {
                 let entity = entity.clone();
                 window.on_mouse_event(move |ev: &MouseUpEvent, phase, _window, cx| {
-                    if phase != DispatchPhase::Bubble {
+                    // Left-only, matching the `on_mouse_up(MouseButton::Left)`
+                    // registration this stands in for. A raw listener hears
+                    // every button, and a live wire drag reads any release as
+                    // "drop the wire here".
+                    if phase != DispatchPhase::Bubble || ev.button != MouseButton::Left {
                         return;
                     }
                     entity.update(cx, |canvas, cx| {

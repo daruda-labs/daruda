@@ -10,9 +10,9 @@ use crate::{ActiveTheme, AxisExt};
 use gpui::{
     Anchor, App, Axis, BorderStyle, Bounds, ContentMask, CursorStyle, Edges, Element, ElementId,
     GlobalElementId, Hitbox, HitboxBehavior, Hsla, InspectorElementId, IntoElement, IsZero,
-    LayoutId, ListState, MouseDownEvent, MouseMoveEvent, MouseUpEvent, PaintQuad, Pixels, Point,
-    Position, ScrollHandle, ScrollWheelEvent, Size, Style, UniformListScrollHandle, Window, fill,
-    point, px, relative, size,
+    LayoutId, ListState, MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent, PaintQuad,
+    Pixels, Point, Position, ScrollHandle, ScrollWheelEvent, Size, Style, UniformListScrollHandle,
+    Window, fill, point, px, relative, size,
 };
 
 /// Build `Bounds` from an anchor corner, anchor point, and size — replacement for
@@ -853,8 +853,16 @@ impl Element for Scrollbar {
                             let state = scrollbar_state.clone();
                             let scroll_handle = self.scroll_handle.clone();
 
+                            // Left-only, as zed's own scrollbar gates it
+                            // (`ui/components/scrollbar.rs`). A raw
+                            // `window.on_mouse_event` hears every button, so
+                            // without this a right press jumped the view and
+                            // swallowed the host's context menu.
                             move |event: &MouseDownEvent, phase, _, cx| {
-                                if phase.bubble() && bounds.contains(&event.position) {
+                                if phase.bubble()
+                                    && event.button == MouseButton::Left
+                                    && bounds.contains(&event.position)
+                                {
                                     cx.stop_propagation();
 
                                     if thumb_bounds.contains(&event.position) {
@@ -990,6 +998,8 @@ impl Element for Scrollbar {
                         let state = scrollbar_state.clone();
                         let scroll_handle = self.scroll_handle.clone();
 
+                        // ANY-BUTTON: ends the thumb drag on whatever release
+                        // arrives; the drag can only start from a left press.
                         move |_event: &MouseUpEvent, phase, _, cx| {
                             if phase.bubble() {
                                 scroll_handle.end_drag();

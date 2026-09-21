@@ -1004,6 +1004,9 @@ impl Element for TextView {
                 // up to end selection
                 window.on_mouse_event({
                     let state = self.state.clone();
+                    // ANY-BUTTON: ends the selection drag on any release. The
+                    // press that starts one is left-only (above), and a drag
+                    // left pending is the worse failure.
                     move |_: &MouseUpEvent, phase, _, cx| {
                         if !phase.bubble() {
                             return;

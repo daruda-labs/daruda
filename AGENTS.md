@@ -22,7 +22,7 @@ subsystem's real constraints are written down.
 | **Anything at all, before committing** | [Pre-commit checks](#pre-commit-checks) · [Verification](#verification) |
 | **Terminal, VT parsing, PTY, scrollback** | `crates/daruda_terminal/src/view/CLAUDE.md` · [Pitfalls](#pitfall-prevention-rules) 1 (coordinates), 3 (Zig FFI), 7 (text↔pixel), 8 (paint scope), 9 (palette) |
 | **Agent chat, ACP, adapters, wire log** | `crates/daruda_acp/CLAUDE.md` · [Pitfall](#pitfall-prevention-rules) 11 (single activity source) |
-| **A widget, a modal, anything visual** | `crates/app/src/ui/CLAUDE.md` · [`DESIGN.md`](./DESIGN.md) · [Pitfall](#pitfall-prevention-rules) 10 (render cost) |
+| **A widget, a modal, anything visual** | `crates/app/src/ui/CLAUDE.md` · [`DESIGN.md`](./DESIGN.md) · [Pitfalls](#pitfall-prevention-rules) 10 (render cost), 12 (mouse buttons) |
 | **Workspace layout — tabs, panes, docks** | `crates/app/src/CLAUDE.md` · [UI component hierarchy](#ui-component-hierarchy) · [MVU rules](#mvu-flavored-guiding-rules) |
 | **Any string a user will see** | `crates/app/locales/CLAUDE.md` |
 | **Where a new file or crate goes** | [Crate dependency graph](#crate-dependency-graph) · [File-structure rules](#file-structure-rules) · [Change-impact discipline](#change-impact-discipline) |
@@ -73,6 +73,8 @@ cargo test -p ghostty_vt -p ghostty_vt_sys -p daruda_terminal -p daruda \
 ./scripts/lint-agent-list-sync.sh
 ./scripts/lint-declarative-context-menu.sh
 ./scripts/lint-acp-air-gate.sh
+./scripts/lint-raw-mouse-button.sh
+./scripts/lint-raw-mouse-button.sh --self-test
 ./scripts/lint-comment-length.sh
 RUSTDOCFLAGS="-D warnings" cargo doc --no-deps \
   -p daruda_flow -p daruda_core -p daruda_update -p ghostty_vt_sys \
@@ -222,6 +224,8 @@ scripts/lint-fold-header.sh
 scripts/lint-agent-list-sync.sh
 scripts/lint-declarative-context-menu.sh
 scripts/lint-acp-air-gate.sh
+scripts/lint-raw-mouse-button.sh
+scripts/lint-raw-mouse-button.sh --self-test
 scripts/lint-comment-length.sh
 RUSTDOCFLAGS="-D warnings" cargo doc --no-deps \
   -p daruda_flow -p daruda_core -p daruda_update -p ghostty_vt_sys \
@@ -243,7 +247,7 @@ read intra-doc links, so a deleted item leaves a dangling `[`Name`]` in the
 prose that explains the module. These six are clean today; the rest carry a
 backlog and join the list a crate at a time as that is worked off. Measured
 2026-09-18: `daruda_config` 8, `daruda_store` 8, `daruda_terminal` 11,
-`daruda_acp` 16, `daruda` 85 — the app crate is most of what is left. `lint-daruda-path-literals.sh`, `lint-file-size.sh`, `lint-mark-dirty-direct-call.sh`, `lint-fold-header.sh`, `lint-agent-list-sync.sh`, `lint-declarative-context-menu.sh`, `lint-acp-air-gate.sh`, `lint-comment-length.sh`, and `gen_acp_presets -- --check` are local/reviewer checks not yet wired into CI.
+`daruda_acp` 16, `daruda` 85 — the app crate is most of what is left. `lint-daruda-path-literals.sh`, `lint-file-size.sh`, `lint-mark-dirty-direct-call.sh`, `lint-fold-header.sh`, `lint-agent-list-sync.sh`, `lint-declarative-context-menu.sh`, `lint-acp-air-gate.sh`, `lint-raw-mouse-button.sh`, `lint-comment-length.sh`, and `gen_acp_presets -- --check` are local/reviewer checks not yet wired into CI.
 
 `gen_acp_presets -- --check` is the ACP preset drift gate: it regenerates the `// BEGIN GENERATED` block of `crates/daruda_config/src/agent/preset.rs` from the committed `tools/gen_acp_presets/registry-snapshot.json` and fails on any difference. It is offline; `scripts/sync-acp-registry.sh` is the separate path that refreshes the snapshot from the live registry.
 
@@ -385,6 +389,8 @@ Daruda is not strict MVU, but the architecture leans on three rules. Treat them 
     - **Never call `window.refresh()` / `cx.refresh_windows()` on a hot path.** Refresh sets `window.refreshing`, which **bypasses every `AnyView::cached`** for that frame (see gpui `view.rs` prepaint `!window.refreshing` guard). It is reserved for genuinely global invalidation (theme swap in `ui/theme.rs`). For everything else use **targeted `cx.notify(entity)`** so only that view subtree (and its ancestors) goes dirty and sibling `.cached()` views stay cached. Reference: zed PR #25009.
     - **Caching a child view requires notify-on-change.** A view that renders from a parent-staged snapshot (e.g. `Dock::snap`) must be marked dirty (`cx.notify(child)`) when that snapshot's content changes, or `.cached()` will show stale data. Self-notifying views (TerminalView, ToastLayer) are already safe. Bare `entity.update(cx, |e, _| e.field = …)` without notify is incompatible with caching that entity.
 11. **Agent-chat single activity source**: every "is the pane working / did it just finish" decision reads `activity_state()` / `is_busy()` / `activity_elapsed()` on `AgentChatView` — never the raw prompt `Turn`, which settles busy→idle before trailing background subagents finish. Completion side effects (notification + backing-task done) fire only via `fire_activity_completion` at the busy→idle settle edge that `reconcile_activity` detects — never straight from an `AcpEvent::TurnEnded` / `AcpEvent::Error` arm (early + double-fire). `Turn` is module-private to the `agent_chat_pane/view/` module tree (`mod.rs` + its `apply_event.rs` / `queue_ops.rs` / `session_ops.rs` / `tests.rs` submodules) for prompt-queue sequencing only; tests reach it through the `#[cfg(test)]` hooks (`set_turn_in_flight` / `set_turn_idle` / `turn_is_idle`). Enforced by `scripts/lint-agent-activity.sh`. Stop (`cancel_turn`) settles the turn locally and immediately (responsive + hung-safe) and stashes `Stopped`; the turn moves to `Turn::AwaitingCancelAck`, and the one `cancelled` `TurnEnded` that state expects is **swallowed** by `apply_event` so a stale cancel-ack can't be misattributed to a turn the user re-prompted (the stop-then-reprompt race). A prompt typed inside that window buffers client-side rather than going on the wire, which is what `Turn::can_dispatch` answers — the cancel window and the in-flight turn are one value, not a bool beside an enum. This is sound because `daruda_acp::session.rs` is strictly FIFO — 1 prompt → 1 `TurnEnded`, in order, and a hung turn blocks all later ones.
+
+12. **Raw mouse listeners name their button**: `window.on_mouse_event::<MouseDownEvent>()` hears *every* button, unlike `div().on_click()` (left-only by construction — gpui's `elements/div.rs` routes the rest to `on_aux_click`) and `.on_mouse_down(MouseButton::X, ..)`. A hand-rolled `Element` has no `div`, so it can only use the raw tier, and forgetting the filter is silent: a right click opened agent-chat links, jumped any scrollbar (swallowing the host context menu with it), and dropped a live flow-editor wire. Check `event.button`, or mark a genuinely button-agnostic listener `// ANY-BUTTON: <reason>` — the ones that qualify either *end* a drag or dismiss on an outside press. Enforced by `scripts/lint-raw-mouse-button.sh`, which scans the vendored crates too, since that is where all three bugs lived and a re-vendor drops the gates. Its `--self-test` drives the shapes a naive detector misses (turbofish, path-qualified type, no `move`, a `MouseButton` mentioned only in a comment, a brace inside a string, a braceless listener ahead of a real one) so the guard cannot go quietly green.
 
 ### Error reporting
 

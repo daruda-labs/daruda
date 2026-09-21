@@ -420,20 +420,23 @@ handler had one in scope and did not use it.
 | `TextView::PrepaintState` = `Hitbox` | was `()`. `prepaint` now inserts a `HitboxBehavior::Normal` hitbox for the block's bounds **before** prepainting its children, so the inner `Inline`'s own hitbox stays in front of it (both `Normal`, so neither suppresses the other — the ordering only preserves upstream's layering). |
 | Selection start gates on `is_hovered` | `text_view.rs`. Only the press that *starts* a drag. The move/up handlers are deliberately left un-gated: they are reachable only through a drag this gate already approved, and gating them would break dragging a selection outside the block (the agent-chat autoscroll extends it past the viewport) and could strand `is_selecting` if the modality flipped to keyboard mid-drag — the failure class of `gpui-held-key-keeps-modality.patch` and `ferrum_flow`'s "A drag hears its own release". |
 | Link click gates on `is_hovered` | `inline.rs`. The `hitbox` was already in scope. |
+| Link click gates on `MouseButton::Left` | `inline.rs`, both ends. gpui's own `on_click` is left-only by construction (`div.rs` routes every other button to `on_aux_click`), but these are raw `window.on_mouse_event`s, which hear all of them — so a right click over a link in agent chat reached `cx.open_url` instead of leaving the gesture to the context menu. The press side clears the record for a non-left button rather than ignoring it, so a right click during a left drag cannot leave one behind for a later release. |
 | Keyboard-modality safety | `is_hovered` also returns `false` during keyboard modality. Safe here because `Window::dispatch_event` sets the modality to `Mouse` **from a `MouseDown`, before dispatching it** — so a press never arrives under keyboard modality. A `MouseUp` does not set it, which is why the link gate is the only up-handler gated and why the selection *release* is not. |
 
 ### Re-vendor procedure
 
 Copy the fresh upstream `text_view.rs` / `inline.rs` in, then re-apply the table
-above by hand. Four paired tests in `crates/app/src/ui/markdown.rs`
+above by hand. Five paired tests in `crates/app/src/ui/markdown/tests.rs`
 (`a_press_on_selectable_prose_grabs_it` /
 `a_press_inside_an_occluding_panel_does_not_grab_the_prose_under_it`,
 `a_click_on_a_link_opens_it` /
 `a_click_inside_an_occluding_panel_does_not_open_the_link_under_it` /
-`a_drag_that_merely_ends_on_a_link_does_not_open_it`) fail loudly if you forget —
-and the control in each group fails if a gate is applied too widely. The two link
-gates are independently covered: dropping the press-side hitbox check fails the
-overlay case, dropping the press/release match fails both link cases.
+`a_drag_that_merely_ends_on_a_link_does_not_open_it` /
+`a_non_primary_click_on_a_link_does_not_open_it`) fail loudly if you forget —
+and the control in each group fails if a gate is applied too widely. The three
+link gates are independently covered: dropping the press-side hitbox check fails
+the overlay case, dropping the press/release match fails both link cases, and
+dropping either button check fails the right/middle case.
 
 ---
 
@@ -507,6 +510,53 @@ in both appearances.
 
 ---
 
+## `crates/gpui_component/` — vendored, **a raw mouse listener names its button**
+
+Applied in place across six files, on the same terms as the sections above.
+The link-click half of it is written up under "an overlay's clicks stop at it";
+this section is the class it turned out to belong to.
+
+### Why
+
+GPUI has two tiers of mouse input with opposite defaults. `div().on_click()` is
+left-only by construction — `elements/div.rs` routes every other button to
+`on_aux_click` — and `.on_mouse_down(MouseButton::X, ..)` takes the button as an
+argument. But a hand-rolled `Element` has no `div` to hang interactivity on, so
+it reaches for `window.on_mouse_event::<MouseDownEvent>()`, which hears every
+button and leaves the filter as a field you have to remember to read. This
+module is full of hand-rolled elements, and three of them had forgotten:
+
+- **`text/inline.rs`, link click.** A right click over a link in agent chat
+  reached `cx.open_url`, opening the browser *and* the host's pane context menu.
+- **`scroll/scrollbar.rs`, track click.** A right press anywhere on a scrollbar
+  jumped the view to that spot and `stop_propagation`'d the context menu with
+  it. Reachable from every agent-chat input, the mermaid lightbox, lists and
+  tables. zed's own scrollbar gates this (`ui/components/scrollbar.rs`:
+  `phase == capture && event.button == MouseButton::Left`); upstream's does not.
+- **`resizable/resize_handle.rs`, pressed styling.** A right press lit a resize
+  handle as though it were resizing, though the drag behind it is left-only.
+
+### What diverges
+
+| Delta | Detail |
+|---|---|
+| Link press/release gate on `Left` | `text/inline.rs`. Detailed in the overlay section above. |
+| Track click gates on `Left` | `scroll/scrollbar.rs`. Same shape and same reasoning as zed's. The gate also restores the context menu, because the `stop_propagation()` now only fires for a press the scrollbar actually answered. |
+| Handle press gates on `Left` | `resizable/resize_handle.rs`. Cosmetic state only, but a button that cannot resize should not look like it is. |
+| `// ANY-BUTTON: <reason>` markers | `dock/dock.rs`, `resizable/panel.rs`, `resizable/resize_handle.rs` (release), `scroll/scrollbar.rs` (release), `text/text_view.rs` (release), `input/popovers/hover_popover.rs`, `webview.rs`. Seven listeners that answer every button on purpose — every one of them either *ends* a drag (leaving one installed is the worse failure, and only a left press can have started it) or dismisses/blurs on an outside press. The marker is what separates an intent from an omission. |
+
+### Re-vendor procedure
+
+`scripts/lint-raw-mouse-button.sh` is the checklist. A fresh upstream copy drops
+both the gates and the markers, so the lint re-fires on all ten sites and walks
+you back through the table above. Two paired tests
+(`crates/app/src/ui/scrollbar.rs`'s `a_left_press_on_the_track_jumps_the_view` /
+`a_right_press_on_the_track_does_not_jump_the_view`) cover the scrollbar gate
+from both directions; the link gates have their own pair, listed in the overlay
+section.
+
+---
+
 ## `crates/gpui_component/locales/ko.yml` — vendored, **an added file, not a patch**
 
 The only Korean the vendored widgets have. Upstream's `locales/ui.yml` carries
@@ -548,7 +598,7 @@ forces the re-read. The same holds for `crates/app/locales/`.
 
 ---
 
-## `crates/ferrum_flow/` — vendored, **six source patches**
+## `crates/ferrum_flow/` — vendored, **seven source patches**
 
 Provenance for a vendored crate, plus the source deltas it now carries.
 Re-vendoring stays a file copy followed by re-applying those.
@@ -570,7 +620,7 @@ Re-vendoring stays a file copy followed by re-applying those.
 | Dragged wire says yes as well as no | `src/plugins/port/interaction.rs` (`preview_tint` + its use in `PortConnecting::render`, plus a daruda-authored `mod tests` guarding it) | Upstream coloured only the **refusal**: `target_highlight` was computed solely when `validation_error` was set, and the line and dot only branched on the same flag. So a port that *would* take the drop rendered identically to empty space — the one thing a person needs to see while dragging was the one thing nothing said. The state was already there (`hovered_port` is set for every hovered candidate, valid or not), so the patch is the branch that reads it: over a valid port the wire takes `theme.success` and the port is ringed, over a refusal `theme.error` as before, over nothing upstream's two-tone neutral. Extracted into a pure `preview_tint` so the decision is testable without a window, which is also what keeps the edit inside `render` to one call. No new theme field — `FlowTheme::success` already existed and daruda maps it to the same green a passed card uses (`flow_theme`). Not reachable from outside: the active `InteractionState` is `pub(crate)` and `RenderContext` does not expose it, and a host plugin cannot even see the drag begin, since this plugin's priority (125) claims the port's `MouseDown` with `EventResult::Stop`. |
 | Dangling links are opt-out | `src/plugins/port/interaction.rs` (`PortInteractionPlugin::dangling_links` + a `dangling` field threaded into `PortConnecting`, gating the `PendingLinkCommitted` emit in `on_mouse_up`) | Releasing a wire over empty space left a line to nowhere, drawn until the *next* click — and clicking its endpoint built a blank node plus an edge to it. Both are upstream features for a canvas whose nodes are created on it; daruda's come from a file, so the node has nowhere to be recorded and the line says something untrue until it is dismissed. Off, a release that landed on no port simply ends the drag. Shaped as a builder flag defaulting to `true` — the same extension point as the neighbouring `validator`, so upstream behaviour is what a caller gets without asking, and the re-vendor diff stays one field and one `if`. A drop on a port that is *refused* already ended immediately (it emits `FlowEvent::error` and returns), so only the empty-space case needed this. The consequence is separately guarded on daruda's side — `reconcile_edges` removes any node the flow file cannot name (`a_blank_node_the_file_never_named_is_taken_off_the_canvas`) — but that fires after the fact; this removes the cause. |
 | A release lands where the wire said it would | `src/plugins/port/interaction.rs` (`PortConnecting::on_mouse_up` reads `hovered_port` / `validation_error` instead of hit-testing again) | The move pass decides which port a drag is over by `port_screen_big_bounds` — a 30×30 box — and the wire's colour reports that decision. The release then decided *again*, against `port_screen_bounds`, which is the port's own 12×12. So a ring roughly nine pixels wide around every port showed green and refused the drop. Now the release uses what the move pass already concluded, which is React Flow's structure rather than merely its numbers: `XYHandle` computes `closestHandle` and `isValid` on pointer-move and its `onPointerUp` reuses both, so the preview and the drop cannot disagree. Starting a drag still needs the port itself (`bounds`, on mouse-down) — strict to start and forgiving to land is the same asymmetry React Flow has, where a drag begins on the handle element but ends anywhere inside `connectionRadius`. One behaviour is dropped with the second hit-test: a refused release no longer emits `FlowEvent::error`. Nothing consumed it — the message has no reader in the vendor or in daruda — and the wire had already turned red under the cursor. |
-| A drag hears its own release | `src/canvas.rs` (`on_mouse_up` steps aside for a live interaction; a `canvas()` child registers an ungated window listener that serves one) | The canvas starts an [`Interaction`] on mouse-down and ends it on mouse-up, but `div`'s mouse-up listeners are gated on `Hitbox::is_hovered` — which is false once the pointer has left (dragging a view is dragging it *away*), and, less obviously, false whenever `Window::last_input_was_keyboard` (gpui `window.rs`, in `is_hovered`). Only `KeyDown` and `MouseMove`/`MouseDown` set that modality; `MouseUp` leaves it alone. So a key held through a drag — daruda's space-to-pan, and any modifier-style hold — auto-repeats, and a release landing between two repeats was dropped: `on_mouse_up` never ran, the interaction stayed installed with nothing to end it, and the next mouse move carried on dragging with no button down. Intermittent by construction, since it turns on whether the last repeat beat the last move. The two listeners are mutually exclusive on `interaction.handler.is_some()`, so exactly one forwards any release and no plugin sees it twice. Upstream's own node and port drags have the same hole; this fixes it for all of them rather than for the one daruda noticed. |
+| A drag hears its own release | `src/canvas.rs` (`on_mouse_up` steps aside for a live interaction; a `canvas()` child registers an ungated window listener that serves one) | The canvas starts an [`Interaction`] on mouse-down and ends it on mouse-up, but `div`'s mouse-up listeners are gated on `Hitbox::is_hovered` — which is false once the pointer has left (dragging a view is dragging it *away*), and, less obviously, false whenever `Window::last_input_was_keyboard` (gpui `window.rs`, in `is_hovered`). Only `KeyDown` and `MouseMove`/`MouseDown` set that modality; `MouseUp` leaves it alone. So a key held through a drag — daruda's space-to-pan, and any modifier-style hold — auto-repeats, and a release landing between two repeats was dropped: `on_mouse_up` never ran, the interaction stayed installed with nothing to end it, and the next mouse move carried on dragging with no button down. Intermittent by construction, since it turns on whether the last repeat beat the last move. The two listeners are mutually exclusive on `interaction.handler.is_some()`, so exactly one forwards any release and no plugin sees it twice. Upstream's own node and port drags have the same hole; this fixes it for all of them rather than for the one daruda noticed. The forwarder is gated on `MouseButton::Left`, matching the `on_mouse_up(MouseButton::Left, ..)` registration it stands in for — ungated, a right click during a live wire drag read as a release and dropped the wire (the raw-listener class written up under `gpui_component`). That gate is sound only because every interaction the canvas can start is a Left one: the canvas div registers `on_mouse_down` for Left and Right alone, so `ViewportPlugin`'s Middle-button `Panning` arm is unreachable and cannot be stranded without a release. Re-check that if a Middle registration is ever added. |
 
 **The other daruda-authored file is `Cargo.toml`.** It differs from
 upstream's in four ways, none of which touch source:

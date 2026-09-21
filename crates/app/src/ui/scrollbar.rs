@@ -592,3 +592,116 @@ mod tests {
         assert_eq!(thumb_scroll_delta(px(20.), px(100.), px(0.)), px(0.));
     }
 }
+
+/// What a press on the draggable [`Scrollbar`] track is allowed to do.
+///
+/// Its listeners are raw `window.on_mouse_event`s, which hear every button —
+/// the same shape as the agent-chat link handlers in `text/inline.rs`.
+#[cfg(test)]
+mod track_press_tests {
+    use gpui::{
+        Bounds, Context, IntoElement, Modifiers, MouseButton, MouseDownEvent, MouseUpEvent, Render,
+        ScrollHandle, TestAppContext, VisualTestContext, Window, WindowBounds, WindowOptions, div,
+        point, prelude::*, px, size,
+    };
+
+    use super::{Scrollbar, ScrollbarShow};
+    use crate::test_support::init_gpui_component;
+
+    /// A scroll area far taller than its window, with the draggable scrollbar
+    /// laid over it. `Always` so the bar's listeners are installed without
+    /// having to scroll or hover first.
+    struct ScrollbarProbe {
+        handle: ScrollHandle,
+    }
+
+    impl Render for ScrollbarProbe {
+        fn render(&mut self, _window: &mut Window, _cx: &mut Context<Self>) -> impl IntoElement {
+            div()
+                .relative()
+                .size_full()
+                .child(
+                    div()
+                        .id("scroll-area")
+                        .size_full()
+                        .overflow_y_scroll()
+                        .track_scroll(&self.handle)
+                        .child(div().w_full().h(px(4000.))),
+                )
+                .child(
+                    div()
+                        .absolute()
+                        .top_0()
+                        .left_0()
+                        .right_0()
+                        .bottom_0()
+                        .child(
+                            Scrollbar::vertical(&self.handle)
+                                .scrollbar_show(ScrollbarShow::Always)
+                                .id("probe-scrollbar"),
+                        ),
+                )
+        }
+    }
+
+    /// Click the track near its bottom — below the thumb, so this is the
+    /// "jump to here" path, not a thumb drag. Reports the resulting offset,
+    /// which is negative once the view has scrolled down.
+    fn track_click_offset(cx: &mut TestAppContext, button: MouseButton) -> f32 {
+        init_gpui_component(cx);
+        let handle = ScrollHandle::new();
+        let bounds = Bounds::new(point(px(0.), px(0.)), size(px(600.), px(400.)));
+        let opts = WindowOptions {
+            window_bounds: Some(WindowBounds::Windowed(bounds)),
+            ..Default::default()
+        };
+        let window = cx
+            .update(|cx| {
+                let handle = handle.clone();
+                cx.open_window(opts, |_window, cx| cx.new(|_cx| ScrollbarProbe { handle }))
+            })
+            .expect("window opens");
+        let mut vcx = VisualTestContext::from_window(window.into(), cx);
+        vcx.run_until_parked();
+        vcx.update(|window, _| window.refresh());
+        vcx.run_until_parked();
+
+        // The vertical bar is the right-edge strip; y near the bottom is track.
+        let on_track = point(px(594.), px(360.));
+        vcx.simulate_event(MouseDownEvent {
+            position: on_track,
+            modifiers: Modifiers::default(),
+            button,
+            click_count: 1,
+            first_mouse: false,
+        });
+        vcx.simulate_event(MouseUpEvent {
+            position: on_track,
+            modifiers: Modifiers::default(),
+            button,
+            click_count: 1,
+        });
+        vcx.run_until_parked();
+
+        f32::from(handle.offset().y)
+    }
+
+    /// Control: the primary button must still jump the view to the track spot.
+    #[gpui::test]
+    fn a_left_press_on_the_track_jumps_the_view(cx: &mut TestAppContext) {
+        assert!(
+            track_click_offset(cx, MouseButton::Left) < 0.,
+            "a left press on the scrollbar track no longer scrolls"
+        );
+    }
+
+    /// A right press belongs to the context menu, not the scrollbar.
+    #[gpui::test]
+    fn a_right_press_on_the_track_does_not_jump_the_view(cx: &mut TestAppContext) {
+        assert_eq!(
+            track_click_offset(cx, MouseButton::Right),
+            0.,
+            "a right press on the scrollbar track scrolled the view"
+        );
+    }
+}
