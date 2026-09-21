@@ -98,21 +98,7 @@ impl Workspace {
                 // is left untrimmed.
                 let trimmed = input.body.trim();
                 if trimmed.is_empty() {
-                    // A whitespace-only submit while a queued prompt is being
-                    // edited would strand the "Editing…" strip row (the flag
-                    // stays set against an empty body). Cancel the edit so the
-                    // row reverts and the composer clears.
-                    let editing = self
-                        .agent_chat_view(pane_id)
-                        .is_some_and(|v| v.read(cx).queue.editing_prompt.is_some());
-                    if editing {
-                        self.cancel_edit_queued_prompt(pane_id, window, cx);
-                        return true;
-                    }
-                    // Nothing being edited: the empty submit is the resume
-                    // gesture instead — first Enter arms a parked queue, second
-                    // resumes it. Inert when nothing is parked.
-                    self.handle_agent_empty_submit(pane_id, cx);
+                    self.agent_empty_submit(pane_id, window, cx);
                     return true;
                 }
                 self.send_agent_prompt_text(pane_id, trimmed.to_string(), cx);
@@ -131,6 +117,31 @@ impl Workspace {
         } else {
             false
         }
+    }
+
+    /// What an empty submit means on the Agent chat pane `pane_id`: cancel a
+    /// queued-prompt edit if one is open, else arm / resume a parked queue.
+    ///
+    /// One definition for its two callers — an "Enter-only" macro through
+    /// [`Self::deliver_text_to_pane`], and the composer's own empty Enter,
+    /// which reaches it directly since a terminal must not take that submit.
+    pub(in crate::workspace) fn agent_empty_submit(
+        &mut self,
+        pane_id: PaneId,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        // An empty submit while a queued prompt is being edited would strand the
+        // "Editing…" strip row (the flag stays set against an empty body).
+        // Cancel the edit so the row reverts; that outranks the resume gesture.
+        let editing = self
+            .agent_chat_view(pane_id)
+            .is_some_and(|v| v.read(cx).queue.editing_prompt.is_some());
+        if editing {
+            self.cancel_edit_queued_prompt(pane_id, window, cx);
+            return;
+        }
+        self.handle_agent_empty_submit(pane_id, cx);
     }
 
     /// Deliver `input` to the currently focused pane. Thin wrapper over

@@ -424,6 +424,7 @@ impl AgentChatView {
                 self.queue.pending_prompts.clear();
                 self.queue.paused_prompts.clear();
                 self.queue.editing_prompt = None;
+                self.queue.resume_armed = false;
                 // Drop the now-dead handle. The connection task has ended (this
                 // `Error` is its terminal signal), so its command channel is
                 // closed — a lingering `Some(handle)` would let `send_prompt_text`

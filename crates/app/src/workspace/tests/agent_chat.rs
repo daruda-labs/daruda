@@ -2505,3 +2505,37 @@ async fn empty_composer_enter_cancels_a_queued_edit_before_arming(cx: &mut TestA
     })
     .unwrap();
 }
+
+/// An empty composer is not a terminal command. The resume gesture reads an
+/// empty submit, but only an agent pane does — routing it through the
+/// pane-agnostic funnel would hand a focused terminal a bare `\r`, submitting
+/// whatever the user had typed at the shell prompt itself.
+#[gpui::test]
+async fn empty_composer_enter_never_reaches_a_focused_terminal(cx: &mut TestAppContext) {
+    let (window_handle, workspace) = build_workspace(cx);
+    cx.run_until_parked();
+
+    cx.update_window(window_handle.into(), |_, window, cx| {
+        workspace.update(cx, |ws, cx| {
+            let focused = ws.active_runtime().focused_pane_id;
+            assert!(
+                ws.active_runtime()
+                    .panes
+                    .iter()
+                    .any(|p| p.id == focused && p.terminal_view().is_some()),
+                "a fresh workspace focuses a terminal pane"
+            );
+            // The funnel bumps this on every accepted delivery, so an unchanged
+            // tick is what proves the terminal was never handed anything.
+            let before = ws.main_area.activity_tick;
+
+            ws.send_terminal_input(window, cx);
+
+            assert_eq!(
+                ws.main_area.activity_tick, before,
+                "an empty composer delivers nothing to a focused terminal"
+            );
+        });
+    })
+    .unwrap();
+}

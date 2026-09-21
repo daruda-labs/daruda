@@ -692,6 +692,31 @@ fn empty_submit_arms_then_resumes_parked_queue(cx: &mut gpui::TestAppContext) {
         .unwrap();
 }
 
+/// Esc keeps its meaning while the resume gesture is armed: one press discards
+/// the parked queue. Arming must not turn the discard into a three-press
+/// gesture — `handle_escape` never consults the armed flag, and this pins it.
+#[gpui::test]
+fn escape_still_discards_a_parked_queue_in_one_press_while_armed(cx: &mut gpui::TestAppContext) {
+    let window = make_test_view(cx);
+    window
+        .update(cx, |view, _window, cx| {
+            view.queue.paused_prompts.push(queued(1, "a"));
+            view.handle_empty_submit(cx);
+            assert!(view.resume_armed());
+
+            assert!(
+                matches!(view.handle_escape(cx), super::EscapeOutcome::ClearedQueue),
+                "an armed gesture does not intercept Escape"
+            );
+            assert!(
+                view.queue.paused_prompts.is_empty(),
+                "one Escape still discards the parked queue"
+            );
+            assert!(!view.resume_armed());
+        })
+        .unwrap();
+}
+
 /// With nothing parked the gesture is inert: an empty Enter must not arm a
 /// state the strip would then have no parked rows to explain.
 #[gpui::test]

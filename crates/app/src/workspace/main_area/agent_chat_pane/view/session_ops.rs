@@ -840,6 +840,7 @@ impl AgentChatView {
         self.queue.pending_prompts.clear();
         self.queue.paused_prompts.clear();
         self.queue.editing_prompt = None;
+        self.queue.resume_armed = false;
         self.pending_permissions.clear();
         self.permissions_told_to_phone.clear();
         self.phone_turn_state = None;
