@@ -2409,6 +2409,55 @@ async fn empty_composer_enter_twice_resumes_the_parked_queue(cx: &mut TestAppCon
     .unwrap();
 }
 
+/// Only a composer that holds text ends the gesture. The composer is written
+/// programmatically too — a focus swap restores the incoming pane's draft — and
+/// `set_value` emits `Change` even for empty text, so an unconditional disarm
+/// would cancel the arm of the pane being focused.
+#[gpui::test]
+async fn only_a_non_empty_composer_disarms_the_resume_gesture(cx: &mut TestAppContext) {
+    let (window_handle, workspace) = build_workspace(cx);
+    cx.run_until_parked();
+
+    let tmp = std::env::temp_dir();
+    cx.update_window(window_handle.into(), |_, window, cx| {
+        workspace.update(cx, |ws, cx| {
+            let pane = ws.create_agent_chat_pane(
+                Some(PaneCwd::Local(tmp.clone())),
+                None,
+                daruda_config::AgentDefinition::claude_default().id,
+                None,
+                window,
+                cx,
+            );
+            let pane_id = pane.id;
+            ws.active_runtime_mut().panes.push(pane);
+            ws.active_runtime_mut().focused_pane_id = pane_id;
+
+            let view = agent_view(ws, pane_id);
+            view.update(cx, |v, _| v.set_turn_in_flight());
+            ws.send_agent_prompt_text(pane_id, "parked".to_string(), cx);
+            view.update(cx, |v, cx| v.cancel_turn(cx));
+            ws.send_terminal_input(window, cx);
+            assert!(view.read(cx).resume_armed());
+
+            ws.disarm_queue_resume(cx);
+            assert!(
+                view.read(cx).resume_armed(),
+                "an empty composer leaves the gesture armed"
+            );
+
+            ws.terminal_input
+                .update(cx, |s, cx_state| s.set_value("next", window, cx_state));
+            ws.disarm_queue_resume(cx);
+            assert!(
+                !view.read(cx).resume_armed(),
+                "typed text ends the gesture — the next Enter sends it"
+            );
+        });
+    })
+    .unwrap();
+}
+
 /// A queued-prompt edit outranks the resume gesture: clearing the composer and
 /// pressing Enter reverts the "Editing…" row rather than arming, so the strip
 /// never shows both states at once.

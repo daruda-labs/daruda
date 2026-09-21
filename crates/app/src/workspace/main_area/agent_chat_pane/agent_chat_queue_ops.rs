@@ -235,10 +235,18 @@ impl Workspace {
         view.update(cx, |v, cx| v.handle_empty_submit(cx))
     }
 
-    /// Drop the focused Agent chat pane's armed resume gesture — the composer
-    /// changed, so the next Enter sends what was typed instead of confirming.
-    /// No-op when the focused pane is not an Agent chat pane.
+    /// Drop the focused Agent chat pane's armed resume gesture once the composer
+    /// holds text — the next Enter then sends that instead of confirming.
+    ///
+    /// Gated on the composer being non-empty rather than on the change itself:
+    /// the composer is also written programmatically, and a focus swap restores
+    /// the incoming pane's draft through `set_value`, which emits `Change` even
+    /// for empty text. An unconditional disarm there cancels the arm of the very
+    /// pane being focused, while its confirmation is still on screen.
     pub(in crate::workspace) fn disarm_queue_resume(&mut self, cx: &mut Context<Self>) {
+        if self.terminal_input.read(cx).value().is_empty() {
+            return;
+        }
         let focused = self.active_runtime().focused_pane_id;
         if let Some(view) = self.agent_chat_view(focused).cloned() {
             view.update(cx, |v, cx| v.disarm_resume(cx));

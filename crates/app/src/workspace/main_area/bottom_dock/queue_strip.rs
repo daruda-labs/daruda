@@ -53,9 +53,9 @@ pub(super) fn render(snap: &BottomDockSnapshot, cx: &mut Context<Dock>) -> Optio
             }))
     };
     // A parked queue (kept by a Stop) shows a Resume button that drains it back
-    // into the live queue, plus the key hint for its keyboard path. Absent when
-    // nothing is parked (normal live queue). Once an empty-composer Enter has
-    // armed that path, the button reads as the primary action.
+    // into the live queue. Absent when nothing is parked (normal live queue).
+    // Once an empty-composer Enter has armed the keyboard path, the button reads
+    // as the primary action the header is asking to confirm.
     let has_paused = prompts.iter().any(|qp| qp.paused);
     let armed = queue.resume_armed;
     let resume = has_paused.then(|| {
@@ -67,24 +67,23 @@ pub(super) fn render(snap: &BottomDockSnapshot, cx: &mut Context<Dock>) -> Optio
                     ws.update(cx, |ws, cx| ws.resume_queued_prompts(pane_id, cx));
                 }
             }));
-        let button = if armed {
+        if armed {
             button.primary()
         } else {
             button.ghost()
-        };
-        div()
-            .flex()
-            .flex_row()
-            .items_center()
-            .gap(px(theme::AGENT_QUEUE_STRIP_GAP))
-            .child(button)
-            .child(
-                div()
-                    .text_size(px(theme::FONT_SIZE_SM))
-                    .text_color(header_color)
-                    .child(SharedString::from(s::bottom_input_queue_resume_shortcut())),
-            )
+        }
     });
+    // The header's left slot carries all three queue states: a plain count, the
+    // parked count naming the keyboard path, and the armed confirmation. Keeping
+    // the key hint here rather than beside Resume is what makes it unambiguous —
+    // floated between the two buttons it annotates neither.
+    let header_text = if armed {
+        s::bottom_input_queue_resume_armed(prompts.len())
+    } else if has_paused {
+        s::bottom_input_queue_resume_hint(prompts.len())
+    } else {
+        s::bottom_input_queued_count(prompts.len())
+    };
     let header = div()
         .flex()
         .flex_row()
@@ -94,11 +93,7 @@ pub(super) fn render(snap: &BottomDockSnapshot, cx: &mut Context<Dock>) -> Optio
             div()
                 .text_size(px(theme::FONT_SIZE_SM))
                 .text_color(header_color)
-                .child(SharedString::from(if armed {
-                    s::bottom_input_queue_resume_armed(prompts.len())
-                } else {
-                    s::bottom_input_queued_count(prompts.len())
-                })),
+                .child(SharedString::from(header_text)),
         )
         .child(
             div()
