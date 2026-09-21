@@ -141,7 +141,7 @@ pub(super) fn diff_block(
                 return;
             };
             let path = path_for_external_open.clone();
-            ws.update(cx, |ws, cx| ws.open_diff_externally(pane_id, path, cx));
+            ws.update(cx, |ws, cx| ws.open_pane_file_externally(pane_id, path, cx));
         })
         .into_any_element(),
     );

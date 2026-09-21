@@ -1102,6 +1102,29 @@ pub fn active_text_selection(cx: &App) -> Option<TextSelectionHandle> {
         .map(TextSelectionHandle)
 }
 
+/// Take the URL of the link the right press at `at` landed on, if it landed
+/// on one. Recorded in the capture phase by the inline text element, so a
+/// host building a context menu from its own right-press handler sees it in
+/// time.
+///
+/// `at` is the position of the press the caller is answering. The record is
+/// cleared either way — it belongs to one press — but it is only *returned*
+/// when it came from that same press, so a record no menu consumed cannot be
+/// adopted by a later, unrelated one.
+///
+/// Returns `None` before [`crate::init`] has run: a host may open a menu in a
+/// context where the vendored globals were never installed.
+pub fn take_right_clicked_link(cx: &mut App, at: Point<Pixels>) -> Option<SharedString> {
+    if !cx.has_global::<GlobalState>() {
+        return None;
+    }
+    GlobalState::global_mut(cx)
+        .right_clicked_link
+        .take()
+        .filter(|(position, _)| *position == at)
+        .map(|(_, url)| url)
+}
+
 fn parse_content(
     type_: TextViewType,
     text: &str,

@@ -102,6 +102,7 @@ pub use gpui_component::button::{
 pub use gpui_component::scroll::ScrollableElement;
 pub use gpui_component::text::{
     SelectMode, TextSelectionHandle, active_text_selection, select_mode_for_click_count,
+    take_right_clicked_link,
 };
 pub use gpui_component::{ActiveTheme, Disableable, Root, Selectable, Sizable, WindowExt};
 pub use gpui_component::{Icon, IconName, IconNamed};

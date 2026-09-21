@@ -5083,6 +5083,14 @@ pub fn ctx_open_link() -> String {
 pub fn ctx_copy_link_address() -> String {
     rust_i18n::t!("ctx.copy_link_address").into_owned()
 }
+
+pub fn ctx_open_link_in_file_view() -> String {
+    rust_i18n::t!("ctx.open_link_in_file_view").into_owned()
+}
+
+pub fn ctx_open_link_externally() -> String {
+    rust_i18n::t!("ctx.open_link_externally").into_owned()
+}
 pub fn ctx_send_selection_to_agent_chat() -> String {
     rust_i18n::t!("ctx.send_selection_to_agent_chat").into_owned()
 }

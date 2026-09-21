@@ -297,7 +297,10 @@ fn hex_value(b: u8) -> Option<u8> {
     }
 }
 
-fn is_external_url(link: &str) -> bool {
+/// Whether a markdown link points outside the filesystem — the same test
+/// [`markdown_file_link_target`] uses to decline a link, so the context menu
+/// and the click cannot disagree about what a link is.
+pub(in crate::workspace) fn is_external_url(link: &str) -> bool {
     link.contains("://")
         || link.starts_with("mailto:")
         || link.starts_with("tel:")
@@ -1594,24 +1597,43 @@ impl Workspace {
         );
     }
 
+    /// The pane's working directory, when it is a local one. A remote
+    /// session's paths are not this machine's, so they resolve to nothing.
+    fn agent_chat_local_cwd(&self, pane_id: PaneId, cx: &App) -> Option<PathBuf> {
+        self.agent_chat_view(pane_id).and_then(|view| {
+            let view = view.read(cx);
+            match &view.cwd {
+                Some(PaneCwd::Local(path)) => Some(path.clone()),
+                Some(PaneCwd::Remote(_)) | None => None,
+            }
+        })
+    }
+
+    /// The file an agent-chat markdown link resolves to, if it resolves to one
+    /// at all. Shares [`markdown_file_link_target`] with the click, so the
+    /// context menu cannot offer a viewer entry the click would decline.
+    pub(in crate::workspace) fn agent_chat_link_file_path(
+        &self,
+        pane_id: PaneId,
+        link: &str,
+        cx: &App,
+    ) -> Option<PathBuf> {
+        let cwd = self.agent_chat_local_cwd(pane_id, cx);
+        markdown_file_link_target(link, cwd.as_deref()).map(|target| target.path)
+    }
+
     /// Open a file-shaped link from rendered agent-chat Markdown in the pane
     /// file viewer. Returns `false` for normal URLs so the caller can fall back
     /// to the platform URL opener. Handles the file-link shape this app emits
     /// in chat (`/abs/path:line`) by stripping the line suffix before opening.
-    pub(super) fn open_agent_chat_markdown_file_link(
+    pub(in crate::workspace) fn open_agent_chat_markdown_file_link(
         &mut self,
         pane_id: PaneId,
         link: &str,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> bool {
-        let cwd = self.agent_chat_view(pane_id).and_then(|view| {
-            let view = view.read(cx);
-            match &view.cwd {
-                Some(PaneCwd::Local(path)) => Some(path.clone()),
-                Some(PaneCwd::Remote(_)) | None => None,
-            }
-        });
+        let cwd = self.agent_chat_local_cwd(pane_id, cx);
         let Some(target) = markdown_file_link_target(link, cwd.as_deref()) else {
             return false;
         };
@@ -1647,12 +1669,13 @@ impl Workspace {
         true
     }
 
-    /// Open a diff block's file externally — the user's preferred editor
+    /// Open one of a pane's files externally — the user's preferred editor
     /// (Settings → External Editor), or the OS default handler when none is
-    /// set. Dispatched from the agent-chat diff header, same shape as
+    /// set. Dispatched from the agent-chat diff header and from the context
+    /// menu on a markdown file link, same shape as
     /// [`Self::open_diff_in_file_view`], including the no-op-on-missing-lane
     /// and remote-session guard.
-    pub(in crate::workspace) fn open_diff_externally(
+    pub(in crate::workspace) fn open_pane_file_externally(
         &mut self,
         pane_id: PaneId,
         path: PathBuf,

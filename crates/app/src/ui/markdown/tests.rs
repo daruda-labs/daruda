@@ -515,6 +515,11 @@ fn on_link() -> gpui::Point<gpui::Pixels> {
     point(px(8.), px(8.))
 }
 
+/// Inside the probe's prose but past the link, so a press there finds none.
+fn off_link() -> gpui::Point<gpui::Pixels> {
+    point(px(120.), px(8.))
+}
+
 fn press(vcx: &mut VisualTestContext, at: gpui::Point<gpui::Pixels>, button: MouseButton) {
     vcx.simulate_event(MouseDownEvent {
         position: at,
@@ -559,6 +564,17 @@ fn drag_onto_link_opens_it(cx: &mut TestAppContext, from: gpui::Point<gpui::Pixe
     opened.get()
 }
 
+/// Drive the probe and hand back whatever the driver read.
+fn drive_probe<R>(cx: &mut TestAppContext, drive: impl FnOnce(&mut VisualTestContext) -> R) -> R {
+    with_link_probe(cx, false, drive).0
+}
+
+/// What a host answering the press at `at` gets from the capture-phase
+/// recorder.
+fn take_as(vcx: &mut VisualTestContext, at: gpui::Point<gpui::Pixels>) -> Option<SharedString> {
+    vcx.update(|_window, cx| crate::ui::take_right_clicked_link(cx, at))
+}
+
 /// A release is not a click: navigation needs a press that agreed with it.
 /// A drag begun off the block — the pane behind, or a popover's padding —
 /// must not open the link it happens to end on.
@@ -577,6 +593,64 @@ fn a_click_on_a_link_opens_it(cx: &mut TestAppContext) {
     assert!(
         click_opens_the_link(cx, false, MouseButton::Left),
         "a plain click no longer opens a link at all"
+    );
+}
+
+/// The other half of the right-click contract: it does not navigate, and it
+/// hands the host the URL so a context menu can act on it.
+#[gpui::test]
+fn a_right_press_records_the_link_for_the_host(cx: &mut TestAppContext) {
+    let recorded = drive_probe(cx, |vcx| {
+        press(vcx, on_link(), MouseButton::Right);
+        take_as(vcx, on_link())
+    });
+    assert_eq!(
+        recorded.as_deref(),
+        Some("https://example.invalid/opened"),
+        "a right press on a link left the host nothing to build a menu from"
+    );
+}
+
+/// Only a right press records. A left one navigates, and a record left by it
+/// would be offered to the next context menu.
+#[gpui::test]
+fn a_left_press_records_nothing(cx: &mut TestAppContext) {
+    let recorded = drive_probe(cx, |vcx| {
+        press(vcx, on_link(), MouseButton::Left);
+        take_as(vcx, on_link())
+    });
+    assert_eq!(recorded, None);
+}
+
+/// The record is keyed to the press that made it. A host answering some
+/// *other* press must not be handed it — that is what keeps a record no menu
+/// consumed from surfacing later, on an unrelated pane.
+#[gpui::test]
+fn a_record_is_refused_to_a_press_that_did_not_make_it(cx: &mut TestAppContext) {
+    let recorded = drive_probe(cx, |vcx| {
+        press(vcx, on_link(), MouseButton::Right);
+        take_as(vcx, off_link())
+    });
+    assert_eq!(
+        recorded, None,
+        "a link recorded by one press was handed to another"
+    );
+}
+
+/// A right press that lands on no link clears whatever the last one found,
+/// so the next menu is not offered a link from a press two gestures ago.
+#[gpui::test]
+fn a_right_press_off_the_link_clears_the_record(cx: &mut TestAppContext) {
+    let recorded = drive_probe(cx, |vcx| {
+        press(vcx, on_link(), MouseButton::Right);
+        press(vcx, off_link(), MouseButton::Right);
+        // Asked as the *first* press, which is the only question the position
+        // key cannot already answer — so this sees the clearing, not the key.
+        take_as(vcx, on_link())
+    });
+    assert_eq!(
+        recorded, None,
+        "an earlier link outlived the press that found it"
     );
 }
 

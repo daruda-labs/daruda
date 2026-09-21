@@ -541,6 +541,8 @@ ctx:
   unzoom_pane: "Unzoom Pane"
   open_link: "Open Link"
   copy_link_address: "Copy Link Address"
+  open_link_in_file_view: "Open in File View"
+  open_link_externally: "Open Externally"
   send_selection_to_agent_chat: "Send Selection to Agent Chat"
   send_selection_to_terminal: "Send Selection to Terminal"
   selection_too_large: "Selection is too large to send."

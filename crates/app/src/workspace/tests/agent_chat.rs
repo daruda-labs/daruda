@@ -1339,7 +1339,7 @@ async fn diff_actions_on_a_remote_pane_report_an_error_instead_of_reading_local_
                 window,
                 cx,
             );
-            ws.open_diff_externally(
+            ws.open_pane_file_externally(
                 pane_id,
                 std::path::PathBuf::from("/repo/lane/src/main.rs"),
                 cx,

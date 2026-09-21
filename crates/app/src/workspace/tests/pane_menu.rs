@@ -169,3 +169,66 @@ async fn send_pane_selection_activates_the_target_tab_and_pane(cx: &mut TestAppC
     })
     .unwrap();
 }
+
+/// The link menu's file resolution and the click's have to be one answer.
+/// They are two call sites of `markdown_file_link_target`, and if they ever
+/// drift the menu offers "Open in File View" for a link the click declines —
+/// a dead entry, with no signal that it is dead. Both directions are pinned:
+/// a path the menu calls a file is one the click accepts, and a URL the menu
+/// declines is one the click hands back for the browser.
+#[gpui::test]
+async fn the_link_menu_resolves_a_file_exactly_as_the_click_does(cx: &mut TestAppContext) {
+    use daruda_store::project::PaneCwd;
+
+    let dir = tempfile::tempdir().expect("temp dir");
+    std::fs::create_dir_all(dir.path().join("src")).expect("src dir");
+    std::fs::write(dir.path().join("src/main.rs"), "fn main() {}").expect("file");
+
+    let (window_handle, workspace) = build_workspace(cx);
+    cx.run_until_parked();
+
+    let pane_id = cx
+        .update_window(window_handle.into(), |_, window, cx| {
+            workspace.update(cx, |ws, cx| {
+                let pane = ws.create_agent_chat_pane(
+                    Some(PaneCwd::Local(dir.path().to_path_buf())),
+                    None,
+                    daruda_config::AgentDefinition::claude_default().id,
+                    None,
+                    window,
+                    cx,
+                );
+                let pane_id = pane.id;
+                ws.active_runtime_mut().panes.push(pane);
+                pane_id
+            })
+        })
+        .unwrap();
+
+    cx.update_window(window_handle.into(), |_, window, cx| {
+        workspace.update(cx, |ws, cx| {
+            // A path relative to the pane's cwd, carrying the `:line` suffix
+            // the agents actually emit.
+            assert_eq!(
+                ws.agent_chat_link_file_path(pane_id, "src/main.rs:12", cx),
+                Some(dir.path().join("src/main.rs")),
+                "the menu did not resolve a path under the pane's cwd"
+            );
+            assert!(
+                ws.open_agent_chat_markdown_file_link(pane_id, "src/main.rs:12", window, cx),
+                "the click declined the very link the menu called a file"
+            );
+
+            assert_eq!(
+                ws.agent_chat_link_file_path(pane_id, "https://example.com", cx),
+                None,
+                "the menu treated a URL as a file"
+            );
+            assert!(
+                !ws.open_agent_chat_markdown_file_link(pane_id, "https://example.com", window, cx),
+                "the click swallowed a URL instead of handing it to the browser"
+            );
+        });
+    })
+    .unwrap();
+}

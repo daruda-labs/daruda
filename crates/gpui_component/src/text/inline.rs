@@ -484,6 +484,30 @@ impl Element for Inline {
         });
 
         if !is_selection {
+            // A right press is the context-menu gesture, so it records the
+            // link for the host instead of navigating. Capture phase, because
+            // the host opens its menu from a *bubble* handler and gpui runs
+            // every capture listener before any bubble one — so the URL is
+            // already there, whichever order the two were registered in.
+            window.on_mouse_event({
+                let links = self.links.clone();
+                let text_layout = text_layout.clone();
+                let hitbox = hitbox.clone();
+
+                move |event: &MouseDownEvent, phase, window, cx| {
+                    if !phase.capture()
+                        || event.button != MouseButton::Right
+                        || !hitbox.is_hovered(window)
+                        || !bounds.contains(&event.position)
+                    {
+                        return;
+                    }
+                    GlobalState::global_mut(cx).right_clicked_link =
+                        Self::link_for_position(&text_layout, &links, event.position)
+                            .map(|link| (event.position, link.url));
+                }
+            });
+
             // Hitbox-gated, so a press an `occlude()`d overlay covers records
             // nothing. The only place that gate is needed: the release below
             // trusts this record instead of re-testing the geometry.

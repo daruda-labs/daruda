@@ -9,7 +9,9 @@ use crate::workspace::main_area::pane::PaneContent;
 use crate::workspace::main_area::pane_tree::PaneId;
 
 use super::adapter::build_popup_menu;
-use super::context::{ClickInfo, LaneAccess, PaneMenuContext, PaneMenuKind, PaneRole, SendTarget};
+use super::context::{
+    ClickInfo, ClickLink, LaneAccess, PaneMenuContext, PaneMenuKind, PaneRole, SendTarget,
+};
 use super::sections::compose;
 
 impl Workspace {
@@ -20,7 +22,7 @@ impl Workspace {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let click = self.terminal_click_info(pane_id, position, window, cx);
+        let click = self.take_pane_click_info(pane_id, position, window, cx);
         let Some(context) = self.begin_pane_menu(pane_id, click, window, cx) else {
             return;
         };
@@ -70,23 +72,49 @@ impl Workspace {
         })
     }
 
-    fn terminal_click_info(
+    /// What the right press landed on, for whichever pane kind can answer.
+    ///
+    /// **Takes** the chat's answer, first and unconditionally: the inline text
+    /// element records the link in the capture phase of this very press, and a
+    /// record left behind would outlive it. Every pane menu clears it, whether
+    /// or not it uses it, and the position key means only the press that
+    /// recorded it can read it back.
+    fn take_pane_click_info(
         &self,
         pane_id: PaneId,
         position: Point<Pixels>,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Option<ClickInfo> {
-        let view = self.terminal_view_for_pane(pane_id)?;
-        let link = view.read(cx).link_at_window_position(position, window);
-        let annotation = view
-            .read(cx)
-            .annotation_at_window_position(position, window);
-        if link.is_none() && annotation.is_none() {
-            None
-        } else {
-            Some(ClickInfo { link, annotation })
+        let markdown_link = crate::ui::take_right_clicked_link(cx, position);
+        if let Some(view) = self.terminal_view_for_pane(pane_id) {
+            let link = view.read(cx).link_at_window_position(position, window);
+            let annotation = view
+                .read(cx)
+                .annotation_at_window_position(position, window);
+            let link = link.map(|link| ClickLink::for_terminal(link.url, link.openable));
+            if link.is_none() && annotation.is_none() {
+                return None;
+            }
+            return Some(ClickInfo { link, annotation });
         }
+
+        let url = markdown_link?;
+        Some(ClickInfo {
+            link: Some(self.classify_markdown_link(pane_id, url.into(), cx)),
+            annotation: None,
+        })
+    }
+
+    /// Ask the world the two questions [`ClickLink::for_markdown`] decides
+    /// from. The path comes from [`Self::agent_chat_link_file_path`], the same
+    /// resolution the left click performs — so the menu never offers a viewer
+    /// entry that click would decline.
+    fn classify_markdown_link(&self, pane_id: PaneId, url: String, cx: &App) -> ClickLink {
+        let path = self.agent_chat_link_file_path(pane_id, &url, cx);
+        let external =
+            crate::workspace::main_area::agent_chat_pane::agent_chat_ops::is_external_url(&url);
+        ClickLink::for_markdown(url, path, external)
     }
 
     fn pane_menu_kind_and_selection(

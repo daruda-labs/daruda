@@ -4,7 +4,9 @@ use crate::surface::strings as s;
 use crate::workspace::main_area::pane_tree::{PaneId, SplitDirection};
 use crate::workspace::main_area::tab_ops::NewPaneKind;
 
-use super::context::{LaneAccess, PaneMenuContext, PaneMenuKind, PaneRole, SEND_SELECTION_LIMIT};
+use super::context::{
+    ClickLink, LaneAccess, PaneMenuContext, PaneMenuKind, PaneRole, SEND_SELECTION_LIMIT,
+};
 use super::spec::{
     Activate, ItemState, MenuEntry, disabled_item, item, normalize_entries, state_if,
 };
@@ -22,24 +24,7 @@ impl PaneMenuSource for TerminalMenu {
     fn head(ctx: &PaneMenuContext) -> Vec<MenuEntry> {
         let mut entries = Vec::new();
 
-        if let Some(link) = ctx.click.as_ref().and_then(|click| click.link.clone()) {
-            if link.openable {
-                let url = link.url.clone();
-                entries.push(item(
-                    s::ctx_open_link(),
-                    ItemState::Enabled,
-                    Activate::Op(Box::new(move |ws, _window, cx| {
-                        ws.open_pane_menu_link(url.clone(), cx);
-                    })),
-                ));
-            }
-            entries.push(item(
-                s::ctx_copy_link_address(),
-                ItemState::Enabled,
-                Activate::Clipboard(link.url),
-            ));
-            entries.push(MenuEntry::Separator);
-        }
+        entries.extend(link_entries(ctx));
 
         entries.push(item(
             s::menu_copy(),
@@ -118,7 +103,7 @@ impl PaneMenuSource for TerminalMenu {
 
 impl PaneMenuSource for AgentChatMenu {
     fn head(ctx: &PaneMenuContext) -> Vec<MenuEntry> {
-        let mut entries = Vec::new();
+        let mut entries = link_entries(ctx);
 
         // Clipboard-by-value, not an action: the chat's selection is cleared
         // by the left-click that confirms the item, so the text has to come
@@ -318,6 +303,60 @@ fn split_item(
     )
 }
 
+/// The entries the link under the click earns, plus the separator that closes
+/// them off. Empty when the click landed on no link.
+///
+/// One builder for both menus: what a link offers follows from what it *is*
+/// ([`ClickLink`]), not from which pane it was read out of.
+fn link_entries(ctx: &PaneMenuContext) -> Vec<MenuEntry> {
+    let Some(link) = ctx.click.as_ref().and_then(|click| click.link.clone()) else {
+        return Vec::new();
+    };
+    let pane_id = ctx.pane_id;
+    let mut entries = Vec::new();
+
+    match &link {
+        ClickLink::File { url, path } => {
+            let url = url.clone();
+            entries.push(item(
+                s::ctx_open_link_in_file_view(),
+                ItemState::Enabled,
+                Activate::Op(Box::new(move |ws, window, cx| {
+                    ws.open_agent_chat_markdown_file_link(pane_id, &url, window, cx);
+                })),
+            ));
+            let path = path.clone();
+            entries.push(item(
+                s::ctx_open_link_externally(),
+                ItemState::Enabled,
+                Activate::Op(Box::new(move |ws, _window, cx| {
+                    ws.open_pane_file_externally(pane_id, path.clone(), cx);
+                })),
+            ));
+        }
+        ClickLink::Web { url } => {
+            let url = url.clone();
+            entries.push(item(
+                s::ctx_open_link(),
+                ItemState::Enabled,
+                Activate::Op(Box::new(move |ws, _window, cx| {
+                    ws.open_pane_menu_link(url.clone(), cx);
+                })),
+            ));
+        }
+        // Nothing can open it; its text is still worth having.
+        ClickLink::Opaque { .. } => {}
+    }
+
+    entries.push(item(
+        s::ctx_copy_link_address(),
+        ItemState::Enabled,
+        Activate::Clipboard(link.url().to_owned()),
+    ));
+    entries.push(MenuEntry::Separator);
+    entries
+}
+
 fn send_selection_entries(ctx: &PaneMenuContext, label: String) -> Vec<MenuEntry> {
     let Some(text) = ctx.selection.clone() else {
         return Vec::new();
@@ -379,7 +418,6 @@ fn send_item(
 #[cfg(test)]
 mod tests {
     use daruda_terminal::session::interval_tree::{IntervalTree, LineCoord, LineRange, MarkId};
-    use daruda_terminal::view::TerminalLink;
 
     use super::super::context::{ClickInfo, SendTarget};
     use super::super::spec::{MenuItemSpec, normalize_entries};
@@ -704,9 +742,8 @@ mod tests {
         // into one exclusive enum.
         let ctx = PaneMenuContext {
             click: Some(ClickInfo {
-                link: Some(TerminalLink {
+                link: Some(ClickLink::Web {
                     url: "https://example.com".to_string(),
-                    openable: true,
                 }),
                 annotation: Some(some_mark_id()),
             }),
@@ -721,9 +758,8 @@ mod tests {
     fn non_openable_link_offers_copy_only() {
         let ctx = PaneMenuContext {
             click: Some(ClickInfo {
-                link: Some(TerminalLink {
+                link: Some(ClickLink::Opaque {
                     url: "javascript:alert(1)".to_string(),
-                    openable: false,
                 }),
                 annotation: None,
             }),
@@ -732,6 +768,58 @@ mod tests {
         let labels = labels(&compose(&ctx));
         assert!(!labels.contains(&s::ctx_open_link()));
         assert!(labels.contains(&s::ctx_copy_link_address()));
+    }
+
+    /// A chat link that resolves to a file is the one case with two ways to
+    /// open it, and neither is the browser.
+    #[test]
+    fn a_file_link_offers_the_viewer_and_the_external_opener() {
+        let ctx = PaneMenuContext {
+            click: Some(ClickInfo {
+                link: Some(ClickLink::File {
+                    url: "src/main.rs:42".to_string(),
+                    path: std::path::PathBuf::from("/repo/src/main.rs"),
+                }),
+                annotation: None,
+            }),
+            ..base(PaneMenuKind::AgentChat { busy: false })
+        };
+        let labels = labels(&compose(&ctx));
+        assert!(labels.contains(&s::ctx_open_link_in_file_view()));
+        assert!(labels.contains(&s::ctx_open_link_externally()));
+        assert!(labels.contains(&s::ctx_copy_link_address()));
+        // The browser has nothing to do with a path.
+        assert!(!labels.contains(&s::ctx_open_link()));
+    }
+
+    /// The mirror: a web link in the chat reads exactly like one in the
+    /// terminal, because the entries follow the link kind, not the pane.
+    #[test]
+    fn a_web_link_in_the_chat_offers_the_browser_and_copy() {
+        let ctx = PaneMenuContext {
+            click: Some(ClickInfo {
+                link: Some(ClickLink::Web {
+                    url: "https://example.com".to_string(),
+                }),
+                annotation: None,
+            }),
+            ..base(PaneMenuKind::AgentChat { busy: false })
+        };
+        let labels = labels(&compose(&ctx));
+        assert!(labels.contains(&s::ctx_open_link()));
+        assert!(labels.contains(&s::ctx_copy_link_address()));
+        assert!(!labels.contains(&s::ctx_open_link_in_file_view()));
+    }
+
+    /// No right-click on a link means no link section at all — the chat menu
+    /// is what it always was.
+    #[test]
+    fn a_chat_menu_without_a_link_offers_none_of_it() {
+        let labels = labels(&compose(&base(PaneMenuKind::AgentChat { busy: false })));
+        assert!(!labels.contains(&s::ctx_copy_link_address()));
+        assert!(!labels.contains(&s::ctx_open_link()));
+        assert!(!labels.contains(&s::ctx_open_link_in_file_view()));
+        assert!(!labels.contains(&s::ctx_open_link_externally()));
     }
 
     #[test]

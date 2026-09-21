@@ -540,6 +540,8 @@ ctx:
   unzoom_pane: "패널 축소"
   open_link: "링크 열기"
   copy_link_address: "링크 주소 복사"
+  open_link_in_file_view: "파일 뷰에서 열기"
+  open_link_externally: "외부에서 열기"
   send_selection_to_agent_chat: "선택 내용을 에이전트 채팅으로 보내기"
   send_selection_to_terminal: "선택 내용을 터미널로 보내기"
   selection_too_large: "선택 내용이 너무 커서 보낼 수 없습니다."
