@@ -120,6 +120,12 @@ x11rb = { version = "0.13.1", features = ["screensaver", "allow-unsafe-code"] }
 # hence disabling default-features + opting back in only on macOS above).
 notify = { version = "7", default-features = false }
 
+[target.'cfg(target_os = "windows")'.dependencies]
+# Same reasoning as Linux: ReadDirectoryChangesW is unconditional, so there is
+# no feature to opt into — only `macos_fsevent` is gated. Without this section
+# the app has no `notify` at all on Windows and does not compile.
+notify = { version = "7", default-features = false }
+
 [dev-dependencies]
 agent-client-protocol = "2.0"
 # `test-support` swaps the PTY spawn for a stub. Declared here rather than on
