@@ -65,6 +65,9 @@ jobs:
       - name: Lint — viewport-row scroll dispatch
         run: ./scripts/lint-viewport-row-scroll.sh
 
+      - name: Lint — landing view reads no disk
+        run: ./scripts/lint-landing-no-disk-read.sh
+
       - name: Lint — platform capability boundary
         run: ./scripts/lint-platform-boundary.sh
 

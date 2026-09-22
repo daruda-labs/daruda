@@ -469,6 +469,14 @@ fn handle_picked_folder(
         open_new_workspace_for_path(config, &path, cx);
         return;
     };
+    // An empty workspace is the Landing state, where the policy question
+    // ("add here or open a new window?") has nothing to weigh — there is
+    // no occupant to displace. Answer it here so `Ask` doesn't pop a
+    // chooser over a window holding nothing.
+    if workspace_is_empty(handle, &weak, cx) {
+        add_path_to_workspace(handle, &weak, path, cx);
+        return;
+    }
     let policy = workspace_policy(handle, &weak, cx);
     match policy {
         daruda_store::project::WindowOpenPolicy::AddHere => {
@@ -516,6 +524,24 @@ fn workspace_policy(
             .unwrap_or_default()
     })
     .unwrap_or_default()
+}
+
+/// True when the workspace referenced by `weak` holds no projects — the
+/// Landing state. Returns `false` if the entity is gone or the read
+/// fails, which routes the caller back through the normal policy path
+/// rather than silently adding to a window that may not be there.
+fn workspace_is_empty(
+    handle: gpui::AnyWindowHandle,
+    weak: &gpui::WeakEntity<crate::workspace::Workspace>,
+    cx: &mut App,
+) -> bool {
+    let weak = weak.clone();
+    cx.update_window(handle, move |_, _, cx_w| {
+        weak.upgrade()
+            .map(|ws| ws.read(cx_w).has_no_projects())
+            .unwrap_or(false)
+    })
+    .unwrap_or(false)
 }
 
 /// True when the workspace referenced by `weak` already hosts a project

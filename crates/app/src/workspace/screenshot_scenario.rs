@@ -25,6 +25,8 @@ const NAME_ERROR_MODAL: &str = "error-modal";
 /// CLI token for the error-toast scenario.
 const NAME_TOAST: &str = "toast";
 const NAME_SCRATCH_TAB: &str = "scratch-tab";
+/// CLI token for the Landing view — a workspace emptied of its projects.
+const NAME_LANDING: &str = "landing";
 /// CLI token for the Settings-window scenario. Bare opens the default section;
 /// `settings:<slug>` opens a specific section (e.g. `settings:font`).
 const NAME_SETTINGS: &str = "settings";
@@ -169,6 +171,10 @@ pub(crate) enum ScreenshotScenario {
     /// scratch tab. The scratch one renders in italics, which is the whole
     /// affordance and the one thing a unit test cannot see.
     ScratchTab,
+    /// Empty the workspace so the center paints the Landing view. A capture
+    /// always restores a workspace that has projects, so this is the only
+    /// way to reach the state `NewEmptyWindow` and a last-project close land on.
+    Landing,
     /// Open the Settings window at the given section.
     Settings(BuiltinSection),
     /// The same window with an action's failure banner up. Every Settings
@@ -331,6 +337,7 @@ impl ScreenshotScenario {
             NAME_ERROR_MODAL => Some(Self::ErrorModal),
             NAME_TOAST => Some(Self::Toast),
             NAME_SCRATCH_TAB => Some(Self::ScratchTab),
+            NAME_LANDING => Some(Self::Landing),
             NAME_SETTINGS => Some(Self::Settings(BuiltinSection::default())),
             NAME_SETTINGS_ERROR => Some(Self::SettingsError),
             NAME_PANE_CONTEXT_MENU => Some(Self::PaneContextMenu),
@@ -461,6 +468,9 @@ pub(crate) fn drive(
         }
         ScreenshotScenario::Toast => {
             workspace.update(cx, |ws, cx| ws.report_error(sample_report(), cx));
+        }
+        ScreenshotScenario::Landing => {
+            workspace.update(cx, |ws, cx| ws.empty_workspace_for_shot(window, cx));
         }
         ScreenshotScenario::ScratchTab => {
             workspace.update(cx, |ws, cx| {
@@ -735,6 +745,14 @@ mod tests {
         assert_eq!(
             ScreenshotScenario::from_cli_name("client-chrome"),
             Some(ScreenshotScenario::ClientChrome)
+        );
+    }
+
+    #[test]
+    fn landing_name_maps_to_scenario() {
+        assert_eq!(
+            ScreenshotScenario::from_cli_name("landing"),
+            Some(ScreenshotScenario::Landing)
         );
     }
 

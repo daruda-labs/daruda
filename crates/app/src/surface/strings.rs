@@ -1706,6 +1706,23 @@ pub fn welcome_no_recent() -> String {
     rust_i18n::t!("welcome.no_recent").into_owned()
 }
 
+/// Heading over the Landing view's keyboard cheat sheet.
+pub fn welcome_shortcuts() -> String {
+    rust_i18n::t!("welcome.shortcuts").into_owned()
+}
+pub fn welcome_shortcut_open_folder() -> String {
+    rust_i18n::t!("welcome.shortcut_open_folder").into_owned()
+}
+pub fn welcome_shortcut_open_folder_new_window() -> String {
+    rust_i18n::t!("welcome.shortcut_open_folder_new_window").into_owned()
+}
+pub fn welcome_shortcut_new_window() -> String {
+    rust_i18n::t!("welcome.shortcut_new_window").into_owned()
+}
+pub fn welcome_shortcut_command_palette() -> String {
+    rust_i18n::t!("welcome.shortcut_command_palette").into_owned()
+}
+
 /// Short changelog line shown at the bottom of the welcome panel.
 /// Announces the post-multi-project shortcut semantics — `Cmd+O` now
 /// adds the project to the current window (policy-aware) instead of

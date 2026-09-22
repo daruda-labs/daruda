@@ -39,6 +39,7 @@ use super::{FocusPaneDown, FocusPaneLeft, FocusPaneRight, FocusPaneUp};
 use crate::workspace::root_menu::RootContextMenuExt as _;
 
 mod center;
+mod landing;
 mod snapshots;
 
 pub(super) const PANE_HEADER_HEIGHT: f32 = theme::PANE_HEADER_HEIGHT;

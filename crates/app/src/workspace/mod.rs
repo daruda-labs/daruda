@@ -1777,6 +1777,14 @@ impl Workspace {
         })
     }
 
+    /// True when this workspace holds no projects — the state the
+    /// Landing view paints. The open-folder path reads it to skip the
+    /// `WindowOpenPolicy` question entirely: "add here or open a new
+    /// window?" has no meaning for a window with nothing in it.
+    pub(crate) fn has_no_projects(&self) -> bool {
+        self.projects.is_empty()
+    }
+
     /// True when any project in this workspace already has `root` as
     /// its checkout. Used by the `AddHere` policy path so opening the
     /// same folder twice in the same window focuses the existing

@@ -57,6 +57,23 @@ impl Workspace {
         self.mutate_durable(cx, |_, _| {});
     }
 
+    /// Drop every project so `render` paints the Landing view, for the
+    /// `landing` screenshot scenario. A capture restores a real workspace,
+    /// and the empty state is not otherwise reachable from one.
+    ///
+    /// Shares `reset_to_empty_workspace` with the real close path rather
+    /// than re-deriving the teardown, and stays a `Workspace` method so
+    /// the driver never writes these fields itself.
+    #[cfg(feature = "screenshot")]
+    pub(in crate::workspace) fn empty_workspace_for_shot(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.projects.clear();
+        self.reset_to_empty_workspace(window, cx);
+    }
+
     /// Add a freshly-opened project to this workspace and activate its
     /// first lane.
     ///

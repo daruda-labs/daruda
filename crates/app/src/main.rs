@@ -120,6 +120,21 @@ macro_rules! recent_slot_table {
             }
         }
 
+        /// The boxed `OpenRecent*` action for `idx`, for callers that
+        /// dispatch rather than build a menu row — the Landing view's
+        /// recent rows. Going through the same action the File menu
+        /// uses is what gives a Landing click `OpenMode::ReplaceCurrent`
+        /// (and its stale-entry pruning) without a second code path.
+        /// `None` past the declared range so callers can bound a list.
+        pub(crate) fn recent_open_action_for_slot(
+            idx: usize,
+        ) -> Option<Box<dyn gpui::Action>> {
+            match idx {
+                $( $idx => Some(Box::new($replace)), )*
+                _ => None,
+            }
+        }
+
         /// Register all 2×N recent-project action handlers in one
         /// sweep. Each click reloads the recent list from disk so the
         /// File > Open Recent submenu can stay live (re-built via
