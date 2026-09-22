@@ -116,6 +116,14 @@ impl Updater {
         self.target.is_some()
     }
 
+    /// Clear what an earlier update left behind, if this build is the kind
+    /// that leaves anything.
+    pub fn sweep(&self) {
+        if let Some(target) = &self.target {
+            target.sweep();
+        }
+    }
+
     /// Kick off a background `check_latest`. No-op while a flow is already
     /// in flight.
     pub fn check(&mut self, cx: &mut Context<Self>) {
@@ -264,6 +272,18 @@ impl Updater {
     }
 }
 
+/// `<…>/target/{debug,release}` — where cargo puts a build, and the one
+/// place a portable install never is.
+fn is_cargo_output(dir: &Path) -> bool {
+    matches!(
+        dir.file_name().and_then(|name| name.to_str()),
+        Some("debug" | "release")
+    ) && dir
+        .parent()
+        .and_then(|parent| parent.file_name())
+        .is_some_and(|name| name == "target")
+}
+
 /// Where the running build lives, and therefore how it is replaced.
 ///
 /// One value rather than a `cfg` at each step: macOS ships a bundle rsync
@@ -289,10 +309,13 @@ impl InstallTarget {
     fn for_host(exe: &Path, windows: bool) -> Option<Self> {
         if windows {
             // A portable install is the directory holding the executable.
-            // Nothing else identifies one, so a dev build is indistinguishable
-            // and `can_install` stays true — the swap then refuses on its own
-            // writability check rather than guessing here.
-            return exe.parent().map(|dir| Self::Directory(dir.to_path_buf()));
+            // Everything but a cargo build looks like one, and that directory
+            // is writable — so the swap's own check would not save a developer
+            // from having a release dropped over `target\\debug`.
+            return exe
+                .parent()
+                .filter(|dir| !is_cargo_output(dir))
+                .map(|dir| Self::Directory(dir.to_path_buf()));
         }
         exe.ancestors()
             .find(|path| path.extension().is_some_and(|ext| ext == "app"))
@@ -303,6 +326,15 @@ impl InstallTarget {
         match self {
             Self::Bundle(bundle) => daruda_update::install_dmg(package, bundle),
             Self::Directory(root) => daruda_update::install_zip(package, root),
+        }
+    }
+
+    /// Remove what an earlier swap left behind. A bundle has none: `rsync`
+    /// replaces its contents outright, and the path `app_path` hands back
+    /// there is `/Applications`, which is nobody's install root.
+    pub fn sweep(&self) {
+        if let Self::Directory(root) = self {
+            daruda_update::sweep_aside(root);
         }
     }
 
@@ -392,6 +424,33 @@ mod tests {
             InstallTarget::for_host(exe, true),
             Some(InstallTarget::Directory(PathBuf::from(
                 "C:/Users/me/daruda-0.3.0-windows-x86_64"
+            )))
+        );
+    }
+
+    /// A developer running `cargo run` on Windows must not have a release
+    /// dropped over the build directory — which is writable, so the swap's
+    /// own check would not have stopped it.
+    #[test]
+    fn a_windows_cargo_build_is_not_an_install() {
+        for exe in [
+            "C:/src/daruda/target/debug/daruda.exe",
+            "C:/src/daruda/target/release/daruda.exe",
+        ] {
+            assert_eq!(InstallTarget::for_host(Path::new(exe), true), None, "{exe}");
+        }
+    }
+
+    /// The guard is narrow on purpose: a real install may well sit in a
+    /// directory called `release`, just not one under `target`.
+    #[test]
+    fn a_directory_named_release_outside_target_is_still_an_install() {
+        let exe = Path::new("C:/Users/me/release/daruda.exe");
+
+        assert_eq!(
+            InstallTarget::for_host(exe, true),
+            Some(InstallTarget::Directory(PathBuf::from(
+                "C:/Users/me/release"
             )))
         );
     }

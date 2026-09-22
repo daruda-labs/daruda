@@ -19,10 +19,8 @@ pub fn init(cx: &mut App) {
     Updater::init(cx);
     // A portable install keeps the files it replaced until something can
     // delete them, which is any run after the one that held them open.
-    if let Ok(exe) = cx.app_path()
-        && let Some(root) = exe.parent()
-    {
-        daruda_update::sweep_aside(root);
+    if let Some(updater) = Updater::get(cx) {
+        updater.read(cx).sweep();
     }
 }
 

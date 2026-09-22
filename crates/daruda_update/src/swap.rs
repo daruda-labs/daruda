@@ -28,7 +28,7 @@ pub fn swap_into(bundle: &Path, root: &Path) -> Result<(), UpdateError> {
         // Rename rather than overwrite: `to` may be mapped into this very
         // process, which is the case this module exists for.
         if std::fs::symlink_metadata(&to).is_ok() {
-            std::fs::rename(&to, aside(&to)).map_err(io)?;
+            std::fs::rename(&to, free_aside(&to)?).map_err(io)?;
         }
         std::fs::copy(&from, &to).map_err(io)?;
     }
@@ -107,21 +107,54 @@ fn plan(bundle: &Path, root: &Path) -> Result<Vec<(PathBuf, PathBuf)>, UpdateErr
 /// The suffix is appended to the whole name, never substituted for the
 /// extension: `daruda.exe` must not become `daruda.daruda-old`, which Windows
 /// would still happily execute.
-fn aside(path: &Path) -> PathBuf {
+fn aside(path: &Path, attempt: usize) -> PathBuf {
     let mut name = path.as_os_str().to_os_string();
     name.push(ASIDE_SUFFIX);
+    if attempt > 0 {
+        name.push(format!(".{attempt}"));
+    }
     PathBuf::from(name)
+}
+
+/// How many aside names to try before giving up.
+const ASIDE_ATTEMPTS: usize = 64;
+
+/// An aside name nothing occupies.
+///
+/// A second update before the app restarts finds the first one still there
+/// *and* still locked — the running executable was moved into it — so the
+/// next name is taken only once the one before it refuses to go.
+fn free_aside(path: &Path) -> Result<PathBuf, UpdateError> {
+    for attempt in 0..ASIDE_ATTEMPTS {
+        let candidate = aside(path, attempt);
+        if std::fs::symlink_metadata(&candidate).is_err()
+            || std::fs::remove_file(&candidate).is_ok()
+        {
+            return Ok(candidate);
+        }
+    }
+    Err(UpdateError::Io(format!(
+        "{} has no free name to move aside to",
+        path.display()
+    )))
 }
 
 /// Remove what a previous swap left behind. Best effort by nature: a file the
 /// last run had open is free by now, but one *this* run opened is not.
 pub fn sweep_aside(root: &Path) {
-    let Ok(entries) = std::fs::read_dir(root) else {
-        return;
-    };
-    for path in entries.flatten().map(|entry| entry.path()) {
-        if path.as_os_str().to_string_lossy().ends_with(ASIDE_SUFFIX) {
-            let _ = std::fs::remove_file(&path);
+    let mut stack = vec![root.to_path_buf()];
+    while let Some(dir) = stack.pop() {
+        let Ok(entries) = std::fs::read_dir(&dir) else {
+            continue;
+        };
+        for path in entries.flatten().map(|entry| entry.path()) {
+            // Recursive because the swap is: a bundle carries `licenses/`,
+            // and an aside file under it would never be collected otherwise.
+            if path.is_dir() {
+                stack.push(path);
+            } else if path.to_string_lossy().contains(ASIDE_SUFFIX) {
+                let _ = std::fs::remove_file(&path);
+            }
         }
     }
 }
@@ -278,7 +311,7 @@ mod tests {
 
     #[test]
     fn the_aside_name_keeps_the_extension_it_had() {
-        let named = aside(Path::new("/x/daruda.exe"));
+        let named = aside(Path::new("/x/daruda.exe"), 0);
 
         assert_eq!(
             named,
@@ -329,6 +362,56 @@ mod tests {
 
         assert!(sole_bundle(&staging).is_err());
         assert!(sole_bundle(&tmp.path().join("empty-missing")).is_err());
+    }
+
+    /// A second update before the app restarts: the first aside still holds
+    /// the running executable, so it cannot be reused or removed.
+    #[cfg(unix)]
+    #[test]
+    fn a_locked_leftover_gets_the_next_name_rather_than_failing() {
+        use std::os::unix::fs::PermissionsExt as _;
+
+        let tmp = tempfile::tempdir().unwrap();
+        let guarded = tmp.path().join("guarded");
+        let exe = guarded.join("daruda.exe");
+        write(&exe, "second old");
+        // Stands in for a Windows lock: the directory refuses unlink, so the
+        // existing aside can be neither reused nor deleted.
+        write(
+            &guarded.join(format!("daruda.exe{ASIDE_SUFFIX}")),
+            "first old",
+        );
+        std::fs::set_permissions(&guarded, std::fs::Permissions::from_mode(0o500)).unwrap();
+
+        let taken = free_aside(&exe);
+
+        std::fs::set_permissions(&guarded, std::fs::Permissions::from_mode(0o700)).unwrap();
+        assert_eq!(
+            taken.unwrap(),
+            guarded.join(format!("daruda.exe{ASIDE_SUFFIX}.1")),
+            "the occupied name must not be handed out again"
+        );
+    }
+
+    /// An aside file under a subdirectory is one the swap itself created.
+    #[test]
+    fn a_sweep_reaches_the_nested_ones_too() {
+        let tmp = tempfile::tempdir().unwrap();
+        let nested = tmp.path().join("licenses");
+        write(
+            &nested.join(format!("third-party.md{ASIDE_SUFFIX}")),
+            "stale",
+        );
+        write(&nested.join("third-party.md"), "live");
+
+        sweep_aside(tmp.path());
+
+        assert!(
+            !nested
+                .join(format!("third-party.md{ASIDE_SUFFIX}"))
+                .exists()
+        );
+        assert_eq!(read(&nested.join("third-party.md")), "live");
     }
 
     #[test]
