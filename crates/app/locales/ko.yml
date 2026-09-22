@@ -52,6 +52,9 @@ timestamp:
 
 # Command palette and quick switchers
 command:
+  open_project_config: "프로젝트 설정 열기…"
+  edit_window_title: "창 제목 편집…"
+  zoom_window: "창 확대/축소"
   check_flow: "플로우 검사…"
   claude_install_hooks: "Claude: Hook 통합 설치"
   claude_uninstall_hooks: "Claude: Hook 통합 제거"
@@ -137,6 +140,9 @@ welcome:
   changelog_open_policy: "Cmd+O: 이 창에 프로젝트 추가 · Cmd+Shift+O: 새 창에서 열기"
 
 # Menus — top-level names
+titlebar:
+  app_menu: "애플리케이션 메뉴"
+
 menu:
   file: "파일"
   view: "보기"
@@ -219,6 +225,7 @@ dock:
   sidebar_tab_worktrees: "프로젝트"
   sidebar_tab_git: "Git"
   sidebar_tab_files: "파일"
+  settings: "설정"
 
 # Task panel
 task:

@@ -2103,6 +2103,13 @@ impl Workspace {
                 "move_project_to_group" => {
                     self.on_move_active_project_to_group(&MoveActiveProjectToGroup, window, cx);
                 }
+                "open_project_config" => {
+                    self.on_open_project_config(&OpenProjectConfig, window, cx);
+                }
+                "edit_window_title" => {
+                    self.on_edit_window_title(&EditWindowTitle, window, cx);
+                }
+                "zoom_window" => self.on_zoom_window(&ZoomWindow, window, cx),
                 "quit" => cx.quit(),
                 _ => {
                     // Per-section settings entries follow the

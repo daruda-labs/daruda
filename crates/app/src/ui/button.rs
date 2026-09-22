@@ -319,6 +319,23 @@ pub fn button_toggle(
     active: bool,
     cx: &App,
 ) -> Button {
+    toggle_shell(id, active, cx).label(icon)
+}
+
+/// [`button_toggle`] carrying an SVG rather than a glyph, for the controls
+/// whose meaning no box-drawing character carries.
+pub fn button_toggle_icon(
+    id: impl Into<ElementId>,
+    icon_path: &'static str,
+    active: bool,
+    cx: &App,
+) -> Button {
+    toggle_shell(id, active, cx).icon(gpui_component::Icon::empty().path(icon_path))
+}
+
+/// The chrome both toggle factories share: subdued at rest, hover previewing
+/// the active fill, sized to the dock-icon box.
+fn toggle_shell(id: impl Into<ElementId>, active: bool, cx: &App) -> Button {
     let t = theme::current(cx);
     let fg = if active { t.text_primary } else { t.text_muted };
     let active_bg = t.dock_icon_active_bg;
@@ -334,7 +351,6 @@ pub fn button_toggle(
         .small()
         .tab_stop(false)
         .custom(variant)
-        .label(icon)
         .w(px(theme::DOCK_ICON_BUTTON_W))
         .h(px(theme::DOCK_ICON_BUTTON_H))
         .p(px(0.))

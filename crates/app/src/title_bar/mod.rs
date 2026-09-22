@@ -6,6 +6,7 @@
 //! window, not of the `Workspace` that usually fills it. Settings and Welcome
 //! call the same builders.
 
+mod app_menu;
 pub(crate) mod policy;
 pub(crate) mod window_controls;
 
@@ -76,6 +77,9 @@ pub(crate) fn render(
         .bg(bg)
         .items_center()
         .child(div().flex_none().w(px(inset)))
+        .when(chrome.is_client(), |d| {
+            d.children(app_menu::app_menu_button(cx).map(IntoElement::into_any_element))
+        })
         .children(leading)
         .child(window_controls::drag_region(chrome.tier, window, cx))
         .children(trailing)

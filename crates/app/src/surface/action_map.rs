@@ -4,17 +4,18 @@
 use gpui::KeyBinding;
 
 use crate::workspace::{
-    ClosePane, CloseTab, CommitAmend, CommitChanges, EditTask, FilesActivate, FilesCollapse,
-    FilesExpand, FilesRefresh, FilesSelectNext, FilesSelectPrev, FilesToggleHidden, FocusNextPane,
-    FocusPaneDown, FocusPaneLeft, FocusPaneRight, FocusPaneUp, FocusPrevPane, GitChangesActivate,
-    GitChangesSelectNext, GitChangesSelectPrev, GitChangesToggleStage, MoveActiveProjectToGroup,
-    MoveTabLeft, MoveTabRight, NewGroup, NewSkill, NewTab, NewTask, NextTab, OpenAgentChat,
-    OpenCommandHistory, OpenSettings, PrevTab, PushChanges, RefreshGitStatus, ReloadFlowGraph,
-    RenameActiveProject, RunFlow, ShowFlowGraph, ShowLeftDockFiles, ShowLeftDockGit,
-    ShowLeftDockLanes, SplitDown, SplitRight, SwitchRightPanelFlows, SwitchRightPanelSkills,
-    SwitchRightPanelTasks, SwitchRightPanelTools, SwitchRightPanelUsage, ToggleBottomDock,
-    ToggleCommandPalette, ToggleFilesFocus, ToggleGitChangesFocus, ToggleLaneSwitcher,
-    ToggleLeftDock, ToggleRightDock, ValidateFlow,
+    ClosePane, CloseTab, CommitAmend, CommitChanges, EditTask, EditWindowTitle, FilesActivate,
+    FilesCollapse, FilesExpand, FilesRefresh, FilesSelectNext, FilesSelectPrev, FilesToggleHidden,
+    FocusNextPane, FocusPaneDown, FocusPaneLeft, FocusPaneRight, FocusPaneUp, FocusPrevPane,
+    GitChangesActivate, GitChangesSelectNext, GitChangesSelectPrev, GitChangesToggleStage,
+    MoveActiveProjectToGroup, MoveTabLeft, MoveTabRight, NewGroup, NewSkill, NewTab, NewTask,
+    NextTab, OpenAgentChat, OpenCommandHistory, OpenProjectConfig, OpenSettings, PrevTab,
+    PushChanges, RefreshGitStatus, ReloadFlowGraph, RenameActiveProject, RunFlow, ShowFlowGraph,
+    ShowLeftDockFiles, ShowLeftDockGit, ShowLeftDockLanes, SplitDown, SplitRight,
+    SwitchRightPanelFlows, SwitchRightPanelSkills, SwitchRightPanelTasks, SwitchRightPanelTools,
+    SwitchRightPanelUsage, ToggleBottomDock, ToggleCommandPalette, ToggleFilesFocus,
+    ToggleGitChangesFocus, ToggleLaneSwitcher, ToggleLeftDock, ToggleRightDock, ValidateFlow,
+    ZoomWindow,
 };
 use crate::{CloseProject, OpenFolder, Quit};
 use daruda_terminal::view::{Copy, Paste, SelectAll};
@@ -64,6 +65,9 @@ pub fn apply_keybinding_overrides(
 
         bind!(key_str, name_str, cx,
             "open_settings" => OpenSettings(daruda_config::BuiltinSection::default()),
+            "open_project_config" => OpenProjectConfig,
+            "edit_window_title" => EditWindowTitle,
+            "zoom_window" => ZoomWindow,
             "quit" => Quit,
             "copy" => Copy,
             "paste" => Paste,

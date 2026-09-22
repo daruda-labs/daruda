@@ -55,6 +55,23 @@ pub(in crate::workspace) const PALETTE_ENTRIES: &[PaletteEntry] = &[
         label: s::command_settings,
         shortcut: "Cmd+,",
     },
+    // These three are otherwise menu-only, which puts them out of reach
+    // wherever gpui does not draw a menu bar.
+    PaletteEntry {
+        id: "open_project_config",
+        label: s::command_open_project_config,
+        shortcut: "",
+    },
+    PaletteEntry {
+        id: "edit_window_title",
+        label: s::command_edit_window_title,
+        shortcut: "",
+    },
+    PaletteEntry {
+        id: "zoom_window",
+        label: s::command_zoom_window,
+        shortcut: "",
+    },
     PaletteEntry {
         id: "open_settings.general",
         label: s::command_settings_general,

@@ -53,6 +53,9 @@ timestamp:
 
 # Command palette and quick switchers
 command:
+  open_project_config: "Open Project Config…"
+  edit_window_title: "Edit Window Title…"
+  zoom_window: "Zoom Window"
   check_flow: "Check Flow…"
   claude_install_hooks: "Claude: Install Hook Integration"
   claude_uninstall_hooks: "Claude: Uninstall Hook Integration"
@@ -138,6 +141,9 @@ welcome:
   changelog_open_policy: "Cmd+O adds the project to this window · Cmd+Shift+O opens in a new window"
 
 # Menus — top-level names
+titlebar:
+  app_menu: "Application menu"
+
 menu:
   file: "File"
   view: "View"
@@ -220,6 +226,7 @@ dock:
   sidebar_tab_worktrees: "Projects"
   sidebar_tab_git: "Git"
   sidebar_tab_files: "Files"
+  settings: "Settings"
 
 # Task panel
 task:

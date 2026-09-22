@@ -363,6 +363,9 @@ command_string!(command_right_panel_usage, "command.right_panel_usage");
 command_string!(command_run_flow, "command.run_flow");
 command_string!(command_select_all, "command.select_all");
 command_string!(command_settings, "command.settings");
+command_string!(command_open_project_config, "command.open_project_config");
+command_string!(command_edit_window_title, "command.edit_window_title");
+command_string!(command_zoom_window, "command.zoom_window");
 command_string!(command_show_files, "command.show_files");
 command_string!(command_show_flow_graph, "command.show_flow_graph");
 command_string!(command_show_git_changes, "command.show_git_changes");
@@ -1033,6 +1036,12 @@ pub fn sidebar_tab_git() -> String {
 }
 pub fn sidebar_tab_files() -> String {
     rust_i18n::t!("dock.sidebar_tab_files").into_owned()
+}
+pub fn dock_settings() -> String {
+    rust_i18n::t!("dock.settings").into_owned()
+}
+pub fn titlebar_app_menu() -> String {
+    rust_i18n::t!("titlebar.app_menu").into_owned()
 }
 
 // ============================================================================
