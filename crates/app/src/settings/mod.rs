@@ -2,7 +2,11 @@
 //!
 //! Hosted by a `Workspace` in place of its body, one per window; re-opening an
 //! already-open one routes through [`SettingsView::focus_section`] instead of
-//! building a second. Builtin sections pair a `BuiltinSection` variant with
+//! building a second. Two windows can therefore show this at once:
+//! [`SettingsView::sync_external_settings`] keeps them coherent by adopting an
+//! outside change only when there is no local draft, so a view holding one
+//! shows a stale value until that draft clears — and a stale re-commit is
+//! refused as a conflict rather than overwriting. Builtin sections pair a `BuiltinSection` variant with
 //! nav/header strings and a `render_<section>` method. The view draws no
 //! chrome of its own — the host window owns the title bar — and asks to be
 //! dismissed by emitting [`SettingsEvent::Close`] rather than acting on the

@@ -285,6 +285,9 @@ impl Render for Workspace {
         // the title bar offers and which actions this window answers.
         let in_settings = self.settings.is_some();
         let title_bar_bg = t.title_bar_bg;
+        // Copied out like the other title-bar tokens: `t` borrows `cx`, which the
+        // snapshot staging below needs mutably.
+        let title_bar_text = t.text_primary;
         // These tab-strip slots still read raw consts; pick light-aware values
         // so the tab bar doesn't render dark with white text on the light theme.
         let tab_bar_bg = if dark {
@@ -526,7 +529,17 @@ impl Render for Workspace {
         let title_bar = crate::title_bar::render(
             crate::title_bar::chrome_for_window(window),
             title_bar_bg,
-            None,
+            // Settings draws no header of its own, so without this the screen
+            // goes unnamed — the sidebar lists sections, not what they belong
+            // to, and the window title still reads as the project.
+            in_settings.then(|| {
+                div()
+                    .flex_none()
+                    .text_size(px(theme::TAB_FONT_SIZE))
+                    .text_color(title_bar_text)
+                    .child(crate::surface::strings::settings_title())
+                    .into_any_element()
+            }),
             // No docks are on screen behind Settings, so the toggles have
             // nothing to show or hide — and the actions they dispatch are not
             // registered in that mode either.
@@ -1109,10 +1122,16 @@ impl Render for Workspace {
         // pane's content. Each open file pane carries its own search
         // state; "the file viewer" for action-routing purposes is the
         // one that currently has focus.
-        let focused_is_file = self.focused_file_view().is_some();
-        let focused_search_open = self
-            .focused_file_view()
-            .is_some_and(|fv| fv.search.is_some());
+        // Settings covers the file pane, so its tokens must come off with it:
+        // `FileViewerSearch` binds a bare `enter`, and leaving it advertised
+        // while the user types in a settings field would rest on "the action
+        // is unregistered, so the key falls through" — true today, and not a
+        // thing to depend on.
+        let focused_is_file = !in_settings && self.focused_file_view().is_some();
+        let focused_search_open = !in_settings
+            && self
+                .focused_file_view()
+                .is_some_and(|fv| fv.search.is_some());
         let mut key_ctx = KeyContext::default();
         key_ctx.add("Workspace");
         if focused_is_file {

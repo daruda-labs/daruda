@@ -248,9 +248,15 @@ agent/ → lane/
 - `lane/` imports nothing from `workspace/`, `project/`, or `agent/`.
 - `project/` imports `lane/` only; nothing from `workspace/` or `agent/`.
 - `agent/` imports `lane/` only; nothing from `workspace/` or `project/`.
-- `settings/` imports nothing from `workspace/`. Its host is a `Workspace`, but
-  it asks for things by emitting `SettingsEvent` — a handle or a direct call
-  would put the edge back the other way.
+- `settings/` holds no handle to its host and never resolves "the" workspace to
+  act on its behalf — it asks by emitting `SettingsEvent`, and
+  `workspace/settings_ops.rs` answers. The two things it *may* reach for read
+  the other way round: the Globals that happen to live under `workspace/`
+  (`accounts_global`, `auth_status_global`, `agent_vocabulary_global`,
+  `dialog_helpers`), and `WindowRegistry::for_each_workspace` for a symmetric
+  broadcast to *every* window (`accounts.rs`). Publishing to all of them is not
+  delegating to one; the first hop back into a single `Workspace` is the edge
+  that must not come back.
 
 When a function references a lane across module boundaries, pass
 the full `daruda_store::project::LaneRef { project, lane }` —
