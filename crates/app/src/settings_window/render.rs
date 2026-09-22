@@ -10,7 +10,7 @@ use super::{SettingsWindow, settings_button as button};
 use crate::surface::strings as s;
 
 impl Render for SettingsWindow {
-    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let t = theme::current(cx);
         // Match the workspace title bar's themed token (retones for light mode)
         // rather than the fixed-dark `SURFACE_1` const, which left dark header
@@ -19,7 +19,15 @@ impl Render for SettingsWindow {
         let header_text = t.text_primary;
         let panel_bg = t.modal_panel_bg;
 
-        // Header bar (window-wide, above sidebar+body).
+        // Header bar (window-wide, above sidebar+body). This window shares
+        // `build_titlebar_options` with the workspace, so off macOS it is the
+        // only row that can carry the drag region and the close button.
+        let chrome = crate::title_bar::chrome_for_window(window);
+        let inset = if chrome.is_client() {
+            theme::CLIENT_CHROME_INSET
+        } else {
+            theme::TRAFFIC_LIGHT_WIDTH
+        };
         let header = div()
             .flex()
             .flex_row()
@@ -28,10 +36,20 @@ impl Render for SettingsWindow {
             .h(px(theme::TAB_BAR_HEIGHT))
             .flex_none()
             .bg(header_bg)
-            .pl(px(theme::TRAFFIC_LIGHT_WIDTH))
+            .pl(px(inset))
             .text_size(px(theme::TAB_FONT_SIZE))
             .text_color(header_text)
-            .child(s::settings_title());
+            .child(s::settings_title())
+            .child(crate::title_bar::window_controls::drag_region(
+                chrome.tier,
+                window,
+                cx,
+            ))
+            .when(chrome.is_client(), |d| {
+                d.child(crate::title_bar::window_controls::window_controls(
+                    chrome, window, cx,
+                ))
+            });
 
         let body = self.render_section_body(cx);
         let sidebar = self.render_sidebar_nav(cx);

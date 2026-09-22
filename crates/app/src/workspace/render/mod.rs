@@ -510,8 +510,8 @@ impl Render for Workspace {
                     this.on_toggle_right_dock(&super::ToggleRightDock, window, cx);
                 }),
             ));
-        let title_bar = super::title_bar::render(
-            self.window_chrome,
+        let title_bar = crate::title_bar::render(
+            crate::title_bar::chrome_for_window(window),
             title_bar_bg,
             None,
             Some(dock_toggles.into_any_element()),

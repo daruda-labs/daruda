@@ -54,7 +54,7 @@ impl WelcomeScreen {
 }
 
 impl Render for WelcomeScreen {
-    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let has_recent = !self.recent.is_empty();
 
         let t = theme::current(cx);
@@ -198,27 +198,35 @@ impl Render for WelcomeScreen {
             .text_color(faint_text)
             .child(s::welcome_changelog_open_policy());
 
-        // Main layout — centered panel.
+        // This is the first window a fresh install opens, and it shares
+        // `build_titlebar_options` with the workspace — so off macOS it needs
+        // its own drag region and close button or it cannot be moved or shut.
+        let chrome = crate::title_bar::chrome_for_window(window);
+        let title_bar = crate::title_bar::render(chrome, panel_bg, None, None, window, cx);
+
+        // Main layout — title bar over a centered panel.
         div()
             .track_focus(&self.focus_handle)
             .size_full()
             .flex()
-            .items_center()
-            .justify_center()
+            .flex_col()
             .bg(panel_bg)
+            .child(title_bar)
             .child(
-                div()
-                    .flex()
-                    .flex_col()
-                    .items_center()
-                    .gap(px(theme::WELCOME_GAP))
-                    .w(px(theme::WELCOME_PANEL_WIDTH))
-                    .p(px(theme::WELCOME_PANEL_PAD))
-                    .child(title)
-                    .child(open_folder_btn)
-                    .child(recent_section)
-                    .child(new_empty_btn)
-                    .child(changelog),
+                div().flex_1().flex().items_center().justify_center().child(
+                    div()
+                        .flex()
+                        .flex_col()
+                        .items_center()
+                        .gap(px(theme::WELCOME_GAP))
+                        .w(px(theme::WELCOME_PANEL_WIDTH))
+                        .p(px(theme::WELCOME_PANEL_PAD))
+                        .child(title)
+                        .child(open_folder_btn)
+                        .child(recent_section)
+                        .child(new_empty_btn)
+                        .child(changelog),
+                ),
             )
     }
 }

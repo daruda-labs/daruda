@@ -39,6 +39,7 @@ pub mod surface;
 mod telegram;
 #[cfg(test)]
 mod test_support;
+mod title_bar;
 mod transcript;
 pub mod ui;
 mod update;

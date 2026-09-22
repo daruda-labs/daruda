@@ -32,7 +32,7 @@ impl gpui::Render for DragArm {
 /// here would be shadowed unless it also called `.occlude()` — a step that
 /// fails silently and cannot be reproduced on macOS. Keeping the strip empty
 /// makes the mistake unrepresentable.
-pub(super) fn drag_region(tier: ControlTier, window: &mut Window, cx: &mut App) -> Stateful<Div> {
+pub(crate) fn drag_region(tier: ControlTier, window: &mut Window, cx: &mut App) -> Stateful<Div> {
     let base = div().id("title-bar-drag").flex_1().h_full();
     match tier {
         // Windows answers WM_NCHITTEST from this hitbox and takes the drag,
@@ -66,7 +66,7 @@ pub(super) fn drag_region(tier: ControlTier, window: &mut Window, cx: &mut App) 
 }
 
 /// Minimize / maximize-or-restore / close, flush to the title bar's right edge.
-pub(super) fn window_controls(chrome: WindowChrome, window: &Window, cx: &App) -> Div {
+pub(crate) fn window_controls(chrome: WindowChrome, window: &Window, cx: &App) -> Div {
     let maximized = window.is_maximized();
     let (zoom_glyph, zoom_id) = if maximized {
         (GLYPH_RESTORE, "window-restore")

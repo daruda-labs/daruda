@@ -105,12 +105,13 @@ async fn drive_client_chrome_switches_the_window_chrome(cx: &mut TestAppContext)
     })
     .unwrap();
 
-    cx.update(|cx| {
+    cx.update_window(window_handle.into(), |_, window, _| {
         assert!(
-            workspace.read(cx).window_chrome.is_client(),
+            crate::title_bar::chrome_for_window(window).is_client(),
             "the scenario left the window on its host chrome",
         );
-    });
+    })
+    .unwrap();
 }
 
 #[gpui::test]
