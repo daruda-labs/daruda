@@ -246,9 +246,11 @@ same suite minus the one module that dominates it: measured 2026-09-18,
 each tab they open spawns an actual shell. It is an iteration loop, not a
 gate — the [pre-commit checks](#pre-commit-checks) still run everything.
 
-`ci.yml` has a second job, `linux`, which builds and tests the same package list on `ubuntu-latest`. It runs no lint scripts — those read source rather than platform, and the macOS job already ran them. What it does carry is the `#[cfg]` arms the macOS job can never compile: its first three runs turned up two unused imports and a font-resolution defect that left every mermaid label blank on Linux, none of which macOS could have seen.
+`ci.yml` runs one job per platform — `macOS`, `Linux`, `Windows` — each building and testing the same package list, plus a `Lint` job. The lint work is split out because none of it compiles: `cargo fmt` and the lint scripts read source rather than platform, so running them once on `ubuntu-latest` answers in seconds instead of behind a platform build, and a lint failure cannot be mistaken for a test failure.
 
-Note: `.github/workflows/ci.yml` gates fmt, the clippy list above, the 8 lint scripts through `lint-platform-boundary.sh`, `lint-env-literals.sh` with its self-test, `lint-no-silent-update.sh`, `lint-agent-activity.sh`, the `cargo doc` link check, and the package-scoped `cargo test` list above.
+What the `Linux` job carries that no lint could is the `#[cfg]` arms the macOS job never compiles: its first three runs turned up two unused imports and a font-resolution defect that left every mermaid label blank on Linux, none of which macOS could have seen.
+
+Note: the `Lint` job gates fmt, the 8 lint scripts through `lint-platform-boundary.sh`, `lint-env-literals.sh` with its self-test, `lint-no-silent-update.sh`, and `lint-agent-activity.sh`. The platform jobs gate the clippy list above and the package-scoped `cargo test` list above; the `cargo doc` link check runs on macOS.
 
 The doc-link gate covers six crates rather than all of them: clippy does not
 read intra-doc links, so a deleted item leaves a dangling `[`Name`]` in the

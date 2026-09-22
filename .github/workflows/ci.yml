@@ -18,55 +18,28 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  check:
-    name: Check, lint, test
-    runs-on: macos-14  # Apple Silicon runner
-    timeout-minutes: 15
+  lint:
+    name: Lint
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
 
+    # Nothing here compiles: `cargo fmt` reads the source and the scripts are
+    # greps. Split out so the answer arrives in seconds rather than behind a
+    # platform build, and so a lint failure is not read as a test failure.
     steps:
       - name: Checkout
         uses: actions/checkout@v6
-        with:
-          submodules: recursive
-
-      - name: Cache rustup toolchain
-        uses: actions/cache@v5
-        with:
-          path: ~/.rustup/toolchains
-          key: rustup-1.95-${{ runner.os }}-${{ runner.arch }}
+        # No submodules: the ghostty tree is only wanted by a build script,
+        # and the scans below never leave `crates/` and `scripts/`.
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
         with:
           toolchain: "1.95"
-          components: rustfmt, clippy
-
-      - name: Cache Rust build
-        uses: Swatinem/rust-cache@v2.9.1
-
-      - name: Cache Zig
-        uses: actions/cache@v5
-        with:
-          path: .context/zig
-          key: zig-0.14.1-${{ runner.os }}-${{ runner.arch }}
-
-      - name: Install Zig 0.14.1
-        run: ./scripts/bootstrap-zig.sh
-
-      - name: Add Zig to PATH
-        run: echo "$GITHUB_WORKSPACE/.context/zig/0.14.1" >> "$GITHUB_PATH"
-
-      - name: Fetch locked dependencies
-        run: cargo fetch --locked
-
-      - name: Verify vendored GPUI
-        run: cargo run --locked -p vendor_gpui -- --check
+          components: rustfmt
 
       - name: Format
         run: cargo fmt --all -- --check
-
-      - name: Clippy
-        run: cargo clippy --locked -p ghostty_vt -p ghostty_vt_sys -p daruda_terminal -p daruda -p daruda_config -p daruda_store -p daruda_agent -p daruda_update -p daruda_acp -p daruda_core -p daruda_flow -p ferrum_flow -p vendor_gpui -p test_process --all-targets -- -D warnings
 
       - name: Lint — inline literals
         run: ./scripts/lint-inline-literals.sh
@@ -102,6 +75,53 @@ jobs:
 
       - name: Lint — single agent-activity source
         run: ./scripts/lint-agent-activity.sh
+
+  macos:
+    name: macOS — build and test
+    runs-on: macos-14  # Apple Silicon runner
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          submodules: recursive
+
+      - name: Cache rustup toolchain
+        uses: actions/cache@v5
+        with:
+          path: ~/.rustup/toolchains
+          key: rustup-1.95-${{ runner.os }}-${{ runner.arch }}
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: "1.95"
+          components: clippy
+
+      - name: Cache Rust build
+        uses: Swatinem/rust-cache@v2.9.1
+
+      - name: Cache Zig
+        uses: actions/cache@v5
+        with:
+          path: .context/zig
+          key: zig-0.14.1-${{ runner.os }}-${{ runner.arch }}
+
+      - name: Install Zig 0.14.1
+        run: ./scripts/bootstrap-zig.sh
+
+      - name: Add Zig to PATH
+        run: echo "$GITHUB_WORKSPACE/.context/zig/0.14.1" >> "$GITHUB_PATH"
+
+      - name: Fetch locked dependencies
+        run: cargo fetch --locked
+
+      - name: Verify vendored GPUI
+        run: cargo run --locked -p vendor_gpui -- --check
+
+      - name: Clippy
+        run: cargo clippy --locked -p ghostty_vt -p ghostty_vt_sys -p daruda_terminal -p daruda -p daruda_config -p daruda_store -p daruda_agent -p daruda_update -p daruda_acp -p daruda_core -p daruda_flow -p ferrum_flow -p vendor_gpui -p test_process --all-targets -- -D warnings
 
       - name: Doc links
         run: RUSTDOCFLAGS="-D warnings" cargo doc --locked --no-deps -p daruda_flow -p daruda_core -p daruda_update -p ghostty_vt_sys -p ghostty_vt -p daruda_agent
@@ -178,7 +198,7 @@ jobs:
       - name: Verify vendored GPUI
         run: cargo run --locked -p vendor_gpui -- --check
 
-      # No lint steps: those read source, not platform, and the macOS job
+      # No lint steps: those read source, not platform, and the `lint` job
       # already ran them. What is unproven here is whether this tree
       # compiles and passes at all on Linux.
       # `--keep-going`: the first run stopped at the first crate that would
