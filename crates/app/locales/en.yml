@@ -1098,7 +1098,6 @@ settings:
   accounts_reauth_no_credentials_detail: "Reauthentication succeeded but no credentials were found afterward."
   accounts_login_in_progress: "Adding account…"
   accounts_authentication_in_progress: "Authentication in progress…"
-  accounts_workspace_required: "Open a workspace before adding or reauthenticating an account."
   accounts_reauth_added: "Account reauthenticated."
   accounts_reauth_failed: "Could not reauthenticate account."
   accounts_reauth_missing: "The account being reauthenticated no longer exists."

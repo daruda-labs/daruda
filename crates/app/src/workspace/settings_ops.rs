@@ -10,7 +10,7 @@
 use daruda_config::BuiltinSection;
 use gpui::{AppContext as _, Context, Entity, Subscription, Window};
 
-use crate::settings::{SettingsEvent, SettingsView};
+use crate::settings::{LoginRequest, SettingsEvent, SettingsView};
 use crate::workspace::Workspace;
 
 /// The Settings view a window is showing, with the subscription carrying its
@@ -41,6 +41,9 @@ impl Workspace {
                     window,
                     |this, _, event: &SettingsEvent, window, cx| match event {
                         SettingsEvent::Close => this.close_settings(window, cx),
+                        SettingsEvent::Login(request) => {
+                            this.run_settings_login(request, window, cx)
+                        }
                     },
                 );
                 self.settings = Some(SettingsHost {
@@ -66,5 +69,21 @@ impl Workspace {
         let pane_id = self.active_runtime().focused_pane_id;
         self.focus_pane(pane_id, window, cx);
         cx.notify();
+    }
+
+    /// Run a login an account row asked for. The view has no business spawning
+    /// one — the login command comes from this window's agent catalog, and this
+    /// window keeps the process handle and the Cancel that goes with it.
+    fn run_settings_login(
+        &mut self,
+        request: &LoginRequest,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        match *request {
+            LoginRequest::AddAccount(recipe) => self.add_managed_account(recipe, window, cx),
+            LoginRequest::Reauthenticate(account) => self.reauthenticate_account(account, cx),
+            LoginRequest::ReauthenticateSystem(recipe) => self.reauthenticate_system(recipe, cx),
+        }
     }
 }

@@ -3918,9 +3918,6 @@ pub fn settings_accounts_login_in_progress() -> String {
 pub fn settings_accounts_authentication_in_progress() -> String {
     rust_i18n::t!("settings.accounts_authentication_in_progress").into_owned()
 }
-pub fn settings_accounts_workspace_required() -> String {
-    rust_i18n::t!("settings.accounts_workspace_required").into_owned()
-}
 /// Settings-window banner for an action that could not be carried out. Each
 /// wraps the raw diagnostic (a `daruda_config` persistence message, an OS
 /// credential-store stderr line, an `io::Error`) in a sentence aimed at the

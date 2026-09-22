@@ -14,11 +14,11 @@
 //! every window symmetrically — never a manual per-window broadcast, which is
 //! what let logins go stale in other windows.
 //!
-//! The add-account buttons are the one case needing a `Workspace` (the login
-//! command comes from that window's agent catalog), so `start_add_account`
-//! runs the login in `WindowRegistry::first_workspace`. The process-wide
-//! login marker in `AccountsGlobal` disables competing Settings actions while
-//! the target Workspace retains ownership of the process handle and Cancel.
+//! The login buttons are the one case needing a `Workspace` (the login command
+//! comes from that window's agent catalog), so they emit
+//! [`SettingsEvent::Login`] and the host runs it. The process-wide login marker
+//! in `AccountsGlobal` disables competing Settings actions while that Workspace
+//! retains ownership of the process handle and Cancel.
 
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -27,7 +27,8 @@ use daruda_store::observability::error_report::{ErrorReport, ErrorSeverity};
 use gpui::{AnyElement, ClickEvent, IntoElement, SharedString, div, prelude::*, px};
 
 use super::super::{
-    SettingsView, settings_button as button, settings_button_danger as button_danger,
+    LoginRequest, SettingsEvent, SettingsView, settings_button as button,
+    settings_button_danger as button_danger,
 };
 use crate::surface::strings as s;
 use crate::ui::theme;
@@ -373,143 +374,37 @@ impl SettingsView {
         )
     }
 
-    /// Starts a headless add-account login for `recipe` against the first
-    /// live `Workspace` window (`WindowRegistry::first_workspace` — see
-    /// its doc for why "first" rather than the OS-active window: this is
-    /// a Settings-window click handler, so `cx.active_window()` would
-    /// resolve to the Settings window itself, not a workspace). The domain
-    /// is the button the user pressed, not that window's active agent —
+    /// Ask the host to add a managed account under `recipe`. The domain is the
+    /// button the user pressed, not the host's active agent — the host's
     /// `add_managed_account` resolves a login command for it.
     fn start_add_account(&mut self, recipe: AccountRecipeId, cx: &mut gpui::Context<Self>) {
-        let Some((handle, weak)) = WindowRegistry::first_workspace(cx) else {
-            self.report_no_workspace(
-                "Add-account login has no open Workspace window to run against",
-                "settings.accounts.add_no_workspace",
-                None,
-                cx,
-            );
-            return;
-        };
-        self.error = None;
-        let result = cx.update_window(handle, |_root, window, cx_w| {
-            if let Some(ws) = weak.upgrade() {
-                ws.update(cx_w, |ws, cx| {
-                    ws.add_managed_account(recipe, window, cx);
-                });
-                true
-            } else {
-                false
-            }
-        });
-        // `Ok(false)` is the entity behind a live window handle being gone,
-        // `Err` the window itself — one banner, two records.
-        match result {
-            Ok(true) => {}
-            Ok(false) => self.report_no_workspace(
-                "Add-account login: the target Workspace entity was released",
-                "settings.accounts.add_target_entity_gone",
-                None,
-                cx,
-            ),
-            Err(e) => self.report_no_workspace(
-                "Failed to start add-account login: target Workspace window is gone",
-                "settings.accounts.add_target_window_gone",
-                Some(e.to_string()),
-                cx,
-            ),
-        }
+        self.request_login(LoginRequest::AddAccount(recipe), cx);
     }
 
-    /// Starts a headless reauthenticate-account login against the first
-    /// live `Workspace` window — same
-    /// `WindowRegistry::first_workspace` target-resolution rationale as
-    /// [`Self::start_add_account`]. Unlike that method, this dispatches
-    /// the [`crate::workspace::ReauthenticateAccount`] action into the
-    /// resolved window (rather than calling a `Workspace` method
-    /// directly): the action already carries the target `AccountId` and
-    /// is registered on `Workspace`'s root render tree
-    /// (`Workspace::on_reauthenticate_account`), so dispatching it here
-    /// reaches the same handler without this Settings-window module
-    /// needing `pub(crate)` access into `crate::workspace`'s internals.
+    /// Ask the host to re-run the login for an account that already exists.
     fn start_reauthenticate_account(
         &mut self,
         account_id: AccountId,
         cx: &mut gpui::Context<Self>,
     ) {
-        self.dispatch_login_action(
-            Box::new(crate::workspace::ReauthenticateAccount(account_id)),
-            "reauth",
-            cx,
-        );
+        self.request_login(LoginRequest::Reauthenticate(account_id), cx);
     }
 
-    /// Re-run the login for `recipe`'s ambient home — the credentials a pane
-    /// with no managed account uses. Same dispatch shape as
-    /// [`Self::start_reauthenticate_account`]; only the action differs,
-    /// because a system login has no account id to name.
+    /// Ask the host to re-run the login for `recipe`'s ambient home — the
+    /// credentials a pane with no managed account uses.
     fn start_reauthenticate_system(
         &mut self,
         recipe: AccountRecipeId,
         cx: &mut gpui::Context<Self>,
     ) {
-        self.dispatch_login_action(
-            Box::new(crate::workspace::ReauthenticateSystem(recipe)),
-            "system_reauth",
-            cx,
-        );
+        self.request_login(LoginRequest::ReauthenticateSystem(recipe), cx);
     }
 
-    /// Hand a login action to the first open `Workspace` window, which is
-    /// where the headless login machinery lives.
-    ///
-    /// Both failure modes surface the same user-facing message — there is no
-    /// Workspace window to run against — and differ only in the diagnostic
-    /// they log; `flow` names the caller in that log and its dedup key.
-    fn dispatch_login_action(
-        &mut self,
-        action: Box<dyn gpui::Action>,
-        flow: &str,
-        cx: &mut gpui::Context<Self>,
-    ) {
-        let Some((handle, _weak)) = WindowRegistry::first_workspace(cx) else {
-            self.report_no_workspace(
-                format!("{flow} login has no open Workspace window to run against"),
-                format!("settings.accounts.{flow}_no_workspace"),
-                None,
-                cx,
-            );
-            return;
-        };
+    /// The one way a login leaves this section. Clearing the banner first is
+    /// what keeps a previous failure from reading as this attempt's.
+    fn request_login(&mut self, request: LoginRequest, cx: &mut gpui::Context<Self>) {
         self.error = None;
-        let result = cx.update_window(handle, |_root, window, cx_w| {
-            window.dispatch_action(action, cx_w);
-        });
-        if let Err(e) = result {
-            self.report_no_workspace(
-                format!("Failed to start {flow} login: target Workspace window is gone"),
-                format!("settings.accounts.{flow}_target_window_gone"),
-                Some(e.to_string()),
-                cx,
-            );
-        }
-    }
-
-    /// Surface "no Workspace window" inline in Settings and log why.
-    fn report_no_workspace(
-        &mut self,
-        title: impl Into<String>,
-        dedup: impl Into<String>,
-        detail: Option<String>,
-        cx: &mut gpui::Context<Self>,
-    ) {
-        let mut report = ErrorReport::new(title)
-            .severity(ErrorSeverity::Warning)
-            .at(file!(), line!())
-            .dedup(dedup);
-        if let Some(detail) = detail {
-            report = report.message(detail);
-        }
-        self.report_section_error(s::settings_accounts_workspace_required(), report, cx);
+        cx.emit(SettingsEvent::Login(request));
     }
 
     /// Immediate (no confirm) — sets which account new panes of `recipe`

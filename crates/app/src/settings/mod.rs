@@ -76,6 +76,22 @@ impl CopyFeedback {
 pub enum SettingsEvent {
     /// The user is done: Escape, or the sidebar's back button.
     Close,
+    /// A login to run. The machinery lives on `Workspace`, beside the panes
+    /// the resulting credentials are for, and it owns the process handle and
+    /// the Cancel that goes with it.
+    Login(LoginRequest),
+}
+
+/// Which login an account row asked for.
+pub enum LoginRequest {
+    /// Add a managed account under `recipe`. The login command comes from the
+    /// host's agent catalog, which is why the host resolves it.
+    AddAccount(daruda_store::accounts::AccountRecipeId),
+    /// Re-run the login for an account that already exists.
+    Reauthenticate(daruda_store::accounts::AccountId),
+    /// Re-run the login for `recipe`'s ambient home — the credentials a pane
+    /// with no managed account uses, which has no account id to name.
+    ReauthenticateSystem(daruda_store::accounts::AccountRecipeId),
 }
 
 impl EventEmitter<SettingsEvent> for SettingsView {}
