@@ -131,7 +131,7 @@ command:
   toggle_right_dock: "Toggle Right Dock"
   type_command_placeholder: "Type a command..."
 
-# Welcome screen
+# Landing view (the `welcome` key namespace is retained — see palette.rs)
 welcome:
   title: "daruda"
   open_folder: "Open Folder..."

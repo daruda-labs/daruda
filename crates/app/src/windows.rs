@@ -1,4 +1,4 @@
-//! Window lifecycle — open / close / replace workspace and welcome windows.
+//! Window lifecycle — open / close / replace workspace and settings windows.
 //!
 //! Holds the re-entrancy guard around project-opening flows so the
 //! folder picker (async) cannot race with itself or sweep a window
@@ -8,14 +8,13 @@ use std::sync::atomic::{AtomicBool, Ordering};
 
 use daruda_store::observability::error_report::{ErrorReport, ErrorSeverity};
 use daruda_store::observability::log_writer::LogWriter;
-use daruda_store::project::{ProjectState, WorkspaceState, WorkspaceUuid};
+use daruda_store::project::{ProjectState, WorkspaceState};
 use gpui::{
     App, Bounds, Point, Size, TitlebarOptions, WindowBackgroundAppearance, WindowBounds,
     WindowOptions, point, prelude::*, px,
 };
 
 use crate::settings_window::SettingsWindow;
-use crate::welcome;
 use crate::window_registry::WindowRegistry;
 use crate::workspace::Workspace;
 
@@ -177,127 +176,6 @@ pub(crate) fn try_open_workspace_window(
         cx.new(|cx| gpui_component::Root::new(workspace, window, cx))
     })
     .map(Into::into)
-}
-
-/// Resolve a recent-list `WorkspaceUuid` to its `(WorkspaceState,
-/// Vec<ProjectState>)` payload and open it. Stale UUIDs (the workspace
-/// JSON has been removed) are removed from the recent list and the
-/// call becomes a silent no-op (matches macOS conventions for stale
-/// Open Recent entries).
-pub(crate) fn open_recent_workspace(
-    uuid: WorkspaceUuid,
-    config: std::sync::Arc<daruda_config::Config>,
-    cx: &mut App,
-) {
-    let data_dir = daruda_store::persistence::default_data_dir();
-    let Some(ws_state) = daruda_store::project::load_workspace_state_in(&data_dir, uuid) else {
-        // Workspace file gone — prune the recent list so the same
-        // dead row doesn't keep returning to the menu.
-        let mut entries = daruda_store::project::load_recent_in(&data_dir);
-        entries.retain(|e| e.workspace_uuid != uuid);
-        if let Err(e) = daruda_store::project::save_recent_in(&data_dir, &entries) {
-            LogWriter::log(
-                ErrorReport::new("Failed to prune stale recent entry")
-                    .severity(ErrorSeverity::Warning)
-                    .from_error(&e)
-                    .at(file!(), line!())
-                    .with_context("workspace_uuid", uuid.as_inner().to_string())
-                    .dedup("recent.prune_missing")
-                    .build(),
-            );
-        }
-        crate::menus::refresh_recent_menu(cx);
-        return;
-    };
-    let project_states: Vec<_> = ws_state
-        .project_ids
-        .iter()
-        .filter_map(|p| daruda_store::project::load_project_state_in(&data_dir, *p))
-        .collect();
-    let opts = build_window_options(&config);
-    open_workspace_window(config, Some((ws_state, project_states)), None, opts, cx);
-}
-
-/// Open the welcome screen and wire its buttons/recent-list clicks to
-/// the workspace launch path. Shared by startup (when there is no
-/// recent project to restore) and the `CloseProject` action.
-pub(crate) fn open_welcome_window(
-    config: std::sync::Arc<daruda_config::Config>,
-    opts: WindowOptions,
-    cx: &mut App,
-) {
-    let recent =
-        daruda_store::project::load_recent_in(&daruda_store::persistence::default_data_dir());
-    let cfg_for_welcome = config.clone();
-
-    // WelcomeScreen::new registers itself in WindowRegistry; retrieve the
-    // entity from the registry after open_window returns instead of
-    // shuttling it through Arc<Mutex<>>.
-    let Ok(welcome_window) = cx.open_window(opts, |window, cx| {
-        cx.new(|cx| welcome::WelcomeScreen::new(recent, window, cx))
-    }) else {
-        LogWriter::log(
-            ErrorReport::new("failed to open welcome window")
-                .at(file!(), line!())
-                .build(),
-        );
-        return;
-    };
-
-    let Some(welcome_entity) = WindowRegistry::welcome(cx).and_then(|h| h.upgrade()) else {
-        return;
-    };
-    let ww_handle = welcome_window;
-    cx.subscribe(&welcome_entity, move |_welcome, event, cx| {
-        let cfg = cfg_for_welcome.clone();
-        // Close welcome after opening a successor window.
-        let close_welcome = move |cx: &mut App| {
-            // SILENT-OK: window or process may exit during async picker / close-loop / registry iteration
-            let _ = cx.update_window(ww_handle.into(), |_, window, _cx| {
-                window.remove_window();
-            });
-        };
-        match event {
-            welcome::WelcomeEvent::OpenFolder => {
-                // Folder picker is async; closing welcome before
-                // the user picks would quit the app on
-                // last-window-closed.
-                let cfg2 = cfg.clone();
-                let paths = cx.prompt_for_paths(gpui::PathPromptOptions {
-                    files: false,
-                    directories: true,
-                    multiple: false,
-                    prompt: None,
-                });
-                cx.spawn(async move |cx| {
-                    if let Ok(Ok(Some(selected))) = paths.await
-                        && let Some(path) = selected.first()
-                    {
-                        let project = daruda_store::project::Project::from_path(path);
-                        // SILENT-OK: window or process may exit during async picker / close-loop / registry iteration
-                        cx.update(|cx| {
-                            let opts = build_window_options(&cfg2);
-                            open_workspace_window(cfg2.clone(), None, Some(project), opts, cx);
-                            close_welcome(cx);
-                            crate::menus::refresh_recent_menu(cx);
-                        });
-                    }
-                })
-                .detach();
-            }
-            welcome::WelcomeEvent::OpenRecent(uuid) => {
-                open_recent_workspace(*uuid, cfg.clone(), cx);
-                close_welcome(cx);
-                crate::menus::refresh_recent_menu(cx);
-            }
-            welcome::WelcomeEvent::NewEmpty => {
-                let opts = build_window_options(&cfg);
-                open_workspace_window(cfg, None, None, opts, cx);
-                close_welcome(cx);
-            }
-        }
-    })
-    .detach();
 }
 
 /// Open the recent project at `idx`. Missing index / stale workspace
@@ -724,22 +602,18 @@ fn open_chooser_modal(
 }
 
 /// Return the handle of the window that should be closed when a
-/// `ReplaceCurrent` open fires. Checks the `WindowRegistry` first
-/// (covers Workspace windows), then falls back to checking whether the
-/// active window is a `WelcomeScreen` (which is not tracked by the
-/// registry).
+/// `ReplaceCurrent` open fires. Every window that can initiate one is a
+/// registered Workspace, including the empty one showing Landing, so the
+/// registry is the whole answer.
 fn active_window_to_close(cx: &App) -> Option<gpui::AnyWindowHandle> {
-    WindowRegistry::active_workspace_handle(cx).or_else(|| {
-        let active = cx.active_window()?;
-        WindowRegistry::welcome_window(cx).filter(|&h| h == active)
-    })
+    WindowRegistry::active_workspace_handle(cx)
 }
 
 /// Open a workspace window and, if `mode == ReplaceCurrent`, close
 /// `window_to_close` on the next tick. Passing `None` skips the
 /// close step (used when there is no initiating window to replace).
-/// Welcome is included as a valid target because the menu-bar
-/// `Open…` path does not route through Welcome's own event handler.
+/// An empty workspace showing Landing is a valid target like any other:
+/// replacing it is what keeps a recent-row click from leaving it behind.
 pub(crate) fn open_project_with_mode(
     config: std::sync::Arc<daruda_config::Config>,
     saved: Option<(WorkspaceState, Vec<ProjectState>)>,

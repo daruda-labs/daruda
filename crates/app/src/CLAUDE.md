@@ -8,11 +8,11 @@ config/keybinding wiring.
 
 ```
 app/src/
-├── (top-level)           # App entry, window/menu lifecycle, PTY, config watcher, slot actions, welcome
+├── (top-level)           # App entry, window/menu lifecycle, PTY, config watcher, slot actions
 ├── agent/                # Agent-side data models — MCP, skills, tasks (GPUI-free cores + Global wrappers) — plus GPUI-free account + ACP launch resolution
 ├── project/              # Runtime Project model — `Vec<Lane>` + group/color/tab_order (GPUI-free)
 ├── surface/              # App-shell constants — name, shortcuts, strings, keybinding action map
-├── title_bar/            # Window chrome shared by all three window kinds — who draws the frame (GPUI-free `policy.rs`), the drag strip, the app-drawn caption controls, the application-menu button
+├── title_bar/            # Window chrome shared by both window kinds — who draws the frame (GPUI-free `policy.rs`), the drag strip, the app-drawn caption controls, the application-menu button
 ├── ui/                   # Reusable widget primitives — gpui_component wrappers + preserved daruda widgets
 ├── workspace/            # Workspace entity — projects, tabs, panes, docks
 │   ├── command/          # Command palette + history picker
@@ -35,7 +35,7 @@ app/src/
 
 ## Top-level (`app/src/*.rs`)
 
-App-shell glue — process entry, native menu bar + Open Recent, window lifecycle (workspace / welcome / settings, `gpui_component::Root` wrapping, double-open guards), live config-reload watcher, PTY spawn + I/O threads, tab/lane slot-action macros (`tab_slot_table!` / `lane_slot_table!` — the latter generates `ActivateLane*` actions, displayed as "Activate Worktree N" in the menu), and the Welcome screen entity.
+App-shell glue — process entry, native menu bar + Open Recent, window lifecycle (workspace / settings, `gpui_component::Root` wrapping, double-open guards), live config-reload watcher, PTY spawn + I/O threads, and tab/lane slot-action macros (`tab_slot_table!` / `lane_slot_table!` — the latter generates `ActivateLane*` actions, displayed as "Activate Worktree N" in the menu).
 
 ## Layered config (user → project)
 
@@ -53,7 +53,7 @@ Not every submodule is a right-dock model with a Global wrapper: `account.rs` (`
 
 ## `surface/`
 
-App-shell constants and binding glue — app/process name, user-visible labels (menu / welcome / dock), keyboard shortcut string constants, and the config-override → GPUI `Action` resolver. Pure strings + no sibling imports (except the action map, which reaches into workspace action types).
+App-shell constants and binding glue — app/process name, user-visible labels (menu / landing / dock), keyboard shortcut string constants, the binding→display formatter, and the config-override → GPUI `Action` resolver. Pure strings + no sibling imports (except the action map, which reaches into workspace action types).
 
 ## `ui/`
 
@@ -234,7 +234,7 @@ Enforced by `scripts/lint-inline-literals.sh`. When porting from reference imple
 ### G7 — Dependency direction (one-way)
 
 ```
-main.rs → menus.rs, windows.rs → workspace/, welcome.rs, settings_window/
+main.rs → menus.rs, windows.rs → workspace/, settings_window/
   → title_bar/ → ui/, surface/          # every window kind draws the same chrome
   → agent/, project/, lane/, surface/, pty.rs, config_watcher.rs
 

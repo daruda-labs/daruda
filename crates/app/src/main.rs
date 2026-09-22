@@ -45,7 +45,6 @@ pub mod ui;
 mod update;
 mod watcher_pumps;
 mod watchers_lifecycle;
-pub mod welcome;
 pub(crate) mod window_registry;
 mod window_startup;
 mod windows;
@@ -257,7 +256,7 @@ fn main() {
         // (the single source of truth every window mirrors). Window
         // constructors also install it idempotently, so this is belt-and-
         // suspenders for the first window plus the authoritative install
-        // point when that window is Welcome (no Workspace).
+        // point for a window with no Workspace (Settings).
         crate::workspace::accounts_global::install_if_absent(
             cx,
             daruda_store::accounts::load_accounts().unwrap_or_default(),

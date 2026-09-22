@@ -8,7 +8,7 @@
 //! version and panics survive a dead `LogWriter`.
 
 use crate::hooks;
-use crate::windows::{build_window_options, open_welcome_window};
+use crate::windows::{build_window_options, open_workspace_window};
 #[cfg(debug_assertions)]
 use daruda_core::process_env;
 use gpui::{Application, QuitMode};
@@ -136,7 +136,11 @@ pub(crate) fn new_application() -> Application {
             std::sync::Arc::new(daruda_config::Config::load())
         };
         let opts = build_window_options(&config);
-        open_welcome_window(config, opts, cx);
+        // An empty workspace, which paints Landing. On macOS `QuitMode::Default`
+        // resolves to `Explicit`, so the app outlives its last window and this
+        // is the way back in; the other platforms quit instead and never
+        // reach here.
+        open_workspace_window(config, None, None, opts, cx);
     });
     app
 }

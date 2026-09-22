@@ -238,7 +238,7 @@ impl Workspace {
     }
 
     /// Rename the currently active project. No-op when the workspace
-    /// has no projects (Welcome state) or when the new name equals the
+    /// has no projects (Landing state) or when the new name equals the
     /// current one. Returns `true` when the rename mutated state.
     pub(in crate::workspace) fn rename_active_project(
         &mut self,

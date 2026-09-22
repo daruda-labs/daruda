@@ -81,7 +81,7 @@ fn abbreviate_project_branch(label: &str, density: StatusBarDensity) -> &str {
 pub(super) struct StatusBarData {
     pub orchestrator: Option<orchestrator_chip::OrchestratorChipState>,
     /// `<project>/<branch>` for git-backed active lanes, just
-    /// `<project>` for non-git or detached HEAD, `None` in Welcome
+    /// `<project>` for non-git or detached HEAD, `None` in the Landing
     /// state (no project loaded). The detached marker is rendered
     /// separately via [`Self::is_detached`].
     pub project_branch: Option<SharedString>,
@@ -158,7 +158,7 @@ impl RenderOnce for StatusBar {
         let toggle_menu_workspace = data.workspace.clone();
 
         // Detached chip is meaningful only when there's a
-        // project/branch slot to anchor next to; in Welcome state
+        // project/branch slot to anchor next to; in the Landing state
         // (`project_branch` is `None`) or when the segment is hidden,
         // suppress the chip too.
         let show_detached =

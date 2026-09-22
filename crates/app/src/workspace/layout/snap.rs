@@ -87,7 +87,7 @@ pub(in crate::workspace) struct LeftDockSnapshot {
     /// Every project in the workspace, in `tab_order` order. Drives
     /// the multi-project tree render — each entry's `lanes` slice
     /// is shown under its project header. Empty when the workspace is
-    /// in the Welcome state.
+    /// in the Landing state.
     pub projects: Vec<ProjectSnapshot>,
     /// Every group in the workspace, in `tab_order` order. Group
     /// headers interleave with ungrouped projects in the top-level
@@ -273,7 +273,7 @@ pub(in crate::workspace) struct BottomDockSnapshot {
     /// queue. Carries the pane id + the queued prompts (in FIFO order) so the
     /// bottom dock renders the queued-prompt strip above the input and routes
     /// each removal / clear-all back to that pane. `None` for a terminal-pane
-    /// focus, an agent pane with an empty queue, or the Welcome state — the
+    /// focus, an agent pane with an empty queue, or the Landing state — the
     /// strip is then not rendered.
     pub queued_prompts: Option<QueuedPromptsSnapshot>,
     /// Shell flavour of the focused pane's PTY. Drives drag-and-drop path

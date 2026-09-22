@@ -403,7 +403,7 @@ impl Render for Workspace {
 
         // Window title — user override (Window > Edit Window Title…) wins;
         // otherwise show `<project> · <branch>` for the active lane
-        // (active project only, no aggregate count). Welcome state
+        // (active project only, no aggregate count). Landing state
         // (no projects) leaves the title untouched.
         if let Some(label) = self.window_user_label.as_ref() {
             window.set_window_title(label.as_ref());

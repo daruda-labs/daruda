@@ -818,7 +818,7 @@ impl SettingsWindow {
         // `installed_plugins.json` write, and depending on
         // `WindowRegistry::for_each_workspace` would silently
         // do nothing when no Workspace is open (e.g. user
-        // running Settings from the welcome window). Direct
+        // running Settings with no workspace window). Direct
         // mutation triggers `observe_global::<SkillsState>` on
         // every observer — every open Workspace's Skills tab
         // and this Settings page's render path both re-paint

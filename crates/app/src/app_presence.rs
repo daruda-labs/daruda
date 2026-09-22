@@ -30,10 +30,9 @@ pub(crate) fn init(cx: &mut App) {
     let state = AwaySignal::HERE.observe(is_app_active(), sampled_idle(), Instant::now());
     cx.set_global(AppPresence { state });
     track_new_windows::<crate::ui::Root>(cx);
-    track_new_windows::<crate::welcome::WelcomeScreen>(cx);
 }
 
-/// Root wraps workspace and settings windows; WelcomeScreen is a bare root.
+/// Root wraps every window daruda opens — workspace and settings alike.
 /// Register at app startup so auxiliary windows participate without a Workspace.
 fn track_new_windows<T: 'static>(cx: &App) {
     cx.observe_new::<T>(|_, window, cx| {

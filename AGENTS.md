@@ -285,7 +285,7 @@ Verification loop: render → PNG → an agent reads the PNG and checks the resu
 
 #### Driving the captured state
 
-`--screenshot` takes no view argument — it captures the **restored** workspace (or welcome screen), so you steer it by steering what gets restored *before* launch. Two isolation levers + three reach tiers:
+`--screenshot` takes no view argument — it captures the **restored** workspace (empty or not), so you steer it by steering what gets restored *before* launch. Two isolation levers + three reach tiers:
 
 - **`DARUDA_DATA_DIR=<dir>`** — points the whole state dir at `<dir>` (verbatim). Pre-seed it; isolates from your real workspace.
 - **`DARUDA_PROFILE=<name>`** — `release` → `daruda/`, else `daruda-<name>/`. Debug builds already use `daruda-debug/`, so runs are isolated by default.
@@ -531,7 +531,7 @@ Plus three files that are gates of their own, each the single door to its capabi
 
 ```
 Workspace
-├── TitleBar                         — shared by Workspace / Settings / Welcome; off macOS also carries the app-menu button and the caption controls (`app/src/title_bar/`)
+├── TitleBar                         — shared by Workspace / Settings; off macOS also carries the app-menu button and the caption controls (`app/src/title_bar/`)
 ├── BodyLayout
 │   ├── LeftDock
 │   │   ├── ViewSwitcher             — Worktrees / Git / Files tab strip

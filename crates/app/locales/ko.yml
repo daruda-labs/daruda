@@ -130,7 +130,7 @@ command:
   toggle_right_dock: "오른쪽 독 전환"
   type_command_placeholder: "명령 입력..."
 
-# Welcome screen
+# Landing view (the `welcome` key namespace is retained — see palette.rs)
 welcome:
   title: "daruda"
   open_folder: "폴더 열기..."

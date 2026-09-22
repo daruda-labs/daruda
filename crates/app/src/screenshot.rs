@@ -9,7 +9,7 @@
 //! plus the first frames), captures the window, writes the PNG, and quits.
 //!
 //! Accepts `--screenshot <path>` and `--screenshot=<path>`. The capture target
-//! is the first open window — the restored workspace or the welcome screen,
+//! is the first open window — the restored workspace, empty or not,
 //! i.e. whatever the user would see on launch.
 
 use std::path::{Path, PathBuf};
@@ -444,7 +444,7 @@ pub(crate) fn schedule_terminal_widen_capture(path: PathBuf, cx: &mut App) {
 
 /// Resolve which window a capture step acts on: the scenario's own window when
 /// it opened one (Settings), else the first open window — the restored
-/// workspace or the welcome screen. Every step here has to agree on this, so
+/// workspace, empty or not. Every step here has to agree on this, so
 /// the fallback lives in one place.
 fn capture_target(target: Option<AnyWindowHandle>, cx: &mut App) -> Option<AnyWindowHandle> {
     target.or_else(|| cx.windows().into_iter().next())
@@ -488,7 +488,7 @@ fn force_repaint(target: Option<AnyWindowHandle>, cx: &mut App) {
 
 /// Drive `scenario` into view on the workspace window, returning the window to
 /// capture when the scenario opens its own (Settings); `None` falls back to the
-/// first open window. Logs and skips when no workspace is open (e.g. the welcome
+/// first open window. Logs and skips when no workspace is open (e.g. only the
 /// screen) so the capture still proceeds.
 fn apply_scenario(scenario: ScreenshotScenario, cx: &mut App) -> Option<AnyWindowHandle> {
     let Some((handle, weak)) = crate::window_registry::WindowRegistry::first_workspace(cx) else {

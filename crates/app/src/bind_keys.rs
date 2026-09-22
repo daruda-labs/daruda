@@ -169,7 +169,7 @@ pub(crate) fn register_static_bindings(cx: &mut App) {
             Some("GitChanges"),
         ),
         // Window menu — Minimize / Toggle Full Screen are global so
-        // they work whether terminal, welcome, or settings is the
+        // they work whether terminal or settings is the
         // focused responder. Zoom has no standard macOS keystroke.
         KeyBinding::new(k::SHORTCUT_MINIMIZE, MinimizeWindow, None),
         KeyBinding::new(k::SHORTCUT_TOGGLE_FULL_SCREEN, ToggleFullScreen, None),
@@ -199,15 +199,15 @@ pub(crate) fn register_global_actions(cx: &mut App, config: std::sync::Arc<darud
     });
 
     // Fallback for a window with no Workspace in its dispatch path — the
-    // Welcome screen and the Settings window itself. A focused Workspace
+    // Settings window itself. A focused Workspace
     // answers first and keeps its auth-status probe; this runs after.
     cx.on_action(|action: &OpenSettings, cx: &mut App| {
         crate::windows::open_settings_window(action.0, cx);
         cx.stop_propagation();
     });
 
-    // Close fallback for a window with no Workspace — Welcome and Settings
-    // have no dirty state to guard, so closing is unconditional. A focused
+    // Close fallback for a window with no Workspace — Settings
+    // has no dirty state to guard, so closing is unconditional. A focused
     // Workspace answers first and runs its dirty-draft prompt instead.
     cx.on_action(|_: &CloseWindow, cx: &mut App| {
         if let Some(handle) = cx.active_window() {
@@ -261,7 +261,7 @@ pub(crate) fn register_global_actions(cx: &mut App, config: std::sync::Arc<darud
     // "Remove lanes and delete on disk" (destructive). The
     // workspace mutation runs on the modal's submit callback.
     //
-    // Fallback for "no active workspace" (e.g. only Welcome is open)
+    // Fallback for "no active workspace" (e.g. only Settings is open)
     // is to close every Workspace window, so the user is never stuck
     // with an unresponsive shortcut. `QuitMode::Default` (macOS
     // Explicit) keeps the app running past the last closed window.
@@ -331,7 +331,7 @@ mod tests {
     use gpui::Keystroke;
 
     /// Root view for a window that is not a `Workspace` — the shape the
-    /// Welcome screen and the Settings window present to action dispatch.
+    /// Settings window presents to action dispatch.
     struct NoWorkspaceRoot;
 
     impl gpui::Render for NoWorkspaceRoot {
@@ -345,8 +345,8 @@ mod tests {
     }
 
     /// Such a window has no `OpenSettings` listener in its dispatch path, so
-    /// before the global fallback existed the Welcome screen had no way into
-    /// Settings at all off macOS — where gpui draws no menu bar.
+    /// without the global fallback it would have no way into Settings at all
+    /// off macOS — where gpui draws no menu bar.
     #[gpui::test]
     async fn open_settings_reaches_a_window_with_no_workspace(cx: &mut gpui::TestAppContext) {
         crate::test_support::init_gpui_component(cx);
