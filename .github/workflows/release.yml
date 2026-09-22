@@ -152,6 +152,20 @@ jobs:
         id: package
         run: ./scripts/package-windows.ps1
 
+      # The bytes that ship, not the ones that built them: a release-profile
+      # failure would otherwise be found by whoever downloaded it. `--smoke`
+      # opens the real window and exits non-zero if nothing is drawn.
+      - name: Smoke-test the packaged build
+        timeout-minutes: 5
+        shell: pwsh
+        run: |
+          $out = Join-Path $env:RUNNER_TEMP 'smoke'
+          Expand-Archive -LiteralPath '${{ steps.package.outputs.archive }}' -DestinationPath $out -Force
+          $exe = Get-ChildItem $out -Recurse -Filter daruda.exe | Select-Object -First 1
+          if (-not $exe) { throw 'the package contains no daruda.exe' }
+          & $exe.FullName --smoke
+          if ($LASTEXITCODE -ne 0) { throw "the packaged build did not start (exit $LASTEXITCODE)" }
+
       - name: Upload Windows package
         uses: actions/upload-artifact@v7
         with:
@@ -175,6 +189,14 @@ jobs:
           merge-multiple: true
           path: packages
 
+      # Neither package is signed, so a digest published beside them is the
+      # only thing a downloader can check them against.
+      - name: Write checksums
+        working-directory: packages
+        # `daruda-*` rather than `*`, which would or would not include the
+        # sums file depending on when the glob expanded.
+        run: sha256sum daruda-* | tee SHA256SUMS.txt
+
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v3
         with:
@@ -185,6 +207,7 @@ jobs:
           files: |
             packages/daruda-${{ needs.metadata.outputs.version }}.dmg
             packages/daruda-${{ needs.metadata.outputs.version }}-windows-x86_64.zip
+            packages/SHA256SUMS.txt
           body: |
             ## macOS
 
@@ -193,12 +216,19 @@ jobs:
             First launch: right-click daruda.app and select Open.
             If macOS still refuses, run `xattr -cr /Applications/daruda.app`.
 
-            ## Windows (x86_64, experimental)
+            ## Windows (x86_64)
 
             Download `daruda-${{ needs.metadata.outputs.version }}-windows-x86_64.zip`,
             extract the entire archive, and run `daruda.exe`.
             Keep the included runtime DLLs beside the executable.
             This portable build is unsigned; no installer is required.
+            Install Git for Windows to use repositories, shell flows, and agents.
+
+            ## Verifying a download
+
+            `SHA256SUMS.txt` holds a digest for each file above. Neither
+            package is signed, so this is what a download can be checked
+            against: `sha256sum -c SHA256SUMS.txt` (or `Get-FileHash`).
 
             ## Build from source
 
