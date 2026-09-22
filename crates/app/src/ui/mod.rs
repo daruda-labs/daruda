@@ -60,6 +60,7 @@ pub use button::{
     button_chip_on_surface, button_close, button_danger, button_delete_glyph,
     button_edit_cancel_glyph, button_edit_glyph, button_header_action, button_on_surface,
     button_primary, button_status_pill, button_status_pill_bare, button_toggle,
+    button_window_control,
 };
 pub use button_group::{ButtonGroup, button_group, button_group_on_surface};
 pub use chart::BarChart;

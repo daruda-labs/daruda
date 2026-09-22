@@ -276,6 +276,40 @@ pub fn button_add_tile(id: impl Into<ElementId>, cx: &App) -> Button {
         .text_size(px(theme::BUTTON_WIDGET_FONT_SIZE))
 }
 
+/// A window caption control (minimize / maximize / restore / close) drawn by
+/// the app because the platform removed the OS caption. Square-ish and
+/// flush to the title bar edge, Windows-style; `danger` gives close its red
+/// hover without painting it red at rest.
+pub fn button_window_control(
+    id: impl Into<ElementId>,
+    glyph: impl Into<SharedString>,
+    danger: bool,
+    cx: &App,
+) -> Button {
+    let t = theme::current(cx);
+    // `theme::ERROR` on hover is the same destructive tone `button_close`
+    // uses, so close reads the same everywhere it appears.
+    let hover_bg = if danger {
+        theme::ERROR
+    } else {
+        t.dock_icon_active_bg
+    };
+    let variant = ButtonCustomVariant::new(cx)
+        .foreground(t.text_muted)
+        .hover(hover_bg)
+        .active(hover_bg);
+    Button::new(id)
+        .small()
+        .tab_stop(false)
+        .custom(variant)
+        .label(glyph)
+        .w(px(theme::WINDOW_CONTROL_W))
+        .h(px(theme::TITLE_BAR_HEIGHT))
+        .p(px(0.))
+        .rounded(px(0.))
+        .text_size(px(theme::WINDOW_CONTROL_GLYPH_SIZE))
+}
+
 /// Dock toggle (◨ ⊞ ◧). `active=true` → filled bg + bright icon;
 /// `active=false` → subdued, with a hover-bg that previews the
 /// active fill.

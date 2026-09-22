@@ -94,6 +94,25 @@ async fn drive_mermaid_lightbox_opens_dialog(cx: &mut TestAppContext) {
     .unwrap();
 }
 
+/// The scenario is the only way to see the Windows/Linux title bar from a
+/// macOS host, so it has to actually flip the field the render reads.
+#[gpui::test]
+async fn drive_client_chrome_switches_the_window_chrome(cx: &mut TestAppContext) {
+    let (window_handle, workspace) = build_workspace(cx);
+
+    cx.update_window(window_handle.into(), |_, window, cx| {
+        drive(ScreenshotScenario::ClientChrome, &workspace, window, cx);
+    })
+    .unwrap();
+
+    cx.update(|cx| {
+        assert!(
+            workspace.read(cx).window_chrome.is_client(),
+            "the scenario left the window on its host chrome",
+        );
+    });
+}
+
 #[gpui::test]
 async fn drive_settings_opens_settings_window(cx: &mut TestAppContext) {
     let (window_handle, workspace) = build_workspace(cx);

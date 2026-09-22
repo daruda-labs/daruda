@@ -488,6 +488,15 @@ pub const TRAFFIC_LIGHT_X: f32 = 8.0;
 pub const TRAFFIC_LIGHT_Y: f32 = 6.0;
 /// Width reserved for traffic lights in the title bar.
 pub const TRAFFIC_LIGHT_WIDTH: f32 = 70.0;
+/// Left inset before the first title-bar control when the app draws its own
+/// chrome. No traffic lights to clear off macOS, so this is plain margin.
+pub const CLIENT_CHROME_INSET: f32 = 8.0;
+/// Width of one app-drawn window control (minimize / maximize / close).
+/// Narrower than the Windows 46px caption button because daruda's title bar
+/// is 28px tall; a 46px-wide 28px-tall target reads as a letterbox.
+pub const WINDOW_CONTROL_W: f32 = 38.0;
+/// Glyph size inside a window control.
+pub const WINDOW_CONTROL_GLYPH_SIZE: f32 = 11.0;
 /// Standard button height (px) — DESIGN.md §Fixed Heights "Button (standard): 28px".
 /// Applied to Submit and secondary action buttons in the bottom-dock input chrome.
 pub const BUTTON_HEIGHT: f32 = 28.0;

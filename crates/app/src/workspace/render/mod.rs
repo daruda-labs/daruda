@@ -32,7 +32,7 @@ use super::main_area::tab_ops::NewPaneKind;
 use super::status_bar::{self, StatusBarData};
 use super::{
     FileViewerSearchNext, FileViewerSearchOpen, FileViewerSearchPrev, SaveFilePane, TAB_BAR_HEIGHT,
-    TITLE_BAR_HEIGHT, Workspace,
+    Workspace,
 };
 #[allow(unused_imports)]
 use super::{FocusPaneDown, FocusPaneLeft, FocusPaneRight, FocusPaneUp};
@@ -474,10 +474,9 @@ impl Render for Workspace {
         // - Middle-click on a tab closes it (iTerm2 `middleClickClosesTab`).
         // - Active tab gets a 2px bottom accent + brighter bg.
         // ── Title bar ──────────────────────────────────────
-        // Traffic lights sit in the left 70px. Dock toggle
-        // icons are pushed to the right. The area is
-        // draggable so the user can move the window.
-        let title_spacer = div().flex_1();
+        // `title_bar::render` owns the row: the left inset (traffic lights on
+        // macOS, plain margin elsewhere), the drag strip, and — where the
+        // platform left no caption — the window controls.
         let dock_toggles = div()
             .flex()
             .flex_row()
@@ -511,16 +510,14 @@ impl Render for Workspace {
                     this.on_toggle_right_dock(&super::ToggleRightDock, window, cx);
                 }),
             ));
-        let title_bar = div()
-            .flex()
-            .flex_row()
-            .w_full()
-            .h(px(TITLE_BAR_HEIGHT))
-            .bg(title_bar_bg)
-            .items_center()
-            .child(div().flex_none().w(px(theme::TRAFFIC_LIGHT_WIDTH)))
-            .child(title_spacer)
-            .child(dock_toggles);
+        let title_bar = super::title_bar::render(
+            self.window_chrome,
+            title_bar_bg,
+            None,
+            Some(dock_toggles.into_any_element()),
+            window,
+            cx,
+        );
 
         // ── Tab bar ──────────────────────────────────────
         // Reorder-insertion indicator: `Some(k)` means "insert the dragged

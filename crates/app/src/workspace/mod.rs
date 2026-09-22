@@ -69,6 +69,7 @@ mod status_bar_ops;
 pub(in crate::workspace) mod sync;
 #[cfg(test)]
 mod tests;
+pub(in crate::workspace) mod title_bar;
 mod toast_layer;
 mod update_ops;
 mod usage_labels;
@@ -386,6 +387,11 @@ pub struct Workspace {
     /// right edge of the left dock, the left edge of the right dock,
     /// or the top edge of the bottom dock.
     pub(in crate::workspace) dock_drag: Option<layout::ops::DockDrag>,
+    /// Who draws this window's frame. Resolved once at construction from the
+    /// platform and the live decoration mode, then read as a value — so the
+    /// arm this build will never run still compiles and can be driven into a
+    /// capture.
+    pub(in crate::workspace) window_chrome: title_bar::WindowChrome,
     /// When true, new tabs/panes spawn with the focused pane's cwd
     /// (iTerm2 "Reuse previous session's directory").
     pub(in crate::workspace) inherit_cwd: bool,
@@ -1167,6 +1173,7 @@ impl Workspace {
             next_id: 0,
             focus_handle,
             dock_drag: None,
+            window_chrome: title_bar::chrome_for_window(window),
             inherit_cwd: true,
             terminal_config: config_ops::terminal_config_from(config),
             font_family: config.font.terminal.family.clone(),

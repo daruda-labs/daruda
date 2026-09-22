@@ -30,6 +30,9 @@ const NAME_SCRATCH_TAB: &str = "scratch-tab";
 const NAME_SETTINGS: &str = "settings";
 /// CLI token for the Settings window showing a failed action's banner.
 const NAME_SETTINGS_ERROR: &str = "settings-error";
+/// CLI token for the app-drawn window chrome. Forces the Client arm on a host
+/// that would resolve to Native, so the layout is reviewable off its platform.
+const NAME_CLIENT_CHROME: &str = "client-chrome";
 /// CLI token for the pane context-menu scenario.
 const NAME_PANE_CONTEXT_MENU: &str = "pane-context-menu";
 /// CLI token for the mermaid-diagram lightbox scenario.
@@ -146,6 +149,11 @@ pub(crate) enum ScreenshotScenario {
     /// `"{project} / {branch}"` label — the real lanes in the test
     /// workspace are always short enough to fit.
     LaneSwitcher,
+    /// Draw the title bar as if the platform left no caption — the Windows and
+    /// Linux arm. macOS still paints its real traffic lights over the left
+    /// inset, so this capture speaks for the right edge and the spacing, not
+    /// for the left.
+    ClientChrome,
     /// Open the Layer-2 error-report modal with a synthetic report.
     ErrorModal,
     /// Push a synthetic error toast.
@@ -311,6 +319,7 @@ impl ScreenshotScenario {
             NAME_ORCHESTRATOR_TAB => Some(Self::OrchestratorTab),
             NAME_COMMAND_PALETTE => Some(Self::CommandPalette),
             NAME_LANE_SWITCHER => Some(Self::LaneSwitcher),
+            NAME_CLIENT_CHROME => Some(Self::ClientChrome),
             NAME_ERROR_MODAL => Some(Self::ErrorModal),
             NAME_TOAST => Some(Self::Toast),
             NAME_SCRATCH_TAB => Some(Self::ScratchTab),
@@ -382,6 +391,9 @@ pub(crate) fn drive(
     cx: &mut App,
 ) {
     match scenario {
+        ScreenshotScenario::ClientChrome => {
+            workspace.update(cx, |ws, cx| ws.force_client_chrome_for_shot(cx));
+        }
         ScreenshotScenario::CommandPalette => {
             workspace.update(cx, |ws, cx| {
                 ws.on_toggle_command_palette(&ToggleCommandPalette, window, cx);
@@ -702,6 +714,14 @@ mod tests {
         assert_eq!(
             ScreenshotScenario::from_cli_name("error-modal"),
             Some(ScreenshotScenario::ErrorModal)
+        );
+    }
+
+    #[test]
+    fn client_chrome_name_maps_to_scenario() {
+        assert_eq!(
+            ScreenshotScenario::from_cli_name("client-chrome"),
+            Some(ScreenshotScenario::ClientChrome)
         );
     }
 
