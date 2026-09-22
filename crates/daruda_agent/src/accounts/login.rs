@@ -314,6 +314,9 @@ pub fn spawn_login(
     daruda_core::process::lead_own_group(&mut cmd);
 
     let mut child = cmd.spawn().map_err(|e| LoginError::Spawn(e.to_string()))?;
+    // Immediately: on Windows the child is spawned suspended and this is what
+    // lets it run, so nothing that could fail may sit in between.
+    let group = Arc::new(daruda_core::process::Group::adopt(child.id()));
 
     let stdout: ChildStdout = child.stdout.take().expect("stdout was piped");
     let stderr: ChildStderr = child.stderr.take().expect("stderr was piped");
@@ -324,7 +327,7 @@ pub fn spawn_login(
     spawn_drain(stderr, Arc::clone(&stderr_buf));
 
     Ok(LoginProcess {
-        group: Arc::new(daruda_core::process::Group::adopt(child.id())),
+        group,
         child: Arc::new(Mutex::new(child)),
         reaped: Arc::new(AtomicBool::new(false)),
         stdout_buf,

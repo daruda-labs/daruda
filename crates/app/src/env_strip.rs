@@ -104,12 +104,16 @@ fn run(request: Request) -> i32 {
         unrunnable(&request.program, &error)
     }
     #[cfg(not(unix))]
+    {
+        daruda_core::process::lead_own_group(&mut command);
+    }
+    #[cfg(not(unix))]
     match command.spawn() {
         Ok(mut child) => {
-            // The wrapper stays between the app and the adapter, so without
-            // this the tear-down that kills it leaves `npx` and `node` behind
-            // holding the protocol pipes. Held until the child is reaped:
-            // closing the group is what ends the tree.
+            // Immediately, and for two reasons: the wrapper stays between
+            // the app and the adapter, so without a job the tear-down that
+            // kills it leaves `npx` and `node` holding the protocol pipes —
+            // and the child was spawned suspended, so this is what runs it.
             let group = daruda_core::process::Group::adopt(child.id());
             let code = match child.wait() {
                 Ok(status) => status.code().unwrap_or(1),

@@ -40,16 +40,26 @@ pub fn command(program: impl AsRef<OsStr>) -> std::process::Command {
 /// Ask for a child that can be torn down as a tree. Call before `spawn`,
 /// then [`Group::adopt`] on the pid it returns.
 ///
-/// Unix does the work here: the child leads its own process group, so its pid
-/// doubles as a group id and a signal aimed at this app's group stops at the
-/// boundary. Windows has nothing to say before a process exists.
+/// Unix makes it lead its own group, so its pid doubles as a group id.
+/// Windows has none to ask for before the process exists, so it starts the
+/// child *suspended* and [`Group::adopt`] is what lets it go.
 pub fn lead_own_group(command: &mut std::process::Command) {
     #[cfg(unix)]
     {
         use std::os::unix::process::CommandExt as _;
         command.process_group(0);
     }
-    #[cfg(not(unix))]
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt as _;
+        // `creation_flags` replaces rather than adds, so the flag `command`
+        // already set is repeated here — both live in this module.
+        command.creation_flags(
+            windows_sys::Win32::System::Threading::CREATE_NO_WINDOW
+                | windows_sys::Win32::System::Threading::CREATE_SUSPENDED,
+        );
+    }
+    #[cfg(not(any(unix, windows)))]
     let _ = command;
 }
 
@@ -78,12 +88,12 @@ struct GroupInner(std::os::windows::io::OwnedHandle);
 struct GroupInner;
 
 impl Group {
-    /// Take the child at `pid` into a group, right after `spawn` — a Windows
-    /// descendant forked in that window escapes the job.
+    /// Take the child at `pid` into a group, and on Windows let it run.
     ///
-    /// INVARIANT (unix): `pid` led its own group ([`lead_own_group`]) and is
-    /// not yet reaped — a zombie holds its pid, so the group id is still this
-    /// process's to name. Reap first and the OS may have reissued it.
+    /// Pairs with [`lead_own_group`], which started it suspended, so it joins
+    /// the job before its first instruction. **A child never adopted stays
+    /// suspended forever** — nothing fallible may sit in between. On unix
+    /// `pid` must also be unreaped, or the group id may name someone else.
     pub fn adopt(pid: u32) -> Self {
         #[cfg(unix)]
         {
@@ -91,7 +101,11 @@ impl Group {
         }
         #[cfg(windows)]
         {
-            Self(GroupInner(windows_job::adopt(pid)))
+            let job = windows_job::adopt(pid);
+            // Last, and unconditionally: a child left suspended would hang
+            // whatever waits on it, which is worse than a job it escaped.
+            windows_job::resume(pid);
+            Self(GroupInner(job))
         }
         #[cfg(not(any(unix, windows)))]
         {
@@ -203,6 +217,49 @@ mod windows_job {
             // SAFETY: the API just produced this handle and hands ownership
             // to the caller; it is wrapped once and never duplicated.
             .then(|| unsafe { OwnedHandle::from_raw_handle(handle.cast()) })
+    }
+
+    /// Let a child started by [`super::lead_own_group`] run.
+    ///
+    /// A process created suspended has exactly one thread, so resuming every
+    /// thread it owns is resuming that one. Failure is not reported: the
+    /// caller is about to wait on a child that will never answer, and the
+    /// wait is where that surfaces.
+    pub(super) fn resume(pid: u32) {
+        use windows_sys::Win32::System::Diagnostics::ToolHelp::{
+            CreateToolhelp32Snapshot, TH32CS_SNAPTHREAD, THREADENTRY32, Thread32First, Thread32Next,
+        };
+        use windows_sys::Win32::System::Threading::{
+            OpenThread, ResumeThread, THREAD_SUSPEND_RESUME,
+        };
+
+        // SAFETY: a thread snapshot takes no pointer arguments; the handle is
+        // owned here and closed by `OwnedHandle`.
+        let snapshot = unsafe { CreateToolhelp32Snapshot(TH32CS_SNAPTHREAD, 0) };
+        let Some(snapshot) = owned(snapshot) else {
+            return;
+        };
+        let mut entry = THREADENTRY32 {
+            dwSize: size_of::<THREADENTRY32>() as u32,
+            ..unsafe { std::mem::zeroed() }
+        };
+        // SAFETY: `entry` is sized as the API requires and outlives the walk.
+        let mut walking = unsafe { Thread32First(snapshot.as_raw_handle() as HANDLE, &mut entry) };
+        while walking != 0 {
+            if entry.th32OwnerProcessID == pid {
+                // SAFETY: the id came from the snapshot; the handle is closed
+                // on the next line whether or not the resume takes.
+                unsafe {
+                    let thread = OpenThread(THREAD_SUSPEND_RESUME, 0, entry.th32ThreadID);
+                    if let Some(thread) = owned(thread) {
+                        ResumeThread(thread.as_raw_handle() as HANDLE);
+                    }
+                }
+            }
+            entry.dwSize = size_of::<THREADENTRY32>() as u32;
+            // SAFETY: same contract as `Thread32First`.
+            walking = unsafe { Thread32Next(snapshot.as_raw_handle() as HANDLE, &mut entry) };
+        }
     }
 
     /// A handle that owns nothing, so `terminate` is a no-op on it.
