@@ -1,27 +1,30 @@
-//! Self-update logic for the daruda macOS app.
+//! Self-update logic for the daruda app.
 //!
 //! This crate is GPUI-free: it holds release parsing, release metadata
-//! fetching, DMG download, and the DMG-based install/bundle-swap flow.
+//! fetching, package download, and the macOS DMG install/bundle-swap flow.
+//! Which package a build looks for is [`release::asset_suffix`]'s answer.
 
 pub mod check;
 pub mod install;
 pub mod release;
 
-pub use check::{check_latest, download_dmg};
+pub use check::{check_latest, download_asset};
 pub use install::{install_dmg, relaunch};
-pub use release::{ReleaseInfo, parse_release};
+pub use release::{ReleaseInfo, asset_suffix, parse_release};
 
 /// Errors that can occur anywhere in the update flow: checking for a new
-/// release, downloading its DMG asset, mounting it, and installing the
-/// update by swapping the running app bundle.
+/// release, downloading this platform's package, mounting it, and installing
+/// the update by swapping the running app bundle.
 #[derive(Debug, thiserror::Error)]
 pub enum UpdateError {
     #[error("HTTP request failed: {0}")]
     Http(String),
     #[error("failed to parse release metadata: {0}")]
     Parse(String),
-    #[error("release has no .dmg asset")]
-    NoDmgAsset,
+    #[error("release has no {0} asset")]
+    NoAssetForPlatform(&'static str),
+    #[error("no daruda package is published for {0}")]
+    NoPackageForPlatform(&'static str),
     #[error("I/O error: {0}")]
     Io(String),
     #[error("failed to mount disk image: {0}")]

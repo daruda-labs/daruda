@@ -12,8 +12,8 @@ pub struct ReleaseInfo {
     pub version: semver::Version,
     /// The original release tag, e.g. `"v0.3.0"`.
     pub tag: String,
-    /// The `browser_download_url` of the release's `.dmg` asset.
-    pub dmg_url: String,
+    /// The `browser_download_url` of this platform's package.
+    pub asset_url: String,
     /// The release body/notes, verbatim.
     pub notes: String,
 }
@@ -42,12 +42,32 @@ fn normalize_tag(tag: &str) -> &str {
     tag.strip_prefix('v').unwrap_or(tag)
 }
 
+/// How this platform's package ends. `None` where daruda publishes none —
+/// there is nothing to offer, which is not the same fact as being current.
+///
+/// A suffix rather than a whole name: the release workflow spells the version
+/// into the file, and matching it here would repeat what the tag already says.
+pub fn asset_suffix() -> Option<&'static str> {
+    asset_suffix_for(std::env::consts::OS)
+}
+
+/// [`asset_suffix`] with the host as a value, so the Windows answer is
+/// checked from a macOS run. Kept next to `.github/workflows/release.yml`,
+/// which is what actually names these files.
+fn asset_suffix_for(os: &str) -> Option<&'static str> {
+    match os {
+        "macos" => Some(".dmg"),
+        "windows" => Some("-windows-x86_64.zip"),
+        _ => None,
+    }
+}
+
 /// Parse a GitHub `releases/latest` JSON payload.
 ///
 /// Returns `Ok(Some(info))` if the release version is strictly newer than
 /// `current`, `Ok(None)` if it's a prerelease/draft or equal to or older than
 /// `current`, and `Err(..)` if the JSON is malformed, the tag isn't a valid
-/// semver version, or the release has no `.dmg` asset.
+/// semver version, or the release carries no package for this platform.
 ///
 /// Prereleases and drafts are rejected here regardless of endpoint, so callers
 /// don't have to rely on `/releases/latest` (which already excludes them) to
@@ -55,6 +75,17 @@ fn normalize_tag(tag: &str) -> &str {
 pub fn parse_release(
     json: &str,
     current: &semver::Version,
+) -> Result<Option<ReleaseInfo>, UpdateError> {
+    let suffix = asset_suffix().ok_or(UpdateError::NoPackageForPlatform(std::env::consts::OS))?;
+    parse_release_with_suffix(json, current, suffix)
+}
+
+/// [`parse_release`] against a named package suffix, so a platform's
+/// selection is checked without being run on it.
+fn parse_release_with_suffix(
+    json: &str,
+    current: &semver::Version,
+    suffix: &'static str,
 ) -> Result<Option<ReleaseInfo>, UpdateError> {
     let release: GithubRelease =
         serde_json::from_str(json).map_err(|e| UpdateError::Parse(e.to_string()))?;
@@ -70,17 +101,17 @@ pub fn parse_release(
         return Ok(None);
     }
 
-    let dmg_url = release
+    let asset_url = release
         .assets
         .iter()
-        .find(|asset| asset.name.to_lowercase().ends_with(".dmg"))
+        .find(|asset| asset.name.to_lowercase().ends_with(suffix))
         .map(|asset| asset.browser_download_url.clone())
-        .ok_or(UpdateError::NoDmgAsset)?;
+        .ok_or(UpdateError::NoAssetForPlatform(suffix))?;
 
     Ok(Some(ReleaseInfo {
         version,
         tag: release.tag_name,
-        dmg_url,
+        asset_url,
         notes: release.body.unwrap_or_default(),
     }))
 }
@@ -98,12 +129,67 @@ mod tests {
         ]\
     }";
 
+    /// A real release carries both packages. Picking by suffix is the whole
+    /// mechanism: before it, every platform took the `.dmg`.
+    const BOTH_PACKAGES_JSON: &str = "{\
+        \"tag_name\": \"v0.3.0\",\
+        \"assets\": [\
+            { \"name\": \"daruda-0.3.0.dmg\", \"browser_download_url\": \"https://github.com/d/mac\" },\
+            { \"name\": \"daruda-0.3.0-windows-x86_64.zip\", \"browser_download_url\": \"https://github.com/d/win\" }\
+        ]\
+    }";
+
+    fn url_for(os: &str) -> Result<String, UpdateError> {
+        let current = semver::Version::parse("0.2.0").unwrap();
+        let suffix = asset_suffix_for(os).ok_or(UpdateError::NoPackageForPlatform("test"))?;
+        Ok(
+            parse_release_with_suffix(BOTH_PACKAGES_JSON, &current, suffix)
+                .unwrap()
+                .unwrap()
+                .asset_url,
+        )
+    }
+
+    #[test]
+    fn each_platform_takes_its_own_package() {
+        assert_eq!(url_for("macos").unwrap(), "https://github.com/d/mac");
+        assert_eq!(url_for("windows").unwrap(), "https://github.com/d/win");
+    }
+
+    /// No Linux package is published, and saying "up to date" would be a
+    /// different claim than "there is nothing here for you".
+    #[test]
+    fn a_platform_with_no_package_is_refused_not_called_current() {
+        assert!(matches!(
+            url_for("linux"),
+            Err(UpdateError::NoPackageForPlatform(_))
+        ));
+        assert_eq!(asset_suffix_for("linux"), None);
+    }
+
+    /// The suffix must not match the other platform's file: `.dmg` and
+    /// `-windows-x86_64.zip` share no ending, and a release missing one
+    /// package has to say so rather than hand over the other.
+    #[test]
+    fn a_release_missing_this_platforms_package_is_an_error() {
+        let current = semver::Version::parse("0.2.0").unwrap();
+        let mac_only = "{\"tag_name\": \"v0.3.0\", \"assets\": [\
+            { \"name\": \"daruda-0.3.0.dmg\", \"browser_download_url\": \"https://github.com/d/mac\" }]}";
+
+        let result =
+            parse_release_with_suffix(mac_only, &current, asset_suffix_for("windows").unwrap());
+
+        assert!(matches!(result, Err(UpdateError::NoAssetForPlatform(_))));
+    }
+
     #[test]
     fn selects_dmg_asset_among_multiple() {
         let current = semver::Version::parse("0.2.0").unwrap();
-        let info = parse_release(RELEASE_JSON, &current).unwrap().unwrap();
+        let info = parse_release_with_suffix(RELEASE_JSON, &current, ".dmg")
+            .unwrap()
+            .unwrap();
         assert_eq!(
-            info.dmg_url,
+            info.asset_url,
             "https://github.com/daruda-labs/daruda/releases/download/v0.3.0/daruda-0.3.0.dmg"
         );
         assert_eq!(info.version, semver::Version::parse("0.3.0").unwrap());
@@ -114,21 +200,21 @@ mod tests {
     #[test]
     fn newer_release_returns_some() {
         let current = semver::Version::parse("0.2.0").unwrap();
-        let result = parse_release(RELEASE_JSON, &current).unwrap();
+        let result = parse_release_with_suffix(RELEASE_JSON, &current, ".dmg").unwrap();
         assert!(result.is_some());
     }
 
     #[test]
     fn equal_release_returns_none() {
         let current = semver::Version::parse("0.3.0").unwrap();
-        let result = parse_release(RELEASE_JSON, &current).unwrap();
+        let result = parse_release_with_suffix(RELEASE_JSON, &current, ".dmg").unwrap();
         assert!(result.is_none());
     }
 
     #[test]
     fn older_current_returns_none() {
         let current = semver::Version::parse("0.4.0").unwrap();
-        let result = parse_release(RELEASE_JSON, &current).unwrap();
+        let result = parse_release_with_suffix(RELEASE_JSON, &current, ".dmg").unwrap();
         assert!(result.is_none());
     }
 
@@ -143,7 +229,10 @@ mod tests {
         }"#;
         let current = semver::Version::parse("0.2.0").unwrap();
         let result = parse_release(json, &current);
-        assert!(matches!(result, Err(UpdateError::NoDmgAsset)));
+        assert!(matches!(
+            result,
+            Err(UpdateError::NoAssetForPlatform(".dmg"))
+        ));
     }
 
     #[test]

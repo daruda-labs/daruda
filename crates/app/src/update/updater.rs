@@ -5,7 +5,7 @@
 //! registered behind a `GlobalUpdater` marker so any view can resolve the
 //! live handle via [`Updater::get`] and drive it with `entity.update(...)`.
 //!
-//! The three blocking `daruda_update` calls (`check_latest`, `download_dmg`,
+//! The three blocking `daruda_update` calls (`check_latest`, `download_asset`,
 //! `install_dmg`) run on `cx.background_executor()`; every status transition
 //! flips back onto the foreground inside `this.update(cx, ...)` so `cx.notify`
 //! fires on the GPUI main thread. `daruda_update` stays GPUI-free — this file
@@ -155,14 +155,14 @@ impl Updater {
 
         cx.spawn(async move |this, cx| {
             let dest = std::env::temp_dir().join(format!("daruda-update-{}.dmg", info.version));
-            let url = info.dmg_url.clone();
+            let url = info.asset_url.clone();
             let dest_for_dl = dest.clone();
 
             // hop A — download to a temp path on the background executor.
             let downloaded = cx
                 .background_executor()
                 .spawn(async move {
-                    daruda_update::download_dmg(&url, &dest_for_dl).map(|()| dest_for_dl)
+                    daruda_update::download_asset(&url, &dest_for_dl).map(|()| dest_for_dl)
                 })
                 .await;
 
@@ -308,7 +308,7 @@ mod tests {
         let info = ReleaseInfo {
             version: semver::Version::new(0, 3, 0),
             tag: "v0.3.0".to_string(),
-            dmg_url: "https://github.com/x.dmg".to_string(),
+            asset_url: "https://github.com/x.dmg".to_string(),
             notes: String::new(),
         };
         for status in [

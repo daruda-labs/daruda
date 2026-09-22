@@ -1,5 +1,5 @@
 //! Network side of the update flow: fetching release metadata from GitHub
-//! and downloading the release's `.dmg` asset.
+//! and downloading this platform's release package.
 //!
 //! Everything here is blocking (`ureq`). This crate stays GPUI-free and
 //! synchronous by design — the app-layer caller is responsible for running
@@ -30,10 +30,10 @@ const MAX_REDIRECTS: usize = 5;
 /// GitHub's `/releases/latest` endpoint already excludes prereleases and drafts.
 /// Blocking; call off the main thread.
 pub fn check_latest(current: &semver::Version) -> Result<Option<ReleaseInfo>, UpdateError> {
-    // Redirects are followed with the default agent here (unlike `download_dmg`,
+    // Redirects are followed with the default agent here (unlike `download_asset`,
     // which pins hosts per hop): the target is a fixed HTTPS GitHub API URL with
     // TLS certificate validation, and the only value derived from the response —
-    // the `dmg_url` — is independently host-checked when `download_dmg` fetches
+    // the `asset_url` — is independently host-checked when `download_asset` fetches
     // it. Release notes render as plain text, so a tampered body cannot inject.
     let agent = ureq::AgentBuilder::new()
         .timeout(Duration::from_secs(30))
@@ -63,10 +63,10 @@ pub fn check_latest(current: &semver::Version) -> Result<Option<ReleaseInfo>, Up
 /// hijacked redirect could stream bytes from an arbitrary (even plain-`http`)
 /// host.
 /// Blocking; call off the main thread.
-pub fn download_dmg(url: &str, dest: &Path) -> Result<(), UpdateError> {
+pub fn download_asset(url: &str, dest: &Path) -> Result<(), UpdateError> {
     let agent = ureq::AgentBuilder::new()
         .redirects(0) // we follow manually so we can re-validate each hop
-        .timeout(Duration::from_secs(300)) // overall cap; large for a DMG download
+        .timeout(Duration::from_secs(300)) // overall cap; large for a package download
         .build();
 
     let mut current = url.to_string();
@@ -197,11 +197,11 @@ mod tests {
     }
 
     #[test]
-    fn download_dmg_rejects_untrusted_initial_host() {
+    fn download_asset_rejects_untrusted_initial_host() {
         // First-hop allowlist gate: an untrusted URL is rejected before any
         // connection is attempted, so this never touches the network.
         let dest = std::env::temp_dir().join("daruda-update-should-not-exist.dmg");
-        let result = download_dmg("https://evil.example/x.dmg", &dest);
+        let result = download_asset("https://evil.example/x.dmg", &dest);
         assert!(matches!(result, Err(UpdateError::UntrustedHost(_))));
     }
 
