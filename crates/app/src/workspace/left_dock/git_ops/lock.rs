@@ -29,6 +29,18 @@ pub(in crate::workspace) enum GitLock {
     Repo,
 }
 
+/// Which of the two git locks this window holds.
+///
+/// Private: a lock is claimed and released by [`Workspace::with_git_lock`]
+/// alone, and a bool every `impl Workspace` file could set would make the
+/// duplicate-click refusal a convention rather than a rule. Read it through
+/// [`Workspace::git_lock_held`].
+#[derive(Default)]
+pub(in crate::workspace) struct GitLocks {
+    index: bool,
+    repo: bool,
+}
+
 impl Workspace {
     /// Whether `lock` is held right now. For the callers that must refuse
     /// *before* doing something the claim cannot cover: every path that opens a
@@ -36,16 +48,16 @@ impl Workspace {
     /// a dialog for work that will be refused is worse than no dialog.
     pub(in crate::workspace) fn git_lock_held(&self, lock: GitLock) -> bool {
         match lock {
-            GitLock::Index => self.git_stage_in_flight,
-            GitLock::Repo => self.git_op_in_flight,
+            GitLock::Index => self.git_locks.index,
+            GitLock::Repo => self.git_locks.repo,
         }
     }
 
     fn set_git_lock(&mut self, lock: GitLock, held: bool, cx: &mut Context<Self>) {
         match lock {
-            GitLock::Index => self.git_stage_in_flight = held,
+            GitLock::Index => self.git_locks.index = held,
             GitLock::Repo => {
-                self.git_op_in_flight = held;
+                self.git_locks.repo = held;
                 // The commit button's disabled state mirrors this flag. Syncing
                 // it here is what keeps the mirror to one update site — every
                 // flip of the repo lock goes through this arm.

@@ -8,7 +8,20 @@ use crate::surface::strings as app_strings;
 use crate::ui::ButtonVariant;
 use crate::workspace::dialog_helpers::open_confirm_dialog;
 use crate::workspace::left_dock::git_ops::lock::GitLock;
-use crate::workspace::{CommitChanges, CommitMode, PushChanges, Workspace};
+use crate::workspace::{CommitChanges, PushChanges, Workspace};
+
+/// State of the Commit split button. `Amend` carries `saved_draft` — the
+/// commit-box text captured at the moment amend mode was entered — so
+/// "Cancel Amend" restores exactly that (the user's own message, or empty)
+/// instead of wiping a draft they meant to commit normally.
+#[derive(Debug, Clone, Default)]
+pub(in crate::workspace) enum CommitMode {
+    #[default]
+    Normal,
+    Amend {
+        saved_draft: String,
+    },
+}
 
 impl Workspace {
     /// Commit staged changes with the current commit-message input text.

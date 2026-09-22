@@ -303,16 +303,6 @@ actions!(
 const TITLE_BAR_HEIGHT: f32 = crate::ui::theme::TITLE_BAR_HEIGHT;
 const TAB_BAR_HEIGHT: f32 = crate::ui::theme::TAB_BAR_HEIGHT;
 
-/// State of the Commit split button. `Amend` carries `saved_draft` — the
-/// commit-box text captured at the moment amend mode was entered — so
-/// "Cancel Amend" restores exactly that (the user's own message, or empty)
-/// instead of wiping a draft they meant to commit normally.
-#[derive(Debug, Clone)]
-pub(in crate::workspace) enum CommitMode {
-    Normal,
-    Amend { saved_draft: String },
-}
-
 pub struct Workspace {
     /// Stable cross-session identifier — matches the UUID stored on disk
     /// at `workspaces/<uuid>.json`. Minted at construction, then replaced
@@ -530,26 +520,11 @@ pub struct Workspace {
     /// `detect_accessed_entities` lost-wakeup, see
     /// `lane_switch_scroll_dead_rootcause`). Runtime-only; never serialized.
     pub(in crate::workspace) agent_pulse_prev: Vec<gpui::EntityId>,
-    /// True while a repo-level git operation (commit / amend / push / pull /
-    /// fetch / init) is running — [`GitLock::Repo`]. Prevents duplicate
-    /// submissions when the user double-clicks Commit/Push. Written only by
-    /// `spawn_locked_git_work`; read it through `git_lock_held`.
-    ///
-    /// [`GitLock::Repo`]: left_dock::git_ops::lock::GitLock::Repo
-    pub(in crate::workspace) git_op_in_flight: bool,
-    /// Commit split button mode (Normal vs Amend). In `Amend` the primary
-    /// button reads "Amend" (drives `git commit --amend`) and the dropdown
-    /// reads "Cancel Amend". Entered via the dropdown's "Amend Last Commit",
-    /// left on success / cancel / lane switch. Tied to the active lane — the
-    /// prefilled message belongs to that lane's HEAD.
-    pub(in crate::workspace) commit_mode: CommitMode,
-    /// True while a staging operation (git add / restore-staged / add-all) is
-    /// running — [`GitLock::Index`]. Separate from `git_op_in_flight` so a stage
-    /// click doesn't block the commit button and vice versa. Written only by
-    /// `spawn_locked_git_work`; read it through `git_lock_held`.
-    ///
-    /// [`GitLock::Index`]: left_dock::git_ops::lock::GitLock::Index
-    pub(in crate::workspace) git_stage_in_flight: bool,
+    /// The two git locks this window holds — see
+    /// [`left_dock::git_ops::lock::GitLocks`].
+    pub(in crate::workspace) git_locks: left_dock::git_ops::lock::GitLocks,
+    /// Commit-button mode — see [`left_dock::git_ops::history::CommitMode`].
+    pub(in crate::workspace) commit_mode: left_dock::git_ops::history::CommitMode,
     /// Git directories this window watches — see
     /// [`left_dock::git_ops::watch::GitWatch`].
     pub(in crate::workspace) git_watch: left_dock::git_ops::watch::GitWatch,
@@ -1216,9 +1191,8 @@ impl Workspace {
             session_host_tombstones: config.session_host_tombstones.clone(),
             last_agent_id: None,
             agent_pulse_prev: Vec::new(),
-            git_op_in_flight: false,
-            commit_mode: CommitMode::Normal,
-            git_stage_in_flight: false,
+            git_locks: left_dock::git_ops::lock::GitLocks::default(),
+            commit_mode: left_dock::git_ops::history::CommitMode::default(),
             git_watch: left_dock::git_ops::watch::GitWatch::default(),
             git_changes_panel_focus: cx.focus_handle(),
             left_dock_preview: None,
