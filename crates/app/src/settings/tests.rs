@@ -99,6 +99,75 @@ fn boolean_setting_applies_immediately(cx: &mut TestAppContext) {
     });
 }
 
+/// A text setting persists on Enter or Blur only, so a field still holding
+/// focus when the view goes away has never been written. The exit path has to
+/// land it.
+#[gpui::test]
+fn exit_commits_a_text_field_never_blurred(cx: &mut TestAppContext) {
+    let (wh, win) = build_window(cx);
+    set_input(
+        &wh,
+        &win,
+        cx,
+        |window| window.terminal_font_size_input.clone(),
+        "16",
+    );
+
+    commit_pending_edits(&wh, &win, cx);
+
+    win.read_with(cx, |_window, cx| {
+        assert_eq!(
+            crate::settings_store::SettingsStore::global(cx)
+                .user()
+                .font
+                .terminal
+                .size,
+            16.0
+        );
+    });
+}
+
+/// The same path must not write a value the field would have rejected — it
+/// reverts instead, so the input agrees with the config it left behind.
+#[gpui::test]
+fn exit_reverts_a_text_field_that_cannot_parse(cx: &mut TestAppContext) {
+    let (wh, win) = build_window(cx);
+    set_input(
+        &wh,
+        &win,
+        cx,
+        |window| window.terminal_font_size_input.clone(),
+        "999",
+    );
+
+    commit_pending_edits(&wh, &win, cx);
+
+    let input = win.read_with(cx, |window, _| window.terminal_font_size_input.clone());
+    win.read_with(cx, |window, cx| {
+        assert_eq!(
+            crate::settings_store::SettingsStore::global(cx)
+                .user()
+                .font
+                .terminal
+                .size,
+            13.0
+        );
+        assert_eq!(input.read(cx).value(), "13");
+        assert!(window.error.is_none());
+    });
+}
+
+fn commit_pending_edits(
+    wh: &WindowHandle<gpui_component::Root>,
+    win: &Entity<SettingsView>,
+    cx: &mut TestAppContext,
+) {
+    wh.update(cx, |_root, window, cx| {
+        win.update(cx, |w, cx| w.commit_pending_edits(window, cx));
+    })
+    .expect("settings window should still be open during the test");
+}
+
 #[gpui::test]
 fn valid_text_draft_applies_on_commit(cx: &mut TestAppContext) {
     let (wh, win) = build_window(cx);

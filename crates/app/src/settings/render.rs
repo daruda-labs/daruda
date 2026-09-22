@@ -125,7 +125,7 @@ impl Render for SettingsView {
                         cx.stop_propagation();
                     }
                     "escape" => {
-                        this.dismiss(window);
+                        this.dismiss(window, cx);
                         cx.stop_propagation();
                     }
                     _ => {}

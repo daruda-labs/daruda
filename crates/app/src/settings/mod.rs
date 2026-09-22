@@ -1871,8 +1871,43 @@ impl SettingsView {
         self.active_section
     }
 
-    fn dismiss(&mut self, window: &mut Window) {
+    fn dismiss(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.commit_pending_edits(window, cx);
         window.remove_window();
+    }
+
+    /// Commit every text input holding something other than what the live
+    /// config shows, so an exit taken mid-edit does not drop it.
+    ///
+    /// Text settings persist on Enter or Blur only, so an input that still
+    /// holds focus has never been written. The `show` comparison is what
+    /// keeps an untouched field from re-writing itself —
+    /// [`Self::persist_text_setting`] applies unconditionally. Anything that
+    /// will not land — unparseable, or the field moved underneath this view —
+    /// is reverted to the live value instead: refusing the exit would trap
+    /// the user in the field, and both other resolutions need a question this
+    /// path has no one left to ask.
+    pub(super) fn commit_pending_edits(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        for spec in spec::TEXT_SETTINGS {
+            // Re-read per row: a landed patch moves the global underneath us.
+            let live = crate::settings_store::SettingsStore::global(cx)
+                .user()
+                .clone();
+            let shown = (spec.show)(&live);
+            let input = (spec.field)(self).clone();
+            if input.read(cx).value().trim() == shown {
+                continue;
+            }
+            let landed = match (spec.parse)(&input, cx) {
+                Ok(patch) => self.apply_settings_patch(patch, cx),
+                Err(_) => false,
+            };
+            if !landed {
+                self.error = None;
+                self.conflict = None;
+                Self::set_input_value(&input, shown, window, cx);
+            }
+        }
     }
 
     /// Commit one field's change, refusing it when the same field moved
