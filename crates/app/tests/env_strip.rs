@@ -59,6 +59,30 @@ fn a_variable_that_was_not_named_still_reaches_the_child() {
     );
 }
 
+/// The shape a managed-runtime launch actually builds: `NAME=value` operands
+/// between the unsets and the program. Reading the first of those as the
+/// program is how the wrapper ran nothing at all — the unit tests beside the
+/// module cover the grammar, this covers it against the real binary.
+#[test]
+fn a_launch_with_assignments_runs_the_program_and_sets_them() {
+    let out = Command::new(DARUDA)
+        .args(["--env", "-u", "ANTHROPIC_API_KEY"])
+        .args(["npm_config_cpu=x64", "npm_config_os=win32"])
+        .arg(test_process::executable())
+        .args(["--absent-env", "ANTHROPIC_API_KEY"])
+        .args(["--require-env", "npm_config_cpu", "x64"])
+        .args(["--require-env", "npm_config_os", "win32"])
+        .env("ANTHROPIC_API_KEY", "leaked")
+        .output()
+        .expect("spawn daruda --env");
+
+    assert!(
+        out.status.success(),
+        "the operands were not applied, or the program was not reached: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+}
+
 /// The child's exit code is the wrapper's, or a failing adapter would look
 /// like a clean one.
 #[test]
