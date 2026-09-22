@@ -40,6 +40,15 @@ pub(crate) fn route_mcp_subcommand() -> Option<i32> {
     None
 }
 
+/// Returns `Some(exit_code)` when invoked as `daruda --env …`.
+///
+/// Routed with the other non-GUI subcommands: this one stands in for
+/// `env(1)` where the host has none, and an ACP launch puts it between the
+/// app and the adapter — a window per adapter would be absurd.
+pub(crate) fn route_env_subcommand() -> Option<i32> {
+    crate::env_strip::route()
+}
+
 /// Observability bootstrap. Order matters — see module docs.
 pub(crate) fn init_observability() {
     daruda_store::observability::system_info::set_app_version(env!("CARGO_PKG_VERSION"));

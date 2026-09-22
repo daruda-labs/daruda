@@ -13,6 +13,7 @@ mod bootstrap;
 mod config_watcher;
 mod control;
 mod dir_watch;
+mod env_strip;
 pub mod files;
 mod fuzzy;
 mod globals;
@@ -195,6 +196,14 @@ fn main() {
     // daruda's tools. Same reasoning as the hook above: it must not open a
     // window, and an agent may run several at once.
     if let Some(code) = bootstrap::route_mcp_subcommand() {
+        std::process::exit(code);
+    }
+
+    // `daruda --env` stands in for `env(1)` on a host without one. Same
+    // reasoning as the two above, and it must precede `shell_env` below: the
+    // whole point is to hand the child a smaller environment, not a hydrated
+    // one.
+    if let Some(code) = bootstrap::route_env_subcommand() {
         std::process::exit(code);
     }
 

@@ -13,8 +13,8 @@ use std::path::Path;
 /// command needs one, then [`LaunchSpec::strip_env`] is applied to whatever
 /// shape that produced — the one strip site, so no branch can skip it.
 ///
-/// The strip must run *after* runtime selection: the [`crate::launch_config::ENV_BIN`] prefix it
-/// emits hides the launcher token from [`command_needs_node`].
+/// The strip must run *after* runtime selection: the wrapper prefix it emits
+/// hides the launcher token from [`command_needs_node`].
 pub fn prepare_adapter_command(
     launch: &LaunchSpec,
     install_root: &Path,
