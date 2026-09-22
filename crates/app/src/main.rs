@@ -33,6 +33,7 @@ pub mod settings_store;
 pub mod settings_window;
 mod shell_env;
 mod slot_actions;
+mod smoke;
 pub mod surface;
 mod telegram;
 #[cfg(test)]
@@ -267,6 +268,12 @@ fn main() {
                     cx,
                 );
             }
+        }
+
+        // `--smoke`: wait for the window to come up and paint, then quit. Last,
+        // so it observes the same startup every other path just set running.
+        if smoke::requested() {
+            smoke::schedule(cx);
         }
     });
 }
