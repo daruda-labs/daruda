@@ -343,8 +343,8 @@ fn test_activate_lane_swaps_tabs(cx: &mut TestAppContext) {
 }
 
 #[gpui::test]
-fn welcome_workspace_has_seeded_active_runtime(cx: &mut TestAppContext) {
-    // Regression: with the single `runtimes` store, the Welcome state
+fn empty_workspace_has_seeded_active_runtime(cx: &mut TestAppContext) {
+    // Regression: with the single `runtimes` store, the Landing state
     // (no project, `active == LaneRef::default()`, no `add_tab`) must
     // still carry a seeded runtime so `render`'s unconditional
     // `active_runtime()` read (and every accessor it drives) resolves

@@ -45,7 +45,6 @@ pub mod ui;
 mod update;
 mod watcher_pumps;
 mod watchers_lifecycle;
-pub mod welcome;
 pub(crate) mod window_registry;
 mod window_startup;
 mod windows;
@@ -53,6 +52,17 @@ mod workspace;
 
 use gpui::{App, MenuItem, actions};
 use windows::OpenMode;
+
+/// Open a recent workspace by identity. The File menu's `OpenRecent*` slots
+/// address the list by index, which is fine for a menu gpui rebuilds from the
+/// same load. The Landing view renders from a cached snapshot, so an index
+/// there can drift from the list the handler reloads — a row would then open
+/// a workspace other than the one it names. Carrying the
+/// [`daruda_store::project::WorkspaceUuid`] removes that gap, and the
+/// `OPEN_RECENT_SLOTS` cap with it.
+#[derive(Clone, PartialEq, Debug, gpui::Action)]
+#[action(namespace = daruda, no_json)]
+pub struct OpenRecentWorkspace(pub daruda_store::project::WorkspaceUuid);
 
 actions!(
     daruda,
@@ -242,7 +252,7 @@ fn main() {
         // (the single source of truth every window mirrors). Window
         // constructors also install it idempotently, so this is belt-and-
         // suspenders for the first window plus the authoritative install
-        // point when that window is Welcome (no Workspace).
+        // point for a window with no Workspace (Settings).
         crate::workspace::accounts_global::install_if_absent(
             cx,
             daruda_store::accounts::load_accounts().unwrap_or_default(),

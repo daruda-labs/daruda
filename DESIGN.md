@@ -30,7 +30,7 @@ Three rules:
 ```yaml
 colors:
   # Canvas — cool near-black (Linear-inspired, faint blue tint)
-  canvas:         "#070809"                   # Window frame base: title/status bar, welcome, active terminal tab, active-state recesses. Lifted off pure black so the frame isn't harsher than the lifted content; cool tint matches the surface ladder (hue 210), not navy (see §Readability).
+  canvas:         "#070809"                   # Window frame base: title/status bar, landing, active terminal tab, active-state recesses. Lifted off pure black so the frame isn't harsher than the lifted content; cool tint matches the surface ladder (hue 210), not navy (see §Readability).
   editor-surface: "#0b0c0e"                   # File viewer + diff code area — one rung above canvas (see §Readability)
   surface-1:      "#0f1011"                   # Dock panels, sidebar, card backgrounds
   surface-2:      "#141516"                   # Hover row, active tab, MacroKey resting state
@@ -207,7 +207,7 @@ spacing:
   lg:   10px   # PAD_LG — panel inner padding, dock view tab padding
   xl:   14px   # PAD_XL — settings rows, modal buttons, wide controls
 # Larger values (16 / 24) exist only as feature-specific
-# constants (modal/card/welcome padding), not part of the shared scale.
+# constants (modal/card/landing padding), not part of the shared scale.
 ```
 
 **Fixed heights:**

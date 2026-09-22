@@ -97,9 +97,9 @@ pub(super) fn render_center_content(ws: &Workspace, cx: &mut Context<Workspace>)
         // New Agent Chat rather than a blank hole.
         present_empty_state(cx)
     } else {
-        // Truly empty workspace (no projects, no active lane) lands here.
-        // Nothing to root a pane at, so fall through to a blank element.
-        div().flex_1().w_full().into_any_element()
+        // Truly empty workspace (no projects, no active lane). Nothing to
+        // root a pane at, so the Landing view takes the whole center.
+        super::landing::render(cx)
     }
 }
 

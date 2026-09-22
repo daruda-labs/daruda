@@ -24,7 +24,7 @@ use crate::workspace::main_area::pane::{AccountDomain, resolve_pane_account};
 /// nothing has been taken or written when one is returned.
 #[derive(Debug)]
 pub(in crate::workspace) enum FlowSubmitError {
-    /// No active lane, so no working directory. The welcome window.
+    /// No active lane, so no working directory — an empty workspace.
     NoLane,
     /// The lane is there, but its path would not resolve — so there is no
     /// telling which tree it is, and therefore no telling where its lock

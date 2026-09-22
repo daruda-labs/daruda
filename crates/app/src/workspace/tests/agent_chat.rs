@@ -739,7 +739,7 @@ async fn agent_chat_agent_id_restore_handles_present_and_removed_owner(cx: &mut 
                     last_focused_pane: pane_id,
                     user_label: None,
                 });
-                ws.snapshot_for_disk(cx).expect("snapshot")
+                ws.snapshot_for_disk(cx)
             })
         })
         .unwrap();
@@ -1879,7 +1879,7 @@ async fn an_untouched_pane_keeps_following_the_config_defaults(cx: &mut TestAppC
                     last_focused_pane: pane_id,
                     user_label: None,
                 });
-                ws.snapshot_for_disk(cx).expect("snapshot")
+                ws.snapshot_for_disk(cx)
             })
         })
         .unwrap();
@@ -2205,7 +2205,7 @@ async fn a_model_pick_is_remembered_and_survives_a_restore(cx: &mut TestAppConte
                     "the chip pick is remembered so the next connect reapplies it"
                 );
 
-                ws.snapshot_for_disk(cx).expect("snapshot")
+                ws.snapshot_for_disk(cx)
             })
         })
         .unwrap();

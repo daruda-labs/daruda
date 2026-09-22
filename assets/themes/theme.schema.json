@@ -318,21 +318,6 @@
       "$ref": "#/$defs/Rgba",
       "default": "#070809ff"
     },
-    "welcome_button_bg": {
-      "description": "Maps to `palette::BG_HOVER`.",
-      "$ref": "#/$defs/Rgba",
-      "default": "#141516ff"
-    },
-    "welcome_button_hover_bg": {
-      "description": "Maps to `palette::BG_ACTIVE`.",
-      "$ref": "#/$defs/Rgba",
-      "default": "#18191aff"
-    },
-    "welcome_recent_hover_bg": {
-      "description": "Maps to `palette::BG_HOVER`.",
-      "$ref": "#/$defs/Rgba",
-      "default": "#141516ff"
-    },
     "file_viewer_bg": {
       "description": "Maps to `palette::BG_EDITOR`.",
       "$ref": "#/$defs/Rgba",

@@ -7,10 +7,9 @@
 
 use std::collections::HashSet;
 
-use gpui::{AnyWindowHandle, App, AppContext, Context, Entity, Global, WeakEntity, Window};
+use gpui::{AnyWindowHandle, App, AppContext, Context, Global, WeakEntity, Window};
 
 use crate::settings_window::SettingsWindow;
-use crate::welcome::WelcomeScreen;
 use crate::workspace::Workspace;
 
 /// Settings singleton handle; stores the inner entity because the window root
@@ -36,21 +35,6 @@ impl SettingsHandle {
     }
 }
 
-/// Welcome singleton handle; mirrors [`SettingsHandle`] so singleton lifecycle
-/// stays symmetric.
-#[derive(Clone)]
-pub(crate) struct WelcomeHandle {
-    window: AnyWindowHandle,
-    inner: WeakEntity<WelcomeScreen>,
-}
-
-impl WelcomeHandle {
-    /// Upgrade to the live entity, or `None` if the window has closed.
-    pub(crate) fn upgrade(&self) -> Option<Entity<WelcomeScreen>> {
-        self.inner.upgrade()
-    }
-}
-
 /// GPUI global mapping open windows to their typed workspace/singleton entity.
 /// `Default` lets tests and production paths create it lazily via
 /// `default_global`, without a separate init call.
@@ -58,7 +42,6 @@ impl WelcomeHandle {
 pub(crate) struct WindowRegistry {
     workspaces: Vec<(AnyWindowHandle, WeakEntity<Workspace>)>,
     settings: Option<SettingsHandle>,
-    welcome: Option<WelcomeHandle>,
     /// The workspace hosting the app-global orchestrator session.
     orchestrator: Option<(AnyWindowHandle, WeakEntity<Workspace>)>,
 }
@@ -180,6 +163,25 @@ impl WindowRegistry {
             .map(|(h, w)| (*h, w.clone()))
     }
 
+    /// The window already showing the workspace `uuid` names, if one is
+    /// open.
+    ///
+    /// A `WorkspaceUuid` is the key of one on-disk record, so two windows
+    /// holding the same one both write `workspaces/<uuid>.json` and the
+    /// last save wins — an emptied window can erase the projects the other
+    /// still has open. The open paths consult this first and focus the
+    /// existing window rather than minting a duplicate.
+    pub(crate) fn workspace_window_for_uuid(
+        uuid: daruda_store::project::WorkspaceUuid,
+        cx: &App,
+    ) -> Option<AnyWindowHandle> {
+        cx.try_global::<WindowRegistry>()?
+            .workspaces
+            .iter()
+            .find(|(_, weak)| weak.upgrade().is_some_and(|ws| ws.read(cx).uuid() == uuid))
+            .map(|(h, _)| *h)
+    }
+
     /// First registered workspace — used by screenshot runs where no
     /// OS-focused active window exists, and by the Settings window
     /// (a separate OS window with no `Workspace` of its own) to pick a
@@ -280,27 +282,6 @@ impl WindowRegistry {
         cx.try_global::<WindowRegistry>()?.settings.clone()
     }
 
-    /// Record the live Welcome singleton.
-    pub(crate) fn register_welcome(
-        window: AnyWindowHandle,
-        inner: WeakEntity<WelcomeScreen>,
-        cx: &mut App,
-    ) {
-        cx.default_global::<WindowRegistry>().welcome = Some(WelcomeHandle { window, inner });
-    }
-
-    /// Drop the Welcome singleton entry from its `cx.on_release` hook.
-    pub(crate) fn clear_welcome(cx: &mut App) {
-        if cx.try_global::<WindowRegistry>().is_some() {
-            cx.global_mut::<WindowRegistry>().welcome = None;
-        }
-    }
-
-    /// Return the open Welcome handle, if any.
-    pub(crate) fn welcome(cx: &App) -> Option<WelcomeHandle> {
-        cx.try_global::<WindowRegistry>()?.welcome.clone()
-    }
-
     /// Look up the window that owns a workspace entity.
     pub(crate) fn handle_for_workspace(
         entity_id: gpui::EntityId,
@@ -324,14 +305,6 @@ impl WindowRegistry {
             .iter()
             .find(|(h, _)| *h == handle)
             .map(|(_, weak)| weak.clone())
-    }
-
-    /// Return the open Welcome window handle, if any.
-    pub(crate) fn welcome_window(cx: &App) -> Option<AnyWindowHandle> {
-        cx.try_global::<WindowRegistry>()?
-            .welcome
-            .as_ref()
-            .map(|h| h.window)
     }
 
     /// Return the open Settings window handle, if any.

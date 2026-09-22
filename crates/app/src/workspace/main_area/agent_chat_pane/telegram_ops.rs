@@ -655,6 +655,9 @@ impl Workspace {
     /// `crate::telegram::global`) that route by `WorkspaceUuid` since
     /// `PaneId` alone is only unique within one workspace, not across
     /// all open windows.
+    ///
+    /// Also how the open paths avoid giving two windows one persisted
+    /// record — see `WindowRegistry::workspace_window_for_uuid`.
     pub(crate) fn uuid(&self) -> daruda_store::project::WorkspaceUuid {
         self.uuid
     }

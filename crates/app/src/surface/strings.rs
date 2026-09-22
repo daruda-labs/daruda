@@ -75,6 +75,12 @@ pub fn menu_close_project() -> String {
 pub fn menu_no_recent() -> String {
     rust_i18n::t!("menu.no_recent").into_owned()
 }
+/// Recent-list label for a workspace that holds no projects. Such a row is
+/// kept (so the next launch can restore the workspace) but must not keep
+/// advertising a project that is no longer in it.
+pub fn menu_recent_empty_workspace() -> String {
+    rust_i18n::t!("menu.recent_empty_workspace").into_owned()
+}
 pub fn menu_new_tab() -> String {
     rust_i18n::t!("common.new_tab").into_owned()
 }
@@ -1695,13 +1701,16 @@ pub fn service_status_label(status: &daruda_agent::ServiceStatus) -> String {
 }
 
 // ============================================================================
-// Welcome screen
+// Landing view (the `welcome` key namespace is retained — see palette.rs)
 // ============================================================================
 
 pub fn welcome_title() -> String {
     rust_i18n::t!("welcome.title").into_owned()
 }
-pub const WELCOME_VERSION: &str = "v0.1.0";
+/// Version line under the Landing title. Read from the crate version so it
+/// cannot drift — this surface is reachable from every project-less launch,
+/// not just a first run.
+pub const WELCOME_VERSION: &str = concat!("v", env!("CARGO_PKG_VERSION"));
 pub fn welcome_open_folder() -> String {
     rust_i18n::t!("welcome.open_folder").into_owned()
 }
@@ -1715,12 +1724,21 @@ pub fn welcome_no_recent() -> String {
     rust_i18n::t!("welcome.no_recent").into_owned()
 }
 
-/// Short changelog line shown at the bottom of the welcome panel.
-/// Announces the post-multi-project shortcut semantics — `Cmd+O` now
-/// adds the project to the current window (policy-aware) instead of
-/// spawning a new one. Plain text; no Markdown rendering.
-pub fn welcome_changelog_open_policy() -> String {
-    rust_i18n::t!("welcome.changelog_open_policy").into_owned()
+/// Heading over the Landing view's keyboard cheat sheet.
+pub fn welcome_shortcuts() -> String {
+    rust_i18n::t!("welcome.shortcuts").into_owned()
+}
+pub fn welcome_shortcut_open_folder() -> String {
+    rust_i18n::t!("welcome.shortcut_open_folder").into_owned()
+}
+pub fn welcome_shortcut_open_folder_new_window() -> String {
+    rust_i18n::t!("welcome.shortcut_open_folder_new_window").into_owned()
+}
+pub fn welcome_shortcut_new_window() -> String {
+    rust_i18n::t!("welcome.shortcut_new_window").into_owned()
+}
+pub fn welcome_shortcut_command_palette() -> String {
+    rust_i18n::t!("welcome.shortcut_command_palette").into_owned()
 }
 
 // ============================================================================
@@ -5908,7 +5926,7 @@ pub fn mcp_new_button() -> String {
 pub fn mcp_empty_project() -> String {
     rust_i18n::t!("mcp.empty_project").into_owned()
 }
-/// Body when project scope has no active lane (welcome-style window).
+/// Body when project scope has no active lane (an empty workspace).
 pub fn mcp_no_project_hint() -> String {
     rust_i18n::t!("mcp.no_project_hint").into_owned()
 }

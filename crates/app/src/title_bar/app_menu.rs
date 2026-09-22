@@ -160,8 +160,8 @@ fn fill(
             } => {
                 // The native menu greys out what the focused window cannot
                 // answer (`validateMenuItem` on macOS). Without this the
-                // Welcome window's popup shows every workspace action live
-                // and does nothing when one is picked.
+                // popup of a window with no Workspace shows every workspace
+                // action live and does nothing when one is picked.
                 let unavailable = !cx.is_action_available(action.as_ref());
                 menu.item(
                     PopupMenuItem::new(name.clone())

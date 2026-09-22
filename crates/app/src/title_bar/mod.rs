@@ -3,7 +3,7 @@
 //! Every window daruda opens shares `build_titlebar_options`, whose
 //! `appears_transparent` removes the OS caption off macOS — so the row that
 //! carries the drag region and the window controls is a property of the
-//! window, not of the `Workspace` that usually fills it. Settings and Welcome
+//! window, not of the `Workspace` that usually fills it. Settings
 //! call the same builders.
 
 mod app_menu;

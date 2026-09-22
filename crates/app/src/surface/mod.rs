@@ -4,6 +4,9 @@
 //!   * [`constants`] — app name + `TERM_PROGRAM` value (rename trigger).
 //!   * [`keybindings`] — every `KeyBinding` shortcut string
 //!     (key-remap trigger).
+//!   * [`shortcut_display`] — those same strings rendered for a reader
+//!     (key-remap trigger, but a formatting change, so kept separate from
+//!     the declarative table).
 //!   * [`strings`] — menu and dialog labels (localisation trigger).
 //!   * [`timestamp`] — wall-clock timestamp shapes (localisation trigger).
 //!
@@ -15,5 +18,6 @@
 pub mod action_map;
 pub mod constants;
 pub mod keybindings;
+pub mod shortcut_display;
 pub mod strings;
 pub mod timestamp;

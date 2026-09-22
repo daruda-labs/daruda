@@ -24,8 +24,9 @@ pub use lane::{
 pub use persistence::{
     RECENT_MAX, delete_project_state_in, delete_workspace_state_in, for_each_project_state_in,
     for_each_workspace_state_in, is_uuid_filename_stem, load_project_state_in, load_recent_in,
-    load_workspace_state_in, projects_dir_in, recent_path_in, save_project_state_in,
-    save_recent_in, save_workspace_state_in, touch_recent_in, workspaces_dir_in,
+    load_workspace_state_in, projects_dir_in, recent_path_in, refresh_recent_if_present_in,
+    save_project_state_in, save_recent_in, save_workspace_state_in, touch_recent_in,
+    workspaces_dir_in,
 };
 pub use session_host_id::SessionHostId;
 pub use types::{

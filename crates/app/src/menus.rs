@@ -66,12 +66,22 @@ pub(crate) struct MenuSnapshot(pub(crate) std::rc::Rc<Vec<gpui::OwnedMenu>>);
 
 impl gpui::Global for MenuSnapshot {}
 
-/// Install `menus` as the application menu and refresh the snapshot the
-/// app-drawn menu reads. The one entry point for both.
-pub(crate) fn set_menu_bar(menus: Vec<Menu>, cx: &mut App) {
-    cx.set_menus(menus);
+/// The recent-projects list as the Landing view reads it back.
+///
+/// `load_recent_in` is a disk read, which `render` must not do. The menu
+/// bar already loads the list at every point it changes, so the same write
+/// serves both readers and no second cache has to be kept in sync.
+pub(crate) struct RecentSnapshot(pub(crate) std::rc::Rc<Vec<daruda_store::project::RecentEntry>>);
+
+impl gpui::Global for RecentSnapshot {}
+
+/// Install the application menu built from `recent` and refresh both
+/// snapshots that read it back. The one entry point for all three.
+pub(crate) fn set_menu_bar(recent: &[daruda_store::project::RecentEntry], cx: &mut App) {
+    cx.set_menus(build_menu_bar(recent));
     let snapshot = cx.get_menus().unwrap_or_default();
     cx.set_global(MenuSnapshot(std::rc::Rc::new(snapshot)));
+    cx.set_global(RecentSnapshot(std::rc::Rc::new(recent.to_vec())));
 }
 
 /// Re-load the recent-projects list from disk and refresh the entire
@@ -80,13 +90,13 @@ pub(crate) fn set_menu_bar(menus: Vec<Menu>, cx: &mut App) {
 pub(crate) fn refresh_recent_menu(cx: &mut App) {
     let recent =
         daruda_store::project::load_recent_in(&daruda_store::persistence::default_data_dir());
-    set_menu_bar(build_menu_bar(&recent), cx);
+    set_menu_bar(&recent, cx);
 }
 
 /// Build the entire native menu bar. Kept in one helper so the File
 /// menu's Recent submenu can be rebuilt with fresh data on launch and
 /// after each `touch_recent_in` via [`refresh_recent_menu`].
-pub(crate) fn build_menu_bar(recent: &[daruda_store::project::RecentEntry]) -> Vec<Menu> {
+fn build_menu_bar(recent: &[daruda_store::project::RecentEntry]) -> Vec<Menu> {
     vec![
         Menu {
             name: s::menu_app().into(),

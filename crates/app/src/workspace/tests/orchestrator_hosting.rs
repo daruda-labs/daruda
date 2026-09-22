@@ -221,7 +221,7 @@ fn closing_a_project_stashes_the_orchestrator_draft_for_its_next_open(cx: &mut T
             ws.terminal_input.update(cx, |input, cx| {
                 input.set_value("Keep this unsent prompt", window, cx)
             });
-            assert!(ws.close_active_project(window, cx));
+            ws.close_active_project(window, cx);
             assert_eq!(ws.active, surviving);
             // Closing the project switches worktrees, which takes the
             // orchestrator's tab down with it.
@@ -332,7 +332,7 @@ fn visible_orchestrator_is_excluded_from_persisted_tab_indices(cx: &mut TestAppC
                 ws.active_runtime_mut().active_tab_index = active;
                 ws.active_runtime_mut().focused_pane_id =
                     ws.active_runtime().tabs[active].last_focused_pane;
-                let (saved_workspace, projects) = ws.snapshot_for_disk(cx).unwrap();
+                let (saved_workspace, projects) = ws.snapshot_for_disk(cx);
                 let saved = &projects[0].lanes[0];
                 assert_eq!(saved.tabs.len(), 2);
                 assert_eq!(saved.active_tab_index, expected, "active index {active}");
@@ -342,7 +342,7 @@ fn visible_orchestrator_is_excluded_from_persisted_tab_indices(cx: &mut TestAppC
             // Filtering a trailing active slot clamps to the preceding user tab.
             ws.active_runtime_mut().tabs.swap(1, 2);
             ws.active_runtime_mut().active_tab_index = 2;
-            let (_, projects) = ws.snapshot_for_disk(cx).unwrap();
+            let (_, projects) = ws.snapshot_for_disk(cx);
             assert_eq!(projects[0].lanes[0].active_tab_index, 1);
         })
     })

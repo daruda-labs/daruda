@@ -10,7 +10,7 @@
 //!   so the first watcher fanout never sees a half-initialised
 //!   observer chain.
 //! - `app_presence::init` must precede the first window so its new-root
-//!   subscriptions cover workspace, settings, and welcome activation edges.
+//!   subscriptions cover workspace and settings activation edges.
 //! - Every `init(cx)` helper is idempotent (`cx.has_global` guard).
 
 use crate::ui;

@@ -370,10 +370,9 @@ pub(in crate::workspace) enum PendingLogin {
 
 pub struct Workspace {
     /// Stable cross-session identifier — matches the UUID stored on disk
-    /// at `workspaces/<uuid>.json`. Minted at construction, never changes
-    /// for the entity's lifetime. Read by the v3 persistence path;
-    /// otherwise unread outside tests.
-    #[allow(dead_code)]
+    /// at `workspaces/<uuid>.json`. Minted at construction, then replaced
+    /// once by `restore_from_disk` when this window adopts a saved
+    /// workspace; never changes after that.
     pub(in crate::workspace) uuid: daruda_store::project::WorkspaceUuid,
     /// TabBar + PaneTree runtime state. Holds every lane's runtime
     /// (tabs / panes / focus, keyed by `LaneRef`) plus the
@@ -415,7 +414,7 @@ pub struct Workspace {
     /// 18 sub-fields don't clutter `Workspace`'s top level. See
     /// [`claude_session_ops::ClaudeContext`].
     pub(in crate::workspace) claude: claude_session_ops::ClaudeContext,
-    /// Runtime projects in this workspace. Zero entries = empty (Welcome
+    /// Runtime projects in this workspace. Zero entries = empty (Landing
     /// screen). Each project owns its own lanes, reached via
     /// `projects[i].lanes`. `tabs`/`panes` live on the active lane's
     /// `MainAreaContext` slot.
@@ -1236,7 +1235,7 @@ impl Workspace {
             // git discovery is deferred to
             // `reconcile_bootstrapped_lanes` below so window creation
             // never blocks on git CLI. Otherwise the workspace starts
-            // with no projects (Welcome path).
+            // with no projects (Landing path).
             projects: project
                 .as_ref()
                 .map(|p| {
@@ -1420,12 +1419,12 @@ impl Workspace {
         };
         // Invariant seed: the active lane's runtime must always exist in
         // `runtimes` so `active_runtime()` (read unconditionally by
-        // `render`) never panics — including the Welcome state, where
+        // `render`) never panics — including the Landing state, where
         // `active` is `LaneRef::default()` and no project is open. Seed
         // it for whatever `active` is, unconditionally: production then
         // populates the first project's lane via `add_tab` below (the only
-        // auto-seed left), and Welcome leaves it empty (render shows the
-        // welcome screen). Lanes activated later are never auto-seeded —
+        // auto-seed left), and an empty workspace leaves it empty (render
+        // shows Landing). Lanes activated later are never auto-seeded —
         // they render the empty-state until the user opens content.
         ws.main_area.runtimes.entry(ws.active).or_default();
         // Test-only short-circuit: every line below this point spawns a
@@ -1441,7 +1440,17 @@ impl Workspace {
             crate::agent::tasks_global::init(cx);
             return ws;
         }
-        ws.add_tab(window, cx);
+        // Seed the first tab only when there is a project to root it at.
+        // With no project there is no working directory, so the shell would
+        // land in `$HOME` — somewhere nobody asked for, and it would cover
+        // the Landing view on every project-less launch.
+        //
+        // This governs the *automatic* seed only. `add_tab` still honours an
+        // explicit `+` / Cmd+T in an empty workspace (see its own comment):
+        // there the user did ask, and `$HOME` is the documented fallback.
+        if !ws.projects.is_empty() {
+            ws.add_tab(window, cx);
+        }
         // After tabs/lanes are seeded, decide whether the JSONL
         // fallback watcher should run for this Workspace and start it.
         ws.refresh_jsonl_watcher(cx);
@@ -1582,7 +1591,16 @@ impl Workspace {
                 .file_name()
                 .map(|s| s.to_string_lossy().into_owned())
                 .unwrap_or_else(|| "?".into()),
-            None => "empty".into(),
+            // The workspace emptied out. Its recent row is kept so the next
+            // launch finds it, so the label has to stop naming a project it
+            // no longer holds.
+            //
+            // The departed project's name is deliberately not carried along
+            // (as "Empty workspace — was <name>"): a recent row addresses a
+            // workspace, not a folder, and reopening the folder is the job
+            // of Open Folder. Keeping the name would make the row advertise
+            // something it cannot deliver.
+            None => crate::surface::strings::menu_recent_empty_workspace(),
         };
 
         let rest = self.projects.len().saturating_sub(1);
@@ -1594,7 +1612,7 @@ impl Workspace {
     }
 
     /// Borrow the currently active project. `None` when the workspace
-    /// has no projects (Welcome state).
+    /// has no projects (Landing state).
     pub(in crate::workspace) fn active_project(&self) -> Option<&crate::project::Project> {
         let active = self.active;
         self.projects.iter().find(|p| p.id == active.project)
@@ -1626,7 +1644,7 @@ impl Workspace {
     /// not `Present` (i.e. `Missing` or `AccessDenied`). Such a lane renders
     /// the empty-state and must reject pane-spawning actions (new tab /
     /// split) that would root a PTY at the dead path. `false` when there is
-    /// no active lane at all (no project / welcome window) — that
+    /// no active lane at all (no project) — that
     /// legitimately allows tabs.
     pub(in crate::workspace) fn active_lane_is_inaccessible(&self) -> bool {
         self.active_lane()
@@ -1680,7 +1698,7 @@ impl Workspace {
     }
 
     /// Borrow the active project's lane list. Empty when the
-    /// workspace has no projects (Welcome state).
+    /// workspace has no projects (Landing state).
     pub(in crate::workspace) fn active_lanes(&self) -> &[crate::lane::Lane] {
         self.active_project()
             .map(|p| p.lanes.as_slice())
@@ -1775,6 +1793,14 @@ impl Workspace {
             }
             BranchStatus::Detached | BranchStatus::NotGit => project.name.clone(),
         })
+    }
+
+    /// True when this workspace holds no projects — the state the
+    /// Landing view paints. The open-folder path reads it to skip the
+    /// `WindowOpenPolicy` question entirely: "add here or open a new
+    /// window?" has no meaning for a window with nothing in it.
+    pub(crate) fn has_no_projects(&self) -> bool {
+        self.projects.is_empty()
     }
 
     /// True when any project in this workspace already has `root` as

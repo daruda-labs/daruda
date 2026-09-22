@@ -166,7 +166,7 @@ fn closing_a_project_drops_all_its_scoped_state_and_preserves_other_projects(
                 assert!(ws.lane_scoped.contains_key(&target));
             }
 
-            assert!(ws.close_active_project(window, cx));
+            ws.close_active_project(window, cx);
 
             assert_eq!(ws.active, survivor);
             assert!(

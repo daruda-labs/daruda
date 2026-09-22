@@ -37,6 +37,7 @@ use super::{FocusPaneDown, FocusPaneLeft, FocusPaneRight, FocusPaneUp};
 use crate::workspace::root_menu::RootContextMenuExt as _;
 
 mod center;
+mod landing;
 mod snapshots;
 
 pub(super) const PANE_HEADER_HEIGHT: f32 = theme::PANE_HEADER_HEIGHT;
@@ -400,7 +401,7 @@ impl Render for Workspace {
 
         // Window title — user override (Window > Edit Window Title…) wins;
         // otherwise show `<project> · <branch>` for the active lane
-        // (active project only, no aggregate count). Welcome state
+        // (active project only, no aggregate count). Landing state
         // (no projects) leaves the title untouched.
         if let Some(label) = self.window_user_label.as_ref() {
             window.set_window_title(label.as_ref());

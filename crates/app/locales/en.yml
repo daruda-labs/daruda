@@ -134,14 +134,18 @@ command:
   toggle_right_dock: "Toggle Right Dock"
   type_command_placeholder: "Type a command..."
 
-# Welcome screen
+# Landing view (the `welcome` key namespace is retained — see palette.rs)
 welcome:
   title: "daruda"
   open_folder: "Open Folder..."
   recent: "Recent Projects"
   new_empty: "New Empty Window"
   no_recent: "No recent projects"
-  changelog_open_policy: "Cmd+O adds the project to this window · Cmd+Shift+O opens in a new window"
+  shortcuts: "Shortcuts"
+  shortcut_open_folder: "Open a project folder"
+  shortcut_open_folder_new_window: "Open a folder in a new window"
+  shortcut_new_window: "New empty window"
+  shortcut_command_palette: "Command palette"
 
 # Menus — top-level names
 menu:
@@ -166,6 +170,8 @@ menu:
   open_recent_in_new_window: "Open Recent in New Window"
   close_project: "Close Project"
   no_recent: "No recent projects"
+  # Label for a recent row whose workspace no longer holds any project.
+  recent_empty_workspace: "Empty workspace"
 
   # Edit menu
   copy: "Copy"

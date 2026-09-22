@@ -62,7 +62,7 @@ impl Workspace {
     }
 
     /// Project-skills root for the active lane. `None` when the
-    /// workspace has no active lane (welcome window).
+    /// workspace has no active lane (an empty workspace).
     pub(in crate::workspace) fn active_lane_root(&self) -> Option<PathBuf> {
         self.active_lane().map(|wt| wt.path.clone())
     }

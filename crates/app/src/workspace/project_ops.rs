@@ -40,6 +40,14 @@ impl Workspace {
     /// Called from `close_active_project` when no project (or no usable
     /// lane) remains.
     fn reset_to_empty_workspace(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.reset_to_empty_workspace_inner(window, cx);
+        self.mutate_durable(cx, |_, _| {});
+    }
+
+    /// The teardown itself, without the save. Split out for the `landing`
+    /// screenshot scenario: a capture must not write the emptied workspace
+    /// back over the state dir it was seeded from.
+    fn reset_to_empty_workspace_inner(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         // Every runtime drops below, so release the Markdown GPU images first
         // — the no-usable-lane caller still has surviving projects whose panes
         // were never released. Already-released tables are empty, so the panes
@@ -50,11 +58,29 @@ impl Workspace {
         }
         // Drop every lane's runtime — no project remains — and re-seed the
         // default-ref entry so the "active runtime always present"
-        // invariant holds for the Welcome state that `render` paints next.
+        // invariant holds for the Landing view that `render` paints next.
         self.main_area.runtimes.clear();
         self.active = LaneRef::default();
         self.main_area.runtimes.entry(self.active).or_default();
-        self.mutate_durable(cx, |_, _| {});
+    }
+
+    /// Drop every project so `render` paints the Landing view, for the
+    /// `landing` screenshot scenario. A capture restores a real workspace,
+    /// and the empty state is not otherwise reachable from one.
+    ///
+    /// Shares the teardown with the real close path rather than re-deriving
+    /// it, and stays a `Workspace` method so the driver never writes these
+    /// fields itself. It deliberately does **not** persist: a capture must
+    /// leave the state dir it was seeded from exactly as it found it.
+    #[cfg(feature = "screenshot")]
+    pub(in crate::workspace) fn empty_workspace_for_shot(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.projects.clear();
+        self.reset_to_empty_workspace_inner(window, cx);
+        cx.notify();
     }
 
     /// Add a freshly-opened project to this workspace and activate its
@@ -221,7 +247,7 @@ impl Workspace {
     }
 
     /// Rename the currently active project. No-op when the workspace
-    /// has no projects (Welcome state) or when the new name equals the
+    /// has no projects (Landing state) or when the new name equals the
     /// current one. Returns `true` when the rename mutated state.
     pub(in crate::workspace) fn rename_active_project(
         &mut self,
@@ -239,24 +265,18 @@ impl Workspace {
         true
     }
 
-    /// Remove the active project and route the workspace to the next
-    /// project (or signal "close this window" when none remain).
+    /// Remove the active project and route the workspace to the next one.
     ///
-    /// Returns `true` when a usable lane remains after the removal — the
-    /// caller should keep the window open. Returns `false` when the
-    /// removal leaves the workspace with nothing to show (no projects
-    /// left, or every surviving project is lane-less); the caller closes
-    /// the window, which routes to the Welcome screen.
+    /// The window always survives. When the removal leaves nothing to show
+    /// — no projects left, or every surviving project is lane-less — the
+    /// workspace resets to the empty state and `render` paints the Landing
+    /// view; callers have nothing to handle.
     ///
     /// Every lane's runtime for the removed project also drops out of
     /// `runtimes` so memory does not leak.
-    pub(crate) fn close_active_project(
-        &mut self,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) -> bool {
+    pub(crate) fn close_active_project(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let Some(project_id) = self.active_project().map(|p| p.id) else {
-            return false;
+            return;
         };
         // Release every pane the closing project owns — across all of its
         // lanes' runtimes (including the active lane, which belongs to
@@ -299,14 +319,14 @@ impl Workspace {
 
         self.projects.retain(|p| p.id != project_id);
 
-        // No more projects — clear the active runtime fields and tell
-        // the caller to close the window. Persist the empty list (mirrors
-        // the no-survivor-lane branch below) so a force-quit between this
-        // point and the natural shutdown save can't resurrect the closed
-        // project from a stale on-disk snapshot.
+        // No more projects — clear the active runtime fields and leave the
+        // window standing on Landing. Persist the empty list (mirrors the
+        // no-survivor-lane branch below) so a force-quit between this point
+        // and the natural shutdown save can't resurrect the closed project
+        // from a stale on-disk snapshot.
         if self.projects.is_empty() {
             self.reset_to_empty_workspace(window, cx);
-            return false;
+            return;
         }
 
         // Pick a fallback project (first remaining with a usable
@@ -318,10 +338,9 @@ impl Workspace {
             // re-discovers an empty list), so this is runtime corruption
             // that left nothing to display. Treat it as an empty
             // workspace — same outcome as the no-projects case above — so
-            // the caller closes the window and the user lands on Welcome
-            // rather than a blank viewport.
+            // the window lands on Landing rather than a blank viewport.
             self.reset_to_empty_workspace(window, cx);
-            return false;
+            return;
         };
         // `self.active` is intentionally left pointing at the deleted
         // project's lane ref through this call — its project_id is
@@ -344,7 +363,6 @@ impl Workspace {
             .runtimes
             .retain(|key, _| key.project != project_id);
         self.mutate_durable(cx, |_, _| {});
-        true
     }
 
     /// Disk-cleanup variant of [`Self::close_active_project`]. Runs
@@ -435,7 +453,7 @@ impl Workspace {
                     let Some(ws) = _this.upgrade() else {
                         return;
                     };
-                    let close_window = ws.update(cx_w, |ws, cx| {
+                    ws.update(cx_w, |ws, cx| {
                         for (path, message) in &errors {
                             let report = daruda_store::observability::error_report::ErrorReport::new(
                                 crate::surface::strings::error_lane_disk_cleanup_failed(),
@@ -465,16 +483,21 @@ impl Workspace {
                             ws.main_area
                                 .runtimes
                                 .retain(|key, _| key.project != project_id);
-                            ws.mutate_durable(cx, |_, _| {});
-                            return ws.projects.is_empty();
+                            // Reaching zero here needs `self.active` to have
+                            // been dangling already, but if it happens the
+                            // workspace must land in the same normalized
+                            // empty state every other path establishes —
+                            // `render` reads `active_runtime()` to paint
+                            // Landing.
+                            if ws.projects.is_empty() {
+                                ws.reset_to_empty_workspace(window, cx);
+                            } else {
+                                ws.mutate_durable(cx, |_, _| {});
+                            }
+                            return;
                         }
-                        let keep = ws.close_active_project(window, cx);
-                        !keep
+                        ws.close_active_project(window, cx);
                     });
-                    if close_window {
-                        window.remove_window();
-                        crate::windows::ensure_welcome_if_last(cx_w);
-                    }
                 });
             });
         })
@@ -672,19 +695,17 @@ impl Workspace {
                         "project.delete_by_id",
                         move |window, cx_w| match choice {
                             DeleteProjectChoice::KeepOnDisk => {
-                                let keep = ws.update(cx_w, |ws, cx| {
+                                ws.update(cx_w, |ws, cx| {
                                     // Bail if the target vanished between
                                     // open and confirm — never delete a
                                     // different, still-active project.
                                     if !ws.activate_target_project(project_id, window, cx) {
-                                        return true;
+                                        return;
                                     }
-                                    ws.close_active_project(window, cx)
+                                    // Closing the last one empties the
+                                    // workspace; the window stays on Landing.
+                                    ws.close_active_project(window, cx);
                                 });
-                                if !keep {
-                                    window.remove_window();
-                                    crate::windows::ensure_welcome_if_last(cx_w);
-                                }
                             }
                             DeleteProjectChoice::DeleteOnDisk => {
                                 ws.update(cx_w, |ws, cx| {
