@@ -238,8 +238,9 @@ fn row_preset_item(
 /// glyph sequence.
 fn add_tab_button(snap: &BottomDockSnapshot, cx: &mut Context<Dock>) -> impl IntoElement {
     let workspace = snap.workspace.clone();
-    crate::ui::button_chip("panel-tab-add", "+").on_click(cx.listener(
-        move |_dock, _: &ClickEvent, window, cx| {
+    crate::ui::button_icon("panel-tab-add", crate::ui::icons::ADD, cx)
+        .tooltip(surface_strings::create_panel_tab_modal_title())
+        .on_click(cx.listener(move |_dock, _: &ClickEvent, window, cx| {
             if let Some(ws) = workspace.upgrade() {
                 let callback_ws = workspace.clone();
                 ws.update(cx, |ws, cx| {
@@ -259,8 +260,7 @@ fn add_tab_button(snap: &BottomDockSnapshot, cx: &mut Context<Dock>) -> impl Int
                     );
                 });
             }
-        },
-    ))
+        }))
 }
 
 fn macro_tab(

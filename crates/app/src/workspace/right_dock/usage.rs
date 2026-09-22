@@ -215,6 +215,7 @@ fn recent_session_row(
         .items_center()
         .w_full()
         .min_w_0()
+        .min_h(px(theme::CONTROL_TARGET_SIZE))
         .overflow_hidden()
         .gap(px(theme::RIGHT_PANEL_ROW_GAP))
         .px(px(theme::SKILL_ROW_PAD_X))
@@ -253,9 +254,9 @@ fn recent_session_row(
                 .invisible()
                 .group_hover("usage-session-row", |s| s.visible())
                 .child(
-                    button(restore_id, strings::usage_session_restore())
-                        .ghost()
-                        .xsmall()
+                    crate::ui::button_icon(restore_id, crate::ui::icons::HISTORY, cx)
+                        .tooltip(strings::usage_session_restore())
+                        .debug_selector(|| "usage-session-restore".into())
                         .on_click(move |_, window, cx| {
                             if let Some(ws) = workspace.upgrade() {
                                 ws.update(cx, |ws, cx| {
@@ -406,6 +407,7 @@ fn usage_section_header(
             // feedback. Disabled while a refresh is in flight so a
             // double-click can't fan out a second fetch.
             button("usage-refresh-badge", label)
+                .child(crate::ui::icons::icon(crate::ui::icons::REFRESH))
                 .ghost()
                 .xsmall()
                 .disabled(in_flight)
@@ -892,6 +894,28 @@ fn plan_badge_with_mult(base: &str, sub: &str, tier: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[gpui::test]
+    fn restore_action_fits_the_session_row(cx: &mut gpui::TestAppContext) {
+        crate::workspace::right_dock::row_tests::assert_hover_targets_fit(
+            cx,
+            &["usage-session-restore"],
+            |workspace, cx| {
+                let session = RestorableSession {
+                    session_id: "sample-session".into(),
+                    agent_id: "claude-acp".into(),
+                    account: daruda_store::accounts::AccountSelection::SystemDefault,
+                    lane_ref: workspace.upgrade().unwrap().read(cx).active,
+                    title: Some("A previous session".into()),
+                    prompt_preview: None,
+                    git_branch: None,
+                    cwd: std::path::PathBuf::from("sample-project"),
+                    last_active: SystemTime::UNIX_EPOCH,
+                };
+                recent_session_row(&session, &workspace, cx).into_any_element()
+            },
+        );
+    }
     use daruda_agent::UsageOutcome;
 
     fn section(recipe: AccountRecipeId) -> UsageSectionSnapshot {

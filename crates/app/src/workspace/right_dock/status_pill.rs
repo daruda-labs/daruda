@@ -18,7 +18,7 @@
 
 use crate::ui::theme;
 use daruda_store::tasks::{Task, TaskState};
-use gpui::{Hsla, IntoElement, SharedString, Styled as _, px};
+use gpui::{Hsla, IntoElement, ParentElement as _, SharedString, Styled as _, px};
 
 use super::super::Workspace;
 use super::super::layout::RightDockSnapshot;
@@ -28,10 +28,7 @@ use crate::ui::{DropdownMenu as _, PopupMenu, PopupMenuItem, button};
 
 /// Build the status-pill trigger + dropdown for a single task row.
 ///
-/// The label is the state label plus `TASK_PILL_CHEVRON`. Height,
-/// padding, and inline gap come from the `xsmall()` factory in
-/// [`crate::ui::button`]; the pill sets only corner radius and a
-/// state-tinted background.
+/// The state label and SVG chevron share the compact text-button chrome.
 pub(super) fn status_pill(
     task: &Task,
     snap: &RightDockSnapshot,
@@ -43,10 +40,10 @@ pub(super) fn status_pill(
     let state = task.state.clone();
 
     let pill_id = SharedString::from(format!("task-pill-{}", task.id));
-    let label = SharedString::from(format!("{}{}", state_label, strings::TASK_PILL_CHEVRON));
     let bg = pill_background(&state, cx);
 
-    button(pill_id, label)
+    button(pill_id, state_label)
+        .child(crate::ui::icons::icon(crate::ui::icons::EXPAND_MORE))
         .xsmall()
         .bg(bg)
         .rounded(px(theme::RIGHT_PANEL_STATUS_PILL_RADIUS_PX))

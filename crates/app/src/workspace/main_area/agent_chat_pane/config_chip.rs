@@ -15,7 +15,7 @@
 //! per-agent UI code.
 
 use daruda_acp::{ConfigOptionKindView, ConfigOptionView, ConfigValueView};
-use gpui::{IntoElement, SharedString, Styled as _, WeakEntity, px};
+use gpui::{IntoElement, ParentElement as _, SharedString, Styled as _, WeakEntity, px};
 
 use crate::surface::strings;
 use crate::ui::{
@@ -59,6 +59,7 @@ pub(in crate::workspace) fn config_chip(
     // Same chrome as the mode chip (ghost variant: transparent bg, fills on
     // hover; 28px height, radius md) so the chip row reads as one control group.
     button(chip_id, label)
+        .child(crate::ui::icons::icon(crate::ui::icons::EXPAND_MORE))
         .ghost()
         .xsmall()
         .h(px(theme::BUTTON_HEIGHT))
@@ -78,7 +79,7 @@ pub(in crate::workspace) fn config_chip(
 }
 
 fn visible_config_label(display_name: &str) -> String {
-    format!("{}{}", display_name, strings::TASK_PILL_CHEVRON)
+    display_name.to_owned()
 }
 
 /// The option's choices as `(value, display name)` in menu order, plus the
@@ -179,9 +180,6 @@ mod tests {
 
     #[test]
     fn visible_label_is_only_the_current_option_value() {
-        assert_eq!(
-            visible_config_label("Sonnet 4"),
-            format!("Sonnet 4{}", strings::TASK_PILL_CHEVRON)
-        );
+        assert_eq!(visible_config_label("Sonnet 4"), "Sonnet 4");
     }
 }

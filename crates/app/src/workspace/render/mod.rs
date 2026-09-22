@@ -8,9 +8,7 @@
 
 use crate::ui::cursor::{CursorReach, CursorReachExt as _};
 use crate::ui::theme;
-use crate::ui::{
-    ButtonVariants as _, DropdownMenu as _, PopupMenu, PopupMenuItem, button, menu_builder,
-};
+use crate::ui::{DropdownMenu as _, PopupMenu, PopupMenuItem, menu_builder};
 use gpui::{
     ClickEvent, ClipboardItem, Context, CursorStyle, DragMoveEvent, Focusable as _, IntoElement,
     KeyContext, MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent, Render, SharedString,
@@ -840,10 +838,8 @@ impl Render for Workspace {
                     .iter()
                     .map(|a| (a.id.clone(), a.name.clone()))
                     .collect();
-                button("new-tab-btn", "+")
-                    .ghost()
-                    .px(px(theme::NEW_TAB_PAD_X))
-                    .py(px(theme::NEW_TAB_PAD_Y))
+                crate::ui::button_icon("new-tab-btn", crate::ui::icons::ADD, cx)
+                    .tooltip(crate::surface::strings::menu_new_tab())
                     .mx(px(theme::NEW_TAB_MARGIN_X))
                     .rounded(px(theme::NEW_TAB_RADIUS))
                     .text_size(px(theme::NEW_TAB_FONT_SIZE))

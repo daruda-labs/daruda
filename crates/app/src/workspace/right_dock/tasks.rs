@@ -25,7 +25,7 @@ use super::super::layout::Dock;
 use super::super::layout::RightDockSnapshot;
 use super::status_pill;
 use crate::surface::strings;
-use crate::ui::{Badge, button, button_primary};
+use crate::ui::{Badge, ButtonVariants as _, button};
 
 pub(super) fn render(snap: &RightDockSnapshot, cx: &mut Context<Dock>) -> AnyElement {
     // Pipeline: state filter → search filter → newest-first sort.
@@ -105,15 +105,20 @@ fn header_row(snap: &RightDockSnapshot) -> impl IntoElement {
         },
     );
 
-    let new_btn = button_primary("task-new", strings::task_new_button())
-        .xsmall()
-        .on_click(move |_evt: &ClickEvent, window, app| {
-            if let Some(w) = new_ws.upgrade() {
-                w.update(app, |this: &mut Workspace, cx| {
-                    this.open_task_edit_pane(None, window, cx);
-                });
-            }
-        });
+    let new_btn = crate::ui::button_with_icon(
+        "task-new",
+        strings::task_new_button(),
+        crate::ui::icons::ADD,
+    )
+    .primary()
+    .xsmall()
+    .on_click(move |_evt: &ClickEvent, window, app| {
+        if let Some(w) = new_ws.upgrade() {
+            w.update(app, |this: &mut Workspace, cx| {
+                this.open_task_edit_pane(None, window, cx);
+            });
+        }
+    });
 
     div()
         .flex()
@@ -136,8 +141,6 @@ fn header_row(snap: &RightDockSnapshot) -> impl IntoElement {
 fn search_row(snap: &RightDockSnapshot, cx: &gpui::App) -> impl IntoElement {
     let has_query = !snap.task_search_query.trim().is_empty();
     let workspace = snap.workspace.clone();
-    let chip_text = theme::current(cx).text_body;
-    let chip_hover_text = theme::current(cx).text_primary;
     div()
         .relative()
         .flex()
@@ -145,20 +148,11 @@ fn search_row(snap: &RightDockSnapshot, cx: &gpui::App) -> impl IntoElement {
         .child(crate::ui::input(&snap.task_search_input, cx, ()))
         .when(has_query, |row| {
             row.child(
-                div()
-                    .id("task-search-clear")
+                crate::ui::button_icon("task-search-clear", crate::ui::icons::CLOSE, cx)
+                    .tooltip(strings::common_search_clear())
                     .absolute()
-                    .right(px(theme::SKILL_ROW_PAD_X))
+                    .right(px(theme::PAD_XS))
                     .top_0()
-                    .bottom_0()
-                    .flex()
-                    .items_center()
-                    .px(px(theme::SKILL_BADGE_PAD_X))
-                    .text_size(px(theme::SKILL_BADGE_FONT_SIZE))
-                    .text_color(chip_text)
-                    .cursor_pointer()
-                    .hover(move |s| s.text_color(chip_hover_text))
-                    .child(strings::TASK_SEARCH_CLEAR_ICON)
                     .on_mouse_down(MouseButton::Left, move |_, window, cx| {
                         // Stop propagation so the click lands on the
                         // overlay, not the underlying Input.

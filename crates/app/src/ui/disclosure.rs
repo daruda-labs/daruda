@@ -4,11 +4,12 @@
 //! fires `on_toggle`. Colour is caller-supplied or inherited, avoiding a
 //! hardcoded `hsla(..)` fallback under the inline-literal rule.
 
+use super::icons;
 use crate::ui::theme;
 use gpui::{
     App, ClickEvent, ElementId, Hsla, IntoElement, RenderOnce, Window, div, prelude::*, px,
 };
-use gpui_component::{Icon, IconName, Sizable as _, Size};
+use gpui_component::{Sizable as _, Size};
 
 /// Boxed click handler alias to keep the field type readable.
 type OnToggle = Box<dyn Fn(&ClickEvent, &mut Window, &mut App) + 'static>;
@@ -28,12 +29,12 @@ pub enum DisclosureAxis {
 /// The glyph a disclosure shows. Pulled out of `render` so the mapping is
 /// assertable: a `Vertical` disclosure showing `ChevronUp` while closed inverts
 /// the affordance, and nothing about the render path would say so.
-fn chevron_icon(axis: DisclosureAxis, is_open: bool) -> IconName {
+fn chevron_icon(axis: DisclosureAxis, is_open: bool) -> &'static str {
     match (axis, is_open) {
-        (DisclosureAxis::Horizontal, false) => IconName::ChevronRight,
-        (DisclosureAxis::Horizontal, true) => IconName::ChevronDown,
-        (DisclosureAxis::Vertical, false) => IconName::ChevronDown,
-        (DisclosureAxis::Vertical, true) => IconName::ChevronUp,
+        (DisclosureAxis::Horizontal, false) => icons::CHEVRON_RIGHT,
+        (DisclosureAxis::Horizontal, true) => icons::EXPAND_MORE,
+        (DisclosureAxis::Vertical, false) => icons::EXPAND_MORE,
+        (DisclosureAxis::Vertical, true) => icons::PREVIOUS,
     }
 }
 
@@ -79,7 +80,7 @@ impl Disclosure {
         self
     }
 
-    /// Override the chevron pixel size. Defaults to `xsmall` when unset.
+    /// Override the chevron pixel size. Defaults to the 16px control icon.
     pub fn size(mut self, size_px: f32) -> Self {
         self.size = Some(size_px);
         self
@@ -107,7 +108,7 @@ impl RenderOnce for Disclosure {
             on_toggle,
         } = self;
 
-        let mut icon = Icon::new(chevron_icon(axis, is_open)).xsmall();
+        let mut icon = icons::icon(chevron_icon(axis, is_open));
         if let Some(px_size) = size {
             icon = icon.with_size(Size::Size(px(px_size)));
         }
@@ -135,12 +136,10 @@ impl RenderOnce for Disclosure {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use gpui_component::IconNamed as _;
 
-    /// `IconName` is a vendored enum with no `PartialEq`, so compare the asset
-    /// each variant resolves to rather than patching the vendored tree.
+    /// Compare paths so the test asserts the actual embedded artwork.
     fn glyph(axis: DisclosureAxis, is_open: bool) -> String {
-        chevron_icon(axis, is_open).path().to_string()
+        chevron_icon(axis, is_open).to_string()
     }
 
     /// Both axes flip, and they disagree on the *closed* glyph — which is the
@@ -165,7 +164,7 @@ mod tests {
     /// as "already open".
     #[test]
     fn the_vertical_axis_points_down_while_closed() {
-        assert!(glyph(DisclosureAxis::Vertical, false).ends_with("chevron-down.svg"));
-        assert!(glyph(DisclosureAxis::Vertical, true).ends_with("chevron-up.svg"));
+        assert_eq!(glyph(DisclosureAxis::Vertical, false), icons::EXPAND_MORE);
+        assert_eq!(glyph(DisclosureAxis::Vertical, true), icons::PREVIOUS);
     }
 }

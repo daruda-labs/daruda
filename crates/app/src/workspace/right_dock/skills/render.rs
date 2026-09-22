@@ -26,7 +26,7 @@ use super::super::super::layout::RightDockSnapshot;
 use crate::agent::skills::{Skill, SkillScope, SkillsSnapshot};
 use crate::surface::strings;
 use crate::ui::Sizable as _;
-use crate::ui::{Divider, button, button_primary};
+use crate::ui::{ButtonVariants as _, Divider, button};
 use crate::workspace::Workspace;
 
 /// Render the Skills tab body.
@@ -152,8 +152,6 @@ fn filter_skills(skills: &[Skill], query_lower: &str) -> Vec<Skill> {
 /// non-empty — the row collapses back to a plain input at rest.
 fn search_row(snap: &RightDockSnapshot, cx: &gpui::App) -> impl IntoElement {
     let has_query = !snap.skill_search_query.trim().is_empty();
-    let chip_text = theme::current(cx).text_body;
-    let chip_hover_text = theme::current(cx).text_primary;
     let workspace = snap.workspace.clone();
     div()
         .relative()
@@ -162,20 +160,11 @@ fn search_row(snap: &RightDockSnapshot, cx: &gpui::App) -> impl IntoElement {
         .child(crate::ui::input(&snap.skill_search_input, cx, ()))
         .when(has_query, |row| {
             row.child(
-                div()
-                    .id("skill-search-clear")
+                crate::ui::button_icon("skill-search-clear", crate::ui::icons::CLOSE, cx)
+                    .tooltip(strings::common_search_clear())
                     .absolute()
-                    .right(px(theme::SKILL_ROW_PAD_X))
+                    .right(px(theme::PAD_XS))
                     .top_0()
-                    .bottom_0()
-                    .flex()
-                    .items_center()
-                    .px(px(theme::SKILL_BADGE_PAD_X))
-                    .text_size(px(theme::SKILL_BADGE_FONT_SIZE))
-                    .text_color(chip_text)
-                    .cursor_pointer()
-                    .hover(move |s| s.text_color(chip_hover_text))
-                    .child(strings::SKILLS_SEARCH_CLEAR_ICON)
                     .on_mouse_down(MouseButton::Left, move |_, window, cx| {
                         // The mouse-down lands on the absolute overlay,
                         // not on the Input, so propagation stop is
@@ -249,13 +238,18 @@ fn manage_plugins_button() -> impl IntoElement {
 }
 
 fn new_skill_button(workspace: gpui::WeakEntity<Workspace>) -> impl IntoElement {
-    button_primary("skills-new", strings::skills_new_button())
-        .xsmall()
-        .on_click(move |_, window, cx| {
-            if let Some(ws) = workspace.upgrade() {
-                ws.update(cx, |ws, cx| ws.open_create_skill(window, cx));
-            }
-        })
+    crate::ui::button_with_icon(
+        "skills-new",
+        strings::skills_new_button(),
+        crate::ui::icons::ADD,
+    )
+    .primary()
+    .xsmall()
+    .on_click(move |_, window, cx| {
+        if let Some(ws) = workspace.upgrade() {
+            ws.update(cx, |ws, cx| ws.open_create_skill(window, cx));
+        }
+    })
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -490,7 +484,7 @@ fn skill_row(
     t: &DarudaTheme,
     cx: &gpui::App,
 ) -> AnyElement {
-    use crate::ui::{button, button_delete_glyph};
+    use crate::ui::{button, button_delete_glyph, button_icon};
 
     let dir = s.dir.clone();
     let scope = s.scope;
@@ -570,7 +564,7 @@ fn skill_row(
             .tooltip(crate::ui::tooltip::text(SharedString::from(full)))
     });
 
-    // Actions — Edit / × for writable scopes, View for plugin scope.
+    // Actions — edit / delete for writable scopes, view for plugin scope.
     // Absolute-positioned overlay on the right so the row stays a
     // single visual line; on hover the actions slide in over the
     // tail of the description.
@@ -588,18 +582,19 @@ fn skill_row(
             .flex()
             .flex_row()
             .items_center()
-            .gap(px(theme::SKILL_HEADER_GAP))
+            .gap(px(theme::GAP_SM))
             .bg(actions_bg)
             .pl(px(theme::SKILL_ROW_PAD_X))
             .invisible()
             .group_hover("skill-row", |s| s.visible())
             .child(
-                button(
+                button_icon(
                     SharedString::from(format!("skill-edit-{}-{}", scope.slug(), s.name)),
-                    strings::skills_button_edit(),
+                    crate::ui::icons::EDIT,
+                    cx,
                 )
-                .xsmall()
-                .outline()
+                .tooltip(strings::skills_button_edit())
+                .debug_selector(|| "skill-edit".into())
                 .on_click(move |_: &gpui::ClickEvent, window, cx| {
                     if let Some(ws) = ws_edit.upgrade() {
                         let dir = dir_edit.clone();
@@ -613,6 +608,7 @@ fn skill_row(
                     cx,
                 )
                 .tooltip(strings::skills_button_delete())
+                .debug_selector(|| "skill-delete".into())
                 .on_click(move |_: &gpui::ClickEvent, window, cx| {
                     if let Some(ws) = ws_delete.upgrade() {
                         let dir = dir_delete.clone();
@@ -634,18 +630,19 @@ fn skill_row(
             .flex()
             .flex_row()
             .items_center()
-            .gap(px(theme::SKILL_HEADER_GAP))
+            .gap(px(theme::GAP_SM))
             .bg(actions_bg)
             .pl(px(theme::SKILL_ROW_PAD_X))
             .invisible()
             .group_hover("skill-row", |s| s.visible())
             .child(
-                button(
+                button_icon(
                     SharedString::from(format!("skill-view-{}-{}", scope.slug(), s.name)),
-                    strings::skills_button_view(),
+                    crate::ui::icons::VISIBILITY,
+                    cx,
                 )
-                .xsmall()
-                .outline()
+                .tooltip(strings::skills_button_view())
+                .debug_selector(|| "skill-view".into())
                 .on_click(move |_: &gpui::ClickEvent, window, cx| {
                     if let Some(ws) = ws_view.upgrade() {
                         let dir = dir_view.clone();
@@ -674,6 +671,7 @@ fn skill_row(
         .flex()
         .flex_row()
         .items_center()
+        .min_h(px(theme::CONTROL_TARGET_SIZE))
         .gap(px(theme::SKILL_HEADER_GAP))
         .pl(row_pad_left)
         .pr(px(theme::SKILL_ROW_PAD_X))
@@ -738,4 +736,40 @@ fn count_unique_plugins(skills: &[Skill]) -> usize {
         }
     }
     ids.len()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn check_actions(cx: &mut gpui::TestAppContext, scope: SkillScope, selectors: &[&'static str]) {
+        let plugin = matches!(scope, SkillScope::Plugin);
+        let skill = Skill {
+            name: "sample".into(),
+            dir: std::path::PathBuf::from("sample-skill"),
+            scope,
+            frontmatter: Default::default(),
+            body_preview: "A sample skill".into(),
+            aux_file_count: 0,
+            modified_at: std::time::SystemTime::UNIX_EPOCH,
+            plugin_id: plugin.then(|| "sample-plugin".into()),
+            plugin_availability: plugin
+                .then_some(crate::agent::skills::plugins::PluginAvailability::Installed),
+        };
+        crate::workspace::right_dock::row_tests::assert_hover_targets_fit(
+            cx,
+            selectors,
+            move |workspace, cx| skill_row(&skill, false, workspace, theme::current(cx), cx),
+        );
+    }
+
+    #[gpui::test]
+    fn writable_hover_actions_fit_the_skill_row(cx: &mut gpui::TestAppContext) {
+        check_actions(cx, SkillScope::Personal, &["skill-edit", "skill-delete"]);
+    }
+
+    #[gpui::test]
+    fn view_action_fits_the_plugin_row(cx: &mut gpui::TestAppContext) {
+        check_actions(cx, SkillScope::Plugin, &["skill-view"]);
+    }
 }

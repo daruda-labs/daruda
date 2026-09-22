@@ -22,6 +22,9 @@ pub(in crate::workspace) mod usage_ops;
 pub(in crate::workspace) mod usage_session_ops;
 pub(in crate::workspace) mod view_tabs;
 
+#[cfg(test)]
+mod row_tests;
+
 /// Shared scaffold for a right-dock tab body: a vertical flex column
 /// with the panel's standard padding and section gap, so every view
 /// (Usage / Skills / Tasks / Tools) shares one definition.

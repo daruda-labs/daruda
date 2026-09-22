@@ -1,6 +1,43 @@
 use super::*;
 
 #[test]
+fn light_chrome_keeps_a_gray_titlebar_over_the_bright_canvas() {
+    let light: DarudaTheme = serde_json::from_str(include_str!(
+        "../../../../../../assets/themes/daruda_light.json"
+    ))
+    .unwrap();
+    fn rgb(color: Hsla) -> [u8; 3] {
+        let c: gpui::Rgba = color.into();
+        [c.r, c.g, c.b].map(|v| (v * 255.0).round() as u8)
+    }
+    assert_eq!(rgb(palette::LIGHT_CANVAS), [249, 250, 251]);
+    assert_eq!(rgb(light.title_bar_bg), [222, 223, 227]);
+    assert_eq!(rgb(light.status_bar_bg), rgb(palette::LIGHT_CANVAS));
+    assert_eq!(rgb(light.welcome_bg), rgb(palette::LIGHT_CANVAS));
+    assert_eq!(rgb(light.dock_bg), [234, 236, 240]);
+    assert_eq!(rgb(light.dock_bg), rgb(palette::LIGHT_SURFACE_1));
+    assert_eq!(rgb(light.tab_inactive_bg), rgb(palette::LIGHT_SURFACE_1));
+    assert_eq!(
+        rgb(light.dock_icon_active_bg),
+        rgb(palette::LIGHT_SURFACE_2)
+    );
+    assert_eq!(
+        rgb(light.button_widget_bg_hover),
+        rgb(palette::LIGHT_SURFACE_3)
+    );
+    for background in [
+        palette::LIGHT_CANVAS,
+        palette::LIGHT_SURFACE_1,
+        palette::LIGHT_SURFACE_2,
+        palette::LIGHT_SURFACE_3,
+        light.title_bar_bg,
+    ] {
+        assert!(super::super::contrast_ratio(light.text_muted, background) >= 4.5);
+        assert!(super::super::contrast_ratio(light.text_subtle, background) >= 3.0);
+    }
+}
+
+#[test]
 fn default_clones_compile_time_palette() {
     // Every field must equal the underlying `pub const` so a
     // fresh `DarudaTheme::default()` is observationally identical

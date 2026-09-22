@@ -110,7 +110,7 @@ pub(crate) fn app_menu_button(cx: &App) -> Option<impl gpui::IntoElement> {
         // control", and the point of the button is that the whole menu bar
         // is otherwise invisible here. Ghost-toned like the dock toggles at
         // the other end of the bar, so both ends read as one family.
-        crate::ui::button_toggle_icon("title-bar-app-menu", ICON_MENU, false, cx)
+        crate::ui::button_icon("title-bar-app-menu", ICON_MENU, cx)
             .tooltip(crate::surface::strings::titlebar_app_menu())
             .dropdown_menu(menu_builder(move |menu, window, cx| {
                 top_level(menu, &menus, window, cx)

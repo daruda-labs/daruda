@@ -32,7 +32,6 @@ pub(super) fn render_search_panel(
     let count_color = surface.foreground_muted;
     let empty_color = t.file_viewer_search_empty;
     let text_color = surface.foreground;
-    let button_color = surface.foreground_muted;
 
     let (counter, counter_color) = if !has_query {
         (String::new(), count_color)
@@ -108,74 +107,74 @@ pub(super) fn render_search_panel(
         .when(has_query, |d| {
             let clear_input = input_for_clear;
             d.child(
-                div()
-                    .id("fv-search-clear")
-                    .px(px(theme::FILE_VIEWER_SEARCH_BTN_PAD_X))
-                    .text_color(button_color)
-                    .cursor_pointer()
-                    .hover(|s| s.text_color(text_color))
-                    .on_mouse_down(
-                        MouseButton::Left,
-                        cx.listener(move |this, _: &MouseDownEvent, window, cx| {
-                            this.clear_file_view_search(clear_input.clone(), window, cx);
-                            cx.stop_propagation();
-                        }),
-                    )
-                    .child(strings::FILE_VIEWER_SEARCH_CLEAR),
+                crate::ui::button_icon_on_surface(
+                    "fv-search-clear",
+                    crate::ui::icons::CLOSE,
+                    &surface,
+                    cx,
+                )
+                .tooltip(strings::common_search_clear())
+                .on_mouse_down(
+                    MouseButton::Left,
+                    cx.listener(move |this, _: &MouseDownEvent, window, cx| {
+                        this.clear_file_view_search(clear_input.clone(), window, cx);
+                        cx.stop_propagation();
+                    }),
+                ),
             )
         })
         // Prev match button — operates on the focused file pane.
         .child(
-            div()
-                .id("fv-search-prev")
-                .px(px(theme::FILE_VIEWER_SEARCH_BTN_PAD_X))
-                .text_color(button_color)
-                .cursor_pointer()
-                .hover(|s| s.text_color(text_color))
-                .on_mouse_down(
-                    MouseButton::Left,
-                    cx.listener(|this, _: &MouseDownEvent, _w, cx| {
-                        this.file_view_search_prev(cx);
-                        cx.stop_propagation();
-                    }),
-                )
-                .child(strings::FILE_VIEWER_SEARCH_PREV),
+            crate::ui::button_icon_on_surface(
+                "fv-search-prev",
+                crate::ui::icons::PREVIOUS,
+                &surface,
+                cx,
+            )
+            .tooltip(strings::common_search_previous())
+            .on_mouse_down(
+                MouseButton::Left,
+                cx.listener(|this, _: &MouseDownEvent, _w, cx| {
+                    this.file_view_search_prev(cx);
+                    cx.stop_propagation();
+                }),
+            ),
         )
         // Next match button — operates on the focused file pane.
         .child(
-            div()
-                .id("fv-search-next")
-                .px(px(theme::FILE_VIEWER_SEARCH_BTN_PAD_X))
-                .text_color(button_color)
-                .cursor_pointer()
-                .hover(|s| s.text_color(text_color))
-                .on_mouse_down(
-                    MouseButton::Left,
-                    cx.listener(|this, _: &MouseDownEvent, _w, cx| {
-                        this.file_view_search_next(cx);
-                        cx.stop_propagation();
-                    }),
-                )
-                .child(strings::FILE_VIEWER_SEARCH_NEXT),
+            crate::ui::button_icon_on_surface(
+                "fv-search-next",
+                crate::ui::icons::NEXT,
+                &surface,
+                cx,
+            )
+            .tooltip(strings::common_search_next())
+            .on_mouse_down(
+                MouseButton::Left,
+                cx.listener(|this, _: &MouseDownEvent, _w, cx| {
+                    this.file_view_search_next(cx);
+                    cx.stop_propagation();
+                }),
+            ),
         )
         // Close button — closes the find panel (not the tab).
         .child({
             let close_input = input_for_close;
-            div()
-                .id("fv-search-close")
-                .ml(px(theme::FILE_VIEWER_SEARCH_BTN_ML))
-                .px(px(theme::FILE_VIEWER_SEARCH_BTN_PAD_X))
-                .text_color(button_color)
-                .cursor_pointer()
-                .hover(|s| s.text_color(text_color))
-                .on_mouse_down(
-                    MouseButton::Left,
-                    cx.listener(move |this, _: &MouseDownEvent, window, cx| {
-                        this.close_file_view_search(close_input.clone(), window, cx);
-                        cx.stop_propagation();
-                    }),
-                )
-                .child(strings::FILE_VIEWER_SEARCH_CLOSE_BTN)
+            crate::ui::button_icon_on_surface(
+                "fv-search-close",
+                crate::ui::icons::CLOSE,
+                &surface,
+                cx,
+            )
+            .tooltip(strings::common_button_close())
+            .ml(px(theme::FILE_VIEWER_SEARCH_BTN_ML))
+            .on_mouse_down(
+                MouseButton::Left,
+                cx.listener(move |this, _: &MouseDownEvent, window, cx| {
+                    this.close_file_view_search(close_input.clone(), window, cx);
+                    cx.stop_propagation();
+                }),
+            )
         })
         .into_any_element()
 }

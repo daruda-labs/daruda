@@ -12,7 +12,7 @@
 
 use crate::ui::theme;
 use crate::ui::theme::PaneSurfaceTokens;
-use gpui::{App, ElementId, SharedString, Styled as _, px};
+use gpui::{App, ElementId, ParentElement as _, SharedString, Styled as _, px};
 use gpui_component::Sizable as _;
 use gpui_component::button::{ButtonCustomVariant, ButtonVariants as _};
 
@@ -37,6 +37,63 @@ pub fn button_danger(id: impl Into<ElementId>, label: impl Into<SharedString>) -
 /// chains `.icon(...)`.
 pub fn button_bare(id: impl Into<ElementId>) -> Button {
     Button::new(id).small().tab_stop(false)
+}
+
+/// Labelled action with leading 16px artwork, independent of the button tier.
+pub fn button_with_icon(
+    id: impl Into<ElementId>,
+    label: impl Into<SharedString>,
+    path: &'static str,
+) -> Button {
+    button_bare(id).child(super::icons::icon(path)).child(
+        gpui::div()
+            .flex_none()
+            .line_height(gpui::relative(1.))
+            .child(label.into()),
+    )
+}
+
+/// Ghost chrome with a fixed 24px hit target and independent 16px SVG.
+pub fn button_icon(id: impl Into<ElementId>, path: &'static str, cx: &App) -> Button {
+    let t = theme::current(cx);
+    icon_button_shell(id, path).custom(
+        ButtonCustomVariant::new(cx)
+            .foreground(t.text_muted)
+            .hover(t.dock_icon_active_bg)
+            .active(t.dock_icon_active_bg),
+    )
+}
+
+/// Destructive action: neutral at rest, a translucent red fill on hover.
+pub fn button_icon_danger(id: impl Into<ElementId>, path: &'static str, cx: &App) -> Button {
+    let hover = theme::with_alpha(theme::ERROR, theme::CONTROL_DANGER_HOVER_ALPHA);
+    icon_button_shell(id, path).custom(
+        ButtonCustomVariant::new(cx)
+            .foreground(theme::current(cx).text_muted)
+            .hover(hover)
+            .active(hover),
+    )
+}
+
+/// The same metrics on a terminal-mirrored surface, with pane-local colours.
+pub fn button_icon_on_surface(
+    id: impl Into<ElementId>,
+    path: &'static str,
+    surface: &PaneSurfaceTokens,
+    cx: &App,
+) -> Button {
+    icon_button_shell(id, path).custom(surface_button_variant(surface, cx))
+}
+
+fn icon_button_shell(id: impl Into<ElementId>, path: &'static str) -> Button {
+    // The vendor's icon slot inherits Small (14px). A child decouples artwork
+    // from the button tier while the shell still owns focus and disabled state.
+    button_bare(id)
+        .child(super::icons::icon(path))
+        .w(px(theme::CONTROL_TARGET_SIZE))
+        .h(px(theme::CONTROL_TARGET_SIZE))
+        .p(px(0.))
+        .rounded(px(theme::RADIUS_SM))
 }
 
 /// The one mapping from a pane-local surface's tokens to a button's colours.
@@ -127,76 +184,25 @@ pub fn button_chip(id: impl Into<ElementId>, label: impl Into<SharedString>) -> 
         .h(px(theme::BUTTON_CHIP_SIZE))
 }
 
-/// Always-visible `×` close glyph — muted at rest, fills bg with the
-/// destructive `ERROR` token on direct hover. The single close affordance
-/// shared by the tab cell, pane header, and task_edit rows: all three show
-/// the `×` unconditionally (no hover gating). `xsmall` + the compact
-/// pane-header box keeps it fitting the short pane-header height.
+/// Neutral dismissal, distinct from deleting an item.
 pub fn button_close(id: impl Into<ElementId>, cx: &App) -> Button {
-    let t = theme::current(cx);
-    let variant = ButtonCustomVariant::new(cx)
-        .foreground(t.text_muted)
-        .hover(theme::ERROR);
-    Button::new(id)
-        .xsmall()
-        .tab_stop(false)
-        .custom(variant)
-        .label("\u{00d7}")
-        .w(px(theme::PANE_HEADER_CLOSE_W))
-        .h(px(theme::PANE_HEADER_CLOSE_H))
-        .p(px(0.))
-        .rounded(px(theme::PANE_HEADER_CLOSE_RADIUS))
-        .text_size(px(theme::PANE_HEADER_CLOSE_FONT_SIZE))
+    button_icon(id, super::icons::CLOSE, cx).tooltip(crate::surface::strings::common_button_close())
 }
 
-/// Destructive `×` glyph for hover-revealed row actions — muted at
-/// rest, fills with the `ERROR` token on direct hover so the
-/// destructive action reads clearly only when the pointer is on it.
-/// Unlike [`button_close`] it bakes no visibility gating or fixed
-/// pane-header sizing: the caller's own hover-reveal container
-/// controls when it appears, and `xsmall` keeps it compact next to
-/// other row-action chips.
+/// Delete action; the caller owns any row-hover visibility gating.
 pub fn button_delete_glyph(id: impl Into<ElementId>, cx: &App) -> Button {
-    let t = theme::current(cx);
-    let variant = ButtonCustomVariant::new(cx)
-        .foreground(t.text_muted)
-        .hover(theme::ERROR);
-    Button::new(id)
-        .xsmall()
-        .tab_stop(false)
-        .custom(variant)
-        .label("\u{00d7}")
+    button_icon_danger(id, super::icons::DELETE, cx)
+        .tooltip(crate::surface::strings::common_button_delete())
 }
 
-/// `✎` edit glyph for hover-revealed row actions — muted at rest, brightens to
-/// the primary text tone on direct hover. Sibling of [`button_delete_glyph`]
-/// (same compact `xsmall`, no fixed sizing) for the queued-prompt strip's
-/// per-item edit affordance.
+/// Edit action, sharing the delete action's metrics without its danger tone.
 pub fn button_edit_glyph(id: impl Into<ElementId>, cx: &App) -> Button {
-    let t = theme::current(cx);
-    let variant = ButtonCustomVariant::new(cx)
-        .foreground(t.text_muted)
-        .hover(t.text_primary);
-    Button::new(id)
-        .xsmall()
-        .tab_stop(false)
-        .custom(variant)
-        .label("\u{270e}")
+    button_icon(id, super::icons::EDIT, cx)
 }
 
-/// `↩` cancel-edit glyph — muted at rest, brightens to the primary text tone on
-/// direct hover. Shown on the queued-prompt row currently being edited, in
-/// place of the edit / delete glyphs.
+/// Undo the in-progress queue edit, without deleting the queued item.
 pub fn button_edit_cancel_glyph(id: impl Into<ElementId>, cx: &App) -> Button {
-    let t = theme::current(cx);
-    let variant = ButtonCustomVariant::new(cx)
-        .foreground(t.text_muted)
-        .hover(t.text_primary);
-    Button::new(id)
-        .xsmall()
-        .tab_stop(false)
-        .custom(variant)
-        .label("\u{21a9}")
+    button_icon(id, super::icons::UNDO, cx)
 }
 
 /// Section-header action glyph (`+`, `⟳`, `▾`, ...) — muted text on
@@ -266,7 +272,7 @@ pub fn button_add_tile(id: impl Into<ElementId>, cx: &App) -> Button {
         .small()
         .tab_stop(false)
         .custom(variant)
-        .label("+")
+        .child(super::icons::icon(super::icons::ADD))
         .w(px(theme::BUTTON_WIDGET_HEIGHT))
         .h(px(theme::BUTTON_WIDGET_HEIGHT))
         .p(px(0.))
@@ -282,10 +288,10 @@ pub fn button_add_tile(id: impl Into<ElementId>, cx: &App) -> Button {
 /// hover without painting it red at rest.
 pub fn button_window_control(
     id: impl Into<ElementId>,
-    glyph: impl Into<SharedString>,
+    icon_path: &'static str,
     cx: &App,
 ) -> Button {
-    window_control_shell(id, glyph, false, cx)
+    window_control_shell(id, icon_path, false, cx)
 }
 
 /// The close control. Its own factory rather than a `danger` flag on the one
@@ -293,23 +299,21 @@ pub fn button_window_control(
 /// call site than as a bool argument, the way `button` / `button_danger` do.
 pub fn button_window_control_danger(
     id: impl Into<ElementId>,
-    glyph: impl Into<SharedString>,
+    icon_path: &'static str,
     cx: &App,
 ) -> Button {
-    window_control_shell(id, glyph, true, cx)
+    window_control_shell(id, icon_path, true, cx)
 }
 
 fn window_control_shell(
     id: impl Into<ElementId>,
-    glyph: impl Into<SharedString>,
+    icon_path: &'static str,
     danger: bool,
     cx: &App,
 ) -> Button {
     let t = theme::current(cx);
-    // `theme::ERROR` on hover is the same destructive tone `button_close`
-    // uses, so close reads the same everywhere it appears.
     let hover_bg = if danger {
-        theme::ERROR
+        theme::with_alpha(theme::ERROR, theme::CONTROL_DANGER_HOVER_ALPHA)
     } else {
         t.dock_icon_active_bg
     };
@@ -321,7 +325,7 @@ fn window_control_shell(
         .small()
         .tab_stop(false)
         .custom(variant)
-        .label(glyph)
+        .child(super::icons::icon(icon_path))
         .w(px(theme::WINDOW_CONTROL_W))
         .h(px(theme::TITLE_BAR_HEIGHT))
         .p(px(0.))
@@ -329,43 +333,26 @@ fn window_control_shell(
         .text_size(px(theme::WINDOW_CONTROL_GLYPH_SIZE))
 }
 
-/// Dock toggle (◨ ⊞ ◧). `active=true` → filled bg + bright icon;
-/// `active=false` → subdued, with a hover-bg that previews the
-/// active fill.
-pub fn button_toggle(
-    id: impl Into<ElementId>,
-    icon: impl Into<SharedString>,
-    active: bool,
-    cx: &App,
-) -> Button {
-    toggle_shell(id, active, cx).label(icon)
-}
-
-/// [`button_toggle`] carrying an SVG rather than a glyph, for the controls
-/// whose meaning no box-drawing character carries.
+/// Dock toggle: the caller chooses filled artwork for the active state.
 pub fn button_toggle_icon(
     id: impl Into<ElementId>,
     icon_path: &'static str,
     active: bool,
     cx: &App,
 ) -> Button {
-    toggle_shell(id, active, cx).icon(gpui_component::Icon::empty().path(icon_path))
+    toggle_shell(id, active, cx)
+        .child(super::icons::icon(icon_path).with_size(px(theme::DOCK_TOGGLE_ICON_SIZE)))
 }
 
-/// The chrome both toggle factories share: subdued at rest, hover previewing
-/// the active fill, sized to the dock-icon box.
+/// Active state brightens the filled SVG, without a persistent button fill.
 fn toggle_shell(id: impl Into<ElementId>, active: bool, cx: &App) -> Button {
     let t = theme::current(cx);
     let fg = if active { t.text_primary } else { t.text_muted };
     let active_bg = t.dock_icon_active_bg;
-    let variant = if active {
-        ButtonCustomVariant::new(cx)
-            .color(active_bg)
-            .foreground(fg)
-            .hover(active_bg)
-    } else {
-        ButtonCustomVariant::new(cx).foreground(fg).hover(active_bg)
-    };
+    let variant = ButtonCustomVariant::new(cx)
+        .foreground(fg)
+        .hover(active_bg)
+        .active(active_bg);
     Button::new(id)
         .small()
         .tab_stop(false)
@@ -374,5 +361,85 @@ fn toggle_shell(id: impl Into<ElementId>, active: bool, cx: &App) -> Button {
         .h(px(theme::DOCK_ICON_BUTTON_H))
         .p(px(0.))
         .rounded(px(theme::DOCK_ICON_BUTTON_RADIUS))
-        .text_size(px(theme::DOCK_ICON_SIZE))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::ui::Disableable as _;
+    use gpui::{
+        Context, InteractiveElement as _, IntoElement, Render, TestAppContext, VisualTestContext,
+        Window, div, size,
+    };
+
+    #[derive(Default)]
+    struct ChromeProbe {
+        presses: usize,
+    }
+
+    impl Render for ChromeProbe {
+        fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+            div()
+                .flex()
+                .flex_col()
+                .items_start()
+                .child(
+                    button_icon("live", crate::ui::icons::ADD, cx)
+                        .debug_selector(|| "chrome-live".into())
+                        .on_click(cx.listener(|this, _, _, cx| {
+                            this.presses += 1;
+                            cx.notify();
+                        })),
+                )
+                .child(
+                    button_icon_danger("off", crate::ui::icons::DELETE, cx)
+                        .debug_selector(|| "chrome-disabled".into())
+                        .disabled(true)
+                        .on_click(cx.listener(|this, _, _, _| this.presses += 1)),
+                )
+                .child(
+                    crate::ui::tab_bar("tabs")
+                        .child(crate::ui::tab("Tab").debug_selector(|| "chrome-tab".into())),
+                )
+                .child(
+                    button_with_icon("new", "New", crate::ui::icons::ADD)
+                        .primary()
+                        .xsmall()
+                        .debug_selector(|| "chrome-labelled".into()),
+                )
+        }
+    }
+
+    #[gpui::test]
+    fn chrome_targets_fit_the_tab_grid_and_disabled_controls_ignore_clicks(
+        cx: &mut TestAppContext,
+    ) {
+        crate::test_support::init_gpui_component(cx);
+        let window = cx.add_window(|_, _| ChromeProbe::default());
+        let mut vcx = VisualTestContext::from_window(window.into(), cx);
+        vcx.run_until_parked();
+        vcx.update(|window, _| window.refresh());
+        vcx.run_until_parked();
+        let live = vcx
+            .debug_bounds("chrome-live")
+            .expect("live button painted");
+        let disabled = vcx
+            .debug_bounds("chrome-disabled")
+            .expect("disabled button painted");
+        let target = px(theme::CONTROL_TARGET_SIZE);
+        assert_eq!(live.size, size(target, target));
+        assert_eq!(disabled.size, size(target, target));
+        assert_eq!(
+            vcx.debug_bounds("chrome-tab").unwrap().size.height,
+            px(theme::TAB_BAR_HEIGHT)
+        );
+        let labelled = vcx.debug_bounds("chrome-labelled").unwrap();
+        assert!(labelled.size.height >= px(theme::CONTROL_ICON_SIZE));
+        assert!(labelled.size.width > labelled.size.height);
+        vcx.simulate_click(live.center(), Default::default());
+        vcx.run_until_parked();
+        vcx.simulate_click(disabled.center(), Default::default());
+        vcx.run_until_parked();
+        assert_eq!(window.read_with(&vcx, |view, _| view.presses).unwrap(), 1);
+    }
 }

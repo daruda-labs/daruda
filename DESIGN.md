@@ -264,7 +264,7 @@ are unchanged from dark.
 |-------|-----|-----|
 | 0 — Base | `#f9fafb` | Window / editor / terminal background |
 | 1 — Panel | `#eaecf0` | Docks, sidebar, tab strip |
-| 2 — Card | `#e4e6ec` | Title bar, hovered row, active tab |
+| 2 — Card | `#e4e6ec` | Hovered row, active tab |
 | 3 — Raised | `#dbdee5` | Active/pressed row, button-widget surfaces |
 | 4 — Float | `#f6f6f8` | Popover / modal panel (raised above base) |
 
@@ -273,6 +273,9 @@ faint cool tint, and only **surfaces** otherwise carry it. Re-darken the
 dark grays rather than just inverting lightness — a gray that reads on
 near-black collapses on near-white. Floor: **muted ≳ 4.5:1, subtle ≳ 3:1**
 against its surface. Input fields remain pure `#ffffff`.
+
+The light title bar deliberately stays a slightly darker cool gray, `#dedfe3`,
+while the window base uses `#f9fafb`. It is not a white strip.
 
 ---
 
@@ -294,6 +297,26 @@ Most app chrome sits at `sm` (4px) or `md` (6px). Dock panels and modals use `lg
 
 ## Components
 
+### Icon controls
+
+Use Google Material Symbols Outlined SVGs: 16px artwork in a 24px square
+target, 4px corners, ghost at rest. Dock and pin toggles use filled artwork
+when active. Delete actions tint red on hover; ordinary dismissal and search
+clearing stay neutral. Native OS caption buttons are not replaced.
+
+The three title-bar dock toggles use quieter 14px artwork in the same 24px
+target; the application menu and other controls remain 16px.
+
+Right-dock row actions follow the same rule: history for session restore,
+visibility for read-only skills, and edit/delete for writable skills and tools.
+Keep localized tooltips and hover-only reveal, with at least a 24px row height.
+Labelled creation buttons retain their text with a leading SVG add symbol.
+
+Use 4px between controls (2px in the title-bar dock cluster), 8px between
+groups, 10px toolbar side gutters, and 8px panel/input padding. Tabs and file
+toolbars are 32px tall; pane headers are 28px. Text buttons, macro tiles, and
+app-drawn caption controls retain their own container metrics.
+
 ### TitleBar
 
 ```
@@ -302,6 +325,8 @@ height:        28px
 border-bottom: 1px hairline
 padding:       0 lg (0 16px)
 ```
+
+In light mode the title bar uses `#dedfe3`; its 28px height stays unchanged.
 
 The bar has two modes, resolved per window in `title_bar::chrome_for_window`.
 
@@ -415,7 +440,7 @@ tab-default: background transparent,  text mute,   padding 0 md (0 12px)
 tab-active:  background canvas,       text ink,    border-bottom 2px solid accent
 tab-hover:   background surface-2,   text body
 tab-modified: accent dot (4px) before the title text
-tab-close:   16px × 16px ×, mute — visible on tab hover only
+tab-close:   16px Material close SVG in a 24px target, mute — always visible
 ```
 
 - Active tab drops to `canvas` background to visually connect with the terminal pane below.
@@ -443,7 +468,7 @@ Resize handle: 4px wide, appears on hover (cursor: col-resize / row-resize)
 **PaneHeader (visible in split mode only)**
 ```
 background:    surface-1
-height:        24px
+height:        28px
 border-bottom: 1px hairline
 text:          ui-sm, mute — lane/file name  (ui-sm minimum for legibility in narrow panes)
 ```

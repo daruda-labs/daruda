@@ -266,6 +266,15 @@ pub const URL_HELP: &str = "https://github.com/daruda-ai/daruda#readme";
 pub fn common_button_cancel() -> String {
     rust_i18n::t!("common.btn_cancel").into_owned()
 }
+pub fn common_search_clear() -> String {
+    rust_i18n::t!("common.search_clear").into_owned()
+}
+pub fn common_search_previous() -> String {
+    rust_i18n::t!("common.search_previous").into_owned()
+}
+pub fn common_search_next() -> String {
+    rust_i18n::t!("common.search_next").into_owned()
+}
 pub fn common_button_close() -> String {
     rust_i18n::t!("common.btn_close").into_owned()
 }

@@ -451,10 +451,13 @@ fn subtask_row(
 
     let sub_id_for_remove = sub.id.clone();
     let task_id_for_remove = task_id.clone();
-    let remove = button_close(SharedString::from(format!("subtask-remove-{}", sub.id)), cx)
-        .on_click(cx.listener(move |this, _ev: &gpui::ClickEvent, _w, cx| {
-            this.delete_subtask(&task_id_for_remove, &sub_id_for_remove, cx);
-        }));
+    let remove = crate::ui::button_delete_glyph(
+        SharedString::from(format!("subtask-remove-{}", sub.id)),
+        cx,
+    )
+    .on_click(cx.listener(move |this, _ev: &gpui::ClickEvent, _w, cx| {
+        this.delete_subtask(&task_id_for_remove, &sub_id_for_remove, cx);
+    }));
 
     div()
         .flex()

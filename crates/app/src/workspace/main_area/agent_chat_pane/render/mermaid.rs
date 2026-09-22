@@ -11,7 +11,7 @@ use gpui::{AnyElement, App, ElementId, IntoElement, SharedString, Window, div, p
 use super::MermaidImages;
 use crate::surface::strings as s;
 use crate::ui::theme;
-use crate::ui::{IconName, button_bare, copy_button};
+use crate::ui::{copy_button, icons};
 use crate::workspace::main_area::agent_chat_pane::agent_chat_helpers::mermaid_key;
 use crate::workspace::main_area::file_view_pane::render::CachedImage;
 
@@ -126,29 +126,33 @@ impl RenderOnce for DiagramActions {
             .invisible()
             .group_hover(self.group, |s| s.visible())
             .child(
-                button_bare(SharedString::from(format!("mermaid-zoom-{key}")))
-                    .icon(IconName::Maximize)
-                    .tooltip(s::agent_chat_diagram_zoom())
-                    .on_click(move |_, window, cx| {
-                        // This row floats over the diagram, and gpui hit-tests
-                        // every hitbox under the pointer — without this the
-                        // button also runs the diagram's own open handler and
-                        // stacks a second lightbox. `occlude()` would instead
-                        // break the group hover this row's visibility depends
-                        // on (`group_hover` resolves through the group
-                        // hitbox), hiding the buttons on approach.
-                        cx.stop_propagation();
-                        super::mermaid_lightbox::open(&self.image, window, cx);
-                    }),
+                crate::ui::button_icon_on_surface(
+                    SharedString::from(format!("mermaid-zoom-{key}")),
+                    icons::EXPAND,
+                    &theme::PaneSurfaceTokens::agent_chat(cx),
+                    cx,
+                )
+                .tooltip(s::agent_chat_diagram_zoom())
+                .on_click(move |_, window, cx| {
+                    // This row floats over the diagram, and gpui hit-tests
+                    // every hitbox under the pointer — without this the
+                    // button also runs the diagram's own open handler and
+                    // stacks a second lightbox. `occlude()` would instead
+                    // break the group hover this row's visibility depends
+                    // on (`group_hover` resolves through the group
+                    // hitbox), hiding the buttons on approach.
+                    cx.stop_propagation();
+                    super::mermaid_lightbox::open(&self.image, window, cx);
+                }),
             )
             // `copy_button` already stops propagation for the same reason, and
             // adds the ✓ feedback every other daruda copy affordance has.
             .child(copy_button(
                 ElementId::from(SharedString::from(format!("mermaid-copy-{key}"))),
                 self.source,
-                IconName::Copy.into(),
+                icons::icon(icons::COPY),
                 SharedString::from(s::agent_chat_diagram_copy()),
-                IconName::Check.into(),
+                icons::icon(icons::CHECK),
                 SharedString::from(s::agent_chat_diagram_copied()),
                 window,
                 cx,

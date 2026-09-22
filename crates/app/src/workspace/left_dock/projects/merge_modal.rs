@@ -506,7 +506,11 @@ impl Render for MergeModal {
                         .flex_none()
                         .w(px(theme::MODAL_RADIO_W))
                         .text_color(radio_dot_color)
-                        .child(if is_selected { "●" } else { "○" }),
+                        .child(crate::ui::icons::icon(if is_selected {
+                            crate::ui::icons::RADIO_ON
+                        } else {
+                            crate::ui::icons::RADIO_OFF
+                        })),
                 )
                 .child(branch_label);
             branch_list = branch_list.child(row);
@@ -612,6 +616,7 @@ impl Render for MergeModal {
                         "merge-goto",
                         surface_strings::merge_modal_goto_target(&sel_branch),
                     )
+                    .child(crate::ui::icons::icon(crate::ui::icons::FORWARD))
                     .on_click(cx.listener(
                         move |this, _: &ClickEvent, window, cx| {
                             this.go_to_target(window, cx);

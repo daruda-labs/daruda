@@ -38,7 +38,7 @@ pub(super) fn render(snap: &RightDockSnapshot, cx: &mut gpui::Context<Dock>) -> 
     // way in was knowing the command palette had an entry for it.
     body = body.child(
         crate::ui::SectionHeader::new(strings::right_panel_flows_heading())
-            .actions(new_flow_button(snap)),
+            .actions(new_flow_button(snap, cx)),
     );
     if snap.flow_files.is_empty() {
         body = body.child(

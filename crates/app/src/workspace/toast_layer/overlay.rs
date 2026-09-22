@@ -25,7 +25,7 @@ use gpui::{
 };
 
 use crate::surface::strings as s;
-use crate::ui::{button, button_header_action};
+use crate::ui::button;
 use crate::workspace::Workspace;
 use crate::workspace::dialog_helpers;
 use crate::workspace::error::toast::ToastId;
@@ -205,7 +205,7 @@ fn dismiss_button(
     cx: &gpui::App,
 ) -> impl IntoElement {
     let element_id = format!("error-toast-{toast_id}-dismiss");
-    button_header_action(SharedString::from(element_id), s::TOAST_BUTTON_DISMISS, cx).on_click(
+    crate::ui::button_close(SharedString::from(element_id), cx).on_click(
         move |_: &ClickEvent, _window, app_cx| {
             if let Some(ws) = workspace.upgrade() {
                 ws.update(app_cx, |ws, cx| {

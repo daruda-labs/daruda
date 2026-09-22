@@ -19,10 +19,7 @@ use gpui::{
 use crate::lane::paths::LanePaths;
 use crate::path_ext::PathExt;
 use crate::surface::strings as app_strings;
-use crate::ui::{
-    ButtonVariants as _, Icon, IconName, PopupMenuItem, SectionHeader, Sizable as _, button,
-    button_bare,
-};
+use crate::ui::{PopupMenuItem, SectionHeader, Sizable as _, button};
 use crate::workspace::layout::Dock;
 use crate::workspace::layout::LeftDockSnapshot;
 use crate::workspace::left_dock::git_ops::git_status_color;
@@ -231,10 +228,8 @@ fn view_header(
         .map(|t| (t.ahead, t.behind))
         .unwrap_or((0, 0));
 
-    let refresh_icon = button_bare("git-refresh")
-        .xsmall()
-        .ghost()
-        .icon(IconName::Refresh)
+    let refresh_icon = crate::ui::button_icon("git-refresh", crate::ui::icons::REFRESH, cx)
+        .tooltip(app_strings::usage_refresh())
         .on_click(cx.listener(move |_dock, _: &ClickEvent, _window, cx| {
             if let Some(ws) = workspace_refresh.upgrade() {
                 ws.update(cx, |ws, cx| ws.refresh_git_status(active_ref, cx));
@@ -430,52 +425,35 @@ fn dir_header(
     let in_flight = snap.git_stage_in_flight;
 
     let t = theme::current(cx);
-    let checkbox_border = t.border;
     let checkbox_checked_bg = t.git_stage_checkbox_checked_bg;
-    let checkbox_unchecked_bg = t.git_stage_checkbox_unchecked_bg;
-    // Checkmark sits on the accent fill → accent-fg for contrast; the
-    // indeterminate dash sits on the unchecked surface → theme foreground.
-    let checkbox_tick_color = theme::ACCENT_FG;
-    let dash_color = t.text_primary;
     let dir_label_color = t.text_subtle;
     let dir_label_hover = t.text_muted;
 
     let chevron_icon = if is_collapsed {
-        IconName::ChevronRight
+        crate::ui::icons::CHEVRON_RIGHT
     } else {
-        IconName::ChevronDown
+        crate::ui::icons::EXPAND_MORE
     };
 
     let checkbox_id: ElementId = ("git-dir-checkbox", dir_idx).into();
     let checkbox = div()
         .id(checkbox_id)
         .flex_none()
-        .w(px(theme::GIT_STAGE_CHECKBOX_SIZE))
-        .h(px(theme::GIT_STAGE_CHECKBOX_SIZE))
-        .rounded(px(theme::GIT_STAGE_CHECKBOX_RADIUS))
-        .border_1()
-        // Checked → border matches the accent fill (seamless, like the
-        // gpui_component checkbox); otherwise a hairline rim.
-        .border_color(match state {
-            DirStageState::AllStaged => checkbox_checked_bg,
-            DirStageState::Mixed | DirStageState::NoneStaged => checkbox_border,
-        })
-        .bg(match state {
-            DirStageState::AllStaged => checkbox_checked_bg,
-            DirStageState::Mixed | DirStageState::NoneStaged => checkbox_unchecked_bg,
-        })
+        .w(px(theme::CONTROL_TARGET_SIZE))
+        .h(px(theme::CONTROL_TARGET_SIZE))
         .flex()
         .items_center()
         .justify_center()
-        .text_size(px(theme::GIT_STAGE_CHECKBOX_TICK_SIZE))
-        .when(state == DirStageState::AllStaged, |d| {
-            d.text_color(checkbox_tick_color)
-                .child(app_strings::UI_CHECKMARK)
+        .text_color(if state == DirStageState::NoneStaged {
+            t.text_muted
+        } else {
+            checkbox_checked_bg
         })
-        .when(state == DirStageState::Mixed, |d| {
-            // Indeterminate: dash glyph at the same size as the tick.
-            d.text_color(dash_color).child("–")
-        })
+        .child(crate::ui::icons::icon(match state {
+            DirStageState::AllStaged => crate::ui::icons::CHECKBOX_ON,
+            DirStageState::Mixed => crate::ui::icons::CHECKBOX_MIXED,
+            DirStageState::NoneStaged => crate::ui::icons::CHECKBOX_OFF,
+        }))
         .when(!in_flight && !stage_paths.is_empty(), |d| {
             d.cursor_pointer().on_mouse_down(
                 MouseButton::Left,
@@ -532,7 +510,7 @@ fn dir_header(
                         }
                     }),
                 )
-                .child(Icon::new(chevron_icon).xsmall().text_color(dir_label_color))
+                .child(crate::ui::icons::icon(chevron_icon).text_color(dir_label_color))
                 .child(
                     div()
                         .flex_1()
@@ -630,11 +608,7 @@ fn unified_file_row(
 
     // Snapshot every row chrome colour from the live theme.
     let t = theme::current(cx);
-    let checkbox_border = t.border;
     let checkbox_checked_bg = t.git_stage_checkbox_checked_bg;
-    let checkbox_unchecked_bg = t.git_stage_checkbox_unchecked_bg;
-    // Tick only renders on the checked (accent) fill → accent-fg.
-    let checkbox_tick_color = theme::ACCENT_FG;
     let cursor_border_color = theme::PRIMARY;
     let row_selected_bg = t.git_file_row_selected_bg;
     let row_hover_bg = t.git_file_row_hover_bg;
@@ -646,30 +620,21 @@ fn unified_file_row(
     let checkbox = div()
         .id(checkbox_id)
         .flex_none()
-        .w(px(theme::GIT_STAGE_CHECKBOX_SIZE))
-        .h(px(theme::GIT_STAGE_CHECKBOX_SIZE))
-        .rounded(px(theme::GIT_STAGE_CHECKBOX_RADIUS))
-        .border_1()
-        // Staged → border matches the accent fill (seamless, like the
-        // gpui_component checkbox); otherwise a hairline rim.
-        .border_color(if is_staged {
-            checkbox_checked_bg
-        } else {
-            checkbox_border
-        })
-        .bg(if is_staged {
-            checkbox_checked_bg
-        } else {
-            checkbox_unchecked_bg
-        })
+        .w(px(theme::CONTROL_TARGET_SIZE))
+        .h(px(theme::CONTROL_TARGET_SIZE))
         .flex()
         .items_center()
         .justify_center()
-        .text_size(px(theme::GIT_STAGE_CHECKBOX_TICK_SIZE))
-        .when(is_staged, |d| {
-            d.text_color(checkbox_tick_color)
-                .child(app_strings::UI_CHECKMARK)
+        .text_color(if is_staged {
+            checkbox_checked_bg
+        } else {
+            t.text_muted
         })
+        .child(crate::ui::icons::icon(if is_staged {
+            crate::ui::icons::CHECKBOX_ON
+        } else {
+            crate::ui::icons::CHECKBOX_OFF
+        }))
         .when(!in_flight, |d| {
             d.cursor_pointer().on_mouse_down(
                 MouseButton::Left,

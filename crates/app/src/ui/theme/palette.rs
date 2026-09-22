@@ -130,10 +130,10 @@ pub const EDITOR_SURFACE: Hsla = hsla(220.0, 0.10, 0.05, 1.0);
 // neutral gray), mirroring the dark ladder. Used by `apply_daruda_palette` and
 // theme-variant render helpers so light mode doesn't fall through to the dark
 // consts above. Matches `daruda_light.json`.
-pub const LIGHT_CANVAS: Hsla = hsla(222.0, 0.10, 0.954, 1.0);
-pub const LIGHT_SURFACE_1: Hsla = hsla(222.0, 0.09, 0.907, 1.0);
-pub const LIGHT_SURFACE_2: Hsla = hsla(222.0, 0.085, 0.879, 1.0);
-pub const LIGHT_SURFACE_3: Hsla = hsla(222.0, 0.08, 0.846, 1.0);
+pub const LIGHT_CANVAS: Hsla = hsla(210.0, 0.20, 250.0 / 255.0, 1.0);
+pub const LIGHT_SURFACE_1: Hsla = hsla(220.0, 1.0 / 6.0, 237.0 / 255.0, 1.0);
+pub const LIGHT_SURFACE_2: Hsla = hsla(225.0, 4.0 / 23.0, 232.0 / 255.0, 1.0);
+pub const LIGHT_SURFACE_3: Hsla = hsla(222.0, 5.0 / 31.0, 224.0 / 255.0, 1.0);
 /// Near-black ink for text on light surfaces (inverse of `INK`). Used by
 /// render sites that read a raw text const instead of a theme-variant field.
 pub const LIGHT_INK: Hsla = hsla(222.0, 0.14, 0.12, 1.0);
@@ -564,9 +564,9 @@ pub const GIT_COMMIT_INPUT_HEIGHT: f32 = 64.0;
 /// Gap between remote action buttons (Fetch / Push) (px).
 pub const GIT_REMOTE_BTN_GAP: f32 = GAP_SM;
 /// Gap between the text area and the action button group in InputPanel (px).
-pub const INPUT_PANEL_SECTION_GAP: f32 = GAP_STANDARD;
+pub const INPUT_PANEL_SECTION_GAP: f32 = GAP_LG;
 /// Gap between buttons in the InputPanel action group (px).
-pub const INPUT_PANEL_BUTTON_GAP: f32 = GAP_STANDARD;
+pub const INPUT_PANEL_BUTTON_GAP: f32 = GAP_SM;
 /// Horizontal inner padding of the bottom-dock textarea (px). Matches
 /// DESIGN.md TerminalInputDock textarea spec: `padding: sm md (8px 12px)`.
 pub const INPUT_TEXTAREA_PAD_X: f32 = 12.0;
@@ -612,12 +612,17 @@ pub const STATUS_BAR_FONT_SIZE: f32 = FONT_SIZE_SM;
 pub const STATUS_BAR_PAD_X: f32 = 24.0;
 /// Dock placeholder message font size (px).
 pub const DOCK_PLACEHOLDER_FONT_SIZE: f32 = FONT_SIZE_MD;
-/// Dock toggle icon size (px).
-pub const DOCK_ICON_SIZE: f32 = 13.0;
+/// SVG artwork and hit target shared by chrome icon buttons.
+pub const CONTROL_ICON_SIZE: f32 = 16.0;
+pub const CONTROL_TARGET_SIZE: f32 = 24.0;
+/// Dock toggles recede from the other title-bar controls without a smaller target.
+pub const DOCK_TOGGLE_ICON_SIZE: f32 = 14.0;
+/// A destructive hover stays translucent so the resting foreground is legible.
+pub const CONTROL_DANGER_HOVER_ALPHA: f32 = 0.18;
 /// Dock toggle icon button width (px).
-pub const DOCK_ICON_BUTTON_W: f32 = 24.0;
+pub const DOCK_ICON_BUTTON_W: f32 = CONTROL_TARGET_SIZE;
 /// Dock toggle icon button height (px).
-pub const DOCK_ICON_BUTTON_H: f32 = 20.0;
+pub const DOCK_ICON_BUTTON_H: f32 = CONTROL_TARGET_SIZE;
 /// Dock toggle icon button corner radius (px).
 pub const DOCK_ICON_BUTTON_RADIUS: f32 = RADIUS_SM;
 /// Padding around the left dock's footer row, which carries the settings
@@ -628,8 +633,8 @@ pub const DOCK_ICON_GROUP_MR: f32 = PAD_STANDARD;
 /// Side length of a `button_chip` (px). Single-glyph chip buttons
 /// (`+`, `1`, `2`, `3`) sized to a uniform square so adjacent chips
 /// read as a row of equal-weight controls regardless of glyph width.
-/// Sized to sit inside the 28-px tab bar with comfortable margin.
-pub const BUTTON_CHIP_SIZE: f32 = 20.0;
+/// Sized to sit inside the 32-px tab bar with comfortable margin.
+pub const BUTTON_CHIP_SIZE: f32 = CONTROL_TARGET_SIZE;
 /// Panel body horizontal padding (px).
 pub const PANEL_BODY_PAD_X: f32 = PAD_STANDARD;
 /// Panel body vertical padding (px).
@@ -664,18 +669,18 @@ pub const BUTTON_WIDGET_PAD_X: f32 = PAD_LG;
 /// Macro button corner radius (px).
 pub const BUTTON_WIDGET_RADIUS: f32 = RADIUS_SM;
 /// Pane header height (px).
-pub const PANE_HEADER_HEIGHT: f32 = 20.0;
+pub const PANE_HEADER_HEIGHT: f32 = 28.0;
 /// Row height for file tree entries (px).
-pub const FILES_ROW_HEIGHT: f32 = 22.0;
+pub const FILES_ROW_HEIGHT: f32 = 24.0;
 /// Outer horizontal padding for each row (px).
 pub const FILES_ROW_PAD_X: f32 = PAD_STANDARD;
 /// Pixel offset added per directory depth level — visual indent.
 pub const FILES_INDENT_PX: f32 = PAD_XL;
 /// Width of the chevron column (px).
-pub const FILES_CHEVRON_W: f32 = 14.0;
-/// Hitbox width of the reusable `Disclosure` chevron (px). Decoupled from the
-/// file-tree column so the two can diverge later; initially equal.
-pub const DISCLOSURE_CHEVRON_W: f32 = FILES_CHEVRON_W;
+pub const FILES_CHEVRON_W: f32 = CONTROL_ICON_SIZE;
+/// Hitbox width of the reusable `Disclosure` chevron (px), matching icon
+/// controls rather than the narrower file-tree column.
+pub const DISCLOSURE_CHEVRON_W: f32 = CONTROL_TARGET_SIZE;
 /// Width of the icon column to the right of the chevron (px).
 pub const FILES_ICON_W: f32 = 16.0;
 /// Gap between chevron / icon / name (px).
@@ -689,9 +694,9 @@ pub const PANE_HEADER_GAP: f32 = GAP_SM;
 /// Pane header title/cwd inner gap (px).
 pub const PANE_HEADER_INNER_GAP: f32 = GAP_STANDARD;
 /// Pane header close button width/height (px).
-pub const PANE_HEADER_CLOSE_W: f32 = 16.0;
+pub const PANE_HEADER_CLOSE_W: f32 = CONTROL_TARGET_SIZE;
 /// Pane header close button height (px).
-pub const PANE_HEADER_CLOSE_H: f32 = 14.0;
+pub const PANE_HEADER_CLOSE_H: f32 = CONTROL_TARGET_SIZE;
 /// Pane header close button corner radius (px).
 pub const PANE_HEADER_CLOSE_RADIUS: f32 = RADIUS_XS;
 /// Tab cell inner gap (px).
@@ -764,7 +769,7 @@ pub const SETTINGS_WINDOW_H: f32 = 680.0;
 /// Title bar height (px).
 pub const TITLE_BAR_HEIGHT: f32 = 28.0;
 /// Tab bar height (px).
-pub const TAB_BAR_HEIGHT: f32 = 28.0;
+pub const TAB_BAR_HEIGHT: f32 = 32.0;
 /// Status bar height (px).
 pub const STATUS_BAR_HEIGHT: f32 = 24.0;
 /// Diameter of the project-config indicator dot.
@@ -1078,7 +1083,7 @@ pub const WELCOME_GAP_TIGHT: f32 = GAP_SM;
 /// Welcome screen loose inner gap (px) — used between recent entry rows.
 pub const WELCOME_GAP_LOOSE: f32 = GAP_LG;
 /// File viewer toolbar height (px).
-pub const FILE_VIEWER_HEADER_H: f32 = 28.0;
+pub const FILE_VIEWER_HEADER_H: f32 = 32.0;
 /// File viewer toolbar horizontal padding (px).
 pub const FILE_VIEWER_HEADER_PAD_X: f32 = PAD_LG;
 /// File viewer toolbar font size (px).
@@ -1102,15 +1107,15 @@ pub const FILE_VIEWER_LINE_H_RATIO: f32 = 1.7;
 /// Rows rendered above and below the visible viewport (overscan).
 pub const FILE_VIEWER_VIRTUAL_OVERSCAN: usize = 8;
 /// Gap between toolbar button group items (px).
-pub const FILE_VIEWER_TOOLBAR_GAP: f32 = GAP_STANDARD;
+pub const FILE_VIEWER_TOOLBAR_GAP: f32 = GAP_SM;
 /// File viewer close button horizontal padding (px).
 pub const FILE_VIEWER_CLOSE_PAD_X: f32 = PAD_STANDARD;
 /// File viewer toolbar button corner radius (px).
 pub const FILE_VIEWER_TOOL_BUTTON_RADIUS: f32 = RADIUS_SM;
 /// Icon-only file viewer toolbar button width (px).
-pub const FILE_VIEWER_TOOL_BUTTON_W: f32 = 26.0;
+pub const FILE_VIEWER_TOOL_BUTTON_W: f32 = CONTROL_TARGET_SIZE;
 /// Icon-only file viewer toolbar button height (px).
-pub const FILE_VIEWER_TOOL_BUTTON_H: f32 = 22.0;
+pub const FILE_VIEWER_TOOL_BUTTON_H: f32 = CONTROL_TARGET_SIZE;
 // Diff line colors track the canonical DESIGN §Git&Diff tokens
 // (`DIFF_*`) so the file-viewer and git-changes diffs read identically
 // to the spec instead of carrying a parallel green/red palette.
@@ -1908,7 +1913,7 @@ pub const FILE_VIEWER_SEARCH_PANEL_W: f32 = 380.0;
 /// Search panel font size (px).
 pub const FILE_VIEWER_SEARCH_FONT_SIZE: f32 = FONT_SIZE_MD;
 /// Gap between items inside the search panel (px).
-pub const FILE_VIEWER_SEARCH_ITEM_GAP: f32 = GAP_LG;
+pub const FILE_VIEWER_SEARCH_ITEM_GAP: f32 = GAP_SM;
 /// Match counter font size inside the input area (px).
 pub const FILE_VIEWER_SEARCH_COUNTER_SIZE: f32 = 11.0;
 /// Button horizontal padding (px).
@@ -2166,7 +2171,7 @@ pub const AGENT_BANNER_MARGIN_Y: f32 = PAD_SM;
 /// Outer horizontal padding for right-panel content rows (px).
 pub const RIGHT_PANEL_PAD_X: f32 = PAD_LG;
 /// Outer vertical padding between right-panel sections (px).
-pub const RIGHT_PANEL_PAD_Y: f32 = PAD_SM;
+pub const RIGHT_PANEL_PAD_Y: f32 = PAD_STANDARD;
 /// Vertical gap between two siblings inside a single right-panel row (px).
 pub const RIGHT_PANEL_ROW_GAP: f32 = GAP_LG;
 /// Vertical gap between major sections in a right-dock tab body
@@ -2428,7 +2433,7 @@ pub const FLOW_INSPECTOR_PROMPT_ROWS: usize = 5;
 /// Distance from the canvas's top-right corner.
 pub const FLOW_TOOLBAR_INSET: f32 = PAD_LG;
 /// Space between the toolbar's buttons.
-pub const FLOW_TOOLBAR_GAP: f32 = PAD_SM;
+pub const FLOW_TOOLBAR_GAP: f32 = GAP_SM;
 
 /// Canvas behind the graph — the app canvas, so the pane reads as a
 /// surface rather than a floating panel.

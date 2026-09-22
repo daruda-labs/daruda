@@ -23,10 +23,6 @@ const ICON_CHECK: &str = "icons/ui/check.svg";
 /// `skip_next` — a play arrow against a bar. The same vocabulary as ▶ plus the
 /// one thing that makes it partial: it ends somewhere.
 const ICON_RUN_UNTIL: &str = "icons/ui/skip-next.svg";
-/// `keep` — Material Symbols' push pin, which is also the engine's own word
-/// for what this does (`RunRequest::pinned`).
-const ICON_PIN: &str = "icons/ui/keep.svg";
-
 /// How the tests find the buttons to press them. Named here so a test cannot
 /// drift from its button by spelling the selector a second time.
 pub(in crate::workspace) const TOOLBAR_RUN_SELECTOR: &str = "flow-toolbar-run-press";
@@ -62,7 +58,7 @@ pub(super) struct ToolbarState {
 /// here for the same reason and one more: what they act on is the selection,
 /// which is only visible on this canvas.
 pub(super) fn toolbar(state: ToolbarState, cx: &mut Context<FlowGraphView>) -> impl IntoElement {
-    use crate::ui::{Disableable as _, Icon, button_bare};
+    use crate::ui::{Disableable as _, button_icon, button_icon_danger, icons};
 
     let ToolbarState {
         has_selection,
@@ -84,6 +80,11 @@ pub(super) fn toolbar(state: ToolbarState, cx: &mut Context<FlowGraphView>) -> i
         PinAction::Pin(nodes) => (s::flow_pin_tooltip(nodes), false),
         PinAction::Unpin(nodes) => (s::flow_unpin_tooltip(nodes), false),
     };
+    let pin_icon = if matches!(pin, PinAction::Unpin(_)) {
+        icons::PIN_FILLED
+    } else {
+        icons::PIN
+    };
 
     div()
         .absolute()
@@ -103,16 +104,14 @@ pub(super) fn toolbar(state: ToolbarState, cx: &mut Context<FlowGraphView>) -> i
         .flex_row()
         .gap(px(palette::FLOW_TOOLBAR_GAP))
         .child(
-            button_bare("flow-toolbar-add")
-                .icon(crate::ui::IconName::Plus)
+            button_icon("flow-toolbar-add", icons::ADD, cx)
                 .tooltip(s::flow_add_node())
                 .on_click(cx.listener(|_, _, _, cx| cx.emit(FlowGraphEvent::AddNode))),
         )
         .child(
             // Disabled rather than absent: a button that comes and goes under
             // the pointer is worse than one that says it is not available.
-            button_bare("flow-toolbar-delete")
-                .icon(crate::ui::IconName::Minus)
+            button_icon_danger("flow-toolbar-delete", icons::DELETE, cx)
                 .tooltip(s::flow_delete_node())
                 .disabled(!has_selection)
                 .on_click(cx.listener(|_, _, _, cx| cx.emit(FlowGraphEvent::Delete))),
@@ -120,8 +119,7 @@ pub(super) fn toolbar(state: ToolbarState, cx: &mut Context<FlowGraphView>) -> i
         .child(
             // Beside delete rather than beside ▶: both act on the selection,
             // and neither spends anything.
-            button_bare("flow-toolbar-pin")
-                .icon(Icon::empty().path(ICON_PIN))
+            button_icon("flow-toolbar-pin", pin_icon, cx)
                 .tooltip(pin_says)
                 .disabled(pin_off)
                 .debug_selector(|| TOOLBAR_PIN_SELECTOR.into())
@@ -135,16 +133,14 @@ pub(super) fn toolbar(state: ToolbarState, cx: &mut Context<FlowGraphView>) -> i
         // a disabled button still shows one and grey on its own is not an
         // answer.
         .child(
-            button_bare("flow-toolbar-check")
-                .icon(Icon::empty().path(ICON_CHECK))
+            button_icon("flow-toolbar-check", ICON_CHECK, cx)
                 .tooltip(reason_or(unsaved_form, s::flow_check_tooltip()))
                 .disabled(unsaved_form)
                 .debug_selector(|| TOOLBAR_CHECK_SELECTOR.into())
                 .on_click(cx.listener(|_, _, _, cx| cx.emit(FlowGraphEvent::Validate))),
         )
         .child(
-            button_bare("flow-toolbar-run")
-                .icon(Icon::empty().path(ICON_PLAY))
+            button_icon("flow-toolbar-run", ICON_PLAY, cx)
                 .tooltip(reason_or(unsaved_form, s::flow_run_tooltip()))
                 .disabled(unsaved_form)
                 // The press is what the disabled state has to actually stop, and
@@ -156,8 +152,7 @@ pub(super) fn toolbar(state: ToolbarState, cx: &mut Context<FlowGraphView>) -> i
             // After ▶ and not instead of it: a partial run is the exception,
             // and the button that runs the whole flow must not change meaning
             // because a card happens to be selected.
-            button_bare("flow-toolbar-run-until")
-                .icon(Icon::empty().path(ICON_RUN_UNTIL))
+            button_icon("flow-toolbar-run-until", ICON_RUN_UNTIL, cx)
                 .tooltip(until_says)
                 .disabled(until_off)
                 .debug_selector(|| TOOLBAR_RUN_UNTIL_SELECTOR.into())

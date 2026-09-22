@@ -64,8 +64,7 @@ impl ChannelSettings {
                                 .child(s::remote_token_saved()),
                         )
                         .child(
-                            ui::button_bare(("remote-remove", index))
-                                .icon(IconName::Delete)
+                            ui::button_icon_danger(("remote-remove", index), ui::icons::DELETE, cx)
                                 .disabled(input.busy)
                                 .tooltip(s::remote_clear_token())
                                 .tab_stop(true)
@@ -159,7 +158,7 @@ impl Render for ChannelSettings {
                         ))
                         .child(
                             ui::button(("remote-unpair", index), s::remote_unpair())
-                                .icon(IconName::Close)
+                                .child(ui::icons::icon(ui::icons::CLOSE))
                                 .tab_stop(true)
                                 .on_click(
                                     cx.listener(move |this, _, _, cx| this.unpair(&unpair_id, cx)),
@@ -169,7 +168,7 @@ impl Render for ChannelSettings {
             } else {
                 section = section.child(
                     ui::button(("remote-pair", index), s::remote_pair())
-                        .icon(IconName::Plus)
+                        .child(ui::icons::icon(ui::icons::ADD))
                         .disabled(!row.config.enabled || !ready)
                         .tab_stop(true)
                         .on_click(cx.listener(move |this, _, _, cx| this.pair(&pair_id, cx))),
@@ -183,8 +182,7 @@ impl Render for ChannelSettings {
                         .gap(px(theme::MODAL_FOOTER_GAP))
                         .child(format!("!pair {code}"))
                         .child(
-                            ui::button_bare(("remote-copy-pair", index))
-                                .icon(IconName::Copy)
+                            ui::button_icon(("remote-copy-pair", index), ui::icons::COPY, cx)
                                 .tooltip(s::remote_copy_pair())
                                 .tab_stop(true)
                                 .on_click(

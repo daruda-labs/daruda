@@ -11,8 +11,7 @@ use crate::lane::Lane;
 use crate::lane::availability::LaneAvailability;
 use crate::surface::strings as surface_strings;
 use crate::ui::{
-    ButtonVariants as _, DropdownMenu as _, Icon, IconName, PopupMenuItem, SectionHeader,
-    Sizable as _, button_bare, menu_builder,
+    DropdownMenu as _, Icon, IconName, PopupMenuItem, SectionHeader, Sizable as _, menu_builder,
 };
 use crate::workspace::NewGroup;
 use crate::workspace::layout::{Dock, GroupSnapshot, LeftDockSnapshot};
@@ -185,9 +184,9 @@ pub(super) fn group_header_row(
         });
 
     let caret_icon = if group.is_collapsed {
-        IconName::ChevronRight
+        crate::ui::icons::CHEVRON_RIGHT
     } else {
-        IconName::ChevronDown
+        crate::ui::icons::EXPAND_MORE
     };
 
     let group_id = group.id;
@@ -221,19 +220,15 @@ pub(super) fn group_header_row(
                 .child(SharedString::from(group.name.to_uppercase())),
         )
         .child(
-            // Chevron uses `button_bare` so its chrome (ghost padding /
-            // hit area) matches every `[+]` button on the row. Always
-            // visible (DESIGN.md GroupHeader ▶ / ▼); `caret_icon` flips
-            // by collapse state.
-            button_bare(("group-chevron", group_id as usize))
-                .ghost()
-                .icon(caret_icon)
-                .on_click(cx.listener(move |_dock, _: &ClickEvent, _window, cx| {
+            // Same hit target as the add action; collapse state lives in the SVG.
+            crate::ui::button_icon(("group-chevron", group_id as usize), caret_icon, cx).on_click(
+                cx.listener(move |_dock, _: &ClickEvent, _window, cx| {
                     cx.stop_propagation();
                     if let Some(ws) = ws_for_chevron.upgrade() {
                         ws.update(cx, |ws, cx| ws.toggle_group_collapse(group_id, cx));
                     }
-                })),
+                }),
+            ),
         );
 
     div()
@@ -470,17 +465,12 @@ pub(super) fn project_header_row(
         .child({
             let ws_for_chevron = snap.workspace.clone();
             let chevron_icon = if is_collapsed {
-                IconName::ChevronRight
+                crate::ui::icons::CHEVRON_RIGHT
             } else {
-                IconName::ChevronDown
+                crate::ui::icons::EXPAND_MORE
             };
-            // Same `button_bare` chrome as the group chevron + `[+]`
-            // button on this row. Always visible (matches the group
-            // chevron + DESIGN.md GroupHeader spec); `chevron_icon`
-            // flips ChevronRight/ChevronDown by collapse state.
-            button_bare(("project-chevron", project_id as usize))
-                .ghost()
-                .icon(chevron_icon)
+            // Keep the chevron and add action on the same chrome grid.
+            crate::ui::button_icon(("project-chevron", project_id as usize), chevron_icon, cx)
                 .on_click(cx.listener(move |_dock, _: &ClickEvent, _window, cx| {
                     cx.stop_propagation();
                     if let Some(ws) = ws_for_chevron.upgrade() {
@@ -516,51 +506,53 @@ pub(super) fn project_header_row(
             let ws_for_add = snap.workspace.clone();
             let row_group_for_btn = row_group.clone();
             row.child(
-                button_bare(("project-add-lane", project_id as usize))
-                    .ghost()
-                    .icon(IconName::Plus)
-                    .invisible()
-                    .group_hover(row_group_for_btn, |this| this.visible())
-                    .on_click(cx.listener(move |_dock, _: &ClickEvent, window, cx| {
-                        // Stop the row activate handler so the [+]
-                        // doesn't double-fire as a "snap to project"
-                        // click.
-                        cx.stop_propagation();
-                        if let Some(ws) = ws_for_add.upgrade() {
-                            let workspace_for_modal = ws_for_add.clone();
-                            ws.update(cx, |ws, cx| {
-                                // Activate this project first so
-                                // `git_repo_root()` returns the right
-                                // repo when the modal reads it at open
-                                // time.
-                                let target = daruda_store::project::LaneRef {
-                                    project: project_id,
-                                    lane: last_active_lane_id,
-                                };
-                                ws.activate_lane(target, window, cx);
-                                let Some(repo_root) = ws.git_repo_root() else {
-                                    return;
-                                };
-                                let catalog = ws.session_hosts.clone();
-                                crate::workspace::dialog_helpers::open_form_modal(
-                                    surface_strings::create_lane_button_title(),
-                                    None,
-                                    move |window, cx| {
-                                        super::create_modal::CreateWorktreeModal::new(
-                                            workspace_for_modal.clone(),
-                                            repo_root,
-                                            project_id,
-                                            catalog,
-                                            window,
-                                            cx,
-                                        )
-                                    },
-                                    window,
-                                    cx,
-                                );
-                            });
-                        }
-                    })),
+                crate::ui::button_icon(
+                    ("project-add-lane", project_id as usize),
+                    crate::ui::icons::ADD,
+                    cx,
+                )
+                .invisible()
+                .group_hover(row_group_for_btn, |this| this.visible())
+                .on_click(cx.listener(move |_dock, _: &ClickEvent, window, cx| {
+                    // Stop the row activate handler so the [+]
+                    // doesn't double-fire as a "snap to project"
+                    // click.
+                    cx.stop_propagation();
+                    if let Some(ws) = ws_for_add.upgrade() {
+                        let workspace_for_modal = ws_for_add.clone();
+                        ws.update(cx, |ws, cx| {
+                            // Activate this project first so
+                            // `git_repo_root()` returns the right
+                            // repo when the modal reads it at open
+                            // time.
+                            let target = daruda_store::project::LaneRef {
+                                project: project_id,
+                                lane: last_active_lane_id,
+                            };
+                            ws.activate_lane(target, window, cx);
+                            let Some(repo_root) = ws.git_repo_root() else {
+                                return;
+                            };
+                            let catalog = ws.session_hosts.clone();
+                            crate::workspace::dialog_helpers::open_form_modal(
+                                surface_strings::create_lane_button_title(),
+                                None,
+                                move |window, cx| {
+                                    super::create_modal::CreateWorktreeModal::new(
+                                        workspace_for_modal.clone(),
+                                        repo_root,
+                                        project_id,
+                                        catalog,
+                                        window,
+                                        cx,
+                                    )
+                                },
+                                window,
+                                cx,
+                            );
+                        });
+                    }
+                })),
             )
         })
         .root_context_menu(ws_for_menu.clone(), move |menu, _window, _cx| {
@@ -576,7 +568,7 @@ pub(super) fn project_header_row(
 pub(super) fn section_header(
     _any_git: bool,
     snap: &LeftDockSnapshot,
-    _cx: &mut Context<Dock>,
+    cx: &mut Context<Dock>,
 ) -> impl IntoElement + use<> {
     // Section-level `[+]` is a toggle: clicking it opens a flat dropdown
     // with "Add Project…" (folder picker routed through
@@ -584,9 +576,7 @@ pub(super) fn section_header(
     // "New Group…". Per-project lane creation lives on each
     // project's `[+ new lane]` row.
     let ws_for_group = snap.workspace.clone();
-    let add_button = button_bare("section-add-toggle")
-        .ghost()
-        .icon(IconName::Plus)
+    let add_button = crate::ui::button_icon("section-add-toggle", crate::ui::icons::ADD, cx)
         .dropdown_menu(menu_builder(move |menu, _window, _cx| {
             let ws_for_group = ws_for_group.clone();
             menu.item(
@@ -950,11 +940,11 @@ pub(super) fn worktree_row(
     if removable {
         let ws_for_close = workspace.clone();
         let row_group_for_close = row_group.clone();
-        let close = button_bare(SharedString::from(format!(
-            "wt-remove-{project_id}-{wt_id}"
-        )))
-        .ghost()
-        .icon(IconName::Close)
+        let close = crate::ui::button_icon_danger(
+            SharedString::from(format!("wt-remove-{project_id}-{wt_id}")),
+            crate::ui::icons::DELETE,
+            cx,
+        )
         .invisible()
         .group_hover(row_group_for_close, |this| this.visible())
         .on_click(cx.listener(move |_dock, _: &ClickEvent, window, cx| {

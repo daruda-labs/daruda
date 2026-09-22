@@ -615,6 +615,7 @@ impl SettingsWindow {
                     "settings-plugin-skill-back",
                     s::settings_plugin_skill_back(),
                 )
+                .child(crate::ui::icons::icon(crate::ui::icons::BACK))
                 .on_click(cx.listener(|this, _: &ClickEvent, _, cx| {
                     this.plugin_view_skill = None;
                     cx.notify();

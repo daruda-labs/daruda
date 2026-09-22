@@ -294,6 +294,8 @@ impl MacroEditModal {
 
         div()
             .id("macro-edit-record")
+            .gap(px(theme::GAP_SM))
+            .child(crate::ui::icons::icon(crate::ui::icons::RECORD))
             .track_focus(&self.record_focus.clone())
             .on_key_down(cx.listener(|this, ev: &KeyDownEvent, window, cx| {
                 this.handle_record_keydown(ev, window, cx);

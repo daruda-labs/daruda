@@ -11,7 +11,7 @@
 //! `modes.available` is non-empty (the caller gates).
 
 use daruda_acp::ModeStateView;
-use gpui::{IntoElement, SharedString, Styled as _, WeakEntity, px};
+use gpui::{IntoElement, ParentElement as _, SharedString, Styled as _, WeakEntity, px};
 
 use crate::surface::strings;
 use crate::ui::{
@@ -58,6 +58,7 @@ pub(in crate::workspace) fn mode_chip(
     // raised buttons. Height/radius match the spec's fixed-heights table and
     // `config_chip`, so all chips read as one control group.
     button(chip_id, label)
+        .child(crate::ui::icons::icon(crate::ui::icons::EXPAND_MORE))
         .ghost()
         .xsmall()
         .h(px(theme::BUTTON_HEIGHT))
@@ -69,7 +70,7 @@ pub(in crate::workspace) fn mode_chip(
 }
 
 fn visible_mode_label(display_name: &str) -> String {
-    format!("{}{}", display_name, strings::TASK_PILL_CHEVRON)
+    display_name.to_owned()
 }
 
 /// Build the mode selection popup menu. One item per available mode; the
@@ -105,9 +106,6 @@ mod tests {
 
     #[test]
     fn visible_label_is_only_the_current_mode_value() {
-        assert_eq!(
-            visible_mode_label("Review Changes"),
-            format!("Review Changes{}", strings::TASK_PILL_CHEVRON)
-        );
+        assert_eq!(visible_mode_label("Review Changes"), "Review Changes");
     }
 }

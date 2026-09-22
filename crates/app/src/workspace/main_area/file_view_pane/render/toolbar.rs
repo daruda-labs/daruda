@@ -11,7 +11,7 @@ use gpui::{Context, IntoElement, MouseButton, MouseDownEvent, div, prelude::*, p
 
 use crate::path_ext::PathExt;
 use crate::surface::strings;
-use crate::ui::{Icon, Selectable as _, Sizable as _, button_bare, button_group_on_surface};
+use crate::ui::{Selectable as _, button_group_on_surface};
 use crate::workspace::Workspace;
 use crate::workspace::left_dock::git_ops::git_status_color;
 use crate::workspace::main_area::file_view_pane::{FileViewMode, PaneFileView};
@@ -144,13 +144,17 @@ fn mode_button_group(
     button_group_on_surface(("file-viewer-mode-group", pane_id), surface, cx)
         .children(options.into_iter().map(|mode| {
             let is_active = mode == active;
-            button_bare((mode_button_id(mode), pane_id))
-                .icon(Icon::empty().path(mode_icon(mode)))
-                .tooltip(mode_label(mode))
-                .selected(is_active)
-                // The variant carries one foreground; lift only the selected
-                // segment's, matching the diff-context toggle's active state.
-                .when(is_active, |b| b.text_color(colors.active_text))
+            crate::ui::button_icon_on_surface(
+                (mode_button_id(mode), pane_id),
+                mode_icon(mode),
+                surface,
+                cx,
+            )
+            .tooltip(mode_label(mode))
+            .selected(is_active)
+            // The variant carries one foreground; lift only the selected
+            // segment's, matching the diff-context toggle's active state.
+            .when(is_active, |b| b.text_color(colors.active_text))
         }))
         .on_click(cx.listener(move |this, ixs: &Vec<usize>, window, cx| {
             if let Some(&ix) = ixs.first() {
@@ -177,7 +181,6 @@ pub(super) fn render_file_viewer_toolbar(
         active_bg: surface.active_tint,
         active_text: header_text,
     };
-    let close_hover = header_text;
     let controls = ToolbarControls::from_view(fv);
 
     let file_name = fv.path.file_name_lossy();
@@ -324,21 +327,19 @@ pub(super) fn render_file_viewer_toolbar(
                     cx,
                 ))
                 .child(
-                    div()
-                        .id("file-viewer-close")
-                        .flex_none()
-                        .px(px(theme::FILE_VIEWER_CLOSE_PAD_X))
-                        .text_size(px(theme::FILE_VIEWER_CLOSE_FONT_SIZE))
-                        .text_color(button_colors.text)
-                        .cursor_pointer()
-                        .hover(move |d| d.text_color(close_hover))
-                        .on_mouse_down(
-                            MouseButton::Left,
-                            cx.listener(move |this, _: &MouseDownEvent, window, cx| {
-                                this.request_close_pane(pane_id, window, cx);
-                            }),
-                        )
-                        .child(strings::FILE_VIEWER_CLOSE),
+                    crate::ui::button_icon_on_surface(
+                        "file-viewer-close",
+                        crate::ui::icons::CLOSE,
+                        &surface,
+                        cx,
+                    )
+                    .tooltip(strings::common_button_close())
+                    .on_mouse_down(
+                        MouseButton::Left,
+                        cx.listener(move |this, _: &MouseDownEvent, window, cx| {
+                            this.request_close_pane(pane_id, window, cx);
+                        }),
+                    ),
                 ),
         )
 }
@@ -385,7 +386,7 @@ fn toolbar_toggle_button(
             }),
         )
         .tooltip(crate::ui::tooltip::text(label))
-        .child(Icon::empty().path(toggle.icon).small())
+        .child(crate::ui::icons::icon(toggle.icon))
 }
 
 #[cfg(test)]

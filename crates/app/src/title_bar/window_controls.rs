@@ -13,12 +13,7 @@ use super::policy::{ControlTier, WindowChrome};
 use crate::ui::theme;
 use crate::workspace::CloseWindow;
 
-/// Box-drawing glyphs rather than SVG: the dock toggles beside these already
-/// read as glyphs, and the three shapes are unambiguous at 11px.
-const GLYPH_MINIMIZE: &str = "\u{2500}";
-const GLYPH_MAXIMIZE: &str = "\u{25a1}";
-const GLYPH_RESTORE: &str = "\u{29c9}";
-const GLYPH_CLOSE: &str = "\u{2715}";
+use crate::ui::icons;
 
 /// One app-drawn caption control. An enum rather than a string id because the
 /// area, the action and the danger tone all have to agree, and a `_` arm over
@@ -42,10 +37,10 @@ impl Control {
 
     fn glyph(self, maximized: bool) -> &'static str {
         match self {
-            Self::Minimize => GLYPH_MINIMIZE,
-            Self::Zoom if maximized => GLYPH_RESTORE,
-            Self::Zoom => GLYPH_MAXIMIZE,
-            Self::Close => GLYPH_CLOSE,
+            Self::Minimize => icons::MINIMIZE,
+            Self::Zoom if maximized => icons::RESTORE,
+            Self::Zoom => icons::MAXIMIZE,
+            Self::Close => icons::CLOSE,
         }
     }
 
@@ -197,8 +192,8 @@ mod tests {
     /// and Zoom is the one control whose label changes with window state.
     #[test]
     fn zoom_swaps_its_glyph_with_the_window_state() {
-        assert_eq!(Control::Zoom.glyph(false), GLYPH_MAXIMIZE);
-        assert_eq!(Control::Zoom.glyph(true), GLYPH_RESTORE);
+        assert_eq!(Control::Zoom.glyph(false), icons::MAXIMIZE);
+        assert_eq!(Control::Zoom.glyph(true), icons::RESTORE);
     }
 
     /// A duplicate glyph or id would read as two buttons doing the same thing.

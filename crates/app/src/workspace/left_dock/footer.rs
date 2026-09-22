@@ -24,7 +24,7 @@ pub(in crate::workspace) fn render(cx: &mut Context<Dock>) -> AnyElement {
         .border_t_1()
         .border_color(t.border)
         .child(
-            crate::ui::button_toggle("left-dock-settings", "\u{2699}", false, cx)
+            crate::ui::button_icon("left-dock-settings", crate::ui::icons::SETTINGS, cx)
                 .tooltip(crate::surface::strings::dock_settings())
                 // The View dispatches; `Workspace::on_open_settings` owns the
                 // body, and the global fallback answers where it does not.

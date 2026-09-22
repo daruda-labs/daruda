@@ -23,7 +23,7 @@ use gpui::{AnyElement, Context, IntoElement, SharedString, div, prelude::*, px};
 use crate::agent::mcp::{McpScope, McpServer, McpSnapshot, McpTransport};
 use crate::surface::strings;
 use crate::ui::Sizable as _;
-use crate::ui::{Divider, button_primary};
+use crate::ui::{ButtonVariants as _, Divider};
 use crate::workspace::Workspace;
 use crate::workspace::layout::Dock;
 use crate::workspace::layout::RightDockSnapshot;
@@ -43,7 +43,7 @@ pub(in crate::workspace) fn render(snap: &RightDockSnapshot, cx: &mut Context<Do
             mcp,
             workspace.clone(),
             has_lane,
-            &t,
+            cx,
         ))
         .child(Divider::horizontal())
         .child(scope_section(
@@ -52,7 +52,7 @@ pub(in crate::workspace) fn render(snap: &RightDockSnapshot, cx: &mut Context<Do
             mcp,
             workspace.clone(),
             has_lane,
-            &t,
+            cx,
         ))
         .child(Divider::horizontal())
         .child(scope_section(
@@ -61,7 +61,7 @@ pub(in crate::workspace) fn render(snap: &RightDockSnapshot, cx: &mut Context<Do
             mcp,
             workspace,
             true,
-            &t,
+            cx,
         ))
         .into_any_element()
 }
@@ -84,7 +84,8 @@ fn header_row(workspace: gpui::WeakEntity<Workspace>, title_color: gpui::Hsla) -
 }
 
 fn new_server_button(workspace: gpui::WeakEntity<Workspace>) -> impl IntoElement {
-    button_primary("mcp-new", strings::mcp_new_button())
+    crate::ui::button_with_icon("mcp-new", strings::mcp_new_button(), crate::ui::icons::ADD)
+        .primary()
         .xsmall()
         .on_click(move |_, window, cx| {
             if let Some(ws) = workspace.upgrade() {
@@ -99,8 +100,9 @@ fn scope_section(
     state: &McpSnapshot,
     workspace: gpui::WeakEntity<Workspace>,
     enabled: bool,
-    t: &DarudaTheme,
+    cx: &gpui::App,
 ) -> AnyElement {
+    let t = theme::current(cx);
     let servers = state.servers(scope);
     let mut col = div().flex().flex_col().gap(px(theme::MCP_ROW_GAP)).child(
         div()
@@ -140,7 +142,7 @@ fn scope_section(
     }
 
     for s in servers {
-        col = col.child(server_row(s, workspace.clone(), t));
+        col = col.child(server_row(s, workspace.clone(), t, cx));
     }
     col.into_any_element()
 }
@@ -149,6 +151,7 @@ fn server_row(
     s: &McpServer,
     workspace: gpui::WeakEntity<Workspace>,
     t: &DarudaTheme,
+    cx: &gpui::App,
 ) -> AnyElement {
     let scope = s.scope;
     let name = s.name.clone();
@@ -202,6 +205,7 @@ fn server_row(
         .flex_row()
         .items_center()
         .min_w_0()
+        .min_h(px(theme::CONTROL_TARGET_SIZE))
         .gap(px(theme::MCP_HEADER_GAP))
         .px(px(theme::RIGHT_PANEL_PAD_X))
         .py(px(theme::SKILL_BADGE_PAD_Y))
@@ -256,7 +260,7 @@ fn server_row(
                 .flex()
                 .flex_row()
                 .items_center()
-                .gap(px(theme::MCP_HEADER_GAP))
+                .gap(px(theme::GAP_SM))
                 .bg(actions_bg)
                 .pl(px(theme::MCP_HEADER_GAP))
                 .invisible()
@@ -267,7 +271,7 @@ fn server_row(
                     name_for_delete,
                     workspace_edit,
                     workspace_delete,
-                    t,
+                    cx,
                 )),
         )
         .into_any_element()
@@ -279,39 +283,37 @@ fn row_actions(
     name_for_delete: String,
     workspace_edit: gpui::WeakEntity<Workspace>,
     workspace_delete: gpui::WeakEntity<Workspace>,
-    t: &DarudaTheme,
+    cx: &gpui::App,
 ) -> impl IntoElement {
     div()
         .flex()
         .flex_row()
         .flex_none()
-        .gap(px(theme::MCP_HEADER_GAP))
-        .child(text_action_button(
-            "edit",
-            strings::mcp_button_edit(),
-            t.text_primary,
-            t,
-            move |window, cx| {
-                if let Some(ws) = workspace_edit.upgrade() {
-                    let n = name_for_edit.clone();
-                    ws.update(cx, |ws, cx| ws.open_edit_mcp_server(scope, n, window, cx));
-                }
-            },
-        ))
-        .child(text_action_button(
-            "del",
-            strings::mcp_button_delete(),
-            theme::ERROR,
-            t,
-            move |window, cx| {
-                if let Some(ws) = workspace_delete.upgrade() {
-                    let n = name_for_delete.clone();
-                    ws.update(cx, |ws, cx| {
-                        ws.open_delete_mcp_server_confirm(scope, n, window, cx)
-                    });
-                }
-            },
-        ))
+        .gap(px(theme::GAP_SM))
+        .child(
+            crate::ui::button_icon("edit", crate::ui::icons::EDIT, cx)
+                .tooltip(strings::mcp_button_edit())
+                .debug_selector(|| "mcp-edit".into())
+                .on_click(move |_, window, cx| {
+                    if let Some(ws) = workspace_edit.upgrade() {
+                        let n = name_for_edit.clone();
+                        ws.update(cx, |ws, cx| ws.open_edit_mcp_server(scope, n, window, cx));
+                    }
+                }),
+        )
+        .child(
+            crate::ui::button_delete_glyph("del", cx)
+                .tooltip(strings::mcp_button_delete())
+                .debug_selector(|| "mcp-delete".into())
+                .on_click(move |_, window, cx| {
+                    if let Some(ws) = workspace_delete.upgrade() {
+                        let n = name_for_delete.clone();
+                        ws.update(cx, |ws, cx| {
+                            ws.open_delete_mcp_server_confirm(scope, n, window, cx)
+                        });
+                    }
+                }),
+        )
 }
 
 fn transport_chip(label: &'static str, t: &DarudaTheme) -> impl IntoElement {
@@ -326,31 +328,28 @@ fn transport_chip(label: &'static str, t: &DarudaTheme) -> impl IntoElement {
         .child(label)
 }
 
-/// Hover-only text action button. Visually distinct from the Skills
-/// tab's chip-shaped `[Edit]` / `[×]` (built from `crate::ui::button`):
-/// Tools rows already carry a status indicator dot, so a flat text
-/// affordance keeps the row line-height tight. The different shape is
-/// deliberate, so this stays a local helper instead of a shared one.
-fn text_action_button<F>(
-    id: impl Into<gpui::ElementId>,
-    label: impl Into<gpui::SharedString>,
-    hover_color: gpui::Hsla,
-    t: &DarudaTheme,
-    on_click: F,
-) -> impl IntoElement
-where
-    F: Fn(&mut gpui::Window, &mut gpui::App) + 'static,
-{
-    let idle_color = t.text_body;
-    div()
-        .id(id)
-        .flex_none()
-        .text_size(px(theme::MCP_BADGE_FONT_SIZE))
-        .text_color(idle_color)
-        .cursor_pointer()
-        .hover(move |s| s.text_color(hover_color))
-        .child(label.into())
-        .on_click(move |_: &gpui::ClickEvent, window, cx| {
-            on_click(window, cx);
-        })
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[gpui::test]
+    fn hover_actions_fit_the_server_row(cx: &mut gpui::TestAppContext) {
+        let server = McpServer {
+            name: "filesystem".into(),
+            scope: McpScope::User,
+            transport: McpTransport::Stdio,
+            command: Some("test-server".into()),
+            args: Vec::new(),
+            url: None,
+            env: Default::default(),
+            headers: Default::default(),
+            disabled: false,
+            extra: Default::default(),
+        };
+        crate::workspace::right_dock::row_tests::assert_hover_targets_fit(
+            cx,
+            &["mcp-edit", "mcp-delete"],
+            move |workspace, cx| server_row(&server, workspace, theme::current(cx), cx),
+        );
+    }
 }

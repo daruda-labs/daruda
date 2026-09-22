@@ -21,9 +21,12 @@
 
 use std::time::{Duration, Instant};
 
-use gpui::{App, ClipboardItem, ElementId, IntoElement, SharedString, Window};
+use gpui::{
+    App, ClipboardItem, ElementId, IntoElement, ParentElement as _, SharedString, Styled as _,
+    Window, px,
+};
 
-use crate::ui::{Button, Icon, IconName, button_bare};
+use crate::ui::{Button, Icon, Sizable as _, button_bare, icons, theme};
 
 /// How long the button shows the copied (✓) state before reverting to the
 /// copy icon.
@@ -59,9 +62,9 @@ pub fn code_copy_button<I: Into<ElementId>>(
     copy_button(
         id,
         code,
-        IconName::Copy.into(),
+        icons::icon(icons::COPY),
         crate::surface::strings::code_block_copy().into(),
-        IconName::Check.into(),
+        icons::icon(icons::CHECK),
         crate::surface::strings::code_block_copied().into(),
         window,
         cx,
@@ -102,7 +105,10 @@ pub fn copy_button<I: Into<ElementId>>(
     };
 
     button_bare(id)
-        .icon(icon)
+        .child(icon.with_size(px(theme::CONTROL_ICON_SIZE)))
+        .w(px(theme::CONTROL_TARGET_SIZE))
+        .h(px(theme::CONTROL_TARGET_SIZE))
+        .p(px(0.))
         .tooltip(tooltip)
         .on_click(move |_, _window, cx| {
             // Keep the click from bubbling to an ancestor click handler (e.g. a

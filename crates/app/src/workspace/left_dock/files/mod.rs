@@ -17,7 +17,7 @@ use gpui::{
 use crate::files::icons::icon_path;
 use crate::files::tree::EntryKind;
 use crate::surface::strings;
-use crate::ui::{ButtonVariants as _, Icon, IconName, SectionHeader, Sizable as _, button_bare};
+use crate::ui::SectionHeader;
 use crate::workspace::layout::Dock;
 use crate::workspace::layout::LeftDockSnapshot;
 use crate::workspace::left_dock::file_tree_ops::VisibleEntry;
@@ -154,10 +154,8 @@ fn view_header(
     cx: &mut Context<Dock>,
 ) -> impl IntoElement {
     let workspace = snap.workspace.clone();
-    let refresh = button_bare("files-refresh")
-        .xsmall()
-        .ghost()
-        .icon(IconName::Refresh)
+    let refresh = crate::ui::button_icon("files-refresh", crate::ui::icons::REFRESH, cx)
+        .tooltip(strings::usage_refresh())
         .on_click(cx.listener(move |_dock, _: &ClickEvent, _window, cx| {
             if let Some(ws) = workspace.upgrade() {
                 ws.update(cx, |ws, cx| ws.refresh_files_root(cx));
@@ -284,11 +282,11 @@ fn chevron_element(kind: EntryKind, is_expanded: bool, color: Hsla) -> AnyElemen
     match kind {
         EntryKind::Dir | EntryKind::UnloadedDir => {
             let icon = if is_expanded {
-                IconName::ChevronDown
+                crate::ui::icons::EXPAND_MORE
             } else {
-                IconName::ChevronRight
+                crate::ui::icons::CHEVRON_RIGHT
             };
-            slot.child(Icon::new(icon).xsmall().text_color(color))
+            slot.child(crate::ui::icons::icon(icon).text_color(color))
                 .into_any_element()
         }
         EntryKind::PendingDir => slot

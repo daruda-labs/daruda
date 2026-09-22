@@ -19,10 +19,9 @@ const ICON_PLAY: &str = "icons/ui/play-arrow.svg";
 /// `[+]` in the section header. A flow made here lands in this project's own
 /// directory under the app home, not in the working tree — see
 /// `Workspace::create_flow`.
-pub(super) fn new_flow_button(snap: &RightDockSnapshot) -> impl IntoElement {
+pub(super) fn new_flow_button(snap: &RightDockSnapshot, cx: &gpui::App) -> impl IntoElement {
     let workspace = snap.workspace.clone();
-    crate::ui::button_bare("flow-new")
-        .icon(crate::ui::IconName::Plus)
+    crate::ui::button_icon("flow-new", crate::ui::icons::ADD, cx)
         .tooltip(strings::flow_new_tooltip())
         .on_click(move |_, window, cx| {
             let Some(ws) = workspace.upgrade() else {
@@ -128,6 +127,7 @@ fn flow_row_menu(
 fn run_button(
     found: &crate::workspace::flow_paths::FoundFlow,
     snap: &RightDockSnapshot,
+    cx: &gpui::App,
 ) -> impl IntoElement {
     let workspace = snap.workspace.clone();
     let path = found.path.clone();
@@ -141,8 +141,7 @@ fn run_button(
         // the test that presses it needs to find it.
         .debug_selector(move || selector)
         .child(
-            crate::ui::button_bare(id)
-                .icon(crate::ui::Icon::empty().path(ICON_PLAY))
+            crate::ui::button_icon(id, ICON_PLAY, cx)
                 .tooltip(if unsaved {
                     strings::flow_needs_save()
                 } else {
@@ -238,7 +237,7 @@ pub(super) fn flow_row(
                 .text_color(t.text_subtle)
                 .child(origin),
         )
-        .child(run_button(found, snap))
+        .child(run_button(found, snap, cx))
         .on_click(move |_, window, cx| {
             let path = path.clone();
             match workspace.update(cx, |ws, cx| ws.open_flow_graph(&path, window, cx)) {

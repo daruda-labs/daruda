@@ -254,9 +254,7 @@ pub(super) fn render(
                         .truncate()
                         .child(label),
                 )
-                .child(div().flex_none().child(SharedString::from(
-                    crate::surface::strings::TASK_PILL_CHEVRON.trim_start(),
-                ))),
+                .child(crate::ui::icons::icon(crate::ui::icons::EXPAND_MORE)),
         )
         .dropdown_menu(crate::ui::menu_builder(move |menu, _window, _cx| {
             build_account_menu(&slot, menu)
