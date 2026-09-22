@@ -192,7 +192,7 @@ impl Render for Dock {
         let (header_el, content_el) = match &self.snap {
             DockSnapshot::Left(snap) => {
                 let header = crate::workspace::left_dock::view_tabs::render(snap, cx);
-                let content: gpui::AnyElement = match snap.left_dock_view {
+                let body: gpui::AnyElement = match snap.left_dock_view {
                     daruda_store::project::LeftDockView::Lanes => {
                         crate::workspace::left_dock::projects::render(snap, cx)
                     }
@@ -203,6 +203,17 @@ impl Render for Dock {
                         crate::workspace::left_dock::files::render(snap, cx)
                     }
                 };
+                // The footer rides inside this dock's content rather than a
+                // third slot on `Dock::render`: only the left dock has one,
+                // and the other three arms would carry a mechanical `None`.
+                let content = div()
+                    .flex()
+                    .flex_col()
+                    .size_full()
+                    .overflow_hidden()
+                    .child(div().flex_1().overflow_hidden().child(body))
+                    .child(crate::workspace::left_dock::footer::render(cx))
+                    .into_any_element();
                 (header, content)
             }
             DockSnapshot::Bottom(snap) => {

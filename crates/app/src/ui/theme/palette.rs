@@ -620,6 +620,9 @@ pub const DOCK_ICON_BUTTON_W: f32 = 24.0;
 pub const DOCK_ICON_BUTTON_H: f32 = 20.0;
 /// Dock toggle icon button corner radius (px).
 pub const DOCK_ICON_BUTTON_RADIUS: f32 = RADIUS_SM;
+/// Padding around the left dock's footer row, which carries the settings
+/// shortcut under the panel body.
+pub const DOCK_FOOTER_PAD: f32 = 4.0;
 /// Dock toggle icon group right margin (px).
 pub const DOCK_ICON_GROUP_MR: f32 = PAD_STANDARD;
 /// Side length of a `button_chip` (px). Single-glyph chip buttons
