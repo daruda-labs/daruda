@@ -56,12 +56,13 @@ pub(crate) fn route_env_subcommand() -> Option<i32> {
 /// instances must never overlap — they contend for the control socket and the
 /// flow locks — so this waits rather than racing.
 pub(crate) fn route_await_exit_subcommand() -> Option<i32> {
-    let mut args = std::env::args().skip(1);
-    if args.next().as_deref() != Some(daruda_update::AWAIT_EXIT_SUBCOMMAND) {
-        return None;
-    }
-    let pid = args.next().and_then(|arg| arg.parse().ok())?;
-    Some(crate::update::await_exit_and_start(pid))
+    Some(
+        match crate::update::parse_await_exit(std::env::args().skip(1))? {
+            Ok(pid) => crate::update::await_exit_and_start(pid),
+            // Same code `--env` reports for a line it cannot read.
+            Err(()) => 2,
+        },
+    )
 }
 
 /// Observability bootstrap. Order matters — see module docs.

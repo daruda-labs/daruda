@@ -26,6 +26,19 @@ pub fn init(cx: &mut App) {
     }
 }
 
+/// The pid `--await-exit` was told to wait for, when the arguments say so.
+///
+/// `None` means this is not an `--await-exit` launch at all. A malformed one
+/// is `Some(Err(()))`: falling through to a normal launch would open a window
+/// nobody asked for, in a process spawned to finish an update.
+pub fn parse_await_exit<I: IntoIterator<Item = String>>(args: I) -> Option<Result<u32, ()>> {
+    let mut args = args.into_iter();
+    if args.next()? != daruda_update::AWAIT_EXIT_SUBCOMMAND {
+        return None;
+    }
+    Some(args.next().and_then(|arg| arg.parse().ok()).ok_or(()))
+}
+
 /// How often to ask whether the process being replaced has gone.
 const EXIT_POLL: std::time::Duration = std::time::Duration::from_millis(100);
 
@@ -52,5 +65,33 @@ pub fn await_exit_and_start(pid: u32) -> i32 {
     match daruda_core::process::command(exe).spawn() {
         Ok(_) => 0,
         Err(_) => 1,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn parse(args: &[&str]) -> Option<Result<u32, ()>> {
+        parse_await_exit(args.iter().map(|arg| (*arg).to_owned()))
+    }
+
+    #[test]
+    fn a_pid_is_read_from_the_arguments() {
+        assert_eq!(parse(&["--await-exit", "4321"]), Some(Ok(4321)));
+    }
+
+    #[test]
+    fn an_ordinary_launch_is_not_one_of_these() {
+        assert_eq!(parse(&[]), None);
+        assert_eq!(parse(&["--smoke"]), None);
+    }
+
+    /// A malformed one must not fall through: this process exists to finish
+    /// an update, and a window would be the one thing nobody asked it for.
+    #[test]
+    fn a_missing_or_unreadable_pid_is_refused_rather_than_launched() {
+        assert_eq!(parse(&["--await-exit"]), Some(Err(())));
+        assert_eq!(parse(&["--await-exit", "not-a-pid"]), Some(Err(())));
     }
 }
