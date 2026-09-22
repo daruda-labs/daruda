@@ -271,6 +271,103 @@ thread_local! {
         const { std::cell::Cell::new(0) };
 }
 
+/// What `Workspace::render` needs from the dock entities: the snapshots staged
+/// into them, and the geometry read back out. `Default` is the closed-and-empty
+/// answer Settings renders against, since it draws no docks at all.
+#[derive(Default)]
+struct DockFrame {
+    dragged_dock: Option<DockPosition>,
+    left_dock_open: bool,
+    left_dock_size: f32,
+    bottom_dock_open: bool,
+    bottom_dock_size: f32,
+    right_dock_open: bool,
+    right_dock_size: f32,
+}
+
+impl Workspace {
+    /// Stage each dock's snapshot and read its geometry back.
+    ///
+    /// Called only when the docks are actually on screen — see the call site
+    /// for why touching them otherwise is not merely wasted work.
+    fn stage_docks(&mut self, cx: &mut Context<Self>) -> DockFrame {
+        // --- Stage dock snapshots before GPUI descends into dock entities ---
+        //
+        // Each snapshot is a plain-data copy of the Workspace fields the
+        // dock's render needs.  Written here (Context<Workspace>) so the
+        // dock render closure runs inside Context<Dock> without reaching
+        // back through WeakEntity<Workspace>.
+
+        // Ensure the file tree is primed before snapshotting its state.
+        let active_ref = self.active_ref();
+        if self.lane_file_tree(active_ref).is_none() {
+            self.ensure_file_tree(active_ref, cx);
+        }
+
+        // — Build dock snapshots ————————————————————————————————————————
+        let left_snap = self.prepare_left_dock_snapshot(cx);
+        let bottom_snap = self.prepare_bottom_dock_snapshot(cx);
+        let right_snap = self.prepare_right_dock_snapshot(cx);
+
+        // — Publish snapshots to docks ————————————————————————————————
+        // Left dock is wrapped in `.cached()` too (see `body` below), so it
+        // is marked dirty only when its snapshot content actually changes —
+        // an absent / non-Left prior snapshot counts as changed. This is the
+        // sole left-dock invalidation path: any workspace render re-stages
+        // the snapshot and `content_differs` decides whether to dirty the
+        // dock, so source mutations only need a workspace `cx.notify()` (no
+        // manual per-site `notify_left_dock()`). The lone exception is the
+        // status pulse, which advances badge animation frames not present in
+        // the snapshot and so keeps its explicit notify. Per Pitfall #10.
+        self.left_dock.update(cx, |d, cx| {
+            if d.stage(DockSnapshot::Left(Box::new(left_snap))) {
+                cx.notify();
+            }
+        });
+        // Bottom dock is wrapped in `.cached()` (see `body`/`main_area`
+        // below), so it must be marked dirty only when its snapshot
+        // content actually changes — otherwise the cached view shows
+        // stale data, and an unconditional notify would defeat the cache
+        // by repainting on every 250 ms status-pulse tick (which leaves
+        // this snapshot identical). Per root CLAUDE.md Pitfall #10.
+        self.bottom_dock.update(cx, |d, cx| {
+            if d.stage(DockSnapshot::Bottom(Box::new(bottom_snap))) {
+                cx.notify();
+            }
+        });
+        self.right_dock.update(cx, |d, cx| {
+            if d.stage(DockSnapshot::Right(Box::new(right_snap))) {
+                cx.notify();
+            }
+        });
+
+        // Read dock display state after staging snapshots.
+        // Which handle is being held, so its cursor can reach past itself.
+        let dragged_dock = self.dock_drag.map(|drag| drag.position);
+        let (left_dock_open, left_dock_size) = {
+            let d = self.left_dock.read(cx);
+            (d.is_open, d.size)
+        };
+        let (bottom_dock_open, bottom_dock_size) = {
+            let d = self.bottom_dock.read(cx);
+            (d.is_open, d.size)
+        };
+        let (right_dock_open, right_dock_size) = {
+            let d = self.right_dock.read(cx);
+            (d.is_open, d.size)
+        };
+        DockFrame {
+            dragged_dock,
+            left_dock_open,
+            left_dock_size,
+            bottom_dock_open,
+            bottom_dock_size,
+            right_dock_open,
+            right_dock_size,
+        }
+    }
+}
+
 impl Render for Workspace {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         #[cfg(test)]
@@ -415,71 +512,24 @@ impl Render for Workspace {
             window.set_window_title(&title);
         }
 
-        // --- Stage dock snapshots before GPUI descends into dock entities ---
-        //
-        // Each snapshot is a plain-data copy of the Workspace fields the
-        // dock's render needs.  Written here (Context<Workspace>) so the
-        // dock render closure runs inside Context<Dock> without reaching
-        // back through WeakEntity<Workspace>.
-
-        // Ensure the file tree is primed before snapshotting its state.
-        let active_ref = self.active_ref();
-        if self.lane_file_tree(active_ref).is_none() {
-            self.ensure_file_tree(active_ref, cx);
-        }
-
-        // — Build dock snapshots ————————————————————————————————————————
-        let left_snap = self.prepare_left_dock_snapshot(cx);
-        let bottom_snap = self.prepare_bottom_dock_snapshot(cx);
-        let right_snap = self.prepare_right_dock_snapshot(cx);
-
-        // — Publish snapshots to docks ————————————————————————————————
-        // Left dock is wrapped in `.cached()` too (see `body` below), so it
-        // is marked dirty only when its snapshot content actually changes —
-        // an absent / non-Left prior snapshot counts as changed. This is the
-        // sole left-dock invalidation path: any workspace render re-stages
-        // the snapshot and `content_differs` decides whether to dirty the
-        // dock, so source mutations only need a workspace `cx.notify()` (no
-        // manual per-site `notify_left_dock()`). The lone exception is the
-        // status pulse, which advances badge animation frames not present in
-        // the snapshot and so keeps its explicit notify. Per Pitfall #10.
-        self.left_dock.update(cx, |d, cx| {
-            if d.stage(DockSnapshot::Left(Box::new(left_snap))) {
-                cx.notify();
-            }
-        });
-        // Bottom dock is wrapped in `.cached()` (see `body`/`main_area`
-        // below), so it must be marked dirty only when its snapshot
-        // content actually changes — otherwise the cached view shows
-        // stale data, and an unconditional notify would defeat the cache
-        // by repainting on every 250 ms status-pulse tick (which leaves
-        // this snapshot identical). Per root CLAUDE.md Pitfall #10.
-        self.bottom_dock.update(cx, |d, cx| {
-            if d.stage(DockSnapshot::Bottom(Box::new(bottom_snap))) {
-                cx.notify();
-            }
-        });
-        self.right_dock.update(cx, |d, cx| {
-            if d.stage(DockSnapshot::Right(Box::new(right_snap))) {
-                cx.notify();
-            }
-        });
-
-        // Read dock display state after staging snapshots.
-        // Which handle is being held, so its cursor can reach past itself.
-        let dragged_dock = self.dock_drag.map(|drag| drag.position);
-        let (left_dock_open, left_dock_size) = {
-            let d = self.left_dock.read(cx);
-            (d.is_open, d.size)
-        };
-        let (bottom_dock_open, bottom_dock_size) = {
-            let d = self.bottom_dock.read(cx);
-            (d.is_open, d.size)
-        };
-        let (right_dock_open, right_dock_size) = {
-            let d = self.right_dock.read(cx);
-            (d.is_open, d.size)
-        };
+        // Docks are the one thing `render` must not touch while Settings
+        // covers them. gpui filters invalidation to windows that *display* an
+        // entity (`App::notify` → `tracked_entities`), and that set is built
+        // from what a render pass **accessed** — so staging a snapshot into a
+        // dock that is off screen re-registers it as displayed and hands the
+        // 4 fps status pulse a full workspace render to throw away. Skipping
+        // the access is what lets gpui's own filter do its job; the snapshots
+        // are re-staged by the render that `close_settings` notifies.
+        let docks = (!in_settings).then(|| self.stage_docks(cx));
+        let DockFrame {
+            dragged_dock,
+            left_dock_open,
+            left_dock_size,
+            bottom_dock_open,
+            bottom_dock_size,
+            right_dock_open,
+            right_dock_size,
+        } = docks.unwrap_or_default();
 
         // iTerm2-style tab bar:
         // - Each tab grows to share row width (min 80px, max 220px); text

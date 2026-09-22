@@ -275,3 +275,55 @@ fn build_workspace_without_tabs(
     let workspace = held.borrow().clone().unwrap();
     (window_handle, workspace)
 }
+
+/// The status pulse dirties the dock entities four times a second for as long
+/// as any agent is animating — which is exactly when someone opens Settings.
+/// Behind Settings the docks are off screen, and gpui already filters
+/// invalidation to windows that *display* an entity
+/// (`App::notify` → `tracked_entities`). The one thing that can defeat that
+/// filter is `Workspace::render` reading the docks anyway, which registers
+/// them as displayed and turns every tick into a full workspace render whose
+/// body is thrown away.
+#[gpui::test]
+async fn a_dock_pulse_does_not_wake_the_workspace_behind_settings(cx: &mut TestAppContext) {
+    use crate::workspace::render::WORKSPACE_RENDERS;
+
+    let (window_handle, workspace) = build_workspace(cx);
+    let mut vcx = gpui::VisualTestContext::from_window(window_handle.into(), cx);
+    vcx.run_until_parked();
+
+    let pulse = |vcx: &mut gpui::VisualTestContext| {
+        WORKSPACE_RENDERS.with(|n| n.set(0));
+        vcx.update(|_, cx| {
+            workspace.update(cx, |ws, cx| {
+                ws.notify_left_dock(cx);
+                ws.notify_right_dock(cx);
+            });
+        });
+        vcx.run_until_parked();
+        WORKSPACE_RENDERS.with(|n| n.get())
+    };
+
+    // Control: on screen, the same pulse has to reach them.
+    assert!(
+        pulse(&mut vcx) > 0,
+        "with the docks on screen a pulse must render the workspace",
+    );
+
+    vcx.update(|window, cx| {
+        workspace.update(cx, |ws, cx| {
+            ws.on_open_settings(
+                &OpenSettings(daruda_config::BuiltinSection::General),
+                window,
+                cx,
+            );
+        });
+    });
+    vcx.run_until_parked();
+
+    assert_eq!(
+        pulse(&mut vcx),
+        0,
+        "a pulse for docks Settings covers must wake nothing",
+    );
+}
