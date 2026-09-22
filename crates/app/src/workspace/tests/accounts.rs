@@ -323,7 +323,7 @@ fn finish_codex_login(
     config_dir: std::path::PathBuf,
     cx: &mut Context<Workspace>,
 ) -> AccountId {
-    use crate::workspace::PendingLogin;
+    use crate::workspace::account_login_ops::PendingLogin;
     use crate::workspace::account_login_ops::{LoginFinish, LoginTarget, next_login_attempt};
     // A real (near-instant) child process is the only way to build a
     // `LoginProcessHandle` — it has no other public constructor.
@@ -336,7 +336,7 @@ fn finish_codex_login(
     .expect("spawn a trivial process for the test handle");
     let account_id = AccountId::new();
     let attempt = next_login_attempt();
-    ws.pending_login = PendingLogin::InProgress {
+    ws.login.seed_for_test(PendingLogin::InProgress {
         target: LoginTarget::Managed {
             id: account_id,
             recipe: daruda_store::accounts::AccountRecipeId::Codex,
@@ -345,7 +345,7 @@ fn finish_codex_login(
         ambient_before: None,
         handle: login.handle(),
         finish: LoginFinish::Add,
-    };
+    });
     ws.finish_login(
         account_id,
         attempt,

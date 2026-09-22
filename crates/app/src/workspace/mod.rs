@@ -313,63 +313,6 @@ pub(in crate::workspace) enum CommitMode {
     Amend { saved_draft: String },
 }
 
-/// State of an in-flight headless add-account login. At most one at a time; a
-/// second `AddManagedAccount` while `InProgress` is expected to be blocked by the
-/// UI (a disabled "+ Add account" affordance while a login is running),
-/// not by this enum itself.
-///
-/// `InProgress` carries the cancel [`LoginProcessHandle`] and the
-/// [`account_login_ops::LoginTarget`] the login writes into — but not the
-/// config dir, which is a pure function of data already on `Workspace`
-/// (`daruda_agent::accounts::account_config_dir(&self.data_dir, id)` for a
-/// managed target; the domain's own `system_home_dir()` for a system one).
-/// The target carries the auth domain because a cancel has to clean that dir
-/// up through the right one, and only the spawning flow knows which it
-/// launched.
-///
-/// `finish` distinguishes an add-account login (whose account id names a
-/// throwaway config dir that only becomes real on success) from a
-/// reauthenticate login (whose id names an *existing*
-/// [`daruda_agent::accounts::ManagedAccount`]'s real, permanent config dir
-/// and Keychain item) and from a system login (which writes into the user's
-/// own home). `Workspace::cancel_pending_login` reads it to decide whether
-/// cancelling may delete that directory — for the latter two it must not, or
-/// cancelling would destroy credentials this app did not create.
-///
-/// `Preparing` covers the window before a login process even exists: the
-/// managed-node resolve (`account_login_ops::resolve_node_path_env`) is blocking
-/// and, on a first-run machine, downloads Node.js, so it runs on the
-/// background executor rather than the UI thread — this variant is what
-/// `can_start_login` blocks a second concurrent login on, and what
-/// `cancel_pending_login` can still cancel (no handle to kill yet, so it
-/// just clears the state), during that async gap before `spawn_login`
-/// produces a real [`LoginProcessHandle`] and the state advances to
-/// `InProgress`.
-#[derive(Debug, Clone)]
-pub(in crate::workspace) enum PendingLogin {
-    None,
-    Preparing {
-        target: account_login_ops::LoginTarget,
-        /// Which attempt this is — see `account_login_ops::LoginAttempt`. The
-        /// target cannot stand in: a taken-over login is replaced by another
-        /// attempt at the same target.
-        attempt: account_login_ops::LoginAttempt,
-        finish: account_login_ops::LoginFinish,
-    },
-    InProgress {
-        target: account_login_ops::LoginTarget,
-        attempt: account_login_ops::LoginAttempt,
-        /// Digest of the ambient credential entry as it stood when this
-        /// attempt started, for the clobber check in
-        /// `account_login_ops`. `None` when there was nothing to read.
-        ambient_before: Option<String>,
-        // Read by `Workspace::cancel_pending_login` (`handle.cancel()`),
-        // wired to the status-bar dropdown's Cancel row.
-        handle: daruda_agent::accounts::LoginProcessHandle,
-        finish: account_login_ops::LoginFinish,
-    },
-}
-
 pub struct Workspace {
     /// Stable cross-session identifier — matches the UUID stored on disk
     /// at `workspaces/<uuid>.json`. Minted at construction, then replaced
@@ -661,11 +604,9 @@ pub struct Workspace {
     /// `focused_account`, the status-bar slot) stay cx-free, exactly like the
     /// config fields cache `SettingsStore`.
     pub(in crate::workspace) accounts: daruda_store::accounts::AccountsState,
-    /// In-flight headless add-account login, if any — see [`PendingLogin`].
-    /// Drives the add-account spinner/cancel affordance;
-    /// `None` outside of `Workspace::add_managed_account`'s call through
-    /// `Workspace::finish_login` / `Workspace::cancel_pending_login`.
-    pub(in crate::workspace) pending_login: PendingLogin,
+    /// The login this window has in flight — see
+    /// [`account_login_ops::LoginState`].
+    pub(in crate::workspace) login: account_login_ops::LoginState,
     /// Subscription that refreshes the `accounts` read-cache and repaints
     /// whenever the app-wide [`accounts_global::AccountsGlobal`] changes —
     /// so an add/reauth/default/delete in *any* window (or the Settings
@@ -1284,7 +1225,7 @@ impl Workspace {
             panels: main_area::bottom_dock::macro_ops::load_or_seed_panels(&data_dir),
             agent_vocabulary,
             accounts,
-            pending_login: PendingLogin::None,
+            login: account_login_ops::LoginState::default(),
             // Managed accounts live in the app-wide `AccountsGlobal`; this
             // subscription refreshes the `accounts` read-cache from it and
             // repaints whenever any window mutates it (single, symmetric

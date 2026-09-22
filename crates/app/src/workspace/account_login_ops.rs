@@ -25,7 +25,7 @@ use daruda_store::observability::error_report::{ErrorReport, ErrorSeverity};
 use daruda_store::observability::log_writer::LogWriter;
 
 use super::{
-    AddManagedAccount, PendingLogin, ReauthenticateAccount, ReauthenticateSystem, accounts_global,
+    AddManagedAccount, ReauthenticateAccount, ReauthenticateSystem, accounts_global,
     auth_status_global,
 };
 use crate::surface::strings as s;
@@ -162,6 +162,86 @@ impl LoginFinish {
 // English constant here. [`LoginOutcome::Failed`]'s captured-output
 // string stays as-is: it's a diagnostic dump, not an authored sentence.
 
+/// The login this window has in flight, if any.
+///
+/// The field is private because every transition is a method in this module —
+/// starting a login, taking one over, finishing it, cancelling it — and a field
+/// the other `impl Workspace` files could assign would make that a convention
+/// instead of a rule. `Workspace` holds the value; only this module reads it.
+#[derive(Default)]
+pub(in crate::workspace) struct LoginState {
+    pending: PendingLogin,
+}
+
+impl LoginState {
+    /// Seed an in-flight login. A test hook: reaching this state in production
+    /// goes through [`Workspace::add_managed_account`], which needs a real
+    /// child process, so a test that only exercises the *finish* path has no
+    /// other way in.
+    #[cfg(test)]
+    pub(in crate::workspace) fn seed_for_test(&mut self, pending: PendingLogin) {
+        self.pending = pending;
+    }
+}
+
+/// State of an in-flight headless add-account login. At most one at a time; a
+/// second `AddManagedAccount` while `InProgress` is expected to be blocked by the
+/// UI (a disabled "+ Add account" affordance while a login is running),
+/// not by this enum itself.
+///
+/// `InProgress` carries the cancel [`LoginProcessHandle`] and the
+/// [`LoginTarget`] the login writes into — but not the
+/// config dir, which is a pure function of data already on `Workspace`
+/// (`daruda_agent::accounts::account_config_dir(&self.data_dir, id)` for a
+/// managed target; the domain's own `system_home_dir()` for a system one).
+/// The target carries the auth domain because a cancel has to clean that dir
+/// up through the right one, and only the spawning flow knows which it
+/// launched.
+///
+/// `finish` distinguishes an add-account login (whose account id names a
+/// throwaway config dir that only becomes real on success) from a
+/// reauthenticate login (whose id names an *existing*
+/// [`daruda_agent::accounts::ManagedAccount`]'s real, permanent config dir
+/// and Keychain item) and from a system login (which writes into the user's
+/// own home). `Workspace::cancel_pending_login` reads it to decide whether
+/// cancelling may delete that directory — for the latter two it must not, or
+/// cancelling would destroy credentials this app did not create.
+///
+/// `Preparing` covers the window before a login process even exists: the
+/// managed-node resolve ([`Workspace::resolve_node_path_env`]) is blocking
+/// and, on a first-run machine, downloads Node.js, so it runs on the
+/// background executor rather than the UI thread — this variant is what
+/// `can_start_login` blocks a second concurrent login on, and what
+/// `cancel_pending_login` can still cancel (no handle to kill yet, so it
+/// just clears the state), during that async gap before `spawn_login`
+/// produces a real [`LoginProcessHandle`] and the state advances to
+/// `InProgress`.
+#[derive(Debug, Clone, Default)]
+pub(in crate::workspace) enum PendingLogin {
+    #[default]
+    None,
+    Preparing {
+        target: LoginTarget,
+        /// Which attempt this is — see `account_login_ops::LoginAttempt`. The
+        /// target cannot stand in: a taken-over login is replaced by another
+        /// attempt at the same target.
+        attempt: LoginAttempt,
+        finish: LoginFinish,
+    },
+    InProgress {
+        target: LoginTarget,
+        attempt: LoginAttempt,
+        /// Digest of the ambient credential entry as it stood when this
+        /// attempt started, for the clobber check in
+        /// this module. `None` when there was nothing to read.
+        ambient_before: Option<String>,
+        // Read by `Workspace::cancel_pending_login` (`handle.cancel()`),
+        // wired to the status-bar dropdown's Cancel row.
+        handle: daruda_agent::accounts::LoginProcessHandle,
+        finish: LoginFinish,
+    },
+}
+
 impl Workspace {
     /// Action handler for [`AddManagedAccount`]. Thin shim, mirroring
     /// [`Self::on_switch_pane_account`].
@@ -197,7 +277,7 @@ impl Workspace {
     /// the window that happens to hold it. The Cancel row cancels across
     /// windows to match.
     pub(in crate::workspace) fn is_login_pending(&self, cx: &App) -> bool {
-        !can_start_login(&self.pending_login) || accounts_global::login_busy(cx)
+        !can_start_login(&self.login.pending) || accounts_global::login_busy(cx)
     }
 
     /// Start a headless add-account login for the `recipe` auth domain:
@@ -223,7 +303,7 @@ impl Workspace {
         _window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if !can_start_login(&self.pending_login) || accounts_global::login_busy(cx) {
+        if !can_start_login(&self.login.pending) || accounts_global::login_busy(cx) {
             self.report_error(
                 ErrorReport::new(s::settings_accounts_login_busy())
                     .severity(ErrorSeverity::Warning)
@@ -269,7 +349,7 @@ impl Workspace {
     /// of a repeated click. A no-op for anything else, so the busy guard right
     /// after it still refuses a genuinely concurrent login.
     fn restart_stale_login(&mut self, target: LoginTarget, cx: &mut Context<Self>) {
-        if reclick_restarts(&self.pending_login, target) {
+        if reclick_restarts(&self.login.pending, target) {
             self.cancel_pending_login(cx);
         }
     }
@@ -341,7 +421,7 @@ impl Workspace {
         // doc for why this state exists at all (`resolve_node_path_env` is
         // blocking and may download Node.js, so it can't run inline here on
         // the UI thread).
-        self.pending_login = PendingLogin::Preparing {
+        self.login.pending = PendingLogin::Preparing {
             target,
             attempt,
             finish,
@@ -365,7 +445,7 @@ impl Workspace {
                 // reaches here after its replacement has already staged the
                 // same target, and would otherwise spawn a second process.
                 let is_current = matches!(
-                    &ws.pending_login,
+                    &ws.login.pending,
                     PendingLogin::Preparing { attempt: current, .. }
                         if *current == attempt
                 );
@@ -381,7 +461,7 @@ impl Workspace {
                 match spawn_login(&command, &inject, &env.strip, LOGIN_TIMEOUT) {
                     Ok(login_process) => {
                         let handle = login_process.handle();
-                        ws.pending_login = PendingLogin::InProgress {
+                        ws.login.pending = PendingLogin::InProgress {
                             target,
                             attempt,
                             ambient_before,
@@ -436,7 +516,7 @@ impl Workspace {
                         if cleanup_dir_on_cancel(finish) {
                             cleanup_account_dir(recipe_id, &home_dir);
                         }
-                        ws.pending_login = PendingLogin::None;
+                        ws.login.pending = PendingLogin::None;
                         accounts_global::finish_login(cx, attempt);
                         ws.report_error(
                             ErrorReport::new(finish.spawn_error_title())
@@ -488,7 +568,7 @@ impl Workspace {
         outcome: LoginOutcome,
         cx: &mut Context<Self>,
     ) {
-        let ambient_before = match &self.pending_login {
+        let ambient_before = match &self.login.pending {
             PendingLogin::InProgress { ambient_before, .. } => ambient_before.clone(),
             _ => None,
         };
@@ -654,7 +734,7 @@ impl Workspace {
     /// guard, so a cancelled login never double-cleans or toasts.
     pub(in crate::workspace) fn cancel_pending_login(&mut self, cx: &mut Context<Self>) {
         let (target, attempt, handle, finish) =
-            match std::mem::replace(&mut self.pending_login, PendingLogin::None) {
+            match std::mem::replace(&mut self.login.pending, PendingLogin::None) {
                 PendingLogin::None => return,
                 PendingLogin::Preparing {
                     target,
@@ -695,7 +775,7 @@ impl Workspace {
     /// window being released has nothing left to paint.
     pub(in crate::workspace) fn release_pending_login_on_close(&mut self, cx: &mut App) {
         let (target, attempt, handle, finish) =
-            match std::mem::replace(&mut self.pending_login, PendingLogin::None) {
+            match std::mem::replace(&mut self.login.pending, PendingLogin::None) {
                 PendingLogin::None => return,
                 PendingLogin::Preparing {
                     target,
@@ -848,10 +928,10 @@ impl Workspace {
     }
 
     fn claim_finished_login(&mut self, attempt: LoginAttempt, cx: &mut Context<Self>) -> bool {
-        if !claims_pending(&self.pending_login, attempt) {
+        if !claims_pending(&self.login.pending, attempt) {
             return false;
         }
-        self.pending_login = PendingLogin::None;
+        self.login.pending = PendingLogin::None;
         accounts_global::finish_login(cx, attempt);
         true
     }
@@ -902,7 +982,7 @@ impl Workspace {
             },
             cx,
         );
-        if !can_start_login(&self.pending_login) || accounts_global::login_busy(cx) {
+        if !can_start_login(&self.login.pending) || accounts_global::login_busy(cx) {
             self.report_error(
                 ErrorReport::new(s::settings_accounts_login_busy())
                     .severity(ErrorSeverity::Warning)
@@ -979,7 +1059,7 @@ impl Workspace {
         cx: &mut Context<Self>,
     ) {
         self.restart_stale_login(LoginTarget::System { recipe }, cx);
-        if !can_start_login(&self.pending_login) || accounts_global::login_busy(cx) {
+        if !can_start_login(&self.login.pending) || accounts_global::login_busy(cx) {
             self.report_error(
                 ErrorReport::new(s::settings_accounts_login_busy())
                     .severity(ErrorSeverity::Warning)
@@ -1071,7 +1151,7 @@ impl Workspace {
     ) {
         // Read before the claim clears it — the reconnect sweep below needs to
         // know which credentials this login wrote.
-        let PendingLogin::InProgress { target, .. } = self.pending_login else {
+        let PendingLogin::InProgress { target, .. } = self.login.pending else {
             return;
         };
         if !self.claim_finished_login(attempt, cx) {
@@ -1113,7 +1193,7 @@ impl Workspace {
         outcome: LoginOutcome,
         cx: &mut Context<Self>,
     ) {
-        let ambient_before = match &self.pending_login {
+        let ambient_before = match &self.login.pending {
             PendingLogin::InProgress { ambient_before, .. } => ambient_before.clone(),
             _ => None,
         };
