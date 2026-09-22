@@ -368,14 +368,84 @@ impl Workspace {
     }
 }
 
-impl Render for Workspace {
-    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        #[cfg(test)]
-        WORKSPACE_RENDERS.with(|n| n.set(n.get() + 1));
+/// What a frame needs computed before it can be drawn — and, with
+/// [`Workspace::prepare_frame`], the only place a render pass changes
+/// anything. `build_frame` takes `&self`, so the compiler is what keeps the
+/// two apart rather than a convention someone has to remember.
+struct FramePrep {
+    /// `None` while Settings covers the docks: see `prepare_frame`.
+    docks: Option<DockFrame>,
+    /// Whether the active project carries a config layer (status-bar dot).
+    has_project_config: bool,
+}
+
+impl Workspace {
+    /// Everything a frame has to settle before it is drawn.
+    fn prepare_frame(&mut self, window: &mut Window, cx: &mut Context<Self>) -> FramePrep {
         if self.main_area.pending_resize {
             self.resize_all_tabs(window, cx);
         }
 
+        // Docks are the one thing a frame must not touch while Settings covers
+        // them. gpui filters invalidation to windows that *display* an entity
+        // (`App::notify` → `tracked_entities`), and that set is built from what
+        // a render pass **accessed** — so staging a snapshot into a dock that is
+        // off screen re-registers it as displayed and hands the 4 fps status
+        // pulse a full workspace render to throw away. Skipping the access is
+        // what lets gpui's own filter do its job; the snapshots are re-staged by
+        // the render that `close_settings` notifies.
+        let docks = (!self.settings_is_open()).then(|| self.stage_docks(cx));
+
+        // `project_config_path` (canonicalize) + `Path::exists` are filesystem
+        // stats, and a frame can be requested on every animation tick (status
+        // badges ask for one without `cx.notify`). Memoize the flag keyed by the
+        // active project root so the stat only fires when the active project
+        // changes; `reload_config` clears the memo so a freshly created project
+        // layer surfaces immediately.
+        let has_project_config = match self.active_project().map(|p| p.root.clone()) {
+            Some(root) => {
+                if self.cached_project_config.as_ref().map(|(r, _)| r) != Some(&root) {
+                    let exists = daruda_config::project_config_path(&root)
+                        .is_some_and(|path: std::path::PathBuf| path.exists());
+                    self.cached_project_config = Some((root, exists));
+                }
+                self.cached_project_config
+                    .as_ref()
+                    .map(|(_, exists)| *exists)
+                    .unwrap_or(false)
+            }
+            None => false,
+        };
+
+        FramePrep {
+            docks,
+            has_project_config,
+        }
+    }
+}
+
+impl Render for Workspace {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        #[cfg(test)]
+        WORKSPACE_RENDERS.with(|n| n.set(n.get() + 1));
+        let prep = self.prepare_frame(window, cx);
+        self.build_frame(prep, window, cx)
+    }
+}
+
+impl Workspace {
+    /// Draw the frame `prepare_frame` settled.
+    ///
+    /// `&self` on purpose: everything a frame changes belongs in
+    /// [`Self::prepare_frame`], and taking a shared borrow here is what makes
+    /// that a compiler rule instead of a convention. The `&mut Context` is not
+    /// a way around it — it addresses the entity, not this state.
+    fn build_frame(
+        &self,
+        prep: FramePrep,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> impl IntoElement {
         let t = theme::current(cx);
         let dark = t.is_dark();
         // Settings owns the whole body while it is up, which decides both what
@@ -512,15 +582,7 @@ impl Render for Workspace {
             window.set_window_title(&title);
         }
 
-        // Docks are the one thing `render` must not touch while Settings
-        // covers them. gpui filters invalidation to windows that *display* an
-        // entity (`App::notify` → `tracked_entities`), and that set is built
-        // from what a render pass **accessed** — so staging a snapshot into a
-        // dock that is off screen re-registers it as displayed and hands the
-        // 4 fps status pulse a full workspace render to throw away. Skipping
-        // the access is what lets gpui's own filter do its job; the snapshots
-        // are re-staged by the render that `close_settings` notifies.
-        let docks = (!in_settings).then(|| self.stage_docks(cx));
+        // Geometry `prepare_frame` read back out of the docks it staged.
         let DockFrame {
             dragged_dock,
             left_dock_open,
@@ -529,7 +591,7 @@ impl Render for Workspace {
             bottom_dock_size,
             right_dock_open,
             right_dock_size,
-        } = docks.unwrap_or_default();
+        } = prep.docks.unwrap_or_default();
 
         // iTerm2-style tab bar:
         // - Each tab grows to share row width (min 80px, max 220px); text
@@ -1107,27 +1169,7 @@ impl Render for Workspace {
                 login_pending,
             )
         });
-        // `project_config_path` (canonicalize) + `Path::exists` are
-        // filesystem stats, and `render()` re-runs on every animation frame
-        // (status badges request frames without `cx.notify`). Memoize the
-        // flag keyed by the active project root so the stat only fires when
-        // the active project changes; `reload_config` clears the memo so a
-        // freshly created project layer surfaces immediately.
-        let active_root = self.active_project().map(|p| p.root.clone());
-        let has_project_config = match &active_root {
-            Some(root) => {
-                if self.cached_project_config.as_ref().map(|(r, _)| r) != Some(root) {
-                    let exists = daruda_config::project_config_path(root)
-                        .is_some_and(|path: std::path::PathBuf| path.exists());
-                    self.cached_project_config = Some((root.clone(), exists));
-                }
-                self.cached_project_config
-                    .as_ref()
-                    .map(|(_, exists)| *exists)
-                    .unwrap_or(false)
-            }
-            None => false,
-        };
+        let has_project_config = prep.has_project_config;
         // One usage pill per auth domain, reading the same per-account cache
         // the Usage tab does. `usage_account` picks the same sticky account
         // the pump filed under: a domain's own focused account when its pane
