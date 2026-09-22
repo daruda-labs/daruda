@@ -60,6 +60,7 @@ cargo clippy -p ghostty_vt -p ghostty_vt_sys -p daruda_terminal -p daruda \
 ./scripts/lint-direct-ferrum-flow.sh
 ./scripts/lint-no-eprintln.sh
 ./scripts/lint-viewport-row-scroll.sh
+./scripts/lint-render-purity.sh
 ./scripts/lint-landing-no-disk-read.sh
 ./scripts/lint-platform-boundary.sh
 cargo test -p ghostty_vt -p ghostty_vt_sys -p daruda_terminal -p daruda \
@@ -216,6 +217,7 @@ scripts/lint-direct-gpui-component.sh
 scripts/lint-direct-ferrum-flow.sh
 scripts/lint-no-eprintln.sh
 scripts/lint-viewport-row-scroll.sh
+scripts/lint-render-purity.sh
 scripts/lint-landing-no-disk-read.sh
 scripts/lint-platform-boundary.sh
 cargo test -p ghostty_vt -p ghostty_vt_sys -p daruda_terminal -p daruda \
@@ -260,7 +262,7 @@ read intra-doc links, so a deleted item leaves a dangling `[`Name`]` in the
 prose that explains the module. These six are clean today; the rest carry a
 backlog and join the list a crate at a time as that is worked off. Measured
 2026-09-18: `daruda_config` 8, `daruda_store` 8, `daruda_terminal` 11,
-`daruda_acp` 16, `daruda` 85 — the app crate is most of what is left. `lint-daruda-path-literals.sh`, `lint-file-size.sh`, `lint-mark-dirty-direct-call.sh`, `lint-fold-header.sh`, `lint-agent-list-sync.sh`, `lint-declarative-context-menu.sh`, `lint-acp-air-gate.sh`, `lint-raw-mouse-button.sh`, `lint-comment-length.sh`, `gen_acp_presets -- --check`, and `cargo check -p daruda --features screenshot` are local/reviewer checks not yet wired into CI.
+`daruda_acp` 16, `daruda` 85 — the app crate is most of what is left. `lint-render-purity.sh`, `lint-daruda-path-literals.sh`, `lint-file-size.sh`, `lint-mark-dirty-direct-call.sh`, `lint-fold-header.sh`, `lint-agent-list-sync.sh`, `lint-declarative-context-menu.sh`, `lint-acp-air-gate.sh`, `lint-raw-mouse-button.sh`, `lint-comment-length.sh`, `gen_acp_presets -- --check`, and `cargo check -p daruda --features screenshot` are local/reviewer checks not yet wired into CI.
 
 That last one is why it is on the list at all. `screenshot` is off by default, so every item it reaches — the `*_for_shot` seams, `screenshot_scenario`'s two modules — looks unused to a build that does not enable it. A visibility-narrowing pass took that at face value and left the feature uncompilable for a while, with nothing to say so. `cargo check` with the feature on is the cheapest thing that notices.
 
