@@ -81,6 +81,31 @@ pub fn symlink(target: impl AsRef<Path>, link: impl AsRef<Path>) -> io::Result<(
     }
 }
 
+/// Remove `link` without touching what it points at.
+///
+/// A link to a directory is a directory entry on Windows, and `remove_file`
+/// refuses it with "access denied" — the same call that unlinks it everywhere
+/// else. Anything that is not a link is refused, so a caller who guessed wrong
+/// deletes nothing.
+pub fn remove_symlink(link: impl AsRef<Path>) -> io::Result<()> {
+    let link = link.as_ref();
+    let meta = std::fs::symlink_metadata(link)?;
+    if !meta.file_type().is_symlink() {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "not a symbolic link",
+        ));
+    }
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::FileTypeExt as _;
+        if meta.file_type().is_symlink_dir() {
+            return std::fs::remove_dir(link);
+        }
+    }
+    std::fs::remove_file(link)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -234,5 +259,58 @@ mod tests {
 
         assert_eq!(std::fs::read_link(&link).unwrap(), Path::new("d"));
         assert_eq!(std::fs::read(link.join("f")).unwrap(), b"x");
+    }
+
+    #[test]
+    fn removing_a_directory_link_leaves_the_directory() {
+        let temp = tempfile::tempdir().unwrap();
+        let dir = temp.path().join("d");
+        std::fs::create_dir(&dir).unwrap();
+        std::fs::write(dir.join("f"), b"x").unwrap();
+        let link = temp.path().join("link");
+        symlink(&dir, &link).unwrap();
+
+        remove_symlink(&link).unwrap();
+
+        assert!(std::fs::symlink_metadata(&link).is_err());
+        assert_eq!(std::fs::read(dir.join("f")).unwrap(), b"x");
+    }
+
+    #[test]
+    fn removing_a_file_link_leaves_the_file() {
+        let temp = tempfile::tempdir().unwrap();
+        let file = temp.path().join("f");
+        std::fs::write(&file, b"x").unwrap();
+        let link = temp.path().join("link");
+        symlink(&file, &link).unwrap();
+
+        remove_symlink(&link).unwrap();
+
+        assert!(std::fs::symlink_metadata(&link).is_err());
+        assert_eq!(std::fs::read(&file).unwrap(), b"x");
+    }
+
+    #[test]
+    fn a_dangling_link_is_removed_too() {
+        let temp = tempfile::tempdir().unwrap();
+        let link = temp.path().join("link");
+        symlink(temp.path().join("never-written"), &link).unwrap();
+
+        remove_symlink(&link).unwrap();
+
+        assert!(std::fs::symlink_metadata(&link).is_err());
+    }
+
+    /// The guard: a real file handed to a link remover survives.
+    #[test]
+    fn a_real_file_is_refused_not_deleted() {
+        let temp = tempfile::tempdir().unwrap();
+        let file = temp.path().join("f");
+        std::fs::write(&file, b"x").unwrap();
+
+        let err = remove_symlink(&file).unwrap_err();
+
+        assert_eq!(err.kind(), std::io::ErrorKind::InvalidInput);
+        assert_eq!(std::fs::read(&file).unwrap(), b"x");
     }
 }

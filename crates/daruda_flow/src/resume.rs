@@ -306,7 +306,7 @@ mod tests {
                 std::fs::symlink_metadata(&output).is_ok(),
                 "{name}: a refused link is left where a reader can see it"
             );
-            std::fs::remove_file(&output).expect("unlink");
+            daruda_core::path::remove_symlink(&output).expect("unlink");
         }
     }
 }

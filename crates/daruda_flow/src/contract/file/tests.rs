@@ -71,7 +71,7 @@ fn a_linked_parent_is_refused_and_the_refusal_names_the_target() {
     assert_eq!(expected, output);
     assert_eq!(
         resolved,
-        std::fs::canonicalize(&outside)
+        daruda_core::path::canonicalize(&outside)
             .expect("real")
             .join("out.md"),
         "the message has to name where the write would land"
@@ -100,7 +100,7 @@ fn a_linked_output_is_refused_as_not_a_file_wherever_it_points() {
             target.display()
         );
         assert_eq!(met(&run_dir, &output), preflight(&run_dir, &output));
-        std::fs::remove_file(&output).expect("unlink");
+        daruda_core::path::remove_symlink(&output).expect("unlink");
     }
 }
 
@@ -148,7 +148,7 @@ fn a_plain_file_under_a_linked_directory_escapes_the_run() {
     assert_eq!(expected, output);
     assert_eq!(
         resolved,
-        std::fs::canonicalize(outside.join("out.md")).expect("real")
+        daruda_core::path::canonicalize(outside.join("out.md")).expect("real")
     );
 }
 
