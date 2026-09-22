@@ -169,18 +169,29 @@ fn build_new_tab_menu(
     }
 }
 
-/// Small icon button in the tab bar for toggling docks.
-/// Thin wrapper around [`crate::ui::button_toggle`] so the
-/// render tree keeps reading as a local helper while the visual
-/// bits live in one place.
+// Material names the large region's docking direction, so the narrow
+// panel appears on the opposite side for the left/right icons.
+fn dock_toggle_icon_path(position: DockPosition, is_open: bool) -> &'static str {
+    match (position, is_open) {
+        (DockPosition::Left, false) => "icons/ui/dock-to-right.svg",
+        (DockPosition::Left, true) => "icons/ui/dock-to-right-fill.svg",
+        (DockPosition::Bottom, false) => "icons/ui/dock-to-bottom.svg",
+        (DockPosition::Bottom, true) => "icons/ui/dock-to-bottom-fill.svg",
+        (DockPosition::Right, false) => "icons/ui/dock-to-left.svg",
+        (DockPosition::Right, true) => "icons/ui/dock-to-left-fill.svg",
+    }
+}
+
+/// Title-bar dock toggle; the filled panel denotes an open dock.
 fn dock_toggle_icon(
     id: &'static str,
-    icon: &'static str,
+    position: DockPosition,
     is_active: bool,
     cx: &gpui::App,
     on_click: impl Fn(&ClickEvent, &mut Window, &mut gpui::App) + 'static,
 ) -> impl IntoElement {
-    crate::ui::button_toggle(id, icon, is_active, cx).on_click(on_click)
+    let icon = dock_toggle_icon_path(position, is_active);
+    crate::ui::button_toggle_icon(id, icon, is_active, cx).on_click(on_click)
 }
 
 /// Resize handle — purely a hit target, absolutely positioned so it
@@ -485,7 +496,7 @@ impl Render for Workspace {
             .mr(px(theme::DOCK_ICON_GROUP_MR))
             .child(dock_toggle_icon(
                 "toggle-left-dock",
-                "◧",
+                DockPosition::Left,
                 left_dock_open,
                 cx,
                 cx.listener(|this, _, window, cx| {
@@ -494,7 +505,7 @@ impl Render for Workspace {
             ))
             .child(dock_toggle_icon(
                 "toggle-bottom-dock",
-                "⬓",
+                DockPosition::Bottom,
                 bottom_dock_open,
                 cx,
                 cx.listener(|this, _, window, cx| {
@@ -503,7 +514,7 @@ impl Render for Workspace {
             ))
             .child(dock_toggle_icon(
                 "toggle-right-dock",
-                "◨",
+                DockPosition::Right,
                 right_dock_open,
                 cx,
                 cx.listener(|this, _, window, cx| {
@@ -1319,6 +1330,7 @@ impl Render for Workspace {
             .on_action(cx.listener(Self::on_git_changes_toggle_stage))
             .on_action(cx.listener(Self::on_git_changes_activate))
             .on_action(cx.listener(Self::on_open_settings))
+            .on_action(cx.listener(Self::on_close_window))
             .on_action(cx.listener(Self::on_switch_pane_account))
             .on_action(cx.listener(Self::on_add_managed_account))
             .on_action(cx.listener(Self::on_reauthenticate_account))
@@ -1410,7 +1422,31 @@ impl Render for Workspace {
 
 #[cfg(test)]
 mod tests {
-    use super::agent_menu_is_flat;
+    use super::{DockPosition, agent_menu_is_flat, dock_toggle_icon_path};
+
+    #[test]
+    fn dock_toggle_icons_follow_panel_position_and_visibility() {
+        for (position, closed, open) in [
+            (
+                DockPosition::Left,
+                "icons/ui/dock-to-right.svg",
+                "icons/ui/dock-to-right-fill.svg",
+            ),
+            (
+                DockPosition::Bottom,
+                "icons/ui/dock-to-bottom.svg",
+                "icons/ui/dock-to-bottom-fill.svg",
+            ),
+            (
+                DockPosition::Right,
+                "icons/ui/dock-to-left.svg",
+                "icons/ui/dock-to-left-fill.svg",
+            ),
+        ] {
+            assert_eq!(dock_toggle_icon_path(position, false), closed);
+            assert_eq!(dock_toggle_icon_path(position, true), open);
+        }
+    }
 
     #[test]
     fn agent_menu_flat_boundary() {

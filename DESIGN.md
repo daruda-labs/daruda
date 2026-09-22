@@ -303,9 +303,29 @@ border-bottom: 1px hairline
 padding:       0 lg (0 16px)
 ```
 
+The bar has two modes, resolved per window in `title_bar::chrome_for_window`.
+
+**Native** — macOS, and Linux under server-side decorations. Something else
+draws the frame, so the bar only reserves space for it.
+
 - macOS traffic-light buttons at standard macOS position (left).
+- The centre is an inert spacer; the OS owns the drag gesture.
+
+**Client** — Windows, and Linux under client-side decorations. The caption is
+gone and the app owns everything the OS would have drawn.
+
+- Application-menu button (`☰`) at the left inset, since gpui stores the menu
+  bar without rendering it on these platforms.
+- Drag strip in the centre — a control nested inside it would be swallowed by
+  its hit area, so it carries no children.
+- Minimize / maximize-or-restore / close flush to the right edge, past the
+  dock toggles.
+
 - App title centered: `ui-md-strong`, `body` color.
-- No extra controls in TitleBar — title and window management only.
+- No *content* controls in the TitleBar — window management and the entry
+  point to the application menu only. The dock toggles are the standing
+  exception; they predate this rule and are window-shaped rather than
+  content-shaped.
 
 ---
 

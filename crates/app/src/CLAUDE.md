@@ -12,6 +12,7 @@ app/src/
 ├── agent/                # Agent-side data models — MCP, skills, tasks (GPUI-free cores + Global wrappers) — plus GPUI-free account + ACP launch resolution
 ├── project/              # Runtime Project model — `Vec<Lane>` + group/color/tab_order (GPUI-free)
 ├── surface/              # App-shell constants — name, shortcuts, strings, keybinding action map
+├── title_bar/            # Window chrome shared by all three window kinds — who draws the frame (GPUI-free `policy.rs`), the drag strip, the app-drawn caption controls, the application-menu button
 ├── ui/                   # Reusable widget primitives — gpui_component wrappers + preserved daruda widgets
 ├── workspace/            # Workspace entity — projects, tabs, panes, docks
 │   ├── command/          # Command palette + history picker
@@ -233,7 +234,8 @@ Enforced by `scripts/lint-inline-literals.sh`. When porting from reference imple
 ### G7 — Dependency direction (one-way)
 
 ```
-main.rs → menus.rs, windows.rs → workspace/, welcome.rs
+main.rs → menus.rs, windows.rs → workspace/, welcome.rs, settings_window/
+  → title_bar/ → ui/, surface/          # every window kind draws the same chrome
   → agent/, project/, lane/, surface/, pty.rs, config_watcher.rs
 
 project/ → lane/

@@ -141,9 +141,6 @@ welcome:
   changelog_open_policy: "Cmd+O adds the project to this window · Cmd+Shift+O opens in a new window"
 
 # Menus — top-level names
-titlebar:
-  app_menu: "Application menu"
-
 menu:
   file: "File"
   view: "View"
@@ -215,6 +212,10 @@ menu:
   edit_keymap: "Edit Keymap…"
   report_issue: "Report Issue…"
   github_repo: "GitHub Repository"
+
+# Title bar — the app-drawn chrome off macOS
+titlebar:
+  app_menu: "Application menu"
 
 # Dock / sidebar tabs (display labels only — DOCK_PANEL_* identity consts stay &'static str)
 dock:

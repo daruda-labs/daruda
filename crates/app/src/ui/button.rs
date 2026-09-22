@@ -283,6 +283,25 @@ pub fn button_add_tile(id: impl Into<ElementId>, cx: &App) -> Button {
 pub fn button_window_control(
     id: impl Into<ElementId>,
     glyph: impl Into<SharedString>,
+    cx: &App,
+) -> Button {
+    window_control_shell(id, glyph, false, cx)
+}
+
+/// The close control. Its own factory rather than a `danger` flag on the one
+/// above — `ui/CLAUDE.md` holds that a variant reads better as a name at the
+/// call site than as a bool argument, the way `button` / `button_danger` do.
+pub fn button_window_control_danger(
+    id: impl Into<ElementId>,
+    glyph: impl Into<SharedString>,
+    cx: &App,
+) -> Button {
+    window_control_shell(id, glyph, true, cx)
+}
+
+fn window_control_shell(
+    id: impl Into<ElementId>,
+    glyph: impl Into<SharedString>,
     danger: bool,
     cx: &App,
 ) -> Button {

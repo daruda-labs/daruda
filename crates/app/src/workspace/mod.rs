@@ -257,6 +257,10 @@ actions!(
         UninstallAgentHooks,
         MinimizeWindow,
         ZoomWindow,
+        /// Ask the window to close, honouring the dirty-draft prompt the
+        /// platform's own close path runs. Dispatched by the app-drawn
+        /// caption button, which cannot reach that callback directly.
+        CloseWindow,
         ToggleFullScreen,
         EditWindowTitle,
         OpenCommandHistory,

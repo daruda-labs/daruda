@@ -46,5 +46,5 @@ pub(crate) fn open_first_window(
 
     // Install the native menu bar. Deferred until the recent list
     // is loaded so File > Open Recent shows live entries.
-    cx.set_menus(menus::build_menu_bar(&recent));
+    menus::set_menu_bar(menus::build_menu_bar(&recent), cx);
 }

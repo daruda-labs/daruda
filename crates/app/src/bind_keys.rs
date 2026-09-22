@@ -18,15 +18,15 @@ use crate::windows::{
     open_workspace_window, prompt_and_open_folder, prompt_and_open_folder_with_policy,
 };
 use crate::workspace::{
-    ClosePane, FileViewerSearchNext, FileViewerSearchOpen, FileViewerSearchPrev, FilesActivate,
-    FilesCollapse, FilesExpand, FilesRefresh, FilesSelectNext, FilesSelectPrev, FilesToggleHidden,
-    FocusNextPane, FocusPaneDown, FocusPaneLeft, FocusPaneRight, FocusPaneUp, FocusPrevPane,
-    FocusSkillSearch, GitChangesActivate, GitChangesSelectNext, GitChangesSelectPrev,
-    GitChangesToggleStage, InvokeSkillPalette, MinimizeWindow, MoveActiveProjectToGroup,
-    MoveTabLeft, MoveTabRight, NewGroup, NewTab, NextTab, OpenCommandHistory, OpenSettings,
-    PrevTab, RenameActiveProject, SaveFilePane, SplitDown, SplitRight, ToggleBottomDock,
-    ToggleCommandPalette, ToggleFilesFocus, ToggleFullScreen, ToggleGitChangesFocus,
-    ToggleLaneSwitcher, ToggleLeftDock, ToggleRightDock,
+    ClosePane, CloseWindow, FileViewerSearchNext, FileViewerSearchOpen, FileViewerSearchPrev,
+    FilesActivate, FilesCollapse, FilesExpand, FilesRefresh, FilesSelectNext, FilesSelectPrev,
+    FilesToggleHidden, FocusNextPane, FocusPaneDown, FocusPaneLeft, FocusPaneRight, FocusPaneUp,
+    FocusPrevPane, FocusSkillSearch, GitChangesActivate, GitChangesSelectNext,
+    GitChangesSelectPrev, GitChangesToggleStage, InvokeSkillPalette, MinimizeWindow,
+    MoveActiveProjectToGroup, MoveTabLeft, MoveTabRight, NewGroup, NewTab, NextTab,
+    OpenCommandHistory, OpenSettings, PrevTab, RenameActiveProject, SaveFilePane, SplitDown,
+    SplitRight, ToggleBottomDock, ToggleCommandPalette, ToggleFilesFocus, ToggleFullScreen,
+    ToggleGitChangesFocus, ToggleLaneSwitcher, ToggleLeftDock, ToggleRightDock,
 };
 use crate::{
     CloseProject, NewEmptyWindow, OpenDarudaHelp, OpenFolder, OpenFolderInNewWindow,
@@ -203,6 +203,17 @@ pub(crate) fn register_global_actions(cx: &mut App, config: std::sync::Arc<darud
     // answers first and keeps its auth-status probe; this runs after.
     cx.on_action(|action: &OpenSettings, cx: &mut App| {
         crate::windows::open_settings_window(action.0, cx);
+        cx.stop_propagation();
+    });
+
+    // Close fallback for a window with no Workspace — Welcome and Settings
+    // have no dirty state to guard, so closing is unconditional. A focused
+    // Workspace answers first and runs its dirty-draft prompt instead.
+    cx.on_action(|_: &CloseWindow, cx: &mut App| {
+        if let Some(handle) = cx.active_window() {
+            // SILENT-OK: the window is gone, which is the state this asked for
+            let _ = handle.update(cx, |_, window, _| window.remove_window());
+        }
         cx.stop_propagation();
     });
 

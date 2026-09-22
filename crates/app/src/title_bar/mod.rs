@@ -41,9 +41,21 @@ const fn forced_client() -> bool {
 /// decoration mode. The one place either fact is read, so every window agrees
 /// and a compositor that switches decoration modes is picked up on the next
 /// frame rather than frozen at construction.
+/// Whether asking the window who draws its frame means anything here.
+///
+/// Only the Linux backends implement `window_decorations`; everything else
+/// inherits the trait default `Decorations::Server`. Reading that on Windows
+/// says "the compositor draws our controls" about a window whose caption
+/// `appears_transparent` just removed, which switches the whole feature off
+/// on the platform it exists for. zed gates the same check on Linux alone.
+const fn decorations_are_negotiated() -> bool {
+    cfg!(any(target_os = "linux", target_os = "freebsd"))
+}
+
 pub(crate) fn chrome_for_window(window: &Window) -> WindowChrome {
-    let server_decorated =
-        !forced_client() && matches!(window.window_decorations(), gpui::Decorations::Server);
+    let server_decorated = !forced_client()
+        && decorations_are_negotiated()
+        && matches!(window.window_decorations(), gpui::Decorations::Server);
     WindowChrome::new(
         FrameFacts {
             os_draws_caption: !forced_client() && cfg!(target_os = "macos"),
@@ -63,25 +75,32 @@ pub(crate) fn render(
     window: &mut Window,
     cx: &mut App,
 ) -> Div {
-    let inset = if chrome.is_client() {
-        theme::CLIENT_CHROME_INSET
-    } else {
-        theme::TRAFFIC_LIGHT_WIDTH
-    };
-
     div()
         .flex()
         .flex_row()
         .w_full()
         .h(px(theme::TITLE_BAR_HEIGHT))
+        // A control pushed past the right edge by a narrow window would be
+        // unreachable; clipping keeps it out of the pane below.
+        .overflow_hidden()
         .bg(bg)
         .items_center()
-        .child(div().flex_none().w(px(inset)))
+        .child(div().flex_none().w(px(chrome.leading_inset())))
         .when(chrome.is_client(), |d| {
             d.children(app_menu::app_menu_button(cx).map(IntoElement::into_any_element))
         })
         .children(leading)
-        .child(window_controls::drag_region(chrome.tier, window, cx))
+        // Only the client arm gets a drag strip. Where the OS or the
+        // compositor still owns the frame it already handles the gesture,
+        // and ours would override the platform's own answer to a title-bar
+        // double-click.
+        .map(|d| {
+            if chrome.is_client() {
+                d.child(window_controls::drag_region(chrome.tier, window, cx))
+            } else {
+                d.child(div().flex_1())
+            }
+        })
         .children(trailing)
         .when(chrome.is_client(), |d| {
             d.child(window_controls::window_controls(chrome, window, cx))

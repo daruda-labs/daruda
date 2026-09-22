@@ -2,11 +2,28 @@ use gpui::{App, Context, Window};
 
 use daruda_store::observability::error_report::{ErrorReport, ErrorSeverity};
 
-use crate::workspace::Workspace;
 use crate::workspace::main_area::pane::PaneContent;
 use crate::workspace::main_area::pane_tree::PaneId;
+use crate::workspace::{CloseWindow, Workspace};
 
 impl Workspace {
+    /// The app-drawn caption button's close. `window.remove_window()` sets a
+    /// flag the teardown reads; it never calls the platform should-close
+    /// callback, so taking that shortcut would drop a dirty task-edit draft
+    /// without asking. Routing through the same body the hook runs keeps one
+    /// answer for "may this window close".
+    pub(in crate::workspace) fn on_close_window(
+        &mut self,
+        _: &CloseWindow,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let weak = cx.entity().downgrade();
+        if Self::may_close_window(&weak, window, cx) {
+            window.remove_window();
+        }
+    }
+
     /// Register the platform `on_window_should_close` callback that
     /// holds the window open while the batch close prompt runs. The
     /// `window_close_in_flight` flag guards against the callback
@@ -18,6 +35,20 @@ impl Workspace {
     ) {
         let weak_for_hook = weak.clone();
         window.on_window_should_close(cx, move |window, app| {
+            Self::may_close_window(&weak_for_hook, window, app)
+        });
+    }
+
+    /// `true` when the window may close now; `false` when a prompt is on
+    /// screen and will close it later. Shared by the platform callback and
+    /// the app-drawn close button.
+    fn may_close_window(
+        weak: &gpui::WeakEntity<Workspace>,
+        window: &mut Window,
+        app: &mut App,
+    ) -> bool {
+        let weak_for_hook = weak.clone();
+        {
             let Some(ws) = weak_for_hook.upgrade() else {
                 return true;
             };
@@ -74,7 +105,7 @@ impl Workspace {
                 .detach();
 
             false
-        });
+        }
     }
 
     /// Walk every entry in `dirty` and call `commit_task_edit_pane`.

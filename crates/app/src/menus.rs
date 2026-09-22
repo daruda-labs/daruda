@@ -54,13 +54,33 @@ pub(crate) fn build_recent_submenu(
         .collect()
 }
 
+/// The menu table as the app-drawn menu reads it back.
+///
+/// `App::get_menus` deep-clones the whole table — every label and a
+/// `boxed_clone` per action — and the button that pops it is rebuilt inside
+/// an uncached root render, so reading it there would pay that on every
+/// frame off macOS. Snapshotting at the one place the table is written keeps
+/// the per-frame cost at an `Rc::clone` and keeps `build_menu_bar` the single
+/// definition.
+pub(crate) struct MenuSnapshot(pub(crate) std::rc::Rc<Vec<gpui::OwnedMenu>>);
+
+impl gpui::Global for MenuSnapshot {}
+
+/// Install `menus` as the application menu and refresh the snapshot the
+/// app-drawn menu reads. The one entry point for both.
+pub(crate) fn set_menu_bar(menus: Vec<Menu>, cx: &mut App) {
+    cx.set_menus(menus);
+    let snapshot = cx.get_menus().unwrap_or_default();
+    cx.set_global(MenuSnapshot(std::rc::Rc::new(snapshot)));
+}
+
 /// Re-load the recent-projects list from disk and refresh the entire
 /// menu bar. Call after every successful `touch_recent_in` so File >
 /// Open Recent stays current without requiring a relaunch.
 pub(crate) fn refresh_recent_menu(cx: &mut App) {
     let recent =
         daruda_store::project::load_recent_in(&daruda_store::persistence::default_data_dir());
-    cx.set_menus(build_menu_bar(&recent));
+    set_menu_bar(build_menu_bar(&recent), cx);
 }
 
 /// Build the entire native menu bar. Kept in one helper so the File

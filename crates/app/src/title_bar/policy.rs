@@ -59,9 +59,20 @@ impl WindowChrome {
     pub(crate) fn is_client(self) -> bool {
         self.kind == TitleBarChrome::Client
     }
+
+    /// Space reserved before the first control: the traffic lights on macOS,
+    /// a plain margin where the app draws its own chrome. One definition, so
+    /// the workspace and the settings header cannot drift apart.
+    pub(crate) fn leading_inset(self) -> f32 {
+        if self.is_client() {
+            crate::ui::theme::CLIENT_CHROME_INSET
+        } else {
+            crate::ui::theme::TRAFFIC_LIGHT_WIDTH
+        }
+    }
 }
 
-pub(crate) const fn chrome_for(facts: FrameFacts) -> TitleBarChrome {
+const fn chrome_for(facts: FrameFacts) -> TitleBarChrome {
     if facts.os_draws_caption || facts.server_decorated {
         TitleBarChrome::Native
     } else {
@@ -69,7 +80,7 @@ pub(crate) const fn chrome_for(facts: FrameFacts) -> TitleBarChrome {
     }
 }
 
-pub(crate) const fn control_tier(is_windows: bool) -> ControlTier {
+const fn control_tier(is_windows: bool) -> ControlTier {
     if is_windows {
         ControlTier::Hitbox
     } else {

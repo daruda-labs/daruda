@@ -83,6 +83,7 @@ RUSTDOCFLAGS="-D warnings" cargo doc --no-deps \
   -p ghostty_vt -p daruda_agent
 cargo run -p gen_acp_presets -- --check
 cargo check -p daruda --features screenshot
+cargo test -p daruda --features screenshot
 ```
 
 If a hook fails, fix the underlying issue rather than bypassing it
@@ -528,7 +529,7 @@ Plus three files that are gates of their own, each the single door to its capabi
 
 ```
 Workspace
-├── TitleBar
+├── TitleBar                         — shared by Workspace / Settings / Welcome; off macOS also carries the app-menu button and the caption controls (`app/src/title_bar/`)
 ├── BodyLayout
 │   ├── LeftDock
 │   │   ├── ViewSwitcher             — Worktrees / Git / Files tab strip

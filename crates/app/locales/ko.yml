@@ -140,9 +140,6 @@ welcome:
   changelog_open_policy: "Cmd+O: 이 창에 프로젝트 추가 · Cmd+Shift+O: 새 창에서 열기"
 
 # Menus — top-level names
-titlebar:
-  app_menu: "애플리케이션 메뉴"
-
 menu:
   file: "파일"
   view: "보기"
@@ -214,6 +211,10 @@ menu:
   edit_keymap: "키맵 편집…"
   report_issue: "문제 신고…"
   github_repo: "GitHub 저장소"
+
+# Title bar — the app-drawn chrome off macOS
+titlebar:
+  app_menu: "애플리케이션 메뉴"
 
 # Dock / sidebar tabs
 dock:
