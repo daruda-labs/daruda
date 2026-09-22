@@ -817,28 +817,6 @@ pub(crate) fn open_settings_window(section: daruda_config::BuiltinSection, cx: &
     .unwrap();
 }
 
-/// Spawn a Welcome window when the last Workspace window has just
-/// been removed. Deferred one update cycle so the `WindowRegistry`
-/// `cx.on_release` deregistration runs first — without the defer the
-/// just-removed window is still listed and we'd skip the Welcome
-/// spawn. Pulls the live `Config` from [`crate::settings_store::SettingsStore`]
-/// so callers don't have to thread it through every code path that
-/// closes a project.
-pub(crate) fn ensure_welcome_if_last(cx: &mut App) {
-    cx.spawn(async move |cx| {
-        // SILENT-OK: window or process may exit during async picker / close-loop / registry iteration
-        cx.update(|cx| {
-            if !WindowRegistry::all_handles(cx).is_empty() {
-                return;
-            }
-            let config = crate::settings_store::SettingsStore::global(cx).user_arc();
-            let opts = build_window_options(&config);
-            open_welcome_window(config, opts, cx);
-        });
-    })
-    .detach();
-}
-
 /// Close every currently-open Workspace window. Runs on the next
 /// tick so callers can trigger this from a menu dispatch without
 /// re-entering the current update cycle.

@@ -14,8 +14,8 @@
 use crate::surface::{self, keybindings as k};
 use crate::window_registry::WindowRegistry;
 use crate::windows::{
-    OpenMode, build_window_options, close_all_workspace_windows, ensure_welcome_if_last,
-    open_workspace_window, prompt_and_open_folder, prompt_and_open_folder_with_policy,
+    OpenMode, build_window_options, close_all_workspace_windows, open_workspace_window,
+    prompt_and_open_folder, prompt_and_open_folder_with_policy,
 };
 use crate::workspace::{
     ClosePane, CloseWindow, FileViewerSearchNext, FileViewerSearchOpen, FileViewerSearchPrev,
@@ -302,13 +302,12 @@ pub(crate) fn register_global_actions(cx: &mut App, config: std::sync::Arc<darud
                             "close_project.modal_callback",
                             |window, cx_w| match choice {
                                 crate::workspace::delete_project_modal::DeleteProjectChoice::KeepOnDisk => {
-                                    let keep = ws.update(cx_w, |ws, cx| {
-                                        ws.close_active_project(window, cx)
+                                    // Closing the last project empties the
+                                    // workspace; the window stays and paints
+                                    // Landing rather than being destroyed.
+                                    ws.update(cx_w, |ws, cx| {
+                                        ws.close_active_project(window, cx);
                                     });
-                                    if !keep {
-                                        window.remove_window();
-                                        ensure_welcome_if_last(cx_w);
-                                    }
                                 }
                                 crate::workspace::delete_project_modal::DeleteProjectChoice::DeleteOnDisk => {
                                     ws.update(cx_w, |ws, cx| {

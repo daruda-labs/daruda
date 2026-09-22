@@ -168,6 +168,8 @@ menu:
   open_recent_in_new_window: "Open Recent in New Window"
   close_project: "Close Project"
   no_recent: "No recent projects"
+  # Label for a recent row whose workspace no longer holds any project.
+  recent_empty_workspace: "Empty workspace"
 
   # Edit menu
   copy: "Copy"

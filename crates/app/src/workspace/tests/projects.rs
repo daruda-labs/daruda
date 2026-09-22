@@ -1,5 +1,178 @@
 use super::*;
 
+// ---- empty workspace as a first-class persisted state (Landing) ----
+
+/// A workspace that has lost its last project must still be saveable, and
+/// must come back empty. Before Landing this returned `None` and the window
+/// was destroyed instead, so the state had nowhere to round-trip through.
+#[gpui::test]
+fn empty_workspace_snapshots_and_restores(cx: &mut TestAppContext) {
+    let config = daruda_config::Config::default();
+    std::fs::create_dir_all("/tmp/daruda_empty_round_trip").unwrap();
+    let project = daruda_store::project::Project::from_path("/tmp/daruda_empty_round_trip");
+    let wh = cx.add_window(|window, cx| {
+        Workspace::new_with_project_for_test(
+            &config,
+            Some(project),
+            fresh_test_data_dir(),
+            window,
+            cx,
+        )
+    });
+    let ws = wh.root(cx).unwrap();
+
+    // Close the only project — the workspace goes empty but stays alive.
+    cx.update_window(wh.into(), |_, window, cx| {
+        ws.update(cx, |ws, cx| ws.close_active_project(window, cx))
+    })
+    .unwrap();
+    ws.read_with(cx, |ws, _| {
+        assert!(ws.projects.is_empty(), "the only project is gone");
+    });
+
+    let (workspace_state, project_states) = ws
+        .read_with(cx, |ws, app_cx| ws.snapshot_for_disk(app_cx))
+        .expect("an empty workspace must still snapshot");
+    assert!(project_states.is_empty());
+    assert!(workspace_state.project_ids.is_empty());
+
+    // Restore into a fresh workspace: it must accept the empty payload.
+    let restored_handle = cx.add_window(|window, cx| {
+        let mut ws =
+            Workspace::new_with_project_for_test(&config, None, fresh_test_data_dir(), window, cx);
+        ws.restore_from_disk(&workspace_state, &project_states, window, cx);
+        ws
+    });
+    let restored = restored_handle.root(cx).unwrap();
+    restored.read_with(cx, |ws, _| {
+        assert!(ws.projects.is_empty(), "restored workspace stays empty");
+        assert_eq!(
+            ws.uuid, workspace_state.uuid,
+            "the empty workspace keeps its identity, so the next launch finds it"
+        );
+        assert!(
+            ws.has_no_projects(),
+            "the accessor the open-folder path reads must agree"
+        );
+    });
+}
+
+/// Closing the last project leaves the window standing on Landing. The
+/// caller used to be told to destroy it; nothing reads that signal now.
+#[gpui::test]
+fn closing_the_only_project_keeps_the_window(cx: &mut TestAppContext) {
+    let config = daruda_config::Config::default();
+    std::fs::create_dir_all("/tmp/daruda_last_project_survives").unwrap();
+    let project = daruda_store::project::Project::from_path("/tmp/daruda_last_project_survives");
+    let wh = cx.add_window(|window, cx| {
+        Workspace::new_with_project_for_test(
+            &config,
+            Some(project),
+            fresh_test_data_dir(),
+            window,
+            cx,
+        )
+    });
+    let ws = wh.root(cx).unwrap();
+
+    cx.update_window(wh.into(), |_, window, cx| {
+        ws.update(cx, |ws, cx| ws.close_active_project(window, cx))
+    })
+    .unwrap();
+
+    assert!(
+        wh.root(cx).is_ok(),
+        "the window must outlive its last project"
+    );
+    ws.read_with(cx, |ws, _| {
+        assert!(ws.has_no_projects());
+        // The "active runtime always present" invariant has to survive the
+        // teardown, because `render` reads it to paint Landing.
+        assert_eq!(ws.active, daruda_store::project::LaneRef::default());
+        assert!(ws.active_runtime().tabs.is_empty());
+    });
+}
+
+/// The recent list after a workspace empties out: the row stays (that is
+/// how the next launch finds the workspace) but stops naming the project
+/// that left, and no second row appears. Covers the `persist_state` branch
+/// — the round-trip test above cannot see it, because it never writes.
+#[gpui::test]
+fn emptying_a_workspace_refreshes_its_recent_row_without_adding_one(cx: &mut TestAppContext) {
+    let tmp = tempfile::tempdir().unwrap();
+    let data_dir = tmp.path().to_path_buf();
+    let root = std::env::temp_dir().join("daruda_recent_refresh");
+    std::fs::create_dir_all(&root).unwrap();
+
+    let config = daruda_config::Config::default();
+    let project = daruda_store::project::Project::from_path(&root);
+    let wh = cx.add_window(|window, cx| {
+        Workspace::new_with_project_for_test(&config, Some(project), data_dir.clone(), window, cx)
+    });
+    let ws = wh.root(cx).unwrap();
+
+    // Persist while it still holds a project: a normal touch, so this
+    // workspace takes the top slot with its project's name.
+    ws.read_with(cx, |w, cx| w.persist_state(cx));
+    let uuid = ws.read_with(cx, |w, _| w.uuid);
+
+    // Another workspace is then opened, taking the top slot. Ordering is
+    // what separates a refresh from a touch: with a plain `touch_recent_in`
+    // the step below would promote this workspace back to the front, which
+    // is exactly what going empty must not do.
+    let other = daruda_store::project::WorkspaceUuid::new();
+    daruda_store::project::touch_recent_in(&data_dir, other, "other".into()).unwrap();
+    let before = daruda_store::project::load_recent_in(&data_dir);
+    assert_eq!(before.len(), 2);
+    assert_eq!(before[0].workspace_uuid, other);
+    assert_eq!(before[1].workspace_uuid, uuid);
+    assert_eq!(before[1].display_name, "daruda_recent_refresh");
+
+    // Close the only project, then persist the now-empty workspace.
+    cx.update_window(wh.into(), |_, window, cx| {
+        ws.update(cx, |ws, cx| ws.close_active_project(window, cx))
+    })
+    .unwrap();
+    ws.read_with(cx, |w, cx| w.persist_state(cx));
+
+    let after = daruda_store::project::load_recent_in(&data_dir);
+    assert_eq!(after.len(), 2, "an empty workspace must not add a row");
+    assert_eq!(
+        after[0].workspace_uuid, other,
+        "going empty must not promote the row over the workspace last worked in"
+    );
+    assert_eq!(
+        after[1].workspace_uuid, uuid,
+        "the row is refreshed in place, not removed"
+    );
+    assert_eq!(
+        after[1].display_name,
+        crate::surface::strings::recent_empty_workspace(),
+        "the row must stop naming a project the workspace no longer holds"
+    );
+}
+
+/// A workspace that never held a project earns no recent row at all — the
+/// New Empty Window case. Without this, every such window would push a
+/// nameless row that `RECENT_MAX` eventually spends on nothing.
+#[gpui::test]
+fn a_workspace_that_never_held_a_project_earns_no_recent_row(cx: &mut TestAppContext) {
+    let tmp = tempfile::tempdir().unwrap();
+    let data_dir = tmp.path().to_path_buf();
+    let config = daruda_config::Config::default();
+
+    let wh = cx.add_window(|window, cx| {
+        Workspace::new_with_project_for_test(&config, None, data_dir.clone(), window, cx)
+    });
+    let ws = wh.root(cx).unwrap();
+    ws.read_with(cx, |w, cx| w.persist_state(cx));
+
+    assert!(
+        daruda_store::project::load_recent_in(&data_dir).is_empty(),
+        "an empty workspace must not appear in the recent list"
+    );
+}
+
 // ---- add_project / close_active_project / window_open_policy ----
 
 #[gpui::test]
@@ -75,12 +248,10 @@ fn add_project_mints_next_id_and_activates_first_lane(cx: &mut TestAppContext) {
         assert_eq!(ws.active.project, 1);
     });
 
-    let keep = cx
-        .update_window(wh.into(), |_, window, cx| {
-            ws.update(cx, |ws, cx| ws.close_active_project(window, cx))
-        })
-        .expect("close_active_project window callback succeeded");
-    assert!(keep, "closing one of two projects must keep the window");
+    cx.update_window(wh.into(), |_, window, cx| {
+        ws.update(cx, |ws, cx| ws.close_active_project(window, cx))
+    })
+    .expect("close_active_project window callback succeeded");
     ws.read_with(cx, |ws, _| {
         assert_eq!(ws.projects.len(), 1);
         assert_eq!(ws.projects[0].id, 0);
@@ -139,9 +310,8 @@ fn close_active_project_releases_pane_tracking(cx: &mut TestAppContext) {
                 );
             }
 
-            let keep = ws.close_active_project(window, cx);
+            ws.close_active_project(window, cx);
 
-            assert!(!keep, "last project should signal close-window");
             assert!(ws.projects.is_empty());
             assert_eq!(ws.active, daruda_store::project::LaneRef::default());
             assert!(
@@ -199,11 +369,11 @@ fn close_active_project_drops_the_input_history_of_its_lanes(cx: &mut TestAppCon
 }
 
 #[gpui::test]
-fn close_active_project_signals_window_close_when_no_survivor_has_a_lane(cx: &mut TestAppContext) {
+fn close_active_project_empties_the_workspace_when_no_survivor_has_a_lane(cx: &mut TestAppContext) {
     // Safety net: if every surviving project is somehow lane-less
     // (runtime corruption), closing the active project must treat the
-    // workspace as empty — signal the caller to close the window
-    // (→ Welcome) rather than leaving a blank viewport open.
+    // workspace as empty — reset to the Landing state rather than leaving
+    // a blank viewport open.
     let config = daruda_config::Config::default();
     let project = daruda_store::project::Project::from_path("/tmp/daruda_close_no_lane_a");
     std::fs::create_dir_all("/tmp/daruda_close_no_lane_a").unwrap();
@@ -236,18 +406,17 @@ fn close_active_project_signals_window_close_when_no_survivor_has_a_lane(cx: &mu
         }
     });
     // Close active project B. The only survivor (A) has no usable lane.
-    let keep = cx
-        .update_window(wh.into(), |_, window, cx| {
-            ws.update(cx, |ws, cx| ws.close_active_project(window, cx))
-        })
-        .unwrap();
+    cx.update_window(wh.into(), |_, window, cx| {
+        ws.update(cx, |ws, cx| ws.close_active_project(window, cx))
+    })
+    .unwrap();
     assert!(
-        !keep,
-        "a workspace with no usable lane must signal window close"
+        wh.root(cx).is_ok(),
+        "the window survives a workspace with no usable lane"
     );
     ws.read_with(cx, |ws, _| {
-        // Live runtime is cleared; the window is closing, so the user
-        // lands on Welcome instead of a blank viewport.
+        // Live runtime is cleared and the active ref is back at the default
+        // seed, which is what `render` needs to paint Landing.
         assert!(ws.active_runtime().tabs.is_empty());
         assert_eq!(ws.active, daruda_store::project::LaneRef::default());
     });

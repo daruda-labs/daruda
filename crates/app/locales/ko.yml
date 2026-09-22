@@ -167,6 +167,8 @@ menu:
   open_recent_in_new_window: "최근 항목을 새 창에서 열기"
   close_project: "프로젝트 닫기"
   no_recent: "최근 프로젝트 없음"
+  # Label for a recent row whose workspace no longer holds any project.
+  recent_empty_workspace: "빈 워크스페이스"
 
   # Edit menu
   copy: "복사"

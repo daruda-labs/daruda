@@ -221,7 +221,7 @@ fn closing_a_project_stashes_the_orchestrator_draft_for_its_next_open(cx: &mut T
             ws.terminal_input.update(cx, |input, cx| {
                 input.set_value("Keep this unsent prompt", window, cx)
             });
-            assert!(ws.close_active_project(window, cx));
+            ws.close_active_project(window, cx);
             assert_eq!(ws.active, surviving);
             // Closing the project switches worktrees, which takes the
             // orchestrator's tab down with it.

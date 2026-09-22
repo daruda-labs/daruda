@@ -1582,7 +1582,10 @@ impl Workspace {
                 .file_name()
                 .map(|s| s.to_string_lossy().into_owned())
                 .unwrap_or_else(|| "?".into()),
-            None => "empty".into(),
+            // The workspace emptied out. Its recent row is kept so the next
+            // launch finds it, so the label has to stop naming a project it
+            // no longer holds.
+            None => crate::surface::strings::recent_empty_workspace(),
         };
 
         let rest = self.projects.len().saturating_sub(1);

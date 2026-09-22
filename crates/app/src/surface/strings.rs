@@ -75,6 +75,12 @@ pub fn menu_close_project() -> String {
 pub fn menu_no_recent() -> String {
     rust_i18n::t!("menu.no_recent").into_owned()
 }
+/// Recent-list label for a workspace that holds no projects. Such a row is
+/// kept (so the next launch can restore the workspace) but must not keep
+/// advertising a project that is no longer in it.
+pub fn recent_empty_workspace() -> String {
+    rust_i18n::t!("menu.recent_empty_workspace").into_owned()
+}
 pub fn menu_new_tab() -> String {
     rust_i18n::t!("common.new_tab").into_owned()
 }

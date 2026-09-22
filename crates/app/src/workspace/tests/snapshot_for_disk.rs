@@ -2,17 +2,24 @@
 //! `(WorkspaceState, Vec<ProjectState>)` output: each runtime project
 //! lands as a separate `ProjectState`, every project carries a
 //! policy-B `ProjectOverride` entry, the active focus is projected
-//! onto UUIDs, and the empty-workspace case short-circuits to `None`.
+//! onto UUIDs, and a workspace with no projects still snapshots.
 
 use super::*;
 use daruda_store::project::WORKSPACE_SCHEMA_VERSION;
 
 #[gpui::test]
-fn snapshot_for_disk_short_circuits_empty_and_emits_project_schema(cx: &mut TestAppContext) {
+fn snapshot_for_disk_covers_empty_and_emits_project_schema(cx: &mut TestAppContext) {
     let (_wh, ws) = build_workspace(cx);
     ws.read_with(cx, |ws, app_cx| {
-        // No projects opened — same short-circuit as `save_state`.
-        assert!(ws.snapshot_for_disk(app_cx).is_none());
+        // No projects opened. This is the Landing state, which persists like
+        // any other — it used to short-circuit to `None` because the window
+        // was destroyed instead of surviving.
+        let (workspace, projects) = ws
+            .snapshot_for_disk(app_cx)
+            .expect("an empty workspace still snapshots");
+        assert!(projects.is_empty());
+        assert!(workspace.project_ids.is_empty());
+        assert_eq!(workspace.schema_version, WORKSPACE_SCHEMA_VERSION);
     });
 
     let config = daruda_config::Config::default();

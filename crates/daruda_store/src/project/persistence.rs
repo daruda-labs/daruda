@@ -180,3 +180,31 @@ pub fn touch_recent_in(
     entries.truncate(RECENT_MAX);
     save_recent_in(data_dir, &entries)
 }
+
+/// Update an existing recent row in place, and do nothing if the workspace
+/// has no row yet. Writing only when the row already exists is what a
+/// workspace holding no projects gets instead of [`touch_recent_in`].
+///
+/// Two halves, both deliberate. **No insert:** an empty workspace has no
+/// project to name it after, and one opened by New Empty Window and closed
+/// while still empty has nothing worth restoring, so it must not displace a
+/// real entry. **No reorder:** the row stays where it was, because a
+/// workspace going empty is not the user working in it.
+///
+/// Updating rather than skipping is what keeps the row honest — the name
+/// would otherwise still advertise a project the workspace no longer holds.
+pub fn refresh_recent_if_present_in(
+    data_dir: &Path,
+    workspace_uuid: WorkspaceUuid,
+    display_name: String,
+) -> std::io::Result<()> {
+    let mut entries = load_recent_in(data_dir);
+    let Some(entry) = entries
+        .iter_mut()
+        .find(|e| e.workspace_uuid == workspace_uuid)
+    else {
+        return Ok(());
+    };
+    *entry = RecentEntry::now(workspace_uuid, display_name);
+    save_recent_in(data_dir, &entries)
+}

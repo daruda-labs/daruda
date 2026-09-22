@@ -82,16 +82,20 @@ impl Workspace {
     /// (color / tab order / group / collapsed) lives in
     /// [`WorkspaceState::project_overrides`]. Active focus projects from
     /// `self.active` onto persisted `(ProjectUuid, LaneId)` — runtime
-    /// `ProjectId` is per-session and not persisted. `None` for an empty
-    /// workspace (Welcome). Drives [`Workspace::persist_state`].
+    /// `ProjectId` is per-session and not persisted.
+    ///
+    /// A workspace with no projects snapshots like any other: it is the
+    /// Landing state, which survives a restart rather than ending the
+    /// window. Its payload carries the window geometry, dock sizes and
+    /// open policy and an empty project list.
+    ///
+    /// Still `Option` because the callers below it are fallible; it just
+    /// no longer has an emptiness reason to answer `None`.
+    /// Drives [`Workspace::persist_state`].
     pub(in crate::workspace) fn snapshot_for_disk(
         &self,
         cx: &App,
     ) -> Option<(WorkspaceState, Vec<ProjectState>)> {
-        if self.projects.is_empty() {
-            return None;
-        }
-
         let mut project_states = Vec::with_capacity(self.projects.len());
         let mut project_ids = Vec::with_capacity(self.projects.len());
         let mut project_overrides = BTreeMap::new();
@@ -294,10 +298,21 @@ impl Workspace {
             );
         }
 
+        // An empty workspace refreshes an existing row but never earns a new
+        // one: it has no project to name it after, and one that never held a
+        // project has nothing worth restoring. See
+        // `refresh_recent_if_present_in` for both halves of that reasoning.
         let display_name = self.recent_display_name();
-        if let Err(e) =
+        let touched = if self.projects.is_empty() {
+            daruda_store::project::refresh_recent_if_present_in(
+                &self.data_dir,
+                workspace.uuid,
+                display_name,
+            )
+        } else {
             daruda_store::project::touch_recent_in(&self.data_dir, workspace.uuid, display_name)
-        {
+        };
+        if let Err(e) = touched {
             LogWriter::log(
                 ErrorReport::new("Failed to update recent list")
                     .severity(ErrorSeverity::Warning)
@@ -370,7 +385,10 @@ impl Workspace {
         // geometry even if `observe_window_bounds` hasn't fired yet.
         self.cached_window_bounds = Some(workspace.window.clone());
 
-        // Empty workspace — keep whatever `new_with_project` bootstrapped.
+        // Empty workspace — the Landing state. Everything above (geometry,
+        // docks, uuid, open policy) has already been adopted, which is what
+        // makes it worth persisting; there is simply nothing to hydrate, so
+        // keep whatever `new_with_project` bootstrapped.
         if project_states.is_empty() {
             self.main_area.pending_resize = true;
             return;

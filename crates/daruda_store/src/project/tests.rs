@@ -1219,8 +1219,8 @@ mod new_schema_persistence {
     use super::new_schema_fixtures::{sample_project, sample_workspace};
     use crate::project::persistence::{
         RECENT_MAX, for_each_project_state_in, is_uuid_filename_stem, load_project_state_in,
-        load_recent_in, load_workspace_state_in, projects_dir_in, save_project_state_in,
-        save_workspace_state_in, touch_recent_in,
+        load_recent_in, load_workspace_state_in, projects_dir_in, refresh_recent_if_present_in,
+        save_project_state_in, save_workspace_state_in, touch_recent_in,
     };
     use crate::project::{ProjectUuid, WorkspaceUuid};
 
@@ -1257,6 +1257,63 @@ mod new_schema_persistence {
         assert_eq!(r.len(), 1);
         assert_eq!(r[0].display_name, "second");
         assert_eq!(r[0].workspace_uuid, uuid);
+    }
+
+    /// An empty workspace must not earn a recent row. It has no project to
+    /// name it after, and a window opened by New Empty Window and quit
+    /// without ever holding a project has nothing worth restoring — the
+    /// next launch should return to the last real workspace instead.
+    #[test]
+    fn refresh_if_present_does_not_insert_a_missing_uuid() {
+        let dir = tmp();
+        let known = WorkspaceUuid::new();
+        touch_recent_in(dir.path(), known, "real".into()).unwrap();
+
+        refresh_recent_if_present_in(dir.path(), WorkspaceUuid::new(), "empty".into()).unwrap();
+
+        let r = load_recent_in(dir.path());
+        assert_eq!(r.len(), 1, "an unknown uuid must not be inserted");
+        assert_eq!(r[0].workspace_uuid, known);
+    }
+
+    /// A workspace that emptied out keeps its row — that is how the next
+    /// launch finds it — but the row must stop claiming the name of a
+    /// project the workspace no longer holds.
+    #[test]
+    fn refresh_if_present_updates_name_and_recency_in_place() {
+        let dir = tmp();
+        let uuid = WorkspaceUuid::new();
+        touch_recent_in(dir.path(), uuid, "myproject".into()).unwrap();
+        let before = load_recent_in(dir.path())[0].last_opened;
+
+        refresh_recent_if_present_in(dir.path(), uuid, "empty".into()).unwrap();
+
+        let r = load_recent_in(dir.path());
+        assert_eq!(r.len(), 1, "refresh must not duplicate the row");
+        assert_eq!(r[0].display_name, "empty");
+        assert!(r[0].last_opened >= before);
+    }
+
+    /// Unlike `touch_recent_in`, refreshing must not reorder the list: a
+    /// workspace going empty is not a reason to promote it over the
+    /// workspace the user actually worked in last.
+    #[test]
+    fn refresh_if_present_keeps_position() {
+        let dir = tmp();
+        let older = WorkspaceUuid::new();
+        let newer = WorkspaceUuid::new();
+        touch_recent_in(dir.path(), older, "older".into()).unwrap();
+        touch_recent_in(dir.path(), newer, "newer".into()).unwrap();
+        assert_eq!(load_recent_in(dir.path())[0].workspace_uuid, newer);
+
+        refresh_recent_if_present_in(dir.path(), older, "older-empty".into()).unwrap();
+
+        let r = load_recent_in(dir.path());
+        assert_eq!(
+            r[0].workspace_uuid, newer,
+            "refreshing an older row must not promote it to the front"
+        );
+        assert_eq!(r[1].display_name, "older-empty");
     }
 
     #[test]
