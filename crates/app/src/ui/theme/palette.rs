@@ -756,16 +756,6 @@ pub const PALETTE_SHORTCUT_FONT_SIZE: f32 = FONT_SIZE_SM;
 pub const PALETTE_FOCUS_BORDER_W: f32 = LANE_ACTIVE_BORDER_W;
 /// Command palette "no results" padding Y (px).
 pub const PALETTE_EMPTY_PAD_Y: f32 = 16.0;
-/// Settings window initial origin X from screen top-left (px).
-pub const SETTINGS_WINDOW_ORIGIN_X: f32 = 200.0;
-/// Settings window initial origin Y from screen top-left (px).
-pub const SETTINGS_WINDOW_ORIGIN_Y: f32 = 100.0;
-/// Settings window width (px). Was 520 (single-column form);
-/// increased to fit the new section-nav sidebar to the left of the
-/// body without compressing field rows.
-pub const SETTINGS_WINDOW_W: f32 = 720.0;
-/// Settings window height (px).
-pub const SETTINGS_WINDOW_H: f32 = 680.0;
 /// Title bar height (px).
 pub const TITLE_BAR_HEIGHT: f32 = 28.0;
 /// Tab bar height (px).

@@ -18,15 +18,15 @@ use crate::windows::{
     prompt_and_open_folder, prompt_and_open_folder_with_policy,
 };
 use crate::workspace::{
-    ClosePane, CloseWindow, FileViewerSearchNext, FileViewerSearchOpen, FileViewerSearchPrev,
-    FilesActivate, FilesCollapse, FilesExpand, FilesRefresh, FilesSelectNext, FilesSelectPrev,
-    FilesToggleHidden, FocusNextPane, FocusPaneDown, FocusPaneLeft, FocusPaneRight, FocusPaneUp,
-    FocusPrevPane, FocusSkillSearch, GitChangesActivate, GitChangesSelectNext,
-    GitChangesSelectPrev, GitChangesToggleStage, InvokeSkillPalette, MinimizeWindow,
-    MoveActiveProjectToGroup, MoveTabLeft, MoveTabRight, NewGroup, NewTab, NextTab,
-    OpenCommandHistory, OpenSettings, PrevTab, RenameActiveProject, SaveFilePane, SplitDown,
-    SplitRight, ToggleBottomDock, ToggleCommandPalette, ToggleFilesFocus, ToggleFullScreen,
-    ToggleGitChangesFocus, ToggleLaneSwitcher, ToggleLeftDock, ToggleRightDock,
+    ClosePane, FileViewerSearchNext, FileViewerSearchOpen, FileViewerSearchPrev, FilesActivate,
+    FilesCollapse, FilesExpand, FilesRefresh, FilesSelectNext, FilesSelectPrev, FilesToggleHidden,
+    FocusNextPane, FocusPaneDown, FocusPaneLeft, FocusPaneRight, FocusPaneUp, FocusPrevPane,
+    FocusSkillSearch, GitChangesActivate, GitChangesSelectNext, GitChangesSelectPrev,
+    GitChangesToggleStage, InvokeSkillPalette, MinimizeWindow, MoveActiveProjectToGroup,
+    MoveTabLeft, MoveTabRight, NewGroup, NewTab, NextTab, OpenCommandHistory, OpenSettings,
+    PrevTab, RenameActiveProject, SaveFilePane, SplitDown, SplitRight, ToggleBottomDock,
+    ToggleCommandPalette, ToggleFilesFocus, ToggleFullScreen, ToggleGitChangesFocus,
+    ToggleLaneSwitcher, ToggleLeftDock, ToggleRightDock,
 };
 use crate::{
     CloseProject, NewEmptyWindow, OpenDarudaHelp, OpenFolder, OpenFolderInNewWindow,
@@ -196,17 +196,6 @@ pub(crate) fn register_static_bindings(cx: &mut App) {
 pub(crate) fn register_global_actions(cx: &mut App, config: std::sync::Arc<daruda_config::Config>) {
     cx.on_action(|_: &Quit, cx: &mut App| {
         cx.quit();
-    });
-
-    // Close fallback for a window with no Workspace — Settings
-    // has no dirty state to guard, so closing is unconditional. A focused
-    // Workspace answers first and runs its dirty-draft prompt instead.
-    cx.on_action(|_: &CloseWindow, cx: &mut App| {
-        if let Some(handle) = cx.active_window() {
-            // SILENT-OK: the window is gone, which is the state this asked for
-            let _ = handle.update(cx, |_, window, _| window.remove_window());
-        }
-        cx.stop_propagation();
     });
 
     // Help menu — open URLs in the user's default browser.
