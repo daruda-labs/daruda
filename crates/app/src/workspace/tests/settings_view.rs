@@ -108,3 +108,39 @@ async fn the_view_s_close_event_takes_it_down(cx: &mut TestAppContext) {
     })
     .unwrap();
 }
+
+/// A chord that drives a dock must not land while Settings covers it. The
+/// registration is skipped wholesale in that mode, so this is the check that
+/// the skip actually reaches the dispatch tree rather than just the source.
+#[gpui::test]
+async fn settings_mode_does_not_answer_a_dock_action(cx: &mut TestAppContext) {
+    let (window_handle, workspace) = build_workspace(cx);
+    let mut vcx = gpui::VisualTestContext::from_window(window_handle.into(), cx);
+
+    // Control: outside Settings the same dispatch flips the dock.
+    let before = workspace.read_with(&vcx, |ws, cx| ws.left_dock.read(cx).is_open);
+    vcx.dispatch_action(crate::workspace::ToggleLeftDock);
+    vcx.run_until_parked();
+    let toggled = workspace.read_with(&vcx, |ws, cx| ws.left_dock.read(cx).is_open);
+    assert_ne!(before, toggled, "the dock action works outside Settings");
+
+    vcx.update(|window, cx| {
+        workspace.update(cx, |ws, cx| {
+            ws.on_open_settings(
+                &OpenSettings(daruda_config::BuiltinSection::General),
+                window,
+                cx,
+            );
+        });
+    });
+    vcx.run_until_parked();
+
+    vcx.dispatch_action(crate::workspace::ToggleLeftDock);
+    vcx.run_until_parked();
+
+    assert_eq!(
+        workspace.read_with(&vcx, |ws, cx| ws.left_dock.read(cx).is_open),
+        toggled,
+        "Settings must swallow the dock chord, not pass it to a hidden dock",
+    );
+}
