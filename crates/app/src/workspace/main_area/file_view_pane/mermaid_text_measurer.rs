@@ -320,16 +320,16 @@ mod tests {
         }
     }
 
-    /// The oracle is what the rasterizer advances for the whole label, read
-    /// off the same usvg stack that paints it — `ink(label·label) − ink(label)`,
-    /// the trick the module itself uses for one syllable. An ink box would not
-    /// do: how far a face's ink sits from its advances is its own business,
-    /// and it differs in sign between Apple's, Noto's and Microsoft's Korean.
+    /// The oracle is what the rasterizer advances for the syllables, off the
+    /// same usvg stack that paints them: `box(L·L) − box(L)` cancels bearings.
+    /// No spaces in the fixture — merman measures those from its Latin table,
+    /// which this module does not touch, and where no Trebuchet is installed
+    /// that disagreement outweighs the whole correction.
     #[test]
     fn the_correction_matches_what_the_rasterizer_advances() {
         let corrected = HangulCorrectedMeasurer::default();
         let plain = VendoredFontMetricsTextMeasurer::default();
-        let label = "스케줄 틱 발생";
+        let label = "스케줄틱발생";
         let family = style().font_family.unwrap_or_default();
         let before = plain.measure(label, &style()).width;
         let after = corrected.measure(label, &style()).width;
@@ -348,6 +348,28 @@ mod tests {
         assert!(
             off <= advanced / 100.0,
             "corrected to {after}px against {advanced}px advanced — off by {off}px"
+        );
+    }
+
+    /// The other half of the same claim: a space costs the label exactly what
+    /// merman says it does. Whatever the two disagree on there, the correction
+    /// is the same number of syllables either way.
+    #[test]
+    fn spaces_are_left_to_merman() {
+        let corrected = HangulCorrectedMeasurer::default();
+        let plain = VendoredFontMetricsTextMeasurer::default();
+        let spaced = "스케줄 틱 발생";
+        let tight = "스케줄틱발생";
+
+        let added = |text: &str| {
+            corrected.measure(text, &style()).width - plain.measure(text, &style()).width
+        };
+
+        assert!(added(tight) > 0.0, "the fixture must be corrected at all");
+        assert_eq!(
+            added(spaced),
+            added(tight),
+            "the same six syllables must draw the same correction"
         );
     }
 
