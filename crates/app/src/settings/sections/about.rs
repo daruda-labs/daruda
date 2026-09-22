@@ -1,4 +1,4 @@
-//! About section of the Settings window — app version plus the
+//! About section of Settings — app version plus the
 //! self-update check / download / restart controls.
 //!
 //! The page reads the process-wide [`crate::update::Updater`] entity

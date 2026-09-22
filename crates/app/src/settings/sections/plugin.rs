@@ -1,4 +1,4 @@
-//! Plugin section of the Settings window — master/detail panes,
+//! Plugin section of Settings — master/detail panes,
 //! skill rows, action buttons, and the supporting helpers.
 //!
 //! Every method this file adds to `SettingsView` uses

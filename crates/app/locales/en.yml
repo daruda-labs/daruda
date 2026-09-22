@@ -772,6 +772,7 @@ git:
 # Settings panel
 settings:
   title: "Settings"
+  back: "Back to workspace"
   external_change: "%{path} changed outside this window. Choose which value to keep."
   use_external_value: "Use External Value"
   overwrite_external_value: "Overwrite"

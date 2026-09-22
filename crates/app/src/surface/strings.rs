@@ -4059,6 +4059,9 @@ pub const PROJECT_CONFIG_TEMPLATE: &str = "\
 pub fn settings_title() -> String {
     rust_i18n::t!("settings.title").into_owned()
 }
+pub fn settings_back() -> String {
+    rust_i18n::t!("settings.back").into_owned()
+}
 pub fn settings_section_font() -> String {
     rust_i18n::t!("settings.section_font").into_owned()
 }

@@ -35,9 +35,6 @@ const NAME_SETTINGS_ERROR: &str = "settings-error";
 /// CLI token for the app-drawn window chrome. Forces the Client arm on a host
 /// that would resolve to Native, so the layout is reviewable off its platform.
 const NAME_CLIENT_CHROME: &str = "client-chrome";
-/// CLI token for the Settings window under app-drawn chrome — the one window
-/// `client-chrome` cannot reach, since that one captures the workspace.
-const NAME_CLIENT_CHROME_SETTINGS: &str = "client-chrome-settings";
 /// CLI token for the pane context-menu scenario.
 const NAME_PANE_CONTEXT_MENU: &str = "pane-context-menu";
 /// CLI token for the mermaid-diagram lightbox scenario.
@@ -159,10 +156,6 @@ pub(crate) enum ScreenshotScenario {
     /// inset, so this capture speaks for the right edge and the spacing, not
     /// for the left.
     ClientChrome,
-    /// The Settings window drawn with app chrome. Settings resolves its own
-    /// chrome at render time, so proving it can be closed off macOS needs the
-    /// forced arm and that window in one capture.
-    ClientChromeSettings,
     /// Open the Layer-2 error-report modal with a synthetic report.
     ErrorModal,
     /// Push a synthetic error toast.
@@ -333,7 +326,6 @@ impl ScreenshotScenario {
             NAME_COMMAND_PALETTE => Some(Self::CommandPalette),
             NAME_LANE_SWITCHER => Some(Self::LaneSwitcher),
             NAME_CLIENT_CHROME => Some(Self::ClientChrome),
-            NAME_CLIENT_CHROME_SETTINGS => Some(Self::ClientChromeSettings),
             NAME_ERROR_MODAL => Some(Self::ErrorModal),
             NAME_TOAST => Some(Self::Toast),
             NAME_SCRATCH_TAB => Some(Self::ScratchTab),
@@ -409,10 +401,6 @@ pub(crate) fn drive(
         ScreenshotScenario::ClientChrome => {
             crate::title_bar::force_client_chrome_for_shot();
             workspace.update(cx, |_, cx| cx.notify());
-        }
-        ScreenshotScenario::ClientChromeSettings => {
-            crate::title_bar::force_client_chrome_for_shot();
-            crate::windows::open_settings_window(BuiltinSection::default(), cx);
         }
         ScreenshotScenario::CommandPalette => {
             workspace.update(cx, |ws, cx| {
@@ -500,15 +488,19 @@ pub(crate) fn drive(
             // Accounts rows capture blank where the running app shows how each
             // account signed in — a scenario that under-reports the real screen
             // is worse than no scenario.
-            workspace.update(cx, |ws, cx| ws.probe_auth_statuses(cx));
-            crate::windows::open_settings_window(section, cx);
+            workspace.update(cx, |ws, cx| {
+                ws.probe_auth_statuses(cx);
+                ws.open_settings(section, window, cx);
+            });
         }
         ScreenshotScenario::SettingsError => {
-            crate::windows::open_settings_window(BuiltinSection::Notifications, cx);
-            if let Some(settings) = crate::window_registry::WindowRegistry::settings(cx) {
-                // SILENT-OK: the window was opened on the line above
-                let _ = settings.update(cx, |this, _window, cx| this.seed_error_for_shot(cx));
-            }
+            workspace.update(cx, |ws, cx| {
+                ws.open_settings(BuiltinSection::Notifications, window, cx);
+                if let Some(host) = ws.settings.as_ref() {
+                    host.view
+                        .update(cx, |this, cx| this.seed_error_for_shot(cx));
+                }
+            });
         }
         ScreenshotScenario::PaneContextMenu => {
             workspace.update(cx, |ws, cx| {
@@ -753,14 +745,6 @@ mod tests {
         assert_eq!(
             ScreenshotScenario::from_cli_name("landing"),
             Some(ScreenshotScenario::Landing)
-        );
-    }
-
-    #[test]
-    fn client_chrome_settings_name_maps_to_scenario() {
-        assert_eq!(
-            ScreenshotScenario::from_cli_name("client-chrome-settings"),
-            Some(ScreenshotScenario::ClientChromeSettings)
         );
     }
 

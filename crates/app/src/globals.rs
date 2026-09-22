@@ -15,7 +15,7 @@
 
 use crate::ui;
 use crate::window_registry::WindowRegistry;
-use gpui::App;
+use gpui::{App, WindowBackgroundAppearance};
 
 pub(crate) fn init_all(cx: &mut App) {
     // Apply system locale before the settings store loads so that any
@@ -108,7 +108,7 @@ fn register_settings_observer(cx: &mut App) {
         crate::menus::refresh_recent_menu(cx);
         crate::surface::action_map::apply_keybinding_overrides(&user.keybindings.bindings, cx);
         ui::theme::apply_ui_theme(&user.theme.ui_preset, cx);
-        let appearance = crate::settings::window_background_for(&user);
+        let appearance = window_background_for(&user);
         WindowRegistry::for_each_workspace(cx, |_ws, window, _cx| {
             window.set_background_appearance(appearance);
         });
@@ -140,4 +140,15 @@ fn apply_locale_str(lang: &str) {
     rust_i18n::set_locale(&resolved);
     daruda_terminal::set_locale(&resolved);
     gpui_component::set_locale(&resolved);
+}
+
+/// Map config window settings to the GPUI window background appearance.
+pub(crate) fn window_background_for(config: &daruda_config::Config) -> WindowBackgroundAppearance {
+    if config.window.blur {
+        WindowBackgroundAppearance::Blurred
+    } else if config.window.opacity < 1.0 {
+        WindowBackgroundAppearance::Transparent
+    } else {
+        WindowBackgroundAppearance::Opaque
+    }
 }

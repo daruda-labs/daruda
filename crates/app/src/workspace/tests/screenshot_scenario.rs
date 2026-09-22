@@ -115,7 +115,7 @@ async fn drive_client_chrome_switches_the_window_chrome(cx: &mut TestAppContext)
 }
 
 #[gpui::test]
-async fn drive_settings_opens_settings_window(cx: &mut TestAppContext) {
+async fn drive_settings_shows_the_settings_view(cx: &mut TestAppContext) {
     let (window_handle, workspace) = build_workspace(cx);
 
     cx.update_window(window_handle.into(), |_, window, cx| {
@@ -125,41 +125,36 @@ async fn drive_settings_opens_settings_window(cx: &mut TestAppContext) {
             window,
             cx,
         );
+        assert!(
+            workspace.read(cx).settings.is_some(),
+            "settings scenario should put the Settings view on screen",
+        );
     })
     .unwrap();
-
-    cx.update(|cx| {
-        assert!(
-            crate::window_registry::WindowRegistry::settings(cx).is_some(),
-            "settings scenario should open the Settings window",
-        );
-    });
 }
 
 /// The banner seed is the whole point of this scenario, and the only thing
-/// that could quietly drop it is the settings window not being in the registry
-/// by the time `drive` looks — which is exactly what the `SILENT-OK` there
-/// assumes cannot happen.
+/// that could quietly drop it is the view not being on screen by the time
+/// `drive` reaches for it.
 #[gpui::test]
 async fn drive_settings_error_raises_the_banner(cx: &mut TestAppContext) {
     let (window_handle, workspace) = build_workspace(cx);
 
     cx.update_window(window_handle.into(), |_, window, cx| {
         drive(ScreenshotScenario::SettingsError, &workspace, window, cx);
-    })
-    .unwrap();
-
-    cx.update(|cx| {
-        let settings = crate::window_registry::WindowRegistry::settings(cx)
-            .expect("settings-error scenario should open the Settings window");
-        let banner = settings
-            .update(cx, |this, _window, _cx| this.error_for_test().cloned())
-            .expect("settings window is live");
+        let view = workspace
+            .read(cx)
+            .settings
+            .as_ref()
+            .expect("settings-error scenario should put the Settings view on screen")
+            .view
+            .clone();
         assert!(
-            banner.is_some(),
+            view.read(cx).error_for_test().is_some(),
             "the scenario must leave a banner for the capture to show"
         );
-    });
+    })
+    .unwrap();
 }
 
 /// The one hazard in the long-label seed: it must swap the *label* of a real

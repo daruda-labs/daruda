@@ -436,7 +436,7 @@ impl Workspace {
     pub(in crate::workspace) fn on_open_settings(
         &mut self,
         action: &OpenSettings,
-        _window: &mut Window,
+        window: &mut Window,
         cx: &mut Context<Self>,
     ) {
         // Refresh how each account signed in before the rows that show it are
@@ -444,7 +444,7 @@ impl Workspace {
         // look, and the reading costs a process spawn — so it is taken here
         // rather than polled.
         self.probe_auth_statuses(cx);
-        crate::windows::open_settings_window(action.0, cx);
+        self.open_settings(action.0, window, cx);
     }
 
     // ---- Command history picker (Cmd+Shift+H) ----

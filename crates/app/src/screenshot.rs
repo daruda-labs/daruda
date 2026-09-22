@@ -197,10 +197,9 @@ pub(crate) fn schedule_capture(
         // The scenario is applied once; the theme loop then re-themes the open
         // overlay in place (`apply_ui_theme` refreshes every window), so a batch
         // never needs to tear down and re-open the overlay between captures.
-        let target = match scenario {
-            Some(scenario) => cx.update(|cx| apply_scenario(scenario, cx)),
-            None => None,
-        };
+        if let Some(scenario) = scenario {
+            cx.update(|cx| apply_scenario(scenario, cx));
+        }
 
         // No `--screenshot-theme` → one capture with whatever theme is live.
         let steps: Vec<Option<ScreenshotTheme>> = if themes.is_empty() {
@@ -219,14 +218,14 @@ pub(crate) fn schedule_capture(
                 });
             }
             if let Some(win_size) = win_size {
-                cx.update(|cx| resize_target(target, win_size, cx));
+                cx.update(|cx| resize_target(win_size, cx));
             }
             // Let the theme swap / resize / scenario overlay paint before
             // capture (`render_to_image` reads the last painted frame).
             cx.background_executor().timer(SCENARIO_RENDER_DELAY).await;
             // Then one more, so anything that only settles on the frame after
             // it was measured is what the capture reads.
-            cx.update(|cx| force_repaint(target, cx));
+            cx.update(|cx| force_repaint(cx));
             cx.background_executor().timer(SCENARIO_RENDER_DELAY).await;
 
             let out = match theme {
@@ -234,7 +233,7 @@ pub(crate) fn schedule_capture(
                 _ => path.clone(),
             };
             // AsyncApp::update is infallible; the inner Result is the capture's.
-            let outcome = cx.update(|cx| capture_window(target, &out, cx));
+            let outcome = cx.update(|cx| capture_window(&out, cx));
             match outcome {
                 Ok(()) => println!("screenshot written: {}", out.display()),
                 Err(error) => println!("screenshot failed: {error:#}"),
@@ -399,7 +398,7 @@ pub(crate) fn schedule_terminal_widen_capture(path: PathBuf, cx: &mut App) {
         scroll_seam(cx);
         settle(cx).await;
         report(cx, "widen");
-        match cx.update(|cx| capture_window(Some(window.into()), &widen_path, cx)) {
+        match cx.update(|cx| capture_window_on(window.into(), &widen_path, cx)) {
             Ok(()) => println!("screenshot written: {}", widen_path.display()),
             Err(e) => println!("screenshot failed: {e:#}"),
         }
@@ -414,7 +413,7 @@ pub(crate) fn schedule_terminal_widen_capture(path: PathBuf, cx: &mut App) {
         scroll_seam(cx);
         settle(cx).await;
         report(cx, "narrow");
-        match cx.update(|cx| capture_window(Some(window.into()), &narrow_path, cx)) {
+        match cx.update(|cx| capture_window_on(window.into(), &narrow_path, cx)) {
             Ok(()) => println!("screenshot written: {}", narrow_path.display()),
             Err(e) => println!("screenshot failed: {e:#}"),
         }
@@ -432,7 +431,7 @@ pub(crate) fn schedule_terminal_widen_capture(path: PathBuf, cx: &mut App) {
         settle(cx).await;
         report(cx, "roundtrip");
         let roundtrip_path = derive_path(&path, "roundtrip");
-        match cx.update(|cx| capture_window(Some(window.into()), &roundtrip_path, cx)) {
+        match cx.update(|cx| capture_window_on(window.into(), &roundtrip_path, cx)) {
             Ok(()) => println!("screenshot written: {}", roundtrip_path.display()),
             Err(e) => println!("screenshot failed: {e:#}"),
         }
@@ -442,18 +441,17 @@ pub(crate) fn schedule_terminal_widen_capture(path: PathBuf, cx: &mut App) {
     .detach();
 }
 
-/// Resolve which window a capture step acts on: the scenario's own window when
-/// it opened one (Settings), else the first open window — the restored
-/// workspace, empty or not. Every step here has to agree on this, so
-/// the fallback lives in one place.
-fn capture_target(target: Option<AnyWindowHandle>, cx: &mut App) -> Option<AnyWindowHandle> {
-    target.or_else(|| cx.windows().into_iter().next())
+/// The window every capture step acts on: the first open one — the restored
+/// workspace, empty or not. Every scenario now drives that same window, so
+/// there is nothing left to choose between.
+fn capture_target(cx: &mut App) -> Option<AnyWindowHandle> {
+    cx.windows().into_iter().next()
 }
 
-/// Resize the capture target window (or the first window when `None`) and
-/// force a repaint so the new bounds are reflected in the captured frame.
-fn resize_target(target: Option<AnyWindowHandle>, win_size: Size<Pixels>, cx: &mut App) {
-    let Some(handle) = capture_target(target, cx) else {
+/// Resize the capture target and force a repaint so the new bounds are
+/// reflected in the captured frame.
+fn resize_target(win_size: Size<Pixels>, cx: &mut App) {
+    let Some(handle) = capture_target(cx) else {
         return;
     };
     crate::windows::try_update_workspace_window(
@@ -474,8 +472,8 @@ fn resize_target(target: Option<AnyWindowHandle>, win_size: Size<Pixels>, cx: &m
 /// size, and gpui drops a `notify` raised inside a draw phase, so the state it
 /// derives lands one frame late. A live window gets that frame from the display
 /// link; an offscreen capture gets no ticks at all, so it has to ask.
-fn force_repaint(target: Option<AnyWindowHandle>, cx: &mut App) {
-    let Some(handle) = capture_target(target, cx) else {
+fn force_repaint(cx: &mut App) {
+    let Some(handle) = capture_target(cx) else {
         return;
     };
     crate::windows::try_update_workspace_window(
@@ -486,14 +484,12 @@ fn force_repaint(target: Option<AnyWindowHandle>, cx: &mut App) {
     );
 }
 
-/// Drive `scenario` into view on the workspace window, returning the window to
-/// capture when the scenario opens its own (Settings); `None` falls back to the
-/// first open window. Logs and skips when no workspace is open (e.g. only the
-/// screen) so the capture still proceeds.
-fn apply_scenario(scenario: ScreenshotScenario, cx: &mut App) -> Option<AnyWindowHandle> {
+/// Drive `scenario` into view on the workspace window. Logs and skips when no
+/// workspace is open (e.g. only the screen) so the capture still proceeds.
+fn apply_scenario(scenario: ScreenshotScenario, cx: &mut App) {
     let Some((handle, weak)) = crate::window_registry::WindowRegistry::first_workspace(cx) else {
         println!("screenshot scenario skipped: no workspace window");
-        return None;
+        return;
     };
     crate::windows::try_update_workspace_window(
         handle,
@@ -511,64 +507,17 @@ fn apply_scenario(scenario: ScreenshotScenario, cx: &mut App) -> Option<AnyWindo
             window.refresh();
         },
     );
-    // Settings is a separate window; capture it instead of the workspace.
-    match scenario {
-        ScreenshotScenario::Settings(_)
-        | ScreenshotScenario::SettingsError
-        | ScreenshotScenario::ClientChromeSettings => {
-            crate::window_registry::WindowRegistry::settings_window(cx)
-        }
-        ScreenshotScenario::ClientChrome
-        | ScreenshotScenario::CommandPalette
-        | ScreenshotScenario::LaneSwitcher
-        | ScreenshotScenario::ErrorModal
-        | ScreenshotScenario::Toast
-        | ScreenshotScenario::ScratchTab
-        | ScreenshotScenario::Landing
-        | ScreenshotScenario::PaneContextMenu
-        | ScreenshotScenario::MermaidLightbox
-        | ScreenshotScenario::FlowGraph
-        | ScreenshotScenario::FlowGraphRunning
-        | ScreenshotScenario::FlowGraphForm
-        | ScreenshotScenario::FlowGraphFormRefused
-        | ScreenshotScenario::FlowGraphPinned
-        | ScreenshotScenario::FlowGraphAuthoring
-        | ScreenshotScenario::FlowPicker
-        | ScreenshotScenario::FlowProfilePicker
-        | ScreenshotScenario::FlowResumable
-        | ScreenshotScenario::FlowRunning
-        | ScreenshotScenario::FlowAsking
-        | ScreenshotScenario::FlowDeleteConfirm
-        | ScreenshotScenario::AgentChatFailure
-        | ScreenshotScenario::AgentChatTransportClosed
-        | ScreenshotScenario::AgentChatPreparationFailure(_)
-        | ScreenshotScenario::AgentChatEmpty
-        | ScreenshotScenario::AgentChat
-        | ScreenshotScenario::OrchestratorChip
-        | ScreenshotScenario::OrchestratorTab
-        | ScreenshotScenario::AgentChatWorking
-        | ScreenshotScenario::AgentChatNarrowed
-        | ScreenshotScenario::AgentChatFold
-        | ScreenshotScenario::AgentChatInterrupted
-        | ScreenshotScenario::AgentChatQueueParked
-        | ScreenshotScenario::AgentChatQueueArmed
-        | ScreenshotScenario::AgentChatSoleReply
-        | ScreenshotScenario::AgentChatRunningTool
-        | ScreenshotScenario::AgentChatPlan
-        | ScreenshotScenario::AgentChatPlanStopped
-        | ScreenshotScenario::AgentChatTail
-        | ScreenshotScenario::AgentChatTailOpen
-        | ScreenshotScenario::AgentChatGroupTail
-        | ScreenshotScenario::AgentChatGroupTailOpen
-        | ScreenshotScenario::AgentChatSubagentTail
-        | ScreenshotScenario::AgentChatSubagentTailOpen
-        | ScreenshotScenario::AgentChatOptions(_) => None,
-    }
 }
 
-/// Render `target` (or the first open window when `None`) to `path` as a PNG.
-fn capture_window(target: Option<AnyWindowHandle>, path: &Path, cx: &mut App) -> Result<()> {
-    let window = capture_target(target, cx).context("no open window to capture")?;
+/// Render the capture target to `path` as a PNG.
+fn capture_window(path: &Path, cx: &mut App) -> Result<()> {
+    let window = capture_target(cx).context("no open window to capture")?;
+    capture_window_on(window, path, cx)
+}
+
+/// Render a named window to `path`. The widen-reflow harness opens its own
+/// window rather than driving the restored workspace, so it says which.
+fn capture_window_on(window: AnyWindowHandle, path: &Path, cx: &mut App) -> Result<()> {
     let image = cx
         .update_window(window, |_, window, _| window.render_to_image())
         .context("capture window is gone")??;

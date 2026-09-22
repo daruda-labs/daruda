@@ -63,6 +63,7 @@ mod right_dock;
 mod root_menu;
 #[cfg(feature = "screenshot")]
 pub(crate) mod screenshot_scenario;
+mod settings_ops;
 mod spawn_helpers;
 pub(crate) mod status_bar;
 mod status_bar_ops;
@@ -440,6 +441,10 @@ pub struct Workspace {
     pub(in crate::workspace) bottom_dock: gpui::Entity<layout::Dock>,
     /// Right dock (file explorer, git changes).
     pub(in crate::workspace) right_dock: gpui::Entity<layout::Dock>,
+    /// The Settings view this window is showing, if any. `Some` *is* settings
+    /// mode: it swaps the body and gates the workspace actions, so there is no
+    /// separate flag to disagree with it.
+    pub(in crate::workspace) settings: Option<settings_ops::SettingsHost>,
     /// Command palette state (Cmd+Shift+P).
     pub(in crate::workspace) command_palette: command::palette::CommandPaletteState,
     /// Lane switcher state (Cmd+P) — fuzzy quick-switch across every
@@ -1258,6 +1263,7 @@ impl Workspace {
                     d
                 })
             },
+            settings: None,
             command_palette: command::palette::CommandPaletteState::default(),
             lane_switcher: command::lane_switcher::LaneSwitcherState::default(),
             flow_picker: command::flow_picker::FlowPicker::default(),

@@ -198,14 +198,6 @@ pub(crate) fn register_global_actions(cx: &mut App, config: std::sync::Arc<darud
         cx.quit();
     });
 
-    // Fallback for a window with no Workspace in its dispatch path — the
-    // Settings window itself. A focused Workspace
-    // answers first and keeps its auth-status probe; this runs after.
-    cx.on_action(|action: &OpenSettings, cx: &mut App| {
-        crate::windows::open_settings_window(action.0, cx);
-        cx.stop_propagation();
-    });
-
     // Close fallback for a window with no Workspace — Settings
     // has no dirty state to guard, so closing is unconditional. A focused
     // Workspace answers first and runs its dirty-draft prompt instead.
@@ -342,47 +334,6 @@ pub(crate) fn register_global_actions(cx: &mut App, config: std::sync::Arc<darud
 #[cfg(test)]
 mod tests {
     use gpui::Keystroke;
-
-    /// Root view for a window that is not a `Workspace` — the shape the
-    /// Settings window presents to action dispatch.
-    struct NoWorkspaceRoot;
-
-    impl gpui::Render for NoWorkspaceRoot {
-        fn render(
-            &mut self,
-            _window: &mut gpui::Window,
-            _cx: &mut gpui::Context<Self>,
-        ) -> impl gpui::IntoElement {
-            gpui::div()
-        }
-    }
-
-    /// Such a window has no `OpenSettings` listener in its dispatch path, so
-    /// without the global fallback it would have no way into Settings at all
-    /// off macOS — where gpui draws no menu bar.
-    #[gpui::test]
-    async fn open_settings_reaches_a_window_with_no_workspace(cx: &mut gpui::TestAppContext) {
-        crate::test_support::init_gpui_component(cx);
-        cx.update(|cx| {
-            super::register_global_actions(
-                cx,
-                std::sync::Arc::new(daruda_config::Config::default()),
-            );
-        });
-
-        let window = cx.add_window(|_window, _cx| NoWorkspaceRoot);
-        cx.dispatch_action(
-            window.into(),
-            crate::workspace::OpenSettings(daruda_config::BuiltinSection::default()),
-        );
-
-        cx.update(|cx| {
-            assert!(
-                crate::window_registry::WindowRegistry::settings(cx).is_some(),
-                "a window with no Workspace could not reach Settings",
-            );
-        });
-    }
 
     /// The catalogue, read rather than listed.
     ///

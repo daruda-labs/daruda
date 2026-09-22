@@ -100,7 +100,7 @@ impl SettingsView {
             cx.background_executor()
                 .timer(TELEGRAM_PAIR_COPY_LABEL_DURATION)
                 .await;
-            // SILENT-OK: settings window may close before the revert timer fires
+            // SILENT-OK: the settings view may go away before the revert timer fires
             let _ = this.update(cx, |this, cx| {
                 if slot(this).copied {
                     slot(this).copied = false;

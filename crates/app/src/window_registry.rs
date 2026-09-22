@@ -7,33 +7,9 @@
 
 use std::collections::HashSet;
 
-use gpui::{AnyWindowHandle, App, AppContext, Context, Global, WeakEntity, Window};
+use gpui::{AnyWindowHandle, App, AppContext, Global, WeakEntity};
 
-use crate::settings::SettingsView;
 use crate::workspace::Workspace;
-
-/// Settings singleton handle; stores the inner entity because the window root
-/// is `gpui_component::Root`, not `SettingsView`.
-#[derive(Clone)]
-pub(crate) struct SettingsHandle {
-    window: AnyWindowHandle,
-    inner: WeakEntity<SettingsView>,
-}
-
-impl SettingsHandle {
-    /// Run `f` against the live `SettingsView`; `None` means reopen it.
-    pub(crate) fn update<R>(
-        &self,
-        cx: &mut App,
-        f: impl FnOnce(&mut SettingsView, &mut Window, &mut Context<SettingsView>) -> R,
-    ) -> Option<R> {
-        let inner = self.inner.upgrade()?;
-        cx.update_window(self.window, |_root, window, cx_w| {
-            inner.update(cx_w, |this, cx| f(this, window, cx))
-        })
-        .ok()
-    }
-}
 
 /// GPUI global mapping open windows to their typed workspace/singleton entity.
 /// `Default` lets tests and production paths create it lazily via
@@ -41,7 +17,6 @@ impl SettingsHandle {
 #[derive(Default)]
 pub(crate) struct WindowRegistry {
     workspaces: Vec<(AnyWindowHandle, WeakEntity<Workspace>)>,
-    settings: Option<SettingsHandle>,
     /// The workspace hosting the app-global orchestrator session.
     orchestrator: Option<(AnyWindowHandle, WeakEntity<Workspace>)>,
 }
@@ -261,27 +236,6 @@ impl WindowRegistry {
         cx.try_global::<WindowRegistry>()?.orchestrator.clone()
     }
 
-    /// Record the live Settings singleton.
-    pub(crate) fn register_settings(
-        window: AnyWindowHandle,
-        inner: WeakEntity<SettingsView>,
-        cx: &mut App,
-    ) {
-        cx.default_global::<WindowRegistry>().settings = Some(SettingsHandle { window, inner });
-    }
-
-    /// Drop the Settings singleton entry from its `cx.on_release` hook.
-    pub(crate) fn clear_settings(cx: &mut App) {
-        if cx.try_global::<WindowRegistry>().is_some() {
-            cx.global_mut::<WindowRegistry>().settings = None;
-        }
-    }
-
-    /// Return the open Settings handle, if any.
-    pub(crate) fn settings(cx: &App) -> Option<SettingsHandle> {
-        cx.try_global::<WindowRegistry>()?.settings.clone()
-    }
-
     /// Look up the window that owns a workspace entity.
     pub(crate) fn handle_for_workspace(
         entity_id: gpui::EntityId,
@@ -305,15 +259,6 @@ impl WindowRegistry {
             .iter()
             .find(|(h, _)| *h == handle)
             .map(|(_, weak)| weak.clone())
-    }
-
-    /// Return the open Settings window handle, if any.
-    #[cfg(feature = "screenshot")]
-    pub(crate) fn settings_window(cx: &App) -> Option<AnyWindowHandle> {
-        cx.try_global::<WindowRegistry>()?
-            .settings
-            .as_ref()
-            .map(|h| h.window)
     }
 }
 

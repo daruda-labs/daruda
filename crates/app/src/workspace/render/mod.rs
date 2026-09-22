@@ -1351,7 +1351,22 @@ impl Render for Workspace {
             .flex()
             .flex_col()
             .child(title_bar)
-            .child(body_layout)
+            // Settings replaces the whole body — docks included. Its own
+            // sidebar does the job the left dock would, and the form needs the
+            // width. `.cached()` is safe because the view notifies itself on
+            // every edit (Pitfall 10), so terminal output repainting the
+            // workspace does not rebuild the form.
+            .child(match self.settings.as_ref() {
+                Some(host) => gpui::AnyView::from(host.view.clone())
+                    .cached(
+                        gpui::StyleRefinement::default()
+                            .flex_1()
+                            .w_full()
+                            .overflow_hidden(),
+                    )
+                    .into_any_element(),
+                None => body_layout.into_any_element(),
+            })
             .child(status_bar)
             // Toast overlay paints last so it floats above the status
             // bar. ToastLayer owns its queue, expiry sweep, and render;

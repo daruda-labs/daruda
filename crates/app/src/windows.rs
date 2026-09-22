@@ -14,7 +14,6 @@ use gpui::{
     WindowOptions, point, prelude::*, px,
 };
 
-use crate::settings::SettingsView;
 use crate::window_registry::WindowRegistry;
 use crate::workspace::Workspace;
 
@@ -672,46 +671,6 @@ pub(crate) fn open_project_with_mode(
         });
     })
     .detach();
-}
-
-/// Open the Settings window on `section`. If a Settings window is
-/// already open, bring it to the front and route through
-/// `SettingsView::focus_section` to switch the active page instead
-/// of opening a second one.
-pub(crate) fn open_settings_window(section: daruda_config::BuiltinSection, cx: &mut App) {
-    if let Some(sh) = WindowRegistry::settings(cx) {
-        sh.update(cx, move |this, window, cx| {
-            this.focus_section(section, window, cx);
-            window.activate_window();
-        });
-        return;
-    }
-
-    let opts = WindowOptions {
-        titlebar: Some(build_titlebar_options()),
-        window_bounds: Some(WindowBounds::Windowed(Bounds::new(
-            Point::new(
-                px(crate::ui::theme::SETTINGS_WINDOW_ORIGIN_X),
-                px(crate::ui::theme::SETTINGS_WINDOW_ORIGIN_Y),
-            ),
-            Size::new(
-                px(crate::ui::theme::SETTINGS_WINDOW_W),
-                px(crate::ui::theme::SETTINGS_WINDOW_H),
-            ),
-        ))),
-        ..Default::default()
-    };
-
-    // The Settings window root is `gpui_component::Root` because the form
-    // renders `gpui_component::Input` text fields, whose `TextElement::paint`
-    // calls `Root::read` and panics if the root view is not a `Root`. The
-    // inner `SettingsView` entity registers itself in `WindowRegistry` via
-    // its constructor so the singleton-focus path above can reach it.
-    cx.open_window(opts, |window, cx| {
-        let settings = cx.new(|cx| SettingsView::new_with_section(section, window, cx));
-        cx.new(|cx| gpui_component::Root::new(settings, window, cx))
-    })
-    .unwrap();
 }
 
 /// Close every currently-open Workspace window. Runs on the next

@@ -38,6 +38,7 @@ mod regression_namespace;
 mod restore_from_disk;
 #[cfg(feature = "screenshot")]
 mod screenshot_scenario;
+mod settings_view;
 mod snapshot_for_disk;
 mod splits;
 mod tab_drag;

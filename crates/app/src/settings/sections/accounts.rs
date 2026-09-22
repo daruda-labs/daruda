@@ -1,4 +1,4 @@
-//! Accounts section of the Settings window — one block per auth domain
+//! Accounts section of Settings — one block per auth domain
 //! (`AccountRecipeId`), each listing a "System" row plus that domain's
 //! managed accounts, with the per-domain default and delete/add/reauth
 //! actions. Visual language mirrors the Agent-catalog section's bordered row

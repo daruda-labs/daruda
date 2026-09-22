@@ -771,6 +771,7 @@ git:
 # Settings panel
 settings:
   title: "설정"
+  back: "워크스페이스로 돌아가기"
   external_change: "%{path} 설정이 외부에서 변경되었습니다. 유지할 값을 선택하세요."
   use_external_value: "외부 값 사용"
   overwrite_external_value: "내 값으로 덮어쓰기"

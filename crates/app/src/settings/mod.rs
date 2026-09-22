@@ -1,8 +1,12 @@
-//! Singleton settings window for common daruda config options.
+//! The settings surface for common daruda config options.
 //!
-//! Reopening routes through [`SettingsView::focus_section`] instead of
-//! spawning a duplicate. Builtin sections pair a `BuiltinSection` variant with
-//! nav/header strings and a `render_<section>` method.
+//! Hosted by a `Workspace` in place of its body, one per window; re-opening an
+//! already-open one routes through [`SettingsView::focus_section`] instead of
+//! building a second. Builtin sections pair a `BuiltinSection` variant with
+//! nav/header strings and a `render_<section>` method. The view draws no
+//! chrome of its own — the host window owns the title bar — and asks to be
+//! dismissed by emitting [`SettingsEvent::Close`] rather than acting on the
+//! window itself.
 
 mod render;
 mod sections;
@@ -16,8 +20,8 @@ use std::collections::{HashMap, HashSet};
 use crate::ui::theme;
 use daruda_config::BuiltinSection;
 use gpui::{
-    Context, Entity, FocusHandle, Focusable as _, IntoElement, SharedString, Subscription, Task,
-    Window, WindowBackgroundAppearance, div, prelude::*, px,
+    Context, Entity, EventEmitter, FocusHandle, Focusable as _, IntoElement, SharedString,
+    Subscription, Task, Window, div, prelude::*, px,
 };
 
 use crate::lane::session_host;
@@ -27,7 +31,6 @@ use crate::transcript::editor::state::FoldEditorState;
 use crate::transcript::fold_mode::FoldMode;
 use crate::ui::select::{self, SelectOption, SelectState};
 use crate::ui::{InputEvent, InputState};
-use crate::window_registry::WindowRegistry;
 use daruda_store::observability::error_report::{ErrorReport, ErrorSeverity};
 use daruda_store::observability::log_writer::LogWriter;
 
@@ -66,6 +69,16 @@ impl CopyFeedback {
         self.copied
     }
 }
+
+/// What the view asks of whichever `Workspace` is showing it. Kept as an
+/// event rather than a handle so this module never points back at
+/// `crate::workspace` — the dependency runs one way.
+pub enum SettingsEvent {
+    /// The user is done: Escape, or the sidebar's back button.
+    Close,
+}
+
+impl EventEmitter<SettingsEvent> for SettingsView {}
 
 pub struct SettingsView {
     panel_focus_handle: FocusHandle,
@@ -1819,28 +1832,13 @@ impl SettingsView {
         })
         .detach();
 
-        // Track this window in the WindowRegistry so `open_settings_window`
-        // can raise it instead of opening a second copy. The window's root
-        // view is `gpui_component::Root` (the SettingsView needs Root in
-        // the tree so `gpui_component::Input::TextElement::paint` can call
-        // `Root::read` without panicking), so the registry stores a typed
-        // `SettingsHandle` that bundles the window handle with a
-        // `WeakEntity<SettingsView>` to recover the inner entity.
-        let weak = cx.entity().downgrade();
-        let window_handle = window.window_handle();
-        WindowRegistry::register_settings(window_handle, weak, cx);
-        cx.on_release(move |_: &mut SettingsView, cx: &mut gpui::App| {
-            WindowRegistry::clear_settings(cx);
-        })
-        .detach();
-
         result
     }
 
     /// Switch the active page and (when applicable) land focus on the
-    /// section's natural starting field. Called both by sidebar clicks
-    /// and by `windows::open_settings_window` when a second open
-    /// dispatch arrives while a Settings window is already alive.
+    /// section's natural starting field. Called both by sidebar clicks and by
+    /// `Workspace::open_settings` when a second dispatch arrives while this
+    /// view is already up.
     pub fn focus_section(
         &mut self,
         section: BuiltinSection,
@@ -1871,9 +1869,11 @@ impl SettingsView {
         self.active_section
     }
 
+    /// Ask the host to take this view down. The host decides what that means;
+    /// the view only guarantees it leaves no edit behind.
     fn dismiss(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.commit_pending_edits(window, cx);
-        window.remove_window();
+        cx.emit(SettingsEvent::Close);
     }
 
     /// Commit every text input holding something other than what the live
@@ -2695,17 +2695,6 @@ impl SettingsView {
             .text_color(theme::current(cx).text_muted)
             .mt(px(theme::MODAL_FOOTER_MARGIN_TOP))
             .child(label.into())
-    }
-}
-
-/// Map config window settings to the GPUI window background appearance.
-pub(crate) fn window_background_for(config: &daruda_config::Config) -> WindowBackgroundAppearance {
-    if config.window.blur {
-        WindowBackgroundAppearance::Blurred
-    } else if config.window.opacity < 1.0 {
-        WindowBackgroundAppearance::Transparent
-    } else {
-        WindowBackgroundAppearance::Opaque
     }
 }
 
