@@ -159,12 +159,22 @@ fn a_cyclic_parent_link_does_not_hang_the_index() {
     assert!(index.keeps_tool(&tool_of(&items, "b")));
 }
 
-/// Guard against per-key rescans by checking growth when one turn doubles.
+/// Guard against per-key rescans by checking growth when one turn grows.
+///
+/// Eight times, not twice: the linear-to-quadratic gap widens with the size
+/// ratio (8 against 64, not 2 against 4), and a shared runner moves a
+/// measurement by more than the narrow gap holds. Under a concurrent suite,
+/// doubling read 2.02 against a 2.6 bar; eight-fold read 8.97 against 22.
 #[test]
 fn a_long_single_turn_of_cycles_stays_linear() {
     const N: usize = 250;
+    const GROWTH: usize = 8;
+    /// Geometric mean of linear (`GROWTH`) and quadratic (`GROWTH²`), so the
+    /// bar sits as far from a passing measurement as from a failing one.
+    const RATIO_BAR: f64 = 22.0;
+
     let small = one_turn_of_cycles(N);
-    let large = one_turn_of_cycles(N * 2);
+    let large = one_turn_of_cycles(N * GROWTH);
 
     let groups = |rows: &[RenderRow]| {
         rows.iter()
@@ -183,15 +193,15 @@ fn a_long_single_turn_of_cycles_stays_linear() {
     };
     // Interleave sizes and keep minima to reduce scheduler-noise sensitivity.
     let (mut t1, mut t2) = (std::time::Duration::MAX, std::time::Duration::MAX);
-    for _ in 0..40 {
+    for _ in 0..10 {
         t1 = t1.min(sample(&small));
         t2 = t2.min(sample(&large));
     }
     let ratio = t2.as_secs_f64() / t1.as_secs_f64();
     assert!(
-        ratio < 2.6,
-        "doubling a single turn cost {ratio:.2}× ({t1:?} -> {t2:?}) — \
-         the per-key rescan is back"
+        ratio < RATIO_BAR,
+        "growing a single turn {GROWTH}-fold cost {ratio:.2}× ({t1:?} -> {t2:?}) \
+         — the per-key rescan is back"
     );
 }
 
