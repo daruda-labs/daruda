@@ -744,24 +744,27 @@ fn pending_permissions_bound_evicts_oldest_entries() {
     assert_eq!(result.answer_callback_id, Some("cbq-evicted".to_string()));
 }
 
+/// The pair is built forwards, never by subtracting from `now`: an `Instant`
+/// is measured from boot, so `now - 20min` panics outright on a host that has
+/// been up for less than that. A fresh CI runner is exactly such a host.
 #[test]
 fn pair_code_expired_not_yet_expired() {
-    let now = std::time::Instant::now();
-    let generated_at = now - std::time::Duration::from_secs(1);
+    let generated_at = std::time::Instant::now();
+    let now = generated_at + std::time::Duration::from_secs(1);
     assert!(!pair_code_expired(generated_at, now, PAIR_CODE_TTL));
 }
 
 #[test]
 fn pair_code_expired_at_exact_boundary() {
-    let now = std::time::Instant::now();
-    let generated_at = now - PAIR_CODE_TTL;
+    let generated_at = std::time::Instant::now();
+    let now = generated_at + PAIR_CODE_TTL;
     assert!(pair_code_expired(generated_at, now, PAIR_CODE_TTL));
 }
 
 #[test]
 fn pair_code_expired_well_past_ttl() {
-    let now = std::time::Instant::now();
-    let generated_at = now - (PAIR_CODE_TTL * 2);
+    let generated_at = std::time::Instant::now();
+    let now = generated_at + PAIR_CODE_TTL * 2;
     assert!(pair_code_expired(generated_at, now, PAIR_CODE_TTL));
 }
 
