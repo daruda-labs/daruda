@@ -34,7 +34,7 @@ fn output_with_timeout(
         .stderr(Stdio::piped())
         .kill_on_drop(true)
         .spawn()?;
-    let mut group = ProcessGroup(Some(child.id()));
+    let mut group = ProcessGroup(Some(daruda_core::process::Group::adopt(child.id())));
     smol::block_on(async {
         let stdout = child.stdout.take().expect("piped stdout");
         let stderr = child.stderr.take().expect("piped stderr");
@@ -82,14 +82,14 @@ fn output_with_timeout(
     })
 }
 
-struct ProcessGroup(Option<u32>);
+struct ProcessGroup(Option<daruda_core::process::Group>);
 
 impl ProcessGroup {
     fn kill(&mut self) {
-        // Taking the pid disarms the guard: the child is unreaped while this
-        // runs, which is what makes the id still ours to name.
-        if let Some(pid) = self.0.take() {
-            daruda_core::process::kill_tree(pid);
+        // Taking the group disarms the guard: the child is unreaped while
+        // this runs, which is what makes the id still ours to name.
+        if let Some(group) = self.0.take() {
+            group.kill_tree();
         }
     }
 }

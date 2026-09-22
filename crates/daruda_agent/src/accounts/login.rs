@@ -230,6 +230,9 @@ where
 #[derive(Debug)]
 pub struct LoginProcess {
     child: Arc<Mutex<Child>>,
+    /// The child's tear-down handle. Held rather than derived from the pid:
+    /// Windows needs a job object that exists before the descendants do.
+    group: Arc<daruda_core::process::Group>,
     /// Set once the child has been reaped, so a concurrent cancel knows its
     /// pid is no longer this process's to name.
     reaped: Arc<AtomicBool>,
@@ -246,6 +249,7 @@ pub struct LoginProcess {
 #[derive(Debug, Clone)]
 pub struct LoginProcessHandle {
     child: Arc<Mutex<Child>>,
+    group: Arc<daruda_core::process::Group>,
     reaped: Arc<AtomicBool>,
 }
 
@@ -269,7 +273,7 @@ impl LoginProcessHandle {
             // precisely when the descendants need the signal. A zombie keeps
             // its pid until we reap it, so the group id stays ours to name.
             if !self.reaped.load(Ordering::Acquire) {
-                daruda_core::process::kill_tree(child.id());
+                self.group.kill_tree();
             }
             let _ = child.kill();
         }
@@ -320,6 +324,7 @@ pub fn spawn_login(
     spawn_drain(stderr, Arc::clone(&stderr_buf));
 
     Ok(LoginProcess {
+        group: Arc::new(daruda_core::process::Group::adopt(child.id())),
         child: Arc::new(Mutex::new(child)),
         reaped: Arc::new(AtomicBool::new(false)),
         stdout_buf,
@@ -385,6 +390,7 @@ impl LoginProcess {
     pub fn cancel(&self) {
         LoginProcessHandle {
             child: Arc::clone(&self.child),
+            group: Arc::clone(&self.group),
             reaped: Arc::clone(&self.reaped),
         }
         .cancel();
@@ -399,6 +405,7 @@ impl LoginProcess {
     pub fn handle(&self) -> LoginProcessHandle {
         LoginProcessHandle {
             child: Arc::clone(&self.child),
+            group: Arc::clone(&self.group),
             reaped: Arc::clone(&self.reaped),
         }
     }

@@ -15,7 +15,7 @@
 # | Instead of                    | Call                                  |
 # |-------------------------------|---------------------------------------|
 # | `Command::new`                | `daruda_core::process::command`        |
-# | `libc::kill*` / `process_group`| `daruda_core::process::{lead_own_group,kill_tree}` |
+# | `libc::kill*` / `process_group`| `daruda_core::process::{lead_own_group,Group}`      |
 # | `fs::canonicalize`            | `daruda_core::path::canonicalize`      |
 # | `env::var("SHELL")`           | `daruda_core::shell::interactive`      |
 # | `std::os::unix::fs::symlink`  | `daruda_core::path::symlink`           |
@@ -157,7 +157,7 @@ for file in "${FILES[@]}"; do
             print "$ARGV:$.: Command::new -> daruda_core::process::command\n";
         }
         if (/\blibc::(kill|killpg)\b/) {
-            print "$ARGV:$.: libc kill -> daruda_core::process::kill_tree\n";
+            print "$ARGV:$.: libc kill -> daruda_core::process::Group::kill_tree\n";
         }
         if (/\bprocess_group\s*\(/) {
             print "$ARGV:$.: process_group -> daruda_core::process::lead_own_group\n";

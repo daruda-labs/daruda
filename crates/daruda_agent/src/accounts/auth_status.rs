@@ -147,11 +147,11 @@ fn field(v: &serde_json::Value, names: &[&str]) -> Option<String> {
 ///
 /// Only call this where the child is known unreaped — the deadline path. A
 /// caller that cannot tell must kill the direct child instead; see the
-/// contract on [`daruda_core::process::kill_tree`].
-fn kill_probe_tree(child: &mut std::process::Child) {
+/// contract on [`daruda_core::process::Group::adopt`].
+fn kill_probe_tree(group: &daruda_core::process::Group, child: &mut std::process::Child) {
     // Unreaped — the `wait` below is the reap — so the pid is still this
-    // process's to name, which is what `kill_tree` requires.
-    daruda_core::process::kill_tree(child.id());
+    // process's to name, which is what the group requires.
+    group.kill_tree();
     let _ = child.kill();
     let _ = child.wait();
 }
@@ -194,6 +194,7 @@ pub fn read_auth_status(
     daruda_core::process::lead_own_group(&mut cmd);
 
     let mut child = cmd.spawn().ok()?;
+    let group = daruda_core::process::Group::adopt(child.id());
     let deadline = std::time::Instant::now() + timeout;
     loop {
         match child.try_wait() {
@@ -203,7 +204,7 @@ pub fn read_auth_status(
             // tear it down rather than dropping the handle on a live child.
             //
             // The direct child only. `try_wait` most often fails with ECHILD,
-            // meaning the child was already reaped — and `kill_tree` requires
+            // meaning the child was already reaped — and the group requires
             // an unreaped pid precisely because a reaped one may already name
             // someone else's group.
             Err(_) => {
@@ -213,7 +214,7 @@ pub fn read_auth_status(
             }
         }
         if std::time::Instant::now() >= deadline {
-            kill_probe_tree(&mut child);
+            kill_probe_tree(&group, &mut child);
             return None;
         }
         std::thread::sleep(std::time::Duration::from_millis(25));

@@ -501,7 +501,7 @@ Adding a fourth means adding it to `clippy.toml`'s allow reasoning too.
 | Instead of | Call |
 |---|---|
 | `Command::new` | `daruda_core::process::command` |
-| `libc::kill*` / `process_group` | `daruda_core::process::{lead_own_group, kill_tree}` |
+| `libc::kill*` / `process_group` | `daruda_core::process::{lead_own_group, Group}` |
 | `fs::canonicalize` | `daruda_core::path::{canonicalize, canonicalize_or_self}` |
 | `env::var("SHELL")` | `daruda_core::shell::interactive` |
 | `std::os::unix::fs::symlink` | `daruda_core::path::symlink` |

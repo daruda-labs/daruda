@@ -125,6 +125,7 @@ where
     // to reach those, not just git.
     daruda_core::process::lead_own_group(&mut command);
     let mut child = command.spawn().map_err(GitError::Spawn)?;
+    let group = daruda_core::process::Group::adopt(child.id());
 
     // Drain stdout/stderr concurrently so the child never blocks on a
     // full pipe buffer while we're polling `try_wait`. Each handle
@@ -153,7 +154,7 @@ where
                     // The whole tree, so no helper is left holding the pipes
                     // the drain threads read. Unreaped until the `wait`
                     // below, so the pid is still ours to name.
-                    daruda_core::process::kill_tree(child.id());
+                    group.kill_tree();
                     let _ = child.kill();
                     let _ = child.wait();
                     // Still detached rather than joined: a timeout is already

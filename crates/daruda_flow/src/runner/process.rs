@@ -60,7 +60,7 @@ impl ProcessRunner {
             Ok(child) => child,
             Err(e) => return failed(artifacts, format!("could not run `{run}`: {e}")),
         };
-        let pid = child.id();
+        let group = daruda_core::process::Group::adopt(child.id());
         let started = std::time::Instant::now();
 
         // Scoped so the racing futures are dropped before `child` is used
@@ -84,11 +84,11 @@ impl ProcessRunner {
             }
             Stop::Timeout => {
                 let elapsed = started.elapsed();
-                kill_tree(pid, &mut child).await;
+                kill_tree(&group, &mut child).await;
                 Err(NodeFailure::Timeout { elapsed })
             }
             Stop::Canceled => {
-                kill_tree(pid, &mut child).await;
+                kill_tree(&group, &mut child).await;
                 Err(NodeFailure::SessionError(CANCELED.to_string()))
             }
         };
@@ -171,10 +171,10 @@ async fn watch_cancel(cancel: &CancelToken) -> Stop {
 /// `child.kill()` reaches only `sh`, and a gate's real work is its children.
 /// The reap afterwards is what keeps a night of repeated timeouts from
 /// accumulating zombies.
-async fn kill_tree(pid: u32, child: &mut smol::process::Child) {
+async fn kill_tree(group: &daruda_core::process::Group, child: &mut smol::process::Child) {
     // The child is unreaped here — the reap is the line below — so the pid is
-    // still this process's to name, which is what `kill_tree` requires.
-    daruda_core::process::kill_tree(pid);
+    // still this process's to name, which is what the group requires.
+    group.kill_tree();
     // Where there was no group to signal, this is the only reach; where there
     // was, it is a no-op on a child already gone. Same order every caller of
     // `kill_tree` uses.
