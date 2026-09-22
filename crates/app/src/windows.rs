@@ -210,6 +210,16 @@ pub(crate) fn open_recent_uuid(
     if !try_enter_open() {
         return;
     }
+    // A workspace is one on-disk record, so opening a second window onto it
+    // would give two live `Workspace`s one uuid and let the last save win —
+    // an emptied one can erase the projects the other still holds. Focus the
+    // window that already has it instead. Clicking a Landing row for the
+    // window you are in lands here too, and correctly does nothing.
+    if let Some(open) = WindowRegistry::workspace_window_for_uuid(uuid, cx) {
+        activate_existing(open, cx);
+        leave_open();
+        return;
+    }
     let initiating_window = active_window_to_close(cx);
     let data_dir = daruda_store::persistence::default_data_dir();
     let Some(ws_state) = daruda_store::project::load_workspace_state_in(&data_dir, uuid) else {

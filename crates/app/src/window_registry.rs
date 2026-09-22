@@ -163,6 +163,25 @@ impl WindowRegistry {
             .map(|(h, w)| (*h, w.clone()))
     }
 
+    /// The window already showing the workspace `uuid` names, if one is
+    /// open.
+    ///
+    /// A `WorkspaceUuid` is the key of one on-disk record, so two windows
+    /// holding the same one both write `workspaces/<uuid>.json` and the
+    /// last save wins — an emptied window can erase the projects the other
+    /// still has open. The open paths consult this first and focus the
+    /// existing window rather than minting a duplicate.
+    pub(crate) fn workspace_window_for_uuid(
+        uuid: daruda_store::project::WorkspaceUuid,
+        cx: &App,
+    ) -> Option<AnyWindowHandle> {
+        cx.try_global::<WindowRegistry>()?
+            .workspaces
+            .iter()
+            .find(|(_, weak)| weak.upgrade().is_some_and(|ws| ws.read(cx).uuid() == uuid))
+            .map(|(h, _)| *h)
+    }
+
     /// First registered workspace — used by screenshot runs where no
     /// OS-focused active window exists, and by the Settings window
     /// (a separate OS window with no `Workspace` of its own) to pick a

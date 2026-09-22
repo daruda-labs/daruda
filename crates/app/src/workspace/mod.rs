@@ -370,10 +370,9 @@ pub(in crate::workspace) enum PendingLogin {
 
 pub struct Workspace {
     /// Stable cross-session identifier — matches the UUID stored on disk
-    /// at `workspaces/<uuid>.json`. Minted at construction, never changes
-    /// for the entity's lifetime. Read by the v3 persistence path;
-    /// otherwise unread outside tests.
-    #[allow(dead_code)]
+    /// at `workspaces/<uuid>.json`. Minted at construction, then replaced
+    /// once by `restore_from_disk` when this window adopts a saved
+    /// workspace; never changes after that.
     pub(in crate::workspace) uuid: daruda_store::project::WorkspaceUuid,
     /// TabBar + PaneTree runtime state. Holds every lane's runtime
     /// (tabs / panes / focus, keyed by `LaneRef`) plus the
@@ -1595,6 +1594,12 @@ impl Workspace {
             // The workspace emptied out. Its recent row is kept so the next
             // launch finds it, so the label has to stop naming a project it
             // no longer holds.
+            //
+            // The departed project's name is deliberately not carried along
+            // (as "Empty workspace — was <name>"): a recent row addresses a
+            // workspace, not a folder, and reopening the folder is the job
+            // of Open Folder. Keeping the name would make the row advertise
+            // something it cannot deliver.
             None => crate::surface::strings::menu_recent_empty_workspace(),
         };
 

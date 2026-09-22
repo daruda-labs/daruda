@@ -1054,28 +1054,12 @@ pub const WELCOME_TITLE_FONT_SIZE: f32 = 28.0;
 pub const WELCOME_VERSION_FONT_SIZE: f32 = FONT_SIZE_LG;
 /// Landing view section heading font size (px).
 pub const WELCOME_HEADING_FONT_SIZE: f32 = FONT_SIZE_LG;
-/// Landing view button font size (px).
-pub const WELCOME_BUTTON_FONT_SIZE: f32 = FONT_SIZE_LG;
-/// Landing view recent entry font size (px).
-pub const WELCOME_RECENT_FONT_SIZE: f32 = FONT_SIZE_LG;
 /// Landing view panel width (px).
 pub const WELCOME_PANEL_WIDTH: f32 = 420.0;
 /// Landing view panel padding (px).
 pub const WELCOME_PANEL_PAD: f32 = 40.0;
 /// Landing view item gap (px).
 pub const WELCOME_GAP: f32 = 16.0;
-/// Landing view button padding X (px).
-pub const WELCOME_BUTTON_PAD_X: f32 = 16.0;
-/// Landing view button padding Y (px).
-pub const WELCOME_BUTTON_PAD_Y: f32 = PAD_LG;
-/// Landing view button corner radius (px).
-pub const WELCOME_BUTTON_RADIUS: f32 = RADIUS_MD;
-/// Landing view recent entry padding X (px).
-pub const WELCOME_RECENT_PAD_X: f32 = 12.0;
-/// Landing view recent entry padding Y (px).
-pub const WELCOME_RECENT_PAD_Y: f32 = PAD_STANDARD;
-/// Landing view recent entry corner radius (px).
-pub const WELCOME_RECENT_RADIUS: f32 = RADIUS_SM;
 /// Landing view tight inner gap (px) — used between heading + label.
 pub const WELCOME_GAP_TIGHT: f32 = GAP_SM;
 /// Landing view loose inner gap (px) — used between recent entry rows.

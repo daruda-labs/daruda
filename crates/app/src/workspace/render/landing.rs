@@ -10,17 +10,19 @@
 //! `OpenRecentWorkspace`, whose `OpenMode::ReplaceCurrent` closes this
 //! window as the successor opens.
 //!
-//! The chrome is a verbatim port of the Welcome window it replaces — bespoke
-//! `div` rather than the `crate::ui` wrappers, which is why the `WELCOME_*`
-//! theme constants were kept. Moving it onto the wrappers is a separate,
-//! visual change.
+//! Chrome comes from the `crate::ui` wrappers, like its sibling
+//! `present_empty_state` — the two empty states are the same family and the
+//! decision matrix in `crates/app/src/CLAUDE.md` bans hand-rolled `div`
+//! buttons at a call site. The `WELCOME_*` theme constants that survive here
+//! are the layout metrics the wrappers do not own (panel width, gaps, the
+//! title and version type scale).
 
-use gpui::{AnyElement, Context, MouseButton, SharedString, div, prelude::*, px};
+use gpui::{AnyElement, Context, SharedString, div, prelude::*, px};
 
 use crate::surface::keybindings as k;
 use crate::surface::shortcut_display::display;
 use crate::surface::strings as s;
-use crate::ui::theme;
+use crate::ui::{button, button_primary, picker_row, theme};
 use crate::workspace::Workspace;
 
 /// One cheat-sheet row: the binding as the app declares it, and the label
@@ -44,29 +46,13 @@ fn shortcut_rows() -> [(&'static str, String); 4] {
 /// Build the Landing element: heading → body → actions, the same ordering
 /// `present_empty_state` uses one level down.
 pub(super) fn render(cx: &mut Context<Workspace>) -> AnyElement {
-    // Every colour is copied out before `cx` is used mutably below —
-    // `theme::current` borrows it for as long as the returned theme lives.
-    let (
-        primary,
-        faint,
-        muted,
-        button_bg,
-        button_border,
-        button_hover_bg,
-        recent_hover_bg,
-        panel_bg,
-    ) = {
+    // Copied out before `cx` is used mutably below — `theme::current`
+    // borrows it for as long as the returned theme lives. Button and row
+    // chrome is the wrappers' to colour; what is left is the text this
+    // module lays out itself.
+    let (primary, faint, muted, panel_bg) = {
         let t = theme::current(cx);
-        (
-            t.text_primary,
-            t.text_subtle,
-            t.text_muted,
-            t.welcome_button_bg,
-            t.border,
-            t.welcome_button_hover_bg,
-            t.welcome_recent_hover_bg,
-            t.welcome_bg,
-        )
+        (t.text_primary, t.text_subtle, t.text_muted, t.welcome_bg)
     };
 
     let title = div()
@@ -87,44 +73,13 @@ pub(super) fn render(cx: &mut Context<Workspace>) -> AnyElement {
                 .child(s::WELCOME_VERSION),
         );
 
-    let open_folder_btn = div()
-        .id("landing-open-folder")
-        .flex()
-        .items_center()
-        .justify_center()
+    let open_folder_btn = button_primary("landing-open-folder", s::welcome_open_folder())
         .w_full()
-        .px(px(theme::WELCOME_BUTTON_PAD_X))
-        .py(px(theme::WELCOME_BUTTON_PAD_Y))
-        .bg(button_bg)
-        .border_1()
-        .border_color(button_border)
-        .rounded(px(theme::WELCOME_BUTTON_RADIUS))
-        .text_size(px(theme::WELCOME_BUTTON_FONT_SIZE))
-        .text_color(primary)
-        .cursor_pointer()
-        .hover(move |d| d.bg(button_hover_bg))
-        .on_mouse_down(MouseButton::Left, |_, window, cx| {
-            window.dispatch_action(Box::new(crate::OpenFolder), cx)
-        })
-        .child(s::welcome_open_folder());
+        .on_click(|_, window, cx| window.dispatch_action(Box::new(crate::OpenFolder), cx));
 
-    let new_empty_btn = div()
-        .id("landing-new-empty")
-        .flex()
-        .items_center()
-        .justify_center()
+    let new_empty_btn = button("landing-new-empty", s::welcome_new_empty())
         .w_full()
-        .px(px(theme::WELCOME_BUTTON_PAD_X))
-        .py(px(theme::WELCOME_BUTTON_PAD_Y))
-        .rounded(px(theme::WELCOME_BUTTON_RADIUS))
-        .text_size(px(theme::WELCOME_BUTTON_FONT_SIZE))
-        .text_color(muted)
-        .cursor_pointer()
-        .hover(move |d| d.bg(button_hover_bg).text_color(primary))
-        .on_mouse_down(MouseButton::Left, |_, window, cx| {
-            window.dispatch_action(Box::new(crate::NewEmptyWindow), cx)
-        })
-        .child(s::welcome_new_empty());
+        .on_click(|_, window, cx| window.dispatch_action(Box::new(crate::NewEmptyWindow), cx));
 
     let panel = div()
         .flex()
@@ -135,7 +90,7 @@ pub(super) fn render(cx: &mut Context<Workspace>) -> AnyElement {
         .p(px(theme::WELCOME_PANEL_PAD))
         .child(title)
         .child(open_folder_btn)
-        .child(recent_section(primary, faint, muted, recent_hover_bg, cx))
+        .child(recent_section(faint, muted, cx))
         .child(new_empty_btn)
         .child(cheat_sheet(faint, muted));
 
@@ -156,13 +111,7 @@ pub(super) fn render(cx: &mut Context<Workspace>) -> AnyElement {
 /// reading the recent file here would be a disk read inside `render`. A
 /// missing global (no menu bar installed yet) renders as "no recent"
 /// rather than panicking — the same degradation the app-drawn menu takes.
-fn recent_section(
-    primary: gpui::Hsla,
-    faint: gpui::Hsla,
-    muted: gpui::Hsla,
-    hover_bg: gpui::Hsla,
-    cx: &mut Context<Workspace>,
-) -> AnyElement {
+fn recent_section(faint: gpui::Hsla, muted: gpui::Hsla, cx: &mut Context<Workspace>) -> AnyElement {
     let recent = cx
         .try_global::<crate::menus::RecentSnapshot>()
         .map(|snap| snap.0.clone())
@@ -185,34 +134,21 @@ fn recent_section(
 
     // Each row carries the workspace's identity, not its position, so the
     // label and what the click opens cannot disagree even if the snapshot
-    // has drifted from the list on disk.
+    // has drifted from the list on disk. `picker_row` is the shared row
+    // chrome every search-and-pick overlay uses; nothing here is focused, so
+    // it renders in its resting state.
     let rows = recent
         .iter()
-        .enumerate()
-        .map(|(i, entry)| {
+        .map(|entry| {
             let action = crate::OpenRecentWorkspace(entry.workspace_uuid);
-            let display_name = SharedString::from(entry.display_name.clone());
-            div()
-                .id(("landing-recent", i))
-                .flex()
-                .flex_row()
-                .items_center()
-                .gap(px(theme::WELCOME_GAP_LOOSE))
-                .w_full()
-                .px(px(theme::WELCOME_RECENT_PAD_X))
-                .py(px(theme::WELCOME_RECENT_PAD_Y))
-                .rounded(px(theme::WELCOME_RECENT_RADIUS))
-                .cursor_pointer()
-                .hover(move |d| d.bg(hover_bg))
-                .on_mouse_down(MouseButton::Left, move |_, window, cx| {
-                    window.dispatch_action(Box::new(action.clone()), cx)
-                })
-                .child(
-                    div()
-                        .text_size(px(theme::WELCOME_RECENT_FONT_SIZE))
-                        .text_color(primary)
-                        .child(display_name),
-                )
+            picker_row(
+                false,
+                SharedString::from(entry.display_name.clone()),
+                None,
+                move |window, cx| window.dispatch_action(Box::new(action.clone()), cx),
+                cx,
+            )
+            .into_any_element()
         })
         .collect::<Vec<_>>();
 

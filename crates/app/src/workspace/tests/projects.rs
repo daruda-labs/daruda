@@ -187,6 +187,50 @@ fn a_workspace_that_never_held_a_project_earns_no_recent_row(cx: &mut TestAppCon
     );
 }
 
+/// One persisted workspace, one window. A `WorkspaceUuid` keys a single
+/// `workspaces/<uuid>.json`, so a second window onto the same record would
+/// let the last save win — an emptied window erasing the projects the other
+/// still holds. The open paths resolve the uuid to the live window first.
+#[gpui::test]
+fn a_workspace_uuid_resolves_to_the_window_already_holding_it(cx: &mut TestAppContext) {
+    let config = daruda_config::Config::default();
+    let root = std::env::temp_dir().join("daruda_uuid_dedup");
+    std::fs::create_dir_all(&root).unwrap();
+    let project = daruda_store::project::Project::from_path(&root);
+
+    let wh = cx.add_window(|window, cx| {
+        Workspace::new_with_project_for_test(
+            &config,
+            Some(project),
+            fresh_test_data_dir(),
+            window,
+            cx,
+        )
+    });
+    let ws = wh.root(cx).unwrap();
+    // The test constructor skips registration; the lookup reads the registry.
+    cx.update(|cx| {
+        crate::window_registry::WindowRegistry::register(wh.into(), ws.downgrade(), cx);
+    });
+    let uuid = ws.read_with(cx, |w, _| w.uuid);
+
+    cx.update(|cx| {
+        assert_eq!(
+            crate::window_registry::WindowRegistry::workspace_window_for_uuid(uuid, cx),
+            Some(wh.into()),
+            "an open workspace must be found by its persisted identity"
+        );
+        assert_eq!(
+            crate::window_registry::WindowRegistry::workspace_window_for_uuid(
+                daruda_store::project::WorkspaceUuid::new(),
+                cx
+            ),
+            None,
+            "a uuid no window holds must not resolve to some other window"
+        );
+    });
+}
+
 /// The reachable half of the same invariant: an emptied workspace that
 /// still owns a recent row keeps its file, because that is how the next
 /// launch finds it.
