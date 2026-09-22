@@ -191,7 +191,7 @@ daruda/
 - **Zig**: 0.14.1 (`./scripts/bootstrap-zig.sh` on macOS/Linux, `./scripts/bootstrap-zig.ps1` on Windows x86_64; alternatively set `ZIG=<path>` or put `zig` on `PATH`)
 - **macOS**: Apple Silicon or Intel + Xcode Command Line Tools — the primary, fully-verified target.
 - **Linux**: built and tested by the `linux` CI job, which gates like the macOS one — the claim is green, not merely measured. GUI runtime (window/menu/tray) is still unverified on a real desktop, since CI has no one to look at the window. Needs system `libfontconfig`/`libxcb` and real fonts (the job installs them).
-- **Windows**: native MSVC build via `cargo build --locked -p daruda` or `scripts/build-windows.ps1`. CI gates the build, app target compilation, Clippy, and native/platform tests; full runtime tests remain experimental. GUI runtime still needs desktop verification.
+- **Windows**: native MSVC build via `cargo build --locked -p daruda` or `scripts/build-windows.ps1`. The `windows` CI job gates everything the other two do, the whole test suite included, plus `daruda --smoke` — which opens the real window on a runner with no GPU (D3D11 falls back to a software device) and fails if nothing is drawn. What is still unverified is a person *looking* at it, and `--screenshot`, which needs a `render_to_image` only Metal implements.
 
 ### Build
 
@@ -264,6 +264,8 @@ That last one is why it is on the list at all. `screenshot` is off by default, s
 ### Visual verification
 
 Render the UI offscreen to a PNG and read it back — text, layout, colors, images, and toasts all render, permission-free (no Screen Recording grant). Capture goes through gpui's `render_to_image`, gated upstream behind `test-support`; the `--screenshot` path below requires it, plus `gpui_macos/font-kit` (without that feature glyphs don't rasterize — shapes render but **text is invisible**).
+
+**macOS only.** `render_to_image` has one implementation upstream — `MetalHeadlessRenderer` — and `gpui_platform::current_headless_renderer` answers `None` everywhere else, so the default `bail!` is what Linux and Windows get. That is a gap in the *capture* path, not in either port: what a capture would add over the macOS one is the platform's own text stack (DirectWrite, fontconfig), since daruda's layout and widget code is platform-neutral. On those hosts, `daruda --smoke` is what says the window came up and painted.
 
 **Whole app** — the `--screenshot` flag captures the live workspace window:
 
