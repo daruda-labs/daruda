@@ -4,27 +4,29 @@ Tracked diffs against external sources. Two distinct flavours live
 here — they serve different goals and have different application
 flows.
 
-## `gpui-ime-cjk-path-a.patch`
+## GPUI patches — `gpui-*.patch`
 
-Targets the **cargo git checkout** of GPUI (Zed's `gpui` crate). The
-checkout sits under `~/.cargo/git/checkouts/zed-*/<short-rev>/` and
-is recreated by `cargo fetch`, so this patch must be re-applied each
-time the cache is cleared or the GPUI rev bumps.
+GPUI compiles from `vendor/zed/crates/gpui`, a pristine copy of the
+pinned zed revision (`vendor/zed/UPSTREAM`) with the patches below
+applied. `tools/vendor_gpui` is the only thing that writes that tree:
+it fetches the pinned rev, applies each `patches/gpui-*.patch`, and
+`--check` — run by every CI job and by
+`scripts/apply-gpui-patch.sh`, kept as a compatibility entry point —
+fails on any drift between the tree and what fetch + patches produce.
+So a patch is edited here and materialised there; never edit
+`vendor/zed` by hand.
 
-- Auto-applied by `scripts/apply-gpui-patch.sh`.
-- Run order: `cargo fetch` → `./scripts/apply-gpui-patch.sh` → build.
-- Idempotent — bails out early if the marker (`has_non_ascii_key_char`)
-  is already present.
-
-Patch contents: route non-ASCII `key_char` (Korean jamo, Japanese
-kana, …) through macOS IME-first dispatch (PATH A) so composition
-works during IMK Mach Port initialization delays.
+There is no macOS IME patch. The one this directory used to carry
+targeted `crates/gpui/src/platform/mac/window.rs`, a path that does not
+exist at the pinned rev (the platform code moved to `gpui_macos`), so
+it had never applied; upstream's `is_ime_printable_key` in
+`gpui_macos/src/window.rs` now routes printable keys IME-first whenever
+an IME input source is active, which is the behaviour it wanted.
 
 ## `gpui-held-key-keeps-modality.patch`
 
-Targets the **cargo git checkout** of GPUI, on the same terms as the
-CJK patch above: auto-applied by `scripts/apply-gpui-patch.sh`,
-idempotent on the marker `PlatformInput::KeyDown(ev) if !ev.is_held`.
+Applied into `vendor/zed` by `tools/vendor_gpui` as above; the marker
+`PlatformInput::KeyDown(ev) if !ev.is_held` is what to look for there.
 
 One line in `Window::dispatch_event`'s input-modality decision: an
 **auto-repeat no longer counts as new keyboard input**.
@@ -65,9 +67,8 @@ Guarded by `an_auto_repeat_does_not_flip_the_input_modality`
 
 ## `gpui-text-wrap-cache.patch`
 
-Targets the **cargo git checkout** of GPUI, on the same terms as the
-patches above: auto-applied by `scripts/apply-gpui-patch.sh`,
-idempotent on the marker `Condition 2 is an exact match on purpose`.
+Applied into `vendor/zed` by `tools/vendor_gpui` as above; the marker
+`Condition 2 is an exact match on purpose` is what to look for there.
 
 One condition in `TextLayout::layout`'s measure closure
 (`crates/gpui/src/elements/text.rs`): **a max-content measure no longer
@@ -100,8 +101,8 @@ genuinely new `(text, wrap_width)` pair rather than per query.
 `render_md_prose` (`file_view_pane/render/markdown/inline.rs`) stacks its
 runs with block layout rather than a flex column, which keeps that probe
 from being decisive even on an unpatched checkout. Both are wanted: the
-patch fixes the cause, the block column means a developer who skipped
-`apply-gpui-patch.sh` does not see a collapsed list item.
+patch fixes the cause, the block column means a build against an
+unpatched gpui does not show a collapsed list item.
 
 ## `gpui-component-input-state-ime-selection.patch`
 

@@ -390,7 +390,8 @@ rev bump if the re-vendor trims them again):
 
 The patches live directly in the vendored tree (not in
 `patches/<name>.patch`) because `crates/gpui_component/` is an
-in-repo copy — `scripts/apply-gpui-patch.sh` only handles the
-`cargo` git cache patch for the GPUI IME path. On a `gpui_component`
-rev bump, re-apply each patch by re-doing the diff against the
-upstream source.
+in-repo copy. GPUI itself is vendored the other way round — a pristine
+tree under `vendor/zed/` with `patches/gpui-*.patch` applied by
+`tools/vendor_gpui`, which CI reruns with `--check`. On a
+`gpui_component` rev bump, re-apply each patch by re-doing the diff
+against the upstream source.
