@@ -157,15 +157,19 @@ fn exit_reverts_a_text_field_that_cannot_parse(cx: &mut TestAppContext) {
     });
 }
 
+/// Run the exit commit and assert it did not refuse — every caller here is a
+/// case that must settle, so a silent `false` would hide the interesting part.
 fn commit_pending_edits(
     wh: &WindowHandle<gpui_component::Root>,
     win: &Entity<SettingsView>,
     cx: &mut TestAppContext,
 ) {
-    wh.update(cx, |_root, window, cx| {
-        win.update(cx, |w, cx| w.commit_pending_edits(window, cx));
-    })
-    .expect("settings window should still be open during the test");
+    let settled = wh
+        .update(cx, |_root, window, cx| {
+            win.update(cx, |w, cx| w.commit_pending_edits(window, cx))
+        })
+        .expect("settings window should still be open during the test");
+    assert!(settled, "nothing here should block the exit");
 }
 
 #[gpui::test]

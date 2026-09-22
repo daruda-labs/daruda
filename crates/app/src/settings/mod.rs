@@ -1885,25 +1885,37 @@ impl SettingsView {
         self.active_section
     }
 
-    /// Ask the host to take this view down. The host decides what that means;
-    /// the view only guarantees it leaves no edit behind.
-    fn dismiss(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        self.commit_pending_edits(window, cx);
+    /// Ask the host to take this view down. Committing what is in flight is
+    /// the host's job — every exit it knows about (this one, and the window
+    /// closing underneath) has to land the same edits, so the funnel lives
+    /// there rather than being repeated per gesture.
+    fn dismiss(&mut self, _window: &mut Window, cx: &mut Context<Self>) {
         cx.emit(SettingsEvent::Close);
     }
 
     /// Commit every text input holding something other than what the live
-    /// config shows, so an exit taken mid-edit does not drop it.
+    /// config shows, so an exit taken mid-edit does not drop it. Returns
+    /// whether the exit may proceed.
     ///
     /// Text settings persist on Enter or Blur only, so an input that still
     /// holds focus has never been written. The `show` comparison is what
     /// keeps an untouched field from re-writing itself —
-    /// [`Self::persist_text_setting`] applies unconditionally. Anything that
-    /// will not land — unparseable, or the field moved underneath this view —
-    /// is reverted to the live value instead: refusing the exit would trap
-    /// the user in the field, and both other resolutions need a question this
-    /// path has no one left to ask.
-    pub(super) fn commit_pending_edits(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+    /// [`Self::persist_text_setting`] applies unconditionally.
+    ///
+    /// The two refusals are not the same and are not treated the same. A
+    /// value that cannot parse was never usable, and a field that moved
+    /// underneath this view resolves to the external value — the same answer
+    /// [`Self::sync_external_settings`] picks when there is no local draft —
+    /// so both revert and the exit continues. A *write* that failed is
+    /// neither: the value is still what the user asked for and the banner
+    /// naming the failure is the only place it is said, so the edit stays in
+    /// the field and `false` holds the view open around it.
+    pub(super) fn commit_pending_edits(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        let mut blocked = false;
         for spec in spec::TEXT_SETTINGS {
             // Re-read per row: a landed patch moves the global underneath us.
             let live = crate::settings_store::SettingsStore::global(cx)
@@ -1914,16 +1926,29 @@ impl SettingsView {
             if input.read(cx).value().trim() == shown {
                 continue;
             }
-            let landed = match (spec.parse)(&input, cx) {
-                Ok(patch) => self.apply_settings_patch(patch, cx),
-                Err(_) => false,
-            };
-            if !landed {
-                self.error = None;
-                self.conflict = None;
-                Self::set_input_value(&input, shown, window, cx);
+            match (spec.parse)(&input, cx) {
+                Err(_) => {
+                    self.error = None;
+                    self.conflict = None;
+                    Self::set_input_value(&input, shown, window, cx);
+                }
+                Ok(patch) => {
+                    if self.apply_settings_patch(patch, cx) {
+                        continue;
+                    }
+                    // A refusal is a conflict or a failed write; only the
+                    // first one reverts. `apply_settings_patch` sets exactly
+                    // one of the two, so this tells them apart.
+                    if self.conflict.take().is_some() {
+                        self.error = None;
+                        Self::set_input_value(&input, shown, window, cx);
+                    } else {
+                        blocked = true;
+                    }
+                }
             }
         }
+        !blocked
     }
 
     /// Commit one field's change, refusing it when the same field moved

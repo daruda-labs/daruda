@@ -52,6 +52,13 @@ impl Workspace {
             let Some(ws) = weak_for_hook.upgrade() else {
                 return true;
             };
+            // Settings is a body-level view, not a pane, so the dirty-pane
+            // sweep below cannot see what one of its fields is holding. Land
+            // it through the same funnel Escape and the back button use; a
+            // write that failed holds the window open around its banner.
+            if !ws.update(app, |this, cx| this.commit_settings_edits(window, cx)) {
+                return false;
+            }
             let dirty = ws.read(app).collect_dirty_pane_descriptors(app);
             if dirty.is_empty() {
                 return true;

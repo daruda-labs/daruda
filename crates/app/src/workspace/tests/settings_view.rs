@@ -112,6 +112,11 @@ async fn the_view_s_close_event_takes_it_down(cx: &mut TestAppContext) {
 /// A chord that drives a dock must not land while Settings covers it. The
 /// registration is skipped wholesale in that mode, so this is the check that
 /// the skip actually reaches the dispatch tree rather than just the source.
+///
+/// This only means anything while focus is genuinely inside the view: an
+/// unfocused open collapses the dispatch path to the root, under which *no*
+/// workspace action fires and the assertion would pass for the wrong reason.
+/// [`escape_closes_settings_from_a_fresh_open`] is what holds that up.
 #[gpui::test]
 async fn settings_mode_does_not_answer_a_dock_action(cx: &mut TestAppContext) {
     let (window_handle, workspace) = build_workspace(cx);
@@ -143,4 +148,130 @@ async fn settings_mode_does_not_answer_a_dock_action(cx: &mut TestAppContext) {
         toggled,
         "Settings must swallow the dock chord, not pass it to a hidden dock",
     );
+}
+
+/// The gesture the design decision names, taken the way a user takes it —
+/// through key dispatch, not by emitting the event. A fresh open used to leave
+/// focus on the pane it replaced, gpui resolved that to the root dispatch
+/// node, and Escape reached nothing.
+#[gpui::test]
+async fn escape_closes_settings_from_a_fresh_open(cx: &mut TestAppContext) {
+    let (window_handle, workspace) = build_workspace(cx);
+    let mut vcx = gpui::VisualTestContext::from_window(window_handle.into(), cx);
+
+    vcx.update(|window, cx| {
+        workspace.update(cx, |ws, cx| {
+            ws.on_open_settings(
+                &OpenSettings(daruda_config::BuiltinSection::General),
+                window,
+                cx,
+            );
+        });
+    });
+    vcx.run_until_parked();
+
+    vcx.simulate_keystrokes("escape");
+    vcx.run_until_parked();
+
+    assert!(
+        workspace.read_with(&vcx, |ws, _| ws.settings.is_none()),
+        "Escape must reach the view on the first open, with no click first",
+    );
+}
+
+/// The other half of the same contract: the window-level actions stay on the
+/// dispatch path. `CloseWindow` is the one whose global fallback was deleted,
+/// so nothing else would answer it.
+#[gpui::test]
+async fn a_fresh_open_still_answers_window_level_actions(cx: &mut TestAppContext) {
+    let (window_handle, workspace) = build_workspace(cx);
+    let mut vcx = gpui::VisualTestContext::from_window(window_handle.into(), cx);
+
+    vcx.update(|window, cx| {
+        workspace.update(cx, |ws, cx| {
+            ws.on_open_settings(
+                &OpenSettings(daruda_config::BuiltinSection::General),
+                window,
+                cx,
+            );
+        });
+    });
+    vcx.run_until_parked();
+
+    vcx.dispatch_action(OpenSettings(daruda_config::BuiltinSection::About));
+    vcx.run_until_parked();
+
+    assert_eq!(
+        workspace.read_with(&vcx, |ws, cx| ws
+            .settings
+            .as_ref()
+            .map(|h| h.view.read(cx).active_section())),
+        Some(daruda_config::BuiltinSection::About),
+        "a window-level action must still reach the workspace behind Settings",
+    );
+}
+
+/// Closing from a workspace with no panes must still leave the window focused
+/// on something it renders — otherwise the keyboard dies the same way an
+/// unfocused open killed it.
+#[gpui::test]
+async fn closing_without_a_pane_to_return_to_keeps_the_keyboard(cx: &mut TestAppContext) {
+    // Deliberately not `build_workspace`: that seeds a tab, and the state under
+    // test is the one a workspace lands in after its last project closes.
+    let (window_handle, workspace) = build_workspace_without_tabs(cx);
+    let mut vcx = gpui::VisualTestContext::from_window(window_handle.into(), cx);
+
+    vcx.update(|window, cx| {
+        workspace.update(cx, |ws, cx| {
+            assert!(
+                ws.active_runtime().panes.is_empty(),
+                "this test is about the no-pane workspace",
+            );
+            ws.on_open_settings(
+                &OpenSettings(daruda_config::BuiltinSection::General),
+                window,
+                cx,
+            );
+        });
+    });
+    vcx.run_until_parked();
+
+    vcx.simulate_keystrokes("escape");
+    vcx.run_until_parked();
+
+    vcx.update(|window, cx| {
+        assert!(workspace.read(cx).settings.is_none());
+        assert!(
+            workspace.read(cx).focus_handle.is_focused(window),
+            "the workspace root has to take focus when no pane can",
+        );
+    });
+}
+
+/// [`super::build_workspace`] without its seeded tab — the shape a workspace
+/// has once its last project is gone, which `render/center.rs` draws as
+/// Landing.
+fn build_workspace_without_tabs(
+    cx: &mut TestAppContext,
+) -> (
+    gpui::WindowHandle<gpui_component::Root>,
+    gpui::Entity<crate::workspace::Workspace>,
+) {
+    crate::test_support::init_gpui_component(cx);
+    let held = std::cell::RefCell::new(None);
+    let window_handle = cx.add_window(|window, cx| {
+        let workspace = cx.new(|cx| {
+            crate::workspace::Workspace::new_with_project_for_test(
+                &daruda_config::Config::default(),
+                None,
+                super::fresh_test_data_dir(),
+                window,
+                cx,
+            )
+        });
+        *held.borrow_mut() = Some(workspace.clone());
+        gpui_component::Root::new(workspace, window, cx)
+    });
+    let workspace = held.borrow().clone().unwrap();
+    (window_handle, workspace)
 }

@@ -29,11 +29,8 @@ impl Workspace {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        match self.settings.as_ref() {
-            Some(host) => {
-                let view = host.view.clone();
-                view.update(cx, |view, cx| view.focus_section(section, window, cx));
-            }
+        let view = match self.settings.as_ref() {
+            Some(host) => host.view.clone(),
             None => {
                 let view = cx.new(|cx| SettingsView::new_with_section(section, window, cx));
                 let close = cx.subscribe_in(
@@ -47,28 +44,67 @@ impl Workspace {
                     },
                 );
                 self.settings = Some(SettingsHost {
-                    view,
+                    view: view.clone(),
                     _close: close,
                 });
+                view
             }
-        }
+        };
+        // Both paths land focus, and that is the whole contract of the swap:
+        // the pane that had it is no longer rendered, and gpui resolves an
+        // unrendered focus id to the root dispatch node — which carries
+        // neither the view's key handler nor this window's actions. Skipping
+        // it on the build path left Escape and Cmd+W inert until the user
+        // clicked something.
+        view.update(cx, |view, cx| view.focus_section(section, window, cx));
         cx.notify();
     }
 
-    /// Take Settings down and hand focus back to the pane that had it. The
-    /// view has already committed whatever was mid-edit (`dismiss`), so
-    /// dropping it here loses nothing.
+    /// Take Settings down and hand focus back to the workspace.
+    ///
+    /// Refused when a pending edit could not be written: that value and the
+    /// banner naming the failure both live in the view, so taking it down
+    /// would be the silent drop [`SettingsView::commit_pending_edits`] exists
+    /// to prevent.
     pub(in crate::workspace) fn close_settings(
         &mut self,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        if !self.commit_settings_edits(window, cx) {
+            cx.notify();
+            return;
+        }
         if self.settings.take().is_none() {
             return;
         }
+        // Focus has to land on something this window still renders. A
+        // workspace holding no projects has no pane to return to, so the root
+        // takes it — leaving the window pointed at the view just dropped kills
+        // the keyboard exactly the way an unfocused open did.
         let pane_id = self.active_runtime().focused_pane_id;
-        self.focus_pane(pane_id, window, cx);
+        if self.active_runtime().panes.iter().any(|p| p.id == pane_id) {
+            self.focus_pane(pane_id, window, cx);
+        } else {
+            self.focus_handle.focus(window, cx);
+        }
         cx.notify();
+    }
+
+    /// Land every pending Settings edit, whatever is taking the view away.
+    /// The one funnel: the back button, Escape and the window closing
+    /// underneath all pass through here, so no exit can be added that skips
+    /// the commit. `false` means a write failed and the view must stay up.
+    pub(in crate::workspace) fn commit_settings_edits(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        let Some(host) = self.settings.as_ref() else {
+            return true;
+        };
+        let view = host.view.clone();
+        view.update(cx, |view, cx| view.commit_pending_edits(window, cx))
     }
 
     /// Run a login an account row asked for. The view has no business spawning
