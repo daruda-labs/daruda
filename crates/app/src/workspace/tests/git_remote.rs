@@ -212,7 +212,7 @@ fn external_commit_refreshes_linked_lane_through_the_git_dir_watcher(cx: &mut Te
             1
         );
         assert_eq!(
-            ws.git_watchers.len(),
+            ws.git_watch.watched_count(),
             2,
             "the shared dir and linked lane dir must both be watched"
         );
@@ -265,7 +265,7 @@ fn external_fetch_refreshes_tracking_for_every_lane(cx: &mut TestAppContext) {
     ws.read_with(cx, |ws, _| {
         assert_eq!(targets.len(), 2, "fixture must expose both lanes");
         assert_eq!(
-            ws.git_watchers.len(),
+            ws.git_watch.watched_count(),
             2,
             "one common-dir watcher plus the linked lane's own watcher"
         );

@@ -16,7 +16,7 @@ pub(super) mod init;
 pub(in crate::workspace) mod lock;
 pub(super) mod nav;
 pub(super) mod status;
-pub(super) mod watch;
+pub(in crate::workspace) mod watch;
 
 /// Map a git status character to a single-letter display symbol. Shared by
 /// the Git Changes dock and the Files view so both badges match.

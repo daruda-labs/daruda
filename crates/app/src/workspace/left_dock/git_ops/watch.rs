@@ -27,6 +27,38 @@ use crate::workspace::lane_scoped::GitDirsState;
 /// how long a settled change waits to be seen.
 const POLL_INTERVAL: std::time::Duration = std::time::Duration::from_millis(250);
 
+/// Every git directory this window watches, and the loop draining them.
+///
+/// One value because the three move together — a directory leaves `live` or
+/// `failed` and the poll stops with the last watcher — and private because
+/// [`Workspace::sync_git_watchers`] is the only thing that may decide which
+/// directories are watched. Tests read the count through
+/// [`Self::watched_count`].
+#[derive(Default)]
+pub(in crate::workspace) struct GitWatch {
+    /// One watcher per git directory, keyed by that directory. Keyed rather
+    /// than lane-scoped because every lane of a repository shares one common
+    /// dir: a fetch writes there once, and N watchers over it would mean N
+    /// times the work for one event.
+    live: std::collections::HashMap<std::path::PathBuf, crate::files::git_watcher::GitDirWatcher>,
+    /// Dirs whose watcher failed to attach. Retained while a lane still needs
+    /// the dir so the poll does not retry and toast every 250 ms.
+    failed: std::collections::HashSet<std::path::PathBuf>,
+    /// Drains `live`; started with the first watcher, dropped with the
+    /// workspace.
+    poll: Option<gpui::Task<()>>,
+}
+
+impl GitWatch {
+    /// How many directories are watched. A test hook, in the codebase's
+    /// `#[cfg(test)]` style: production code has no cause to ask, and leaving
+    /// the field reachable instead would undo the point of the type.
+    #[cfg(test)]
+    pub(in crate::workspace) fn watched_count(&self) -> usize {
+        self.live.len()
+    }
+}
+
 impl Workspace {
     /// Hold exactly the watchers the open lanes need — no more, no fewer.
     ///
@@ -46,15 +78,15 @@ impl Workspace {
             .flat_map(|dirs| [dirs.git_dir.clone(), dirs.common_dir.clone()])
             .collect();
 
-        self.git_watchers.retain(|dir, _| desired.contains(dir));
-        self.git_watch_failures.retain(|dir| desired.contains(dir));
+        self.git_watch.live.retain(|dir, _| desired.contains(dir));
+        self.git_watch.failed.retain(|dir| desired.contains(dir));
         for dir in desired {
-            if self.git_watchers.contains_key(&dir) || self.git_watch_failures.contains(&dir) {
+            if self.git_watch.live.contains_key(&dir) || self.git_watch.failed.contains(&dir) {
                 continue;
             }
             match GitDirWatcher::new(dir.clone()) {
                 Ok(watcher) => {
-                    self.git_watchers.insert(dir, watcher);
+                    self.git_watch.live.insert(dir, watcher);
                 }
                 Err(e) => {
                     // Losing a watcher costs freshness for outside writes
@@ -70,12 +102,12 @@ impl Workspace {
                     self.report_error(report, cx);
                     // Do not retry every poll, but keep the successful sibling
                     // watch alive when only one of a lane's two dirs failed.
-                    self.git_watch_failures.insert(dir);
+                    self.git_watch.failed.insert(dir);
                 }
             }
         }
 
-        if !self.git_watchers.is_empty() {
+        if !self.git_watch.live.is_empty() {
             self.ensure_git_watch_poll(cx);
         }
     }
@@ -133,10 +165,10 @@ impl Workspace {
     }
 
     fn ensure_git_watch_poll(&mut self, cx: &mut Context<Self>) {
-        if self.git_watch_poll.is_some() {
+        if self.git_watch.poll.is_some() {
             return;
         }
-        self.git_watch_poll = Some(cx.spawn(async move |this, cx| {
+        self.git_watch.poll = Some(cx.spawn(async move |this, cx| {
             loop {
                 cx.background_executor().timer(POLL_INTERVAL).await;
                 let alive = this
@@ -160,7 +192,7 @@ impl Workspace {
     pub(in crate::workspace) fn drain_git_watchers(&mut self, cx: &mut Context<Self>) {
         let mut signals: HashMap<PathBuf, GitDirSignal> = HashMap::new();
         let mut errors = Vec::new();
-        for (dir, watcher) in &self.git_watchers {
+        for (dir, watcher) in &self.git_watch.live {
             while let Ok(event) = watcher.events_rx.try_recv() {
                 match event {
                     GitDirEvent::Changed(signal) => {
@@ -269,7 +301,7 @@ mod tests {
                 2,
                 "fixture must expose both the main and the linked lane"
             );
-            let mut watched: Vec<_> = ws.git_watchers.keys().cloned().collect();
+            let mut watched: Vec<_> = ws.git_watch.live.keys().cloned().collect();
             watched.sort();
 
             // The lanes carry canonical paths, so the expectations must too
