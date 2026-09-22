@@ -41,6 +41,31 @@ pub(crate) fn env_program() -> PathBuf {
     env_launcher().0
 }
 
+/// The wrapper's own tokens, quoted as a command line carries them — the
+/// program, then whatever it needs before `env(1)`'s grammar starts.
+///
+/// Tests compose expectations from this rather than spelling `/usr/bin/env`,
+/// so one assertion covers a host where the wrapper is daruda itself.
+#[cfg(test)]
+pub(crate) fn env_prefix_tokens() -> Vec<String> {
+    let (program, leading) = env_launcher();
+    let mut tokens = vec![shell_words::quote(&program.to_string_lossy()).into_owned()];
+    tokens.extend(leading);
+    tokens
+}
+
+/// `rest` behind whatever the wrapper puts first, as argv.
+#[cfg(test)]
+pub(crate) fn env_argv<I, S>(rest: I) -> Vec<String>
+where
+    I: IntoIterator<Item = S>,
+    S: Into<String>,
+{
+    let mut argv = env_launcher().1;
+    argv.extend(rest.into_iter().map(Into::into));
+    argv
+}
+
 /// `env(1)`'s remove-a-variable flag.
 pub(crate) const ENV_UNSET_FLAG: &str = "-u";
 
@@ -241,7 +266,10 @@ mod tests {
             let config = parse_json_launch(json).unwrap();
             let prepared = finalize_config(config, &["SECRET".into()]);
             assert_eq!(prepared.command(), env_program());
-            assert_eq!(prepared.arguments(), ["-u", "SECRET", "node", "entry.js"]);
+            assert_eq!(
+                prepared.arguments(),
+                env_argv(["-u", "SECRET", "node", "entry.js"])
+            );
             assert_eq!(prepared.environment()["TEST"], "value");
         }
     }

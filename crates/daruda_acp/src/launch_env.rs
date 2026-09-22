@@ -151,7 +151,7 @@ mod tests {
         assert!(
             wrapped.0.starts_with(&format!(
                 "{} -u ANTHROPIC_API_KEY -u CLAUDE_CODE_OAUTH_TOKEN npm_config_cpu=",
-                shell_words::quote(&env_program().to_string_lossy())
+                crate::launch_config::env_prefix_tokens().join(" ")
             )),
             "{}",
             wrapped.0
@@ -204,7 +204,7 @@ mod tests {
         assert_eq!(config.command(), env_program());
         assert_eq!(
             config.arguments(),
-            vec![
+            crate::launch_config::env_argv(vec![
                 "-u".to_string(),
                 "ANTHROPIC_API_KEY".to_string(),
                 "-u".to_string(),
@@ -214,7 +214,7 @@ mod tests {
                     .into_owned(),
                 "-y".to_string(),
                 ADAPTER_NPM_PACKAGE.to_string(),
-            ]
+            ])
         );
         // The env list is applied by the downstream spawner via `Command::env`
         // on the `env` process and inherited by the launcher — unaffected.
@@ -279,7 +279,7 @@ mod tests {
             prepared.0,
             format!(
                 "{} -u ANTHROPIC_API_KEY -u CLAUDE_CODE_OAUTH_TOKEN /usr/local/bin/claude-agent-acp --acp",
-                shell_words::quote(&env_program().to_string_lossy())
+                crate::launch_config::env_prefix_tokens().join(" ")
             )
         );
 
@@ -309,12 +309,12 @@ mod tests {
         assert_eq!(config.command(), env_program());
         assert_eq!(
             config.arguments(),
-            [
+            crate::launch_config::env_argv([
                 "-u",
                 "ANTHROPIC_API_KEY",
                 "/usr/local/bin/claude-agent-acp",
                 "--acp",
-            ]
+            ])
         );
         // The config's own env list is untouched — only the argv is rewritten.
         assert_eq!(
@@ -394,12 +394,14 @@ mod tests {
                 "unstripped launch: {}",
                 stripped.0
             );
-            assert_eq!(&config.arguments()[..2], ["-u", "ANTHROPIC_API_KEY"]);
+            let expected = crate::launch_config::env_argv(["-u", "ANTHROPIC_API_KEY"]);
+            assert_eq!(&config.arguments()[..expected.len()], expected);
         }
     }
 
     /// Run `config` for real with `ANTHROPIC_API_KEY` set on the child, and
     /// report whether it exited 0 — i.e. whether the var was removed.
+    #[cfg(unix)]
     fn probe_sees_no_key(config: &AcpAgentConfig) -> bool {
         std::process::Command::new(config.command())
             .args(config.arguments())
@@ -409,6 +411,11 @@ mod tests {
             .success()
     }
 
+    /// Unix only, because the wrapper is `/usr/bin/env` there and this test
+    /// binary is what `env_program` names anywhere else — and a test harness
+    /// does not route `--env`. The daruda wrapper's own behaviour is spawned
+    /// for real in `crates/app/tests/env_strip.rs`.
+    #[cfg(unix)]
     #[test]
     fn the_emitted_unsets_really_remove_the_var_from_a_spawned_child() {
         // `env(1)`'s argv grammar is only checked at spawn time: a `-u` placed
@@ -509,7 +516,7 @@ mod tests {
         assert_eq!(config.command(), env_program());
         assert_eq!(
             config.arguments(),
-            vec![
+            crate::launch_config::env_argv(vec![
                 "-u".to_string(),
                 "ANTHROPIC_API_KEY".to_string(),
                 crate::node::managed_launcher(&node_dir, "npx")
@@ -518,7 +525,7 @@ mod tests {
                 "-y".to_string(),
                 "@augmentcode/auggie@0.32.0".to_string(),
                 "--acp".to_string(),
-            ]
+            ])
         );
         // The command's own assignment stays in the env list, not the argv.
         assert_eq!(
