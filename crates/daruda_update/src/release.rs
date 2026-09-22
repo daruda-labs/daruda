@@ -228,7 +228,7 @@ mod tests {
             ]
         }"#;
         let current = semver::Version::parse("0.2.0").unwrap();
-        let result = parse_release(json, &current);
+        let result = parse_release_with_suffix(json, &current, ".dmg");
         assert!(matches!(
             result,
             Err(UpdateError::NoAssetForPlatform(".dmg"))
@@ -243,7 +243,7 @@ mod tests {
             "assets": []
         }"#;
         let current = semver::Version::parse("0.2.0").unwrap();
-        let result = parse_release(json, &current);
+        let result = parse_release_with_suffix(json, &current, ".dmg");
         assert!(matches!(result, Err(UpdateError::Parse(_))));
     }
 
@@ -258,7 +258,11 @@ mod tests {
             ]
         }"#;
         let current = semver::Version::parse("0.2.0").unwrap();
-        assert!(parse_release(json, &current).unwrap().is_none());
+        assert!(
+            parse_release_with_suffix(json, &current, ".dmg")
+                .unwrap()
+                .is_none()
+        );
     }
 
     #[test]
@@ -272,7 +276,11 @@ mod tests {
             ]
         }"#;
         let current = semver::Version::parse("0.2.0").unwrap();
-        assert!(parse_release(json, &current).unwrap().is_none());
+        assert!(
+            parse_release_with_suffix(json, &current, ".dmg")
+                .unwrap()
+                .is_none()
+        );
     }
 
     #[test]
