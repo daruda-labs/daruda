@@ -9,7 +9,7 @@ use daruda_config::Config;
 use daruda_store::accounts::{AccountId, ManagedAccount};
 use gpui::{AnyElement, IntoElement, SharedString, div, prelude::*, px};
 
-use crate::settings_window::{BoolSetting, SettingsWindow};
+use crate::settings::{BoolSetting, SettingsView};
 use crate::surface::strings as s;
 use crate::ui::theme;
 use crate::ui::{checkbox, checkbox_row, field_row, select};
@@ -20,7 +20,7 @@ use crate::ui::{checkbox, checkbox_row, field_row, select};
 const UNSET: &str = "";
 
 /// Agent options: the catalog, headed by the follow-the-catalog choice.
-pub(in crate::settings_window) fn agent_options(config: &Config) -> Vec<select::SelectOption> {
+pub(in crate::settings) fn agent_options(config: &Config) -> Vec<select::SelectOption> {
     let mut opts = vec![select::SelectOption::new(
         UNSET,
         s::settings_orchestrator_agent_default(),
@@ -35,7 +35,7 @@ pub(in crate::settings_window) fn agent_options(config: &Config) -> Vec<select::
 }
 
 /// Account options: the managed accounts, headed by the system default.
-pub(in crate::settings_window) fn account_options(
+pub(in crate::settings) fn account_options(
     accounts: &[ManagedAccount],
 ) -> Vec<select::SelectOption> {
     let mut opts = vec![select::SelectOption::new(
@@ -61,7 +61,7 @@ fn account_label(account: &ManagedAccount) -> String {
 }
 
 /// The select value the live config implies.
-pub(in crate::settings_window) fn agent_select_value(config: &Config) -> SharedString {
+pub(in crate::settings) fn agent_select_value(config: &Config) -> SharedString {
     config
         .orchestrator
         .agent_id
@@ -70,7 +70,7 @@ pub(in crate::settings_window) fn agent_select_value(config: &Config) -> SharedS
 }
 
 /// Same, for the account picker.
-pub(in crate::settings_window) fn account_select_value(config: &Config) -> SharedString {
+pub(in crate::settings) fn account_select_value(config: &Config) -> SharedString {
     config.orchestrator.account_id.map_or_else(
         || SharedString::new_static(UNSET),
         |id| SharedString::from(id.0.to_string()),
@@ -78,18 +78,18 @@ pub(in crate::settings_window) fn account_select_value(config: &Config) -> Share
 }
 
 /// Inverse of [`agent_select_value`]: an empty pick is "follow the catalog".
-pub(in crate::settings_window) fn agent_id_from_select(value: String) -> Option<String> {
+pub(in crate::settings) fn agent_id_from_select(value: String) -> Option<String> {
     (!value.is_empty()).then_some(value)
 }
 
 /// Inverse of [`account_select_value`]. An unparseable value cannot be one of
 /// the options this module built, so it reads as the system default rather
 /// than pinning the session to an account that does not exist.
-pub(in crate::settings_window) fn account_id_from_select(value: &str) -> Option<AccountId> {
+pub(in crate::settings) fn account_id_from_select(value: &str) -> Option<AccountId> {
     uuid::Uuid::parse_str(value).ok().map(AccountId)
 }
 
-impl SettingsWindow {
+impl SettingsView {
     /// The orchestrator subsection of the Notifications page. Its own file
     /// rather than another block in `sections/mod.rs`, which is already over
     /// the size budget.

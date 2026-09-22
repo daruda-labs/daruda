@@ -9,23 +9,23 @@ use std::collections::HashSet;
 
 use gpui::{AnyWindowHandle, App, AppContext, Context, Global, WeakEntity, Window};
 
-use crate::settings_window::SettingsWindow;
+use crate::settings::SettingsView;
 use crate::workspace::Workspace;
 
 /// Settings singleton handle; stores the inner entity because the window root
-/// is `gpui_component::Root`, not `SettingsWindow`.
+/// is `gpui_component::Root`, not `SettingsView`.
 #[derive(Clone)]
 pub(crate) struct SettingsHandle {
     window: AnyWindowHandle,
-    inner: WeakEntity<SettingsWindow>,
+    inner: WeakEntity<SettingsView>,
 }
 
 impl SettingsHandle {
-    /// Run `f` against the live `SettingsWindow`; `None` means reopen it.
+    /// Run `f` against the live `SettingsView`; `None` means reopen it.
     pub(crate) fn update<R>(
         &self,
         cx: &mut App,
-        f: impl FnOnce(&mut SettingsWindow, &mut Window, &mut Context<SettingsWindow>) -> R,
+        f: impl FnOnce(&mut SettingsView, &mut Window, &mut Context<SettingsView>) -> R,
     ) -> Option<R> {
         let inner = self.inner.upgrade()?;
         cx.update_window(self.window, |_root, window, cx_w| {
@@ -187,7 +187,7 @@ impl WindowRegistry {
     /// (a separate OS window with no `Workspace` of its own) to pick a
     /// concrete target for an action that must run against *some* live
     /// Workspace (e.g. the Accounts section's add-account button — see
-    /// `settings_window::sections::accounts::start_add_account`).
+    /// `settings::sections::accounts::start_add_account`).
     /// Deterministic (registration order) but arbitrary when more than one
     /// workspace window is open; documented simplification, same class as
     /// `Workspace::panes_referencing_account`'s per-window undercount.
@@ -264,7 +264,7 @@ impl WindowRegistry {
     /// Record the live Settings singleton.
     pub(crate) fn register_settings(
         window: AnyWindowHandle,
-        inner: WeakEntity<SettingsWindow>,
+        inner: WeakEntity<SettingsView>,
         cx: &mut App,
     ) {
         cx.default_global::<WindowRegistry>().settings = Some(SettingsHandle { window, inner });

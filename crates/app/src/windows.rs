@@ -14,7 +14,7 @@ use gpui::{
     WindowOptions, point, prelude::*, px,
 };
 
-use crate::settings_window::SettingsWindow;
+use crate::settings::SettingsView;
 use crate::window_registry::WindowRegistry;
 use crate::workspace::Workspace;
 
@@ -676,7 +676,7 @@ pub(crate) fn open_project_with_mode(
 
 /// Open the Settings window on `section`. If a Settings window is
 /// already open, bring it to the front and route through
-/// `SettingsWindow::focus_section` to switch the active page instead
+/// `SettingsView::focus_section` to switch the active page instead
 /// of opening a second one.
 pub(crate) fn open_settings_window(section: daruda_config::BuiltinSection, cx: &mut App) {
     if let Some(sh) = WindowRegistry::settings(cx) {
@@ -705,10 +705,10 @@ pub(crate) fn open_settings_window(section: daruda_config::BuiltinSection, cx: &
     // The Settings window root is `gpui_component::Root` because the form
     // renders `gpui_component::Input` text fields, whose `TextElement::paint`
     // calls `Root::read` and panics if the root view is not a `Root`. The
-    // inner `SettingsWindow` entity registers itself in `WindowRegistry` via
+    // inner `SettingsView` entity registers itself in `WindowRegistry` via
     // its constructor so the singleton-focus path above can reach it.
     cx.open_window(opts, |window, cx| {
-        let settings = cx.new(|cx| SettingsWindow::new_with_section(section, window, cx));
+        let settings = cx.new(|cx| SettingsView::new_with_section(section, window, cx));
         cx.new(|cx| gpui_component::Root::new(settings, window, cx))
     })
     .unwrap();

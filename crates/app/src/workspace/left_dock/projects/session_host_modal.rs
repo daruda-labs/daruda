@@ -7,7 +7,7 @@
 //! single registry dropdown (`crate::ui::select`) picks Local, "keep the
 //! lane's current value" (the default whenever that value isn't already a
 //! live registry link), or one catalog entry — free-text `target`/`container`
-//! entry was removed in favor of the registry (see `settings_window::sections
+//! entry was removed in favor of the registry (see `settings::sections
 //! ::session_hosts`, where a host is actually registered). `build_host`
 //! validates via `lane::session_host::from_registry_entry` (the one place
 //! that quoting-safety rule lives — see that module), and an inline banner

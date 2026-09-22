@@ -1,4 +1,4 @@
-//! `impl Render for SettingsWindow` — sidebar + body layout.
+//! `impl Render for SettingsView` — sidebar + body layout.
 
 use crate::ui::theme;
 use daruda_config::BuiltinSection;
@@ -6,10 +6,10 @@ use gpui::{
     AnyElement, ClickEvent, Context, IntoElement, KeyDownEvent, Render, Window, div, prelude::*, px,
 };
 
-use super::{SettingsWindow, settings_button as button};
+use super::{SettingsView, settings_button as button};
 use crate::surface::strings as s;
 
-impl Render for SettingsWindow {
+impl Render for SettingsView {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let t = theme::current(cx);
         // Match the workspace title bar's themed token (retones for light mode)
@@ -112,7 +112,7 @@ impl Render for SettingsWindow {
         body_with_error = body_with_error.child(body);
 
         div()
-            .key_context("SettingsWindow")
+            .key_context("SettingsView")
             .track_focus(&self.panel_focus_handle)
             .on_key_down(cx.listener(|this, ev: &KeyDownEvent, window, cx| {
                 match ev.keystroke.key.as_str() {
@@ -172,7 +172,7 @@ impl Render for SettingsWindow {
     }
 }
 
-impl SettingsWindow {
+impl SettingsView {
     /// Build the active page's body. New sections are wired here.
     fn render_section_body(&self, cx: &mut Context<Self>) -> AnyElement {
         match self.active_section {

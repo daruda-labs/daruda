@@ -10,7 +10,7 @@
 //! This is a sibling domain to `account_ops.rs`'s pane-account *switching* —
 //! split out because account state (creation, switching, deletion) is one
 //! cohesive domain on `Workspace`, mirrored by
-//! `settings_window/sections/accounts.rs` owning the Settings-side half of
+//! `settings/sections/accounts.rs` owning the Settings-side half of
 //! the same domain (default/delete), but the login flow's spawn/poll/finish
 //! machinery is large enough to warrant its own file.
 
@@ -1523,7 +1523,7 @@ fn cleanup_account_dir(recipe: AccountRecipeId, config_dir: &Path) {
 }
 
 /// Current Unix time in seconds, saturating to `0` on a clock error.
-/// Mirrors `settings_window::sections::accounts`'s private helper of the
+/// Mirrors `settings::sections::accounts`'s private helper of the
 /// same shape — not shared across that module boundary for a 5-line
 /// helper.
 fn now_unix() -> u64 {
@@ -1534,7 +1534,7 @@ fn now_unix() -> u64 {
 }
 
 /// Log an I/O failure without surfacing a toast — mirrors
-/// `settings_window::sections::accounts`'s private helper of the same
+/// `settings::sections::accounts`'s private helper of the same
 /// shape (see its doc for why: this module has `Workspace::report_error`
 /// available and still chooses to log rather than toast, since a
 /// best-effort cleanup failure has no functional impact worth interrupting

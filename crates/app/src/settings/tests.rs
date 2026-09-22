@@ -13,14 +13,14 @@ use crate::transcript::fold_mode::{BlockRule, FoldBlock, FoldMode, FoldPreset, T
 /// `TextElement::paint` can resolve `Root::read` without panicking.
 fn build_window(
     cx: &mut TestAppContext,
-) -> (WindowHandle<gpui_component::Root>, Entity<SettingsWindow>) {
+) -> (WindowHandle<gpui_component::Root>, Entity<SettingsView>) {
     build_window_with_config(cx, daruda_config::Config::default())
 }
 
 fn build_window_with_config(
     cx: &mut TestAppContext,
     config: daruda_config::Config,
-) -> (WindowHandle<gpui_component::Root>, Entity<SettingsWindow>) {
+) -> (WindowHandle<gpui_component::Root>, Entity<SettingsView>) {
     init_gpui_component(cx);
     cx.update(|cx| {
         crate::settings_store::SettingsStore::init(cx);
@@ -30,7 +30,7 @@ fn build_window_with_config(
     });
     let settings_for_root = std::cell::RefCell::new(None);
     let wh = cx.add_window(|window, cx| {
-        let settings = cx.new(|cx| SettingsWindow::new(window, cx));
+        let settings = cx.new(|cx| SettingsView::new(window, cx));
         *settings_for_root.borrow_mut() = Some(settings.clone());
         gpui_component::Root::new(settings, window, cx)
     });
@@ -472,14 +472,14 @@ fn structural_overwrite_reloads_the_persisted_catalog(cx: &mut TestAppContext) {
     });
 }
 
-/// Test-only — write `value` into one of the settings_window's inputs
+/// Test-only — write `value` into one of the settings's inputs
 /// through the real `InputState::set_value` pipeline. Tests don't hold
 /// a live `&mut Window`, so re-enter via the window handle.
 fn set_input(
     wh: &WindowHandle<gpui_component::Root>,
-    win: &Entity<SettingsWindow>,
+    win: &Entity<SettingsView>,
     cx: &mut TestAppContext,
-    field: fn(&SettingsWindow) -> Entity<InputState>,
+    field: fn(&SettingsView) -> Entity<InputState>,
     value: &str,
 ) {
     let state = win.read_with(cx, |w, _| field(w));
@@ -601,7 +601,7 @@ fn validate_collects_agent_catalog(cx: &mut TestAppContext) {
 /// all (`set_selected_value` clears the selection for an unknown value).
 fn select_agent_preset(
     wh: &WindowHandle<gpui_component::Root>,
-    win: &Entity<SettingsWindow>,
+    win: &Entity<SettingsView>,
     cx: &mut TestAppContext,
     preset_id: &str,
 ) -> bool {
@@ -619,7 +619,7 @@ fn select_agent_preset(
 /// Test-only — click "Add Preset" for whatever the dropdown currently holds.
 fn add_selected_agent_preset(
     wh: &WindowHandle<gpui_component::Root>,
-    win: &Entity<SettingsWindow>,
+    win: &Entity<SettingsView>,
     cx: &mut TestAppContext,
 ) {
     let win = win.clone();
@@ -632,7 +632,7 @@ fn add_selected_agent_preset(
 /// Test-only — pick `kind` in one catalog row's transport dropdown.
 fn select_agent_transport(
     wh: &WindowHandle<gpui_component::Root>,
-    win: &Entity<SettingsWindow>,
+    win: &Entity<SettingsView>,
     cx: &mut TestAppContext,
     index: usize,
     kind: &str,
@@ -654,7 +654,7 @@ fn select_agent_transport(
 /// the confirm event a real click emits (`set_selected_value` alone is silent).
 fn confirm_agent_row_select(
     wh: &WindowHandle<gpui_component::Root>,
-    win: &Entity<SettingsWindow>,
+    win: &Entity<SettingsView>,
     cx: &mut TestAppContext,
     index: usize,
     field: fn(&AgentCatalogRow) -> Entity<SelectState>,
@@ -676,7 +676,7 @@ fn confirm_agent_row_select(
 /// not carry, which is the only public read of what a `SelectState` holds.
 fn agent_row_select_offers(
     wh: &WindowHandle<gpui_component::Root>,
-    win: &Entity<SettingsWindow>,
+    win: &Entity<SettingsView>,
     cx: &mut TestAppContext,
     index: usize,
     field: fn(&AgentCatalogRow) -> Entity<SelectState>,
@@ -694,7 +694,7 @@ fn agent_row_select_offers(
 /// Test-only — install a known vocabulary cache into the open Settings window.
 fn set_agent_vocabulary(
     wh: &WindowHandle<gpui_component::Root>,
-    win: &Entity<SettingsWindow>,
+    win: &Entity<SettingsView>,
     cx: &mut TestAppContext,
     vocabulary: daruda_store::agent_vocabulary::AgentVocabularyCache,
 ) {
@@ -710,7 +710,7 @@ fn set_agent_vocabulary(
 /// Test-only — write `value` into one catalog row's input.
 fn set_agent_row_input(
     wh: &WindowHandle<gpui_component::Root>,
-    win: &Entity<SettingsWindow>,
+    win: &Entity<SettingsView>,
     cx: &mut TestAppContext,
     index: usize,
     field: fn(&AgentCatalogRow) -> Entity<InputState>,
@@ -1481,7 +1481,7 @@ fn clearing_a_preset_shipping_environment_opts_the_row_out(cx: &mut TestAppConte
 #[gpui::test]
 fn only_a_row_launching_the_codex_overlay_carries_its_note(cx: &mut TestAppContext) {
     let (wh, win) = build_window(cx);
-    let ships = |win: &Entity<SettingsWindow>, cx: &mut TestAppContext, index: usize| {
+    let ships = |win: &Entity<SettingsView>, cx: &mut TestAppContext, index: usize| {
         win.read_with(cx, |w, cx| {
             w.agent_editable_row(index)
                 .unwrap()
@@ -1616,7 +1616,7 @@ fn blur(
 /// The environment of the first editable row, as it stands in the live
 /// settings — the thing a save actually moves.
 fn stored_first_agent_env(
-    win: &Entity<SettingsWindow>,
+    win: &Entity<SettingsView>,
     cx: &mut TestAppContext,
 ) -> Option<Vec<(String, String)>> {
     win.read_with(cx, |_w, cx| {
@@ -2282,7 +2282,7 @@ fn basic_toggles_and_section_focus(cx: &mut TestAppContext) {
     let settings_for_root = std::cell::RefCell::new(None);
     let _wh = cx.add_window(|window, cx| {
         let settings =
-            cx.new(|cx| SettingsWindow::new_with_section(BuiltinSection::Keymap, window, cx));
+            cx.new(|cx| SettingsView::new_with_section(BuiltinSection::Keymap, window, cx));
         *settings_for_root.borrow_mut() = Some(settings.clone());
         gpui_component::Root::new(settings, window, cx)
     });
@@ -2367,7 +2367,7 @@ async fn the_orchestrator_pickers_follow_a_change_made_while_settings_is_open(
     let account_value: SharedString = account.id.0.to_string().into();
 
     let can_pick = |value: &SharedString,
-                    select: fn(&SettingsWindow) -> &Entity<SelectState>,
+                    select: fn(&SettingsView) -> &Entity<SelectState>,
                     cx: &mut TestAppContext|
      -> bool {
         let value = value.clone();
@@ -2498,7 +2498,7 @@ async fn copy_telegram_pair_command_writes_clipboard_and_reverts_label(cx: &mut 
 /// Test-only — click "Add Host".
 fn add_session_host(
     wh: &WindowHandle<gpui_component::Root>,
-    win: &Entity<SettingsWindow>,
+    win: &Entity<SettingsView>,
     cx: &mut TestAppContext,
 ) {
     let win = win.clone();
@@ -2511,7 +2511,7 @@ fn add_session_host(
 /// Test-only — pick `kind` in one session-host row's kind dropdown.
 fn select_session_host_kind(
     wh: &WindowHandle<gpui_component::Root>,
-    win: &Entity<SettingsWindow>,
+    win: &Entity<SettingsView>,
     cx: &mut TestAppContext,
     index: usize,
     kind: &str,
@@ -2529,7 +2529,7 @@ fn select_session_host_kind(
 /// Test-only — write `value` into one session-host row's input.
 fn set_session_host_row_input(
     wh: &WindowHandle<gpui_component::Root>,
-    win: &Entity<SettingsWindow>,
+    win: &Entity<SettingsView>,
     cx: &mut TestAppContext,
     index: usize,
     field: fn(&SessionHostRow) -> Entity<InputState>,
@@ -2842,7 +2842,7 @@ fn removing_a_session_host_row_updates_the_row_list_immediately(cx: &mut TestApp
 /// click would.
 fn open_session_hosts_section(
     wh: &WindowHandle<gpui_component::Root>,
-    win: &Entity<SettingsWindow>,
+    win: &Entity<SettingsView>,
     cx: &mut TestAppContext,
 ) {
     let win = win.clone();
@@ -2857,7 +2857,7 @@ fn open_session_hosts_section(
 /// Test-only — one Tab (`forward`) / Shift-Tab press.
 fn press_tab(
     wh: &WindowHandle<gpui_component::Root>,
-    win: &Entity<SettingsWindow>,
+    win: &Entity<SettingsView>,
     cx: &mut TestAppContext,
     forward: bool,
 ) {
@@ -2871,7 +2871,7 @@ fn press_tab(
 /// Test-only — whether one session-host row's input currently holds focus.
 fn session_host_input_is_focused(
     wh: &WindowHandle<gpui_component::Root>,
-    win: &Entity<SettingsWindow>,
+    win: &Entity<SettingsView>,
     cx: &mut TestAppContext,
     index: usize,
     field: fn(&SessionHostRow) -> Entity<InputState>,
@@ -2885,7 +2885,7 @@ fn session_host_input_is_focused(
 
 fn focus_session_host_input(
     wh: &WindowHandle<gpui_component::Root>,
-    win: &Entity<SettingsWindow>,
+    win: &Entity<SettingsView>,
     cx: &mut TestAppContext,
     index: usize,
     field: fn(&SessionHostRow) -> Entity<InputState>,
@@ -2899,7 +2899,7 @@ fn focus_session_host_input(
 
 fn session_host_kind_is_focused(
     wh: &WindowHandle<gpui_component::Root>,
-    win: &Entity<SettingsWindow>,
+    win: &Entity<SettingsView>,
     cx: &mut TestAppContext,
     index: usize,
 ) -> bool {

@@ -18,7 +18,7 @@ impl Workspace {
     ///
     /// Do not call this from a test: `apply_patch` writes the real
     /// on-disk `config_path()` with no test-mode redirect (see
-    /// `settings_window/tests.rs::validate_does_not_revert_background_pairing`).
+    /// `settings/tests.rs::validate_does_not_revert_background_pairing`).
     /// `StatusBarConfig::toggle` carries the actual membership-flip logic
     /// and is unit-tested there instead.
     pub(in crate::workspace) fn toggle_status_bar_item(

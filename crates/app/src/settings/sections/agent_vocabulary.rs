@@ -7,7 +7,7 @@
 //! not erase the seed on the other.
 //!
 //! Both keys are editable after the row was built, so the lists are rebuilt in
-//! place by [`SettingsWindow::refresh_agent_row_vocabulary`] rather than at
+//! place by [`SettingsView::refresh_agent_row_vocabulary`] rather than at
 //! render time — building them in `render` would mean mutating select state
 //! mid-paint.
 
@@ -16,16 +16,16 @@ use crate::ui::select::{SelectOption, SelectState};
 use daruda_store::agent_vocabulary::{AgentVocabularyCache, VocabEntry};
 use gpui::{Entity, SharedString, Window};
 
-use super::super::{AgentCatalogItem, AgentCatalogRow, SettingsWindow};
+use super::super::{AgentCatalogItem, AgentCatalogRow, SettingsView};
 
-impl SettingsWindow {
+impl SettingsView {
     /// Rebuild one row's mode/model option lists from the row's current id and
     /// command. Both are editable after the row was constructed, so the lists
     /// are re-sourced here rather than at render time (building them in
     /// `render` would mean mutating the select state mid-paint). The
     /// `SelectState` entities are reused, never replaced, so the row's
     /// subscriptions stay wired to them.
-    pub(in crate::settings_window) fn refresh_agent_row_vocabulary(
+    pub(in crate::settings) fn refresh_agent_row_vocabulary(
         &mut self,
         index: usize,
         window: &mut Window,
@@ -56,12 +56,12 @@ impl AgentCatalogRow {
     /// The pinned session mode, or `None` for the empty "agent default"
     /// sentinel. The one reading both collect paths and `provenance` share,
     /// so none of them can disagree about what "no override" looks like.
-    pub(in crate::settings_window) fn default_mode(&self, cx: &gpui::App) -> Option<String> {
+    pub(in crate::settings) fn default_mode(&self, cx: &gpui::App) -> Option<String> {
         selected_override(&self.default_mode_select, cx)
     }
 
     /// The pinned model, same sentinel as [`Self::default_mode`].
-    pub(in crate::settings_window) fn default_model(&self, cx: &gpui::App) -> Option<String> {
+    pub(in crate::settings) fn default_model(&self, cx: &gpui::App) -> Option<String> {
         selected_override(&self.default_model_select, cx)
     }
 }
@@ -98,7 +98,7 @@ fn set_options(
 
 /// The `(modes, models)` option lists for a row whose id is `agent_id` and
 /// whose command is `command`. Cache first, then seed, per axis.
-pub(in crate::settings_window) fn agent_row_vocabulary_options(
+pub(in crate::settings) fn agent_row_vocabulary_options(
     vocabulary: &AgentVocabularyCache,
     agent_id: &str,
     command: &str,
@@ -168,11 +168,11 @@ fn agent_default_label(entries: &[VocabEntry], adapter_default: Option<&str>) ->
 }
 
 #[cfg(test)]
-impl SettingsWindow {
+impl SettingsView {
     /// Test-only — install a known vocabulary cache and re-source every row's
     /// pickers from it, so a test never depends on the developer's real
     /// `agent_vocabulary.json`.
-    pub(in crate::settings_window) fn set_agent_vocabulary_for_test(
+    pub(in crate::settings) fn set_agent_vocabulary_for_test(
         &mut self,
         vocabulary: AgentVocabularyCache,
         window: &mut Window,

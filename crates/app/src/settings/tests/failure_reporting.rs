@@ -25,7 +25,7 @@ fn break_settings_persistence(cx: &mut TestAppContext) {
 /// into one update block would wipe the very banner under test.
 fn type_token(
     wh: &WindowHandle<gpui_component::Root>,
-    win: &Entity<SettingsWindow>,
+    win: &Entity<SettingsView>,
     token: &str,
     cx: &mut TestAppContext,
 ) {

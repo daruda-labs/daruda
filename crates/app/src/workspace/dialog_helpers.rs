@@ -99,7 +99,7 @@ pub(in crate::workspace) fn open_single_field_dialog<Cb>(
 /// confirms; the helper closes the dialog regardless of the handler's
 /// outcome.
 ///
-/// `pub(crate)` (not `pub(in crate::workspace)`) so `settings_window`'s
+/// `pub(crate)` (not `pub(in crate::workspace)`) so `settings`'s
 /// account-delete confirm can reuse the same `gpui_component::Dialog`
 /// chrome instead of duplicating it — the signature has no `Workspace`
 /// coupling.

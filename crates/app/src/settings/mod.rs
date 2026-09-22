@@ -1,6 +1,6 @@
 //! Singleton settings window for common daruda config options.
 //!
-//! Reopening routes through [`SettingsWindow::focus_section`] instead of
+//! Reopening routes through [`SettingsView::focus_section`] instead of
 //! spawning a duplicate. Builtin sections pair a `BuiltinSection` variant with
 //! nav/header strings and a `render_<section>` method.
 
@@ -67,7 +67,7 @@ impl CopyFeedback {
     }
 }
 
-pub struct SettingsWindow {
+pub struct SettingsView {
     panel_focus_handle: FocusHandle,
     /// Last config this window observed after opening or successfully writing.
     /// Used only to detect a same-field external edit before applying a draft.
@@ -477,7 +477,7 @@ pub(super) struct AgentCatalogRow {
     /// the agent's cached vocabulary, falling back to the adapter seed the
     /// command names; the empty value is the "agent default" sentinel that
     /// means no override. Rebuilt whenever the row's id or command changes —
-    /// see [`SettingsWindow::refresh_agent_row_vocabulary`].
+    /// see [`SettingsView::refresh_agent_row_vocabulary`].
     pub(super) default_mode_select: Entity<SelectState>,
     /// Optional model to request when this agent connects. Same option
     /// sourcing and same empty sentinel as `default_mode_select`.
@@ -489,7 +489,7 @@ pub(super) struct AgentCatalogRow {
     /// render time instead (see `sections::agent::render_agent_catalog_row`),
     /// since that needs no fresh `which` lookup. Recomputed on construction
     /// and whenever `command_input` changes (see
-    /// [`SettingsWindow::recompute_agent_row_path_warning`]); `which::which`
+    /// [`SettingsView::recompute_agent_row_path_warning`]); `which::which`
     /// is I/O, so `render` only ever reads this field, never calls it.
     pub(super) path_warning: Option<String>,
     /// Fold rules a fresh chat pane under this agent starts on, or `None` to
@@ -535,7 +535,7 @@ pub(super) struct AgentCatalogRow {
 /// `id` is minted once, at construction, and never changes for the row's
 /// lifetime: an existing row keeps the [`daruda_config::SessionHostId`] it
 /// loaded from config, and a freshly added row mints its own right away
-/// so [`SettingsWindow::validate`] can distinguish a persisted row from a
+/// so [`SettingsView::validate`] can distinguish a persisted row from a
 /// newly-added draft by id membership alone. The id persisted on commit can
 /// still differ: a row whose Type changed retires it (see
 /// [`session_host_entry_id`]).
@@ -566,7 +566,7 @@ impl SessionHostRow {
     }
 }
 
-impl SettingsWindow {
+impl SettingsView {
     pub fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
         Self::new_with_section(BuiltinSection::default(), window, cx)
     }
@@ -1821,15 +1821,15 @@ impl SettingsWindow {
 
         // Track this window in the WindowRegistry so `open_settings_window`
         // can raise it instead of opening a second copy. The window's root
-        // view is `gpui_component::Root` (the SettingsWindow needs Root in
+        // view is `gpui_component::Root` (the SettingsView needs Root in
         // the tree so `gpui_component::Input::TextElement::paint` can call
         // `Root::read` without panicking), so the registry stores a typed
         // `SettingsHandle` that bundles the window handle with a
-        // `WeakEntity<SettingsWindow>` to recover the inner entity.
+        // `WeakEntity<SettingsView>` to recover the inner entity.
         let weak = cx.entity().downgrade();
         let window_handle = window.window_handle();
         WindowRegistry::register_settings(window_handle, weak, cx);
-        cx.on_release(move |_: &mut SettingsWindow, cx: &mut gpui::App| {
+        cx.on_release(move |_: &mut SettingsView, cx: &mut gpui::App| {
             WindowRegistry::clear_settings(cx);
         })
         .detach();
@@ -2731,7 +2731,7 @@ fn is_valid_agent_id(id: &str) -> bool {
 /// lands unquoted in the launch command `daruda_config`'s assembler builds,
 /// so non-emptiness alone would let a typed host carry its own `ssh` flags
 /// or a `;` into that command line. Pure and GPUI-free so it is directly
-/// unit-testable — the save loop in [`SettingsWindow::validate`] is the only
+/// unit-testable — the save loop in [`SettingsView::validate`] is the only
 /// caller.
 fn agent_row_transport_error(
     kind: &str,
@@ -2858,7 +2858,7 @@ const MAX_SESSION_HOST_TOMBSTONES: usize = 20;
 ///    `redirected_to` set to the new entry's id; an older tie is left
 ///    unresolved by this tie-break.
 ///
-/// Pure and GPUI-free so it is directly unit-testable — [`SettingsWindow::validate`]
+/// Pure and GPUI-free so it is directly unit-testable — [`SettingsView::validate`]
 /// is the only caller.
 fn reconcile_session_host_tombstones(
     previous_entries: &[daruda_config::SessionHostEntry],
@@ -2927,7 +2927,7 @@ fn path_check_token(command: &str) -> Option<String> {
 /// [`path_check_token`] says a check applies and that token is not found on
 /// `PATH`, `None` otherwise (no check applies, or the binary was found).
 /// Advisory only — a missing command never blocks
-/// [`SettingsWindow::validate`], since registering an agent before
+/// [`SettingsView::validate`], since registering an agent before
 /// installing its CLI (or before adding it to `PATH`) is a legitimate flow.
 fn agent_command_path_warning(command: &str) -> Option<String> {
     let token = path_check_token(command)?;
@@ -2966,7 +2966,7 @@ fn font_select_options(cx: &gpui::App, current: &[&str]) -> Vec<SelectOption> {
         .collect()
 }
 
-// `render::*` is just the `impl Render for SettingsWindow` block —
+// `render::*` is just the `impl Render for SettingsView` block —
 // no items are re-exported, but keeping the module declaration above
 // is what makes the impl visible to external callers.
 

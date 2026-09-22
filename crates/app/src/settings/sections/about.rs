@@ -6,8 +6,8 @@
 //! button click. The window's `_updater_subscription` observes that
 //! entity, so every status transition re-renders this page reactively.
 //!
-//! `render_about` uses `pub(in crate::settings_window)` so the
-//! `settings_window::render` dispatcher can call it, matching the
+//! `render_about` uses `pub(in crate::settings)` so the
+//! `settings::render` dispatcher can call it, matching the
 //! sibling `render_plugin` pattern.
 
 use crate::surface::strings as s;
@@ -16,7 +16,7 @@ use crate::ui::theme;
 use crate::update::AutoUpdateStatus;
 use gpui::{AnyElement, ClickEvent, IntoElement, SharedString, div, prelude::*, px};
 
-use super::super::{SettingsWindow, settings_button as button};
+use super::super::{SettingsView, settings_button as button};
 
 /// Two-column meta row: muted label on the left, primary value on the
 /// right. Used for the current-version line.
@@ -55,7 +55,7 @@ fn muted_line(text: impl Into<SharedString>, cx: &gpui::App) -> impl IntoElement
 
 /// "Check for updates" button, wrapped in a row so it hugs its label.
 /// Disabled while a check is in flight.
-fn check_button(disabled: bool, cx: &mut gpui::Context<SettingsWindow>) -> impl IntoElement {
+fn check_button(disabled: bool, cx: &mut gpui::Context<SettingsView>) -> impl IntoElement {
     let btn = button("settings-update-check", s::settings_button_check_updates())
         .disabled(disabled)
         .on_click(cx.listener(|_this, _: &ClickEvent, _window, cx| {
@@ -67,7 +67,7 @@ fn check_button(disabled: bool, cx: &mut gpui::Context<SettingsWindow>) -> impl 
 }
 
 /// "Update" button — download + install the available release.
-fn update_button(cx: &mut gpui::Context<SettingsWindow>) -> impl IntoElement {
+fn update_button(cx: &mut gpui::Context<SettingsView>) -> impl IntoElement {
     let btn = button("settings-update-install", s::settings_button_update()).on_click(cx.listener(
         |_this, _: &ClickEvent, _window, cx| {
             if let Some(e) = crate::update::Updater::get(cx) {
@@ -79,7 +79,7 @@ fn update_button(cx: &mut gpui::Context<SettingsWindow>) -> impl IntoElement {
 }
 
 /// "Restart" button — relaunch into the swapped bundle.
-fn restart_button(cx: &mut gpui::Context<SettingsWindow>) -> impl IntoElement {
+fn restart_button(cx: &mut gpui::Context<SettingsView>) -> impl IntoElement {
     let btn = button("settings-update-restart", s::settings_button_restart()).on_click(
         cx.listener(|_this, _: &ClickEvent, _window, cx| {
             if let Some(e) = crate::update::Updater::get(cx) {
@@ -90,11 +90,8 @@ fn restart_button(cx: &mut gpui::Context<SettingsWindow>) -> impl IntoElement {
     div().flex().flex_row().child(btn)
 }
 
-impl SettingsWindow {
-    pub(in crate::settings_window) fn render_about(
-        &self,
-        cx: &mut gpui::Context<Self>,
-    ) -> AnyElement {
+impl SettingsView {
+    pub(in crate::settings) fn render_about(&self, cx: &mut gpui::Context<Self>) -> AnyElement {
         // Snapshot the updater state once so the mutable `cx` borrow is
         // free for the button listeners below.
         let entity = crate::update::Updater::get(cx);

@@ -567,7 +567,7 @@ impl From<EnvLineError> for FieldError {
 ///
 /// Shared with the agent catalog's Environment field, which edits an
 /// adapter process's environment in the same block form — see
-/// `settings_window::sections::agent_env`.
+/// `settings::sections::agent_env`.
 pub fn parse_env_lines(text: &str) -> Result<BTreeMap<String, String>, EnvLineError> {
     let mut map = BTreeMap::new();
     for line in text.lines() {

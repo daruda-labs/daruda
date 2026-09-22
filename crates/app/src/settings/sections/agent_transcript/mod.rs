@@ -24,33 +24,33 @@ use crate::ui::select::{self, SelectOption, SelectState};
 use daruda_config::{TAIL_WINDOW_ALL, TAIL_WINDOW_CHOICES, TAIL_WINDOW_DEFAULT};
 use gpui::{AppContext as _, Entity, SharedString, Window};
 
-use super::super::{AgentCatalogRow, SettingsWindow};
+use super::super::{AgentCatalogRow, SettingsView};
 
-pub(in crate::settings_window) mod editor;
+pub(in crate::settings) mod editor;
 
 /// Picker value for the entry standing in for a stored size none of the offered
 /// choices can state. Not a token the axis produces, so it cannot collide with
 /// a real choice.
-pub(in crate::settings_window) const CUSTOM: &str = "__custom__";
+pub(in crate::settings) const CUSTOM: &str = "__custom__";
 
 /// The transcript controls a row renders, plus the one stored value the
 /// remaining dropdown cannot state.
-pub(in crate::settings_window) struct TranscriptRow {
-    pub(in crate::settings_window) fold_mode: Option<FoldMode>,
-    pub(in crate::settings_window) fold_mode_loaded: Option<Vec<String>>,
-    pub(in crate::settings_window) display_filter: Option<DisplayFilter>,
-    pub(in crate::settings_window) display_filter_loaded: Option<Vec<String>>,
-    pub(in crate::settings_window) tail_window_select: Entity<SelectState>,
-    pub(in crate::settings_window) tail_window_loaded: Option<u8>,
-    pub(in crate::settings_window) tail_window_calls_select: Entity<SelectState>,
-    pub(in crate::settings_window) tail_window_calls_loaded: Option<u8>,
+pub(in crate::settings) struct TranscriptRow {
+    pub(in crate::settings) fold_mode: Option<FoldMode>,
+    pub(in crate::settings) fold_mode_loaded: Option<Vec<String>>,
+    pub(in crate::settings) display_filter: Option<DisplayFilter>,
+    pub(in crate::settings) display_filter_loaded: Option<Vec<String>>,
+    pub(in crate::settings) tail_window_select: Entity<SelectState>,
+    pub(in crate::settings) tail_window_loaded: Option<u8>,
+    pub(in crate::settings) tail_window_calls_select: Entity<SelectState>,
+    pub(in crate::settings) tail_window_calls_loaded: Option<u8>,
 }
 
 /// Build the transcript half of a catalog row from the definition it loaded.
-pub(in crate::settings_window) fn transcript_row(
+pub(in crate::settings) fn transcript_row(
     definition: &daruda_config::AgentDefinition,
     window: &mut Window,
-    cx: &mut gpui::Context<SettingsWindow>,
+    cx: &mut gpui::Context<SettingsView>,
 ) -> TranscriptRow {
     let tail = picker(
         tail_options(),
@@ -92,7 +92,7 @@ impl AgentCatalogRow {
     /// The `fold_mode` this row writes, or `None` to write no key at all —
     /// which is what "follow the built-in" means, since an absent key resolves
     /// to exactly that value.
-    pub(in crate::settings_window) fn fold_mode(&self) -> Option<Vec<String>> {
+    pub(in crate::settings) fn fold_mode(&self) -> Option<Vec<String>> {
         let mode = self.fold_mode?;
         Some(
             untouched(self.fold_mode_loaded.as_deref(), mode, |tokens| {
@@ -104,19 +104,19 @@ impl AgentCatalogRow {
 
     /// The value the fold editor edits: the row's own override, or the built-in
     /// it would otherwise start from.
-    pub(in crate::settings_window) fn fold_mode_value(&self) -> FoldMode {
+    pub(in crate::settings) fn fold_mode_value(&self) -> FoldMode {
         self.fold_mode.unwrap_or_default()
     }
 
     /// The `tail_window` this row writes, same built-in / preserved rules as
     /// [`Self::fold_mode`].
-    pub(in crate::settings_window) fn tail_window(&self, cx: &gpui::App) -> Option<u8> {
+    pub(in crate::settings) fn tail_window(&self, cx: &gpui::App) -> Option<u8> {
         tail_key(&self.tail_window_select, self.tail_window_loaded, cx)
     }
 
     /// The `tail_window_calls` this row writes — the same axis one level in, so
     /// the same rules and the same reader.
-    pub(in crate::settings_window) fn tail_window_calls(&self, cx: &gpui::App) -> Option<u8> {
+    pub(in crate::settings) fn tail_window_calls(&self, cx: &gpui::App) -> Option<u8> {
         tail_key(
             &self.tail_window_calls_select,
             self.tail_window_calls_loaded,
@@ -126,7 +126,7 @@ impl AgentCatalogRow {
 
     /// The `display_filter` this row writes, same built-in / preserved rules as
     /// [`Self::fold_mode`].
-    pub(in crate::settings_window) fn display_filter(&self) -> Option<Vec<String>> {
+    pub(in crate::settings) fn display_filter(&self) -> Option<Vec<String>> {
         let filter = self.display_filter?;
         Some(
             untouched(self.display_filter_loaded.as_deref(), filter, |tokens| {
@@ -137,12 +137,12 @@ impl AgentCatalogRow {
     }
 
     /// The value the filter editor edits — see [`Self::fold_mode_value`].
-    pub(in crate::settings_window) fn display_filter_value(&self) -> DisplayFilter {
+    pub(in crate::settings) fn display_filter_value(&self) -> DisplayFilter {
         self.display_filter.unwrap_or_default()
     }
 }
 
-impl SettingsWindow {
+impl SettingsView {
     /// Write a fold value onto a row. `None` drops the key, which is what the
     /// editor's reset footer hands back.
     ///
@@ -150,7 +150,7 @@ impl SettingsWindow {
     /// wrote without recording would dead-end its own `Custom` segment, which
     /// is what the chat pane's [`AgentChatView::set_fold_mode`] avoids by
     /// remembering here too.
-    pub(in crate::settings_window) fn set_agent_row_fold_mode(
+    pub(in crate::settings) fn set_agent_row_fold_mode(
         &mut self,
         catalog_index: usize,
         mode: Option<FoldMode>,
@@ -186,7 +186,7 @@ impl SettingsWindow {
 
     /// Pick a segment of the fold editor's preset strip — the same dispatch the
     /// chat pane makes, against this row's own editor state.
-    pub(in crate::settings_window) fn select_agent_row_fold_preset(
+    pub(in crate::settings) fn select_agent_row_fold_preset(
         &mut self,
         catalog_index: usize,
         preset: Option<crate::transcript::fold_mode::FoldPreset>,
@@ -204,7 +204,7 @@ impl SettingsWindow {
     /// Hand the fold axis back to the built-in, keeping the hand-edited matrix
     /// recallable through the `Custom` segment — the chat pane's reset does the
     /// same, and the two sit in the same editor.
-    pub(in crate::settings_window) fn reset_agent_row_fold_mode(
+    pub(in crate::settings) fn reset_agent_row_fold_mode(
         &mut self,
         catalog_index: usize,
         cx: &mut gpui::Context<Self>,
@@ -219,7 +219,7 @@ impl SettingsWindow {
 
     /// Move the fold editor's turn column. A view switch, not a value, so it
     /// neither persists nor marks the catalog dirty.
-    pub(in crate::settings_window) fn set_agent_row_fold_turn(
+    pub(in crate::settings) fn set_agent_row_fold_turn(
         &mut self,
         catalog_index: usize,
         turn: crate::transcript::fold_mode::TurnPosition,
@@ -233,7 +233,7 @@ impl SettingsWindow {
         }
     }
 
-    pub(in crate::settings_window) fn toggle_agent_row_filter_facet(
+    pub(in crate::settings) fn toggle_agent_row_filter_facet(
         &mut self,
         catalog_index: usize,
         facet: crate::transcript::display_filter::FilterFacet,
@@ -246,7 +246,7 @@ impl SettingsWindow {
         self.set_agent_row_display_filter(catalog_index, Some(next), cx);
     }
 
-    pub(in crate::settings_window) fn set_agent_row_filter_section(
+    pub(in crate::settings) fn set_agent_row_filter_section(
         &mut self,
         catalog_index: usize,
         parent: crate::transcript::display_filter::FilterFacet,
@@ -262,7 +262,7 @@ impl SettingsWindow {
 
     /// Hand the filter axis back to the built-in — see
     /// [`Self::reset_agent_row_fold_mode`].
-    pub(in crate::settings_window) fn reset_agent_row_display_filter(
+    pub(in crate::settings) fn reset_agent_row_display_filter(
         &mut self,
         catalog_index: usize,
         cx: &mut gpui::Context<Self>,

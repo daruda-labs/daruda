@@ -234,7 +234,7 @@ Enforced by `scripts/lint-inline-literals.sh`. When porting from reference imple
 ### G7 — Dependency direction (one-way)
 
 ```
-main.rs → menus.rs, windows.rs → workspace/, settings_window/
+main.rs → menus.rs, windows.rs → workspace/, settings/
   → title_bar/ → ui/, surface/          # every window kind draws the same chrome
   → agent/, project/, lane/, surface/, pty.rs, config_watcher.rs
 

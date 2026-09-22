@@ -108,7 +108,7 @@ fn register_settings_observer(cx: &mut App) {
         crate::menus::refresh_recent_menu(cx);
         crate::surface::action_map::apply_keybinding_overrides(&user.keybindings.bindings, cx);
         ui::theme::apply_ui_theme(&user.theme.ui_preset, cx);
-        let appearance = crate::settings_window::window_background_for(&user);
+        let appearance = crate::settings::window_background_for(&user);
         WindowRegistry::for_each_workspace(cx, |_ws, window, _cx| {
             window.set_background_appearance(appearance);
         });

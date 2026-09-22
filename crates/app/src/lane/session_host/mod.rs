@@ -106,7 +106,7 @@ fn breaks_quoting(c: char) -> bool {
 }
 
 /// `pub(crate)` so the Settings session-host registry editor
-/// (`settings_window::sections::session_hosts`) can validate a
+/// (`settings::sections::session_hosts`) can validate a
 /// `target`/`container` field the same way [`sanitized_ssh`]/[`sanitized_docker`]
 /// do, without going through a full `LaneSessionHost` (which also needs a
 /// `session_path` the registry editor has no field for).

@@ -11,12 +11,12 @@ use crate::ui::theme;
 use gpui::{AnyElement, ClickEvent, IntoElement, div, prelude::*, px};
 
 use super::super::{
-    SessionHostRow, SettingsWindow, settings_button as button,
+    SessionHostRow, SettingsView, settings_button as button,
     settings_button_danger as button_danger,
 };
 
-impl SettingsWindow {
-    pub(in crate::settings_window) fn render_session_hosts(
+impl SettingsView {
+    pub(in crate::settings) fn render_session_hosts(
         &self,
         cx: &mut gpui::Context<Self>,
     ) -> AnyElement {

@@ -30,8 +30,8 @@ mod remote_channel;
 mod replay;
 #[cfg(feature = "screenshot")]
 mod screenshot;
+pub mod settings;
 pub mod settings_store;
-pub mod settings_window;
 mod shell_env;
 mod slot_actions;
 mod smoke;

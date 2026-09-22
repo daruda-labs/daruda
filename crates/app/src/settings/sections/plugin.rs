@@ -1,15 +1,15 @@
 //! Plugin section of the Settings window — master/detail panes,
 //! skill rows, action buttons, and the supporting helpers.
 //!
-//! Every method this file adds to `SettingsWindow` uses
-//! `pub(in crate::settings_window)` so `sections::mod` and the
-//! `settings_window::render` dispatcher can call them, but no code
-//! outside `settings_window` can.
+//! Every method this file adds to `SettingsView` uses
+//! `pub(in crate::settings)` so `sections::mod` and the
+//! `settings::render` dispatcher can call them, but no code
+//! outside `settings` can.
 
 use crate::ui::theme;
 
 use super::super::{
-    PluginSkillBodyState, PluginSkillView, SettingsWindow, settings_button as button,
+    PluginSkillBodyState, PluginSkillView, SettingsView, settings_button as button,
 };
 use crate::agent::skills::plugins::{PluginAvailability, PluginInstall};
 use crate::agent::skills::{Skill, SkillInvocation};
@@ -147,8 +147,7 @@ fn invocation_status_label(inv: SkillInvocation) -> String {
 /// detail pane. Errors collapse to an empty map — the detail pane
 /// then surfaces `—` for the missing fields, matching the policy of
 /// the upstream loader.
-pub(in crate::settings_window) fn read_plugin_installs_indexed() -> BTreeMap<String, PluginInstall>
-{
+pub(in crate::settings) fn read_plugin_installs_indexed() -> BTreeMap<String, PluginInstall> {
     let path = crate::agent::skills::plugins::installed_plugins_manifest();
     let installs = crate::agent::skills::plugins::read_installed_plugins(&path);
     let mut out = BTreeMap::new();
@@ -158,11 +157,8 @@ pub(in crate::settings_window) fn read_plugin_installs_indexed() -> BTreeMap<Str
     out
 }
 
-impl SettingsWindow {
-    pub(in crate::settings_window) fn render_plugin(
-        &self,
-        cx: &mut gpui::Context<Self>,
-    ) -> AnyElement {
+impl SettingsView {
+    pub(in crate::settings) fn render_plugin(&self, cx: &mut gpui::Context<Self>) -> AnyElement {
         // Snapshot the skills Global once per render to keep all derived
         // views consistent: the master list, the detail header, the
         // skill table. Reading `cx.global::<...>()` repeatedly in the
@@ -698,7 +694,7 @@ impl SettingsWindow {
     /// `plugin_view_skill` state to `Loading` and spawns a background
     /// disk read; once the read settles, the spawn updates the state
     /// to `Loaded(body)` or `Error(msg)` and re-renders.
-    pub(in crate::settings_window) fn open_plugin_skill_view(
+    pub(in crate::settings) fn open_plugin_skill_view(
         &mut self,
         display_name: String,
         skill_md_path: std::path::PathBuf,
@@ -742,7 +738,7 @@ impl SettingsWindow {
     /// background executor, then broadcast a watcher refresh to every
     /// open Workspace so the right-bar Skills tab reflects the new
     /// state.
-    pub(in crate::settings_window) fn run_plugin_op(
+    pub(in crate::settings) fn run_plugin_op(
         &mut self,
         plugin_id: String,
         action: crate::agent::skills::plugin_ops::PluginAction,
@@ -780,7 +776,7 @@ impl SettingsWindow {
     ///
     /// Split from the spawn above so the outcome handling is reachable without
     /// running the `claude` CLI.
-    pub(in crate::settings_window) fn finish_plugin_op(
+    pub(in crate::settings) fn finish_plugin_op(
         &mut self,
         plugin_id: &str,
         action: crate::agent::skills::plugin_ops::PluginAction,

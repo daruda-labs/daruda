@@ -27,7 +27,7 @@ use daruda_store::observability::error_report::{ErrorReport, ErrorSeverity};
 use gpui::{AnyElement, ClickEvent, IntoElement, SharedString, div, prelude::*, px};
 
 use super::super::{
-    SettingsWindow, settings_button as button, settings_button_danger as button_danger,
+    SettingsView, settings_button as button, settings_button_danger as button_danger,
 };
 use crate::surface::strings as s;
 use crate::ui::theme;
@@ -169,11 +169,8 @@ fn persist_accounts(mutate: &mut dyn FnMut(&mut AccountsState)) -> std::io::Resu
     daruda_store::accounts::mutate_accounts(|state| mutate(state)).map(|(state, ())| state)
 }
 
-impl SettingsWindow {
-    pub(in crate::settings_window) fn render_accounts(
-        &self,
-        cx: &mut gpui::Context<Self>,
-    ) -> AnyElement {
+impl SettingsView {
+    pub(in crate::settings) fn render_accounts(&self, cx: &mut gpui::Context<Self>) -> AnyElement {
         let mut body = div()
             .flex()
             .flex_col()
@@ -528,7 +525,7 @@ impl SettingsWindow {
     }
 
     /// [`Self::set_default_account`] against a caller-supplied persist step.
-    pub(in crate::settings_window) fn set_default_account_with(
+    pub(in crate::settings) fn set_default_account_with(
         &mut self,
         recipe: AccountRecipeId,
         account: Option<AccountId>,
@@ -625,7 +622,7 @@ impl SettingsWindow {
     }
 
     /// [`Self::remove_account`] against a caller-supplied persist step.
-    pub(in crate::settings_window) fn remove_account_with(
+    pub(in crate::settings) fn remove_account_with(
         &mut self,
         account_id: AccountId,
         persist: impl Fn(&mut dyn FnMut(&mut AccountsState)) -> std::io::Result<AccountsState>,

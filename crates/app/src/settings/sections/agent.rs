@@ -2,12 +2,12 @@
 //! status hook toggle.
 //!
 //! The catalog editor reads the **persisted** layer (`Config.agents`, split at
-//! window-open time into [`SettingsWindow::agent_rows`] plus
-//! [`SettingsWindow::agent_unresolved_entries`]) rather than the resolved
+//! window-open time into [`SettingsView::agent_rows`] plus
+//! [`SettingsView::agent_unresolved_entries`]) rather than the resolved
 //! runtime catalog — an entry that resolves to nothing has to stay visible, or
 //! the user has no way to find out why an agent never shows up.
 //!
-//! Method visibility is `pub(in crate::settings_window)` so `render` can
+//! Method visibility is `pub(in crate::settings)` so `render` can
 //! dispatch here, mirroring the [`super::plugin`] submodule.
 
 use crate::surface::strings as s;
@@ -17,7 +17,7 @@ use daruda_config::PresetLaunchability;
 use gpui::{AnyElement, ClickEvent, IntoElement, SharedString, Window, div, prelude::*, px};
 
 use super::super::{
-    AgentCatalogRow, BoolSetting, SettingsWindow, settings_button as button,
+    AgentCatalogRow, BoolSetting, SettingsView, settings_button as button,
     settings_button_danger as button_danger,
 };
 
@@ -25,11 +25,8 @@ use super::super::{
 /// transport a preset reference can carry (see [`daruda_config::AgentEntry`]).
 const TRANSPORT_RAW: &str = "raw";
 
-impl SettingsWindow {
-    pub(in crate::settings_window) fn render_agent(
-        &self,
-        cx: &mut gpui::Context<Self>,
-    ) -> AnyElement {
+impl SettingsView {
+    pub(in crate::settings) fn render_agent(&self, cx: &mut gpui::Context<Self>) -> AnyElement {
         let description_color = theme::current(cx).text_muted;
         let use_modifier_to_send = self.agent_use_modifier_to_send;
         let mut body = div()
@@ -539,7 +536,7 @@ impl SettingsWindow {
     /// instead of a command daruda can run. `Some` is exactly the state in which
     /// the section swaps the Add button for that install page and explains why —
     /// leaving Add in place would make it a button that does nothing.
-    pub(in crate::settings_window) fn selected_preset_needs_install(
+    pub(in crate::settings) fn selected_preset_needs_install(
         &self,
         cx: &gpui::App,
     ) -> Option<(&'static str, &'static str)> {
@@ -596,18 +593,18 @@ impl SettingsWindow {
 /// differently from that source. Each `*_base` holds the ready-to-render label
 /// for the preset's own value, and is `None` when the field still follows the
 /// preset (or when the row has no preset at all).
-pub(in crate::settings_window) struct RowProvenance {
+pub(in crate::settings) struct RowProvenance {
     /// The preset this row references, `None` for a custom row.
-    pub(in crate::settings_window) preset: Option<String>,
-    pub(in crate::settings_window) name_base: Option<String>,
-    pub(in crate::settings_window) command_base: Option<String>,
-    pub(in crate::settings_window) default_mode_base: Option<String>,
-    pub(in crate::settings_window) default_model_base: Option<String>,
-    pub(in crate::settings_window) fold_mode_base: Option<String>,
-    pub(in crate::settings_window) tail_window_base: Option<String>,
-    pub(in crate::settings_window) tail_window_calls_base: Option<String>,
-    pub(in crate::settings_window) display_filter_base: Option<String>,
-    pub(in crate::settings_window) env_base: Option<String>,
+    pub(in crate::settings) preset: Option<String>,
+    pub(in crate::settings) name_base: Option<String>,
+    pub(in crate::settings) command_base: Option<String>,
+    pub(in crate::settings) default_mode_base: Option<String>,
+    pub(in crate::settings) default_model_base: Option<String>,
+    pub(in crate::settings) fold_mode_base: Option<String>,
+    pub(in crate::settings) tail_window_base: Option<String>,
+    pub(in crate::settings) tail_window_calls_base: Option<String>,
+    pub(in crate::settings) display_filter_base: Option<String>,
+    pub(in crate::settings) env_base: Option<String>,
 }
 
 impl RowProvenance {
@@ -615,7 +612,7 @@ impl RowProvenance {
         self.preset.is_some()
     }
 
-    pub(in crate::settings_window) fn is_overridden(&self) -> bool {
+    pub(in crate::settings) fn is_overridden(&self) -> bool {
         self.name_base.is_some()
             || self.command_base.is_some()
             || self.default_mode_base.is_some()
@@ -637,7 +634,7 @@ impl RowProvenance {
 
 impl AgentCatalogRow {
     /// Diff this row's current field values against the preset it references.
-    pub(in crate::settings_window) fn provenance(&self, cx: &gpui::App) -> RowProvenance {
+    pub(in crate::settings) fn provenance(&self, cx: &gpui::App) -> RowProvenance {
         let Some(preset) = self.preset.clone() else {
             return RowProvenance {
                 preset: None,
@@ -714,7 +711,7 @@ impl AgentCatalogRow {
     /// fix first. Resolved against the preset's own environment, since that
     /// is what decides whether an emptied field clears it or simply states
     /// none (see [`super::agent_env::stated_env`]).
-    pub(in crate::settings_window) fn stated_env(
+    pub(in crate::settings) fn stated_env(
         &self,
         cx: &gpui::App,
     ) -> Result<Option<Vec<(String, String)>>, super::agent_env::EnvFieldError> {
@@ -741,7 +738,7 @@ impl AgentCatalogRow {
     /// told what the Codex preset ships, a hand-built codex row should be,
     /// and a second preset carrying the same overlay needs no second
     /// condition here.
-    pub(in crate::settings_window) fn ships_codex_subagent_overlay(&self, cx: &gpui::App) -> bool {
+    pub(in crate::settings) fn ships_codex_subagent_overlay(&self, cx: &gpui::App) -> bool {
         fn carries(env: &[(String, String)]) -> bool {
             env.iter()
                 .any(|(name, _)| name == daruda_config::CODEX_CONFIG_ENV)
@@ -770,11 +767,11 @@ fn transport_needs_local_path_check(kind: &str) -> bool {
 }
 
 #[cfg(test)]
-impl SettingsWindow {
+impl SettingsView {
     /// Test-only entry into [`Self::add_selected_preset_row`] — the click
     /// handler that drives it lives inside a closure and isn't directly
     /// callable from tests.
-    pub(in crate::settings_window) fn add_selected_preset_row_for_test(
+    pub(in crate::settings) fn add_selected_preset_row_for_test(
         &mut self,
         window: &mut Window,
         cx: &mut gpui::Context<Self>,
@@ -784,7 +781,7 @@ impl SettingsWindow {
 
     /// Test-only entry into [`Self::add_custom_agent_row`] — same reason as
     /// [`Self::add_selected_preset_row_for_test`].
-    pub(in crate::settings_window) fn add_custom_agent_row_for_test(
+    pub(in crate::settings) fn add_custom_agent_row_for_test(
         &mut self,
         window: &mut Window,
         cx: &mut gpui::Context<Self>,

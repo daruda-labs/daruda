@@ -1,4 +1,4 @@
-//! Per-section body renderers for `SettingsWindow`.
+//! Per-section body renderers for `SettingsView`.
 //!
 //! Each method here builds the form for one [`BuiltinSection`] page.
 //! `render::render_section_body` matches on the active section and
@@ -7,7 +7,7 @@
 //! sidebar nav row.
 //!
 //! The Agent, Plugin, and Session Hosts sections live in the [`agent`] /
-//! [`plugin`] / [`session_hosts`] submodules; their `impl SettingsWindow`
+//! [`plugin`] / [`session_hosts`] submodules; their `impl SettingsView`
 //! blocks extend the same type through the standard sibling-module pattern.
 //! [`agent_vocabulary`] and [`agent_transcript`] are the Agent section's
 //! option-sourcing halves — where a catalog row's mode / model pickers and its
@@ -33,7 +33,7 @@ use daruda_store::observability::system_info::redact_home;
 use gpui::{AnyElement, ClickEvent, ClipboardItem, IntoElement, div, prelude::*, px};
 
 use super::{
-    BoolSetting, SettingsWindow, settings_button as button, settings_button_danger as button_danger,
+    BoolSetting, SettingsView, settings_button as button, settings_button_danger as button_danger,
 };
 
 /// How long the pairing-command "Copied!" label stays before reverting
@@ -55,7 +55,7 @@ fn font_domain_label(label: impl Into<gpui::SharedString>, cx: &gpui::App) -> im
         .child(label.into())
 }
 
-impl SettingsWindow {
+impl SettingsView {
     /// Put the `/setcommands` block on the clipboard.
     ///
     /// The block's own text stays English in every locale: what it registers
@@ -772,7 +772,7 @@ impl SettingsWindow {
     /// Returns whether the file was handed over. A failed directory step stops
     /// there: the path cannot name a file, so opening it would show the user an
     /// editor doing nothing instead of the reason.
-    pub(in crate::settings_window) fn open_config_file_with(
+    pub(in crate::settings) fn open_config_file_with(
         &mut self,
         ensure_dir: impl FnOnce(&std::path::Path) -> std::io::Result<()>,
         cx: &mut gpui::Context<Self>,
@@ -820,18 +820,18 @@ impl SettingsWindow {
 
 #[cfg(test)]
 #[allow(dead_code)] // exposed for tests that exercise the section without rendering it.
-impl SettingsWindow {
-    pub(in crate::settings_window) fn telegram_pair_command_copied(&self) -> bool {
+impl SettingsView {
+    pub(in crate::settings) fn telegram_pair_command_copied(&self) -> bool {
         self.telegram_pair_command_copy.copied()
     }
 
-    pub(in crate::settings_window) fn telegram_botfather_copied(&self) -> bool {
+    pub(in crate::settings) fn telegram_botfather_copied(&self) -> bool {
         self.telegram_botfather_copy.copied()
     }
 
     /// Test-only entry into [`Self::copy_botfather_commands`], for the same
     /// reason its pairing-code sibling below has one.
-    pub(in crate::settings_window) fn copy_botfather_commands_for_test(
+    pub(in crate::settings) fn copy_botfather_commands_for_test(
         &mut self,
         cx: &mut gpui::Context<Self>,
     ) {
@@ -842,7 +842,7 @@ impl SettingsWindow {
     /// click handler that drives it lives inside a closure and isn't
     /// directly callable from tests. Mirrors
     /// `ErrorReportModal::copy_to_clipboard_for_test`.
-    pub(in crate::settings_window) fn copy_telegram_pair_command_for_test(
+    pub(in crate::settings) fn copy_telegram_pair_command_for_test(
         &mut self,
         code: &str,
         cx: &mut gpui::Context<Self>,

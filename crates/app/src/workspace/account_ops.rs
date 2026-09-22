@@ -32,7 +32,7 @@
 //! lives in the sibling `account_login_ops.rs` — split out because it is
 //! a distinct, self-contained domain (spawn/poll/finish machinery) large
 //! enough to warrant its own file; both mirror
-//! `settings_window/sections/accounts.rs` owning the Settings-side half
+//! `settings/sections/accounts.rs` owning the Settings-side half
 //! of the same overall account domain (default/delete).
 
 use gpui::{Context, Window};
@@ -345,7 +345,7 @@ impl Workspace {
     /// `Workspace` window via `WindowRegistry::for_each_workspace`
     /// to build its confirm-body count. A lane never opened this session
     /// has no entry in `main_area.runtimes` yet, so this can undercount
-    /// — an accepted simplification (see `settings_window/sections/accounts.rs`).
+    /// — an accepted simplification (see `settings/sections/accounts.rs`).
     pub(crate) fn panes_referencing_account(&self, account_id: AccountId) -> usize {
         self.main_area
             .runtimes

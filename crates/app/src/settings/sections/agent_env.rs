@@ -15,7 +15,7 @@ use std::collections::BTreeMap;
 /// definition that states no environment *and* for one stating an empty one:
 /// the field cannot show the difference, which is why [`stated_env`] resolves
 /// it from the preset instead of from the text alone.
-pub(in crate::settings_window) fn env_field_text(env: Option<&[(String, String)]>) -> String {
+pub(in crate::settings) fn env_field_text(env: Option<&[(String, String)]>) -> String {
     format_env_lines(&env.unwrap_or_default().iter().cloned().collect())
 }
 
@@ -32,7 +32,7 @@ pub(in crate::settings_window) fn env_field_text(env: Option<&[(String, String)]
 ///
 /// `Err` names what the user has to fix first, which the caller turns into the
 /// section's inline diagnostic.
-pub(in crate::settings_window) fn stated_env(
+pub(in crate::settings) fn stated_env(
     text: &str,
     base: Option<&[(String, String)]>,
 ) -> Result<Option<Vec<(String, String)>>, EnvFieldError> {
@@ -67,7 +67,7 @@ pub(in crate::settings_window) fn stated_env(
 /// whose env lands in a JSON `env` map and never reaches a shell — the
 /// charset restriction is this field's, not the text form's.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(in crate::settings_window) enum EnvFieldError {
+pub(in crate::settings) enum EnvFieldError {
     /// The line carries no `=`, or nothing before it.
     MalformedLine(String),
     /// The name is outside `[A-Za-z_][A-Za-z0-9_]*` — see
@@ -80,7 +80,7 @@ pub(in crate::settings_window) enum EnvFieldError {
 /// The environment `base` ships, as the muted line under an overridden field.
 /// One line rather than the field's own block, since that is the shape every
 /// other inherited-base row on this page takes.
-pub(in crate::settings_window) fn env_base_summary(base: &[(String, String)]) -> String {
+pub(in crate::settings) fn env_base_summary(base: &[(String, String)]) -> String {
     base.iter()
         .map(|(key, value)| format!("{key}={value}"))
         .collect::<Vec<_>>()
@@ -92,7 +92,7 @@ pub(in crate::settings_window) fn env_base_summary(base: &[(String, String)]) ->
 /// raw text so `K = v` does not read as an override of `K=v`. Text that does
 /// not parse is not the preset's value either, so it reads as an override;
 /// saving is what reports why.
-pub(in crate::settings_window) fn env_follows_base(text: &str, base: &[(String, String)]) -> bool {
+pub(in crate::settings) fn env_follows_base(text: &str, base: &[(String, String)]) -> bool {
     let parsed: Option<BTreeMap<String, String>> = parse_env_lines(text).ok();
     parsed.is_some_and(|parsed| parsed.into_iter().collect::<Vec<_>>() == base)
 }

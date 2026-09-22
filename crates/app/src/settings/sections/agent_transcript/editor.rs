@@ -4,7 +4,7 @@
 //! What differs from the pane is only what the axis departs from. A pane resets
 //! to the agent's stated default; a row has nothing under it but the built-in,
 //! so its footer hands back by dropping the key entirely — see
-//! [`SettingsWindow::reset_agent_row_fold_mode`].
+//! [`SettingsView::reset_agent_row_fold_mode`].
 
 use std::rc::Rc;
 
@@ -17,7 +17,7 @@ use crate::transcript::editor::{ResetSpec, panel_root};
 use crate::ui::theme;
 use crate::ui::{Popover, button};
 
-use super::super::super::{AgentCatalogRow, SettingsWindow};
+use super::super::super::{AgentCatalogRow, SettingsView};
 
 /// The control a row's editor opens from: an outlined field the width of the
 /// dropdowns beside it, so the three transcript axes read as one row of fields
@@ -39,10 +39,10 @@ fn row_value_label(value: String, overridden: bool) -> String {
     }
 }
 
-pub(in crate::settings_window) fn fold_mode_control(
+pub(in crate::settings) fn fold_mode_control(
     catalog_index: usize,
     row: &AgentCatalogRow,
-    cx: &mut gpui::Context<SettingsWindow>,
+    cx: &mut gpui::Context<SettingsView>,
 ) -> impl IntoElement + use<> {
     let window_entity = cx.entity().downgrade();
     let mode = row.fold_mode_value();
@@ -72,7 +72,7 @@ pub(in crate::settings_window) fn fold_mode_control(
 }
 
 fn fold_panel(
-    settings: &gpui::WeakEntity<SettingsWindow>,
+    settings: &gpui::WeakEntity<SettingsView>,
     catalog_index: usize,
     mode: crate::transcript::fold_mode::FoldMode,
     editor_state: crate::transcript::editor::state::FoldEditorState,
@@ -123,10 +123,10 @@ fn fold_panel(
     )
 }
 
-pub(in crate::settings_window) fn display_filter_control(
+pub(in crate::settings) fn display_filter_control(
     catalog_index: usize,
     row: &AgentCatalogRow,
-    cx: &mut gpui::Context<SettingsWindow>,
+    cx: &mut gpui::Context<SettingsView>,
 ) -> impl IntoElement + use<> {
     let window_entity = cx.entity().downgrade();
     let filter = row.display_filter_value();
@@ -148,7 +148,7 @@ pub(in crate::settings_window) fn display_filter_control(
 }
 
 fn filter_panel(
-    settings: &gpui::WeakEntity<SettingsWindow>,
+    settings: &gpui::WeakEntity<SettingsView>,
     catalog_index: usize,
     filter: crate::transcript::display_filter::DisplayFilter,
     overridden: bool,

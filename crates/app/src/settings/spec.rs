@@ -22,7 +22,7 @@ use std::ops::RangeBounds;
 use daruda_config::{BuiltinSection, Config, SettingsPatch};
 use gpui::{App, Entity, SharedString};
 
-use super::{BoolSetting, SelectSetting, SettingsWindow, TextSetting};
+use super::{BoolSetting, SelectSetting, SettingsView, TextSetting};
 use crate::surface::strings as s;
 use crate::ui::InputState;
 use crate::ui::select::SelectState;
@@ -53,7 +53,7 @@ pub(super) struct TextSpec {
     /// Hint text for the empty input. A thunk rather than a `&'static str`
     /// because the wording is localized and the table is a `const`.
     pub(super) placeholder: fn() -> String,
-    pub(super) field: fn(&SettingsWindow) -> &Entity<InputState>,
+    pub(super) field: fn(&SettingsView) -> &Entity<InputState>,
     /// The current value, formatted the way the input displays it. Used both to
     /// seed the widget at construction and to refresh it when the config
     /// changes underneath the window.
@@ -255,13 +255,13 @@ pub(super) enum SelectLoad {
     Font,
     /// Orchestrator pickers derive both list and selection from live state, so
     /// they own the whole refresh.
-    Rebuild(fn(&SettingsWindow, &mut gpui::Window, &mut gpui::Context<SettingsWindow>)),
+    Rebuild(fn(&SettingsView, &mut gpui::Window, &mut gpui::Context<SettingsView>)),
 }
 
 /// A setting shown as a dropdown.
 pub(super) struct SelectSpec {
     pub(super) setting: SelectSetting,
-    pub(super) field: fn(&SettingsWindow) -> &Entity<SelectState>,
+    pub(super) field: fn(&SettingsView) -> &Entity<SelectState>,
     /// A selected option string as a patch. `None` when the string names
     /// nothing valid — a live edit then does nothing and the draft falls back
     /// to [`Self::current`].
@@ -365,7 +365,7 @@ pub(super) const SELECT_SETTINGS: &[SelectSpec] = &[
         },
         current: |c| SettingsPatch::OrchestratorAgentId(c.orchestrator.agent_id.clone()),
         show: |c| super::sections::orchestrator::agent_select_value(c),
-        load: SelectLoad::Rebuild(SettingsWindow::refresh_orchestrator_agent_select),
+        load: SelectLoad::Rebuild(SettingsView::refresh_orchestrator_agent_select),
     },
     SelectSpec {
         setting: SelectSetting::OrchestratorAccount,
@@ -377,7 +377,7 @@ pub(super) const SELECT_SETTINGS: &[SelectSpec] = &[
         },
         current: |c| SettingsPatch::OrchestratorAccountId(c.orchestrator.account_id),
         show: |c| super::sections::orchestrator::account_select_value(c),
-        load: SelectLoad::Rebuild(SettingsWindow::refresh_orchestrator_account_select),
+        load: SelectLoad::Rebuild(SettingsView::refresh_orchestrator_account_select),
     },
 ];
 
@@ -405,10 +405,10 @@ fn cursor_style_from_option(value: &str) -> daruda_config::CursorStyle {
 pub(super) struct BoolSpec {
     pub(super) setting: BoolSetting,
     /// Read the window's mirror of this checkbox.
-    pub(super) get: fn(&SettingsWindow) -> bool,
+    pub(super) get: fn(&SettingsView) -> bool,
     /// Write it. Split from `get` rather than handing out `&mut bool` so a
     /// read-only caller (the whole-config draft) needs no mutable window.
-    pub(super) set: fn(&mut SettingsWindow, bool),
+    pub(super) set: fn(&mut SettingsView, bool),
     pub(super) patch: fn(bool) -> SettingsPatch,
     pub(super) show: fn(&Config) -> bool,
 }
@@ -687,7 +687,7 @@ mod tests {
             .chain(BOOL_SETTINGS.iter().map(bool_field_id))
             .collect();
 
-        for patch in SettingsWindow::settings_ui_patches(&config) {
+        for patch in SettingsView::settings_ui_patches(&config) {
             let field = patch.field();
             match coverage_of(&patch) {
                 Coverage::Row => assert!(
