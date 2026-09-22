@@ -466,10 +466,10 @@ pub(crate) fn drive(
             // account signed in — a scenario that under-reports the real screen
             // is worse than no scenario.
             workspace.update(cx, |ws, cx| ws.probe_auth_statuses(cx));
-            crate::windows::open_settings_window(section, window, cx);
+            crate::windows::open_settings_window(section, cx);
         }
         ScreenshotScenario::SettingsError => {
-            crate::windows::open_settings_window(BuiltinSection::Notifications, window, cx);
+            crate::windows::open_settings_window(BuiltinSection::Notifications, cx);
             if let Some(settings) = crate::window_registry::WindowRegistry::settings(cx) {
                 // SILENT-OK: the window was opened on the line above
                 let _ = settings.update(cx, |this, _window, cx| this.seed_error_for_shot(cx));

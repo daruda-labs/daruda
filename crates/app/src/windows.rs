@@ -755,11 +755,7 @@ pub(crate) fn open_project_with_mode(
 /// already open, bring it to the front and route through
 /// `SettingsWindow::focus_section` to switch the active page instead
 /// of opening a second one.
-pub(crate) fn open_settings_window(
-    section: daruda_config::BuiltinSection,
-    _window: &mut gpui::Window,
-    cx: &mut App,
-) {
+pub(crate) fn open_settings_window(section: daruda_config::BuiltinSection, cx: &mut App) {
     if let Some(sh) = WindowRegistry::settings(cx) {
         sh.update(cx, move |this, window, cx| {
             this.focus_section(section, window, cx);

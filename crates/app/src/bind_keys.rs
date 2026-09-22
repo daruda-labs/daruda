@@ -6,9 +6,10 @@
 //! `[keybindings]` overrides them.
 //!
 //! [`register_global_actions`] installs the handlers those chords
-//! fire (Quit, Help URLs, OpenFolder, NewEmptyWindow, CloseProject).
-//! Each calls `cx.stop_propagation()` so the global capture phase
-//! wins over a focused Workspace's bubble phase.
+//! fire (Quit, Help URLs, OpenFolder, NewEmptyWindow, CloseProject,
+//! OpenSettings). `cx.on_action` registers a *bubble*-phase global
+//! listener, which GPUI runs only after the focused window's own
+//! listeners declined — so these are fallbacks, not overrides.
 
 use crate::surface::{self, keybindings as k};
 use crate::window_registry::WindowRegistry;
@@ -197,6 +198,14 @@ pub(crate) fn register_global_actions(cx: &mut App, config: std::sync::Arc<darud
         cx.quit();
     });
 
+    // Fallback for a window with no Workspace in its dispatch path — the
+    // Welcome screen and the Settings window itself. A focused Workspace
+    // answers first and keeps its auth-status probe; this runs after.
+    cx.on_action(|action: &OpenSettings, cx: &mut App| {
+        crate::windows::open_settings_window(action.0, cx);
+        cx.stop_propagation();
+    });
+
     // Help menu — open URLs in the user's default browser.
     cx.on_action(|_: &OpenDarudaHelp, cx: &mut App| {
         cx.open_url(surface::strings::URL_HELP);
@@ -208,13 +217,11 @@ pub(crate) fn register_global_actions(cx: &mut App, config: std::sync::Arc<darud
         cx.open_url(surface::strings::URL_GITHUB_REPO);
     });
 
-    // Global OpenFolder handler — routes through the policy-aware
-    // chooser: AddHere adds to the current window, NewWindow opens a
-    // fresh one, Ask surfaces the chooser modal. A duplicate root that
-    // is already open in some window short-circuits to focusing that
-    // window. `cx.stop_propagation()` blocks the action from
-    // re-firing in the focused Workspace's element tree (bubble phase
-    // runs after the global capture phase in GPUI's dispatch pipeline).
+    // Global OpenFolder handler — routes through the policy-aware chooser:
+    // AddHere adds to the current window, NewWindow opens a fresh one, Ask
+    // surfaces the chooser modal. A root already open somewhere short-
+    // circuits to focusing that window. No Workspace handles this action,
+    // so the global listener is what answers it.
     let cfg_for_open = config.clone();
     cx.on_action(move |_: &OpenFolder, cx: &mut App| {
         prompt_and_open_folder_with_policy(cfg_for_open.clone(), cx);
@@ -312,6 +319,47 @@ pub(crate) fn register_global_actions(cx: &mut App, config: std::sync::Arc<darud
 #[cfg(test)]
 mod tests {
     use gpui::Keystroke;
+
+    /// Root view for a window that is not a `Workspace` — the shape the
+    /// Welcome screen and the Settings window present to action dispatch.
+    struct NoWorkspaceRoot;
+
+    impl gpui::Render for NoWorkspaceRoot {
+        fn render(
+            &mut self,
+            _window: &mut gpui::Window,
+            _cx: &mut gpui::Context<Self>,
+        ) -> impl gpui::IntoElement {
+            gpui::div()
+        }
+    }
+
+    /// Such a window has no `OpenSettings` listener in its dispatch path, so
+    /// before the global fallback existed the Welcome screen had no way into
+    /// Settings at all off macOS — where gpui draws no menu bar.
+    #[gpui::test]
+    async fn open_settings_reaches_a_window_with_no_workspace(cx: &mut gpui::TestAppContext) {
+        crate::test_support::init_gpui_component(cx);
+        cx.update(|cx| {
+            super::register_global_actions(
+                cx,
+                std::sync::Arc::new(daruda_config::Config::default()),
+            );
+        });
+
+        let window = cx.add_window(|_window, _cx| NoWorkspaceRoot);
+        cx.dispatch_action(
+            window.into(),
+            crate::workspace::OpenSettings(daruda_config::BuiltinSection::default()),
+        );
+
+        cx.update(|cx| {
+            assert!(
+                crate::window_registry::WindowRegistry::settings(cx).is_some(),
+                "a window with no Workspace could not reach Settings",
+            );
+        });
+    }
 
     /// The catalogue, read rather than listed.
     ///
