@@ -35,8 +35,8 @@ pub enum AutoUpdateStatus {
     Downloading,
     /// The downloaded DMG is being mounted and swapped over the bundle.
     Installing,
-    /// The swap succeeded; holds the `.app` bundle path to relaunch.
-    ReadyToRestart(PathBuf),
+    /// The swap succeeded; holds what to relaunch into.
+    ReadyToRestart(InstallTarget),
     /// A step failed; carries the `UpdateError` `Display` text.
     Errored(String),
 }
@@ -52,7 +52,7 @@ pub struct Updater {
     /// The running `.app` bundle path, `Some` only when launched from a
     /// real bundle. `None` under `cargo run` — the install gate keys off
     /// this so a dev build never tries to swap a bundle that isn't there.
-    app_bundle: Option<PathBuf>,
+    target: Option<InstallTarget>,
 }
 
 /// Newtype marker so the `Global` impl lives in the app crate. Holds the
@@ -63,9 +63,9 @@ struct GlobalUpdater(Option<Entity<Updater>>);
 impl Global for GlobalUpdater {}
 
 impl Updater {
-    /// Idempotent bootstrap. Parses the running build's version, detects
-    /// whether we're inside a `.app` bundle (the install gate), creates the
-    /// entity, and registers it as the `GlobalUpdater`. A `has_global` guard
+    /// Idempotent bootstrap. Parses the running build's version, resolves
+    /// what an install would replace (the install gate), creates the entity,
+    /// and registers it as the `GlobalUpdater`. A `has_global` guard
     /// keeps a second call (test fixtures + production entry) from clobbering
     /// an already-registered global.
     ///
@@ -91,12 +91,12 @@ impl Updater {
             }
         };
 
-        let app_bundle = cx.app_path().ok().and_then(|exe| app_bundle_from_exe(&exe));
+        let target = cx.app_path().ok().and_then(|exe| InstallTarget::of(&exe));
 
         let entity = cx.new(|_| Updater {
             status: AutoUpdateStatus::Idle,
             current,
-            app_bundle,
+            target,
         });
         cx.set_global(GlobalUpdater(Some(entity)));
     }
@@ -111,10 +111,9 @@ impl Updater {
         &self.status
     }
 
-    /// True when running from a real `.app` bundle — the only case where an
-    /// in-place install can succeed.
+    /// True when the running build sits somewhere this can replace in place.
     pub fn can_install(&self) -> bool {
-        self.app_bundle.is_some()
+        self.target.is_some()
     }
 
     /// Kick off a background `check_latest`. No-op while a flow is already
@@ -146,7 +145,7 @@ impl Updater {
             AutoUpdateStatus::Available(info) => info.clone(),
             _ => return,
         };
-        let Some(app_bundle) = self.app_bundle.clone() else {
+        let Some(target) = self.target.clone() else {
             return;
         };
 
@@ -183,13 +182,11 @@ impl Updater {
             });
 
             // hop B — mount + swap the bundle on the background executor.
-            let app_bundle_for_install = app_bundle.clone();
-            let dmg_for_install = dmg.clone();
+            let target_for_install = target.clone();
+            let package = dmg.clone();
             let installed = cx
                 .background_executor()
-                .spawn(async move {
-                    daruda_update::install_dmg(&dmg_for_install, &app_bundle_for_install)
-                })
+                .spawn(async move { target_for_install.install(&package) })
                 .await;
 
             // Best-effort cleanup of the downloaded image on either outcome —
@@ -198,7 +195,7 @@ impl Updater {
             // SILENT-OK: app shutting down mid-update; the entity update is moot
             let _ = this.update(cx, |updater, cx| match installed {
                 Ok(()) => {
-                    updater.status = AutoUpdateStatus::ReadyToRestart(app_bundle);
+                    updater.status = AutoUpdateStatus::ReadyToRestart(target);
                     cx.notify();
                 }
                 Err(e) => updater.fail(&e, cx),
@@ -212,11 +209,11 @@ impl Updater {
     /// detached shell that waits for this pid to exit, then reopens), so it
     /// runs on the main thread directly.
     pub fn restart(&mut self, cx: &mut Context<Self>) {
-        let AutoUpdateStatus::ReadyToRestart(path) = &self.status else {
+        let AutoUpdateStatus::ReadyToRestart(target) = &self.status else {
             return;
         };
-        let path = path.clone();
-        match daruda_update::relaunch(&path) {
+        let target = target.clone();
+        match target.relaunch() {
             Ok(()) => cx.quit(),
             Err(e) => self.fail(&e, cx),
         }
@@ -267,14 +264,54 @@ impl Updater {
     }
 }
 
-/// Walk up from the running executable to the enclosing `.app` bundle.
-/// A bundled launch runs `…/daruda.app/Contents/MacOS/daruda`, so the
-/// first ancestor whose extension is `app` is the bundle. Returns `None`
-/// for a dev / `cargo run` binary that has no `.app` ancestor.
-fn app_bundle_from_exe(exe: &Path) -> Option<PathBuf> {
-    exe.ancestors()
-        .find(|p| p.extension().is_some_and(|ext| ext == "app"))
-        .map(Path::to_path_buf)
+/// Where the running build lives, and therefore how it is replaced.
+///
+/// One value rather than a `cfg` at each step: macOS ships a bundle rsync
+/// copies into, Windows a directory whose files are renamed aside. Both
+/// arms are reachable from either host, so the Windows answer is tested
+/// without being run on it.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum InstallTarget {
+    /// The `.app` the running executable sits inside.
+    Bundle(PathBuf),
+    /// The directory a portable archive was extracted to.
+    Directory(PathBuf),
+}
+
+impl InstallTarget {
+    /// What `exe` can be replaced as, or `None` for a build that is not an
+    /// install at all — `cargo run`, whose parent is a `target/` directory.
+    fn of(exe: &Path) -> Option<Self> {
+        Self::for_host(exe, cfg!(windows))
+    }
+
+    /// [`Self::of`] with the host as a value.
+    fn for_host(exe: &Path, windows: bool) -> Option<Self> {
+        if windows {
+            // A portable install is the directory holding the executable.
+            // Nothing else identifies one, so a dev build is indistinguishable
+            // and `can_install` stays true — the swap then refuses on its own
+            // writability check rather than guessing here.
+            return exe.parent().map(|dir| Self::Directory(dir.to_path_buf()));
+        }
+        exe.ancestors()
+            .find(|path| path.extension().is_some_and(|ext| ext == "app"))
+            .map(|bundle| Self::Bundle(bundle.to_path_buf()))
+    }
+
+    fn install(&self, package: &Path) -> Result<(), UpdateError> {
+        match self {
+            Self::Bundle(bundle) => daruda_update::install_dmg(package, bundle),
+            Self::Directory(root) => daruda_update::install_zip(package, root),
+        }
+    }
+
+    fn relaunch(&self) -> Result<(), UpdateError> {
+        match self {
+            Self::Bundle(bundle) => daruda_update::relaunch(bundle),
+            Self::Directory(root) => daruda_update::relaunch_from(root),
+        }
+    }
 }
 
 #[cfg(test)]
@@ -285,7 +322,7 @@ mod tests {
         Updater {
             status,
             current: semver::Version::new(0, 2, 0),
-            app_bundle: None,
+            target: None,
         }
     }
 
@@ -315,7 +352,9 @@ mod tests {
             AutoUpdateStatus::Idle,
             AutoUpdateStatus::UpToDate,
             AutoUpdateStatus::Available(info),
-            AutoUpdateStatus::ReadyToRestart(PathBuf::from("/Applications/daruda.app")),
+            AutoUpdateStatus::ReadyToRestart(InstallTarget::Bundle(PathBuf::from(
+                "/Applications/daruda.app",
+            ))),
             AutoUpdateStatus::Errored("boom".to_string()),
         ] {
             assert!(
@@ -326,25 +365,56 @@ mod tests {
     }
 
     #[test]
-    fn app_bundle_from_bundled_exe_path() {
+    fn a_bundled_mac_build_is_replaced_as_its_bundle() {
         let exe = Path::new("/Applications/daruda.app/Contents/MacOS/daruda");
         assert_eq!(
-            app_bundle_from_exe(exe),
-            Some(PathBuf::from("/Applications/daruda.app"))
+            InstallTarget::for_host(exe, false),
+            Some(InstallTarget::Bundle(PathBuf::from(
+                "/Applications/daruda.app"
+            )))
         );
     }
 
     #[test]
-    fn app_bundle_from_dev_exe_is_none() {
+    fn a_mac_dev_build_is_not_an_install() {
         let exe = Path::new("/Users/dev/daruda/target/debug/daruda");
-        assert_eq!(app_bundle_from_exe(exe), None);
+        assert_eq!(InstallTarget::for_host(exe, false), None);
+    }
+
+    /// A portable install has no marker in its path, so the directory holding
+    /// the executable is the answer. Forward slashes because `Path` splits on
+    /// the *host's* separator — a backslash is an ordinary character here on
+    /// macOS, and Windows takes either. Only the branch is under test.
+    #[test]
+    fn a_windows_build_is_replaced_as_the_directory_it_sits_in() {
+        let exe = Path::new("C:/Users/me/daruda-0.3.0-windows-x86_64/daruda.exe");
+        assert_eq!(
+            InstallTarget::for_host(exe, true),
+            Some(InstallTarget::Directory(PathBuf::from(
+                "C:/Users/me/daruda-0.3.0-windows-x86_64"
+            )))
+        );
+    }
+
+    /// The same path answers differently per host, which is the whole reason
+    /// the decision is one value rather than a `cfg` at each step.
+    #[test]
+    fn the_two_hosts_do_not_answer_alike() {
+        let exe = Path::new("/Applications/daruda.app/Contents/MacOS/daruda");
+
+        assert_ne!(
+            InstallTarget::for_host(exe, true),
+            InstallTarget::for_host(exe, false)
+        );
     }
 
     #[test]
-    fn can_install_tracks_app_bundle() {
+    fn can_install_tracks_the_target() {
         let mut updater = updater_with(AutoUpdateStatus::Idle);
         assert!(!updater.can_install());
-        updater.app_bundle = Some(PathBuf::from("/Applications/daruda.app"));
+        updater.target = Some(InstallTarget::Bundle(PathBuf::from(
+            "/Applications/daruda.app",
+        )));
         assert!(updater.can_install());
     }
 }

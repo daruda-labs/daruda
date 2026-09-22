@@ -49,6 +49,21 @@ pub(crate) fn route_env_subcommand() -> Option<i32> {
     crate::env_strip::route()
 }
 
+/// Returns `Some(exit_code)` when invoked as `daruda --await-exit <pid>`.
+///
+/// The half of a portable-install update that cannot run inside the process
+/// being replaced: wait for it to go, then start the new executable. Two
+/// instances must never overlap — they contend for the control socket and the
+/// flow locks — so this waits rather than racing.
+pub(crate) fn route_await_exit_subcommand() -> Option<i32> {
+    let mut args = std::env::args().skip(1);
+    if args.next().as_deref() != Some(daruda_update::AWAIT_EXIT_SUBCOMMAND) {
+        return None;
+    }
+    let pid = args.next().and_then(|arg| arg.parse().ok())?;
+    Some(crate::update::await_exit_and_start(pid))
+}
+
 /// Observability bootstrap. Order matters — see module docs.
 pub(crate) fn init_observability() {
     daruda_store::observability::system_info::set_app_version(env!("CARGO_PKG_VERSION"));

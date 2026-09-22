@@ -7,10 +7,12 @@
 pub mod check;
 pub mod install;
 pub mod release;
+pub mod swap;
 
 pub use check::{check_latest, download_asset};
 pub use install::{install_dmg, relaunch};
 pub use release::{ReleaseInfo, asset_suffix, parse_release};
+pub use swap::{AWAIT_EXIT_SUBCOMMAND, install_zip, relaunch_from, sweep_aside};
 
 /// Errors that can occur anywhere in the update flow: checking for a new
 /// release, downloading this platform's package, mounting it, and installing

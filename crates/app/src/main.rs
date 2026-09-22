@@ -199,6 +199,13 @@ fn main() {
         std::process::exit(code);
     }
 
+    // `daruda --await-exit <pid>` finishes a portable-install update: it
+    // outlives the process it replaced and starts the new one. Before the
+    // GUI for the same reason as the rest — it must open no window of its own.
+    if let Some(code) = bootstrap::route_await_exit_subcommand() {
+        std::process::exit(code);
+    }
+
     // `daruda --env` stands in for `env(1)` on a host without one. Same
     // reasoning as the two above, and it must precede `shell_env` below: the
     // whole point is to hand the child a smaller environment, not a hydrated
