@@ -246,7 +246,7 @@ same suite minus the one module that dominates it: measured 2026-09-18,
 each tab they open spawns an actual shell. It is an iteration loop, not a
 gate — the [pre-commit checks](#pre-commit-checks) still run everything.
 
-`ci.yml` runs one job per platform — `macOS`, `Linux`, `Windows` — each building and testing the same package list, plus a `Lint` job. The lint work is split out because none of it compiles: `cargo fmt` and the lint scripts read source rather than platform, so running them once on `ubuntu-latest` answers in seconds instead of behind a platform build, and a lint failure cannot be mistaken for a test failure.
+`ci.yml` runs one job per platform — `macOS`, `Linux`, `Windows` — each building and testing the same package list, plus a `Lint` job. The lint work is split out because none of it compiles: `cargo fmt` and the lint scripts read source rather than platform, so running them once on the Linux runner answers in seconds instead of behind a platform build, and a lint failure cannot be mistaken for a test failure.
 
 What the `Linux` job carries that no lint could is the `#[cfg]` arms the macOS job never compiles: its first three runs turned up two unused imports and a font-resolution defect that left every mermaid label blank on Linux, none of which macOS could have seen.
 
