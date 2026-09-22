@@ -56,9 +56,12 @@ pub fn lead_own_group(command: &mut std::process::Command) {
 /// A spawned child's tear-down handle: everything it goes on to fork belongs
 /// to this, and [`Group::kill_tree`] ends all of it.
 ///
-/// Held rather than derived, because Windows cannot derive it. A job object
-/// has to exist before the descendants do, so the membership lives in a
-/// handle the caller keeps beside the child. Dropping it kills nothing.
+/// Held rather than derived, because Windows cannot derive it: a job object
+/// has to exist before the descendants do.
+///
+/// INVARIANT: keep it at least as long as the child may run. On Windows the
+/// job ends when its last handle closes — which is what stops a crash from
+/// orphaning the tree, and equally means an early drop kills a live child.
 #[derive(Debug)]
 pub struct Group(GroupInner);
 
@@ -148,8 +151,9 @@ mod windows_job {
             return empty();
         };
 
-        // Without this a descendant outlives the handle: the job is destroyed
-        // when its last handle closes, and by default that just releases them.
+        // Without this a descendant outlives the process that spawned it: the
+        // job ends when its last handle closes, and by default that only
+        // releases the members. See the invariant on `Group`.
         let mut limits = JOBOBJECT_EXTENDED_LIMIT_INFORMATION {
             BasicLimitInformation: unsafe { std::mem::zeroed() },
             ..unsafe { std::mem::zeroed() }

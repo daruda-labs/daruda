@@ -41,6 +41,11 @@ fn main() {
             // `child.kill()` never does.
             "--orphan" => {
                 let pid_file = args.next().expect("pid file");
+                // The caller adopts us into its group *after* spawning us, so
+                // a grandchild forked this instant would escape it. Real
+                // children fork well after that window; a test that raced it
+                // would just be flaky about a limitation it is not testing.
+                std::thread::sleep(std::time::Duration::from_millis(300));
                 let child = std::process::Command::new(std::env::current_exe().unwrap())
                     // Detached from our streams and short-lived on its own:
                     // a test that fails to kill it must not then hand the
