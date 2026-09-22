@@ -44,7 +44,7 @@ pub struct SkillsWatcherHandle {
 }
 
 /// Spawn the watcher. `project_dir` is `None` when no lane is
-/// active (welcome window) — the watcher then only subscribes to the
+/// active (an empty workspace) — the watcher then only subscribes to the
 /// personal scope.
 ///
 /// Returns `(events, handle)`: the pump task takes ownership of

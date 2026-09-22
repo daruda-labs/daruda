@@ -229,9 +229,8 @@ async fn clicking_file_opens_raw_viewer_dedupes_and_selection_moves_independentl
 
     // Capture the current state — the file pane is part of the active
     // lane's tab list.
-    let (saved_workspace, saved_projects) = ws
-        .read_with(cx, |ws, app_cx| ws.snapshot_for_disk(app_cx))
-        .expect("snapshot_for_disk");
+    let (saved_workspace, saved_projects) =
+        ws.read_with(cx, |ws, app_cx| ws.snapshot_for_disk(app_cx));
     assert_eq!(saved_projects.len(), 1);
     assert_eq!(saved_projects[0].lanes.len(), 1);
     let saved_tabs = &saved_projects[0].lanes[0].tabs;

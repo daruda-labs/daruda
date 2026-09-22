@@ -143,7 +143,6 @@ welcome:
   shortcut_open_folder_new_window: "Open a folder in a new window"
   shortcut_new_window: "New empty window"
   shortcut_command_palette: "Command palette"
-  changelog_open_policy: "Cmd+O adds the project to this window · Cmd+Shift+O opens in a new window"
 
 # Menus — top-level names
 menu:

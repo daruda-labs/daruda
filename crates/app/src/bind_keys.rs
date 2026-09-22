@@ -30,7 +30,7 @@ use crate::workspace::{
 };
 use crate::{
     CloseProject, NewEmptyWindow, OpenDarudaHelp, OpenFolder, OpenFolderInNewWindow,
-    OpenGithubRepo, OpenReportIssue, Quit,
+    OpenGithubRepo, OpenRecentWorkspace, OpenReportIssue, Quit,
 };
 use daruda_terminal::view::{Copy, Paste, SelectAll};
 use gpui::{App, AppContext as _, KeyBinding};
@@ -248,12 +248,25 @@ pub(crate) fn register_global_actions(cx: &mut App, config: std::sync::Arc<darud
         cx.stop_propagation();
     });
 
-    // Global NewEmptyWindow handler — opens a project-less
-    // workspace. Shell starts in the user's home directory.
-    let cfg_for_new = config;
+    // Global NewEmptyWindow handler — opens a project-less workspace,
+    // which paints the Landing view.
+    let cfg_for_new = config.clone();
     cx.on_action(move |_: &NewEmptyWindow, cx: &mut App| {
         let opts = build_window_options(&cfg_for_new);
         open_workspace_window(cfg_for_new.clone(), None, None, opts, cx);
+        cx.stop_propagation();
+    });
+    // Identity-keyed recent open, dispatched by the Landing view's rows.
+    // `ReplaceCurrent` is what keeps an emptied window from lingering
+    // behind the workspace it just opened.
+    let cfg_for_recent = config;
+    cx.on_action(move |action: &OpenRecentWorkspace, cx: &mut App| {
+        crate::windows::open_recent_uuid(
+            action.0,
+            cfg_for_recent.clone(),
+            OpenMode::ReplaceCurrent,
+            cx,
+        );
         cx.stop_propagation();
     });
     // Global CloseProject handler — surfaces the DeleteProjectModal

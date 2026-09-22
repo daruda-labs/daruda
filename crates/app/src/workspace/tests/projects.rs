@@ -30,9 +30,8 @@ fn empty_workspace_snapshots_and_restores(cx: &mut TestAppContext) {
         assert!(ws.projects.is_empty(), "the only project is gone");
     });
 
-    let (workspace_state, project_states) = ws
-        .read_with(cx, |ws, app_cx| ws.snapshot_for_disk(app_cx))
-        .expect("an empty workspace must still snapshot");
+    let (workspace_state, project_states) =
+        ws.read_with(cx, |ws, app_cx| ws.snapshot_for_disk(app_cx));
     assert!(project_states.is_empty());
     assert!(workspace_state.project_ids.is_empty());
 
@@ -57,10 +56,16 @@ fn empty_workspace_snapshots_and_restores(cx: &mut TestAppContext) {
     });
 }
 
-/// Closing the last project leaves the window standing on Landing. The
-/// caller used to be told to destroy it; nothing reads that signal now.
+/// Closing the last project lands the workspace in the normalized empty
+/// state `render` needs to paint Landing.
+///
+/// Scope note: the window teardown this branch removed lived at the three
+/// *call sites* (`bind_keys`'s CloseProject modal callback and the two in
+/// `project_ops`), never in this method — so the surviving window handle is
+/// asserted here only as a precondition, and those callbacks remain
+/// uncovered because reaching them means driving a real dialog.
 #[gpui::test]
-fn closing_the_only_project_keeps_the_window(cx: &mut TestAppContext) {
+fn closing_the_only_project_lands_in_the_empty_state(cx: &mut TestAppContext) {
     let config = daruda_config::Config::default();
     std::fs::create_dir_all("/tmp/daruda_last_project_survives").unwrap();
     let project = daruda_store::project::Project::from_path("/tmp/daruda_last_project_survives");
@@ -80,10 +85,7 @@ fn closing_the_only_project_keeps_the_window(cx: &mut TestAppContext) {
     })
     .unwrap();
 
-    assert!(
-        wh.root(cx).is_ok(),
-        "the window must outlive its last project"
-    );
+    assert!(wh.root(cx).is_ok(), "precondition: the window is still up");
     ws.read_with(cx, |ws, _| {
         assert!(ws.has_no_projects());
         // The "active runtime always present" invariant has to survive the
@@ -147,7 +149,7 @@ fn emptying_a_workspace_refreshes_its_recent_row_without_adding_one(cx: &mut Tes
     );
     assert_eq!(
         after[1].display_name,
-        crate::surface::strings::recent_empty_workspace(),
+        crate::surface::strings::menu_recent_empty_workspace(),
         "the row must stop naming a project the workspace no longer holds"
     );
 }
@@ -170,6 +172,49 @@ fn a_workspace_that_never_held_a_project_earns_no_recent_row(cx: &mut TestAppCon
     assert!(
         daruda_store::project::load_recent_in(&data_dir).is_empty(),
         "an empty workspace must not appear in the recent list"
+    );
+    // A state file exists only if something can reach it, and the recent
+    // list is the only index there is. The production constructor persists
+    // before `restore_from_disk` adopts the saved uuid, so without this a
+    // junk file would accumulate on every launch and every Open Recent.
+    let count = daruda_store::project::workspaces_dir_in(&data_dir)
+        .read_dir()
+        .map(|d| d.count())
+        .unwrap_or(0);
+    assert_eq!(
+        count, 0,
+        "a workspace nothing can reach must leave no state file"
+    );
+}
+
+/// The reachable half of the same invariant: an emptied workspace that
+/// still owns a recent row keeps its file, because that is how the next
+/// launch finds it.
+#[gpui::test]
+fn an_emptied_workspace_with_a_recent_row_keeps_its_state_file(cx: &mut TestAppContext) {
+    let tmp = tempfile::tempdir().unwrap();
+    let data_dir = tmp.path().to_path_buf();
+    let root = std::env::temp_dir().join("daruda_reachable_keeps_file");
+    std::fs::create_dir_all(&root).unwrap();
+
+    let config = daruda_config::Config::default();
+    let project = daruda_store::project::Project::from_path(&root);
+    let wh = cx.add_window(|window, cx| {
+        Workspace::new_with_project_for_test(&config, Some(project), data_dir.clone(), window, cx)
+    });
+    let ws = wh.root(cx).unwrap();
+    ws.read_with(cx, |w, cx| w.persist_state(cx));
+    let uuid = ws.read_with(cx, |w, _| w.uuid);
+
+    cx.update_window(wh.into(), |_, window, cx| {
+        ws.update(cx, |ws, cx| ws.close_active_project(window, cx))
+    })
+    .unwrap();
+    ws.read_with(cx, |w, cx| w.persist_state(cx));
+
+    assert!(
+        daruda_store::project::load_workspace_state_in(&data_dir, uuid).is_some(),
+        "an emptied workspace the recent list still names must keep its file"
     );
 }
 
@@ -206,9 +251,8 @@ fn add_project_mints_next_id_and_activates_first_lane(cx: &mut TestAppContext) {
     ws.update(cx, |ws, cx| {
         ws.set_window_open_policy(daruda_store::project::WindowOpenPolicy::NewWindow, cx);
     });
-    let (workspace_state, project_states) = ws
-        .read_with(cx, |ws, app_cx| ws.snapshot_for_disk(app_cx))
-        .expect("snapshot_for_disk");
+    let (workspace_state, project_states) =
+        ws.read_with(cx, |ws, app_cx| ws.snapshot_for_disk(app_cx));
     assert_eq!(
         workspace_state.window_open_policy,
         daruda_store::project::WindowOpenPolicy::NewWindow
@@ -572,9 +616,7 @@ fn group_crud_round_trips_and_demotes_deleted_members(cx: &mut TestAppContext) {
         assert_eq!(ws.next_group_id, 2);
     });
     // Round-trip through state preserves the groups.
-    let (workspace_state, _) = ws
-        .read_with(cx, |ws, app_cx| ws.snapshot_for_disk(app_cx))
-        .expect("snapshot_for_disk");
+    let (workspace_state, _) = ws.read_with(cx, |ws, app_cx| ws.snapshot_for_disk(app_cx));
     assert_eq!(workspace_state.groups.len(), 2);
     assert_eq!(workspace_state.next_group_id, 2);
 
@@ -601,9 +643,7 @@ fn group_crud_round_trips_and_demotes_deleted_members(cx: &mut TestAppContext) {
         ws.recolor_group(id_b, Some("#abcdef".into()), cx);
         ws.toggle_group_collapse(id_b, cx);
     });
-    let (workspace_state, _) = ws
-        .read_with(cx, |ws, app_cx| ws.snapshot_for_disk(app_cx))
-        .expect("snapshot_for_disk");
+    let (workspace_state, _) = ws.read_with(cx, |ws, app_cx| ws.snapshot_for_disk(app_cx));
     let group = workspace_state
         .groups
         .iter()

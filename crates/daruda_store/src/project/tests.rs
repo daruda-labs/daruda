@@ -1269,8 +1269,10 @@ mod new_schema_persistence {
         let known = WorkspaceUuid::new();
         touch_recent_in(dir.path(), known, "real".into()).unwrap();
 
-        refresh_recent_if_present_in(dir.path(), WorkspaceUuid::new(), "empty".into()).unwrap();
+        let present =
+            refresh_recent_if_present_in(dir.path(), WorkspaceUuid::new(), "empty".into()).unwrap();
 
+        assert!(!present, "an absent workspace must report unreachable");
         let r = load_recent_in(dir.path());
         assert_eq!(r.len(), 1, "an unknown uuid must not be inserted");
         assert_eq!(r[0].workspace_uuid, known);
@@ -1279,19 +1281,28 @@ mod new_schema_persistence {
     /// A workspace that emptied out keeps its row — that is how the next
     /// launch finds it — but the row must stop claiming the name of a
     /// project the workspace no longer holds.
+    ///
+    /// `last_opened` is deliberately left alone: going empty is not the user
+    /// working in the workspace. Asserting equality rather than `>=` is what
+    /// makes this test able to fail — `last_opened` is whole seconds, so a
+    /// refresh that restamped it would still satisfy `>=` inside one test.
     #[test]
-    fn refresh_if_present_updates_name_and_recency_in_place() {
+    fn refresh_if_present_updates_the_name_and_preserves_recency() {
         let dir = tmp();
         let uuid = WorkspaceUuid::new();
         touch_recent_in(dir.path(), uuid, "myproject".into()).unwrap();
         let before = load_recent_in(dir.path())[0].last_opened;
 
-        refresh_recent_if_present_in(dir.path(), uuid, "empty".into()).unwrap();
+        let present = refresh_recent_if_present_in(dir.path(), uuid, "empty".into()).unwrap();
 
+        assert!(present, "a workspace with a row is still reachable");
         let r = load_recent_in(dir.path());
         assert_eq!(r.len(), 1, "refresh must not duplicate the row");
         assert_eq!(r[0].display_name, "empty");
-        assert!(r[0].last_opened >= before);
+        assert_eq!(
+            r[0].last_opened, before,
+            "going empty must not restamp recency"
+        );
     }
 
     /// Unlike `touch_recent_in`, refreshing must not reorder the list: a

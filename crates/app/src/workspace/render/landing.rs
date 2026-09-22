@@ -5,10 +5,15 @@
 //! Welcome window's, which this replaces.
 //!
 //! Every affordance is a one-line action dispatch, which is also what
-//! keeps the "reuse this window" rule: `OpenFolder` resolves to
-//! `AddHere` for an empty workspace, and a recent row dispatches the same
-//! `OpenRecent*` action the File menu uses, whose
-//! `OpenMode::ReplaceCurrent` closes this window as the successor opens.
+//! keeps the "reuse this window" rule: `OpenFolder` resolves to `AddHere`
+//! for an empty workspace, and a recent row dispatches
+//! `OpenRecentWorkspace`, whose `OpenMode::ReplaceCurrent` closes this
+//! window as the successor opens.
+//!
+//! The chrome is a verbatim port of the Welcome window it replaces — bespoke
+//! `div` rather than the `crate::ui` wrappers, which is why the `WELCOME_*`
+//! theme constants were kept. Moving it onto the wrappers is a separate,
+//! visual change.
 
 use gpui::{AnyElement, Context, MouseButton, SharedString, div, prelude::*, px};
 
@@ -36,9 +41,8 @@ fn shortcut_rows() -> [(&'static str, String); 4] {
     ]
 }
 
-/// Build the Landing element. Mirrors `present_empty_state`'s shape one
-/// level down (heading → body → actions) so the two empty states read as
-/// the same family.
+/// Build the Landing element: heading → body → actions, the same ordering
+/// `present_empty_state` uses one level down.
 pub(super) fn render(cx: &mut Context<Workspace>) -> AnyElement {
     // Every colour is copied out before `cx` is used mutably below —
     // `theme::current` borrows it for as long as the returned theme lives.
@@ -179,37 +183,36 @@ fn recent_section(
             .into_any_element();
     }
 
-    // Bounded by the slot table: a row past the last declared slot has no
-    // action to dispatch, so it would be a dead row rather than a missing one.
+    // Each row carries the workspace's identity, not its position, so the
+    // label and what the click opens cannot disagree even if the snapshot
+    // has drifted from the list on disk.
     let rows = recent
         .iter()
         .enumerate()
-        .filter_map(|(i, entry)| {
-            let action = crate::recent_open_action_for_slot(i)?;
+        .map(|(i, entry)| {
+            let action = crate::OpenRecentWorkspace(entry.workspace_uuid);
             let display_name = SharedString::from(entry.display_name.clone());
-            Some(
-                div()
-                    .id(("landing-recent", i))
-                    .flex()
-                    .flex_row()
-                    .items_center()
-                    .gap(px(theme::WELCOME_GAP_LOOSE))
-                    .w_full()
-                    .px(px(theme::WELCOME_RECENT_PAD_X))
-                    .py(px(theme::WELCOME_RECENT_PAD_Y))
-                    .rounded(px(theme::WELCOME_RECENT_RADIUS))
-                    .cursor_pointer()
-                    .hover(move |d| d.bg(hover_bg))
-                    .on_mouse_down(MouseButton::Left, move |_, window, cx| {
-                        window.dispatch_action(action.boxed_clone(), cx)
-                    })
-                    .child(
-                        div()
-                            .text_size(px(theme::WELCOME_RECENT_FONT_SIZE))
-                            .text_color(primary)
-                            .child(display_name),
-                    ),
-            )
+            div()
+                .id(("landing-recent", i))
+                .flex()
+                .flex_row()
+                .items_center()
+                .gap(px(theme::WELCOME_GAP_LOOSE))
+                .w_full()
+                .px(px(theme::WELCOME_RECENT_PAD_X))
+                .py(px(theme::WELCOME_RECENT_PAD_Y))
+                .rounded(px(theme::WELCOME_RECENT_RADIUS))
+                .cursor_pointer()
+                .hover(move |d| d.bg(hover_bg))
+                .on_mouse_down(MouseButton::Left, move |_, window, cx| {
+                    window.dispatch_action(Box::new(action.clone()), cx)
+                })
+                .child(
+                    div()
+                        .text_size(px(theme::WELCOME_RECENT_FONT_SIZE))
+                        .text_color(primary)
+                        .child(display_name),
+                )
         })
         .collect::<Vec<_>>();
 
@@ -286,11 +289,18 @@ mod tests {
         }
     }
 
-    /// The rows are bounded by the recent-slot table, so the count the
-    /// Landing view can show never exceeds the actions registered for it.
+    /// Rows address a workspace by identity, so what a row opens is fixed
+    /// at render time and cannot drift with the list's ordering — the
+    /// property that lets Landing render from a cached snapshot at all.
     #[test]
-    fn recent_rows_are_bounded_by_the_slot_table() {
-        assert!(crate::recent_open_action_for_slot(0).is_some());
-        assert!(crate::recent_open_action_for_slot(crate::OPEN_RECENT_SLOTS).is_none());
+    fn a_row_carries_the_workspace_identity_it_names() {
+        let uuid = daruda_store::project::WorkspaceUuid::new();
+        let action = crate::OpenRecentWorkspace(uuid);
+        assert_eq!(action.0, uuid);
+        assert_eq!(action.clone(), crate::OpenRecentWorkspace(uuid));
+        assert_ne!(
+            action,
+            crate::OpenRecentWorkspace(daruda_store::project::WorkspaceUuid::new())
+        );
     }
 }

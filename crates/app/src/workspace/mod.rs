@@ -1420,12 +1420,12 @@ impl Workspace {
         };
         // Invariant seed: the active lane's runtime must always exist in
         // `runtimes` so `active_runtime()` (read unconditionally by
-        // `render`) never panics — including the Welcome state, where
+        // `render`) never panics — including the Landing state, where
         // `active` is `LaneRef::default()` and no project is open. Seed
         // it for whatever `active` is, unconditionally: production then
         // populates the first project's lane via `add_tab` below (the only
-        // auto-seed left), and Welcome leaves it empty (render shows the
-        // welcome screen). Lanes activated later are never auto-seeded —
+        // auto-seed left), and an empty workspace leaves it empty (render
+        // shows Landing). Lanes activated later are never auto-seeded —
         // they render the empty-state until the user opens content.
         ws.main_area.runtimes.entry(ws.active).or_default();
         // Test-only short-circuit: every line below this point spawns a
@@ -1441,10 +1441,14 @@ impl Workspace {
             crate::agent::tasks_global::init(cx);
             return ws;
         }
-        // Seed the first tab only when there is a project to root it at. A
-        // workspace with none has no working directory, and the shell would
-        // land in `$HOME` — an arbitrary place the user did not ask for, and
-        // one that hides the Landing view behind a terminal.
+        // Seed the first tab only when there is a project to root it at.
+        // With no project there is no working directory, so the shell would
+        // land in `$HOME` — somewhere nobody asked for, and it would cover
+        // the Landing view on every project-less launch.
+        //
+        // This governs the *automatic* seed only. `add_tab` still honours an
+        // explicit `+` / Cmd+T in an empty workspace (see its own comment):
+        // there the user did ask, and `$HOME` is the documented fallback.
         if !ws.projects.is_empty() {
             ws.add_tab(window, cx);
         }
@@ -1591,7 +1595,7 @@ impl Workspace {
             // The workspace emptied out. Its recent row is kept so the next
             // launch finds it, so the label has to stop naming a project it
             // no longer holds.
-            None => crate::surface::strings::recent_empty_workspace(),
+            None => crate::surface::strings::menu_recent_empty_workspace(),
         };
 
         let rest = self.projects.len().saturating_sub(1);

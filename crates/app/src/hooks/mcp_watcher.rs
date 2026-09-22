@@ -56,7 +56,7 @@ pub struct McpWatcherHandle {
 ///
 /// `project_paths` are the active lane's `.mcp.json` candidates — the
 /// lane root and the focused terminal's cwd (when it differs). Empty
-/// when no lane is active (welcome-style window) — only `~/.claude.json`
+/// when no lane is active (an empty workspace) — only `~/.claude.json`
 /// then has a subscription.
 ///
 /// `claude_json_path` is `~/.claude.json` (User + Local scopes). Its

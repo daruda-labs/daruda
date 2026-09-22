@@ -14,9 +14,7 @@ fn snapshot_for_disk_covers_empty_and_emits_project_schema(cx: &mut TestAppConte
         // No projects opened. This is the Landing state, which persists like
         // any other — it used to short-circuit to `None` because the window
         // was destroyed instead of surviving.
-        let (workspace, projects) = ws
-            .snapshot_for_disk(app_cx)
-            .expect("an empty workspace still snapshots");
+        let (workspace, projects) = ws.snapshot_for_disk(app_cx);
         assert!(projects.is_empty());
         assert!(workspace.project_ids.is_empty());
         assert_eq!(workspace.schema_version, WORKSPACE_SCHEMA_VERSION);
@@ -41,7 +39,7 @@ fn snapshot_for_disk_covers_empty_and_emits_project_schema(cx: &mut TestAppConte
     });
 
     ws.read_with(cx, |ws, app_cx| {
-        let (workspace, projects) = ws.snapshot_for_disk(app_cx).expect("snapshot");
+        let (workspace, projects) = ws.snapshot_for_disk(app_cx);
 
         // Schema version stamped on both the envelope and every project.
         assert_eq!(workspace.schema_version, WORKSPACE_SCHEMA_VERSION);

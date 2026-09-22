@@ -8,7 +8,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 
 use daruda_store::observability::error_report::{ErrorReport, ErrorSeverity};
 use daruda_store::observability::log_writer::LogWriter;
-use daruda_store::project::{ProjectState, WorkspaceState};
+use daruda_store::project::{ProjectState, WorkspaceState, WorkspaceUuid};
 use gpui::{
     App, Bounds, Point, Size, TitlebarOptions, WindowBackgroundAppearance, WindowBounds,
     WindowOptions, point, prelude::*, px,
@@ -189,15 +189,28 @@ pub(crate) fn open_recent_idx(
     mode: OpenMode,
     cx: &mut App,
 ) {
+    let Some(entry) = recent.get(idx) else {
+        return;
+    };
+    open_recent_uuid(entry.workspace_uuid, config, mode, cx);
+}
+
+/// Open the workspace `uuid` names. The identity-keyed entry point: the
+/// Landing view dispatches this so a row's label and the workspace it opens
+/// cannot disagree, which indexing a separately-loaded list can.
+///
+/// Missing / stale workspace is a silent no-op that prunes the recent row
+/// (matches macOS conventions for stale Open Recent).
+pub(crate) fn open_recent_uuid(
+    uuid: WorkspaceUuid,
+    config: std::sync::Arc<daruda_config::Config>,
+    mode: OpenMode,
+    cx: &mut App,
+) {
     if !try_enter_open() {
         return;
     }
-    let Some(entry) = recent.get(idx) else {
-        leave_open();
-        return;
-    };
     let initiating_window = active_window_to_close(cx);
-    let uuid = entry.workspace_uuid;
     let data_dir = daruda_store::persistence::default_data_dir();
     let Some(ws_state) = daruda_store::project::load_workspace_state_in(&data_dir, uuid) else {
         // Stale recent entry — prune and bail. The user perceives

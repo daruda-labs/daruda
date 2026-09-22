@@ -20,7 +20,6 @@ async fn a_flow_graph_pane_survives_a_save_and_restore(cx: &mut TestAppContext) 
             ws.open_flow_graph(&flow_path, window, cx)
         });
         ws.read_with(&vcx, |ws, app_cx| ws.snapshot_for_disk(app_cx))
-            .expect("snapshot_for_disk")
     };
     let saved_tabs = &saved_projects[0].lanes[0].tabs;
     assert!(
@@ -199,7 +198,6 @@ async fn a_restored_graph_whose_file_vanished_says_so(cx: &mut TestAppContext) {
             ws.open_flow_graph(&flow_path, window, cx)
         });
         ws.read_with(&vcx, |ws, app_cx| ws.snapshot_for_disk(app_cx))
-            .expect("snapshot_for_disk")
     };
 
     std::fs::remove_file(&flow_path).expect("remove the flow the tab was saved for");

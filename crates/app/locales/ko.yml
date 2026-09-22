@@ -142,7 +142,6 @@ welcome:
   shortcut_open_folder_new_window: "새 창에서 폴더 열기"
   shortcut_new_window: "새 빈 창"
   shortcut_command_palette: "명령 팔레트"
-  changelog_open_policy: "Cmd+O: 이 창에 프로젝트 추가 · Cmd+Shift+O: 새 창에서 열기"
 
 # Menus — top-level names
 menu:

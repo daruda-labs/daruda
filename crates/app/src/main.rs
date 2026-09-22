@@ -53,6 +53,17 @@ mod workspace;
 use gpui::{App, MenuItem, actions};
 use windows::OpenMode;
 
+/// Open a recent workspace by identity. The File menu's `OpenRecent*` slots
+/// address the list by index, which is fine for a menu gpui rebuilds from the
+/// same load. The Landing view renders from a cached snapshot, so an index
+/// there can drift from the list the handler reloads — a row would then open
+/// a workspace other than the one it names. Carrying the
+/// [`daruda_store::project::WorkspaceUuid`] removes that gap, and the
+/// `OPEN_RECENT_SLOTS` cap with it.
+#[derive(Clone, PartialEq, Debug, gpui::Action)]
+#[action(namespace = daruda, no_json)]
+pub struct OpenRecentWorkspace(pub daruda_store::project::WorkspaceUuid);
+
 actions!(
     daruda,
     [
@@ -116,21 +127,6 @@ macro_rules! recent_slot_table {
                     }
                 )*
                 _ => unreachable!("slot {idx} outside declared recent_slot_table range"),
-            }
-        }
-
-        /// The boxed `OpenRecent*` action for `idx`, for callers that
-        /// dispatch rather than build a menu row — the Landing view's
-        /// recent rows. Going through the same action the File menu
-        /// uses is what gives a Landing click `OpenMode::ReplaceCurrent`
-        /// (and its stale-entry pruning) without a second code path.
-        /// `None` past the declared range so callers can bound a list.
-        pub(crate) fn recent_open_action_for_slot(
-            idx: usize,
-        ) -> Option<Box<dyn gpui::Action>> {
-            match idx {
-                $( $idx => Some(Box::new($replace)), )*
-                _ => None,
             }
         }
 

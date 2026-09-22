@@ -40,6 +40,14 @@ impl Workspace {
     /// Called from `close_active_project` when no project (or no usable
     /// lane) remains.
     fn reset_to_empty_workspace(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.reset_to_empty_workspace_inner(window, cx);
+        self.mutate_durable(cx, |_, _| {});
+    }
+
+    /// The teardown itself, without the save. Split out for the `landing`
+    /// screenshot scenario: a capture must not write the emptied workspace
+    /// back over the state dir it was seeded from.
+    fn reset_to_empty_workspace_inner(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         // Every runtime drops below, so release the Markdown GPU images first
         // — the no-usable-lane caller still has surviving projects whose panes
         // were never released. Already-released tables are empty, so the panes
@@ -54,16 +62,16 @@ impl Workspace {
         self.main_area.runtimes.clear();
         self.active = LaneRef::default();
         self.main_area.runtimes.entry(self.active).or_default();
-        self.mutate_durable(cx, |_, _| {});
     }
 
     /// Drop every project so `render` paints the Landing view, for the
     /// `landing` screenshot scenario. A capture restores a real workspace,
     /// and the empty state is not otherwise reachable from one.
     ///
-    /// Shares `reset_to_empty_workspace` with the real close path rather
-    /// than re-deriving the teardown, and stays a `Workspace` method so
-    /// the driver never writes these fields itself.
+    /// Shares the teardown with the real close path rather than re-deriving
+    /// it, and stays a `Workspace` method so the driver never writes these
+    /// fields itself. It deliberately does **not** persist: a capture must
+    /// leave the state dir it was seeded from exactly as it found it.
     #[cfg(feature = "screenshot")]
     pub(in crate::workspace) fn empty_workspace_for_shot(
         &mut self,
@@ -71,7 +79,8 @@ impl Workspace {
         cx: &mut Context<Self>,
     ) {
         self.projects.clear();
-        self.reset_to_empty_workspace(window, cx);
+        self.reset_to_empty_workspace_inner(window, cx);
+        cx.notify();
     }
 
     /// Add a freshly-opened project to this workspace and activate its
@@ -256,14 +265,12 @@ impl Workspace {
         true
     }
 
-    /// Remove the active project and route the workspace to the next
-    /// project (or signal "close this window" when none remain).
+    /// Remove the active project and route the workspace to the next one.
     ///
-    /// Returns `true` when a usable lane remains after the removal — the
-    /// caller should keep the window open. Returns `false` when the
-    /// removal leaves the workspace with nothing to show (no projects
-    /// left, or every surviving project is lane-less); the caller closes
-    /// the window, which routes to the Welcome screen.
+    /// The window always survives. When the removal leaves nothing to show
+    /// — no projects left, or every surviving project is lane-less — the
+    /// workspace resets to the empty state and `render` paints the Landing
+    /// view; callers have nothing to handle.
     ///
     /// Every lane's runtime for the removed project also drops out of
     /// `runtimes` so memory does not leak.
@@ -476,7 +483,17 @@ impl Workspace {
                             ws.main_area
                                 .runtimes
                                 .retain(|key, _| key.project != project_id);
-                            ws.mutate_durable(cx, |_, _| {});
+                            // Reaching zero here needs `self.active` to have
+                            // been dangling already, but if it happens the
+                            // workspace must land in the same normalized
+                            // empty state every other path establishes —
+                            // `render` reads `active_runtime()` to paint
+                            // Landing.
+                            if ws.projects.is_empty() {
+                                ws.reset_to_empty_workspace(window, cx);
+                            } else {
+                                ws.mutate_durable(cx, |_, _| {});
+                            }
                             return;
                         }
                         ws.close_active_project(window, cx);

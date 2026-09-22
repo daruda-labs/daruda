@@ -193,18 +193,27 @@ pub fn touch_recent_in(
 ///
 /// Updating rather than skipping is what keeps the row honest — the name
 /// would otherwise still advertise a project the workspace no longer holds.
+///
+/// Returns whether the workspace had a row. The recent list is the only
+/// index of workspaces there is, so that answer doubles as "can this
+/// workspace still be reached?" — which is what decides whether its state
+/// file is worth keeping. See `Workspace::persist_state`.
 pub fn refresh_recent_if_present_in(
     data_dir: &Path,
     workspace_uuid: WorkspaceUuid,
     display_name: String,
-) -> std::io::Result<()> {
+) -> std::io::Result<bool> {
     let mut entries = load_recent_in(data_dir);
     let Some(entry) = entries
         .iter_mut()
         .find(|e| e.workspace_uuid == workspace_uuid)
     else {
-        return Ok(());
+        return Ok(false);
     };
-    *entry = RecentEntry::now(workspace_uuid, display_name);
-    save_recent_in(data_dir, &entries)
+    // `last_opened` deliberately keeps its old value: going empty is not the
+    // user working in the workspace, and a future recency sort must not
+    // undo the no-reorder rule above.
+    entry.display_name = display_name;
+    save_recent_in(data_dir, &entries)?;
+    Ok(true)
 }

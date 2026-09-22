@@ -89,13 +89,12 @@ impl Workspace {
     /// window. Its payload carries the window geometry, dock sizes and
     /// open policy and an empty project list.
     ///
-    /// Still `Option` because the callers below it are fallible; it just
-    /// no longer has an emptiness reason to answer `None`.
-    /// Drives [`Workspace::persist_state`].
+    /// Drives [`Workspace::persist_state`]. Infallible: every workspace has
+    /// a snapshot, the empty one included.
     pub(in crate::workspace) fn snapshot_for_disk(
         &self,
         cx: &App,
-    ) -> Option<(WorkspaceState, Vec<ProjectState>)> {
+    ) -> (WorkspaceState, Vec<ProjectState>) {
         let mut project_states = Vec::with_capacity(self.projects.len());
         let mut project_ids = Vec::with_capacity(self.projects.len());
         let mut project_overrides = BTreeMap::new();
@@ -237,7 +236,7 @@ impl Workspace {
             project_tabs,
         };
 
-        Some((workspace, project_states))
+        (workspace, project_states)
     }
 
     /// Sample the window's windowed bounds into `cached_window_bounds`.
@@ -267,9 +266,22 @@ impl Workspace {
     /// sharing a project see updates via it (last-writer-wins on the lane
     /// list). Also touches `recent-workspaces.json` with the display name.
     pub fn persist_state(&self, cx: &App) {
-        let Some((workspace, projects)) = self.snapshot_for_disk(cx) else {
+        let (workspace, projects) = self.snapshot_for_disk(cx);
+
+        // Settle the recent list first, because for an empty workspace its
+        // answer decides whether there is anything worth saving.
+        //
+        // An empty workspace refreshes an existing row but never earns a new
+        // one (see `refresh_recent_if_present_in`). The recent list is also
+        // the only index of workspaces there is, so an empty one with no row
+        // can never be reached again — a window opened empty, or the
+        // constructor's save on the restore path, before the saved uuid is
+        // adopted. Writing its file would leak one per launch. Delete
+        // instead, which also sweeps a row that has aged out past RECENT_MAX.
+        if !self.update_recent_entry(&workspace) {
+            self.discard_unreachable_state(&workspace);
             return;
-        };
+        }
 
         for project in &projects {
             if let Err(e) = daruda_store::project::save_project_state_in(&self.data_dir, project) {
@@ -297,13 +309,15 @@ impl Workspace {
                     .build(),
             );
         }
+    }
 
-        // An empty workspace refreshes an existing row but never earns a new
-        // one: it has no project to name it after, and one that never held a
-        // project has nothing worth restoring. See
-        // `refresh_recent_if_present_in` for both halves of that reasoning.
+    /// Update this workspace's recent-list row and answer whether it is
+    /// reachable afterwards. A workspace holding projects always is — it
+    /// takes the top slot. An empty one is reachable only if it already had
+    /// a row, which is refreshed in place.
+    fn update_recent_entry(&self, workspace: &WorkspaceState) -> bool {
         let display_name = self.recent_display_name();
-        let touched = if self.projects.is_empty() {
+        let outcome = if self.projects.is_empty() {
             daruda_store::project::refresh_recent_if_present_in(
                 &self.data_dir,
                 workspace.uuid,
@@ -311,14 +325,40 @@ impl Workspace {
             )
         } else {
             daruda_store::project::touch_recent_in(&self.data_dir, workspace.uuid, display_name)
+                .map(|()| true)
         };
-        if let Err(e) = touched {
+        match outcome {
+            Ok(reachable) => reachable,
+            Err(e) => {
+                LogWriter::log(
+                    ErrorReport::new("Failed to update recent list")
+                        .severity(ErrorSeverity::Warning)
+                        .from_error(&e)
+                        .at(file!(), line!())
+                        .dedup("recent.touch")
+                        .build(),
+                );
+                // The list could not be read or written, so reachability is
+                // unknown. Keep the state file: a stale file is recoverable,
+                // a deleted workspace is not.
+                true
+            }
+        }
+    }
+
+    /// Remove the state file of a workspace nothing can reach, so an empty
+    /// window does not leave one behind on every launch.
+    fn discard_unreachable_state(&self, workspace: &WorkspaceState) {
+        if let Err(e) =
+            daruda_store::project::delete_workspace_state_in(&self.data_dir, workspace.uuid)
+        {
             LogWriter::log(
-                ErrorReport::new("Failed to update recent list")
+                ErrorReport::new("Failed to discard unreachable workspace state")
                     .severity(ErrorSeverity::Warning)
                     .from_error(&e)
                     .at(file!(), line!())
-                    .dedup("recent.touch")
+                    .with_context("workspace_uuid", workspace.uuid.as_inner().to_string())
+                    .dedup("workspace.discard")
                     .build(),
             );
         }

@@ -30,7 +30,7 @@ fn snapshot_then_restore_preserves_identity(cx: &mut TestAppContext) {
 
     let (workspace_state, project_states, original_uuid, original_project_uuid) = original
         .read_with(cx, |ws, app_cx| {
-            let (ws_state, p_states) = ws.snapshot_for_disk(app_cx).expect("snapshot");
+            let (ws_state, p_states) = ws.snapshot_for_disk(app_cx);
             (ws_state, p_states, ws.uuid, ws.projects[0].uuid)
         });
 
