@@ -320,38 +320,34 @@ mod tests {
         }
     }
 
-    /// The ink box is the independent oracle: reserve less and the label runs
-    /// past its node. A sum of advances lands a side bearing above it, and how
-    /// far above is the face's business (Noto Sans CJK's run three times
-    /// Apple's) — hence a one-advance bound, not a ratio. The two tests below
-    /// pin magnitude.
+    /// The oracle is what the rasterizer advances for the whole label, read
+    /// off the same usvg stack that paints it — `ink(label·label) − ink(label)`,
+    /// the trick the module itself uses for one syllable. An ink box would not
+    /// do: how far a face's ink sits from its advances is its own business,
+    /// and it differs in sign between Apple's, Noto's and Microsoft's Korean.
     #[test]
-    fn the_correction_covers_the_glyphs_the_rasterizer_paints() {
+    fn the_correction_matches_what_the_rasterizer_advances() {
         let corrected = HangulCorrectedMeasurer::default();
         let plain = VendoredFontMetricsTextMeasurer::default();
         let label = "스케줄 틱 발생";
+        let family = style().font_family.unwrap_or_default();
         let before = plain.measure(label, &style()).width;
         let after = corrected.measure(label, &style()).width;
-        let painted = f64::from(
-            probe_ink_width(label, style().font_family.as_deref().unwrap_or_default())
-                .expect("probe lays out"),
-        ) / PROBE_FONT_SIZE
-            * style().font_size;
+        let once = probe_ink_width(label, &family).expect("probe lays out");
+        let twice = probe_ink_width(&label.repeat(2), &family).expect("probe lays out");
+        let advanced = f64::from(twice - once) / PROBE_FONT_SIZE * style().font_size;
 
         assert!(
-            before < painted,
+            before < advanced,
             "fixture must reproduce the overflow: merman reserved {before}px \
-             for {painted}px of painted ink"
+             where the rasterizer advances {advanced}px"
         );
+        // Shaping is linear in size, so what is left is float rounding between
+        // merman's table and usvg's — one percent is generous.
+        let off = (after - advanced).abs();
         assert!(
-            after >= painted,
-            "corrected to {after}px, still short of the {painted}px painted"
-        );
-        let advance = corrected.assumed_syllable_advance_px(&style());
-        assert!(
-            after - painted <= advance,
-            "corrected {after}px clears the {painted}px painted by more than one \
-             syllable ({advance}px) — side bearings do not explain that"
+            off <= advanced / 100.0,
+            "corrected to {after}px against {advanced}px advanced — off by {off}px"
         );
     }
 
