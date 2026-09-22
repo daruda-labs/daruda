@@ -82,12 +82,12 @@ impl Workspace {
             .iter()
             .any(|t| matches!(t.state, daruda_store::tasks::TaskState::Running { .. }));
         if has_running {
-            if self._task_live_tick.is_none() {
-                self._task_live_tick =
+            if self.pumps.task_live_tick.is_none() {
+                self.pumps.task_live_tick =
                     Some(crate::workspace::right_dock::task_workflow_ops::spawn_task_live_tick(cx));
             }
         } else {
-            self._task_live_tick = None;
+            self.pumps.task_live_tick = None;
         }
     }
 

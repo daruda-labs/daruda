@@ -50,6 +50,7 @@ mod lane_ops;
 mod lane_scoped;
 pub(in crate::workspace) mod layout;
 mod left_dock;
+mod lifetimes;
 pub(in crate::workspace) mod main_area;
 pub(in crate::workspace) mod modal_view;
 pub(crate) mod open_project_modal;
@@ -653,7 +654,8 @@ pub struct Workspace {
     pub(in crate::workspace) agent_vocabulary: daruda_store::agent_vocabulary::AgentVocabularyCache,
     /// Refreshes [`Self::agent_vocabulary`] after any Workspace records a new
     /// advertisement into the app-wide cache.
-    _agent_vocabulary_global_subscription: gpui::Subscription,
+    /// Global observers installed once — see [`lifetimes::GlobalObservers`].
+    _observers: lifetimes::GlobalObservers,
     /// Managed accounts across every auth domain — the catalog a pane's
     /// `AccountSelection` resolves against, plus the per-domain default seeded
     /// onto a freshly-created pane (see
@@ -677,12 +679,10 @@ pub struct Workspace {
     /// whenever the app-wide [`accounts_global::AccountsGlobal`] changes —
     /// so an add/reauth/default/delete in *any* window (or the Settings
     /// window) is reflected here immediately, with no manual broadcast.
-    _accounts_global_subscription: gpui::Subscription,
     /// Subscription that calls `cx.notify()` whenever the app-wide
     /// `GlobalTasks` changes — so the Tasks tab in this workspace
     /// re-renders after a CRUD or lifecycle mutation triggered by any
     /// other workspace, hook, or modal.
-    _tasks_global_subscription: gpui::Subscription,
     /// Background tick that re-renders the right-panel Tasks tab
     /// every [`crate::ui::theme::RIGHT_PANEL_TASK_LIVE_TICK_MS`]
     /// while at least one task is `Running`, so the pulse dot animates
@@ -690,7 +690,6 @@ pub struct Workspace {
     /// `Running` row is on screen — the loop self-terminates and
     /// gets re-spawned by `ensure_task_live_tick` on the next
     /// state-change event. See `task_ops::spawn_task_live_tick`.
-    pub(in crate::workspace) _task_live_tick: Option<gpui::Task<()>>,
     /// Active filter shown in the Tasks tab header. Default = `All`.
     pub(in crate::workspace) task_filter: daruda_store::tasks::TaskFilter,
     /// Per-repo lock that prevents two concurrent `start_task`
@@ -738,27 +737,12 @@ pub struct Workspace {
     /// (empty set) means every plugin group renders collapsed; the
     /// user toggles individual groups via the accordion chevron.
     pub(in crate::workspace) skill_plugin_expanded: std::collections::HashSet<String>,
-    /// Skills filesystem watcher — drops on shutdown / re-spawn so
-    /// the FSEvent subscription unregisters cleanly. Updates land in
-    /// the app-wide `SkillsState` Global (registered by
-    /// `agent::skills::global::init`).
-    _skills_watcher: Option<crate::hooks::skills_watcher::SkillsWatcherHandle>,
-    _skills_event_pump: Option<gpui::Task<()>>,
+    /// Background watches and their pumps — see [`lifetimes::Pumps`].
+    pub(in crate::workspace) pumps: lifetimes::Pumps,
     /// Subscription that calls `cx.notify()` whenever the `SkillsState`
     /// Global changes — so panels in this workspace re-render after a
     /// mutation triggered by another workspace's watcher or by the
     /// Settings window's plugin install / uninstall flow.
-    _skills_global_subscription: gpui::Subscription,
-    /// MCP filesystem watcher — drops on shutdown / re-spawn so the
-    /// FSEvent subscription unregisters cleanly. Updates land in the
-    /// app-wide `McpState` Global (registered by
-    /// `agent::mcp::global::init`).
-    _mcp_watcher: Option<crate::hooks::mcp_watcher::McpWatcherHandle>,
-    _mcp_event_pump: Option<gpui::Task<()>>,
-    /// Flow-definition watcher for the active lane's three flow directories.
-    /// Dropped on re-spawn, which is how the anchors follow a lane switch.
-    _flow_watcher: Option<crate::hooks::flow_watcher::FlowWatcherHandle>,
-    _flow_event_pump: Option<gpui::Task<()>>,
     /// Cached Project-scope `.mcp.json` directories (lane root + the
     /// focused cwd, each walked up to its git repo root). Recomputed
     /// only inside `respawn_mcp_watcher` — the render snapshot reads
@@ -768,15 +752,12 @@ pub struct Workspace {
     /// Global changes — so panels in this workspace re-render after a
     /// mutation triggered by another workspace's watcher or by a
     /// Settings-window action.
-    _mcp_global_subscription: gpui::Subscription,
     /// Subscription on the `SettingsStore` Global. Re-resolves the
     /// effective config (user layer + this workspace's project
     /// overlay) and calls `apply_config` on every change.
-    _settings_global_subscription: gpui::Subscription,
     /// Subscription on the `Updater` entity. Fires on every status
     /// transition; the handler toasts only when it becomes `Available`.
     /// `None` when no `Updater` global is registered (e.g. tests).
-    _updater_subscription: Option<gpui::Subscription>,
     /// Last version surfaced via the "update available" toast. Guards
     /// against re-toasting the same version on repeated `Available`
     /// notifies.
@@ -812,10 +793,6 @@ pub struct Workspace {
     /// (`set_scanned_ports`); read by the status bar's Ports segment
     /// snapshot builder.
     pub(in crate::workspace) attributed_ports: Vec<sync::ports::PortEntry>,
-    /// Background listening-port scan loop for the status bar's Ports
-    /// segment. Dropping it (Workspace teardown) cancels the loop.
-    #[allow(dead_code)]
-    _ports_pump: gpui::Task<()>,
 }
 
 impl Workspace {
@@ -1317,33 +1294,16 @@ impl Workspace {
             left_dock_preview: None,
             panels: main_area::bottom_dock::macro_ops::load_or_seed_panels(&data_dir),
             agent_vocabulary,
-            _agent_vocabulary_global_subscription: cx
-                .observe_global::<agent_vocabulary_global::AgentVocabularyGlobal>(|ws, cx| {
-                    ws.agent_vocabulary = agent_vocabulary_global::snapshot(cx, &ws.data_dir);
-                    cx.notify();
-                }),
             accounts,
             pending_login: PendingLogin::None,
             // Managed accounts live in the app-wide `AccountsGlobal`; this
             // subscription refreshes the `accounts` read-cache from it and
             // repaints whenever any window mutates it (single, symmetric
             // cross-window propagation path — see `accounts_global`).
-            _accounts_global_subscription: cx.observe_global::<accounts_global::AccountsGlobal>(
-                |ws, cx| {
-                    ws.accounts = accounts_global::snapshot(cx);
-                    cx.notify();
-                },
-            ),
             // Task data lives in the app-wide `GlobalTasks`; this
             // subscription rebroadcasts mutations into this
             // workspace's render path and re-evaluates whether the
             // live tick (pulse + duration) needs to be running.
-            _tasks_global_subscription: cx
-                .observe_global::<crate::agent::tasks_global::GlobalTasks>(|ws, cx| {
-                    ws.ensure_task_live_tick(cx);
-                    cx.notify();
-                }),
-            _task_live_tick: None,
             task_filter: daruda_store::tasks::TaskFilter::default(),
             pending_lane_creates: HashSet::new(),
             window_close_in_flight: false,
@@ -1377,51 +1337,57 @@ impl Workspace {
                     d
                 })
             },
-            _skills_watcher: None,
-            _skills_event_pump: None,
-            _skills_global_subscription: cx.observe_global::<crate::agent::skills::SkillsState>(
-                |_ws, cx| {
-                    // Right dock re-stages + diffs on this notify.
-                    cx.notify();
-                },
-            ),
-            _mcp_watcher: None,
-            _mcp_event_pump: None,
-            _flow_watcher: None,
-            _flow_event_pump: None,
             mcp_project_dirs: Vec::new(),
-            _mcp_global_subscription: cx.observe_global::<crate::agent::mcp::McpState>(
-                |_ws, cx| {
-                    // Right dock re-stages + diffs on this notify.
-                    cx.notify();
-                },
-            ),
             // Re-resolve the user layer with this workspace's project
             // overlay and reapply whenever `SettingsStore` changes —
             // both the FS watch tick and the Settings-window save
             // fold into the same Global mutation and fanout here.
-            _settings_global_subscription: cx
-                .observe_global::<crate::settings_store::SettingsStore>(|ws, cx| {
-                    let store = crate::settings_store::SettingsStore::global(cx);
-                    let lane = ws.active_project().map(|p| p.root.as_path());
-                    let effective = store.effective_for(lane);
-                    ws.apply_config(&effective, cx);
-                }),
             // Observe the Updater entity: it self-notifies on every status
             // transition, so the handler filters for `Available` and toasts
             // once per new version.
-            _updater_subscription: crate::update::Updater::get(cx).map(|e| {
-                cx.observe(&e, |this: &mut Workspace, updater, cx| {
-                    this.on_updater_status_changed(&updater, cx);
-                })
-            }),
             last_update_toast_version: None,
             window_handle: window.window_handle(),
             input_drafts: std::collections::HashMap::new(),
             input_owner: None,
             port_scan_status: sync::ports::PortScanStatus::Pending,
             attributed_ports: Vec::new(),
-            _ports_pump: sync::ports::spawn(cx),
+            _observers: lifetimes::GlobalObservers::new(
+                cx.observe_global::<accounts_global::AccountsGlobal>(|ws, cx| {
+                    ws.accounts = accounts_global::snapshot(cx);
+                    cx.notify();
+                }),
+                cx.observe_global::<agent_vocabulary_global::AgentVocabularyGlobal>(|ws, cx| {
+                    ws.agent_vocabulary = agent_vocabulary_global::snapshot(cx, &ws.data_dir);
+                    cx.notify();
+                }),
+                cx.observe_global::<crate::agent::mcp::McpState>(|_ws, cx| {
+                    // Right dock re-stages + diffs on this notify.
+                    cx.notify();
+                }),
+                cx.observe_global::<crate::settings_store::SettingsStore>(|ws, cx| {
+                    let store = crate::settings_store::SettingsStore::global(cx);
+                    let lane = ws.active_project().map(|p| p.root.as_path());
+                    let effective = store.effective_for(lane);
+                    ws.apply_config(&effective, cx);
+                }),
+                cx.observe_global::<crate::agent::skills::SkillsState>(|_ws, cx| {
+                    // Right dock re-stages + diffs on this notify.
+                    cx.notify();
+                }),
+                cx.observe_global::<crate::agent::tasks_global::GlobalTasks>(|ws, cx| {
+                    ws.ensure_task_live_tick(cx);
+                    cx.notify();
+                }),
+                crate::update::Updater::get(cx).map(|e| {
+                    cx.observe(&e, |this: &mut Workspace, updater, cx| {
+                        this.on_updater_status_changed(&updater, cx);
+                    })
+                }),
+            ),
+            pumps: lifetimes::Pumps {
+                _ports: Some(sync::ports::spawn(cx)),
+                ..Default::default()
+            },
         };
         // Invariant seed: the active lane's runtime must always exist in
         // `runtimes` so `active_runtime()` (read unconditionally by

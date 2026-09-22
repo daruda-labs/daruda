@@ -15,6 +15,7 @@ use gpui::{BorrowAppContext, Context, Task};
 use crate::agent::skills::{SkillScope, SkillsState, scan};
 use crate::hooks::skills_watcher::{self, SkillsEvent};
 use crate::workspace::Workspace;
+use crate::workspace::lifetimes::Watch;
 
 const POLL_INTERVAL: Duration = Duration::from_millis(100);
 
@@ -75,8 +76,7 @@ impl Workspace {
     pub fn refresh_skills_watcher(&mut self, cx: &mut Context<Self>) {
         // Drop the previous watcher + pump first so the old FSEvent
         // subscription unregisters before we attach a new one.
-        self._skills_watcher = None;
-        self._skills_event_pump = None;
+        self.pumps.skills = None;
 
         let project_root = self.active_lane_root();
         let personal = scan::skills_personal_dir();
@@ -97,7 +97,6 @@ impl Workspace {
         let plugin_root = crate::agent::skills::plugins::plugins_root();
         let (events, handle) = skills_watcher::spawn(project_skills_dir, personal, plugin_root);
         let pump = spawn(events, cx);
-        self._skills_watcher = Some(handle);
-        self._skills_event_pump = Some(pump);
+        self.pumps.skills = Some(Watch::new(handle, pump));
     }
 }

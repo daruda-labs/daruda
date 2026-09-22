@@ -17,6 +17,7 @@ use std::time::Duration;
 use gpui::{Context, Task, Window};
 
 use crate::hooks::flow_watcher::{self, FlowsEvent};
+use crate::workspace::lifetimes::Watch;
 use crate::workspace::{Workspace, flow_paths};
 
 const POLL_INTERVAL: Duration = Duration::from_millis(100);
@@ -76,8 +77,7 @@ impl Workspace {
     /// creates or deletes a flow — creating the first one also creates the
     /// directory the watcher has to be anchored on.
     pub(in crate::workspace) fn respawn_flow_watcher(&mut self, cx: &mut Context<Self>) {
-        self._flow_watcher = None;
-        self._flow_event_pump = None;
+        self.pumps.flow = None;
 
         let Some(sources) = self.flow_sources() else {
             return;
@@ -85,7 +85,6 @@ impl Workspace {
         // The origin is what a *listing* needs; anchoring only needs the paths.
         let dirs = sources.dirs().into_iter().map(|(dir, _)| dir).collect();
         let (events, handle) = flow_watcher::spawn(dirs, flow_paths::FLOW_EXTENSIONS.to_vec());
-        self._flow_event_pump = Some(spawn(events, cx));
-        self._flow_watcher = Some(handle);
+        self.pumps.flow = Some(Watch::new(handle, spawn(events, cx)));
     }
 }

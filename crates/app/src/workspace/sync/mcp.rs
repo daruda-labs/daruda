@@ -20,6 +20,7 @@ use gpui::{BorrowAppContext, Context, Task};
 use crate::agent::mcp::{McpState, claude_json_path, project_mcp_path};
 use crate::hooks::mcp_watcher::{self, McpEvent};
 use crate::workspace::Workspace;
+use crate::workspace::lifetimes::Watch;
 
 const POLL_INTERVAL: Duration = Duration::from_millis(100);
 
@@ -184,8 +185,7 @@ impl Workspace {
     /// ([`Workspace::mcp_project_dirs`]). Also called when the focused
     /// terminal's cwd changes so a new cwd's chain is picked up live.
     pub(super) fn respawn_mcp_watcher(&mut self, cx: &mut Context<Self>) {
-        self._mcp_watcher = None;
-        self._mcp_event_pump = None;
+        self.pumps.mcp = None;
 
         // Recompute + cache the Project dirs here (the only site that
         // stat-walks); everything else reads the cached field.
@@ -241,8 +241,7 @@ impl Workspace {
 
         let (events, handle) = mcp_watcher::spawn(project_paths, claude_json);
         let pump = spawn(events, cx);
-        self._mcp_watcher = Some(handle);
-        self._mcp_event_pump = Some(pump);
+        self.pumps.mcp = Some(Watch::new(handle, pump));
     }
 }
 
