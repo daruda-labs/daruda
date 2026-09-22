@@ -160,10 +160,13 @@ mod tests {
 
         let config = config_of(&wrapped);
         assert_eq!(config.command(), env_program());
-        assert_eq!(
-            &config.arguments()[..4],
-            ["-u", "ANTHROPIC_API_KEY", "-u", "CLAUDE_CODE_OAUTH_TOKEN"]
-        );
+        let unsets = crate::launch_config::env_argv([
+            "-u",
+            "ANTHROPIC_API_KEY",
+            "-u",
+            "CLAUDE_CODE_OAUTH_TOKEN",
+        ]);
+        assert_eq!(&config.arguments()[..unsets.len()], unsets);
         assert_eq!(
             &config.arguments()[config.arguments().len() - 3..],
             ["npx", "-y", ADAPTER_NPM_PACKAGE]
@@ -287,14 +290,14 @@ mod tests {
         assert_eq!(config.command(), env_program());
         assert_eq!(
             config.arguments(),
-            [
+            crate::launch_config::env_argv([
                 "-u",
                 "ANTHROPIC_API_KEY",
                 "-u",
                 "CLAUDE_CODE_OAUTH_TOKEN",
                 "/usr/local/bin/claude-agent-acp",
                 "--acp",
-            ]
+            ])
         );
     }
 
