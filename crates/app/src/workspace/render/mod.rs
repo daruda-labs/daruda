@@ -380,7 +380,7 @@ impl Render for Workspace {
         let dark = t.is_dark();
         // Settings owns the whole body while it is up, which decides both what
         // the title bar offers and which actions this window answers.
-        let in_settings = self.settings.is_some();
+        let in_settings = self.settings_is_open();
         let title_bar_bg = t.title_bar_bg;
         // Copied out like the other title-bar tokens: `t` borrows `cx`, which the
         // snapshot staging below needs mutably.
@@ -1448,8 +1448,8 @@ impl Render for Workspace {
             // width. `.cached()` is safe because the view notifies itself on
             // every edit (Pitfall 10), so terminal output repainting the
             // workspace does not rebuild the form.
-            .child(match self.settings.as_ref() {
-                Some(host) => gpui::AnyView::from(host.view.clone())
+            .child(match self.settings_view() {
+                Some(view) => gpui::AnyView::from(view.clone())
                     .cached(
                         gpui::StyleRefinement::default()
                             .flex_1()

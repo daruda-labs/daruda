@@ -126,7 +126,7 @@ async fn drive_settings_shows_the_settings_view(cx: &mut TestAppContext) {
             cx,
         );
         assert!(
-            workspace.read(cx).settings.is_some(),
+            workspace.read(cx).settings_is_open(),
             "settings scenario should put the Settings view on screen",
         );
     })
@@ -144,10 +144,8 @@ async fn drive_settings_error_raises_the_banner(cx: &mut TestAppContext) {
         drive(ScreenshotScenario::SettingsError, &workspace, window, cx);
         let view = workspace
             .read(cx)
-            .settings
-            .as_ref()
+            .settings_view()
             .expect("settings-error scenario should put the Settings view on screen")
-            .view
             .clone();
         assert!(
             view.read(cx).error_for_test().is_some(),

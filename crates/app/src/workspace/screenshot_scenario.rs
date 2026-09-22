@@ -496,9 +496,8 @@ pub(crate) fn drive(
         ScreenshotScenario::SettingsError => {
             workspace.update(cx, |ws, cx| {
                 ws.open_settings(BuiltinSection::Notifications, window, cx);
-                if let Some(host) = ws.settings.as_ref() {
-                    host.view
-                        .update(cx, |this, cx| this.seed_error_for_shot(cx));
+                if let Some(view) = ws.settings_view().cloned() {
+                    view.update(cx, |this, cx| this.seed_error_for_shot(cx));
                 }
             });
         }

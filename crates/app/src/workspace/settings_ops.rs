@@ -17,7 +17,7 @@ use crate::workspace::Workspace;
 /// close request back. Both are built and dropped together, so they are one
 /// value rather than two fields that must agree.
 pub(in crate::workspace) struct SettingsHost {
-    pub(in crate::workspace) view: Entity<SettingsView>,
+    view: Entity<SettingsView>,
     _close: Subscription,
 }
 
@@ -121,5 +121,20 @@ impl Workspace {
             LoginRequest::Reauthenticate(account) => self.reauthenticate_account(account, cx),
             LoginRequest::ReauthenticateSystem(recipe) => self.reauthenticate_system(recipe, cx),
         }
+    }
+
+    /// Whether Settings is on screen. `render` reads this to pick the body and
+    /// to decide which actions this window answers.
+    pub(in crate::workspace) fn settings_is_open(&self) -> bool {
+        self.settings.is_some()
+    }
+
+    /// The view on screen, for the two callers that legitimately need the
+    /// entity itself: `render`, to embed it, and the screenshot driver, to
+    /// seed a state no settled workspace can reach. Everything else goes
+    /// through the operations above — reaching in is how `Workspace` grew 82
+    /// fields its collaborators could write.
+    pub(in crate::workspace) fn settings_view(&self) -> Option<&Entity<SettingsView>> {
+        self.settings.as_ref().map(|host| &host.view)
     }
 }

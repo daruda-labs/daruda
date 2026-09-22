@@ -12,15 +12,18 @@ async fn open_settings_puts_the_view_on_screen(cx: &mut TestAppContext) {
 
     cx.update_window(window_handle.into(), |_, window, cx| {
         workspace.update(cx, |ws, cx| {
-            assert!(ws.settings.is_none(), "a fresh workspace shows no settings");
+            assert!(
+                !ws.settings_is_open(),
+                "a fresh workspace shows no settings"
+            );
             ws.on_open_settings(
                 &OpenSettings(daruda_config::BuiltinSection::Font),
                 window,
                 cx,
             );
-            let host = ws.settings.as_ref().expect("settings should be on screen");
+            let view = ws.settings_view().expect("settings should be on screen");
             assert_eq!(
-                host.view.read(cx).active_section(),
+                view.read(cx).active_section(),
                 daruda_config::BuiltinSection::Font,
                 "the action's section is the one shown",
             );
@@ -42,26 +45,21 @@ async fn reopening_moves_the_same_view(cx: &mut TestAppContext) {
                 window,
                 cx,
             );
-            let first = ws
-                .settings
-                .as_ref()
-                .expect("settings on screen")
-                .view
-                .clone();
+            let first = ws.settings_view().expect("settings on screen").clone();
 
             ws.on_open_settings(
                 &OpenSettings(daruda_config::BuiltinSection::About),
                 window,
                 cx,
             );
-            let host = ws.settings.as_ref().expect("settings still on screen");
+            let view = ws.settings_view().expect("settings still on screen");
             assert_eq!(
-                host.view.entity_id(),
+                view.entity_id(),
                 first.entity_id(),
                 "reopening should reuse the live view",
             );
             assert_eq!(
-                host.view.read(cx).active_section(),
+                view.read(cx).active_section(),
                 daruda_config::BuiltinSection::About,
             );
         });
@@ -83,11 +81,7 @@ async fn the_view_s_close_event_takes_it_down(cx: &mut TestAppContext) {
                     window,
                     cx,
                 );
-                ws.settings
-                    .as_ref()
-                    .expect("settings on screen")
-                    .view
-                    .clone()
+                ws.settings_view().expect("settings on screen").clone()
             })
         })
         .unwrap();
@@ -102,7 +96,7 @@ async fn the_view_s_close_event_takes_it_down(cx: &mut TestAppContext) {
 
     cx.update_window(window_handle.into(), |_, _window, cx| {
         assert!(
-            workspace.read(cx).settings.is_none(),
+            !workspace.read(cx).settings_is_open(),
             "Close should take the view down",
         );
     })
@@ -174,7 +168,7 @@ async fn escape_closes_settings_from_a_fresh_open(cx: &mut TestAppContext) {
     vcx.run_until_parked();
 
     assert!(
-        workspace.read_with(&vcx, |ws, _| ws.settings.is_none()),
+        workspace.read_with(&vcx, |ws, _| !ws.settings_is_open()),
         "Escape must reach the view on the first open, with no click first",
     );
 }
@@ -203,9 +197,8 @@ async fn a_fresh_open_still_answers_window_level_actions(cx: &mut TestAppContext
 
     assert_eq!(
         workspace.read_with(&vcx, |ws, cx| ws
-            .settings
-            .as_ref()
-            .map(|h| h.view.read(cx).active_section())),
+            .settings_view()
+            .map(|view| view.read(cx).active_section())),
         Some(daruda_config::BuiltinSection::About),
         "a window-level action must still reach the workspace behind Settings",
     );
@@ -240,7 +233,7 @@ async fn closing_without_a_pane_to_return_to_keeps_the_keyboard(cx: &mut TestApp
     vcx.run_until_parked();
 
     vcx.update(|window, cx| {
-        assert!(workspace.read(cx).settings.is_none());
+        assert!(!workspace.read(cx).settings_is_open());
         assert!(
             workspace.read(cx).focus_handle.is_focused(window),
             "the workspace root has to take focus when no pane can",
