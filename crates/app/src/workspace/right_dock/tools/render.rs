@@ -31,7 +31,7 @@ use crate::workspace::layout::Dock;
 use crate::workspace::layout::RightDockSnapshot;
 use crate::workspace::right_dock::section::DockSection;
 use crate::workspace::right_dock::section_view::{
-    ScopeSection, SectionFold, library_row, panel_footer,
+    ScopeSection, SectionFold, hover_actions, library_row, panel_footer,
 };
 
 /// Render the Tools tab body.
@@ -167,7 +167,6 @@ fn server_row(
     // a translucent fill let that text bleed through and collide with
     // the buttons.
     let row_hover_bg = t.skill_row_hover_bg;
-    let actions_bg = t.skill_row_hover_bg;
 
     // The switch mirrors the config's `disabled` flag; there is no live
     // connection state to show, so the summary line reports config only.
@@ -199,7 +198,7 @@ fn server_row(
     .id(SharedString::from(s.row_dom_id()))
     .group("mcp-row")
     .relative()
-    .px(px(theme::SKILL_ROW_PAD_X))
+    .px(px(theme::LIST_ROW_PAD_X))
     .rounded(px(theme::MCP_BADGE_RADIUS))
     .hover(move |d| d.bg(row_hover_bg))
     .child(
@@ -221,27 +220,14 @@ fn server_row(
     )
     .child(
         // Sits left of the switch so revealing the actions never hides it.
-        div()
-            .absolute()
-            .right(px(theme::MCP_ACTIONS_RIGHT))
-            .top_0()
-            .bottom_0()
-            .flex()
-            .flex_row()
-            .items_center()
-            .gap(px(theme::GAP_SM))
-            .bg(actions_bg)
-            .pl(px(theme::MCP_HEADER_GAP))
-            .invisible()
-            .group_hover("mcp-row", |s| s.visible())
-            .child(row_actions(
-                scope,
-                name_for_edit,
-                name_for_delete,
-                workspace_edit,
-                workspace_delete,
-                cx,
-            )),
+        hover_actions("mcp-row", theme::MCP_ACTIONS_RIGHT, cx).child(row_actions(
+            scope,
+            name_for_edit,
+            name_for_delete,
+            workspace_edit,
+            workspace_delete,
+            cx,
+        )),
     )
     .into_any_element()
 }

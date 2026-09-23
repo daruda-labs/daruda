@@ -137,7 +137,7 @@ fn row_header(
             div()
                 .flex()
                 .flex_col()
-                .gap(px(theme::SKILL_ROW_GAP))
+                .gap(px(theme::LIST_ROW_GAP))
                 .child(
                     div()
                         .text_size(px(theme::MODAL_BODY_FONT_SIZE))

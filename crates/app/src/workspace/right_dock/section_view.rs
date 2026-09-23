@@ -152,6 +152,25 @@ pub(in crate::workspace) fn library_row(
         )
 }
 
+/// Actions a row reveals on hover, laid over its trailing edge on the row's
+/// hover fill so they mask the text behind them. The row sets `.group(group)`
+/// and `.relative()`; `right_inset` keeps clear of any trailing control.
+pub(in crate::workspace) fn hover_actions(group: &'static str, right_inset: f32, cx: &App) -> Div {
+    div()
+        .absolute()
+        .right(px(right_inset))
+        .top_0()
+        .bottom_0()
+        .flex()
+        .flex_row()
+        .items_center()
+        .gap(px(theme::GAP_SM))
+        .bg(theme::current(cx).skill_row_hover_bg)
+        .pl(px(theme::LIST_ROW_PAD_X))
+        .invisible()
+        .group_hover(group, |s| s.visible())
+}
+
 /// Summary strip pinned beneath a tab's scrolling body.
 pub(in crate::workspace) fn panel_footer(
     icon: &'static str,

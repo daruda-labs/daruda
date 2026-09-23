@@ -21,7 +21,7 @@ pub(super) fn project(body: AnyElement) -> Div {
 }
 
 fn tree_root() -> Div {
-    div().flex().flex_col().mx(px(theme::LANE_CARD_MARGIN_X))
+    div().flex().flex_col().mx(px(theme::LANE_TREE_MARGIN_X))
 }
 
 /// One row rhythm for groups, projects and lanes; each owns its interactions.
@@ -40,7 +40,7 @@ mod tests {
     #[test]
     fn tree_gutter_clears_scrollbar() {
         const {
-            assert!(theme::LANE_CARD_MARGIN_X >= theme::SCROLLBAR_MARGIN_R + theme::SCROLLBAR_W);
+            assert!(theme::LANE_TREE_MARGIN_X >= theme::SCROLLBAR_MARGIN_R + theme::SCROLLBAR_W);
         }
     }
 

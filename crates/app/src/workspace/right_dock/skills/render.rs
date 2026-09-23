@@ -30,7 +30,7 @@ use crate::ui::Sizable as _;
 use crate::workspace::Workspace;
 use crate::workspace::right_dock::section::DockSection;
 use crate::workspace::right_dock::section_view::{
-    ScopeSection, SectionFold, library_row, panel_footer,
+    ScopeSection, SectionFold, hover_actions, library_row, panel_footer,
 };
 
 /// Render the Skills tab body.
@@ -405,7 +405,7 @@ fn plugin_groups(
                 .items_center()
                 .gap(px(theme::LANE_LABEL_GAP))
                 .py(px(theme::SKILL_PLUGIN_GROUP_PAD_Y))
-                .rounded(px(theme::SKILL_ROW_RADIUS))
+                .rounded(px(theme::LIST_ROW_RADIUS))
                 .child(
                     crate::ui::disclosure(chevron_id, is_open)
                         .size(theme::DOCK_SECTION_CHEVRON_SIZE)
@@ -460,7 +460,6 @@ fn skill_row(
     let scope = s.scope;
     let meta_color = t.text_muted;
     let row_hover_bg = t.skill_row_hover_bg;
-    let actions_bg = t.skill_row_hover_bg;
 
     // Plugin rows render under a per-plugin group that already
     // shows `<plugin>` in the header, so strip the namespace prefix
@@ -537,19 +536,7 @@ fn skill_row(
         let dir_delete = dir.clone();
         let ws_edit = workspace_for_actions.clone();
         let ws_delete = workspace_for_actions.clone();
-        div()
-            .absolute()
-            .right(px(theme::SKILL_ROW_PAD_X))
-            .top_0()
-            .bottom_0()
-            .flex()
-            .flex_row()
-            .items_center()
-            .gap(px(theme::GAP_SM))
-            .bg(actions_bg)
-            .pl(px(theme::SKILL_ROW_PAD_X))
-            .invisible()
-            .group_hover("skill-row", |s| s.visible())
+        hover_actions("skill-row", theme::LIST_ROW_PAD_X, cx)
             .child(
                 button_icon(
                     SharedString::from(format!("skill-edit-{}-{}", scope.slug(), s.name)),
@@ -585,19 +572,7 @@ fn skill_row(
     } else {
         let dir_view = s.dir.clone();
         let ws_view = workspace_for_actions.clone();
-        div()
-            .absolute()
-            .right(px(theme::SKILL_ROW_PAD_X))
-            .top_0()
-            .bottom_0()
-            .flex()
-            .flex_row()
-            .items_center()
-            .gap(px(theme::GAP_SM))
-            .bg(actions_bg)
-            .pl(px(theme::SKILL_ROW_PAD_X))
-            .invisible()
-            .group_hover("skill-row", |s| s.visible())
+        hover_actions("skill-row", theme::LIST_ROW_PAD_X, cx)
             .child(
                 button_icon(
                     SharedString::from(format!("skill-view-{}-{}", scope.slug(), s.name)),
@@ -624,7 +599,7 @@ fn skill_row(
     let row_pad_left = if matches!(scope, SkillScope::Plugin) {
         px(theme::SKILL_PLUGIN_INDENT)
     } else {
-        px(theme::SKILL_ROW_PAD_X)
+        px(theme::LIST_ROW_PAD_X)
     };
 
     let name = div()
@@ -648,8 +623,8 @@ fn skill_row(
     .relative()
     .overflow_hidden()
     .pl(row_pad_left)
-    .pr(px(theme::SKILL_ROW_PAD_X))
-    .rounded(px(theme::SKILL_ROW_RADIUS))
+    .pr(px(theme::LIST_ROW_PAD_X))
+    .rounded(px(theme::LIST_ROW_RADIUS))
     .hover(move |s| s.bg(row_hover_bg))
     .child(actions)
     .into_any_element()

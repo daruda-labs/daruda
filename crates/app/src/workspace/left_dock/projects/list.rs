@@ -39,8 +39,8 @@ pub(in crate::workspace) fn render(snap: &LeftDockSnapshot, cx: &mut Context<Doc
     let header = section_header(false, snap, cx);
 
     // Banner + header stay outside the scroll region so the section
-    // actions remain reachable no matter where the card list is scrolled.
-    let mut body = crate::workspace::left_dock::left_panel_body().gap(px(theme::LANE_CARD_GAP));
+    // actions remain reachable no matter where the tree is scrolled.
+    let mut body = crate::workspace::left_dock::left_panel_body().gap(px(theme::LANE_ROOT_GAP));
     if snap.agent_install_banner_visible {
         body = body.child(agent_install_banner(snap, cx));
     }
@@ -81,12 +81,12 @@ pub(in crate::workspace) fn render(snap: &LeftDockSnapshot, cx: &mut Context<Doc
     top_rows.sort_by_key(|r| r.tab_order());
 
     let scroll_handle = snap.lanes_scroll_handle.clone();
-    let mut cards = div()
+    let mut roots = div()
         .id("lanes-scroll")
         .flex()
         .flex_col()
         .size_full()
-        .gap(px(theme::LANE_CARD_GAP))
+        .gap(px(theme::LANE_ROOT_GAP))
         .overflow_y_scroll()
         .track_scroll(&scroll_handle);
 
@@ -109,7 +109,7 @@ pub(in crate::workspace) fn render(snap: &LeftDockSnapshot, cx: &mut Context<Doc
                     }
                     inner.into_any_element()
                 };
-                cards = cards.child(super::tree::group(
+                roots = roots.child(super::tree::group(
                     header,
                     members_block,
                     theme::current(cx).border,
@@ -118,38 +118,37 @@ pub(in crate::workspace) fn render(snap: &LeftDockSnapshot, cx: &mut Context<Doc
             TopRow::UngroupedProject(project) => {
                 let inner = ungrouped_project_block(project, active_project, active_lane, snap, cx)
                     .into_any_element();
-                cards = cards.child(super::tree::project(inner));
+                roots = roots.child(super::tree::project(inner));
             }
         }
     }
 
     // Non-git project hint — surfaces the `git init` path.
     if !any_git {
-        cards = cards.child(non_git_placeholder(cx));
+        roots = roots.child(non_git_placeholder(cx));
     }
 
-    // Thumb overlay needs a `.relative()` parent; the cards' own
-    // `LANE_CARD_MARGIN_X` gutter already clears the thumb (see
+    // Thumb overlay needs a `.relative()` parent; the tree's own
+    // `LANE_TREE_MARGIN_X` gutter already clears the thumb (see
     // `lanes_scrollbar`).
     body = body.child(
         div()
             .flex_1()
             .relative()
             .overflow_hidden()
-            .child(cards)
+            .child(roots)
             .children(lanes_scrollbar(&scroll_handle, cx)),
     );
 
     body.into_any_element()
 }
 
-/// Scrollbar thumb for the card list. Display-only (no `on_drag`), matching
-/// the Git Changes / Files dock views.
+/// Scrollbar thumb for the project tree. Display-only (no `on_drag`),
+/// matching the Git Changes / Files dock views.
 ///
-/// Sits in the gutter the cards leave free: the thumb spans `[2, 6]` px from
-/// the right edge (`SCROLLBAR_MARGIN_R` + `SCROLLBAR_W`) while a card's
-/// surface stops at `LANE_CARD_MARGIN_X` (8 px), so it never overlaps the
-/// card — no extra padding needed.
+/// Sits in the gutter the tree leaves free: the thumb spans `[2, 6]` px from
+/// the right edge (`SCROLLBAR_MARGIN_R` + `SCROLLBAR_W`) while a tree root
+/// stops at `LANE_TREE_MARGIN_X` (8 px), so it never overlaps a row.
 fn lanes_scrollbar(
     handle: &gpui::ScrollHandle,
     cx: &gpui::App,

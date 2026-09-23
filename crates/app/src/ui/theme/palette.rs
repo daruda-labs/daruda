@@ -366,13 +366,12 @@ pub const LANE_GROUP_COLOR_DOT_RADIUS: f32 = RADIUS_SM;
 // ----------------------------------------------------------------------------
 
 /// Vertical space between top-level project tree roots.
-pub const LANE_CARD_GAP: f32 = GAP_STANDARD;
+pub const LANE_ROOT_GAP: f32 = GAP_STANDARD;
 /// Lanes row — corner radius applied to hover/active background fills
 /// so the highlight reads as a rounded chip instead of a hard rectangle.
 pub const LANE_ROW_RADIUS: f32 = RADIUS_SM;
-/// Lanes card — horizontal outer margin so cards don't hug the dock
-/// edges; gives the surface visible left/right breathing room.
-pub const LANE_CARD_MARGIN_X: f32 = PAD_STANDARD;
+/// Horizontal margin around the project tree; also the scrollbar gutter.
+pub const LANE_TREE_MARGIN_X: f32 = PAD_STANDARD;
 /// Lanes list — vertical gap between adjacent lane rows inside
 /// a project block so consecutive rows don't read as a single block.
 pub const LANE_LIST_GAP_Y: f32 = 0.0;
@@ -2345,10 +2344,11 @@ pub const USAGE_CHART_BAR_TODAY: Hsla = ACCENT;
 pub const USAGE_CHART_BAR_OTHER: Hsla = ACCENT_MUTED;
 /// "📎 N" chip background — surfaces auxiliary file presence.
 pub const SKILL_AUX_CHIP_BG: Hsla = hsla(0.0, 0.0, 0.20, 0.85);
-pub const SKILL_ROW_RADIUS: f32 = RADIUS_SM;
-pub const SKILL_ROW_PAD_X: f32 = PAD_STANDARD;
-pub const SKILL_ROW_PAD_Y: f32 = PAD_XS;
-pub const SKILL_ROW_GAP: f32 = GAP_SM;
+/// Shared list-row metrics (dock tabs, Settings lists).
+pub const LIST_ROW_RADIUS: f32 = RADIUS_SM;
+pub const LIST_ROW_PAD_X: f32 = PAD_STANDARD;
+pub const LIST_ROW_PAD_Y: f32 = PAD_XS;
+pub const LIST_ROW_GAP: f32 = GAP_SM;
 /// Extra left padding for plugin-scope skill rows. Plugin rows sit
 /// under a per-plugin sub-header; this indent makes the
 /// header → skill hierarchy obvious without drawing rules.
@@ -2365,7 +2365,7 @@ pub const SKILL_BADGE_RADIUS: f32 = RADIUS_XS;
 /// Horizontal gap between a server row's inline elements.
 pub const MCP_HEADER_GAP: f32 = GAP_STANDARD;
 /// Hover actions stop short of the row's trailing enable switch.
-pub const MCP_ACTIONS_RIGHT: f32 = SKILL_ROW_PAD_X + COMPACT_SWITCH_TARGET_W + GAP_SM;
+pub const MCP_ACTIONS_RIGHT: f32 = LIST_ROW_PAD_X + COMPACT_SWITCH_TARGET_W + GAP_SM;
 /// Malformed warning hue; a theme slot, and the base of the status text.
 pub const MCP_INDICATOR_MALFORMED: Hsla = hsla(14.0, 0.70, 0.55, 1.0);
 pub const MCP_BADGE_RADIUS: f32 = RADIUS_XS;

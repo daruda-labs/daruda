@@ -215,9 +215,9 @@ pub(super) fn flow_row(
         .min_w_0()
         .overflow_hidden()
         .gap(px(theme::RIGHT_PANEL_ROW_GAP))
-        .px(px(theme::SKILL_ROW_PAD_X))
-        .py(px(theme::SKILL_ROW_PAD_Y))
-        .rounded(px(theme::SKILL_ROW_RADIUS))
+        .px(px(theme::LIST_ROW_PAD_X))
+        .py(px(theme::LIST_ROW_PAD_Y))
+        .rounded(px(theme::LIST_ROW_RADIUS))
         .cursor_pointer()
         .hover(move |s| s.bg(row_hover_bg))
         .child(

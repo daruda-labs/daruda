@@ -65,7 +65,7 @@ fn ask_block(
         .flex()
         .flex_col()
         .gap(px(theme::GAP_SM))
-        .px(px(theme::SKILL_ROW_PAD_X))
+        .px(px(theme::LIST_ROW_PAD_X))
         .children(ask.detail.clone().map(|detail| {
             div()
                 .text_size(px(theme::DOCK_PLACEHOLDER_FONT_SIZE))
@@ -164,8 +164,8 @@ fn run_summary(run: &FlowRunRow, snap: &RightDockSnapshot, cx: &gpui::App) -> im
         .w_full()
         .min_w_0()
         .gap(px(theme::RIGHT_PANEL_ROW_GAP))
-        .px(px(theme::SKILL_ROW_PAD_X))
-        .py(px(theme::SKILL_ROW_PAD_Y))
+        .px(px(theme::LIST_ROW_PAD_X))
+        .py(px(theme::LIST_ROW_PAD_Y))
         .child(
             // `min_w_0` overrides the flex default `min-width: auto`, which
             // otherwise holds this column at its unwrapped content width and

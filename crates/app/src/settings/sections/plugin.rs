@@ -260,10 +260,10 @@ impl SettingsView {
             .id(row_id)
             .flex()
             .flex_col()
-            .gap(px(theme::SKILL_ROW_GAP))
-            .px(px(theme::SKILL_ROW_PAD_X))
-            .py(px(theme::SKILL_ROW_PAD_Y))
-            .rounded(px(theme::SKILL_ROW_RADIUS))
+            .gap(px(theme::LIST_ROW_GAP))
+            .px(px(theme::LIST_ROW_PAD_X))
+            .py(px(theme::LIST_ROW_PAD_Y))
+            .rounded(px(theme::LIST_ROW_RADIUS))
             .cursor_pointer()
             .on_click(cx.listener(move |this, _: &ClickEvent, _, cx| {
                 this.plugin_selected = Some(plugin_id.clone());
@@ -327,7 +327,7 @@ impl SettingsView {
             .collect();
 
         let title_color = theme::current(cx).text_primary;
-        let header = div().flex().flex_col().gap(px(theme::SKILL_ROW_GAP)).child(
+        let header = div().flex().flex_col().gap(px(theme::LIST_ROW_GAP)).child(
             div()
                 .text_size(px(theme::MODAL_TITLE_FONT_SIZE))
                 .text_color(title_color)
@@ -355,7 +355,7 @@ impl SettingsView {
         let meta = div()
             .flex()
             .flex_col()
-            .gap(px(theme::SKILL_ROW_GAP))
+            .gap(px(theme::LIST_ROW_GAP))
             .child(detail_row(
                 s::settings_plugin_detail_marketplace(),
                 SharedString::from(marketplace_id),
@@ -388,7 +388,7 @@ impl SettingsView {
             div()
                 .flex()
                 .flex_col()
-                .gap(px(theme::SKILL_ROW_GAP))
+                .gap(px(theme::LIST_ROW_GAP))
                 .child(plugin_subheading(
                     s::settings_plugin_detail_skills_header(),
                     cx,
@@ -526,10 +526,10 @@ impl SettingsView {
             .id(row_id)
             .flex()
             .flex_col()
-            .gap(px(theme::SKILL_ROW_GAP))
-            .px(px(theme::SKILL_ROW_PAD_X))
-            .py(px(theme::SKILL_ROW_PAD_Y))
-            .rounded(px(theme::SKILL_ROW_RADIUS))
+            .gap(px(theme::LIST_ROW_GAP))
+            .px(px(theme::LIST_ROW_PAD_X))
+            .py(px(theme::LIST_ROW_PAD_Y))
+            .rounded(px(theme::LIST_ROW_RADIUS))
             .hover(move |el| el.bg(row_hover_bg))
             .child(header_line);
 
@@ -636,7 +636,7 @@ impl SettingsView {
             PluginSkillBodyState::Error(msg) => div()
                 .flex()
                 .flex_col()
-                .gap(px(theme::SKILL_ROW_GAP))
+                .gap(px(theme::LIST_ROW_GAP))
                 .child(
                     div()
                         .text_size(px(theme::MODAL_BODY_FONT_SIZE))
@@ -653,7 +653,7 @@ impl SettingsView {
             PluginSkillBodyState::Loaded(body) => div()
                 .flex()
                 .flex_col()
-                .gap(px(theme::SKILL_ROW_GAP))
+                .gap(px(theme::LIST_ROW_GAP))
                 .child(
                     div()
                         .text_size(px(theme::SKILL_BADGE_FONT_SIZE))

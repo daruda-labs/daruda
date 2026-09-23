@@ -22,7 +22,7 @@ use super::super::layout::Dock;
 use super::super::layout::RightDockSnapshot;
 use super::super::layout::snap::{RestorableSession, UsageSectionSnapshot};
 use super::section::DockSection;
-use super::section_view::{ScopeSection, SectionFold, library_row, panel_footer};
+use super::section_view::{ScopeSection, SectionFold, hover_actions, library_row, panel_footer};
 use crate::surface::strings;
 use crate::ui::{Disableable as _, GroupBoxVariants as _, SectionHeader, group_box, tab, tab_bar};
 use crate::workspace::Workspace;
@@ -239,7 +239,6 @@ fn recent_session_row(
     let label = session_row_label(session);
     let meta_label = session_row_meta_label(session);
     let row_hover_bg = t.skill_row_hover_bg;
-    let actions_bg = t.skill_row_hover_bg;
     let row_id = SharedString::from(format!("usage-session-row-{}", session.session_id));
     let restore_id = SharedString::from(format!("usage-restore-session-{}", session.session_id));
     let workspace = workspace.clone();
@@ -255,31 +254,20 @@ fn recent_session_row(
     .group("usage-session-row")
     .relative()
     .overflow_hidden()
-    .px(px(theme::SKILL_ROW_PAD_X))
-    .rounded(px(theme::SKILL_ROW_RADIUS))
+    .px(px(theme::LIST_ROW_PAD_X))
+    .rounded(px(theme::LIST_ROW_RADIUS))
     .hover(move |d| d.bg(row_hover_bg))
     .child(
-        div()
-            .absolute()
-            .right(px(theme::SKILL_ROW_PAD_X))
-            .top_0()
-            .bottom_0()
-            .flex()
-            .items_center()
-            .bg(actions_bg)
-            .pl(px(theme::SKILL_ROW_PAD_X))
-            .invisible()
-            .group_hover("usage-session-row", |s| s.visible())
-            .child(
-                crate::ui::button_icon(restore_id, crate::ui::icons::HISTORY, cx)
-                    .tooltip(strings::usage_session_restore())
-                    .debug_selector(|| "usage-session-restore".into())
-                    .on_click(move |_, window, cx| {
-                        if let Some(ws) = workspace.upgrade() {
-                            ws.update(cx, |ws, cx| ws.restore_session(session.clone(), window, cx));
-                        }
-                    }),
-            ),
+        hover_actions("usage-session-row", theme::LIST_ROW_PAD_X, cx).child(
+            crate::ui::button_icon(restore_id, crate::ui::icons::HISTORY, cx)
+                .tooltip(strings::usage_session_restore())
+                .debug_selector(|| "usage-session-restore".into())
+                .on_click(move |_, window, cx| {
+                    if let Some(ws) = workspace.upgrade() {
+                        ws.update(cx, |ws, cx| ws.restore_session(session.clone(), window, cx));
+                    }
+                }),
+        ),
     )
 }
 
