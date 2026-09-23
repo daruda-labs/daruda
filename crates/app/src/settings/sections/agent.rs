@@ -10,7 +10,6 @@
 //! Method visibility is `pub(in crate::settings)` so `render` can
 //! dispatch here, mirroring the [`super::plugin`] submodule.
 
-use crate::settings::TextSetting;
 use crate::surface::strings as s;
 use crate::ui::field_row;
 use crate::ui::theme;
@@ -18,7 +17,7 @@ use daruda_config::PresetLaunchability;
 use gpui::{AnyElement, ClickEvent, IntoElement, SharedString, Window, div, prelude::*, px};
 
 use super::super::{
-    AgentCatalogRow, BoolSetting, SettingsView, settings_button as button,
+    AgentCatalogRow, SettingsView, settings_button as button,
     settings_button_danger as button_danger,
 };
 
@@ -27,49 +26,12 @@ use super::super::{
 const TRANSPORT_RAW: &str = "raw";
 
 impl SettingsView {
-    pub(in crate::settings) fn render_agent(&self, cx: &mut gpui::Context<Self>) -> AnyElement {
-        use crate::settings::presentation::{card, card_content, page_stack};
-        page_stack()
-            .child(
-                card(s::settings_group_chat(), cx)
-                    .child(self.switch_row(BoolSetting::AgentUseReadingWidth, cx))
-                    .child(self.dependent_rows(
-                        BoolSetting::AgentUseReadingWidth,
-                        [self.text_row(TextSetting::AgentReadingWidth, cx)],
-                        cx,
-                    ))
-                    .child(self.switch_row(BoolSetting::AgentUseModifierToSend, cx))
-                    .child(self.text_row(TextSetting::AgentInputMaxRows, cx)),
-            )
-            .child(
-                card(s::settings_card_flows(), cx)
-                    .child(self.text_row(TextSetting::FlowTimeoutMinutes, cx))
-                    .child(self.text_row(TextSetting::FlowMaxNodeRuns, cx))
-                    .child(self.text_row(TextSetting::FlowMaxCost, cx))
-                    .child(self.text_row(TextSetting::FlowCostCurrency, cx)),
-            )
-            .child(
-                card(s::settings_section_agent_catalog(), cx)
-                    .child(card_content(self.render_agent_catalog(cx))),
-            )
-            .child(
-                card(s::settings_section_claude_status(), cx)
-                    .child(self.switch_row(BoolSetting::ClaudeStatusEnabled, cx)),
-            )
-            .child(self.advanced_card(
-                daruda_config::BuiltinSection::Agent,
-                vec![
-                    self.text_row(TextSetting::ClaudeStatusStaleSecs, cx),
-                    self.text_row(TextSetting::ClaudeStatusFileTtlDays, cx),
-                ],
-                cx,
-            ))
-            .into_any_element()
-    }
-
     /// The `[[agents]]` catalog: preset picker, editable rows, and the entries
     /// that resolve to nothing.
-    fn render_agent_catalog(&self, cx: &mut gpui::Context<Self>) -> AnyElement {
+    pub(in crate::settings) fn render_agent_catalog(
+        &self,
+        cx: &mut gpui::Context<Self>,
+    ) -> AnyElement {
         let description_color = theme::current(cx).text_muted;
         let needs_install = self.selected_preset_needs_install(cx);
 

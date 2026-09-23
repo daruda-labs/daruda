@@ -184,21 +184,16 @@ impl Render for SettingsView {
 impl SettingsView {
     /// Build the active page's body. New sections are wired here.
     fn render_section_body(&self, cx: &mut Context<Self>) -> AnyElement {
+        if let Some(page) = self.render_layout_page(self.active_section, cx) {
+            return page;
+        }
         match self.active_section {
-            BuiltinSection::General => self.render_general(cx),
-            BuiltinSection::Appearance => self.render_appearance(cx),
-            BuiltinSection::Font => self.render_font(cx),
-            BuiltinSection::Terminal => self.render_terminal(cx),
-            BuiltinSection::Workspace => self.render_workspace(cx),
             BuiltinSection::Keymap => self.render_keymap(cx),
-            BuiltinSection::Agent => self.render_agent(cx),
-            BuiltinSection::Orchestrator => self.render_orchestrator(cx),
             BuiltinSection::SessionHosts => self.render_session_hosts(cx),
             BuiltinSection::Accounts => self.render_accounts(cx),
-            BuiltinSection::Notifications => self.render_notifications(cx),
-            BuiltinSection::RemoteControl => self.render_remote_control(cx),
             BuiltinSection::Plugin => self.render_plugin(cx),
-            BuiltinSection::About => self.render_about(cx),
+            // Every other page has a layout and returned above.
+            _ => div().into_any_element(),
         }
     }
 
@@ -236,13 +231,6 @@ impl SettingsView {
             {
                 let doc = &results[index];
                 let row = match doc.target {
-                    Target::Text(super::TextSetting::ShellProgram) => {
-                        self.text_row_wide(super::TextSetting::ShellProgram, cx)
-                    }
-                    Target::Text(t) => self.text_row(t, cx),
-                    Target::Select(v) => self.select_row(v, cx),
-                    Target::Bool(b) => self.switch_row(b, cx),
-                    Target::StatusBarItem(item) => self.status_bar_item_row(item, cx),
                     Target::Page(section) => self.link_row(
                         gpui::ElementId::Name(format!("settings-search-link-{index}").into()),
                         doc.label.clone(),
@@ -251,6 +239,7 @@ impl SettingsView {
                         section,
                         cx,
                     ),
+                    target => self.render_target_row(target, cx),
                 };
                 group = group.child(row);
                 index += 1;

@@ -58,61 +58,113 @@ const PARENTS: &[(Target, BoolSetting)] = &[
     ),
 ];
 
-type Handwritten = (Section, fn() -> String, &'static [&'static str]);
+/// Where a hand-drawn block sits, so its result lists in page order.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Anchor {
+    Card(super::layout::CustomCard),
+    Row(super::layout::CustomRow),
+    /// A page with no layout: the block is the page.
+    Page(Section),
+}
+
+struct Handwritten {
+    anchor: Anchor,
+    section: Section,
+    label: fn() -> String,
+    keywords: &'static [&'static str],
+}
+
+const fn hand(
+    anchor: Anchor,
+    section: Section,
+    label: fn() -> String,
+    keywords: &'static [&'static str],
+) -> Handwritten {
+    Handwritten {
+        anchor,
+        section,
+        label,
+        keywords,
+    }
+}
+
+use super::layout::{CustomCard as C, CustomRow as R};
 
 /// Blocks a page draws by hand, indexed as links to that page.
 const HANDWRITTEN: &[Handwritten] = &[
-    (
+    hand(
+        Anchor::Row(R::CustomColors),
         Section::Appearance,
         s::settings_label_custom_colors,
         &["colors", "palette", "ansi", "custom"],
     ),
-    (
+    hand(
+        Anchor::Card(C::AgentCatalog),
         Section::Agent,
         s::settings_section_agent_catalog,
         &["agent", "preset", "command", "model", "mode", "acp"],
     ),
-    (
-        Section::SessionHosts,
-        s::settings_session_host_add,
-        &["ssh", "docker", "host", "remote"],
-    ),
-    (
-        Section::Accounts,
-        s::settings_nav_accounts,
-        &["account", "login", "claude", "codex"],
-    ),
-    (
-        Section::RemoteControl,
-        s::settings_telegram_token_label,
-        &["telegram", "bot", "token"],
-    ),
-    (
-        Section::RemoteControl,
-        s::settings_telegram_generate_code,
-        &["telegram", "pair", "phone"],
-    ),
-    (
+    hand(
+        Anchor::Card(C::RemoteIntegrations),
         Section::RemoteControl,
         s::remote_slack,
         &["slack", "token", "pair", "phone", "away"],
     ),
-    (
+    hand(
+        Anchor::Card(C::RemoteIntegrations),
         Section::RemoteControl,
         s::remote_discord,
         &["discord", "token", "pair", "phone", "away"],
     ),
-    (
+    hand(
+        Anchor::Row(R::TelegramBody),
+        Section::RemoteControl,
+        s::settings_telegram_token_label,
+        &["telegram", "bot", "token"],
+    ),
+    hand(
+        Anchor::Row(R::TelegramBody),
+        Section::RemoteControl,
+        s::settings_telegram_generate_code,
+        &["telegram", "pair", "phone"],
+    ),
+    hand(
+        Anchor::Page(Section::SessionHosts),
+        Section::SessionHosts,
+        s::settings_session_host_add,
+        &["ssh", "docker", "host", "remote"],
+    ),
+    hand(
+        Anchor::Page(Section::Plugin),
         Section::Plugin,
         s::settings_plugin_installed_header,
         &["plugin", "skill", "install"],
     ),
-    (
+    hand(
+        Anchor::Page(Section::Keymap),
         Section::Keymap,
         s::settings_section_keymap,
         &["shortcut", "keybinding", "key", "keymap"],
     ),
 ];
+
+impl Handwritten {
+    fn doc(&self, card: String) -> Doc {
+        Doc {
+            target: Target::Page(self.section),
+            section: self.section,
+            card,
+            label: (self.label)(),
+            hint: String::new(),
+            path: self.section.slug(),
+            keywords: self.keywords,
+        }
+    }
+}
+
+fn anchored(anchor: Anchor) -> impl Iterator<Item = &'static Handwritten> {
+    HANDWRITTEN.iter().filter(move |h| h.anchor == anchor)
+}
 
 /// Retired page names and common words for a page, so a query for where a
 /// setting used to live still finds where it lives now.
@@ -122,6 +174,7 @@ fn page_keywords(section: Section) -> &'static [&'static str] {
         Section::Terminal => &["shell", "cursor", "clipboard"],
         Section::Workspace => &["dock", "panels", "sidebar", "external editor"],
         Section::About => &["update", "version", "license"],
+        Section::Accounts => &["account", "login", "claude", "codex"],
         _ => &[],
     }
 }
@@ -141,60 +194,63 @@ pub(super) fn docs() -> Vec<Doc> {
             keywords: page_keywords(*section),
         });
     }
-    let row = |target, row: copy::RowCopy, path| Doc {
-        target,
-        section: row.section,
-        card: (row.card)(),
-        label: (row.label)(),
-        hint: (row.hint)(),
-        path,
-        keywords: &[],
-    };
-    for spec in spec::TEXT_SETTINGS {
-        let path = (spec.current)(&defaults).field().path();
-        docs.push(row(
-            Target::Text(spec.setting),
-            copy::text(spec.setting),
-            path,
-        ));
-    }
-    for spec in spec::SELECT_SETTINGS {
-        let path = (spec.current)(&defaults).field().path();
-        docs.push(row(
-            Target::Select(spec.setting),
-            copy::select(spec.setting),
-            path,
-        ));
-    }
-    for spec in spec::BOOL_SETTINGS {
-        let path = (spec.patch)(false).field().path();
-        docs.push(row(
-            Target::Bool(spec.setting),
-            copy::bool(spec.setting),
-            path,
-        ));
-    }
-    for item in StatusBarItem::ALL {
+    // Rows in the order their pages show them; the layout places each once.
+    for (section, card, placed) in super::layout::placed() {
+        let target = match placed {
+            super::layout::Placed::Setting(target) => target,
+            super::layout::Placed::Card(kind) => {
+                docs.extend(anchored(Anchor::Card(kind)).map(|h| h.doc(String::new())));
+                continue;
+            }
+            super::layout::Placed::Row(kind) => {
+                docs.extend(anchored(Anchor::Row(kind)).map(|h| h.doc(card.clone())));
+                continue;
+            }
+        };
+        let (label, hint, path) = match target {
+            Target::Text(t) => {
+                let copy = copy::text(t);
+                (
+                    (copy.label)(),
+                    (copy.hint)(),
+                    (spec::text_spec(t).current)(&defaults).field().path(),
+                )
+            }
+            Target::Select(v) => {
+                let copy = copy::select(v);
+                (
+                    (copy.label)(),
+                    (copy.hint)(),
+                    (spec::select_spec(v).current)(&defaults).field().path(),
+                )
+            }
+            Target::Bool(b) => {
+                let copy = copy::bool(b);
+                (
+                    (copy.label)(),
+                    (copy.hint)(),
+                    (spec::bool_spec(b).patch)(false).field().path(),
+                )
+            }
+            Target::StatusBarItem(item) => (
+                super::sections::status_bar_item_label(item),
+                String::new(),
+                "status_bar.hidden_items",
+            ),
+            Target::Page(_) => continue,
+        };
         docs.push(Doc {
-            target: Target::StatusBarItem(*item),
-            section: Section::Workspace,
-            card: s::settings_card_status_bar(),
-            label: super::sections::status_bar_item_label(*item),
-            hint: String::new(),
-            path: "status_bar.hidden_items",
+            target,
+            section,
+            card,
+            label,
+            hint,
+            path,
             keywords: &[],
         });
     }
-    for (section, label, keywords) in HANDWRITTEN {
-        docs.push(Doc {
-            target: Target::Page(*section),
-            section: *section,
-            card: String::new(),
-            label: label(),
-            hint: String::new(),
-            path: section.slug(),
-            keywords,
-        });
+    for section in Section::ALL {
+        docs.extend(anchored(Anchor::Page(*section)).map(|h| h.doc(String::new())));
     }
     docs
 }

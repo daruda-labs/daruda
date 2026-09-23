@@ -14,7 +14,7 @@ use crate::surface::strings as s;
 use crate::ui::Disableable as _;
 use crate::ui::theme;
 use crate::update::AutoUpdateStatus;
-use gpui::{AnyElement, ClickEvent, IntoElement, SharedString, div, prelude::*, px};
+use gpui::{ClickEvent, IntoElement, SharedString, div, prelude::*, px};
 
 use super::super::{SettingsView, settings_button as button};
 
@@ -91,7 +91,8 @@ fn restart_button(cx: &mut gpui::Context<SettingsView>) -> impl IntoElement {
 }
 
 impl SettingsView {
-    pub(in crate::settings) fn render_about(&self, cx: &mut gpui::Context<Self>) -> AnyElement {
+    /// The version line and the updater's current state, as one block.
+    pub(in crate::settings) fn about_version(&self, cx: &mut gpui::Context<Self>) -> gpui::Div {
         // Snapshot the updater state once so the mutable `cx` borrow is
         // free for the button listeners below.
         let entity = crate::update::Updater::get(cx);
@@ -164,20 +165,6 @@ impl SettingsView {
             }
         }
 
-        crate::settings::presentation::page_stack()
-            .child(col)
-            .child(
-                crate::settings::presentation::card(s::settings_card_updates(), cx)
-                    .child(self.switch_row(crate::settings::BoolSetting::UpdateAutoCheck, cx)),
-            )
-            .child(self.advanced_card(
-                daruda_config::BuiltinSection::About,
-                vec![
-                    self.text_row(crate::settings::TextSetting::LogsRetentionDays, cx),
-                    self.text_row(crate::settings::TextSetting::LogsMaxFileSizeMb, cx),
-                ],
-                cx,
-            ))
-            .into_any_element()
+        col
     }
 }

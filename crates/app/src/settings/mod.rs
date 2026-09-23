@@ -14,7 +14,9 @@
 
 mod confirm;
 mod copy;
+mod layout;
 mod navigation;
+mod page;
 mod presentation;
 mod render;
 mod reset;

@@ -22,13 +22,12 @@ pub(super) mod agent_transcript;
 pub(super) mod agent_vocabulary;
 mod basic;
 pub(super) use basic::status_bar_item_label;
-mod notifications;
 pub(super) mod orchestrator;
 pub(super) mod plugin;
 mod session_hosts;
 
 use super::CopyFeedback;
-use crate::settings::presentation::{card, card_content, page_stack};
+use crate::settings::presentation::{card, card_content};
 use crate::surface::strings as s;
 use crate::ui::field_row;
 use crate::ui::theme;
@@ -36,9 +35,7 @@ use daruda_store::observability::error_report::{ErrorReport, ErrorSeverity};
 use daruda_store::observability::system_info::redact_home;
 use gpui::{AnyElement, ClickEvent, ClipboardItem, IntoElement, div, prelude::*, px};
 
-use super::{
-    BoolSetting, SettingsView, settings_button as button, settings_button_danger as button_danger,
-};
+use super::{SettingsView, settings_button as button, settings_button_danger as button_danger};
 
 /// How long the pairing-command "Copied!" label stays before reverting
 /// to "Copy" — mirrors `ErrorReportModal::COPIED_LABEL_DURATION`
@@ -197,7 +194,8 @@ impl SettingsView {
         );
     }
 
-    pub(super) fn render_remote_control(&self, cx: &mut gpui::Context<Self>) -> AnyElement {
+    /// The Telegram card's hand-drawn body: token, pairing, BotFather block.
+    pub(in crate::settings) fn telegram_body(&self, cx: &mut gpui::Context<Self>) -> gpui::Div {
         let t = theme::current(cx);
         let body_color = t.text_primary;
         let token_configured = self.telegram_token_configured;
@@ -208,7 +206,7 @@ impl SettingsView {
         // section is on screen.
         let held_elsewhere = crate::telegram::global::TelegramBridge::bot_held_elsewhere(cx);
 
-        let telegram = div()
+        div()
             .flex()
             .flex_col()
             .gap(px(theme::MODAL_PANEL_GAP))
@@ -399,45 +397,7 @@ impl SettingsView {
                             )),
                         ),
                     ),
-            );
-        let orchestrator_state = if self.orchestrator_enabled {
-            s::settings_toggle_on()
-        } else {
-            s::settings_toggle_off()
-        };
-        page_stack()
-            .child(card(s::settings_card_daruda(), cx).child(self.link_row(
-                "settings-daruda-orchestrator-link",
-                s::settings_daruda_link_label(&orchestrator_state),
-                s::settings_daruda_link_hint(),
-                s::settings_daruda_link_button(),
-                daruda_config::BuiltinSection::Orchestrator,
-                cx,
-            )))
-            .child(
-                card(s::settings_group_integrations(), cx)
-                    .child(card_content(self.remote_channel_settings.clone())),
             )
-            .child(
-                card(s::settings_telegram_heading(), cx)
-                    .child(self.switch_row(BoolSetting::TelegramEnabled, cx))
-                    .child(self.dependent_rows(
-                        BoolSetting::TelegramEnabled,
-                        [self.switch_row(BoolSetting::TelegramOnlyWhenAway, cx)],
-                        cx,
-                    ))
-                    .child(card_content(telegram)),
-            )
-            .child(self.advanced_card(
-                daruda_config::BuiltinSection::RemoteControl,
-                vec![
-                    self.text_row(super::TextSetting::PresenceGraceSecs, cx),
-                    self.text_row(super::TextSetting::PresenceIdleSecs, cx),
-                    self.text_row(super::TextSetting::PresenceIdleForegroundSecs, cx),
-                ],
-                cx,
-            ))
-            .into_any_element()
     }
 
     pub(super) fn render_keymap(&self, cx: &mut gpui::Context<Self>) -> AnyElement {

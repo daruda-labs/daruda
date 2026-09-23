@@ -73,3 +73,50 @@ fn hand_drawn_blocks_link_to_their_page() {
 fn status_bar_items_are_searchable_switches() {
     assert!(targets("ports").contains(&Target::StatusBarItem(daruda_config::StatusBarItem::Ports)));
 }
+
+/// Results keep their page's order: on Remote Control the Telegram card
+/// comes before the Advanced card, as it does on the page.
+#[test]
+fn results_follow_the_page_order() {
+    let found = targets("away");
+    let telegram = found
+        .iter()
+        .position(|t| *t == Target::Bool(BoolSetting::TelegramOnlyWhenAway))
+        .expect("telegram row");
+    let advanced = found
+        .iter()
+        .position(|t| *t == Target::Text(TextSetting::PresenceGraceSecs))
+        .expect("presence row");
+    assert!(telegram < advanced, "{found:?}");
+}
+
+/// Every hand-drawn block is indexed exactly once — an anchor the layout
+/// never places would drop its entry from search silently.
+#[test]
+fn every_hand_drawn_block_is_indexed_once() {
+    let all = docs();
+    for h in HANDWRITTEN {
+        let label = (h.label)();
+        let n = all
+            .iter()
+            .filter(|d| d.label == label && d.section == h.section)
+            .count();
+        assert_eq!(n, 1, "{label}");
+    }
+}
+
+/// A hand-drawn block lists where its page shows it: Slack and Discord sit
+/// in the integrations card, above the Telegram card.
+#[test]
+fn hand_drawn_blocks_keep_their_page_position() {
+    let found = query("away");
+    let slack = found
+        .iter()
+        .position(|d| d.label == s::remote_slack())
+        .expect("slack link");
+    let telegram = found
+        .iter()
+        .position(|d| d.target == Target::Bool(BoolSetting::TelegramEnabled))
+        .expect("telegram row");
+    assert!(slack < telegram);
+}
