@@ -417,3 +417,40 @@ async fn the_chrome_behind_settings_keeps_its_actions(cx: &mut TestAppContext) {
         );
     });
 }
+
+/// On macOS the app outlives its last window, and the menu bar's Settings… is
+/// then dispatched with no window at all — nothing on a dispatch path to answer
+/// it. The global fallback has to open a window to host the view, or the menu
+/// item is a dead end.
+#[gpui::test]
+async fn open_settings_reaches_an_app_with_no_window(cx: &mut TestAppContext) {
+    crate::test_support::init_gpui_component(cx);
+    cx.update(|cx| {
+        crate::bind_keys::register_global_actions(
+            cx,
+            std::sync::Arc::new(daruda_config::Config::default()),
+        );
+        assert!(
+            cx.windows().is_empty(),
+            "the premise is an app with no window"
+        );
+        cx.dispatch_action(&OpenSettings(daruda_config::BuiltinSection::Font));
+    });
+    cx.run_until_parked();
+
+    cx.update(|cx| {
+        let (_, workspace) = crate::window_registry::WindowRegistry::first_workspace(cx)
+            .expect("a window was opened to host Settings");
+        let workspace = workspace.upgrade().expect("its workspace is alive");
+        let view = workspace
+            .read(cx)
+            .settings_view()
+            .expect("settings should be on screen")
+            .clone();
+        assert_eq!(
+            view.read(cx).active_section(),
+            daruda_config::BuiltinSection::Font,
+            "the action's section is the one shown",
+        );
+    });
+}

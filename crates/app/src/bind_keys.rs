@@ -229,6 +229,13 @@ pub(crate) fn register_global_actions(cx: &mut App, config: std::sync::Arc<darud
         cx.stop_propagation();
     });
 
+    // Fallback for an `OpenSettings` no workspace window answered — the
+    // menu bar's, with no window left to dispatch it through.
+    cx.on_action(|action: &OpenSettings, cx: &mut App| {
+        crate::windows::open_settings_in_some_workspace(action.0, cx);
+        cx.stop_propagation();
+    });
+
     // Global NewEmptyWindow handler — opens a project-less workspace,
     // which paints the Landing view.
     let cfg_for_new = config.clone();

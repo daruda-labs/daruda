@@ -8,7 +8,7 @@
 //! version and panics survive a dead `LogWriter`.
 
 use crate::hooks;
-use crate::windows::{build_window_options, open_workspace_window};
+use crate::windows::open_empty_workspace_window;
 #[cfg(debug_assertions)]
 use daruda_core::process_env;
 use gpui::{Application, QuitMode};
@@ -128,19 +128,10 @@ pub(crate) fn new_application() -> Application {
         if !cx.windows().is_empty() {
             return;
         }
-        // Fall back to `Config::load()` if the reopen fires before
-        // `globals::init_all` registered `SettingsStore`.
-        let config = if cx.has_global::<crate::settings_store::SettingsStore>() {
-            crate::settings_store::SettingsStore::global(cx).user_arc()
-        } else {
-            std::sync::Arc::new(daruda_config::Config::load())
-        };
-        let opts = build_window_options(&config);
-        // An empty workspace, which paints Landing. On macOS `QuitMode::Default`
-        // resolves to `Explicit`, so the app outlives its last window and this
-        // is the way back in; the other platforms quit instead and never
-        // reach here.
-        open_workspace_window(config, None, None, opts, cx);
+        // On macOS `QuitMode::Default` resolves to `Explicit`, so the app
+        // outlives its last window and this is the way back in; the other
+        // platforms quit instead and never reach here.
+        open_empty_workspace_window(cx).unwrap();
     });
     app
 }

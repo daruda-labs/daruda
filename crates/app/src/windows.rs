@@ -177,6 +177,69 @@ pub(crate) fn try_open_workspace_window(
     .map(Into::into)
 }
 
+/// Open an empty workspace, which paints Landing, under the live config.
+///
+/// Reads `SettingsStore` rather than a captured config because its callers
+/// run long after startup; the `Config::load` fallback covers a reopen that
+/// fires before `globals::init_all` registered the store.
+pub(crate) fn open_empty_workspace_window(cx: &mut App) -> anyhow::Result<gpui::AnyWindowHandle> {
+    let config = if cx.has_global::<crate::settings_store::SettingsStore>() {
+        crate::settings_store::SettingsStore::global(cx).user_arc()
+    } else {
+        std::sync::Arc::new(daruda_config::Config::load())
+    };
+    let opts = build_window_options(&config);
+    try_open_workspace_window(config, None, None, opts, cx)
+}
+
+/// Show Settings when no workspace window was there to answer the action.
+///
+/// On macOS `QuitMode::Default` resolves to `Explicit`, so the app outlives
+/// its last window and the menu bar's Settings… is then dispatched with no
+/// window at all. A workspace window that exists but is not key (all of them
+/// minimised) is reused; with none, an empty one is opened to host the view.
+pub(crate) fn open_settings_in_some_workspace(
+    section: daruda_config::BuiltinSection,
+    cx: &mut App,
+) {
+    let target = match WindowRegistry::active_workspace(cx)
+        .or_else(|| WindowRegistry::first_workspace(cx))
+    {
+        Some(target) => Some(target),
+        None => match open_empty_workspace_window(cx) {
+            Ok(handle) => WindowRegistry::workspace_for_window(handle, cx).map(|ws| (handle, ws)),
+            Err(e) => {
+                LogWriter::log(
+                    ErrorReport::new("Failed to open a window to host Settings")
+                        .severity(ErrorSeverity::Error)
+                        .at(file!(), line!())
+                        .message(format!("{e}"))
+                        .dedup("settings.open_fallback.window")
+                        .build(),
+                );
+                return;
+            }
+        },
+    };
+    let Some((handle, workspace)) = target else {
+        return;
+    };
+    try_update_workspace_window(handle, cx, "open_settings_fallback", move |window, cx| {
+        window.activate_window();
+        let action = crate::workspace::OpenSettings(section);
+        if let Err(e) = workspace.update(cx, |ws, cx| ws.on_open_settings(&action, window, cx)) {
+            LogWriter::log(
+                ErrorReport::new("Failed to open Settings")
+                    .severity(ErrorSeverity::Warning)
+                    .at(file!(), line!())
+                    .message(format!("{e}"))
+                    .dedup("settings.open_fallback.workspace")
+                    .build(),
+            );
+        }
+    });
+}
+
 /// Open the recent project at `idx`. Missing index / stale workspace
 /// is a silent no-op (matches macOS conventions for stale Open
 /// Recent). `mode` controls whether the active workspace window is

@@ -433,7 +433,7 @@ impl Workspace {
 
     // ---- Settings ----
 
-    pub(in crate::workspace) fn on_open_settings(
+    pub(crate) fn on_open_settings(
         &mut self,
         action: &OpenSettings,
         window: &mut Window,
