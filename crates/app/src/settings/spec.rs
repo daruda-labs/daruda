@@ -19,7 +19,7 @@
 
 use std::ops::RangeBounds;
 
-use daruda_config::{BuiltinSection, Config, SettingsPatch};
+use daruda_config::{Config, SettingsPatch};
 use gpui::{App, Entity, SharedString};
 
 use super::{BoolSetting, SelectSetting, SettingsView, TextSetting};
@@ -52,8 +52,6 @@ const MAX_TOML_INT: u64 = i64::MAX as u64;
 /// A numeric setting shown as a text input.
 pub(super) struct TextSpec {
     pub(super) setting: TextSetting,
-    /// Which settings page the input sits on — also its tab-cycle bucket.
-    pub(super) section: BuiltinSection,
     /// Hint text for the empty input. A thunk rather than a `&'static str`
     /// because the wording is localized and the table is a `const`.
     pub(super) placeholder: fn() -> String,
@@ -72,7 +70,6 @@ pub(super) struct TextSpec {
 pub(super) const TEXT_SETTINGS: &[TextSpec] = &[
     TextSpec {
         setting: TextSetting::TerminalFontSize,
-        section: BuiltinSection::Font,
         placeholder: || s::settings_placeholder_example("13"),
         field: |w| &w.terminal_font_size_input,
         show: |c| c.font.terminal.size.to_string(),
@@ -84,7 +81,6 @@ pub(super) const TEXT_SETTINGS: &[TextSpec] = &[
     },
     TextSpec {
         setting: TextSetting::TerminalLineHeight,
-        section: BuiltinSection::Font,
         placeholder: || s::settings_placeholder_example("1.0"),
         field: |w| &w.terminal_line_height_input,
         show: |c| c.font.terminal.line_height.to_string(),
@@ -96,7 +92,6 @@ pub(super) const TEXT_SETTINGS: &[TextSpec] = &[
     },
     TextSpec {
         setting: TextSetting::TerminalCellWidth,
-        section: BuiltinSection::Font,
         placeholder: || s::settings_placeholder_example("1.0"),
         field: |w| &w.terminal_cell_width_input,
         show: |c| c.font.terminal.cell_width.to_string(),
@@ -108,7 +103,6 @@ pub(super) const TEXT_SETTINGS: &[TextSpec] = &[
     },
     TextSpec {
         setting: TextSetting::EditorFontSize,
-        section: BuiltinSection::Font,
         placeholder: || s::settings_placeholder_example("13"),
         field: |w| &w.editor_font_size_input,
         show: |c| c.font.editor.size.to_string(),
@@ -125,7 +119,6 @@ pub(super) const TEXT_SETTINGS: &[TextSpec] = &[
     },
     TextSpec {
         setting: TextSetting::EditorLineHeight,
-        section: BuiltinSection::Font,
         placeholder: || s::settings_placeholder_example("1.7"),
         field: |w| &w.editor_line_height_input,
         show: |c| c.font.editor.line_height.to_string(),
@@ -137,7 +130,6 @@ pub(super) const TEXT_SETTINGS: &[TextSpec] = &[
     },
     TextSpec {
         setting: TextSetting::AgentChatFontSize,
-        section: BuiltinSection::Font,
         placeholder: || s::settings_placeholder_example("13"),
         field: |w| &w.agent_chat_font_size_input,
         show: |c| c.font.agent_chat.size.to_string(),
@@ -154,7 +146,6 @@ pub(super) const TEXT_SETTINGS: &[TextSpec] = &[
     },
     TextSpec {
         setting: TextSetting::AgentChatLineHeight,
-        section: BuiltinSection::Font,
         placeholder: || s::settings_placeholder_example("1.6"),
         field: |w| &w.agent_chat_line_height_input,
         show: |c| c.font.agent_chat.line_height.to_string(),
@@ -166,7 +157,6 @@ pub(super) const TEXT_SETTINGS: &[TextSpec] = &[
     },
     TextSpec {
         setting: TextSetting::WindowOpacity,
-        section: BuiltinSection::Appearance,
         placeholder: || s::settings_placeholder_range("0.1", "1.0"),
         field: |w| &w.opacity_input,
         show: |c| c.window.opacity.to_string(),
@@ -178,7 +168,6 @@ pub(super) const TEXT_SETTINGS: &[TextSpec] = &[
     },
     TextSpec {
         setting: TextSetting::ScrollbackMaxRows,
-        section: BuiltinSection::Terminal,
         placeholder: || s::settings_placeholder_example("10000"),
         field: |w| &w.scrollback_input,
         show: |c| c.scrollback.max_rows.to_string(),
@@ -195,7 +184,6 @@ pub(super) const TEXT_SETTINGS: &[TextSpec] = &[
     },
     TextSpec {
         setting: TextSetting::TerminalInsetX,
-        section: BuiltinSection::Terminal,
         placeholder: || s::settings_placeholder_example("4"),
         field: |w| &w.inset_x_input,
         show: |c| c.font.terminal.inset_x.to_string(),
@@ -207,7 +195,6 @@ pub(super) const TEXT_SETTINGS: &[TextSpec] = &[
     },
     TextSpec {
         setting: TextSetting::TerminalInsetY,
-        section: BuiltinSection::Terminal,
         placeholder: || s::settings_placeholder_example("2"),
         field: |w| &w.inset_y_input,
         show: |c| c.font.terminal.inset_y.to_string(),
@@ -219,7 +206,6 @@ pub(super) const TEXT_SETTINGS: &[TextSpec] = &[
     },
     TextSpec {
         setting: TextSetting::ClipboardStreamingMaxBytes,
-        section: BuiltinSection::Terminal,
         placeholder: || s::settings_placeholder_example("10485760"),
         field: |w| &w.clipboard_streaming_input,
         show: |c| c.clipboard.streaming_max_bytes.to_string(),
@@ -236,7 +222,6 @@ pub(super) const TEXT_SETTINGS: &[TextSpec] = &[
     },
     TextSpec {
         setting: TextSetting::PanelsGridColumns,
-        section: BuiltinSection::Workspace,
         placeholder: || s::settings_placeholder_range("1", "16"),
         field: |w| &w.panels_grid_columns_input,
         show: |c| c.panels.grid_columns.to_string(),
@@ -248,7 +233,6 @@ pub(super) const TEXT_SETTINGS: &[TextSpec] = &[
     },
     TextSpec {
         setting: TextSetting::ClaudeStatusStaleSecs,
-        section: BuiltinSection::Agent,
         placeholder: || s::settings_placeholder_example("300"),
         field: |w| &w.claude_status_stale_input,
         show: |c| c.claude_status.stale_threshold_secs.to_string(),
@@ -265,7 +249,6 @@ pub(super) const TEXT_SETTINGS: &[TextSpec] = &[
     },
     TextSpec {
         setting: TextSetting::ClaudeStatusFileTtlDays,
-        section: BuiltinSection::Agent,
         placeholder: || s::settings_placeholder_example("7"),
         field: |w| &w.claude_status_ttl_input,
         show: |c| c.claude_status.file_ttl_days.to_string(),
@@ -277,7 +260,6 @@ pub(super) const TEXT_SETTINGS: &[TextSpec] = &[
     },
     TextSpec {
         setting: TextSetting::UsageLimitsPollSecs,
-        section: BuiltinSection::Workspace,
         placeholder: || s::settings_placeholder_example("300"),
         field: |w| &w.usage_limits_poll_input,
         show: |c| c.usage.poll.limits_secs.to_string(),
@@ -294,7 +276,6 @@ pub(super) const TEXT_SETTINGS: &[TextSpec] = &[
     },
     TextSpec {
         setting: TextSetting::UsageStatusPollSecs,
-        section: BuiltinSection::Workspace,
         placeholder: || s::settings_placeholder_example("300"),
         field: |w| &w.usage_status_poll_input,
         show: |c| c.usage.poll.status_secs.to_string(),
@@ -311,7 +292,6 @@ pub(super) const TEXT_SETTINGS: &[TextSpec] = &[
     },
     TextSpec {
         setting: TextSetting::PortsPollSecs,
-        section: BuiltinSection::Workspace,
         placeholder: || s::settings_placeholder_example("5"),
         field: |w| &w.ports_poll_input,
         show: |c| c.ports.poll_secs.to_string(),
@@ -328,7 +308,6 @@ pub(super) const TEXT_SETTINGS: &[TextSpec] = &[
     },
     TextSpec {
         setting: TextSetting::LogsRetentionDays,
-        section: BuiltinSection::About,
         placeholder: || s::settings_placeholder_example("30"),
         field: |w| &w.logs_retention_input,
         show: |c| c.logs.retention_days.to_string(),
@@ -340,7 +319,6 @@ pub(super) const TEXT_SETTINGS: &[TextSpec] = &[
     },
     TextSpec {
         setting: TextSetting::LogsMaxFileSizeMb,
-        section: BuiltinSection::About,
         placeholder: || s::settings_placeholder_example("10"),
         field: |w| &w.logs_max_size_input,
         show: |c| c.logs.max_file_size_mb.to_string(),
@@ -352,7 +330,6 @@ pub(super) const TEXT_SETTINGS: &[TextSpec] = &[
     },
     TextSpec {
         setting: TextSetting::PresenceGraceSecs,
-        section: BuiltinSection::RemoteControl,
         placeholder: || s::settings_placeholder_example("10"),
         field: |w| &w.presence_grace_input,
         show: |c| c.presence.away_grace_secs.to_string(),
@@ -369,7 +346,6 @@ pub(super) const TEXT_SETTINGS: &[TextSpec] = &[
     },
     TextSpec {
         setting: TextSetting::PresenceIdleSecs,
-        section: BuiltinSection::RemoteControl,
         placeholder: || s::settings_placeholder_example("30"),
         field: |w| &w.presence_idle_input,
         show: |c| c.presence.away_idle_secs.to_string(),
@@ -386,7 +362,6 @@ pub(super) const TEXT_SETTINGS: &[TextSpec] = &[
     },
     TextSpec {
         setting: TextSetting::PresenceIdleForegroundSecs,
-        section: BuiltinSection::RemoteControl,
         placeholder: || s::settings_placeholder_example("180"),
         field: |w| &w.presence_idle_foreground_input,
         show: |c| c.presence.away_idle_foreground_secs.to_string(),
@@ -405,7 +380,6 @@ pub(super) const TEXT_SETTINGS: &[TextSpec] = &[
     },
     TextSpec {
         setting: TextSetting::AgentInputMaxRows,
-        section: BuiltinSection::Agent,
         placeholder: || s::settings_placeholder_example("8"),
         field: |w| &w.agent_input_max_rows_input,
         show: |c| c.agent.input_max_rows.to_string(),
@@ -422,7 +396,6 @@ pub(super) const TEXT_SETTINGS: &[TextSpec] = &[
     },
     TextSpec {
         setting: TextSetting::AgentReadingWidth,
-        section: BuiltinSection::Agent,
         placeholder: || s::settings_placeholder_example("700"),
         field: |w| &w.agent_reading_width_input,
         show: |c| c.agent.reading_width.to_string(),
@@ -439,7 +412,6 @@ pub(super) const TEXT_SETTINGS: &[TextSpec] = &[
     },
     TextSpec {
         setting: TextSetting::FlowTimeoutMinutes,
-        section: BuiltinSection::Agent,
         placeholder: || s::settings_placeholder_example("90"),
         field: |w| &w.flow_timeout_minutes_input,
         show: |c| c.flow.timeout_minutes.to_string(),
@@ -451,7 +423,6 @@ pub(super) const TEXT_SETTINGS: &[TextSpec] = &[
     },
     TextSpec {
         setting: TextSetting::FlowMaxNodeRuns,
-        section: BuiltinSection::Agent,
         placeholder: || s::settings_placeholder_example("100"),
         field: |w| &w.flow_max_node_runs_input,
         show: |c| c.flow.max_node_runs.to_string(),
@@ -463,7 +434,6 @@ pub(super) const TEXT_SETTINGS: &[TextSpec] = &[
     },
     TextSpec {
         setting: TextSetting::FlowMaxCost,
-        section: BuiltinSection::Agent,
         placeholder: || s::settings_placeholder_example("5.0"),
         field: |w| &w.flow_max_cost_input,
         show: |c| c.flow.max_cost.to_string(),
@@ -475,7 +445,6 @@ pub(super) const TEXT_SETTINGS: &[TextSpec] = &[
     },
     TextSpec {
         setting: TextSetting::FlowCostCurrency,
-        section: BuiltinSection::Agent,
         placeholder: || s::settings_placeholder_example("USD"),
         field: |w| &w.flow_cost_currency_input,
         show: |c| c.flow.cost_currency.clone(),
@@ -492,7 +461,6 @@ pub(super) const TEXT_SETTINGS: &[TextSpec] = &[
     },
     TextSpec {
         setting: TextSetting::LeftDefaultWidth,
-        section: BuiltinSection::Workspace,
         placeholder: || s::settings_placeholder_example("220"),
         field: |w| &w.left_default_width_input,
         show: |c| c.left_dock.left_default_width.to_string(),
@@ -509,7 +477,6 @@ pub(super) const TEXT_SETTINGS: &[TextSpec] = &[
     },
     TextSpec {
         setting: TextSetting::ShellProgram,
-        section: BuiltinSection::Terminal,
         placeholder: s::settings_placeholder_shell_program,
         field: |w| &w.shell_program_input,
         show: |c| c.shell.program.clone().unwrap_or_default(),
@@ -524,7 +491,6 @@ pub(super) const TEXT_SETTINGS: &[TextSpec] = &[
     },
     TextSpec {
         setting: TextSetting::NotifyLongRunningThresholdSecs,
-        section: BuiltinSection::Notifications,
         placeholder: || s::settings_placeholder_example("30"),
         field: |w| &w.notify_long_running_threshold_input,
         show: |c| c.notifications.long_running_threshold_secs.to_string(),

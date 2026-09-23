@@ -1,7 +1,7 @@
 //! Draw a page from [`super::layout`]: its cards and rows in table order,
 //! with the hand-drawn blocks the table names.
 
-use gpui::{AnyElement, Div, IntoElement, ParentElement as _};
+use gpui::{AnyElement, Div, Focusable as _, IntoElement, ParentElement as _};
 
 use super::layout::{self, Card, CustomCard, CustomRow, Row};
 use super::presentation::{card, card_content, config_only_row, page_stack};
@@ -23,6 +23,35 @@ impl SettingsView {
             body = body.child(self.render_layout_card(section, spec, cx));
         }
         Some(body.into_any_element())
+    }
+
+    /// The first text input `section` shows, in page order. A folded Advanced
+    /// card's inputs are not on screen, so they are skipped.
+    pub(super) fn first_visible_input(
+        &self,
+        section: BuiltinSection,
+        cx: &gpui::App,
+    ) -> Option<gpui::FocusHandle> {
+        let cards = layout::page(section)?;
+        cards
+            .iter()
+            .filter(|card| {
+                !matches!(card, Card::Advanced(_)) || self.advanced_open.contains(&section)
+            })
+            .flat_map(|card| card.rows().iter())
+            .flat_map(|row| match row {
+                Row::Setting(target) => std::slice::from_ref(target),
+                Row::Under(_, children) => children,
+                Row::Custom(_) => &[],
+            })
+            .find_map(|target| match target {
+                Target::Text(t) => Some(
+                    (super::spec::text_spec(*t).field)(self)
+                        .read(cx)
+                        .focus_handle(cx),
+                ),
+                _ => None,
+            })
     }
 
     fn render_layout_card(

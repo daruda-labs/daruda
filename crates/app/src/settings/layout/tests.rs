@@ -39,16 +39,6 @@ fn every_setting_is_placed_exactly_once() {
     );
 }
 
-/// A text row's tab bucket is the page the layout puts it on.
-#[test]
-fn text_rows_sit_on_their_spec_section() {
-    for (section, _, placed) in placed() {
-        if let Placed::Setting(Target::Text(t)) = placed {
-            assert_eq!(spec::text_spec(t).section, section, "{t:?}");
-        }
-    }
-}
-
 /// A switch that heads indented rows is itself placed just before them.
 #[test]
 fn a_parent_switch_precedes_its_rows() {

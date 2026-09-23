@@ -925,7 +925,6 @@ impl SettingsView {
         window: &mut Window,
         cx: &mut Context<Self>,
         subs: &mut Vec<Subscription>,
-        focus: &mut HashMap<BuiltinSection, Vec<FocusHandle>>,
     ) -> Entity<InputState> {
         let row = spec::text_spec(setting);
         let state = cx.new(|cx_state| {
@@ -934,10 +933,6 @@ impl SettingsView {
                 .default_value((row.show)(config))
         });
         subs.push(Self::subscribe_text_setting(&state, setting, window, cx));
-        focus
-            .entry(row.section)
-            .or_default()
-            .push(state.read(cx).focus_handle(cx));
         state
     }
 
@@ -1543,7 +1538,6 @@ impl SettingsView {
             window,
             cx,
             &mut input_subscriptions,
-            &mut section_focus_targets,
         );
         let terminal_line_height_input = Self::new_text_field(
             TextSetting::TerminalLineHeight,
@@ -1551,7 +1545,6 @@ impl SettingsView {
             window,
             cx,
             &mut input_subscriptions,
-            &mut section_focus_targets,
         );
         let terminal_cell_width_input = Self::new_text_field(
             TextSetting::TerminalCellWidth,
@@ -1559,7 +1552,6 @@ impl SettingsView {
             window,
             cx,
             &mut input_subscriptions,
-            &mut section_focus_targets,
         );
         let editor_font_size_input = Self::new_text_field(
             TextSetting::EditorFontSize,
@@ -1567,7 +1559,6 @@ impl SettingsView {
             window,
             cx,
             &mut input_subscriptions,
-            &mut section_focus_targets,
         );
         let editor_line_height_input = Self::new_text_field(
             TextSetting::EditorLineHeight,
@@ -1575,7 +1566,6 @@ impl SettingsView {
             window,
             cx,
             &mut input_subscriptions,
-            &mut section_focus_targets,
         );
         let agent_chat_font_size_input = Self::new_text_field(
             TextSetting::AgentChatFontSize,
@@ -1583,7 +1573,6 @@ impl SettingsView {
             window,
             cx,
             &mut input_subscriptions,
-            &mut section_focus_targets,
         );
         let agent_chat_line_height_input = Self::new_text_field(
             TextSetting::AgentChatLineHeight,
@@ -1591,7 +1580,6 @@ impl SettingsView {
             window,
             cx,
             &mut input_subscriptions,
-            &mut section_focus_targets,
         );
         let opacity_input = Self::new_text_field(
             TextSetting::WindowOpacity,
@@ -1599,7 +1587,6 @@ impl SettingsView {
             window,
             cx,
             &mut input_subscriptions,
-            &mut section_focus_targets,
         );
         let scrollback_input = Self::new_text_field(
             TextSetting::ScrollbackMaxRows,
@@ -1607,7 +1594,6 @@ impl SettingsView {
             window,
             cx,
             &mut input_subscriptions,
-            &mut section_focus_targets,
         );
         let inset_x_input = Self::new_text_field(
             TextSetting::TerminalInsetX,
@@ -1615,7 +1601,6 @@ impl SettingsView {
             window,
             cx,
             &mut input_subscriptions,
-            &mut section_focus_targets,
         );
         let inset_y_input = Self::new_text_field(
             TextSetting::TerminalInsetY,
@@ -1623,7 +1608,6 @@ impl SettingsView {
             window,
             cx,
             &mut input_subscriptions,
-            &mut section_focus_targets,
         );
         let clipboard_streaming_input = Self::new_text_field(
             TextSetting::ClipboardStreamingMaxBytes,
@@ -1631,7 +1615,6 @@ impl SettingsView {
             window,
             cx,
             &mut input_subscriptions,
-            &mut section_focus_targets,
         );
         // External editor select — "" (empty, the config default) means the
         // OS default handler; every other value is a `daruda_config::editor`
@@ -1668,7 +1651,6 @@ impl SettingsView {
             window,
             cx,
             &mut input_subscriptions,
-            &mut section_focus_targets,
         );
         let claude_status_stale_input = Self::new_text_field(
             TextSetting::ClaudeStatusStaleSecs,
@@ -1676,7 +1658,6 @@ impl SettingsView {
             window,
             cx,
             &mut input_subscriptions,
-            &mut section_focus_targets,
         );
         let claude_status_ttl_input = Self::new_text_field(
             TextSetting::ClaudeStatusFileTtlDays,
@@ -1684,7 +1665,6 @@ impl SettingsView {
             window,
             cx,
             &mut input_subscriptions,
-            &mut section_focus_targets,
         );
         let usage_limits_poll_input = Self::new_text_field(
             TextSetting::UsageLimitsPollSecs,
@@ -1692,7 +1672,6 @@ impl SettingsView {
             window,
             cx,
             &mut input_subscriptions,
-            &mut section_focus_targets,
         );
         let usage_status_poll_input = Self::new_text_field(
             TextSetting::UsageStatusPollSecs,
@@ -1700,7 +1679,6 @@ impl SettingsView {
             window,
             cx,
             &mut input_subscriptions,
-            &mut section_focus_targets,
         );
         let ports_poll_input = Self::new_text_field(
             TextSetting::PortsPollSecs,
@@ -1708,7 +1686,6 @@ impl SettingsView {
             window,
             cx,
             &mut input_subscriptions,
-            &mut section_focus_targets,
         );
         let logs_retention_input = Self::new_text_field(
             TextSetting::LogsRetentionDays,
@@ -1716,7 +1693,6 @@ impl SettingsView {
             window,
             cx,
             &mut input_subscriptions,
-            &mut section_focus_targets,
         );
         let logs_max_size_input = Self::new_text_field(
             TextSetting::LogsMaxFileSizeMb,
@@ -1724,7 +1700,6 @@ impl SettingsView {
             window,
             cx,
             &mut input_subscriptions,
-            &mut section_focus_targets,
         );
         let presence_grace_input = Self::new_text_field(
             TextSetting::PresenceGraceSecs,
@@ -1732,7 +1707,6 @@ impl SettingsView {
             window,
             cx,
             &mut input_subscriptions,
-            &mut section_focus_targets,
         );
         let presence_idle_input = Self::new_text_field(
             TextSetting::PresenceIdleSecs,
@@ -1740,7 +1714,6 @@ impl SettingsView {
             window,
             cx,
             &mut input_subscriptions,
-            &mut section_focus_targets,
         );
         let presence_idle_foreground_input = Self::new_text_field(
             TextSetting::PresenceIdleForegroundSecs,
@@ -1748,7 +1721,6 @@ impl SettingsView {
             window,
             cx,
             &mut input_subscriptions,
-            &mut section_focus_targets,
         );
         let agent_input_max_rows_input = Self::new_text_field(
             TextSetting::AgentInputMaxRows,
@@ -1756,7 +1728,6 @@ impl SettingsView {
             window,
             cx,
             &mut input_subscriptions,
-            &mut section_focus_targets,
         );
         let agent_reading_width_input = Self::new_text_field(
             TextSetting::AgentReadingWidth,
@@ -1764,7 +1735,6 @@ impl SettingsView {
             window,
             cx,
             &mut input_subscriptions,
-            &mut section_focus_targets,
         );
         let flow_timeout_minutes_input = Self::new_text_field(
             TextSetting::FlowTimeoutMinutes,
@@ -1772,7 +1742,6 @@ impl SettingsView {
             window,
             cx,
             &mut input_subscriptions,
-            &mut section_focus_targets,
         );
         let flow_max_node_runs_input = Self::new_text_field(
             TextSetting::FlowMaxNodeRuns,
@@ -1780,7 +1749,6 @@ impl SettingsView {
             window,
             cx,
             &mut input_subscriptions,
-            &mut section_focus_targets,
         );
         let flow_max_cost_input = Self::new_text_field(
             TextSetting::FlowMaxCost,
@@ -1788,7 +1756,6 @@ impl SettingsView {
             window,
             cx,
             &mut input_subscriptions,
-            &mut section_focus_targets,
         );
         let flow_cost_currency_input = Self::new_text_field(
             TextSetting::FlowCostCurrency,
@@ -1796,7 +1763,6 @@ impl SettingsView {
             window,
             cx,
             &mut input_subscriptions,
-            &mut section_focus_targets,
         );
         let left_default_width_input = Self::new_text_field(
             TextSetting::LeftDefaultWidth,
@@ -1804,7 +1770,6 @@ impl SettingsView {
             window,
             cx,
             &mut input_subscriptions,
-            &mut section_focus_targets,
         );
         let shell_program_input = Self::new_text_field(
             TextSetting::ShellProgram,
@@ -1812,7 +1777,6 @@ impl SettingsView {
             window,
             cx,
             &mut input_subscriptions,
-            &mut section_focus_targets,
         );
         let notify_long_running_threshold_input = Self::new_text_field(
             TextSetting::NotifyLongRunningThresholdSecs,
@@ -1820,7 +1784,6 @@ impl SettingsView {
             window,
             cx,
             &mut input_subscriptions,
-            &mut section_focus_targets,
         );
         // Never pre-filled with the real token (`default_value`) — a stored
         // secret is never re-displayed in a text field, so this field can't
@@ -2237,12 +2200,14 @@ impl SettingsView {
             // mid-scroll which is confusing.
             self.scroll_handle.set_offset(gpui::point(px(0.), px(0.)));
         }
-        if let Some(fh) = self
-            .section_focus_targets
-            .get(&section)
-            .and_then(|handles| handles.first())
-            .cloned()
-        {
+        // The page's first visible input in layout order, then whatever the
+        // page draws by hand; constructor order knows nothing of either.
+        if let Some(fh) = self.first_visible_input(section, cx).or_else(|| {
+            self.section_focus_targets
+                .get(&section)
+                .and_then(|handles| handles.first())
+                .cloned()
+        }) {
             fh.focus(window, cx);
         } else {
             self.panel_focus_handle.focus(window, cx);

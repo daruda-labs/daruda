@@ -4,6 +4,7 @@ use gpui::{BorrowAppContext, Entity, TestAppContext, WindowHandle};
 
 mod confirmation;
 mod failure_reporting;
+mod focus;
 mod reset;
 mod scrollbar;
 mod terminal_page;
