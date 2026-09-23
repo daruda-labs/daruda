@@ -54,6 +54,17 @@ fn track_cwd_disabled_skips_osc7() {
     assert_eq!(session.cwd(), None);
 }
 
+/// A settings change reaches a session that is already running: the next
+/// keystroke sees the new natural-editing switch.
+#[test]
+fn input_settings_apply_to_a_running_session() {
+    let mut session =
+        TerminalSession::new(TerminalDims::default(), TerminalConfig::default()).unwrap();
+    assert!(session.natural_text_editing());
+    session.apply_input_settings(false, 4096);
+    assert!(!session.natural_text_editing());
+}
+
 // OSC 133 (FinalTerm / shell integration) ------------------------
 
 #[test]

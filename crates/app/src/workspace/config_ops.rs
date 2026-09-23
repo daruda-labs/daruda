@@ -145,6 +145,10 @@ impl Workspace {
                 view.set_background_alpha(config.window.opacity);
                 view.apply_inset(config.font.terminal.inset_x, config.font.terminal.inset_y);
                 view.set_default_cursor_shape(cursor_shape_from(config.cursor.style));
+                view.apply_input_settings(
+                    config.shell.natural_text_editing,
+                    config.clipboard.streaming_max_bytes,
+                );
             });
         }
         let new_mirrors = crate::workspace::ConfigMirrors::from_config(config);

@@ -124,6 +124,13 @@ impl TerminalView {
         self.state.inset_y = y.clamp(crate::INSET_MIN, crate::INSET_MAX);
     }
 
+    /// Push input behaviour from config into the running session. See
+    /// [`crate::TerminalSession::apply_input_settings`].
+    pub fn apply_input_settings(&mut self, natural_text_editing: bool, osc1337_max_bytes: usize) {
+        self.session
+            .apply_input_settings(natural_text_editing, osc1337_max_bytes);
+    }
+
     /// Push the fallback cursor shape from config at runtime. Paint-only:
     /// takes effect on the next frame without touching the shape cache.
     pub fn set_default_cursor_shape(&mut self, shape: crate::CursorShape) {

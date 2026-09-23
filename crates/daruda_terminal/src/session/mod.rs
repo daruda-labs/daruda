@@ -812,6 +812,14 @@ impl TerminalSession {
         self.config.natural_text_editing
     }
 
+    /// Push the config-owned input behaviour into a running session: the
+    /// natural-editing remap and the OSC 1337 clipboard budget are read per
+    /// keystroke and per chunk, so a change applies from the next one.
+    pub fn apply_input_settings(&mut self, natural_text_editing: bool, osc1337_max_bytes: usize) {
+        self.config.natural_text_editing = natural_text_editing;
+        self.config.osc1337_max_bytes = osc1337_max_bytes;
+    }
+
     /// Initial font point size. Used by `TerminalView` at construction
     /// before any runtime zoom action.
     pub fn font_size(&self) -> f32 {
