@@ -151,6 +151,66 @@ pub(super) fn text(setting: TextSetting) -> RowCopy {
             label: s::settings_label_flow_currency,
             hint: s::settings_hint_flow_currency,
         },
+        TextSetting::ClaudeStatusStaleSecs => RowCopy {
+            section: Section::Agent,
+            card: s::settings_card_advanced,
+            label: s::settings_label_stale_threshold,
+            hint: s::settings_hint_stale_threshold,
+        },
+        TextSetting::ClaudeStatusFileTtlDays => RowCopy {
+            section: Section::Agent,
+            card: s::settings_card_advanced,
+            label: s::settings_label_file_ttl,
+            hint: s::settings_hint_file_ttl,
+        },
+        TextSetting::UsageLimitsPollSecs => RowCopy {
+            section: Section::Workspace,
+            card: s::settings_card_advanced,
+            label: s::settings_label_usage_limits_poll,
+            hint: s::settings_hint_usage_poll,
+        },
+        TextSetting::UsageStatusPollSecs => RowCopy {
+            section: Section::Workspace,
+            card: s::settings_card_advanced,
+            label: s::settings_label_usage_status_poll,
+            hint: s::settings_hint_usage_poll,
+        },
+        TextSetting::PortsPollSecs => RowCopy {
+            section: Section::Workspace,
+            card: s::settings_card_advanced,
+            label: s::settings_label_ports_poll,
+            hint: String::new,
+        },
+        TextSetting::LogsRetentionDays => RowCopy {
+            section: Section::About,
+            card: s::settings_card_advanced,
+            label: s::settings_label_logs_retention,
+            hint: s::settings_hint_logs_retention,
+        },
+        TextSetting::LogsMaxFileSizeMb => RowCopy {
+            section: Section::About,
+            card: s::settings_card_advanced,
+            label: s::settings_label_logs_max_size,
+            hint: s::settings_hint_logs_max_size,
+        },
+        TextSetting::PresenceGraceSecs => RowCopy {
+            section: Section::RemoteControl,
+            card: s::settings_card_advanced,
+            label: s::settings_label_presence_grace,
+            hint: s::settings_hint_presence_grace,
+        },
+        TextSetting::PresenceIdleSecs => RowCopy {
+            section: Section::RemoteControl,
+            card: s::settings_card_advanced,
+            label: s::settings_label_presence_idle,
+            hint: s::settings_hint_presence_idle,
+        },
+        TextSetting::PresenceIdleForegroundSecs => RowCopy {
+            section: Section::RemoteControl,
+            card: s::settings_card_advanced,
+            label: s::settings_label_presence_idle_foreground,
+            hint: s::settings_hint_presence_idle_foreground,
+        },
     }
 }
 
@@ -364,6 +424,12 @@ pub(super) fn bool(setting: BoolSetting) -> RowCopy {
             card: s::settings_nav_orchestrator,
             label: s::settings_orchestrator_enabled_label,
             hint: String::new,
+        },
+        BoolSetting::UpdateAutoCheck => RowCopy {
+            section: Section::About,
+            card: s::settings_card_updates,
+            label: s::settings_label_update_auto_check,
+            hint: s::settings_hint_update_auto_check,
         },
     }
 }

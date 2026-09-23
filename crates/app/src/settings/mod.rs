@@ -200,6 +200,17 @@ pub struct SettingsView {
     // Sidebar
     files_show_hidden: bool,
     files_use_gitignore: bool,
+    update_auto_check: bool,
+    claude_status_stale_input: Entity<InputState>,
+    claude_status_ttl_input: Entity<InputState>,
+    usage_limits_poll_input: Entity<InputState>,
+    usage_status_poll_input: Entity<InputState>,
+    ports_poll_input: Entity<InputState>,
+    logs_retention_input: Entity<InputState>,
+    logs_max_size_input: Entity<InputState>,
+    presence_grace_input: Entity<InputState>,
+    presence_idle_input: Entity<InputState>,
+    presence_idle_foreground_input: Entity<InputState>,
     agent_input_max_rows_input: Entity<InputState>,
     agent_reading_width_input: Entity<InputState>,
     flow_timeout_minutes_input: Entity<InputState>,
@@ -369,6 +380,16 @@ enum TextSetting {
     TerminalInsetY,
     ClipboardStreamingMaxBytes,
     PanelsGridColumns,
+    ClaudeStatusStaleSecs,
+    ClaudeStatusFileTtlDays,
+    UsageLimitsPollSecs,
+    UsageStatusPollSecs,
+    PortsPollSecs,
+    LogsRetentionDays,
+    LogsMaxFileSizeMb,
+    PresenceGraceSecs,
+    PresenceIdleSecs,
+    PresenceIdleForegroundSecs,
     AgentInputMaxRows,
     AgentReadingWidth,
     FlowTimeoutMinutes,
@@ -426,6 +447,7 @@ pub(super) enum BoolSetting {
     FilesShowHidden,
     FilesUseGitignore,
     ClaudeStatusEnabled,
+    UpdateAutoCheck,
     LeftCollapsedByDefault,
     PreviewTab,
     ShellNaturalTextEditing,
@@ -450,7 +472,7 @@ pub(super) enum BoolSetting {
 // click of the new widget.
 impl TextSetting {
     #[cfg(test)]
-    const ALL: [Self; 22] = [
+    const ALL: [Self; 32] = [
         Self::TerminalFontSize,
         Self::TerminalLineHeight,
         Self::TerminalCellWidth,
@@ -464,6 +486,16 @@ impl TextSetting {
         Self::TerminalInsetY,
         Self::ClipboardStreamingMaxBytes,
         Self::PanelsGridColumns,
+        Self::ClaudeStatusStaleSecs,
+        Self::ClaudeStatusFileTtlDays,
+        Self::UsageLimitsPollSecs,
+        Self::UsageStatusPollSecs,
+        Self::PortsPollSecs,
+        Self::LogsRetentionDays,
+        Self::LogsMaxFileSizeMb,
+        Self::PresenceGraceSecs,
+        Self::PresenceIdleSecs,
+        Self::PresenceIdleForegroundSecs,
         Self::AgentInputMaxRows,
         Self::AgentReadingWidth,
         Self::FlowTimeoutMinutes,
@@ -493,6 +525,16 @@ impl TextSetting {
             Self::TerminalInsetY => (),
             Self::ClipboardStreamingMaxBytes => (),
             Self::PanelsGridColumns => (),
+            Self::ClaudeStatusStaleSecs => (),
+            Self::ClaudeStatusFileTtlDays => (),
+            Self::UsageLimitsPollSecs => (),
+            Self::UsageStatusPollSecs => (),
+            Self::PortsPollSecs => (),
+            Self::LogsRetentionDays => (),
+            Self::LogsMaxFileSizeMb => (),
+            Self::PresenceGraceSecs => (),
+            Self::PresenceIdleSecs => (),
+            Self::PresenceIdleForegroundSecs => (),
             Self::AgentInputMaxRows => (),
             Self::AgentReadingWidth => (),
             Self::FlowTimeoutMinutes => (),
@@ -548,13 +590,14 @@ impl SelectSetting {
 
 impl BoolSetting {
     #[cfg(test)]
-    const ALL: [Self; 21] = [
+    const ALL: [Self; 22] = [
         Self::AgentUseModifierToSend,
         Self::AgentUseReadingWidth,
         Self::ShellClosePaneOnExit,
         Self::WindowBlur,
         Self::FilesShowHidden,
         Self::FilesUseGitignore,
+        Self::UpdateAutoCheck,
         Self::LeftCollapsedByDefault,
         Self::PreviewTab,
         Self::ShellNaturalTextEditing,
@@ -583,6 +626,7 @@ impl BoolSetting {
             Self::WindowBlur => (),
             Self::FilesShowHidden => (),
             Self::FilesUseGitignore => (),
+            Self::UpdateAutoCheck => (),
             Self::LeftCollapsedByDefault => (),
             Self::PreviewTab => (),
             Self::ShellNaturalTextEditing => (),
@@ -1624,6 +1668,86 @@ impl SettingsView {
             &mut input_subscriptions,
             &mut section_focus_targets,
         );
+        let claude_status_stale_input = Self::new_text_field(
+            TextSetting::ClaudeStatusStaleSecs,
+            &config,
+            window,
+            cx,
+            &mut input_subscriptions,
+            &mut section_focus_targets,
+        );
+        let claude_status_ttl_input = Self::new_text_field(
+            TextSetting::ClaudeStatusFileTtlDays,
+            &config,
+            window,
+            cx,
+            &mut input_subscriptions,
+            &mut section_focus_targets,
+        );
+        let usage_limits_poll_input = Self::new_text_field(
+            TextSetting::UsageLimitsPollSecs,
+            &config,
+            window,
+            cx,
+            &mut input_subscriptions,
+            &mut section_focus_targets,
+        );
+        let usage_status_poll_input = Self::new_text_field(
+            TextSetting::UsageStatusPollSecs,
+            &config,
+            window,
+            cx,
+            &mut input_subscriptions,
+            &mut section_focus_targets,
+        );
+        let ports_poll_input = Self::new_text_field(
+            TextSetting::PortsPollSecs,
+            &config,
+            window,
+            cx,
+            &mut input_subscriptions,
+            &mut section_focus_targets,
+        );
+        let logs_retention_input = Self::new_text_field(
+            TextSetting::LogsRetentionDays,
+            &config,
+            window,
+            cx,
+            &mut input_subscriptions,
+            &mut section_focus_targets,
+        );
+        let logs_max_size_input = Self::new_text_field(
+            TextSetting::LogsMaxFileSizeMb,
+            &config,
+            window,
+            cx,
+            &mut input_subscriptions,
+            &mut section_focus_targets,
+        );
+        let presence_grace_input = Self::new_text_field(
+            TextSetting::PresenceGraceSecs,
+            &config,
+            window,
+            cx,
+            &mut input_subscriptions,
+            &mut section_focus_targets,
+        );
+        let presence_idle_input = Self::new_text_field(
+            TextSetting::PresenceIdleSecs,
+            &config,
+            window,
+            cx,
+            &mut input_subscriptions,
+            &mut section_focus_targets,
+        );
+        let presence_idle_foreground_input = Self::new_text_field(
+            TextSetting::PresenceIdleForegroundSecs,
+            &config,
+            window,
+            cx,
+            &mut input_subscriptions,
+            &mut section_focus_targets,
+        );
         let agent_input_max_rows_input = Self::new_text_field(
             TextSetting::AgentInputMaxRows,
             &config,
@@ -2002,6 +2126,17 @@ impl SettingsView {
             inset_y_input,
             files_show_hidden: config.left_dock.files_show_hidden,
             files_use_gitignore: config.left_dock.files_use_gitignore,
+            update_auto_check: config.update.auto_check,
+            claude_status_stale_input,
+            claude_status_ttl_input,
+            usage_limits_poll_input,
+            usage_status_poll_input,
+            ports_poll_input,
+            logs_retention_input,
+            logs_max_size_input,
+            presence_grace_input,
+            presence_idle_input,
+            presence_idle_foreground_input,
             agent_input_max_rows_input,
             agent_reading_width_input,
             flow_timeout_minutes_input,

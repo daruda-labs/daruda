@@ -800,6 +800,32 @@ pub fn patch_config_file_to(config: &Config, path: &std::path::Path) -> Result<(
 
 /// Patch one section at a time. Creates the table if absent so saving from a
 /// fresh install produces a minimal document.
+/// [`patch_section`] for a table nested under others (`[usage.poll]`),
+/// creating each missing level. A dotted name passed to `patch_section`
+/// would instead make one quoted table, `["usage.poll"]`.
+fn patch_nested_section(
+    doc: &mut toml_edit::DocumentMut,
+    path: &[&str],
+    f: impl FnOnce(&mut dyn toml_edit::TableLike),
+) {
+    let mut table: &mut dyn toml_edit::TableLike = doc.as_table_mut();
+    for part in path {
+        if !table.contains_key(part) {
+            let mut child = toml_edit::Table::new();
+            child.set_implicit(true);
+            table.insert(part, toml_edit::Item::Table(child));
+        }
+        match table
+            .get_mut(part)
+            .and_then(toml_edit::Item::as_table_like_mut)
+        {
+            Some(next) => table = next,
+            None => return,
+        }
+    }
+    f(table);
+}
+
 fn patch_section(
     doc: &mut toml_edit::DocumentMut,
     key: &str,
@@ -1074,6 +1100,70 @@ fn patch_settings_document(
             t.insert(
                 "files_use_gitignore",
                 toml_edit::value(config.left_dock.files_use_gitignore),
+            );
+        }),
+        SettingsPatch::UpdateAutoCheck(_) => patch_section(doc, "update", |t| {
+            t.insert("auto_check", toml_edit::value(config.update.auto_check));
+        }),
+        SettingsPatch::ClaudeStatusStaleSecs(_) => patch_section(doc, "claude_status", |t| {
+            t.insert(
+                "stale_threshold_secs",
+                toml_edit::value(config.claude_status.stale_threshold_secs as i64),
+            );
+        }),
+        SettingsPatch::ClaudeStatusFileTtlDays(_) => patch_section(doc, "claude_status", |t| {
+            t.insert(
+                "file_ttl_days",
+                toml_edit::value(config.claude_status.file_ttl_days as i64),
+            );
+        }),
+        SettingsPatch::UsageLimitsPollSecs(_) => {
+            patch_nested_section(doc, &["usage", "poll"], |t| {
+                t.insert(
+                    "limits_secs",
+                    toml_edit::value(config.usage.poll.limits_secs as i64),
+                );
+            })
+        }
+        SettingsPatch::UsageStatusPollSecs(_) => {
+            patch_nested_section(doc, &["usage", "poll"], |t| {
+                t.insert(
+                    "status_secs",
+                    toml_edit::value(config.usage.poll.status_secs as i64),
+                );
+            })
+        }
+        SettingsPatch::PortsPollSecs(_) => patch_section(doc, "ports", |t| {
+            t.insert("poll_secs", toml_edit::value(config.ports.poll_secs as i64));
+        }),
+        SettingsPatch::LogsRetentionDays(_) => patch_section(doc, "logs", |t| {
+            t.insert(
+                "retention_days",
+                toml_edit::value(config.logs.retention_days as i64),
+            );
+        }),
+        SettingsPatch::LogsMaxFileSizeMb(_) => patch_section(doc, "logs", |t| {
+            t.insert(
+                "max_file_size_mb",
+                toml_edit::value(config.logs.max_file_size_mb as i64),
+            );
+        }),
+        SettingsPatch::PresenceGraceSecs(_) => patch_section(doc, "presence", |t| {
+            t.insert(
+                "away_grace_secs",
+                toml_edit::value(config.presence.away_grace_secs as i64),
+            );
+        }),
+        SettingsPatch::PresenceIdleSecs(_) => patch_section(doc, "presence", |t| {
+            t.insert(
+                "away_idle_secs",
+                toml_edit::value(config.presence.away_idle_secs as i64),
+            );
+        }),
+        SettingsPatch::PresenceIdleForegroundSecs(_) => patch_section(doc, "presence", |t| {
+            t.insert(
+                "away_idle_foreground_secs",
+                toml_edit::value(config.presence.away_idle_foreground_secs as i64),
             );
         }),
         SettingsPatch::AgentInputMaxRows(_) => patch_section(doc, "agent", |t| {

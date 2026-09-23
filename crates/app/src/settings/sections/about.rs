@@ -164,6 +164,20 @@ impl SettingsView {
             }
         }
 
-        col.into_any_element()
+        crate::settings::presentation::page_stack()
+            .child(col)
+            .child(
+                crate::settings::presentation::card(s::settings_card_updates(), cx)
+                    .child(self.switch_row(crate::settings::BoolSetting::UpdateAutoCheck, cx)),
+            )
+            .child(self.advanced_card(
+                daruda_config::BuiltinSection::About,
+                vec![
+                    self.text_row(crate::settings::TextSetting::LogsRetentionDays, cx),
+                    self.text_row(crate::settings::TextSetting::LogsMaxFileSizeMb, cx),
+                ],
+                cx,
+            ))
+            .into_any_element()
     }
 }

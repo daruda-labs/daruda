@@ -32,6 +32,17 @@ pub enum SettingsFieldId {
     TerminalInsetY,
     FilesShowHidden,
     FilesUseGitignore,
+    UpdateAutoCheck,
+    ClaudeStatusStaleSecs,
+    ClaudeStatusFileTtlDays,
+    UsageLimitsPollSecs,
+    UsageStatusPollSecs,
+    PortsPollSecs,
+    LogsRetentionDays,
+    LogsMaxFileSizeMb,
+    PresenceGraceSecs,
+    PresenceIdleSecs,
+    PresenceIdleForegroundSecs,
     AgentInputMaxRows,
     AgentReadingWidth,
     FlowTimeoutMinutes,
@@ -98,6 +109,17 @@ impl SettingsFieldId {
             Self::TerminalInsetY => "font.terminal.inset_y",
             Self::FilesShowHidden => "left_dock.files_show_hidden",
             Self::FilesUseGitignore => "left_dock.files_use_gitignore",
+            Self::UpdateAutoCheck => "update.auto_check",
+            Self::ClaudeStatusStaleSecs => "claude_status.stale_threshold_secs",
+            Self::ClaudeStatusFileTtlDays => "claude_status.file_ttl_days",
+            Self::UsageLimitsPollSecs => "usage.poll.limits_secs",
+            Self::UsageStatusPollSecs => "usage.poll.status_secs",
+            Self::PortsPollSecs => "ports.poll_secs",
+            Self::LogsRetentionDays => "logs.retention_days",
+            Self::LogsMaxFileSizeMb => "logs.max_file_size_mb",
+            Self::PresenceGraceSecs => "presence.away_grace_secs",
+            Self::PresenceIdleSecs => "presence.away_idle_secs",
+            Self::PresenceIdleForegroundSecs => "presence.away_idle_foreground_secs",
             Self::AgentInputMaxRows => "agent.input_max_rows",
             Self::AgentReadingWidth => "agent.reading_width",
             Self::FlowTimeoutMinutes => "flow.timeout_minutes",
@@ -170,6 +192,17 @@ pub enum SettingsPatch {
     TerminalInsetY(f32),
     FilesShowHidden(bool),
     FilesUseGitignore(bool),
+    UpdateAutoCheck(bool),
+    ClaudeStatusStaleSecs(u64),
+    ClaudeStatusFileTtlDays(u32),
+    UsageLimitsPollSecs(u64),
+    UsageStatusPollSecs(u64),
+    PortsPollSecs(u64),
+    LogsRetentionDays(u32),
+    LogsMaxFileSizeMb(u32),
+    PresenceGraceSecs(u64),
+    PresenceIdleSecs(u64),
+    PresenceIdleForegroundSecs(u64),
     AgentInputMaxRows(u8),
     AgentReadingWidth(f32),
     FlowTimeoutMinutes(u32),
@@ -242,6 +275,17 @@ impl SettingsPatch {
             Self::TerminalInsetY(_) => SettingsFieldId::TerminalInsetY,
             Self::FilesShowHidden(_) => SettingsFieldId::FilesShowHidden,
             Self::FilesUseGitignore(_) => SettingsFieldId::FilesUseGitignore,
+            Self::UpdateAutoCheck(_) => SettingsFieldId::UpdateAutoCheck,
+            Self::ClaudeStatusStaleSecs(_) => SettingsFieldId::ClaudeStatusStaleSecs,
+            Self::ClaudeStatusFileTtlDays(_) => SettingsFieldId::ClaudeStatusFileTtlDays,
+            Self::UsageLimitsPollSecs(_) => SettingsFieldId::UsageLimitsPollSecs,
+            Self::UsageStatusPollSecs(_) => SettingsFieldId::UsageStatusPollSecs,
+            Self::PortsPollSecs(_) => SettingsFieldId::PortsPollSecs,
+            Self::LogsRetentionDays(_) => SettingsFieldId::LogsRetentionDays,
+            Self::LogsMaxFileSizeMb(_) => SettingsFieldId::LogsMaxFileSizeMb,
+            Self::PresenceGraceSecs(_) => SettingsFieldId::PresenceGraceSecs,
+            Self::PresenceIdleSecs(_) => SettingsFieldId::PresenceIdleSecs,
+            Self::PresenceIdleForegroundSecs(_) => SettingsFieldId::PresenceIdleForegroundSecs,
             Self::AgentInputMaxRows(_) => SettingsFieldId::AgentInputMaxRows,
             Self::AgentReadingWidth(_) => SettingsFieldId::AgentReadingWidth,
             Self::FlowTimeoutMinutes(_) => SettingsFieldId::FlowTimeoutMinutes,
@@ -319,6 +363,21 @@ impl SettingsPatch {
             Self::TerminalInsetY(value) => config.font.terminal.inset_y = *value,
             Self::FilesShowHidden(value) => config.left_dock.files_show_hidden = *value,
             Self::FilesUseGitignore(value) => config.left_dock.files_use_gitignore = *value,
+            Self::UpdateAutoCheck(value) => config.update.auto_check = *value,
+            Self::ClaudeStatusStaleSecs(value) => {
+                config.claude_status.stale_threshold_secs = *value
+            }
+            Self::ClaudeStatusFileTtlDays(value) => config.claude_status.file_ttl_days = *value,
+            Self::UsageLimitsPollSecs(value) => config.usage.poll.limits_secs = *value,
+            Self::UsageStatusPollSecs(value) => config.usage.poll.status_secs = *value,
+            Self::PortsPollSecs(value) => config.ports.poll_secs = *value,
+            Self::LogsRetentionDays(value) => config.logs.retention_days = *value,
+            Self::LogsMaxFileSizeMb(value) => config.logs.max_file_size_mb = *value,
+            Self::PresenceGraceSecs(value) => config.presence.away_grace_secs = *value,
+            Self::PresenceIdleSecs(value) => config.presence.away_idle_secs = *value,
+            Self::PresenceIdleForegroundSecs(value) => {
+                config.presence.away_idle_foreground_secs = *value
+            }
             Self::AgentInputMaxRows(value) => config.agent.input_max_rows = *value,
             Self::AgentReadingWidth(value) => config.agent.reading_width = *value,
             Self::FlowTimeoutMinutes(value) => config.flow.timeout_minutes = *value,
@@ -418,6 +477,31 @@ impl SettingsPatch {
             }
             Self::FilesUseGitignore(_) => {
                 left.left_dock.files_use_gitignore != right.left_dock.files_use_gitignore
+            }
+            Self::UpdateAutoCheck(_) => left.update.auto_check != right.update.auto_check,
+            Self::ClaudeStatusStaleSecs(_) => {
+                left.claude_status.stale_threshold_secs != right.claude_status.stale_threshold_secs
+            }
+            Self::ClaudeStatusFileTtlDays(_) => {
+                left.claude_status.file_ttl_days != right.claude_status.file_ttl_days
+            }
+            Self::UsageLimitsPollSecs(_) => {
+                left.usage.poll.limits_secs != right.usage.poll.limits_secs
+            }
+            Self::UsageStatusPollSecs(_) => {
+                left.usage.poll.status_secs != right.usage.poll.status_secs
+            }
+            Self::PortsPollSecs(_) => left.ports.poll_secs != right.ports.poll_secs,
+            Self::LogsRetentionDays(_) => left.logs.retention_days != right.logs.retention_days,
+            Self::LogsMaxFileSizeMb(_) => left.logs.max_file_size_mb != right.logs.max_file_size_mb,
+            Self::PresenceGraceSecs(_) => {
+                left.presence.away_grace_secs != right.presence.away_grace_secs
+            }
+            Self::PresenceIdleSecs(_) => {
+                left.presence.away_idle_secs != right.presence.away_idle_secs
+            }
+            Self::PresenceIdleForegroundSecs(_) => {
+                left.presence.away_idle_foreground_secs != right.presence.away_idle_foreground_secs
             }
             Self::AgentInputMaxRows(_) => left.agent.input_max_rows != right.agent.input_max_rows,
             Self::AgentReadingWidth(_) => left.agent.reading_width != right.agent.reading_width,

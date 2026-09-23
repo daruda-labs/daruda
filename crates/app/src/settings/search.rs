@@ -189,7 +189,7 @@ pub(super) fn docs() -> Vec<Doc> {
         docs.push(Doc {
             target: Target::Page(*section),
             section: *section,
-            card: navigation::label(*section),
+            card: String::new(),
             label: label(),
             hint: String::new(),
             path: section.slug(),

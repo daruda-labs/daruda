@@ -56,6 +56,14 @@ impl SettingsView {
                 card(s::settings_section_claude_status(), cx)
                     .child(self.switch_row(BoolSetting::ClaudeStatusEnabled, cx)),
             )
+            .child(self.advanced_card(
+                daruda_config::BuiltinSection::Agent,
+                vec![
+                    self.text_row(TextSetting::ClaudeStatusStaleSecs, cx),
+                    self.text_row(TextSetting::ClaudeStatusFileTtlDays, cx),
+                ],
+                cx,
+            ))
             .into_any_element()
     }
 

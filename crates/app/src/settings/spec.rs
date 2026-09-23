@@ -243,6 +243,133 @@ pub(super) const TEXT_SETTINGS: &[TextSpec] = &[
         },
     },
     TextSpec {
+        setting: TextSetting::ClaudeStatusStaleSecs,
+        section: BuiltinSection::Agent,
+        placeholder: || s::settings_placeholder_example("300"),
+        field: |w| &w.claude_status_stale_input,
+        show: |c| c.claude_status.stale_threshold_secs.to_string(),
+        current: |c| SettingsPatch::ClaudeStatusStaleSecs(c.claude_status.stale_threshold_secs),
+        parse: |input, cx| {
+            bounded(
+                input,
+                30..=86_400,
+                || s::settings_err_stale_threshold().into(),
+                cx,
+            )
+            .map(SettingsPatch::ClaudeStatusStaleSecs)
+        },
+    },
+    TextSpec {
+        setting: TextSetting::ClaudeStatusFileTtlDays,
+        section: BuiltinSection::Agent,
+        placeholder: || s::settings_placeholder_example("7"),
+        field: |w| &w.claude_status_ttl_input,
+        show: |c| c.claude_status.file_ttl_days.to_string(),
+        current: |c| SettingsPatch::ClaudeStatusFileTtlDays(c.claude_status.file_ttl_days),
+        parse: |input, cx| {
+            bounded(input, 1..=365, || s::settings_err_file_ttl().into(), cx)
+                .map(SettingsPatch::ClaudeStatusFileTtlDays)
+        },
+    },
+    TextSpec {
+        setting: TextSetting::UsageLimitsPollSecs,
+        section: BuiltinSection::Workspace,
+        placeholder: || s::settings_placeholder_example("300"),
+        field: |w| &w.usage_limits_poll_input,
+        show: |c| c.usage.poll.limits_secs.to_string(),
+        current: |c| SettingsPatch::UsageLimitsPollSecs(c.usage.poll.limits_secs),
+        parse: |input, cx| {
+            bounded(input, 0.., || s::settings_err_whole_number().into(), cx)
+                .map(SettingsPatch::UsageLimitsPollSecs)
+        },
+    },
+    TextSpec {
+        setting: TextSetting::UsageStatusPollSecs,
+        section: BuiltinSection::Workspace,
+        placeholder: || s::settings_placeholder_example("300"),
+        field: |w| &w.usage_status_poll_input,
+        show: |c| c.usage.poll.status_secs.to_string(),
+        current: |c| SettingsPatch::UsageStatusPollSecs(c.usage.poll.status_secs),
+        parse: |input, cx| {
+            bounded(input, 0.., || s::settings_err_whole_number().into(), cx)
+                .map(SettingsPatch::UsageStatusPollSecs)
+        },
+    },
+    TextSpec {
+        setting: TextSetting::PortsPollSecs,
+        section: BuiltinSection::Workspace,
+        placeholder: || s::settings_placeholder_example("5"),
+        field: |w| &w.ports_poll_input,
+        show: |c| c.ports.poll_secs.to_string(),
+        current: |c| SettingsPatch::PortsPollSecs(c.ports.poll_secs),
+        parse: |input, cx| {
+            bounded(input, 2.., || s::settings_err_ports_poll().into(), cx)
+                .map(SettingsPatch::PortsPollSecs)
+        },
+    },
+    TextSpec {
+        setting: TextSetting::LogsRetentionDays,
+        section: BuiltinSection::About,
+        placeholder: || s::settings_placeholder_example("30"),
+        field: |w| &w.logs_retention_input,
+        show: |c| c.logs.retention_days.to_string(),
+        current: |c| SettingsPatch::LogsRetentionDays(c.logs.retention_days),
+        parse: |input, cx| {
+            bounded(input, 0.., || s::settings_err_whole_number().into(), cx)
+                .map(SettingsPatch::LogsRetentionDays)
+        },
+    },
+    TextSpec {
+        setting: TextSetting::LogsMaxFileSizeMb,
+        section: BuiltinSection::About,
+        placeholder: || s::settings_placeholder_example("10"),
+        field: |w| &w.logs_max_size_input,
+        show: |c| c.logs.max_file_size_mb.to_string(),
+        current: |c| SettingsPatch::LogsMaxFileSizeMb(c.logs.max_file_size_mb),
+        parse: |input, cx| {
+            bounded(input, 0.., || s::settings_err_whole_number().into(), cx)
+                .map(SettingsPatch::LogsMaxFileSizeMb)
+        },
+    },
+    TextSpec {
+        setting: TextSetting::PresenceGraceSecs,
+        section: BuiltinSection::RemoteControl,
+        placeholder: || s::settings_placeholder_example("10"),
+        field: |w| &w.presence_grace_input,
+        show: |c| c.presence.away_grace_secs.to_string(),
+        current: |c| SettingsPatch::PresenceGraceSecs(c.presence.away_grace_secs),
+        parse: |input, cx| {
+            bounded(input, 0.., || s::settings_err_whole_number().into(), cx)
+                .map(SettingsPatch::PresenceGraceSecs)
+        },
+    },
+    TextSpec {
+        setting: TextSetting::PresenceIdleSecs,
+        section: BuiltinSection::RemoteControl,
+        placeholder: || s::settings_placeholder_example("30"),
+        field: |w| &w.presence_idle_input,
+        show: |c| c.presence.away_idle_secs.to_string(),
+        current: |c| SettingsPatch::PresenceIdleSecs(c.presence.away_idle_secs),
+        parse: |input, cx| {
+            bounded(input, 0.., || s::settings_err_whole_number().into(), cx)
+                .map(SettingsPatch::PresenceIdleSecs)
+        },
+    },
+    TextSpec {
+        setting: TextSetting::PresenceIdleForegroundSecs,
+        section: BuiltinSection::RemoteControl,
+        placeholder: || s::settings_placeholder_example("180"),
+        field: |w| &w.presence_idle_foreground_input,
+        show: |c| c.presence.away_idle_foreground_secs.to_string(),
+        current: |c| {
+            SettingsPatch::PresenceIdleForegroundSecs(c.presence.away_idle_foreground_secs)
+        },
+        parse: |input, cx| {
+            bounded(input, 0.., || s::settings_err_whole_number().into(), cx)
+                .map(SettingsPatch::PresenceIdleForegroundSecs)
+        },
+    },
+    TextSpec {
         setting: TextSetting::AgentInputMaxRows,
         section: BuiltinSection::Agent,
         placeholder: || s::settings_placeholder_example("8"),
@@ -605,6 +732,13 @@ pub(super) const BOOL_SETTINGS: &[BoolSpec] = &[
         show: |c| c.left_dock.files_use_gitignore,
     },
     BoolSpec {
+        setting: BoolSetting::UpdateAutoCheck,
+        get: |w| w.update_auto_check,
+        set: |w, v| w.update_auto_check = v,
+        patch: SettingsPatch::UpdateAutoCheck,
+        show: |c| c.update.auto_check,
+    },
+    BoolSpec {
         setting: BoolSetting::LeftCollapsedByDefault,
         get: |w| w.left_collapsed_by_default,
         set: |w, v| w.left_collapsed_by_default = v,
@@ -878,6 +1012,17 @@ mod tests {
             | SettingsPatch::TerminalInsetY(_)
             | SettingsPatch::FilesShowHidden(_)
             | SettingsPatch::FilesUseGitignore(_)
+            | SettingsPatch::UpdateAutoCheck(_)
+            | SettingsPatch::ClaudeStatusStaleSecs(_)
+            | SettingsPatch::ClaudeStatusFileTtlDays(_)
+            | SettingsPatch::UsageLimitsPollSecs(_)
+            | SettingsPatch::UsageStatusPollSecs(_)
+            | SettingsPatch::PortsPollSecs(_)
+            | SettingsPatch::LogsRetentionDays(_)
+            | SettingsPatch::LogsMaxFileSizeMb(_)
+            | SettingsPatch::PresenceGraceSecs(_)
+            | SettingsPatch::PresenceIdleSecs(_)
+            | SettingsPatch::PresenceIdleForegroundSecs(_)
             | SettingsPatch::AgentInputMaxRows(_)
             | SettingsPatch::AgentReadingWidth(_)
             | SettingsPatch::FlowTimeoutMinutes(_)

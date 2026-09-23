@@ -4774,6 +4774,102 @@ pub fn settings_hint_custom_colors() -> String {
     rust_i18n::t!("settings.hint_custom_colors").into_owned()
 }
 
+pub fn settings_err_stale_threshold() -> String {
+    rust_i18n::t!("settings.err_stale_threshold").into_owned()
+}
+
+pub fn settings_err_file_ttl() -> String {
+    rust_i18n::t!("settings.err_file_ttl").into_owned()
+}
+
+pub fn settings_err_ports_poll() -> String {
+    rust_i18n::t!("settings.err_ports_poll").into_owned()
+}
+
+pub fn settings_label_stale_threshold() -> String {
+    rust_i18n::t!("settings.label_stale_threshold").into_owned()
+}
+
+pub fn settings_hint_stale_threshold() -> String {
+    rust_i18n::t!("settings.hint_stale_threshold").into_owned()
+}
+
+pub fn settings_label_file_ttl() -> String {
+    rust_i18n::t!("settings.label_file_ttl").into_owned()
+}
+
+pub fn settings_hint_file_ttl() -> String {
+    rust_i18n::t!("settings.hint_file_ttl").into_owned()
+}
+
+pub fn settings_label_usage_limits_poll() -> String {
+    rust_i18n::t!("settings.label_usage_limits_poll").into_owned()
+}
+
+pub fn settings_label_usage_status_poll() -> String {
+    rust_i18n::t!("settings.label_usage_status_poll").into_owned()
+}
+
+pub fn settings_hint_usage_poll() -> String {
+    rust_i18n::t!("settings.hint_usage_poll").into_owned()
+}
+
+pub fn settings_label_ports_poll() -> String {
+    rust_i18n::t!("settings.label_ports_poll").into_owned()
+}
+
+pub fn settings_label_logs_retention() -> String {
+    rust_i18n::t!("settings.label_logs_retention").into_owned()
+}
+
+pub fn settings_hint_logs_retention() -> String {
+    rust_i18n::t!("settings.hint_logs_retention").into_owned()
+}
+
+pub fn settings_label_logs_max_size() -> String {
+    rust_i18n::t!("settings.label_logs_max_size").into_owned()
+}
+
+pub fn settings_hint_logs_max_size() -> String {
+    rust_i18n::t!("settings.hint_logs_max_size").into_owned()
+}
+
+pub fn settings_label_presence_grace() -> String {
+    rust_i18n::t!("settings.label_presence_grace").into_owned()
+}
+
+pub fn settings_hint_presence_grace() -> String {
+    rust_i18n::t!("settings.hint_presence_grace").into_owned()
+}
+
+pub fn settings_label_presence_idle() -> String {
+    rust_i18n::t!("settings.label_presence_idle").into_owned()
+}
+
+pub fn settings_hint_presence_idle() -> String {
+    rust_i18n::t!("settings.hint_presence_idle").into_owned()
+}
+
+pub fn settings_label_presence_idle_foreground() -> String {
+    rust_i18n::t!("settings.label_presence_idle_foreground").into_owned()
+}
+
+pub fn settings_hint_presence_idle_foreground() -> String {
+    rust_i18n::t!("settings.hint_presence_idle_foreground").into_owned()
+}
+
+pub fn settings_card_updates() -> String {
+    rust_i18n::t!("settings.card_updates").into_owned()
+}
+
+pub fn settings_label_update_auto_check() -> String {
+    rust_i18n::t!("settings.label_update_auto_check").into_owned()
+}
+
+pub fn settings_hint_update_auto_check() -> String {
+    rust_i18n::t!("settings.hint_update_auto_check").into_owned()
+}
+
 pub fn settings_nav_general() -> String {
     rust_i18n::t!("settings.nav_general").into_owned()
 }

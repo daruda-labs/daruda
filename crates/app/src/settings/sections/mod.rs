@@ -428,6 +428,15 @@ impl SettingsView {
                     ))
                     .child(card_content(telegram)),
             )
+            .child(self.advanced_card(
+                daruda_config::BuiltinSection::RemoteControl,
+                vec![
+                    self.text_row(super::TextSetting::PresenceGraceSecs, cx),
+                    self.text_row(super::TextSetting::PresenceIdleSecs, cx),
+                    self.text_row(super::TextSetting::PresenceIdleForegroundSecs, cx),
+                ],
+                cx,
+            ))
             .into_any_element()
     }
 

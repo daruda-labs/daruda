@@ -114,6 +114,15 @@ impl SettingsView {
                 card(s::settings_section_panels(), cx)
                     .child(self.text_row(T::PanelsGridColumns, cx)),
             )
+            .child(self.advanced_card(
+                BuiltinSection::Workspace,
+                vec![
+                    self.text_row(T::UsageLimitsPollSecs, cx),
+                    self.text_row(T::UsageStatusPollSecs, cx),
+                    self.text_row(T::PortsPollSecs, cx),
+                ],
+                cx,
+            ))
             .child(
                 card(s::settings_card_external_editor(), cx)
                     .child(self.select_row(S::PreferredEditor, cx)),

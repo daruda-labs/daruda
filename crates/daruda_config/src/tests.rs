@@ -756,6 +756,42 @@ fn settings_patch_round_trips_the_agent_and_flow_keys() {
     assert_eq!(c.flow.cost_currency, "EUR");
 }
 
+/// The Advanced cards' keys and the update switch through the real
+/// `toml_edit` writer, read back.
+#[test]
+fn settings_patch_round_trips_the_advanced_keys() {
+    use crate::SettingsPatch as P;
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("config.toml");
+    for patch in [
+        P::UpdateAutoCheck(false),
+        P::ClaudeStatusStaleSecs(600),
+        P::ClaudeStatusFileTtlDays(14),
+        P::UsageLimitsPollSecs(0),
+        P::UsageStatusPollSecs(120),
+        P::PortsPollSecs(9),
+        P::LogsRetentionDays(7),
+        P::LogsMaxFileSizeMb(20),
+        P::PresenceGraceSecs(5),
+        P::PresenceIdleSecs(45),
+        P::PresenceIdleForegroundSecs(240),
+    ] {
+        crate::apply_settings_patch_to(&patch, &path).expect("advanced patch");
+    }
+    let c = Config::load_from(&path);
+    assert!(!c.update.auto_check);
+    assert_eq!(c.claude_status.stale_threshold_secs, 600);
+    assert_eq!(c.claude_status.file_ttl_days, 14);
+    assert_eq!(c.usage.poll.limits_secs, 0);
+    assert_eq!(c.usage.poll.status_secs, 120);
+    assert_eq!(c.ports.poll_secs, 9);
+    assert_eq!(c.logs.retention_days, 7);
+    assert_eq!(c.logs.max_file_size_mb, 20);
+    assert_eq!(c.presence.away_grace_secs, 5);
+    assert_eq!(c.presence.away_idle_secs, 45);
+    assert_eq!(c.presence.away_idle_foreground_secs, 240);
+}
+
 /// Reset deletes the key rather than writing the default, and keeps the
 /// table and its other keys.
 #[test]
