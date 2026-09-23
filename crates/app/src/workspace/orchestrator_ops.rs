@@ -17,6 +17,7 @@ pub(in crate::workspace) struct OrchestratorChat {
     pub view: Entity<AgentChatView>,
     pub cwd: Option<PaneCwd>,
     pub account: AccountSelection,
+    pub agent_id: String,
 }
 
 impl Workspace {
@@ -128,6 +129,7 @@ impl Workspace {
             view: content.view,
             cwd: content.cwd,
             account,
+            agent_id: content.agent_id,
         });
         cx.notify();
         pane.id
@@ -192,7 +194,8 @@ impl Workspace {
             .any(|tab| self.is_orchestrator_tab(tab))
         {
             let (view, cwd, account) = (chat.view.clone(), chat.cwd.clone(), chat.account);
-            self.wrap_existing_agent_chat_pane(id, view, cwd, account);
+            let agent_id = chat.agent_id.clone();
+            self.wrap_existing_agent_chat_pane(id, view, cwd, account, agent_id);
         }
         let index = self
             .active_runtime()
@@ -315,6 +318,28 @@ impl Workspace {
                 .iter()
                 .map(|chat| (chat.pane_id, &chat.view)),
         )
+    }
+
+    /// The cached agent and cwd of the chat `pane_id` names, found over the
+    /// same set as [`Self::every_agent_chat`] without touching a view.
+    pub(in crate::workspace) fn agent_chat_identity(
+        &self,
+        pane_id: PaneId,
+    ) -> Option<(&str, Option<&PaneCwd>)> {
+        let lane = self
+            .main_area
+            .runtimes
+            .values()
+            .flat_map(|rt| rt.panes.iter())
+            .filter(|pane| pane.id == pane_id)
+            .find_map(|pane| pane.agent_chat_content())
+            .map(|content| (content.agent_id.as_str(), content.cwd.as_ref()));
+        lane.or_else(|| {
+            self.orchestrator_chat
+                .as_ref()
+                .filter(|chat| chat.pane_id == pane_id)
+                .map(|chat| (chat.agent_id.as_str(), chat.cwd.as_ref()))
+        })
     }
 
     /// Worktree badges and listings exclude the orchestrator, even while visible.

@@ -123,8 +123,9 @@ impl Workspace {
         }
     }
 
-    /// Whether Settings is on screen. `render` reads this to pick the body and
-    /// to decide which actions this window answers.
+    /// Whether Settings is on screen — for tests; `render` matches on
+    /// `settings_view` because it needs the entity too.
+    #[cfg(test)]
     pub(in crate::workspace) fn settings_is_open(&self) -> bool {
         self.settings.is_some()
     }

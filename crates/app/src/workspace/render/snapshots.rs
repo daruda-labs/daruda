@@ -339,7 +339,7 @@ impl Workspace {
         // read what it leaves behind.
         let focused = self.focused_account();
         let pane_domain = crate::workspace::main_area::pane::AccountDomain::for_pane(
-            &self.focused_account_pane(cx),
+            &self.focused_account_pane(),
         );
         crate::workspace::sync::limits::observe_focus(
             &mut self.claude.sticky_focus_by_recipe,

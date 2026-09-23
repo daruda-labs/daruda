@@ -318,6 +318,11 @@ pub(in crate::workspace) struct AgentChatContent {
     /// resolves the actual config dir from it at connect time via
     /// [`super::pane::resolve_pane_account`].
     pub(in crate::workspace) account: daruda_store::accounts::AccountSelection,
+    /// The catalog agent the view was built for. Cached for the same reason
+    /// as `cwd` — it never changes after construction — so the status bar can
+    /// name the pane's auth domain without reading the view: a read from
+    /// render registers it as displayed even behind Settings (Pitfall 10).
+    pub(in crate::workspace) agent_id: String,
 }
 
 pub(in crate::workspace) struct Pane {
@@ -1234,8 +1239,8 @@ impl Workspace {
     /// `agent_id` lives in its view entity, hence the `cx` read; every caller
     /// needs the resulting [`AccountDomain`], so the derivation lives here
     /// rather than being rebuilt per surface.
-    pub(in crate::workspace) fn focused_account_pane(&self, cx: &gpui::App) -> AccountPane {
-        self.account_pane_for(self.active_runtime().focused_pane_id, cx)
+    pub(in crate::workspace) fn focused_account_pane(&self) -> AccountPane {
+        self.account_pane_for(self.active_runtime().focused_pane_id)
     }
 
     /// How the account layer sees one pane by id — the cross-lane form of
@@ -1243,20 +1248,18 @@ impl Workspace {
     /// pane rather than about whatever currently has focus (a failed pane's
     /// re-login button acts on the pane that failed, which need not be the
     /// focused one by the time it is clicked).
+    ///
+    /// Answered from the wrapper caches, never the view: the status bar asks
+    /// on every frame, including frames drawn behind Settings.
     pub(in crate::workspace) fn account_pane_for(
         &self,
         pane_id: crate::workspace::main_area::PaneId,
-        cx: &gpui::App,
     ) -> AccountPane {
-        match self.agent_chat_view(pane_id) {
-            Some(view) => {
-                let v = view.read(cx);
-                let is_remote = matches!(v.cwd, Some(PaneCwd::Remote(_)));
-                AccountPane::AgentChat {
-                    launch: self.agent_launch_for(&v.agent_id).map(|spec| spec.launch),
-                    is_remote,
-                }
-            }
+        match self.agent_chat_identity(pane_id) {
+            Some((agent_id, cwd)) => AccountPane::AgentChat {
+                launch: self.agent_launch_for(agent_id).map(|spec| spec.launch),
+                is_remote: matches!(cwd, Some(PaneCwd::Remote(_))),
+            },
             None => AccountPane::Terminal,
         }
     }

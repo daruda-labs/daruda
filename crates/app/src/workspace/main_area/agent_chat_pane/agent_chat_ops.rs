@@ -651,6 +651,7 @@ impl Workspace {
         let syntax_theme = self.syntax_theme.clone();
         let view = cx.new({
             let cwd = cwd.clone();
+            let agent_id = agent_id.clone();
             let agent_name = agent_name.clone();
             move |cx| {
                 AgentChatView::new(
@@ -675,7 +676,12 @@ impl Workspace {
         });
         Pane {
             id: pane_id,
-            content: PaneContent::AgentChat(AgentChatContent { view, cwd, account }),
+            content: PaneContent::AgentChat(AgentChatContent {
+                view,
+                cwd,
+                account,
+                agent_id,
+            }),
         }
     }
 
@@ -1302,6 +1308,7 @@ impl Workspace {
         view: Entity<AgentChatView>,
         cwd: Option<PaneCwd>,
         account: daruda_store::accounts::AccountSelection,
+        agent_id: String,
     ) {
         let tab_id = self.alloc_id();
         let rt = self.active_runtime_mut();
@@ -1310,7 +1317,12 @@ impl Workspace {
         }
         rt.panes.push(Pane {
             id: pane_id,
-            content: PaneContent::AgentChat(AgentChatContent { view, cwd, account }),
+            content: PaneContent::AgentChat(AgentChatContent {
+                view,
+                cwd,
+                account,
+                agent_id,
+            }),
         });
         rt.tabs.push(TabEntry {
             id: tab_id,

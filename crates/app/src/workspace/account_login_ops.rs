@@ -1115,7 +1115,7 @@ impl Workspace {
         // whether or not its tab happens to be in a runtime right now.
         let selection = self.agent_chat_account_selection(pane_id);
         let domain = crate::workspace::main_area::pane::AccountDomain::for_pane(
-            &self.account_pane_for(pane_id, cx),
+            &self.account_pane_for(pane_id),
         );
         match pane_login_target(selection, domain, &self.accounts) {
             Some(LoginTarget::Managed { id, .. }) => self.reauthenticate_account(id, cx),

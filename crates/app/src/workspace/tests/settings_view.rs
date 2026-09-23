@@ -320,3 +320,55 @@ async fn a_dock_pulse_does_not_wake_the_workspace_behind_settings(cx: &mut TestA
         "a pulse for docks Settings covers must wake nothing",
     );
 }
+
+/// The same filter, for the one pane kind whose title and account domain are
+/// read live off its entity rather than a cache: an agent chat streams far more
+/// often than the pulse ticks, so a frame that reads it behind Settings turns
+/// every streamed token into a workspace render nobody sees.
+#[gpui::test]
+async fn a_streaming_chat_does_not_wake_the_workspace_behind_settings(cx: &mut TestAppContext) {
+    use crate::workspace::render::WORKSPACE_RENDERS;
+
+    let (window_handle, workspace) = build_workspace(cx);
+    let mut vcx = gpui::VisualTestContext::from_window(window_handle.into(), cx);
+    let chat = vcx.update(|window, cx| {
+        workspace.update(cx, |ws, cx| {
+            ws.open_agent_chat_pane(window, cx);
+            let id = ws.active_runtime().focused_pane_id;
+            ws.agent_chat_view(id)
+                .expect("focused pane is the chat")
+                .clone()
+        })
+    });
+    vcx.run_until_parked();
+
+    let stream = |vcx: &mut gpui::VisualTestContext| {
+        WORKSPACE_RENDERS.with(|n| n.set(0));
+        vcx.update(|_, cx| chat.update(cx, |_, cx| cx.notify()));
+        vcx.run_until_parked();
+        WORKSPACE_RENDERS.with(|n| n.get())
+    };
+
+    // Control: on screen, the chat's tab title follows it.
+    assert!(
+        stream(&mut vcx) > 0,
+        "with the chat on screen a notify must render the workspace",
+    );
+
+    vcx.update(|window, cx| {
+        workspace.update(cx, |ws, cx| {
+            ws.on_open_settings(
+                &OpenSettings(daruda_config::BuiltinSection::General),
+                window,
+                cx,
+            );
+        });
+    });
+    vcx.run_until_parked();
+
+    assert_eq!(
+        stream(&mut vcx),
+        0,
+        "a chat Settings covers must wake nothing",
+    );
+}

@@ -272,9 +272,7 @@ thread_local! {
 }
 
 /// What `Workspace::render` needs from the dock entities: the snapshots staged
-/// into them, and the geometry read back out. `Default` is the closed-and-empty
-/// answer Settings renders against, since it draws no docks at all.
-#[derive(Default)]
+/// into them, and the geometry read back out.
 struct DockFrame {
     dragged_dock: Option<DockPosition>,
     left_dock_open: bool,
@@ -373,10 +371,17 @@ impl Workspace {
 /// anything. `build_frame` takes `&self`, so the compiler is what keeps the
 /// two apart rather than a convention someone has to remember.
 struct FramePrep {
-    /// `None` while Settings covers the docks: see `prepare_frame`.
-    docks: Option<DockFrame>,
+    body: FrameBody,
     /// Whether the active project carries a config layer (status-bar dot).
     has_project_config: bool,
+}
+
+/// What fills the frame between the title bar and the status bar. Decided
+/// once, in `prepare_frame`, so a frame drawn behind Settings cannot reach
+/// anything Settings covers.
+enum FrameBody {
+    Settings(gpui::Entity<crate::settings::SettingsView>),
+    Workspace(DockFrame),
 }
 
 impl Workspace {
@@ -386,15 +391,17 @@ impl Workspace {
             self.resize_all_tabs(window, cx);
         }
 
-        // Docks are the one thing a frame must not touch while Settings covers
-        // them. gpui filters invalidation to windows that *display* an entity
-        // (`App::notify` → `tracked_entities`), and that set is built from what
-        // a render pass **accessed** — so staging a snapshot into a dock that is
-        // off screen re-registers it as displayed and hands the 4 fps status
-        // pulse a full workspace render to throw away. Skipping the access is
-        // what lets gpui's own filter do its job; the snapshots are re-staged by
-        // the render that `close_settings` notifies.
-        let docks = (!self.settings_is_open()).then(|| self.stage_docks(cx));
+        // Nothing Settings covers may be touched while it is up. gpui filters
+        // invalidation to windows that *display* an entity (`App::notify` →
+        // `tracked_entities`), and that set is built from what a render pass
+        // **accessed** — so staging a dock or reading a chat pane that is off
+        // screen re-registers it as displayed, and every notify it sends
+        // becomes a full workspace render thrown away. The dock snapshots are
+        // re-staged by the render that `close_settings` notifies.
+        let body = match self.settings_view() {
+            Some(view) => FrameBody::Settings(view.clone()),
+            None => FrameBody::Workspace(self.stage_docks(cx)),
+        };
 
         // `project_config_path` (canonicalize) + `Path::exists` are filesystem
         // stats, and a frame can be requested on every animation tick (status
@@ -418,7 +425,7 @@ impl Workspace {
         };
 
         FramePrep {
-            docks,
+            body,
             has_project_config,
         }
     }
@@ -446,15 +453,165 @@ impl Workspace {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> impl IntoElement {
+        // Window title — user override (Window > Edit Window Title…) wins;
+        // otherwise show `<project> · <branch>` for the active lane
+        // (active project only, no aggregate count). Landing state
+        // (no projects) leaves the title untouched.
+        if let Some(label) = self.window_user_label.as_ref() {
+            window.set_window_title(label.as_ref());
+        } else if let Some(title) = self.window_title_label() {
+            window.set_window_title(&title);
+        }
+
+        let status_bar = self.build_status_bar(prep.has_project_config, cx);
+        let frame = match prep.body {
+            FrameBody::Settings(view) => self.build_settings_frame(view, window, cx),
+            FrameBody::Workspace(docks) => self.build_workspace_frame(docks, window, cx),
+        };
+
+        frame
+            .child(status_bar)
+            // Toast overlay paints last so it floats above the status
+            // bar. ToastLayer owns its queue, expiry sweep, and render;
+            // it notifies only itself when toasts change, sparing the
+            // full Workspace repaint.
+            .child(self.toast_layer.clone())
+            .child(command_palette::CommandPaletteOverlay::new(
+                self.command_palette.clone(),
+                cx.listener(|this, _, _, cx| this.close_command_palette(cx)),
+                cx.listener(|this, index: &usize, window, cx| {
+                    this.pick_palette_row(*index, window, cx)
+                }),
+            ))
+            .child(lane_switcher::LaneSwitcherOverlay::new(
+                self.lane_switcher.clone(),
+                cx.listener(|this, _, _, cx| this.close_lane_switcher(cx)),
+                cx.listener(|this, index: &usize, window, cx| {
+                    this.pick_lane_switcher_row(*index, window, cx)
+                }),
+            ))
+            .child(flow_picker::FlowPickerOverlay::new(
+                self.flow_picker.clone(),
+                self.flow_picker.prompt(),
+                crate::surface::strings::flow_picker_empty(),
+                crate::surface::strings::flow_stop_prompt(),
+                crate::surface::strings::flow_stop_action(),
+                cx.listener(|this, _, _, cx| this.close_flow_picker(cx)),
+                cx.listener(|this, index: &usize, window, cx| {
+                    this.pick_flow_row(*index, window, cx)
+                }),
+            ))
+            // Imperative PopupMenu deploy overlay. `PopupMenu` already
+            // dismisses itself on outside click / Escape / confirmed click
+            // (see `PopupMenuDeploy`'s dismiss subscription); the callback
+            // below just routes that back into `close_context_menu`.
+            .when_some(
+                self.main_area
+                    .popup_menu_deploy
+                    .as_ref()
+                    .map(|d| (d.menu.clone(), d.position)),
+                |el, (menu, position)| {
+                    let weak = cx.entity().downgrade();
+                    el.child(crate::ui::popup_menu_deferred(
+                        &menu,
+                        position,
+                        move |window, cx| {
+                            if let Some(ws) = weak.upgrade() {
+                                ws.update(cx, |ws, cx| ws.close_context_menu(window, cx));
+                            }
+                        },
+                    ))
+                },
+            )
+            // gpui_component overlay layers. The window root is
+            // `gpui_component::Root`, but `Root::render` only
+            // renders the inner view — Dialog/Sheet/Notification layers
+            // must be rendered by the inner view explicitly. Without
+            // these, `window.open_dialog(...)` registers a dialog into
+            // `Root.active_dialogs` but nothing ever paints it.
+            .children(gpui_component::Root::render_sheet_layer(window, cx))
+            .children(gpui_component::Root::render_dialog_layer(window, cx))
+            .children(gpui_component::Root::render_notification_layer(window, cx))
+    }
+
+    /// The root both frames share. It answers what survives Settings: the
+    /// window's own commands.
+    fn frame_root(&self, key_ctx: KeyContext, cx: &mut Context<Self>) -> gpui::Div {
+        div()
+            // Toast overlay (and other absolute-positioned children added
+            // later) anchor inside the workspace, not the entire window.
+            .relative()
+            .size_full()
+            .flex()
+            .flex_col()
+            .key_context(key_ctx)
+            .track_focus(&self.focus_handle)
+            .capture_key_down(cx.listener(Self::cancel_drag_on_escape))
+            // `OpenSettings` is also how the menu moves an already-open view
+            // to another section.
+            .on_action(cx.listener(Self::on_open_settings))
+            .on_action(cx.listener(Self::on_close_window))
+            .on_action(cx.listener(Self::on_minimize_window))
+            .on_action(cx.listener(Self::on_zoom_window))
+            .on_action(cx.listener(Self::on_toggle_full_screen))
+    }
+
+    /// Settings in place of the body, docks included. Nothing it covers is
+    /// built — or read, which is what matters to gpui (see `prepare_frame`) —
+    /// and only the root's actions are answered, so a chord cannot mutate a
+    /// surface nobody can see.
+    fn build_settings_frame(
+        &self,
+        view: gpui::Entity<crate::settings::SettingsView>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> gpui::Div {
+        let t = theme::current(cx);
+        let title_bar_bg = t.title_bar_bg;
+        let title_bar_text = t.text_primary;
+        // Settings draws no header of its own, so without this the screen
+        // goes unnamed — the sidebar lists sections, not what they belong
+        // to, and the window title still reads as the project. No dock
+        // toggles: there are no docks on screen to show or hide.
+        let title = div()
+            .flex_none()
+            .text_size(px(theme::TAB_FONT_SIZE))
+            .text_color(title_bar_text)
+            .child(crate::surface::strings::settings_title())
+            .into_any_element();
+        let title_bar = crate::title_bar::render(
+            crate::title_bar::chrome_for_window(window),
+            title_bar_bg,
+            Some(title),
+            None,
+            window,
+            cx,
+        );
+        self.frame_root(root_key_context(), cx)
+            .child(title_bar)
+            // `.cached()` is safe because the view notifies itself on every
+            // edit (Pitfall 10), so a workspace repaint does not rebuild the
+            // form.
+            .child(
+                gpui::AnyView::from(view).cached(
+                    gpui::StyleRefinement::default()
+                        .flex_1()
+                        .w_full()
+                        .overflow_hidden(),
+                ),
+            )
+    }
+
+    /// Title bar, tab strip, panes and docks.
+    fn build_workspace_frame(
+        &self,
+        docks: DockFrame,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> gpui::Div {
         let t = theme::current(cx);
         let dark = t.is_dark();
-        // Settings owns the whole body while it is up, which decides both what
-        // the title bar offers and which actions this window answers.
-        let in_settings = self.settings_is_open();
         let title_bar_bg = t.title_bar_bg;
-        // Copied out like the other title-bar tokens: `t` borrows `cx`, which the
-        // snapshot staging below needs mutably.
-        let title_bar_text = t.text_primary;
         // These tab-strip slots still read raw consts; pick light-aware values
         // so the tab bar doesn't render dark with white text on the light theme.
         let tab_bar_bg = if dark {
@@ -572,17 +729,6 @@ impl Workspace {
                 .collect()
         };
 
-        // Window title — user override (Window > Edit Window Title…) wins;
-        // otherwise show `<project> · <branch>` for the active lane
-        // (active project only, no aggregate count). Landing state
-        // (no projects) leaves the title untouched.
-        if let Some(label) = self.window_user_label.as_ref() {
-            window.set_window_title(label.as_ref());
-        } else if let Some(title) = self.window_title_label() {
-            window.set_window_title(&title);
-        }
-
-        // Geometry `prepare_frame` read back out of the docks it staged.
         let DockFrame {
             dragged_dock,
             left_dock_open,
@@ -591,7 +737,7 @@ impl Workspace {
             bottom_dock_size,
             right_dock_open,
             right_dock_size,
-        } = prep.docks.unwrap_or_default();
+        } = docks;
 
         // iTerm2-style tab bar:
         // - Each tab grows to share row width (min 80px, max 220px); text
@@ -641,21 +787,8 @@ impl Workspace {
         let title_bar = crate::title_bar::render(
             crate::title_bar::chrome_for_window(window),
             title_bar_bg,
-            // Settings draws no header of its own, so without this the screen
-            // goes unnamed — the sidebar lists sections, not what they belong
-            // to, and the window title still reads as the project.
-            in_settings.then(|| {
-                div()
-                    .flex_none()
-                    .text_size(px(theme::TAB_FONT_SIZE))
-                    .text_color(title_bar_text)
-                    .child(crate::surface::strings::settings_title())
-                    .into_any_element()
-            }),
-            // No docks are on screen behind Settings, so the toggles have
-            // nothing to show or hide — and the actions they dispatch are not
-            // registered in that mode either.
-            (!in_settings).then(|| dock_toggles.into_any_element()),
+            None,
+            Some(dock_toggles.into_any_element()),
             window,
             cx,
         );
@@ -1123,10 +1256,253 @@ impl Workspace {
                 ))
             });
 
-        // Status bar. Resolve the focused pane's title eagerly into an owned
-        // value so the `active_runtime()` borrow doesn't span the
-        // `cached_project_config` write below (it borrows all of `self`).
-        // AgentChat panes suppress this: their own activity bar already shows
+        // Key contexts gate search/file-viewer actions on the focused
+        // pane's content. Each open file pane carries its own search
+        // state; "the file viewer" for action-routing purposes is the
+        // one that currently has focus.
+        let focused_is_file = self.focused_file_view().is_some();
+        let focused_search_open = self
+            .focused_file_view()
+            .is_some_and(|fv| fv.search.is_some());
+        let mut key_ctx = root_key_context();
+        if focused_is_file {
+            key_ctx.add("FileViewer");
+            if focused_search_open {
+                key_ctx.add("FileViewerSearch");
+            }
+        }
+
+        let workspace_root = self
+            .frame_root(key_ctx, cx)
+            // Search actions — context-gated via KeyBinding context strings in main.rs.
+            .on_action(cx.listener(|this, _: &SaveFilePane, _window, cx| {
+                this.save_focused_file_pane(cx);
+            }))
+            .on_action(cx.listener(|this, _: &FileViewerSearchOpen, window, cx| {
+                if let Some(fv) = this.focused_file_view_mut() {
+                    fv.search_open();
+                }
+                if let Some(fc) = this.focused_file_content() {
+                    let fh = fc.search_input.read(cx).focus_handle(cx);
+                    fh.focus(window, cx);
+                    cx.notify();
+                }
+            }))
+            .on_action(cx.listener(|this, _: &FileViewerSearchNext, _window, cx| {
+                this.file_view_search_next(cx);
+            }))
+            .on_action(cx.listener(|this, _: &FileViewerSearchPrev, _window, cx| {
+                this.file_view_search_prev(cx);
+            }))
+            // Keyboard shortcuts when the focused pane is a file viewer.
+            // The per-pane Input handles its own typing; this `on_key_down`
+            // owns the panel-level shortcuts (close pane, search close,
+            // copy / select-all when no input is focused).
+            .when(focused_is_file, |el| {
+                el.on_key_down(cx.listener(|this, ev: &KeyDownEvent, window, cx| {
+                    let search_open = this
+                        .focused_file_view()
+                        .is_some_and(|fv| fv.search.is_some());
+                    match ev.keystroke.key.as_str() {
+                        // Escape while the search panel is open closes it +
+                        // clears the query and restores pane focus.
+                        // `gpui_component::Input` doesn't emit Escape via
+                        // `InputEvent`, so the per-pane subscription can't
+                        // see it; the panel-level handler picks it up.
+                        "escape" if search_open => {
+                            let pane_id = this.active_runtime().focused_pane_id;
+                            if let Some(fc) = this.focused_file_content() {
+                                let input = fc.search_input.clone();
+                                input.update(cx, |inp, cx_state| {
+                                    inp.set_value("", window, cx_state)
+                                });
+                            }
+                            if let Some(fv) = this.focused_file_view_mut() {
+                                fv.search_close();
+                            }
+                            this.focus_pane(pane_id, window, cx);
+                            cx.notify();
+                            cx.stop_propagation();
+                        }
+                        "escape" => {
+                            this.close_focused_file_pane(window, cx);
+                        }
+                        "c" if ev.keystroke.modifiers.platform && !search_open => {
+                            let text = this
+                                .focused_file_view()
+                                .map(|fv| fv.selected_text_for_copy())
+                                .unwrap_or_default();
+                            if !text.is_empty() {
+                                cx.write_to_clipboard(ClipboardItem::new_string(text));
+                            }
+                        }
+                        "a" if ev.keystroke.modifiers.platform && !search_open => {
+                            if let Some(fv) = this.focused_file_view_mut()
+                                && fv.select_all()
+                            {
+                                cx.notify();
+                            }
+                        }
+                        _ => {}
+                    }
+                }))
+            })
+            // The three overlay key interceptors below all capture rather than
+            // bubble: key events dispatch to the focused element first, and
+            // while an overlay is open that is still the terminal — which
+            // forwards every arrow and character to its PTY before the root
+            // ever sees them. Capture runs root → leaf, so these intercept,
+            // and each handler's `stop_propagation` keeps the keystroke out of
+            // the shell.
+            .when(self.command_palette.is_open, |el| {
+                el.capture_key_down(cx.listener(|this, ev: &KeyDownEvent, window, cx| {
+                    this.on_palette_key(ev, window, cx)
+                }))
+            })
+            .when(self.lane_switcher.is_open, |el| {
+                el.capture_key_down(cx.listener(|this, ev: &KeyDownEvent, window, cx| {
+                    this.on_lane_switcher_key(ev, window, cx)
+                }))
+            })
+            .when(self.flow_picker.is_open(), |el| {
+                el.capture_key_down(cx.listener(|this, ev: &KeyDownEvent, window, cx| {
+                    this.on_flow_picker_key(ev, window, cx)
+                }))
+            })
+            .on_mouse_move(cx.listener(|this, ev: &MouseMoveEvent, window, cx| {
+                // A mouse-up released outside the window never reaches the
+                // bubble-phase on_mouse_up below — it fails the root div's
+                // hit-test — so any drag begun inside stays "live". The first
+                // re-entry move carries pressed_button: None: treat that as
+                // the missed release and settle every live drag (dock/divider
+                // resize + file-view text/block selection) instead of
+                // continuing it. The root move handler spans the whole window,
+                // so it catches the release wherever the cursor re-enters.
+                if !ev.dragging() {
+                    this.end_stale_resize_drags(cx);
+                    this.end_file_selection_drag(cx);
+                    this.clear_pane_drop_hover(cx);
+                    this.finish_tab_drag(false, cx);
+                    return;
+                }
+                if let Some(drag) = this.dock_drag {
+                    let cursor_px: f32 = match drag.position {
+                        DockPosition::Left | DockPosition::Right => ev.position.x.into(),
+                        DockPosition::Bottom => ev.position.y.into(),
+                    };
+                    this.update_dock_drag(cursor_px, window, cx);
+                    return;
+                }
+                let Some(drag) = this.main_area.drag_state else {
+                    return;
+                };
+                let cursor_px: f32 = match drag.direction {
+                    SplitDirection::Horizontal => ev.position.x.into(),
+                    SplitDirection::Vertical => ev.position.y.into(),
+                };
+                this.update_divider_drag(cursor_px, window, cx);
+            }))
+            // Bubble phase, so every `on_drop` has already had its shot and a
+            // consumed drop stopped propagation (gpui `div.rs`). Reaching
+            // here means the release hit no drop target at all.
+            .on_mouse_up(
+                MouseButton::Left,
+                cx.listener(|this, _: &MouseUpEvent, _window, cx| {
+                    this.end_divider_drag(cx);
+                    this.end_dock_drag(cx);
+                    this.end_file_selection_drag(cx);
+                    this.clear_pane_drop_hover(cx);
+                    this.finish_tab_drag(false, cx);
+                }),
+            )
+            .on_action(cx.listener(Self::on_new_tab))
+            .on_action(cx.listener(Self::on_close_tab))
+            .on_action(cx.listener(Self::on_close_pane))
+            .on_action(cx.listener(Self::on_next_tab))
+            .on_action(cx.listener(Self::on_prev_tab))
+            .on_action(cx.listener(Self::on_split_right))
+            .on_action(cx.listener(Self::on_split_down))
+            .on_action(cx.listener(Self::on_focus_next_pane))
+            .on_action(cx.listener(Self::on_focus_prev_pane))
+            .on_action(cx.listener(Self::on_focus_pane_left))
+            .on_action(cx.listener(Self::on_focus_pane_right))
+            .on_action(cx.listener(Self::on_focus_pane_up))
+            .on_action(cx.listener(Self::on_focus_pane_down))
+            .on_action(cx.listener(Self::on_move_tab_left))
+            .on_action(cx.listener(Self::on_move_tab_right));
+        // Cmd+1..9 tab quick-switch + Cmd+Ctrl+1..9 lane quick-switch —
+        // each slot is one macro line in `slot_actions.rs`.
+        let workspace_root = crate::tab_slot_table!(@register_listeners cx, workspace_root);
+        let workspace_root = crate::lane_slot_table!(@register_listeners cx, workspace_root);
+        workspace_root
+            .on_action(cx.listener(Self::on_toggle_left_dock))
+            .on_action(cx.listener(Self::on_toggle_git_changes_focus))
+            .on_action(cx.listener(Self::on_toggle_files_focus))
+            .on_action(cx.listener(Self::on_toggle_bottom_dock))
+            .on_action(cx.listener(Self::on_toggle_right_dock))
+            .on_action(cx.listener(Self::on_toggle_command_palette))
+            .on_action(cx.listener(Self::on_toggle_lane_switcher))
+            .on_action(cx.listener(Self::on_run_flow))
+            .on_action(cx.listener(Self::on_validate_flow))
+            .on_action(cx.listener(Self::on_show_flow_graph))
+            .on_action(cx.listener(Self::on_reload_flow_graph))
+            .on_action(cx.listener(Self::on_show_left_dock_worktrees))
+            .on_action(cx.listener(Self::on_show_left_dock_git))
+            .on_action(cx.listener(Self::on_show_left_dock_files))
+            .on_action(cx.listener(Self::on_switch_right_panel_usage))
+            .on_action(cx.listener(Self::on_switch_right_panel_skills))
+            .on_action(cx.listener(Self::on_switch_right_panel_tools))
+            .on_action(cx.listener(Self::on_switch_right_panel_tasks))
+            .on_action(cx.listener(Self::on_switch_right_panel_flows))
+            .on_action(cx.listener(Self::on_new_skill))
+            .on_action(cx.listener(Self::on_new_task))
+            .on_action(cx.listener(Self::on_open_agent_chat))
+            .on_action(cx.listener(Self::on_edit_task))
+            .on_action(cx.listener(Self::on_focus_skill_search))
+            .on_action(cx.listener(Self::on_invoke_skill_palette))
+            .on_action(cx.listener(Self::on_refresh_git_status_action))
+            .on_action(cx.listener(Self::on_commit_changes))
+            .on_action(cx.listener(Self::on_commit_amend_action))
+            .on_action(cx.listener(Self::on_push_changes))
+            .on_action(cx.listener(Self::on_fetch_action))
+            .on_action(cx.listener(Self::on_pull_action))
+            .on_action(cx.listener(Self::on_files_toggle_hidden))
+            .on_action(cx.listener(Self::on_files_select_next))
+            .on_action(cx.listener(Self::on_files_select_prev))
+            .on_action(cx.listener(Self::on_files_activate))
+            .on_action(cx.listener(Self::on_files_expand))
+            .on_action(cx.listener(Self::on_files_collapse))
+            .on_action(cx.listener(Self::on_files_refresh))
+            .on_action(cx.listener(Self::on_git_changes_select_next))
+            .on_action(cx.listener(Self::on_git_changes_select_prev))
+            .on_action(cx.listener(Self::on_git_changes_toggle_stage))
+            .on_action(cx.listener(Self::on_git_changes_activate))
+            .on_action(cx.listener(Self::on_switch_pane_account))
+            .on_action(cx.listener(Self::on_add_managed_account))
+            .on_action(cx.listener(Self::on_reauthenticate_account))
+            .on_action(cx.listener(Self::on_reauthenticate_system))
+            .on_action(cx.listener(Self::on_open_project_config))
+            .on_action(cx.listener(Self::on_install_agent_hooks))
+            .on_action(cx.listener(Self::on_uninstall_agent_hooks))
+            .on_action(cx.listener(Self::on_run_macro_by_shortcut))
+            .on_action(cx.listener(Self::on_edit_window_title))
+            .on_action(cx.listener(Self::on_open_command_history))
+            .on_action(cx.listener(Self::on_close_other_tabs))
+            .on_action(cx.listener(Self::on_close_tabs_to_right))
+            .on_action(cx.listener(Self::on_toggle_zoom_pane))
+            .on_action(cx.listener(Self::on_new_group))
+            .on_action(cx.listener(Self::on_rename_active_project))
+            .on_action(cx.listener(Self::on_move_active_project_to_group))
+            .child(title_bar)
+            .child(body_layout)
+    }
+
+    fn build_status_bar(
+        &self,
+        has_project_config: bool,
+        cx: &mut Context<Self>,
+    ) -> status_bar::StatusBar {
+        // The focused pane's title. AgentChat panes suppress it: their own activity bar already shows
         // the same live title, so repeating it here is redundant
         // (Terminal/File/TaskEdit have no such in-pane title, so they keep
         // using this slot).
@@ -1158,7 +1534,7 @@ impl Workspace {
             // agent-chat pane follows its own agent rather than the session's
             // active one.
             let domain = crate::workspace::main_area::pane::AccountDomain::for_pane(
-                &self.focused_account_pane(cx),
+                &self.focused_account_pane(),
             );
             status_bar::AccountSlot::resolve(
                 focused_pane_id,
@@ -1169,15 +1545,12 @@ impl Workspace {
                 login_pending,
             )
         });
-        let has_project_config = prep.has_project_config;
         // One usage pill per auth domain, reading the same per-account cache
         // the Usage tab does. `usage_account` picks the same sticky account
         // the pump filed under: a domain's own focused account when its pane
         // is (or was last) live, the ambient login otherwise. Domains with
         // nothing to show drop out here, so the renderer never has to decide
-        // whether a pill is worth drawing. `prepare_right_dock_snapshot`
-        // (called earlier this same render pass) is the sticky map's sole
-        // writer — this site only reads what it left behind.
+        // whether a pill is worth drawing.
         let usage: Vec<_> = daruda_store::accounts::AccountRecipeId::all()
             .map(|recipe| {
                 let account = crate::workspace::sync::limits::usage_account(
@@ -1208,362 +1581,16 @@ impl Workspace {
             visible: self.mirrors.status_bar.clone(),
             workspace: weak_workspace.clone(),
         };
-        let status_bar = status_bar::StatusBar(status_data);
-
-        // Key contexts gate search/file-viewer actions on the focused
-        // pane's content. Each open file pane carries its own search
-        // state; "the file viewer" for action-routing purposes is the
-        // one that currently has focus.
-        // Settings covers the file pane, so its tokens must come off with it:
-        // `FileViewerSearch` binds a bare `enter`, and leaving it advertised
-        // while the user types in a settings field would rest on "the action
-        // is unregistered, so the key falls through" — true today, and not a
-        // thing to depend on.
-        let focused_is_file = !in_settings && self.focused_file_view().is_some();
-        let focused_search_open = !in_settings
-            && self
-                .focused_file_view()
-                .is_some_and(|fv| fv.search.is_some());
-        let mut key_ctx = KeyContext::default();
-        key_ctx.add("Workspace");
-        if focused_is_file {
-            key_ctx.add("FileViewer");
-            if focused_search_open {
-                key_ctx.add("FileViewerSearch");
-            }
-        }
-
-        let workspace_root = div()
-            // Toast overlay (and other absolute-positioned children added
-            // later) anchor inside the workspace, not the entire window.
-            .relative()
-            .key_context(key_ctx)
-            .track_focus(&self.focus_handle)
-            .capture_key_down(cx.listener(Self::cancel_drag_on_escape))
-            // Window-level commands: they act on the window itself, not on
-            // anything Settings covers, so both modes answer them.
-            // `OpenSettings` belongs here because it is also how the menu
-            // moves an already-open view to another section.
-            .on_action(cx.listener(Self::on_open_settings))
-            .on_action(cx.listener(Self::on_close_window))
-            .on_action(cx.listener(Self::on_minimize_window))
-            .on_action(cx.listener(Self::on_zoom_window))
-            .on_action(cx.listener(Self::on_toggle_full_screen));
-
-        // Everything below drives the docks, tabs and panes Settings replaces.
-        // Registering them behind it would let a chord mutate a surface nobody
-        // can see. Skipping the block wholesale is also what keeps the *next*
-        // action from being forgotten here: anything added below is gated by
-        // default rather than by someone remembering to gate it.
-        let workspace_root = if in_settings {
-            workspace_root
-        } else {
-            let workspace_root = workspace_root
-                // Search actions — context-gated via KeyBinding context strings in main.rs.
-                .on_action(cx.listener(|this, _: &SaveFilePane, _window, cx| {
-                    this.save_focused_file_pane(cx);
-                }))
-                .on_action(cx.listener(|this, _: &FileViewerSearchOpen, window, cx| {
-                    if let Some(fv) = this.focused_file_view_mut() {
-                        fv.search_open();
-                    }
-                    if let Some(fc) = this.focused_file_content() {
-                        let fh = fc.search_input.read(cx).focus_handle(cx);
-                        fh.focus(window, cx);
-                        cx.notify();
-                    }
-                }))
-                .on_action(cx.listener(|this, _: &FileViewerSearchNext, _window, cx| {
-                    this.file_view_search_next(cx);
-                }))
-                .on_action(cx.listener(|this, _: &FileViewerSearchPrev, _window, cx| {
-                    this.file_view_search_prev(cx);
-                }))
-                // Keyboard shortcuts when the focused pane is a file viewer.
-                // The per-pane Input handles its own typing; this `on_key_down`
-                // owns the panel-level shortcuts (close pane, search close,
-                // copy / select-all when no input is focused).
-                .when(focused_is_file, |el| {
-                    el.on_key_down(cx.listener(|this, ev: &KeyDownEvent, window, cx| {
-                        let search_open = this
-                            .focused_file_view()
-                            .is_some_and(|fv| fv.search.is_some());
-                        match ev.keystroke.key.as_str() {
-                            // Escape while the search panel is open closes it +
-                            // clears the query and restores pane focus.
-                            // `gpui_component::Input` doesn't emit Escape via
-                            // `InputEvent`, so the per-pane subscription can't
-                            // see it; the panel-level handler picks it up.
-                            "escape" if search_open => {
-                                let pane_id = this.active_runtime().focused_pane_id;
-                                if let Some(fc) = this.focused_file_content() {
-                                    let input = fc.search_input.clone();
-                                    input.update(cx, |inp, cx_state| {
-                                        inp.set_value("", window, cx_state)
-                                    });
-                                }
-                                if let Some(fv) = this.focused_file_view_mut() {
-                                    fv.search_close();
-                                }
-                                this.focus_pane(pane_id, window, cx);
-                                cx.notify();
-                                cx.stop_propagation();
-                            }
-                            "escape" => {
-                                this.close_focused_file_pane(window, cx);
-                            }
-                            "c" if ev.keystroke.modifiers.platform && !search_open => {
-                                let text = this
-                                    .focused_file_view()
-                                    .map(|fv| fv.selected_text_for_copy())
-                                    .unwrap_or_default();
-                                if !text.is_empty() {
-                                    cx.write_to_clipboard(ClipboardItem::new_string(text));
-                                }
-                            }
-                            "a" if ev.keystroke.modifiers.platform && !search_open => {
-                                if let Some(fv) = this.focused_file_view_mut()
-                                    && fv.select_all()
-                                {
-                                    cx.notify();
-                                }
-                            }
-                            _ => {}
-                        }
-                    }))
-                })
-                // The three overlay key interceptors below all capture rather than
-                // bubble: key events dispatch to the focused element first, and
-                // while an overlay is open that is still the terminal — which
-                // forwards every arrow and character to its PTY before the root
-                // ever sees them. Capture runs root → leaf, so these intercept,
-                // and each handler's `stop_propagation` keeps the keystroke out of
-                // the shell.
-                .when(self.command_palette.is_open, |el| {
-                    el.capture_key_down(cx.listener(|this, ev: &KeyDownEvent, window, cx| {
-                        this.on_palette_key(ev, window, cx)
-                    }))
-                })
-                .when(self.lane_switcher.is_open, |el| {
-                    el.capture_key_down(cx.listener(|this, ev: &KeyDownEvent, window, cx| {
-                        this.on_lane_switcher_key(ev, window, cx)
-                    }))
-                })
-                .when(self.flow_picker.is_open(), |el| {
-                    el.capture_key_down(cx.listener(|this, ev: &KeyDownEvent, window, cx| {
-                        this.on_flow_picker_key(ev, window, cx)
-                    }))
-                })
-                .on_mouse_move(cx.listener(|this, ev: &MouseMoveEvent, window, cx| {
-                    // A mouse-up released outside the window never reaches the
-                    // bubble-phase on_mouse_up below — it fails the root div's
-                    // hit-test — so any drag begun inside stays "live". The first
-                    // re-entry move carries pressed_button: None: treat that as
-                    // the missed release and settle every live drag (dock/divider
-                    // resize + file-view text/block selection) instead of
-                    // continuing it. The root move handler spans the whole window,
-                    // so it catches the release wherever the cursor re-enters.
-                    if !ev.dragging() {
-                        this.end_stale_resize_drags(cx);
-                        this.end_file_selection_drag(cx);
-                        this.clear_pane_drop_hover(cx);
-                        this.finish_tab_drag(false, cx);
-                        return;
-                    }
-                    if let Some(drag) = this.dock_drag {
-                        let cursor_px: f32 = match drag.position {
-                            DockPosition::Left | DockPosition::Right => ev.position.x.into(),
-                            DockPosition::Bottom => ev.position.y.into(),
-                        };
-                        this.update_dock_drag(cursor_px, window, cx);
-                        return;
-                    }
-                    let Some(drag) = this.main_area.drag_state else {
-                        return;
-                    };
-                    let cursor_px: f32 = match drag.direction {
-                        SplitDirection::Horizontal => ev.position.x.into(),
-                        SplitDirection::Vertical => ev.position.y.into(),
-                    };
-                    this.update_divider_drag(cursor_px, window, cx);
-                }))
-                // Bubble phase, so every `on_drop` has already had its shot and a
-                // consumed drop stopped propagation (gpui `div.rs`). Reaching
-                // here means the release hit no drop target at all.
-                .on_mouse_up(
-                    MouseButton::Left,
-                    cx.listener(|this, _: &MouseUpEvent, _window, cx| {
-                        this.end_divider_drag(cx);
-                        this.end_dock_drag(cx);
-                        this.end_file_selection_drag(cx);
-                        this.clear_pane_drop_hover(cx);
-                        this.finish_tab_drag(false, cx);
-                    }),
-                )
-                .on_action(cx.listener(Self::on_new_tab))
-                .on_action(cx.listener(Self::on_close_tab))
-                .on_action(cx.listener(Self::on_close_pane))
-                .on_action(cx.listener(Self::on_next_tab))
-                .on_action(cx.listener(Self::on_prev_tab))
-                .on_action(cx.listener(Self::on_split_right))
-                .on_action(cx.listener(Self::on_split_down))
-                .on_action(cx.listener(Self::on_focus_next_pane))
-                .on_action(cx.listener(Self::on_focus_prev_pane))
-                .on_action(cx.listener(Self::on_focus_pane_left))
-                .on_action(cx.listener(Self::on_focus_pane_right))
-                .on_action(cx.listener(Self::on_focus_pane_up))
-                .on_action(cx.listener(Self::on_focus_pane_down))
-                .on_action(cx.listener(Self::on_move_tab_left))
-                .on_action(cx.listener(Self::on_move_tab_right));
-            // Cmd+1..9 tab quick-switch + Cmd+Ctrl+1..9 lane quick-switch —
-            // each slot is one macro line in `slot_actions.rs`.
-            let workspace_root = crate::tab_slot_table!(@register_listeners cx, workspace_root);
-            let workspace_root = crate::lane_slot_table!(@register_listeners cx, workspace_root);
-            workspace_root
-                .on_action(cx.listener(Self::on_toggle_left_dock))
-                .on_action(cx.listener(Self::on_toggle_git_changes_focus))
-                .on_action(cx.listener(Self::on_toggle_files_focus))
-                .on_action(cx.listener(Self::on_toggle_bottom_dock))
-                .on_action(cx.listener(Self::on_toggle_right_dock))
-                .on_action(cx.listener(Self::on_toggle_command_palette))
-                .on_action(cx.listener(Self::on_toggle_lane_switcher))
-                .on_action(cx.listener(Self::on_run_flow))
-                .on_action(cx.listener(Self::on_validate_flow))
-                .on_action(cx.listener(Self::on_show_flow_graph))
-                .on_action(cx.listener(Self::on_reload_flow_graph))
-                .on_action(cx.listener(Self::on_show_left_dock_worktrees))
-                .on_action(cx.listener(Self::on_show_left_dock_git))
-                .on_action(cx.listener(Self::on_show_left_dock_files))
-                .on_action(cx.listener(Self::on_switch_right_panel_usage))
-                .on_action(cx.listener(Self::on_switch_right_panel_skills))
-                .on_action(cx.listener(Self::on_switch_right_panel_tools))
-                .on_action(cx.listener(Self::on_switch_right_panel_tasks))
-                .on_action(cx.listener(Self::on_switch_right_panel_flows))
-                .on_action(cx.listener(Self::on_new_skill))
-                .on_action(cx.listener(Self::on_new_task))
-                .on_action(cx.listener(Self::on_open_agent_chat))
-                .on_action(cx.listener(Self::on_edit_task))
-                .on_action(cx.listener(Self::on_focus_skill_search))
-                .on_action(cx.listener(Self::on_invoke_skill_palette))
-                .on_action(cx.listener(Self::on_refresh_git_status_action))
-                .on_action(cx.listener(Self::on_commit_changes))
-                .on_action(cx.listener(Self::on_commit_amend_action))
-                .on_action(cx.listener(Self::on_push_changes))
-                .on_action(cx.listener(Self::on_fetch_action))
-                .on_action(cx.listener(Self::on_pull_action))
-                .on_action(cx.listener(Self::on_files_toggle_hidden))
-                .on_action(cx.listener(Self::on_files_select_next))
-                .on_action(cx.listener(Self::on_files_select_prev))
-                .on_action(cx.listener(Self::on_files_activate))
-                .on_action(cx.listener(Self::on_files_expand))
-                .on_action(cx.listener(Self::on_files_collapse))
-                .on_action(cx.listener(Self::on_files_refresh))
-                .on_action(cx.listener(Self::on_git_changes_select_next))
-                .on_action(cx.listener(Self::on_git_changes_select_prev))
-                .on_action(cx.listener(Self::on_git_changes_toggle_stage))
-                .on_action(cx.listener(Self::on_git_changes_activate))
-                .on_action(cx.listener(Self::on_switch_pane_account))
-                .on_action(cx.listener(Self::on_add_managed_account))
-                .on_action(cx.listener(Self::on_reauthenticate_account))
-                .on_action(cx.listener(Self::on_reauthenticate_system))
-                .on_action(cx.listener(Self::on_open_project_config))
-                .on_action(cx.listener(Self::on_install_agent_hooks))
-                .on_action(cx.listener(Self::on_uninstall_agent_hooks))
-                .on_action(cx.listener(Self::on_run_macro_by_shortcut))
-                .on_action(cx.listener(Self::on_edit_window_title))
-                .on_action(cx.listener(Self::on_open_command_history))
-                .on_action(cx.listener(Self::on_close_other_tabs))
-                .on_action(cx.listener(Self::on_close_tabs_to_right))
-                .on_action(cx.listener(Self::on_toggle_zoom_pane))
-                .on_action(cx.listener(Self::on_new_group))
-                .on_action(cx.listener(Self::on_rename_active_project))
-                .on_action(cx.listener(Self::on_move_active_project_to_group))
-        };
-
-        workspace_root
-            .size_full()
-            .flex()
-            .flex_col()
-            .child(title_bar)
-            // Settings replaces the whole body — docks included. Its own
-            // sidebar does the job the left dock would, and the form needs the
-            // width. `.cached()` is safe because the view notifies itself on
-            // every edit (Pitfall 10), so terminal output repainting the
-            // workspace does not rebuild the form.
-            .child(match self.settings_view() {
-                Some(view) => gpui::AnyView::from(view.clone())
-                    .cached(
-                        gpui::StyleRefinement::default()
-                            .flex_1()
-                            .w_full()
-                            .overflow_hidden(),
-                    )
-                    .into_any_element(),
-                None => body_layout.into_any_element(),
-            })
-            .child(status_bar)
-            // Toast overlay paints last so it floats above the status
-            // bar. ToastLayer owns its queue, expiry sweep, and render;
-            // it notifies only itself when toasts change, sparing the
-            // full Workspace repaint.
-            .child(self.toast_layer.clone())
-            .child(command_palette::CommandPaletteOverlay::new(
-                self.command_palette.clone(),
-                cx.listener(|this, _, _, cx| this.close_command_palette(cx)),
-                cx.listener(|this, index: &usize, window, cx| {
-                    this.pick_palette_row(*index, window, cx)
-                }),
-            ))
-            .child(lane_switcher::LaneSwitcherOverlay::new(
-                self.lane_switcher.clone(),
-                cx.listener(|this, _, _, cx| this.close_lane_switcher(cx)),
-                cx.listener(|this, index: &usize, window, cx| {
-                    this.pick_lane_switcher_row(*index, window, cx)
-                }),
-            ))
-            .child(flow_picker::FlowPickerOverlay::new(
-                self.flow_picker.clone(),
-                self.flow_picker.prompt(),
-                crate::surface::strings::flow_picker_empty(),
-                crate::surface::strings::flow_stop_prompt(),
-                crate::surface::strings::flow_stop_action(),
-                cx.listener(|this, _, _, cx| this.close_flow_picker(cx)),
-                cx.listener(|this, index: &usize, window, cx| {
-                    this.pick_flow_row(*index, window, cx)
-                }),
-            ))
-            // Imperative PopupMenu deploy overlay. `PopupMenu` already
-            // dismisses itself on outside click / Escape / confirmed click
-            // (see `PopupMenuDeploy`'s dismiss subscription); the callback
-            // below just routes that back into `close_context_menu`.
-            .when_some(
-                self.main_area
-                    .popup_menu_deploy
-                    .as_ref()
-                    .map(|d| (d.menu.clone(), d.position)),
-                |el, (menu, position)| {
-                    let weak = cx.entity().downgrade();
-                    el.child(crate::ui::popup_menu_deferred(
-                        &menu,
-                        position,
-                        move |window, cx| {
-                            if let Some(ws) = weak.upgrade() {
-                                ws.update(cx, |ws, cx| ws.close_context_menu(window, cx));
-                            }
-                        },
-                    ))
-                },
-            )
-            // gpui_component overlay layers. The window root is
-            // `gpui_component::Root`, but `Root::render` only
-            // renders the inner view — Dialog/Sheet/Notification layers
-            // must be rendered by the inner view explicitly. Without
-            // these, `window.open_dialog(...)` registers a dialog into
-            // `Root.active_dialogs` but nothing ever paints it.
-            .children(gpui_component::Root::render_sheet_layer(window, cx))
-            .children(gpui_component::Root::render_dialog_layer(window, cx))
-            .children(gpui_component::Root::render_notification_layer(window, cx))
+        status_bar::StatusBar(status_data)
     }
+}
+
+/// The key context both frames start from; the workspace frame adds the
+/// focused pane's tokens to it.
+fn root_key_context() -> KeyContext {
+    let mut key_ctx = KeyContext::default();
+    key_ctx.add("Workspace");
+    key_ctx
 }
 
 #[cfg(test)]

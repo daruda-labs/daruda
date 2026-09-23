@@ -269,7 +269,7 @@ impl Workspace {
             .filter(|&(pane_id, selection)| {
                 let pane_target = selection.and_then(|selection| {
                     let domain = crate::workspace::main_area::pane::AccountDomain::for_pane(
-                        &self.account_pane_for(pane_id, cx),
+                        &self.account_pane_for(pane_id),
                     );
                     crate::workspace::account_login_ops::pane_login_target(
                         selection,
