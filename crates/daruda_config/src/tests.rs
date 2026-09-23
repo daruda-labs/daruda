@@ -820,6 +820,88 @@ fn resetting_a_field_removes_only_its_key() {
     assert_eq!(Config::load_from(&path).font.terminal.line_height, 1.5);
 }
 
+/// Reset lands on the default even when the file still spells the field
+/// the way an older release did — the old spelling is carried away first.
+#[test]
+fn resetting_reaches_the_default_through_legacy_spellings() {
+    use crate::SettingsPatch as P;
+    let d = Config::default();
+    let cases: [(&str, P); 5] = [
+        (
+            "[theme]\npreset = \"dracula\"\n",
+            P::TerminalPreset(d.theme.terminal_preset.clone()),
+        ),
+        (
+            "[font]\nsize = 18.0\n",
+            P::TerminalFontSize(d.font.terminal.size),
+        ),
+        (
+            "[font]\nsize = 18.0\n\n[font.terminal]\nsize = 20.0\n",
+            P::TerminalFontSize(d.font.terminal.size),
+        ),
+        (
+            "[telegram]\ndefer_while_active = false\n",
+            P::TelegramOnlyWhenAway(d.telegram.only_when_away),
+        ),
+        (
+            "[telegram]\naway_grace_secs = 99\n",
+            P::PresenceGraceSecs(d.presence.away_grace_secs),
+        ),
+    ];
+    for (text, default) in cases {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("config.toml");
+        std::fs::write(&path, text).unwrap();
+        let before = Config::load_from(&path);
+        crate::reset_settings_field_to_if_unchanged(&default, &before, &path).unwrap();
+        let after = Config::load_from(&path);
+        assert!(
+            !default.field_changed_between(&after, &Config::default()),
+            "{text:?} did not reset: {}",
+            std::fs::read_to_string(&path).unwrap()
+        );
+    }
+}
+
+/// Resetting the terminal font through the old shared `family` key keeps
+/// the editor on the family the user had chosen.
+#[test]
+fn resetting_a_shared_flat_font_key_keeps_the_other_domain() {
+    use crate::SettingsPatch as P;
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("config.toml");
+    std::fs::write(&path, "[font]\nfamily = \"Iosevka\"\n").unwrap();
+    let before = Config::load_from(&path);
+    let default = P::TerminalFontFamily(Config::default().font.terminal.family.clone());
+    crate::reset_settings_field_to_if_unchanged(&default, &before, &path).unwrap();
+    let after = Config::load_from(&path);
+    assert_eq!(
+        after.font.terminal.family,
+        Config::default().font.terminal.family
+    );
+    assert_eq!(after.font.editor.family, "Iosevka");
+}
+
+/// Editing one font field writes that key alone, so a field reset earlier
+/// stays unwritten and keeps following the default.
+#[test]
+fn a_font_edit_does_not_pin_a_reset_font_key() {
+    use crate::SettingsPatch as P;
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("config.toml");
+    crate::apply_settings_patch_to(&P::TerminalFontSize(20.0), &path).unwrap();
+    let before = Config::load_from(&path);
+    let default = P::TerminalFontSize(Config::default().font.terminal.size);
+    crate::reset_settings_field_to_if_unchanged(&default, &before, &path).unwrap();
+    crate::apply_settings_patch_to(&P::EditorFontSize(15.0), &path).unwrap();
+
+    let text = std::fs::read_to_string(&path).unwrap();
+    let doc: toml_edit::DocumentMut = text.parse().unwrap();
+    let terminal = doc["font"].get("terminal").and_then(|t| t.as_table_like());
+    assert!(terminal.is_none_or(|t| !t.contains_key("size")), "{text}");
+    assert_eq!(Config::load_from(&path).font.editor.size, 15.0);
+}
+
 /// A field that moved on disk since the window read it is not reset.
 #[test]
 fn resetting_a_field_changed_on_disk_is_a_conflict() {

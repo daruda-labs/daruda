@@ -557,19 +557,30 @@ fn apply_settings_patch_to_inner(
 
         patch.apply_to(&mut config);
         config.clamp();
+        migrate_legacy_keys(&mut doc, patch.field());
         match mode {
             WriteMode::Set => patch_settings_document(&mut doc, &config, patch),
             WriteMode::Remove => remove_key_path(&mut doc, patch.field().path()),
         }
         remove_legacy_agent_keys_from(&mut doc, &config);
 
-        let text = doc.to_string();
-        let mut written = deserialize_config(&text).map_err(|e| {
-            SettingsPatchApplyError::Persistence(format!(
-                "written config could not be reloaded: {e}"
-            ))
-        })?;
-        written.clamp();
+        let reload = |doc: &toml_edit::DocumentMut| {
+            let text = doc.to_string();
+            let mut written = deserialize_config(&text).map_err(|e| {
+                SettingsPatchApplyError::Persistence(format!(
+                    "written config could not be reloaded: {e}"
+                ))
+            })?;
+            written.clamp();
+            Ok::<_, SettingsPatchApplyError>((text, written))
+        };
+        let (mut text, mut written) = reload(&doc)?;
+        // A reset must land on the default. If a spelling this function does
+        // not know still feeds the field, write the default instead.
+        if matches!(mode, WriteMode::Remove) && patch.field_changed_between(&written, &config) {
+            patch_settings_document(&mut doc, &config, patch);
+            (text, written) = reload(&doc)?;
+        }
         if write_config_text_atomic(path, &text, Some(&existing))
             .map_err(SettingsPatchApplyError::Persistence)?
         {
@@ -798,8 +809,6 @@ pub fn patch_config_file_to(config: &Config, path: &std::path::Path) -> Result<(
     write_config_text_atomic(path, &doc.to_string(), None).map(|_| ())
 }
 
-/// Patch one section at a time. Creates the table if absent so saving from a
-/// fresh install produces a minimal document.
 /// [`patch_section`] for a table nested under others (`[usage.poll]`),
 /// creating each missing level. A dotted name passed to `patch_section`
 /// would instead make one quoted table, `["usage.poll"]`.
@@ -826,6 +835,8 @@ fn patch_nested_section(
     f(table);
 }
 
+/// Patch one section at a time. Creates the table if absent so saving from a
+/// fresh install produces a minimal document.
 fn patch_section(
     doc: &mut toml_edit::DocumentMut,
     key: &str,
@@ -897,6 +908,111 @@ fn patch_font_config(doc: &mut toml_edit::DocumentMut, font: &FontConfig) {
             toml_edit::value(f64::from(font.agent_chat.line_height)),
         );
     });
+}
+
+fn font_key(
+    doc: &mut toml_edit::DocumentMut,
+    domain: &str,
+    key: &str,
+    value: impl Into<toml_edit::Value>,
+) {
+    let value = value.into();
+    patch_font_domain(doc, domain, |t| {
+        t.insert(key, toml_edit::Item::Value(value));
+    });
+}
+
+/// Flat `[font]` keys an older release wrote, and where each is read now.
+/// `family` fed both the terminal and the editor.
+const FLAT_FONT_KEYS: &[(&str, &[(&str, &str)])] = &[
+    ("family", &[("terminal", "family"), ("editor", "family")]),
+    ("size", &[("terminal", "size")]),
+    ("editor_size", &[("editor", "size")]),
+    ("agent_chat_size", &[("agent_chat", "size")]),
+    ("vertical_spacing", &[("terminal", "line_height")]),
+    ("horizontal_spacing", &[("terminal", "cell_width")]),
+    ("inset_x", &[("terminal", "inset_x")]),
+    ("inset_y", &[("terminal", "inset_y")]),
+];
+
+/// Carry the keys an older release spelled differently to where `field` is
+/// read now, so neither a write nor a reset of `field` is undone by the old
+/// spelling. A key already at its new place wins, as it does on load.
+fn migrate_legacy_keys(doc: &mut toml_edit::DocumentMut, field: SettingsFieldId) {
+    use SettingsFieldId as F;
+    match field {
+        F::TerminalPreset => move_key(doc, "theme", "preset", &["theme"], "terminal_preset"),
+        F::TelegramOnlyWhenAway => move_key(
+            doc,
+            "telegram",
+            "defer_while_active",
+            &["telegram"],
+            "only_when_away",
+        ),
+        F::PresenceIdleSecs => move_key(
+            doc,
+            "telegram",
+            "active_idle_secs",
+            &["presence"],
+            "away_idle_secs",
+        ),
+        F::PresenceGraceSecs => move_key(
+            doc,
+            "telegram",
+            "away_grace_secs",
+            &["presence"],
+            "away_grace_secs",
+        ),
+        F::TerminalFontFamily
+        | F::TerminalFontSize
+        | F::TerminalLineHeight
+        | F::TerminalCellWidth
+        | F::TerminalInsetX
+        | F::TerminalInsetY
+        | F::EditorFontFamily
+        | F::EditorFontSize
+        | F::EditorLineHeight
+        | F::AgentChatFontFamily
+        | F::AgentChatFontSize
+        | F::AgentChatLineHeight => migrate_flat_font_keys(doc),
+        _ => {}
+    }
+}
+
+/// Move `[from] key` to `to.new_key` unless the new key is already set.
+fn move_key(doc: &mut toml_edit::DocumentMut, from: &str, key: &str, to: &[&str], new_key: &str) {
+    let Some(item) = doc
+        .get_mut(from)
+        .and_then(toml_edit::Item::as_table_like_mut)
+        .and_then(|t| t.remove(key))
+    else {
+        return;
+    };
+    patch_nested_section(doc, to, |t| {
+        if !t.contains_key(new_key) {
+            t.insert(new_key, item);
+        }
+    });
+}
+
+fn migrate_flat_font_keys(doc: &mut toml_edit::DocumentMut) {
+    for (flat, targets) in FLAT_FONT_KEYS {
+        let Some(item) = doc
+            .get_mut("font")
+            .and_then(toml_edit::Item::as_table_like_mut)
+            .and_then(|t| t.remove(flat))
+        else {
+            continue;
+        };
+        for (domain, key) in *targets {
+            let item = item.clone();
+            patch_font_domain(doc, domain, |t| {
+                if !t.contains_key(key) {
+                    t.insert(key, item);
+                }
+            });
+        }
+    }
 }
 
 fn patch_font_domain(
@@ -1015,7 +1131,6 @@ fn patch_settings_document(
             );
         }),
         SettingsPatch::TerminalPreset(_) => patch_section(doc, "theme", |t| {
-            t.remove("preset");
             t.insert(
                 "terminal_preset",
                 toml_edit::value(config.theme.terminal_preset.clone()),
@@ -1027,18 +1142,74 @@ fn patch_settings_document(
                 toml_edit::value(config.theme.ui_preset.clone()),
             );
         }),
-        SettingsPatch::TerminalFontFamily(_)
-        | SettingsPatch::TerminalFontSize(_)
-        | SettingsPatch::TerminalLineHeight(_)
-        | SettingsPatch::TerminalCellWidth(_)
-        | SettingsPatch::EditorFontFamily(_)
-        | SettingsPatch::EditorFontSize(_)
-        | SettingsPatch::EditorLineHeight(_)
-        | SettingsPatch::AgentChatFontFamily(_)
-        | SettingsPatch::AgentChatFontSize(_)
-        | SettingsPatch::AgentChatLineHeight(_)
-        | SettingsPatch::TerminalInsetX(_)
-        | SettingsPatch::TerminalInsetY(_) => patch_font_config(doc, &config.font),
+        // One key each: rewriting the whole `[font]` tree would pin every
+        // other font field, including one just reset, to its current value.
+        SettingsPatch::TerminalFontFamily(_) => font_key(
+            doc,
+            "terminal",
+            "family",
+            config.font.terminal.family.clone(),
+        ),
+        SettingsPatch::TerminalFontSize(_) => font_key(
+            doc,
+            "terminal",
+            "size",
+            f64::from(config.font.terminal.size),
+        ),
+        SettingsPatch::TerminalLineHeight(_) => font_key(
+            doc,
+            "terminal",
+            "line_height",
+            f64::from(config.font.terminal.line_height),
+        ),
+        SettingsPatch::TerminalCellWidth(_) => font_key(
+            doc,
+            "terminal",
+            "cell_width",
+            f64::from(config.font.terminal.cell_width),
+        ),
+        SettingsPatch::TerminalInsetX(_) => font_key(
+            doc,
+            "terminal",
+            "inset_x",
+            f64::from(config.font.terminal.inset_x),
+        ),
+        SettingsPatch::TerminalInsetY(_) => font_key(
+            doc,
+            "terminal",
+            "inset_y",
+            f64::from(config.font.terminal.inset_y),
+        ),
+        SettingsPatch::EditorFontFamily(_) => {
+            font_key(doc, "editor", "family", config.font.editor.family.clone())
+        }
+        SettingsPatch::EditorFontSize(_) => {
+            font_key(doc, "editor", "size", f64::from(config.font.editor.size))
+        }
+        SettingsPatch::EditorLineHeight(_) => font_key(
+            doc,
+            "editor",
+            "line_height",
+            f64::from(config.font.editor.line_height),
+        ),
+        SettingsPatch::AgentChatFontFamily(_) => font_key(
+            doc,
+            "agent_chat",
+            "family",
+            config.font.agent_chat.family.clone(),
+        ),
+        SettingsPatch::AgentChatFontSize(_) => font_key(
+            doc,
+            "agent_chat",
+            "size",
+            f64::from(config.font.agent_chat.size),
+        ),
+        SettingsPatch::AgentChatLineHeight(_) => font_key(
+            doc,
+            "agent_chat",
+            "line_height",
+            f64::from(config.font.agent_chat.line_height),
+        ),
         SettingsPatch::CursorStyle(_) => patch_section(doc, "cursor", |t| {
             let value = match config.cursor.style {
                 CursorStyle::Block => "block",

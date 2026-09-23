@@ -45,6 +45,10 @@ fn bounded<T: std::str::FromStr + PartialOrd>(
         .ok_or_else(err)
 }
 
+/// The largest integer `config.toml` can hold; a `u64` field above it would
+/// wrap when written as TOML's signed 64-bit integer.
+const MAX_TOML_INT: u64 = i64::MAX as u64;
+
 /// A numeric setting shown as a text input.
 pub(super) struct TextSpec {
     pub(super) setting: TextSetting,
@@ -279,8 +283,13 @@ pub(super) const TEXT_SETTINGS: &[TextSpec] = &[
         show: |c| c.usage.poll.limits_secs.to_string(),
         current: |c| SettingsPatch::UsageLimitsPollSecs(c.usage.poll.limits_secs),
         parse: |input, cx| {
-            bounded(input, 0.., || s::settings_err_whole_number().into(), cx)
-                .map(SettingsPatch::UsageLimitsPollSecs)
+            bounded(
+                input,
+                0..=MAX_TOML_INT,
+                || s::settings_err_whole_number().into(),
+                cx,
+            )
+            .map(SettingsPatch::UsageLimitsPollSecs)
         },
     },
     TextSpec {
@@ -291,8 +300,13 @@ pub(super) const TEXT_SETTINGS: &[TextSpec] = &[
         show: |c| c.usage.poll.status_secs.to_string(),
         current: |c| SettingsPatch::UsageStatusPollSecs(c.usage.poll.status_secs),
         parse: |input, cx| {
-            bounded(input, 0.., || s::settings_err_whole_number().into(), cx)
-                .map(SettingsPatch::UsageStatusPollSecs)
+            bounded(
+                input,
+                0..=MAX_TOML_INT,
+                || s::settings_err_whole_number().into(),
+                cx,
+            )
+            .map(SettingsPatch::UsageStatusPollSecs)
         },
     },
     TextSpec {
@@ -303,8 +317,13 @@ pub(super) const TEXT_SETTINGS: &[TextSpec] = &[
         show: |c| c.ports.poll_secs.to_string(),
         current: |c| SettingsPatch::PortsPollSecs(c.ports.poll_secs),
         parse: |input, cx| {
-            bounded(input, 2.., || s::settings_err_ports_poll().into(), cx)
-                .map(SettingsPatch::PortsPollSecs)
+            bounded(
+                input,
+                2..=MAX_TOML_INT,
+                || s::settings_err_ports_poll().into(),
+                cx,
+            )
+            .map(SettingsPatch::PortsPollSecs)
         },
     },
     TextSpec {
@@ -339,8 +358,13 @@ pub(super) const TEXT_SETTINGS: &[TextSpec] = &[
         show: |c| c.presence.away_grace_secs.to_string(),
         current: |c| SettingsPatch::PresenceGraceSecs(c.presence.away_grace_secs),
         parse: |input, cx| {
-            bounded(input, 0.., || s::settings_err_whole_number().into(), cx)
-                .map(SettingsPatch::PresenceGraceSecs)
+            bounded(
+                input,
+                0..=MAX_TOML_INT,
+                || s::settings_err_whole_number().into(),
+                cx,
+            )
+            .map(SettingsPatch::PresenceGraceSecs)
         },
     },
     TextSpec {
@@ -351,8 +375,13 @@ pub(super) const TEXT_SETTINGS: &[TextSpec] = &[
         show: |c| c.presence.away_idle_secs.to_string(),
         current: |c| SettingsPatch::PresenceIdleSecs(c.presence.away_idle_secs),
         parse: |input, cx| {
-            bounded(input, 0.., || s::settings_err_whole_number().into(), cx)
-                .map(SettingsPatch::PresenceIdleSecs)
+            bounded(
+                input,
+                0..=MAX_TOML_INT,
+                || s::settings_err_whole_number().into(),
+                cx,
+            )
+            .map(SettingsPatch::PresenceIdleSecs)
         },
     },
     TextSpec {
@@ -365,8 +394,13 @@ pub(super) const TEXT_SETTINGS: &[TextSpec] = &[
             SettingsPatch::PresenceIdleForegroundSecs(c.presence.away_idle_foreground_secs)
         },
         parse: |input, cx| {
-            bounded(input, 0.., || s::settings_err_whole_number().into(), cx)
-                .map(SettingsPatch::PresenceIdleForegroundSecs)
+            bounded(
+                input,
+                0..=MAX_TOML_INT,
+                || s::settings_err_whole_number().into(),
+                cx,
+            )
+            .map(SettingsPatch::PresenceIdleForegroundSecs)
         },
     },
     TextSpec {
