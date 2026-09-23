@@ -1036,6 +1036,7 @@ settings:
   confirm_unpair_telegram_title: "Telegram 페어링을 해제할까요?"
   confirm_unpair_body: "페어링된 채팅이 더 이상 daruda에 닿지 않습니다. 다시 페어링하려면 새 코드가 필요합니다."
   confirm_ok_unpair: "페어링 해제"
+  confirm_remove_named: "“%{name}”을(를) 제거할까요?"
   confirm_remove_session_host_title: "이 세션 호스트를 제거할까요?"
   confirm_remove_from_config_body: "config.toml에서 이 항목을 제거합니다."
   confirm_ok_remove: "제거"

@@ -32,20 +32,61 @@ fn removing_a_catalog_agent_waits_for_confirmation(cx: &mut TestAppContext) {
     assert_eq!(win.read_with(cx, |w, _| w.agent_catalog.len()), before);
 }
 
+fn two_hosts() -> daruda_config::Config {
+    let host = |label: &str| daruda_config::SessionHostEntry {
+        id: daruda_store::project::SessionHostId::new(),
+        label: label.to_string(),
+        kind: daruda_config::SessionHostKind::Ssh {
+            target: format!("{label}.example"),
+        },
+    };
+    daruda_config::Config {
+        session_hosts: vec![host("alpha"), host("beta")],
+        ..daruda_config::Config::default()
+    }
+}
+
 #[gpui::test]
-fn removing_a_session_host_waits_for_confirmation(cx: &mut TestAppContext) {
-    let (wh, win) = build_window(cx);
-    let win_for_add = win.clone();
-    wh.update(cx, |_root, window, cx| {
-        win_for_add.update(cx, |view, cx| view.add_session_host_row(window, cx));
-    })
-    .unwrap();
+fn removing_a_saved_session_host_waits_for_confirmation(cx: &mut TestAppContext) {
+    let (wh, win) = build_window_with_config(cx, two_hosts());
     let before = win.read_with(cx, |w, _| w.session_host_rows.len());
 
     assert!(opens_a_dialog(cx, wh, &win, |view, window, cx| {
         view.request_remove_session_host_row(0, window, cx)
     }));
     assert_eq!(win.read_with(cx, |w, _| w.session_host_rows.len()), before);
+}
+
+/// A row nothing outside the window knows yet goes without a dialog.
+#[gpui::test]
+fn removing_an_unsaved_session_host_needs_no_confirmation(cx: &mut TestAppContext) {
+    let (wh, win) = build_window(cx);
+    let win_for_add = win.clone();
+    wh.update(cx, |_root, window, cx| {
+        win_for_add.update(cx, |view, cx| view.add_session_host_row(window, cx));
+    })
+    .unwrap();
+
+    assert!(!opens_a_dialog(cx, wh, &win, |view, window, cx| {
+        view.request_remove_session_host_row(0, window, cx)
+    }));
+    assert!(win.read_with(cx, |w, _| w.session_host_rows.is_empty()));
+}
+
+/// The dialog's OK removes the host it was opened for even after the list
+/// shifted under it — here the host ahead of it went first.
+#[gpui::test]
+fn a_confirmed_removal_follows_the_host_not_its_position(cx: &mut TestAppContext) {
+    let (_wh, win) = build_window_with_config(cx, two_hosts());
+    win.update(cx, |w, cx| {
+        let beta = w.session_host_rows[1].id;
+        w.remove_session_host_row(0, cx);
+        w.remove_session_host_by_id(&beta, cx);
+        assert!(
+            w.session_host_rows.is_empty(),
+            "beta, not whatever sat at 1"
+        );
+    });
 }
 
 #[gpui::test]

@@ -1037,6 +1037,7 @@ settings:
   confirm_unpair_telegram_title: "Unpair Telegram?"
   confirm_unpair_body: "The paired chat can no longer reach daruda. Pairing again needs a new code."
   confirm_ok_unpair: "Unpair"
+  confirm_remove_named: "Remove “%{name}”?"
   confirm_remove_session_host_title: "Remove this session host?"
   confirm_remove_from_config_body: "Its entry is removed from config.toml."
   confirm_ok_remove: "Remove"

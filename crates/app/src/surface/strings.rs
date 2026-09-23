@@ -5013,6 +5013,10 @@ pub fn settings_confirm_ok_unpair() -> String {
     rust_i18n::t!("settings.confirm_ok_unpair").into_owned()
 }
 
+pub fn settings_confirm_remove_named(name: &str) -> String {
+    rust_i18n::t!("settings.confirm_remove_named", name = name).into_owned()
+}
+
 pub fn settings_confirm_remove_session_host_title() -> String {
     rust_i18n::t!("settings.confirm_remove_session_host_title").into_owned()
 }
