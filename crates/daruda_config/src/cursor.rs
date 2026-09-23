@@ -14,9 +14,11 @@ pub enum CursorStyle {
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(default)]
 pub struct CursorConfig {
-    /// Cursor shape. Programs can override this via DECSCUSR.
+    /// Cursor shape while the program has not chosen one. A DECSCUSR
+    /// request from the program wins.
     pub style: CursorStyle,
-    /// Whether the cursor blinks when idle.
+    /// Not implemented: the terminal renderer never blinks the cursor, so
+    /// this is read and ignored. Kept so existing files still parse.
     pub blinking: bool,
 }
 

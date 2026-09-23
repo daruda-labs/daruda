@@ -89,13 +89,7 @@ impl SettingsView {
             .child(self.select_row(
                 S::CursorStyle,
                 s::settings_label_cursor_style(),
-                String::new(),
-                cx,
-            ))
-            .child(self.switch_row(
-                B::CursorBlinking,
-                s::settings_label_cursor_blinking(),
-                String::new(),
+                s::settings_hint_cursor_style(),
                 cx,
             ))
             .into_any_element()

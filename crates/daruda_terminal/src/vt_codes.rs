@@ -20,6 +20,23 @@ pub const CSI_ALT_SCREEN: u32 = 1047;
 /// This is the variant used by most modern TUI applications.
 pub const CSI_ALT_SCREEN_SAVE_CURSOR: u32 = 1049;
 
+// ============================================================================
+// DECSCUSR — cursor shape (`CSI Ps SP q`)
+// ============================================================================
+
+/// No shape requested; the terminal's configured default applies.
+pub const DECSCUSR_DEFAULT: u8 = 0;
+/// Steady block.
+pub const DECSCUSR_STEADY_BLOCK: u8 = 2;
+/// Blinking underline.
+pub const DECSCUSR_BLINK_UNDERLINE: u8 = 3;
+/// Steady underline.
+pub const DECSCUSR_STEADY_UNDERLINE: u8 = 4;
+/// Blinking bar.
+pub const DECSCUSR_BLINK_BAR: u8 = 5;
+/// Steady bar.
+pub const DECSCUSR_STEADY_BAR: u8 = 6;
+
 /// DEC private modes we track. Any `Ps` not listed here is forwarded
 /// unchanged to ghostty_vt.
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]

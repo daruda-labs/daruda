@@ -19,7 +19,6 @@ pub enum SettingsFieldId {
     AgentChatFontSize,
     AgentChatLineHeight,
     CursorStyle,
-    CursorBlinking,
     AgentUseModifierToSend,
     AgentUseReadingWidth,
     AgentCatalog,
@@ -64,7 +63,6 @@ impl SettingsFieldId {
             Self::AgentChatFontSize => "font.agent_chat.size",
             Self::AgentChatLineHeight => "font.agent_chat.line_height",
             Self::CursorStyle => "cursor.style",
-            Self::CursorBlinking => "cursor.blinking",
             Self::AgentUseModifierToSend => "agent.use_modifier_to_send",
             Self::AgentUseReadingWidth => "agent.use_reading_width",
             Self::AgentCatalog => "agents",
@@ -112,7 +110,6 @@ pub enum SettingsPatch {
     AgentChatFontSize(f32),
     AgentChatLineHeight(f32),
     CursorStyle(CursorStyle),
-    CursorBlinking(bool),
     AgentUseModifierToSend(bool),
     AgentUseReadingWidth(bool),
     AgentCatalog(Vec<AgentEntry>),
@@ -163,7 +160,6 @@ impl SettingsPatch {
             Self::AgentChatFontSize(_) => SettingsFieldId::AgentChatFontSize,
             Self::AgentChatLineHeight(_) => SettingsFieldId::AgentChatLineHeight,
             Self::CursorStyle(_) => SettingsFieldId::CursorStyle,
-            Self::CursorBlinking(_) => SettingsFieldId::CursorBlinking,
             Self::AgentUseModifierToSend(_) => SettingsFieldId::AgentUseModifierToSend,
             Self::AgentUseReadingWidth(_) => SettingsFieldId::AgentUseReadingWidth,
             Self::AgentCatalog(_) => SettingsFieldId::AgentCatalog,
@@ -210,7 +206,6 @@ impl SettingsPatch {
             Self::AgentChatFontSize(value) => config.font.agent_chat.size = *value,
             Self::AgentChatLineHeight(value) => config.font.agent_chat.line_height = *value,
             Self::CursorStyle(value) => config.cursor.style = *value,
-            Self::CursorBlinking(value) => config.cursor.blinking = *value,
             Self::AgentUseModifierToSend(value) => config.agent.use_modifier_to_send = *value,
             Self::AgentUseReadingWidth(value) => config.agent.use_reading_width = *value,
             Self::AgentCatalog(value) => config.agents = value.clone(),
@@ -275,7 +270,6 @@ impl SettingsPatch {
                 left.font.agent_chat.line_height != right.font.agent_chat.line_height
             }
             Self::CursorStyle(_) => left.cursor.style != right.cursor.style,
-            Self::CursorBlinking(_) => left.cursor.blinking != right.cursor.blinking,
             Self::AgentUseModifierToSend(_) => {
                 left.agent.use_modifier_to_send != right.agent.use_modifier_to_send
             }

@@ -4186,6 +4186,10 @@ pub fn settings_hint_reading_width() -> String {
     rust_i18n::t!("settings.hint_reading_width").into_owned()
 }
 
+pub fn settings_hint_cursor_style() -> String {
+    rust_i18n::t!("settings.hint_cursor_style").into_owned()
+}
+
 pub fn settings_hint_line_height() -> String {
     rust_i18n::t!("settings.hint_line_height").into_owned()
 }
@@ -4246,9 +4250,6 @@ pub fn settings_label_cell_width() -> String {
 }
 pub fn settings_label_cursor_style() -> String {
     rust_i18n::t!("settings.label_cursor_style").into_owned()
-}
-pub fn settings_label_cursor_blinking() -> String {
-    rust_i18n::t!("settings.label_cursor_blinking").into_owned()
 }
 pub fn settings_label_max_fps() -> String {
     rust_i18n::t!("settings.label_max_fps").into_owned()

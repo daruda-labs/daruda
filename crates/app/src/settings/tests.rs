@@ -84,19 +84,19 @@ fn validate_accepts_defaults(cx: &mut TestAppContext) {
 fn boolean_setting_applies_immediately(cx: &mut TestAppContext) {
     let (_wh, win) = build_window(cx);
     win.update(cx, |window, cx| {
-        let next = !window.cursor_blinking;
-        window.set_bool_setting(BoolSetting::CursorBlinking, next, cx);
+        let next = !window.window_blur;
+        window.set_bool_setting(BoolSetting::WindowBlur, next, cx);
         assert!(window.error.is_none());
-        assert_eq!(window.cursor_blinking, next);
+        assert_eq!(window.window_blur, next);
     });
 
     win.read_with(cx, |window, cx| {
         assert_eq!(
             crate::settings_store::SettingsStore::global(cx)
                 .user()
-                .cursor
-                .blinking,
-            window.cursor_blinking
+                .window
+                .blur,
+            window.window_blur
         );
     });
 }
@@ -296,21 +296,21 @@ fn conflict_can_reload_the_external_value(cx: &mut TestAppContext) {
 #[gpui::test]
 fn boolean_conflict_overwrite_updates_store_and_visible_value(cx: &mut TestAppContext) {
     let (wh, win) = build_window(cx);
-    let desired = win.read_with(cx, |window, _| !window.cursor_blinking);
+    let desired = win.read_with(cx, |window, _| !window.window_blur);
     win.update(cx, |window, cx| {
-        window.cursor_blinking = desired;
+        window.window_blur = desired;
         cx.notify();
     });
     cx.update(|cx| {
         cx.update_global::<crate::settings_store::SettingsStore, _>(|store, _| {
             store
-                .apply_patch(daruda_config::SettingsPatch::CursorBlinking(desired))
+                .apply_patch(daruda_config::SettingsPatch::WindowBlur(desired))
                 .expect("external edit");
         });
     });
 
     win.update(cx, |window, cx| {
-        assert!(!window.persist_bool_setting(BoolSetting::CursorBlinking, desired, cx));
+        assert!(!window.persist_bool_setting(BoolSetting::WindowBlur, desired, cx));
         assert!(window.conflict.is_some());
     });
     let win_for_overwrite = win.clone();
@@ -323,12 +323,12 @@ fn boolean_conflict_overwrite_updates_store_and_visible_value(cx: &mut TestAppCo
 
     win.read_with(cx, |window, cx| {
         assert!(window.conflict.is_none());
-        assert_eq!(window.cursor_blinking, desired);
+        assert_eq!(window.window_blur, desired);
         assert_eq!(
             crate::settings_store::SettingsStore::global(cx)
                 .user()
-                .cursor
-                .blinking,
+                .window
+                .blur,
             desired
         );
     });
@@ -2330,16 +2330,16 @@ fn basic_toggles_and_section_focus(cx: &mut TestAppContext) {
         assert_eq!(w.active_section(), BuiltinSection::General);
     });
 
-    let (initial_cursor, initial_close) =
-        win.read_with(cx, |w, _| (w.cursor_blinking, w.close_pane_on_exit));
+    let (initial_blur, initial_close) =
+        win.read_with(cx, |w, _| (w.window_blur, w.close_pane_on_exit));
     win.update(cx, |w, cx| {
-        w.cursor_blinking = !w.cursor_blinking;
+        w.window_blur = !w.window_blur;
         w.close_pane_on_exit = !w.close_pane_on_exit;
         cx.notify();
     });
     win.read_with(cx, |w, cx| {
         let cfg = w.validate(cx).expect("toggled settings must validate");
-        assert_eq!(cfg.cursor.blinking, !initial_cursor);
+        assert_eq!(cfg.window.blur, !initial_blur);
         assert_eq!(cfg.shell.close_pane_on_exit, !initial_close);
     });
 

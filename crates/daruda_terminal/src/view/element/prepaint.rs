@@ -620,7 +620,11 @@ impl TerminalTextElement {
             let search_overlay = view.state.search_overlay;
 
             if focused && !search_overlay && cursor_visible && !has_marked {
-                Some((view.session.cursor_position(), view.session.cursor_style()))
+                let style = view
+                    .state
+                    .default_cursor_shape
+                    .resolve(view.session.cursor_style());
+                Some((view.session.cursor_position(), style))
             } else {
                 None
             }
@@ -655,14 +659,17 @@ impl TerminalTextElement {
             let cursor_w = cursor_width_for_col(line, col, cell_width_f);
 
             let cursor_bounds = match style_code {
-                3 | 4 => {
+                crate::vt_codes::DECSCUSR_BLINK_UNDERLINE
+                | crate::vt_codes::DECSCUSR_STEADY_UNDERLINE => {
                     let underline_height = 2.0_f32;
                     Bounds::new(
                         point(x, y + line_height - px(underline_height)),
                         size(px(cursor_w), px(underline_height)),
                     )
                 }
-                5 | 6 => Bounds::new(point(x, y), size(px(theme::CURSOR_BAR_W), line_height)),
+                crate::vt_codes::DECSCUSR_BLINK_BAR | crate::vt_codes::DECSCUSR_STEADY_BAR => {
+                    Bounds::new(point(x, y), size(px(theme::CURSOR_BAR_W), line_height))
+                }
                 _ => Bounds::new(point(x, y), size(px(cursor_w), line_height)),
             };
 

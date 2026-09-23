@@ -476,6 +476,8 @@ impl TerminalView {
             session.inset_x(),
             session.inset_y(),
         );
+        let mut state = state;
+        state.default_cursor_shape = session.default_cursor_shape();
         Self {
             session,
             line_layouts: Vec::new(),

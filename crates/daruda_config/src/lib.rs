@@ -979,9 +979,6 @@ fn patch_settings_document(
             };
             t.insert("style", toml_edit::value(value));
         }),
-        SettingsPatch::CursorBlinking(_) => patch_section(doc, "cursor", |t| {
-            t.insert("blinking", toml_edit::value(config.cursor.blinking));
-        }),
         SettingsPatch::AgentUseModifierToSend(_) => patch_section(doc, "agent", |t| {
             t.insert(
                 "use_modifier_to_send",

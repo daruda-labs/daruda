@@ -415,13 +415,6 @@ pub(super) struct BoolSpec {
 
 pub(super) const BOOL_SETTINGS: &[BoolSpec] = &[
     BoolSpec {
-        setting: BoolSetting::CursorBlinking,
-        get: |w| w.cursor_blinking,
-        set: |w, v| w.cursor_blinking = v,
-        patch: SettingsPatch::CursorBlinking,
-        show: |c| c.cursor.blinking,
-    },
-    BoolSpec {
         setting: BoolSetting::AgentUseModifierToSend,
         get: |w| w.agent_use_modifier_to_send,
         set: |w, v| w.agent_use_modifier_to_send = v,
@@ -639,7 +632,6 @@ mod tests {
             | SettingsPatch::AgentChatFontSize(_)
             | SettingsPatch::AgentChatLineHeight(_)
             | SettingsPatch::CursorStyle(_)
-            | SettingsPatch::CursorBlinking(_)
             | SettingsPatch::AgentUseModifierToSend(_)
             | SettingsPatch::AgentUseReadingWidth(_)
             | SettingsPatch::RenderMaxFps(_)

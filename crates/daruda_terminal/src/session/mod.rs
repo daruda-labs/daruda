@@ -844,6 +844,11 @@ impl TerminalSession {
         self.config.inset_y
     }
 
+    /// Cursor shape used while the program has not set one.
+    pub fn default_cursor_shape(&self) -> crate::CursorShape {
+        self.config.default_cursor_shape
+    }
+
     pub fn hyperlink_at(&self, col: u16, row: u16) -> Option<String> {
         self.terminal.hyperlink_at(col, row)
     }

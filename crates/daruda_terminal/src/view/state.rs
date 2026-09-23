@@ -121,6 +121,9 @@ pub(crate) struct TerminalViewState {
     /// `TerminalVMargin`. See [`Self::inset_x`].
     pub(crate) inset_y: f32,
 
+    /// Cursor shape painted while the program has not chosen one.
+    pub(crate) default_cursor_shape: crate::CursorShape,
+
     /// Inactive-pane dim amount (0.0 = none). When `> 0` every color
     /// the element produces is blended toward mid-gray by this amount
     /// with its alpha preserved, matching iTerm2's
@@ -305,6 +308,7 @@ impl TerminalViewState {
             background_alpha,
             inset_x,
             inset_y,
+            default_cursor_shape: crate::CursorShape::default(),
             dim_amount: 0.0,
             search: super::SearchState::default(),
             search_overlay: false,

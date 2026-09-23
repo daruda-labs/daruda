@@ -124,6 +124,12 @@ impl TerminalView {
         self.state.inset_y = y.clamp(crate::INSET_MIN, crate::INSET_MAX);
     }
 
+    /// Push the fallback cursor shape from config at runtime. Paint-only:
+    /// takes effect on the next frame without touching the shape cache.
+    pub fn set_default_cursor_shape(&mut self, shape: crate::CursorShape) {
+        self.state.default_cursor_shape = shape;
+    }
+
     /// Current pane inset `(x, y)` in pixels. Read by the app-layer
     /// resize path so grid cols/rows match the painted content area.
     pub fn inset(&self) -> (f32, f32) {

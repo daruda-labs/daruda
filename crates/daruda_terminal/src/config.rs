@@ -84,6 +84,34 @@ pub struct TerminalConfig {
     /// in pixels. iTerm2 `TerminalVMargin`. Mirrors
     /// `daruda_config::FontConfig::inset_y`.
     pub inset_y: f32,
+    /// Cursor shape painted while the program has not chosen one with
+    /// DECSCUSR. Mirrors `daruda_config::CursorConfig::style`.
+    pub default_cursor_shape: CursorShape,
+}
+
+/// Cursor shape a terminal falls back to when the program sets none.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum CursorShape {
+    #[default]
+    Block,
+    Underline,
+    Bar,
+}
+
+impl CursorShape {
+    /// The DECSCUSR code to paint: the program's own choice wins, and
+    /// `DECSCUSR_DEFAULT` (none chosen) takes this shape.
+    pub fn resolve(self, vt_code: u8) -> u8 {
+        use crate::vt_codes as v;
+        if vt_code != v::DECSCUSR_DEFAULT {
+            return vt_code;
+        }
+        match self {
+            Self::Block => v::DECSCUSR_STEADY_BLOCK,
+            Self::Underline => v::DECSCUSR_STEADY_UNDERLINE,
+            Self::Bar => v::DECSCUSR_STEADY_BAR,
+        }
+    }
 }
 
 /// Points. Monaco 13 on first launch — a notch above iTerm2's
@@ -141,6 +169,7 @@ impl Default for TerminalConfig {
             natural_text_editing: true,
             inset_x: DEFAULT_INSET_X,
             inset_y: DEFAULT_INSET_Y,
+            default_cursor_shape: CursorShape::Block,
         }
     }
 }
@@ -155,5 +184,39 @@ impl TerminalConfig {
         self.horizontal_spacing = self.horizontal_spacing.clamp(SPACING_MIN, SPACING_MAX);
         self.inset_x = self.inset_x.clamp(INSET_MIN, INSET_MAX);
         self.inset_y = self.inset_y.clamp(INSET_MIN, INSET_MAX);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::CursorShape;
+    use crate::vt_codes as v;
+
+    #[test]
+    fn unset_shape_takes_the_configured_default() {
+        assert_eq!(
+            CursorShape::Bar.resolve(v::DECSCUSR_DEFAULT),
+            v::DECSCUSR_STEADY_BAR
+        );
+        assert_eq!(
+            CursorShape::Block.resolve(v::DECSCUSR_DEFAULT),
+            v::DECSCUSR_STEADY_BLOCK
+        );
+        assert_eq!(
+            CursorShape::Underline.resolve(v::DECSCUSR_DEFAULT),
+            v::DECSCUSR_STEADY_UNDERLINE
+        );
+    }
+
+    #[test]
+    fn program_chosen_shape_wins() {
+        assert_eq!(
+            CursorShape::Bar.resolve(v::DECSCUSR_BLINK_UNDERLINE),
+            v::DECSCUSR_BLINK_UNDERLINE
+        );
+        assert_eq!(
+            CursorShape::Underline.resolve(v::DECSCUSR_STEADY_BLOCK),
+            v::DECSCUSR_STEADY_BLOCK
+        );
     }
 }

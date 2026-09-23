@@ -144,6 +144,7 @@ impl Workspace {
                 view.apply_colors(fg, bg, &pal);
                 view.set_background_alpha(config.window.opacity);
                 view.apply_inset(config.font.terminal.inset_x, config.font.terminal.inset_y);
+                view.set_default_cursor_shape(cursor_shape_from(config.cursor.style));
             });
         }
         let new_mirrors = crate::workspace::ConfigMirrors::from_config(config);
@@ -470,6 +471,15 @@ pub(in crate::workspace) fn effective_config_for(
     user.clone().resolve(&project_cfg)
 }
 
+/// The terminal crate cannot see `daruda_config`, so the shape crosses here.
+fn cursor_shape_from(style: daruda_config::CursorStyle) -> daruda_terminal::CursorShape {
+    match style {
+        daruda_config::CursorStyle::Block => daruda_terminal::CursorShape::Block,
+        daruda_config::CursorStyle::Underline => daruda_terminal::CursorShape::Underline,
+        daruda_config::CursorStyle::Bar => daruda_terminal::CursorShape::Bar,
+    }
+}
+
 /// Build a [`TerminalConfig`] from the resolved app config. Single source
 /// of truth for the config → terminal-config mapping: both pane creation
 /// and reload call this, so a config-derived field is wired in one place.
@@ -503,6 +513,7 @@ pub(in crate::workspace) fn terminal_config_from(
         background_alpha: config.window.opacity,
         osc1337_max_bytes: config.clipboard.streaming_max_bytes,
         natural_text_editing: config.shell.natural_text_editing,
+        default_cursor_shape: cursor_shape_from(config.cursor.style),
         // ── not yet wired to daruda_config (named to force completeness) ──
         update_window_title: true,
         track_cwd: true,
@@ -533,6 +544,16 @@ mod tests {
         assert_eq!(
             terminal_config_from(&c).font_size,
             daruda_terminal::FONT_SIZE_MAX
+        );
+    }
+
+    #[test]
+    fn terminal_config_carries_the_cursor_style() {
+        let mut c = daruda_config::Config::default();
+        c.cursor.style = daruda_config::CursorStyle::Bar;
+        assert_eq!(
+            terminal_config_from(&c).default_cursor_shape,
+            daruda_terminal::CursorShape::Bar
         );
     }
 }
