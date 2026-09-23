@@ -53,6 +53,9 @@ impl Workspace {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        if self.return_to_worktree(window, cx) {
+            return;
+        }
         self.mutate_durable_in(window, cx, |ws, window, cx| {
             let idx = ws.active_runtime().active_tab_index;
             ws.request_close_tab(idx, window, cx);
@@ -138,6 +141,9 @@ impl Workspace {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        if self.return_to_worktree(window, cx) {
+            return;
+        }
         self.mutate_durable_in(window, cx, |ws, window, cx| {
             ws.close_focused_pane(window, cx);
         });
@@ -204,19 +210,19 @@ impl Workspace {
     pub(in crate::workspace) fn on_switch_right_panel_tasks(
         &mut self,
         _: &SwitchRightPanelTasks,
-        _window: &mut Window,
+        window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        self.reveal_right_dock_view(daruda_store::project::RightDockView::Tasks, cx);
+        self.open_page(super::pages::Page::Tasks, window, cx);
     }
 
     pub(in crate::workspace) fn on_switch_right_panel_flows(
         &mut self,
         _: &SwitchRightPanelFlows,
-        _window: &mut Window,
+        window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        self.reveal_right_dock_view(daruda_store::project::RightDockView::Flows, cx);
+        self.open_page(super::pages::Page::Flows, window, cx);
     }
 
     pub(in crate::workspace) fn on_new_skill(

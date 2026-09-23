@@ -83,6 +83,7 @@ pub(in crate::workspace) struct GroupSnapshot {
 #[derive(PartialEq)]
 pub(in crate::workspace) struct LeftDockSnapshot {
     pub left_dock_view: daruda_store::project::LeftDockView,
+    pub workspace_page: Option<crate::workspace::pages::Page>,
     pub lanes: Vec<crate::lane::Lane>,
     /// Every project in the workspace, in `tab_order` order. Drives
     /// the multi-project tree render — each entry's `lanes` slice
@@ -345,6 +346,7 @@ pub(in crate::workspace) struct RightDockSnapshot {
     /// Renderer treats default (empty) as "all collapsed". Cloned per
     /// frame — small set, cheap.
     pub skill_plugin_expanded: std::collections::HashSet<String>,
+    pub sections: crate::workspace::right_dock::section::DockSections,
     /// Snapshot of the Tasks tab's task list. Plain-data clone — the
     /// renderer never touches `Workspace::tasks` directly.
     pub tasks: daruda_store::tasks::TasksState,
@@ -531,6 +533,7 @@ mod tests {
         });
         LeftDockSnapshot {
             left_dock_view: daruda_store::project::LeftDockView::default(),
+            workspace_page: None,
             lanes: Vec::new(),
             projects: Vec::new(),
             groups: Vec::new(),
@@ -579,6 +582,7 @@ mod tests {
             skill_search_input: Handle(skill_search_input),
             skill_search_query: String::new(),
             skill_plugin_expanded: std::collections::HashSet::new(),
+            sections: Default::default(),
             tasks: daruda_store::tasks::TasksState::default(),
             task_search_input: Handle(task_search_input),
             task_search_query: String::new(),

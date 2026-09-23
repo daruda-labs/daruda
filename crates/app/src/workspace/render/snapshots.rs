@@ -38,6 +38,7 @@ impl Workspace {
             );
         LeftDockSnapshot {
             left_dock_view: self.left_dock_view,
+            workspace_page: self.active_page(),
             lanes: self.active_lanes().to_vec(),
             projects: {
                 let mut projects: Vec<crate::workspace::layout::snap::ProjectSnapshot> = self
@@ -483,6 +484,7 @@ impl Workspace {
             skill_search_input: Handle(self.skill_search_input.clone()),
             skill_search_query: self.skill_search_input.read(cx).value().to_string(),
             skill_plugin_expanded: self.skill_plugin_expanded.clone(),
+            sections: self.right_dock_sections.clone(),
             tasks: cx
                 .global::<crate::agent::tasks_global::GlobalTasks>()
                 .0

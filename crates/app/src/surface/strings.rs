@@ -1073,6 +1073,10 @@ pub fn titlebar_app_menu() -> String {
 // ============================================================================
 
 /// Filter dropdown labels.
+pub fn task_scope_all() -> String {
+    rust_i18n::t!("task.scope_all").into_owned()
+}
+
 pub fn task_filter_all() -> String {
     rust_i18n::t!("task.filter_all").into_owned()
 }
@@ -6375,6 +6379,10 @@ pub fn skills_search_placeholder() -> String {
 pub fn skills_search_empty_prefix() -> String {
     rust_i18n::t!("skills.search_empty_prefix").into_owned()
 }
+/// Skills tab footer: every skill the panel lists, across scopes.
+pub fn skills_footer_available(n: usize) -> String {
+    rust_i18n::t!("skills.footer_available", n => n).into_owned()
+}
 /// Count chip on the Plugin scope header — plugin skills are spread across
 /// several plugins, so the chip carries both numbers.
 pub fn skills_count_chip_with_plugins(skills: usize, plugins: usize) -> String {
@@ -6539,6 +6547,22 @@ pub fn mcp_empty_local() -> String {
 /// Row status label — server has `"disabled": true` in config.
 pub fn mcp_status_disabled() -> String {
     rust_i18n::t!("mcp.status_disabled").into_owned()
+}
+/// Row status label — the config leaves the server switched on.
+pub fn mcp_status_enabled() -> String {
+    rust_i18n::t!("mcp.status_enabled").into_owned()
+}
+/// Tooltip on the server row's enable switch.
+pub fn mcp_toggle_tooltip() -> String {
+    rust_i18n::t!("mcp.toggle_tooltip").into_owned()
+}
+/// Server row's second line: config state beside its transport.
+pub fn mcp_row_summary(status: &str, transport: &str) -> String {
+    rust_i18n::t!("mcp.row_summary", status => status, transport => transport).into_owned()
+}
+/// Tools tab footer: servers configured across every scope.
+pub fn mcp_footer_servers(n: usize) -> String {
+    rust_i18n::t!("mcp.footer_servers", n => n).into_owned()
 }
 /// Row status label — required fields for the chosen transport are missing.
 pub fn mcp_status_malformed() -> String {

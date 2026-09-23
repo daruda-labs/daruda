@@ -515,24 +515,15 @@ impl Workspace {
         if self.active != lane {
             self.activate_lane(lane, window, cx);
         }
-        self.reveal_flows_panel(cx);
+        self.open_page(super::pages::Page::Flows, window, cx);
     }
 
-    /// Bring the Flows panel into view: the dock open, the main area told to
-    /// re-measure, and the panel selected.
-    ///
-    /// A named op rather than the steps at each surface, because a copy that
-    /// does two of the three shows nothing: the tab alone lands behind a
-    /// collapsed dock, and a dock opened without `pending_resize` leaves the
-    /// main area measured for the width it had before the panel appeared, so
-    /// a terminal beside it keeps its old column count. The repaint belongs
-    /// here for the same reason — `set_right_dock_view` returns early when
-    /// Flows is already the tab, and then only the dock width moved.
-    ///
-    /// Lane switching is the caller's: a run worth revealing may live in
-    /// another lane, while the capture paths want the lane they are on.
+    /// Show the active lane's Flows page without changing the utility dock.
+    /// Screenshot seeds use this windowless path; interactive entry points
+    /// use `open_page` to transfer keyboard focus as well.
+    #[cfg(feature = "screenshot")]
     pub(in crate::workspace) fn reveal_flows_panel(&mut self, cx: &mut Context<Self>) {
-        self.reveal_right_dock_view(daruda_store::project::RightDockView::Flows, cx);
+        self.show_page(super::pages::Page::Flows, cx);
     }
 
     /// Open a past run's narrative in the active lane. The same view a run

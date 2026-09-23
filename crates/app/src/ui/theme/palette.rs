@@ -287,6 +287,33 @@ pub const DOCK_VIEW_TAB_PAD_X: f32 = PAD_LG;
 /// Dock view tab strip — font size (px).
 pub const DOCK_VIEW_TAB_FONT_SIZE: f32 = FONT_SIZE_SM;
 
+/// Fixed icon-tab target shared by the left and right dock strips.
+pub const DOCK_TAB_WIDTH: f32 = 36.0;
+pub const DOCK_NAV_ROW_HEIGHT: f32 = 34.0;
+pub const DOCK_NAV_ROW_GAP: f32 = 3.0;
+pub const DOCK_NAV_PAD_X: f32 = PAD_STANDARD;
+pub const DOCK_NAV_PAD_Y: f32 = 12.0;
+pub const DOCK_PAGE_PAD: f32 = 24.0;
+pub const DOCK_PAGE_MAX_WIDTH: f32 = 960.0;
+/// Compact tree rhythm; secondary content can grow a row beyond this height.
+pub const DOCK_TREE_ROW_HEIGHT: f32 = 28.0;
+pub const DOCK_TREE_ROW_PAD_Y: f32 = 2.0;
+/// Right-dock collapsible section: summary row and the hairline above it.
+pub const DOCK_SECTION_HEADER_PAD_Y: f32 = 9.0;
+pub const DOCK_SECTION_DIVIDER_PAD_T: f32 = PAD_XS;
+pub const DOCK_SECTION_CHEVRON_SIZE: f32 = 12.0;
+/// Right-dock library row: icon beside a name / description stack.
+pub const DOCK_LIBRARY_ROW_PAD_Y: f32 = 10.0;
+pub const DOCK_LIBRARY_ROW_GAP: f32 = PAD_STANDARD;
+pub const DOCK_LIBRARY_ICON_SIZE: f32 = 14.0;
+/// Drops the icon onto the name's first line rather than the stack's top.
+pub const DOCK_LIBRARY_ICON_MT: f32 = 3.0;
+pub const DOCK_LIBRARY_DESC_MT: f32 = GAP_XS;
+/// Right-dock summary strip pinned under the scrolling body.
+pub const DOCK_PANEL_FOOTER_HEIGHT: f32 = 36.0;
+pub const DOCK_PANEL_FOOTER_PAD_X: f32 = 14.0;
+pub const DOCK_PANEL_FOOTER_ICON_SIZE: f32 = 12.0;
+
 // Lanes list (left dock Lanes view)
 /// Lanes list — horizontal padding (px).
 pub const LANE_ROW_PAD_X: f32 = PAD_LG;
@@ -335,52 +362,48 @@ pub const LANE_GROUP_COLOR_DOT_SIZE: f32 = 8.0;
 pub const LANE_GROUP_COLOR_DOT_RADIUS: f32 = RADIUS_SM;
 
 // ----------------------------------------------------------------------------
-// Premium Card surface tokens (Lanes redesign)
+// Project tree metrics
 // ----------------------------------------------------------------------------
 
-/// Lanes card — outer corner radius (px). Capped at `lg` (8px) per
-/// DESIGN §Border Radius ("no radius exceeds 8px in application chrome").
-pub const LANE_CARD_RADIUS: f32 = RADIUS_LG;
-/// Lanes card — vertical gap between adjacent cards (px).
+/// Vertical space between top-level project tree roots.
 pub const LANE_CARD_GAP: f32 = GAP_STANDARD;
-/// Lanes card — inner horizontal padding (px).
-pub const LANE_CARD_PAD_X: f32 = PAD_SM;
-/// Lanes card — inner vertical padding (px).
-pub const LANE_CARD_PAD_Y: f32 = PAD_SM;
 /// Lanes row — corner radius applied to hover/active background fills
 /// so the highlight reads as a rounded chip instead of a hard rectangle.
-pub const LANE_ROW_RADIUS: f32 = RADIUS_MD;
+pub const LANE_ROW_RADIUS: f32 = RADIUS_SM;
 /// Lanes card — horizontal outer margin so cards don't hug the dock
 /// edges; gives the surface visible left/right breathing room.
 pub const LANE_CARD_MARGIN_X: f32 = PAD_STANDARD;
 /// Lanes list — vertical gap between adjacent lane rows inside
 /// a project block so consecutive rows don't read as a single block.
-pub const LANE_LIST_GAP_Y: f32 = 3.0;
-/// Lanes list — horizontal indent step (px). Each hierarchy level sits one
-/// step deeper than its parent (lane rows one step right of their project
-/// header). Applied to the lane list container, not per-row.
+pub const LANE_LIST_GAP_Y: f32 = 0.0;
+/// Indent of a grouped project under its group header. Lanes indent by
+/// their own row inset (`LANE_ROW_INSET_L`) so the highlight spans the row.
 pub const LANE_INDENT_STEP: f32 = 8.0;
-/// Lanes card — border width (px).
-pub const LANE_CARD_BORDER_W: f32 = 1.0;
 /// Active lane row — left accent border width (px). Renders as the primary
 /// selection signal on the active lane row; inactive rows reserve the same
 /// space with a transparent border so label x-position stays stable.
 pub const LANE_ACTIVE_BORDER_W: f32 = 2.0;
 /// Group label font size (px) — uppercase eyebrow.
 pub const LANE_GROUP_LABEL_FONT_SIZE: f32 = FONT_SIZE_SM;
+/// Project header — folder glyph, a step below control icons so it reads lighter.
+pub const LANE_PROJECT_ICON_SIZE: f32 = 14.0;
+/// Group outline — hairline box that marks where a group's members end.
+pub const LANE_GROUP_OUTLINE_W: f32 = 1.0;
+pub const LANE_GROUP_OUTLINE_PAD: f32 = 3.0;
+pub const LANE_GROUP_OUTLINE_RADIUS: f32 = RADIUS_MD;
+/// Added to the list gap so a group sits a little apart from its neighbours.
+pub const LANE_GROUP_OUTLINE_MARGIN_Y: f32 = GAP_XS;
+/// Where a project header's name starts: pad, chevron, gap, folder, gap.
+pub const LANE_PROJECT_NAME_INSET: f32 =
+    LANE_ROW_PAD_X + CONTROL_TARGET_SIZE + LANE_LABEL_GAP + LANE_PROJECT_ICON_SIZE + LANE_LABEL_GAP;
+/// Lane left inset that lands its label on the project name and centres
+/// the status cell under the folder glyph.
+pub const LANE_ROW_INSET_L: f32 =
+    LANE_PROJECT_NAME_INSET - LANE_ACTIVE_BORDER_W - STATUS_INDICATOR_CELL_WIDTH - LANE_ROW_GAP;
 
 /// Project header — branch chip horizontal padding (px). Matches the git
 /// badge pill padding so chips on the same row have consistent weight.
 pub const LANE_BRANCH_CHIP_PAD_X: f32 = PAD_XS;
-/// Project header — branch chip vertical padding (px). Zero keeps the chip
-/// flush with the row's line-height, same as the git badge pill.
-pub const LANE_BRANCH_CHIP_PAD_Y: f32 = 0.0;
-/// Project header — branch chip corner radius (px). Matches `RADIUS_SM` for
-/// consistency with other pill-shaped chips in the lanes list.
-pub const LANE_BRANCH_CHIP_RADIUS: f32 = RADIUS_SM;
-/// Project header — branch chip border width (px). 1 px hairline, same as
-/// card borders across the lanes list.
-pub const LANE_BRANCH_CHIP_BORDER_W: f32 = LANE_CARD_BORDER_W;
 
 // ============================================================================
 // Workspace chrome (modal, dock, banners, settings, agent panels, etc.)
@@ -484,6 +507,12 @@ pub const SETTINGS_DEPENDENT_INDENT: f32 = 16.0;
 /// Opacity of those rows while the parent is off — the vendored button's
 /// disabled tone, so an inactive child reads like a disabled control.
 pub const SETTINGS_DEPENDENT_OFF_OPACITY: f32 = 0.5;
+/// Compact switch for dense list rows (right-dock Tools).
+pub const COMPACT_SWITCH_W: f32 = 24.0;
+pub const COMPACT_SWITCH_H: f32 = 14.0;
+pub const COMPACT_SWITCH_THUMB: f32 = 10.0;
+pub const COMPACT_SWITCH_INSET: f32 = 2.0;
+pub const COMPACT_SWITCH_TARGET_W: f32 = 28.0;
 /// Dock background — slightly darker than the panel body so the
 /// active row's highlight reads cleanly.
 pub const SETTINGS_SIDEBAR_BG: Hsla = with_alpha(CANVAS, 0.18);
@@ -811,7 +840,7 @@ pub const STATUS_BAR_ACCOUNT_RADIUS: f32 = RADIUS_XS;
 pub const STATUS_BAR_AGENT_ICON_SIZE: f32 = 12.0;
 /// Provider mark heading a Usage tab section — sized to the section title
 /// beside it rather than to the status bar's tighter row.
-pub const USAGE_SECTION_ICON_SIZE: f32 = 14.0;
+pub const USAGE_SECTION_ICON_SIZE: f32 = 16.0;
 /// Window-width breakpoints driving `StatusBarDensity`. Below
 /// `STATUS_BAR_COMPACT_WIDTH` the project/branch label abbreviates to
 /// just the branch and the Ports chip drops its "Ports:" word (bare
@@ -2114,7 +2143,7 @@ pub const STATUS_INDICATOR_SIZE: f32 = 16.0;
 pub const STATUS_INDICATOR_BADGE_SIZE: f32 = 12.0;
 /// Width of the cell that holds the indicator inside the lane row,
 /// inserted between the active-row accent bar and the body.
-pub const STATUS_INDICATOR_CELL_WIDTH: f32 = 22.0;
+pub const STATUS_INDICATOR_CELL_WIDTH: f32 = STATUS_INDICATOR_SIZE + GAP_XS;
 /// Status-badge animation tick interval (~4 fps). One shared
 /// `StatusPulseClock` tick fires this often; every badge derives its
 /// frame from the tick rather than from a per-frame `with_animation`
@@ -2279,7 +2308,7 @@ pub const STATUS_PILL_GAP: f32 = GAP_STANDARD;
 /// Gap between the header title and the plan badge.
 pub const USAGE_HEADER_GAP: f32 = GAP_LG;
 /// Title ("Claude Code") font size (px).
-pub const USAGE_TITLE_FONT_SIZE: f32 = FONT_SIZE_LG;
+pub const USAGE_TITLE_FONT_SIZE: f32 = FONT_SIZE_MD;
 /// Plan-badge font size (px).
 pub const USAGE_PLAN_BADGE_FONT_SIZE: f32 = FONT_SIZE_XS;
 /// Plan-badge horizontal padding (px).
@@ -2292,8 +2321,10 @@ pub const USAGE_PLAN_BADGE_RADIUS: f32 = RADIUS_LG;
 pub const USAGE_ACCENT_CHIP_BG: Hsla = ACCENT;
 /// Logo-chip / plan-badge foreground.
 pub const USAGE_ACCENT_CHIP_FG: Hsla = ACCENT_FG;
+/// Space between the Usage tab's major blocks (identity, gauges, charts).
+pub const USAGE_BLOCK_GAP: f32 = 24.0;
 /// Vertical gap between stacked gauge cards (px).
-pub const USAGE_CARD_GAP: f32 = GAP_LG;
+pub const USAGE_CARD_GAP: f32 = USAGE_BLOCK_GAP;
 /// Big utilization-percent font size on a gauge card (px).
 pub const USAGE_GAUGE_PERCENT_FONT_SIZE: f32 = 18.0;
 /// 7-day chart: bar height (px) the busiest day maps to.
@@ -2318,14 +2349,12 @@ pub const SKILL_ROW_RADIUS: f32 = RADIUS_SM;
 pub const SKILL_ROW_PAD_X: f32 = PAD_STANDARD;
 pub const SKILL_ROW_PAD_Y: f32 = PAD_XS;
 pub const SKILL_ROW_GAP: f32 = GAP_SM;
-/// Vertical padding for skill rows rendered inside a plugin
-/// accordion. Smaller than `SKILL_ROW_PAD_Y` so the group reads as
-/// a dense list rather than another full-size section.
-pub const SKILL_PLUGIN_ROW_PAD_Y: f32 = GAP_XS;
 /// Extra left padding for plugin-scope skill rows. Plugin rows sit
 /// under a per-plugin sub-header; this indent makes the
 /// header → skill hierarchy obvious without drawing rules.
 pub const SKILL_PLUGIN_INDENT: f32 = 24.0;
+/// Plugin group disclosure row inside the Skills tab's Plugin section.
+pub const SKILL_PLUGIN_GROUP_PAD_Y: f32 = PAD_SM;
 pub const SKILL_HEADER_GAP: f32 = GAP_STANDARD;
 /// Badge / chip metrics. Shared across the four invocation badges +
 /// the aux chip so they line up at the trailing edge.
@@ -2333,19 +2362,12 @@ pub const SKILL_BADGE_FONT_SIZE: f32 = FONT_SIZE_XS;
 pub const SKILL_BADGE_PAD_X: f32 = PAD_XS;
 pub const SKILL_BADGE_PAD_Y: f32 = 0.0;
 pub const SKILL_BADGE_RADIUS: f32 = RADIUS_XS;
-/// Vertical spacing between MCP server rows. Same value as the Skills
-/// tab so the two tabs read as belonging to the same panel.
-pub const MCP_ROW_GAP: f32 = GAP_SM;
-/// Horizontal gap between elements in the row's main line
-/// (indicator / transport / command-preview).
+/// Horizontal gap between a server row's inline elements.
 pub const MCP_HEADER_GAP: f32 = GAP_STANDARD;
-/// Indicator dot diameter (px). Clickable hit-target — keep ≥ 8.
-pub const MCP_INDICATOR_SIZE: f32 = 8.0;
-/// Indicator colour for the malformed flag.
+/// Hover actions stop short of the row's trailing enable switch.
+pub const MCP_ACTIONS_RIGHT: f32 = SKILL_ROW_PAD_X + COMPACT_SWITCH_TARGET_W + GAP_SM;
+/// Malformed warning hue; a theme slot, and the base of the status text.
 pub const MCP_INDICATOR_MALFORMED: Hsla = hsla(14.0, 0.70, 0.55, 1.0);
-pub const MCP_BADGE_FONT_SIZE: f32 = FONT_SIZE_XS;
-pub const MCP_BADGE_PAD_X: f32 = GAP_XS;
-pub const MCP_BADGE_PAD_Y: f32 = 0.0;
 pub const MCP_BADGE_RADIUS: f32 = RADIUS_XS;
 /// Malformed chip — same shape as the transport badge, warning hue.
 pub const MCP_MALFORMED_BADGE_BG: Hsla = hsla(14.0, 0.50, 0.40, 0.30);

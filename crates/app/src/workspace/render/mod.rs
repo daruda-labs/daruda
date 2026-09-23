@@ -1193,7 +1193,7 @@ impl Workspace {
             .flex_col()
             .relative()
             .overflow_hidden()
-            .child(tab_bar)
+            .when(self.workspace_page.is_none(), |el| el.child(tab_bar))
             .child(pane_area)
             // `.cached()`: when the bottom dock isn't notified (its
             // snapshot was staged unchanged above), GPUI recycles its
@@ -1201,7 +1201,7 @@ impl Workspace {
             // grid / terminal input on every parent repaint. The
             // self-notifying terminal input entity inside still repaints
             // on its own edits (Pitfall #10).
-            .when(bottom_dock_open, |el| {
+            .when(bottom_dock_open && self.workspace_page.is_none(), |el| {
                 el.child(
                     gpui::AnyView::from(self.bottom_dock.clone()).cached(
                         gpui::StyleRefinement::default()
@@ -1210,7 +1210,7 @@ impl Workspace {
                     ),
                 )
             })
-            .when(bottom_dock_open, |el| {
+            .when(bottom_dock_open && self.workspace_page.is_none(), |el| {
                 el.child(dock_resize_handle(
                     DockPosition::Bottom,
                     bottom_dock_size,

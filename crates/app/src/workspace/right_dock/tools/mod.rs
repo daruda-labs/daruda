@@ -19,4 +19,4 @@ pub(super) mod render;
 pub(super) use add_modal::open_add_mcp_server_modal;
 pub(super) use delete_confirm::open_delete_mcp_server_confirm;
 pub(super) use edit_modal::open_edit_mcp_server_modal;
-pub(in crate::workspace) use render::render;
+pub(in crate::workspace) use render::{footer, render};

@@ -574,12 +574,14 @@ impl Workspace {
         cx: &mut Context<Self>,
     ) {
         if self.active == target {
+            self.close_page(cx);
             self.reactivate_active_lane(window, cx);
             return;
         }
         if self.lane_for(target).is_none() {
             return;
         }
+        self.close_page(cx);
         // The orchestrator belongs to no worktree, so it does not follow the
         // user into the next one — a tab that trailed every switch would read
         // as content of whichever lane it landed in. The chip puts it back.

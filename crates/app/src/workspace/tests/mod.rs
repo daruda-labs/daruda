@@ -24,6 +24,7 @@ mod left_dock_pulse;
 mod lifecycle;
 mod modal_tab_containment;
 mod orchestrator;
+mod pages;
 mod palette_agent;
 mod pane_menu;
 mod ports;

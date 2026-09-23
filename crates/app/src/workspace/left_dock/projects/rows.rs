@@ -122,12 +122,7 @@ fn availability_chip(icon: IconName, label: String, label_color: gpui::Hsla) -> 
 /// (e.g. `⎇ main`). Uses `GalleryVerticalEnd` as the branch glyph — the
 /// closest available icon to the standard branch symbol; no dedicated
 /// `GitBranch` variant exists in the current icon set.
-fn branch_chip(
-    branch: SharedString,
-    label_color: gpui::Hsla,
-    chip_bg: gpui::Hsla,
-    border_color: gpui::Hsla,
-) -> impl IntoElement {
+fn branch_chip(branch: SharedString, label_color: gpui::Hsla) -> impl IntoElement {
     div()
         .flex()
         .flex_none() // must not stretch: sits right-aligned after the flex_1 name and keeps its intrinsic width
@@ -135,13 +130,8 @@ fn branch_chip(
         .items_center()
         .gap(px(theme::LANE_LABEL_GAP))
         .px(px(theme::LANE_BRANCH_CHIP_PAD_X))
-        .py(px(theme::LANE_BRANCH_CHIP_PAD_Y))
-        .rounded(px(theme::LANE_BRANCH_CHIP_RADIUS))
-        .border(px(theme::LANE_BRANCH_CHIP_BORDER_W))
-        .border_color(border_color)
         .text_size(px(theme::LANE_SUB_FONT_SIZE))
         .text_color(label_color)
-        .bg(chip_bg)
         .child(
             Icon::new(IconName::GalleryVerticalEnd)
                 .with_size(px(theme::LANE_SUB_FONT_SIZE))
@@ -161,15 +151,12 @@ pub(super) fn group_header_row(
     cx: &mut Context<Dock>,
 ) -> impl IntoElement + use<> {
     let t = theme::current(cx);
-    let label_color = t.text_primary;
+    let label_color = t.text_body;
     let row_hover_bg = t.lane_row_hover_bg;
     let drop_target_bg = t.lane_drop_target_bg;
     let drop_target_rejected_bg = t.lane_drop_target_rejected_bg;
 
-    // Color dot rendered at the left of the group row (right-aligned
-    // chevron carries the collapse state, so color is its own glyph
-    // again). Silently skipped when the stored value is not parseable
-    // hex.
+    // A stored group color remains independent of the disclosure indicator.
     let color_dot = group
         .color
         .as_ref()
@@ -215,8 +202,7 @@ pub(super) fn group_header_row(
         .child(
             div()
                 .flex_1()
-                .overflow_hidden()
-                .whitespace_nowrap()
+                .text_ellipsis()
                 .child(SharedString::from(group.name.to_uppercase())),
         )
         .child(
@@ -231,20 +217,13 @@ pub(super) fn group_header_row(
             ),
         );
 
-    div()
+    super::tree::row()
         .id(("group-header", group_id as usize))
         .group(row_group_key.clone())
         .flex()
         .flex_col()
         .w_full()
-        .px(px(theme::LANE_ROW_PAD_X))
-        .py(px(theme::LANE_SECTION_PAD_Y))
-        .rounded(px(theme::LANE_ROW_RADIUS))
         .cursor_pointer()
-        // Active highlight is expressed by the wrapping `group_card`
-        // (see `card::group_card`), so the header row only carries the
-        // hover lift. Painting an active bg here too would double-up
-        // with the card fill and read as a brighter inner chip.
         .hover(move |d| d.bg(row_hover_bg))
         .on_click(cx.listener(move |_dock, _: &ClickEvent, _window, cx| {
             if let Some(ws) = workspace.upgrade() {
@@ -370,14 +349,8 @@ pub(super) fn project_header_row(
     };
     let chip_color = t.text_subtle;
     let row_hover_bg = t.lane_row_hover_bg;
-    let row_active_bg = t.lane_card_active_bg;
     let drop_target_bg = t.lane_drop_target_bg;
     let drop_target_rejected_bg = t.lane_drop_target_rejected_bg;
-    // Active highlight lands on this header only when the project is
-    // ungrouped — grouped projects rely on the wrapping `group_card`
-    // active fill instead, so painting an inner row chip would double
-    // up the highlight.
-    let show_active_bg = is_active && is_ungrouped;
 
     let workspace = snap.workspace.clone();
     let ws_for_click = workspace.clone();
@@ -389,7 +362,7 @@ pub(super) fn project_header_row(
     };
 
     let row_group = SharedString::from(format!("project-row-{project_id}"));
-    div()
+    super::tree::row()
         .id(("project-header", project_id as usize))
         .group(row_group.clone())
         .flex()
@@ -397,17 +370,10 @@ pub(super) fn project_header_row(
         .items_center()
         .gap(px(theme::LANE_LABEL_GAP))
         .w_full()
-        .px(px(theme::LANE_ROW_PAD_X))
-        .py(px(theme::LANE_SECTION_PAD_Y))
-        .rounded(px(theme::LANE_ROW_RADIUS))
         .text_size(px(theme::LANE_LABEL_FONT_SIZE))
         .text_color(label_color)
         .cursor_pointer()
-        .when(!show_active_bg, move |d| {
-            d.hover(move |d| d.bg(row_hover_bg))
-        })
-        // Accent left border is lane-only; the header carries the active fill only.
-        .when(show_active_bg, move |d| d.bg(row_active_bg))
+        .hover(move |d| d.bg(row_hover_bg))
         // Header click snaps the workspace focus to this project's
         // last-active lane. No-op when the click lands on
         // the already-active project — the snap target would equal
@@ -478,24 +444,16 @@ pub(super) fn project_header_row(
                     }
                 }))
         })
+        // The folder stays a quiet outline whatever weight the name carries.
         .child(
-            div()
-                .flex_1()
-                .overflow_hidden()
-                .whitespace_nowrap()
-                .child(name),
+            crate::ui::icons::icon(crate::ui::icons::FOLDER)
+                .with_size(px(theme::LANE_PROJECT_ICON_SIZE))
+                .text_color(t.text_muted),
         )
-        // Branch chip sits right of the project name: small icon + branch
-        // text, muted color, hairline-bordered pill. Only rendered when the
-        // default branch is known and the project is not in an error state so
-        // it doesn't compete visually with the availability chip.
+        .child(div().flex_1().text_ellipsis().child(name))
+        // Keep branch metadata quiet beside the project name.
         .when_some(default_branch.filter(|_| !is_unavailable), |row, branch| {
-            let chip_bg = if t.is_dark() {
-                theme::SURFACE_3
-            } else {
-                theme::LIGHT_SURFACE_2
-            };
-            row.child(branch_chip(branch, chip_color, chip_bg, t.border))
+            row.child(branch_chip(branch, chip_color))
         })
         .when_some(avail_badge, |row, (icon, state_label)| {
             row.child(availability_chip(icon, state_label, chip_color))
@@ -698,11 +656,9 @@ pub(super) fn worktree_row(
     let drop_target_rejected_bg = t.lane_drop_target_rejected_bg;
 
     let label = wt.display_name();
-    // Sublabel priority: user-set description → path.
-    let sublabel = wt
-        .description
-        .clone()
-        .unwrap_or_else(|| wt.path.to_str().map(|s| s.to_string()).unwrap_or_default());
+    // Paths stay available on hover without making every lane a two-line row.
+    let path_tooltip = format!("{label}\n{}", wt.path.display());
+    let sublabel = wt.description.as_deref().filter(|s| !s.trim().is_empty());
 
     // Inaccessible lanes (Missing / AccessDenied) render muted: the
     // label greys out, the unread dot + git badge are suppressed (a
@@ -738,13 +694,7 @@ pub(super) fn worktree_row(
                 } else {
                     label_inactive
                 })
-                .child(
-                    div()
-                        .flex_1()
-                        .overflow_hidden()
-                        .whitespace_nowrap()
-                        .child(label.clone()),
-                )
+                .child(div().flex_1().text_ellipsis().child(label.clone()))
                 .when(wt.is_unread && !is_unavailable, |d| d.child(unread_dot))
                 .when_some(git_badge.filter(|_| !is_unavailable), |d, badge| {
                     d.child(git_badge_view(
@@ -755,21 +705,21 @@ pub(super) fn worktree_row(
                     ))
                 }),
         )
-        .child(match avail_badge {
-            Some((icon, state_label)) => {
-                availability_chip(icon, state_label, sublabel_color).into_any_element()
-            }
-            None => div()
-                .flex()
-                .flex_row()
-                .items_center()
-                .gap(px(theme::LANE_SUBLABEL_GAP))
-                .text_size(px(theme::LANE_SUB_FONT_SIZE))
-                .text_color(sublabel_color)
-                .overflow_hidden()
-                .whitespace_nowrap()
-                .child(sublabel)
-                .into_any_element(),
+        .when_some(avail_badge, |d, (icon, state_label)| {
+            d.child(availability_chip(icon, state_label, sublabel_color))
+        })
+        .when_some(sublabel.filter(|_| !is_unavailable), |d, sublabel| {
+            d.child(
+                div()
+                    .flex()
+                    .flex_row()
+                    .items_center()
+                    .gap(px(theme::LANE_SUBLABEL_GAP))
+                    .text_size(px(theme::LANE_SUB_FONT_SIZE))
+                    .text_color(sublabel_color)
+                    .text_ellipsis()
+                    .child(sublabel.to_owned()),
+            )
         })
         .when_some(
             snap.agent_per_session_per_lane
@@ -838,22 +788,18 @@ pub(super) fn worktree_row(
     // across projects and GPUI routes every first-lane click to a single row.
     // Encode both project + lane id so each row is uniquely addressable.
     let row_group = SharedString::from(format!("lane-row-{project_id}-{wt_id}"));
-    let mut row = div()
+    let mut row = super::tree::row()
         .id(SharedString::from(format!("lane-row-{project_id}-{wt_id}")))
         // Expose to test debug_bounds so gpui::test can find this row.
         .debug_selector(|| format!("lane-row-{project_id}-{wt_id}"))
+        .pl(px(theme::LANE_ROW_INSET_L))
         .group(row_group.clone())
         .flex()
         .flex_row()
         .items_center()
-        // Vertical padding (not `min_h`) matches the project/group header
-        // rows so all three kinds share the same breathing room regardless
-        // of body height, even when the agent multi-session sub-row grows it.
-        .px(px(theme::LANE_ROW_PAD_X))
-        .py(px(theme::LANE_SECTION_PAD_Y))
         .gap(px(theme::LANE_ROW_GAP))
-        .rounded(px(theme::LANE_ROW_RADIUS))
         .cursor_pointer()
+        .tooltip(crate::ui::tooltip::text(path_tooltip))
         // Reserve a same-width transparent left border on inactive rows so
         // the label x-position stays stable when the active border appears.
         .border_l(px(theme::LANE_ACTIVE_BORDER_W))

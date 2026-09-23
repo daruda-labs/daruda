@@ -430,14 +430,14 @@ async fn the_panel_reads_past_runs_off_disk_when_its_tab_is_showing(cx: &mut Tes
     }
     std::fs::write(done.join("DONE"), "").expect("marker");
 
-    ws.update(cx, |ws, _cx| {
+    ws.update(cx, |ws, cx| {
         // The tab has to be showing: a lane nobody is looking at must not
         // cost a directory listing.
         assert!(
             ws.flow_history_for_panel().is_none(),
             "read the disk for a tab that is not open"
         );
-        ws.right_dock_view = daruda_store::project::RightDockView::Flows;
+        ws.set_right_dock_view(daruda_store::project::RightDockView::Flows, cx);
 
         let history = ws.flow_history_for_panel().expect("read");
         let statuses: Vec<_> = history.runs().iter().map(|r| r.status).collect();
@@ -468,7 +468,7 @@ async fn only_a_run_leaving_setup_refreshes_the_history(cx: &mut TestAppContext)
 
     ws.update(cx, |ws, cx| {
         let here = ws.active;
-        ws.right_dock_view = daruda_store::project::RightDockView::Flows;
+        ws.set_right_dock_view(daruda_store::project::RightDockView::Flows, cx);
         ws.seed_flow_run_for_test(here, lane.path().join("run-here"));
         ws.flow_history_for_panel().expect("primed");
 
@@ -523,12 +523,12 @@ async fn revealing_a_run_lands_on_its_lane_with_the_panel_open(cx: &mut TestAppC
             ws.reveal_flow_run(here, window, cx);
 
             assert!(
-                ws.right_dock.read(cx).is_open,
-                "revealed a run behind a closed dock"
+                !ws.right_dock.read(cx).is_open,
+                "pages leave the utility dock alone"
             );
             assert_eq!(
-                ws.right_dock_view,
-                daruda_store::project::RightDockView::Flows,
+                ws.active_page(),
+                Some(crate::workspace::pages::Page::Flows),
                 "landed on the wrong tab"
             );
         });
@@ -587,7 +587,7 @@ async fn the_palette_can_reach_the_flows_panel(cx: &mut TestAppContext) {
             ws.set_right_dock_view(daruda_store::project::RightDockView::Tasks, cx);
             ws.command_palette.open();
             // Smart-case matching requires the label's capitalization here.
-            for ch in "Right Panel: Flows".chars() {
+            for ch in "Open Flows".chars() {
                 let visible_len = ws.command_palette.visible().len();
                 ws.command_palette
                     .picker
@@ -600,8 +600,8 @@ async fn the_palette_can_reach_the_flows_panel(cx: &mut TestAppContext) {
             );
             ws.execute_palette_action(window, cx);
             assert_eq!(
-                ws.right_dock_view,
-                daruda_store::project::RightDockView::Flows,
+                ws.active_page(),
+                Some(crate::workspace::pages::Page::Flows),
                 "the palette entry did not reach the panel"
             );
         });
@@ -1201,6 +1201,11 @@ async fn the_panel_run_button_is_off_while_that_flows_graph_has_unsaved_edits(
         .expect("the graph pane opened");
     view.update_in(&mut vcx, |v, window, cx| {
         v.select_node_for_test(&"design".into(), window, cx)
+    });
+    vcx.run_until_parked();
+
+    ws.update_in(&mut vcx, |ws, window, cx| {
+        ws.open_page(crate::workspace::pages::Page::Flows, window, cx)
     });
     vcx.run_until_parked();
 

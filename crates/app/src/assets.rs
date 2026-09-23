@@ -10,6 +10,9 @@
 //!
 //! UI control icons under `icons/ui/` are sourced from Google Material
 //! Symbols (Apache-2.0). See LICENSES/material-symbols-Apache-2.0.txt.
+//!
+//! Icons under `icons/lucide/` are sourced from Lucide (ISC; a few Feather-derived glyphs MIT).
+//! See LICENSES/lucide-LICENSE.txt.
 
 use std::borrow::Cow;
 
@@ -111,6 +114,7 @@ impl AssetSource for DarudaAssets {
                 icon!("ui/chevron-right.svg")
             }
             "icons/ui/block.svg" => icon!("ui/block.svg"),
+            "icons/ui/build.svg" => icon!("ui/build.svg"),
             "icons/ui/check-circle.svg" => icon!("ui/check-circle.svg"),
             "icons/ui/check.svg" | "icons/check.svg" => icon!("ui/check.svg"),
             "icons/ui/chrome-reader-mode.svg" => icon!("ui/chrome-reader-mode.svg"),
@@ -142,6 +146,14 @@ impl AssetSource for DarudaAssets {
             "icons/ui/unfold-more.svg" => icon!("ui/unfold-more.svg"),
             "icons/ui/warning.svg" => icon!("ui/warning.svg"),
             "icons/ui/width-wide.svg" => icon!("ui/width-wide.svg"),
+
+            // ── Lucide ───────────────────────────────────────────────────
+            "icons/lucide/list-checks.svg" => icon!("lucide/list-checks.svg"),
+            "icons/lucide/workflow.svg" => icon!("lucide/workflow.svg"),
+            "icons/lucide/folder.svg" => icon!("lucide/folder.svg"),
+            "icons/lucide/message-square.svg" => icon!("lucide/message-square.svg"),
+            "icons/lucide/file-text.svg" => icon!("lucide/file-text.svg"),
+            "icons/lucide/server.svg" => icon!("lucide/server.svg"),
 
             // ── Folders ──────────────────────────────────────────────────
             "icons/folder.svg" => icon!("folder.svg"),

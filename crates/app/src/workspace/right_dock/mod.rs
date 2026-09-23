@@ -1,4 +1,4 @@
-//! Right-dock four-tab panel (Usage / Skills / Tools / Tasks).
+//! Right-dock utilities (Usage / Skills / Tools).
 
 use crate::ui::theme;
 use daruda_store::project::RightDockView;
@@ -9,6 +9,9 @@ use super::layout::RightDockSnapshot;
 
 pub(in crate::workspace) mod flows;
 pub(in crate::workspace) mod mcp_ops;
+pub(in crate::workspace) mod section;
+pub(in crate::workspace) mod section_ops;
+pub(in crate::workspace) mod section_view;
 pub(in crate::workspace) mod skill_ops;
 pub(in crate::workspace) mod skills;
 pub(in crate::workspace) mod status_pill;
@@ -43,31 +46,39 @@ pub(in crate::workspace) fn right_panel_body() -> gpui::Div {
 /// list doesn't push the dock footer off-screen (the outer dock wrapper
 /// sets `overflow_hidden`), with a scrollbar thumb overlay for position.
 pub(in crate::workspace) fn render(snap: &RightDockSnapshot, cx: &mut Context<Dock>) -> AnyElement {
-    let body = match snap.right_dock_view {
-        RightDockView::Usage => usage::render(snap, cx),
-        RightDockView::Skills => skills::render(snap, cx),
-        RightDockView::Tasks => tasks::render(snap, cx),
-        RightDockView::Tools => tools::render(snap, cx),
-        RightDockView::Flows => flows::render(snap, cx),
+    let (body, footer) = match snap.right_dock_view {
+        RightDockView::Usage | RightDockView::Tasks | RightDockView::Flows => {
+            (usage::render(snap, cx), usage::footer(snap, cx))
+        }
+        RightDockView::Skills => (skills::render(snap, cx), Some(skills::footer(snap, cx))),
+        RightDockView::Tools => (tools::render(snap, cx), Some(tools::footer(snap, cx))),
     };
     let handle = snap.right_panel_scroll_handle.clone();
     div()
-        .relative()
+        .flex()
+        .flex_col()
         .size_full()
-        .overflow_hidden()
         .child(
             div()
-                .id("right-panel-scroll")
-                .absolute()
-                .top_0()
-                .left_0()
-                .right_0()
-                .bottom_0()
-                .overflow_y_scroll()
-                .track_scroll(&handle)
-                .child(body),
+                .relative()
+                .flex_1()
+                .min_h_0()
+                .overflow_hidden()
+                .child(
+                    div()
+                        .id("right-panel-scroll")
+                        .absolute()
+                        .top_0()
+                        .left_0()
+                        .right_0()
+                        .bottom_0()
+                        .overflow_y_scroll()
+                        .track_scroll(&handle)
+                        .child(body),
+                )
+                .children(scrollbar_thumb(&handle, cx)),
         )
-        .children(scrollbar_thumb(&handle, cx))
+        .children(footer)
         .into_any_element()
 }
 

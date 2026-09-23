@@ -55,6 +55,7 @@ pub(in crate::workspace) mod main_area;
 pub(in crate::workspace) mod modal_view;
 pub(crate) mod open_project_modal;
 mod orchestrator_ops;
+mod pages;
 mod path_drag;
 mod persistence;
 mod project_ops;
@@ -316,9 +317,9 @@ pub struct Workspace {
     pub(in crate::workspace) left_dock: gpui::Entity<layout::Dock>,
     /// Active view inside `left_dock`. Persisted via ProjectState.
     pub(in crate::workspace) left_dock_view: daruda_store::project::LeftDockView,
-    /// Active tab inside the right dock (Usage / Skills / Tools /
-    /// Tasks). Persisted via ProjectState.
+    /// Active utility tab (Usage / Skills / Tools), independent of pages.
     pub(in crate::workspace) right_dock_view: daruda_store::project::RightDockView,
+    pub(in crate::workspace) workspace_page: Option<pages::PageState>,
     /// Claude Code integration state — usage / plan-limits / service-
     /// status / session-status / PTY tracker / JSONL fallback +
     /// associated background tasks. Grouped into one struct so the
@@ -603,6 +604,8 @@ pub struct Workspace {
     /// (empty set) means every plugin group renders collapsed; the
     /// user toggles individual groups via the accordion chevron.
     pub(in crate::workspace) skill_plugin_expanded: std::collections::HashSet<String>,
+    /// Right-dock sections the user folded or unfolded against their default.
+    pub(in crate::workspace) right_dock_sections: right_dock::section::DockSections,
     /// Background watches and their pumps — see [`lifetimes::Pumps`].
     pub(in crate::workspace) pumps: lifetimes::Pumps,
     /// Cached Project-scope `.mcp.json` directories (lane root + the
@@ -1023,6 +1026,7 @@ impl Workspace {
             },
             left_dock_view: daruda_store::project::LeftDockView::default(),
             right_dock_view: daruda_store::project::RightDockView::default(),
+            workspace_page: None,
             claude: claude_session_ops::ClaudeContext {
                 usage_poll: config.usage.poll.clone(),
                 usage_by_account: claude_session_ops::PerAccountUsage::default(),
@@ -1169,6 +1173,7 @@ impl Workspace {
                     .placeholder(crate::surface::strings::task_search_placeholder())
             }),
             skill_plugin_expanded: std::collections::HashSet::new(),
+            right_dock_sections: Default::default(),
             // The shared root in production; under the test's own data
             // directory otherwise, so a suite takes no lock the developer's
             // app could see and leaves nothing in their config directory.
@@ -1381,6 +1386,7 @@ impl Workspace {
         view: daruda_store::project::LeftDockView,
         cx: &mut Context<Self>,
     ) {
+        self.close_page(cx);
         if self.left_dock_view == view {
             return;
         }
@@ -1778,6 +1784,10 @@ impl Workspace {
         view: daruda_store::project::RightDockView,
         cx: &mut Context<Self>,
     ) {
+        if let Some(page) = pages::Page::from_legacy(view) {
+            self.show_page(page, cx);
+            return;
+        }
         if self.right_dock_view == view {
             return;
         }

@@ -5,7 +5,7 @@
 //! handlers call them directly. This file holds the ops that
 //! genuinely need `&mut Workspace`: dialog construction over
 //! `dialog_helpers`, file-viewer dispatch, Finder spawn, and
-//! plugin-accordion UI state.
+//! plugin-group fold state.
 
 use gpui::{Context, Window};
 
@@ -15,20 +15,16 @@ use daruda_store::observability::error_report::{ErrorReport, ErrorSeverity};
 use daruda_store::observability::system_info::redact_home;
 
 impl Workspace {
-    /// Replace the right-bar plugin accordion's expanded set in full.
-    /// `gpui_component::Accordion::on_toggle_click` fires with the
-    /// current vector of open indices on every change, so daruda
-    /// computes the corresponding `plugin_id` set in the renderer and
-    /// hands it back here verbatim.
-    pub(super) fn set_skill_plugin_expanded(
+    /// Open or fold one plugin's group in the Skills tab.
+    pub(super) fn toggle_skill_plugin_expanded(
         &mut self,
-        expanded: std::collections::HashSet<String>,
+        plugin_id: String,
         cx: &mut Context<Self>,
     ) {
-        if self.skill_plugin_expanded != expanded {
-            self.skill_plugin_expanded = expanded;
-            cx.notify();
+        if !self.skill_plugin_expanded.remove(&plugin_id) {
+            self.skill_plugin_expanded.insert(plugin_id);
         }
+        cx.notify();
     }
 
     /// Open the [`SkillPickerModal`](super::skills::SkillPickerModal)

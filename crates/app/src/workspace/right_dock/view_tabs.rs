@@ -1,14 +1,14 @@
 //! ViewSwitcher for the right dock.
 //!
-//! Four tabs (Usage / Skills / Tools / Tasks) map to
+//! Icon tabs map to
 //! `daruda_store::project::RightDockView`. Clicking a tab dispatches
 //! `set_right_dock_view` on `Workspace` via the snapshot's weak handle.
 
 use daruda_store::project::RightDockView;
-use gpui::{AnyElement, Context, IntoElement, prelude::*, px};
+use gpui::{AnyElement, Context, IntoElement};
 
 use crate::surface::strings;
-use crate::ui::{tab, tab_bar};
+use crate::ui::{Icon, IconName, dock_tab, dock_tab_bar, icons};
 
 use super::super::layout::Dock;
 use super::super::layout::RightDockSnapshot;
@@ -28,14 +28,6 @@ fn entries() -> Vec<(RightDockView, gpui::SharedString)> {
             RightDockView::Tools,
             strings::right_panel_tab_tools().into(),
         ),
-        (
-            RightDockView::Tasks,
-            strings::right_panel_tab_tasks().into(),
-        ),
-        (
-            RightDockView::Flows,
-            strings::right_panel_tab_flows().into(),
-        ),
     ]
 }
 
@@ -46,6 +38,16 @@ fn view_by_index(ix: usize) -> RightDockView {
         .get(ix)
         .map(|(v, _)| *v)
         .unwrap_or(RightDockView::Usage)
+}
+
+fn view_icon(view: RightDockView) -> Icon {
+    match view {
+        RightDockView::Usage | RightDockView::Tasks | RightDockView::Flows => {
+            Icon::new(IconName::ChartPie)
+        }
+        RightDockView::Skills => Icon::new(IconName::BookOpen),
+        RightDockView::Tools => icons::icon(icons::BUILD),
+    }
 }
 
 /// Render the ViewSwitcher tab strip for the right dock.
@@ -60,18 +62,12 @@ pub(in crate::workspace) fn render(
         .unwrap_or(0);
     let workspace = snap.workspace.clone();
 
-    tab_bar("right-dock-view-switcher")
-        .w_full()
-        .gap(px(0.))
-        // Five labels do not fit this dock at its narrower widths — in
-        // English "Flows" is already clipped at the default 250px and gone
-        // entirely at the 220px minimum, with only its underline left. The
-        // strip has no other overflow behaviour: it just cuts, so the active
-        // tab can be the unreadable one. The menu keeps every tab reachable
-        // whatever the width, and keeps doing so if a sixth is ever added.
-        .menu(true)
+    dock_tab_bar("right-dock-view-switcher")
         .selected_index(active_ix)
-        .children(all.into_iter().map(|(_, label)| tab(label)))
+        .children(
+            all.into_iter()
+                .map(|(view, label)| dock_tab(view_icon(view), label)),
+        )
         .on_click(move |ix, _window, cx| {
             let view = view_by_index(*ix);
             if let Some(ws) = workspace.upgrade() {

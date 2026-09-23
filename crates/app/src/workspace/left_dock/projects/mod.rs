@@ -6,7 +6,6 @@
 
 pub(super) mod agent_badges;
 pub(super) mod banner;
-pub(super) mod card;
 pub(super) mod context_menu;
 pub(super) mod create_modal;
 pub(super) mod drag;
@@ -18,5 +17,6 @@ pub(super) mod project_menu;
 pub(in crate::workspace) mod remove_modal;
 pub(super) mod rows;
 pub(super) mod session_host_modal;
+pub(super) mod tree;
 
 pub(in crate::workspace) use list::render;

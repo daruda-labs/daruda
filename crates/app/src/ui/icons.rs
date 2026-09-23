@@ -14,6 +14,7 @@ pub const DNS: &str = "icons/ui/dns.svg";
 pub const PERSON: &str = "icons/ui/person.svg";
 pub const NOTIFICATIONS: &str = "icons/ui/notifications.svg";
 pub const EXTENSION: &str = "icons/ui/extension.svg";
+pub const BUILD: &str = "icons/ui/build.svg";
 pub const INFO: &str = "icons/ui/info.svg";
 pub const AGENT: &str = "icons/bot.svg";
 pub const CODE: &str = "icons/ui/code.svg";
@@ -46,6 +47,14 @@ pub const CHECK: &str = "icons/ui/check.svg";
 pub const EXPAND: &str = "icons/ui/open-in-full.svg";
 pub const HISTORY: &str = "icons/ui/history.svg";
 pub const VISIBILITY: &str = "icons/ui/visibility.svg";
+pub const DIFFERENCE: &str = "icons/ui/difference.svg";
+// Lucide (ISC) outlines, drawn at the dock's lighter 1.65 stroke.
+pub const TASKS: &str = "icons/lucide/list-checks.svg";
+pub const FLOWS: &str = "icons/lucide/workflow.svg";
+pub const FOLDER: &str = "icons/lucide/folder.svg";
+pub const SESSION: &str = "icons/lucide/message-square.svg";
+pub const SKILL: &str = "icons/lucide/file-text.svg";
+pub const SERVER: &str = "icons/lucide/server.svg";
 
 /// Explicit pixels keep controls independent of font and button size tiers.
 pub fn icon(path: &'static str) -> Icon {
@@ -62,6 +71,7 @@ mod tests {
     #[test]
     fn every_control_symbol_is_embedded() {
         for path in [
+            BUILD,
             SETTINGS,
             CLOSE,
             DELETE,
@@ -91,6 +101,13 @@ mod tests {
             EXPAND,
             HISTORY,
             VISIBILITY,
+            DIFFERENCE,
+            TASKS,
+            FLOWS,
+            FOLDER,
+            SESSION,
+            SKILL,
+            SERVER,
         ] {
             let bytes = crate::assets::DarudaAssets.load(path).unwrap().unwrap();
             assert!(bytes.windows(4).any(|w| w == b"<svg"), "{path}");

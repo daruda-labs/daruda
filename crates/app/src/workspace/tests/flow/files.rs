@@ -105,7 +105,11 @@ async fn a_created_flow_is_listed_and_loads(cx: &mut TestAppContext) {
     });
     vcx.run_until_parked();
 
-    let listed = ws.update(&mut vcx, |ws, _| ws.flow_list_for_panel());
+    let listed = ws.update(&mut vcx, |ws, cx| {
+        assert_eq!(ws.active_page(), None, "creating a flow opens its graph");
+        ws.show_page(crate::workspace::pages::Page::Flows, cx);
+        ws.flow_list_for_panel()
+    });
     let made = listed
         .iter()
         .find(|f| f.path.file_name().is_some_and(|n| n == "ship it.yaml"))

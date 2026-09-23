@@ -27,4 +27,4 @@ pub(super) use edit_modal::open_edit_skill_modal;
 pub(super) use invocation_modal::{SkillInvocationLabel, SkillInvocationModal};
 pub(super) use picker_modal::SkillPickerModal;
 pub(super) use rename_modal::open_rename_skill_modal;
-pub(in crate::workspace) use render::render;
+pub(in crate::workspace) use render::{footer, render};

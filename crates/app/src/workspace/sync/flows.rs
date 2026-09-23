@@ -67,7 +67,7 @@ impl Workspace {
         // notify here would repaint the whole window for an event that changed
         // nothing (an editor touching a file, our own write coming back). What
         // it *is* needed for is the panel's list, which is rendered from here.
-        if self.right_dock_view == daruda_store::project::RightDockView::Flows {
+        if self.active_page() == Some(crate::workspace::pages::Page::Flows) {
             cx.notify();
         }
     }

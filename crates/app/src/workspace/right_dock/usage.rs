@@ -21,11 +21,10 @@ use gpui::{AnyElement, Context, Hsla, IntoElement, SharedString, WeakEntity, div
 use super::super::layout::Dock;
 use super::super::layout::RightDockSnapshot;
 use super::super::layout::snap::{RestorableSession, UsageSectionSnapshot};
+use super::section::DockSection;
+use super::section_view::{ScopeSection, SectionFold, library_row, panel_footer};
 use crate::surface::strings;
-use crate::ui::{
-    ButtonVariants as _, Disableable as _, GroupBoxVariants as _, SectionHeader, Sizable as _,
-    button, group_box, tab, tab_bar,
-};
+use crate::ui::{Disableable as _, GroupBoxVariants as _, SectionHeader, group_box, tab, tab_bar};
 use crate::workspace::Workspace;
 use crate::workspace::main_area::pane::AccountDomain;
 
@@ -37,14 +36,7 @@ use crate::workspace::main_area::pane::AccountDomain;
 /// pane, or an agent daruda can't resolve a domain for) and there is more
 /// than one to choose from.
 pub(super) fn render(snap: &RightDockSnapshot, cx: &mut Context<Dock>) -> AnyElement {
-    if snap.usage.is_empty() {
-        return no_provider_body(cx);
-    }
-    let Some(displayed) = resolve_displayed_domain(
-        snap.focused_agent_domain,
-        snap.usage_domain_override,
-        &snap.usage,
-    ) else {
+    let Some(displayed) = displayed_domain(snap) else {
         return no_provider_body(cx);
     };
     // `Exactly(recipe)` names a domain unconditionally — only reachable here
@@ -52,7 +44,7 @@ pub(super) fn render(snap: &RightDockSnapshot, cx: &mut Context<Dock>) -> AnyEle
     // no section). Another domain might still be signed in, so this names
     // the specific missing one instead of the generic "nobody is signed in
     // anywhere" notice.
-    let Some(section) = snap.usage.iter().find(|s| s.recipe == displayed) else {
+    let Some(section) = displayed_section(snap, displayed) else {
         return no_provider_body_for_domain(displayed, cx);
     };
     let activity = snap
@@ -71,31 +63,70 @@ pub(super) fn render(snap: &RightDockSnapshot, cx: &mut Context<Dock>) -> AnyEle
             section.outcome.is_stale(),
             snap.usage_refresh_in_flight,
             &snap.workspace,
+            cx,
         ));
     let body = if show_domain_switcher(snap.focused_agent_domain, snap.usage.len()) {
         body.child(domain_switcher(&snap.usage, displayed, &snap.workspace))
     } else {
         body
     };
-    let body = body.child(provider_section(section, activity, cx));
+    let body = body.child(provider_section(section, activity, snap, cx));
     let recent_sessions = snap
         .recent_sessions
         .iter()
         .find(|(recipe, _)| *recipe == displayed)
         .map(|(_, sessions)| sessions.as_slice());
     let body = match recent_sessions {
-        Some(sessions) if !sessions.is_empty() => {
-            body.child(recent_sessions_block(sessions, &snap.workspace, cx))
-        }
+        Some(sessions) if !sessions.is_empty() => body.child(recent_sessions_block(
+            sessions,
+            snap.sections.is_open(DockSection::UsageRecentSessions),
+            &snap.workspace,
+            cx,
+        )),
         _ => body,
     };
     body.into_any_element()
+}
+
+fn displayed_domain(snap: &RightDockSnapshot) -> Option<AccountRecipeId> {
+    if snap.usage.is_empty() {
+        return None;
+    }
+    resolve_displayed_domain(
+        snap.focused_agent_domain,
+        snap.usage_domain_override,
+        &snap.usage,
+    )
+}
+
+fn displayed_section(
+    snap: &RightDockSnapshot,
+    displayed: AccountRecipeId,
+) -> Option<&UsageSectionSnapshot> {
+    snap.usage.iter().find(|s| s.recipe == displayed)
+}
+
+/// Freshness of the one section on screen, pinned under the body.
+pub(super) fn footer(snap: &RightDockSnapshot, cx: &gpui::App) -> Option<AnyElement> {
+    let section = displayed_section(snap, displayed_domain(snap)?)?;
+    let fetched_at = section.outcome.snapshot().and_then(|u| u.fetched_at);
+    // Before the first fetch there is no freshness to report.
+    if fetched_at.is_none() && !snap.usage_refresh_in_flight {
+        return None;
+    }
+    let label = refresh_badge_label(
+        fetched_at,
+        section.outcome.is_stale(),
+        snap.usage_refresh_in_flight,
+    );
+    Some(panel_footer(crate::ui::icons::REFRESH, label, cx))
 }
 
 /// Body when no provider is signed in: a single notice rather than gauges stuck
 /// on a permanent placeholder.
 fn no_provider_body(cx: &gpui::App) -> AnyElement {
     crate::workspace::right_dock::right_panel_body()
+        .child(SectionHeader::new(strings::right_panel_tab_usage()).prominent())
         .child(
             crate::ui::placeholder_text(strings::usage_no_provider())
                 .text_size(px(theme::DOCK_PLACEHOLDER_FONT_SIZE))
@@ -110,6 +141,7 @@ fn no_provider_body(cx: &gpui::App) -> AnyElement {
 /// nobody is signed into anything.
 fn no_provider_body_for_domain(recipe: AccountRecipeId, cx: &gpui::App) -> AnyElement {
     crate::workspace::right_dock::right_panel_body()
+        .child(SectionHeader::new(strings::right_panel_tab_usage()).prominent())
         .child(
             crate::ui::placeholder_text(strings::usage_no_domain_provider(recipe))
                 .text_size(px(theme::DOCK_PLACEHOLDER_FONT_SIZE))
@@ -171,20 +203,27 @@ fn domain_switcher(
 /// `chart_block`'s "nothing yet" precedent.
 fn recent_sessions_block(
     sessions: &[RestorableSession],
+    is_open: bool,
     workspace: &WeakEntity<Workspace>,
     cx: &gpui::App,
 ) -> AnyElement {
-    sessions
-        .iter()
-        .fold(
-            div()
-                .flex()
-                .flex_col()
-                .gap(px(theme::RIGHT_PANEL_ROW_GAP))
-                .child(SectionHeader::new(strings::usage_recent_sessions_section())),
-            |block, session| block.child(recent_session_row(session, workspace, cx)),
-        )
-        .into_any_element()
+    let rows = is_open.then(|| {
+        sessions
+            .iter()
+            .fold(div().flex().flex_col(), |block, session| {
+                block.child(recent_session_row(session, workspace, cx))
+            })
+            .into_any_element()
+    });
+    ScopeSection {
+        section: DockSection::UsageRecentSessions,
+        label: strings::usage_recent_sessions_section().into(),
+        count: Some(sessions.len().to_string().into()),
+        fold: SectionFold::toggleable(is_open),
+        divided: true,
+    }
+    .render(rows, workspace, cx)
+    .into_any_element()
 }
 
 /// One row: title/prompt preview/cwd fallback + compact session metadata +
@@ -206,66 +245,42 @@ fn recent_session_row(
     let workspace = workspace.clone();
     let session = session.clone();
 
-    div()
-        .id(row_id)
-        .group("usage-session-row")
-        .relative()
-        .flex()
-        .flex_row()
-        .items_center()
-        .w_full()
-        .min_w_0()
-        .min_h(px(theme::CONTROL_TARGET_SIZE))
-        .overflow_hidden()
-        .gap(px(theme::RIGHT_PANEL_ROW_GAP))
-        .px(px(theme::SKILL_ROW_PAD_X))
-        .py(px(theme::SKILL_ROW_PAD_Y))
-        .rounded(px(theme::SKILL_ROW_RADIUS))
-        .hover(move |d| d.bg(row_hover_bg))
-        .child(
-            div()
-                .flex_1()
-                .min_w_0()
-                .truncate()
-                .text_size(px(theme::RIGHT_PANEL_BODY_FONT_SIZE))
-                .text_color(t.text_body)
-                .child(label),
-        )
-        .child(
-            div()
-                .flex_shrink()
-                .max_w(gpui::relative(0.45))
-                .min_w_0()
-                .truncate()
-                .text_size(px(theme::RIGHT_PANEL_LABEL_FONT_SIZE))
-                .text_color(t.text_muted)
-                .child(meta_label),
-        )
-        .child(
-            div()
-                .absolute()
-                .right(px(theme::SKILL_ROW_PAD_X))
-                .top_0()
-                .bottom_0()
-                .flex()
-                .items_center()
-                .bg(actions_bg)
-                .pl(px(theme::SKILL_ROW_PAD_X))
-                .invisible()
-                .group_hover("usage-session-row", |s| s.visible())
-                .child(
-                    crate::ui::button_icon(restore_id, crate::ui::icons::HISTORY, cx)
-                        .tooltip(strings::usage_session_restore())
-                        .debug_selector(|| "usage-session-restore".into())
-                        .on_click(move |_, window, cx| {
-                            if let Some(ws) = workspace.upgrade() {
-                                ws.update(cx, |ws, cx| {
-                                    ws.restore_session(session.clone(), window, cx)
-                                });
-                            }
-                        }),
-                ),
-        )
+    library_row(
+        crate::ui::icons::SESSION,
+        label,
+        Some(meta_label.into_any_element()),
+        cx,
+    )
+    .id(row_id)
+    .group("usage-session-row")
+    .relative()
+    .overflow_hidden()
+    .px(px(theme::SKILL_ROW_PAD_X))
+    .rounded(px(theme::SKILL_ROW_RADIUS))
+    .hover(move |d| d.bg(row_hover_bg))
+    .child(
+        div()
+            .absolute()
+            .right(px(theme::SKILL_ROW_PAD_X))
+            .top_0()
+            .bottom_0()
+            .flex()
+            .items_center()
+            .bg(actions_bg)
+            .pl(px(theme::SKILL_ROW_PAD_X))
+            .invisible()
+            .group_hover("usage-session-row", |s| s.visible())
+            .child(
+                crate::ui::button_icon(restore_id, crate::ui::icons::HISTORY, cx)
+                    .tooltip(strings::usage_session_restore())
+                    .debug_selector(|| "usage-session-restore".into())
+                    .on_click(move |_, window, cx| {
+                        if let Some(ws) = workspace.upgrade() {
+                            ws.update(cx, |ws, cx| ws.restore_session(session.clone(), window, cx));
+                        }
+                    }),
+            ),
+    )
 }
 
 /// One auth domain's block: header (icon + name + plan badge), account label,
@@ -274,6 +289,7 @@ fn recent_session_row(
 fn provider_section(
     section: &crate::workspace::layout::snap::UsageSectionSnapshot,
     activity: Option<&ActivityStats>,
+    snap: &RightDockSnapshot,
     cx: &gpui::App,
 ) -> impl IntoElement {
     let stale = section.outcome.is_stale();
@@ -281,14 +297,20 @@ fn provider_section(
         .flex()
         .flex_col()
         .w_full()
-        .gap(px(theme::RIGHT_PANEL_ROW_GAP))
-        .child(header(
-            section.recipe,
-            section.outcome.snapshot().and_then(|u| u.plan.as_ref()),
-            section.account_label.clone(),
-            cx,
-        ))
-        .child(status_pill(section.service_status.as_ref(), cx))
+        .gap(px(theme::USAGE_BLOCK_GAP))
+        .child(
+            div()
+                .flex()
+                .flex_col()
+                .gap(px(theme::RIGHT_PANEL_ROW_GAP))
+                .child(header(
+                    section.recipe,
+                    section.outcome.snapshot().and_then(|u| u.plan.as_ref()),
+                    section.account_label.clone(),
+                    cx,
+                ))
+                .child(status_pill(section.service_status.as_ref(), cx)),
+        )
         .child(gauges_block(section.outcome.snapshot(), stale, cx));
 
     let Some(activity) = activity else {
@@ -296,15 +318,19 @@ fn provider_section(
     };
     block
         .child(chart_block(
+            DockSection::UsageTurns,
             strings::usage_section_7day(),
             activity,
             |d| d.turns,
+            snap,
             cx,
         ))
         .child(chart_block(
+            DockSection::UsageTokens,
             strings::usage_section_tokens(),
             activity,
             |d| d.tokens,
+            snap,
             cx,
         ))
 }
@@ -332,13 +358,14 @@ fn header(
         .child(crate::ui::agent_icon(
             Some(crate::agent::icons::icon_for_recipe(recipe)),
             px(theme::USAGE_SECTION_ICON_SIZE),
-            t.text_muted,
+            t.text_body,
         ))
         .child(
             div()
                 .flex_grow()
                 .text_size(px(theme::USAGE_TITLE_FONT_SIZE))
-                .text_color(t.text_muted)
+                .font_weight(gpui::FontWeight::SEMIBOLD)
+                .text_color(t.text_primary)
                 .child(SharedString::from(strings::account_recipe_label(recipe))),
         );
 
@@ -384,32 +411,27 @@ fn plan_badge(label: String) -> impl IntoElement {
 // Section header + refresh badge
 // ----------------------------------------------------------------
 
-/// "PLAN USAGE" heading with a trailing clickable cache-age / refresh
-/// badge. Clicking dispatches `Workspace::refresh_usage_now`.
+/// Panel title with an icon-only refresh; the cache age is its tooltip.
+/// Clicking dispatches `Workspace::refresh_usage_now`.
 fn usage_section_header(
     fetched_at: Option<SystemTime>,
     stale: bool,
     in_flight: bool,
     workspace: &gpui::WeakEntity<crate::workspace::Workspace>,
+    cx: &gpui::App,
 ) -> impl IntoElement {
     let label = refresh_badge_label(fetched_at, stale, in_flight);
     let workspace = workspace.clone();
 
-    div()
-        .flex()
-        .flex_row()
-        .items_center()
-        .justify_between()
-        .w_full()
-        .child(SectionHeader::new(strings::usage_limits_section_label()))
-        .child(
+    SectionHeader::new(strings::right_panel_tab_usage())
+        .prominent()
+        .truncate_label(true)
+        .actions(
             // Ghost button: subtle text affordance with hover/press
             // feedback. Disabled while a refresh is in flight so a
             // double-click can't fan out a second fetch.
-            button("usage-refresh-badge", label)
-                .child(crate::ui::icons::icon(crate::ui::icons::REFRESH))
-                .ghost()
-                .xsmall()
+            crate::ui::button_icon("usage-refresh-badge", crate::ui::icons::REFRESH, cx)
+                .tooltip(label)
                 .disabled(in_flight)
                 .on_click(move |_, _window, cx| {
                     if let Some(ws) = workspace.upgrade() {
@@ -588,25 +610,40 @@ fn gauge_bar(pct: f32, color: Hsla) -> impl IntoElement {
 /// date), so zero days are dropped, not padded; today is matched by date
 /// (not position). Heights normalize to the busiest day in the window.
 fn chart_block(
+    section: DockSection,
     heading: String,
     activity: &ActivityStats,
+    value_of: impl Fn(&DayActivity) -> u64,
+    snap: &RightDockSnapshot,
+    cx: &gpui::App,
+) -> AnyElement {
+    let n = activity.daily.len();
+    let recent = &activity.daily[n.saturating_sub(7)..];
+    // Nothing aggregated yet — just the heading, no empty chart frame, and
+    // nothing to fold.
+    let fold = if recent.is_empty() {
+        SectionFold::Fixed
+    } else {
+        SectionFold::toggleable(snap.sections.is_open(section))
+    };
+    let chart = (fold.is_open() && !recent.is_empty()).then(|| chart_row(recent, value_of, cx));
+    ScopeSection {
+        section,
+        label: heading.into(),
+        count: None,
+        fold,
+        divided: true,
+    }
+    .render(chart, &snap.workspace, cx)
+    .into_any_element()
+}
+
+fn chart_row(
+    recent: &[DayActivity],
     value_of: impl Fn(&DayActivity) -> u64,
     cx: &gpui::App,
 ) -> AnyElement {
     let today = chrono::Local::now().date_naive();
-    let n = activity.daily.len();
-    let recent = &activity.daily[n.saturating_sub(7)..];
-
-    let block = div()
-        .flex()
-        .flex_col()
-        .gap(px(theme::RIGHT_PANEL_ROW_GAP))
-        .child(SectionHeader::new(heading));
-
-    // Nothing aggregated yet — just the heading, no empty chart frame.
-    if recent.is_empty() {
-        return block.into_any_element();
-    }
 
     let values: Vec<u64> = recent.iter().map(&value_of).collect();
     let heights = chart_heights(
@@ -625,7 +662,7 @@ fn chart_block(
         row = row.child(chart_bar(&day.date, today, heights[i], cx));
     }
 
-    block.child(row).into_any_element()
+    row.into_any_element()
 }
 
 /// One chart column: the bar (bottom-aligned) over its weekday label.

@@ -93,12 +93,6 @@ pub(in crate::workspace) fn render(snap: &LeftDockSnapshot, cx: &mut Context<Doc
     for row in &top_rows {
         match row {
             TopRow::Group(group, members) => {
-                // Card-level active fill: lit when the focused project
-                // is a member of this group. Computed against the full
-                // member list (not collapsed-filtered) so a collapsed
-                // group whose active member is hidden still reads as
-                // selected.
-                let card_is_active = members.iter().any(|p| p.id == active_project);
                 let header = group_header_row(group, snap, cx).into_any_element();
                 let members_block = {
                     let mut inner = div().flex().flex_col().w_full();
@@ -115,17 +109,16 @@ pub(in crate::workspace) fn render(snap: &LeftDockSnapshot, cx: &mut Context<Doc
                     }
                     inner.into_any_element()
                 };
-                cards = cards.child(super::card::group_card(
+                cards = cards.child(super::tree::group(
                     header,
                     members_block,
-                    card_is_active,
-                    cx,
+                    theme::current(cx).border,
                 ));
             }
             TopRow::UngroupedProject(project) => {
                 let inner = ungrouped_project_block(project, active_project, active_lane, snap, cx)
                     .into_any_element();
-                cards = cards.child(super::card::ungrouped_shell(inner, cx));
+                cards = cards.child(super::tree::project(inner));
             }
         }
     }
@@ -217,7 +210,6 @@ fn ungrouped_project_block(
             .flex()
             .flex_col()
             .w_full()
-            .pl(px(theme::LANE_INDENT_STEP))
             .gap(px(theme::LANE_LIST_GAP_Y));
         for wt in &project.lanes {
             let is_active = project.id == active_project && wt.id == active_lane;
@@ -229,9 +221,7 @@ fn ungrouped_project_block(
     block
 }
 
-/// Member project block inside an expanded group card. Delegates to
-/// `ungrouped_project_block`, which applies the stepped lane indent
-/// internally; the group card wraps both the header and lane rows.
+/// Group members indent one step; lanes indent by their own row inset.
 fn grouped_project_block(
     project: &ProjectSnapshot,
     active_project: daruda_store::project::ProjectId,
@@ -243,6 +233,7 @@ fn grouped_project_block(
         .flex()
         .flex_col()
         .w_full()
+        .pl(px(theme::LANE_INDENT_STEP))
         .child(ungrouped_project_block(
             project,
             active_project,

@@ -5,10 +5,10 @@
 //! `Workspace::set_left_dock_view` via the snapshot's weak handle.
 
 use daruda_store::project::LeftDockView;
-use gpui::{AnyElement, Context, IntoElement, prelude::*, px};
+use gpui::{AnyElement, Context, IntoElement, div, prelude::*};
 
 use crate::surface::strings;
-use crate::ui::{tab, tab_bar};
+use crate::ui::{Icon, IconName, dock_tab, dock_tab_bar, icons};
 
 use super::super::layout::Dock;
 use super::super::layout::LeftDockSnapshot;
@@ -32,8 +32,16 @@ fn view_by_index(ix: usize) -> LeftDockView {
         .unwrap_or(LeftDockView::Lanes)
 }
 
+fn view_icon(view: LeftDockView) -> Icon {
+    match view {
+        LeftDockView::Lanes => Icon::new(IconName::FolderClosed),
+        LeftDockView::GitChanges => icons::icon(icons::DIFFERENCE),
+        LeftDockView::Files => Icon::new(IconName::File),
+    }
+}
+
 /// Render the ViewSwitcher tab strip for the left dock.
-pub(in crate::workspace) fn render(snap: &LeftDockSnapshot, _cx: &mut Context<Dock>) -> AnyElement {
+pub(in crate::workspace) fn render(snap: &LeftDockSnapshot, cx: &mut Context<Dock>) -> AnyElement {
     let all = entries();
     let active_ix = all
         .iter()
@@ -41,17 +49,25 @@ pub(in crate::workspace) fn render(snap: &LeftDockSnapshot, _cx: &mut Context<Do
         .unwrap_or(0);
     let workspace = snap.workspace.clone();
 
-    tab_bar("left-dock-view-switcher")
-        .w_full()
-        .gap(px(0.))
+    let tabs = dock_tab_bar("left-dock-view-switcher")
         .selected_index(active_ix)
-        .children(all.into_iter().map(|(_, label)| tab(label)))
+        .children(
+            all.into_iter()
+                .map(|(view, label)| dock_tab(view_icon(view), label)),
+        )
         .on_click(move |ix, _window, cx| {
             let view = view_by_index(*ix);
             if let Some(ws) = workspace.upgrade() {
                 ws.update(cx, |ws, cx| ws.set_left_dock_view(view, cx));
             }
         })
+        .into_any_element();
+    div()
+        .flex()
+        .flex_col()
+        .flex_none()
+        .child(crate::workspace::pages::render::navigation(snap, cx))
+        .child(tabs)
         .into_any_element()
 }
 

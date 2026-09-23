@@ -83,3 +83,11 @@ fn switch_supports_click_and_keyboard_but_not_disabled_activation(cx: &mut TestA
         (true, 3)
     );
 }
+
+#[test]
+fn compact_thumb_fits_its_track() {
+    for m in [&SETTINGS, &COMPACT] {
+        assert!(m.thumb + 2.0 * m.inset <= m.h);
+        assert!(m.w <= m.target_w && m.h <= m.target_h);
+    }
+}

@@ -31,6 +31,17 @@ pub(super) fn assert_hover_targets_fit(
     selectors: &[&'static str],
     render_row: impl Fn(WeakEntity<Workspace>, &App) -> AnyElement + 'static,
 ) {
+    assert_hover_targets_fit_beside(cx, selectors, None, render_row);
+}
+
+/// As [`assert_hover_targets_fit`], and every revealed target also ends
+/// left of `beside` — a control the overlay must never cover.
+pub(super) fn assert_hover_targets_fit_beside(
+    cx: &mut TestAppContext,
+    selectors: &[&'static str],
+    beside: Option<&'static str>,
+    render_row: impl Fn(WeakEntity<Workspace>, &App) -> AnyElement + 'static,
+) {
     crate::test_support::init_gpui_component(cx);
     let state = tempfile::tempdir().unwrap();
     let window = cx.add_window(|window, cx| RowProbe {
@@ -65,5 +76,11 @@ pub(super) fn assert_hover_targets_fit(
         assert!(bounds.bottom() <= row.bottom(), "{selector} below row");
         assert!(bounds.left() >= row.left(), "{selector} left of row");
         assert!(bounds.right() <= row.right(), "{selector} right of row");
+        if let Some(beside) = beside {
+            let kept = vcx
+                .debug_bounds(beside)
+                .unwrap_or_else(|| panic!("{beside} painted"));
+            assert!(bounds.right() <= kept.left(), "{selector} covers {beside}");
+        }
     }
 }

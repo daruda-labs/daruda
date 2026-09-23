@@ -28,6 +28,15 @@ use crate::workspace::main_area::render_layout;
 /// Reads only `&Workspace` (the `cx` is for the embedded views'
 /// listeners), so it stays render-pure.
 pub(super) fn render_center_content(ws: &Workspace, cx: &mut Context<Workspace>) -> AnyElement {
+    if let Some(page) = &ws.workspace_page
+        && let crate::workspace::layout::DockSnapshot::Right(snap) = &ws.right_dock.read(cx).snap
+    {
+        let lane = ws
+            .active_lane()
+            .map(|lane| lane.display_name())
+            .unwrap_or_default();
+        return crate::workspace::pages::render::content(page, snap, lane, cx);
+    }
     // Which divider is being held, so its cursor can reach past itself.
     let dragged_divider = ws.main_area.drag_state.map(|drag| drag.left_first_leaf);
     // Availability gate runs FIRST, before any tab lookup. An

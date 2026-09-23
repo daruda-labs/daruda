@@ -3,14 +3,17 @@
 //!
 //! Layout:
 //! ```text
-//! ┌─ Tools ──────────────────────────── [+ Add server] ┐
-//! │  Project                                           │
-//! │  ● filesystem  [stdio]  enabled                    │
-//! │  ○ playwright  [stdio]  disabled                   │
-//! │  ⚠ broken     [stdio]  malformed                   │
-//! │  Personal                                          │
-//! │  ● context7    [http]   enabled                    │
-//! └────────────────────────────────────────────────────┘
+//! ┌─ Tools ──────────────────────────────────────── [+] ┐
+//! │  ▾ PROJECT                                        2 │
+//! │  ▤ filesystem                                  [on] │
+//! │    enabled · stdio                                  │
+//! │  ▤ playwright                                 [off] │
+//! │    disabled · stdio                                 │
+//! │  ─────────────────────────────────────────────────  │
+//! │  ▾ USER                                           1 │
+//! ├─────────────────────────────────────────────────────┤
+//! │  ▤ 3 MCP servers                                    │
+//! └─────────────────────────────────────────────────────┘
 //! ```
 //!
 //! All static text comes from `surface::strings::MCP_*`; pixel +
@@ -22,71 +25,82 @@ use gpui::{AnyElement, Context, IntoElement, SharedString, div, prelude::*, px};
 
 use crate::agent::mcp::{McpScope, McpServer, McpSnapshot, McpTransport};
 use crate::surface::strings;
-use crate::ui::Sizable as _;
-use crate::ui::{ButtonVariants as _, Divider};
+use crate::ui::SectionHeader;
 use crate::workspace::Workspace;
 use crate::workspace::layout::Dock;
 use crate::workspace::layout::RightDockSnapshot;
+use crate::workspace::right_dock::section::DockSection;
+use crate::workspace::right_dock::section_view::{
+    ScopeSection, SectionFold, library_row, panel_footer,
+};
 
 /// Render the Tools tab body.
 pub(in crate::workspace) fn render(snap: &RightDockSnapshot, cx: &mut Context<Dock>) -> AnyElement {
     let mcp = &snap.mcp;
     let workspace = snap.workspace.clone();
-    let t = theme::current(cx).clone();
-
     let has_lane = mcp.project_root.is_some();
-    crate::workspace::right_dock::right_panel_body()
-        .child(header_row(workspace.clone(), t.text_primary))
-        .child(scope_section(
+    let scopes = [
+        (
+            DockSection::ToolsProject,
             strings::mcp_project(),
             McpScope::Project,
-            mcp,
-            workspace.clone(),
             has_lane,
-            cx,
-        ))
-        .child(Divider::horizontal())
-        .child(scope_section(
+        ),
+        (
+            DockSection::ToolsLocal,
             strings::mcp_local(),
             McpScope::Local,
-            mcp,
-            workspace.clone(),
             has_lane,
-            cx,
-        ))
-        .child(Divider::horizontal())
-        .child(scope_section(
+        ),
+        (
+            DockSection::ToolsUser,
             strings::mcp_user(),
             McpScope::User,
-            mcp,
-            workspace,
             true,
-            cx,
-        ))
-        .into_any_element()
+        ),
+    ];
+    let mut col =
+        crate::workspace::right_dock::right_panel_body().child(header_row(workspace.clone(), cx));
+    for (ix, (section, label, scope, enabled)) in scopes.into_iter().enumerate() {
+        let is_open = snap.sections.is_open(section);
+        let body = is_open.then(|| scope_body(scope, mcp, workspace.clone(), enabled, cx));
+        col = col.child(
+            ScopeSection {
+                section,
+                label: label.into(),
+                count: enabled.then(|| mcp.servers(scope).len().to_string().into()),
+                fold: SectionFold::toggleable(is_open),
+                divided: ix > 0,
+            }
+            .render(body, &workspace, cx),
+        );
+    }
+    col.into_any_element()
 }
 
-fn header_row(workspace: gpui::WeakEntity<Workspace>, title_color: gpui::Hsla) -> impl IntoElement {
-    div()
-        .flex()
-        .flex_row()
-        .items_center()
-        .justify_between()
-        .gap(px(theme::RIGHT_PANEL_ROW_GAP))
-        .py(px(theme::RIGHT_PANEL_HEADER_PAD_Y))
-        .child(
-            div()
-                .text_size(px(theme::RIGHT_PANEL_BODY_FONT_SIZE))
-                .text_color(title_color)
-                .child(strings::right_panel_tab_tools()),
-        )
-        .child(new_server_button(workspace))
+/// Servers configured across every scope.
+pub(in crate::workspace) fn footer(snap: &RightDockSnapshot, cx: &gpui::App) -> AnyElement {
+    let total: usize = [McpScope::Project, McpScope::Local, McpScope::User]
+        .into_iter()
+        .map(|scope| snap.mcp.servers(scope).len())
+        .sum();
+    panel_footer(
+        crate::ui::icons::SERVER,
+        strings::mcp_footer_servers(total),
+        cx,
+    )
 }
 
-fn new_server_button(workspace: gpui::WeakEntity<Workspace>) -> impl IntoElement {
-    crate::ui::button_with_icon("mcp-new", strings::mcp_new_button(), crate::ui::icons::ADD)
-        .primary()
-        .xsmall()
+fn header_row(workspace: gpui::WeakEntity<Workspace>, cx: &gpui::App) -> impl IntoElement {
+    SectionHeader::new(strings::right_panel_tab_tools())
+        .prominent()
+        .truncate_label(true)
+        .actions(new_server_button(workspace, cx))
+}
+
+fn new_server_button(workspace: gpui::WeakEntity<Workspace>, cx: &gpui::App) -> impl IntoElement {
+    crate::ui::button_icon("mcp-new", crate::ui::icons::ADD, cx)
+        .tooltip(strings::mcp_new_button())
         .on_click(move |_, window, cx| {
             if let Some(ws) = workspace.upgrade() {
                 ws.update(cx, |ws, cx| ws.open_add_mcp_server(window, cx));
@@ -94,8 +108,7 @@ fn new_server_button(workspace: gpui::WeakEntity<Workspace>) -> impl IntoElement
         })
 }
 
-fn scope_section(
-    label: impl Into<gpui::SharedString>,
+fn scope_body(
     scope: McpScope,
     state: &McpSnapshot,
     workspace: gpui::WeakEntity<Workspace>,
@@ -103,48 +116,34 @@ fn scope_section(
     cx: &gpui::App,
 ) -> AnyElement {
     let t = theme::current(cx);
-    let servers = state.servers(scope);
-    let mut col = div().flex().flex_col().gap(px(theme::MCP_ROW_GAP)).child(
-        div()
-            .flex()
-            .flex_row()
-            .items_center()
-            .gap(px(theme::MCP_HEADER_GAP))
-            .text_size(px(theme::RIGHT_PANEL_LABEL_FONT_SIZE))
-            .text_color(t.text_muted)
-            .child(label.into()),
-    );
-
     if !enabled {
-        return col
-            .child(
-                div()
-                    .text_size(px(theme::RIGHT_PANEL_BODY_FONT_SIZE))
-                    .text_color(t.text_subtle)
-                    .child(strings::mcp_no_project_hint()),
-            )
-            .into_any_element();
+        return empty_hint(strings::mcp_no_project_hint(), t);
     }
-
+    let servers = state.servers(scope);
     if servers.is_empty() {
         let msg = match scope {
             McpScope::Project => strings::mcp_empty_project(),
             McpScope::Local => strings::mcp_empty_local(),
             McpScope::User => strings::mcp_empty_user(),
         };
-        col = col.child(
-            div()
-                .text_size(px(theme::RIGHT_PANEL_BODY_FONT_SIZE))
-                .text_color(t.text_subtle)
-                .child(msg),
-        );
-        return col.into_any_element();
+        return empty_hint(msg, t);
     }
+    servers
+        .iter()
+        .fold(div().flex().flex_col(), |col, s| {
+            col.child(server_row(s, workspace.clone(), t, cx))
+        })
+        .into_any_element()
+}
 
-    for s in servers {
-        col = col.child(server_row(s, workspace.clone(), t, cx));
-    }
-    col.into_any_element()
+/// Quiet one-line explanation for a scope with nothing to list.
+fn empty_hint(msg: String, t: &DarudaTheme) -> AnyElement {
+    div()
+        .pb(px(theme::DOCK_SECTION_HEADER_PAD_Y))
+        .text_size(px(theme::RIGHT_PANEL_LABEL_FONT_SIZE))
+        .text_color(t.text_subtle)
+        .child(msg)
+        .into_any_element()
 }
 
 fn server_row(
@@ -170,111 +169,81 @@ fn server_row(
     let row_hover_bg = t.skill_row_hover_bg;
     let actions_bg = t.skill_row_hover_bg;
 
-    let indicator_color = if s.disabled {
-        t.text_subtle
-    } else if s.is_malformed() {
-        t.mcp_indicator_malformed
+    // The switch mirrors the config's `disabled` flag; there is no live
+    // connection state to show, so the summary line reports config only.
+    let (status, status_color) = if s.is_malformed() {
+        (strings::mcp_status_malformed(), t.mcp_malformed_badge_text)
+    } else if s.disabled {
+        (strings::mcp_status_disabled(), t.text_subtle)
     } else {
-        theme::SIGNAL_GREEN
+        (strings::mcp_status_enabled(), t.text_muted)
     };
-
-    // Only the noteworthy states carry a text label — the enabled
-    // (default) state is conveyed by the green indicator dot and the
-    // full-brightness name alone, so a redundant "enabled" word is
-    // omitted.
-    let status: Option<(String, gpui::Hsla)> = if s.disabled {
-        Some((strings::mcp_status_disabled(), t.text_subtle))
-    } else if s.is_malformed() {
-        Some((strings::mcp_status_malformed(), t.mcp_malformed_badge_text))
-    } else {
-        None
-    };
-
-    let server_name = SharedString::from(s.name.clone());
     let transport_label = match s.transport {
         McpTransport::Stdio => strings::MCP_TRANSPORT_STDIO,
         McpTransport::Sse => strings::MCP_TRANSPORT_SSE,
         McpTransport::Http => strings::MCP_TRANSPORT_HTTP,
     };
+    let summary = div()
+        .text_color(status_color)
+        .child(strings::mcp_row_summary(&status, transport_label));
+    let name = div()
+        .when(s.disabled, |d| d.text_color(t.text_subtle))
+        .child(SharedString::from(s.name.clone()));
 
-    div()
-        .id(SharedString::from(s.row_dom_id()))
-        .group("mcp-row")
-        .relative()
-        .flex()
-        .flex_row()
-        .items_center()
-        .min_w_0()
-        .min_h(px(theme::CONTROL_TARGET_SIZE))
-        .gap(px(theme::MCP_HEADER_GAP))
-        .px(px(theme::RIGHT_PANEL_PAD_X))
-        .py(px(theme::SKILL_BADGE_PAD_Y))
-        .rounded(px(theme::MCP_BADGE_RADIUS))
-        .hover(move |d| d.bg(row_hover_bg))
-        .child(
-            div()
-                .id(SharedString::from(format!("mcp-toggle-{}", s.name)))
-                .flex_none()
-                .w(px(theme::MCP_INDICATOR_SIZE))
-                .h(px(theme::MCP_INDICATOR_SIZE))
-                .rounded_full()
-                .bg(indicator_color)
-                .cursor_pointer()
-                .on_click(move |_: &gpui::ClickEvent, _window, cx| {
-                    if let Some(ws) = workspace_toggle.upgrade() {
-                        let n = name_for_toggle.clone();
-                        ws.update(cx, |ws, cx| ws.toggle_mcp_server(scope, &n, cx));
-                    }
-                }),
-        )
-        .child(
-            div()
-                .flex_none()
-                .text_size(px(theme::RIGHT_PANEL_BODY_FONT_SIZE))
-                .text_color(if s.disabled {
-                    t.text_subtle
-                } else {
-                    t.text_primary
-                })
-                .child(server_name),
-        )
-        .child(transport_chip(transport_label, t))
-        .child(
-            // Always present as the flex spacer that fills the row and
-            // backs the hover-action overlay; carries text only for the
-            // disabled / malformed states.
-            div()
-                .flex_1()
-                .min_w_0()
-                .overflow_hidden()
-                .whitespace_nowrap()
-                .text_size(px(theme::RIGHT_PANEL_BODY_FONT_SIZE))
-                .when_some(status, |d, (label, color)| d.text_color(color).child(label)),
-        )
-        .child(
-            div()
-                .absolute()
-                .right(px(theme::RIGHT_PANEL_PAD_X))
-                .top_0()
-                .bottom_0()
-                .flex()
-                .flex_row()
-                .items_center()
-                .gap(px(theme::GAP_SM))
-                .bg(actions_bg)
-                .pl(px(theme::MCP_HEADER_GAP))
-                .invisible()
-                .group_hover("mcp-row", |s| s.visible())
-                .child(row_actions(
-                    scope,
-                    name_for_edit,
-                    name_for_delete,
-                    workspace_edit,
-                    workspace_delete,
-                    cx,
-                )),
-        )
-        .into_any_element()
+    library_row(
+        crate::ui::icons::SERVER,
+        name,
+        Some(summary.into_any_element()),
+        cx,
+    )
+    .id(SharedString::from(s.row_dom_id()))
+    .group("mcp-row")
+    .relative()
+    .px(px(theme::SKILL_ROW_PAD_X))
+    .rounded(px(theme::MCP_BADGE_RADIUS))
+    .hover(move |d| d.bg(row_hover_bg))
+    .child(
+        div().flex_none().self_center().child(
+            crate::ui::switch_compact(
+                SharedString::from(format!("mcp-toggle-{}", s.name)),
+                !s.disabled,
+                cx,
+            )
+            .tooltip(strings::mcp_toggle_tooltip())
+            .debug_selector(|| "mcp-toggle".into())
+            .on_click(move |_, _window, cx| {
+                if let Some(ws) = workspace_toggle.upgrade() {
+                    let n = name_for_toggle.clone();
+                    ws.update(cx, |ws, cx| ws.toggle_mcp_server(scope, &n, cx));
+                }
+            }),
+        ),
+    )
+    .child(
+        // Sits left of the switch so revealing the actions never hides it.
+        div()
+            .absolute()
+            .right(px(theme::MCP_ACTIONS_RIGHT))
+            .top_0()
+            .bottom_0()
+            .flex()
+            .flex_row()
+            .items_center()
+            .gap(px(theme::GAP_SM))
+            .bg(actions_bg)
+            .pl(px(theme::MCP_HEADER_GAP))
+            .invisible()
+            .group_hover("mcp-row", |s| s.visible())
+            .child(row_actions(
+                scope,
+                name_for_edit,
+                name_for_delete,
+                workspace_edit,
+                workspace_delete,
+                cx,
+            )),
+    )
+    .into_any_element()
 }
 
 fn row_actions(
@@ -316,18 +285,6 @@ fn row_actions(
         )
 }
 
-fn transport_chip(label: &'static str, t: &DarudaTheme) -> impl IntoElement {
-    div()
-        .flex_none()
-        .px(px(theme::MCP_BADGE_PAD_X))
-        .py(px(theme::MCP_BADGE_PAD_Y))
-        .rounded(px(theme::MCP_BADGE_RADIUS))
-        .bg(t.overlay_selected)
-        .text_size(px(theme::MCP_BADGE_FONT_SIZE))
-        .text_color(t.text_body)
-        .child(label)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -346,9 +303,10 @@ mod tests {
             disabled: false,
             extra: Default::default(),
         };
-        crate::workspace::right_dock::row_tests::assert_hover_targets_fit(
+        crate::workspace::right_dock::row_tests::assert_hover_targets_fit_beside(
             cx,
             &["mcp-edit", "mcp-delete"],
+            Some("mcp-toggle"),
             move |workspace, cx| server_row(&server, workspace, theme::current(cx), cx),
         );
     }

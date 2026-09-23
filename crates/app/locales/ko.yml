@@ -97,10 +97,10 @@ command:
   rename_project: "프로젝트 이름 바꾸기…"
   reopen_task: "작업 다시 열기…"
   retry_task: "작업 재시도…"
-  right_panel_flows: "오른쪽 패널: 플로우"
+  right_panel_flows: "플로우 열기"
   reload_flow_graph: "플로우 그래프 다시 읽기"
   right_panel_skills: "오른쪽 패널: 스킬"
-  right_panel_tasks: "오른쪽 패널: 작업"
+  right_panel_tasks: "작업 열기"
   right_panel_tools: "오른쪽 패널: 도구"
   right_panel_usage: "오른쪽 패널: 사용량"
   run_flow: "플로우 실행…"
@@ -239,6 +239,7 @@ dock:
 
 # Task panel
 task:
+  scope_all: "전체 작업"
   filter_all: "전체"
   filter_backlog: "대기"
   filter_running: "실행 중"
@@ -1259,6 +1260,7 @@ settings:
 skills:
   section_plugin: "플러그인"
   count_chip_with_plugins: "스킬 %{skills}개 · 플러그인 %{plugins}개"
+  footer_available: "사용 가능한 스킬 %{n}개"
   new_button: "새 스킬"
   manage_plugins_button: "관리…"
   invoke_submitting: "전송 중…"
@@ -1307,6 +1309,10 @@ mcp:
   empty_user: "설정된 사용자 MCP 서버가 없습니다."
   empty_local: "이 프로젝트의 로컬 MCP 서버가 없습니다."
   status_disabled: "비활성화됨"
+  status_enabled: "활성화됨"
+  toggle_tooltip: "이 서버 사용 여부 전환"
+  row_summary: "%{status} · %{transport}"
+  footer_servers: "MCP 서버 %{n}개"
   status_malformed: "형식 오류"
   new_title: "MCP 서버 추가"
   edit_title: "MCP 서버 편집"

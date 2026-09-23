@@ -99,8 +99,8 @@ pub use scrollbar::{ScrollArea, scroll_area};
 pub use section_header::SectionHeader;
 pub use selectable_text::{SelectableText, selectable_text};
 pub use spinner::{Spinner, spinner};
-pub use switch::switch;
-pub use tab_bar::{Tab, TabBar, tab, tab_bar};
+pub use switch::{switch, switch_compact};
+pub use tab_bar::{Tab, TabBar, dock_tab, dock_tab_bar, tab, tab_bar};
 
 pub use daruda_core::text::{CharType, char_cell_hit_x, logical_line_range, word_range};
 pub use gpui_component::button::{

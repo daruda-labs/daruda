@@ -1677,6 +1677,7 @@ impl Workspace {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        self.close_page(cx);
         // The bottom input is the shared prompt/command surface for every
         // pane, so on each (re-)entry surface its panel and sync the
         // placeholder to the focused pane kind. Done here — the canonical

@@ -14,6 +14,7 @@ pub struct SectionHeader {
     pad_x: Option<f32>,
     pad_y: Option<f32>,
     truncate_label: bool,
+    prominent: bool,
 }
 
 impl SectionHeader {
@@ -25,7 +26,14 @@ impl SectionHeader {
             pad_x: None,
             pad_y: None,
             truncate_label: false,
+            prominent: false,
         }
+    }
+
+    /// Panel-level title; section labels keep their quieter default styling.
+    pub fn prominent(mut self) -> Self {
+        self.prominent = true;
+        self
     }
 
     /// Right-aligned action slot.
@@ -69,12 +77,13 @@ impl RenderOnce for SectionHeader {
             pad_x,
             pad_y,
             truncate_label,
+            prominent,
         } = self;
 
         let label_node = if truncate_label {
             div()
-                .overflow_hidden()
-                .whitespace_nowrap()
+                .min_w_0()
+                .text_ellipsis()
                 .child(label)
                 .into_any_element()
         } else {
@@ -87,7 +96,13 @@ impl RenderOnce for SectionHeader {
             .items_center()
             .justify_between()
             .text_size(px(theme::LANE_SECTION_HEADER_FONT_SIZE))
-            .text_color(theme::current(cx).text_muted);
+            .text_color(theme::current(cx).text_muted)
+            .when(prominent, |row| {
+                row.min_h(px(theme::DOCK_TREE_ROW_HEIGHT))
+                    .text_size(px(theme::RIGHT_PANEL_BODY_FONT_SIZE))
+                    .font_weight(gpui::FontWeight::SEMIBOLD)
+                    .text_color(theme::current(cx).text_primary)
+            });
 
         if let Some(x) = pad_x {
             row = row.px(px(x));
@@ -101,5 +116,16 @@ impl RenderOnce for SectionHeader {
             row = row.child(actions);
         }
         row
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn panel_emphasis_is_opt_in() {
+        assert!(!SectionHeader::new("section").prominent);
+        assert!(SectionHeader::new("panel").prominent().prominent);
     }
 }

@@ -98,10 +98,10 @@ command:
   rename_project: "Rename Project…"
   reopen_task: "Reopen Task…"
   retry_task: "Retry Task…"
-  right_panel_flows: "Right Panel: Flows"
+  right_panel_flows: "Open Flows"
   reload_flow_graph: "Reload Flow Graph"
   right_panel_skills: "Right Panel: Skills"
-  right_panel_tasks: "Right Panel: Tasks"
+  right_panel_tasks: "Open Tasks"
   right_panel_tools: "Right Panel: Tools"
   right_panel_usage: "Right Panel: Usage"
   run_flow: "Run Flow…"
@@ -240,6 +240,7 @@ dock:
 
 # Task panel
 task:
+  scope_all: "All tasks"
   filter_all: "All"
   filter_backlog: "Backlog"
   filter_running: "Running"
@@ -1260,6 +1261,7 @@ settings:
 skills:
   section_plugin: "Plugin"
   count_chip_with_plugins: "%{skills} skills · %{plugins} plugins"
+  footer_available: "%{n} skills available"
   new_button: "New skill"
   manage_plugins_button: "Manage…"
   invoke_submitting: "Sending…"
@@ -1308,6 +1310,10 @@ mcp:
   empty_user: "No user MCP servers configured."
   empty_local: "No local MCP servers for this project."
   status_disabled: "disabled"
+  status_enabled: "enabled"
+  toggle_tooltip: "Enable or disable this server"
+  row_summary: "%{status} · %{transport}"
+  footer_servers: "%{n} MCP servers"
   status_malformed: "malformed"
   new_title: "Add MCP server"
   edit_title: "Edit MCP server"

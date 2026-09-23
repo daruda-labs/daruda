@@ -3,15 +3,16 @@
 //!
 //! Layout:
 //! ```text
-//! ┌─ Skills ─────────────────────────── [+ New skill] ┐
-//! │  PROJECT  (.claude/skills · daruda)               │
-//! │  ┌─ pr-review ───────────────────────────────┐    │
-//! │  │  Review pull requests …      🤖 user+model│    │
-//! │  │  allowed-tools: Read · Bash · …  📎 2     │    │
-//! │  └────────────────────────────────────────────┘   │
-//! │  PERSONAL  (~/.claude/skills)                     │
-//! │  …                                                │
-//! └───────────────────────────────────────────────────┘
+//! ┌─ Skills ──────────────────────────────────── [⚙][+] ┐
+//! │  [ Search skills… ]                                 │
+//! │  ▾ PROJECT                                        1 │
+//! │  ▤ pr-review                                        │
+//! │    Review pull requests …                           │
+//! │  ─────────────────────────────────────────────────  │
+//! │  ▸ PLUGIN                       38 skills · 5 plugins│
+//! ├─────────────────────────────────────────────────────┤
+//! │  ▤ 39 skills available                              │
+//! └─────────────────────────────────────────────────────┘
 //! ```
 //!
 //! All static text comes from `surface::strings::SKILLS_*`; pixel +
@@ -26,8 +27,11 @@ use super::super::super::layout::RightDockSnapshot;
 use crate::agent::skills::{Skill, SkillScope, SkillsSnapshot};
 use crate::surface::strings;
 use crate::ui::Sizable as _;
-use crate::ui::{ButtonVariants as _, Divider, button};
 use crate::workspace::Workspace;
+use crate::workspace::right_dock::section::DockSection;
+use crate::workspace::right_dock::section_view::{
+    ScopeSection, SectionFold, library_row, panel_footer,
+};
 
 /// Render the Skills tab body.
 pub(in crate::workspace) fn render(snap: &RightDockSnapshot, cx: &mut Context<Dock>) -> AnyElement {
@@ -41,17 +45,12 @@ pub(in crate::workspace) fn render(snap: &RightDockSnapshot, cx: &mut Context<Do
     let installed_plugin_skills: Vec<Skill> = skills
         .plugin
         .iter()
-        .filter(|s| {
-            matches!(
-                s.plugin_availability,
-                Some(crate::agent::skills::plugins::PluginAvailability::Installed)
-            )
-        })
+        .filter(|s| is_installed(s))
         .cloned()
         .collect();
 
-    // Apply the search filter to each scope before passing to
-    // `scope_section`. A skill matches when its name or its
+    // Apply the search filter to each scope before it is rendered.
+    // A skill matches when its name or its
     // frontmatter description contains the query (case-insensitive).
     let query = snap.skill_search_query.trim().to_ascii_lowercase();
     let project = filter_skills(&skills.project, &query);
@@ -62,7 +61,7 @@ pub(in crate::workspace) fn render(snap: &RightDockSnapshot, cx: &mut Context<Do
     let searching = !query.is_empty();
 
     let mut col = crate::workspace::right_dock::right_panel_body()
-        .child(header_row(workspace.clone(), t.text_primary))
+        .child(header_row(workspace.clone(), cx))
         .child(search_row(snap, cx));
 
     if searching && !any_match {
@@ -70,55 +69,84 @@ pub(in crate::workspace) fn render(snap: &RightDockSnapshot, cx: &mut Context<Do
         return col.into_any_element();
     }
 
-    let plugin_expanded = &snap.skill_plugin_expanded;
-
+    let ctx = ScopeCtx {
+        state: skills,
+        workspace,
+        plugin_expanded: &snap.skill_plugin_expanded,
+        searching,
+    };
     // While searching, render only the scopes that actually have a
     // match. Empty scopes get hidden entirely (no "No project skills"
     // hint), since that hint is misleading mid-search — the cause is
-    // the active query, not an empty disk state.
-    let project_section = scope_section(
-        strings::skills_project(),
-        SkillScope::Project,
-        &project,
-        skills,
-        workspace.clone(),
-        skills.project_root.is_some(),
-        plugin_expanded,
-        searching,
-        &t,
-        cx,
-    );
-    let personal_section = scope_section(
-        strings::skills_personal(),
-        SkillScope::Personal,
-        &personal,
-        skills,
-        workspace.clone(),
-        true,
-        plugin_expanded,
-        searching,
-        &t,
-        cx,
-    );
-    let plugin_section = scope_section(
-        strings::skills_plugin(),
-        SkillScope::Plugin,
-        &plugin,
-        skills,
-        workspace,
-        true,
-        plugin_expanded,
-        searching,
-        &t,
-        cx,
-    );
+    // the active query, not an empty disk state. Search pins every
+    // section and plugin group it shows open, so no match is folded away.
+    let scopes = [
+        (
+            DockSection::SkillsProject,
+            strings::skills_project(),
+            SkillScope::Project,
+            &project,
+            skills.project_root.is_some(),
+        ),
+        (
+            DockSection::SkillsPersonal,
+            strings::skills_personal(),
+            SkillScope::Personal,
+            &personal,
+            true,
+        ),
+        (
+            DockSection::SkillsPlugins,
+            strings::skills_plugin(),
+            SkillScope::Plugin,
+            &plugin,
+            true,
+        ),
+    ];
+    let mut divided = false;
+    for (section, label, scope, list, enabled) in scopes {
+        if searching && list.is_empty() {
+            continue;
+        }
+        let fold = if searching {
+            SectionFold::Fixed
+        } else {
+            SectionFold::toggleable(snap.sections.is_open(section))
+        };
+        let header = ScopeSection {
+            section,
+            label: label.into(),
+            count: Some(scope_count(scope, list)),
+            fold,
+            divided,
+        };
+        let body = fold
+            .is_open()
+            .then(|| scope_body(scope, list, enabled, &ctx, &t, cx));
+        col = col.child(header.render(body, &ctx.workspace, cx));
+        divided = true;
+    }
+    col.into_any_element()
+}
 
-    col.when_some(project_section, |c, sec| c.child(sec))
-        .when(!searching, |c| c.child(Divider::horizontal()))
-        .when_some(personal_section, |c, sec| c.child(sec))
-        .when(!searching, |c| c.child(Divider::horizontal()))
-        .when_some(plugin_section, |c, sec| c.child(sec))
-        .into_any_element()
+/// Every skill the panel can list, before the search filter.
+pub(in crate::workspace) fn footer(snap: &RightDockSnapshot, cx: &gpui::App) -> AnyElement {
+    let skills = &snap.skills;
+    let installed = skills.plugin.iter().filter(|s| is_installed(s)).count();
+    let total = skills.project.len() + skills.personal.len() + installed;
+    panel_footer(
+        crate::ui::icons::SKILL,
+        strings::skills_footer_available(total),
+        cx,
+    )
+}
+
+/// Only installed plugins are listed; the footer counts the same set.
+fn is_installed(skill: &Skill) -> bool {
+    matches!(
+        skill.plugin_availability,
+        Some(crate::agent::skills::plugins::PluginAvailability::Installed)
+    )
 }
 
 /// Substring filter on `name` + frontmatter `description`. Empty
@@ -194,27 +222,17 @@ fn search_empty_hint(query: String, t: &DarudaTheme) -> impl IntoElement {
         )))
 }
 
-fn header_row(workspace: gpui::WeakEntity<Workspace>, title_color: gpui::Hsla) -> impl IntoElement {
-    div()
-        .flex()
-        .flex_row()
-        .items_center()
-        .justify_between()
-        .gap(px(theme::RIGHT_PANEL_ROW_GAP))
-        .py(px(theme::RIGHT_PANEL_HEADER_PAD_Y))
-        .child(
-            div()
-                .text_size(px(theme::RIGHT_PANEL_BODY_FONT_SIZE))
-                .text_color(title_color)
-                .child(strings::right_panel_tab_skills()),
-        )
-        .child(
+fn header_row(workspace: gpui::WeakEntity<Workspace>, cx: &gpui::App) -> impl IntoElement {
+    crate::ui::SectionHeader::new(strings::right_panel_tab_skills())
+        .prominent()
+        .truncate_label(true)
+        .actions(
             div()
                 .flex()
                 .flex_row()
                 .gap(px(theme::SKILL_HEADER_GAP))
-                .child(manage_plugins_button())
-                .child(new_skill_button(workspace)),
+                .child(manage_plugins_button(cx))
+                .child(new_skill_button(workspace, cx)),
         )
 }
 
@@ -222,13 +240,14 @@ fn header_row(workspace: gpui::WeakEntity<Workspace>, title_color: gpui::Hsla) -
 /// `OpenSettings(BuiltinSection::Plugin)` so the user lands on the
 /// install / uninstall page in the Settings window. The Skills tab
 /// itself stays read-only — see Settings → Plugin for the CRUD UI.
-fn manage_plugins_button() -> impl IntoElement {
+fn manage_plugins_button(cx: &gpui::App) -> impl IntoElement {
     use crate::workspace::OpenSettings;
-    button(
+    crate::ui::button_icon(
         "plugin-manage-open-settings",
-        strings::skills_manage_plugins_button(),
+        crate::ui::icons::SETTINGS,
+        cx,
     )
-    .xsmall()
+    .tooltip(strings::skills_manage_plugins_button())
     .on_click(|_, window, cx| {
         window.dispatch_action(
             Box::new(OpenSettings(daruda_config::BuiltinSection::Plugin)),
@@ -237,126 +256,90 @@ fn manage_plugins_button() -> impl IntoElement {
     })
 }
 
-fn new_skill_button(workspace: gpui::WeakEntity<Workspace>) -> impl IntoElement {
-    crate::ui::button_with_icon(
-        "skills-new",
-        strings::skills_new_button(),
-        crate::ui::icons::ADD,
-    )
-    .primary()
-    .xsmall()
-    .on_click(move |_, window, cx| {
-        if let Some(ws) = workspace.upgrade() {
-            ws.update(cx, |ws, cx| ws.open_create_skill(window, cx));
-        }
-    })
+fn new_skill_button(workspace: gpui::WeakEntity<Workspace>, cx: &gpui::App) -> impl IntoElement {
+    crate::ui::button_icon("skills-new", crate::ui::icons::ADD, cx)
+        .tooltip(strings::skills_new_button())
+        .on_click(move |_, window, cx| {
+            if let Some(ws) = workspace.upgrade() {
+                ws.update(cx, |ws, cx| ws.open_create_skill(window, cx));
+            }
+        })
 }
 
-#[allow(clippy::too_many_arguments)]
-fn scope_section(
-    label: impl Into<gpui::SharedString>,
+/// Inputs every scope body shares.
+struct ScopeCtx<'a> {
+    state: &'a SkillsSnapshot,
+    workspace: gpui::WeakEntity<Workspace>,
+    plugin_expanded: &'a std::collections::HashSet<String>,
+    /// A search opens every plugin group it lists, and pins it open.
+    searching: bool,
+}
+
+/// Plugin skills are spread across several plugins, so that scope's count
+/// carries both numbers.
+fn scope_count(scope: SkillScope, skills: &[Skill]) -> SharedString {
+    if matches!(scope, SkillScope::Plugin) {
+        strings::skills_count_chip_with_plugins(skills.len(), count_unique_plugins(skills)).into()
+    } else {
+        skills.len().to_string().into()
+    }
+}
+
+fn scope_body(
     scope: SkillScope,
     skills: &[Skill],
-    state: &SkillsSnapshot,
-    workspace: gpui::WeakEntity<Workspace>,
     enabled: bool,
-    plugin_expanded: &std::collections::HashSet<String>,
-    searching: bool,
+    ctx: &ScopeCtx<'_>,
     t: &DarudaTheme,
     cx: &gpui::App,
-) -> Option<AnyElement> {
-    // While searching, an empty scope means "nothing matches the
-    // query in this scope". Hide the section entirely — the default
-    // empty hint ("No project skills") would read as a misleading
-    // absence-of-disk message in that context.
-    if searching && skills.is_empty() {
-        return None;
-    }
-
-    // Count chip on the section header — for Plugin scope this shows
-    // both total skills and how many distinct plugins they're spread
-    // across so the user gets a quick sense of catalogue size.
-    let count_text: SharedString = if matches!(scope, SkillScope::Plugin) {
-        let plugins = count_unique_plugins(skills);
-        SharedString::from(strings::skills_count_chip_with_plugins(
-            skills.len(),
-            plugins,
-        ))
-    } else {
-        SharedString::from(format!("{}", skills.len()))
-    };
-
-    let mut col = div().flex().flex_col().gap(px(theme::SKILL_ROW_GAP)).child(
-        div()
-            .flex()
-            .flex_row()
-            .items_center()
-            .gap(px(theme::SKILL_HEADER_GAP))
-            .text_size(px(theme::RIGHT_PANEL_LABEL_FONT_SIZE))
-            .text_color(t.text_muted)
-            .child(label.into())
-            .child(neutral_chip(count_text, t)),
-    );
-
+) -> AnyElement {
     if !enabled {
         // Project scope without a project root — explain why.
-        return Some(
-            col.child(
-                div()
-                    .text_size(px(theme::RIGHT_PANEL_BODY_FONT_SIZE))
-                    .text_color(t.text_subtle)
-                    .child(strings::skills_no_project_hint()),
-            )
-            .into_any_element(),
-        );
+        return empty_hint(strings::skills_no_project_hint(), t);
     }
-
     if skills.is_empty() {
         // Empty at rest — show only the text hint. Inline action
         // buttons are intentionally absent: the panel header already
         // carries `[+ New skill]` and `[Manage…]`, and surfacing the
         // same action again as an inline chip muddies the empty
-        // state.
+        // state. A search never lands here: the caller drops the scope.
         let msg = match scope {
             SkillScope::Project => strings::skills_empty_project(),
             SkillScope::Personal => strings::skills_empty_personal(),
             SkillScope::Plugin => strings::skills_empty_plugin(),
         };
-        return Some(
-            col.child(
-                div()
-                    .text_size(px(theme::RIGHT_PANEL_BODY_FONT_SIZE))
-                    .text_color(t.text_subtle)
-                    .child(msg),
-            )
-            .into_any_element(),
-        );
+        return empty_hint(msg, t);
     }
-
     if matches!(scope, SkillScope::Plugin) {
-        // Plugin scope groups by owning plugin id in a collapsible
-        // Accordion. Header clicks only toggle the section open state;
-        // individual skill rows keep their own click-to-invoke.
-        col = col.child(plugin_accordion(skills, &workspace, plugin_expanded, t, cx));
-    } else {
-        for s in skills {
-            let overrides =
-                matches!(scope, SkillScope::Project) && state.project_overrides_personal(&s.name);
-            col = col.child(skill_row(s, overrides, workspace.clone(), t, cx));
-        }
+        // Plugin scope groups by owning plugin id under disclosure rows.
+        return plugin_groups(skills, ctx, t, cx).into_any_element();
     }
-    Some(col.into_any_element())
+    let mut col = div().flex().flex_col();
+    for s in skills {
+        let overrides =
+            matches!(scope, SkillScope::Project) && ctx.state.project_overrides_personal(&s.name);
+        col = col.child(skill_row(s, overrides, ctx.workspace.clone(), t, cx));
+    }
+    col.into_any_element()
 }
 
-/// One plugin's worth of skills, ready to be rendered as an
-/// `AccordionItem` (title = plugin name + count chip; children =
-/// indented skill rows).
+/// Quiet one-line explanation for a scope with nothing to list.
+fn empty_hint(msg: impl Into<SharedString>, t: &DarudaTheme) -> AnyElement {
+    div()
+        .pb(px(theme::DOCK_SECTION_HEADER_PAD_Y))
+        .text_size(px(theme::RIGHT_PANEL_LABEL_FONT_SIZE))
+        .text_color(t.text_subtle)
+        .child(msg.into())
+        .into_any_element()
+}
+
+/// One plugin's worth of skills: a disclosure row over indented skill rows.
 struct PluginGroup<'a> {
     /// Local plugin name without the `@<marketplace>` suffix —
     /// matches what the user types into Claude Code.
     plugin_local: String,
     /// Fully-qualified id (`<plugin>@<marketplace>`) — used as the
-    /// expanded-set key and as the accordion item id.
+    /// expanded-set key.
     plugin_id: String,
     /// All skills sharing this plugin id, sorted by display name.
     skills: Vec<&'a Skill>,
@@ -396,85 +379,72 @@ fn group_plugin_skills(skills: &[Skill]) -> Vec<PluginGroup<'_>> {
     out
 }
 
-/// Build the per-plugin Accordion. Each `AccordionItem` corresponds
-/// to one plugin id and houses its skill rows as children. Header
-/// click toggles open / closed; the per-skill row's own name-button
-/// `on_click` (set in `skill_row`) still triggers invocation, so
-/// clicking inside an open section is unambiguous.
-fn plugin_accordion(
+/// One disclosure row per plugin over its skill rows. Rows only toggle;
+/// each skill's name button (set in `skill_row`) still invokes it, so a
+/// click inside an open group is unambiguous.
+fn plugin_groups(
     skills: &[Skill],
-    workspace: &gpui::WeakEntity<Workspace>,
-    plugin_expanded: &std::collections::HashSet<String>,
+    ctx: &ScopeCtx<'_>,
     t: &DarudaTheme,
     cx: &gpui::App,
 ) -> impl IntoElement {
-    use crate::ui::accordion::{AccordionItem, accordion};
-
-    // Build the grouping once. The closure passed to
-    // `Accordion::on_toggle_click` needs the plugin-id order to map
-    // back from indices, so capture that vector alongside the items.
-    let groups = group_plugin_skills(skills);
-    let plugin_ids: Vec<String> = groups.iter().map(|g| g.plugin_id.clone()).collect();
-
-    let mut acc = accordion("skills-plugin-groups")
-        .multiple(true)
-        .bordered(false);
-    for group in &groups {
-        let plugin_local = group.plugin_local.clone();
-        let count = group.skills.len();
-        let is_open = plugin_expanded.contains(&group.plugin_id);
-
-        // Build the indented skill rows up front so the item can take
-        // them as children (`ParentElement`). `skill_row` returns an
-        // `AnyElement`, which matches Accordion's expectation.
-        let mut item = AccordionItem::new()
-            .title(plugin_title(&plugin_local, count, t))
-            .open(is_open)
-            .bordered(false);
-        for s in &group.skills {
-            item.extend(std::iter::once(
-                skill_row(s, false, workspace.clone(), t, cx).into_any_element(),
-            ));
-        }
-        acc = acc.item(|_| item);
-    }
-
-    // The accordion-level callback fires whenever any item is
-    // toggled. The argument is the full list of currently-open
-    // indices, which we map back into the `plugin_id` set and hand
-    // to `Workspace::set_skill_plugin_expanded` in one go.
-    let ws_for_toggle = workspace.clone();
-    acc.on_toggle_click(move |open_indices, _window, cx| {
-        let Some(ws) = ws_for_toggle.upgrade() else {
-            return;
-        };
-        let new_set: std::collections::HashSet<String> = open_indices
-            .iter()
-            .filter_map(|&ix| plugin_ids.get(ix).cloned())
-            .collect();
-        ws.update(cx, |ws: &mut Workspace, cx| {
-            ws.set_skill_plugin_expanded(new_set, cx);
-        });
-    })
-}
-
-/// Title element rendered inside the accordion header for one plugin
-/// — plugin name on the left, skill-count chip on the right.
-fn plugin_title(plugin_local: &str, count: usize, t: &DarudaTheme) -> gpui::AnyElement {
-    div()
-        .flex()
-        .flex_row()
-        .items_center()
-        .gap(px(theme::SKILL_HEADER_GAP))
-        .child(
+    let mut col = div().flex().flex_col();
+    for group in group_plugin_skills(skills) {
+        let is_open = ctx.searching || ctx.plugin_expanded.contains(&group.plugin_id);
+        let plugin_id = group.plugin_id.clone();
+        let ws = ctx.workspace.clone();
+        // Keyed by plugin id: search reorders groups, and a positional id
+        // would hand one plugin's hover / press state to another.
+        let row_id = SharedString::from(format!("skill-plugin-group-{}", group.plugin_id));
+        let chevron_id = SharedString::from(format!("skill-plugin-chevron-{}", group.plugin_id));
+        col = col.child(
             div()
-                .flex_1()
-                .text_size(px(theme::RIGHT_PANEL_BODY_FONT_SIZE))
-                .text_color(t.text_primary)
-                .child(SharedString::from(plugin_local.to_string())),
-        )
-        .child(neutral_chip(SharedString::from(format!("{count}")), t))
-        .into_any_element()
+                .id(row_id)
+                .flex()
+                .flex_row()
+                .items_center()
+                .gap(px(theme::LANE_LABEL_GAP))
+                .py(px(theme::SKILL_PLUGIN_GROUP_PAD_Y))
+                .rounded(px(theme::SKILL_ROW_RADIUS))
+                .child(
+                    crate::ui::disclosure(chevron_id, is_open)
+                        .size(theme::DOCK_SECTION_CHEVRON_SIZE)
+                        .color(t.text_muted),
+                )
+                .child(
+                    div()
+                        .flex_1()
+                        .min_w_0()
+                        .text_ellipsis()
+                        .text_size(px(theme::RIGHT_PANEL_BODY_FONT_SIZE))
+                        .text_color(t.text_body)
+                        .child(SharedString::from(group.plugin_local.clone())),
+                )
+                .child(
+                    div()
+                        .text_size(px(theme::RIGHT_PANEL_LABEL_FONT_SIZE))
+                        .text_color(t.text_muted)
+                        .child(SharedString::from(group.skills.len().to_string())),
+                )
+                .when(!ctx.searching, |row| {
+                    row.cursor_pointer()
+                        .hover(|d| d.bg(t.skill_row_hover_bg))
+                        .on_click(move |_, _window, cx| {
+                            if let Some(ws) = ws.upgrade() {
+                                ws.update(cx, |ws, cx| {
+                                    ws.toggle_skill_plugin_expanded(plugin_id.clone(), cx)
+                                });
+                            }
+                        })
+                }),
+        );
+        if is_open {
+            for s in &group.skills {
+                col = col.child(skill_row(s, false, ctx.workspace.clone(), t, cx));
+            }
+        }
+    }
+    col
 }
 
 fn skill_row(
@@ -484,15 +454,15 @@ fn skill_row(
     t: &DarudaTheme,
     cx: &gpui::App,
 ) -> AnyElement {
-    use crate::ui::{button, button_delete_glyph, button_icon};
+    use crate::ui::{ButtonVariants as _, button, button_delete_glyph, button_icon};
 
     let dir = s.dir.clone();
     let scope = s.scope;
-    let meta_color = t.text_body;
+    let meta_color = t.text_muted;
     let row_hover_bg = t.skill_row_hover_bg;
     let actions_bg = t.skill_row_hover_bg;
 
-    // Plugin rows render under a per-plugin accordion that already
+    // Plugin rows render under a per-plugin group that already
     // shows `<plugin>` in the header, so strip the namespace prefix
     // here and lean on indentation to communicate hierarchy.
     let display_name = if matches!(scope, SkillScope::Plugin) {
@@ -521,19 +491,15 @@ fn skill_row(
     let desc_id = SharedString::from(format!("skill-desc-{}-{}", scope.slug(), s.name));
     let row_id = SharedString::from(format!("skill-{}-{}", scope.slug(), s.name));
 
-    // Name button — primary affordance for "invoke this skill". Made
-    // an actual button so click affordance is obvious; secondary
-    // variant keeps the panel quiet.
+    // Invocation remains a button; the secondary line gets the full row width.
     let skill_for_invoke = s.clone();
     let workspace_for_invoke = workspace.clone();
-    // Outline variant keeps the button visually distinct from the
-    // row's hover background — at default sizing the secondary fill
-    // sat right on top of `SKILL_ROW_HOVER_BG` and read as flat. The
-    // outline border draws a clean edge against whatever surface the
-    // row is sitting on (hovered or not).
     let name_button = button(name_btn_id, SharedString::from(display_name))
         .xsmall()
-        .outline()
+        .ghost()
+        .p(px(0.))
+        .max_w_full()
+        .tooltip(s.name.clone())
         .on_click({
             let ws = workspace_for_invoke.clone();
             let sk = skill_for_invoke.clone();
@@ -554,20 +520,17 @@ fn skill_row(
         let full = description_full.clone();
         div()
             .id(desc_id)
-            .flex_1()
+            .w_full()
             .min_w_0()
-            .overflow_hidden()
-            .whitespace_nowrap()
-            .text_size(px(theme::RIGHT_PANEL_BODY_FONT_SIZE))
+            .text_ellipsis()
+            .text_size(px(theme::FONT_SIZE_SM))
             .text_color(meta_color)
             .child(SharedString::from(description_truncated))
             .tooltip(crate::ui::tooltip::text(SharedString::from(full)))
     });
 
     // Actions — edit / delete for writable scopes, view for plugin scope.
-    // Absolute-positioned overlay on the right so the row stays a
-    // single visual line; on hover the actions slide in over the
-    // tail of the description.
+    // Overlay actions preserve the text column's resting width.
     let workspace_for_actions = workspace.clone();
     let actions: AnyElement = if scope.is_writable() {
         let dir_edit = dir.clone();
@@ -655,7 +618,7 @@ fn skill_row(
             .into_any_element()
     };
 
-    // Plugin rows live under a per-plugin accordion — indent them so
+    // Plugin rows live under a per-plugin group — indent them so
     // the hierarchy reads at a glance. Project / Personal rows stay
     // flush with the section header.
     let row_pad_left = if matches!(scope, SkillScope::Plugin) {
@@ -664,34 +627,32 @@ fn skill_row(
         px(theme::SKILL_ROW_PAD_X)
     };
 
-    div()
-        .id(row_id)
-        .group("skill-row")
-        .relative()
+    let name = div()
         .flex()
-        .flex_row()
         .items_center()
-        .min_h(px(theme::CONTROL_TARGET_SIZE))
+        .w_full()
+        .min_w_0()
         .gap(px(theme::SKILL_HEADER_GAP))
-        .pl(row_pad_left)
-        .pr(px(theme::SKILL_ROW_PAD_X))
-        // Plugin-scope rows sit inside an accordion section, so trim
-        // their vertical padding for a denser list look. Project /
-        // Personal rows keep the standard pad since they're top-level.
-        .py(if matches!(scope, SkillScope::Plugin) {
-            px(theme::SKILL_PLUGIN_ROW_PAD_Y)
-        } else {
-            px(theme::SKILL_ROW_PAD_Y)
-        })
-        .rounded(px(theme::SKILL_ROW_RADIUS))
-        .hover(move |s| s.bg(row_hover_bg))
         .child(name_button)
         .when(overrides_personal, |c| {
             c.child(neutral_chip(strings::skills_overrides_personal(), t))
-        })
-        .when_some(description_span, |c, span| c.child(span))
-        .child(actions)
-        .into_any_element()
+        });
+    library_row(
+        crate::ui::icons::SKILL,
+        name,
+        description_span.map(IntoElement::into_any_element),
+        cx,
+    )
+    .id(row_id)
+    .group("skill-row")
+    .relative()
+    .overflow_hidden()
+    .pl(row_pad_left)
+    .pr(px(theme::SKILL_ROW_PAD_X))
+    .rounded(px(theme::SKILL_ROW_RADIUS))
+    .hover(move |s| s.bg(row_hover_bg))
+    .child(actions)
+    .into_any_element()
 }
 
 /// Character budget for the skill row's description line. Chosen to

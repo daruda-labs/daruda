@@ -422,7 +422,7 @@ impl Workspace {
     pub(in crate::workspace) fn flow_list_for_panel(
         &mut self,
     ) -> Vec<super::flow_paths::FoundFlow> {
-        if self.right_dock_view != daruda_store::project::RightDockView::Flows {
+        if self.active_page() != Some(super::pages::Page::Flows) {
             return Vec::new();
         }
         let lane = self.active;
@@ -450,7 +450,7 @@ impl Workspace {
         &self,
         cx: &gpui::App,
     ) -> Vec<std::path::PathBuf> {
-        if self.right_dock_view != daruda_store::project::RightDockView::Flows {
+        if self.active_page() != Some(super::pages::Page::Flows) {
             return Vec::new();
         }
         self.active_runtime()

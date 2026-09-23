@@ -164,7 +164,8 @@ fn restore_into_empty_workspace_applies_dock_state(cx: &mut TestAppContext) {
         assert_eq!(ws.terminal_config.font_size, 17.0);
         assert!((ws.terminal_config.vertical_spacing - 1.25).abs() < f32::EPSILON);
         assert_eq!(ws.left_dock_view, LeftDockView::GitChanges);
-        assert_eq!(ws.right_dock_view, RightDockView::Tasks);
+        assert_eq!(ws.active_page(), Some(crate::workspace::pages::Page::Tasks));
+        assert_eq!(ws.right_dock_view, RightDockView::Usage);
     });
 
     let _ = std::fs::remove_dir_all(&project_root);

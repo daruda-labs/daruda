@@ -114,7 +114,7 @@ impl Workspace {
     /// costs nothing, and the tab they are on costs one listing per
     /// change rather than one per frame.
     pub(in crate::workspace) fn flow_history_for_panel(&mut self) -> Option<FlowHistory> {
-        if self.right_dock_view != daruda_store::project::RightDockView::Flows {
+        if self.active_page() != Some(super::pages::Page::Flows) {
             return None;
         }
         self.flow_history_of_active_lane()

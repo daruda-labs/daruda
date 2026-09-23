@@ -169,11 +169,13 @@ fn every_right_panel_action_opens_the_dock_it_selects_in(cx: &mut TestAppContext
                     }
                     assert!(!ws_is_open(ws, cx), "the fixture left the dock open");
                     act(ws, cx);
-                    assert!(
-                        ws_is_open(ws, cx),
-                        "{view:?} was selected behind a closed dock, so nothing was shown"
-                    );
-                    assert_eq!(ws.right_dock_view, view);
+                    if let Some(page) = crate::workspace::pages::Page::from_legacy(view) {
+                        assert_eq!(ws.active_page(), Some(page));
+                        assert!(!ws_is_open(ws, cx), "pages do not open the utility dock");
+                    } else {
+                        assert!(ws_is_open(ws, cx), "{view:?} is behind a closed dock");
+                        assert_eq!(ws.right_dock_view, view);
+                    }
                 };
 
             check(RightDockView::Usage, &mut |ws, cx| {

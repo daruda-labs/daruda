@@ -16,18 +16,16 @@ use daruda_store::tasks::{
 };
 use daruda_terminal::ux::strings as ux_strings;
 use gpui::{
-    AnyElement, ClickEvent, Context, Hsla, IntoElement, MouseButton, SharedString, div, prelude::*,
-    px,
+    AnyElement, ClickEvent, Hsla, IntoElement, MouseButton, SharedString, div, prelude::*, px,
 };
 
 use super::super::Workspace;
-use super::super::layout::Dock;
 use super::super::layout::RightDockSnapshot;
 use super::status_pill;
 use crate::surface::strings;
 use crate::ui::{Badge, ButtonVariants as _, button};
 
-pub(super) fn render(snap: &RightDockSnapshot, cx: &mut Context<Dock>) -> AnyElement {
+pub(in crate::workspace) fn render(snap: &RightDockSnapshot, cx: &gpui::App) -> AnyElement {
     // Pipeline: state filter → search filter → newest-first sort.
     // The search filter is a no-op when the query is blank, so empty
     // searches still go through `filter_by_state` unchanged.
