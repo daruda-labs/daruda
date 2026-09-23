@@ -692,6 +692,30 @@ fn restore_resets_a_dangling_or_unsupported_agent_pin() {
     );
 }
 
+/// A terminal keeps its pin while the account exists — of any domain, since
+/// no agent narrows it — and restores to the system default once it is gone.
+#[test]
+fn restore_resets_a_dangling_terminal_pin() {
+    use crate::workspace::persistence::restored_terminal_account;
+
+    let id = AccountId::new();
+    let state = listing(&[id]);
+
+    assert_eq!(
+        restored_terminal_account(Some(id), &state),
+        AccountSelection::Managed(id)
+    );
+    assert_eq!(
+        restored_terminal_account(Some(AccountId::new()), &state),
+        AccountSelection::SystemDefault,
+        "an account that no longer exists"
+    );
+    assert_eq!(
+        restored_terminal_account(None, &state),
+        AccountSelection::SystemDefault
+    );
+}
+
 /// A terminal pane must materialize its managed account's config dir, not just
 /// inject the env var pointing at it: `CODEX_HOME` on a bare directory gives a
 /// Codex CLI run from that shell none of the symlinked system resources.

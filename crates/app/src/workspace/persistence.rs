@@ -830,8 +830,7 @@ impl Workspace {
                     }
                     Content::Terminal { cwd, account_id } => {
                         let effective = effective_cwd(cwd.clone(), fallback_cwd);
-                        let account =
-                            daruda_store::accounts::AccountSelection::from_persisted(*account_id);
+                        let account = restored_terminal_account(*account_id, &self.accounts);
                         // Terminal pane: no agent, so no required auth domain —
                         // the account's own recipe decides the env.
                         let prepared = pane::resolve_pane_account(
@@ -939,6 +938,24 @@ pub(in crate::workspace) fn restored_agent_account(
         (Some(account), Some(required)) if account.recipe == required => {
             AccountSelection::Managed(id)
         }
+        _ => AccountSelection::SystemDefault,
+    }
+}
+
+/// The account a restored terminal pane keeps: its persisted pin only while
+/// that account still exists. A terminal has no agent, so no domain narrows
+/// it further — the account's own recipe decides the env.
+///
+/// The same rule `Workspace::reconcile_account_pins` holds for a live pane,
+/// applied where a lane first loads: a lane not visited when the account was
+/// deleted still carries the pin on disk.
+pub(in crate::workspace) fn restored_terminal_account(
+    persisted: Option<daruda_store::accounts::AccountId>,
+    accounts: &daruda_store::accounts::AccountsState,
+) -> daruda_store::accounts::AccountSelection {
+    use daruda_store::accounts::AccountSelection;
+    match persisted {
+        Some(id) if accounts.find(id).is_some() => AccountSelection::Managed(id),
         _ => AccountSelection::SystemDefault,
     }
 }
