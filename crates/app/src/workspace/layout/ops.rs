@@ -172,10 +172,6 @@ impl Workspace {
         view: daruda_store::project::RightDockView,
         cx: &mut Context<Self>,
     ) {
-        if let Some(page) = crate::workspace::pages::Page::from_legacy(view) {
-            self.show_page(page, cx);
-            return;
-        }
         if !self.right_dock.read(cx).is_open {
             self.mutate_durable(cx, |ws, cx| {
                 ws.right_dock.update(cx, |d, _| d.open());

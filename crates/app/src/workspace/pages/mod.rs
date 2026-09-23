@@ -1,6 +1,6 @@
 //! Task and flow pages, independent of the right utility dock.
 
-use daruda_store::project::RightDockView;
+use daruda_store::project::WorkspacePage;
 use gpui::{Context, ScrollHandle, Window};
 
 use super::Workspace;
@@ -16,20 +16,17 @@ pub(in crate::workspace) enum Page {
 }
 
 impl Page {
-    pub fn from_legacy(view: RightDockView) -> Option<Self> {
-        match view {
-            RightDockView::Tasks => Some(Self::Tasks),
-            RightDockView::Flows => Some(Self::Flows),
-            _ => None,
+    pub fn from_stored(page: WorkspacePage) -> Self {
+        match page {
+            WorkspacePage::Tasks => Self::Tasks,
+            WorkspacePage::Flows => Self::Flows,
         }
     }
 
-    /// Retain the existing serialized discriminants so saved layouts migrate
-    /// without rewriting task data or widening the workspace storage schema.
-    pub fn persisted_view(self) -> RightDockView {
+    pub fn stored(self) -> WorkspacePage {
         match self {
-            Self::Tasks => RightDockView::Tasks,
-            Self::Flows => RightDockView::Flows,
+            Self::Tasks => WorkspacePage::Tasks,
+            Self::Flows => WorkspacePage::Flows,
         }
     }
 
@@ -128,16 +125,9 @@ mod tests {
     use super::*;
 
     #[test]
-    fn legacy_page_selection_round_trips_without_changing_utility_views() {
+    fn stored_page_round_trips() {
         for page in [Page::Tasks, Page::Flows] {
-            assert_eq!(Page::from_legacy(page.persisted_view()), Some(page));
-        }
-        for view in [
-            RightDockView::Usage,
-            RightDockView::Skills,
-            RightDockView::Tools,
-        ] {
-            assert_eq!(Page::from_legacy(view), None);
+            assert_eq!(Page::from_stored(page.stored()), page);
         }
     }
 }

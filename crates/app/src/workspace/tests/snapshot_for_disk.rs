@@ -35,7 +35,7 @@ fn snapshot_for_disk_covers_empty_and_emits_project_schema(cx: &mut TestAppConte
 
     ws.update(cx, |ws, cx| {
         ws.set_left_dock_view(daruda_store::project::LeftDockView::GitChanges, cx);
-        ws.set_right_dock_view(daruda_store::project::RightDockView::Tasks, cx);
+        ws.set_right_dock_view(daruda_store::project::RightDockView::Skills, cx);
     });
 
     ws.read_with(cx, |ws, app_cx| {
@@ -76,7 +76,7 @@ fn snapshot_for_disk_covers_empty_and_emits_project_schema(cx: &mut TestAppConte
         );
         assert_eq!(
             workspace.active_right_panel_view,
-            daruda_store::project::RightDockView::Tasks
+            daruda_store::project::RightDockView::Skills
         );
 
         // ProjectState carries intrinsic fields from the runtime Project.

@@ -20,6 +20,7 @@ mod tests;
 
 pub use lane::{
     LaneId, LaneKind, LaneSessionHost, LaneStatus, LeftDockView, RightDockView, SerializedLane,
+    WorkspacePage,
 };
 pub use persistence::{
     RECENT_MAX, delete_project_state_in, delete_workspace_state_in, for_each_project_state_in,

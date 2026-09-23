@@ -17,7 +17,7 @@ use uuid::Uuid;
 
 use crate::project::{
     DockStates, GroupId, LaneId, LeftDockView, RightDockView, SerializedGroup, SerializedLane,
-    SerializedTab, WindowOpenPolicy, WindowState,
+    SerializedTab, WindowOpenPolicy, WindowState, WorkspacePage,
 };
 
 pub const WORKSPACE_SCHEMA_VERSION: u32 = 3;
@@ -157,6 +157,9 @@ pub struct WorkspaceState {
     pub focused_pane_id: PaneId,
     pub active_dock_view: LeftDockView,
     pub active_right_panel_view: RightDockView,
+    /// Absent in files written before pages had their own slot.
+    #[serde(default)]
+    pub active_page: Option<WorkspacePage>,
     pub window_open_policy: WindowOpenPolicy,
 
     #[serde(default)]

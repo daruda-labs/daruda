@@ -29,13 +29,40 @@ pub enum LeftDockView {
 
 /// Which view the right dock is currently showing. Persisted so the
 /// app restores the user's last-used right-panel tab on restart.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum RightDockView {
     #[default]
     Usage,
     Skills,
     Tools,
+}
+
+/// Tasks and Flows were right-dock tabs before they became workspace
+/// pages; a file that still names one restores to the default tab.
+impl<'de> Deserialize<'de> for RightDockView {
+    fn deserialize<D: serde::Deserializer<'de>>(de: D) -> Result<Self, D::Error> {
+        #[derive(Deserialize)]
+        #[serde(rename_all = "snake_case")]
+        enum Stored {
+            Usage,
+            Skills,
+            Tools,
+            Tasks,
+            Flows,
+        }
+        Ok(match Stored::deserialize(de)? {
+            Stored::Usage | Stored::Tasks | Stored::Flows => Self::Usage,
+            Stored::Skills => Self::Skills,
+            Stored::Tools => Self::Tools,
+        })
+    }
+}
+
+/// The central workspace page shown in place of the active lane, if any.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum WorkspacePage {
     Tasks,
     Flows,
 }
@@ -254,17 +281,12 @@ impl SerializedLane {
 mod tests {
     use super::*;
 
-    /// A config written before `Flows` existed names one of the older four,
-    /// and must still restore to it — adding a variant to a single-choice
-    /// enum is only safe while that stays true.
     #[test]
-    fn a_right_dock_view_written_before_flows_existed_still_restores() {
+    fn right_dock_tabs_round_trip() {
         for (stored, expected) in [
             ("\"usage\"", RightDockView::Usage),
             ("\"skills\"", RightDockView::Skills),
             ("\"tools\"", RightDockView::Tools),
-            ("\"tasks\"", RightDockView::Tasks),
-            ("\"flows\"", RightDockView::Flows),
         ] {
             let parsed: RightDockView = serde_json::from_str(stored).expect(stored);
             assert_eq!(parsed, expected, "{stored}");
@@ -276,10 +298,25 @@ mod tests {
         }
     }
 
-    /// The new tab must not become what an unconfigured workspace opens on.
+    /// A file saved while Tasks / Flows were tabs must still load.
     #[test]
-    fn flows_is_not_the_default_tab() {
-        assert_eq!(RightDockView::default(), RightDockView::Usage);
+    fn a_former_page_tab_restores_to_the_default_tab() {
+        for stored in ["\"tasks\"", "\"flows\""] {
+            let parsed: RightDockView = serde_json::from_str(stored).expect(stored);
+            assert_eq!(parsed, RightDockView::default(), "{stored}");
+        }
+        assert!(serde_json::from_str::<RightDockView>("\"nope\"").is_err());
+    }
+
+    #[test]
+    fn workspace_page_round_trips() {
+        for (page, stored) in [
+            (WorkspacePage::Tasks, "\"tasks\""),
+            (WorkspacePage::Flows, "\"flows\""),
+        ] {
+            assert_eq!(serde_json::to_string(&page).unwrap(), stored);
+            assert_eq!(serde_json::from_str::<WorkspacePage>(stored).unwrap(), page);
+        }
     }
 
     #[test]

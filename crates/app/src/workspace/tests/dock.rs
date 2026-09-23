@@ -151,6 +151,7 @@ fn notify_docks_safe_while_dock_is_leased(cx: &mut TestAppContext) {
 /// view, which is why asserting the view is not enough on its own.
 #[gpui::test]
 fn every_right_panel_action_opens_the_dock_it_selects_in(cx: &mut TestAppContext) {
+    use crate::workspace::pages::Page;
     use crate::workspace::{
         FocusSkillSearch, SwitchRightPanelFlows, SwitchRightPanelSkills, SwitchRightPanelTasks,
         SwitchRightPanelTools, SwitchRightPanelUsage,
@@ -169,13 +170,8 @@ fn every_right_panel_action_opens_the_dock_it_selects_in(cx: &mut TestAppContext
                     }
                     assert!(!ws_is_open(ws, cx), "the fixture left the dock open");
                     act(ws, cx);
-                    if let Some(page) = crate::workspace::pages::Page::from_legacy(view) {
-                        assert_eq!(ws.active_page(), Some(page));
-                        assert!(!ws_is_open(ws, cx), "pages do not open the utility dock");
-                    } else {
-                        assert!(ws_is_open(ws, cx), "{view:?} is behind a closed dock");
-                        assert_eq!(ws.right_dock_view, view);
-                    }
+                    assert!(ws_is_open(ws, cx), "{view:?} is behind a closed dock");
+                    assert_eq!(ws.right_dock_view, view);
                 };
 
             check(RightDockView::Usage, &mut |ws, cx| {
@@ -187,17 +183,20 @@ fn every_right_panel_action_opens_the_dock_it_selects_in(cx: &mut TestAppContext
             check(RightDockView::Tools, &mut |ws, cx| {
                 ws.on_switch_right_panel_tools(&SwitchRightPanelTools, window, cx)
             });
-            check(RightDockView::Tasks, &mut |ws, cx| {
-                ws.on_switch_right_panel_tasks(&SwitchRightPanelTasks, window, cx)
-            });
-            check(RightDockView::Flows, &mut |ws, cx| {
-                ws.on_switch_right_panel_flows(&SwitchRightPanelFlows, window, cx)
-            });
             // `Cmd+/` promises the query box, which is not rendered at all
             // while the dock is shut.
             check(RightDockView::Skills, &mut |ws, cx| {
                 ws.on_focus_skill_search(&FocusSkillSearch, window, cx)
             });
+
+            // Tasks and Flows are pages: they must leave the utility dock shut.
+            ws.right_dock.update(cx, |d, _| d.toggle());
+            assert!(!ws_is_open(ws, cx), "the fixture left the dock open");
+            ws.on_switch_right_panel_tasks(&SwitchRightPanelTasks, window, cx);
+            assert_eq!(ws.active_page(), Some(Page::Tasks));
+            ws.on_switch_right_panel_flows(&SwitchRightPanelFlows, window, cx);
+            assert_eq!(ws.active_page(), Some(Page::Flows));
+            assert!(!ws_is_open(ws, cx), "pages do not open the utility dock");
         });
     })
     .expect("the test window is live");

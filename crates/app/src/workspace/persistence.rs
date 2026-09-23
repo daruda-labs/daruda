@@ -230,10 +230,8 @@ impl Workspace {
             horizontal_spacing: self.terminal_config.horizontal_spacing,
             focused_pane_id,
             active_dock_view: self.left_dock_view,
-            active_right_panel_view: self
-                .active_page()
-                .map(super::pages::Page::persisted_view)
-                .unwrap_or(self.right_dock_view),
+            active_right_panel_view: self.right_dock_view,
+            active_page: self.active_page().map(super::pages::Page::stored),
             window_open_policy: self.window_open_policy,
             next_group_id: self.next_group_id,
             project_tabs,
@@ -392,11 +390,10 @@ impl Workspace {
             }
         });
         self.left_dock_view = workspace.active_dock_view;
-        if let Some(page) = super::pages::Page::from_legacy(workspace.active_right_panel_view) {
-            self.workspace_page = Some(super::pages::PageState::new(page));
-        } else {
-            self.right_dock_view = workspace.active_right_panel_view;
-        }
+        self.right_dock_view = workspace.active_right_panel_view;
+        self.workspace_page = workspace
+            .active_page
+            .map(|page| super::pages::PageState::new(super::pages::Page::from_stored(page)));
         let bottom_open = workspace.docks.bottom_open;
         let bottom_size = workspace.docks.bottom_size;
         self.bottom_dock.update(cx, |d, _| {

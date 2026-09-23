@@ -55,7 +55,7 @@ async fn the_panel_lists_the_lane_s_flow_files_only_while_showing(cx: &mut TestA
     );
 
     let listed = ws.update(cx, |ws, cx| {
-        ws.set_right_dock_view(daruda_store::project::RightDockView::Flows, cx);
+        ws.show_page(crate::workspace::pages::Page::Flows, cx);
         ws.flow_list_for_panel()
     });
     let names: Vec<String> = listed
@@ -92,7 +92,7 @@ async fn a_created_flow_is_listed_and_loads(cx: &mut TestAppContext) {
     // when `[+]` is clicked. Reading it only afterwards passes even with the
     // invalidation deleted, because a hidden tab never fills the cache.
     let before = ws.update(&mut vcx, |ws, cx| {
-        ws.set_right_dock_view(daruda_store::project::RightDockView::Flows, cx);
+        ws.show_page(crate::workspace::pages::Page::Flows, cx);
         ws.flow_list_for_panel()
     });
     assert!(

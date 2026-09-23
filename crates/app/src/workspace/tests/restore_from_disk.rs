@@ -120,7 +120,8 @@ fn restore_into_empty_workspace_applies_dock_state(cx: &mut TestAppContext) {
         horizontal_spacing: 1.0,
         focused_pane_id: 0,
         active_dock_view: LeftDockView::GitChanges,
-        active_right_panel_view: RightDockView::Tasks,
+        active_right_panel_view: RightDockView::Skills,
+        active_page: Some(daruda_store::project::WorkspacePage::Tasks),
         window_open_policy: WindowOpenPolicy::default(),
         next_group_id: 0,
         project_tabs: BTreeMap::new(),
@@ -165,7 +166,7 @@ fn restore_into_empty_workspace_applies_dock_state(cx: &mut TestAppContext) {
         assert!((ws.terminal_config.vertical_spacing - 1.25).abs() < f32::EPSILON);
         assert_eq!(ws.left_dock_view, LeftDockView::GitChanges);
         assert_eq!(ws.active_page(), Some(crate::workspace::pages::Page::Tasks));
-        assert_eq!(ws.right_dock_view, RightDockView::Usage);
+        assert_eq!(ws.right_dock_view, RightDockView::Skills);
     });
 
     let _ = std::fs::remove_dir_all(&project_root);

@@ -993,7 +993,6 @@ fn right_panel_view_round_trips_as_snake_case() {
         (RightDockView::Usage, "\"usage\""),
         (RightDockView::Skills, "\"skills\""),
         (RightDockView::Tools, "\"tools\""),
-        (RightDockView::Tasks, "\"tasks\""),
     ] {
         let json = serde_json::to_string(&v).unwrap();
         assert_eq!(json, expect);
@@ -1113,6 +1112,7 @@ mod new_schema_fixtures {
             focused_pane_id: Default::default(),
             active_dock_view: LeftDockView::default(),
             active_right_panel_view: RightDockView::default(),
+            active_page: None,
             window_open_policy: Default::default(),
             next_group_id: Default::default(),
             project_tabs: BTreeMap::new(),

@@ -2,7 +2,7 @@
 
 use super::build_workspace;
 use crate::workspace::pages::Page;
-use daruda_store::project::{LeftDockView, RightDockView};
+use daruda_store::project::{LeftDockView, RightDockView, WorkspacePage};
 use gpui::{AppContext as _, Modifiers, TestAppContext, VisualTestContext};
 
 #[gpui::test]
@@ -60,11 +60,15 @@ fn page_selection_survives_restore_with_an_existing_pane(cx: &mut TestAppContext
     let (window, workspace) = build_workspace(cx);
     cx.update_window(window.into(), |_, window, cx| {
         workspace.update(cx, |ws, cx| {
+            ws.set_right_dock_view(RightDockView::Skills, cx);
             ws.open_page(Page::Tasks, window, cx);
             let (state, projects) = ws.snapshot_for_disk(cx);
-            assert_eq!(state.active_right_panel_view, RightDockView::Tasks);
+            assert_eq!(state.active_page, Some(WorkspacePage::Tasks));
+            assert_eq!(state.active_right_panel_view, RightDockView::Skills);
             ws.restore_from_disk(&state, &projects, window, cx);
             assert_eq!(ws.active_page(), Some(Page::Tasks));
+            // The page no longer borrows the tab's slot, so the tab survives.
+            assert_eq!(ws.right_dock_view, RightDockView::Skills);
         });
     })
     .unwrap();

@@ -42,9 +42,7 @@ fn view_by_index(ix: usize) -> RightDockView {
 
 fn view_icon(view: RightDockView) -> Icon {
     match view {
-        RightDockView::Usage | RightDockView::Tasks | RightDockView::Flows => {
-            Icon::new(IconName::ChartPie)
-        }
+        RightDockView::Usage => Icon::new(IconName::ChartPie),
         RightDockView::Skills => Icon::new(IconName::BookOpen),
         RightDockView::Tools => icons::icon(icons::BUILD),
     }

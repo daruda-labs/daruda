@@ -1784,10 +1784,6 @@ impl Workspace {
         view: daruda_store::project::RightDockView,
         cx: &mut Context<Self>,
     ) {
-        if let Some(page) = pages::Page::from_legacy(view) {
-            self.show_page(page, cx);
-            return;
-        }
         if self.right_dock_view == view {
             return;
         }

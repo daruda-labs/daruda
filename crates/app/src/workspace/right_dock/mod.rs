@@ -47,9 +47,7 @@ pub(in crate::workspace) fn right_panel_body() -> gpui::Div {
 /// sets `overflow_hidden`), with a scrollbar thumb overlay for position.
 pub(in crate::workspace) fn render(snap: &RightDockSnapshot, cx: &mut Context<Dock>) -> AnyElement {
     let (body, footer) = match snap.right_dock_view {
-        RightDockView::Usage | RightDockView::Tasks | RightDockView::Flows => {
-            (usage::render(snap, cx), usage::footer(snap, cx))
-        }
+        RightDockView::Usage => (usage::render(snap, cx), usage::footer(snap, cx)),
         RightDockView::Skills => (skills::render(snap, cx), Some(skills::footer(snap, cx))),
         RightDockView::Tools => (tools::render(snap, cx), Some(tools::footer(snap, cx))),
     };

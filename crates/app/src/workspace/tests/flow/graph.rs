@@ -763,7 +763,7 @@ nodes:
     // Read the list once so there is a cache to invalidate — the state the
     // panel is in whenever the tab is up.
     let listed = ws.update(&mut vcx, |ws, cx| {
-        ws.set_right_dock_view(daruda_store::project::RightDockView::Flows, cx);
+        ws.show_page(crate::workspace::pages::Page::Flows, cx);
         ws.flow_list_for_panel()
     });
     assert_eq!(listed.len(), 1, "one flow to start: {listed:?}");
@@ -827,7 +827,7 @@ async fn a_flow_event_that_changed_nothing_costs_no_frame(cx: &mut TestAppContex
     // With the Flows tab up, the list is rendered from the workspace and a file
     // added from outside has to reach it.
     ws.update(&mut vcx, |ws, cx| {
-        ws.set_right_dock_view(daruda_store::project::RightDockView::Flows, cx)
+        ws.show_page(crate::workspace::pages::Page::Flows, cx)
     });
     vcx.run_until_parked();
     WORKSPACE_RENDERS.with(|n| n.set(0));

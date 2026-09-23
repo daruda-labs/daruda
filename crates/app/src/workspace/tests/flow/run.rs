@@ -437,7 +437,7 @@ async fn the_panel_reads_past_runs_off_disk_when_its_tab_is_showing(cx: &mut Tes
             ws.flow_history_for_panel().is_none(),
             "read the disk for a tab that is not open"
         );
-        ws.set_right_dock_view(daruda_store::project::RightDockView::Flows, cx);
+        ws.show_page(crate::workspace::pages::Page::Flows, cx);
 
         let history = ws.flow_history_for_panel().expect("read");
         let statuses: Vec<_> = history.runs().iter().map(|r| r.status).collect();
@@ -468,7 +468,7 @@ async fn only_a_run_leaving_setup_refreshes_the_history(cx: &mut TestAppContext)
 
     ws.update(cx, |ws, cx| {
         let here = ws.active;
-        ws.set_right_dock_view(daruda_store::project::RightDockView::Flows, cx);
+        ws.show_page(crate::workspace::pages::Page::Flows, cx);
         ws.seed_flow_run_for_test(here, lane.path().join("run-here"));
         ws.flow_history_for_panel().expect("primed");
 
@@ -584,7 +584,7 @@ async fn the_palette_can_reach_the_flows_panel(cx: &mut TestAppContext) {
 
     cx.update_window(wh.into(), |_, window, cx| {
         ws.update(cx, |ws, cx| {
-            ws.set_right_dock_view(daruda_store::project::RightDockView::Tasks, cx);
+            ws.show_page(crate::workspace::pages::Page::Tasks, cx);
             ws.command_palette.open();
             // Smart-case matching requires the label's capitalization here.
             for ch in "Open Flows".chars() {
@@ -1137,7 +1137,7 @@ async fn the_run_button_on_a_row_does_not_also_open_the_graph(cx: &mut TestAppCo
 
     let mut vcx = gpui::VisualTestContext::from_window(wh.into(), cx);
     ws.update_in(&mut vcx, |ws, _window, cx| {
-        ws.set_right_dock_view(daruda_store::project::RightDockView::Flows, cx);
+        ws.show_page(crate::workspace::pages::Page::Flows, cx);
         ws.right_dock.update(cx, |dock, cx| {
             dock.open();
             cx.notify();
@@ -1183,7 +1183,7 @@ async fn the_panel_run_button_is_off_while_that_flows_graph_has_unsaved_edits(
     let (_lane, ws, flow_path, wh) = workspace_with_a_flow(cx, WITH_PROFILES);
     let mut vcx = gpui::VisualTestContext::from_window(wh.into(), cx);
     ws.update_in(&mut vcx, |ws, window, cx| {
-        ws.set_right_dock_view(daruda_store::project::RightDockView::Flows, cx);
+        ws.show_page(crate::workspace::pages::Page::Flows, cx);
         ws.right_dock.update(cx, |dock, cx| {
             dock.open();
             cx.notify();
