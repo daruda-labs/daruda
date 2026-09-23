@@ -843,6 +843,7 @@ settings:
   search_open: "열기"
   search_count_one: "설정 1개"
   search_count: "설정 %{count}개"
+  reset_to_default: "기본값으로 되돌리기"
   desc_general: "현재 프로필에서 사용할 표시 언어를 선택합니다."
   desc_font: "터미널, 에디터, 에이전트 채팅의 글꼴을 개별적으로 조정합니다."
   desc_terminal: "터미널 pane의 셸, 출력, 여백, 커서, 클립보드를 설정합니다."

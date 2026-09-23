@@ -844,6 +844,7 @@ settings:
   search_open: "Open"
   search_count_one: "1 setting"
   search_count: "%{count} settings"
+  reset_to_default: "Reset to default"
   desc_general: "Choose the display language for the current profile."
   desc_font: "Adjust typography independently for terminals, editors, and agent chat."
   desc_terminal: "Shell, output, padding, cursor and clipboard for terminal panes."

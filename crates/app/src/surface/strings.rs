@@ -4702,6 +4702,10 @@ pub fn settings_search_count(count: usize) -> String {
     }
 }
 
+pub fn settings_reset_to_default() -> String {
+    rust_i18n::t!("settings.reset_to_default").into_owned()
+}
+
 pub fn settings_nav_general() -> String {
     rust_i18n::t!("settings.nav_general").into_owned()
 }

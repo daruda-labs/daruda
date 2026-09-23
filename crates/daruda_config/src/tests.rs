@@ -730,6 +730,50 @@ fn settings_patch_writes_render_max_fps() {
     assert_eq!(Config::load_from(&path).render.max_fps, 60);
 }
 
+/// Reset deletes the key rather than writing the default, and keeps the
+/// table and its other keys.
+#[test]
+fn resetting_a_field_removes_only_its_key() {
+    use crate::SettingsPatch as P;
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("config.toml");
+    crate::apply_settings_patch_to(&P::TerminalFontSize(20.0), &path).unwrap();
+    crate::apply_settings_patch_to(&P::TerminalLineHeight(1.5), &path).unwrap();
+    let before = Config::load_from(&path);
+
+    let default = P::TerminalFontSize(Config::default().font.terminal.size);
+    let after = crate::reset_settings_field_to_if_unchanged(&default, &before, &path).unwrap();
+
+    let text = std::fs::read_to_string(&path).unwrap();
+    let doc: toml_edit::DocumentMut = text.parse().unwrap();
+    let terminal = doc["font"]["terminal"]
+        .as_table()
+        .expect("terminal table kept");
+    assert!(!terminal.contains_key("size"), "{text}");
+    assert!(terminal.contains_key("line_height"), "{text}");
+    assert_eq!(
+        after.font.terminal.size,
+        Config::default().font.terminal.size
+    );
+    assert_eq!(Config::load_from(&path).font.terminal.line_height, 1.5);
+}
+
+/// A field that moved on disk since the window read it is not reset.
+#[test]
+fn resetting_a_field_changed_on_disk_is_a_conflict() {
+    use crate::SettingsPatch as P;
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("config.toml");
+    let stale = Config::default();
+    crate::apply_settings_patch_to(&P::TerminalFontSize(20.0), &path).unwrap();
+
+    let default = P::TerminalFontSize(Config::default().font.terminal.size);
+    assert!(matches!(
+        crate::reset_settings_field_to_if_unchanged(&default, &stale, &path),
+        Err(crate::SettingsPatchApplyError::Conflict(_))
+    ));
+}
+
 /// The Workspace page's keys through the real `toml_edit` writer, read back.
 #[test]
 fn settings_patch_round_trips_the_workspace_keys() {

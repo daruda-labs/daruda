@@ -45,6 +45,17 @@ pub(super) fn row(
     control: impl IntoElement,
     cx: &App,
 ) -> Div {
+    row_with_reset(label, None::<gpui::AnyElement>, description, control, cx)
+}
+
+/// [`row`] with a Reset affordance beside the label, shown only when given.
+pub(super) fn row_with_reset(
+    label: impl Into<SharedString>,
+    reset: Option<impl IntoElement>,
+    description: impl Into<SharedString>,
+    control: impl IntoElement,
+    cx: &App,
+) -> Div {
     let t = theme::current(cx);
     let description = description.into();
     div()
@@ -67,7 +78,15 @@ pub(super) fn row(
                 .gap(px(theme::PAD_XS))
                 .text_size(px(theme::MODAL_BODY_FONT_SIZE))
                 .text_color(t.text_body)
-                .child(label.into())
+                .child(
+                    div()
+                        .flex()
+                        .flex_row()
+                        .items_center()
+                        .gap(px(theme::PAD_SM))
+                        .child(label.into())
+                        .children(reset),
+                )
                 .when(!description.is_empty(), |el| {
                     el.child(
                         div()
@@ -115,12 +134,33 @@ pub(super) fn card_content(content: impl IntoElement) -> Div {
 }
 
 impl SettingsView {
-    pub(super) fn text_row(&self, setting: TextSetting, cx: &App) -> Div {
+    /// The Reset icon for `target`'s row, while its value is not the default.
+    fn reset_button(
+        &self,
+        target: super::search::Target,
+        cx: &gpui::Context<Self>,
+    ) -> Option<crate::ui::Button> {
+        self.differs_from_default(target).then(|| {
+            crate::ui::button_icon(
+                gpui::ElementId::Name(format!("settings-reset-{target:?}").into()),
+                crate::ui::icons::UNDO,
+                cx,
+            )
+            .tooltip(s::settings_reset_to_default())
+            .tab_stop(true)
+            .on_click(
+                cx.listener(move |this, _, window, cx| this.reset_to_default(target, window, cx)),
+            )
+        })
+    }
+
+    pub(super) fn text_row(&self, setting: TextSetting, cx: &gpui::Context<Self>) -> Div {
         let copy = super::copy::text(setting);
         let (label, description) = ((copy.label)(), (copy.hint)());
         let input = (spec::text_spec(setting).field)(self);
-        row(
+        row_with_reset(
             label,
+            self.reset_button(super::search::Target::Text(setting), cx),
             description,
             div()
                 .w(px(theme::SETTINGS_NUMBER_W))
@@ -131,12 +171,13 @@ impl SettingsView {
 
     /// [`Self::text_row`] for free text (a path, a command) rather than a
     /// number: the input takes the full control column.
-    pub(super) fn text_row_wide(&self, setting: TextSetting, cx: &App) -> Div {
+    pub(super) fn text_row_wide(&self, setting: TextSetting, cx: &gpui::Context<Self>) -> Div {
         let copy = super::copy::text(setting);
         let (label, description) = ((copy.label)(), (copy.hint)());
         let input = (spec::text_spec(setting).field)(self);
-        row(
+        row_with_reset(
             label,
+            self.reset_button(super::search::Target::Text(setting), cx),
             description,
             div().w_full().child(crate::ui::input(input, cx, 0)),
             cx,
@@ -163,7 +204,7 @@ impl SettingsView {
         )
     }
 
-    pub(super) fn select_row(&self, setting: SelectSetting, cx: &App) -> Div {
+    pub(super) fn select_row(&self, setting: SelectSetting, cx: &gpui::Context<Self>) -> Div {
         let copy = super::copy::select(setting);
         let (label, description) = ((copy.label)(), (copy.hint)());
         let input = (spec::select_spec(setting).field)(self);
@@ -171,7 +212,13 @@ impl SettingsView {
             setting == SelectSetting::UiPreset && daruda_config::UI_THEME_PRESETS.len() <= 1,
             |el| el.disabled(true),
         );
-        row(label, description, div().w_full().child(control), cx)
+        row_with_reset(
+            label,
+            self.reset_button(super::search::Target::Select(setting), cx),
+            description,
+            div().w_full().child(control),
+            cx,
+        )
     }
 
     pub(super) fn switch_row(&self, setting: BoolSetting, cx: &gpui::Context<Self>) -> Div {
@@ -188,7 +235,13 @@ impl SettingsView {
             checked,
             cx,
         );
-        row(label, description, control, cx)
+        row_with_reset(
+            label,
+            self.reset_button(super::search::Target::Bool(setting), cx),
+            description,
+            control,
+            cx,
+        )
     }
 
     /// Rows that only apply while `parent` is on, indented under it. While

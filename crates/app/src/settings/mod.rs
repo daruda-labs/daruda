@@ -17,6 +17,7 @@ mod copy;
 mod navigation;
 mod presentation;
 mod render;
+mod reset;
 mod search;
 mod sections;
 mod spec;

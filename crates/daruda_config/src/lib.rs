@@ -462,7 +462,8 @@ pub fn apply_settings_patch_to(
     patch: &SettingsPatch,
     path: &std::path::Path,
 ) -> Result<Config, String> {
-    apply_settings_patch_to_inner(patch, path, None).map_err(|error| error.to_string())
+    apply_settings_patch_to_inner(patch, path, None, WriteMode::Set)
+        .map_err(|error| error.to_string())
 }
 
 /// A Settings patch failed because the addressed field changed or persistence
@@ -493,13 +494,51 @@ pub fn apply_settings_patch_to_if_unchanged(
     expected: &Config,
     path: &std::path::Path,
 ) -> Result<Config, SettingsPatchApplyError> {
-    apply_settings_patch_to_inner(patch, path, Some(expected))
+    apply_settings_patch_to_inner(patch, path, Some(expected), WriteMode::Set)
+}
+
+/// Return one field to its default by deleting its key, so the file tracks a
+/// future change to the default instead of pinning today's value. `default`
+/// is that field's patch built from `Config::default()`; it names the field
+/// and gives the in-memory value. Refused like a write when the field moved
+/// on disk since `expected` was read.
+pub fn reset_settings_field_to_if_unchanged(
+    default: &SettingsPatch,
+    expected: &Config,
+    path: &std::path::Path,
+) -> Result<Config, SettingsPatchApplyError> {
+    apply_settings_patch_to_inner(default, path, Some(expected), WriteMode::Remove)
+}
+
+/// Whether a write sets the field's key or removes it.
+#[derive(Clone, Copy)]
+enum WriteMode {
+    Set,
+    Remove,
+}
+
+/// Remove the key a dotted `path` names, leaving its tables in place.
+fn remove_key_path(doc: &mut toml_edit::DocumentMut, path: &str) {
+    let mut parts: Vec<&str> = path.split('.').collect();
+    let Some(key) = parts.pop() else { return };
+    let mut table: &mut dyn toml_edit::TableLike = doc.as_table_mut();
+    for part in parts {
+        match table
+            .get_mut(part)
+            .and_then(toml_edit::Item::as_table_like_mut)
+        {
+            Some(next) => table = next,
+            None => return,
+        }
+    }
+    table.remove(key);
 }
 
 fn apply_settings_patch_to_inner(
     patch: &SettingsPatch,
     path: &std::path::Path,
     expected: Option<&Config>,
+    mode: WriteMode,
 ) -> Result<Config, SettingsPatchApplyError> {
     const MAX_WRITE_ATTEMPTS: usize = 8;
 
@@ -518,7 +557,10 @@ fn apply_settings_patch_to_inner(
 
         patch.apply_to(&mut config);
         config.clamp();
-        patch_settings_document(&mut doc, &config, patch);
+        match mode {
+            WriteMode::Set => patch_settings_document(&mut doc, &config, patch),
+            WriteMode::Remove => remove_key_path(&mut doc, patch.field().path()),
+        }
         remove_legacy_agent_keys_from(&mut doc, &config);
 
         let text = doc.to_string();

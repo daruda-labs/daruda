@@ -63,6 +63,14 @@ impl ConfigWriter {
     ) -> Result<Config, daruda_config::SettingsPatchApplyError> {
         daruda_config::apply_settings_patch_to_if_unchanged(patch, expected, &self.path)
     }
+
+    fn reset_if_unchanged(
+        &self,
+        default: &SettingsPatch,
+        expected: &Config,
+    ) -> Result<Config, daruda_config::SettingsPatchApplyError> {
+        daruda_config::reset_settings_field_to_if_unchanged(default, expected, &self.path)
+    }
 }
 
 impl Global for SettingsStore {}
@@ -166,6 +174,27 @@ impl SettingsStore {
                 // The writer observed a newer valid document than this cache.
                 // Publish it immediately so the conflict banner's "Use
                 // external value" action does not wait for watcher debounce.
+                self.reload_user();
+                Err(error)
+            }
+            Err(error) => Err(error),
+        }
+    }
+
+    /// [`Self::apply_patch_if_unchanged`] that deletes the field's key instead
+    /// of writing `default`'s value. See
+    /// [`daruda_config::reset_settings_field_to_if_unchanged`].
+    pub fn reset_field_if_unchanged(
+        &mut self,
+        default: SettingsPatch,
+        expected: &Config,
+    ) -> Result<(), daruda_config::SettingsPatchApplyError> {
+        match self.writer.reset_if_unchanged(&default, expected) {
+            Ok(next) => {
+                self.user = Arc::new(next);
+                Ok(())
+            }
+            Err(error @ daruda_config::SettingsPatchApplyError::Conflict(_)) => {
                 self.reload_user();
                 Err(error)
             }
