@@ -24,10 +24,7 @@ use daruda_store::accounts::{AccountId, AccountRecipeId, AccountsState, ManagedA
 use daruda_store::observability::error_report::{ErrorReport, ErrorSeverity};
 use daruda_store::observability::log_writer::LogWriter;
 
-use super::{
-    AddManagedAccount, ReauthenticateAccount, ReauthenticateSystem, accounts_global,
-    auth_status_global,
-};
+use super::{AddManagedAccount, accounts_global, auth_status_global};
 use crate::surface::strings as s;
 use crate::workspace::Workspace;
 use crate::workspace::main_area::agent_chat_pane::agent_chat_ops::resolve_open_agent_id;
@@ -292,12 +289,7 @@ impl Workspace {
     ///
     /// The command and the domain the new account is filed under come from
     /// that one resolution, so they can't name different domains.
-    /// `pub(crate)`: the Settings window's Accounts section also calls this
-    /// directly — via `WindowRegistry::first_workspace` — since the headless
-    /// login has no other entry point that reaches a specific `Workspace`
-    /// from outside `crate::workspace` (see that section's
-    /// `start_add_account`).
-    pub(crate) fn add_managed_account(
+    pub(in crate::workspace) fn add_managed_account(
         &mut self,
         recipe: AccountRecipeId,
         _window: &mut Window,
@@ -936,17 +928,6 @@ impl Workspace {
         true
     }
 
-    /// Action handler for [`ReauthenticateAccount`]. Thin shim, mirroring
-    /// [`Self::on_add_managed_account`].
-    pub(in crate::workspace) fn on_reauthenticate_account(
-        &mut self,
-        action: &ReauthenticateAccount,
-        _window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
-        self.reauthenticate_account(action.0, cx);
-    }
-
     /// Re-run a headless login for an **existing** managed account — the
     /// counterpart to [`Self::add_managed_account`], reusing the account's
     /// `config_dir` and `AccountId` instead of minting a fresh pair. Guards
@@ -1025,17 +1006,6 @@ impl Workspace {
             LoginFinish::Reauth,
             cx,
         );
-    }
-
-    /// Action handler for [`ReauthenticateSystem`]. Thin shim, mirroring
-    /// [`Self::on_reauthenticate_account`].
-    pub(in crate::workspace) fn on_reauthenticate_system(
-        &mut self,
-        action: &ReauthenticateSystem,
-        _window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
-        self.reauthenticate_system(action.0, cx);
     }
 
     /// Sign in to the **ambient** home for `recipe` — the credentials a pane

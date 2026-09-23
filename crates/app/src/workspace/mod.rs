@@ -139,30 +139,6 @@ pub struct SwitchPaneAccount(pub daruda_store::accounts::AccountSelection);
 #[action(namespace = workspace, no_json)]
 pub struct AddManagedAccount(pub daruda_store::accounts::AccountRecipeId);
 
-/// Re-run a headless login for an **existing** managed account. Carries the
-/// target [`daruda_store::accounts::AccountId`] rather than a provider: unlike
-/// [`AddManagedAccount`], this reuses the account's existing config dir
-/// and identity row instead of minting a new one, so the concrete account
-/// must be known up front. `no_json`: dispatched only from the Settings
-/// window's Accounts section "Reauthenticate" button (via
-/// `Window::dispatch_action` on the target `Workspace` window resolved
-/// through `WindowRegistry::first_workspace`), never from keymap.json.
-#[derive(Clone, PartialEq, Debug, gpui::Action)]
-#[action(namespace = workspace, no_json)]
-pub struct ReauthenticateAccount(pub daruda_store::accounts::AccountId);
-
-/// Re-run the headless login for an auth domain's **ambient** home — the
-/// credentials a pane with no managed account runs under (see
-/// `account_login_ops::reauthenticate_system`). Carries the
-/// [`daruda_store::accounts::AccountRecipeId`] rather than an account id
-/// because there is no `accounts.json` row to name: the domain identifies
-/// the home by itself. `no_json`: dispatched from the Settings window's
-/// System row and from a failed pane's re-login button, never from
-/// keymap.json.
-#[derive(Clone, PartialEq, Debug, gpui::Action)]
-#[action(namespace = workspace, no_json)]
-pub struct ReauthenticateSystem(pub daruda_store::accounts::AccountRecipeId);
-
 /// Active lane's branch state, derived once per render and shared
 /// by the status bar (text label + inline detached chip) and the
 /// macOS window title (text only — chip cannot ride along).
@@ -561,8 +537,6 @@ pub struct Workspace {
     /// Workspace can update that shared snapshot without overwriting each
     /// other's observations.
     pub(in crate::workspace) agent_vocabulary: daruda_store::agent_vocabulary::AgentVocabularyCache,
-    /// Refreshes [`Self::agent_vocabulary`] after any Workspace records a new
-    /// advertisement into the app-wide cache.
     /// Global observers installed once — see [`lifetimes::GlobalObservers`].
     _observers: lifetimes::GlobalObservers,
     /// Managed accounts across every auth domain — the catalog a pane's
@@ -574,29 +548,14 @@ pub struct Workspace {
     ///
     /// Read-cache of the app-wide [`accounts_global::AccountsGlobal`] (the
     /// single source of truth): seeded at construction, refreshed *only* by
-    /// `_accounts_global_subscription`. Cached as a field so the many cx-free
-    /// read sites (`main_area::pane::resolve_pane_account` callers,
-    /// `focused_account`, the status-bar slot) stay cx-free, exactly like the
-    /// config fields cache `SettingsStore`.
+    /// its observer in [`lifetimes::GlobalObservers`]. Cached as a field so
+    /// the many cx-free read sites (`main_area::pane::resolve_pane_account`
+    /// callers, `focused_account`, the status-bar slot) stay cx-free, exactly
+    /// like the config fields cache `SettingsStore`.
     pub(in crate::workspace) accounts: daruda_store::accounts::AccountsState,
     /// The login this window has in flight — see
     /// [`account_login_ops::LoginState`].
     pub(in crate::workspace) login: account_login_ops::LoginState,
-    /// Subscription that refreshes the `accounts` read-cache and repaints
-    /// whenever the app-wide [`accounts_global::AccountsGlobal`] changes —
-    /// so an add/reauth/default/delete in *any* window (or the Settings
-    /// window) is reflected here immediately, with no manual broadcast.
-    /// Subscription that calls `cx.notify()` whenever the app-wide
-    /// `GlobalTasks` changes — so the Tasks tab in this workspace
-    /// re-renders after a CRUD or lifecycle mutation triggered by any
-    /// other workspace, hook, or modal.
-    /// Background tick that re-renders the right-panel Tasks tab
-    /// every [`crate::ui::theme::RIGHT_PANEL_TASK_LIVE_TICK_MS`]
-    /// while at least one task is `Running`, so the pulse dot animates
-    /// and the inline duration text advances. `None` when no
-    /// `Running` row is on screen — the loop self-terminates and
-    /// gets re-spawned by `ensure_task_live_tick` on the next
-    /// state-change event. See `task_ops::spawn_task_live_tick`.
     /// Active filter shown in the Tasks tab header. Default = `All`.
     pub(in crate::workspace) task_filter: daruda_store::tasks::TaskFilter,
     /// Per-repo lock that prevents two concurrent `start_task`
@@ -646,25 +605,11 @@ pub struct Workspace {
     pub(in crate::workspace) skill_plugin_expanded: std::collections::HashSet<String>,
     /// Background watches and their pumps — see [`lifetimes::Pumps`].
     pub(in crate::workspace) pumps: lifetimes::Pumps,
-    /// Subscription that calls `cx.notify()` whenever the `SkillsState`
-    /// Global changes — so panels in this workspace re-render after a
-    /// mutation triggered by another workspace's watcher or by the
-    /// Settings window's plugin install / uninstall flow.
     /// Cached Project-scope `.mcp.json` directories (lane root + the
     /// focused cwd, each walked up to its git repo root). Recomputed
     /// only inside `respawn_mcp_watcher` — the render snapshot reads
     /// this field instead of stat-walking the filesystem every frame.
     mcp_project_dirs: Vec<std::path::PathBuf>,
-    /// Subscription that calls `cx.notify()` whenever the `McpState`
-    /// Global changes — so panels in this workspace re-render after a
-    /// mutation triggered by another workspace's watcher or by a
-    /// Settings-window action.
-    /// Subscription on the `SettingsStore` Global. Re-resolves the
-    /// effective config (user layer + this workspace's project
-    /// overlay) and calls `apply_config` on every change.
-    /// Subscription on the `Updater` entity. Fires on every status
-    /// transition; the handler toasts only when it becomes `Available`.
-    /// `None` when no `Updater` global is registered (e.g. tests).
     /// Last version surfaced via the "update available" toast. Guards
     /// against re-toasting the same version on repeated `Available`
     /// notifies.
@@ -1288,10 +1233,7 @@ impl Workspace {
                     })
                 }),
             ),
-            pumps: lifetimes::Pumps {
-                _ports: Some(sync::ports::spawn(cx)),
-                ..Default::default()
-            },
+            pumps: lifetimes::Pumps::new(sync::ports::spawn(cx)),
         };
         // Invariant seed: the active lane's runtime must always exist in
         // `runtimes` so `active_runtime()` (read unconditionally by

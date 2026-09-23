@@ -157,15 +157,10 @@ impl WindowRegistry {
             .map(|(h, _)| *h)
     }
 
-    /// First registered workspace — used by screenshot runs where no
-    /// OS-focused active window exists, and by the Settings window
-    /// (a separate OS window with no `Workspace` of its own) to pick a
-    /// concrete target for an action that must run against *some* live
-    /// Workspace (e.g. the Accounts section's add-account button — see
-    /// `settings::sections::accounts::start_add_account`).
-    /// Deterministic (registration order) but arbitrary when more than one
-    /// workspace window is open; documented simplification, same class as
-    /// `Workspace::panes_referencing_account`'s per-window undercount.
+    /// First registered workspace, for callers with no OS-focused window to
+    /// go by — screenshot and replay runs, the orchestrator host, and the
+    /// Settings fallback when no window is key. Deterministic (registration
+    /// order) but arbitrary when more than one workspace window is open.
     pub(crate) fn first_workspace(cx: &App) -> Option<(AnyWindowHandle, WeakEntity<Workspace>)> {
         cx.try_global::<WindowRegistry>()?
             .workspaces

@@ -35,7 +35,6 @@ impl<H> Watch<H> {
 /// Background watches, restarted as the lane, project or focused cwd moves.
 /// Each `respawn_*` clears its field before building the replacement so the
 /// old OS subscription is gone before the new one attaches.
-#[derive(Default)]
 pub(in crate::workspace) struct Pumps {
     pub(in crate::workspace) skills: Option<Watch<skills_watcher::SkillsWatcherHandle>>,
     pub(in crate::workspace) mcp: Option<Watch<mcp_watcher::McpWatcherHandle>>,
@@ -46,7 +45,20 @@ pub(in crate::workspace) struct Pumps {
     pub(in crate::workspace) task_live_tick: Option<Task<()>>,
     /// Port scanning has nothing to re-target, so it is started once and never
     /// touched again.
-    pub(in crate::workspace) _ports: Option<Task<()>>,
+    _ports: Task<()>,
+}
+
+impl Pumps {
+    /// Every watch starts unset; each `respawn_*` fills its own.
+    pub(in crate::workspace) fn new(ports: Task<()>) -> Self {
+        Self {
+            skills: None,
+            mcp: None,
+            flow: None,
+            task_live_tick: None,
+            _ports: ports,
+        }
+    }
 }
 
 /// `cx.observe_global` subscriptions installed once in the constructor.
