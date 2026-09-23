@@ -3090,7 +3090,7 @@ fn focus_section_resets_scroll(cx: &mut TestAppContext) {
             // (so the test exercises the reset path inside focus_section).
             w.scroll_handle
                 .set_offset(gpui::point(gpui::px(0.), gpui::px(-100.)));
-            w.focus_section(BuiltinSection::Window, window, cx);
+            w.focus_section(BuiltinSection::Appearance, window, cx);
         });
     })
     .unwrap();

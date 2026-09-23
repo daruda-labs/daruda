@@ -3,6 +3,7 @@
 //! state machine and overlay in [`super`] so each half stays one
 //! responsibility.
 
+use crate::surface::keybindings as k;
 use crate::surface::strings as s;
 
 /// A single entry in the command palette.
@@ -12,7 +13,8 @@ pub(in crate::workspace) struct PaletteEntry {
     pub id: &'static str,
     /// Human-readable label shown in the palette.
     pub label: fn() -> String,
-    /// Keyboard shortcut hint (displayed right-aligned).
+    /// Default chord (`surface::keybindings`), rendered through
+    /// `surface::shortcut_display` so each platform reads its own modifiers.
     pub shortcut: &'static str,
 }
 
@@ -28,7 +30,7 @@ pub(in crate::workspace) const PALETTE_ENTRIES: &[PaletteEntry] = &[
     PaletteEntry {
         id: "toggle_lane_switcher",
         label: s::command_switch_lane,
-        shortcut: "Cmd+P",
+        shortcut: k::SHORTCUT_LANE_SWITCHER,
     },
     PaletteEntry {
         id: "run_flow",
@@ -53,7 +55,7 @@ pub(in crate::workspace) const PALETTE_ENTRIES: &[PaletteEntry] = &[
     PaletteEntry {
         id: "open_settings",
         label: s::command_settings,
-        shortcut: "Cmd+,",
+        shortcut: k::SHORTCUT_SETTINGS,
     },
     // These three are otherwise menu-only, which puts them out of reach
     // wherever gpui does not draw a menu bar.
@@ -78,23 +80,13 @@ pub(in crate::workspace) const PALETTE_ENTRIES: &[PaletteEntry] = &[
         shortcut: "",
     },
     PaletteEntry {
+        id: "open_settings.appearance",
+        label: s::command_settings_appearance,
+        shortcut: "",
+    },
+    PaletteEntry {
         id: "open_settings.font",
         label: s::command_settings_font,
-        shortcut: "",
-    },
-    PaletteEntry {
-        id: "open_settings.cursor",
-        label: s::command_settings_cursor,
-        shortcut: "",
-    },
-    PaletteEntry {
-        id: "open_settings.shell",
-        label: s::command_settings_shell,
-        shortcut: "",
-    },
-    PaletteEntry {
-        id: "open_settings.window",
-        label: s::command_settings_window,
         shortcut: "",
     },
     PaletteEntry {
@@ -103,23 +95,8 @@ pub(in crate::workspace) const PALETTE_ENTRIES: &[PaletteEntry] = &[
         shortcut: "",
     },
     PaletteEntry {
-        id: "open_settings.dock",
-        label: s::command_settings_dock,
-        shortcut: "",
-    },
-    PaletteEntry {
-        id: "open_settings.clipboard",
-        label: s::command_settings_clipboard,
-        shortcut: "",
-    },
-    PaletteEntry {
-        id: "open_settings.external_editor",
-        label: s::command_settings_external_editor,
-        shortcut: "",
-    },
-    PaletteEntry {
-        id: "open_settings.notifications",
-        label: s::command_settings_notifications,
+        id: "open_settings.workspace",
+        label: s::command_settings_workspace,
         shortcut: "",
     },
     PaletteEntry {
@@ -128,9 +105,49 @@ pub(in crate::workspace) const PALETTE_ENTRIES: &[PaletteEntry] = &[
         shortcut: "",
     },
     PaletteEntry {
+        id: "open_settings.agent",
+        label: s::command_settings_agent,
+        shortcut: "",
+    },
+    PaletteEntry {
+        id: "open_settings.orchestrator",
+        label: s::command_settings_orchestrator,
+        shortcut: "",
+    },
+    PaletteEntry {
+        id: "open_settings.session_hosts",
+        label: s::command_settings_session_hosts,
+        shortcut: "",
+    },
+    PaletteEntry {
+        id: "open_settings.accounts",
+        label: s::command_settings_accounts,
+        shortcut: "",
+    },
+    PaletteEntry {
+        id: "open_settings.notifications",
+        label: s::command_settings_notifications,
+        shortcut: "",
+    },
+    PaletteEntry {
+        id: "open_settings.remote_control",
+        label: s::command_settings_remote_control,
+        shortcut: "",
+    },
+    PaletteEntry {
+        id: "open_settings.plugin",
+        label: s::command_settings_plugin,
+        shortcut: "",
+    },
+    PaletteEntry {
+        id: "open_settings.about",
+        label: s::command_settings_about,
+        shortcut: "",
+    },
+    PaletteEntry {
         id: "new_tab",
         label: s::command_new_tab,
-        shortcut: "Cmd+T",
+        shortcut: k::SHORTCUT_NEW_TAB,
     },
     PaletteEntry {
         id: "new_task",
@@ -175,7 +192,7 @@ pub(in crate::workspace) const PALETTE_ENTRIES: &[PaletteEntry] = &[
     PaletteEntry {
         id: "close_pane",
         label: s::command_close_pane,
-        shortcut: "Cmd+W",
+        shortcut: k::SHORTCUT_CLOSE_PANE,
     },
     PaletteEntry {
         id: "close_tab",
@@ -185,77 +202,77 @@ pub(in crate::workspace) const PALETTE_ENTRIES: &[PaletteEntry] = &[
     PaletteEntry {
         id: "split_right",
         label: s::command_split_right,
-        shortcut: "Cmd+D",
+        shortcut: k::SHORTCUT_SPLIT_RIGHT,
     },
     PaletteEntry {
         id: "split_down",
         label: s::command_split_down,
-        shortcut: "Cmd+Shift+D",
+        shortcut: k::SHORTCUT_SPLIT_DOWN,
     },
     PaletteEntry {
         id: "next_tab",
         label: s::command_next_tab,
-        shortcut: "Ctrl+Tab",
+        shortcut: k::SHORTCUT_NEXT_TAB,
     },
     PaletteEntry {
         id: "prev_tab",
         label: s::command_previous_tab,
-        shortcut: "Ctrl+Shift+Tab",
+        shortcut: k::SHORTCUT_PREV_TAB,
     },
     PaletteEntry {
         id: "toggle_left_dock",
         label: s::command_toggle_left_dock,
-        shortcut: "Cmd+B",
+        shortcut: k::SHORTCUT_TOGGLE_LEFT_DOCK,
     },
     PaletteEntry {
         id: "toggle_git_changes_focus",
         label: s::command_toggle_git_changes_focus,
-        shortcut: "Ctrl+Shift+G",
+        shortcut: k::SHORTCUT_TOGGLE_GIT_CHANGES_FOCUS,
     },
     PaletteEntry {
         id: "toggle_files_focus",
         label: s::command_toggle_files_focus,
-        shortcut: "Cmd+Shift+E",
+        shortcut: k::SHORTCUT_TOGGLE_FILES_FOCUS,
     },
     PaletteEntry {
         id: "toggle_bottom_dock",
         label: s::command_toggle_bottom_panel,
-        shortcut: "Cmd+J",
+        shortcut: k::SHORTCUT_TOGGLE_BOTTOM_DOCK,
     },
     PaletteEntry {
         id: "toggle_right_dock",
         label: s::command_toggle_right_dock,
-        shortcut: "Cmd+Shift+B",
+        shortcut: k::SHORTCUT_TOGGLE_RIGHT_DOCK,
     },
     PaletteEntry {
         id: "focus_next_pane",
         label: s::command_focus_next_pane,
-        shortcut: "Cmd+]",
+        shortcut: k::SHORTCUT_FOCUS_NEXT_PANE,
     },
     PaletteEntry {
         id: "focus_prev_pane",
         label: s::command_focus_previous_pane,
-        shortcut: "Cmd+[",
+        shortcut: k::SHORTCUT_FOCUS_PREV_PANE,
     },
     PaletteEntry {
         id: "focus_pane_left",
         label: s::command_focus_pane_left,
-        shortcut: "Cmd+Alt+Left",
+        shortcut: k::SHORTCUT_FOCUS_PANE_LEFT,
     },
     PaletteEntry {
         id: "focus_pane_right",
         label: s::command_focus_pane_right,
-        shortcut: "Cmd+Alt+Right",
+        shortcut: k::SHORTCUT_FOCUS_PANE_RIGHT,
     },
     PaletteEntry {
         id: "focus_pane_up",
         label: s::command_focus_pane_up,
-        shortcut: "Cmd+Alt+Up",
+        shortcut: k::SHORTCUT_FOCUS_PANE_UP,
     },
     PaletteEntry {
         id: "focus_pane_down",
         label: s::command_focus_pane_down,
-        shortcut: "Cmd+Alt+Down",
+        shortcut: k::SHORTCUT_FOCUS_PANE_DOWN,
     },
     PaletteEntry {
         id: "move_tab_left",
@@ -270,87 +287,87 @@ pub(in crate::workspace) const PALETTE_ENTRIES: &[PaletteEntry] = &[
     PaletteEntry {
         id: "copy",
         label: s::command_copy,
-        shortcut: "Cmd+C",
+        shortcut: k::SHORTCUT_COPY,
     },
     PaletteEntry {
         id: "paste",
         label: s::command_paste,
-        shortcut: "Cmd+V",
+        shortcut: k::SHORTCUT_PASTE,
     },
     PaletteEntry {
         id: "select_all",
         label: s::command_select_all,
-        shortcut: "Cmd+A",
+        shortcut: k::SHORTCUT_SELECT_ALL,
     },
     PaletteEntry {
         id: "activate_lane_1",
         label: s::command_activate_lane_1,
-        shortcut: "Cmd+Ctrl+1",
+        shortcut: k::SHORTCUT_ACTIVATE_LANE_1,
     },
     PaletteEntry {
         id: "activate_lane_2",
         label: s::command_activate_lane_2,
-        shortcut: "Cmd+Ctrl+2",
+        shortcut: k::SHORTCUT_ACTIVATE_LANE_2,
     },
     PaletteEntry {
         id: "activate_lane_3",
         label: s::command_activate_lane_3,
-        shortcut: "Cmd+Ctrl+3",
+        shortcut: k::SHORTCUT_ACTIVATE_LANE_3,
     },
     PaletteEntry {
         id: "activate_lane_4",
         label: s::command_activate_lane_4,
-        shortcut: "Cmd+Ctrl+4",
+        shortcut: k::SHORTCUT_ACTIVATE_LANE_4,
     },
     PaletteEntry {
         id: "activate_lane_5",
         label: s::command_activate_lane_5,
-        shortcut: "Cmd+Ctrl+5",
+        shortcut: k::SHORTCUT_ACTIVATE_LANE_5,
     },
     PaletteEntry {
         id: "activate_lane_6",
         label: s::command_activate_lane_6,
-        shortcut: "Cmd+Ctrl+6",
+        shortcut: k::SHORTCUT_ACTIVATE_LANE_6,
     },
     PaletteEntry {
         id: "activate_lane_7",
         label: s::command_activate_lane_7,
-        shortcut: "Cmd+Ctrl+7",
+        shortcut: k::SHORTCUT_ACTIVATE_LANE_7,
     },
     PaletteEntry {
         id: "activate_lane_8",
         label: s::command_activate_lane_8,
-        shortcut: "Cmd+Ctrl+8",
+        shortcut: k::SHORTCUT_ACTIVATE_LANE_8,
     },
     PaletteEntry {
         id: "activate_lane_9",
         label: s::command_activate_lane_9,
-        shortcut: "Cmd+Ctrl+9",
+        shortcut: k::SHORTCUT_ACTIVATE_LANE_9,
     },
     PaletteEntry {
         id: "open_folder",
         label: s::command_open_project,
-        shortcut: "Cmd+O",
+        shortcut: k::SHORTCUT_OPEN_FOLDER,
     },
     PaletteEntry {
         id: "new_group",
         label: s::command_new_group,
-        shortcut: "Cmd+Shift+N",
+        shortcut: k::SHORTCUT_NEW_GROUP,
     },
     PaletteEntry {
         id: "rename_project",
         label: s::command_rename_project,
-        shortcut: "Cmd+Shift+R",
+        shortcut: k::SHORTCUT_RENAME_PROJECT,
     },
     PaletteEntry {
         id: "move_project_to_group",
         label: s::command_move_project_to_group,
-        shortcut: "Cmd+Shift+M",
+        shortcut: k::SHORTCUT_MOVE_PROJECT_TO_GROUP,
     },
     PaletteEntry {
         id: "close_project",
         label: s::command_close_project,
-        shortcut: "Cmd+Shift+W",
+        shortcut: k::SHORTCUT_CLOSE_PROJECT,
     },
     PaletteEntry {
         id: "show_left_dock_lanes",
@@ -405,7 +422,7 @@ pub(in crate::workspace) const PALETTE_ENTRIES: &[PaletteEntry] = &[
     PaletteEntry {
         id: "files_toggle_hidden",
         label: s::command_files_toggle_hidden,
-        shortcut: "Cmd+Shift+.",
+        shortcut: k::SHORTCUT_FILES_TOGGLE_HIDDEN,
     },
     PaletteEntry {
         id: "files_refresh",
@@ -435,11 +452,11 @@ pub(in crate::workspace) const PALETTE_ENTRIES: &[PaletteEntry] = &[
     PaletteEntry {
         id: "open_command_history",
         label: s::command_open_command_history,
-        shortcut: "Cmd+Shift+H",
+        shortcut: k::SHORTCUT_OPEN_COMMAND_HISTORY,
     },
     PaletteEntry {
         id: "quit",
         label: s::command_quit,
-        shortcut: "Cmd+Q",
+        shortcut: k::SHORTCUT_QUIT,
     },
 ];

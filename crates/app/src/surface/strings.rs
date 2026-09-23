@@ -413,35 +413,44 @@ pub fn command_settings_section(section: &str) -> String {
 pub fn command_settings_general() -> String {
     command_settings_section(&settings_nav_general())
 }
+pub fn command_settings_appearance() -> String {
+    command_settings_section(&settings_nav_appearance())
+}
 pub fn command_settings_font() -> String {
     command_settings_section(&settings_nav_font())
-}
-pub fn command_settings_cursor() -> String {
-    command_settings_section(&settings_nav_cursor())
-}
-pub fn command_settings_shell() -> String {
-    command_settings_section(&settings_nav_shell())
-}
-pub fn command_settings_window() -> String {
-    command_settings_section(&settings_nav_window())
 }
 pub fn command_settings_terminal() -> String {
     command_settings_section(&settings_nav_terminal())
 }
-pub fn command_settings_dock() -> String {
-    command_settings_section(&settings_nav_dock())
+pub fn command_settings_workspace() -> String {
+    command_settings_section(&settings_nav_workspace())
 }
-pub fn command_settings_clipboard() -> String {
-    command_settings_section(&settings_nav_clipboard())
+pub fn command_settings_keymap() -> String {
+    command_settings_section(&settings_nav_keymap())
 }
-pub fn command_settings_external_editor() -> String {
-    command_settings_section(&settings_nav_external_editor())
+pub fn command_settings_agent() -> String {
+    command_settings_section(&settings_nav_agent())
+}
+pub fn command_settings_orchestrator() -> String {
+    command_settings_section(&settings_nav_orchestrator())
+}
+pub fn command_settings_session_hosts() -> String {
+    command_settings_section(&settings_nav_session_hosts())
+}
+pub fn command_settings_accounts() -> String {
+    command_settings_section(&settings_nav_accounts())
 }
 pub fn command_settings_notifications() -> String {
     command_settings_section(&settings_nav_notifications())
 }
-pub fn command_settings_keymap() -> String {
-    command_settings_section(&settings_nav_keymap())
+pub fn command_settings_remote_control() -> String {
+    command_settings_section(&settings_nav_remote_control())
+}
+pub fn command_settings_plugin() -> String {
+    command_settings_section(&settings_nav_plugin())
+}
+pub fn command_settings_about() -> String {
+    command_settings_section(&settings_nav_about())
 }
 
 // ============================================================================
@@ -4102,36 +4111,12 @@ pub fn settings_desc_general() -> String {
     rust_i18n::t!("settings.desc_general").into_owned()
 }
 
-pub fn settings_desc_window() -> String {
-    rust_i18n::t!("settings.desc_window").into_owned()
-}
-
 pub fn settings_desc_font() -> String {
     rust_i18n::t!("settings.desc_font").into_owned()
 }
 
-pub fn settings_desc_cursor() -> String {
-    rust_i18n::t!("settings.desc_cursor").into_owned()
-}
-
-pub fn settings_desc_shell() -> String {
-    rust_i18n::t!("settings.desc_shell").into_owned()
-}
-
 pub fn settings_desc_terminal() -> String {
     rust_i18n::t!("settings.desc_terminal").into_owned()
-}
-
-pub fn settings_desc_dock() -> String {
-    rust_i18n::t!("settings.desc_dock").into_owned()
-}
-
-pub fn settings_desc_clipboard() -> String {
-    rust_i18n::t!("settings.desc_clipboard").into_owned()
-}
-
-pub fn settings_desc_external_editor() -> String {
-    rust_i18n::t!("settings.desc_external_editor").into_owned()
 }
 
 pub fn settings_desc_agent() -> String {
@@ -4449,29 +4434,55 @@ pub fn settings_syntax_theme_darcula() -> String {
 // (The uppercase `SETTINGS_SECTION_*` consts above are used as
 //  body-area headers inside each rendered section.)
 // ----------------------------------------------------------------
+pub fn settings_nav_appearance() -> String {
+    rust_i18n::t!("settings.nav_appearance").into_owned()
+}
+
+pub fn settings_nav_workspace() -> String {
+    rust_i18n::t!("settings.nav_workspace").into_owned()
+}
+
+pub fn settings_nav_orchestrator() -> String {
+    rust_i18n::t!("settings.nav_orchestrator").into_owned()
+}
+
+pub fn settings_nav_remote_control() -> String {
+    rust_i18n::t!("settings.nav_remote_control").into_owned()
+}
+
+pub fn settings_desc_appearance() -> String {
+    rust_i18n::t!("settings.desc_appearance").into_owned()
+}
+
+pub fn settings_desc_workspace() -> String {
+    rust_i18n::t!("settings.desc_workspace").into_owned()
+}
+
+pub fn settings_desc_orchestrator() -> String {
+    rust_i18n::t!("settings.desc_orchestrator").into_owned()
+}
+
+pub fn settings_desc_remote_control() -> String {
+    rust_i18n::t!("settings.desc_remote_control").into_owned()
+}
+
 pub fn settings_nav_general() -> String {
     rust_i18n::t!("settings.nav_general").into_owned()
 }
 pub fn settings_nav_font() -> String {
     rust_i18n::t!("settings.nav_font").into_owned()
 }
-pub fn settings_nav_cursor() -> String {
-    rust_i18n::t!("settings.nav_cursor").into_owned()
+pub fn settings_card_cursor() -> String {
+    rust_i18n::t!("settings.card_cursor").into_owned()
 }
-pub fn settings_nav_shell() -> String {
-    rust_i18n::t!("settings.nav_shell").into_owned()
-}
-pub fn settings_nav_window() -> String {
-    rust_i18n::t!("settings.nav_window").into_owned()
+pub fn settings_card_shell() -> String {
+    rust_i18n::t!("settings.card_shell").into_owned()
 }
 pub fn settings_nav_terminal() -> String {
     rust_i18n::t!("settings.nav_terminal").into_owned()
 }
-pub fn settings_nav_dock() -> String {
-    rust_i18n::t!("settings.nav_dock").into_owned()
-}
-pub fn settings_nav_clipboard() -> String {
-    rust_i18n::t!("settings.nav_clipboard").into_owned()
+pub fn settings_card_clipboard() -> String {
+    rust_i18n::t!("settings.card_clipboard").into_owned()
 }
 pub fn settings_nav_notifications() -> String {
     rust_i18n::t!("settings.nav_notifications").into_owned()
@@ -4485,8 +4496,8 @@ pub fn settings_nav_plugin() -> String {
 pub fn settings_nav_agent() -> String {
     rust_i18n::t!("settings.nav_agent").into_owned()
 }
-pub fn settings_nav_external_editor() -> String {
-    rust_i18n::t!("settings.nav_external_editor").into_owned()
+pub fn settings_card_external_editor() -> String {
+    rust_i18n::t!("settings.card_external_editor").into_owned()
 }
 
 pub fn settings_section_general() -> String {
@@ -4644,10 +4655,6 @@ pub fn settings_telegram_unpair() -> String {
 }
 
 // Notifications section — orchestrator subsection.
-pub fn settings_orchestrator_heading() -> String {
-    rust_i18n::t!("settings.orchestrator_heading").into_owned()
-}
-
 pub fn orchestrator_tab_unavailable() -> String {
     rust_i18n::t!("orchestrator.tab_unavailable").into_owned()
 }

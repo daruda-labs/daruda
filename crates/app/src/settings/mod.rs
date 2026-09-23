@@ -1514,7 +1514,7 @@ impl SettingsView {
             cx,
         ));
         section_focus_targets
-            .entry(BuiltinSection::Notifications)
+            .entry(BuiltinSection::RemoteControl)
             .or_default()
             .push(telegram_token_input.read(cx).focus_handle(cx));
         let telegram_token_configured = crate::telegram::keychain::read_token().is_some();

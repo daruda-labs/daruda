@@ -171,7 +171,7 @@ impl RenderOnce for CommandPaletteOverlay {
                     div()
                         .text_size(px(theme::PALETTE_SHORTCUT_FONT_SIZE))
                         .text_color(shortcut_text)
-                        .child(entry.shortcut)
+                        .child(crate::surface::shortcut_display::display(entry.shortcut))
                         .into_any_element()
                 });
                 let on_pick = self.on_pick.clone();
@@ -395,5 +395,42 @@ mod tests {
         ids.sort();
         ids.dedup();
         assert_eq!(ids.len(), len, "duplicate palette entry IDs found");
+    }
+
+    /// Every Settings page is reachable from the palette, under its current
+    /// slug — a page added without an entry, or an entry left pointing at a
+    /// retired slug, fails here.
+    #[test]
+    fn every_settings_section_has_a_palette_entry() {
+        for section in daruda_config::BuiltinSection::ALL {
+            let id = format!("open_settings.{}", section.slug());
+            assert!(
+                PALETTE_ENTRIES.iter().any(|entry| entry.id == id),
+                "missing palette entry {id}"
+            );
+        }
+        let settings_entries = PALETTE_ENTRIES
+            .iter()
+            .filter(|entry| entry.id.starts_with("open_settings."))
+            .count();
+        assert_eq!(settings_entries, daruda_config::BuiltinSection::ALL.len());
+    }
+
+    /// Shortcut hints are chords, not display text: off macOS they must read
+    /// `Ctrl+…`, which a hand-written `"Cmd+T"` never did.
+    #[test]
+    fn palette_shortcuts_render_per_platform() {
+        let entry = PALETTE_ENTRIES
+            .iter()
+            .find(|entry| entry.id == "new_tab")
+            .expect("new_tab entry");
+        assert_eq!(
+            crate::surface::shortcut_display::display_for(entry.shortcut, false),
+            "Ctrl+T"
+        );
+        assert_eq!(
+            crate::surface::shortcut_display::display_for(entry.shortcut, true),
+            "⌘T"
+        );
     }
 }

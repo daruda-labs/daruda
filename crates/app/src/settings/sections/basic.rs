@@ -18,7 +18,10 @@ impl SettingsView {
             .into_any_element()
     }
 
-    pub(in crate::settings) fn render_window(&self, cx: &mut gpui::Context<Self>) -> AnyElement {
+    pub(in crate::settings) fn render_appearance(
+        &self,
+        cx: &mut gpui::Context<Self>,
+    ) -> AnyElement {
         page_stack()
             .child(
                 card(s::settings_group_themes(), cx)
@@ -84,30 +87,14 @@ impl SettingsView {
         body.into_any_element()
     }
 
-    pub(in crate::settings) fn render_cursor(&self, cx: &mut gpui::Context<Self>) -> AnyElement {
-        card(s::settings_nav_cursor(), cx)
-            .child(self.select_row(
-                S::CursorStyle,
-                s::settings_label_cursor_style(),
-                s::settings_hint_cursor_style(),
-                cx,
-            ))
-            .into_any_element()
-    }
-
-    pub(in crate::settings) fn render_shell(&self, cx: &mut gpui::Context<Self>) -> AnyElement {
-        card(s::settings_nav_shell(), cx)
-            .child(self.switch_row(
+    pub(in crate::settings) fn render_terminal(&self, cx: &mut gpui::Context<Self>) -> AnyElement {
+        page_stack()
+            .child(card(s::settings_card_shell(), cx).child(self.switch_row(
                 B::ShellClosePaneOnExit,
                 s::settings_label_close_on_exit(),
                 String::new(),
                 cx,
-            ))
-            .into_any_element()
-    }
-
-    pub(in crate::settings) fn render_terminal(&self, cx: &mut gpui::Context<Self>) -> AnyElement {
-        page_stack()
+            )))
             .child(
                 card(s::settings_group_rendering(), cx)
                     .child(self.text_row(
@@ -138,10 +125,22 @@ impl SettingsView {
                         cx,
                     )),
             )
+            .child(card(s::settings_card_cursor(), cx).child(self.select_row(
+                S::CursorStyle,
+                s::settings_label_cursor_style(),
+                s::settings_hint_cursor_style(),
+                cx,
+            )))
+            .child(card(s::settings_card_clipboard(), cx).child(self.text_row(
+                T::ClipboardStreamingMaxBytes,
+                s::settings_label_clipboard_streaming(),
+                String::new(),
+                cx,
+            )))
             .into_any_element()
     }
 
-    pub(in crate::settings) fn render_dock(&self, cx: &mut gpui::Context<Self>) -> AnyElement {
+    pub(in crate::settings) fn render_workspace(&self, cx: &mut gpui::Context<Self>) -> AnyElement {
         page_stack()
             .child(
                 card(s::settings_section_sidebar(), cx)
@@ -164,28 +163,14 @@ impl SettingsView {
                 String::new(),
                 cx,
             )))
-            .into_any_element()
-    }
-
-    pub(in crate::settings) fn render_clipboard(&self, cx: &mut gpui::Context<Self>) -> AnyElement {
-        card(s::settings_nav_clipboard(), cx)
-            .child(self.text_row(
-                T::ClipboardStreamingMaxBytes,
-                s::settings_label_clipboard_streaming(),
-                String::new(),
-                cx,
-            ))
-            .into_any_element()
-    }
-
-    pub(in crate::settings) fn render_editor(&self, cx: &mut gpui::Context<Self>) -> AnyElement {
-        card(s::settings_nav_external_editor(), cx)
-            .child(self.select_row(
-                S::PreferredEditor,
-                s::settings_label_preferred_editor(),
-                String::new(),
-                cx,
-            ))
+            .child(
+                card(s::settings_card_external_editor(), cx).child(self.select_row(
+                    S::PreferredEditor,
+                    s::settings_label_preferred_editor(),
+                    String::new(),
+                    cx,
+                )),
+            )
             .into_any_element()
     }
 }

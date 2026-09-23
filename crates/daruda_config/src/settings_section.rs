@@ -1,7 +1,7 @@
 //! Identifier for a single page in the Settings window.
 //!
 //! Lives in `daruda_config` so the same enum can be referenced by:
-//! - the in-app GUI router (`app/src/settings_window/`),
+//! - the in-app GUI router (`app/src/settings/`),
 //! - keybinding-override deserialization in
 //!   `app/src/surface/action_map.rs`,
 //! - any future CLI / plugin entry point that needs to address a
@@ -42,21 +42,18 @@ impl From<BuiltinSection> for SettingsSection {
 pub enum BuiltinSection {
     #[default]
     General,
+    /// UI, terminal and syntax themes plus window opacity and blur.
+    Appearance,
     Font,
-    Cursor,
-    Shell,
-    Window,
+    /// Shell, output, padding, cursor and clipboard for terminal panes.
     Terminal,
-    /// Left-dock (Sidebar/Files) settings + bottom-dock (macro grid)
-    /// settings, combined — both are "dock configuration" from a user's
-    /// perspective even though they're separate `Dock` instances
-    /// internally (`workspace::layout::Dock` position=Left vs Bottom).
-    Dock,
-    Clipboard,
-    /// Preferred external editor for "open externally" actions
-    /// (`daruda_config::EditorConfig`).
-    ExternalEditor,
+    /// Left-dock (sidebar/files) settings, the bottom-dock macro grid and
+    /// the external editor — the workspace chrome around the panes.
+    Workspace,
+    Keymap,
     Agent,
+    /// The resident agent `/daruda` talks to.
+    Orchestrator,
     /// Named, reusable SSH/Docker host registry a lane's `session_host` can
     /// reference by id (`daruda_config::SessionHostEntry`) — companion to
     /// [`Self::Agent`], which still hosts the per-agent legacy transport
@@ -64,7 +61,8 @@ pub enum BuiltinSection {
     SessionHosts,
     Accounts,
     Notifications,
-    Keymap,
+    /// Telegram, Slack and Discord channels that reach agents remotely.
+    RemoteControl,
     Plugin,
     About,
 }
@@ -73,19 +71,17 @@ impl BuiltinSection {
     /// Dock order. Add a variant here to make it discoverable.
     pub const ALL: &'static [Self] = &[
         Self::General,
+        Self::Appearance,
         Self::Font,
-        Self::Cursor,
-        Self::Shell,
-        Self::Window,
         Self::Terminal,
-        Self::Dock,
-        Self::Clipboard,
-        Self::ExternalEditor,
+        Self::Workspace,
+        Self::Keymap,
         Self::Agent,
+        Self::Orchestrator,
         Self::SessionHosts,
         Self::Accounts,
         Self::Notifications,
-        Self::Keymap,
+        Self::RemoteControl,
         Self::Plugin,
         Self::About,
     ];
@@ -97,19 +93,17 @@ impl BuiltinSection {
     pub const fn slug(self) -> &'static str {
         match self {
             Self::General => "general",
+            Self::Appearance => "appearance",
             Self::Font => "font",
-            Self::Cursor => "cursor",
-            Self::Shell => "shell",
-            Self::Window => "window",
             Self::Terminal => "terminal",
-            Self::Dock => "dock",
-            Self::Clipboard => "clipboard",
-            Self::ExternalEditor => "external_editor",
+            Self::Workspace => "workspace",
+            Self::Keymap => "keymap",
             Self::Agent => "agent",
+            Self::Orchestrator => "orchestrator",
             Self::SessionHosts => "session_hosts",
             Self::Accounts => "accounts",
             Self::Notifications => "notifications",
-            Self::Keymap => "keymap",
+            Self::RemoteControl => "remote_control",
             Self::Plugin => "plugin",
             Self::About => "about",
         }
@@ -117,7 +111,7 @@ impl BuiltinSection {
 
     /// Inverse of `slug` — returns `None` for unknown slugs so callers
     /// (config keybinding parser) can ignore typos rather than panic.
-    /// Also accepts pre-merge slugs no longer returned by `slug()` (see
+    /// Also accepts retired slugs no longer returned by `slug()` (see
     /// `legacy_slug`), so an existing user's `open_settings.<slug>`
     /// keybinding override keeps resolving after a section is merged or
     /// renamed instead of silently going dead.
@@ -129,21 +123,30 @@ impl BuiltinSection {
             .or_else(|| Self::legacy_slug(s))
     }
 
-    /// Pre-merge slugs kept recognizable after a `BuiltinSection`
-    /// reclassification, mapped to the section that absorbed their
-    /// content. Never returned by `slug()` — new code (nav labels,
-    /// command-palette entries) only ever sees the current slugs; this
-    /// is purely an input-compatibility shim for `from_slug`.
+    /// Retired slugs, mapped to the section that absorbed their content.
+    /// Never returned by `slug()` — new code (nav labels, command-palette
+    /// entries) only ever sees the current slugs; this is purely an
+    /// input-compatibility shim for `from_slug`.
     fn legacy_slug(s: &str) -> Option<Self> {
-        match s {
-            // `left_dock` and `panels` merged into one `Dock` page.
-            "left_dock" | "panels" => Some(Self::Dock),
-            // `claude_status` became a subsection of `Agent`.
-            "claude_status" => Some(Self::Agent),
-            _ => None,
-        }
+        LEGACY_SLUGS
+            .iter()
+            .find(|(old, _)| *old == s)
+            .map(|(_, section)| *section)
     }
 }
+
+/// Every slug a past release answered to, and where it lands now.
+const LEGACY_SLUGS: &[(&str, BuiltinSection)] = &[
+    ("window", BuiltinSection::Appearance),
+    ("shell", BuiltinSection::Terminal),
+    ("cursor", BuiltinSection::Terminal),
+    ("clipboard", BuiltinSection::Terminal),
+    ("dock", BuiltinSection::Workspace),
+    ("left_dock", BuiltinSection::Workspace),
+    ("panels", BuiltinSection::Workspace),
+    ("external_editor", BuiltinSection::Workspace),
+    ("claude_status", BuiltinSection::Agent),
+];
 
 #[cfg(test)]
 mod tests {
@@ -182,38 +185,36 @@ mod tests {
         assert_eq!(BuiltinSection::from_slug(""), None);
     }
 
-    /// Regression: `open_settings.left_dock` / `.panels` /
-    /// `.claude_status` keybinding overrides from a config written before
-    /// the Dock/Agent reclassification must keep resolving instead of
-    /// silently binding nothing.
+    /// Regression: an `open_settings.<slug>` keybinding written against any
+    /// earlier page layout must keep opening the page that now holds it.
     #[test]
-    fn from_slug_accepts_legacy_left_dock_and_panels_as_dock() {
-        assert_eq!(
-            BuiltinSection::from_slug("left_dock"),
-            Some(BuiltinSection::Dock)
-        );
-        assert_eq!(
-            BuiltinSection::from_slug("panels"),
-            Some(BuiltinSection::Dock)
-        );
+    fn every_retired_slug_opens_the_page_that_absorbed_it() {
+        let expected = [
+            ("window", BuiltinSection::Appearance),
+            ("shell", BuiltinSection::Terminal),
+            ("cursor", BuiltinSection::Terminal),
+            ("clipboard", BuiltinSection::Terminal),
+            ("dock", BuiltinSection::Workspace),
+            ("left_dock", BuiltinSection::Workspace),
+            ("panels", BuiltinSection::Workspace),
+            ("external_editor", BuiltinSection::Workspace),
+            ("claude_status", BuiltinSection::Agent),
+        ];
+        for (slug, section) in expected {
+            assert_eq!(BuiltinSection::from_slug(slug), Some(section), "{slug}");
+        }
     }
 
     #[test]
-    fn from_slug_accepts_legacy_claude_status_as_agent() {
-        assert_eq!(
-            BuiltinSection::from_slug("claude_status"),
-            Some(BuiltinSection::Agent)
-        );
-    }
-
-    #[test]
-    fn legacy_slugs_are_never_returned_by_slug() {
-        // `slug()` must stay canonical — only `from_slug` should accept
-        // the retired names, so new code never round-trips through them.
+    fn retired_slugs_are_never_returned_by_slug() {
+        // `slug()` must stay canonical — only `from_slug` accepts the
+        // retired names, so new code never round-trips through them.
         for &b in BuiltinSection::ALL {
-            assert_ne!(b.slug(), "left_dock");
-            assert_ne!(b.slug(), "panels");
-            assert_ne!(b.slug(), "claude_status");
+            assert!(
+                LEGACY_SLUGS.iter().all(|(old, _)| *old != b.slug()),
+                "{} is both current and retired",
+                b.slug()
+            );
         }
     }
 
@@ -239,6 +240,6 @@ mod tests {
         // added or removed. There is no `strum::EnumCount`-style helper
         // in this crate; the count exists precisely to force a manual
         // sync of `ALL` with the enum.
-        assert_eq!(BuiltinSection::ALL.len(), 16);
+        assert_eq!(BuiltinSection::ALL.len(), 14);
     }
 }

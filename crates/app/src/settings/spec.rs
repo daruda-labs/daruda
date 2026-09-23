@@ -162,7 +162,7 @@ pub(super) const TEXT_SETTINGS: &[TextSpec] = &[
     },
     TextSpec {
         setting: TextSetting::WindowOpacity,
-        section: BuiltinSection::Window,
+        section: BuiltinSection::Appearance,
         placeholder: || s::settings_placeholder_range("0.1", "1.0"),
         field: |w| &w.opacity_input,
         show: |c| c.window.opacity.to_string(),
@@ -215,7 +215,7 @@ pub(super) const TEXT_SETTINGS: &[TextSpec] = &[
     },
     TextSpec {
         setting: TextSetting::ClipboardStreamingMaxBytes,
-        section: BuiltinSection::Clipboard,
+        section: BuiltinSection::Terminal,
         placeholder: || s::settings_placeholder_example("10485760"),
         field: |w| &w.clipboard_streaming_input,
         show: |c| c.clipboard.streaming_max_bytes.to_string(),
@@ -232,7 +232,7 @@ pub(super) const TEXT_SETTINGS: &[TextSpec] = &[
     },
     TextSpec {
         setting: TextSetting::PanelsGridColumns,
-        section: BuiltinSection::Dock,
+        section: BuiltinSection::Workspace,
         placeholder: || s::settings_placeholder_range("1", "16"),
         field: |w| &w.panels_grid_columns_input,
         show: |c| c.panels.grid_columns.to_string(),

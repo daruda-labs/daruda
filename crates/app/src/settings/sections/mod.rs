@@ -195,7 +195,7 @@ impl SettingsView {
         );
     }
 
-    pub(super) fn render_notifications(&self, cx: &mut gpui::Context<Self>) -> AnyElement {
+    pub(super) fn render_remote_control(&self, cx: &mut gpui::Context<Self>) -> AnyElement {
         let t = theme::current(cx);
         let body_color = t.text_primary;
         let token_configured = self.telegram_token_configured;
@@ -397,14 +397,7 @@ impl SettingsView {
                             )),
                         ),
                     ),
-            )
-            .child(
-                div()
-                    .text_size(px(theme::MODAL_BODY_FONT_SIZE))
-                    .text_color(body_color)
-                    .child(s::settings_placeholder_notifications()),
-            )
-            .child(Self::render_open_config_button(cx));
+            );
         page_stack()
             .child(
                 card(s::settings_group_integrations(), cx)
@@ -420,8 +413,16 @@ impl SettingsView {
                     ))
                     .child(card_content(telegram)),
             )
-            .child(self.render_orchestrator(cx))
             .into_any_element()
+    }
+
+    /// `[notifications]` has no GUI yet; the page points at the file.
+    pub(super) fn render_notifications(&self, cx: &mut gpui::Context<Self>) -> AnyElement {
+        Self::render_placeholder(
+            s::settings_nav_notifications(),
+            s::settings_placeholder_notifications(),
+            cx,
+        )
     }
 
     pub(super) fn render_keymap(&self, cx: &mut gpui::Context<Self>) -> AnyElement {
@@ -461,8 +462,7 @@ impl SettingsView {
     /// "Open Config File" button — creates the config directory if
     /// missing, then opens `config.toml` in the user's default editor
     /// for the file type. Shared by [`render_placeholder`] (sections
-    /// with no GUI yet) and [`render_notifications`] (the Telegram
-    /// block's "everything else" fallback).
+    /// with no GUI yet).
     fn render_open_config_button(cx: &mut gpui::Context<Self>) -> impl IntoElement {
         div().flex().flex_row().child(
             button("settings-open-config", s::settings_open_config_file()).on_click(cx.listener(

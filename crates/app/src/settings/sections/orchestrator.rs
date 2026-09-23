@@ -90,14 +90,12 @@ pub(in crate::settings) fn account_id_from_select(value: &str) -> Option<Account
 }
 
 impl SettingsView {
-    /// The orchestrator subsection of the Notifications page. Its own file
-    /// rather than another block in `sections/mod.rs`, which is already over
-    /// the size budget.
-    ///
-    /// Sits beside the Telegram controls because the two are one feature from
-    /// the user's side: `/daruda` arrives over the bridge.
-    pub(super) fn render_orchestrator(&self, cx: &mut gpui::Context<Self>) -> AnyElement {
-        card(s::settings_orchestrator_heading(), cx)
+    /// The Orchestrator page: enable, which agent, which account.
+    pub(in crate::settings) fn render_orchestrator(
+        &self,
+        cx: &mut gpui::Context<Self>,
+    ) -> AnyElement {
+        card(s::settings_nav_orchestrator(), cx)
             .child(self.switch_row(
                 BoolSetting::OrchestratorEnabled,
                 s::settings_orchestrator_enabled_label(),
