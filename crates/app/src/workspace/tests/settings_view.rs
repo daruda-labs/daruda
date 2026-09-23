@@ -372,3 +372,48 @@ async fn a_streaming_chat_does_not_wake_the_workspace_behind_settings(cx: &mut T
         "a chat Settings covers must wake nothing",
     );
 }
+
+/// Behind Settings the window answers only what the chrome still on screen can
+/// dispatch. The status bar stays up, so its account menu's actions must too —
+/// an unanswered one is a button that does nothing, with no toast and no log.
+#[gpui::test]
+async fn the_chrome_behind_settings_keeps_its_actions(cx: &mut TestAppContext) {
+    use crate::workspace::{AddManagedAccount, CloseWindow, NewTab};
+    use daruda_store::accounts::AccountRecipeId;
+
+    let (window_handle, workspace) = build_workspace(cx);
+    let mut vcx = gpui::VisualTestContext::from_window(window_handle.into(), cx);
+    vcx.run_until_parked();
+    let survivors: [Box<dyn gpui::Action>; 3] = [
+        Box::new(AddManagedAccount(AccountRecipeId::Claude)),
+        Box::new(OpenSettings(daruda_config::BuiltinSection::Accounts)),
+        Box::new(CloseWindow),
+    ];
+
+    vcx.update(|window, cx| {
+        workspace.update(cx, |ws, cx| {
+            ws.on_open_settings(
+                &OpenSettings(daruda_config::BuiltinSection::General),
+                window,
+                cx,
+            );
+        });
+    });
+    vcx.run_until_parked();
+
+    vcx.update(|window, cx| {
+        for action in &survivors {
+            assert!(
+                window.is_action_available(action.as_ref(), cx),
+                "{} must stay answered behind Settings",
+                action.name(),
+            );
+        }
+        // Control: an action for a surface Settings covers is not answered,
+        // so the check above is not passing on a root that answers anything.
+        assert!(
+            !window.is_action_available(&NewTab, cx),
+            "NewTab drives the tab strip Settings covers",
+        );
+    });
+}

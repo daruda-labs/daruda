@@ -535,7 +535,8 @@ impl Workspace {
     }
 
     /// The root both frames share. It answers what survives Settings: the
-    /// window's own commands.
+    /// window's own commands, and every action the chrome still on screen —
+    /// title bar and status bar — dispatches.
     fn frame_root(&self, key_ctx: KeyContext, cx: &mut Context<Self>) -> gpui::Div {
         div()
             // Toast overlay (and other absolute-positioned children added
@@ -554,6 +555,8 @@ impl Workspace {
             .on_action(cx.listener(Self::on_minimize_window))
             .on_action(cx.listener(Self::on_zoom_window))
             .on_action(cx.listener(Self::on_toggle_full_screen))
+            // The status bar's account menu.
+            .on_action(cx.listener(Self::on_add_managed_account))
     }
 
     /// Settings in place of the body, docks included. Nothing it covers is
@@ -1478,7 +1481,6 @@ impl Workspace {
             .on_action(cx.listener(Self::on_git_changes_toggle_stage))
             .on_action(cx.listener(Self::on_git_changes_activate))
             .on_action(cx.listener(Self::on_switch_pane_account))
-            .on_action(cx.listener(Self::on_add_managed_account))
             .on_action(cx.listener(Self::on_reauthenticate_account))
             .on_action(cx.listener(Self::on_reauthenticate_system))
             .on_action(cx.listener(Self::on_open_project_config))
