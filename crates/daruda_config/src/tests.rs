@@ -730,6 +730,34 @@ fn settings_patch_writes_render_max_fps() {
     assert_eq!(Config::load_from(&path).render.max_fps, 60);
 }
 
+/// The Workspace page's keys through the real `toml_edit` writer, read back.
+#[test]
+fn settings_patch_round_trips_the_workspace_keys() {
+    use crate::SettingsPatch as P;
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("config.toml");
+
+    for patch in [
+        P::LeftDefaultWidth(300.0),
+        P::LeftCollapsedByDefault(true),
+        P::FileIconColorMode(crate::IconColorMode::Color),
+        P::PreviewTab(false),
+        P::StatusBarHiddenItems(vec![crate::StatusBarItem::Ports]),
+    ] {
+        crate::apply_settings_patch_to(&patch, &path).expect("workspace patch");
+    }
+
+    let c = Config::load_from(&path);
+    assert_eq!(c.left_dock.left_default_width, 300.0);
+    assert!(c.left_dock.left_collapsed_by_default);
+    assert_eq!(
+        c.left_dock.file_icon_color_mode,
+        crate::IconColorMode::Color
+    );
+    assert!(!c.file_viewer.preview_tab);
+    assert_eq!(c.status_bar.hidden_items, vec![crate::StatusBarItem::Ports]);
+}
+
 /// A shell program is written as a key, and clearing it removes the key
 /// rather than writing an empty program that would fail to spawn.
 #[test]

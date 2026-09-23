@@ -4630,6 +4630,54 @@ pub fn settings_hint_clipboard_streaming() -> String {
     rust_i18n::t!("settings.hint_clipboard_streaming").into_owned()
 }
 
+pub fn settings_err_left_default_width() -> String {
+    rust_i18n::t!("settings.err_left_default_width").into_owned()
+}
+
+pub fn settings_icon_color_color() -> String {
+    rust_i18n::t!("settings.icon_color_color").into_owned()
+}
+
+pub fn settings_icon_color_monochrome() -> String {
+    rust_i18n::t!("settings.icon_color_monochrome").into_owned()
+}
+
+pub fn settings_label_left_default_width() -> String {
+    rust_i18n::t!("settings.label_left_default_width").into_owned()
+}
+
+pub fn settings_hint_new_windows_width() -> String {
+    rust_i18n::t!("settings.hint_new_windows_width").into_owned()
+}
+
+pub fn settings_label_left_collapsed() -> String {
+    rust_i18n::t!("settings.label_left_collapsed").into_owned()
+}
+
+pub fn settings_hint_new_windows_state() -> String {
+    rust_i18n::t!("settings.hint_new_windows_state").into_owned()
+}
+
+pub fn settings_label_file_icon_colors() -> String {
+    rust_i18n::t!("settings.label_file_icon_colors").into_owned()
+}
+
+pub fn settings_label_preview_tab() -> String {
+    rust_i18n::t!("settings.label_preview_tab").into_owned()
+}
+
+pub fn settings_hint_preview_tab() -> String {
+    rust_i18n::t!("settings.hint_preview_tab").into_owned()
+}
+
+pub fn settings_card_files() -> String {
+    rust_i18n::t!("settings.card_files").into_owned()
+}
+
+pub fn settings_card_status_bar() -> String {
+    rust_i18n::t!("settings.card_status_bar").into_owned()
+}
+
 pub fn settings_nav_general() -> String {
     rust_i18n::t!("settings.nav_general").into_owned()
 }

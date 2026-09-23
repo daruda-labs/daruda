@@ -243,6 +243,23 @@ pub(super) const TEXT_SETTINGS: &[TextSpec] = &[
         },
     },
     TextSpec {
+        setting: TextSetting::LeftDefaultWidth,
+        section: BuiltinSection::Workspace,
+        placeholder: || s::settings_placeholder_example("220"),
+        field: |w| &w.left_default_width_input,
+        show: |c| c.left_dock.left_default_width.to_string(),
+        current: |c| SettingsPatch::LeftDefaultWidth(c.left_dock.left_default_width),
+        parse: |input, cx| {
+            bounded(
+                input,
+                150.0..=400.0,
+                || s::settings_err_left_default_width().into(),
+                cx,
+            )
+            .map(SettingsPatch::LeftDefaultWidth)
+        },
+    },
+    TextSpec {
         setting: TextSetting::ShellProgram,
         section: BuiltinSection::Terminal,
         placeholder: s::settings_placeholder_shell_program,
@@ -392,6 +409,14 @@ pub(super) const SELECT_SETTINGS: &[SelectSpec] = &[
         load: SelectLoad::Value,
     },
     SelectSpec {
+        setting: SelectSetting::FileIconColorMode,
+        field: |w| &w.file_icon_color_select,
+        read: |v| super::icon_color_from_value(v).map(SettingsPatch::FileIconColorMode),
+        current: |c| SettingsPatch::FileIconColorMode(c.left_dock.file_icon_color_mode.clone()),
+        show: |c| super::icon_color_value(&c.left_dock.file_icon_color_mode).into(),
+        load: SelectLoad::Value,
+    },
+    SelectSpec {
         setting: SelectSetting::OrchestratorAgent,
         field: |w| &w.orchestrator_agent_select,
         read: |v| {
@@ -491,6 +516,20 @@ pub(super) const BOOL_SETTINGS: &[BoolSpec] = &[
         set: |w, v| w.files_use_gitignore = v,
         patch: SettingsPatch::FilesUseGitignore,
         show: |c| c.left_dock.files_use_gitignore,
+    },
+    BoolSpec {
+        setting: BoolSetting::LeftCollapsedByDefault,
+        get: |w| w.left_collapsed_by_default,
+        set: |w, v| w.left_collapsed_by_default = v,
+        patch: SettingsPatch::LeftCollapsedByDefault,
+        show: |c| c.left_dock.left_collapsed_by_default,
+    },
+    BoolSpec {
+        setting: BoolSetting::PreviewTab,
+        get: |w| w.preview_tab,
+        set: |w, v| w.preview_tab = v,
+        patch: SettingsPatch::PreviewTab,
+        show: |c| c.file_viewer.preview_tab,
     },
     BoolSpec {
         setting: BoolSetting::ShellNaturalTextEditing,
@@ -752,6 +791,9 @@ mod tests {
             | SettingsPatch::TerminalInsetY(_)
             | SettingsPatch::FilesShowHidden(_)
             | SettingsPatch::FilesUseGitignore(_)
+            | SettingsPatch::LeftCollapsedByDefault(_)
+            | SettingsPatch::PreviewTab(_)
+            | SettingsPatch::LeftDefaultWidth(_)
             | SettingsPatch::ShellNaturalTextEditing(_)
             | SettingsPatch::ShellProgram(_)
             | SettingsPatch::NotifyOsc9(_)
@@ -767,6 +809,7 @@ mod tests {
             | SettingsPatch::SyntaxTheme(_)
             | SettingsPatch::ClipboardStreamingMaxBytes(_)
             | SettingsPatch::PreferredEditor(_)
+            | SettingsPatch::FileIconColorMode(_)
             | SettingsPatch::PanelsGridColumns(_)
             | SettingsPatch::ClaudeStatusEnabled(_)
             | SettingsPatch::TelegramEnabled(_)
@@ -775,12 +818,14 @@ mod tests {
             | SettingsPatch::OrchestratorAccountId(_) => Coverage::Row,
             SettingsPatch::AgentCatalog(_)
             | SettingsPatch::SessionHosts { .. }
-            | SettingsPatch::RemoteChannels(_) => Coverage::ByHand,
-            // Neither is a *field* of this window: the status-bar item list is
-            // toggled from the bar itself, and the Telegram chat id is owned by
-            // pairing. The Notifications section does write the chat id (Unpair)
-            // and render it, but from `telegram_authorized_chat_id`, which
-            // `adopt_external_settings` mirrors — not from this reload table.
+            | SettingsPatch::RemoteChannels(_)
+            | SettingsPatch::StatusBarHiddenItems(_) => Coverage::ByHand,
+            // Neither is a *field* of this window. The toggle is the status
+            // bar's own menu gesture; Settings writes the same list through
+            // `StatusBarHiddenItems`. The Telegram chat id is owned by pairing:
+            // Remote Control writes it (Unpair) and renders it from
+            // `telegram_authorized_chat_id`, which `adopt_external_settings`
+            // mirrors — not from this reload table.
             SettingsPatch::ToggleStatusBarItem(_) | SettingsPatch::TelegramAuthorizedChatId(_) => {
                 Coverage::NotShown
             }

@@ -6,6 +6,7 @@ mod confirmation;
 mod failure_reporting;
 mod scrollbar;
 mod terminal_page;
+mod workspace_page;
 
 use crate::test_support::init_gpui_component;
 use crate::transcript::display_filter::FilterFacet;

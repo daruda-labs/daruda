@@ -171,9 +171,28 @@ impl SettingsView {
     }
 
     pub(in crate::settings) fn render_workspace(&self, cx: &mut gpui::Context<Self>) -> AnyElement {
+        let mut status_bar = card(s::settings_card_status_bar(), cx);
+        for item in daruda_config::StatusBarItem::ALL {
+            status_bar = status_bar.child(self.status_bar_item_row(*item, cx));
+        }
         page_stack()
             .child(
                 card(s::settings_section_sidebar(), cx)
+                    .child(self.text_row(
+                        T::LeftDefaultWidth,
+                        s::settings_label_left_default_width(),
+                        s::settings_hint_new_windows_width(),
+                        cx,
+                    ))
+                    .child(self.switch_row(
+                        B::LeftCollapsedByDefault,
+                        s::settings_label_left_collapsed(),
+                        s::settings_hint_new_windows_state(),
+                        cx,
+                    )),
+            )
+            .child(
+                card(s::settings_card_files(), cx)
                     .child(self.switch_row(
                         B::FilesShowHidden,
                         s::settings_label_show_hidden(),
@@ -185,8 +204,21 @@ impl SettingsView {
                         s::settings_label_use_gitignore(),
                         String::new(),
                         cx,
+                    ))
+                    .child(self.select_row(
+                        S::FileIconColorMode,
+                        s::settings_label_file_icon_colors(),
+                        String::new(),
+                        cx,
+                    ))
+                    .child(self.switch_row(
+                        B::PreviewTab,
+                        s::settings_label_preview_tab(),
+                        s::settings_hint_preview_tab(),
+                        cx,
                     )),
             )
+            .child(status_bar)
             .child(card(s::settings_section_panels(), cx).child(self.text_row(
                 T::PanelsGridColumns,
                 s::settings_label_grid_columns(),
@@ -202,6 +234,67 @@ impl SettingsView {
                 )),
             )
             .into_any_element()
+    }
+}
+
+/// The status bar menu's label for `item`, reused so both places name it alike.
+fn status_bar_item_label(item: daruda_config::StatusBarItem) -> String {
+    use daruda_config::StatusBarItem as I;
+    match item {
+        I::ProjectBranch => s::status_bar_toggle_project_branch(),
+        I::AccountSlot => s::status_bar_toggle_account_slot(),
+        I::Ports => s::status_bar_toggle_ports(),
+        I::ClaudeUsage => s::status_bar_toggle_claude_usage(),
+        I::Flow => s::status_bar_toggle_flow(),
+    }
+}
+
+impl SettingsView {
+    /// One status-bar segment's switch. It reads the list this window last
+    /// saw and writes the whole list back, so a toggle from the bar's own
+    /// menu in the meantime is adopted rather than flipped twice.
+    fn status_bar_item_row(
+        &self,
+        item: daruda_config::StatusBarItem,
+        cx: &mut gpui::Context<Self>,
+    ) -> gpui::Div {
+        let shown = self.base_config.status_bar.is_visible(item);
+        let label = status_bar_item_label(item);
+        crate::settings::presentation::row(
+            label.clone(),
+            String::new(),
+            crate::settings::presentation::switch_with_state(
+                crate::ui::switch(
+                    gpui::ElementId::Name(format!("settings-status-bar-{item:?}").into()),
+                    shown,
+                    cx,
+                )
+                .tooltip(label)
+                .on_click(cx.listener(move |this, _, _, cx| {
+                    this.set_status_bar_item_visible(item, !shown, cx)
+                })),
+                shown,
+                cx,
+            ),
+            cx,
+        )
+    }
+
+    pub(in crate::settings) fn set_status_bar_item_visible(
+        &mut self,
+        item: daruda_config::StatusBarItem,
+        visible: bool,
+        cx: &mut gpui::Context<Self>,
+    ) {
+        let mut hidden = self.base_config.status_bar.hidden_items.clone();
+        hidden.retain(|i| *i != item);
+        if !visible {
+            hidden.push(item);
+        }
+        self.apply_settings_patch(
+            daruda_config::SettingsPatch::StatusBarHiddenItems(hidden),
+            cx,
+        );
     }
 }
 

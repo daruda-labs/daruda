@@ -32,6 +32,10 @@ pub enum SettingsFieldId {
     TerminalInsetY,
     FilesShowHidden,
     FilesUseGitignore,
+    LeftCollapsedByDefault,
+    PreviewTab,
+    LeftDefaultWidth,
+    FileIconColorMode,
     ShellNaturalTextEditing,
     ShellProgram,
     NotifyOsc9,
@@ -88,6 +92,10 @@ impl SettingsFieldId {
             Self::TerminalInsetY => "font.terminal.inset_y",
             Self::FilesShowHidden => "left_dock.files_show_hidden",
             Self::FilesUseGitignore => "left_dock.files_use_gitignore",
+            Self::LeftCollapsedByDefault => "left_dock.left_collapsed_by_default",
+            Self::PreviewTab => "file_viewer.preview_tab",
+            Self::LeftDefaultWidth => "left_dock.left_default_width",
+            Self::FileIconColorMode => "left_dock.file_icon_color_mode",
             Self::ShellNaturalTextEditing => "shell.natural_text_editing",
             Self::ShellProgram => "shell.program",
             Self::NotifyOsc9 => "notifications.osc9_enabled",
@@ -150,6 +158,13 @@ pub enum SettingsPatch {
     TerminalInsetY(f32),
     FilesShowHidden(bool),
     FilesUseGitignore(bool),
+    LeftCollapsedByDefault(bool),
+    PreviewTab(bool),
+    LeftDefaultWidth(f32),
+    FileIconColorMode(crate::IconColorMode),
+    /// The whole hidden list, for Settings' switches. The status bar's own
+    /// menu keeps [`Self::ToggleStatusBarItem`]; both write one field.
+    StatusBarHiddenItems(Vec<StatusBarItem>),
     ShellNaturalTextEditing(bool),
     ShellProgram(Option<String>),
     NotifyOsc9(bool),
@@ -209,6 +224,11 @@ impl SettingsPatch {
             Self::TerminalInsetY(_) => SettingsFieldId::TerminalInsetY,
             Self::FilesShowHidden(_) => SettingsFieldId::FilesShowHidden,
             Self::FilesUseGitignore(_) => SettingsFieldId::FilesUseGitignore,
+            Self::LeftCollapsedByDefault(_) => SettingsFieldId::LeftCollapsedByDefault,
+            Self::PreviewTab(_) => SettingsFieldId::PreviewTab,
+            Self::LeftDefaultWidth(_) => SettingsFieldId::LeftDefaultWidth,
+            Self::FileIconColorMode(_) => SettingsFieldId::FileIconColorMode,
+            Self::StatusBarHiddenItems(_) => SettingsFieldId::StatusBarHiddenItems,
             Self::ShellNaturalTextEditing(_) => SettingsFieldId::ShellNaturalTextEditing,
             Self::ShellProgram(_) => SettingsFieldId::ShellProgram,
             Self::NotifyOsc9(_) => SettingsFieldId::NotifyOsc9,
@@ -275,6 +295,13 @@ impl SettingsPatch {
             Self::TerminalInsetY(value) => config.font.terminal.inset_y = *value,
             Self::FilesShowHidden(value) => config.left_dock.files_show_hidden = *value,
             Self::FilesUseGitignore(value) => config.left_dock.files_use_gitignore = *value,
+            Self::LeftCollapsedByDefault(value) => {
+                config.left_dock.left_collapsed_by_default = *value
+            }
+            Self::PreviewTab(value) => config.file_viewer.preview_tab = *value,
+            Self::LeftDefaultWidth(value) => config.left_dock.left_default_width = *value,
+            Self::FileIconColorMode(value) => config.left_dock.file_icon_color_mode = value.clone(),
+            Self::StatusBarHiddenItems(value) => config.status_bar.hidden_items = value.clone(),
             Self::ShellNaturalTextEditing(value) => config.shell.natural_text_editing = *value,
             Self::ShellProgram(value) => config.shell.program = value.clone(),
             Self::NotifyOsc9(value) => config.notifications.osc9_enabled = *value,
@@ -361,6 +388,20 @@ impl SettingsPatch {
             }
             Self::FilesUseGitignore(_) => {
                 left.left_dock.files_use_gitignore != right.left_dock.files_use_gitignore
+            }
+            Self::LeftCollapsedByDefault(_) => {
+                left.left_dock.left_collapsed_by_default
+                    != right.left_dock.left_collapsed_by_default
+            }
+            Self::PreviewTab(_) => left.file_viewer.preview_tab != right.file_viewer.preview_tab,
+            Self::LeftDefaultWidth(_) => {
+                left.left_dock.left_default_width != right.left_dock.left_default_width
+            }
+            Self::FileIconColorMode(_) => {
+                left.left_dock.file_icon_color_mode != right.left_dock.file_icon_color_mode
+            }
+            Self::StatusBarHiddenItems(_) => {
+                left.status_bar.hidden_items != right.status_bar.hidden_items
             }
             Self::ShellNaturalTextEditing(_) => {
                 left.shell.natural_text_editing != right.shell.natural_text_editing

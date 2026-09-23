@@ -1034,6 +1034,24 @@ fn patch_settings_document(
                 toml_edit::value(config.left_dock.files_use_gitignore),
             );
         }),
+        SettingsPatch::LeftCollapsedByDefault(_) => patch_section(doc, "left_dock", |t| {
+            t.insert(
+                "left_collapsed_by_default",
+                toml_edit::value(config.left_dock.left_collapsed_by_default),
+            );
+        }),
+        SettingsPatch::PreviewTab(_) => patch_section(doc, "file_viewer", |t| {
+            t.insert(
+                "preview_tab",
+                toml_edit::value(config.file_viewer.preview_tab),
+            );
+        }),
+        SettingsPatch::LeftDefaultWidth(_) => patch_section(doc, "left_dock", |t| {
+            t.insert(
+                "left_default_width",
+                toml_edit::value(f64::from(config.left_dock.left_default_width)),
+            );
+        }),
         SettingsPatch::ShellNaturalTextEditing(_) => patch_section(doc, "shell", |t| {
             t.insert(
                 "natural_text_editing",
@@ -1132,13 +1150,22 @@ fn patch_settings_document(
                 toml_edit::value(i64::from(config.panels.grid_columns)),
             );
         }),
-        SettingsPatch::ToggleStatusBarItem(_) => patch_section(doc, "status_bar", |t| {
-            let mut items = toml_edit::Array::new();
-            for item in &config.status_bar.hidden_items {
-                items.push(status_bar_item_slug(*item));
-            }
-            t.insert("hidden_items", toml_edit::value(items));
-            t.remove("visible_items");
+        SettingsPatch::ToggleStatusBarItem(_) | SettingsPatch::StatusBarHiddenItems(_) => {
+            patch_section(doc, "status_bar", |t| {
+                let mut items = toml_edit::Array::new();
+                for item in &config.status_bar.hidden_items {
+                    items.push(status_bar_item_slug(*item));
+                }
+                t.insert("hidden_items", toml_edit::value(items));
+                t.remove("visible_items");
+            })
+        }
+        SettingsPatch::FileIconColorMode(_) => patch_section(doc, "left_dock", |t| {
+            let mode = match config.left_dock.file_icon_color_mode {
+                crate::IconColorMode::Color => "color",
+                crate::IconColorMode::Monochrome => "monochrome",
+            };
+            t.insert("file_icon_color_mode", toml_edit::value(mode));
         }),
         SettingsPatch::ClaudeStatusEnabled(_) => patch_section(doc, "claude_status", |t| {
             t.insert("enable", toml_edit::value(config.claude_status.enable));

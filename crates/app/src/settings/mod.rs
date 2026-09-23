@@ -197,6 +197,9 @@ pub struct SettingsView {
     // Sidebar
     files_show_hidden: bool,
     files_use_gitignore: bool,
+    left_collapsed_by_default: bool,
+    preview_tab: bool,
+    left_default_width_input: Entity<InputState>,
     shell_program_input: Entity<InputState>,
     /// Settings pages whose Advanced card the user has opened this session.
     advanced_open: std::collections::HashSet<BuiltinSection>,
@@ -217,6 +220,7 @@ pub struct SettingsView {
     clipboard_streaming_input: Entity<InputState>,
     // External Editor
     editor_select: Entity<SelectState>,
+    file_icon_color_select: Entity<SelectState>,
     // Panels (bottom-dock macro grid)
     panels_grid_columns_input: Entity<InputState>,
     // Claude Status
@@ -356,8 +360,29 @@ enum TextSetting {
     TerminalInsetY,
     ClipboardStreamingMaxBytes,
     PanelsGridColumns,
+    LeftDefaultWidth,
     ShellProgram,
     NotifyLongRunningThresholdSecs,
+}
+
+/// Select values for `left_dock.file_icon_color_mode`, matching its
+/// `snake_case` config spelling.
+const ICON_COLOR: &str = "color";
+const ICON_MONOCHROME: &str = "monochrome";
+
+fn icon_color_value(mode: &daruda_config::IconColorMode) -> &'static str {
+    match mode {
+        daruda_config::IconColorMode::Color => ICON_COLOR,
+        daruda_config::IconColorMode::Monochrome => ICON_MONOCHROME,
+    }
+}
+
+fn icon_color_from_value(value: &str) -> Option<daruda_config::IconColorMode> {
+    match value {
+        ICON_COLOR => Some(daruda_config::IconColorMode::Color),
+        ICON_MONOCHROME => Some(daruda_config::IconColorMode::Monochrome),
+        _ => None,
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -372,6 +397,7 @@ enum SelectSetting {
     RenderMaxFps,
     SyntaxTheme,
     PreferredEditor,
+    FileIconColorMode,
     OrchestratorAgent,
     OrchestratorAccount,
 }
@@ -385,6 +411,8 @@ pub(super) enum BoolSetting {
     FilesShowHidden,
     FilesUseGitignore,
     ClaudeStatusEnabled,
+    LeftCollapsedByDefault,
+    PreviewTab,
     ShellNaturalTextEditing,
     NotifyOsc9,
     NotifyOsc777,
@@ -407,7 +435,7 @@ pub(super) enum BoolSetting {
 // click of the new widget.
 impl TextSetting {
     #[cfg(test)]
-    const ALL: [Self; 15] = [
+    const ALL: [Self; 16] = [
         Self::TerminalFontSize,
         Self::TerminalLineHeight,
         Self::TerminalCellWidth,
@@ -421,6 +449,7 @@ impl TextSetting {
         Self::TerminalInsetY,
         Self::ClipboardStreamingMaxBytes,
         Self::PanelsGridColumns,
+        Self::LeftDefaultWidth,
         Self::ShellProgram,
         Self::NotifyLongRunningThresholdSecs,
     ];
@@ -443,6 +472,7 @@ impl TextSetting {
             Self::TerminalInsetY => (),
             Self::ClipboardStreamingMaxBytes => (),
             Self::PanelsGridColumns => (),
+            Self::LeftDefaultWidth => (),
             Self::ShellProgram => (),
             Self::NotifyLongRunningThresholdSecs => (),
         }
@@ -451,7 +481,7 @@ impl TextSetting {
 
 impl SelectSetting {
     #[cfg(test)]
-    const ALL: [Self; 12] = [
+    const ALL: [Self; 13] = [
         Self::Language,
         Self::TerminalPreset,
         Self::UiPreset,
@@ -462,6 +492,7 @@ impl SelectSetting {
         Self::RenderMaxFps,
         Self::SyntaxTheme,
         Self::PreferredEditor,
+        Self::FileIconColorMode,
         Self::OrchestratorAgent,
         Self::OrchestratorAccount,
     ];
@@ -481,6 +512,7 @@ impl SelectSetting {
             Self::RenderMaxFps => (),
             Self::SyntaxTheme => (),
             Self::PreferredEditor => (),
+            Self::FileIconColorMode => (),
             Self::OrchestratorAgent => (),
             Self::OrchestratorAccount => (),
         }
@@ -489,13 +521,15 @@ impl SelectSetting {
 
 impl BoolSetting {
     #[cfg(test)]
-    const ALL: [Self; 19] = [
+    const ALL: [Self; 21] = [
         Self::AgentUseModifierToSend,
         Self::AgentUseReadingWidth,
         Self::ShellClosePaneOnExit,
         Self::WindowBlur,
         Self::FilesShowHidden,
         Self::FilesUseGitignore,
+        Self::LeftCollapsedByDefault,
+        Self::PreviewTab,
         Self::ShellNaturalTextEditing,
         Self::NotifyOsc9,
         Self::NotifyOsc777,
@@ -522,6 +556,8 @@ impl BoolSetting {
             Self::WindowBlur => (),
             Self::FilesShowHidden => (),
             Self::FilesUseGitignore => (),
+            Self::LeftCollapsedByDefault => (),
+            Self::PreviewTab => (),
             Self::ShellNaturalTextEditing => (),
             Self::NotifyOsc9 => (),
             Self::NotifyOsc777 => (),
@@ -1540,12 +1576,29 @@ impl SettingsView {
             );
             select::state_with_options(opts, Some(&preferred_editor), window, cx)
         });
+        let file_icon_color_select = cx.new(|cx| {
+            let opts = vec![
+                select::SelectOption::new(ICON_COLOR, s::settings_icon_color_color()),
+                select::SelectOption::new(ICON_MONOCHROME, s::settings_icon_color_monochrome()),
+            ];
+            let current =
+                SharedString::new_static(icon_color_value(&config.left_dock.file_icon_color_mode));
+            select::state_with_options(opts, Some(&current), window, cx)
+        });
         // Second (and last) text input on the merged Dock page — after
         // the Sidebar subsection's checkboxes (no text input) and before
         // the Bottom Dock subsection's own fields, so it's simply
         // appended to the same section's tab-cycle list.
         let panels_grid_columns_input = Self::new_text_field(
             TextSetting::PanelsGridColumns,
+            &config,
+            window,
+            cx,
+            &mut input_subscriptions,
+            &mut section_focus_targets,
+        );
+        let left_default_width_input = Self::new_text_field(
+            TextSetting::LeftDefaultWidth,
             &config,
             window,
             cx,
@@ -1694,6 +1747,7 @@ impl SettingsView {
 
         for (state, setting) in [
             (&language_select, SelectSetting::Language),
+            (&file_icon_color_select, SelectSetting::FileIconColorMode),
             (&terminal_preset_select, SelectSetting::TerminalPreset),
             (&ui_preset_select, SelectSetting::UiPreset),
             (
@@ -1873,6 +1927,9 @@ impl SettingsView {
             inset_y_input,
             files_show_hidden: config.left_dock.files_show_hidden,
             files_use_gitignore: config.left_dock.files_use_gitignore,
+            left_collapsed_by_default: config.left_dock.left_collapsed_by_default,
+            preview_tab: config.file_viewer.preview_tab,
+            left_default_width_input,
             shell_program_input,
             advanced_open: Default::default(),
             shell_natural_text_editing: config.shell.natural_text_editing,
@@ -1889,6 +1946,7 @@ impl SettingsView {
             syntax_theme_select,
             clipboard_streaming_input,
             editor_select,
+            file_icon_color_select,
             panels_grid_columns_input,
             claude_status_enable: config.claude_status.enable,
             telegram_enabled: config.telegram.enabled,
@@ -2406,7 +2464,7 @@ impl SettingsView {
     /// [`Self::adopt_external_settings`] mirrors it instead.
     fn settings_ui_patches(config: &daruda_config::Config) -> Vec<daruda_config::SettingsPatch> {
         let mut patches: Vec<daruda_config::SettingsPatch> = Vec::with_capacity(
-            spec::TEXT_SETTINGS.len() + spec::SELECT_SETTINGS.len() + spec::BOOL_SETTINGS.len() + 2,
+            spec::TEXT_SETTINGS.len() + spec::SELECT_SETTINGS.len() + spec::BOOL_SETTINGS.len() + 3,
         );
         patches.extend(
             spec::TEXT_SETTINGS
@@ -2425,6 +2483,9 @@ impl SettingsView {
         );
         patches.push(daruda_config::SettingsPatch::AgentCatalog(
             config.agents.clone(),
+        ));
+        patches.push(daruda_config::SettingsPatch::StatusBarHiddenItems(
+            config.status_bar.hidden_items.clone(),
         ));
         patches.push(daruda_config::SettingsPatch::SessionHosts {
             entries: config.session_hosts.clone(),

@@ -87,6 +87,26 @@ pub(super) fn row(
         )
 }
 
+/// A switch with its On/Off word beside it, the control every switch row uses.
+pub(super) fn switch_with_state(switch: crate::ui::Button, checked: bool, cx: &App) -> Div {
+    let state = if checked {
+        s::settings_toggle_on()
+    } else {
+        s::settings_toggle_off()
+    };
+    div()
+        .flex()
+        .items_center()
+        .gap(px(theme::PAD_SM))
+        .child(switch)
+        .child(
+            div()
+                .text_size(px(theme::TAB_FONT_SIZE))
+                .text_color(theme::current(cx).text_muted)
+                .child(state),
+        )
+}
+
 pub(super) fn card_content(content: impl IntoElement) -> Div {
     div()
         .p(px(theme::SETTINGS_CARD_PAD))
@@ -175,28 +195,15 @@ impl SettingsView {
     ) -> Div {
         let checked = (spec::bool_spec(setting).get)(self);
         let id = format!("settings-switch-{:?}", setting);
-        let state = if checked {
-            s::settings_toggle_on()
-        } else {
-            s::settings_toggle_off()
-        };
-        let control = div()
-            .flex()
-            .items_center()
-            .gap(px(theme::PAD_SM))
-            .child(
-                crate::ui::switch(id, checked, cx)
-                    .tooltip(label.clone())
-                    .on_click(cx.listener(move |this, _, _, cx| {
-                        this.set_bool_setting(setting, !checked, cx)
-                    })),
-            )
-            .child(
-                div()
-                    .text_size(px(theme::TAB_FONT_SIZE))
-                    .text_color(theme::current(cx).text_muted)
-                    .child(state),
-            );
+        let control = switch_with_state(
+            crate::ui::switch(id, checked, cx)
+                .tooltip(label.clone())
+                .on_click(
+                    cx.listener(move |this, _, _, cx| this.set_bool_setting(setting, !checked, cx)),
+                ),
+            checked,
+            cx,
+        );
         row(label, description, control, cx)
     }
 
