@@ -12,7 +12,7 @@ fn default_config_is_valid() {
     assert_eq!(cfg.scrollback.lines, 10_000);
     assert!(cfg.keybindings.bindings.is_empty());
     assert_eq!(cfg.left_dock.left_default_width, 220.0);
-    assert!(cfg.left_dock.left_collapsed_by_default);
+    assert!(!cfg.left_dock.left_collapsed_by_default);
 }
 
 #[test]
@@ -20,10 +20,10 @@ fn left_dock_parses_from_toml() {
     let input = "\
 [left_dock]\n\
 left_default_width = 260.0\n\
-left_collapsed_by_default = false\n";
+left_collapsed_by_default = true\n";
     let cfg: Config = toml::from_str(input).unwrap();
     assert_eq!(cfg.left_dock.left_default_width, 260.0);
-    assert!(!cfg.left_dock.left_collapsed_by_default);
+    assert!(cfg.left_dock.left_collapsed_by_default);
 }
 
 #[test]

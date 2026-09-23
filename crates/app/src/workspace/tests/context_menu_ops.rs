@@ -78,15 +78,15 @@ async fn a_dock_row_right_click_deploys_at_the_workspace_root(cx: &mut TestAppCo
         &config,
         Some(daruda_store::project::Project::from_path(&root)),
     );
-    // The press has to land on a real row, and the fixture supplies neither
-    // half of that: it boots with the left dock closed, and a lane only exists
-    // once one is pushed.
+    // The press has to land on a real row: a lane only exists once one is
+    // pushed, and the dock is opened explicitly so the row is on screen
+    // whatever the config default is.
     workspace.update(cx, |ws, cx| {
         if let Some(p) = ws.active_project_mut() {
             p.lanes
                 .push(crate::lane::Lane::default_for_project(1, root.clone()));
         }
-        ws.left_dock.update(cx, |d, _| d.toggle());
+        ws.left_dock.update(cx, |d, _| d.open());
         cx.notify();
     });
 

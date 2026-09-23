@@ -22,7 +22,6 @@ use gpui::{App, Context, Window};
 use daruda_agent::accounts::{LoginOutcome, account_config_dir, recipe_for, spawn_login};
 use daruda_store::accounts::{AccountId, AccountRecipeId, AccountsState, ManagedAccount};
 use daruda_store::observability::error_report::{ErrorReport, ErrorSeverity};
-use daruda_store::observability::log_writer::LogWriter;
 
 use super::{AddManagedAccount, accounts_global, auth_status_global};
 use crate::surface::strings as s;
@@ -654,12 +653,11 @@ impl Workspace {
                 }
             }) {
                 Ok((state, is_duplicate)) => (state, is_duplicate),
+                // The list could not take the account (unwritable, or a file
+                // this build refuses to overwrite): nothing references the
+                // fresh home, so it goes the way a failed login's does.
                 Err(e) => {
-                    log_io_error(
-                        "Failed to save accounts.json after add-account login",
-                        "account.add.save_failed",
-                        &e,
-                    );
+                    self.finish_login_failed(recipe_id, config_dir, e.to_string(), cx);
                     return;
                 }
             };
@@ -1233,11 +1231,7 @@ impl Workspace {
             }) {
                 Ok((state, updated)) => (state, updated),
                 Err(e) => {
-                    log_io_error(
-                        "Failed to save accounts.json after reauthenticate-account login",
-                        "account.reauth.save_failed",
-                        &e,
-                    );
+                    self.finish_reauth_failed(e.to_string(), cx);
                     return;
                 }
             };
@@ -1581,23 +1575,6 @@ fn now_unix() -> u64 {
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_secs())
         .unwrap_or(0)
-}
-
-/// Log an I/O failure without surfacing a toast — mirrors
-/// `settings::sections::accounts`'s private helper of the same
-/// shape (see its doc for why: this module has `Workspace::report_error`
-/// available and still chooses to log rather than toast, since a
-/// best-effort cleanup failure has no functional impact worth interrupting
-/// the user for).
-fn log_io_error(title: &str, dedup: &str, err: &std::io::Error) {
-    LogWriter::log(
-        ErrorReport::new(title)
-            .severity(ErrorSeverity::Warning)
-            .at(file!(), line!())
-            .with_context("error", format!("{err}"))
-            .dedup(dedup)
-            .build(),
-    );
 }
 
 #[cfg(test)]

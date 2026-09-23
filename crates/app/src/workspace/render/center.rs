@@ -146,20 +146,20 @@ fn present_empty_state(cx: &mut Context<Workspace>) -> AnyElement {
                 .flex_row()
                 .gap(px(theme::MAIN_EMPTY_STATE_GAP))
                 .child(
-                    button_primary("no-tabs-new-terminal", s::ctx_new_terminal()).on_click(
-                        cx.listener(|this, _, window, cx| {
+                    button("no-tabs-new-terminal", s::ctx_new_terminal()).on_click(cx.listener(
+                        |this, _, window, cx| {
                             this.mutate_durable_in(window, cx, |ws, w, cx| ws.add_tab(w, cx));
-                        }),
-                    ),
+                        },
+                    )),
                 )
                 .child(
-                    button("no-tabs-new-chat", s::ctx_new_agent_chat()).on_click(cx.listener(
-                        |this, _, window, cx| {
+                    button_primary("no-tabs-new-chat", s::ctx_new_agent_chat()).on_click(
+                        cx.listener(|this, _, window, cx| {
                             this.mutate_durable_in(window, cx, |ws, w, cx| {
                                 ws.open_agent_chat_pane(w, cx)
                             });
-                        },
-                    )),
+                        }),
+                    ),
                 ),
         )
         .into_any_element()

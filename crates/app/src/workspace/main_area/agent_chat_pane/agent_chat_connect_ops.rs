@@ -326,6 +326,7 @@ impl Workspace {
                 v.agent_program = None;
                 v.reseed_transcript_defaults(&defaults, cx);
             });
+            self.update_agent_chat_agent_id(pane_id, effective_id.clone());
             self.mutate_durable(cx, |_, _| {});
         }
         Some(self.agent_launch_for(&effective_id).unwrap_or_else(|| {

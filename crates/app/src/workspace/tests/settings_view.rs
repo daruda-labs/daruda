@@ -426,6 +426,9 @@ async fn the_chrome_behind_settings_keeps_its_actions(cx: &mut TestAppContext) {
 async fn open_settings_reaches_an_app_with_no_window(cx: &mut TestAppContext) {
     crate::test_support::init_gpui_component(cx);
     cx.update(|cx| {
+        // The window is built from the live config; without the store it
+        // would fall back to reading the developer's own `config.toml`.
+        crate::settings_store::SettingsStore::init(cx);
         crate::bind_keys::register_global_actions(
             cx,
             std::sync::Arc::new(daruda_config::Config::default()),

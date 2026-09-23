@@ -1170,3 +1170,35 @@ fn a_pane_pinned_to_a_dropped_account_reverts_and_a_kept_one_stays(cx: &mut Test
         );
     });
 }
+
+/// A login whose account cannot be filed — here because `accounts.json` is
+/// unreadable and the store refuses to write over it — must say so and take
+/// the fresh home with it, not log and leave credentials nothing points at.
+#[gpui::test]
+async fn a_login_the_account_list_refuses_is_reported_and_cleaned_up(cx: &mut TestAppContext) {
+    let (_wh, workspace) = build_workspace(cx);
+    cx.run_until_parked();
+    let accounts_json = workspace.read_with(cx, |ws, _| ws.data_dir.join("accounts.json"));
+    std::fs::create_dir_all(accounts_json.parent().unwrap()).unwrap();
+    std::fs::write(&accounts_json, "{ not json").unwrap();
+    let dir = tempfile::tempdir().expect("tempdir").keep();
+    write_codex_auth_json(&dir, "alice@openai.com");
+
+    let account_id = workspace.update(cx, |ws, cx| finish_codex_login(ws, dir.clone(), cx));
+    cx.run_until_parked();
+
+    workspace.read_with(cx, |ws, _| {
+        assert!(ws.accounts.find(account_id).is_none(), "nothing was filed");
+        assert_eq!(
+            ws.error_history.first().map(|r| r.title.as_str()),
+            Some(crate::surface::strings::settings_accounts_login_failed().as_str()),
+            "the failure reaches the user"
+        );
+    });
+    assert!(!dir.exists(), "the unreferenced home is removed");
+    assert_eq!(
+        std::fs::read_to_string(&accounts_json).unwrap(),
+        "{ not json",
+        "and the file it could not read is left as it was"
+    );
+}

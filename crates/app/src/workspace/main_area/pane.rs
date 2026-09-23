@@ -318,10 +318,10 @@ pub(in crate::workspace) struct AgentChatContent {
     /// resolves the actual config dir from it at connect time via
     /// [`super::pane::resolve_pane_account`].
     pub(in crate::workspace) account: daruda_store::accounts::AccountSelection,
-    /// The catalog agent the view was built for. Cached for the same reason
-    /// as `cwd` — it never changes after construction — so the status bar can
-    /// name the pane's auth domain without reading the view: a read from
+    /// The catalog agent the view runs, cached like `cwd` so the status bar
+    /// can name the pane's auth domain without reading the view — a read from
     /// render registers it as displayed even behind Settings (Pitfall 10).
+    /// Re-pointed only through `update_agent_chat_agent_id`.
     pub(in crate::workspace) agent_id: String,
 }
 
@@ -1235,8 +1235,7 @@ impl Workspace {
         resolve_focused_account(selection, &self.accounts, &self.data_dir)
     }
 
-    /// The focused pane as the account layer sees it. An agent-chat pane's
-    /// `agent_id` lives in its view entity, hence the `cx` read; every caller
+    /// The focused pane as the account layer sees it. Every caller
     /// needs the resulting [`AccountDomain`], so the derivation lives here
     /// rather than being rebuilt per surface.
     pub(in crate::workspace) fn focused_account_pane(&self) -> AccountPane {

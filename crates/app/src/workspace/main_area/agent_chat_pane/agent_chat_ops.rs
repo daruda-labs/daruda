@@ -1526,6 +1526,28 @@ impl Workspace {
         }
     }
 
+    /// Keep both wrapper caches of `pane_id`'s agent in step with its view —
+    /// the one place a live pane is re-pointed at another agent.
+    pub(super) fn update_agent_chat_agent_id(&mut self, pane_id: PaneId, agent_id: String) {
+        if let Some(chat) = self
+            .orchestrator_chat
+            .as_mut()
+            .filter(|chat| chat.pane_id == pane_id)
+        {
+            chat.agent_id = agent_id.clone();
+        }
+        if let Some(content) = self
+            .main_area
+            .runtimes
+            .values_mut()
+            .flat_map(|rt| rt.panes.iter_mut())
+            .find(|p| p.id == pane_id)
+            .and_then(Pane::agent_chat_content_mut)
+        {
+            content.agent_id = agent_id;
+        }
+    }
+
     /// The lane that owns `pane_id`, found by the same cross-lane scan as
     /// [`Self::agent_chat_view`] (a pane's owning lane never changes, but a
     /// lane switch only re-points `self.active`, so this must not be

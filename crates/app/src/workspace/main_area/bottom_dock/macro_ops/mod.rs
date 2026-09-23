@@ -461,7 +461,11 @@ impl Workspace {
     /// Switch the active panel tab and persist. No-op if `tab_id` is
     /// not present (e.g. the tab was just deleted on another window).
     /// Deactivates the built-in Input panel if it was active.
-    pub(super) fn set_active_panel_tab(&mut self, tab_id: TabId, cx: &mut Context<Self>) {
+    pub(in crate::workspace) fn set_active_panel_tab(
+        &mut self,
+        tab_id: TabId,
+        cx: &mut Context<Self>,
+    ) {
         if !self.panels.tabs.iter().any(|t| t.id == tab_id) {
             return;
         }
@@ -471,6 +475,7 @@ impl Workspace {
             return;
         }
         self.terminal_input_visible = false;
+        self.sync_bottom_dock_min_to_panel(cx);
         self.panels.active_tab_id = Some(tab_id);
         self.save_panels(cx);
         self.bottom_dock.update(cx, |_, cx| cx.notify());
@@ -483,7 +488,7 @@ impl Workspace {
             return;
         }
         self.terminal_input_visible = true;
-        self.bottom_dock.update(cx, |_, cx| cx.notify());
+        self.sync_bottom_dock_min_to_panel(cx);
         cx.notify();
     }
 

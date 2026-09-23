@@ -7,7 +7,7 @@ use daruda_store::project::{LeftDockView, RightDockView};
 fn dock_defaults_toggles_and_view_selection(cx: &mut TestAppContext) {
     let (_wh, ws) = build_workspace(cx);
     ws.update(cx, |ws, cx| {
-        assert!(!ws.left_dock.read(cx).is_open);
+        assert!(ws.left_dock.read(cx).is_open);
         assert!(!ws.bottom_dock.read(cx).is_open);
         assert!(!ws.right_dock.read(cx).is_open);
 
@@ -17,9 +17,9 @@ fn dock_defaults_toggles_and_view_selection(cx: &mut TestAppContext) {
         assert_eq!(ws.right_dock.read(cx).panels.len(), 1);
 
         ws.left_dock.update(cx, |d, _| d.toggle());
-        assert!(ws.left_dock.read(cx).is_open);
-        ws.left_dock.update(cx, |d, _| d.toggle());
         assert!(!ws.left_dock.read(cx).is_open);
+        ws.left_dock.update(cx, |d, _| d.toggle());
+        assert!(ws.left_dock.read(cx).is_open);
 
         ws.bottom_dock.update(cx, |d, _| d.toggle());
         assert!(ws.bottom_dock.read(cx).is_open);
@@ -50,6 +50,29 @@ fn dock_defaults_toggles_and_view_selection(cx: &mut TestAppContext) {
             ws.set_left_dock_view(view, cx);
             assert_eq!(ws.left_dock_view, view);
         }
+    });
+}
+
+/// The Input panel's stacked chrome is taller than the single-row macro
+/// preset; showing it must lift the dock to fit, and the macro panel must be
+/// free to shrink back afterwards.
+#[gpui::test]
+fn input_panel_lifts_the_bottom_dock_floor_to_its_one_row_height(cx: &mut TestAppContext) {
+    let (_wh, ws) = build_workspace(cx);
+    ws.update(cx, |ws, cx| {
+        let one_row = layout::ops::bottom_dock_height_for_rows(1);
+        let macro_floor = crate::ui::theme::DOCK_BOTTOM_MIN_H;
+        assert!(macro_floor < one_row);
+
+        let tab_id = ws.panels.tabs[0].id.clone();
+        ws.set_active_panel_tab(tab_id, cx);
+        ws.bottom_dock.update(cx, |d, _| d.resize(0.0));
+        assert_eq!(ws.bottom_dock.read(cx).size, macro_floor);
+
+        ws.activate_bottom_input(cx);
+        assert_eq!(ws.bottom_dock.read(cx).size, one_row);
+        ws.bottom_dock.update(cx, |d, _| d.resize(0.0));
+        assert_eq!(ws.bottom_dock.read(cx).size, one_row);
     });
 }
 

@@ -131,10 +131,10 @@ fn diag_wheel_after_drag_then_lane_swap(cx: &mut TestAppContext) {
         }
     });
 
-    // The test fixture boots with the left dock closed — open it so the
-    // worktree rows are rendered and clickable.
+    // Open the left dock explicitly so the worktree rows are rendered and
+    // clickable whatever the config default is.
     ws.update(cx, |ws, cx| {
-        ws.left_dock.update(cx, |d, _| d.toggle());
+        ws.left_dock.update(cx, |d, _| d.open());
         cx.notify();
     });
 

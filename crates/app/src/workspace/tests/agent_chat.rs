@@ -1740,6 +1740,14 @@ async fn stale_agent_reconnect_reseeds_to_the_fallback_agents_transcript_setting
     let view = workspace.read_with(cx, |ws, _| agent_view(ws, pane_id));
     let agent_id = view.read_with(cx, |v, _| v.agent_id.clone());
     assert_eq!(agent_id, TRANSCRIPT_AGENT_B);
+    // The status bar names the pane's auth domain from the wrapper's copy, so
+    // it has to follow the view there too.
+    workspace.read_with(cx, |ws, _| {
+        assert_eq!(
+            ws.agent_chat_identity(pane_id).map(|(id, _)| id),
+            Some(TRANSCRIPT_AGENT_B)
+        );
+    });
     assert_eq!(
         transcript_settings(&view, cx),
         (

@@ -167,6 +167,13 @@ impl Dock {
     pub fn resize(&mut self, new_size: f32) {
         self.size = new_size.clamp(self.min_size, self.max_size);
     }
+
+    /// Replace the floor and re-clamp the current size to it, so a panel
+    /// whose content needs more room than the last one never opens clipped.
+    pub fn set_min_size(&mut self, min_size: f32) {
+        self.min_size = min_size.min(self.max_size);
+        self.resize(self.size);
+    }
 }
 
 // ----------------------------------------------------------------
@@ -301,6 +308,18 @@ mod tests {
         assert_eq!(dock.size, dock.min_size);
         dock.resize(9999.0);
         assert_eq!(dock.size, dock.max_size);
+    }
+
+    #[test]
+    fn set_min_size_raises_the_floor_and_keeps_larger_sizes() {
+        let mut dock = Dock::new(DockPosition::Bottom, dummy_weak());
+        dock.set_min_size(dock.size + 40.0);
+        assert_eq!(dock.size, dock.min_size);
+        dock.resize(300.0);
+        dock.set_min_size(theme::DOCK_BOTTOM_MIN_H);
+        assert_eq!(dock.size, 300.0);
+        dock.resize(0.0);
+        assert_eq!(dock.size, theme::DOCK_BOTTOM_MIN_H);
     }
 
     #[test]

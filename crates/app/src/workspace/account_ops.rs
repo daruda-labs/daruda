@@ -373,10 +373,11 @@ impl Workspace {
     /// pane's shell keeps running under the env it spawned with; only the
     /// selection used for persistence and display is reset.
     ///
-    /// Runs from the `AccountsGlobal` observer, so a delete in any window —
-    /// or an edit to `accounts.json` outside the app — lands here the same
-    /// way. Idempotent: that observer also fires for the login slot, and a
-    /// pass with nothing to change neither persists nor repaints.
+    /// Runs from the `AccountsGlobal` observer, so a delete in any window
+    /// lands here the same way — as does an account an outside edit dropped,
+    /// once the next in-app write reloads the file. Idempotent: that observer
+    /// also fires for the login slot, and a pass with nothing to change
+    /// persists nothing.
     pub(in crate::workspace) fn reconcile_account_pins(&mut self, cx: &mut Context<Self>) {
         let accounts = &self.accounts;
         let dangling = |selection: AccountSelection| match selection {

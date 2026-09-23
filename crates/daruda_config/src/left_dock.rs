@@ -47,7 +47,7 @@ impl Default for LeftDockConfig {
     fn default() -> Self {
         Self {
             left_default_width: LEFT_DEFAULT_W,
-            left_collapsed_by_default: true,
+            left_collapsed_by_default: false,
             files_show_hidden: true,
             files_use_gitignore: true,
             file_icon_color_mode: IconColorMode::Monochrome,

@@ -62,7 +62,7 @@ pub(in crate::workspace) struct DockDrag {
 /// outside the per-row loop — it is not repeated with more lines.
 ///
 /// Extracted as a free function so it can be unit-tested without a GPUI context.
-pub(super) fn bottom_dock_height_for_rows(rows: usize) -> f32 {
+pub(in crate::workspace) fn bottom_dock_height_for_rows(rows: usize) -> f32 {
     use crate::ui::theme::{
         DOCK_BOTTOM_INPUT_ACTION_ROW_H, DOCK_BOTTOM_INPUT_EXTRA_LINE_H,
         DOCK_BOTTOM_INPUT_TEXT_PAD_H, PANEL_BODY_PAD_Y, TAB_BAR_HEIGHT,
@@ -345,6 +345,27 @@ impl Workspace {
             ws.resize_all_tabs(window, cx);
         });
         cx.notify();
+    }
+
+    /// Match the bottom dock's floor to the panel it shows: the Input panel's
+    /// stacked chrome (one text row + action row) is taller than the
+    /// single-row macro preset, so under the shared floor it paints clipped.
+    pub(in crate::workspace) fn sync_bottom_dock_min_to_panel(&mut self, cx: &mut Context<Self>) {
+        let min = if self.terminal_input_visible {
+            bottom_dock_height_for_rows(1)
+        } else {
+            crate::ui::theme::DOCK_BOTTOM_MIN_H
+        };
+        let before = self.bottom_dock.read(cx).size;
+        let after = self.bottom_dock.update(cx, |d, cx| {
+            d.set_min_size(min);
+            cx.notify();
+            d.size
+        });
+        if after != before {
+            self.main_area.pending_resize = true;
+            self.mutate_durable(cx, |_, _| {});
+        }
     }
 
     /// Recompute and apply the bottom dock height to match the current
