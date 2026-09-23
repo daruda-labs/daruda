@@ -71,6 +71,32 @@ fn migrate_to_current(
     Some(state)
 }
 
+/// Load `accounts.json` for a write that will replace it.
+///
+/// Unlike [`load_accounts_in`], only a *missing* file reads as the empty list.
+/// One that is present but unreadable, or written by a newer daruda, is an
+/// error: saving over it would erase every account it holds, and the file may
+/// yet be fixed by hand or read by the build that wrote it.
+fn load_for_write(data_dir: &Path) -> std::io::Result<AccountsState> {
+    let path = accounts_path_in(data_dir);
+    let newer = || {
+        std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            "accounts.json was written by a newer daruda; left untouched",
+        )
+    };
+    match load_json_file::<AccountsState>("accounts", &path) {
+        LoadOutcome::Missing => Ok(AccountsState::default()),
+        LoadOutcome::Corrupt => Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            "accounts.json could not be read; left untouched",
+        )),
+        LoadOutcome::Parsed(state) if state.schema_version > SCHEMA_VERSION => Err(newer()),
+        LoadOutcome::Parsed(state) if state.schema_version == SCHEMA_VERSION => Ok(state),
+        LoadOutcome::Parsed(state) => migrate_to_current(data_dir, &path, state).ok_or_else(newer),
+    }
+}
+
 pub fn save_accounts_in(data_dir: &Path, state: &AccountsState) -> std::io::Result<()> {
     let path = accounts_path_in(data_dir);
     save_json_atomic(data_dir, &path, state)
@@ -95,7 +121,7 @@ pub fn mutate_accounts_in<R>(
         .open(accounts_lock_path_in(data_dir))?;
     lock_file.lock_exclusive()?;
 
-    let mut state = load_accounts_in(data_dir).unwrap_or_default();
+    let mut state = load_for_write(data_dir)?;
     let result = mutate(&mut state);
     save_accounts_in(data_dir, &state)?;
     Ok((state, result))
@@ -178,6 +204,35 @@ mod tests {
         save_accounts_in(&dir, &state).unwrap();
         assert!(load_accounts_in(&dir).is_none());
         std::fs::remove_dir_all(&dir).ok();
+    }
+
+    /// A write must not treat a file it cannot read as an empty list — saving
+    /// the result would erase every account in it. The mutation never runs,
+    /// and the bytes on disk are exactly what they were.
+    #[test]
+    fn mutate_leaves_a_file_it_cannot_read_untouched() {
+        let newer = serde_json::to_string(&AccountsState {
+            schema_version: SCHEMA_VERSION + 1,
+            ..Default::default()
+        })
+        .unwrap();
+        for (label, bytes) in [("corrupt", "{ not json".to_owned()), ("newer", newer)] {
+            let dir = std::env::temp_dir().join(format!("daruda-acct-test-{}", AccountId::new().0));
+            std::fs::create_dir_all(&dir).unwrap();
+            std::fs::write(accounts_path_in(&dir), &bytes).unwrap();
+
+            let mut ran = false;
+            let outcome = mutate_accounts_in(&dir, |_| ran = true);
+
+            assert!(outcome.is_err(), "{label}: the write is refused");
+            assert!(!ran, "{label}: the mutation never sees an empty list");
+            assert_eq!(
+                std::fs::read_to_string(accounts_path_in(&dir)).unwrap(),
+                bytes,
+                "{label}: the file is left as it was"
+            );
+            std::fs::remove_dir_all(&dir).ok();
+        }
     }
 
     /// Hand-written v1 `accounts.json`: two account records (one Codex) and a
