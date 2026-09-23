@@ -136,6 +136,37 @@ pub(crate) fn open_confirm_dialog<F>(
     });
 }
 
+/// Ask before a destructive Settings action, then run `on_ok` on `entity`.
+///
+/// The rule it serves: an action that cannot be undone, or that reaches a
+/// system outside daruda (a credential store, a paired chat), confirms first.
+/// A reversible value change never does.
+pub(crate) fn confirm_destructive<T: 'static>(
+    entity: WeakEntity<T>,
+    title: impl Into<SharedString>,
+    body: impl Into<SharedString>,
+    ok_label: impl Into<SharedString>,
+    on_ok: impl Fn(&mut T, &mut Window, &mut Context<T>) + 'static,
+    window: &mut Window,
+    cx: &mut App,
+) {
+    let on_ok = Rc::new(on_ok);
+    open_confirm_dialog(
+        title,
+        body,
+        ok_label,
+        ButtonVariant::Danger,
+        move |_, window, app_cx| {
+            let on_ok = on_ok.clone();
+            if let Some(entity) = entity.upgrade() {
+                entity.update(app_cx, |this, cx| on_ok(this, window, cx));
+            }
+        },
+        window,
+        cx,
+    );
+}
+
 /// Open an OK-only alert dialog. No cancel, no destructive action —
 /// just a title, a body, and a single dismiss button. Used by
 /// [`Workspace::open_task_error_dialog`] to surface the full

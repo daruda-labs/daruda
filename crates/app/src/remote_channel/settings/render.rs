@@ -69,7 +69,7 @@ impl ChannelSettings {
                                 .tooltip(s::remote_clear_token())
                                 .tab_stop(true)
                                 .on_click(cx.listener(move |this, _, window, cx| {
-                                    this.store_secret(&remove_id, secret, true, window, cx)
+                                    this.request_remove_secret(&remove_id, secret, window, cx)
                                 })),
                         )
                     }),
@@ -164,9 +164,9 @@ impl Render for ChannelSettings {
                             ui::button(("remote-unpair", index), s::remote_unpair())
                                 .child(ui::icons::icon(ui::icons::CLOSE))
                                 .tab_stop(true)
-                                .on_click(
-                                    cx.listener(move |this, _, _, cx| this.unpair(&unpair_id, cx)),
-                                ),
+                                .on_click(cx.listener(move |this, _, window, cx| {
+                                    this.request_unpair(&unpair_id, window, cx)
+                                })),
                         ),
                 );
             } else {

@@ -274,6 +274,14 @@ that trait's methods. Speculative re-exports rot.
 
 ---
 
+## Destructive actions confirm first
+
+An action that cannot be undone, or that reaches a system outside daruda
+(the credential store, a paired chat, a removed config entry), opens
+`workspace::dialog_helpers::confirm_destructive` and runs only from its OK.
+Its button label ends in `…`. A reversible value change, including Reset,
+never confirms.
+
 ## Allowed exceptions to the import rule
 
 A small set of infrastructure files legitimately calls `gpui_component::*`

@@ -203,6 +203,42 @@ impl ChannelSettings {
         cx.notify();
     }
 
+    /// Confirm-first entry for [`Self::unpair`]: the paired chat stops
+    /// reaching daruda, and pairing again needs a fresh code.
+    fn request_unpair(&mut self, id: &str, window: &mut Window, cx: &mut Context<Self>) {
+        let id = id.to_owned();
+        crate::workspace::dialog_helpers::confirm_destructive(
+            cx.weak_entity(),
+            s::remote_confirm_unpair_title(),
+            s::settings_confirm_unpair_body(),
+            s::settings_confirm_ok_unpair(),
+            move |this, _window, cx| this.unpair(&id, cx),
+            window,
+            cx,
+        );
+    }
+
+    /// Confirm-first entry for removing a stored token, which deletes it
+    /// from the system credential store.
+    fn request_remove_secret(
+        &mut self,
+        id: &str,
+        secret: Secret,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let id = id.to_owned();
+        crate::workspace::dialog_helpers::confirm_destructive(
+            cx.weak_entity(),
+            s::remote_confirm_remove_token_title(),
+            s::settings_confirm_remove_token_body(),
+            s::settings_confirm_ok_remove_token(),
+            move |this, window, cx| this.store_secret(&id, secret, true, window, cx),
+            window,
+            cx,
+        );
+    }
+
     fn unpair(&mut self, id: &str, cx: &mut Context<Self>) {
         self.configure(id, |config| config.recipient = None, cx);
     }

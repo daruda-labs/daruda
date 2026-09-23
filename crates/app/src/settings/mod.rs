@@ -12,6 +12,7 @@
 //! dismissed by emitting [`SettingsEvent::Close`] rather than acting on the
 //! window itself.
 
+mod confirm;
 mod navigation;
 mod presentation;
 mod render;

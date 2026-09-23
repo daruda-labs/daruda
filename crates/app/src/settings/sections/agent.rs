@@ -205,8 +205,8 @@ impl SettingsView {
                             s::settings_agent_remove(),
                         )
                         .on_click(cx.listener(
-                            move |this, _: &ClickEvent, _window, cx| {
-                                this.remove_agent_catalog_item(index, cx);
+                            move |this, _: &ClickEvent, window, cx| {
+                                this.request_remove_agent_catalog_item(index, window, cx);
                             },
                         )),
                     ),
@@ -278,8 +278,8 @@ impl SettingsView {
                     )
                     .child(
                         button_danger(remove_id, s::settings_agent_remove()).on_click(cx.listener(
-                            move |this, _: &ClickEvent, _window, cx| {
-                                this.remove_agent_catalog_item(catalog_index, cx);
+                            move |this, _: &ClickEvent, window, cx| {
+                                this.request_remove_agent_catalog_item(catalog_index, window, cx);
                             },
                         )),
                     ),

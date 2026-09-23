@@ -2,6 +2,7 @@ use super::*;
 use daruda_config::BuiltinSection;
 use gpui::{BorrowAppContext, Entity, TestAppContext, WindowHandle};
 
+mod confirmation;
 mod failure_reporting;
 mod scrollbar;
 

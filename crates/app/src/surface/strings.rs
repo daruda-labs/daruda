@@ -4574,6 +4574,46 @@ pub fn settings_telegram_save_token() -> String {
 pub fn settings_telegram_token_configured() -> String {
     rust_i18n::t!("settings.telegram_token_configured").into_owned()
 }
+pub fn settings_confirm_remove_telegram_token_title() -> String {
+    rust_i18n::t!("settings.confirm_remove_telegram_token_title").into_owned()
+}
+
+pub fn settings_confirm_remove_token_body() -> String {
+    rust_i18n::t!("settings.confirm_remove_token_body").into_owned()
+}
+
+pub fn settings_confirm_ok_remove_token() -> String {
+    rust_i18n::t!("settings.confirm_ok_remove_token").into_owned()
+}
+
+pub fn settings_confirm_unpair_telegram_title() -> String {
+    rust_i18n::t!("settings.confirm_unpair_telegram_title").into_owned()
+}
+
+pub fn settings_confirm_unpair_body() -> String {
+    rust_i18n::t!("settings.confirm_unpair_body").into_owned()
+}
+
+pub fn settings_confirm_ok_unpair() -> String {
+    rust_i18n::t!("settings.confirm_ok_unpair").into_owned()
+}
+
+pub fn settings_confirm_remove_session_host_title() -> String {
+    rust_i18n::t!("settings.confirm_remove_session_host_title").into_owned()
+}
+
+pub fn settings_confirm_remove_from_config_body() -> String {
+    rust_i18n::t!("settings.confirm_remove_from_config_body").into_owned()
+}
+
+pub fn settings_confirm_ok_remove() -> String {
+    rust_i18n::t!("settings.confirm_ok_remove").into_owned()
+}
+
+pub fn settings_confirm_remove_agent_title() -> String {
+    rust_i18n::t!("settings.confirm_remove_agent_title").into_owned()
+}
+
 pub fn settings_telegram_clear_token() -> String {
     rust_i18n::t!("settings.telegram_clear_token").into_owned()
 }
@@ -6997,6 +7037,14 @@ pub fn remote_token_saved() -> String {
 
 pub fn remote_save_token() -> String {
     rust_i18n::t!("remote_channel.save_token").into_owned()
+}
+
+pub fn remote_confirm_remove_token_title() -> String {
+    rust_i18n::t!("remote_channel.confirm_remove_token_title").into_owned()
+}
+
+pub fn remote_confirm_unpair_title() -> String {
+    rust_i18n::t!("remote_channel.confirm_unpair_title").into_owned()
 }
 
 pub fn remote_clear_token() -> String {

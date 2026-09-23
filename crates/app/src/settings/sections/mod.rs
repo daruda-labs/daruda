@@ -152,7 +152,7 @@ impl SettingsView {
     }
 
     /// Forget the stored token, so the bridge has nothing to poll with.
-    fn clear_telegram_token(&mut self, cx: &mut gpui::Context<Self>) {
+    pub(in crate::settings) fn clear_telegram_token(&mut self, cx: &mut gpui::Context<Self>) {
         self.clear_telegram_token_with(crate::telegram::keychain::delete_token, cx);
     }
 
@@ -250,8 +250,8 @@ impl SettingsView {
                                 s::settings_telegram_clear_token(),
                             )
                             .on_click(cx.listener(
-                                |this, _: &ClickEvent, _window, cx| {
-                                    this.clear_telegram_token(cx);
+                                |this, _: &ClickEvent, window, cx| {
+                                    this.request_clear_telegram_token(window, cx);
                                 },
                             )),
                         )
@@ -334,8 +334,8 @@ impl SettingsView {
                                 s::settings_telegram_unpair(),
                             )
                             .on_click(cx.listener(
-                                |this, _: &ClickEvent, _window, cx| {
-                                    this.unpair_telegram(cx);
+                                |this, _: &ClickEvent, window, cx| {
+                                    this.request_unpair_telegram(window, cx);
                                 },
                             )),
                         )

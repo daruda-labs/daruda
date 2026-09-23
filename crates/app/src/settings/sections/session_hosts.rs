@@ -88,8 +88,8 @@ impl SettingsView {
                     )
                     .child(
                         button_danger(remove_id, s::settings_session_host_remove()).on_click(
-                            cx.listener(move |this, _: &ClickEvent, _window, cx| {
-                                this.remove_session_host_row(index, cx);
+                            cx.listener(move |this, _: &ClickEvent, window, cx| {
+                                this.request_remove_session_host_row(index, window, cx);
                             }),
                         ),
                     ),
