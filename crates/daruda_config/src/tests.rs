@@ -730,6 +730,29 @@ fn settings_patch_writes_render_max_fps() {
     assert_eq!(Config::load_from(&path).render.max_fps, 60);
 }
 
+/// A shell program is written as a key, and clearing it removes the key
+/// rather than writing an empty program that would fail to spawn.
+#[test]
+fn settings_patch_writes_and_clears_the_shell_program() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("config.toml");
+
+    crate::apply_settings_patch_to(
+        &crate::SettingsPatch::ShellProgram(Some("/bin/fish".to_string())),
+        &path,
+    )
+    .expect("set program");
+    assert_eq!(
+        Config::load_from(&path).shell.program.as_deref(),
+        Some("/bin/fish")
+    );
+
+    crate::apply_settings_patch_to(&crate::SettingsPatch::ShellProgram(None), &path)
+        .expect("clear program");
+    assert_eq!(Config::load_from(&path).shell.program, None);
+    assert!(!std::fs::read_to_string(&path).unwrap().contains("program"));
+}
+
 /// Every `[notifications]` key and `telegram.only_when_away` through the real
 /// `toml_edit` writer: flipped off from their `true` defaults, the threshold
 /// written as an integer, all read back from disk.

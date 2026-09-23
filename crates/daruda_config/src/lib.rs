@@ -1034,6 +1034,18 @@ fn patch_settings_document(
                 toml_edit::value(config.left_dock.files_use_gitignore),
             );
         }),
+        SettingsPatch::ShellNaturalTextEditing(_) => patch_section(doc, "shell", |t| {
+            t.insert(
+                "natural_text_editing",
+                toml_edit::value(config.shell.natural_text_editing),
+            );
+        }),
+        SettingsPatch::ShellProgram(_) => patch_section(doc, "shell", |t| {
+            match &config.shell.program {
+                Some(program) => t.insert("program", toml_edit::value(program.clone())),
+                None => t.remove("program"),
+            };
+        }),
         SettingsPatch::NotifyOsc9(_) => patch_section(doc, "notifications", |t| {
             t.insert(
                 "osc9_enabled",

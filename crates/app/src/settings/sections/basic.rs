@@ -3,8 +3,11 @@
 use gpui::{AnyElement, IntoElement, ParentElement as _};
 
 use crate::settings::presentation::{card, page_stack};
-use crate::settings::{BoolSetting as B, SelectSetting as S, SettingsView, TextSetting as T};
+use crate::settings::{
+    BoolSetting as B, SelectSetting as S, SettingsEvent, SettingsView, TextSetting as T,
+};
 use crate::surface::strings as s;
+use daruda_config::BuiltinSection;
 
 impl SettingsView {
     pub(in crate::settings) fn render_general(&self, cx: &mut gpui::Context<Self>) -> AnyElement {
@@ -89,12 +92,35 @@ impl SettingsView {
 
     pub(in crate::settings) fn render_terminal(&self, cx: &mut gpui::Context<Self>) -> AnyElement {
         page_stack()
-            .child(card(s::settings_card_shell(), cx).child(self.switch_row(
-                B::ShellClosePaneOnExit,
-                s::settings_label_close_on_exit(),
-                String::new(),
-                cx,
-            )))
+            .child(
+                card(s::settings_card_shell(), cx)
+                    .child(self.text_row_wide(
+                        T::ShellProgram,
+                        s::settings_label_shell_program(),
+                        s::settings_hint_shell_program(),
+                        cx,
+                    ))
+                    .child(self.switch_row(
+                        B::ShellNaturalTextEditing,
+                        s::settings_label_natural_text_editing(),
+                        s::settings_hint_natural_text_editing(),
+                        cx,
+                    ))
+                    .child(self.switch_row(
+                        B::ShellClosePaneOnExit,
+                        s::settings_label_close_on_exit(),
+                        String::new(),
+                        cx,
+                    ))
+                    .child(self.event_row(
+                        "settings-open-project-config",
+                        s::settings_label_project_shell(),
+                        s::settings_hint_project_shell(),
+                        s::settings_button_open_project_config(),
+                        || SettingsEvent::OpenProjectConfig,
+                        cx,
+                    )),
+            )
             .child(
                 card(s::settings_group_rendering(), cx)
                     .child(self.text_row(
@@ -131,12 +157,16 @@ impl SettingsView {
                 s::settings_hint_cursor_style(),
                 cx,
             )))
-            .child(card(s::settings_card_clipboard(), cx).child(self.text_row(
-                T::ClipboardStreamingMaxBytes,
-                s::settings_label_clipboard_streaming(),
-                String::new(),
+            .child(self.advanced_card(
+                BuiltinSection::Terminal,
+                vec![self.text_row(
+                    T::ClipboardStreamingMaxBytes,
+                    s::settings_label_clipboard_streaming(),
+                    s::settings_hint_clipboard_streaming(),
+                    cx,
+                )],
                 cx,
-            )))
+            ))
             .into_any_element()
     }
 

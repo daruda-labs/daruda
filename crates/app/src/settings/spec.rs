@@ -243,6 +243,21 @@ pub(super) const TEXT_SETTINGS: &[TextSpec] = &[
         },
     },
     TextSpec {
+        setting: TextSetting::ShellProgram,
+        section: BuiltinSection::Terminal,
+        placeholder: s::settings_placeholder_shell_program,
+        field: |w| &w.shell_program_input,
+        show: |c| c.shell.program.clone().unwrap_or_default(),
+        current: |c| SettingsPatch::ShellProgram(c.shell.program.clone()),
+        // An empty field means "no override": the login shell.
+        parse: |input, cx| {
+            let value = input.read(cx).value().trim().to_string();
+            Ok(SettingsPatch::ShellProgram(
+                (!value.is_empty()).then_some(value),
+            ))
+        },
+    },
+    TextSpec {
         setting: TextSetting::NotifyLongRunningThresholdSecs,
         section: BuiltinSection::Notifications,
         placeholder: || s::settings_placeholder_example("30"),
@@ -478,6 +493,13 @@ pub(super) const BOOL_SETTINGS: &[BoolSpec] = &[
         show: |c| c.left_dock.files_use_gitignore,
     },
     BoolSpec {
+        setting: BoolSetting::ShellNaturalTextEditing,
+        get: |w| w.shell_natural_text_editing,
+        set: |w, v| w.shell_natural_text_editing = v,
+        patch: SettingsPatch::ShellNaturalTextEditing,
+        show: |c| c.shell.natural_text_editing,
+    },
+    BoolSpec {
         setting: BoolSetting::NotifyOsc9,
         get: |w| w.notify_osc9,
         set: |w, v| w.notify_osc9 = v,
@@ -620,8 +642,11 @@ mod tests {
                 "{:?} placeholder fell through to its key: {text}",
                 row.setting
             );
+            // A numeric field shows a sample number; a free-text one (a shell
+            // path) has no sample value to lose.
+            let numeric = (row.show)(&Config::default()).parse::<f64>().is_ok();
             assert!(
-                text.chars().any(|c| c.is_ascii_digit()),
+                !numeric || text.chars().any(|c| c.is_ascii_digit()),
                 "{:?} placeholder lost its sample value: {text}",
                 row.setting
             );
@@ -727,6 +752,8 @@ mod tests {
             | SettingsPatch::TerminalInsetY(_)
             | SettingsPatch::FilesShowHidden(_)
             | SettingsPatch::FilesUseGitignore(_)
+            | SettingsPatch::ShellNaturalTextEditing(_)
+            | SettingsPatch::ShellProgram(_)
             | SettingsPatch::NotifyOsc9(_)
             | SettingsPatch::NotifyOsc777(_)
             | SettingsPatch::NotifyAttention(_)

@@ -5,6 +5,7 @@ use gpui::{BorrowAppContext, Entity, TestAppContext, WindowHandle};
 mod confirmation;
 mod failure_reporting;
 mod scrollbar;
+mod terminal_page;
 
 use crate::test_support::init_gpui_component;
 use crate::transcript::display_filter::FilterFacet;

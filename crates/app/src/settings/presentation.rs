@@ -113,6 +113,44 @@ impl SettingsView {
         )
     }
 
+    /// [`Self::text_row`] for free text (a path, a command) rather than a
+    /// number: the input takes the full control column.
+    pub(super) fn text_row_wide(
+        &self,
+        setting: TextSetting,
+        label: String,
+        description: String,
+        cx: &App,
+    ) -> Div {
+        let input = (spec::text_spec(setting).field)(self);
+        row(
+            label,
+            description,
+            div().w_full().child(crate::ui::input(input, cx, 0)),
+            cx,
+        )
+    }
+
+    /// A row whose button asks the host for something through `event`.
+    pub(super) fn event_row(
+        &self,
+        id: &'static str,
+        label: String,
+        description: String,
+        button_label: String,
+        event: fn() -> super::SettingsEvent,
+        cx: &gpui::Context<Self>,
+    ) -> Div {
+        row(
+            label,
+            description,
+            super::settings_button(id, button_label)
+                .tab_stop(true)
+                .on_click(cx.listener(move |_, _, _, cx| cx.emit(event()))),
+            cx,
+        )
+    }
+
     pub(super) fn select_row(
         &self,
         setting: SelectSetting,
@@ -206,6 +244,72 @@ impl SettingsView {
                 ),
             cx,
         )
+    }
+
+    /// The low-traffic rows of `section`, folded behind one header. Closed
+    /// until the user opens it; the open set lives for the Settings session.
+    pub(super) fn advanced_card(
+        &self,
+        section: daruda_config::BuiltinSection,
+        rows: Vec<Div>,
+        cx: &gpui::Context<Self>,
+    ) -> Div {
+        let t = theme::current(cx);
+        let open = self.advanced_open.contains(&section);
+        let count = rows.len();
+        let chevron = if open {
+            crate::ui::icons::EXPAND_MORE
+        } else {
+            crate::ui::icons::CHEVRON_RIGHT
+        };
+        let header = div()
+            .id(gpui::ElementId::Name(
+                format!("settings-advanced-{}", section.slug()).into(),
+            ))
+            .flex()
+            .flex_row()
+            .items_center()
+            .gap(px(theme::PAD_SM))
+            .px(px(theme::SETTINGS_CARD_PAD))
+            .py(px(theme::PAD_XL))
+            .bg(t.button_widget_bg)
+            .rounded(px(theme::RADIUS_SM))
+            .cursor_pointer()
+            .text_size(px(theme::MODAL_BODY_FONT_SIZE))
+            .font_weight(gpui::FontWeight::MEDIUM)
+            .text_color(t.text_primary)
+            .child(crate::ui::icons::icon(chevron))
+            .child(s::settings_card_advanced())
+            .child(
+                div()
+                    .ml_auto()
+                    .text_size(px(theme::TAB_FONT_SIZE))
+                    .font_weight(gpui::FontWeight::NORMAL)
+                    .text_color(t.text_muted)
+                    .child(s::settings_advanced_count(count)),
+            )
+            .on_click(cx.listener(move |this, _, _, cx| this.toggle_advanced(section, cx)));
+        div()
+            .flex()
+            .flex_col()
+            .min_w_0()
+            .border_1()
+            .border_color(t.border)
+            .rounded(px(theme::RADIUS_SM))
+            .bg(t.dock_bg)
+            .child(header)
+            .when(open, |el| el.children(rows))
+    }
+
+    pub(super) fn toggle_advanced(
+        &mut self,
+        section: daruda_config::BuiltinSection,
+        cx: &mut gpui::Context<Self>,
+    ) {
+        if !self.advanced_open.remove(&section) {
+            self.advanced_open.insert(section);
+        }
+        cx.notify();
     }
 
     pub(super) fn set_bool_setting(

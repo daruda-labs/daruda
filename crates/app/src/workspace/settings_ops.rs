@@ -11,7 +11,7 @@ use daruda_config::BuiltinSection;
 use gpui::{AppContext as _, Context, Entity, Subscription, Window};
 
 use crate::settings::{LoginRequest, SettingsEvent, SettingsView};
-use crate::workspace::Workspace;
+use crate::workspace::{OpenProjectConfig, Workspace};
 
 /// The Settings view a window is showing, with the subscription carrying its
 /// close request back. Both are built and dropped together, so they are one
@@ -40,6 +40,9 @@ impl Workspace {
                         SettingsEvent::Close => this.close_settings(window, cx),
                         SettingsEvent::Login(request) => {
                             this.run_settings_login(request, window, cx)
+                        }
+                        SettingsEvent::OpenProjectConfig => {
+                            this.on_open_project_config(&OpenProjectConfig, window, cx)
                         }
                     },
                 );

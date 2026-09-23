@@ -4582,6 +4582,54 @@ pub fn settings_card_daruda() -> String {
     rust_i18n::t!("settings.card_daruda").into_owned()
 }
 
+pub fn settings_placeholder_shell_program() -> String {
+    rust_i18n::t!("settings.placeholder_shell_program").into_owned()
+}
+
+pub fn settings_label_shell_program() -> String {
+    rust_i18n::t!("settings.label_shell_program").into_owned()
+}
+
+pub fn settings_hint_shell_program() -> String {
+    rust_i18n::t!("settings.hint_shell_program").into_owned()
+}
+
+pub fn settings_label_natural_text_editing() -> String {
+    rust_i18n::t!("settings.label_natural_text_editing").into_owned()
+}
+
+pub fn settings_hint_natural_text_editing() -> String {
+    rust_i18n::t!("settings.hint_natural_text_editing").into_owned()
+}
+
+pub fn settings_label_project_shell() -> String {
+    rust_i18n::t!("settings.label_project_shell").into_owned()
+}
+
+pub fn settings_hint_project_shell() -> String {
+    rust_i18n::t!("settings.hint_project_shell").into_owned()
+}
+
+pub fn settings_button_open_project_config() -> String {
+    rust_i18n::t!("settings.button_open_project_config").into_owned()
+}
+
+pub fn settings_card_advanced() -> String {
+    rust_i18n::t!("settings.card_advanced").into_owned()
+}
+
+pub fn settings_advanced_count(count: usize) -> String {
+    if count == 1 {
+        rust_i18n::t!("settings.advanced_count_one").into_owned()
+    } else {
+        rust_i18n::t!("settings.advanced_count", count = count).into_owned()
+    }
+}
+
+pub fn settings_hint_clipboard_streaming() -> String {
+    rust_i18n::t!("settings.hint_clipboard_streaming").into_owned()
+}
+
 pub fn settings_nav_general() -> String {
     rust_i18n::t!("settings.nav_general").into_owned()
 }

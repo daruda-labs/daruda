@@ -87,6 +87,9 @@ pub enum SettingsEvent {
     /// the resulting credentials are for, and it owns the process handle and
     /// the Cancel that goes with it.
     Login(LoginRequest),
+    /// Open the active project's config file, where `[shell]` can be
+    /// overridden per project.
+    OpenProjectConfig,
 }
 
 /// Which login an account row asked for.
@@ -194,6 +197,10 @@ pub struct SettingsView {
     // Sidebar
     files_show_hidden: bool,
     files_use_gitignore: bool,
+    shell_program_input: Entity<InputState>,
+    /// Settings pages whose Advanced card the user has opened this session.
+    advanced_open: std::collections::HashSet<BuiltinSection>,
+    shell_natural_text_editing: bool,
     notify_osc9: bool,
     notify_osc777: bool,
     notify_attention: bool,
@@ -349,6 +356,7 @@ enum TextSetting {
     TerminalInsetY,
     ClipboardStreamingMaxBytes,
     PanelsGridColumns,
+    ShellProgram,
     NotifyLongRunningThresholdSecs,
 }
 
@@ -377,6 +385,7 @@ pub(super) enum BoolSetting {
     FilesShowHidden,
     FilesUseGitignore,
     ClaudeStatusEnabled,
+    ShellNaturalTextEditing,
     NotifyOsc9,
     NotifyOsc777,
     NotifyAttention,
@@ -398,7 +407,7 @@ pub(super) enum BoolSetting {
 // click of the new widget.
 impl TextSetting {
     #[cfg(test)]
-    const ALL: [Self; 14] = [
+    const ALL: [Self; 15] = [
         Self::TerminalFontSize,
         Self::TerminalLineHeight,
         Self::TerminalCellWidth,
@@ -412,6 +421,7 @@ impl TextSetting {
         Self::TerminalInsetY,
         Self::ClipboardStreamingMaxBytes,
         Self::PanelsGridColumns,
+        Self::ShellProgram,
         Self::NotifyLongRunningThresholdSecs,
     ];
 
@@ -433,6 +443,7 @@ impl TextSetting {
             Self::TerminalInsetY => (),
             Self::ClipboardStreamingMaxBytes => (),
             Self::PanelsGridColumns => (),
+            Self::ShellProgram => (),
             Self::NotifyLongRunningThresholdSecs => (),
         }
     }
@@ -478,13 +489,14 @@ impl SelectSetting {
 
 impl BoolSetting {
     #[cfg(test)]
-    const ALL: [Self; 18] = [
+    const ALL: [Self; 19] = [
         Self::AgentUseModifierToSend,
         Self::AgentUseReadingWidth,
         Self::ShellClosePaneOnExit,
         Self::WindowBlur,
         Self::FilesShowHidden,
         Self::FilesUseGitignore,
+        Self::ShellNaturalTextEditing,
         Self::NotifyOsc9,
         Self::NotifyOsc777,
         Self::NotifyAttention,
@@ -510,6 +522,7 @@ impl BoolSetting {
             Self::WindowBlur => (),
             Self::FilesShowHidden => (),
             Self::FilesUseGitignore => (),
+            Self::ShellNaturalTextEditing => (),
             Self::NotifyOsc9 => (),
             Self::NotifyOsc777 => (),
             Self::NotifyAttention => (),
@@ -1539,6 +1552,14 @@ impl SettingsView {
             &mut input_subscriptions,
             &mut section_focus_targets,
         );
+        let shell_program_input = Self::new_text_field(
+            TextSetting::ShellProgram,
+            &config,
+            window,
+            cx,
+            &mut input_subscriptions,
+            &mut section_focus_targets,
+        );
         let notify_long_running_threshold_input = Self::new_text_field(
             TextSetting::NotifyLongRunningThresholdSecs,
             &config,
@@ -1852,6 +1873,9 @@ impl SettingsView {
             inset_y_input,
             files_show_hidden: config.left_dock.files_show_hidden,
             files_use_gitignore: config.left_dock.files_use_gitignore,
+            shell_program_input,
+            advanced_open: Default::default(),
+            shell_natural_text_editing: config.shell.natural_text_editing,
             notify_osc9: config.notifications.osc9_enabled,
             notify_osc777: config.notifications.osc777_enabled,
             notify_attention: config.notifications.attention_enabled,

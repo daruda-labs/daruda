@@ -32,6 +32,8 @@ pub enum SettingsFieldId {
     TerminalInsetY,
     FilesShowHidden,
     FilesUseGitignore,
+    ShellNaturalTextEditing,
+    ShellProgram,
     NotifyOsc9,
     NotifyOsc777,
     NotifyAttention,
@@ -86,6 +88,8 @@ impl SettingsFieldId {
             Self::TerminalInsetY => "font.terminal.inset_y",
             Self::FilesShowHidden => "left_dock.files_show_hidden",
             Self::FilesUseGitignore => "left_dock.files_use_gitignore",
+            Self::ShellNaturalTextEditing => "shell.natural_text_editing",
+            Self::ShellProgram => "shell.program",
             Self::NotifyOsc9 => "notifications.osc9_enabled",
             Self::NotifyOsc777 => "notifications.osc777_enabled",
             Self::NotifyAttention => "notifications.attention_enabled",
@@ -146,6 +150,8 @@ pub enum SettingsPatch {
     TerminalInsetY(f32),
     FilesShowHidden(bool),
     FilesUseGitignore(bool),
+    ShellNaturalTextEditing(bool),
+    ShellProgram(Option<String>),
     NotifyOsc9(bool),
     NotifyOsc777(bool),
     NotifyAttention(bool),
@@ -203,6 +209,8 @@ impl SettingsPatch {
             Self::TerminalInsetY(_) => SettingsFieldId::TerminalInsetY,
             Self::FilesShowHidden(_) => SettingsFieldId::FilesShowHidden,
             Self::FilesUseGitignore(_) => SettingsFieldId::FilesUseGitignore,
+            Self::ShellNaturalTextEditing(_) => SettingsFieldId::ShellNaturalTextEditing,
+            Self::ShellProgram(_) => SettingsFieldId::ShellProgram,
             Self::NotifyOsc9(_) => SettingsFieldId::NotifyOsc9,
             Self::NotifyOsc777(_) => SettingsFieldId::NotifyOsc777,
             Self::NotifyAttention(_) => SettingsFieldId::NotifyAttention,
@@ -267,6 +275,8 @@ impl SettingsPatch {
             Self::TerminalInsetY(value) => config.font.terminal.inset_y = *value,
             Self::FilesShowHidden(value) => config.left_dock.files_show_hidden = *value,
             Self::FilesUseGitignore(value) => config.left_dock.files_use_gitignore = *value,
+            Self::ShellNaturalTextEditing(value) => config.shell.natural_text_editing = *value,
+            Self::ShellProgram(value) => config.shell.program = value.clone(),
             Self::NotifyOsc9(value) => config.notifications.osc9_enabled = *value,
             Self::NotifyOsc777(value) => config.notifications.osc777_enabled = *value,
             Self::NotifyAttention(value) => config.notifications.attention_enabled = *value,
@@ -352,6 +362,10 @@ impl SettingsPatch {
             Self::FilesUseGitignore(_) => {
                 left.left_dock.files_use_gitignore != right.left_dock.files_use_gitignore
             }
+            Self::ShellNaturalTextEditing(_) => {
+                left.shell.natural_text_editing != right.shell.natural_text_editing
+            }
+            Self::ShellProgram(_) => left.shell.program != right.shell.program,
             Self::NotifyOsc9(_) => {
                 left.notifications.osc9_enabled != right.notifications.osc9_enabled
             }
