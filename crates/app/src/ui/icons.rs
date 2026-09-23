@@ -6,6 +6,18 @@ use gpui_component::{Icon, Sizable as _};
 use super::theme;
 
 pub const SETTINGS: &str = "icons/ui/settings.svg";
+pub const TERMINAL: &str = "icons/ui/terminal.svg";
+pub const TEXT_FIELDS: &str = "icons/ui/text-fields.svg";
+pub const CURSOR: &str = "icons/ui/cursor.svg";
+pub const KEYBOARD: &str = "icons/ui/keyboard.svg";
+pub const DNS: &str = "icons/ui/dns.svg";
+pub const PERSON: &str = "icons/ui/person.svg";
+pub const NOTIFICATIONS: &str = "icons/ui/notifications.svg";
+pub const EXTENSION: &str = "icons/ui/extension.svg";
+pub const INFO: &str = "icons/ui/info.svg";
+pub const AGENT: &str = "icons/bot.svg";
+pub const CODE: &str = "icons/ui/code.svg";
+pub const DOCK: &str = "icons/ui/dock-to-left.svg";
 pub const CLOSE: &str = "icons/ui/close.svg";
 pub const DELETE: &str = "icons/ui/delete.svg";
 pub const EDIT: &str = "icons/ui/edit.svg";

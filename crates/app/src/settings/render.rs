@@ -6,12 +6,12 @@ use gpui::{
     AnyElement, ClickEvent, Context, IntoElement, KeyDownEvent, Render, Window, div, prelude::*, px,
 };
 
-use super::{SettingsView, settings_button as button};
+use super::{SettingsView, navigation, settings_button as button};
 use crate::surface::strings as s;
 
 impl Render for SettingsView {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let panel_bg = theme::current(cx).modal_panel_bg;
+        let panel_bg = theme::current(cx).welcome_bg;
 
         let body = self.render_section_body(cx);
         let sidebar = self.render_sidebar_nav(cx);
@@ -19,7 +19,34 @@ impl Render for SettingsView {
         // Both, not one or the other: a conflict is a standing question about a
         // field, an error is the report on the action just taken. Rendering the
         // conflict *instead of* the error silently dropped the second.
-        let mut body_with_error = div().flex().flex_col();
+        let mut body_with_error = div()
+            .flex()
+            .flex_col()
+            .min_w_0()
+            .w_full()
+            .when(!navigation::is_catalog(self.active_section), |el| {
+                el.max_w(px(theme::SETTINGS_CONTENT_MAX_W))
+            })
+            .child(
+                div()
+                    .flex()
+                    .flex_col()
+                    .gap(px(theme::PAD_SM))
+                    .mb(px(theme::SETTINGS_GROUP_GAP))
+                    .child(
+                        div()
+                            .text_size(px(theme::MODAL_TITLE_FONT_SIZE))
+                            .font_weight(gpui::FontWeight::SEMIBOLD)
+                            .text_color(theme::current(cx).text_primary)
+                            .child(navigation::label(self.active_section)),
+                    )
+                    .child(
+                        div()
+                            .text_size(px(theme::MODAL_BODY_FONT_SIZE))
+                            .text_color(theme::current(cx).text_muted)
+                            .child(navigation::description(self.active_section)),
+                    ),
+            );
         if let Some(err) = self.error.as_ref() {
             body_with_error = body_with_error.child(
                 div()
@@ -109,6 +136,7 @@ impl Render for SettingsView {
                     .child(
                         div()
                             .flex_1()
+                            .min_w_0()
                             .relative()
                             .overflow_hidden()
                             .child(
@@ -121,12 +149,13 @@ impl Render for SettingsView {
                                     .bottom_0()
                                     .overflow_y_scroll()
                                     .track_scroll(&self.scroll_handle)
-                                    .px(px(theme::MODAL_PANEL_PAD))
-                                    .pt(px(theme::MODAL_PANEL_PAD))
-                                    .pb(px(theme::MODAL_FOOTER_GAP))
+                                    .p(px(theme::SETTINGS_CONTENT_PAD))
                                     .child(body_with_error),
                             )
-                            .children(settings_scrollbar(&self.scroll_handle, cx)),
+                            .child(settings_scrollbar(
+                                "settings-scrollbar",
+                                &self.scroll_handle,
+                            )),
                     ),
             )
     }
@@ -167,13 +196,12 @@ impl SettingsView {
             .flex()
             .flex_col()
             .py(px(theme::SETTINGS_SIDEBAR_PAD_Y));
-        for group in SidebarGroup::ALL {
-            let matching = BuiltinSection::ALL
+        for (sections, group_label) in navigation::GROUPS {
+            let matching = sections
                 .iter()
                 .copied()
-                .filter(|section| sidebar_group(*section) == group)
                 .filter_map(|section| {
-                    let label = section_nav_label(section);
+                    let label = navigation::label(section);
                     let matches = query.is_empty()
                         || label.to_lowercase().contains(&query)
                         || section.slug().contains(&query);
@@ -190,7 +218,7 @@ impl SettingsView {
                     .pb(px(theme::MODAL_FOOTER_GAP))
                     .text_size(px(theme::TAB_FONT_SIZE))
                     .text_color(theme::current(cx).text_muted)
-                    .child(sidebar_group_label(group)),
+                    .child(group_label()),
             );
             for (section, label) in matching {
                 let is_active = section == active;
@@ -204,6 +232,8 @@ impl SettingsView {
             .w(px(theme::SETTINGS_SIDEBAR_W))
             .h_full()
             .bg(sidebar_bg)
+            .border_r_1()
+            .border_color(theme::current(cx).border)
             .flex()
             .flex_col()
             // Back sits above the search field rather than in the title bar:
@@ -215,17 +245,23 @@ impl SettingsView {
                     .px(px(theme::SETTINGS_SIDEBAR_ROW_PAD_X))
                     .pt(px(theme::SETTINGS_SIDEBAR_PAD_Y))
                     .flex()
-                    .flex_row()
-                    .items_center()
-                    .gap(px(theme::MODAL_FOOTER_GAP))
+                    .flex_col()
+                    .gap(px(theme::MODAL_PANEL_GAP))
+                    .pb(px(theme::MODAL_PANEL_GAP))
                     .child(
-                        crate::ui::button_icon("settings-back", crate::ui::icons::BACK, cx)
-                            .tooltip(s::settings_back())
-                            .on_click(cx.listener(|this, _: &ClickEvent, window, cx| {
+                        crate::ui::button_with_icon(
+                            "settings-back",
+                            s::settings_back(),
+                            crate::ui::icons::BACK,
+                        )
+                        .tab_stop(true)
+                        .on_click(cx.listener(
+                            |this, _: &ClickEvent, window, cx| {
                                 this.dismiss(window, cx);
-                            })),
+                            },
+                        )),
                     )
-                    .child(div().flex_1().child(crate::ui::input(
+                    .child(div().w_full().child(crate::ui::input(
                         &self.sidebar_search_input,
                         cx,
                         0,
@@ -233,10 +269,27 @@ impl SettingsView {
             )
             .child(
                 div()
-                    .id("settings-sidebar-scroll")
                     .flex_1()
-                    .overflow_y_scroll()
-                    .child(list),
+                    .min_h_0()
+                    .relative()
+                    .overflow_hidden()
+                    .child(
+                        div()
+                            .id("settings-sidebar-scroll")
+                            .absolute()
+                            .top_0()
+                            .left_0()
+                            .right_0()
+                            .bottom_0()
+                            .pr(px(theme::SCROLL_AREA_GUTTER))
+                            .overflow_y_scroll()
+                            .track_scroll(&self.sidebar_scroll_handle)
+                            .child(list),
+                    )
+                    .child(settings_scrollbar(
+                        "settings-sidebar-scrollbar",
+                        &self.sidebar_scroll_handle,
+                    )),
             )
             .into_any_element()
     }
@@ -267,9 +320,18 @@ impl SettingsView {
             .items_center()
             .px(px(theme::SETTINGS_SIDEBAR_ROW_PAD_X))
             .py(px(theme::SETTINGS_SIDEBAR_ROW_PAD_Y))
+            .gap(px(theme::PAD_STANDARD))
+            .border_l(px(theme::SETTINGS_ACTIVE_BORDER))
+            .border_color(if is_active {
+                theme::ACCENT
+            } else {
+                theme::with_alpha(row_text, 0.)
+            })
             .text_size(px(theme::MODAL_BODY_FONT_SIZE))
             .text_color(row_text)
             .cursor_pointer()
+            .focus_visible(|style| style.border_color(theme::ACCENT))
+            .child(crate::ui::icons::icon(navigation::icon(section)))
             .child(label.into())
             .on_key_down(cx.listener(move |this, event: &KeyDownEvent, window, cx| {
                 if matches!(event.keystroke.key.as_str(), "enter" | "space") {
@@ -289,94 +351,18 @@ impl SettingsView {
     }
 }
 
-fn section_nav_label(section: BuiltinSection) -> String {
-    match section {
-        BuiltinSection::General => s::settings_nav_general(),
-        BuiltinSection::Font => s::settings_nav_font(),
-        BuiltinSection::Cursor => s::settings_nav_cursor(),
-        BuiltinSection::Shell => s::settings_nav_shell(),
-        BuiltinSection::Window => s::settings_nav_window(),
-        BuiltinSection::Terminal => s::settings_nav_terminal(),
-        BuiltinSection::Dock => s::settings_nav_dock(),
-        BuiltinSection::Clipboard => s::settings_nav_clipboard(),
-        BuiltinSection::ExternalEditor => s::settings_nav_external_editor(),
-        BuiltinSection::Agent => s::settings_nav_agent(),
-        BuiltinSection::SessionHosts => s::settings_nav_session_hosts(),
-        BuiltinSection::Accounts => s::settings_nav_accounts(),
-        BuiltinSection::Notifications => s::settings_nav_notifications(),
-        BuiltinSection::Keymap => s::settings_nav_keymap(),
-        BuiltinSection::Plugin => s::settings_nav_plugin(),
-        BuiltinSection::About => s::settings_nav_about(),
-    }
-}
-
-#[derive(Clone, Copy, PartialEq, Eq)]
-enum SidebarGroup {
-    General,
-    Appearance,
-    Terminal,
-    Workspace,
-    Agents,
-    Integrations,
-    System,
-}
-
-impl SidebarGroup {
-    const ALL: [Self; 7] = [
-        Self::General,
-        Self::Appearance,
-        Self::Terminal,
-        Self::Workspace,
-        Self::Agents,
-        Self::Integrations,
-        Self::System,
-    ];
-}
-
-fn sidebar_group(section: BuiltinSection) -> SidebarGroup {
-    match section {
-        BuiltinSection::General => SidebarGroup::General,
-        BuiltinSection::Font | BuiltinSection::Cursor | BuiltinSection::Window => {
-            SidebarGroup::Appearance
-        }
-        BuiltinSection::Shell | BuiltinSection::Terminal => SidebarGroup::Terminal,
-        BuiltinSection::Dock | BuiltinSection::Clipboard | BuiltinSection::ExternalEditor => {
-            SidebarGroup::Workspace
-        }
-        BuiltinSection::Agent | BuiltinSection::SessionHosts | BuiltinSection::Accounts => {
-            SidebarGroup::Agents
-        }
-        BuiltinSection::Notifications | BuiltinSection::Plugin => SidebarGroup::Integrations,
-        BuiltinSection::Keymap | BuiltinSection::About => SidebarGroup::System,
-    }
-}
-
-fn sidebar_group_label(group: SidebarGroup) -> String {
-    match group {
-        SidebarGroup::General => s::settings_group_general(),
-        SidebarGroup::Appearance => s::settings_group_appearance(),
-        SidebarGroup::Terminal => s::settings_group_terminal(),
-        SidebarGroup::Workspace => s::settings_group_workspace(),
-        SidebarGroup::Agents => s::settings_group_agents(),
-        SidebarGroup::Integrations => s::settings_group_integrations(),
-        SidebarGroup::System => s::settings_group_system(),
-    }
-}
-
-fn settings_scrollbar(
-    scroll_handle: &gpui::ScrollHandle,
-    cx: &gpui::App,
-) -> Option<crate::ui::scrollbar::Thumb> {
-    let viewport_h = scroll_handle.bounds().size.height;
-    let max_offset = scroll_handle.max_offset().y;
-    let t = theme::current(cx);
-    crate::ui::scrollbar::vertical_thumb(
-        "settings-scrollbar-thumb",
-        viewport_h,
-        viewport_h + max_offset,
-        scroll_handle.offset().y,
-        px(0.),
-        t.scrollbar_thumb,
-        t.settings_scrollbar_thumb_hover,
-    )
+fn settings_scrollbar(id: &'static str, scroll_handle: &gpui::ScrollHandle) -> impl IntoElement {
+    // Prepaint reads the current content bounds, including page switches and
+    // resize. The inset layer pins the track over its own scroll viewport.
+    div()
+        .absolute()
+        .top_0()
+        .left_0()
+        .right_0()
+        .bottom_0()
+        .child(
+            crate::ui::scrollbar::Scrollbar::vertical(scroll_handle)
+                .id(id)
+                .scrollbar_show(crate::ui::scrollbar::ScrollbarShow::Always),
+        )
 }

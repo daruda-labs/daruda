@@ -12,6 +12,8 @@
 //! dismissed by emitting [`SettingsEvent::Close`] rather than acting on the
 //! window itself.
 
+mod navigation;
+mod presentation;
 mod render;
 mod sections;
 mod spec;
@@ -119,7 +121,7 @@ pub struct SettingsView {
     // ---- form fields ----
     // General page.
     language_select: Entity<SelectState>,
-    // Theme (rendered inside the General page).
+    // Theme (rendered inside Appearance & Window).
     // `terminal_preset_select` controls the cell palette (16-color
     // ANSI + fg/bg); `ui_preset_select` controls the chrome palette
     // (workspace, sidebar, modal, status bar). The two axes are
@@ -233,6 +235,7 @@ pub struct SettingsView {
     /// The same, for the BotFather `/setcommands` block.
     telegram_botfather_copy: CopyFeedback,
     scroll_handle: gpui::ScrollHandle,
+    sidebar_scroll_handle: gpui::ScrollHandle,
     _input_subscriptions: Vec<Subscription>,
     error: Option<SharedString>,
     conflict: Option<daruda_config::SettingsPatch>,
@@ -1762,7 +1765,7 @@ impl SettingsView {
                 },
             );
 
-        let result = Self {
+        Self {
             panel_focus_handle: cx.focus_handle(),
             base_config: config.clone(),
             active_section: active,
@@ -1819,6 +1822,7 @@ impl SettingsView {
             telegram_pair_command_copy: CopyFeedback::default(),
             telegram_botfather_copy: CopyFeedback::default(),
             scroll_handle: gpui::ScrollHandle::new(),
+            sidebar_scroll_handle: gpui::ScrollHandle::new(),
             _input_subscriptions: input_subscriptions,
             error: None,
             conflict: None,
@@ -1843,16 +1847,7 @@ impl SettingsView {
             _accounts_global_subscription,
             _auth_status_subscription,
             _updater_subscription,
-        };
-        // The scroll handle is populated during prepaint, which runs after render.
-        // Schedule a re-render so the scrollbar thumb appears on first display
-        // without requiring an initial scroll event.
-        cx.spawn(async move |this, cx| {
-            this.update(cx, |_, cx| cx.notify()).ok();
-        })
-        .detach();
-
-        result
+        }
     }
 
     /// Switch the active page and (when applicable) land focus on the
@@ -2435,7 +2430,7 @@ impl SettingsView {
         self.apply_settings_patch(patch, cx);
     }
 
-    /// One checkbox's new state, persisted. Returns whether the write landed —
+    /// One switch's new state, persisted. Returns whether the write landed —
     /// the caller mirrors the value onto its own field only then.
     pub(super) fn persist_bool_setting(
         &mut self,
@@ -2736,8 +2731,9 @@ impl SettingsView {
         cx: &gpui::App,
     ) -> impl IntoElement {
         div()
-            .text_size(px(theme::LANE_SECTION_HEADER_FONT_SIZE))
-            .text_color(theme::current(cx).text_muted)
+            .text_size(px(theme::MODAL_BODY_FONT_SIZE))
+            .font_weight(gpui::FontWeight::MEDIUM)
+            .text_color(theme::current(cx).text_primary)
             .mt(px(theme::MODAL_FOOTER_MARGIN_TOP))
             .child(label.into())
     }

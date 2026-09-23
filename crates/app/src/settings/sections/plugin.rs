@@ -171,11 +171,7 @@ impl SettingsView {
         let groups = group_plugins_for_settings(&plugin_skills);
         let in_flight = self.plugin_ops_in_flight.clone();
 
-        let header_col = div()
-            .flex()
-            .flex_col()
-            .gap(px(theme::MODAL_PANEL_GAP))
-            .child(Self::section_label(s::settings_section_plugin(), cx));
+        let header_col = div().flex().flex_col().gap(px(theme::SETTINGS_GROUP_GAP));
         let master = self.plugin_master_pane(&groups, cx);
         let detail = self.plugin_detail_pane(
             &groups,
@@ -188,6 +184,7 @@ impl SettingsView {
         let split = div()
             .flex()
             .flex_row()
+            .flex_wrap()
             .gap(px(theme::MODAL_PANEL_GAP))
             .child(
                 div()

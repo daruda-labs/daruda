@@ -112,7 +112,8 @@ fn row_card(cx: &gpui::App) -> gpui::Div {
         .flex()
         .flex_col()
         .gap(px(theme::MODAL_PANEL_GAP))
-        .p(px(theme::MODAL_PANEL_GAP))
+        .p(px(theme::SETTINGS_CARD_PAD))
+        .bg(theme::current(cx).dock_bg)
         .border_1()
         .border_color(theme::current(cx).border)
         .rounded(px(theme::RADIUS_MD))
@@ -172,11 +173,7 @@ fn persist_accounts(mutate: &mut dyn FnMut(&mut AccountsState)) -> std::io::Resu
 
 impl SettingsView {
     pub(in crate::settings) fn render_accounts(&self, cx: &mut gpui::Context<Self>) -> AnyElement {
-        let mut body = div()
-            .flex()
-            .flex_col()
-            .gap(px(theme::MODAL_PANEL_GAP))
-            .child(Self::section_label(s::settings_section_accounts(), cx));
+        let mut body = div().flex().flex_col().gap(px(theme::SETTINGS_GROUP_GAP));
 
         for recipe in AccountRecipeId::all() {
             let default_id = self.accounts.default_by_recipe.get(&recipe).copied();

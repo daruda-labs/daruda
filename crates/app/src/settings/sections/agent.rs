@@ -11,8 +11,8 @@
 //! dispatch here, mirroring the [`super::plugin`] submodule.
 
 use crate::surface::strings as s;
+use crate::ui::field_row;
 use crate::ui::theme;
-use crate::ui::{checkbox, checkbox_row, field_row};
 use daruda_config::PresetLaunchability;
 use gpui::{AnyElement, ClickEvent, IntoElement, SharedString, Window, div, prelude::*, px};
 
@@ -27,56 +27,36 @@ const TRANSPORT_RAW: &str = "raw";
 
 impl SettingsView {
     pub(in crate::settings) fn render_agent(&self, cx: &mut gpui::Context<Self>) -> AnyElement {
-        let description_color = theme::current(cx).text_muted;
-        let use_modifier_to_send = self.agent_use_modifier_to_send;
-        let mut body = div()
-            .flex()
-            .flex_col()
-            .gap(px(theme::MODAL_PANEL_GAP))
-            .child(Self::section_label(s::settings_section_agent(), cx))
-            .child(checkbox_row(
-                checkbox(
-                    "settings-agent-use-modifier-to-send",
-                    s::settings_label_agent_use_modifier_to_send(),
-                    0,
-                )
-                .checked(use_modifier_to_send)
-                .on_click(cx.listener(|this, checked: &bool, _, cx| {
-                    if this.persist_bool_setting(BoolSetting::AgentUseModifierToSend, *checked, cx)
-                    {
-                        this.agent_use_modifier_to_send = *checked;
-                        cx.notify();
-                    }
-                })),
-            ))
+        use crate::settings::presentation::{card, card_content, page_stack};
+        page_stack()
             .child(
-                div()
-                    .text_size(px(theme::MODAL_BODY_FONT_SIZE))
-                    .text_color(description_color)
-                    .child(s::settings_agent_use_modifier_to_send_description()),
-            );
-
-        body = body.child(self.render_agent_catalog(cx));
-
-        let claude_status_enable = self.claude_status_enable;
-        body = body
-            .child(Self::section_label(s::settings_section_claude_status(), cx))
-            .child(checkbox_row(
-                checkbox(
-                    "settings-claude-status-enable",
+                card(s::settings_group_chat(), cx)
+                    .child(self.switch_row(
+                        BoolSetting::AgentUseReadingWidth,
+                        s::settings_label_agent_use_reading_width(),
+                        s::settings_hint_reading_width(),
+                        cx,
+                    ))
+                    .child(self.switch_row(
+                        BoolSetting::AgentUseModifierToSend,
+                        s::settings_label_agent_use_modifier_to_send(),
+                        s::settings_agent_use_modifier_to_send_description(),
+                        cx,
+                    )),
+            )
+            .child(
+                card(s::settings_section_agent_catalog(), cx)
+                    .child(card_content(self.render_agent_catalog(cx))),
+            )
+            .child(
+                card(s::settings_section_claude_status(), cx).child(self.switch_row(
+                    BoolSetting::ClaudeStatusEnabled,
                     s::settings_label_claude_status_enable(),
-                    0,
-                )
-                .checked(claude_status_enable)
-                .on_click(cx.listener(|this, checked: &bool, _, cx| {
-                    if this.persist_bool_setting(BoolSetting::ClaudeStatusEnabled, *checked, cx) {
-                        this.claude_status_enable = *checked;
-                        cx.notify();
-                    }
-                })),
-            ));
-
-        body.into_any_element()
+                    String::new(),
+                    cx,
+                )),
+            )
+            .into_any_element()
     }
 
     /// The `[[agents]]` catalog: preset picker, editable rows, and the entries
@@ -89,7 +69,6 @@ impl SettingsView {
             .flex()
             .flex_col()
             .gap(px(theme::MODAL_PANEL_GAP))
-            .child(Self::section_label(s::settings_section_agent_catalog(), cx))
             .child(
                 div()
                     .text_size(px(theme::MODAL_BODY_FONT_SIZE))
@@ -281,7 +260,7 @@ impl SettingsView {
             .flex()
             .flex_col()
             .gap(px(theme::MODAL_PANEL_GAP))
-            .p(px(theme::MODAL_PANEL_GAP))
+            .p(px(theme::SETTINGS_CARD_PAD))
             .border_1()
             .border_color(t.border)
             .rounded(px(theme::RADIUS_MD))

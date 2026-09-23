@@ -3,6 +3,7 @@ use daruda_config::BuiltinSection;
 use gpui::{BorrowAppContext, Entity, TestAppContext, WindowHandle};
 
 mod failure_reporting;
+mod scrollbar;
 
 use crate::test_support::init_gpui_component;
 use crate::transcript::display_filter::FilterFacet;
@@ -84,8 +85,9 @@ fn boolean_setting_applies_immediately(cx: &mut TestAppContext) {
     let (_wh, win) = build_window(cx);
     win.update(cx, |window, cx| {
         let next = !window.cursor_blinking;
-        assert!(window.persist_bool_setting(BoolSetting::CursorBlinking, next, cx));
-        window.cursor_blinking = next;
+        window.set_bool_setting(BoolSetting::CursorBlinking, next, cx);
+        assert!(window.error.is_none());
+        assert_eq!(window.cursor_blinking, next);
     });
 
     win.read_with(cx, |window, cx| {

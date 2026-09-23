@@ -19,6 +19,29 @@ fn break_settings_persistence(cx: &mut TestAppContext) {
     });
 }
 
+#[gpui::test]
+fn a_switch_keeps_its_visible_state_when_saving_fails(cx: &mut TestAppContext) {
+    let (_wh, win) = build_window(cx);
+    let before = win.read_with(cx, |w, _| w.window_blur);
+    break_settings_persistence(cx);
+
+    win.update(cx, |w, cx| {
+        w.set_bool_setting(BoolSetting::WindowBlur, !before, cx)
+    });
+
+    win.read_with(cx, |w, cx| {
+        assert!(w.error.is_some());
+        assert_eq!(w.window_blur, before);
+        assert_eq!(
+            crate::settings_store::SettingsStore::global(cx)
+                .user()
+                .window
+                .blur,
+            before,
+        );
+    });
+}
+
 /// Fill the token field and let the resulting `InputEvent::Change` land before
 /// returning. Typing and clicking Save are two separate turns for a real user,
 /// and `subscribe_draft_input` clears the banner on every change — folding both

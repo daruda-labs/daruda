@@ -89,6 +89,8 @@ impl Render for ChannelSettings {
         for (index, row) in self.rows.iter().enumerate() {
             let enabled_id = row.config.id.clone();
             let presence_id = row.config.id.clone();
+            let next_enabled = !row.config.enabled;
+            let next_presence = !row.config.only_when_away;
             let pair_id = row.config.id.clone();
             let unpair_id = row.config.id.clone();
             let copy_id = row.config.id.clone();
@@ -121,18 +123,20 @@ impl Render for ChannelSettings {
                         .text_color(theme::current(cx).text_muted)
                         .child(row.config.id.clone()),
                 )
-                .child(ui::checkbox_row(
-                    ui::checkbox(("remote-enabled", index), s::remote_enabled(), 0)
-                        .checked(row.config.enabled)
-                        .on_click(cx.listener(move |this, value: &bool, _, cx| {
-                            this.set_enabled(&enabled_id, *value, cx)
+                .child(ui::field_row(
+                    s::remote_enabled(),
+                    ui::switch(("remote-enabled", index), row.config.enabled, cx)
+                        .tooltip(s::remote_enabled())
+                        .on_click(cx.listener(move |this, _, _, cx| {
+                            this.set_enabled(&enabled_id, next_enabled, cx)
                         })),
                 ))
-                .child(ui::checkbox_row(
-                    ui::checkbox(("remote-presence", index), s::remote_only_when_away(), 0)
-                        .checked(row.config.only_when_away)
-                        .on_click(cx.listener(move |this, value: &bool, _, cx| {
-                            this.set_presence(&presence_id, *value, cx)
+                .child(ui::field_row(
+                    s::remote_only_when_away(),
+                    ui::switch(("remote-presence", index), row.config.only_when_away, cx)
+                        .tooltip(s::remote_only_when_away())
+                        .on_click(cx.listener(move |this, _, _, cx| {
+                            this.set_presence(&presence_id, next_presence, cx)
                         })),
                 ))
                 .child(self.token_row(&row.config.id, index * 2, Secret::Bot, &row.bot, cx));

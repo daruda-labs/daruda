@@ -7,12 +7,12 @@
 
 use daruda_config::Config;
 use daruda_store::accounts::{AccountId, ManagedAccount};
-use gpui::{AnyElement, IntoElement, SharedString, div, prelude::*, px};
+use gpui::{AnyElement, IntoElement, SharedString, prelude::*};
 
+use crate::settings::presentation::{card, row};
 use crate::settings::{BoolSetting, SettingsView};
 use crate::surface::strings as s;
-use crate::ui::theme;
-use crate::ui::{checkbox, checkbox_row, field_row, select};
+use crate::ui::select;
 
 /// The select value standing for "no explicit choice". Empty rather than a
 /// sentinel word, because a select's value is also its option key and any
@@ -97,38 +97,24 @@ impl SettingsView {
     /// Sits beside the Telegram controls because the two are one feature from
     /// the user's side: `/daruda` arrives over the bridge.
     pub(super) fn render_orchestrator(&self, cx: &mut gpui::Context<Self>) -> AnyElement {
-        let t = theme::current(cx);
-        div()
-            .flex()
-            .flex_col()
-            .gap(px(theme::MODAL_PANEL_GAP))
-            .child(
-                div()
-                    .text_size(px(theme::MODAL_BODY_FONT_SIZE))
-                    .text_color(t.text_primary)
-                    .child(s::settings_orchestrator_heading()),
-            )
-            .child(checkbox_row(
-                checkbox(
-                    "settings-orchestrator-enabled",
-                    s::settings_orchestrator_enabled_label(),
-                    0,
-                )
-                .checked(self.orchestrator_enabled)
-                .on_click(cx.listener(|this, checked: &bool, _, cx| {
-                    if this.persist_bool_setting(BoolSetting::OrchestratorEnabled, *checked, cx) {
-                        this.orchestrator_enabled = *checked;
-                        cx.notify();
-                    }
-                })),
+        card(s::settings_orchestrator_heading(), cx)
+            .child(self.switch_row(
+                BoolSetting::OrchestratorEnabled,
+                s::settings_orchestrator_enabled_label(),
+                String::new(),
+                cx,
             ))
-            .child(field_row(
+            .child(row(
                 s::settings_orchestrator_agent_label(),
+                String::new(),
                 select::select(&self.orchestrator_agent_select, cx, 0),
+                cx,
             ))
-            .child(field_row(
+            .child(row(
                 s::settings_orchestrator_account_label(),
+                String::new(),
                 select::select(&self.orchestrator_account_select, cx, 0),
+                cx,
             ))
             .into_any_element()
     }

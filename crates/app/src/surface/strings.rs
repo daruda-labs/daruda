@@ -4053,6 +4053,146 @@ pub const PROJECT_CONFIG_TEMPLATE: &str = "\
 # program = \"/usr/local/bin/zsh\"
 # close_pane_on_exit = true
 ";
+pub fn settings_toggle_on() -> String {
+    rust_i18n::t!("settings.toggle_on").into_owned()
+}
+
+pub fn settings_toggle_off() -> String {
+    rust_i18n::t!("settings.toggle_off").into_owned()
+}
+
+pub fn settings_group_application() -> String {
+    rust_i18n::t!("settings.group_application").into_owned()
+}
+
+pub fn settings_group_themes() -> String {
+    rust_i18n::t!("settings.group_themes").into_owned()
+}
+
+pub fn settings_group_window() -> String {
+    rust_i18n::t!("settings.group_window").into_owned()
+}
+
+pub fn settings_group_language() -> String {
+    rust_i18n::t!("settings.group_language").into_owned()
+}
+
+pub fn settings_group_rendering() -> String {
+    rust_i18n::t!("settings.group_rendering").into_owned()
+}
+
+pub fn settings_group_insets() -> String {
+    rust_i18n::t!("settings.group_insets").into_owned()
+}
+
+pub fn settings_group_chat() -> String {
+    rust_i18n::t!("settings.group_chat").into_owned()
+}
+
+pub fn settings_desc_general() -> String {
+    rust_i18n::t!("settings.desc_general").into_owned()
+}
+
+pub fn settings_desc_window() -> String {
+    rust_i18n::t!("settings.desc_window").into_owned()
+}
+
+pub fn settings_desc_font() -> String {
+    rust_i18n::t!("settings.desc_font").into_owned()
+}
+
+pub fn settings_desc_cursor() -> String {
+    rust_i18n::t!("settings.desc_cursor").into_owned()
+}
+
+pub fn settings_desc_shell() -> String {
+    rust_i18n::t!("settings.desc_shell").into_owned()
+}
+
+pub fn settings_desc_terminal() -> String {
+    rust_i18n::t!("settings.desc_terminal").into_owned()
+}
+
+pub fn settings_desc_dock() -> String {
+    rust_i18n::t!("settings.desc_dock").into_owned()
+}
+
+pub fn settings_desc_clipboard() -> String {
+    rust_i18n::t!("settings.desc_clipboard").into_owned()
+}
+
+pub fn settings_desc_external_editor() -> String {
+    rust_i18n::t!("settings.desc_external_editor").into_owned()
+}
+
+pub fn settings_desc_agent() -> String {
+    rust_i18n::t!("settings.desc_agent").into_owned()
+}
+
+pub fn settings_desc_session_hosts() -> String {
+    rust_i18n::t!("settings.desc_session_hosts").into_owned()
+}
+
+pub fn settings_desc_accounts() -> String {
+    rust_i18n::t!("settings.desc_accounts").into_owned()
+}
+
+pub fn settings_desc_notifications() -> String {
+    rust_i18n::t!("settings.desc_notifications").into_owned()
+}
+
+pub fn settings_desc_keymap() -> String {
+    rust_i18n::t!("settings.desc_keymap").into_owned()
+}
+
+pub fn settings_desc_plugin() -> String {
+    rust_i18n::t!("settings.desc_plugin").into_owned()
+}
+
+pub fn settings_desc_about() -> String {
+    rust_i18n::t!("settings.desc_about").into_owned()
+}
+
+pub fn settings_hint_ui_theme() -> String {
+    rust_i18n::t!("settings.hint_ui_theme").into_owned()
+}
+
+pub fn settings_hint_terminal_theme() -> String {
+    rust_i18n::t!("settings.hint_terminal_theme").into_owned()
+}
+
+pub fn settings_hint_syntax_theme() -> String {
+    rust_i18n::t!("settings.hint_syntax_theme").into_owned()
+}
+
+pub fn settings_hint_opacity() -> String {
+    rust_i18n::t!("settings.hint_opacity").into_owned()
+}
+
+pub fn settings_hint_blur() -> String {
+    rust_i18n::t!("settings.hint_blur").into_owned()
+}
+
+pub fn settings_hint_reading_width() -> String {
+    rust_i18n::t!("settings.hint_reading_width").into_owned()
+}
+
+pub fn settings_hint_line_height() -> String {
+    rust_i18n::t!("settings.hint_line_height").into_owned()
+}
+
+pub fn settings_hint_cell_width() -> String {
+    rust_i18n::t!("settings.hint_cell_width").into_owned()
+}
+
+pub fn settings_hint_scrollback() -> String {
+    rust_i18n::t!("settings.hint_scrollback").into_owned()
+}
+
+pub fn settings_hint_user_scope() -> String {
+    rust_i18n::t!("settings.hint_user_scope").into_owned()
+}
+
 pub fn settings_title() -> String {
     rust_i18n::t!("settings.title").into_owned()
 }

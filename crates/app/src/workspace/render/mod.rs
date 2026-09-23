@@ -584,24 +584,31 @@ impl Workspace {
         let t = theme::current(cx);
         let title_bar_bg = t.title_bar_bg;
         let title_bar_text = t.text_primary;
-        // Settings draws no header of its own, so without this the screen
-        // goes unnamed — the sidebar lists sections, not what they belong
-        // to, and the window title still reads as the project. No dock
-        // toggles: there are no docks on screen to show or hide.
+        // Center the caption against the whole window, independent of the
+        // platform's asymmetric controls. The text adds no interactive hitbox.
         let title = div()
-            .flex_none()
-            .text_size(px(theme::TAB_FONT_SIZE))
+            .absolute()
+            .top_0()
+            .left_0()
+            .right_0()
+            .bottom_0()
+            .flex()
+            .items_center()
+            .justify_center()
+            .text_size(px(theme::MODAL_BODY_FONT_SIZE))
+            .font_weight(gpui::FontWeight::MEDIUM)
             .text_color(title_bar_text)
-            .child(crate::surface::strings::settings_title())
-            .into_any_element();
+            .child(crate::surface::strings::settings_title());
         let title_bar = crate::title_bar::render(
             crate::title_bar::chrome_for_window(window),
             title_bar_bg,
-            Some(title),
+            None,
             None,
             window,
             cx,
-        );
+        )
+        .relative()
+        .child(title);
         self.frame_root(root_key_context(), cx)
             .child(title_bar)
             // `.cached()` is safe because the view notifies itself on every

@@ -105,7 +105,11 @@ impl SettingsView {
             .flex()
             .flex_col()
             .gap(px(theme::MODAL_PANEL_GAP))
-            .child(Self::section_label(s::settings_section_about(), cx))
+            .p(px(theme::SETTINGS_CARD_PAD))
+            .bg(theme::current(cx).dock_bg)
+            .border_1()
+            .border_color(theme::current(cx).border)
+            .rounded(px(theme::RADIUS_SM))
             .child(about_row(
                 s::settings_label_current_version(),
                 SharedString::from(env!("CARGO_PKG_VERSION")),

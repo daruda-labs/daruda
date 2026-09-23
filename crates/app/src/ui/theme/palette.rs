@@ -460,9 +460,25 @@ pub const SETTINGS_LABEL_W: f32 = 120.0;
 pub const SETTINGS_AGENT_ENV_ROWS_MIN: usize = 2;
 pub const SETTINGS_AGENT_ENV_ROWS_MAX: usize = 6;
 
-/// Width of the section-nav sidebar (px). Sized to fit `Claude Status`
-/// (the longest builtin nav label) at the body font size with comfort.
-pub const SETTINGS_SIDEBAR_W: f32 = 168.0;
+/// Width of the section-nav sidebar, including its icon and label columns.
+pub const SETTINGS_SIDEBAR_W: f32 = 208.0;
+/// Settings-only form geometry; shared modal rows retain their own metrics.
+pub const SETTINGS_CONTENT_MAX_W: f32 = 800.0;
+pub const SETTINGS_CONTENT_PAD: f32 = 24.0;
+pub const SETTINGS_GROUP_GAP: f32 = 28.0;
+pub const SETTINGS_CARD_PAD: f32 = 16.0;
+pub const SETTINGS_ROW_PAD_Y: f32 = 18.0;
+pub const SETTINGS_ROW_MIN_H: f32 = 68.0;
+pub const SETTINGS_ROW_GAP: f32 = 24.0;
+pub const SETTINGS_LABEL_MIN_W: f32 = 180.0;
+pub const SETTINGS_CONTROL_W: f32 = 240.0;
+pub const SETTINGS_NUMBER_W: f32 = 96.0;
+pub const SETTINGS_ACTIVE_BORDER: f32 = 2.0;
+pub const SETTINGS_SWITCH_W: f32 = 30.0;
+pub const SETTINGS_SWITCH_H: f32 = 18.0;
+pub const SETTINGS_SWITCH_THUMB: f32 = 10.0;
+pub const SETTINGS_SWITCH_INSET: f32 = 3.0;
+pub const SETTINGS_SWITCH_TARGET_W: f32 = 38.0;
 /// Dock background — slightly darker than the panel body so the
 /// active row's highlight reads cleanly.
 pub const SETTINGS_SIDEBAR_BG: Hsla = with_alpha(CANVAS, 0.18);

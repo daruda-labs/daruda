@@ -49,6 +49,7 @@ pub mod section_header;
 pub mod select;
 pub mod selectable_text;
 pub mod spinner;
+pub mod switch;
 pub mod tab_bar;
 pub mod theme;
 pub mod tooltip;
@@ -96,6 +97,7 @@ pub use scrollbar::{ScrollArea, scroll_area};
 pub use section_header::SectionHeader;
 pub use selectable_text::{SelectableText, selectable_text};
 pub use spinner::{Spinner, spinner};
+pub use switch::switch;
 pub use tab_bar::{Tab, TabBar, tab, tab_bar};
 
 pub use daruda_core::text::{CharType, char_cell_hit_x, logical_line_range, word_range};

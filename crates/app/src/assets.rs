@@ -74,6 +74,15 @@ impl AssetSource for DarudaAssets {
 
             // ── UI controls ───────────────────────────────────────────────
             "icons/ui/settings.svg" => icon!("ui/settings.svg"),
+            "icons/ui/terminal.svg" => icon!("ui/terminal.svg"),
+            "icons/ui/text-fields.svg" => icon!("ui/text-fields.svg"),
+            "icons/ui/cursor.svg" => icon!("ui/cursor.svg"),
+            "icons/ui/keyboard.svg" => icon!("ui/keyboard.svg"),
+            "icons/ui/dns.svg" => icon!("ui/dns.svg"),
+            "icons/ui/person.svg" => icon!("ui/person.svg"),
+            "icons/ui/notifications.svg" => icon!("ui/notifications.svg"),
+            "icons/ui/extension.svg" => icon!("ui/extension.svg"),
+            "icons/ui/info.svg" => icon!("ui/info.svg"),
             "icons/ui/close.svg" | "icons/close.svg" => icon!("ui/close.svg"),
             "icons/ui/delete.svg" | "icons/delete.svg" => icon!("ui/delete.svg"),
             "icons/ui/edit.svg" | "icons/edit.svg" => icon!("ui/edit.svg"),
