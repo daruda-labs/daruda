@@ -1,5 +1,6 @@
-//! Per-pane account switching + `Workspace::clear_account_override` (the
-//! per-window account-delete hook, including its usage-cache prune).
+//! Per-pane account switching + `Workspace::reconcile_account_pins` (the
+//! per-window side of an account list change, including its usage-cache
+//! prune).
 
 use super::agent_chat::agent_view;
 use super::*;
@@ -411,13 +412,34 @@ async fn login_success_accepts_codex_auth_and_rejects_missing_credentials(cx: &m
     assert!(!empty_dir.exists(), "the throwaway dir is cleaned up");
 }
 
+/// The account list as the Global publishes it: `ids`, each a Claude account.
+fn listing(ids: &[AccountId]) -> daruda_store::accounts::AccountsState {
+    daruda_store::accounts::AccountsState {
+        accounts: ids
+            .iter()
+            .map(|&id| daruda_store::accounts::ManagedAccount {
+                id,
+                recipe: AccountRecipeId::Claude,
+                email: None,
+                organization: None,
+                config_dir: std::path::PathBuf::from("/tmp").join(id.0.to_string()),
+                created_at: 0,
+                last_authenticated_at: 0,
+            })
+            .collect(),
+        ..daruda_store::accounts::AccountsState::default()
+    }
+}
+
 #[gpui::test]
-fn clear_account_override_prunes_usage_caches_for_deleted_account_only(cx: &mut TestAppContext) {
+fn a_dropped_account_is_pruned_from_the_usage_caches_only(cx: &mut TestAppContext) {
     let (_wh, ws) = build_workspace(cx);
     let deleted = AccountId::new();
     let kept = AccountId::new();
+    cx.update(|cx| accounts_global::replace(cx, listing(&[deleted, kept])));
+    cx.run_until_parked();
 
-    ws.update(cx, |ws, cx| {
+    ws.update(cx, |ws, _| {
         for key in [
             AccountSelection::Managed(deleted),
             AccountSelection::Managed(kept),
@@ -458,9 +480,12 @@ fn clear_account_override_prunes_usage_caches_for_deleted_account_only(cx: &mut 
                 config_dir: std::path::PathBuf::from("/tmp/kept"),
             },
         );
+    });
+    // The delete, as Settings publishes it: the shorter list, and nothing else.
+    cx.update(|cx| accounts_global::replace(cx, listing(&[kept])));
+    cx.run_until_parked();
 
-        ws.clear_account_override(deleted, cx);
-
+    ws.update(cx, |ws, _| {
         let usage = &ws.claude.usage_by_account;
         let outcome = |account| {
             usage.usage(UsageKey {
@@ -1084,5 +1109,40 @@ async fn restore_session_activates_the_sessions_lane_before_focusing(cx: &mut Te
             "must reuse the pre-existing pane, not add a duplicate"
         );
         assert_eq!(ws.active_runtime().focused_pane_id, existing_pane_id);
+    });
+}
+
+/// An account delete reaches the panes pinned to it through the list alone:
+/// Settings publishes the shorter list, and each window reverts its own pins.
+/// A pane pinned to an account the list keeps is left alone.
+#[gpui::test]
+fn a_pane_pinned_to_a_dropped_account_reverts_and_a_kept_one_stays(cx: &mut TestAppContext) {
+    let (wh, ws) = build_workspace(cx);
+    let (dropped, kept) = (AccountId::new(), AccountId::new());
+    cx.update(|cx| accounts_global::replace(cx, listing(&[dropped, kept])));
+    cx.run_until_parked();
+    let (on_dropped, on_kept) = cx
+        .update_window(wh.into(), |_, window, cx| {
+            ws.update(cx, |ws, cx| {
+                (
+                    seed_agent_pane(ws, AccountSelection::Managed(dropped), window, cx),
+                    seed_agent_pane(ws, AccountSelection::Managed(kept), window, cx),
+                )
+            })
+        })
+        .unwrap();
+
+    cx.update(|cx| accounts_global::replace(cx, listing(&[kept])));
+    cx.run_until_parked();
+
+    ws.read_with(cx, |ws, _| {
+        assert_eq!(
+            ws.agent_chat_account_selection(on_dropped),
+            AccountSelection::SystemDefault,
+        );
+        assert_eq!(
+            ws.agent_chat_account_selection(on_kept),
+            AccountSelection::Managed(kept),
+        );
     });
 }

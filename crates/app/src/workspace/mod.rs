@@ -1203,6 +1203,7 @@ impl Workspace {
             _observers: lifetimes::GlobalObservers::new(
                 cx.observe_global::<accounts_global::AccountsGlobal>(|ws, cx| {
                     ws.accounts = accounts_global::snapshot(cx);
+                    ws.reconcile_account_pins(cx);
                     cx.notify();
                 }),
                 cx.observe_global::<agent_vocabulary_global::AgentVocabularyGlobal>(|ws, cx| {

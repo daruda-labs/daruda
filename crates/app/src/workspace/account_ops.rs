@@ -21,12 +21,12 @@
 //! the kind of invented session-teardown mechanism the project avoids shipping
 //! without a proven, reused path).
 //!
-//! This file also owns the per-window delete-cleanup side of account
-//! state ([`Workspace::clear_account_override`] — resetting a deleted
-//! account's panes back to the system default and pruning its usage
-//! cache and sticky focus). The shared [`daruda_store::accounts::AccountsState`]
-//! itself is propagated app-wide through [`super::accounts_global`] (a GPUI
-//! Global + `observe_global`), not a per-window broadcast. The headless add-account
+//! This file also owns the per-window side of an account list change
+//! ([`Workspace::reconcile_account_pins`] — reverting panes pinned to an
+//! account the list no longer names and pruning its usage cache and sticky
+//! focus). The shared [`daruda_store::accounts::AccountsState`] itself is
+//! propagated app-wide through [`super::accounts_global`] (a GPUI Global +
+//! `observe_global`), not a per-window broadcast. The headless add-account
 //! / reauthenticate
 //! *login* flow that creates and refreshes accounts in the first place
 //! lives in the sibling `account_login_ops.rs` — split out because it is
@@ -340,12 +340,15 @@ impl Workspace {
 
     /// Count of this workspace's currently-*loaded* panes (every lane
     /// runtime visited this session, not just the active one) whose
-    /// account override is `account_id`. `pub(crate)`: the Settings
-    /// window's account-delete confirm sums this across every open
-    /// `Workspace` window via `WindowRegistry::for_each_workspace`
-    /// to build its confirm-body count. A lane never opened this session
+    /// account override is `account_id`. A lane never opened this session
     /// has no entry in `main_area.runtimes` yet, so this can undercount
     /// — an accepted simplification (see `settings/sections/accounts.rs`).
+    ///
+    /// `pub(crate)` as the one read-only exception to G7: the Settings
+    /// account-delete confirm sums this across every open window to say how
+    /// many panes the delete reverts. It changes nothing; the revert itself
+    /// is [`Self::reconcile_account_pins`], which the delete reaches through
+    /// `AccountsGlobal`.
     pub(crate) fn panes_referencing_account(&self, account_id: AccountId) -> usize {
         self.main_area
             .runtimes
@@ -363,68 +366,55 @@ impl Workspace {
             )
     }
 
-    /// Reset every pane pinned to `account_id` back to
-    /// [`AccountSelection::SystemDefault`] (Terminal + AgentChat, across
-    /// every loaded lane runtime) — run when the Settings window deletes
-    /// that account, so no pane is left pointing at a config dir that no
-    /// longer exists. A Terminal pane's shell keeps running under whatever
-    /// env it already spawned with; only the cached selection used for
-    /// persistence/display is reset.
+    /// Bring every account pin in step with [`Self::accounts`]: a pane (or
+    /// the hidden orchestrator slot) pinned to an account the list no longer
+    /// names reverts to [`AccountSelection::SystemDefault`], and the usage
+    /// caches and sticky usage focus drop what they held for it. A Terminal
+    /// pane's shell keeps running under the env it spawned with; only the
+    /// selection used for persistence and display is reset.
     ///
-    /// Also prunes this account's entries from the per-account usage caches
-    /// (`self.claude.usage_by_account`) and sticky usage focus — this is the
-    /// per-window delete hook, so it is the only place that sees both the
-    /// deleted `account_id` and `self.claude`. The system-default entry is
-    /// never touched.
-    pub(crate) fn clear_account_override(&mut self, account_id: AccountId, cx: &mut Context<Self>) {
-        // Its cached sign-in method goes with it. A later account minted under
-        // the same scope would otherwise inherit a claim about credentials it
-        // never had.
-        for recipe in daruda_store::accounts::AccountRecipeId::all() {
-            crate::workspace::auth_status_global::forget(
-                cx,
-                crate::workspace::account_login_ops::LoginTarget::Managed {
-                    id: account_id,
-                    recipe,
-                },
-            );
-        }
+    /// Runs from the `AccountsGlobal` observer, so a delete in any window —
+    /// or an edit to `accounts.json` outside the app — lands here the same
+    /// way. Idempotent: that observer also fires for the login slot, and a
+    /// pass with nothing to change neither persists nor repaints.
+    pub(in crate::workspace) fn reconcile_account_pins(&mut self, cx: &mut Context<Self>) {
+        let accounts = &self.accounts;
+        let dangling = |selection: AccountSelection| match selection {
+            AccountSelection::Managed(id) => accounts.find(id).is_none(),
+            AccountSelection::SystemDefault => false,
+        };
         let mut pane_changed = false;
         if let Some(chat) = self
             .orchestrator_chat
             .as_mut()
-            .filter(|chat| chat.account == AccountSelection::Managed(account_id))
+            .filter(|chat| dangling(chat.account))
         {
             chat.account = AccountSelection::SystemDefault;
             pane_changed = true;
         }
-        for rt in self.main_area.runtimes.values_mut() {
-            for p in rt.panes.iter_mut() {
-                match &mut p.content {
-                    pane::PaneContent::Terminal(t)
-                        if t.account == AccountSelection::Managed(account_id) =>
-                    {
-                        t.account = AccountSelection::SystemDefault;
-                        pane_changed = true;
-                    }
-                    pane::PaneContent::AgentChat(ac)
-                        if ac.account == AccountSelection::Managed(account_id) =>
-                    {
-                        ac.account = AccountSelection::SystemDefault;
-                        pane_changed = true;
-                    }
-                    _ => {}
-                }
+        for p in self
+            .main_area
+            .runtimes
+            .values_mut()
+            .flat_map(|rt| rt.panes.iter_mut())
+        {
+            let account = match &mut p.content {
+                pane::PaneContent::Terminal(t) => &mut t.account,
+                pane::PaneContent::AgentChat(ac) => &mut ac.account,
+                _ => continue,
+            };
+            if dangling(*account) {
+                *account = AccountSelection::SystemDefault;
+                pane_changed = true;
             }
         }
-        self.claude
-            .usage_by_account
-            .remove(AccountSelection::Managed(account_id));
+        self.claude.usage_by_account.retain_known(accounts);
         let sticky_focus_len = self.claude.sticky_focus_by_recipe.len();
         self.claude
             .sticky_focus_by_recipe
-            .retain(|_, focused| {
-                !matches!(focused, pane::FocusedAccount::Managed { id, .. } if *id == account_id)
+            .retain(|_, focused| match focused {
+                pane::FocusedAccount::Managed { id, .. } => accounts.find(*id).is_some(),
+                pane::FocusedAccount::SystemDefault => true,
             });
         let sticky_focus_changed = self.claude.sticky_focus_by_recipe.len() != sticky_focus_len;
         if pane_changed {

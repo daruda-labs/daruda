@@ -55,7 +55,12 @@ pub(crate) fn install_if_absent(cx: &mut App, initial: AccountsState) {
 /// (`finish_login_success`, `finish_reauth_success`, Settings
 /// `set_default_account` / `remove_account`) call this after persisting to
 /// disk. Falls back to `set_global` if somehow not yet installed.
+///
+/// The app-wide cache keyed by account follows here, once per process; what
+/// each window keys by account follows in its own observer
+/// (`Workspace::reconcile_account_pins`).
 pub(crate) fn replace(cx: &mut App, state: AccountsState) {
+    super::auth_status_global::retain_known(cx, &state);
     if cx.has_global::<AccountsGlobal>() {
         cx.update_global::<AccountsGlobal, _>(|g, _| g.state = state);
     } else {

@@ -19,6 +19,7 @@ use std::collections::HashMap;
 use gpui::{App, BorrowAppContext, Global};
 
 use daruda_agent::accounts::auth_status::AuthStatus;
+use daruda_store::accounts::AccountsState;
 
 pub(crate) use super::account_login_ops::LoginTarget;
 
@@ -114,14 +115,28 @@ pub(in crate::workspace) fn abandon_probe(cx: &mut App, ticket: ProbeTicket) {
     }
 }
 
-/// Forget a reading — used when the credentials it described are gone, so a
-/// stale method cannot outlive the account it belonged to.
-pub(in crate::workspace) fn forget(cx: &mut App, target: LoginTarget) {
-    if cx.has_global::<AuthStatusGlobal>() {
+/// Drop what the cache holds about managed accounts `state` no longer lists,
+/// so a stale method cannot outlive the account it belonged to — nor be
+/// inherited by a later account minted under the same scope.
+///
+/// Writes only when there is something to drop: the caller runs on every
+/// accounts change, and an update would wake every observer for nothing.
+pub(in crate::workspace) fn retain_known(cx: &mut App, state: &AccountsState) {
+    let known = |target: &LoginTarget| match target {
+        LoginTarget::Managed { id, .. } => state.find(*id).is_some(),
+        LoginTarget::System { .. } => true,
+    };
+    let Some(global) = cx.try_global::<AuthStatusGlobal>() else {
+        return;
+    };
+    let stale = global.readings.keys().any(|t| !known(t))
+        || global.issued.keys().any(|t| !known(t))
+        || global.answered.keys().any(|t| !known(t));
+    if stale {
         cx.update_global::<AuthStatusGlobal, _>(|g, _| {
-            g.readings.remove(&target);
-            g.issued.remove(&target);
-            g.answered.remove(&target);
+            g.readings.retain(|t, _| known(t));
+            g.issued.retain(|t, _| known(t));
+            g.answered.retain(|t, _| known(t));
         });
     }
 }
@@ -238,18 +253,45 @@ mod tests {
 
     /// A deleted account's method must not outlive it — the next account to
     /// take that scope would inherit a claim about credentials it never had.
+    /// Only the account the list dropped goes: the kept one and the ambient
+    /// home are not about it.
     #[gpui::test]
-    fn a_forgotten_scope_reads_as_unknown(cx: &mut TestAppContext) {
+    fn an_account_the_list_drops_reads_as_unknown(cx: &mut TestAppContext) {
+        let managed = |id| LoginTarget::Managed {
+            id,
+            recipe: AccountRecipeId::Claude,
+        };
+        let (dropped, kept) = (AccountId::new(), AccountId::new());
+        let list = AccountsState {
+            accounts: vec![daruda_store::accounts::ManagedAccount {
+                id: kept,
+                recipe: AccountRecipeId::Claude,
+                email: None,
+                organization: None,
+                config_dir: std::path::PathBuf::from("/tmp/kept"),
+                created_at: 0,
+                last_authenticated_at: 0,
+            }],
+            ..AccountsState::default()
+        };
         cx.update(|cx| {
             install_if_absent(cx);
-            let ticket = begin_probe(cx, system(), false).expect("probe");
-            record(cx, ticket, reading("claude.ai"));
-            forget(cx, system());
-            assert!(!snapshot(cx).contains_key(&system()));
+            for target in [system(), managed(dropped), managed(kept)] {
+                let ticket = begin_probe(cx, target, false).expect("probe");
+                record(cx, ticket, reading("claude.ai"));
+            }
+            // In flight when the list changes: its ticket goes too.
+            begin_probe(cx, managed(dropped), false).expect("probe");
+
+            retain_known(cx, &list);
+
+            assert!(method(cx, managed(dropped)).is_none());
             assert!(
-                begin_probe(cx, system(), false).is_some(),
+                begin_probe(cx, managed(dropped), false).is_some(),
                 "and the scope is probeable again"
             );
+            assert!(method(cx, managed(kept)).is_some());
+            assert!(method(cx, system()).is_some());
         });
     }
 

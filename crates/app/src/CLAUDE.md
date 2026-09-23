@@ -248,15 +248,16 @@ agent/ → lane/
 - `lane/` imports nothing from `workspace/`, `project/`, or `agent/`.
 - `project/` imports `lane/` only; nothing from `workspace/` or `agent/`.
 - `agent/` imports `lane/` only; nothing from `workspace/` or `project/`.
-- `settings/` holds no handle to its host and never resolves "the" workspace to
-  act on its behalf — it asks by emitting `SettingsEvent`, and
-  `workspace/settings_ops.rs` answers. The two things it *may* reach for read
-  the other way round: the Globals that happen to live under `workspace/`
-  (`accounts_global`, `auth_status_global`, `agent_vocabulary_global`,
-  `dialog_helpers`), and `WindowRegistry::for_each_workspace` for a symmetric
-  broadcast to *every* window (`accounts.rs`). Publishing to all of them is not
-  delegating to one; the first hop back into a single `Workspace` is the edge
-  that must not come back.
+- `settings/` holds no handle to its host and never calls a `Workspace`
+  method that changes state. It asks its own host by emitting
+  `SettingsEvent`, which `workspace/settings_ops.rs` answers, and it changes
+  what every window shares by writing a Global that lives under `workspace/`
+  (`accounts_global`, `auth_status_global`, `agent_vocabulary_global`) —
+  each window's observer then follows on its own. It may also use
+  `dialog_helpers`, and it may *query* windows through
+  `WindowRegistry::for_each_workspace` (the account-delete confirm counts
+  pinned panes with `panes_referencing_account`). Checkable: no `ws.<verb>`
+  that mutates inside `settings/`.
 
 When a function references a lane across module boundaries, pass
 the full `daruda_store::project::LaneRef { project, lane }` —

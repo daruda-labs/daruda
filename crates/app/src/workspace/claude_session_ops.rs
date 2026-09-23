@@ -95,11 +95,19 @@ impl PerAccountUsage {
         true
     }
 
-    /// Drop every cached quantity for `account` across all domains — run when
-    /// the account is deleted so no usage lingers under a dangling selection.
-    pub(in crate::workspace) fn remove(&mut self, account: AccountSelection) {
-        self.usage.retain(|key, _| key.account != account);
-        self.activity.retain(|key, _| key.account != account);
+    /// Drop every cached quantity, across all domains, for a managed account
+    /// `state` no longer lists — so no usage lingers under a dangling
+    /// selection. The system-default entries are never touched.
+    pub(in crate::workspace) fn retain_known(
+        &mut self,
+        state: &daruda_store::accounts::AccountsState,
+    ) {
+        let known = |account: AccountSelection| match account {
+            AccountSelection::Managed(id) => state.find(id).is_some(),
+            AccountSelection::SystemDefault => true,
+        };
+        self.usage.retain(|key, _| known(key.account));
+        self.activity.retain(|key, _| known(key.account));
     }
 }
 

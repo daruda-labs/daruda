@@ -382,23 +382,39 @@ fn hidden_orchestrator_tracks_live_config_updates(cx: &mut TestAppContext) {
 fn hidden_orchestrator_account_cleanup_updates_the_canonical_slot(cx: &mut TestAppContext) {
     let (window, workspace) = build_workspace(cx);
     let account = AccountId::new();
+    let pane = cx
+        .update_window(window.into(), |_, window, cx| {
+            workspace.update(cx, |ws, cx| {
+                let pane = ws
+                    .seed_orchestrator_chat_pane_unrevealed_for_test(
+                        ws.agents[0].id.clone(),
+                        std::env::temp_dir(),
+                        AccountSelection::Managed(account),
+                        None,
+                        window,
+                        cx,
+                    )
+                    .unwrap();
+                assert_eq!(ws.panes_referencing_account(account), 1);
+                ws.show_orchestrator_tab(window, cx);
+                assert_eq!(ws.panes_referencing_account(account), 1);
+                ws.hide_orchestrator_tab(window, cx);
+                pane
+            })
+        })
+        .unwrap();
+
+    // The account's delete, as Settings publishes it: a list without it.
+    cx.update(|cx| {
+        crate::workspace::accounts_global::replace(
+            cx,
+            daruda_store::accounts::AccountsState::default(),
+        )
+    });
+    cx.run_until_parked();
+
     cx.update_window(window.into(), |_, window, cx| {
         workspace.update(cx, |ws, cx| {
-            let pane = ws
-                .seed_orchestrator_chat_pane_unrevealed_for_test(
-                    ws.agents[0].id.clone(),
-                    std::env::temp_dir(),
-                    AccountSelection::Managed(account),
-                    None,
-                    window,
-                    cx,
-                )
-                .unwrap();
-            assert_eq!(ws.panes_referencing_account(account), 1);
-            ws.show_orchestrator_tab(window, cx);
-            assert_eq!(ws.panes_referencing_account(account), 1);
-            ws.hide_orchestrator_tab(window, cx);
-            ws.clear_account_override(account, cx);
             assert_eq!(ws.panes_referencing_account(account), 0);
             assert_eq!(
                 ws.agent_chat_account_selection(pane),

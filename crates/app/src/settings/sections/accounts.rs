@@ -508,10 +508,9 @@ impl SettingsView {
         );
     }
 
-    /// Runs after the delete confirm: best-effort removes the account's
-    /// isolated config dir, drops it from `AccountsState`,
-    /// persists, then clears the override on every pane that referenced
-    /// it (across every open Workspace window) and syncs their caches.
+    /// Runs after the delete confirm: drops the account from `AccountsState`,
+    /// persists, removes its isolated config dir, then publishes the list —
+    /// which is what reverts the panes that referenced it, in every window.
     fn remove_account(&mut self, account_id: AccountId, cx: &mut gpui::Context<Self>) {
         self.remove_account_with(account_id, persist_accounts, cx);
     }
@@ -560,15 +559,9 @@ impl SettingsView {
         // irreversible, so running it before the shorter list was written would
         // leave a live entry pointing at a home that is already gone.
         daruda_agent::accounts::recipe_for(account.recipe).cleanup(&account.config_dir);
-        // Reset every pane pinned to this account back to the system
-        // default (+ prune its per-account usage cache) in every open
-        // Workspace window — this is pane/cache state the Global doesn't
-        // carry, so it stays a direct `for_each_workspace` sweep.
-        WindowRegistry::for_each_workspace(cx, move |ws, _window, cx| {
-            ws.clear_account_override(account_id, cx);
-        });
-        // Publish the account removal itself once — `observe_global`
-        // refreshes every window's `accounts` mirror symmetrically.
+        // Publish the shorter list once. Every window's observer reverts its
+        // own panes pinned to the account (`Workspace::reconcile_account_pins`)
+        // — this view has no business writing into them.
         self.accounts = state.clone();
         accounts_global::replace(cx, state);
         cx.notify();
