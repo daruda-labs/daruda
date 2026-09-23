@@ -60,7 +60,20 @@ impl Workspace {
         // it on the build path left Escape and Cmd+W inert until the user
         // clicked something.
         view.update(cx, |view, cx| view.focus_section(section, window, cx));
+        self.sync_settings_project(cx);
         cx.notify();
+    }
+
+    /// Tell an open Settings whether this window has a project to configure.
+    /// Called wherever that answer can change: opening Settings, adding a
+    /// project, and falling back to the empty workspace.
+    pub(in crate::workspace) fn sync_settings_project(&self, cx: &mut Context<Self>) {
+        let Some(host) = self.settings.as_ref() else {
+            return;
+        };
+        let open = self.active_project().is_some();
+        host.view
+            .update(cx, |view, cx| view.set_project_open(open, cx));
     }
 
     /// Take Settings down and hand focus back to the workspace.

@@ -277,12 +277,12 @@ pub(in crate::workspace) const PALETTE_ENTRIES: &[PaletteEntry] = &[
     PaletteEntry {
         id: "move_tab_left",
         label: s::command_move_tab_left,
-        shortcut: "",
+        shortcut: k::SHORTCUT_MOVE_TAB_LEFT,
     },
     PaletteEntry {
         id: "move_tab_right",
         label: s::command_move_tab_right,
-        shortcut: "",
+        shortcut: k::SHORTCUT_MOVE_TAB_RIGHT,
     },
     PaletteEntry {
         id: "copy",
@@ -427,7 +427,7 @@ pub(in crate::workspace) const PALETTE_ENTRIES: &[PaletteEntry] = &[
     PaletteEntry {
         id: "files_refresh",
         label: s::command_files_refresh,
-        shortcut: "",
+        shortcut: k::SHORTCUT_FILES_REFRESH,
     },
     PaletteEntry {
         id: "commit_changes",

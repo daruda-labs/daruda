@@ -101,6 +101,30 @@ impl SettingsView {
         );
     }
 
+    /// Uninstalling removes files another program owns, so it asks first;
+    /// installing is undone by uninstalling and goes at once.
+    pub(super) fn request_plugin_op(
+        &mut self,
+        plugin_id: String,
+        action: crate::agent::skills::plugin_ops::PluginAction,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        use crate::agent::skills::plugin_ops::PluginAction;
+        match action {
+            PluginAction::Install => self.run_plugin_op(plugin_id, action, cx),
+            PluginAction::Uninstall => confirm_destructive(
+                cx.weak_entity(),
+                s::settings_confirm_uninstall_plugin_title(&plugin_id),
+                s::settings_confirm_uninstall_plugin_body(),
+                s::settings_plugin_uninstall(),
+                move |this, _window, cx| this.run_plugin_op(plugin_id.clone(), action, cx),
+                window,
+                cx,
+            ),
+        }
+    }
+
     pub(super) fn remove_session_host_by_id(
         &mut self,
         id: &daruda_store::project::SessionHostId,

@@ -206,7 +206,7 @@ impl SettingsView {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         use super::presentation::{card, page_stack};
-        use super::search::Target;
+        use super::search::Hit;
 
         if results.is_empty() {
             return div()
@@ -231,7 +231,7 @@ impl SettingsView {
             {
                 let doc = &results[index];
                 let row = match doc.target {
-                    Target::Page(section) => self.link_row(
+                    Hit::Page(section) => self.link_row(
                         gpui::ElementId::Name(format!("settings-search-link-{index}").into()),
                         doc.label.clone(),
                         doc.hint.clone(),
@@ -239,7 +239,23 @@ impl SettingsView {
                         section,
                         cx,
                     ),
-                    target => self.render_target_row(target, cx),
+                    Hit::Setting(target) => match super::layout::parent_of(target) {
+                        // Rows under one switch stay one indented, dimmed block.
+                        Some(parent) => {
+                            let mut rows = Vec::new();
+                            while let Some(Hit::Setting(child)) =
+                                results.get(index).map(|d| d.target)
+                                && results[index].card == first.card
+                                && super::layout::parent_of(child) == Some(parent)
+                            {
+                                rows.push(self.render_target_row(child, cx));
+                                index += 1;
+                            }
+                            group = group.child(self.dependent_rows(parent, rows, cx));
+                            continue;
+                        }
+                        None => self.render_target_row(target, cx),
+                    },
                 };
                 group = group.child(row);
                 index += 1;

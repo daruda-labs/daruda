@@ -173,7 +173,7 @@ impl SettingsView {
     /// The Reset icon for `target`'s row, while its value is not the default.
     fn reset_button(
         &self,
-        target: super::search::Target,
+        target: super::layout::Target,
         cx: &gpui::Context<Self>,
     ) -> Option<crate::ui::Button> {
         self.differs_from_default(target).then(|| {
@@ -196,7 +196,7 @@ impl SettingsView {
         let input = (spec::text_spec(setting).field)(self);
         row_with_reset(
             label,
-            self.reset_button(super::search::Target::Text(setting), cx),
+            self.reset_button(super::layout::Target::Text(setting), cx),
             description,
             div()
                 .w(px(theme::SETTINGS_NUMBER_W))
@@ -213,7 +213,7 @@ impl SettingsView {
         let input = (spec::text_spec(setting).field)(self);
         row_with_reset(
             label,
-            self.reset_button(super::search::Target::Text(setting), cx),
+            self.reset_button(super::layout::Target::Text(setting), cx),
             description,
             div().w_full().child(crate::ui::input(input, cx, 0)),
             cx,
@@ -227,17 +227,15 @@ impl SettingsView {
         label: String,
         description: String,
         button_label: String,
-        event: fn() -> super::SettingsEvent,
+        event: Option<fn() -> super::SettingsEvent>,
         cx: &gpui::Context<Self>,
     ) -> Div {
-        row(
-            label,
-            description,
-            super::settings_button(id, button_label)
-                .tab_stop(true)
-                .on_click(cx.listener(move |_, _, _, cx| cx.emit(event()))),
-            cx,
-        )
+        let button = super::settings_button(id, button_label).tab_stop(true);
+        let button = match event {
+            Some(event) => button.on_click(cx.listener(move |_, _, _, cx| cx.emit(event()))),
+            None => crate::ui::Disableable::disabled(button, true),
+        };
+        row(label, description, button, cx)
     }
 
     pub(super) fn select_row(&self, setting: SelectSetting, cx: &gpui::Context<Self>) -> Div {
@@ -250,7 +248,7 @@ impl SettingsView {
         );
         row_with_reset(
             label,
-            self.reset_button(super::search::Target::Select(setting), cx),
+            self.reset_button(super::layout::Target::Select(setting), cx),
             description,
             div().w_full().child(control),
             cx,
@@ -273,7 +271,7 @@ impl SettingsView {
         );
         row_with_reset(
             label,
-            self.reset_button(super::search::Target::Bool(setting), cx),
+            self.reset_button(super::layout::Target::Bool(setting), cx),
             description,
             control,
             cx,
@@ -289,7 +287,10 @@ impl SettingsView {
         cx: &App,
     ) -> Div {
         let on = (spec::bool_spec(parent).get)(self);
-        crate::ui::dependent(on, cx)
+        // The note sits outside the dimmed block so it keeps full contrast.
+        div()
+            .flex()
+            .flex_col()
             .when(!on, |el| {
                 el.child(
                     div()
@@ -302,7 +303,7 @@ impl SettingsView {
                         ))),
                 )
             })
-            .children(rows)
+            .child(crate::ui::dependent(on, cx).children(rows))
     }
 
     /// A row whose control jumps to another Settings page.
@@ -343,7 +344,7 @@ impl SettingsView {
         } else {
             crate::ui::icons::CHEVRON_RIGHT
         };
-        let header = div()
+        let mut header = div()
             .id(gpui::ElementId::Name(
                 format!("settings-advanced-{}", section.slug()).into(),
             ))
@@ -354,8 +355,11 @@ impl SettingsView {
             .px(px(theme::SETTINGS_CARD_PAD))
             .py(px(theme::PAD_XL))
             .bg(t.button_widget_bg)
+            .border_1()
+            .border_color(theme::with_alpha(t.border, 0.))
             .rounded(px(theme::RADIUS_SM))
             .cursor_pointer()
+            .focus_visible(|style| style.border_color(theme::ACCENT))
             .text_size(px(theme::MODAL_BODY_FONT_SIZE))
             .font_weight(gpui::FontWeight::MEDIUM)
             .text_color(t.text_primary)
@@ -369,7 +373,11 @@ impl SettingsView {
                     .text_color(t.text_muted)
                     .child(s::settings_advanced_count(count)),
             )
+            // A focused div turns Enter / Space into this click on key-up.
             .on_click(cx.listener(move |this, _, _, cx| this.toggle_advanced(section, cx)));
+        if let Some(focus) = self.advanced_focus_handles.get(&section) {
+            header = header.track_focus(focus);
+        }
         div()
             .flex()
             .flex_col()

@@ -62,6 +62,7 @@ impl Workspace {
         self.main_area.runtimes.clear();
         self.active = LaneRef::default();
         self.main_area.runtimes.entry(self.active).or_default();
+        self.sync_settings_project(cx);
     }
 
     /// Drop every project so `render` paints the Landing view, for the
@@ -140,6 +141,7 @@ impl Workspace {
             }
             self.activate_lane(t, window, cx);
         }
+        self.sync_settings_project(cx);
         // Empty closure: see group_ops.rs:83 for rationale. `activate_lane`
         // consumes `&mut Window`, so the persist trigger has to land after
         // those borrows release.

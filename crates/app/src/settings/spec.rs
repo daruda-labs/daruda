@@ -11,9 +11,9 @@
 //! written out in both directions in two places. Nothing kept either pair in
 //! agreement.
 //!
-//! The tables below are now that single place. A new setting adds one row here
-//! plus its widget and its render call; the four generic consumers pick it up
-//! without a new arm. What is deliberately *not* here: settings whose load or
+//! The tables below are now that single place. A new setting adds one row here,
+//! its words in `copy.rs`, its place in `layout.rs`, and its widget field in
+//! `mod.rs`; the four generic consumers pick it up without a new arm. What is deliberately *not* here: settings whose load or
 //! collect step is bespoke (agent catalog, session hosts, the Telegram token),
 //! which stay hand-written in `mod.rs`.
 

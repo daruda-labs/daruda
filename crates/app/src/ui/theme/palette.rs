@@ -298,6 +298,10 @@ pub const DOCK_PAGE_MAX_WIDTH: f32 = 960.0;
 /// Compact tree rhythm; secondary content can grow a row beyond this height.
 pub const DOCK_TREE_ROW_HEIGHT: f32 = 28.0;
 pub const DOCK_TREE_ROW_PAD_Y: f32 = 2.0;
+/// A tree row's first line keeps the single-line row's height even when
+/// sub-rows grow the row, so its label and status cell stay where a
+/// single-line row puts them instead of hugging the top padding.
+pub const DOCK_TREE_ROW_LINE_MIN_H: f32 = DOCK_TREE_ROW_HEIGHT - 2.0 * DOCK_TREE_ROW_PAD_Y;
 /// Right-dock collapsible section: summary row and the hairline above it.
 pub const DOCK_SECTION_HEADER_PAD_Y: f32 = 9.0;
 pub const DOCK_SECTION_DIVIDER_PAD_T: f32 = PAD_XS;

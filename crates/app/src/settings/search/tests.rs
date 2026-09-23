@@ -1,6 +1,7 @@
 use super::*;
+use crate::settings::{BoolSetting, TextSetting};
 
-fn targets(q: &str) -> Vec<Target> {
+fn targets(q: &str) -> Vec<Hit> {
     query(q).into_iter().map(|d| d.target).collect()
 }
 
@@ -16,7 +17,7 @@ fn a_row_is_found_by_its_label_and_lands_on_its_page() {
     assert!(
         results
             .iter()
-            .any(|d| d.target == Target::Text(TextSetting::ScrollbackMaxRows))
+            .any(|d| d.target == Hit::Setting(Target::Text(TextSetting::ScrollbackMaxRows)))
     );
     assert!(results.iter().all(|d| d.section == Section::Terminal));
     assert_eq!(counts(&results)[0].0, Section::Terminal);
@@ -25,8 +26,9 @@ fn a_row_is_found_by_its_label_and_lands_on_its_page() {
 #[test]
 fn a_row_is_found_by_its_config_path() {
     assert!(
-        targets("long_running_threshold")
-            .contains(&Target::Text(TextSetting::NotifyLongRunningThresholdSecs))
+        targets("long_running_threshold").contains(&Hit::Setting(Target::Text(
+            TextSetting::NotifyLongRunningThresholdSecs
+        )))
     );
 }
 
@@ -35,11 +37,11 @@ fn a_matched_child_brings_its_parent_switch_first() {
     let found = targets("only while away");
     let child = found
         .iter()
-        .position(|t| *t == Target::Bool(BoolSetting::TelegramOnlyWhenAway))
+        .position(|t| *t == Hit::Setting(Target::Bool(BoolSetting::TelegramOnlyWhenAway)))
         .expect("child row");
     let parent = found
         .iter()
-        .position(|t| *t == Target::Bool(BoolSetting::TelegramEnabled))
+        .position(|t| *t == Hit::Setting(Target::Bool(BoolSetting::TelegramEnabled)))
         .expect("parent row shown with it");
     assert!(parent < child);
 }
@@ -52,7 +54,7 @@ fn a_retired_page_name_finds_the_page_that_absorbed_it() {
         ("dock", Section::Workspace),
     ] {
         assert!(
-            targets(word).contains(&Target::Page(section)),
+            targets(word).contains(&Hit::Page(section)),
             "{word} should find {section:?}"
         );
     }
@@ -65,13 +67,17 @@ fn every_term_must_match() {
 
 #[test]
 fn hand_drawn_blocks_link_to_their_page() {
-    assert!(targets("ssh").contains(&Target::Page(Section::SessionHosts)));
-    assert!(targets("slack").contains(&Target::Page(Section::RemoteControl)));
+    assert!(targets("ssh").contains(&Hit::Page(Section::SessionHosts)));
+    assert!(targets("slack").contains(&Hit::Page(Section::RemoteControl)));
 }
 
 #[test]
 fn status_bar_items_are_searchable_switches() {
-    assert!(targets("ports").contains(&Target::StatusBarItem(daruda_config::StatusBarItem::Ports)));
+    assert!(
+        targets("ports").contains(&Hit::Setting(Target::StatusBarItem(
+            daruda_config::StatusBarItem::Ports
+        )))
+    );
 }
 
 /// Results keep their page's order: on Remote Control the Telegram card
@@ -81,17 +87,17 @@ fn results_follow_the_page_order() {
     let found = targets("away");
     let telegram = found
         .iter()
-        .position(|t| *t == Target::Bool(BoolSetting::TelegramOnlyWhenAway))
+        .position(|t| *t == Hit::Setting(Target::Bool(BoolSetting::TelegramOnlyWhenAway)))
         .expect("telegram row");
     let advanced = found
         .iter()
-        .position(|t| *t == Target::Text(TextSetting::PresenceGraceSecs))
+        .position(|t| *t == Hit::Setting(Target::Text(TextSetting::PresenceGraceSecs)))
         .expect("presence row");
     assert!(telegram < advanced, "{found:?}");
 }
 
 /// Every hand-drawn block is indexed exactly once — an anchor the layout
-/// never places would drop its entry from search silently.
+/// never places, or places twice, would drop or double its entry silently.
 #[test]
 fn every_hand_drawn_block_is_indexed_once() {
     let all = docs();
@@ -99,10 +105,32 @@ fn every_hand_drawn_block_is_indexed_once() {
         let label = (h.label)();
         let n = all
             .iter()
-            .filter(|d| d.label == label && d.section == h.section)
+            .filter(|d| d.label == label && matches!(d.target, Hit::Page(_)))
             .count();
-        assert_eq!(n, 1, "{label}");
+        assert_eq!(n, 1, "{label} ({:?})", h.anchor);
     }
+}
+
+/// A hand-drawn block's result opens the page the layout draws it on.
+#[test]
+fn a_hand_drawn_block_links_to_the_page_that_draws_it() {
+    let slack = docs()
+        .into_iter()
+        .find(|d| d.label == s::remote_slack())
+        .expect("slack entry");
+    assert_eq!(slack.target, Hit::Page(Section::RemoteControl));
+}
+
+#[test]
+fn a_parent_switch_is_found_from_the_layout() {
+    assert_eq!(
+        layout::parent_of(Target::Bool(BoolSetting::TelegramOnlyWhenAway)),
+        Some(BoolSetting::TelegramEnabled)
+    );
+    assert_eq!(
+        layout::parent_of(Target::Bool(BoolSetting::TelegramEnabled)),
+        None
+    );
 }
 
 /// A hand-drawn block lists where its page shows it: Slack and Discord sit
@@ -116,7 +144,18 @@ fn hand_drawn_blocks_keep_their_page_position() {
         .expect("slack link");
     let telegram = found
         .iter()
-        .position(|d| d.target == Target::Bool(BoolSetting::TelegramEnabled))
+        .position(|d| d.target == Hit::Setting(Target::Bool(BoolSetting::TelegramEnabled)))
         .expect("telegram row");
     assert!(slack < telegram);
+}
+
+/// A hand-drawn card's results group under that card's own heading, not
+/// under the bare page name another card on the page might also use.
+#[test]
+fn a_hand_drawn_card_groups_under_its_heading() {
+    let slack = query("slack")
+        .into_iter()
+        .find(|d| d.label == s::remote_slack())
+        .expect("slack entry");
+    assert_eq!(slack.card, s::settings_group_integrations());
 }

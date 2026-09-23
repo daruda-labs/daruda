@@ -2882,9 +2882,6 @@ pub fn edit_description_modal_title() -> String {
 pub fn edit_description_placeholder() -> String {
     rust_i18n::t!("modal.edit_description_placeholder").into_owned()
 }
-pub fn edit_remote_cwd_placeholder() -> String {
-    rust_i18n::t!("modal.edit_remote_cwd_placeholder").into_owned()
-}
 pub fn rename_modal_title() -> String {
     rust_i18n::t!("modal.rename_worktree_title").into_owned()
 }
@@ -5519,6 +5516,12 @@ pub fn settings_plugin_install() -> String {
 }
 pub fn settings_plugin_uninstall() -> String {
     rust_i18n::t!("settings.plugin_uninstall").into_owned()
+}
+pub fn settings_confirm_uninstall_plugin_title(plugin_id: &str) -> String {
+    rust_i18n::t!("settings.confirm_uninstall_plugin_title", id = plugin_id).into_owned()
+}
+pub fn settings_confirm_uninstall_plugin_body() -> String {
+    rust_i18n::t!("settings.confirm_uninstall_plugin_body").into_owned()
 }
 pub fn settings_plugin_installing() -> String {
     rust_i18n::t!("settings.plugin_installing").into_owned()

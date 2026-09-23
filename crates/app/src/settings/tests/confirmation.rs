@@ -114,3 +114,33 @@ fn unpairing_telegram_waits_for_confirmation(cx: &mut TestAppContext) {
         Some(42)
     );
 }
+
+/// The dialog's OK is what removes the entry. Two agents, since the catalog
+/// refuses to save empty.
+#[gpui::test]
+fn a_confirmed_catalog_removal_removes_the_agent(cx: &mut TestAppContext) {
+    let (wh, win) = build_window(cx);
+    let win_for_add = win.clone();
+    wh.update(cx, |_root, window, cx| {
+        win_for_add.update(cx, |w, cx| {
+            w.add_agent_row(
+                daruda_config::AgentDefinition::codex_default(),
+                Some("codex-acp".to_string()),
+                window,
+                cx,
+            )
+        });
+    })
+    .unwrap();
+    assert!(opens_a_dialog(cx, wh, &win, |view, window, cx| {
+        view.request_remove_agent_catalog_item(0, window, cx)
+    }));
+    assert_eq!(win.read_with(cx, |w, _| w.agent_catalog.len()), 2);
+    confirm_dialog(cx, wh);
+    let err = win.read_with(cx, |w, _| w.error.clone());
+    assert_eq!(
+        win.read_with(cx, |w, _| w.agent_catalog.len()),
+        1,
+        "{err:?}"
+    );
+}

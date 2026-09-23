@@ -676,14 +676,29 @@ pub(super) fn worktree_row(
         .rounded(px(theme::LANE_UNREAD_DOT_RADIUS))
         .bg(unread_dot_color);
 
-    // Body — label row + sublabel row + optional agent multi-session sub-row.
-    let body = div()
-        .flex_1()
+    let status_cell = agent_status_cell(
+        snap.agent_status_per_lane
+            .get(&daruda_store::project::LaneRef {
+                project: project_id,
+                lane: wt.id,
+            })
+            .copied(),
+        cx,
+    );
+
+    // The status cell shares the label's line so it stays pinned to the
+    // first line when sub-rows (sublabel, multi-session badges) grow the row.
+    let label_line = div()
+        .min_h(px(theme::DOCK_TREE_ROW_LINE_MIN_H))
         .flex()
-        .flex_col()
-        .overflow_hidden()
+        .flex_row()
+        .items_center()
+        .gap(px(theme::LANE_ROW_GAP))
+        .child(status_cell)
         .child(
             div()
+                .flex_1()
+                .overflow_hidden()
                 .flex()
                 .flex_row()
                 .items_center()
@@ -704,7 +719,13 @@ pub(super) fn worktree_row(
                         badge_pill_text,
                     ))
                 }),
-        )
+        );
+
+    // Sub-rows indent past the status cell to stay under the label.
+    let sub_rows = div()
+        .flex()
+        .flex_col()
+        .pl(px(theme::STATUS_INDICATOR_CELL_WIDTH + theme::LANE_ROW_GAP))
         .when_some(avail_badge, |d, (icon, state_label)| {
             d.child(availability_chip(icon, state_label, sublabel_color))
         })
@@ -735,6 +756,14 @@ pub(super) fn worktree_row(
                 ))
             },
         );
+
+    let body = div()
+        .flex_1()
+        .flex()
+        .flex_col()
+        .overflow_hidden()
+        .child(label_line)
+        .child(sub_rows);
 
     let wt_id: LaneId = wt.id;
     let wt_path: std::path::PathBuf = wt.path.clone();
@@ -872,15 +901,6 @@ pub(super) fn worktree_row(
             });
             items.into_iter().fold(menu, |m, item| m.item(item))
         })
-        .child(agent_status_cell(
-            snap.agent_status_per_lane
-                .get(&daruda_store::project::LaneRef {
-                    project: project_id,
-                    lane: wt.id,
-                })
-                .copied(),
-            cx,
-        ))
         .child(body);
 
     if removable {

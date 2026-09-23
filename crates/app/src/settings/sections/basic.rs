@@ -15,16 +15,23 @@ pub(in crate::settings) fn status_bar_item_label(item: daruda_config::StatusBarI
     }
 }
 
+/// The saved list, not this window's copy: the bar's own menu writes it too,
+/// and a pending edit elsewhere on the page stops this window catching up.
+fn live_status_bar(cx: &gpui::App) -> &daruda_config::StatusBarConfig {
+    &crate::settings_store::SettingsStore::global(cx)
+        .user()
+        .status_bar
+}
+
 impl SettingsView {
-    /// One status-bar segment's switch. It reads the list this window last
-    /// saw and writes the whole list back, so a toggle from the bar's own
-    /// menu in the meantime is adopted rather than flipped twice.
+    /// One status-bar segment's switch. Like the bar's menu, a flip is an
+    /// immediate gesture on the saved list rather than a draft.
     pub(in crate::settings) fn status_bar_item_row(
         &self,
         item: daruda_config::StatusBarItem,
         cx: &mut gpui::Context<Self>,
     ) -> gpui::Div {
-        let shown = self.base_config.status_bar.is_visible(item);
+        let shown = live_status_bar(cx).is_visible(item);
         let label = status_bar_item_label(item);
         crate::settings::presentation::row(
             label.clone(),
@@ -52,12 +59,12 @@ impl SettingsView {
         visible: bool,
         cx: &mut gpui::Context<Self>,
     ) {
-        let mut hidden = self.base_config.status_bar.hidden_items.clone();
+        let mut hidden = live_status_bar(cx).hidden_items.clone();
         hidden.retain(|i| *i != item);
         if !visible {
             hidden.push(item);
         }
-        self.apply_settings_patch(
+        self.apply_settings_patch_force(
             daruda_config::SettingsPatch::StatusBarHiddenItems(hidden),
             cx,
         );

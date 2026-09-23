@@ -7,9 +7,17 @@
 
 use daruda_config::{BuiltinSection as Section, StatusBarItem as Item};
 
-use super::search::Target;
 use super::{BoolSetting as B, SelectSetting as S, TextSetting as T};
 use crate::surface::strings as s;
+
+/// The setting one row controls.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum Target {
+    Text(T),
+    Select(S),
+    Bool(B),
+    StatusBarItem(Item),
+}
 
 /// One row of a card.
 pub(super) enum Row {
@@ -299,13 +307,25 @@ pub(super) fn page(section: Section) -> Option<&'static [Card]> {
     }
 }
 
+impl CustomCard {
+    /// The card's heading, on its page and over its search results. The
+    /// version block carries none: its first line says what it is.
+    pub(super) fn title(self) -> String {
+        match self {
+            CustomCard::AgentCatalog => s::settings_section_agent_catalog(),
+            CustomCard::RemoteIntegrations => s::settings_group_integrations(),
+            CustomCard::AboutVersion => String::new(),
+        }
+    }
+}
+
 impl Card {
     /// The title a search result groups under.
     pub(super) fn title(&self) -> String {
         match self {
             Card::Rows { title, .. } => title(),
             Card::Advanced(_) => s::settings_card_advanced(),
-            Card::Custom(_) => String::new(),
+            Card::Custom(kind) => kind.title(),
         }
     }
 
@@ -325,6 +345,19 @@ pub(super) enum Placed {
     Row(CustomRow),
 }
 
+/// The switch `target` is indented under, if it only applies while one is on.
+pub(super) fn parent_of(target: Target) -> Option<B> {
+    Section::ALL
+        .iter()
+        .filter_map(|section| page(*section))
+        .flatten()
+        .flat_map(Card::rows)
+        .find_map(|row| match row {
+            Row::Under(parent, children) if children.contains(&target) => Some(*parent),
+            _ => None,
+        })
+}
+
 /// Everything the pages place, with its page and card title, in page order.
 pub(super) fn placed() -> Vec<(Section, String, Placed)> {
     let mut out = Vec::new();
@@ -334,7 +367,7 @@ pub(super) fn placed() -> Vec<(Section, String, Placed)> {
         };
         for card in cards {
             if let Card::Custom(kind) = card {
-                out.push((*section, String::new(), Placed::Card(*kind)));
+                out.push((*section, kind.title(), Placed::Card(*kind)));
                 continue;
             }
             let title = card.title();

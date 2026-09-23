@@ -120,6 +120,11 @@ pub struct SettingsView {
     active_section: BuiltinSection,
     sidebar_search_input: Entity<InputState>,
     sidebar_focus_handles: HashMap<BuiltinSection, FocusHandle>,
+    /// Each page's Advanced header, so Tab reaches it and Enter/Space folds it.
+    advanced_focus_handles: HashMap<BuiltinSection, FocusHandle>,
+    /// Whether the host window has a project, told by the host: the project
+    /// config button has nothing to open without one.
+    project_open: bool,
     /// Per-section input focus handles, in tab-cycle order. `focus_section`
     /// jumps to the first handle when entering a section from outside the
     /// window (sidebar click, external open); `focus_next_input` cycles the
@@ -1453,6 +1458,11 @@ impl SettingsView {
             .copied()
             .map(|section| (section, cx.focus_handle().tab_stop(true)))
             .collect();
+        let advanced_focus_handles = BuiltinSection::ALL
+            .iter()
+            .copied()
+            .map(|section| (section, cx.focus_handle().tab_stop(true)))
+            .collect();
 
         // Language select — options driven by the canonical locale list so
         // adding a new locale only requires updating SUPPORTED_LOCALES.
@@ -2055,6 +2065,8 @@ impl SettingsView {
             active_section: active,
             sidebar_search_input,
             sidebar_focus_handles,
+            advanced_focus_handles,
+            project_open: true,
             section_focus_targets,
             language_select,
             terminal_preset_select,
@@ -2167,10 +2179,14 @@ impl SettingsView {
         }
     }
 
-    /// Switch the active page and (when applicable) land focus on the
-    /// section's natural starting field. Called both by sidebar clicks and by
-    /// `Workspace::open_settings` when a second dispatch arrives while this
-    /// view is already up.
+    /// The host's answer to whether it has a project to configure.
+    pub(crate) fn set_project_open(&mut self, open: bool, cx: &mut Context<Self>) {
+        if self.project_open != open {
+            self.project_open = open;
+            cx.notify();
+        }
+    }
+
     /// Go to `section` from a nav row or a search result: the query is done
     /// with, so it clears and the page shows in full.
     pub(super) fn open_section(
@@ -2187,6 +2203,8 @@ impl SettingsView {
         self.focus_section(section, window, cx);
     }
 
+    /// Switch the active page and land focus on its first visible input.
+    /// Also what `Workspace::open_settings` calls when Settings is already up.
     pub fn focus_section(
         &mut self,
         section: BuiltinSection,
@@ -2213,6 +2231,11 @@ impl SettingsView {
             self.panel_focus_handle.focus(window, cx);
         }
         cx.notify();
+    }
+
+    #[cfg(test)]
+    pub(crate) fn project_open(&self) -> bool {
+        self.project_open
     }
 
     pub fn active_section(&self) -> BuiltinSection {
@@ -2393,7 +2416,7 @@ impl SettingsView {
 
     /// Type a fixed query into the sidebar search — the
     /// `--screenshot-scenario settings-search` entry point. `away` lands on a
-    /// parent switch, its dependent rows and a folded Advanced group.
+    /// parent switch, its dependent row and a folded Advanced card's rows.
     #[cfg(feature = "screenshot")]
     pub(crate) fn seed_search_for_shot(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.sidebar_search_input.update(cx, |input, cx| {
@@ -2595,8 +2618,9 @@ impl SettingsView {
                         .push(row.label_input.read(cx).focus_handle(cx));
                 }
             }
-            // No editor row to reload: the status-bar item list is toggled from
-            // the bar itself, and the Telegram chat id is owned by pairing —
+            // No editor row to reload: a toggle is the status bar menu's own
+            // gesture (Settings writes the list through `StatusBarHiddenItems`),
+            // and the Telegram chat id is owned by pairing —
             // `adopt_external_settings` mirrors that one instead.
             daruda_config::SettingsPatch::ToggleStatusBarItem(_)
             | daruda_config::SettingsPatch::TelegramAuthorizedChatId(_) => {}

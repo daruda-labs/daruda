@@ -311,6 +311,8 @@ const Handler = struct {
     pub fn fullReset(self: *Handler) !void {
         const handle: *TerminalHandle = @fieldParentPtr("handler", self);
         self.terminal.fullReset();
+        // DECSCUSR lives on the handle, not in ghostty's terminal state.
+        handle.cursor_style_code = 0;
         // RIS (ESC c) clears scrollback and resets every screen-affecting
         // mode, including alt-screen → primary; record both transitions.
         // Assumes ghostty's terminal.fullReset() does not internally call

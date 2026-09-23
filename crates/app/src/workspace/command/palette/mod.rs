@@ -220,6 +220,50 @@ impl RenderOnce for CommandPaletteOverlay {
 mod tests {
     use super::*;
 
+    /// `MoveTabLeft` → `move_tab_left`, the palette id of the same command.
+    fn palette_id(action_type: &str) -> String {
+        let mut id = String::new();
+        for (i, ch) in action_type.chars().enumerate() {
+            if ch.is_ascii_uppercase() && i > 0 {
+                id.push('_');
+            }
+            id.push(ch.to_ascii_lowercase());
+        }
+        id
+    }
+
+    /// A command the app binds a key to shows that key in the palette, so
+    /// the hint cannot go missing when a binding is added.
+    #[gpui::test]
+    fn a_bound_palette_command_shows_its_shortcut(cx: &mut gpui::TestAppContext) {
+        cx.update(|cx| {
+            crate::bind_keys::register_static_bindings(cx);
+            let keymap = cx.key_bindings();
+            let keymap = keymap.borrow();
+            let mut checked = 0;
+            for binding in keymap.bindings() {
+                let name = binding.action().name();
+                let id = palette_id(name.rsplit("::").next().unwrap_or(name));
+                let Some(entry) = PALETTE_ENTRIES.iter().find(|e| e.id == id) else {
+                    continue;
+                };
+                let bound: Vec<String> = binding
+                    .keystrokes()
+                    .iter()
+                    .map(|k| k.inner().unparse())
+                    .collect();
+                let shown: Vec<String> = entry
+                    .shortcut
+                    .split_whitespace()
+                    .map(|k| gpui::Keystroke::parse(k).expect("valid shortcut").unparse())
+                    .collect();
+                assert_eq!(shown, bound, "palette entry `{id}`");
+                checked += 1;
+            }
+            assert!(checked > 0, "no binding matched a palette entry");
+        });
+    }
+
     fn typed(query: &str) -> CommandPaletteState {
         let mut state = CommandPaletteState::default();
         state.open();

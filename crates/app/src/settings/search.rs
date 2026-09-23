@@ -1,30 +1,26 @@
-//! Settings search: an index of every row a page renders, and the query that
-//! narrows it.
-//!
-//! Spec-backed rows come from [`super::copy`], the same table their pages
-//! read, so a row cannot be renamed on screen without its search entry
-//! following. Hand-drawn blocks (the agent catalog, tokens, plugins…) are
-//! listed in [`HANDWRITTEN`] and land as a link to their page.
+//! Settings search: an index of every row the pages render, in page order,
+//! and the query that narrows it. Rows come from the tables their pages read
+//! (`copy`, `layout`); hand-drawn blocks are listed in [`HANDWRITTEN`] and
+//! land as a link to their page.
 
-use daruda_config::{BuiltinSection as Section, Config, StatusBarItem};
+use daruda_config::{BuiltinSection as Section, Config, SettingsPatch};
 
-use super::{BoolSetting, SelectSetting, TextSetting, copy, navigation, spec};
+use super::layout::{self, CustomCard as C, CustomRow as R, Target};
+use super::{copy, navigation, spec};
 use crate::surface::strings as s;
 
 /// What a search result renders as.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(super) enum Target {
-    Text(TextSetting),
-    Select(SelectSetting),
-    Bool(BoolSetting),
-    StatusBarItem(StatusBarItem),
+pub(super) enum Hit {
+    /// The row's own live control.
+    Setting(Target),
     /// A block with no row of its own: the result links to its page.
     Page(Section),
 }
 
 #[derive(Clone)]
 pub(super) struct Doc {
-    pub(super) target: Target,
+    pub(super) target: Hit,
     pub(super) section: Section,
     pub(super) card: String,
     pub(super) label: String,
@@ -33,130 +29,92 @@ pub(super) struct Doc {
     keywords: &'static [&'static str],
 }
 
-/// Rows that only take effect under a parent switch. A match on the child
-/// also shows the parent, so its state is never read out of context.
-const PARENTS: &[(Target, BoolSetting)] = &[
-    (
-        Target::Text(TextSetting::AgentReadingWidth),
-        BoolSetting::AgentUseReadingWidth,
-    ),
-    (
-        Target::Text(TextSetting::NotifyLongRunningThresholdSecs),
-        BoolSetting::NotifyLongRunning,
-    ),
-    (
-        Target::Bool(BoolSetting::TelegramOnlyWhenAway),
-        BoolSetting::TelegramEnabled,
-    ),
-    (
-        Target::Select(SelectSetting::OrchestratorAgent),
-        BoolSetting::OrchestratorEnabled,
-    ),
-    (
-        Target::Select(SelectSetting::OrchestratorAccount),
-        BoolSetting::OrchestratorEnabled,
-    ),
-];
-
 /// Where a hand-drawn block sits, so its result lists in page order.
-#[derive(Clone, Copy, PartialEq, Eq)]
+/// The page comes from where the layout places the anchor.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Anchor {
-    Card(super::layout::CustomCard),
-    Row(super::layout::CustomRow),
+    Card(C),
+    Row(R),
     /// A page with no layout: the block is the page.
     Page(Section),
 }
 
 struct Handwritten {
     anchor: Anchor,
-    section: Section,
     label: fn() -> String,
     keywords: &'static [&'static str],
 }
 
 const fn hand(
     anchor: Anchor,
-    section: Section,
     label: fn() -> String,
     keywords: &'static [&'static str],
 ) -> Handwritten {
     Handwritten {
         anchor,
-        section,
         label,
         keywords,
     }
 }
 
-use super::layout::{CustomCard as C, CustomRow as R};
-
 /// Blocks a page draws by hand, indexed as links to that page.
 const HANDWRITTEN: &[Handwritten] = &[
     hand(
         Anchor::Row(R::CustomColors),
-        Section::Appearance,
         s::settings_label_custom_colors,
         &["colors", "palette", "ansi", "custom"],
     ),
     hand(
         Anchor::Card(C::AgentCatalog),
-        Section::Agent,
         s::settings_section_agent_catalog,
         &["agent", "preset", "command", "model", "mode", "acp"],
     ),
     hand(
         Anchor::Card(C::RemoteIntegrations),
-        Section::RemoteControl,
         s::remote_slack,
         &["slack", "token", "pair", "phone", "away"],
     ),
     hand(
         Anchor::Card(C::RemoteIntegrations),
-        Section::RemoteControl,
         s::remote_discord,
         &["discord", "token", "pair", "phone", "away"],
     ),
     hand(
         Anchor::Row(R::TelegramBody),
-        Section::RemoteControl,
         s::settings_telegram_token_label,
         &["telegram", "bot", "token"],
     ),
     hand(
         Anchor::Row(R::TelegramBody),
-        Section::RemoteControl,
         s::settings_telegram_generate_code,
         &["telegram", "pair", "phone"],
     ),
     hand(
         Anchor::Page(Section::SessionHosts),
-        Section::SessionHosts,
         s::settings_session_host_add,
         &["ssh", "docker", "host", "remote"],
     ),
     hand(
         Anchor::Page(Section::Plugin),
-        Section::Plugin,
         s::settings_plugin_installed_header,
         &["plugin", "skill", "install"],
     ),
     hand(
         Anchor::Page(Section::Keymap),
-        Section::Keymap,
         s::settings_section_keymap,
         &["shortcut", "keybinding", "key", "keymap"],
     ),
 ];
 
 impl Handwritten {
-    fn doc(&self, card: String) -> Doc {
+    fn doc(&self, section: Section, card: String) -> Doc {
         Doc {
-            target: Target::Page(self.section),
-            section: self.section,
+            target: Hit::Page(section),
+            section,
             card,
             label: (self.label)(),
             hint: String::new(),
-            path: self.section.slug(),
+            path: section.slug(),
             keywords: self.keywords,
         }
     }
@@ -185,7 +143,7 @@ pub(super) fn docs() -> Vec<Doc> {
     let mut docs = Vec::new();
     for section in Section::ALL {
         docs.push(Doc {
-            target: Target::Page(*section),
+            target: Hit::Page(*section),
             section: *section,
             card: String::new(),
             label: navigation::label(*section),
@@ -195,15 +153,15 @@ pub(super) fn docs() -> Vec<Doc> {
         });
     }
     // Rows in the order their pages show them; the layout places each once.
-    for (section, card, placed) in super::layout::placed() {
+    for (section, card, placed) in layout::placed() {
         let target = match placed {
-            super::layout::Placed::Setting(target) => target,
-            super::layout::Placed::Card(kind) => {
-                docs.extend(anchored(Anchor::Card(kind)).map(|h| h.doc(String::new())));
+            layout::Placed::Setting(target) => target,
+            layout::Placed::Card(kind) => {
+                docs.extend(anchored(Anchor::Card(kind)).map(|h| h.doc(section, card.clone())));
                 continue;
             }
-            super::layout::Placed::Row(kind) => {
-                docs.extend(anchored(Anchor::Row(kind)).map(|h| h.doc(card.clone())));
+            layout::Placed::Row(kind) => {
+                docs.extend(anchored(Anchor::Row(kind)).map(|h| h.doc(section, card.clone())));
                 continue;
             }
         };
@@ -235,12 +193,13 @@ pub(super) fn docs() -> Vec<Doc> {
             Target::StatusBarItem(item) => (
                 super::sections::status_bar_item_label(item),
                 String::new(),
-                "status_bar.hidden_items",
+                SettingsPatch::StatusBarHiddenItems(Vec::new())
+                    .field()
+                    .path(),
             ),
-            Target::Page(_) => continue,
         };
         docs.push(Doc {
-            target,
+            target: Hit::Setting(target),
             section,
             card,
             label,
@@ -250,7 +209,7 @@ pub(super) fn docs() -> Vec<Doc> {
         });
     }
     for section in Section::ALL {
-        docs.extend(anchored(Anchor::Page(*section)).map(|h| h.doc(String::new())));
+        docs.extend(anchored(Anchor::Page(*section)).map(|h| h.doc(*section, String::new())));
     }
     docs
 }
@@ -286,8 +245,13 @@ pub(super) fn query(query: &str) -> Vec<Doc> {
         if !hit[i] {
             continue;
         }
-        if let Some((_, parent)) = PARENTS.iter().find(|(child, _)| *child == doc.target)
-            && let Some(p) = all.iter().position(|d| d.target == Target::Bool(*parent))
+        let Hit::Setting(target) = doc.target else {
+            continue;
+        };
+        if let Some(parent) = layout::parent_of(target)
+            && let Some(p) = all
+                .iter()
+                .position(|d| d.target == Hit::Setting(Target::Bool(parent)))
         {
             keep[p] = true;
         }
@@ -297,26 +261,10 @@ pub(super) fn query(query: &str) -> Vec<Doc> {
         .zip(keep)
         .filter_map(|(doc, keep)| keep.then_some(doc))
         .collect();
-    // Group by page, keeping each page's own order; a parent sits before
-    // its child because the row tables list it first or it is moved there.
+    // Group by page, keeping each page's own order; the layout lists a
+    // parent switch just before the rows under it.
     out.sort_by_key(|doc| Section::ALL.iter().position(|s| *s == doc.section));
-    move_parents_first(&mut out);
     out
-}
-
-fn move_parents_first(docs: &mut Vec<Doc>) {
-    for (child, parent) in PARENTS {
-        let (Some(c), Some(p)) = (
-            docs.iter().position(|d| d.target == *child),
-            docs.iter().position(|d| d.target == Target::Bool(*parent)),
-        ) else {
-            continue;
-        };
-        if p > c {
-            let parent_doc = docs.remove(p);
-            docs.insert(c, parent_doc);
-        }
-    }
 }
 
 /// How many results fall on each page, in sidebar order.

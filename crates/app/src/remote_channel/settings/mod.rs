@@ -339,9 +339,4 @@ impl ChannelSettings {
 }
 
 #[cfg(test)]
-mod tests {
-    #[test]
-    fn credential_accounts_are_distinct() {
-        assert_ne!(super::Secret::Bot.account(), super::Secret::App.account());
-    }
-}
+mod tests;

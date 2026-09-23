@@ -2,7 +2,7 @@
 //! the key rather than pinning today's default.
 
 use super::*;
-use crate::settings::search::Target;
+use crate::settings::layout::Target;
 
 #[gpui::test]
 fn reset_is_offered_off_the_default_and_removes_the_key(cx: &mut TestAppContext) {

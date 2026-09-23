@@ -32,6 +32,7 @@ const NAME_LANDING: &str = "landing";
 const NAME_SETTINGS: &str = "settings";
 /// CLI token for the Settings window showing a failed action's banner.
 const NAME_SETTINGS_ERROR: &str = "settings-error";
+/// CLI token for Settings with a search query typed: the results page.
 const NAME_SETTINGS_SEARCH: &str = "settings-search";
 /// CLI token for the app-drawn window chrome. Forces the Client arm on a host
 /// that would resolve to Native, so the layout is reviewable off its platform.

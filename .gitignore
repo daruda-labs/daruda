@@ -16,3 +16,4 @@ target/
 docs
 !vendor/zed/crates/gpui/docs/
 !vendor/zed/crates/gpui/docs/**
+output

@@ -2,6 +2,7 @@ use super::*;
 use daruda_config::BuiltinSection;
 use gpui::{BorrowAppContext, Entity, TestAppContext, WindowHandle};
 
+mod agent_page;
 mod confirmation;
 mod failure_reporting;
 mod focus;
@@ -17,6 +18,34 @@ use crate::transcript::fold_mode::{BlockRule, FoldBlock, FoldMode, FoldPreset, T
 /// Construct a Settings window wrapped in `gpui_component::Root` —
 /// matches the production windowing path so `gpui_component::Input`'s
 /// `TextElement::paint` can resolve `Root::read` without panicking.
+/// The workspace draws the dialog layer over Settings, so a test window
+/// has to as well for a confirm dialog's OK to be reachable.
+struct DialogHost {
+    view: Entity<SettingsView>,
+}
+
+impl gpui::Render for DialogHost {
+    fn render(
+        &mut self,
+        window: &mut gpui::Window,
+        cx: &mut gpui::Context<Self>,
+    ) -> impl gpui::IntoElement {
+        use gpui::{ParentElement as _, Styled as _};
+        gpui::div()
+            .size_full()
+            .child(self.view.clone())
+            .children(gpui_component::Root::render_dialog_layer(window, cx))
+    }
+}
+
+/// Press Enter in the window, which the open dialog takes as OK.
+fn confirm_dialog(cx: &mut TestAppContext, wh: WindowHandle<gpui_component::Root>) {
+    let mut vcx = gpui::VisualTestContext::from_window(wh.into(), cx);
+    vcx.run_until_parked();
+    vcx.simulate_keystrokes("enter");
+    vcx.run_until_parked();
+}
+
 fn build_window(
     cx: &mut TestAppContext,
 ) -> (WindowHandle<gpui_component::Root>, Entity<SettingsView>) {
@@ -38,7 +67,8 @@ fn build_window_with_config(
     let wh = cx.add_window(|window, cx| {
         let settings = cx.new(|cx| SettingsView::new(window, cx));
         *settings_for_root.borrow_mut() = Some(settings.clone());
-        gpui_component::Root::new(settings, window, cx)
+        let host = cx.new(|_| DialogHost { view: settings });
+        gpui_component::Root::new(host, window, cx)
     });
     let entity = settings_for_root.borrow().clone().unwrap();
     (wh, entity)

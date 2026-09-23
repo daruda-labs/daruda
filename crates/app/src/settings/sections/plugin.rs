@@ -444,8 +444,8 @@ impl SettingsView {
         let mut btn = button(button_id, button_label).disabled(action.is_none());
         if let Some(action) = action {
             let plugin_id_for_handler = plugin_id.clone();
-            btn = btn.on_click(cx.listener(move |this, _: &ClickEvent, _window, cx| {
-                this.run_plugin_op(plugin_id_for_handler.clone(), action, cx);
+            btn = btn.on_click(cx.listener(move |this, _: &ClickEvent, window, cx| {
+                this.request_plugin_op(plugin_id_for_handler.clone(), action, window, cx);
             }));
         }
         div().flex().flex_row().child(btn)

@@ -9,7 +9,7 @@ use gpui::{BorrowAppContext as _, Context};
 use crate::workspace::Workspace;
 
 impl Workspace {
-    /// Flip `item`'s membership in `StatusBarConfig::visible_items` and
+    /// Flip `item`'s membership in `StatusBarConfig::hidden_items` and
     /// persist it through `SettingsStore::apply_patch`, so the choice survives
     /// restart. The
     /// Global's `observe_global` fan-out re-applies the resolved config

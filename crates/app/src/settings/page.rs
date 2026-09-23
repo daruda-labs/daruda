@@ -3,9 +3,9 @@
 
 use gpui::{AnyElement, Div, Focusable as _, IntoElement, ParentElement as _};
 
+use super::layout::Target;
 use super::layout::{self, Card, CustomCard, CustomRow, Row};
 use super::presentation::{card, card_content, config_only_row, page_stack};
-use super::search::Target;
 use super::{SettingsEvent, SettingsView, TextSetting};
 use crate::surface::strings as s;
 use daruda_config::BuiltinSection;
@@ -103,14 +103,6 @@ impl SettingsView {
             Target::Select(v) => self.select_row(v, cx),
             Target::Bool(b) => self.switch_row(b, cx),
             Target::StatusBarItem(item) => self.status_bar_item_row(item, cx),
-            Target::Page(section) => self.link_row(
-                gpui::ElementId::Name(format!("settings-page-link-{}", section.slug()).into()),
-                super::navigation::label(section),
-                super::navigation::description(section),
-                s::settings_search_open(),
-                section,
-                cx,
-            ),
         }
     }
 
@@ -125,9 +117,14 @@ impl SettingsView {
             CustomRow::ProjectShell => self.event_row(
                 "settings-open-project-config",
                 s::settings_label_project_shell(),
-                s::settings_hint_project_shell(),
+                if self.project_open {
+                    s::settings_hint_project_shell()
+                } else {
+                    s::project_config_no_project()
+                },
                 s::settings_button_open_project_config(),
-                || SettingsEvent::OpenProjectConfig,
+                self.project_open
+                    .then_some((|| SettingsEvent::OpenProjectConfig) as fn() -> SettingsEvent),
                 cx,
             ),
             CustomRow::DarudaLink => {
@@ -159,10 +156,12 @@ impl SettingsView {
 
     fn render_custom_card(&self, kind: CustomCard, cx: &mut gpui::Context<Self>) -> Div {
         match kind {
-            CustomCard::AgentCatalog => card(s::settings_section_agent_catalog(), cx)
-                .child(card_content(self.render_agent_catalog(cx))),
-            CustomCard::RemoteIntegrations => card(s::settings_group_integrations(), cx)
-                .child(card_content(self.remote_channel_settings.clone())),
+            CustomCard::AgentCatalog => {
+                card(kind.title(), cx).child(card_content(self.render_agent_catalog(cx)))
+            }
+            CustomCard::RemoteIntegrations => {
+                card(kind.title(), cx).child(card_content(self.remote_channel_settings.clone()))
+            }
             CustomCard::AboutVersion => self.about_version(cx),
         }
     }

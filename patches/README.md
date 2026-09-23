@@ -104,7 +104,6 @@ from being decisive even on an unpatched checkout. Both are wanted: the
 patch fixes the cause, the block column means a build against an
 unpatched gpui does not show a collapsed list item.
 
-
 ## `gpui-test-window-handle.patch`
 
 Applied into `vendor/zed` by `tools/vendor_gpui` as above; the marker
@@ -123,6 +122,7 @@ returns early on `Err`, and still failed every test that builds a
 Workspace through the production constructor (23 at the time, in
 `window_registry` and `telegram_ops`). Upstream has the same
 `unimplemented!` at the pinned rev.
+
 ## `gpui-component-input-state-ime-selection.patch`
 
 Targets the **vendored `crates/gpui_component/src/input/state.rs`**

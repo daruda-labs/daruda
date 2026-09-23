@@ -457,3 +457,26 @@ async fn open_settings_reaches_an_app_with_no_window(cx: &mut TestAppContext) {
         );
     });
 }
+
+/// Without a project the project-config button has nothing to open, so the
+/// host says so, and says so again once a project arrives under Settings.
+#[gpui::test]
+async fn settings_learns_whether_the_window_has_a_project(cx: &mut TestAppContext) {
+    let (window_handle, workspace) = build_workspace(cx);
+    let temp = tempfile::tempdir().unwrap();
+    cx.update_window(window_handle.into(), |_, window, cx| {
+        workspace.update(cx, |ws, cx| {
+            assert!(ws.active_project().is_none());
+            ws.on_open_settings(
+                &OpenSettings(daruda_config::BuiltinSection::Terminal),
+                window,
+                cx,
+            );
+            let view = ws.settings_view().expect("settings open").clone();
+            assert!(!view.read(cx).project_open());
+            ws.add_project(temp.path().to_path_buf(), window, cx);
+            assert!(view.read(cx).project_open());
+        });
+    })
+    .unwrap();
+}

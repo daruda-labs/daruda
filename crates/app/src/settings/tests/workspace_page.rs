@@ -52,3 +52,33 @@ fn a_toggle_from_the_bar_menu_is_adopted_before_the_next_switch(cx: &mut TestApp
     now.sort_by_key(|i| format!("{i:?}"));
     assert_eq!(now, vec![StatusBarItem::Flow, StatusBarItem::Ports]);
 }
+
+/// A pending edit elsewhere on the page stops this window adopting outside
+/// changes. The switch still shows the saved list and flips from it.
+#[gpui::test]
+fn a_pending_edit_does_not_leave_the_switch_behind_the_bar_menu(cx: &mut TestAppContext) {
+    let (wh, win) = build_window(cx);
+    set_input(&wh, &win, cx, |w| w.terminal_font_size_input.clone(), "15");
+    cx.update(|cx| {
+        cx.update_global::<crate::settings_store::SettingsStore, _>(|store, _| {
+            store
+                .apply_patch(daruda_config::SettingsPatch::ToggleStatusBarItem(
+                    StatusBarItem::Flow,
+                ))
+                .expect("menu toggle");
+        });
+    });
+    cx.run_until_parked();
+
+    win.update(cx, |w, cx| {
+        assert!(
+            w.base_config.status_bar.is_visible(StatusBarItem::Flow),
+            "the pending edit keeps this window's copy behind"
+        );
+        w.set_status_bar_item_visible(StatusBarItem::Ports, false, cx);
+        assert!(w.conflict.is_none());
+    });
+    let mut now = hidden(cx);
+    now.sort_by_key(|i| format!("{i:?}"));
+    assert_eq!(now, vec![StatusBarItem::Flow, StatusBarItem::Ports]);
+}

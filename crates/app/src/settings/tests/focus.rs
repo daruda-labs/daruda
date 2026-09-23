@@ -69,3 +69,35 @@ fn an_opened_advanced_card_is_focusable(cx: &mut TestAppContext) {
         |w, cx| { w.logs_retention_input.read(cx).focus_handle(cx) }
     ));
 }
+
+#[gpui::test]
+fn the_advanced_header_folds_from_the_keyboard(cx: &mut TestAppContext) {
+    let (wh, win) = build_window(cx);
+    let mut vcx = gpui::VisualTestContext::from_window(wh.into(), cx);
+    vcx.update(|window, cx| {
+        win.update(cx, |w, cx| {
+            w.focus_section(BuiltinSection::Terminal, window, cx)
+        })
+    });
+    vcx.run_until_parked();
+    let header = win.read_with(&vcx, |w, _| {
+        w.advanced_focus_handles[&BuiltinSection::Terminal].clone()
+    });
+    vcx.update(|window, cx| window.focus(&header, cx));
+    vcx.run_until_parked();
+    let is_open = |vcx: &mut gpui::VisualTestContext| {
+        win.read_with(vcx, |w, _| {
+            w.advanced_open.contains(&BuiltinSection::Terminal)
+        })
+    };
+    for key in ["enter", "space"] {
+        let before = is_open(&mut vcx);
+        // GPUI's keystroke helper emits only KeyDown; clicks activate on KeyUp.
+        vcx.simulate_keystrokes(key);
+        vcx.simulate_event(gpui::KeyUpEvent {
+            keystroke: gpui::Keystroke::parse(key).unwrap(),
+        });
+        vcx.run_until_parked();
+        assert_ne!(is_open(&mut vcx), before, "{key} toggles the card once");
+    }
+}

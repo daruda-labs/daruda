@@ -467,7 +467,7 @@ impl TerminalView {
         focus_handle: FocusHandle,
         input: Option<TerminalInput>,
     ) -> Self {
-        let state = state::TerminalViewState::new(
+        let mut state = state::TerminalViewState::new(
             crate::default_terminal_font(),
             session.font_size(),
             session.vertical_spacing(),
@@ -476,7 +476,6 @@ impl TerminalView {
             session.inset_x(),
             session.inset_y(),
         );
-        let mut state = state;
         state.default_cursor_shape = session.default_cursor_shape();
         Self {
             session,
