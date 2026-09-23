@@ -9,7 +9,7 @@ use daruda_config::Config;
 use daruda_store::accounts::{AccountId, ManagedAccount};
 use gpui::{AnyElement, IntoElement, SharedString, prelude::*};
 
-use crate::settings::presentation::{card, row};
+use crate::settings::presentation::{card, page_stack, row};
 use crate::settings::{BoolSetting, SettingsView};
 use crate::surface::strings as s;
 use crate::ui::select;
@@ -95,25 +95,44 @@ impl SettingsView {
         &self,
         cx: &mut gpui::Context<Self>,
     ) -> AnyElement {
-        card(s::settings_nav_orchestrator(), cx)
-            .child(self.switch_row(
-                BoolSetting::OrchestratorEnabled,
-                s::settings_orchestrator_enabled_label(),
-                String::new(),
+        let enabled = s::settings_orchestrator_enabled_label();
+        page_stack()
+            .child(
+                card(s::settings_nav_orchestrator(), cx)
+                    .child(self.switch_row(
+                        BoolSetting::OrchestratorEnabled,
+                        enabled.clone(),
+                        String::new(),
+                        cx,
+                    ))
+                    .child(self.dependent_rows(
+                        BoolSetting::OrchestratorEnabled,
+                        enabled,
+                        [
+                            row(
+                                s::settings_orchestrator_agent_label(),
+                                String::new(),
+                                select::select(&self.orchestrator_agent_select, cx, 0),
+                                cx,
+                            ),
+                            row(
+                                s::settings_orchestrator_account_label(),
+                                String::new(),
+                                select::select(&self.orchestrator_account_select, cx, 0),
+                                cx,
+                            ),
+                        ],
+                        cx,
+                    )),
+            )
+            .child(card(s::settings_card_used_by(), cx).child(self.link_row(
+                "settings-orchestrator-remote-link",
+                s::settings_nav_remote_control(),
+                s::settings_used_by_remote_hint(),
+                s::settings_used_by_remote_button(),
+                daruda_config::BuiltinSection::RemoteControl,
                 cx,
-            ))
-            .child(row(
-                s::settings_orchestrator_agent_label(),
-                String::new(),
-                select::select(&self.orchestrator_agent_select, cx, 0),
-                cx,
-            ))
-            .child(row(
-                s::settings_orchestrator_account_label(),
-                String::new(),
-                select::select(&self.orchestrator_account_select, cx, 0),
-                cx,
-            ))
+            )))
             .into_any_element()
     }
 }

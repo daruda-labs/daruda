@@ -194,6 +194,16 @@ pub struct SettingsView {
     // Sidebar
     files_show_hidden: bool,
     files_use_gitignore: bool,
+    notify_osc9: bool,
+    notify_osc777: bool,
+    notify_attention: bool,
+    notify_long_running: bool,
+    notify_skip_focused_pane: bool,
+    notify_hook: bool,
+    notify_agent_completion: bool,
+    notify_agent_waiting: bool,
+    telegram_only_when_away: bool,
+    notify_long_running_threshold_input: Entity<InputState>,
     // File Viewer
     syntax_theme_select: Entity<SelectState>,
     // Clipboard
@@ -339,6 +349,7 @@ enum TextSetting {
     TerminalInsetY,
     ClipboardStreamingMaxBytes,
     PanelsGridColumns,
+    NotifyLongRunningThresholdSecs,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -366,6 +377,15 @@ pub(super) enum BoolSetting {
     FilesShowHidden,
     FilesUseGitignore,
     ClaudeStatusEnabled,
+    NotifyOsc9,
+    NotifyOsc777,
+    NotifyAttention,
+    NotifyLongRunning,
+    NotifySkipFocusedPane,
+    NotifyHook,
+    NotifyAgentCompletion,
+    NotifyAgentWaiting,
+    TelegramOnlyWhenAway,
     TelegramEnabled,
     OrchestratorEnabled,
 }
@@ -378,7 +398,7 @@ pub(super) enum BoolSetting {
 // click of the new widget.
 impl TextSetting {
     #[cfg(test)]
-    const ALL: [Self; 13] = [
+    const ALL: [Self; 14] = [
         Self::TerminalFontSize,
         Self::TerminalLineHeight,
         Self::TerminalCellWidth,
@@ -392,6 +412,7 @@ impl TextSetting {
         Self::TerminalInsetY,
         Self::ClipboardStreamingMaxBytes,
         Self::PanelsGridColumns,
+        Self::NotifyLongRunningThresholdSecs,
     ];
 
     /// Compile-time guard for `ALL`: this match is exhaustive, so a new
@@ -412,6 +433,7 @@ impl TextSetting {
             Self::TerminalInsetY => (),
             Self::ClipboardStreamingMaxBytes => (),
             Self::PanelsGridColumns => (),
+            Self::NotifyLongRunningThresholdSecs => (),
         }
     }
 }
@@ -456,13 +478,22 @@ impl SelectSetting {
 
 impl BoolSetting {
     #[cfg(test)]
-    const ALL: [Self; 9] = [
+    const ALL: [Self; 18] = [
         Self::AgentUseModifierToSend,
         Self::AgentUseReadingWidth,
         Self::ShellClosePaneOnExit,
         Self::WindowBlur,
         Self::FilesShowHidden,
         Self::FilesUseGitignore,
+        Self::NotifyOsc9,
+        Self::NotifyOsc777,
+        Self::NotifyAttention,
+        Self::NotifyLongRunning,
+        Self::NotifySkipFocusedPane,
+        Self::NotifyHook,
+        Self::NotifyAgentCompletion,
+        Self::NotifyAgentWaiting,
+        Self::TelegramOnlyWhenAway,
         Self::ClaudeStatusEnabled,
         Self::TelegramEnabled,
         Self::OrchestratorEnabled,
@@ -479,6 +510,15 @@ impl BoolSetting {
             Self::WindowBlur => (),
             Self::FilesShowHidden => (),
             Self::FilesUseGitignore => (),
+            Self::NotifyOsc9 => (),
+            Self::NotifyOsc777 => (),
+            Self::NotifyAttention => (),
+            Self::NotifyLongRunning => (),
+            Self::NotifySkipFocusedPane => (),
+            Self::NotifyHook => (),
+            Self::NotifyAgentCompletion => (),
+            Self::NotifyAgentWaiting => (),
+            Self::TelegramOnlyWhenAway => (),
             Self::ClaudeStatusEnabled => (),
             Self::TelegramEnabled => (),
             Self::OrchestratorEnabled => (),
@@ -1499,6 +1539,14 @@ impl SettingsView {
             &mut input_subscriptions,
             &mut section_focus_targets,
         );
+        let notify_long_running_threshold_input = Self::new_text_field(
+            TextSetting::NotifyLongRunningThresholdSecs,
+            &config,
+            window,
+            cx,
+            &mut input_subscriptions,
+            &mut section_focus_targets,
+        );
         // Never pre-filled with the real token (`default_value`) — a stored
         // secret is never re-displayed in a text field, so this field can't
         // go through `new_text_field` (which always sets a default value).
@@ -1804,6 +1852,16 @@ impl SettingsView {
             inset_y_input,
             files_show_hidden: config.left_dock.files_show_hidden,
             files_use_gitignore: config.left_dock.files_use_gitignore,
+            notify_osc9: config.notifications.osc9_enabled,
+            notify_osc777: config.notifications.osc777_enabled,
+            notify_attention: config.notifications.attention_enabled,
+            notify_long_running: config.notifications.long_running_enabled,
+            notify_skip_focused_pane: config.notifications.skip_focused_pane,
+            notify_hook: config.notifications.hook_notification_enabled,
+            notify_agent_completion: config.notifications.agent_completion_enabled,
+            notify_agent_waiting: config.notifications.agent_waiting_enabled,
+            telegram_only_when_away: config.telegram.only_when_away,
+            notify_long_running_threshold_input,
             syntax_theme_select,
             clipboard_streaming_input,
             editor_select,

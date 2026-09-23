@@ -75,6 +75,7 @@ ui/
 ├── progress.rs     # progress(value) factory over gpui_component::Progress (Styled fill bar)
 ├── scrollbar.rs    # vertical_thumb/horizontal_thumb → Thumb overlays (preserved daruda widget); display-only until `.on_drag(handler)` opts in (the agent-chat embed does) + scroll_area(id, max_h, content) — capped overflow body + gutter + pinned built-in draggable Scrollbar (owns the inset-0 pinning invariant) + Scrollbar/ScrollbarShow re-exports
 ├── select.rs       # SelectOption + state_with_options + select(&state)
+├── dependent.rs    # dependent(parent_on, cx) — indented container for rows that apply only while a parent switch is on; dims (not hides) them while it is off
 ├── switch.rs       # switch(id, checked, cx) — shadow-free controlled toggle over Button; preserves Tab, Space/Enter, focus and disabled behavior
 ├── selectable_text.rs # selectable_text(id, text) — verbatim drag-selectable/copyable plain text over gpui_component::text::TextView::plain (RenderOnce; .selectable()/.color()/.text_size()/.full_width()); no markdown interpretation (zed `new_text` analog)
 ├── tab_bar.rs      # tab_bar(id) + tab(label) factories over gpui_component (Small + underline; tab() bakes 10px x-padding)

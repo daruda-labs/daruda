@@ -242,6 +242,27 @@ pub(super) const TEXT_SETTINGS: &[TextSpec] = &[
                 .map(SettingsPatch::PanelsGridColumns)
         },
     },
+    TextSpec {
+        setting: TextSetting::NotifyLongRunningThresholdSecs,
+        section: BuiltinSection::Notifications,
+        placeholder: || s::settings_placeholder_example("30"),
+        field: |w| &w.notify_long_running_threshold_input,
+        show: |c| c.notifications.long_running_threshold_secs.to_string(),
+        current: |c| {
+            SettingsPatch::NotifyLongRunningThresholdSecs(
+                c.notifications.long_running_threshold_secs,
+            )
+        },
+        parse: |input, cx| {
+            bounded(
+                input,
+                1..=86_400,
+                || s::settings_err_long_running_threshold().into(),
+                cx,
+            )
+            .map(SettingsPatch::NotifyLongRunningThresholdSecs)
+        },
+    },
 ];
 
 /// How a select's widget takes a new value when the config changes underneath
@@ -457,6 +478,69 @@ pub(super) const BOOL_SETTINGS: &[BoolSpec] = &[
         show: |c| c.left_dock.files_use_gitignore,
     },
     BoolSpec {
+        setting: BoolSetting::NotifyOsc9,
+        get: |w| w.notify_osc9,
+        set: |w, v| w.notify_osc9 = v,
+        patch: SettingsPatch::NotifyOsc9,
+        show: |c| c.notifications.osc9_enabled,
+    },
+    BoolSpec {
+        setting: BoolSetting::NotifyOsc777,
+        get: |w| w.notify_osc777,
+        set: |w, v| w.notify_osc777 = v,
+        patch: SettingsPatch::NotifyOsc777,
+        show: |c| c.notifications.osc777_enabled,
+    },
+    BoolSpec {
+        setting: BoolSetting::NotifyAttention,
+        get: |w| w.notify_attention,
+        set: |w, v| w.notify_attention = v,
+        patch: SettingsPatch::NotifyAttention,
+        show: |c| c.notifications.attention_enabled,
+    },
+    BoolSpec {
+        setting: BoolSetting::NotifyLongRunning,
+        get: |w| w.notify_long_running,
+        set: |w, v| w.notify_long_running = v,
+        patch: SettingsPatch::NotifyLongRunning,
+        show: |c| c.notifications.long_running_enabled,
+    },
+    BoolSpec {
+        setting: BoolSetting::NotifySkipFocusedPane,
+        get: |w| w.notify_skip_focused_pane,
+        set: |w, v| w.notify_skip_focused_pane = v,
+        patch: SettingsPatch::NotifySkipFocusedPane,
+        show: |c| c.notifications.skip_focused_pane,
+    },
+    BoolSpec {
+        setting: BoolSetting::NotifyHook,
+        get: |w| w.notify_hook,
+        set: |w, v| w.notify_hook = v,
+        patch: SettingsPatch::NotifyHook,
+        show: |c| c.notifications.hook_notification_enabled,
+    },
+    BoolSpec {
+        setting: BoolSetting::NotifyAgentCompletion,
+        get: |w| w.notify_agent_completion,
+        set: |w, v| w.notify_agent_completion = v,
+        patch: SettingsPatch::NotifyAgentCompletion,
+        show: |c| c.notifications.agent_completion_enabled,
+    },
+    BoolSpec {
+        setting: BoolSetting::NotifyAgentWaiting,
+        get: |w| w.notify_agent_waiting,
+        set: |w, v| w.notify_agent_waiting = v,
+        patch: SettingsPatch::NotifyAgentWaiting,
+        show: |c| c.notifications.agent_waiting_enabled,
+    },
+    BoolSpec {
+        setting: BoolSetting::TelegramOnlyWhenAway,
+        get: |w| w.telegram_only_when_away,
+        set: |w, v| w.telegram_only_when_away = v,
+        patch: SettingsPatch::TelegramOnlyWhenAway,
+        show: |c| c.telegram.only_when_away,
+    },
+    BoolSpec {
         setting: BoolSetting::ClaudeStatusEnabled,
         get: |w| w.claude_status_enable,
         set: |w, v| w.claude_status_enable = v,
@@ -643,6 +727,16 @@ mod tests {
             | SettingsPatch::TerminalInsetY(_)
             | SettingsPatch::FilesShowHidden(_)
             | SettingsPatch::FilesUseGitignore(_)
+            | SettingsPatch::NotifyOsc9(_)
+            | SettingsPatch::NotifyOsc777(_)
+            | SettingsPatch::NotifyAttention(_)
+            | SettingsPatch::NotifyLongRunning(_)
+            | SettingsPatch::NotifySkipFocusedPane(_)
+            | SettingsPatch::NotifyHook(_)
+            | SettingsPatch::NotifyAgentCompletion(_)
+            | SettingsPatch::NotifyAgentWaiting(_)
+            | SettingsPatch::TelegramOnlyWhenAway(_)
+            | SettingsPatch::NotifyLongRunningThresholdSecs(_)
             | SettingsPatch::SyntaxTheme(_)
             | SettingsPatch::ClipboardStreamingMaxBytes(_)
             | SettingsPatch::PreferredEditor(_)

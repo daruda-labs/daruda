@@ -4466,6 +4466,122 @@ pub fn settings_desc_remote_control() -> String {
     rust_i18n::t!("settings.desc_remote_control").into_owned()
 }
 
+pub fn settings_card_terminal_programs() -> String {
+    rust_i18n::t!("settings.card_terminal_programs").into_owned()
+}
+
+pub fn settings_card_claude_code_terminals() -> String {
+    rust_i18n::t!("settings.card_claude_code_terminals").into_owned()
+}
+
+pub fn settings_card_agent_chat_notifications() -> String {
+    rust_i18n::t!("settings.card_agent_chat_notifications").into_owned()
+}
+
+pub fn settings_card_notify_behavior() -> String {
+    rust_i18n::t!("settings.card_notify_behavior").into_owned()
+}
+
+pub fn settings_label_notify_osc9() -> String {
+    rust_i18n::t!("settings.label_notify_osc9").into_owned()
+}
+
+pub fn settings_hint_notify_osc9() -> String {
+    rust_i18n::t!("settings.hint_notify_osc9").into_owned()
+}
+
+pub fn settings_label_notify_osc777() -> String {
+    rust_i18n::t!("settings.label_notify_osc777").into_owned()
+}
+
+pub fn settings_hint_notify_osc777() -> String {
+    rust_i18n::t!("settings.hint_notify_osc777").into_owned()
+}
+
+pub fn settings_label_notify_attention() -> String {
+    rust_i18n::t!("settings.label_notify_attention").into_owned()
+}
+
+pub fn settings_hint_notify_attention() -> String {
+    rust_i18n::t!("settings.hint_notify_attention").into_owned()
+}
+
+pub fn settings_label_notify_long_running() -> String {
+    rust_i18n::t!("settings.label_notify_long_running").into_owned()
+}
+
+pub fn settings_hint_notify_long_running() -> String {
+    rust_i18n::t!("settings.hint_notify_long_running").into_owned()
+}
+
+pub fn settings_label_notify_long_running_threshold() -> String {
+    rust_i18n::t!("settings.label_notify_long_running_threshold").into_owned()
+}
+
+pub fn settings_label_notify_hook() -> String {
+    rust_i18n::t!("settings.label_notify_hook").into_owned()
+}
+
+pub fn settings_hint_notify_hook() -> String {
+    rust_i18n::t!("settings.hint_notify_hook").into_owned()
+}
+
+pub fn settings_label_notify_agent_completion() -> String {
+    rust_i18n::t!("settings.label_notify_agent_completion").into_owned()
+}
+
+pub fn settings_label_notify_agent_waiting() -> String {
+    rust_i18n::t!("settings.label_notify_agent_waiting").into_owned()
+}
+
+pub fn settings_label_notify_skip_focused() -> String {
+    rust_i18n::t!("settings.label_notify_skip_focused").into_owned()
+}
+
+pub fn settings_hint_notify_skip_focused() -> String {
+    rust_i18n::t!("settings.hint_notify_skip_focused").into_owned()
+}
+
+pub fn settings_err_long_running_threshold() -> String {
+    rust_i18n::t!("settings.err_long_running_threshold").into_owned()
+}
+
+pub fn settings_hint_only_when_away() -> String {
+    rust_i18n::t!("settings.hint_only_when_away").into_owned()
+}
+
+pub fn settings_dependent_off(parent: &str) -> String {
+    rust_i18n::t!("settings.dependent_off", parent = parent).into_owned()
+}
+
+pub fn settings_daruda_link_label(state: &str) -> String {
+    rust_i18n::t!("settings.daruda_link_label", state = state).into_owned()
+}
+
+pub fn settings_daruda_link_hint() -> String {
+    rust_i18n::t!("settings.daruda_link_hint").into_owned()
+}
+
+pub fn settings_daruda_link_button() -> String {
+    rust_i18n::t!("settings.daruda_link_button").into_owned()
+}
+
+pub fn settings_card_used_by() -> String {
+    rust_i18n::t!("settings.card_used_by").into_owned()
+}
+
+pub fn settings_used_by_remote_hint() -> String {
+    rust_i18n::t!("settings.used_by_remote_hint").into_owned()
+}
+
+pub fn settings_used_by_remote_button() -> String {
+    rust_i18n::t!("settings.used_by_remote_button").into_owned()
+}
+
+pub fn settings_card_daruda() -> String {
+    rust_i18n::t!("settings.card_daruda").into_owned()
+}
+
 pub fn settings_nav_general() -> String {
     rust_i18n::t!("settings.nav_general").into_owned()
 }
@@ -4562,10 +4678,6 @@ pub fn settings_open_config_file() -> String {
 pub fn settings_placeholder_keymap() -> String {
     rust_i18n::t!("settings.placeholder_keymap").into_owned()
 }
-pub fn settings_placeholder_notifications() -> String {
-    rust_i18n::t!("settings.placeholder_notifications").into_owned()
-}
-
 // Notifications section — Telegram bridge subsection.
 pub fn settings_telegram_heading() -> String {
     rust_i18n::t!("settings.telegram_heading").into_owned()

@@ -32,6 +32,16 @@ pub enum SettingsFieldId {
     TerminalInsetY,
     FilesShowHidden,
     FilesUseGitignore,
+    NotifyOsc9,
+    NotifyOsc777,
+    NotifyAttention,
+    NotifyLongRunning,
+    NotifySkipFocusedPane,
+    NotifyHook,
+    NotifyAgentCompletion,
+    NotifyAgentWaiting,
+    TelegramOnlyWhenAway,
+    NotifyLongRunningThresholdSecs,
     SyntaxTheme,
     ClipboardStreamingMaxBytes,
     PreferredEditor,
@@ -76,6 +86,16 @@ impl SettingsFieldId {
             Self::TerminalInsetY => "font.terminal.inset_y",
             Self::FilesShowHidden => "left_dock.files_show_hidden",
             Self::FilesUseGitignore => "left_dock.files_use_gitignore",
+            Self::NotifyOsc9 => "notifications.osc9_enabled",
+            Self::NotifyOsc777 => "notifications.osc777_enabled",
+            Self::NotifyAttention => "notifications.attention_enabled",
+            Self::NotifyLongRunning => "notifications.long_running_enabled",
+            Self::NotifySkipFocusedPane => "notifications.skip_focused_pane",
+            Self::NotifyHook => "notifications.hook_notification_enabled",
+            Self::NotifyAgentCompletion => "notifications.agent_completion_enabled",
+            Self::NotifyAgentWaiting => "notifications.agent_waiting_enabled",
+            Self::TelegramOnlyWhenAway => "telegram.only_when_away",
+            Self::NotifyLongRunningThresholdSecs => "notifications.long_running_threshold_secs",
             Self::SyntaxTheme => "file_viewer.syntax_theme",
             Self::ClipboardStreamingMaxBytes => "clipboard.streaming_max_bytes",
             Self::PreferredEditor => "editor.preferred",
@@ -126,6 +146,16 @@ pub enum SettingsPatch {
     TerminalInsetY(f32),
     FilesShowHidden(bool),
     FilesUseGitignore(bool),
+    NotifyOsc9(bool),
+    NotifyOsc777(bool),
+    NotifyAttention(bool),
+    NotifyLongRunning(bool),
+    NotifySkipFocusedPane(bool),
+    NotifyHook(bool),
+    NotifyAgentCompletion(bool),
+    NotifyAgentWaiting(bool),
+    TelegramOnlyWhenAway(bool),
+    NotifyLongRunningThresholdSecs(u64),
     SyntaxTheme(String),
     ClipboardStreamingMaxBytes(usize),
     PreferredEditor(String),
@@ -173,6 +203,18 @@ impl SettingsPatch {
             Self::TerminalInsetY(_) => SettingsFieldId::TerminalInsetY,
             Self::FilesShowHidden(_) => SettingsFieldId::FilesShowHidden,
             Self::FilesUseGitignore(_) => SettingsFieldId::FilesUseGitignore,
+            Self::NotifyOsc9(_) => SettingsFieldId::NotifyOsc9,
+            Self::NotifyOsc777(_) => SettingsFieldId::NotifyOsc777,
+            Self::NotifyAttention(_) => SettingsFieldId::NotifyAttention,
+            Self::NotifyLongRunning(_) => SettingsFieldId::NotifyLongRunning,
+            Self::NotifySkipFocusedPane(_) => SettingsFieldId::NotifySkipFocusedPane,
+            Self::NotifyHook(_) => SettingsFieldId::NotifyHook,
+            Self::NotifyAgentCompletion(_) => SettingsFieldId::NotifyAgentCompletion,
+            Self::NotifyAgentWaiting(_) => SettingsFieldId::NotifyAgentWaiting,
+            Self::TelegramOnlyWhenAway(_) => SettingsFieldId::TelegramOnlyWhenAway,
+            Self::NotifyLongRunningThresholdSecs(_) => {
+                SettingsFieldId::NotifyLongRunningThresholdSecs
+            }
             Self::SyntaxTheme(_) => SettingsFieldId::SyntaxTheme,
             Self::ClipboardStreamingMaxBytes(_) => SettingsFieldId::ClipboardStreamingMaxBytes,
             Self::PreferredEditor(_) => SettingsFieldId::PreferredEditor,
@@ -225,6 +267,20 @@ impl SettingsPatch {
             Self::TerminalInsetY(value) => config.font.terminal.inset_y = *value,
             Self::FilesShowHidden(value) => config.left_dock.files_show_hidden = *value,
             Self::FilesUseGitignore(value) => config.left_dock.files_use_gitignore = *value,
+            Self::NotifyOsc9(value) => config.notifications.osc9_enabled = *value,
+            Self::NotifyOsc777(value) => config.notifications.osc777_enabled = *value,
+            Self::NotifyAttention(value) => config.notifications.attention_enabled = *value,
+            Self::NotifyLongRunning(value) => config.notifications.long_running_enabled = *value,
+            Self::NotifySkipFocusedPane(value) => config.notifications.skip_focused_pane = *value,
+            Self::NotifyHook(value) => config.notifications.hook_notification_enabled = *value,
+            Self::NotifyAgentCompletion(value) => {
+                config.notifications.agent_completion_enabled = *value
+            }
+            Self::NotifyAgentWaiting(value) => config.notifications.agent_waiting_enabled = *value,
+            Self::TelegramOnlyWhenAway(value) => config.telegram.only_when_away = *value,
+            Self::NotifyLongRunningThresholdSecs(value) => {
+                config.notifications.long_running_threshold_secs = *value
+            }
             Self::SyntaxTheme(value) => config.file_viewer.syntax_theme = value.clone(),
             Self::ClipboardStreamingMaxBytes(value) => {
                 config.clipboard.streaming_max_bytes = *value;
@@ -295,6 +351,40 @@ impl SettingsPatch {
             }
             Self::FilesUseGitignore(_) => {
                 left.left_dock.files_use_gitignore != right.left_dock.files_use_gitignore
+            }
+            Self::NotifyOsc9(_) => {
+                left.notifications.osc9_enabled != right.notifications.osc9_enabled
+            }
+            Self::NotifyOsc777(_) => {
+                left.notifications.osc777_enabled != right.notifications.osc777_enabled
+            }
+            Self::NotifyAttention(_) => {
+                left.notifications.attention_enabled != right.notifications.attention_enabled
+            }
+            Self::NotifyLongRunning(_) => {
+                left.notifications.long_running_enabled != right.notifications.long_running_enabled
+            }
+            Self::NotifySkipFocusedPane(_) => {
+                left.notifications.skip_focused_pane != right.notifications.skip_focused_pane
+            }
+            Self::NotifyHook(_) => {
+                left.notifications.hook_notification_enabled
+                    != right.notifications.hook_notification_enabled
+            }
+            Self::NotifyAgentCompletion(_) => {
+                left.notifications.agent_completion_enabled
+                    != right.notifications.agent_completion_enabled
+            }
+            Self::NotifyAgentWaiting(_) => {
+                left.notifications.agent_waiting_enabled
+                    != right.notifications.agent_waiting_enabled
+            }
+            Self::TelegramOnlyWhenAway(_) => {
+                left.telegram.only_when_away != right.telegram.only_when_away
+            }
+            Self::NotifyLongRunningThresholdSecs(_) => {
+                left.notifications.long_running_threshold_secs
+                    != right.notifications.long_running_threshold_secs
             }
             Self::SyntaxTheme(_) => left.file_viewer.syntax_theme != right.file_viewer.syntax_theme,
             Self::ClipboardStreamingMaxBytes(_) => {

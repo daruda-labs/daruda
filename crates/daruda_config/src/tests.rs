@@ -730,6 +730,43 @@ fn settings_patch_writes_render_max_fps() {
     assert_eq!(Config::load_from(&path).render.max_fps, 60);
 }
 
+/// Every `[notifications]` key and `telegram.only_when_away` through the real
+/// `toml_edit` writer: flipped off from their `true` defaults, the threshold
+/// written as an integer, all read back from disk.
+#[test]
+fn settings_patch_round_trips_every_notification_key() {
+    use crate::SettingsPatch as P;
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("config.toml");
+
+    for patch in [
+        P::NotifyOsc9(false),
+        P::NotifyOsc777(false),
+        P::NotifyAttention(false),
+        P::NotifyLongRunning(false),
+        P::NotifySkipFocusedPane(false),
+        P::NotifyHook(false),
+        P::NotifyAgentCompletion(false),
+        P::NotifyAgentWaiting(false),
+        P::NotifyLongRunningThresholdSecs(45),
+        P::TelegramOnlyWhenAway(false),
+    ] {
+        crate::apply_settings_patch_to(&patch, &path).expect("notification patch");
+    }
+
+    let n = Config::load_from(&path).notifications;
+    assert!(!n.osc9_enabled);
+    assert!(!n.osc777_enabled);
+    assert!(!n.attention_enabled);
+    assert!(!n.long_running_enabled);
+    assert!(!n.skip_focused_pane);
+    assert!(!n.hook_notification_enabled);
+    assert!(!n.agent_completion_enabled);
+    assert!(!n.agent_waiting_enabled);
+    assert_eq!(n.long_running_threshold_secs, 45);
+    assert!(!Config::load_from(&path).telegram.only_when_away);
+}
+
 /// Each of the three orchestrator keys through the real `toml_edit` writer.
 /// The two optional ones matter most: a `None` has to *remove* its key, since
 /// an empty string is a real agent id that resolves to nothing.

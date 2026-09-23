@@ -479,6 +479,11 @@ pub const SETTINGS_SWITCH_H: f32 = 18.0;
 pub const SETTINGS_SWITCH_THUMB: f32 = 10.0;
 pub const SETTINGS_SWITCH_INSET: f32 = 3.0;
 pub const SETTINGS_SWITCH_TARGET_W: f32 = 38.0;
+/// Left indent of rows that only matter while a parent switch is on.
+pub const SETTINGS_DEPENDENT_INDENT: f32 = 16.0;
+/// Opacity of those rows while the parent is off — the vendored button's
+/// disabled tone, so an inactive child reads like a disabled control.
+pub const SETTINGS_DEPENDENT_OFF_OPACITY: f32 = 0.5;
 /// Dock background — slightly darker than the panel body so the
 /// active row's highlight reads cleanly.
 pub const SETTINGS_SIDEBAR_BG: Hsla = with_alpha(CANVAS, 0.18);

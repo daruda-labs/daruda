@@ -162,6 +162,52 @@ impl SettingsView {
         row(label, description, control, cx)
     }
 
+    /// Rows that only apply while `parent` is on, indented under it. While
+    /// it is off they are dimmed and headed by a note naming the parent.
+    pub(super) fn dependent_rows(
+        &self,
+        parent: BoolSetting,
+        parent_label: String,
+        rows: impl IntoIterator<Item = Div>,
+        cx: &App,
+    ) -> Div {
+        let on = (spec::bool_spec(parent).get)(self);
+        crate::ui::dependent(on, cx)
+            .when(!on, |el| {
+                el.child(
+                    div()
+                        .mx(px(theme::SETTINGS_CARD_PAD))
+                        .pt(px(theme::PAD_SM))
+                        .text_size(px(theme::TAB_FONT_SIZE))
+                        .text_color(theme::current(cx).text_muted)
+                        .child(s::settings_dependent_off(&parent_label)),
+                )
+            })
+            .children(rows)
+    }
+
+    /// A row whose control jumps to another Settings page.
+    pub(super) fn link_row(
+        &self,
+        id: &'static str,
+        label: String,
+        description: String,
+        button_label: String,
+        target: daruda_config::BuiltinSection,
+        cx: &gpui::Context<Self>,
+    ) -> Div {
+        row(
+            label,
+            description,
+            super::settings_button(id, button_label)
+                .tab_stop(true)
+                .on_click(
+                    cx.listener(move |this, _, window, cx| this.focus_section(target, window, cx)),
+                ),
+            cx,
+        )
+    }
+
     pub(super) fn set_bool_setting(
         &mut self,
         setting: BoolSetting,

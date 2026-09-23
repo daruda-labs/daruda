@@ -1034,6 +1034,68 @@ fn patch_settings_document(
                 toml_edit::value(config.left_dock.files_use_gitignore),
             );
         }),
+        SettingsPatch::NotifyOsc9(_) => patch_section(doc, "notifications", |t| {
+            t.insert(
+                "osc9_enabled",
+                toml_edit::value(config.notifications.osc9_enabled),
+            );
+        }),
+        SettingsPatch::NotifyOsc777(_) => patch_section(doc, "notifications", |t| {
+            t.insert(
+                "osc777_enabled",
+                toml_edit::value(config.notifications.osc777_enabled),
+            );
+        }),
+        SettingsPatch::NotifyAttention(_) => patch_section(doc, "notifications", |t| {
+            t.insert(
+                "attention_enabled",
+                toml_edit::value(config.notifications.attention_enabled),
+            );
+        }),
+        SettingsPatch::NotifyLongRunning(_) => patch_section(doc, "notifications", |t| {
+            t.insert(
+                "long_running_enabled",
+                toml_edit::value(config.notifications.long_running_enabled),
+            );
+        }),
+        SettingsPatch::NotifySkipFocusedPane(_) => patch_section(doc, "notifications", |t| {
+            t.insert(
+                "skip_focused_pane",
+                toml_edit::value(config.notifications.skip_focused_pane),
+            );
+        }),
+        SettingsPatch::NotifyHook(_) => patch_section(doc, "notifications", |t| {
+            t.insert(
+                "hook_notification_enabled",
+                toml_edit::value(config.notifications.hook_notification_enabled),
+            );
+        }),
+        SettingsPatch::NotifyAgentCompletion(_) => patch_section(doc, "notifications", |t| {
+            t.insert(
+                "agent_completion_enabled",
+                toml_edit::value(config.notifications.agent_completion_enabled),
+            );
+        }),
+        SettingsPatch::NotifyAgentWaiting(_) => patch_section(doc, "notifications", |t| {
+            t.insert(
+                "agent_waiting_enabled",
+                toml_edit::value(config.notifications.agent_waiting_enabled),
+            );
+        }),
+        SettingsPatch::TelegramOnlyWhenAway(_) => patch_section(doc, "telegram", |t| {
+            t.insert(
+                "only_when_away",
+                toml_edit::value(config.telegram.only_when_away),
+            );
+        }),
+        SettingsPatch::NotifyLongRunningThresholdSecs(_) => {
+            patch_section(doc, "notifications", |t| {
+                t.insert(
+                    "long_running_threshold_secs",
+                    toml_edit::value(config.notifications.long_running_threshold_secs as i64),
+                );
+            })
+        }
         SettingsPatch::SyntaxTheme(_) => patch_section(doc, "file_viewer", |t| {
             t.insert(
                 "syntax_theme",

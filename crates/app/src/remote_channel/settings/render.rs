@@ -131,14 +131,16 @@ impl Render for ChannelSettings {
                             this.set_enabled(&enabled_id, next_enabled, cx)
                         })),
                 ))
-                .child(ui::field_row(
-                    s::remote_only_when_away(),
-                    ui::switch(("remote-presence", index), row.config.only_when_away, cx)
-                        .tooltip(s::remote_only_when_away())
-                        .on_click(cx.listener(move |this, _, _, cx| {
-                            this.set_presence(&presence_id, next_presence, cx)
-                        })),
-                ))
+                .child(
+                    ui::dependent(row.config.enabled, cx).child(ui::field_row(
+                        s::remote_only_when_away(),
+                        ui::switch(("remote-presence", index), row.config.only_when_away, cx)
+                            .tooltip(s::remote_only_when_away())
+                            .on_click(cx.listener(move |this, _, _, cx| {
+                                this.set_presence(&presence_id, next_presence, cx)
+                            })),
+                    )),
+                )
                 .child(self.token_row(&row.config.id, index * 2, Secret::Bot, &row.bot, cx));
             if let Some(app) = &row.app {
                 section = section.child(self.token_row(

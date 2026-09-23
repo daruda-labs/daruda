@@ -21,6 +21,7 @@ pub(super) mod agent_env;
 pub(super) mod agent_transcript;
 pub(super) mod agent_vocabulary;
 mod basic;
+mod notifications;
 pub(super) mod orchestrator;
 pub(super) mod plugin;
 mod session_hosts;
@@ -398,7 +399,21 @@ impl SettingsView {
                         ),
                     ),
             );
+        let orchestrator_state = if self.orchestrator_enabled {
+            s::settings_toggle_on()
+        } else {
+            s::settings_toggle_off()
+        };
+        let telegram_enabled = s::settings_telegram_enabled_label();
         page_stack()
+            .child(card(s::settings_card_daruda(), cx).child(self.link_row(
+                "settings-daruda-orchestrator-link",
+                s::settings_daruda_link_label(&orchestrator_state),
+                s::settings_daruda_link_hint(),
+                s::settings_daruda_link_button(),
+                daruda_config::BuiltinSection::Orchestrator,
+                cx,
+            )))
             .child(
                 card(s::settings_group_integrations(), cx)
                     .child(card_content(self.remote_channel_settings.clone())),
@@ -407,22 +422,24 @@ impl SettingsView {
                 card(s::settings_telegram_heading(), cx)
                     .child(self.switch_row(
                         BoolSetting::TelegramEnabled,
-                        s::settings_telegram_enabled_label(),
+                        telegram_enabled.clone(),
                         String::new(),
+                        cx,
+                    ))
+                    .child(self.dependent_rows(
+                        BoolSetting::TelegramEnabled,
+                        telegram_enabled,
+                        [self.switch_row(
+                            BoolSetting::TelegramOnlyWhenAway,
+                            s::remote_only_when_away(),
+                            s::settings_hint_only_when_away(),
+                            cx,
+                        )],
                         cx,
                     ))
                     .child(card_content(telegram)),
             )
             .into_any_element()
-    }
-
-    /// `[notifications]` has no GUI yet; the page points at the file.
-    pub(super) fn render_notifications(&self, cx: &mut gpui::Context<Self>) -> AnyElement {
-        Self::render_placeholder(
-            s::settings_nav_notifications(),
-            s::settings_placeholder_notifications(),
-            cx,
-        )
     }
 
     pub(super) fn render_keymap(&self, cx: &mut gpui::Context<Self>) -> AnyElement {
