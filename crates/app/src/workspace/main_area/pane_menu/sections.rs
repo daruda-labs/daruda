@@ -1,6 +1,7 @@
 use gpui::SharedString;
 
 use crate::surface::strings as s;
+use crate::workspace::main_area::link_target::LocalKind;
 use crate::workspace::main_area::pane_tree::{PaneId, SplitDirection};
 use crate::workspace::main_area::tab_ops::NewPaneKind;
 
@@ -316,23 +317,41 @@ fn link_entries(ctx: &PaneMenuContext) -> Vec<MenuEntry> {
     let mut entries = Vec::new();
 
     match &link {
-        ClickLink::File { url, path } => {
-            let url = url.clone();
-            entries.push(item(
-                s::ctx_open_link_in_file_view(),
-                ItemState::Enabled,
-                Activate::Op(Box::new(move |ws, window, cx| {
-                    ws.open_agent_chat_markdown_file_link(pane_id, &url, window, cx);
-                })),
-            ));
+        ClickLink::File { url, path, kind } => {
             let path = path.clone();
-            entries.push(item(
-                s::ctx_open_link_externally(),
-                ItemState::Enabled,
-                Activate::Op(Box::new(move |ws, _window, cx| {
-                    ws.open_pane_file_externally(pane_id, path.clone(), cx);
-                })),
-            ));
+            match kind {
+                // Text has two openers: the viewer, and the user's editor.
+                LocalKind::Text => {
+                    let url = url.clone();
+                    entries.push(item(
+                        s::ctx_open_link_in_file_view(),
+                        ItemState::Enabled,
+                        Activate::Op(Box::new(move |ws, window, cx| {
+                            ws.open_pane_link(pane_id, &url, window, cx);
+                        })),
+                    ));
+                    entries.push(item(
+                        s::ctx_open_link_externally(),
+                        ItemState::Enabled,
+                        Activate::Op(Box::new(move |ws, _window, cx| {
+                            ws.open_pane_file_externally(pane_id, path.clone(), cx);
+                        })),
+                    ));
+                }
+                // An image, a PDF, a directory: the code editor is the wrong
+                // tool, so only the OS default handler is offered.
+                LocalKind::Image | LocalKind::Binary | LocalKind::Directory => {
+                    entries.push(item(
+                        s::ctx_open_link_externally(),
+                        ItemState::Enabled,
+                        Activate::Op(Box::new(move |ws, _window, cx| {
+                            ws.open_path_with_system_default(path.clone(), cx);
+                        })),
+                    ));
+                }
+                // Gone: nothing opens it; the address is still worth copying.
+                LocalKind::Missing => {}
+            }
         }
         ClickLink::Web { url } => {
             let url = url.clone();
@@ -779,6 +798,7 @@ mod tests {
                 link: Some(ClickLink::File {
                     url: "src/main.rs:42".to_string(),
                     path: std::path::PathBuf::from("/repo/src/main.rs"),
+                    kind: LocalKind::Text,
                 }),
                 annotation: None,
             }),
@@ -790,6 +810,47 @@ mod tests {
         assert!(labels.contains(&s::ctx_copy_link_address()));
         // The browser has nothing to do with a path.
         assert!(!labels.contains(&s::ctx_open_link()));
+    }
+
+    /// An image is not something the code viewer can show, so the viewer
+    /// entry would be dead — only the OS opener is offered.
+    #[test]
+    fn an_image_link_offers_only_the_external_opener() {
+        let ctx = PaneMenuContext {
+            click: Some(ClickInfo {
+                link: Some(ClickLink::File {
+                    url: "/tmp/shot.png".to_string(),
+                    path: std::path::PathBuf::from("/tmp/shot.png"),
+                    kind: LocalKind::Image,
+                }),
+                annotation: None,
+            }),
+            ..base(PaneMenuKind::AgentChat { busy: false })
+        };
+        let labels = labels(&compose(&ctx));
+        assert!(!labels.contains(&s::ctx_open_link_in_file_view()));
+        assert!(labels.contains(&s::ctx_open_link_externally()));
+        assert!(labels.contains(&s::ctx_copy_link_address()));
+    }
+
+    /// A file that is gone can still have its address copied, and nothing else.
+    #[test]
+    fn a_missing_file_link_offers_only_copy() {
+        let ctx = PaneMenuContext {
+            click: Some(ClickInfo {
+                link: Some(ClickLink::File {
+                    url: "/tmp/gone.rs".to_string(),
+                    path: std::path::PathBuf::from("/tmp/gone.rs"),
+                    kind: LocalKind::Missing,
+                }),
+                annotation: None,
+            }),
+            ..base(PaneMenuKind::AgentChat { busy: false })
+        };
+        let labels = labels(&compose(&ctx));
+        assert!(!labels.contains(&s::ctx_open_link_in_file_view()));
+        assert!(!labels.contains(&s::ctx_open_link_externally()));
+        assert!(labels.contains(&s::ctx_copy_link_address()));
     }
 
     /// The mirror: a web link in the chat reads exactly like one in the

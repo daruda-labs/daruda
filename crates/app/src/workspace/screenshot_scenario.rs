@@ -684,7 +684,7 @@ pub(crate) fn drive(
 /// Render [`MERMAID_LIGHTBOX_SAMPLE`] and open it in the lightbox — no chat
 /// history needed, the same render path the diagram card's zoom button uses.
 fn open_mermaid_lightbox_sample(window: &mut Window, cx: &mut App) {
-    use super::main_area::agent_chat_pane::render::mermaid_lightbox;
+    use super::main_area::agent_chat_pane::render::image_lightbox;
     use super::main_area::file_view_pane::mermaid_theme::MermaidPalette;
     use super::main_area::file_view_pane::render::CachedImage;
     use super::main_area::file_view_pane::visual::render_mermaid_raster;
@@ -696,7 +696,7 @@ fn open_mermaid_lightbox_sample(window: &mut Window, cx: &mut App) {
     let Some(image) = CachedImage::from_raster(raster) else {
         return;
     };
-    mermaid_lightbox::open(&image, window, cx);
+    image_lightbox::open(&image, window, cx);
 }
 
 /// Synthetic report for the error-modal scenario — representative of a real

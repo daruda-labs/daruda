@@ -6,3 +6,4 @@ pub mod attention;
 pub(crate) mod local_socket;
 pub mod notifications;
 pub mod presence;
+pub(crate) mod window_controls;

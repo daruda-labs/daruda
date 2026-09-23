@@ -501,7 +501,11 @@ pub const SETTINGS_PLUGIN_LABEL_W: f32 = 110.0;
 /// macOS traffic light X offset from window left edge.
 pub const TRAFFIC_LIGHT_X: f32 = 8.0;
 /// macOS traffic light Y offset from window top edge.
-pub const TRAFFIC_LIGHT_Y: f32 = 6.0;
+pub const TRAFFIC_LIGHT_Y: f32 = (TITLE_BAR_HEIGHT - TRAFFIC_LIGHT_SIZE) / 2.0;
+/// Diameter of the native macOS window buttons in logical pixels.
+pub const TRAFFIC_LIGHT_SIZE: f32 = 12.0;
+/// Edge-to-edge spacing between the compact native window buttons.
+pub const TRAFFIC_LIGHT_GAP: f32 = 8.0;
 /// Width reserved for traffic lights in the title bar.
 pub const TRAFFIC_LIGHT_WIDTH: f32 = 70.0;
 /// Left inset before the first title-bar control when the app draws its own

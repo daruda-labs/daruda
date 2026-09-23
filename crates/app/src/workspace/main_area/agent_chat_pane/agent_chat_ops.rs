@@ -16,13 +16,14 @@ use daruda_store::observability::error_report::{ErrorReport, ErrorSeverity};
 use daruda_store::observability::log_writer::LogWriter;
 use daruda_store::project::{LaneSessionHost, PaneCwd};
 use gpui::{App, AppContext as _, Context, Entity, Window};
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 use super::transcript_defaults::TranscriptDefaults;
 use super::view::{AgentChatView, AgentSessionStatus, TurnOutcome};
 use crate::agent::launch_resolve::{AgentLaunchSpec, account_recipe_for_connect};
 use crate::surface::strings as s;
 use crate::workspace::Workspace;
+use crate::workspace::main_area::link_target::{self, LinkTarget, LocalKind};
 use crate::workspace::main_area::pane::{AgentChatContent, Pane, PaneContent, TabEntry};
 use crate::workspace::main_area::pane_tree::{PaneId, PaneLayout};
 
@@ -221,96 +222,6 @@ fn should_notify_agent_event(
     is_focused_pane: bool,
 ) -> bool {
     enabled && !(skip_focused_pane && app_active && is_focused_pane)
-}
-
-#[derive(Clone, Debug, PartialEq, Eq)]
-struct MarkdownFileLinkTarget {
-    path: PathBuf,
-    line: Option<usize>,
-}
-
-fn markdown_file_link_target(link: &str, cwd: Option<&Path>) -> Option<MarkdownFileLinkTarget> {
-    let path = if let Some(path) = file_url_path(link) {
-        path
-    } else if is_external_url(link) {
-        return None;
-    } else {
-        let path = PathBuf::from(link);
-        if path.is_absolute() {
-            path
-        } else if link.starts_with("./")
-            || link.starts_with("../")
-            || link.contains('/')
-            || cwd
-                .map(|cwd| strip_markdown_line_suffix(cwd.join(&path)).path.is_file())
-                .unwrap_or(false)
-        {
-            cwd?.join(path)
-        } else {
-            return None;
-        }
-    };
-
-    Some(strip_markdown_line_suffix(path))
-}
-
-fn file_url_path(link: &str) -> Option<PathBuf> {
-    let url = url::Url::parse(link).ok()?;
-    if url.scheme() != "file" || url.host_str().is_some_and(|host| host != "localhost") {
-        return None;
-    }
-    url.to_file_path().ok()
-}
-
-/// Whether a markdown link points outside the filesystem — the same test
-/// [`markdown_file_link_target`] uses to decline a link, so the context menu
-/// and the click cannot disagree about what a link is.
-pub(in crate::workspace) fn is_external_url(link: &str) -> bool {
-    link.contains("://")
-        || link.starts_with("mailto:")
-        || link.starts_with("tel:")
-        || link.starts_with('#')
-}
-
-fn parse_numeric_suffix(suffix: &str) -> Option<Option<usize>> {
-    if suffix.is_empty() || !suffix.bytes().all(|b| b.is_ascii_digit()) {
-        return None;
-    }
-    Some(suffix.parse::<usize>().ok().filter(|n| *n > 0))
-}
-
-fn strip_markdown_line_suffix(path: PathBuf) -> MarkdownFileLinkTarget {
-    if path.is_file() {
-        return MarkdownFileLinkTarget { path, line: None };
-    }
-
-    let Some(mut s) = path.to_str().map(str::to_owned) else {
-        return MarkdownFileLinkTarget { path, line: None };
-    };
-    let mut line = None;
-    for _ in 0..2 {
-        let Some((prefix, suffix)) = s.rsplit_once(':') else {
-            break;
-        };
-        let Some(parsed) = parse_numeric_suffix(suffix) else {
-            break;
-        };
-        if let Some(n) = parsed {
-            line = Some(n);
-        }
-        s = prefix.to_string();
-        let stripped = PathBuf::from(&s);
-        if stripped.is_file() {
-            return MarkdownFileLinkTarget {
-                path: stripped,
-                line,
-            };
-        }
-    }
-    MarkdownFileLinkTarget {
-        path: PathBuf::from(s),
-        line,
-    }
 }
 
 impl Workspace {
@@ -1630,72 +1541,135 @@ impl Workspace {
         })
     }
 
-    /// The file an agent-chat markdown link resolves to, if it resolves to one
-    /// at all. Shares [`markdown_file_link_target`] with the click, so the
-    /// context menu cannot offer a viewer entry the click would decline.
-    pub(in crate::workspace) fn agent_chat_link_file_path(
+    /// Classify a link as `pane_id`'s session sees it — against the pane's
+    /// local working directory, or as remote for a remote session. The
+    /// context menu and [`Self::open_pane_link`] both read this, so the menu
+    /// cannot offer an opener the click would decline.
+    pub(in crate::workspace) fn classify_pane_link(
         &self,
         pane_id: PaneId,
         link: &str,
         cx: &App,
-    ) -> Option<PathBuf> {
+    ) -> LinkTarget {
+        if self.diff_pane_is_remote(pane_id, cx) {
+            return link_target::classify_remote(link);
+        }
         let cwd = self.agent_chat_local_cwd(pane_id, cx);
-        markdown_file_link_target(link, cwd.as_deref()).map(|target| target.path)
+        link_target::classify(link, cwd.as_deref())
     }
 
-    /// Open a file-shaped link from rendered agent-chat Markdown in the pane
-    /// file viewer. Returns `false` for normal URLs so the caller can fall back
-    /// to the platform URL opener. Handles the file-link shape this app emits
-    /// in chat (`/abs/path:line`) by stripping the line suffix before opening.
-    pub(in crate::workspace) fn open_agent_chat_markdown_file_link(
+    /// Open a link from rendered Markdown in `pane_id` — see
+    /// [`Self::open_link_target`] for where each kind goes. Returns `false`
+    /// only for a link nothing can open, so the caller may fall back.
+    pub(in crate::workspace) fn open_pane_link(
         &mut self,
         pane_id: PaneId,
         link: &str,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> bool {
-        let cwd = self.agent_chat_local_cwd(pane_id, cx);
-        let Some(target) = markdown_file_link_target(link, cwd.as_deref()) else {
-            return false;
+        let target = self.classify_pane_link(pane_id, link, cx);
+        self.open_link_target(pane_id, target, window, cx)
+    }
+
+    /// Open a tool's resource-link URI. Classified as a resource rather than
+    /// as Markdown text, so a relative URI that is gone reports instead of
+    /// doing nothing.
+    pub(in crate::workspace) fn open_pane_resource_link(
+        &mut self,
+        pane_id: PaneId,
+        uri: &str,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        let target = if self.diff_pane_is_remote(pane_id, cx) {
+            link_target::classify_remote(uri)
+        } else {
+            let cwd = self.agent_chat_local_cwd(pane_id, cx);
+            link_target::classify_resource(uri, cwd.as_deref())
         };
-        let Some(lane) = self.lane_ref_for_pane(pane_id) else {
-            return true;
+        self.open_link_target(pane_id, target, window, cx)
+    }
+
+    /// Text opens in the pane file viewer (at the `:line` the link carried);
+    /// images, binaries and directories in the OS default handler; URLs in
+    /// the platform opener. A missing file and a remote path each report.
+    fn open_link_target(
+        &mut self,
+        pane_id: PaneId,
+        target: LinkTarget,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        let (path, line, kind) = match target {
+            LinkTarget::Web { url } => {
+                cx.open_url(&url);
+                return true;
+            }
+            LinkTarget::Remote => {
+                self.report_remote_path_unsupported("agent_chat.link.remote_path", cx);
+                return true;
+            }
+            LinkTarget::Opaque => return false,
+            LinkTarget::Local { path, line, kind } => (path, line, kind),
         };
-        if self.diff_pane_is_remote(pane_id, cx) {
-            let report = ErrorReport::new(s::diff_remote_path_unsupported())
-                .severity(ErrorSeverity::Warning)
-                .at(file!(), line!())
-                .dedup("agent_chat.markdown_file_link.remote_path_unsupported")
-                .build();
-            self.report_error(report, cx);
-            return true;
-        }
-        self.open_pane_file_view(
-            lane.lane,
-            target.path,
-            false,
-            crate::workspace::main_area::file_view_pane::FileViewMode::Raw,
-            crate::workspace::main_area::tab_ops::OpenIntent::Enter,
-            window,
-            cx,
-        );
-        if let Some(line) = target.line {
-            self.set_file_view_mode(
-                crate::workspace::main_area::file_view_pane::FileViewMode::Raw,
-                window,
-                cx,
-            );
-            self.scroll_focused_file_viewer_to_line(line, window, cx);
+        match kind {
+            LocalKind::Missing => {
+                let report = ErrorReport::new(s::agent_chat_link_file_missing())
+                    .severity(ErrorSeverity::Warning)
+                    .at(file!(), line!())
+                    .with_context(
+                        "path",
+                        daruda_store::observability::system_info::redact_home(&path),
+                    )
+                    .dedup("agent_chat.link.file_missing")
+                    .build();
+                self.report_error(report, cx);
+            }
+            LocalKind::Image | LocalKind::Binary | LocalKind::Directory => {
+                self.open_path_with_system_default(path, cx);
+            }
+            LocalKind::Text => {
+                // Only the viewer needs a lane; an orchestrator pane has none.
+                let Some(lane) = self.lane_ref_for_pane(pane_id) else {
+                    return true;
+                };
+                self.open_pane_file_view(
+                    lane.lane,
+                    path,
+                    false,
+                    crate::workspace::main_area::file_view_pane::FileViewMode::Raw,
+                    crate::workspace::main_area::tab_ops::OpenIntent::Enter,
+                    window,
+                    cx,
+                );
+                if let Some(line) = line {
+                    self.set_file_view_mode(
+                        crate::workspace::main_area::file_view_pane::FileViewMode::Raw,
+                        window,
+                        cx,
+                    );
+                    self.scroll_focused_file_viewer_to_line(line, window, cx);
+                }
+            }
         }
         true
+    }
+
+    fn report_remote_path_unsupported(&mut self, dedup: &'static str, cx: &mut Context<Self>) {
+        let report = ErrorReport::new(s::diff_remote_path_unsupported())
+            .severity(ErrorSeverity::Warning)
+            .at(file!(), line!())
+            .dedup(dedup)
+            .build();
+        self.report_error(report, cx);
     }
 
     /// Open one of a pane's files externally — the user's preferred editor
     /// (Settings → External Editor), or the OS default handler when none is
     /// set. Dispatched from the agent-chat diff header and from the context
-    /// menu on a markdown file link, same shape as
-    /// [`Self::open_diff_in_file_view`], including the no-op-on-missing-lane
-    /// and remote-session guard.
+    /// menu on a file link, same shape as [`Self::open_diff_in_file_view`],
+    /// including the no-op-on-missing-lane and remote-session guard.
     pub(in crate::workspace) fn open_pane_file_externally(
         &mut self,
         pane_id: PaneId,
@@ -1706,15 +1680,10 @@ impl Workspace {
             return;
         };
         if self.diff_pane_is_remote(pane_id, cx) {
-            let report = ErrorReport::new(s::diff_remote_path_unsupported())
-                .severity(ErrorSeverity::Warning)
-                .at(file!(), line!())
-                .dedup("agent_chat.diff.remote_path_unsupported")
-                .build();
-            self.report_error(report, cx);
+            self.report_remote_path_unsupported("agent_chat.diff.remote_path_unsupported", cx);
             return;
         }
-        self.open_file_externally(lane.lane, path, cx);
+        self.open_file_externally(lane, path, cx);
     }
 
     /// The AgentChat pane's `AccountSelection`. Same cross-lane scan as
@@ -1745,8 +1714,7 @@ impl Workspace {
 #[cfg(test)]
 mod tests {
     use super::{
-        MarkdownFileLinkTarget, PaneCwdBlocked, markdown_file_link_target,
-        resolve_new_pane_cwd_core, resolve_open_agent_id, resolve_restored_agent,
+        PaneCwdBlocked, resolve_new_pane_cwd_core, resolve_open_agent_id, resolve_restored_agent,
         should_notify_agent_event,
     };
     use daruda_config::{AgentDefinition, AgentLaunch};
@@ -2098,95 +2066,5 @@ mod tests {
         // No prior choice falls back to catalog[0] = "other".
         let agents = two_agent_catalog();
         assert_eq!(resolve_open_agent_id(&agents, None), "other");
-    }
-
-    #[test]
-    fn markdown_file_link_strips_absolute_line_suffix() {
-        let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("diff.rs");
-        std::fs::write(&path, "fn main() {}\n").unwrap();
-
-        let link = format!("{}:75", path.display());
-        assert_eq!(
-            markdown_file_link_target(&link, None),
-            Some(MarkdownFileLinkTarget {
-                path,
-                line: Some(75)
-            })
-        );
-    }
-
-    #[test]
-    fn markdown_file_link_strips_line_and_column_suffix() {
-        let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("diff.rs");
-        std::fs::write(&path, "fn main() {}\n").unwrap();
-
-        let link = format!("{}:75:9", path.display());
-        assert_eq!(
-            markdown_file_link_target(&link, None),
-            Some(MarkdownFileLinkTarget {
-                path,
-                line: Some(75)
-            })
-        );
-    }
-
-    #[test]
-    fn markdown_file_link_keeps_colon_filename_when_it_exists() {
-        let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("diff.rs:75");
-        std::fs::write(&path, "literal colon filename\n").unwrap();
-
-        assert_eq!(
-            markdown_file_link_target(path.to_str().unwrap(), None),
-            Some(MarkdownFileLinkTarget { path, line: None })
-        );
-    }
-
-    #[test]
-    fn markdown_file_link_resolves_relative_path_against_cwd() {
-        let dir = tempfile::tempdir().unwrap();
-        let subdir = dir.path().join("crates/app/src");
-        std::fs::create_dir_all(&subdir).unwrap();
-        let path = subdir.join("diff.rs");
-        std::fs::write(&path, "fn main() {}\n").unwrap();
-
-        assert_eq!(
-            markdown_file_link_target("crates/app/src/diff.rs:75", Some(dir.path())),
-            Some(MarkdownFileLinkTarget {
-                path,
-                line: Some(75)
-            })
-        );
-    }
-
-    #[test]
-    fn markdown_file_link_decodes_file_url() {
-        let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("with space.rs");
-        std::fs::write(&path, "fn main() {}\n").unwrap();
-        let encoded = url::Url::from_file_path(&path).unwrap();
-
-        assert_eq!(
-            markdown_file_link_target(&format!("{encoded}:75"), None),
-            Some(MarkdownFileLinkTarget {
-                path,
-                line: Some(75)
-            })
-        );
-    }
-
-    #[test]
-    fn markdown_file_link_ignores_external_urls() {
-        assert_eq!(
-            markdown_file_link_target("https://example.com/a.rs:75", None),
-            None
-        );
-        assert_eq!(
-            markdown_file_link_target("mailto:a@example.com", None),
-            None
-        );
-        assert_eq!(markdown_file_link_target("#local-heading", None), None);
     }
 }

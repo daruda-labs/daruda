@@ -316,6 +316,7 @@ task:
 # File viewer
 file_viewer:
   binary: "Binary file"
+  btn_open_with_default_app: "Open with Default App"
   err_no_git_repo: "No git repository root"
   err_staged_outside_repo: "staged path %{path} is not inside repo root %{root}"
   untitled_tab_title: "(file)"
@@ -519,6 +520,7 @@ agent_chat:
   recent_steps_label: "Recent steps"
   tool_output_truncated: "… (truncated, %{size} total)"
   tool_image_placeholder: "[image]"
+  link_file_missing: "The linked file no longer exists"
   tool_media_label: "[%{mime} · %{size}]"
   tool_media_label_no_mime: "[%{size}]"
   working: "Working"

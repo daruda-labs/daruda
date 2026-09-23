@@ -10,8 +10,8 @@ use daruda_acp::{
     ToolCallItem, ToolKindView, ToolOutputBlock, ToolStatusView,
 };
 use gpui::{
-    AnyElement, AnyWindowHandle, App, Hsla, IntoElement, Pixels, SharedString, Window, div,
-    prelude::*, px,
+    AnyElement, AnyWindowHandle, App, ElementId, Hsla, IntoElement, MouseButton, Pixels,
+    SharedString, Window, div, prelude::*, px,
 };
 
 use super::RenderAssets;
@@ -42,6 +42,7 @@ use crate::workspace::main_area::agent_chat_pane::rows::{
     FilterMatchIndex, LiveSubagentUnits, effective_tool_status,
 };
 use crate::workspace::main_area::agent_chat_pane::view::AgentChatView;
+use crate::workspace::main_area::file_view_pane::render::CachedImage;
 use crate::workspace::main_area::pane_tree::PaneId;
 
 #[derive(Clone, Copy)]
@@ -643,7 +644,10 @@ fn output_block_view(
             let cached = tool_images.lock().unwrap().get(&key).cloned();
             match cached {
                 // Decoded and GPU-ready — render the real bitmap.
-                Some(Some(image)) => image.block(),
+                Some(Some(image)) => zoomable_image(
+                    SharedString::from(format!("agent-chat-tool-image-{tool_id}-{ix}")),
+                    &image,
+                ),
                 // Decode failed (malformed base64 / unsupported format) —
                 // fall back to the binary-descriptor label (mime + the
                 // approximate decoded byte size, `base64_len / 4 * 3`) so the
@@ -677,26 +681,58 @@ fn output_block_view(
             .into_any_element(),
         ToolOutputBlock::ResourceLink { uri, name, .. } => {
             let cached = resource_images.lock().unwrap().get(&key).cloned();
-            let uri = uri.clone();
+            // Through the pane's link opener, not the platform's: Codex sends
+            // a bare path with no scheme, which `open_url` refuses silently,
+            // and only the workspace knows the pane's cwd and the file's kind.
+            let links = context.links;
+            let uri_for_click = uri.clone();
             let link = crate::ui::button(
                 SharedString::from(format!("agent-chat-tool-link-{tool_id}-{ix}")),
                 SharedString::from(name.clone()),
             )
-            .on_click(move |_, _, cx| cx.open_url(&uri));
+            .on_click(move |_, window, cx| links.open_resource(&uri_for_click, window, cx));
+            let uri_for_menu = SharedString::from(uri.clone());
+            let card = div()
+                .flex()
+                .flex_col()
+                .gap(px(theme::GAP_SM))
+                // A right press records the link the way inline text does, so
+                // the pane menu offers this resource the same openers a
+                // Markdown link gets (`take_pane_click_info`).
+                .on_mouse_down(MouseButton::Right, move |event, _window, cx| {
+                    crate::ui::record_right_clicked_link(cx, event.position, uri_for_menu.clone());
+                });
             match cached {
-                Some(Some(image)) => div()
-                    .flex()
-                    .flex_col()
-                    .gap(px(theme::GAP_SM))
-                    .child(image.block())
+                Some(Some(image)) => card
+                    .child(zoomable_image(
+                        SharedString::from(format!("agent-chat-tool-link-image-{tool_id}-{ix}")),
+                        &image,
+                    ))
                     .child(link)
                     .into_any_element(),
                 // Missing, still loading, or failed: the original resource
                 // link remains usable and no permanent placeholder is shown.
-                Some(None) | None => link.into_any_element(),
+                Some(None) | None => card.child(link).into_any_element(),
             }
         }
     }
+}
+
+/// A tool-output bitmap at block size, opening in the lightbox on click — the
+/// same gesture the mermaid card has. Sized to the image, not the row, so the
+/// blank strip beside a narrow image is not a target.
+fn zoomable_image(id: impl Into<ElementId>, image: &CachedImage) -> AnyElement {
+    let image_for_click = image.clone();
+    div()
+        .id(id)
+        .w(px(image.logical_width()))
+        .max_w_full()
+        .cursor_pointer()
+        .on_click(move |_, window, cx| {
+            super::image_lightbox::open(&image_for_click, window, cx);
+        })
+        .child(image.block())
+        .into_any_element()
 }
 
 /// Collapse a multiline tool title to its first line + "…" so the collapsed

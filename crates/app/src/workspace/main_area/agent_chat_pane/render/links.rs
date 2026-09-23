@@ -27,8 +27,21 @@ impl AgentChatMarkdownLinks {
                 return false;
             };
             ws.update(cx, |ws, cx| {
-                ws.open_agent_chat_markdown_file_link(self.pane_id, url, window, cx)
+                ws.open_pane_link(self.pane_id, url, window, cx)
             })
         }
+    }
+
+    /// The opener for a tool's resource-link URI — a file by definition, so
+    /// it resolves as one even where the Markdown rules would read a word.
+    pub(super) fn open_resource(self, uri: &str, window: &mut Window, cx: &mut App) {
+        let Some(ws) = WindowRegistry::workspace_for_window(self.window_handle, cx)
+            .and_then(|ws| ws.upgrade())
+        else {
+            return;
+        };
+        ws.update(cx, |ws, cx| {
+            ws.open_pane_resource_link(self.pane_id, uri, window, cx);
+        });
     }
 }

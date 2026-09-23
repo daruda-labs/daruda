@@ -171,13 +171,14 @@ async fn send_pane_selection_activates_the_target_tab_and_pane(cx: &mut TestAppC
 }
 
 /// The link menu's file resolution and the click's have to be one answer.
-/// They are two call sites of `markdown_file_link_target`, and if they ever
-/// drift the menu offers "Open in File View" for a link the click declines —
-/// a dead entry, with no signal that it is dead. Both directions are pinned:
-/// a path the menu calls a file is one the click accepts, and a URL the menu
-/// declines is one the click hands back for the browser.
+/// Both read `classify_pane_link`, and if they ever drift the menu offers
+/// "Open in File View" for a link the click declines — a dead entry, with no
+/// signal that it is dead. Both directions are pinned: a path the menu calls
+/// a text file is one the click opens in the viewer, and a URL the menu calls
+/// web is one the click hands to the platform opener.
 #[gpui::test]
 async fn the_link_menu_resolves_a_file_exactly_as_the_click_does(cx: &mut TestAppContext) {
+    use crate::workspace::main_area::link_target::{LinkTarget, LocalKind};
     use daruda_store::project::PaneCwd;
 
     let dir = tempfile::tempdir().expect("temp dir");
@@ -210,23 +211,38 @@ async fn the_link_menu_resolves_a_file_exactly_as_the_click_does(cx: &mut TestAp
             // A path relative to the pane's cwd, carrying the `:line` suffix
             // the agents actually emit.
             assert_eq!(
-                ws.agent_chat_link_file_path(pane_id, "src/main.rs:12", cx),
-                Some(dir.path().join("src/main.rs")),
+                ws.classify_pane_link(pane_id, "src/main.rs:12", cx),
+                LinkTarget::Local {
+                    path: dir.path().join("src/main.rs"),
+                    line: Some(12),
+                    kind: LocalKind::Text,
+                },
                 "the menu did not resolve a path under the pane's cwd"
             );
+            let tabs_before = ws.active_runtime().tabs.len();
             assert!(
-                ws.open_agent_chat_markdown_file_link(pane_id, "src/main.rs:12", window, cx),
+                ws.open_pane_link(pane_id, "src/main.rs:12", window, cx),
                 "the click declined the very link the menu called a file"
+            );
+            assert!(
+                ws.active_runtime().tabs.len() > tabs_before,
+                "a text file opens in the viewer"
             );
 
             assert_eq!(
-                ws.agent_chat_link_file_path(pane_id, "https://example.com", cx),
-                None,
+                ws.classify_pane_link(pane_id, "https://example.com", cx),
+                LinkTarget::Web {
+                    url: "https://example.com".into()
+                },
                 "the menu treated a URL as a file"
             );
             assert!(
-                !ws.open_agent_chat_markdown_file_link(pane_id, "https://example.com", window, cx),
-                "the click swallowed a URL instead of handing it to the browser"
+                ws.open_pane_link(pane_id, "https://example.com", window, cx),
+                "the click declined a URL instead of handing it to the platform opener"
+            );
+            assert!(
+                !ws.open_pane_link(pane_id, "#anchor", window, cx),
+                "an in-document anchor is nothing this app can open"
             );
         });
     })

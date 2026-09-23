@@ -958,23 +958,59 @@ impl Workspace {
     /// before that setting existed.
     pub(in crate::workspace) fn open_file_externally(
         &mut self,
-        lane_id: daruda_store::project::LaneId,
+        lane: LaneRef,
         path: std::path::PathBuf,
         cx: &mut Context<Self>,
     ) {
-        let target = LaneRef {
-            project: self.active.project,
-            lane: lane_id,
-        };
-        let Some(wt) = self.lane_for(target) else {
+        let Some(wt) = self.lane_for(lane) else {
             return;
         };
         let full_path = wt.path.join(&path);
         let preset = daruda_config::external_editor_preset(&self.preferred_editor);
-        // `open::that_detached` (the no-preset path) launches the default
-        // handler without blocking on it — the prior `.status()` waited for
-        // the child process to exit; `open_with_preset` keeps that contract
-        // for its own `Command::spawn()` calls.
+        self.spawn_external_open(full_path, preset, cx);
+    }
+
+    /// Open `path` in the OS default handler, ignoring the external-editor
+    /// preference: for an image, a PDF or a directory the editor is the wrong
+    /// tool, and the OS already knows the right one.
+    pub(in crate::workspace) fn open_path_with_system_default(
+        &mut self,
+        path: std::path::PathBuf,
+        cx: &mut Context<Self>,
+    ) {
+        self.spawn_external_open(path, None, cx);
+    }
+
+    /// The file viewer's way out of its binary placeholder: the file it is
+    /// showing, handed to the OS default handler. `path` follows the viewer's
+    /// own convention (absolute, or lane-relative for legacy state), same as
+    /// [`Self::open_file_externally`].
+    pub(in crate::workspace) fn open_lane_file_with_system_default(
+        &mut self,
+        lane_id: LaneId,
+        path: std::path::PathBuf,
+        cx: &mut Context<Self>,
+    ) {
+        let lane = LaneRef {
+            project: self.active.project,
+            lane: lane_id,
+        };
+        let Some(wt) = self.lane_for(lane) else {
+            return;
+        };
+        let full_path = wt.path.join(&path);
+        self.spawn_external_open(full_path, None, cx);
+    }
+
+    /// `open::that_detached` (the no-preset path) launches the default
+    /// handler without blocking on it; `open_with_preset` waits on its own
+    /// short-lived launcher commands so a failed candidate is detected.
+    fn spawn_external_open(
+        &mut self,
+        full_path: std::path::PathBuf,
+        preset: Option<&'static daruda_config::ExternalEditorPreset>,
+        cx: &mut Context<Self>,
+    ) {
         crate::workspace::spawn_helpers::spawn_bg_work_and_mutate(
             cx,
             move || {

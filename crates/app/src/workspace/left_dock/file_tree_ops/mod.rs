@@ -898,7 +898,7 @@ impl Workspace {
 
         if click_count >= 2 {
             if !kind.is_dir() {
-                self.open_file_externally(wt_ref.lane, abs_path, cx);
+                self.open_file_externally(wt_ref, abs_path, cx);
             }
             return;
         }

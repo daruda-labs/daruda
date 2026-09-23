@@ -105,7 +105,11 @@ impl Workspace {
             return;
         };
         if click_count >= 2 {
-            self.open_file_externally(lane_id, abs, cx);
+            let lane = daruda_store::project::LaneRef {
+                project: self.active.project,
+                lane: lane_id,
+            };
+            self.open_file_externally(lane, abs, cx);
             return;
         }
         self.set_git_changes_cursor(lane_id, repo_path, cx);

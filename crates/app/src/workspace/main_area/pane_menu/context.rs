@@ -7,6 +7,7 @@ use std::path::PathBuf;
 use daruda_terminal::session::interval_tree::{LineRange, MarkId};
 use gpui::SharedString;
 
+use crate::workspace::main_area::link_target::{LinkTarget, LocalKind};
 use crate::workspace::main_area::pane_tree::PaneId;
 
 /// Upper bound on a selection routed to another pane. Mirrors iTerm2's
@@ -39,9 +40,15 @@ pub(super) enum LaneAccess {
 /// entries.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(super) enum ClickLink {
-    /// Resolves to a file this machine can reach: the viewer can show it, and
-    /// the user's external editor (or the OS default) can open it.
-    File { url: String, path: PathBuf },
+    /// Resolves to a path this machine can reach. `kind` decides the openers
+    /// on offer: text gets the viewer and the external editor, everything
+    /// else only the OS default handler — the viewer would show a binary
+    /// placeholder, a dead entry dressed as a live one.
+    File {
+        url: String,
+        path: PathBuf,
+        kind: LocalKind,
+    },
     /// An openable URL — the browser takes it.
     Web { url: String },
     /// Neither. Only the text is worth offering.
@@ -59,16 +66,16 @@ impl ClickLink {
         }
     }
 
-    /// Classify a chat markdown link from the two questions answered
-    /// elsewhere: what file it resolves to (if any), and whether it is a URL
-    /// at all. A file wins — a resolved path is something this app can open
-    /// two ways, and handing it to the browser instead would be a worse
-    /// answer to a more specific question.
-    pub(super) fn for_markdown(url: String, file_path: Option<PathBuf>, external: bool) -> Self {
-        match (file_path, external) {
-            (Some(path), _) => ClickLink::File { url, path },
-            (None, true) => ClickLink::Web { url },
-            (None, false) => ClickLink::Opaque { url },
+    /// Classify a chat link from where it resolves. A path wins over looking
+    /// like a URL — `file://…` is both — because a resolved path is something
+    /// this app can act on, and the browser would be a worse answer to a
+    /// more specific question.
+    pub(super) fn for_target(url: String, target: LinkTarget) -> Self {
+        match target {
+            LinkTarget::Local { path, kind, .. } => ClickLink::File { url, path, kind },
+            LinkTarget::Web { .. } => ClickLink::Web { url },
+            // A remote path is copyable, not openable from this machine.
+            LinkTarget::Remote | LinkTarget::Opaque => ClickLink::Opaque { url },
         }
     }
 
@@ -96,29 +103,38 @@ mod tests {
     }
 
     /// A path that also parses as a URL — `file://…` is both — must come out
-    /// as the file, because that is the answer with two ways to act on it.
+    /// as the file, carrying the kind the openers are chosen by.
     #[test]
     fn a_resolved_path_outranks_looking_like_a_url() {
         let path = PathBuf::from("/repo/src/main.rs");
+        let target = LinkTarget::Local {
+            path: path.clone(),
+            line: Some(12),
+            kind: LocalKind::Text,
+        };
         assert_eq!(
-            ClickLink::for_markdown("file:///repo/src/main.rs".into(), Some(path.clone()), true),
+            ClickLink::for_target("file:///repo/src/main.rs".into(), target),
             ClickLink::File {
                 url: "file:///repo/src/main.rs".into(),
                 path,
+                kind: LocalKind::Text,
             }
         );
     }
 
     #[test]
     fn an_unresolved_link_is_web_only_when_it_is_a_url() {
+        let web = LinkTarget::Web {
+            url: "https://example.com".into(),
+        };
         assert!(matches!(
-            ClickLink::for_markdown("https://example.com".into(), None, true),
+            ClickLink::for_target("https://example.com".into(), web),
             ClickLink::Web { .. }
         ));
         // A bare word the resolver declined: no file, no scheme, nothing to
         // open — but its text is still copyable.
         assert!(matches!(
-            ClickLink::for_markdown("somewhere".into(), None, false),
+            ClickLink::for_target("somewhere".into(), LinkTarget::Opaque),
             ClickLink::Opaque { .. }
         ));
     }

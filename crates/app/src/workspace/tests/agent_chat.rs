@@ -1373,6 +1373,105 @@ async fn diff_actions_on_a_remote_pane_report_an_error_instead_of_reading_local_
     });
 }
 
+/// A remote session's link never reaches this machine's disk: the click
+/// reports, and the menu gets no opener — even for a path (`/tmp`) that
+/// happens to exist here, and even spelled as `file://`.
+#[gpui::test]
+async fn a_remote_panes_links_report_instead_of_opening_a_local_file(cx: &mut TestAppContext) {
+    use crate::surface::strings as s;
+    use crate::workspace::main_area::link_target::LinkTarget;
+
+    let (window_handle, workspace) = build_workspace(cx);
+    cx.run_until_parked();
+    let pane_id = push_agent_chat_pane(
+        cx,
+        window_handle,
+        &workspace,
+        PaneCwd::Remote("host:/repo/lane".to_string()),
+    );
+    let errors_before = workspace.read_with(cx, |ws, _| ws.error_history().len());
+
+    cx.update_window(window_handle.into(), |_, window, cx| {
+        workspace.update(cx, |ws, cx| {
+            assert_eq!(
+                ws.classify_pane_link(pane_id, "/tmp", cx),
+                LinkTarget::Remote
+            );
+            assert!(ws.open_pane_link(pane_id, "/tmp", window, cx));
+            assert!(ws.open_pane_link(pane_id, "file:///tmp", window, cx));
+            assert!(ws.open_pane_resource_link(pane_id, "/tmp/shot.png", window, cx));
+        });
+    })
+    .unwrap();
+
+    workspace.read_with(cx, |ws, _| {
+        assert_eq!(ws.error_history().len(), errors_before + 3);
+        for report in &ws.error_history()[..3] {
+            assert_eq!(report.title, s::diff_remote_path_unsupported());
+        }
+    });
+}
+
+/// A resource link whose file is gone reports, where it used to do nothing —
+/// a relative URI included, which Markdown rules would read as a plain word.
+#[gpui::test]
+async fn a_missing_resource_link_reports_instead_of_doing_nothing(cx: &mut TestAppContext) {
+    use crate::surface::strings as s;
+
+    let dir = tempfile::tempdir().expect("temp dir");
+    let (window_handle, workspace) = build_workspace(cx);
+    cx.run_until_parked();
+    let pane_id = push_agent_chat_pane(
+        cx,
+        window_handle,
+        &workspace,
+        PaneCwd::Local(dir.path().to_path_buf()),
+    );
+    let errors_before = workspace.read_with(cx, |ws, _| ws.error_history().len());
+    let tabs_before = workspace.read_with(cx, |ws, _| ws.active_runtime().tabs.len());
+
+    cx.update_window(window_handle.into(), |_, window, cx| {
+        workspace.update(cx, |ws, cx| {
+            assert!(ws.open_pane_resource_link(pane_id, "gone.png", window, cx));
+            let absolute = dir.path().join("gone.rs");
+            assert!(ws.open_pane_link(pane_id, absolute.to_str().unwrap(), window, cx));
+        });
+    })
+    .unwrap();
+
+    workspace.read_with(cx, |ws, _| {
+        assert_eq!(ws.active_runtime().tabs.len(), tabs_before, "no viewer tab");
+        assert_eq!(ws.error_history().len(), errors_before + 2);
+        for report in &ws.error_history()[..2] {
+            assert_eq!(report.title, s::agent_chat_link_file_missing());
+        }
+    });
+}
+
+fn push_agent_chat_pane(
+    cx: &mut TestAppContext,
+    window_handle: gpui::WindowHandle<crate::ui::Root>,
+    workspace: &Entity<Workspace>,
+    cwd: PaneCwd,
+) -> PaneId {
+    cx.update_window(window_handle.into(), |_, window, cx| {
+        workspace.update(cx, |ws, cx| {
+            let pane = ws.create_agent_chat_pane(
+                Some(cwd),
+                None,
+                daruda_config::AgentDefinition::claude_default().id,
+                None,
+                window,
+                cx,
+            );
+            let pane_id = pane.id;
+            ws.active_runtime_mut().panes.push(pane);
+            pane_id
+        })
+    })
+    .unwrap()
+}
+
 /// A live `[agent]` edit must reach an already-open pane, not wait for the next
 /// restore: a pane the user never touched follows config, a pane they chose for
 /// keeps its own settings.

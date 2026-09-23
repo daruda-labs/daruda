@@ -1,11 +1,9 @@
-//! Lightbox dialog for a mermaid diagram: the bitmap at its natural logical
-//! size (no fit-to-pane shrink) inside a scroll container with a visible,
-//! draggable scrollbar on both axes — a diagram wider or taller than the
-//! clamped dialog pans instead of clipping or shrinking below readability.
-//! The 2× raster keeps it crisp at this size. Opened from the diagram
-//! card's zoom button (or a click on the diagram itself); Dialog supplies
-//! Escape/outside-click close, while the body owns the visible close
-//! affordance.
+//! Lightbox dialog for a transcript bitmap — a mermaid diagram, a tool's
+//! inline image, a resource-link preview — at its natural logical size inside
+//! a scroll container with a draggable scrollbar on both axes, so an image
+//! larger than the clamped dialog pans instead of clipping or shrinking.
+//! Opened from the diagram card's zoom button or a click on the image itself;
+//! Dialog supplies Escape/outside-click close, the body the visible button.
 
 use gpui::{
     App, AppContext as _, ClickEvent, Context, FocusHandle, Focusable, ParentElement as _,
@@ -19,8 +17,8 @@ use crate::ui::{WindowExt as _, button_close};
 use crate::workspace::main_area::file_view_pane::render::CachedImage;
 use crate::workspace::modal_view::ModalView;
 
-/// Dialog width: the diagram's natural width plus the card padding on both
-/// sides, clamped to the viewport fraction so an oversized diagram pans
+/// Dialog width: the image's natural width plus the card padding on both
+/// sides, clamped to the viewport fraction so an oversized image pans
 /// inside the body instead of overflowing the window.
 fn lightbox_width(image_logical_width: f32, viewport_width: f32) -> f32 {
     let frac = theme::MERMAID_LIGHTBOX_VIEWPORT_FRACTION;
@@ -45,7 +43,7 @@ pub(in crate::workspace) fn open(image: &CachedImage, window: &mut Window, cx: &
     let width = lightbox_width(image.logical_width(), f32::from(viewport.width));
     let margin_top = lightbox_margin_top(f32::from(viewport.height));
     let image = image.clone();
-    let entity = cx.new(|cx_modal| MermaidLightbox {
+    let entity = cx.new(|cx_modal| ImageLightbox {
         image,
         focus_handle: cx_modal.focus_handle(),
         scroll_handle: ScrollHandle::default(),
@@ -72,7 +70,7 @@ pub(in crate::workspace) fn open(image: &CachedImage, window: &mut Window, cx: &
     });
 }
 
-pub(super) struct MermaidLightbox {
+pub(super) struct ImageLightbox {
     image: CachedImage,
     focus_handle: FocusHandle,
     /// Tracks the body's scroll offset so the overlay [`Scrollbar`] (both
@@ -81,30 +79,30 @@ pub(super) struct MermaidLightbox {
     scroll_handle: ScrollHandle,
 }
 
-impl MermaidLightbox {
+impl ImageLightbox {
     fn dismiss(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         window.close_dialog(cx);
     }
 }
 
-impl Render for MermaidLightbox {
+impl Render for ImageLightbox {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let max_h = lightbox_body_max_height(f32::from(window.viewport_size().height));
         let image_w = self.image.logical_width();
         div()
-            .key_context("MermaidLightbox")
+            .key_context("ImageLightbox")
             .track_focus(&self.focus_handle)
             .flex()
             .flex_col()
             .gap(px(theme::GAP_STANDARD))
             .child(
                 div()
-                    .id("mermaid-lightbox-header")
+                    .id("image-lightbox-header")
                     .flex()
                     .flex_row()
                     .justify_end()
                     .child(
-                        button_close("mermaid-lightbox-close", cx)
+                        button_close("image-lightbox-close", cx)
                             .tooltip(s::error_modal_button_close())
                             .on_click(cx.listener(|this, _: &ClickEvent, window, cx| {
                                 this.dismiss(window, cx);
@@ -116,7 +114,7 @@ impl Render for MermaidLightbox {
                     .relative()
                     .child(
                         div()
-                            .id("mermaid-lightbox-body")
+                            .id("image-lightbox-body")
                             .max_h(px(max_h))
                             .overflow_scroll()
                             .track_scroll(&self.scroll_handle)
@@ -135,13 +133,13 @@ impl Render for MermaidLightbox {
     }
 }
 
-impl Focusable for MermaidLightbox {
+impl Focusable for ImageLightbox {
     fn focus_handle(&self, _cx: &App) -> FocusHandle {
         self.focus_handle.clone()
     }
 }
 
-impl ModalView for MermaidLightbox {}
+impl ModalView for ImageLightbox {}
 
 #[cfg(test)]
 mod tests {

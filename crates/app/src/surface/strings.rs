@@ -1751,6 +1751,10 @@ pub fn file_viewer_loading() -> String {
 pub fn file_viewer_binary() -> String {
     rust_i18n::t!("file_viewer.binary").into_owned()
 }
+/// The one way out of the binary placeholder: hand the file to the OS.
+pub fn file_viewer_btn_open_with_default_app() -> String {
+    rust_i18n::t!("file_viewer.btn_open_with_default_app").into_owned()
+}
 /// Body text when a git-backed view is asked for outside a repository.
 pub fn file_viewer_err_no_git_repo() -> String {
     rust_i18n::t!("file_viewer.err_no_git_repo").into_owned()
@@ -2657,6 +2661,11 @@ pub fn agent_chat_tool_output_truncated(original_bytes: usize) -> String {
 /// (or, on decode failure, `agent_chat_tool_media_label`) replaces it.
 pub fn agent_chat_tool_image_placeholder() -> String {
     rust_i18n::t!("agent_chat.tool_image_placeholder").into_owned()
+}
+
+/// Toast title when a pane link resolves to a path that no longer exists.
+pub fn agent_chat_link_file_missing() -> String {
+    rust_i18n::t!("agent_chat.link_file_missing").into_owned()
 }
 
 /// Descriptor label for a non-rendered binary tool-output block (audio, or an

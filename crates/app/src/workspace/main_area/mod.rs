@@ -12,6 +12,7 @@ pub(in crate::workspace) mod context;
 pub(in crate::workspace) mod file_pane_ops;
 pub(in crate::workspace) mod file_view_pane;
 pub(in crate::workspace) mod flow_graph_pane;
+pub(in crate::workspace) mod link_target;
 pub(in crate::workspace) mod nav;
 pub(in crate::workspace) mod pane;
 pub(in crate::workspace) mod pane_drag_ops;

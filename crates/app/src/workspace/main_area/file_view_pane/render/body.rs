@@ -69,15 +69,31 @@ pub(super) fn render_file_viewer_body(
             .child(msg.clone())
             .into_any_element(),
 
-        PaneFileContent::Binary => frame
-            .overflow_hidden()
-            .flex()
-            .items_center()
-            .justify_center()
-            .text_size(px(editor_font_size))
-            .text_color(ctx_text)
-            .child(strings::file_viewer_binary())
-            .into_any_element(),
+        // Not a dead end: the bytes the viewer cannot show, the OS can.
+        PaneFileContent::Binary => {
+            let lane_id = fv.lane_id;
+            let path = fv.path.clone();
+            frame
+                .overflow_hidden()
+                .flex()
+                .flex_col()
+                .items_center()
+                .justify_center()
+                .gap(px(theme::GAP_STANDARD))
+                .text_size(px(editor_font_size))
+                .text_color(ctx_text)
+                .child(strings::file_viewer_binary())
+                .child(
+                    crate::ui::button(
+                        "file-viewer-open-with-default-app",
+                        strings::file_viewer_btn_open_with_default_app(),
+                    )
+                    .on_click(cx.listener(move |ws, _, _window, cx| {
+                        ws.open_lane_file_with_system_default(lane_id, path.clone(), cx);
+                    })),
+                )
+                .into_any_element()
+        }
 
         PaneFileContent::Deleted => frame
             .overflow_hidden()

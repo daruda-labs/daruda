@@ -106,15 +106,12 @@ impl Workspace {
         })
     }
 
-    /// Ask the world the two questions [`ClickLink::for_markdown`] decides
-    /// from. The path comes from [`Self::agent_chat_link_file_path`], the same
-    /// resolution the left click performs — so the menu never offers a viewer
-    /// entry that click would decline.
+    /// The same resolution the left click performs
+    /// ([`Self::classify_pane_link`]), so the menu never offers an opener
+    /// that click would decline.
     fn classify_markdown_link(&self, pane_id: PaneId, url: String, cx: &App) -> ClickLink {
-        let path = self.agent_chat_link_file_path(pane_id, &url, cx);
-        let external =
-            crate::workspace::main_area::agent_chat_pane::agent_chat_ops::is_external_url(&url);
-        ClickLink::for_markdown(url, path, external)
+        let target = self.classify_pane_link(pane_id, &url, cx);
+        ClickLink::for_target(url, target)
     }
 
     fn pane_menu_kind_and_selection(

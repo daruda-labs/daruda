@@ -118,7 +118,7 @@ fn resource_image_path(uri: &str, mime: Option<&str>, cwd: &Path) -> Option<Path
         || {
             path.extension()
                 .and_then(|ext| ext.to_str())
-                .is_some_and(supported_resource_image_extension)
+                .is_some_and(crate::workspace::main_area::link_target::is_image_extension)
         },
         supported_resource_image_mime,
     );
@@ -140,13 +140,6 @@ fn supported_resource_image_mime(mime: &str) -> bool {
             | "image/webp"
             | "image/bmp"
             | "image/x-ms-bmp"
-    )
-}
-
-fn supported_resource_image_extension(extension: &str) -> bool {
-    matches!(
-        extension.to_ascii_lowercase().as_str(),
-        "png" | "jpg" | "jpeg" | "gif" | "webp" | "bmp"
     )
 }
 

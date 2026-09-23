@@ -1102,6 +1102,18 @@ pub fn active_text_selection(cx: &App) -> Option<TextSelectionHandle> {
         .map(TextSelectionHandle)
 }
 
+/// Record `url` as the link a right press at `at` landed on, for a host
+/// element that is not inline text — a resource-link button, an image
+/// preview — so the host's context menu picks it up through
+/// [`take_right_clicked_link`] exactly as it does a Markdown link. No-op
+/// before [`crate::init`], for the same reason the taker returns `None`.
+pub fn record_right_clicked_link(cx: &mut App, at: Point<Pixels>, url: SharedString) {
+    if !cx.has_global::<GlobalState>() {
+        return;
+    }
+    GlobalState::global_mut(cx).right_clicked_link = Some((at, url));
+}
+
 /// Take the URL of the link the right press at `at` landed on, if it landed
 /// on one. Recorded in the capture phase by the inline text element, so a
 /// host building a context menu from its own right-press handler sees it in
@@ -1184,6 +1196,38 @@ fn selection_bounds(
 mod tests {
     use super::*;
     use gpui::{Bounds, point, px, size};
+
+    /// A host-recorded link is read back only by the press that recorded it,
+    /// and only once — the same contract the inline-text recorder keeps.
+    #[gpui::test]
+    fn a_recorded_link_is_taken_once_and_only_at_its_own_position(cx: &mut gpui::TestAppContext) {
+        cx.update(|cx| {
+            let at = point(px(10.), px(20.));
+            // Before the globals exist: neither side panics.
+            record_right_clicked_link(cx, at, "/tmp/a.png".into());
+            assert_eq!(take_right_clicked_link(cx, at), None);
+
+            cx.set_global(GlobalState::new());
+            record_right_clicked_link(cx, at, "/tmp/a.png".into());
+            assert_eq!(
+                take_right_clicked_link(cx, at),
+                Some(SharedString::from("/tmp/a.png"))
+            );
+            assert_eq!(take_right_clicked_link(cx, at), None, "taken twice");
+
+            record_right_clicked_link(cx, at, "/tmp/a.png".into());
+            assert_eq!(
+                take_right_clicked_link(cx, point(px(11.), px(20.))),
+                None,
+                "a different press adopted the record"
+            );
+            assert_eq!(
+                take_right_clicked_link(cx, at),
+                None,
+                "a refused record survived"
+            );
+        });
+    }
 
     #[test]
     fn test_text_view_state_selection_bounds() {

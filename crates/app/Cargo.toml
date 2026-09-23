@@ -105,8 +105,9 @@ nucleo-matcher = "0.3.1"
 # the `screenshot` feature below references `gpui_macos/test-support` directly.
 [target.'cfg(target_os = "macos")'.dependencies]
 gpui_macos = { workspace = true }
-objc2-app-kit = { version = "0.3", default-features = false, features = ["NSApplication", "NSResponder"] }
+objc2-app-kit = { version = "0.3", default-features = false, features = ["NSApplication", "NSButton", "NSCell", "NSControl", "NSResponder", "NSView", "NSWindow"] }
 objc2-foundation = { version = "0.3", default-features = false, features = ["NSThread"] }
+raw-window-handle = "0.6"
 notify = { version = "7", default-features = false, features = ["macos_fsevent"] }
 
 [target.'cfg(target_os = "linux")'.dependencies]

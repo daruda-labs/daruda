@@ -1302,7 +1302,9 @@ impl Workspace {
         // `Project::bootstrap_placeholder`).
         ws.reconcile_bootstrapped_lanes(cx);
 
+        crate::platform::window_controls::compact(window);
         cx.observe_window_bounds(window, |this: &mut Workspace, window, cx| {
+            crate::platform::window_controls::compact(window);
             this.capture_window_bounds(window);
             this.resize_all_tabs(window, cx);
         })

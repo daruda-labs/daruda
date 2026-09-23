@@ -1693,6 +1693,7 @@ dependencies = [
  "open",
  "portable-pty",
  "pulldown-cmark",
+ "raw-window-handle",
  "resvg",
  "rust-i18n",
  "schemars 1.2.1",

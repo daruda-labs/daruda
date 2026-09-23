@@ -14,11 +14,11 @@ pub(in crate::workspace) mod embed;
 mod filter;
 mod fold_header;
 mod fold_mode;
-mod links;
-mod mermaid;
 /// Reachable from `workspace::screenshot_scenario` so the
 /// `mermaid-lightbox` capture scenario can drive it directly.
-pub(in crate::workspace) mod mermaid_lightbox;
+pub(in crate::workspace) mod image_lightbox;
+mod links;
+mod mermaid;
 mod plan;
 mod status_icon;
 mod tail_row;

@@ -86,7 +86,7 @@ pub(super) fn mermaid_diagram_card(
                 .max_w_full()
                 .cursor_pointer()
                 .on_click(move |_, window, cx| {
-                    super::mermaid_lightbox::open(&image_for_click, window, cx);
+                    super::image_lightbox::open(&image_for_click, window, cx);
                 })
                 .child(image.block_diagram()),
         )
@@ -142,7 +142,7 @@ impl RenderOnce for DiagramActions {
                     // on (`group_hover` resolves through the group
                     // hitbox), hiding the buttons on approach.
                     cx.stop_propagation();
-                    super::mermaid_lightbox::open(&self.image, window, cx);
+                    super::image_lightbox::open(&self.image, window, cx);
                 }),
             )
             // `copy_button` already stops propagation for the same reason, and
