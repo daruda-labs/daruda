@@ -4678,6 +4678,30 @@ pub fn settings_card_status_bar() -> String {
     rust_i18n::t!("settings.card_status_bar").into_owned()
 }
 
+pub fn settings_search_heading(query: &str) -> String {
+    rust_i18n::t!("settings.search_heading", query = query).into_owned()
+}
+
+pub fn settings_search_none(query: &str) -> String {
+    rust_i18n::t!("settings.search_none", query = query).into_owned()
+}
+
+pub fn settings_search_group(section: &str, card: &str) -> String {
+    rust_i18n::t!("settings.search_group", section = section, card = card).into_owned()
+}
+
+pub fn settings_search_open() -> String {
+    rust_i18n::t!("settings.search_open").into_owned()
+}
+
+pub fn settings_search_count(count: usize) -> String {
+    if count == 1 {
+        rust_i18n::t!("settings.search_count_one").into_owned()
+    } else {
+        rust_i18n::t!("settings.search_count", count = count).into_owned()
+    }
+}
+
 pub fn settings_nav_general() -> String {
     rust_i18n::t!("settings.nav_general").into_owned()
 }

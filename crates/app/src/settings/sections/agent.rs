@@ -31,30 +31,16 @@ impl SettingsView {
         page_stack()
             .child(
                 card(s::settings_group_chat(), cx)
-                    .child(self.switch_row(
-                        BoolSetting::AgentUseReadingWidth,
-                        s::settings_label_agent_use_reading_width(),
-                        s::settings_hint_reading_width(),
-                        cx,
-                    ))
-                    .child(self.switch_row(
-                        BoolSetting::AgentUseModifierToSend,
-                        s::settings_label_agent_use_modifier_to_send(),
-                        s::settings_agent_use_modifier_to_send_description(),
-                        cx,
-                    )),
+                    .child(self.switch_row(BoolSetting::AgentUseReadingWidth, cx))
+                    .child(self.switch_row(BoolSetting::AgentUseModifierToSend, cx)),
             )
             .child(
                 card(s::settings_section_agent_catalog(), cx)
                     .child(card_content(self.render_agent_catalog(cx))),
             )
             .child(
-                card(s::settings_section_claude_status(), cx).child(self.switch_row(
-                    BoolSetting::ClaudeStatusEnabled,
-                    s::settings_label_claude_status_enable(),
-                    String::new(),
-                    cx,
-                )),
+                card(s::settings_section_claude_status(), cx)
+                    .child(self.switch_row(BoolSetting::ClaudeStatusEnabled, cx)),
             )
             .into_any_element()
     }

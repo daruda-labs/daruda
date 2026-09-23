@@ -21,6 +21,7 @@ pub(super) mod agent_env;
 pub(super) mod agent_transcript;
 pub(super) mod agent_vocabulary;
 mod basic;
+pub(super) use basic::status_bar_item_label;
 mod notifications;
 pub(super) mod orchestrator;
 pub(super) mod plugin;
@@ -404,7 +405,6 @@ impl SettingsView {
         } else {
             s::settings_toggle_off()
         };
-        let telegram_enabled = s::settings_telegram_enabled_label();
         page_stack()
             .child(card(s::settings_card_daruda(), cx).child(self.link_row(
                 "settings-daruda-orchestrator-link",
@@ -420,21 +420,10 @@ impl SettingsView {
             )
             .child(
                 card(s::settings_telegram_heading(), cx)
-                    .child(self.switch_row(
-                        BoolSetting::TelegramEnabled,
-                        telegram_enabled.clone(),
-                        String::new(),
-                        cx,
-                    ))
+                    .child(self.switch_row(BoolSetting::TelegramEnabled, cx))
                     .child(self.dependent_rows(
                         BoolSetting::TelegramEnabled,
-                        telegram_enabled,
-                        [self.switch_row(
-                            BoolSetting::TelegramOnlyWhenAway,
-                            s::remote_only_when_away(),
-                            s::settings_hint_only_when_away(),
-                            cx,
-                        )],
+                        [self.switch_row(BoolSetting::TelegramOnlyWhenAway, cx)],
                         cx,
                     ))
                     .child(card_content(telegram)),

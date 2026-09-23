@@ -32,6 +32,7 @@ const NAME_LANDING: &str = "landing";
 const NAME_SETTINGS: &str = "settings";
 /// CLI token for the Settings window showing a failed action's banner.
 const NAME_SETTINGS_ERROR: &str = "settings-error";
+const NAME_SETTINGS_SEARCH: &str = "settings-search";
 /// CLI token for the app-drawn window chrome. Forces the Client arm on a host
 /// that would resolve to Native, so the layout is reviewable off its platform.
 const NAME_CLIENT_CHROME: &str = "client-chrome";
@@ -174,6 +175,9 @@ pub(crate) enum ScreenshotScenario {
     /// action that cannot be carried out reports through this one alert, and
     /// no unit test can look at it — only that the field behind it was set.
     SettingsError,
+    /// Settings with a query typed into its search: the results page and the
+    /// sidebar narrowed to the pages that matched, with their counts.
+    SettingsSearch,
     /// Deploy the focused pane's right-click menu. The only way to eyeball
     /// menu length, edge-flip and the keybinding column — none of which any
     /// unit test can see.
@@ -332,6 +336,7 @@ impl ScreenshotScenario {
             NAME_LANDING => Some(Self::Landing),
             NAME_SETTINGS => Some(Self::Settings(BuiltinSection::default())),
             NAME_SETTINGS_ERROR => Some(Self::SettingsError),
+            NAME_SETTINGS_SEARCH => Some(Self::SettingsSearch),
             NAME_PANE_CONTEXT_MENU => Some(Self::PaneContextMenu),
             NAME_MERMAID_LIGHTBOX => Some(Self::MermaidLightbox),
             NAME_FLOW_GRAPH => Some(Self::FlowGraph),
@@ -498,6 +503,14 @@ pub(crate) fn drive(
                 ws.open_settings(BuiltinSection::Notifications, window, cx);
                 if let Some(view) = ws.settings_view().cloned() {
                     view.update(cx, |this, cx| this.seed_error_for_shot(cx));
+                }
+            });
+        }
+        ScreenshotScenario::SettingsSearch => {
+            workspace.update(cx, |ws, cx| {
+                ws.open_settings(BuiltinSection::default(), window, cx);
+                if let Some(view) = ws.settings_view().cloned() {
+                    view.update(cx, |this, cx| this.seed_search_for_shot(window, cx));
                 }
             });
         }
@@ -779,6 +792,10 @@ mod tests {
             ScreenshotScenario::from_cli_name("settings-error"),
             Some(ScreenshotScenario::SettingsError),
             "the hyphenated token must not be read as a `settings:<slug>` section"
+        );
+        assert_eq!(
+            ScreenshotScenario::from_cli_name("settings-search"),
+            Some(ScreenshotScenario::SettingsSearch)
         );
     }
 

@@ -12,12 +12,7 @@ use daruda_config::BuiltinSection;
 impl SettingsView {
     pub(in crate::settings) fn render_general(&self, cx: &mut gpui::Context<Self>) -> AnyElement {
         card(s::settings_group_language(), cx)
-            .child(self.select_row(
-                S::Language,
-                s::settings_label_language(),
-                s::settings_hint_user_scope(),
-                cx,
-            ))
+            .child(self.select_row(S::Language, cx))
             .into_any_element()
     }
 
@@ -28,39 +23,14 @@ impl SettingsView {
         page_stack()
             .child(
                 card(s::settings_group_themes(), cx)
-                    .child(self.select_row(
-                        S::UiPreset,
-                        s::settings_label_ui_theme(),
-                        s::settings_hint_ui_theme(),
-                        cx,
-                    ))
-                    .child(self.select_row(
-                        S::TerminalPreset,
-                        s::settings_label_terminal_theme(),
-                        s::settings_hint_terminal_theme(),
-                        cx,
-                    ))
-                    .child(self.select_row(
-                        S::SyntaxTheme,
-                        s::settings_label_syntax_theme(),
-                        s::settings_hint_syntax_theme(),
-                        cx,
-                    )),
+                    .child(self.select_row(S::UiPreset, cx))
+                    .child(self.select_row(S::TerminalPreset, cx))
+                    .child(self.select_row(S::SyntaxTheme, cx)),
             )
             .child(
                 card(s::settings_group_window(), cx)
-                    .child(self.text_row(
-                        T::WindowOpacity,
-                        s::settings_label_window_opacity(),
-                        s::settings_hint_opacity(),
-                        cx,
-                    ))
-                    .child(self.switch_row(
-                        B::WindowBlur,
-                        s::settings_label_window_blur(),
-                        s::settings_hint_blur(),
-                        cx,
-                    )),
+                    .child(self.text_row(T::WindowOpacity, cx))
+                    .child(self.switch_row(B::WindowBlur, cx)),
             )
             .into_any_element()
     }
@@ -69,21 +39,11 @@ impl SettingsView {
         let mut body = page_stack();
         for (name, family, size, height) in font_domains() {
             let mut group = card(name(), cx)
-                .child(self.select_row(family, s::settings_label_font_family(), String::new(), cx))
-                .child(self.text_row(size, s::settings_label_font_size(), String::new(), cx))
-                .child(self.text_row(
-                    height,
-                    s::settings_label_line_height(),
-                    s::settings_hint_line_height(),
-                    cx,
-                ));
+                .child(self.select_row(family, cx))
+                .child(self.text_row(size, cx))
+                .child(self.text_row(height, cx));
             if family == S::TerminalFontFamily {
-                group = group.child(self.text_row(
-                    T::TerminalCellWidth,
-                    s::settings_label_cell_width(),
-                    s::settings_hint_cell_width(),
-                    cx,
-                ));
+                group = group.child(self.text_row(T::TerminalCellWidth, cx));
             }
             body = body.child(group);
         }
@@ -94,24 +54,9 @@ impl SettingsView {
         page_stack()
             .child(
                 card(s::settings_card_shell(), cx)
-                    .child(self.text_row_wide(
-                        T::ShellProgram,
-                        s::settings_label_shell_program(),
-                        s::settings_hint_shell_program(),
-                        cx,
-                    ))
-                    .child(self.switch_row(
-                        B::ShellNaturalTextEditing,
-                        s::settings_label_natural_text_editing(),
-                        s::settings_hint_natural_text_editing(),
-                        cx,
-                    ))
-                    .child(self.switch_row(
-                        B::ShellClosePaneOnExit,
-                        s::settings_label_close_on_exit(),
-                        String::new(),
-                        cx,
-                    ))
+                    .child(self.text_row_wide(T::ShellProgram, cx))
+                    .child(self.switch_row(B::ShellNaturalTextEditing, cx))
+                    .child(self.switch_row(B::ShellClosePaneOnExit, cx))
                     .child(self.event_row(
                         "settings-open-project-config",
                         s::settings_label_project_shell(),
@@ -123,48 +68,18 @@ impl SettingsView {
             )
             .child(
                 card(s::settings_group_rendering(), cx)
-                    .child(self.text_row(
-                        T::ScrollbackMaxRows,
-                        s::settings_label_scrollback(),
-                        s::settings_hint_scrollback(),
-                        cx,
-                    ))
-                    .child(self.select_row(
-                        S::RenderMaxFps,
-                        s::settings_label_max_fps(),
-                        String::new(),
-                        cx,
-                    )),
+                    .child(self.text_row(T::ScrollbackMaxRows, cx))
+                    .child(self.select_row(S::RenderMaxFps, cx)),
             )
             .child(
                 card(s::settings_group_insets(), cx)
-                    .child(self.text_row(
-                        T::TerminalInsetX,
-                        s::settings_label_inset_x(),
-                        String::new(),
-                        cx,
-                    ))
-                    .child(self.text_row(
-                        T::TerminalInsetY,
-                        s::settings_label_inset_y(),
-                        String::new(),
-                        cx,
-                    )),
+                    .child(self.text_row(T::TerminalInsetX, cx))
+                    .child(self.text_row(T::TerminalInsetY, cx)),
             )
-            .child(card(s::settings_card_cursor(), cx).child(self.select_row(
-                S::CursorStyle,
-                s::settings_label_cursor_style(),
-                s::settings_hint_cursor_style(),
-                cx,
-            )))
+            .child(card(s::settings_card_cursor(), cx).child(self.select_row(S::CursorStyle, cx)))
             .child(self.advanced_card(
                 BuiltinSection::Terminal,
-                vec![self.text_row(
-                    T::ClipboardStreamingMaxBytes,
-                    s::settings_label_clipboard_streaming(),
-                    s::settings_hint_clipboard_streaming(),
-                    cx,
-                )],
+                vec![self.text_row(T::ClipboardStreamingMaxBytes, cx)],
                 cx,
             ))
             .into_any_element()
@@ -178,67 +93,31 @@ impl SettingsView {
         page_stack()
             .child(
                 card(s::settings_section_sidebar(), cx)
-                    .child(self.text_row(
-                        T::LeftDefaultWidth,
-                        s::settings_label_left_default_width(),
-                        s::settings_hint_new_windows_width(),
-                        cx,
-                    ))
-                    .child(self.switch_row(
-                        B::LeftCollapsedByDefault,
-                        s::settings_label_left_collapsed(),
-                        s::settings_hint_new_windows_state(),
-                        cx,
-                    )),
+                    .child(self.text_row(T::LeftDefaultWidth, cx))
+                    .child(self.switch_row(B::LeftCollapsedByDefault, cx)),
             )
             .child(
                 card(s::settings_card_files(), cx)
-                    .child(self.switch_row(
-                        B::FilesShowHidden,
-                        s::settings_label_show_hidden(),
-                        String::new(),
-                        cx,
-                    ))
-                    .child(self.switch_row(
-                        B::FilesUseGitignore,
-                        s::settings_label_use_gitignore(),
-                        String::new(),
-                        cx,
-                    ))
-                    .child(self.select_row(
-                        S::FileIconColorMode,
-                        s::settings_label_file_icon_colors(),
-                        String::new(),
-                        cx,
-                    ))
-                    .child(self.switch_row(
-                        B::PreviewTab,
-                        s::settings_label_preview_tab(),
-                        s::settings_hint_preview_tab(),
-                        cx,
-                    )),
+                    .child(self.switch_row(B::FilesShowHidden, cx))
+                    .child(self.switch_row(B::FilesUseGitignore, cx))
+                    .child(self.select_row(S::FileIconColorMode, cx))
+                    .child(self.switch_row(B::PreviewTab, cx)),
             )
             .child(status_bar)
-            .child(card(s::settings_section_panels(), cx).child(self.text_row(
-                T::PanelsGridColumns,
-                s::settings_label_grid_columns(),
-                String::new(),
-                cx,
-            )))
             .child(
-                card(s::settings_card_external_editor(), cx).child(self.select_row(
-                    S::PreferredEditor,
-                    s::settings_label_preferred_editor(),
-                    String::new(),
-                    cx,
-                )),
+                card(s::settings_section_panels(), cx)
+                    .child(self.text_row(T::PanelsGridColumns, cx)),
+            )
+            .child(
+                card(s::settings_card_external_editor(), cx)
+                    .child(self.select_row(S::PreferredEditor, cx)),
             )
             .into_any_element()
     }
 }
 
 /// The status bar menu's label for `item`, reused so both places name it alike.
-fn status_bar_item_label(item: daruda_config::StatusBarItem) -> String {
+pub(in crate::settings) fn status_bar_item_label(item: daruda_config::StatusBarItem) -> String {
     use daruda_config::StatusBarItem as I;
     match item {
         I::ProjectBranch => s::status_bar_toggle_project_branch(),
@@ -253,7 +132,7 @@ impl SettingsView {
     /// One status-bar segment's switch. It reads the list this window last
     /// saw and writes the whole list back, so a toggle from the bar's own
     /// menu in the meantime is adopted rather than flipped twice.
-    fn status_bar_item_row(
+    pub(in crate::settings) fn status_bar_item_row(
         &self,
         item: daruda_config::StatusBarItem,
         cx: &mut gpui::Context<Self>,

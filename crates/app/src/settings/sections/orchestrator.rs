@@ -95,19 +95,12 @@ impl SettingsView {
         &self,
         cx: &mut gpui::Context<Self>,
     ) -> AnyElement {
-        let enabled = s::settings_orchestrator_enabled_label();
         page_stack()
             .child(
                 card(s::settings_nav_orchestrator(), cx)
-                    .child(self.switch_row(
-                        BoolSetting::OrchestratorEnabled,
-                        enabled.clone(),
-                        String::new(),
-                        cx,
-                    ))
+                    .child(self.switch_row(BoolSetting::OrchestratorEnabled, cx))
                     .child(self.dependent_rows(
                         BoolSetting::OrchestratorEnabled,
-                        enabled,
                         [
                             row(
                                 s::settings_orchestrator_agent_label(),

@@ -13,9 +13,11 @@
 //! window itself.
 
 mod confirm;
+mod copy;
 mod navigation;
 mod presentation;
 mod render;
+mod search;
 mod sections;
 mod spec;
 
@@ -1990,6 +1992,22 @@ impl SettingsView {
     /// section's natural starting field. Called both by sidebar clicks and by
     /// `Workspace::open_settings` when a second dispatch arrives while this
     /// view is already up.
+    /// Go to `section` from a nav row or a search result: the query is done
+    /// with, so it clears and the page shows in full.
+    pub(super) fn open_section(
+        &mut self,
+        section: BuiltinSection,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if !self.sidebar_search_input.read(cx).value().is_empty() {
+            self.sidebar_search_input.update(cx, |input, cx| {
+                input.set_value(String::new(), window, cx);
+            });
+        }
+        self.focus_section(section, window, cx);
+    }
+
     pub fn focus_section(
         &mut self,
         section: BuiltinSection,
@@ -2190,6 +2208,17 @@ impl SettingsView {
     #[cfg(all(test, feature = "screenshot"))]
     pub(crate) fn error_for_test(&self) -> Option<&SharedString> {
         self.error.as_ref()
+    }
+
+    /// Type a fixed query into the sidebar search — the
+    /// `--screenshot-scenario settings-search` entry point. `away` lands on a
+    /// parent switch, its dependent rows and a folded Advanced group.
+    #[cfg(feature = "screenshot")]
+    pub(crate) fn seed_search_for_shot(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.sidebar_search_input.update(cx, |input, cx| {
+            input.set_value("away".to_string(), window, cx);
+        });
+        cx.notify();
     }
 
     /// Raise the failure banner with a representative message — the

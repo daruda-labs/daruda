@@ -115,13 +115,9 @@ pub(super) fn card_content(content: impl IntoElement) -> Div {
 }
 
 impl SettingsView {
-    pub(super) fn text_row(
-        &self,
-        setting: TextSetting,
-        label: String,
-        description: String,
-        cx: &App,
-    ) -> Div {
+    pub(super) fn text_row(&self, setting: TextSetting, cx: &App) -> Div {
+        let copy = super::copy::text(setting);
+        let (label, description) = ((copy.label)(), (copy.hint)());
         let input = (spec::text_spec(setting).field)(self);
         row(
             label,
@@ -135,13 +131,9 @@ impl SettingsView {
 
     /// [`Self::text_row`] for free text (a path, a command) rather than a
     /// number: the input takes the full control column.
-    pub(super) fn text_row_wide(
-        &self,
-        setting: TextSetting,
-        label: String,
-        description: String,
-        cx: &App,
-    ) -> Div {
+    pub(super) fn text_row_wide(&self, setting: TextSetting, cx: &App) -> Div {
+        let copy = super::copy::text(setting);
+        let (label, description) = ((copy.label)(), (copy.hint)());
         let input = (spec::text_spec(setting).field)(self);
         row(
             label,
@@ -171,13 +163,9 @@ impl SettingsView {
         )
     }
 
-    pub(super) fn select_row(
-        &self,
-        setting: SelectSetting,
-        label: String,
-        description: String,
-        cx: &App,
-    ) -> Div {
+    pub(super) fn select_row(&self, setting: SelectSetting, cx: &App) -> Div {
+        let copy = super::copy::select(setting);
+        let (label, description) = ((copy.label)(), (copy.hint)());
         let input = (spec::select_spec(setting).field)(self);
         let control = crate::ui::select::select(input, cx, 0).when(
             setting == SelectSetting::UiPreset && daruda_config::UI_THEME_PRESETS.len() <= 1,
@@ -186,13 +174,9 @@ impl SettingsView {
         row(label, description, div().w_full().child(control), cx)
     }
 
-    pub(super) fn switch_row(
-        &self,
-        setting: BoolSetting,
-        label: String,
-        description: String,
-        cx: &gpui::Context<Self>,
-    ) -> Div {
+    pub(super) fn switch_row(&self, setting: BoolSetting, cx: &gpui::Context<Self>) -> Div {
+        let copy = super::copy::bool(setting);
+        let (label, description) = ((copy.label)(), (copy.hint)());
         let checked = (spec::bool_spec(setting).get)(self);
         let id = format!("settings-switch-{:?}", setting);
         let control = switch_with_state(
@@ -212,7 +196,6 @@ impl SettingsView {
     pub(super) fn dependent_rows(
         &self,
         parent: BoolSetting,
-        parent_label: String,
         rows: impl IntoIterator<Item = Div>,
         cx: &App,
     ) -> Div {
@@ -225,7 +208,9 @@ impl SettingsView {
                         .pt(px(theme::PAD_SM))
                         .text_size(px(theme::TAB_FONT_SIZE))
                         .text_color(theme::current(cx).text_muted)
-                        .child(s::settings_dependent_off(&parent_label)),
+                        .child(s::settings_dependent_off(&(super::copy::bool(parent)
+                            .label)(
+                        ))),
                 )
             })
             .children(rows)
@@ -234,7 +219,7 @@ impl SettingsView {
     /// A row whose control jumps to another Settings page.
     pub(super) fn link_row(
         &self,
-        id: &'static str,
+        id: impl Into<gpui::ElementId>,
         label: String,
         description: String,
         button_label: String,
@@ -247,7 +232,7 @@ impl SettingsView {
             super::settings_button(id, button_label)
                 .tab_stop(true)
                 .on_click(
-                    cx.listener(move |this, _, window, cx| this.focus_section(target, window, cx)),
+                    cx.listener(move |this, _, window, cx| this.open_section(target, window, cx)),
                 ),
             cx,
         )

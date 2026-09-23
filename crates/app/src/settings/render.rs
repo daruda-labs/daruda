@@ -13,8 +13,19 @@ impl Render for SettingsView {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let panel_bg = theme::current(cx).welcome_bg;
 
-        let body = self.render_section_body(cx);
-        let sidebar = self.render_sidebar_nav(cx);
+        let query = self
+            .sidebar_search_input
+            .read(cx)
+            .value()
+            .trim()
+            .to_string();
+        let results = super::search::query(&query);
+        let body = if query.is_empty() {
+            self.render_section_body(cx)
+        } else {
+            self.render_search_results(&query, &results, cx)
+        };
+        let sidebar = self.render_sidebar_nav(&query, &results, cx);
 
         // Both, not one or the other: a conflict is a standing question about a
         // field, an error is the report on the action just taken. Rendering the
@@ -24,9 +35,10 @@ impl Render for SettingsView {
             .flex_col()
             .min_w_0()
             .w_full()
-            .when(!navigation::is_catalog(self.active_section), |el| {
-                el.max_w(px(theme::SETTINGS_CONTENT_MAX_W))
-            })
+            .when(
+                !query.is_empty() || !navigation::is_catalog(self.active_section),
+                |el| el.max_w(px(theme::SETTINGS_CONTENT_MAX_W)),
+            )
             .child(
                 div()
                     .flex()
@@ -38,13 +50,21 @@ impl Render for SettingsView {
                             .text_size(px(theme::MODAL_TITLE_FONT_SIZE))
                             .font_weight(gpui::FontWeight::SEMIBOLD)
                             .text_color(theme::current(cx).text_primary)
-                            .child(navigation::label(self.active_section)),
+                            .child(if query.is_empty() {
+                                navigation::label(self.active_section)
+                            } else {
+                                s::settings_search_heading(&query)
+                            }),
                     )
                     .child(
                         div()
                             .text_size(px(theme::MODAL_BODY_FONT_SIZE))
                             .text_color(theme::current(cx).text_muted)
-                            .child(navigation::description(self.active_section)),
+                            .child(if query.is_empty() {
+                                navigation::description(self.active_section)
+                            } else {
+                                s::settings_search_count(results.len())
+                            }),
                     ),
             );
         if let Some(err) = self.error.as_ref() {
@@ -182,14 +202,72 @@ impl SettingsView {
         }
     }
 
-    fn render_sidebar_nav(&self, cx: &mut Context<Self>) -> AnyElement {
+    /// While a query is typed the body lists what it matched, grouped by page
+    /// and card, each row the live control it is on its own page.
+    fn render_search_results(
+        &self,
+        query: &str,
+        results: &[super::search::Doc],
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        use super::presentation::{card, page_stack};
+        use super::search::Target;
+
+        if results.is_empty() {
+            return div()
+                .text_size(px(theme::MODAL_BODY_FONT_SIZE))
+                .text_color(theme::current(cx).text_muted)
+                .child(s::settings_search_none(query))
+                .into_any_element();
+        }
+        let mut body = page_stack();
+        let mut index = 0;
+        while index < results.len() {
+            let first = &results[index];
+            let title = if first.card.is_empty() {
+                navigation::label(first.section)
+            } else {
+                s::settings_search_group(&navigation::label(first.section), &first.card)
+            };
+            let mut group = card(title, cx);
+            while index < results.len()
+                && results[index].section == first.section
+                && results[index].card == first.card
+            {
+                let doc = &results[index];
+                let row = match doc.target {
+                    Target::Text(super::TextSetting::ShellProgram) => {
+                        self.text_row_wide(super::TextSetting::ShellProgram, cx)
+                    }
+                    Target::Text(t) => self.text_row(t, cx),
+                    Target::Select(v) => self.select_row(v, cx),
+                    Target::Bool(b) => self.switch_row(b, cx),
+                    Target::StatusBarItem(item) => self.status_bar_item_row(item, cx),
+                    Target::Page(section) => self.link_row(
+                        gpui::ElementId::Name(format!("settings-search-link-{index}").into()),
+                        doc.label.clone(),
+                        doc.hint.clone(),
+                        s::settings_search_open(),
+                        section,
+                        cx,
+                    ),
+                };
+                group = group.child(row);
+                index += 1;
+            }
+            body = body.child(group);
+        }
+        body.into_any_element()
+    }
+
+    fn render_sidebar_nav(
+        &self,
+        query: &str,
+        results: &[super::search::Doc],
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
         let active = self.active_section;
-        let query = self
-            .sidebar_search_input
-            .read(cx)
-            .value()
-            .trim()
-            .to_lowercase();
+        let counts = super::search::counts(results);
         let mut list = div()
             .flex()
             .flex_col()
@@ -199,11 +277,9 @@ impl SettingsView {
                 .iter()
                 .copied()
                 .filter_map(|section| {
-                    let label = navigation::label(section);
-                    let matches = query.is_empty()
-                        || label.to_lowercase().contains(&query)
-                        || section.slug().contains(&query);
-                    matches.then_some((section, label))
+                    let count = counts.iter().find(|(s, _)| *s == section).map(|(_, n)| *n);
+                    (query.is_empty() || count.is_some())
+                        .then(|| (section, navigation::label(section), count))
                 })
                 .collect::<Vec<_>>();
             if matching.is_empty() {
@@ -218,9 +294,9 @@ impl SettingsView {
                     .text_color(theme::current(cx).text_muted)
                     .child(group_label()),
             );
-            for (section, label) in matching {
-                let is_active = section == active;
-                list = list.child(self.render_sidebar_row(cx, section, label, is_active));
+            for (section, label, count) in matching {
+                let is_active = query.is_empty() && section == active;
+                list = list.child(self.render_sidebar_row(cx, section, label, count, is_active));
             }
         }
 
@@ -297,6 +373,7 @@ impl SettingsView {
         cx: &mut Context<Self>,
         section: BuiltinSection,
         label: impl Into<gpui::SharedString>,
+        count: Option<usize>,
         is_active: bool,
     ) -> impl IntoElement {
         let row_text = theme::current(cx).text_primary;
@@ -331,14 +408,24 @@ impl SettingsView {
             .focus_visible(|style| style.border_color(theme::ACCENT))
             .child(crate::ui::icons::icon(navigation::icon(section)))
             .child(label.into())
+            .children(count.map(|n| {
+                div()
+                    .ml_auto()
+                    .px(px(theme::PAD_SM))
+                    .rounded_full()
+                    .bg(theme::current(cx).overlay_selected)
+                    .text_size(px(theme::TAB_FONT_SIZE))
+                    .text_color(theme::current(cx).text_muted)
+                    .child(n.to_string())
+            }))
             .on_key_down(cx.listener(move |this, event: &KeyDownEvent, window, cx| {
                 if matches!(event.keystroke.key.as_str(), "enter" | "space") {
-                    this.focus_section(section, window, cx);
+                    this.open_section(section, window, cx);
                     cx.stop_propagation();
                 }
             }))
             .on_click(cx.listener(move |this, _: &ClickEvent, window, cx| {
-                this.focus_section(section, window, cx);
+                this.open_section(section, window, cx);
             }));
         if is_active {
             row = row.bg(active_bg);
