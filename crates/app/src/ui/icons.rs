@@ -1,4 +1,7 @@
-//! Material Symbols used by application controls, separate from file icons.
+//! Application glyphs, separate from file icons. Controls (buttons, tabs,
+//! chevrons, window chrome) use Material Symbols under `icons/ui/`; glyphs
+//! that label dock tree and list items use Lucide outlines under
+//! `icons/lucide/`, all at the one stroke the mockup's rows are drawn at.
 
 use gpui::px;
 use gpui_component::{Icon, Sizable as _};
@@ -48,13 +51,18 @@ pub const EXPAND: &str = "icons/ui/open-in-full.svg";
 pub const HISTORY: &str = "icons/ui/history.svg";
 pub const VISIBILITY: &str = "icons/ui/visibility.svg";
 pub const DIFFERENCE: &str = "icons/ui/difference.svg";
-// Lucide (ISC) outlines, drawn at the dock's lighter 1.65 stroke.
+// Lucide outlines; every file must carry `LUCIDE_STROKE`.
 pub const TASKS: &str = "icons/lucide/list-checks.svg";
 pub const FLOWS: &str = "icons/lucide/workflow.svg";
 pub const FOLDER: &str = "icons/lucide/folder.svg";
 pub const SESSION: &str = "icons/lucide/message-square.svg";
 pub const SKILL: &str = "icons/lucide/file-text.svg";
 pub const SERVER: &str = "icons/lucide/server.svg";
+#[cfg(test)]
+const LUCIDE: [&str; 6] = [TASKS, FLOWS, FOLDER, SESSION, SKILL, SERVER];
+/// Lucide ships at stroke 2; dock rows read at this lighter weight.
+#[cfg(test)]
+const LUCIDE_STROKE: &str = r#"stroke-width="1.65""#;
 
 /// Explicit pixels keep controls independent of font and button size tiers.
 pub fn icon(path: &'static str) -> Icon {
@@ -111,6 +119,17 @@ mod tests {
         ] {
             let bytes = crate::assets::DarudaAssets.load(path).unwrap().unwrap();
             assert!(bytes.windows(4).any(|w| w == b"<svg"), "{path}");
+        }
+    }
+
+    /// A Lucide glyph pasted in at upstream's stroke 2 would read bold
+    /// beside the rest of the row.
+    #[test]
+    fn lucide_glyphs_share_one_stroke() {
+        for path in LUCIDE {
+            let bytes = crate::assets::DarudaAssets.load(path).unwrap().unwrap();
+            let svg = std::str::from_utf8(&bytes).unwrap();
+            assert!(svg.contains(LUCIDE_STROKE), "{path}");
         }
     }
 }
