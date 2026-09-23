@@ -32,6 +32,12 @@ pub enum SettingsFieldId {
     TerminalInsetY,
     FilesShowHidden,
     FilesUseGitignore,
+    AgentInputMaxRows,
+    AgentReadingWidth,
+    FlowTimeoutMinutes,
+    FlowMaxNodeRuns,
+    FlowMaxCost,
+    FlowCostCurrency,
     LeftCollapsedByDefault,
     PreviewTab,
     LeftDefaultWidth,
@@ -92,6 +98,12 @@ impl SettingsFieldId {
             Self::TerminalInsetY => "font.terminal.inset_y",
             Self::FilesShowHidden => "left_dock.files_show_hidden",
             Self::FilesUseGitignore => "left_dock.files_use_gitignore",
+            Self::AgentInputMaxRows => "agent.input_max_rows",
+            Self::AgentReadingWidth => "agent.reading_width",
+            Self::FlowTimeoutMinutes => "flow.timeout_minutes",
+            Self::FlowMaxNodeRuns => "flow.max_node_runs",
+            Self::FlowMaxCost => "flow.max_cost",
+            Self::FlowCostCurrency => "flow.cost_currency",
             Self::LeftCollapsedByDefault => "left_dock.left_collapsed_by_default",
             Self::PreviewTab => "file_viewer.preview_tab",
             Self::LeftDefaultWidth => "left_dock.left_default_width",
@@ -158,6 +170,12 @@ pub enum SettingsPatch {
     TerminalInsetY(f32),
     FilesShowHidden(bool),
     FilesUseGitignore(bool),
+    AgentInputMaxRows(u8),
+    AgentReadingWidth(f32),
+    FlowTimeoutMinutes(u32),
+    FlowMaxNodeRuns(u32),
+    FlowMaxCost(f64),
+    FlowCostCurrency(String),
     LeftCollapsedByDefault(bool),
     PreviewTab(bool),
     LeftDefaultWidth(f32),
@@ -224,6 +242,12 @@ impl SettingsPatch {
             Self::TerminalInsetY(_) => SettingsFieldId::TerminalInsetY,
             Self::FilesShowHidden(_) => SettingsFieldId::FilesShowHidden,
             Self::FilesUseGitignore(_) => SettingsFieldId::FilesUseGitignore,
+            Self::AgentInputMaxRows(_) => SettingsFieldId::AgentInputMaxRows,
+            Self::AgentReadingWidth(_) => SettingsFieldId::AgentReadingWidth,
+            Self::FlowTimeoutMinutes(_) => SettingsFieldId::FlowTimeoutMinutes,
+            Self::FlowMaxNodeRuns(_) => SettingsFieldId::FlowMaxNodeRuns,
+            Self::FlowMaxCost(_) => SettingsFieldId::FlowMaxCost,
+            Self::FlowCostCurrency(_) => SettingsFieldId::FlowCostCurrency,
             Self::LeftCollapsedByDefault(_) => SettingsFieldId::LeftCollapsedByDefault,
             Self::PreviewTab(_) => SettingsFieldId::PreviewTab,
             Self::LeftDefaultWidth(_) => SettingsFieldId::LeftDefaultWidth,
@@ -295,6 +319,12 @@ impl SettingsPatch {
             Self::TerminalInsetY(value) => config.font.terminal.inset_y = *value,
             Self::FilesShowHidden(value) => config.left_dock.files_show_hidden = *value,
             Self::FilesUseGitignore(value) => config.left_dock.files_use_gitignore = *value,
+            Self::AgentInputMaxRows(value) => config.agent.input_max_rows = *value,
+            Self::AgentReadingWidth(value) => config.agent.reading_width = *value,
+            Self::FlowTimeoutMinutes(value) => config.flow.timeout_minutes = *value,
+            Self::FlowMaxNodeRuns(value) => config.flow.max_node_runs = *value,
+            Self::FlowMaxCost(value) => config.flow.max_cost = *value,
+            Self::FlowCostCurrency(value) => config.flow.cost_currency = value.clone(),
             Self::LeftCollapsedByDefault(value) => {
                 config.left_dock.left_collapsed_by_default = *value
             }
@@ -389,6 +419,12 @@ impl SettingsPatch {
             Self::FilesUseGitignore(_) => {
                 left.left_dock.files_use_gitignore != right.left_dock.files_use_gitignore
             }
+            Self::AgentInputMaxRows(_) => left.agent.input_max_rows != right.agent.input_max_rows,
+            Self::AgentReadingWidth(_) => left.agent.reading_width != right.agent.reading_width,
+            Self::FlowTimeoutMinutes(_) => left.flow.timeout_minutes != right.flow.timeout_minutes,
+            Self::FlowMaxNodeRuns(_) => left.flow.max_node_runs != right.flow.max_node_runs,
+            Self::FlowMaxCost(_) => left.flow.max_cost != right.flow.max_cost,
+            Self::FlowCostCurrency(_) => left.flow.cost_currency != right.flow.cost_currency,
             Self::LeftCollapsedByDefault(_) => {
                 left.left_dock.left_collapsed_by_default
                     != right.left_dock.left_collapsed_by_default

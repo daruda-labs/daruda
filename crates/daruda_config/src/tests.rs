@@ -730,6 +730,32 @@ fn settings_patch_writes_render_max_fps() {
     assert_eq!(Config::load_from(&path).render.max_fps, 60);
 }
 
+/// The Agents & Chat page's composer, reading-width and flow-limit keys
+/// through the real `toml_edit` writer, read back.
+#[test]
+fn settings_patch_round_trips_the_agent_and_flow_keys() {
+    use crate::SettingsPatch as P;
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("config.toml");
+    for patch in [
+        P::AgentInputMaxRows(12),
+        P::AgentReadingWidth(900.0),
+        P::FlowTimeoutMinutes(0),
+        P::FlowMaxNodeRuns(40),
+        P::FlowMaxCost(2.5),
+        P::FlowCostCurrency("EUR".to_string()),
+    ] {
+        crate::apply_settings_patch_to(&patch, &path).expect("agent patch");
+    }
+    let c = Config::load_from(&path);
+    assert_eq!(c.agent.input_max_rows, 12);
+    assert_eq!(c.agent.reading_width, 900.0);
+    assert_eq!(c.flow.timeout_minutes, 0);
+    assert_eq!(c.flow.max_node_runs, 40);
+    assert_eq!(c.flow.max_cost, 2.5);
+    assert_eq!(c.flow.cost_currency, "EUR");
+}
+
 /// Reset deletes the key rather than writing the default, and keeps the
 /// table and its other keys.
 #[test]

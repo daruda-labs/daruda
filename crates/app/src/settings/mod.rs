@@ -200,6 +200,12 @@ pub struct SettingsView {
     // Sidebar
     files_show_hidden: bool,
     files_use_gitignore: bool,
+    agent_input_max_rows_input: Entity<InputState>,
+    agent_reading_width_input: Entity<InputState>,
+    flow_timeout_minutes_input: Entity<InputState>,
+    flow_max_node_runs_input: Entity<InputState>,
+    flow_max_cost_input: Entity<InputState>,
+    flow_cost_currency_input: Entity<InputState>,
     left_collapsed_by_default: bool,
     preview_tab: bool,
     left_default_width_input: Entity<InputState>,
@@ -363,6 +369,12 @@ enum TextSetting {
     TerminalInsetY,
     ClipboardStreamingMaxBytes,
     PanelsGridColumns,
+    AgentInputMaxRows,
+    AgentReadingWidth,
+    FlowTimeoutMinutes,
+    FlowMaxNodeRuns,
+    FlowMaxCost,
+    FlowCostCurrency,
     LeftDefaultWidth,
     ShellProgram,
     NotifyLongRunningThresholdSecs,
@@ -438,7 +450,7 @@ pub(super) enum BoolSetting {
 // click of the new widget.
 impl TextSetting {
     #[cfg(test)]
-    const ALL: [Self; 16] = [
+    const ALL: [Self; 22] = [
         Self::TerminalFontSize,
         Self::TerminalLineHeight,
         Self::TerminalCellWidth,
@@ -452,6 +464,12 @@ impl TextSetting {
         Self::TerminalInsetY,
         Self::ClipboardStreamingMaxBytes,
         Self::PanelsGridColumns,
+        Self::AgentInputMaxRows,
+        Self::AgentReadingWidth,
+        Self::FlowTimeoutMinutes,
+        Self::FlowMaxNodeRuns,
+        Self::FlowMaxCost,
+        Self::FlowCostCurrency,
         Self::LeftDefaultWidth,
         Self::ShellProgram,
         Self::NotifyLongRunningThresholdSecs,
@@ -475,6 +493,12 @@ impl TextSetting {
             Self::TerminalInsetY => (),
             Self::ClipboardStreamingMaxBytes => (),
             Self::PanelsGridColumns => (),
+            Self::AgentInputMaxRows => (),
+            Self::AgentReadingWidth => (),
+            Self::FlowTimeoutMinutes => (),
+            Self::FlowMaxNodeRuns => (),
+            Self::FlowMaxCost => (),
+            Self::FlowCostCurrency => (),
             Self::LeftDefaultWidth => (),
             Self::ShellProgram => (),
             Self::NotifyLongRunningThresholdSecs => (),
@@ -1600,6 +1624,54 @@ impl SettingsView {
             &mut input_subscriptions,
             &mut section_focus_targets,
         );
+        let agent_input_max_rows_input = Self::new_text_field(
+            TextSetting::AgentInputMaxRows,
+            &config,
+            window,
+            cx,
+            &mut input_subscriptions,
+            &mut section_focus_targets,
+        );
+        let agent_reading_width_input = Self::new_text_field(
+            TextSetting::AgentReadingWidth,
+            &config,
+            window,
+            cx,
+            &mut input_subscriptions,
+            &mut section_focus_targets,
+        );
+        let flow_timeout_minutes_input = Self::new_text_field(
+            TextSetting::FlowTimeoutMinutes,
+            &config,
+            window,
+            cx,
+            &mut input_subscriptions,
+            &mut section_focus_targets,
+        );
+        let flow_max_node_runs_input = Self::new_text_field(
+            TextSetting::FlowMaxNodeRuns,
+            &config,
+            window,
+            cx,
+            &mut input_subscriptions,
+            &mut section_focus_targets,
+        );
+        let flow_max_cost_input = Self::new_text_field(
+            TextSetting::FlowMaxCost,
+            &config,
+            window,
+            cx,
+            &mut input_subscriptions,
+            &mut section_focus_targets,
+        );
+        let flow_cost_currency_input = Self::new_text_field(
+            TextSetting::FlowCostCurrency,
+            &config,
+            window,
+            cx,
+            &mut input_subscriptions,
+            &mut section_focus_targets,
+        );
         let left_default_width_input = Self::new_text_field(
             TextSetting::LeftDefaultWidth,
             &config,
@@ -1930,6 +2002,12 @@ impl SettingsView {
             inset_y_input,
             files_show_hidden: config.left_dock.files_show_hidden,
             files_use_gitignore: config.left_dock.files_use_gitignore,
+            agent_input_max_rows_input,
+            agent_reading_width_input,
+            flow_timeout_minutes_input,
+            flow_max_node_runs_input,
+            flow_max_cost_input,
+            flow_cost_currency_input,
             left_collapsed_by_default: config.left_dock.left_collapsed_by_default,
             preview_tab: config.file_viewer.preview_tab,
             left_default_width_input,

@@ -1076,6 +1076,39 @@ fn patch_settings_document(
                 toml_edit::value(config.left_dock.files_use_gitignore),
             );
         }),
+        SettingsPatch::AgentInputMaxRows(_) => patch_section(doc, "agent", |t| {
+            t.insert(
+                "input_max_rows",
+                toml_edit::value(config.agent.input_max_rows as i64),
+            );
+        }),
+        SettingsPatch::AgentReadingWidth(_) => patch_section(doc, "agent", |t| {
+            t.insert(
+                "reading_width",
+                toml_edit::value(f64::from(config.agent.reading_width)),
+            );
+        }),
+        SettingsPatch::FlowTimeoutMinutes(_) => patch_section(doc, "flow", |t| {
+            t.insert(
+                "timeout_minutes",
+                toml_edit::value(config.flow.timeout_minutes as i64),
+            );
+        }),
+        SettingsPatch::FlowMaxNodeRuns(_) => patch_section(doc, "flow", |t| {
+            t.insert(
+                "max_node_runs",
+                toml_edit::value(config.flow.max_node_runs as i64),
+            );
+        }),
+        SettingsPatch::FlowMaxCost(_) => patch_section(doc, "flow", |t| {
+            t.insert("max_cost", toml_edit::value(config.flow.max_cost));
+        }),
+        SettingsPatch::FlowCostCurrency(_) => patch_section(doc, "flow", |t| {
+            t.insert(
+                "cost_currency",
+                toml_edit::value(config.flow.cost_currency.clone()),
+            );
+        }),
         SettingsPatch::LeftCollapsedByDefault(_) => patch_section(doc, "left_dock", |t| {
             t.insert(
                 "left_collapsed_by_default",

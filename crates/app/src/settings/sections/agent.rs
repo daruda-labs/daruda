@@ -10,6 +10,7 @@
 //! Method visibility is `pub(in crate::settings)` so `render` can
 //! dispatch here, mirroring the [`super::plugin`] submodule.
 
+use crate::settings::TextSetting;
 use crate::surface::strings as s;
 use crate::ui::field_row;
 use crate::ui::theme;
@@ -32,7 +33,20 @@ impl SettingsView {
             .child(
                 card(s::settings_group_chat(), cx)
                     .child(self.switch_row(BoolSetting::AgentUseReadingWidth, cx))
-                    .child(self.switch_row(BoolSetting::AgentUseModifierToSend, cx)),
+                    .child(self.dependent_rows(
+                        BoolSetting::AgentUseReadingWidth,
+                        [self.text_row(TextSetting::AgentReadingWidth, cx)],
+                        cx,
+                    ))
+                    .child(self.switch_row(BoolSetting::AgentUseModifierToSend, cx))
+                    .child(self.text_row(TextSetting::AgentInputMaxRows, cx)),
+            )
+            .child(
+                card(s::settings_card_flows(), cx)
+                    .child(self.text_row(TextSetting::FlowTimeoutMinutes, cx))
+                    .child(self.text_row(TextSetting::FlowMaxNodeRuns, cx))
+                    .child(self.text_row(TextSetting::FlowMaxCost, cx))
+                    .child(self.text_row(TextSetting::FlowCostCurrency, cx)),
             )
             .child(
                 card(s::settings_section_agent_catalog(), cx)

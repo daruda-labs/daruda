@@ -243,6 +243,93 @@ pub(super) const TEXT_SETTINGS: &[TextSpec] = &[
         },
     },
     TextSpec {
+        setting: TextSetting::AgentInputMaxRows,
+        section: BuiltinSection::Agent,
+        placeholder: || s::settings_placeholder_example("8"),
+        field: |w| &w.agent_input_max_rows_input,
+        show: |c| c.agent.input_max_rows.to_string(),
+        current: |c| SettingsPatch::AgentInputMaxRows(c.agent.input_max_rows),
+        parse: |input, cx| {
+            bounded(
+                input,
+                2..=20,
+                || s::settings_err_input_max_rows().into(),
+                cx,
+            )
+            .map(SettingsPatch::AgentInputMaxRows)
+        },
+    },
+    TextSpec {
+        setting: TextSetting::AgentReadingWidth,
+        section: BuiltinSection::Agent,
+        placeholder: || s::settings_placeholder_example("700"),
+        field: |w| &w.agent_reading_width_input,
+        show: |c| c.agent.reading_width.to_string(),
+        current: |c| SettingsPatch::AgentReadingWidth(c.agent.reading_width),
+        parse: |input, cx| {
+            bounded(
+                input,
+                360.0..=2400.0,
+                || s::settings_err_reading_width().into(),
+                cx,
+            )
+            .map(SettingsPatch::AgentReadingWidth)
+        },
+    },
+    TextSpec {
+        setting: TextSetting::FlowTimeoutMinutes,
+        section: BuiltinSection::Agent,
+        placeholder: || s::settings_placeholder_example("90"),
+        field: |w| &w.flow_timeout_minutes_input,
+        show: |c| c.flow.timeout_minutes.to_string(),
+        current: |c| SettingsPatch::FlowTimeoutMinutes(c.flow.timeout_minutes),
+        parse: |input, cx| {
+            bounded(input, 0.., || s::settings_err_whole_number().into(), cx)
+                .map(SettingsPatch::FlowTimeoutMinutes)
+        },
+    },
+    TextSpec {
+        setting: TextSetting::FlowMaxNodeRuns,
+        section: BuiltinSection::Agent,
+        placeholder: || s::settings_placeholder_example("100"),
+        field: |w| &w.flow_max_node_runs_input,
+        show: |c| c.flow.max_node_runs.to_string(),
+        current: |c| SettingsPatch::FlowMaxNodeRuns(c.flow.max_node_runs),
+        parse: |input, cx| {
+            bounded(input, 0.., || s::settings_err_whole_number().into(), cx)
+                .map(SettingsPatch::FlowMaxNodeRuns)
+        },
+    },
+    TextSpec {
+        setting: TextSetting::FlowMaxCost,
+        section: BuiltinSection::Agent,
+        placeholder: || s::settings_placeholder_example("5.0"),
+        field: |w| &w.flow_max_cost_input,
+        show: |c| c.flow.max_cost.to_string(),
+        current: |c| SettingsPatch::FlowMaxCost(c.flow.max_cost),
+        parse: |input, cx| {
+            bounded(input, 0.0.., || s::settings_err_non_negative().into(), cx)
+                .map(SettingsPatch::FlowMaxCost)
+        },
+    },
+    TextSpec {
+        setting: TextSetting::FlowCostCurrency,
+        section: BuiltinSection::Agent,
+        placeholder: || s::settings_placeholder_example("USD"),
+        field: |w| &w.flow_cost_currency_input,
+        show: |c| c.flow.cost_currency.clone(),
+        current: |c| SettingsPatch::FlowCostCurrency(c.flow.cost_currency.clone()),
+        // Free text: the currency is whatever the agent reports its cost in.
+        parse: |input, cx| {
+            let value = input.read(cx).value().trim().to_string();
+            if value.is_empty() {
+                Err(s::settings_err_currency().into())
+            } else {
+                Ok(SettingsPatch::FlowCostCurrency(value))
+            }
+        },
+    },
+    TextSpec {
         setting: TextSetting::LeftDefaultWidth,
         section: BuiltinSection::Workspace,
         placeholder: || s::settings_placeholder_example("220"),
@@ -791,6 +878,12 @@ mod tests {
             | SettingsPatch::TerminalInsetY(_)
             | SettingsPatch::FilesShowHidden(_)
             | SettingsPatch::FilesUseGitignore(_)
+            | SettingsPatch::AgentInputMaxRows(_)
+            | SettingsPatch::AgentReadingWidth(_)
+            | SettingsPatch::FlowTimeoutMinutes(_)
+            | SettingsPatch::FlowMaxNodeRuns(_)
+            | SettingsPatch::FlowMaxCost(_)
+            | SettingsPatch::FlowCostCurrency(_)
             | SettingsPatch::LeftCollapsedByDefault(_)
             | SettingsPatch::PreviewTab(_)
             | SettingsPatch::LeftDefaultWidth(_)

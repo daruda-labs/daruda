@@ -4706,6 +4706,66 @@ pub fn settings_reset_to_default() -> String {
     rust_i18n::t!("settings.reset_to_default").into_owned()
 }
 
+pub fn settings_err_input_max_rows() -> String {
+    rust_i18n::t!("settings.err_input_max_rows").into_owned()
+}
+
+pub fn settings_err_reading_width() -> String {
+    rust_i18n::t!("settings.err_reading_width").into_owned()
+}
+
+pub fn settings_err_whole_number() -> String {
+    rust_i18n::t!("settings.err_whole_number").into_owned()
+}
+
+pub fn settings_err_non_negative() -> String {
+    rust_i18n::t!("settings.err_non_negative").into_owned()
+}
+
+pub fn settings_err_currency() -> String {
+    rust_i18n::t!("settings.err_currency").into_owned()
+}
+
+pub fn settings_label_input_max_rows() -> String {
+    rust_i18n::t!("settings.label_input_max_rows").into_owned()
+}
+
+pub fn settings_hint_input_max_rows() -> String {
+    rust_i18n::t!("settings.hint_input_max_rows").into_owned()
+}
+
+pub fn settings_label_reading_width() -> String {
+    rust_i18n::t!("settings.label_reading_width").into_owned()
+}
+
+pub fn settings_card_flows() -> String {
+    rust_i18n::t!("settings.card_flows").into_owned()
+}
+
+pub fn settings_label_flow_timeout() -> String {
+    rust_i18n::t!("settings.label_flow_timeout").into_owned()
+}
+
+pub fn settings_label_flow_max_node_runs() -> String {
+    rust_i18n::t!("settings.label_flow_max_node_runs").into_owned()
+}
+
+pub fn settings_label_flow_max_cost() -> String {
+    rust_i18n::t!("settings.label_flow_max_cost").into_owned()
+}
+
+pub fn settings_hint_zero_no_limit() -> String {
+    rust_i18n::t!("settings.hint_zero_no_limit").into_owned()
+}
+
+pub fn settings_label_flow_currency() -> String {
+    rust_i18n::t!("settings.label_flow_currency").into_owned()
+}
+
+pub fn settings_hint_flow_currency() -> String {
+    rust_i18n::t!("settings.hint_flow_currency").into_owned()
+}
+
 pub fn settings_nav_general() -> String {
     rust_i18n::t!("settings.nav_general").into_owned()
 }

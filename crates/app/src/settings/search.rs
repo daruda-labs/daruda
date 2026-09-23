@@ -37,6 +37,10 @@ pub(super) struct Doc {
 /// also shows the parent, so its state is never read out of context.
 const PARENTS: &[(Target, BoolSetting)] = &[
     (
+        Target::Text(TextSetting::AgentReadingWidth),
+        BoolSetting::AgentUseReadingWidth,
+    ),
+    (
         Target::Text(TextSetting::NotifyLongRunningThresholdSecs),
         BoolSetting::NotifyLongRunning,
     ),

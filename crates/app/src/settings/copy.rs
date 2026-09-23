@@ -115,6 +115,42 @@ pub(super) fn text(setting: TextSetting) -> RowCopy {
             label: s::settings_label_notify_long_running_threshold,
             hint: String::new,
         },
+        TextSetting::AgentInputMaxRows => RowCopy {
+            section: Section::Agent,
+            card: s::settings_group_chat,
+            label: s::settings_label_input_max_rows,
+            hint: s::settings_hint_input_max_rows,
+        },
+        TextSetting::AgentReadingWidth => RowCopy {
+            section: Section::Agent,
+            card: s::settings_group_chat,
+            label: s::settings_label_reading_width,
+            hint: String::new,
+        },
+        TextSetting::FlowTimeoutMinutes => RowCopy {
+            section: Section::Agent,
+            card: s::settings_card_flows,
+            label: s::settings_label_flow_timeout,
+            hint: s::settings_hint_zero_no_limit,
+        },
+        TextSetting::FlowMaxNodeRuns => RowCopy {
+            section: Section::Agent,
+            card: s::settings_card_flows,
+            label: s::settings_label_flow_max_node_runs,
+            hint: s::settings_hint_zero_no_limit,
+        },
+        TextSetting::FlowMaxCost => RowCopy {
+            section: Section::Agent,
+            card: s::settings_card_flows,
+            label: s::settings_label_flow_max_cost,
+            hint: s::settings_hint_zero_no_limit,
+        },
+        TextSetting::FlowCostCurrency => RowCopy {
+            section: Section::Agent,
+            card: s::settings_card_flows,
+            label: s::settings_label_flow_currency,
+            hint: s::settings_hint_flow_currency,
+        },
     }
 }
 
