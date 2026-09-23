@@ -860,6 +860,8 @@ settings:
   hint_zero_no_limit: "0 = no limit."
   label_flow_currency: "Cost currency"
   hint_flow_currency: "Only used when Max cost is above 0. Use the currency your agent reports its cost in."
+  label_custom_colors: "Custom terminal colors"
+  hint_custom_colors: "Set terminal_preset = \"custom\" under [theme], then the colors under [colors], in config.toml."
   desc_general: "Choose the display language for the current profile."
   desc_font: "Adjust typography independently for terminals, editors, and agent chat."
   desc_terminal: "Shell, output, padding, cursor and clipboard for terminal panes."

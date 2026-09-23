@@ -25,7 +25,13 @@ impl SettingsView {
                 card(s::settings_group_themes(), cx)
                     .child(self.select_row(S::UiPreset, cx))
                     .child(self.select_row(S::TerminalPreset, cx))
-                    .child(self.select_row(S::SyntaxTheme, cx)),
+                    .child(self.select_row(S::SyntaxTheme, cx))
+                    .child(crate::settings::presentation::config_only_row(
+                        s::settings_label_custom_colors(),
+                        s::settings_hint_custom_colors(),
+                        "colors",
+                        cx,
+                    )),
             )
             .child(
                 card(s::settings_group_window(), cx)

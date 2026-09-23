@@ -63,6 +63,11 @@ type Handwritten = (Section, fn() -> String, &'static [&'static str]);
 /// Blocks a page draws by hand, indexed as links to that page.
 const HANDWRITTEN: &[Handwritten] = &[
     (
+        Section::Appearance,
+        s::settings_label_custom_colors,
+        &["colors", "palette", "ansi", "custom"],
+    ),
+    (
         Section::Agent,
         s::settings_section_agent_catalog,
         &["agent", "preset", "command", "model", "mode", "acp"],

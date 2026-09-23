@@ -126,6 +126,42 @@ pub(super) fn switch_with_state(switch: crate::ui::Button, checked: bool, cx: &A
         )
 }
 
+/// A setting the UI has no control for yet: where it lives in the file, and
+/// the button that opens the file.
+pub(super) fn config_only_row(
+    label: impl Into<SharedString>,
+    description: impl Into<SharedString>,
+    path: &'static str,
+    cx: &gpui::Context<SettingsView>,
+) -> Div {
+    let t = theme::current(cx);
+    row(
+        label,
+        description,
+        div()
+            .flex()
+            .flex_row()
+            .items_center()
+            .gap(px(theme::PAD_SM))
+            .child(
+                div()
+                    .font(gpui::font("monospace"))
+                    .text_size(px(theme::TAB_FONT_SIZE))
+                    .text_color(t.text_muted)
+                    .child(path),
+            )
+            .child(
+                super::settings_button(
+                    gpui::ElementId::Name(format!("settings-config-only-{path}").into()),
+                    s::settings_open_config_file(),
+                )
+                .tab_stop(true)
+                .on_click(cx.listener(|this, _, _, cx| this.open_config_file(cx))),
+            ),
+        cx,
+    )
+}
+
 pub(super) fn card_content(content: impl IntoElement) -> Div {
     div()
         .p(px(theme::SETTINGS_CARD_PAD))

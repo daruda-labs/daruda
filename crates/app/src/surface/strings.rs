@@ -4766,6 +4766,14 @@ pub fn settings_hint_flow_currency() -> String {
     rust_i18n::t!("settings.hint_flow_currency").into_owned()
 }
 
+pub fn settings_label_custom_colors() -> String {
+    rust_i18n::t!("settings.label_custom_colors").into_owned()
+}
+
+pub fn settings_hint_custom_colors() -> String {
+    rust_i18n::t!("settings.hint_custom_colors").into_owned()
+}
+
 pub fn settings_nav_general() -> String {
     rust_i18n::t!("settings.nav_general").into_owned()
 }

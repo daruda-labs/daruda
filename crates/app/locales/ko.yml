@@ -859,6 +859,8 @@ settings:
   hint_zero_no_limit: "0 = 제한 없음."
   label_flow_currency: "비용 통화"
   hint_flow_currency: "최대 비용이 0보다 클 때만 쓰입니다. 에이전트가 보고하는 비용 통화를 입력하세요."
+  label_custom_colors: "사용자 터미널 색상"
+  hint_custom_colors: "config.toml의 [theme]에 terminal_preset = \"custom\"을 넣고 [colors]에서 색을 정합니다."
   desc_general: "현재 프로필에서 사용할 표시 언어를 선택합니다."
   desc_font: "터미널, 에디터, 에이전트 채팅의 글꼴을 개별적으로 조정합니다."
   desc_terminal: "터미널 pane의 셸, 출력, 여백, 커서, 클립보드를 설정합니다."

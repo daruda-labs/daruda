@@ -467,8 +467,8 @@ impl SettingsView {
 
     /// "Open Config File" button — creates the config directory if
     /// missing, then opens `config.toml` in the user's default editor
-    /// for the file type. Shared by [`render_placeholder`] (sections
-    /// with no GUI yet).
+    /// for the file type. Used by [`render_placeholder`] (sections with no
+    /// GUI yet); the sidebar carries the same action for every page.
     fn render_open_config_button(cx: &mut gpui::Context<Self>) -> impl IntoElement {
         div().flex().flex_row().child(
             button("settings-open-config", s::settings_open_config_file()).on_click(cx.listener(
@@ -480,7 +480,7 @@ impl SettingsView {
     }
 
     /// Hand `config.toml` to the user's editor, creating its directory first.
-    fn open_config_file(&mut self, cx: &mut gpui::Context<Self>) {
+    pub(in crate::settings) fn open_config_file(&mut self, cx: &mut gpui::Context<Self>) {
         self.open_config_file_with(|dir| std::fs::create_dir_all(dir), cx);
     }
 

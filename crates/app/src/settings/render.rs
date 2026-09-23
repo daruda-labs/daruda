@@ -365,6 +365,27 @@ impl SettingsView {
                         &self.sidebar_scroll_handle,
                     )),
             )
+            // Every page reaches the file, so a setting the UI does not
+            // cover yet is one click from any of them.
+            .child(
+                div()
+                    .flex_none()
+                    .px(px(theme::SETTINGS_SIDEBAR_ROW_PAD_X))
+                    .py(px(theme::MODAL_PANEL_GAP))
+                    .border_t_1()
+                    .border_color(theme::current(cx).border)
+                    .child(
+                        crate::ui::button_with_icon(
+                            "settings-sidebar-open-config",
+                            s::settings_open_config_file(),
+                            crate::ui::icons::EDIT,
+                        )
+                        .tab_stop(true)
+                        .on_click(cx.listener(
+                            |this, _: &ClickEvent, _window, cx| this.open_config_file(cx),
+                        )),
+                    ),
+            )
             .into_any_element()
     }
 
