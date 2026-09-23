@@ -1,17 +1,23 @@
 #!/usr/bin/env bash
 # Keep the workspace frame split: everything a frame changes belongs in
-# `prepare_frame`, and `build_frame` takes `&self` so the compiler enforces
-# the rest. This guards the two things the compiler cannot:
+# `prepare_frame`, and `build_frame` takes `&self` so the compiler keeps it
+# from writing `Workspace`'s own fields. That borrow says nothing about other
+# entities — `&mut Context` still reaches them — so this guards what the
+# compiler cannot:
 #
 #   1. `build_frame` keeping its shared borrow — flip it to `&mut self` and
 #      every mutation the split moved out can quietly come back.
 #   2. `Render::render` staying a two-line dispatch — a statement added there
 #      runs with `&mut self` and is outside both guards.
+#   3. No dock staging on the build side. Staging writes into a dock entity
+#      through `cx`, which `&self` allows, and it belongs in `prepare_frame`
+#      behind the check for whether the docks are on screen at all.
 #
-# Why it matters: the audit the split forced found three mutations hidden in
-# 1,100 lines, and one of them (staging a snapshot into a dock Settings had
-# covered) re-registered an off-screen entity with gpui and cost a full
-# workspace render four times a second. See AGENTS.md pitfall 10.
+# None of these stops a frame *reading* an entity it does not draw, which
+# gpui counts as displaying it (AGENTS.md pitfall 10). Behind Settings that is
+# kept out by structure — `prepare_frame` picks the frame body once and the
+# settings frame builds nothing it covers — and pinned by the render-count
+# tests in `crates/app/src/workspace/tests/settings_view.rs`.
 set -euo pipefail
 
 FILE="crates/app/src/workspace/render/mod.rs"
@@ -50,4 +56,21 @@ if [ "$body" != "$expected" ]; then
     exit 1
 fi
 
-echo "✓ Workspace frame stays split: build_frame is &self, render only dispatches."
+# 3. Staging. The build side runs from `fn build_frame(` to the free function
+#    that follows the impl block.
+build=$(awk '
+    /fn build_frame\(/ { inside = 1 }
+    inside && /^fn root_key_context\(/ { exit }
+    inside { print }
+' "$FILE")
+if [ -z "$build" ]; then
+    echo "lint-render-purity: could not find the build side of $FILE —" >&2
+    echo "update the region markers in this guard." >&2
+    exit 1
+fi
+if echo "$build" | rg -n '\.stage\(|stage_docks\(' >&2; then
+    echo "Dock staging belongs in prepare_frame, not the build side of the frame." >&2
+    exit 1
+fi
+
+echo "✓ Workspace frame stays split: build_frame is &self, render only dispatches, build stages nothing."

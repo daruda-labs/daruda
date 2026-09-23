@@ -334,17 +334,10 @@ impl Workspace {
         // sticky account for its domain (`usage_account`) rather than the
         // instantaneous focus, so an unrelated pane gaining focus (a
         // terminal, or another domain's agent) can't snap a domain's section
-        // back to its ambient login. This is the single write site for the
-        // sticky map (`observe_focus`) — the pump and manual refresh only
-        // read what it leaves behind.
-        let focused = self.focused_account();
+        // back to its ambient login. `prepare_frame` wrote the map earlier
+        // this pass.
         let pane_domain = crate::workspace::main_area::pane::AccountDomain::for_pane(
             &self.focused_account_pane(),
-        );
-        crate::workspace::sync::limits::observe_focus(
-            &mut self.claude.sticky_focus_by_recipe,
-            focused,
-            pane_domain,
         );
         let usage_sections: Vec<crate::workspace::layout::snap::UsageSectionSnapshot> =
             daruda_store::accounts::AccountRecipeId::all()

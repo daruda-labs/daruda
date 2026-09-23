@@ -144,9 +144,9 @@ fn live_recipe(
 /// agent) can't blank a domain nobody just switched away from back to its
 /// ambient login.
 ///
-/// Single writer: called once per right-dock snapshot build
-/// (`prepare_right_dock_snapshot`). Every other reader (the background pump,
-/// manual refresh) only reads the map this leaves behind.
+/// Single writer: called once per frame (`Workspace::prepare_frame`). Every
+/// other reader (the background pump, manual refresh) only reads the map
+/// this leaves behind.
 pub(in crate::workspace) fn observe_focus(
     sticky: &mut HashMap<AccountRecipeId, FocusedAccount>,
     focused: FocusedAccount,
@@ -206,8 +206,8 @@ fn spawn_loop(cx: &mut Context<Workspace>, kind: Endpoint) -> Task<()> {
             // 3. Resolve which account this tick reads — fresh each time (on
             //    the UI thread) so a focus switch is picked up on the *next*
             //    tick. The sticky map itself is only written by
-            //    `prepare_right_dock_snapshot`; this loop just reads
-            //    whatever it last left behind.
+            //    `prepare_frame`; this loop just reads whatever it last
+            //    left behind.
             let target = if account_scoped(kind) {
                 let sticky =
                     match this.read_with(cx, |ws, _| ws.claude.sticky_focus_by_recipe.clone()) {

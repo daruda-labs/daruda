@@ -391,6 +391,18 @@ impl Workspace {
             self.resize_all_tabs(window, cx);
         }
 
+        // The sticky account map, the one write site: the Usage tab and the
+        // status bar's usage pills both read it. Every frame, not inside the
+        // dock staging below, because the status bar stays up behind Settings.
+        let focused = self.focused_account();
+        let pane_domain =
+            super::main_area::pane::AccountDomain::for_pane(&self.focused_account_pane());
+        super::sync::limits::observe_focus(
+            &mut self.claude.sticky_focus_by_recipe,
+            focused,
+            pane_domain,
+        );
+
         // Nothing Settings covers may be touched while it is up. gpui filters
         // invalidation to windows that *display* an entity (`App::notify` →
         // `tracked_entities`), and that set is built from what a render pass

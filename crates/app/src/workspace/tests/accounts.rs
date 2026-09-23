@@ -35,8 +35,8 @@ fn seed_agent_pane(
 
 /// An agent-chat pane running `agent_id`, pushed onto the active runtime
 /// *and* focused — unlike `seed_agent_pane`, this needs to be the actually
-/// focused pane so `AccountDomain::for_pane` (read by
-/// `prepare_right_dock_snapshot` via `focused_account_pane`) resolves it.
+/// focused pane so `AccountDomain::for_pane` (read through
+/// `focused_account_pane`) resolves it.
 fn seed_and_focus_agent_pane(
     ws: &mut Workspace,
     agent_id: String,

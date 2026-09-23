@@ -209,9 +209,8 @@ pub(in crate::workspace) struct ClaudeContext {
 
     /// Sticky per-domain focus: the last [`FocusedAccount`] observed while a
     /// pane of that domain (`AccountDomain::for_pane`) was actually focused.
-    /// Refreshed once per right-dock snapshot build
-    /// (`prepare_right_dock_snapshot`) via `sync::limits::observe_focus` —
-    /// the single writer. Reading a domain nobody has focused yet (a fresh
+    /// Refreshed once per frame (`Workspace::prepare_frame`) via
+    /// `sync::limits::observe_focus` — the single writer. Reading a domain nobody has focused yet (a fresh
     /// workspace, or a domain the user never switched to) falls back to
     /// `FocusedAccount::SystemDefault`. Without this, focusing an unrelated
     /// pane (a terminal, or another domain's agent) would snap every other
