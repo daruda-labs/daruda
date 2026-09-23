@@ -9,7 +9,6 @@ fn default_config_is_valid() {
     assert!(cfg.cursor.blinking);
     assert_eq!(cfg.window.opacity, 1.0);
     assert!(!cfg.window.blur);
-    assert_eq!(cfg.scrollback.lines, 10_000);
     assert!(cfg.keybindings.bindings.is_empty());
     assert_eq!(cfg.left_dock.left_default_width, 220.0);
     assert!(!cfg.left_dock.left_collapsed_by_default);
@@ -438,7 +437,7 @@ lines = 50000\n\
     assert_eq!(cfg.colors.foreground, HexColor::new(0xE0, 0xE0, 0xE0));
     assert_eq!(cfg.colors.normal.red, HexColor::new(0xFF, 0x00, 0x00));
     assert_eq!(cfg.colors.bright.cyan, HexColor::new(0x33, 0xFF, 0xFF));
-    assert_eq!(cfg.scrollback.lines, 50_000);
+    // `[scrollback] lines` above is a retired key: it must still parse.
     assert_eq!(cfg.keybindings.bindings["cmd-t"], "new_tab");
 }
 
