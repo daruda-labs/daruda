@@ -93,10 +93,12 @@ impl Workspace {
                         .build();
                         ws.report_error(report, cx);
                     }
-                    ws.lane_scoped_mut(target).git.against_base = Some(std::sync::Arc::new(result));
-                    // A range pane's badge and Changes segment read this axis.
-                    ws.sync_file_pane_statuses(target, cx);
-                    cx.notify();
+                    // `get_mut`, not `lane_scoped_mut`: a read that outlived
+                    // its lane must not bring the lane's state back.
+                    if let Some(state) = ws.lane_scoped.get_mut(&target) {
+                        state.git.against_base = Some(std::sync::Arc::new(result));
+                        cx.notify();
+                    }
                 }
                 if pending {
                     ws.refresh_against_base(target, cx);
@@ -104,6 +106,19 @@ impl Workspace {
             },
         )
         .detach();
+    }
+
+    /// The project's base may have just become known (default-branch
+    /// detection lands after the lane is shown); re-read the active lane if
+    /// it belongs to `project`. No ref moved, so nothing else would.
+    pub(in crate::workspace) fn refresh_against_base_for_project(
+        &mut self,
+        project: daruda_store::project::ProjectId,
+        cx: &mut Context<Self>,
+    ) {
+        if self.active.project == project {
+            self.refresh_against_base(self.active, cx);
+        }
     }
 
     /// Open one against-base file in the diff viewer, pinned to the commits
@@ -134,6 +149,7 @@ impl Workspace {
             from: found.merge_base.clone(),
             to: found.tips.head.clone(),
             old_path: file.old_path.as_ref().map(|p| paths.from_git_status(p)),
+            status: file.status,
         };
         let abs = paths.from_git_status(&file.path);
         self.open_pane_file_view(

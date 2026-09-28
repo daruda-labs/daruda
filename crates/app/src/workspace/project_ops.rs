@@ -166,6 +166,7 @@ impl Workspace {
                     {
                         p.default_branch = Some(branch);
                         ws.mutate_durable(cx, |_, _| {});
+                        ws.refresh_against_base_for_project(new_id, cx);
                     }
                 },
             )
@@ -546,6 +547,7 @@ impl Workspace {
                     // Persist the refreshed value and re-stage the
                     // left-dock snapshot (rule 10: targeted notify).
                     ws.mutate_durable(cx, |_, _| {});
+                    ws.refresh_against_base_for_project(project_id, cx);
                 },
             )
             .detach();

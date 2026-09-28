@@ -168,6 +168,7 @@ fn an_against_base_row_opens_a_diff_pinned_to_its_commits(cx: &mut TestAppContex
                 from: found.merge_base.clone(),
                 to: found.tips.head.clone(),
                 old_path: None,
+                status: 'A',
             }
         );
         assert_eq!(
@@ -188,4 +189,57 @@ fn an_against_base_row_opens_a_diff_pinned_to_its_commits(cx: &mut TestAppContex
     // Opening the same row again finds the pane rather than stacking a tab.
     open(cx);
     ws.read_with(cx, |ws, _| assert_eq!(ws.active_runtime().tabs.len(), tabs));
+
+    // The lane moves on and the file leaves the range; the open pane still
+    // shows its pinned diff, so it must keep offering it.
+    run_git(&root, &["rm", "-q", "feature.txt"]);
+    run_git(&root, &["commit", "-qm", "drop"]);
+    ws.update(cx, |ws, cx| ws.refresh_git_status(target, cx));
+    cx.run_until_parked();
+    ws.read_with(cx, |ws, _| {
+        let fc = ws
+            .focused_file_content()
+            .expect("the range pane is still open");
+        assert_eq!(fc.view.file_status, Some('A'));
+    });
+}
+
+#[test]
+fn a_persisted_range_restores_ahead_of_the_staged_flag() {
+    use crate::workspace::main_area::file_view_pane::DiffSource;
+    use daruda_store::project::{
+        SerializedDiffRange, SerializedFileContent, SerializedFileViewMode,
+    };
+    let mut fc = SerializedFileContent {
+        lane_id: 0,
+        path: std::path::PathBuf::from("/r/a.rs"),
+        staged: true,
+        range: None,
+        view_mode: SerializedFileViewMode::Changes,
+    };
+    assert_eq!(
+        crate::workspace::persistence::restored_diff_source(&fc),
+        DiffSource::Index
+    );
+    fc.staged = false;
+    assert_eq!(
+        crate::workspace::persistence::restored_diff_source(&fc),
+        DiffSource::WorkingTree
+    );
+    fc.range = Some(SerializedDiffRange {
+        from: "m".into(),
+        to: "h".into(),
+        old_path: None,
+        status: 'D',
+    });
+    fc.staged = true;
+    assert_eq!(
+        crate::workspace::persistence::restored_diff_source(&fc),
+        DiffSource::Range {
+            from: "m".into(),
+            to: "h".into(),
+            old_path: None,
+            status: 'D',
+        }
+    );
 }

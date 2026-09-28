@@ -139,9 +139,9 @@ pub(super) fn base_rows(
                 collapsed,
             })];
             if !collapsed {
-                let mut files = found.files.clone();
-                files.sort_by(|a, b| a.path.cmp(&b.path));
-                rows.extend(files.into_iter().map(GitChangesRow::BaseFile));
+                // Already in path order: `changes_since` sorts once, not
+                // every render.
+                rows.extend(found.files.iter().cloned().map(GitChangesRow::BaseFile));
             }
             rows
         }
@@ -493,8 +493,8 @@ mod tests {
     }
 
     #[test]
-    fn base_rows_list_the_section_sorted_under_one_header() {
-        let found = against(&["z.rs", "a.rs"]);
+    fn base_rows_list_the_section_under_one_header() {
+        let found = against(&["a.rs", "z.rs"]);
         let rows = base_rows(Some(&found), false);
         assert!(matches!(
             &rows[0],
@@ -523,6 +523,7 @@ mod tests {
         for quiet in [
             BaseProblem::NoBaseConfigured,
             BaseProblem::OnBaseBranch,
+            BaseProblem::UnbornHead,
             BaseProblem::Git("boom".into()),
         ] {
             assert!(base_rows(Some(&Err(quiet)), false).is_empty());

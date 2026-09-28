@@ -1564,6 +1564,7 @@ fn a_range_file_leaf_round_trips_and_older_files_read_without_one() {
                 from: "aaa".into(),
                 to: "bbb".into(),
                 old_path: Some(PathBuf::from("/repo/old.rs")),
+                status: 'R',
             }),
             view_mode: SerializedFileViewMode::Changes,
         }),

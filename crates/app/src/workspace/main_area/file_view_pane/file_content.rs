@@ -118,6 +118,10 @@ fn load_raw(
             path.to_path_buf()
         };
         match source {
+            // A file the range deleted exists only on its `from` side.
+            DiffSource::Range {
+                from, status: 'D', ..
+            } => crate::lane::git::base::git_show_at(wt_path, from, &repo_rel),
             DiffSource::Range { to, .. } => {
                 crate::lane::git::base::git_show_at(wt_path, to, &repo_rel)
             }
@@ -240,7 +244,9 @@ fn load_diff(
             None => crate::lane::git::git_diff(repo, path, false),
         },
         DiffSource::Index => crate::lane::git::git_diff(repo, path, true),
-        DiffSource::Range { from, to, old_path } => {
+        DiffSource::Range {
+            from, to, old_path, ..
+        } => {
             let mut paths = vec![path];
             paths.extend(old_path.as_deref());
             crate::lane::git::base::git_diff_range(repo, from, to, &paths)

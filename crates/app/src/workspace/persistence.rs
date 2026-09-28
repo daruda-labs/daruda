@@ -1125,10 +1125,12 @@ fn serialize_pane_content(
                     from,
                     to,
                     old_path,
+                    status,
                 } => Some(daruda_store::project::SerializedDiffRange {
                     from: from.clone(),
                     to: to.clone(),
                     old_path: old_path.clone(),
+                    status: *status,
                 }),
                 _ => None,
             },
@@ -1227,7 +1229,7 @@ fn serialize_layout(
 
 /// What a persisted file pane shows. A range wins over `staged`: the two were
 /// written together only by a build that knew about ranges.
-fn restored_diff_source(
+pub(in crate::workspace) fn restored_diff_source(
     fc: &daruda_store::project::SerializedFileContent,
 ) -> crate::workspace::main_area::file_view_pane::DiffSource {
     match &fc.range {
@@ -1235,6 +1237,7 @@ fn restored_diff_source(
             from: range.from.clone(),
             to: range.to.clone(),
             old_path: range.old_path.clone(),
+            status: range.status,
         },
         None => crate::workspace::main_area::file_view_pane::DiffSource::from_staged(fc.staged),
     }

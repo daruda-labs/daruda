@@ -356,6 +356,14 @@ pub struct SerializedDiffRange {
     pub to: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub old_path: Option<PathBuf>,
+    /// Git's status letter for the file across the pair. Defaults to `M` so a
+    /// record without it still restores a pane that offers its diff.
+    #[serde(default = "modified_status")]
+    pub status: char,
+}
+
+fn modified_status() -> char {
+    'M'
 }
 
 /// Persisted state for a `PaneContent::FlowGraph` leaf. The flow file's path

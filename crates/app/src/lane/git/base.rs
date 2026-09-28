@@ -32,6 +32,8 @@ pub enum BaseProblem {
     NotFound(String),
     /// Base and HEAD share no history (unrelated roots, a shallow clone).
     NoMergeBase,
+    /// The lane has no commit yet, so there is nothing it could have changed.
+    UnbornHead,
     /// git itself failed; the message is for the log, not the row.
     Git(String),
 }
@@ -121,7 +123,7 @@ pub fn base_tips(
     if current_branch.is_some_and(|b| b == name || b == base.label) {
         return Err(BaseProblem::OnBaseBranch);
     }
-    let head = verify(wt, "HEAD").ok_or_else(|| BaseProblem::NotFound("HEAD".to_owned()))?;
+    let head = verify(wt, "HEAD").ok_or(BaseProblem::UnbornHead)?;
     Ok(BaseTips { base, head })
 }
 
@@ -244,14 +246,20 @@ pub(crate) fn parse_name_status(text: &str) -> Vec<RangeFile> {
     out
 }
 
-/// Line counts keyed by destination path, which `parse_numstat` also keys on.
+/// Line counts keyed by destination path, which `parse_numstat` also keys
+/// on. Sorted by path, the order the list shows them in.
 fn join_stats(mut files: Vec<RangeFile>, stats: &[(u32, u32, PathBuf)]) -> Vec<RangeFile> {
+    let by_path: std::collections::HashMap<&Path, (u32, u32)> = stats
+        .iter()
+        .map(|(added, removed, path)| (path.as_path(), (*added, *removed)))
+        .collect();
     for file in &mut files {
-        if let Some((added, removed, _)) = stats.iter().find(|(_, _, p)| *p == file.path) {
+        if let Some((added, removed)) = by_path.get(file.path.as_path()) {
             file.added = *added;
             file.removed = *removed;
         }
     }
+    files.sort_by(|a, b| a.path.cmp(&b.path));
     files
 }
 

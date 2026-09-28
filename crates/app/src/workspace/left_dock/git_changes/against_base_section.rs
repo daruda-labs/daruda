@@ -109,10 +109,16 @@ pub(super) fn base_file_row(
         .iter()
         .find(|w| w.id == lane_id)
         .map(|w| w.paths().from_git_status(&file.path));
+    // Only a pane pinned to the commits this row was listed from is this
+    // row's; one left open across a later commit shows an older range.
+    let listed = match snap.git_against_base.as_deref() {
+        Some(Ok(found)) => Some((found.merge_base.as_str(), found.tips.head.as_str())),
+        _ => None,
+    };
     let is_selected = matches!(
-        (&snap.focused_file_selection, &abs),
-        (Some((lane, path, DiffSource::Range { .. })), Some(abs))
-            if *lane == lane_id && path == abs
+        (&snap.focused_file_selection, &abs, listed),
+        (Some((lane, path, DiffSource::Range { from, to, .. })), Some(abs), Some((mb, head)))
+            if *lane == lane_id && path == abs && from == mb && to == head
     );
 
     let t = theme::current(cx);

@@ -118,10 +118,13 @@ pub(in crate::workspace) enum DiffSource {
     Index,
     /// The file as of commit `to`; its diff is `from` → `to`. `old_path` is
     /// the rename source, needed in the pathspec for git to pair the two.
+    /// `status` is git's letter for the file across that pair — fixed with
+    /// the commits, so it stays true when the lane's refs move on.
     Range {
         from: String,
         to: String,
         old_path: Option<PathBuf>,
+        status: char,
     },
 }
 
