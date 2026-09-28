@@ -153,7 +153,17 @@ pub(super) fn base_rows(
         Some(Err(BaseProblem::NoMergeBase)) => {
             vec![GitChangesRow::BaseHeader(BaseHeaderRow::NoMergeBase)]
         }
-        _ => Vec::new(),
+        // Nothing to compare, or nothing the lane committed: no section. Named
+        // rather than `_`, so a new problem has to choose to be hidden.
+        // `Git` has already been reported as an error by the read.
+        None
+        | Some(Ok(_))
+        | Some(Err(
+            BaseProblem::NoBaseConfigured
+            | BaseProblem::OnBaseBranch
+            | BaseProblem::UnbornHead
+            | BaseProblem::Git(_),
+        )) => Vec::new(),
     }
 }
 

@@ -66,6 +66,15 @@ pub struct Project {
 }
 
 impl Project {
+    /// The branch this project's lanes start from and are compared against:
+    /// the user's chosen base, else the detected default. One answer, so a
+    /// new lane branches from the base its against-base view later reads.
+    pub fn effective_base_branch(&self) -> Option<&str> {
+        self.base_branch
+            .as_deref()
+            .or(self.default_branch.as_deref())
+    }
+
     /// Build a runtime project from a freshly opened directory. Walks
     /// the filesystem to discover git worktrees (or falls back to a
     /// single `Default` lane for non-git paths) via
@@ -217,6 +226,17 @@ impl Project {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_chosen_base_branch_wins_over_the_detected_default() {
+        let dir = std::env::temp_dir().join("daruda_project_effective_base");
+        let mut p = Project::bootstrap_placeholder(0, dir);
+        assert_eq!(p.effective_base_branch(), None);
+        p.default_branch = Some("main".into());
+        assert_eq!(p.effective_base_branch(), Some("main"));
+        p.base_branch = Some("develop".into());
+        assert_eq!(p.effective_base_branch(), Some("develop"));
+    }
 
     #[test]
     fn bootstrap_non_git_yields_default_worktree() {

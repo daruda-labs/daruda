@@ -43,14 +43,13 @@ enum Read {
 
 impl Workspace {
     /// The base a lane is compared against: the one it was created from,
-    /// else the project's chosen base, else its detected default branch.
+    /// else the project's `effective_base_branch`.
     fn base_name_for(&self, target: LaneRef) -> Option<String> {
         let lane = self.lane_for(target)?;
         let project = self.project_for(target.project)?;
         lane.base_ref
             .clone()
-            .or_else(|| project.base_branch.clone())
-            .or_else(|| project.default_branch.clone())
+            .or_else(|| project.effective_base_branch().map(str::to_owned))
     }
 
     /// Re-read the against-base axis for `target`. Only the active lane is
@@ -128,9 +127,9 @@ impl Workspace {
         .detach();
     }
 
-    /// The project's base may have just become known (default-branch
-    /// detection lands after the lane is shown); re-read the active lane if
-    /// it belongs to `project`. No ref moved, so nothing else would.
+    /// The project's base moved without any ref moving, so nothing else would
+    /// re-read; re-read the active lane if it belongs to `project`. Reached
+    /// only through the project base setters in `project_ops.rs`.
     pub(in crate::workspace) fn refresh_against_base_for_project(
         &mut self,
         project: daruda_store::project::ProjectId,

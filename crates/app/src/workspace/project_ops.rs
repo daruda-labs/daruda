@@ -161,12 +161,8 @@ impl Workspace {
                 cx,
                 move || crate::lane::git::default_branch(&root),
                 move |ws, detected, cx| {
-                    if let Some(branch) = detected
-                        && let Some(p) = ws.projects.iter_mut().find(|p| p.id == new_id)
-                    {
-                        p.default_branch = Some(branch);
-                        ws.mutate_durable(cx, |_, _| {});
-                        ws.refresh_against_base_for_project(new_id, cx);
+                    if let Some(branch) = detected {
+                        ws.set_project_default_branch(new_id, branch, cx);
                     }
                 },
             )
@@ -523,6 +519,26 @@ impl Workspace {
     /// and absorbs external changes (e.g. the repo's `origin/HEAD`
     /// moved while daruda was closed).
     ///
+    /// Record `project`'s detected default branch, and everything that reads
+    /// it: the value persists, and the lane on screen re-reads its changes
+    /// against the base it may now have. The one writer of the field, so a
+    /// future base setter has this to copy rather than steps to forget.
+    pub(in crate::workspace) fn set_project_default_branch(
+        &mut self,
+        project: ProjectId,
+        branch: String,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(p) = self.projects.iter_mut().find(|p| p.id == project) else {
+            return;
+        };
+        p.default_branch = Some(branch);
+        // Persist the refreshed value and re-stage the left-dock snapshot
+        // (rule 10: targeted notify).
+        self.mutate_durable(cx, |_, _| {});
+        self.refresh_against_base_for_project(project, cx);
+    }
+
     /// Scope is deliberately narrow — only `default_branch` is
     /// refreshed. No lanes are added or removed; main-lane recovery
     /// belongs to the repo base node, not here.
@@ -535,7 +551,7 @@ impl Workspace {
                 cx,
                 move || crate::lane::git::default_branch(&root),
                 move |ws, detected, cx| {
-                    let Some(p) = ws.projects.iter_mut().find(|p| p.id == project_id) else {
+                    let Some(p) = ws.projects.iter().find(|p| p.id == project_id) else {
                         return;
                     };
                     let Some(branch) =
@@ -543,11 +559,7 @@ impl Workspace {
                     else {
                         return;
                     };
-                    p.default_branch = Some(branch);
-                    // Persist the refreshed value and re-stage the
-                    // left-dock snapshot (rule 10: targeted notify).
-                    ws.mutate_durable(cx, |_, _| {});
-                    ws.refresh_against_base_for_project(project_id, cx);
+                    ws.set_project_default_branch(project_id, branch, cx);
                 },
             )
             .detach();

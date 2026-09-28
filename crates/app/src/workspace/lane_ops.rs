@@ -1005,11 +1005,10 @@ impl Workspace {
         &self,
         requested: Option<String>,
     ) -> Option<String> {
-        let p = self.active_project();
         resolved_lane_base_ref(
             requested,
-            p.and_then(|p| p.base_branch.as_deref()),
-            p.and_then(|p| p.default_branch.as_deref()),
+            self.active_project()
+                .and_then(crate::project::Project::effective_base_branch),
         )
     }
 
@@ -1024,11 +1023,10 @@ impl Workspace {
         project: ProjectId,
         requested: Option<String>,
     ) -> Option<String> {
-        let p = self.project_for(project);
         resolved_lane_base_ref(
             requested,
-            p.and_then(|p| p.base_branch.as_deref()),
-            p.and_then(|p| p.default_branch.as_deref()),
+            self.project_for(project)
+                .and_then(crate::project::Project::effective_base_branch),
         )
     }
 }
@@ -1086,15 +1084,10 @@ impl Workspace {
     }
 }
 
-/// Effective base ref for a new lane: an explicit user choice wins;
-/// otherwise fall back to the project's base branch, then its
-/// detected default branch; `None` lets git use the current HEAD.
-fn resolved_lane_base_ref(
-    requested: Option<String>,
-    base_branch: Option<&str>,
-    default_branch: Option<&str>,
-) -> Option<String> {
-    requested.or_else(|| base_branch.or(default_branch).map(str::to_owned))
+/// Effective base ref for a new lane: an explicit user choice wins, else
+/// the project's `effective_base_branch`; `None` lets git use HEAD.
+fn resolved_lane_base_ref(requested: Option<String>, project_base: Option<&str>) -> Option<String> {
+    requested.or_else(|| project_base.map(str::to_owned))
 }
 
 #[cfg(test)]
@@ -1118,29 +1111,19 @@ mod tests {
 
     #[test]
     fn explicit_request_overrides_project_branches() {
-        let out = resolved_lane_base_ref(
-            Some("origin/feat".to_string()),
-            Some("develop"),
-            Some("main"),
-        );
+        let out = resolved_lane_base_ref(Some("origin/feat".to_string()), Some("develop"));
         assert_eq!(out.as_deref(), Some("origin/feat"));
     }
 
     #[test]
-    fn falls_back_to_base_branch_when_unspecified() {
-        let out = resolved_lane_base_ref(None, Some("develop"), Some("main"));
+    fn falls_back_to_the_project_base_when_unspecified() {
+        let out = resolved_lane_base_ref(None, Some("develop"));
         assert_eq!(out.as_deref(), Some("develop"));
     }
 
     #[test]
-    fn falls_back_to_default_branch_when_no_base() {
-        let out = resolved_lane_base_ref(None, None, Some("main"));
-        assert_eq!(out.as_deref(), Some("main"));
-    }
-
-    #[test]
     fn returns_none_when_nothing_known() {
-        let out = resolved_lane_base_ref(None, None, None);
+        let out = resolved_lane_base_ref(None, None);
         assert_eq!(out, None);
     }
 }
