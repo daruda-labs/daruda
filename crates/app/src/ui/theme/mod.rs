@@ -80,7 +80,9 @@ pub(crate) fn contrast_ratio(fg: gpui::Hsla, bg: gpui::Hsla) -> f32 {
     (l_fg.max(l_bg) + 0.05) / (l_fg.min(l_bg) + 0.05)
 }
 
-/// Install the named UI theme as the live `DarudaTheme` Global.
+/// Install the named UI theme as the live `DarudaTheme` Global. The raw
+/// installer: app code goes through the `UiThemeState` setters below, which
+/// call this only when the painted preset moves; tests call it directly.
 ///
 /// - Looks up the bundled JSON via [`bundled_theme_json`].
 /// - Parses through `DarudaTheme::from_json`; missing keys in the
@@ -127,38 +129,99 @@ pub fn effective_ui_preset(configured: &str, appearance: gpui::WindowAppearance)
     daruda_config::ui_theme_presets::resolve(configured, dark)
 }
 
-/// Install the theme a configured `theme.ui_preset` paints under the current
-/// OS appearance. Same contract as [`apply_ui_theme`].
-pub fn apply_configured_ui_theme(configured: &str, cx: &mut gpui::App) -> bool {
-    let appearance = system_appearance(cx);
-    apply_ui_theme(effective_ui_preset(configured, appearance), cx)
+/// Which UI theme is live, and why — the one owner of that answer.
+///
+/// Three inputs decide it: the configured `theme.ui_preset`, the OS
+/// appearance a `system` preset follows, and a screenshot's capture override.
+/// Each setter records its input and reconciles, and the bundled theme is
+/// installed only when what they resolve to differs from what is live. So an
+/// unrelated settings edit, or one OS flip heard by every window, costs no
+/// reparse and no `refresh_windows` (Pitfall 10).
+///
+/// The appearance is only ever *told* to this state. On Linux the platform
+/// stays borrowed while it delivers a flip, so asking it again from inside a
+/// window observer panics; zed keeps the same global.
+struct UiThemeState {
+    configured: String,
+    appearance: gpui::WindowAppearance,
+    capture_override: Option<&'static str>,
+    applied: Option<String>,
 }
 
-/// The OS appearance as last reported: seeded once at startup, then written
-/// only by the window appearance observer, and read by everything else. On
-/// Linux the platform stays borrowed while it delivers a flip, so asking it
-/// again from inside that observer panics — zed keeps the same global.
-struct SystemAppearance(gpui::WindowAppearance);
+impl gpui::Global for UiThemeState {}
 
-impl gpui::Global for SystemAppearance {}
+impl UiThemeState {
+    fn painted(&self) -> &str {
+        self.capture_override
+            .unwrap_or_else(|| effective_ui_preset(&self.configured, self.appearance))
+    }
+}
 
-/// Seed [`system_appearance`] from the platform. Startup only.
-pub fn init_system_appearance(cx: &mut gpui::App) {
+/// Seed the state from the platform and the configured preset, and install
+/// it. Startup only — the one place the platform is asked.
+pub fn init_ui_theme(configured: &str, cx: &mut gpui::App) {
     let appearance = cx.window_appearance();
-    cx.set_global(SystemAppearance(appearance));
+    cx.set_global(UiThemeState {
+        configured: configured.to_owned(),
+        appearance,
+        capture_override: None,
+        applied: None,
+    });
+    reconcile_ui_theme(cx);
 }
 
-/// The last OS appearance [`set_system_appearance`] recorded. Light before
-/// the seed, which only a test fixture ever sees.
-pub fn system_appearance(cx: &gpui::App) -> gpui::WindowAppearance {
-    cx.try_global::<SystemAppearance>()
-        .map(|a| a.0)
-        .unwrap_or_default()
+/// The configured preset changed — or may have; unchanged is free.
+pub fn set_configured_ui_preset(configured: &str, cx: &mut gpui::App) {
+    update_ui_theme(cx, |state| {
+        if state.configured != configured {
+            state.configured = configured.to_owned();
+        }
+    });
 }
 
-/// Record the appearance a window observer was just handed.
-pub fn set_system_appearance(cx: &mut gpui::App, appearance: gpui::WindowAppearance) {
-    cx.set_global(SystemAppearance(appearance));
+/// The OS appearance a window observer was just handed.
+pub fn note_system_appearance(appearance: gpui::WindowAppearance, cx: &mut gpui::App) {
+    update_ui_theme(cx, |state| state.appearance = appearance);
+}
+
+/// Paint `preset` regardless of config and appearance, or stop (`None`).
+/// For captures, which must not write the user's config.
+pub fn set_capture_ui_preset(preset: Option<&'static str>, cx: &mut gpui::App) {
+    update_ui_theme(cx, |state| state.capture_override = preset);
+}
+
+/// The bundled preset `configured` paints right now: the capture override,
+/// else `configured` resolved against the last appearance told. Before
+/// [`init_ui_theme`] — a test fixture — that is a light appearance.
+pub fn painted_ui_preset(configured: &str, cx: &gpui::App) -> String {
+    match cx.try_global::<UiThemeState>() {
+        Some(state) => state
+            .capture_override
+            .unwrap_or_else(|| effective_ui_preset(configured, state.appearance))
+            .to_owned(),
+        None => effective_ui_preset(configured, gpui::WindowAppearance::default()).to_owned(),
+    }
+}
+
+/// Apply `change` and reconcile. A no-op before [`init_ui_theme`]: fixtures
+/// that never installed the theme globals must not have one installed.
+fn update_ui_theme(cx: &mut gpui::App, change: impl FnOnce(&mut UiThemeState)) {
+    if !cx.has_global::<UiThemeState>() {
+        return;
+    }
+    change(cx.global_mut::<UiThemeState>());
+    reconcile_ui_theme(cx);
+}
+
+fn reconcile_ui_theme(cx: &mut gpui::App) {
+    let state = cx.global::<UiThemeState>();
+    let next = state.painted().to_owned();
+    if state.applied.as_deref() == Some(next.as_str()) {
+        return;
+    }
+    if apply_ui_theme(&next, cx) {
+        cx.global_mut::<UiThemeState>().applied = Some(next);
+    }
 }
 
 pub use crate::ui::theme::palette::*;
@@ -934,6 +997,48 @@ pub fn file_viewer_pane_syntax_is_light(cx: &App) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The state installs only when the painted preset moves. A reinstall
+    /// would replace the global wholesale, so a marker written into the live
+    /// theme survives exactly the calls that must not reinstall.
+    #[gpui::test]
+    fn the_theme_state_reinstalls_only_when_the_painted_preset_moves(
+        cx: &mut gpui::TestAppContext,
+    ) {
+        cx.update(|cx| {
+            init_if_missing(cx);
+            init_ui_theme("daruda_dark", cx);
+            let marker = gpui::hsla(0.5, 0.5, 0.5, 0.5);
+            cx.global_mut::<DarudaTheme>().link_color = marker;
+
+            set_configured_ui_preset("daruda_dark", cx);
+            note_system_appearance(gpui::WindowAppearance::Light, cx);
+            assert_eq!(
+                current(cx).link_color,
+                marker,
+                "nothing moved, nothing reinstalled"
+            );
+
+            set_configured_ui_preset("daruda_light", cx);
+            assert!(!current(cx).is_dark());
+            assert_ne!(current(cx).link_color, marker);
+        });
+    }
+
+    /// A capture paints its preset over config and appearance, and hands the
+    /// configured one back when it ends.
+    #[gpui::test]
+    fn a_capture_override_paints_over_the_configured_preset(cx: &mut gpui::TestAppContext) {
+        cx.update(|cx| {
+            init_if_missing(cx);
+            init_ui_theme("daruda_dark", cx);
+            set_capture_ui_preset(Some(daruda_config::ui_theme_presets::SYSTEM_LIGHT), cx);
+            assert!(!current(cx).is_dark());
+            assert_eq!(painted_ui_preset("daruda_dark", cx), "daruda_light");
+            set_capture_ui_preset(None, cx);
+            assert!(current(cx).is_dark());
+        });
+    }
 
     /// `system` has to land on a preset `apply_ui_theme` can install, under
     /// both vibrant variants too — otherwise a flip leaves the old theme live.

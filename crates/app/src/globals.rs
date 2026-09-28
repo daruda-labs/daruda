@@ -26,7 +26,6 @@ pub(crate) fn init_all(cx: &mut App) {
     ui::theme::DarudaTheme::init(cx);
     ui::theme::apply_daruda_palette(cx);
     crate::settings_store::SettingsStore::init(cx);
-    ui::theme::init_system_appearance(cx);
     {
         let user = crate::settings_store::SettingsStore::global(cx).user();
         let preset = user.theme.ui_preset.clone();
@@ -39,7 +38,7 @@ pub(crate) fn init_all(cx: &mut App) {
         let term_colors = user.effective_colors();
         let term_bg = term_colors.background;
         let term_fg = term_colors.foreground;
-        ui::theme::apply_configured_ui_theme(&preset, cx);
+        ui::theme::init_ui_theme(&preset, cx);
         apply_locale_str(&lang);
         // Seed the selected syntax palette so the editor highlight theme
         // matches the user's choice from the first paint (not the default).
@@ -108,7 +107,7 @@ fn register_settings_observer(cx: &mut App) {
         // labels reflect the new language immediately.
         crate::menus::refresh_recent_menu(cx);
         crate::surface::action_map::apply_keybinding_overrides(&user.keybindings.bindings, cx);
-        ui::theme::apply_configured_ui_theme(&user.theme.ui_preset, cx);
+        ui::theme::set_configured_ui_preset(&user.theme.ui_preset, cx);
         let appearance = window_background_for(&user);
         WindowRegistry::for_each_workspace(cx, |_ws, window, _cx| {
             window.set_background_appearance(appearance);

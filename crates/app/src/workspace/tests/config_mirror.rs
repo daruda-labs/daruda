@@ -75,7 +75,8 @@ async fn a_system_appearance_flip_swaps_the_theme_and_the_mirror(cx: &mut TestAp
             cfg.theme.ui_preset = daruda_config::ui_theme_presets::SYSTEM.to_owned();
             store.set_user_for_testing(cfg);
         });
-        crate::ui::theme::set_system_appearance(cx, WindowAppearance::Light);
+        crate::ui::theme::init_ui_theme(daruda_config::ui_theme_presets::SYSTEM, cx);
+        crate::ui::theme::note_system_appearance(WindowAppearance::Light, cx);
     });
 
     ws.update(cx, |ws, cx| {
@@ -83,7 +84,7 @@ async fn a_system_appearance_flip_swaps_the_theme_and_the_mirror(cx: &mut TestAp
     });
     ws.read_with(cx, |ws, cx| {
         assert!(crate::ui::theme::current(cx).is_dark());
-        assert_eq!(ws.mirrors.ui_preset, "daruda_dark");
+        assert_eq!(ws.mirrors.painted_ui_preset, "daruda_dark");
     });
 
     ws.update(cx, |ws, cx| {
@@ -91,7 +92,7 @@ async fn a_system_appearance_flip_swaps_the_theme_and_the_mirror(cx: &mut TestAp
     });
     ws.read_with(cx, |ws, cx| {
         assert!(!crate::ui::theme::current(cx).is_dark());
-        assert_eq!(ws.mirrors.ui_preset, "daruda_light");
+        assert_eq!(ws.mirrors.painted_ui_preset, "daruda_light");
     });
 }
 
@@ -106,16 +107,17 @@ async fn a_system_appearance_flip_leaves_an_explicit_preset_alone(cx: &mut TestA
         cx.update_global::<crate::settings_store::SettingsStore, _>(|store, _| {
             store.set_user_for_testing(Config::default());
         });
+        crate::ui::theme::init_ui_theme("daruda_dark", cx);
     });
     ws.update(cx, |ws, cx| {
         ws.on_system_appearance_changed(WindowAppearance::Light, cx)
     });
     ws.read_with(cx, |ws, cx| {
         assert!(crate::ui::theme::current(cx).is_dark(), "daruda_dark stays");
-        assert_eq!(ws.mirrors.ui_preset, "daruda_dark");
+        assert_eq!(ws.mirrors.painted_ui_preset, "daruda_dark");
         assert_eq!(
-            crate::ui::theme::system_appearance(cx),
-            WindowAppearance::Light,
+            crate::ui::theme::painted_ui_preset(daruda_config::ui_theme_presets::SYSTEM, cx),
+            "daruda_light",
             "the flip is still recorded for a later switch to `system`"
         );
     });

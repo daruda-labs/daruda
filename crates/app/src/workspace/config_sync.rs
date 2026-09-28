@@ -7,7 +7,6 @@
 use std::time::Duration;
 
 use daruda_config::{Config, HexColor, IconColorMode, StatusBarConfig};
-use gpui::WindowAppearance;
 
 #[derive(Clone)]
 pub(in crate::workspace) struct ConfigMirrors {
@@ -39,10 +38,11 @@ pub(in crate::workspace) struct ConfigMirrors {
     pub terminal_redraw_interval: Duration,
 
     /// The bundled preset `daruda_config::ThemeConfig::ui_preset` paints —
-    /// `system` resolved against the OS appearance. A change flips the host
+    /// `system` resolved against the OS appearance, or a capture's override.
+    /// A change flips the host
     /// appearance, so `apply_config` reloads open markdown panes to re-theme
     /// their rendered diagrams (mermaid) for the new surface.
-    pub ui_preset: String,
+    pub painted_ui_preset: String,
 
     /// Mirror of `daruda_config::StatusBarConfig`. Drives which segments
     /// `StatusBar::render` includes and whether the Ports scan pump
@@ -95,7 +95,9 @@ impl SharedSurface {
 }
 
 impl ConfigMirrors {
-    pub(in crate::workspace) fn from_config(config: &Config, appearance: WindowAppearance) -> Self {
+    /// `painted_ui_preset` is what `config`'s preset paints now — see
+    /// `crate::ui::theme::painted_ui_preset`, which owns that answer.
+    pub(in crate::workspace) fn from_config(config: &Config, painted_ui_preset: String) -> Self {
         Self {
             panels_grid_columns: config.panels.grid_columns,
             close_pane_on_exit: config.shell.close_pane_on_exit,
@@ -103,8 +105,7 @@ impl ConfigMirrors {
             files_use_gitignore: config.left_dock.files_use_gitignore,
             files_icon_color_mode: config.left_dock.file_icon_color_mode.clone(),
             terminal_redraw_interval: config.render.redraw_interval(),
-            ui_preset: crate::ui::theme::effective_ui_preset(&config.theme.ui_preset, appearance)
-                .to_owned(),
+            painted_ui_preset,
             status_bar: config.status_bar.clone(),
             ports_poll_interval: config.ports.interval(),
             hidden_config_option_descriptions: config

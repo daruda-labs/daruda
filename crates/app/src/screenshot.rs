@@ -51,11 +51,11 @@ impl ScreenshotTheme {
         }
     }
 
-    /// The bundled `ui_preset` name passed to `apply_ui_theme`.
+    /// The bundled `ui_preset` a capture paints in this theme.
     fn ui_preset_name(self) -> &'static str {
         match self {
-            Self::Light => "daruda_light",
-            Self::Dark => "daruda_dark",
+            Self::Light => daruda_config::ui_theme_presets::SYSTEM_LIGHT,
+            Self::Dark => daruda_config::ui_theme_presets::SYSTEM_DARK,
         }
     }
 
@@ -212,9 +212,13 @@ pub(crate) fn schedule_capture(
         for theme in steps {
             if let Some(theme) = theme {
                 cx.update(|cx| {
-                    if !crate::ui::theme::apply_ui_theme(theme.ui_preset_name(), cx) {
-                        println!("screenshot theme not applied: {}", theme.ui_preset_name());
-                    }
+                    crate::ui::theme::set_capture_ui_preset(Some(theme.ui_preset_name()), cx);
+                    // Re-run each window's config pass so file panes re-bake
+                    // their spans and diagrams against the captured theme.
+                    crate::window_registry::WindowRegistry::for_each_workspace(
+                        cx,
+                        |ws, _window, cx| ws.apply_store_config(cx),
+                    );
                 });
             }
             if let Some(win_size) = win_size {

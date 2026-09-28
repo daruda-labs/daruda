@@ -8,38 +8,28 @@ impl Workspace {
     /// Re-resolve the live store with this workspace's project overlay and
     /// apply it — the one path both a settings change and an OS appearance
     /// flip take into `apply_config`.
-    pub(in crate::workspace) fn apply_store_config(&mut self, cx: &mut Context<Self>) {
+    pub(crate) fn apply_store_config(&mut self, cx: &mut Context<Self>) {
         let store = crate::settings_store::SettingsStore::global(cx);
         let lane = self.active_project().map(|p| p.root.as_path());
         let effective = store.effective_for(lane);
         self.apply_config(&effective, cx);
     }
 
-    /// An OS light / dark flip, which only a `system` UI preset paints.
-    ///
-    /// Every window hears the same flip; the first to record it swaps the
-    /// theme app-wide, before its own file-pane reload bakes against it. Each
-    /// window then runs the full `apply_config` — more than a flip needs, but
-    /// it is rare, and a narrower path would be a second sync site for the
-    /// config mirrors.
+    /// An OS light / dark flip. The theme state decides whether that repaints
+    /// anything and swaps it once, however many windows report the same flip;
+    /// this window then re-runs the full `apply_config` so its file panes
+    /// re-bake — more than a flip needs, but it is rare, and a narrower path
+    /// would be a second sync site for the config mirrors.
     pub(in crate::workspace) fn on_system_appearance_changed(
         &mut self,
         appearance: gpui::WindowAppearance,
         cx: &mut Context<Self>,
     ) {
-        use crate::ui::theme::{effective_ui_preset, system_appearance};
-        let previous = system_appearance(cx);
-        crate::ui::theme::set_system_appearance(cx, appearance);
+        crate::ui::theme::note_system_appearance(appearance, cx);
         let user = crate::settings_store::SettingsStore::global(cx).user_arc();
-        let preset = user.theme.ui_preset.as_str();
-        if preset != daruda_config::ui_theme_presets::SYSTEM {
-            return;
+        if user.theme.ui_preset == daruda_config::ui_theme_presets::SYSTEM {
+            self.apply_store_config(cx);
         }
-        let next = effective_ui_preset(preset, appearance);
-        if effective_ui_preset(preset, previous) != next {
-            crate::ui::theme::apply_ui_theme(next, cx);
-        }
-        self.apply_store_config(cx);
     }
 
     /// Reload config from the live store. Only wired up in tests —
@@ -57,10 +47,9 @@ impl Workspace {
     /// Apply a reloaded config to all running panes. Called by the
     /// config file watcher and the Settings window when the TOML changes.
     ///
-    /// **UI theme:** Workspace does *not* swap the live `DarudaTheme`
-    /// here — the settings observer (`globals.rs`) owns that once per
-    /// reload, app-wide, and an OS flip swaps it in
-    /// [`Self::on_system_appearance_changed`] before calling in. Keeping the
+    /// **UI theme:** Workspace does *not* swap the live `DarudaTheme` — the
+    /// `crate::ui::theme` state does, told by the settings observer
+    /// (`globals.rs`) and the window appearance observer. Keeping the
     /// swap out avoids Workspace tests (built without the full
     /// `gpui_component::init` chain) painting into uninitialised Globals.
     pub fn apply_config(&mut self, config: &daruda_config::Config, cx: &mut Context<Self>) {
@@ -191,13 +180,13 @@ impl Workspace {
         }
         let new_mirrors = crate::workspace::ConfigMirrors::from_config(
             config,
-            crate::ui::theme::system_appearance(cx),
+            crate::ui::theme::painted_ui_preset(&config.theme.ui_preset, cx),
         );
         let filter_changed = self.mirrors.files_show_hidden != new_mirrors.files_show_hidden
             || self.mirrors.files_use_gitignore != new_mirrors.files_use_gitignore;
         let icon_changed = self.mirrors.files_icon_color_mode != new_mirrors.files_icon_color_mode;
         let panels_changed = self.mirrors.panels_grid_columns != new_mirrors.panels_grid_columns;
-        let theme_changed = self.mirrors.ui_preset != new_mirrors.ui_preset;
+        let theme_changed = self.mirrors.painted_ui_preset != new_mirrors.painted_ui_preset;
         // Diffed against this window's own mirror, not the app-wide globals
         // written below: those are shared, so after the first window writes
         // them every later one would read "unchanged".

@@ -1111,7 +1111,10 @@ impl Workspace {
                 files_selection: None,
                 files_scroll_handle: gpui::UniformListScrollHandle::new(),
             },
-            mirrors: ConfigMirrors::from_config(config, crate::ui::theme::system_appearance(cx)),
+            mirrors: ConfigMirrors::from_config(
+                config,
+                crate::ui::theme::painted_ui_preset(&config.theme.ui_preset, cx),
+            ),
             git_changes_scroll_handle: gpui::UniformListScrollHandle::new(),
             lanes_scroll_handle: gpui::ScrollHandle::new(),
             right_panel_scroll_handle: gpui::ScrollHandle::new(),
@@ -1304,6 +1307,10 @@ impl Workspace {
         // `Project::bootstrap_placeholder`).
         ws.reconcile_bootstrapped_lanes(cx);
 
+        // An OS flip while no window was open reached no observer; this
+        // window's own appearance says where the OS is now. Cached on the
+        // window, so no platform call.
+        crate::ui::theme::note_system_appearance(window.appearance(), cx);
         // `window.appearance()` is the value the platform just handed over;
         // asking the platform again from here panics on Linux.
         cx.observe_window_appearance(window, |this: &mut Workspace, window, cx| {
