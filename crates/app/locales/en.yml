@@ -967,6 +967,7 @@ settings:
   language_ko: "Korean (한국어)"
   label_terminal_theme: "Terminal Preset"
   label_ui_theme: "UI Theme"
+  ui_preset_system: "Match System"
   label_scrollback: "Scrollback Lines"
   err_scrollback: "Scrollback must be a number between 1 000 and 500 000."
   label_max_fps: "Refresh Rate"

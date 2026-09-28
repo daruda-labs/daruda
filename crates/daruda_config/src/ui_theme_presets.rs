@@ -32,6 +32,26 @@ pub const PRESETS: &[UiThemePreset] = &[
 /// Default UI preset name when the config is empty / fresh.
 pub const DEFAULT: &str = "daruda_dark";
 
+/// `theme.ui_preset` value that follows the OS appearance. Not a bundled
+/// theme itself: [`resolve`] maps it to [`SYSTEM_DARK`] or [`SYSTEM_LIGHT`].
+pub const SYSTEM: &str = "system";
+
+/// The bundled preset [`SYSTEM`] paints under a dark OS appearance.
+pub const SYSTEM_DARK: &str = "daruda_dark";
+
+/// The bundled preset [`SYSTEM`] paints under a light OS appearance.
+pub const SYSTEM_LIGHT: &str = "daruda_light";
+
+/// The bundled preset a configured `theme.ui_preset` paints when the OS
+/// appearance is `dark`. Any name other than [`SYSTEM`] is its own answer.
+pub fn resolve(name: &str, dark: bool) -> &str {
+    match name {
+        SYSTEM if dark => SYSTEM_DARK,
+        SYSTEM => SYSTEM_LIGHT,
+        other => other,
+    }
+}
+
 /// Whether `name` matches one of the built-in UI presets.
 pub fn is_known(name: &str) -> bool {
     PRESETS.iter().any(|p| p.name == name)

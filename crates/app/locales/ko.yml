@@ -966,6 +966,7 @@ settings:
   language_ko: "한국어"
   label_terminal_theme: "터미널 프리셋"
   label_ui_theme: "UI 테마"
+  ui_preset_system: "시스템 설정 따르기"
   label_scrollback: "스크롤백 줄 수"
   err_scrollback: "스크롤백은 1,000에서 500,000 사이의 숫자여야 합니다."
   label_max_fps: "화면 갱신 빈도"

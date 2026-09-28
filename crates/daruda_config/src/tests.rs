@@ -457,6 +457,18 @@ fn theme_config_parses_from_toml() {
 }
 
 #[test]
+fn system_ui_preset_resolves_by_appearance() {
+    use ui_theme_presets::{SYSTEM, resolve};
+    assert_eq!(resolve(SYSTEM, true), "daruda_dark");
+    assert_eq!(resolve(SYSTEM, false), "daruda_light");
+    assert!(ui_theme_presets::is_known(resolve(SYSTEM, true)));
+    assert!(ui_theme_presets::is_known(resolve(SYSTEM, false)));
+    // An explicit preset ignores the OS appearance.
+    assert_eq!(resolve("daruda_dark", false), "daruda_dark");
+    assert_eq!(resolve("daruda_light", true), "daruda_light");
+}
+
+#[test]
 fn theme_config_accepts_legacy_preset_alias() {
     // Legacy configs used the unqualified `preset` key. Serde alias
     // should keep those configs loading without an opt-in

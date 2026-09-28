@@ -5,6 +5,28 @@ use crate::workspace::Workspace;
 use crate::workspace::main_area::agent_chat_pane::transcript_defaults::TranscriptDefaults;
 
 impl Workspace {
+    /// Re-resolve the live store with this workspace's project overlay and
+    /// apply it — the one path both a settings change and an OS appearance
+    /// flip take into `apply_config`.
+    pub(in crate::workspace) fn apply_store_config(&mut self, cx: &mut Context<Self>) {
+        let store = crate::settings_store::SettingsStore::global(cx);
+        let lane = self.active_project().map(|p| p.root.as_path());
+        let effective = store.effective_for(lane);
+        self.apply_config(&effective, cx);
+    }
+
+    /// An OS light / dark flip, which only a `system` UI preset paints. The
+    /// app-wide swap runs first so the file-pane reload in `apply_config`
+    /// bakes against the new theme; every window repeating it is idempotent.
+    pub(in crate::workspace) fn on_system_appearance_changed(&mut self, cx: &mut Context<Self>) {
+        let user = crate::settings_store::SettingsStore::global(cx).user_arc();
+        if user.theme.ui_preset != daruda_config::ui_theme_presets::SYSTEM {
+            return;
+        }
+        crate::ui::theme::apply_configured_ui_theme(&user.theme.ui_preset, cx);
+        self.apply_store_config(cx);
+    }
+
     /// Reload config from the live store. Only wired up in tests —
     /// production goes through the `observe_global::<SettingsStore>`
     /// subscription installed in `new_with_project`.
@@ -151,7 +173,8 @@ impl Workspace {
                 );
             });
         }
-        let new_mirrors = crate::workspace::ConfigMirrors::from_config(config);
+        let new_mirrors =
+            crate::workspace::ConfigMirrors::from_config(config, cx.window_appearance());
         let filter_changed = self.mirrors.files_show_hidden != new_mirrors.files_show_hidden
             || self.mirrors.files_use_gitignore != new_mirrors.files_use_gitignore;
         let icon_changed = self.mirrors.files_icon_color_mode != new_mirrors.files_icon_color_mode;

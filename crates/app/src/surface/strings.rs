@@ -4347,6 +4347,9 @@ pub fn settings_label_terminal_theme() -> String {
 pub fn settings_label_ui_theme() -> String {
     rust_i18n::t!("settings.label_ui_theme").into_owned()
 }
+pub fn settings_ui_preset_system() -> String {
+    rust_i18n::t!("settings.ui_preset_system").into_owned()
+}
 pub fn settings_section_terminal() -> String {
     rust_i18n::t!("settings.section_terminal").into_owned()
 }

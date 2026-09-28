@@ -1111,7 +1111,7 @@ impl Workspace {
                 files_selection: None,
                 files_scroll_handle: gpui::UniformListScrollHandle::new(),
             },
-            mirrors: ConfigMirrors::from_config(config),
+            mirrors: ConfigMirrors::from_config(config, cx.window_appearance()),
             git_changes_scroll_handle: gpui::UniformListScrollHandle::new(),
             lanes_scroll_handle: gpui::ScrollHandle::new(),
             right_panel_scroll_handle: gpui::ScrollHandle::new(),
@@ -1220,10 +1220,7 @@ impl Workspace {
                     cx.notify();
                 }),
                 cx.observe_global::<crate::settings_store::SettingsStore>(|ws, cx| {
-                    let store = crate::settings_store::SettingsStore::global(cx);
-                    let lane = ws.active_project().map(|p| p.root.as_path());
-                    let effective = store.effective_for(lane);
-                    ws.apply_config(&effective, cx);
+                    ws.apply_store_config(cx);
                 }),
                 cx.observe_global::<crate::agent::skills::SkillsState>(|_ws, cx| {
                     // Right dock re-stages + diffs on this notify.
@@ -1306,6 +1303,11 @@ impl Workspace {
         // git-discovered list off the UI thread (see
         // `Project::bootstrap_placeholder`).
         ws.reconcile_bootstrapped_lanes(cx);
+
+        cx.observe_window_appearance(window, |this: &mut Workspace, _window, cx| {
+            this.on_system_appearance_changed(cx);
+        })
+        .detach();
 
         crate::platform::window_controls::compact(window);
         cx.observe_window_bounds(window, |this: &mut Workspace, window, cx| {

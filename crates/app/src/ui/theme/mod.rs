@@ -117,6 +117,23 @@ pub fn apply_ui_theme(name: &str, cx: &mut gpui::App) -> bool {
     true
 }
 
+/// The bundled preset `configured` (a `theme.ui_preset` value) paints under
+/// `appearance` — `system` follows it, any other name ignores it.
+pub fn effective_ui_preset(configured: &str, appearance: gpui::WindowAppearance) -> &str {
+    let dark = matches!(
+        appearance,
+        gpui::WindowAppearance::Dark | gpui::WindowAppearance::VibrantDark
+    );
+    daruda_config::ui_theme_presets::resolve(configured, dark)
+}
+
+/// Install the theme a configured `theme.ui_preset` paints under the current
+/// OS appearance. Same contract as [`apply_ui_theme`].
+pub fn apply_configured_ui_theme(configured: &str, cx: &mut gpui::App) -> bool {
+    let appearance = cx.window_appearance();
+    apply_ui_theme(effective_ui_preset(configured, appearance), cx)
+}
+
 pub use crate::ui::theme::palette::*;
 pub use daruda_terminal::ux::theme::*;
 
@@ -890,6 +907,31 @@ pub fn file_viewer_pane_syntax_is_light(cx: &App) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// `system` has to land on a preset `apply_ui_theme` can install, under
+    /// both vibrant variants too — otherwise a flip leaves the old theme live.
+    #[gpui::test]
+    fn the_system_preset_resolves_to_an_installable_theme(cx: &mut gpui::TestAppContext) {
+        use gpui::WindowAppearance as A;
+        cx.update(|cx| {
+            init_if_missing(cx);
+            for (appearance, expected) in [
+                (A::Dark, "daruda_dark"),
+                (A::VibrantDark, "daruda_dark"),
+                (A::Light, "daruda_light"),
+                (A::VibrantLight, "daruda_light"),
+            ] {
+                let resolved = effective_ui_preset("system", appearance);
+                assert_eq!(resolved, expected, "{appearance:?}");
+                assert!(apply_ui_theme(resolved, cx), "{resolved} is not bundled");
+            }
+            assert!(
+                !apply_ui_theme("system", cx),
+                "the unresolved name must not install"
+            );
+            assert_eq!(effective_ui_preset("daruda_light", A::Dark), "daruda_light");
+        });
+    }
 
     #[gpui::test]
     fn agent_chat_syntax_is_light_switches_at_the_midpoint(cx: &mut gpui::TestAppContext) {

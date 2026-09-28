@@ -98,7 +98,8 @@ pub use window::WindowConfig;
 ///
 /// `terminal_preset = "custom"` falls through to the `[colors]`
 /// section. `terminal_preset = "default"` uses xterm-compatible
-/// defaults.
+/// defaults. `ui_preset = "system"` follows the OS light / dark
+/// appearance (see [`ui_theme_presets::resolve`]).
 ///
 /// The legacy `preset = "..."` key from pre-split configs is accepted
 /// as an alias for `terminal_preset` so users who upgrade keep their

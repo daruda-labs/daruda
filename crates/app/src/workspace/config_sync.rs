@@ -7,6 +7,7 @@
 use std::time::Duration;
 
 use daruda_config::{Config, IconColorMode, StatusBarConfig};
+use gpui::WindowAppearance;
 
 #[derive(Clone)]
 pub(in crate::workspace) struct ConfigMirrors {
@@ -37,9 +38,10 @@ pub(in crate::workspace) struct ConfigMirrors {
     /// output triggers a repaint; live-updates on config reload.
     pub terminal_redraw_interval: Duration,
 
-    /// Mirror of `daruda_config::ThemeConfig::ui_preset`. A change flips the
-    /// host appearance, so `apply_config` reloads open markdown panes to
-    /// re-theme their rendered diagrams (mermaid) for the new surface.
+    /// The bundled preset `daruda_config::ThemeConfig::ui_preset` paints —
+    /// `system` resolved against the OS appearance. A change flips the host
+    /// appearance, so `apply_config` reloads open markdown panes to re-theme
+    /// their rendered diagrams (mermaid) for the new surface.
     pub ui_preset: String,
 
     /// Mirror of `daruda_config::StatusBarConfig`. Drives which segments
@@ -58,7 +60,7 @@ pub(in crate::workspace) struct ConfigMirrors {
 }
 
 impl ConfigMirrors {
-    pub(in crate::workspace) fn from_config(config: &Config) -> Self {
+    pub(in crate::workspace) fn from_config(config: &Config, appearance: WindowAppearance) -> Self {
         Self {
             panels_grid_columns: config.panels.grid_columns,
             close_pane_on_exit: config.shell.close_pane_on_exit,
@@ -66,7 +68,8 @@ impl ConfigMirrors {
             files_use_gitignore: config.left_dock.files_use_gitignore,
             files_icon_color_mode: config.left_dock.file_icon_color_mode.clone(),
             terminal_redraw_interval: config.render.redraw_interval(),
-            ui_preset: config.theme.ui_preset.clone(),
+            ui_preset: crate::ui::theme::effective_ui_preset(&config.theme.ui_preset, appearance)
+                .to_owned(),
             status_bar: config.status_bar.clone(),
             ports_poll_interval: config.ports.interval(),
             hidden_config_option_descriptions: config

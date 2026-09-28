@@ -1496,9 +1496,16 @@ impl SettingsView {
         // UI preset select — chrome palette (workspace, modal, status bar, …).
         let ui_preset = SharedString::from(config.theme.ui_preset.clone());
         let ui_preset_select = cx.new(|cx| {
-            let opts = daruda_config::UI_THEME_PRESETS
-                .iter()
-                .map(|p| SelectOption::new(p.name, p.display_name))
+            let system = SelectOption::new(
+                daruda_config::ui_theme_presets::SYSTEM,
+                s::settings_ui_preset_system(),
+            );
+            let opts = std::iter::once(system)
+                .chain(
+                    daruda_config::UI_THEME_PRESETS
+                        .iter()
+                        .map(|p| SelectOption::new(p.name, p.display_name)),
+                )
                 .collect();
             select::state_with_options(opts, Some(&ui_preset), window, cx)
         });
