@@ -174,7 +174,7 @@ fn selected_text_for_copy_no_selection() {
         lane_id: 0,
         path: "test.rs".into(),
         source: super::DiffSource::WorkingTree,
-        file_status: None,
+        live_status: None,
         content: PaneFileContent::LoadedDiff {
             rows_all,
             rows_no_ctx,
@@ -360,4 +360,22 @@ fn a_markdown_extension_is_recognised_in_any_case() {
         );
     }
     assert!(!super::is_markdown_path(std::path::Path::new("README.txt")));
+}
+
+/// A range pane carries its letter with its commits, so a pane restored
+/// before any git read — `live_status` still `None` — still offers its diff.
+#[test]
+fn a_range_pane_reads_its_pinned_status_and_a_live_pane_its_live_one() {
+    let range = super::DiffSource::Range {
+        from: "m".into(),
+        to: "h".into(),
+        old_path: None,
+        status: 'A',
+    };
+    let mut fv = PaneFileView::loading(0, "a.rs".into(), range, None, FileViewMode::Changes);
+    assert_eq!(fv.status(), Some('A'));
+    fv.source = super::DiffSource::WorkingTree;
+    assert_eq!(fv.status(), None);
+    fv.live_status = Some('M');
+    assert_eq!(fv.status(), Some('M'));
 }

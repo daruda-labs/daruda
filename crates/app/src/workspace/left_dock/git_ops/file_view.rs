@@ -33,7 +33,7 @@ struct FilePaneLoadRequest {
     path: PathBuf,
     source: DiffSource,
     mode: FileViewMode,
-    file_status: Option<char>,
+    live_status: Option<char>,
 }
 
 impl FilePaneLoadRequest {
@@ -44,7 +44,7 @@ impl FilePaneLoadRequest {
             path: view.path.clone(),
             source: view.source.clone(),
             mode: view.view_mode,
-            file_status: view.file_status,
+            live_status: view.live_status,
         }
     }
 
@@ -185,9 +185,10 @@ impl Workspace {
     }
 
     /// The git status char for `path` in `target` — `None` when the file has
-    /// no pending change, or the lane's status hasn't been fetched yet.
+    /// no pending change, the lane's status hasn't been fetched yet, or
+    /// `source` is a range (which carries its own; see `PaneFileView::status`).
     ///
-    /// The single derivation of a pane's `file_status`: `open_pane_file_view`
+    /// The single derivation of a pane's `live_status`: `open_pane_file_view`
     /// stamps it on open (including onto a reused tab) and
     /// [`Self::sync_file_pane_statuses`] re-stamps every open pane on each git
     /// refresh. Openers deliberately do **not** pass a status in — it is a
@@ -202,10 +203,8 @@ impl Workspace {
         path: &std::path::Path,
         source: &DiffSource,
     ) -> Option<char> {
-        // A range pane is pinned to two commits, so its status is part of
-        // what it shows — not a projection of the lane's live state.
-        if let DiffSource::Range { status, .. } = source {
-            return Some(*status);
+        if !source.is_live() {
+            return None;
         }
         let lane_root = self.lane_for(target).map(|w| w.path.clone())?;
         self.status_index_by_abs(target)
@@ -337,17 +336,17 @@ impl Workspace {
     ) {
         let entry = intent.pane_entry();
         let owner = self.owner_lane_ref(lane_id);
-        let file_status = self.git_status_for_path(owner, &path, &source);
+        let live_status = self.git_status_for_path(owner, &path, &source);
 
         // Always dedupe: clicking the same file activates its existing tab.
         if let Some((tab_idx, pane_id)) = self.find_existing_file_tab(lane_id, &path, &source) {
             // Re-stamp the tab being reused. It was opened against an older
             // the lane's cached status, and the toolbar's mode strip reads
-            // `file_status` to decide whether Changes is offered at all.
+            // `status()` to decide whether Changes is offered at all.
             if let Some(fc) = self.file_content_mut_for_pane(pane_id)
-                && fc.view.file_status != file_status
+                && fc.view.live_status != live_status
             {
-                fc.view.file_status = file_status;
+                fc.view.live_status = live_status;
                 cx.notify();
             }
             // Re-activating a tab that already holds this file: a deliberate
@@ -392,7 +391,7 @@ impl Workspace {
                     lane_id,
                     path.clone(),
                     source,
-                    file_status,
+                    live_status,
                     effective_mode,
                 );
                 fc.scroll_handle = gpui::ScrollHandle::new();
@@ -434,7 +433,7 @@ impl Workspace {
             lane_id,
             path.clone(),
             source,
-            file_status,
+            live_status,
             effective_mode,
             window,
             cx,
@@ -490,11 +489,16 @@ impl Workspace {
     ) {
         let effective_mode = FileViewMode::effective_for_path(FileViewMode::Raw, &path);
 
+        let live_status = self.git_status_for_path(
+            self.owner_lane_ref(lane_id),
+            &path,
+            &DiffSource::WorkingTree,
+        );
         let pane = self.create_file_pane(
             lane_id,
             path.clone(),
             DiffSource::WorkingTree,
-            /* file_status = */ None,
+            live_status,
             effective_mode,
             window,
             cx,
@@ -804,16 +808,14 @@ impl Workspace {
             let Some(fv) = pane.file_view_mut() else {
                 continue;
             };
-            let next = match &fv.source {
-                // Stamped at open and fixed with its commits; see
-                // `git_status_for_path`.
-                DiffSource::Range { status, .. } => Some(*status),
-                DiffSource::WorkingTree | DiffSource::Index => {
-                    by_abs.get(&abs_pane_path(&lane_root, &fv.path)).copied()
-                }
+            // A range pane reads its own letter; it has no live one.
+            let next = if fv.source.is_live() {
+                by_abs.get(&abs_pane_path(&lane_root, &fv.path)).copied()
+            } else {
+                None
             };
-            if fv.file_status != next {
-                fv.file_status = next;
+            if fv.live_status != next {
+                fv.live_status = next;
                 changed = true;
             }
         }
@@ -860,7 +862,7 @@ impl Workspace {
                     &path_bg,
                     &request_for_load.source,
                     request_for_load.mode,
-                    request_for_load.file_status,
+                    request_for_load.live_status,
                     &syntax_theme,
                     &mermaid_palette,
                 )

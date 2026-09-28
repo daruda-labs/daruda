@@ -141,15 +141,31 @@ impl DiffSource {
     pub(in crate::workspace) fn is_index(&self) -> bool {
         matches!(self, Self::Index)
     }
+
+    /// Whether the pane tracks the lane as it is now — the working tree or
+    /// the index — rather than two fixed commits.
+    pub(in crate::workspace) fn is_live(&self) -> bool {
+        matches!(self, Self::WorkingTree | Self::Index)
+    }
+
+    /// The status letter fixed with a range's commits; `None` for a live pane.
+    pub(in crate::workspace) fn pinned_status(&self) -> Option<char> {
+        match self {
+            Self::Range { status, .. } => Some(*status),
+            Self::WorkingTree | Self::Index => None,
+        }
+    }
 }
 
 pub(in crate::workspace) struct PaneFileView {
     pub lane_id: LaneId,
     pub path: PathBuf,
     pub source: DiffSource,
-    /// Git status character for the file (M / A / D / R / ? …).
-    /// Shown as a badge in the toolbar. `None` when opened without git context.
-    pub file_status: Option<char>,
+    /// Git's letter (M / A / D / R / ? …) for a change pending in the lane
+    /// now, projected from its cached status. Always `None` for a range pane,
+    /// whose letter is fixed with its commits — read [`Self::status`], never
+    /// this field, to learn what to show.
+    pub live_status: Option<char>,
     pub content: PaneFileContent,
     pub view_mode: FileViewMode,
     pub hide_unchanged: bool,
@@ -389,18 +405,24 @@ pub(super) fn count_diff_stats(hunks: &[DiffHunk]) -> (usize, usize) {
 // ----------------------------------------------------------------
 
 impl PaneFileView {
+    /// The git letter to show for this pane: a range's own, else the lane's
+    /// pending change. `None` means nothing to diff, so no Changes mode.
+    pub(in crate::workspace) fn status(&self) -> Option<char> {
+        self.source.pinned_status().or(self.live_status)
+    }
+
     pub(super) fn loading(
         lane_id: LaneId,
         path: PathBuf,
         source: DiffSource,
-        file_status: Option<char>,
+        live_status: Option<char>,
         view_mode: FileViewMode,
     ) -> Self {
         Self {
             lane_id,
             path,
             source,
-            file_status,
+            live_status,
             content: PaneFileContent::Loading,
             view_mode,
             hide_unchanged: false,
@@ -415,13 +437,13 @@ impl PaneFileView {
         lane_id: LaneId,
         path: PathBuf,
         source: DiffSource,
-        file_status: Option<char>,
+        live_status: Option<char>,
         view_mode: FileViewMode,
     ) {
         self.lane_id = lane_id;
         self.path = path;
         self.source = source;
-        self.file_status = file_status;
+        self.live_status = live_status;
         self.content = PaneFileContent::Loading;
         self.view_mode = view_mode;
         self.hide_unchanged = false;

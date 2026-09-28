@@ -1537,7 +1537,7 @@ async fn git_status_refresh_re_derives_open_file_panes_status(cx: &mut TestAppCo
         assert_eq!(
             ws.focused_file_view()
                 .expect("file viewer open")
-                .file_status,
+                .live_status,
             None,
             "a restore-shaped open carries no status of its own"
         );
@@ -1551,7 +1551,7 @@ async fn git_status_refresh_re_derives_open_file_panes_status(cx: &mut TestAppCo
         assert_eq!(
             ws.focused_file_view()
                 .expect("file viewer open")
-                .file_status,
+                .live_status,
             Some('M'),
             "a refreshed status must reach the open pane"
         );
@@ -1567,7 +1567,7 @@ async fn git_status_refresh_re_derives_open_file_panes_status(cx: &mut TestAppCo
         assert_eq!(
             ws.focused_file_view()
                 .expect("file viewer open")
-                .file_status,
+                .live_status,
             None,
             "a cleared status must clear the pane's badge too"
         );
@@ -1665,7 +1665,7 @@ async fn opening_a_changed_file_without_git_context_still_resolves_its_status(
         assert_eq!(
             ws.focused_file_view()
                 .expect("file viewer open")
-                .file_status,
+                .live_status,
             Some('M'),
             "a context-free open must still resolve the file's status"
         );
@@ -1694,7 +1694,7 @@ async fn opening_a_changed_file_without_git_context_still_resolves_its_status(
         assert_eq!(
             ws.focused_file_view()
                 .expect("file viewer open")
-                .file_status,
+                .live_status,
             None,
             "reusing an existing tab must re-stamp it from the current cache"
         );

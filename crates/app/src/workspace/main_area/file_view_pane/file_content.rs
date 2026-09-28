@@ -56,7 +56,7 @@ pub(in crate::workspace) fn load_file_content(
     path: &std::path::Path,
     source: &DiffSource,
     mode: FileViewMode,
-    file_status: Option<char>,
+    live_status: Option<char>,
     syntax_theme: &str,
     mermaid_palette: &MermaidPalette,
 ) -> LoadOutcome {
@@ -73,7 +73,7 @@ pub(in crate::workspace) fn load_file_content(
             repo_root,
             path,
             source,
-            file_status,
+            live_status,
             syntax_theme,
             mermaid_palette.dark,
         )),
@@ -218,7 +218,7 @@ fn load_diff(
     repo_root: Option<&std::path::Path>,
     path: &std::path::Path,
     source: &DiffSource,
-    file_status: Option<char>,
+    live_status: Option<char>,
     syntax_theme: &str,
     diagram_dark: bool,
 ) -> PaneFileContent {
@@ -228,7 +228,7 @@ fn load_diff(
 
     // Untracked files produce no output from `git diff`; use --no-index to
     // show the file content as entirely new (all added lines).
-    let is_untracked = file_status == Some('?') && *source == DiffSource::WorkingTree;
+    let is_untracked = live_status == Some('?') && *source == DiffSource::WorkingTree;
     // `path` is absolute when opened from the left dock.  git diff accepts
     // absolute paths when run from the repo root, so we pass it directly.
     // For legacy relative paths from old session state, behaviour is unchanged.

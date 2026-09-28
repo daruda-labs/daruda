@@ -97,7 +97,7 @@ fn mode_options(fv: &PaneFileView) -> Vec<FileViewMode> {
     [
         (FileViewMode::Raw, true),
         (FileViewMode::Preview, fv.is_markdown_path()),
-        (FileViewMode::Changes, fv.file_status.is_some()),
+        (FileViewMode::Changes, fv.status().is_some()),
     ]
     .into_iter()
     .filter(|(mode, available)| *available || *mode == fv.view_mode)
@@ -206,7 +206,7 @@ pub(super) fn render_file_viewer_toolbar(
     let lane_id_for_menu = fv.lane_id;
     let ws_for_menu = cx.entity().downgrade();
 
-    let file_status = fv.file_status;
+    let file_status = fv.status();
     let staged = fv.source.is_index();
     let file_status_color = file_status.map(|status| git_status_color(status, staged, cx));
 
@@ -395,12 +395,12 @@ mod tests {
     use crate::workspace::main_area::file_view_pane::DiffSource;
     use crate::workspace::main_area::file_view_pane::PaneFileContent;
 
-    fn view(name: &str, file_status: Option<char>, view_mode: FileViewMode) -> PaneFileView {
+    fn view(name: &str, live_status: Option<char>, view_mode: FileViewMode) -> PaneFileView {
         let mut fv = PaneFileView::loading(
             0,
             name.into(),
             DiffSource::WorkingTree,
-            file_status,
+            live_status,
             view_mode,
         );
         fv.content = PaneFileContent::LoadedRaw;

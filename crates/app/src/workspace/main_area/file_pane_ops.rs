@@ -190,7 +190,7 @@ impl Workspace {
         lane_id: daruda_store::project::LaneId,
         path: std::path::PathBuf,
         source: DiffSource,
-        file_status: Option<char>,
+        live_status: Option<char>,
         view_mode: FileViewMode,
         window: &mut Window,
         cx: &mut Context<Self>,
@@ -257,7 +257,7 @@ impl Workspace {
         Pane {
             id: pane_id,
             content: PaneContent::File(FileContent {
-                view: PaneFileView::loading(lane_id, path, source, file_status, view_mode),
+                view: PaneFileView::loading(lane_id, path, source, live_status, view_mode),
                 scroll_handle: gpui::ScrollHandle::new(),
                 search_input,
                 focus_handle,

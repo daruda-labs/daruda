@@ -171,11 +171,7 @@ fn an_against_base_row_opens_a_diff_pinned_to_its_commits(cx: &mut TestAppContex
                 status: 'A',
             }
         );
-        assert_eq!(
-            fc.view.file_status,
-            Some('A'),
-            "status comes from the range"
-        );
+        assert_eq!(fc.view.status(), Some('A'), "status comes from the range");
         match &fc.view.content {
             PaneFileContent::LoadedDiff { added, removed, .. } => {
                 assert_eq!((*added, *removed), (1, 0));
@@ -200,7 +196,7 @@ fn an_against_base_row_opens_a_diff_pinned_to_its_commits(cx: &mut TestAppContex
         let fc = ws
             .focused_file_content()
             .expect("the range pane is still open");
-        assert_eq!(fc.view.file_status, Some('A'));
+        assert_eq!(fc.view.status(), Some('A'));
     });
 }
 
@@ -273,5 +269,51 @@ fn a_git_read_that_outlives_its_lane_does_not_revive_its_state(cx: &mut TestAppC
             !ws.lane_scoped.contains_key(&target),
             "a late git read recreated the removed lane's state"
         );
+    });
+}
+
+/// Split-right used to skip the status derivation every other open takes,
+/// so a changed file opened that way offered no Changes view.
+#[gpui::test]
+fn a_file_split_right_knows_its_pending_change(cx: &mut TestAppContext) {
+    if !crate::lane::git::has_git() {
+        return;
+    }
+    let temp = tempfile::tempdir().unwrap();
+    let root = feature_repo(temp.path());
+    std::fs::write(root.join("base.txt"), b"edited\n").unwrap();
+    let (wh, ws) = build_workspace_with(
+        cx,
+        &daruda_config::Config::default(),
+        Some(daruda_store::project::Project::from_path(&root)),
+    );
+    ws.update(cx, |ws, cx| ws.reconcile_bootstrapped_lanes(cx));
+    cx.run_until_parked();
+    let target = ws.update(cx, |ws, cx| {
+        let target = ws.active;
+        ws.refresh_git_status(target, cx);
+        target
+    });
+    cx.run_until_parked();
+    let abs = daruda_core::path::canonicalize(&root)
+        .unwrap()
+        .join("base.txt");
+    cx.update_window(wh.into(), |_, window, cx| {
+        ws.update(cx, |ws, cx| {
+            let anchor = ws.active_runtime().focused_pane_id;
+            ws.open_file_split_right(target.lane, abs.clone(), anchor, window, cx);
+        });
+    })
+    .unwrap();
+    cx.run_until_parked();
+    ws.read_with(cx, |ws, _| {
+        let fv = ws
+            .active_runtime()
+            .panes
+            .iter()
+            .filter_map(|p| p.file_view())
+            .find(|fv| fv.path == abs)
+            .expect("the split pane holds the file");
+        assert_eq!(fv.status(), Some('M'));
     });
 }

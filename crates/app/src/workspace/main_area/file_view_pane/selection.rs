@@ -265,7 +265,7 @@ mod tests {
             lane_id: 0,
             path: "test.txt".into(),
             source: crate::workspace::main_area::file_view_pane::DiffSource::WorkingTree,
-            file_status: None,
+            live_status: None,
             content: PaneFileContent::LoadedRaw,
             view_mode: FileViewMode::Raw,
             hide_unchanged: false,
@@ -293,7 +293,7 @@ mod tests {
             lane_id: 0,
             path: "test.diff".into(),
             source: crate::workspace::main_area::file_view_pane::DiffSource::WorkingTree,
-            file_status: None,
+            live_status: None,
             content: PaneFileContent::LoadedDiff {
                 rows_all,
                 rows_no_ctx: Vec::new(),
