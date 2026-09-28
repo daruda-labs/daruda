@@ -25,12 +25,16 @@ const CODEX_SUMMARY: [usize; 3] = [3, 2, 3];
 /// Every run earns a bar, one call included, and the bar's fold is the only
 /// thing that decides whether its calls show — a run of one included. That is
 /// what the `AUTO`, `TAIL`, `SETTLED` and `EXPANDED` ceilings below price: the
-/// bar costs a row, and a shut one takes its calls off the count.
-const CODEX_EXPANDED: [usize; 3] = [420, 4, 71];
+/// bar costs a row, and a shut one takes its calls off the count. Codex reasons
+/// between calls, and a thought after a call stays in its run, so turn 0 is 32
+/// tool bars and 5 thinking bars rather than 58 and 60.
+const CODEX_EXPANDED: [usize; 3] = [339, 4, 60];
 /// The ceiling with the step axis engaged. Codex's cut is the response-level
-/// one: its runs are short, so most of what goes is whole steps.
-const CODEX_EXPANDED_TAIL: [usize; 3] = [42, 4, 35];
-const CODEX_SETTLED: [usize; 3] = [3, 2, 33];
+/// one: its runs are short, so most of what goes is whole steps. A step is a
+/// whole narrated run, thoughts included, so five of them hold more rows than
+/// the call-sized fragments the thoughts used to cut them into.
+const CODEX_EXPANDED_TAIL: [usize; 3] = [59, 4, 31];
+const CODEX_SETTLED: [usize; 3] = [3, 2, 22];
 
 /// Claude rows per turn under each projection mode. Turn 0 is the one turn
 /// with no tools and a single block; it costs one row for the response bar

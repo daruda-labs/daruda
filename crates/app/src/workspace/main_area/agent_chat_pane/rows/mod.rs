@@ -145,6 +145,10 @@ pub(in crate::workspace) enum RowKind {
         /// than a span: the run covers items that own no row, and the bar
         /// counts and summarizes its calls alone.
         calls: Vec<usize>,
+        /// The thoughts between those calls, in transcript order. Kept apart
+        /// from `calls` because the bar tallies and rolls up calls alone and
+        /// only counts these.
+        thoughts: Vec<usize>,
         collapsed: bool,
     },
     /// Keyed on the run's first item rather than a message id: a thought carries
@@ -675,11 +679,11 @@ impl UnitWindow {
             }
             let span = context.structure().tool_run(k, run.end);
             k = span.end;
-            // The span's own calls decide, not everything it covers: an item
+            // The span's own members decide, not everything it covers: an item
             // the run only passes over is not what the run has to show.
             let shows = context
                 .structure()
-                .group_calls(span.clone())
+                .group_members(span.clone())
                 .any(|j| context.filter.matches(&items[j]));
             units.push((span.end, shows));
         }
@@ -844,7 +848,11 @@ impl<'items, 'rows> RunProjector<'items, 'rows> {
                 // `grun` is only the walk's cursor. Reading the span where a
                 // member was meant is what put a nested child in two tallies.
                 let calls: Vec<usize> = structure.group_calls(grun.clone()).collect();
-                let group = GroupFilter::of(calls.iter().copied(), items, filter);
+                let thoughts: Vec<usize> = structure.group_thoughts(grun.clone()).collect();
+                let members: Vec<usize> = structure.group_members(grun.clone()).collect();
+                // Members, not calls: a filter that keeps only thoughts still
+                // leaves the group something to show.
+                let group = GroupFilter::of(members.iter().copied(), items, filter);
                 let group_live = run_is_live(items, calls.iter().copied(), live_units);
                 {
                     let gid = tool_id(&items[grun.start]);
@@ -857,7 +865,9 @@ impl<'items, 'rows> RunProjector<'items, 'rows> {
                     // `fold_context_at` would rescan from `grun.start` without
                     // the hierarchy, so a nested child running inside one of
                     // these cards would read as a member.
-                    let group_active = calls.iter().any(|&k| is_active(&items[k]));
+                    // A streaming thought counts too, or it would fold its own
+                    // group shut while it is still being written.
+                    let group_active = members.iter().any(|&k| is_active(&items[k]));
                     let group_collapsed = !fold.is_expanded(
                         &group_key,
                         FoldContext::new(boundary.at(grun.start), group_active),
@@ -872,6 +882,7 @@ impl<'items, 'rows> RunProjector<'items, 'rows> {
                         RowKind::ToolGroupHeader {
                             gid: gid.clone(),
                             calls: calls.clone(),
+                            thoughts,
                             collapsed: group_collapsed,
                         },
                         folded && !group_live,
@@ -894,7 +905,7 @@ impl<'items, 'rows> RunProjector<'items, 'rows> {
                     );
                     out.push_group_children(
                         context,
-                        calls.into_iter(),
+                        members.into_iter(),
                         GroupFolds {
                             enclosing: folded,
                             collapsed: group_collapsed,

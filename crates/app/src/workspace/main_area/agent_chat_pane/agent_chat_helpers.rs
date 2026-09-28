@@ -743,7 +743,7 @@ fn fold_active_at(key: &FoldKey, ix: usize, items: &[daruda_acp::ChatItem]) -> b
             let hierarchy = ToolHierarchy::build(items);
             let structure = TranscriptStructure::new(items, &hierarchy);
             structure
-                .group_calls(structure.tool_run(ix, items.len()))
+                .group_members(structure.tool_run(ix, items.len()))
                 .any(|k| is_active(&items[k]))
         }
         FoldKey::ThinkingGroup(_) => items.get(ix..).is_some_and(|rest| {

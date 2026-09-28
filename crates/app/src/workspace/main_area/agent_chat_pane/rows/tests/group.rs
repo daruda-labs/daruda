@@ -618,8 +618,10 @@ fn prose_between_two_runs_splits_them_into_separate_groups() {
     );
 }
 
+/// Thoughts ahead of the first call keep their own group; the ones after it
+/// belong to the call's group, so they earn no thinking bar of their own.
 #[test]
-fn a_tool_call_between_two_runs_splits_them_into_separate_groups() {
+fn a_thought_after_a_call_joins_its_tool_group() {
     let items = [
         ChatItem::UserText("q".into()),
         think("a"),
@@ -629,10 +631,9 @@ fn a_tool_call_between_two_runs_splits_them_into_separate_groups() {
         think("d"),
         asst("done"),
     ];
-    assert_eq!(
-        think_group_spans(&project_all(&items)),
-        vec![(1, 2), (4, 2)]
-    );
+    let rows = project_all(&items);
+    assert_eq!(think_group_spans(&rows), vec![(1, 2)]);
+    assert_eq!(tool_groups(&rows), vec![(vec![3], vec![4, 5])]);
 }
 
 /// The thinking run grows only while the item is `Thinking` *and* not bodyless,
@@ -818,5 +819,164 @@ fn the_turn_tally_is_withheld_when_one_bar_below_already_says_it() {
         ])
         .is_empty(),
         "prose split them into two runs, so the bar summarizes across both"
+    );
+}
+
+// ── Thoughts inside a tool group ───────────────────────────────────────────
+
+/// Each tool group's calls and thoughts, in row order.
+fn tool_groups(rows: &[RenderRow]) -> Vec<(Vec<usize>, Vec<usize>)> {
+    rows.iter()
+        .filter_map(|r| match &r.kind {
+            RowKind::ToolGroupHeader {
+                calls, thoughts, ..
+            } => Some((calls.clone(), thoughts.clone())),
+            _ => None,
+        })
+        .collect()
+}
+
+fn row_of(rows: &[RenderRow], ix: usize) -> &RenderRow {
+    rows.iter()
+        .find(|r| matches!(r.kind, RowKind::AgentItem(i) if i == ix))
+        .expect("the item owns a row")
+}
+
+/// `U T U` — the shape agents narrate calls in — is one group whichever of the
+/// thoughts or the calls the filter keeps. The filter decides what the members
+/// show, never where the group ends.
+#[test]
+fn the_filter_never_moves_a_tool_group_boundary() {
+    let items = [
+        ChatItem::UserText("q".into()),
+        tool("a", ToolStatusView::Completed),
+        think("why"),
+        tool("b", ToolStatusView::Completed),
+        asst("done"),
+    ];
+    for tokens in [
+        &["thinking", "prose", "tools"][..],
+        &["prose", "tools"][..],
+        &["thinking", "prose"][..],
+    ] {
+        let rows = project_filtered(&items, &DisplayFilter::from_tokens(tokens.iter().copied()));
+        assert_eq!(
+            tool_groups(&rows),
+            vec![(vec![1, 3], vec![2])],
+            "filter {tokens:?}"
+        );
+        assert!(think_group_spans(&rows).is_empty(), "filter {tokens:?}");
+    }
+}
+
+/// A filter that keeps only thoughts still leaves the group something to show,
+/// so its bar stays up with the thought under it; a filter without thoughts
+/// hides the thought and keeps the calls.
+#[test]
+fn a_group_shows_whichever_members_the_filter_keeps() {
+    let items = [
+        ChatItem::UserText("q".into()),
+        tool("a", ToolStatusView::Completed),
+        think("why"),
+        tool("b", ToolStatusView::Completed),
+        asst("done"),
+    ];
+    let open = |tokens: &[&str]| {
+        project(
+            &items,
+            &FoldState::with_mode(FoldPreset::Expanded.mode()),
+            false,
+            &LiveSubagentUnits::of(&items),
+            StepWindow::uniform(TailWindow::All),
+            &DisplayFilter::from_tokens(tokens.iter().copied()),
+        )
+    };
+
+    let thoughts_only = open(&["thinking", "prose"]);
+    let bar = thoughts_only
+        .iter()
+        .find(|r| matches!(r.kind, RowKind::ToolGroupHeader { .. }))
+        .unwrap();
+    assert!(!bar.hidden, "a kept thought keeps the bar up");
+    assert!(!row_of(&thoughts_only, 2).hidden);
+    assert!(row_of(&thoughts_only, 1).hidden && row_of(&thoughts_only, 3).hidden);
+
+    let no_thoughts = open(&["prose", "tools"]);
+    assert!(row_of(&no_thoughts, 2).hidden);
+    assert!(!row_of(&no_thoughts, 1).hidden && !row_of(&no_thoughts, 3).hidden);
+}
+
+/// A thought covered by the call window goes with the call after it; one with
+/// no call after it yet — the thought being written right now — is never
+/// covered.
+#[test]
+fn a_thought_follows_the_call_after_it_through_the_window() {
+    let items = [
+        ChatItem::UserText("q".into()),
+        tool("a", ToolStatusView::Completed),
+        think("before b"),
+        tool("b", ToolStatusView::Completed),
+        think("before c"),
+        tool("c", ToolStatusView::Completed),
+        think("after c"),
+    ];
+    let rows = project_open_group_calls(&items, TailWindow::Last(1));
+    assert!(
+        row_of(&rows, 2).hidden,
+        "b is covered, so its thought is too"
+    );
+    assert!(!row_of(&rows, 4).hidden, "c is kept, so its thought is too");
+    assert!(
+        !row_of(&rows, 6).hidden,
+        "nothing follows it, so nothing covers it"
+    );
+}
+
+/// The group's only live member is a thought still streaming, and that is
+/// enough to hold the group open.
+#[test]
+fn a_streaming_thought_holds_its_group_open() {
+    let settled = [
+        ChatItem::UserText("q".into()),
+        tool("a", ToolStatusView::Completed),
+        think("next"),
+    ];
+    let mut streaming = settled.clone();
+    streaming[2] = ChatItem::Thinking {
+        text: "next".into(),
+        streaming: true,
+        message_id: None,
+    };
+    let collapsed = |items: &[ChatItem]| {
+        project_all(items)
+            .iter()
+            .find_map(|r| match r.kind {
+                RowKind::ToolGroupHeader { collapsed, .. } => Some(collapsed),
+                _ => None,
+            })
+            .unwrap()
+    };
+    assert!(!collapsed(&streaming));
+    assert!(
+        collapsed(&settled),
+        "settled, the default fold applies again"
+    );
+}
+
+/// A pending permission still ends the group, so it keeps its own row — the
+/// one that escapes every fold — rather than sinking into a group's.
+#[test]
+fn a_permission_still_ends_a_group_that_holds_thoughts() {
+    let items = [
+        ChatItem::UserText("q".into()),
+        tool("a", ToolStatusView::Completed),
+        think("asking"),
+        perm(false),
+        tool("b", ToolStatusView::Completed),
+    ];
+    let rows = project_all(&items);
+    assert_eq!(
+        tool_groups(&rows),
+        vec![(vec![1], vec![2]), (vec![4], vec![])]
     );
 }

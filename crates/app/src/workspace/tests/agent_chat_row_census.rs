@@ -144,7 +144,9 @@ fn row_reach(kind: &RowKind) -> Option<usize> {
         }
         // A group header stands for several items, so its reach is the last of
         // them, not the first.
-        RowKind::ToolGroupHeader { calls, .. } => calls.last().copied(),
+        RowKind::ToolGroupHeader {
+            calls, thoughts, ..
+        } => calls.last().copied().max(thoughts.last().copied()),
         RowKind::ThinkingGroupHeader {
             first_ix, count, ..
         } => Some(first_ix + count.saturating_sub(1)),

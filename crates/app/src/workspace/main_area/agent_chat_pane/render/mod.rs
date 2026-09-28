@@ -439,9 +439,19 @@ fn render_row(
         RowKind::ToolGroupHeader {
             gid,
             calls,
+            thoughts,
             collapsed,
-        } => tool_group_bar(this, gid, calls, *collapsed, row.filter_revealed, t, cx)
-            .into_any_element(),
+        } => tool_group_bar(
+            this,
+            gid,
+            calls,
+            thoughts,
+            *collapsed,
+            row.filter_revealed,
+            t,
+            cx,
+        )
+        .into_any_element(),
         RowKind::ThinkingGroupHeader {
             first_ix,
             count,
@@ -592,7 +602,7 @@ fn response_bar(
                 .next()
         })
     } else {
-        FoldHeader::with_title(category_segments(this, categories, cx))
+        FoldHeader::with_title(category_segments(this, categories, 0, cx))
     }
     .leading(agent_label(this, cx).into_any_element());
     // The filter's reveal sits left of the run's own counts, so the numbers that
@@ -735,9 +745,14 @@ fn abbreviate_tokens(n: u64) -> String {
 /// to the first N categories — a header that dropped a category silently would
 /// under-report what the group did. See [`category_segments`] for why the cut is
 /// a clip and not an ellipsis.
+///
+/// The thoughts between the calls close the title as one more segment, so a
+/// filter that keeps only thoughts reads as what it shows rather than as an
+/// empty tally.
 fn group_category_title(
     this: &AgentChatView,
     calls: &[usize],
+    thoughts: &[usize],
     filter_revealed: bool,
     cx: &Context<AgentChatView>,
 ) -> AnyElement {
@@ -746,16 +761,19 @@ fn group_category_title(
         calls.iter().copied(),
         filter_revealed,
     ));
-    category_segments(this, &tally, cx)
+    let thoughts = kept_thoughts(this, thoughts.iter().copied(), filter_revealed);
+    category_segments(this, &tally, thoughts, cx)
 }
 
 /// A tally rendered as one icon-and-count segment per category, separated and
-/// most-numerous first. Shared by the two bars that carry one — they differ in
-/// *what* they count (a group's own calls, filter-aware; a turn's top-level
-/// calls, filter-blind) but not in how it reads.
+/// most-numerous first, then a thought segment when `thoughts` is non-zero.
+/// Shared by the two bars that carry one — they differ in *what* they count (a
+/// group's own calls, filter-aware; a turn's top-level calls, filter-blind) but
+/// not in how it reads.
 fn category_segments(
     this: &AgentChatView,
     tally: &[(crate::transcript::tool_category::ToolCategory, usize)],
+    thoughts: usize,
     cx: &Context<AgentChatView>,
 ) -> AnyElement {
     let fg = this.dim(theme::agent_chat_fg_muted(cx));
@@ -777,7 +795,18 @@ fn category_segments(
         .flex()
         .flex_row()
         .items_center();
-    for (ix, (category, count)) in tally.iter().copied().enumerate() {
+    let segments = tally
+        .iter()
+        .map(|&(category, count)| {
+            (
+                category_icon(category),
+                s::agent_chat_group_category(category.token(), count),
+            )
+        })
+        .chain(
+            (thoughts > 0).then(|| (thought_icon(), s::agent_chat_thinking_group_count(thoughts))),
+        );
+    for (ix, (icon, label)) in segments.enumerate() {
         if ix > 0 {
             row = row.child(
                 div()
@@ -796,16 +825,8 @@ fn category_segments(
                 .gap(px(theme::GAP_SM))
                 .text_color(fg)
                 .text_size(font_size)
-                .child(
-                    Icon::empty()
-                        .path(category_icon(category))
-                        .xsmall()
-                        .text_color(fg),
-                )
-                .child(SharedString::from(s::agent_chat_group_category(
-                    category.token(),
-                    count,
-                ))),
+                .child(Icon::empty().path(icon).xsmall().text_color(fg))
+                .child(SharedString::from(label)),
         );
     }
     div()
@@ -814,6 +835,13 @@ fn category_segments(
         .pr(px(theme::AGENT_CHAT_TRAILING_GAP))
         .child(row)
         .into_any_element()
+}
+
+/// The glyph a thought carries wherever it stands for itself — a group bar's
+/// count, a thought row inside a group. The one a `Think` tool call wears, so
+/// reasoning reads the same whichever channel delivered it.
+fn thought_icon() -> SharedString {
+    tool::tool_kind_icon(daruda_acp::ToolKindView::Think)
 }
 
 /// The glyph for one tool category. A category an ACP kind can name borrows the
@@ -864,10 +892,10 @@ fn kept_tool_calls(
 /// on screen.
 fn kept_thoughts(
     this: &AgentChatView,
-    run: std::ops::Range<usize>,
+    indices: impl Iterator<Item = usize>,
     filter_revealed: bool,
 ) -> usize {
-    run.filter(|&k| {
+    indices.filter(|&k| {
         matches!(this.items.get(k), Some(item @ ChatItem::Thinking { .. }) if filter_revealed || this.filter_matches.matches(item))
     })
     .count()
@@ -876,10 +904,12 @@ fn kept_thoughts(
 /// Collapsible header for a consecutive tool-call group. The whole row toggles
 /// the group's fold (`FoldKey::ToolGroup`); shows a chevron, one segment per
 /// category the group holds, and a status-rollup glyph.
+#[allow(clippy::too_many_arguments)]
 fn tool_group_bar(
     this: &AgentChatView,
     gid: &str,
     calls: &[usize],
+    thoughts: &[usize],
     collapsed: bool,
     filter_revealed: bool,
     t: &theme::DarudaTheme,
@@ -896,10 +926,19 @@ fn tool_group_bar(
     // than a bare call count: a run's members are mixed in practice, and "5 tool
     // calls" says nothing about what happened. What it counts is the part of the
     // group's calls the display filter keeps.
-    let header =
-        FoldHeader::with_title(group_category_title(this, calls, filter_revealed, cx)).trailing(
-            fold_group_status_icon(rollup_glyph(rollup, t, this.dim_amount, cx)),
-        );
+    let header = FoldHeader::with_title(group_category_title(
+        this,
+        calls,
+        thoughts,
+        filter_revealed,
+        cx,
+    ))
+    .trailing(fold_group_status_icon(rollup_glyph(
+        rollup,
+        t,
+        this.dim_amount,
+        cx,
+    )));
     // Borderless section bar, same as the response bar.
     FoldRow::section(
         SharedString::from(format!("agent-chat-toolgroup-{gid}")),

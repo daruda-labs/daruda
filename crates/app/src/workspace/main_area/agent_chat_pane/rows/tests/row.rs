@@ -232,6 +232,7 @@ fn every_row_kind_declares_a_distinct_slot() {
         RowKind::ToolGroupHeader {
             gid: "g".into(),
             calls: Vec::new(),
+            thoughts: Vec::new(),
             collapsed: false,
         },
         RowKind::ThinkingGroupHeader {
@@ -260,6 +261,7 @@ fn same_slot_compares_key_not_hidden_or_payload() {
         RowKind::ToolGroupHeader {
             gid: "g".into(),
             calls: vec![1, 2],
+            thoughts: Vec::new(),
             collapsed: false,
         },
         false,
@@ -269,6 +271,7 @@ fn same_slot_compares_key_not_hidden_or_payload() {
         RowKind::ToolGroupHeader {
             gid: "g".into(),
             calls: vec![5, 6, 7],
+            thoughts: vec![8],
             collapsed: true,
         },
         true,

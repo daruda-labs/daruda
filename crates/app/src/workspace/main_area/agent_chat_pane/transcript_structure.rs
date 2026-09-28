@@ -91,25 +91,53 @@ impl<'a> TranscriptStructure<'a> {
         }
     }
 
+    /// Whether the item at `ix` is a thought with something in it — the one
+    /// non-call item a tool run carries as a member.
+    pub(super) fn is_thought(&self, ix: usize) -> bool {
+        matches!(self.items.get(ix), Some(item @ ChatItem::Thinking { .. }) if !is_bodyless(item))
+    }
+
     /// The stretch of top-level tool calls beginning at `start`, bounded by
-    /// `limit`. It ends at the first item that owns a row and is not one of
-    /// them — an item the walk passes over is spanned, not a boundary, or two
-    /// cards the reader sees side by side would land in separate groups.
+    /// `limit`. It ends at the first item that owns a row and is neither one of
+    /// them nor a thought — an item the walk passes over is spanned, not a
+    /// boundary, or two cards the reader sees side by side would land in
+    /// separate groups.
+    ///
+    /// A thought after a call continues the run: agents narrate before nearly
+    /// every call, and ending the run there gave each call a group of its own.
+    /// The rule reads structure alone, never the display filter, so hiding the
+    /// thoughts cannot leave the run split around them.
     ///
     /// The range is what to walk, not what the group holds: ask
-    /// [`Self::group_calls`] for the members.
+    /// [`Self::group_members`] for the members.
     pub(super) fn tool_run(&self, start: usize, limit: usize) -> Range<usize> {
         let mut k = start + 1;
-        while k < limit && (!self.owns_a_row(k) || self.top_level_tool(k)) {
+        while k < limit && (!self.owns_a_row(k) || self.top_level_tool(k) || self.is_thought(k)) {
             k += 1;
         }
         start..k
     }
 
-    /// The calls a run's group holds — every row-owning item it spans, which by
-    /// [`Self::tool_run`]'s boundary is exactly its top-level tool calls.
+    /// The calls a run's group holds, without the thoughts between them.
     pub(super) fn group_calls(self, run: Range<usize>) -> impl Iterator<Item = usize> + Clone + 'a {
         run.filter(move |&ix| self.top_level_tool(ix))
+    }
+
+    /// The thoughts a run's group holds, without its calls.
+    pub(super) fn group_thoughts(
+        self,
+        run: Range<usize>,
+    ) -> impl Iterator<Item = usize> + Clone + 'a {
+        run.filter(move |&ix| self.is_thought(ix))
+    }
+
+    /// Every item that renders as one of the group's children, in transcript
+    /// order — by [`Self::tool_run`]'s boundary, its calls and its thoughts.
+    pub(super) fn group_members(
+        self,
+        run: Range<usize>,
+    ) -> impl Iterator<Item = usize> + Clone + 'a {
+        run.filter(move |&ix| self.owns_a_row(ix))
     }
 
     /// How many separate top-level tool runs `run` holds. One run means the
@@ -267,6 +295,60 @@ mod tests {
         let s = TranscriptStructure::new(&items, &h);
         assert_eq!(s.tool_run(0, items.len()), 0..3);
         assert_eq!(s.top_level_tool_runs(0..items.len()), 1);
+    }
+
+    fn think(text: &str) -> ChatItem {
+        ChatItem::Thinking {
+            text: text.to_owned(),
+            streaming: false,
+            message_id: None,
+        }
+    }
+
+    /// The shape agents now send before nearly every call: a thought after a
+    /// call is a member, so `U T U` is one run holding both calls.
+    #[test]
+    fn a_thought_after_a_call_continues_the_run() {
+        let items = [tool("a", None, false), think("why"), tool("b", None, false)];
+        let h = ToolHierarchy::build(&items);
+        let s = TranscriptStructure::new(&items, &h);
+        assert_eq!(s.tool_run(0, items.len()), 0..3);
+        assert_eq!(s.group_calls(0..3).collect::<Vec<_>>(), [0, 2]);
+        assert_eq!(s.group_thoughts(0..3).collect::<Vec<_>>(), [1]);
+        assert_eq!(s.group_members(0..3).collect::<Vec<_>>(), [0, 1, 2]);
+        assert_eq!(s.top_level_tool_runs(0..items.len()), 1);
+    }
+
+    /// A trailing thought joins the run it follows — while it streams, nothing
+    /// says what comes next, and moving it once the next item lands would shift
+    /// the row under the reader. A thought ahead of the first call is not a
+    /// member, and prose still ends the run.
+    #[test]
+    fn a_thought_joins_only_a_run_already_under_way() {
+        let trailing = [tool("a", None, false), think("next")];
+        let h = ToolHierarchy::build(&trailing);
+        let s = TranscriptStructure::new(&trailing, &h);
+        assert_eq!(s.tool_run(0, trailing.len()), 0..2);
+
+        let leading = [think("plan"), tool("a", None, false)];
+        let h = ToolHierarchy::build(&leading);
+        let s = TranscriptStructure::new(&leading, &h);
+        assert!(
+            !s.top_level_tool(0),
+            "a run starts at a call, never a thought"
+        );
+        assert_eq!(s.tool_run(1, leading.len()), 1..2);
+
+        let prose = [
+            tool("a", None, false),
+            think("t"),
+            asst(false),
+            tool("b", None, false),
+        ];
+        let h = ToolHierarchy::build(&prose);
+        let s = TranscriptStructure::new(&prose, &h);
+        assert_eq!(s.tool_run(0, prose.len()), 0..2, "prose ends the run");
+        assert_eq!(s.top_level_tool_runs(0..prose.len()), 2);
     }
 
     /// A range holding a live call reads active; the same range without one
