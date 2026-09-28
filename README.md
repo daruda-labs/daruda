@@ -80,7 +80,7 @@ packaging, see [CONTRIBUTING.md](CONTRIBUTING.md).
 |---|---|
 | macOS runtime | Primary supported target, Apple Silicon and Intel |
 | Linux | Builds and tests pass; GUI runtime still needs desktop verification |
-| Windows | Not ported yet |
+| Windows | x86_64 ZIP ships with in-place self-update; builds, tests, and a smoke launch pass in CI; GUI runtime still needs desktop verification |
 | ACP chat sessions | Shipped for configured ACP agents |
 | Claude Code integration | Status, usage, skills, tools, and task launching shipped |
 | Other agent integrations | Ongoing as each CLI exposes stable metadata |
@@ -89,7 +89,7 @@ packaging, see [CONTRIBUTING.md](CONTRIBUTING.md).
 
 - Provider-specific status, usage, skills, and tools for more agents
 - Linux desktop runtime verification
-- Windows platform port
+- Windows desktop runtime verification
 - Native app-identity notifications
 - Developer ID code-signing, notarization, and Homebrew Cask distribution
 - Kitty keyboard protocol, vi scrollback navigation, and image protocol support
