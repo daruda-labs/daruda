@@ -635,3 +635,27 @@ fn the_turn_tally_ignores_what_the_filter_hides() {
         .expect("the turn has a bar");
     assert_eq!(tally.iter().map(|(_, n)| *n).sum::<usize>(), 2);
 }
+
+/// Thoughts a filter hides from a group that still shows its calls count one
+/// block each, like the calls it hides; a group the filter empties counts once,
+/// thoughts included, because the reveal brings it back whole.
+#[test]
+fn thoughts_hidden_inside_a_tool_group_count_like_its_calls() {
+    use ToolStatusView::Completed;
+    let items = [
+        ChatItem::UserText("q".into()),
+        tool("a", Completed),
+        think("one"),
+        think("two"),
+        tool("b", Completed),
+        asst("done"),
+    ];
+    let no_thoughts = project_filtered(&items, &DisplayFilter::from_tokens(["prose", "tools"]));
+    assert_eq!(filtered_count(&no_thoughts), 2);
+    let prose_only = project_filtered(&items, &DisplayFilter::from_tokens(["prose"]));
+    assert_eq!(
+        filtered_count(&prose_only),
+        1,
+        "the emptied group is one block"
+    );
+}

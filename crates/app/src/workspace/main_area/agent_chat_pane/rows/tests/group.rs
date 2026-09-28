@@ -1027,3 +1027,25 @@ fn the_next_call_leaves_a_trailing_thought_where_it_was() {
         assert!(before[b].same_slot(&after[a]));
     }
 }
+
+/// Folding the whole response still leaves a pending permission on screen, and
+/// a running call on screen through a folded response, whatever thoughts share
+/// their group.
+#[test]
+fn a_permission_and_a_live_call_escape_the_fold_beside_thoughts() {
+    let items = [
+        ChatItem::UserText("q".into()),
+        tool("a", ToolStatusView::Completed),
+        think("asking"),
+        perm(false),
+        tool("b", ToolStatusView::InProgress),
+        think("while b runs"),
+    ];
+    let rows = project_under(&items, &FoldState::with_mode(FoldPreset::Summary.mode()));
+    assert!(!row_of(&rows, 3).hidden, "the pending permission stays up");
+    assert!(!row_of(&rows, 4).hidden, "the running call stays up");
+    assert!(
+        row_of(&rows, 2).hidden,
+        "a settled thought folds with its group"
+    );
+}

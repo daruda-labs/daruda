@@ -55,11 +55,11 @@ impl FilteredAway {
 /// contributes to the tally: the group itself, or the calls taken from it.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 enum GroupFilter {
-    /// At least one call survives, so the group is on screen and what the
-    /// reveal brings back is each call the filter took from it.
+    /// At least one member — a call or a thought — survives, so the group is
+    /// on screen and what the reveal brings back is each member it took.
     Kept,
-    /// Every call is rejected, so the group is what the reveal brings back and
-    /// its calls are already covered by it.
+    /// Every member is rejected, so the group is what the reveal brings back
+    /// and its members are already covered by it.
     Emptied,
 }
 
@@ -860,8 +860,8 @@ impl<'items, 'rows> RunProjector<'items, 'rows> {
                 let structure = TranscriptStructure::new(items, hierarchy);
                 let grun = structure.tool_run(k, run.end);
                 k = grun.end;
-                // Resolved once: past this line the group is its calls, and
-                // `grun` is only the walk's cursor. Reading the span where a
+                // Resolved once: past this line the group is its calls and
+                // thoughts, and `grun` is only the walk's cursor. Reading the span where a
                 // member was meant is what put a nested child in two tallies.
                 let calls: Vec<usize> = structure.group_calls(grun.clone()).collect();
                 let thoughts: Vec<usize> = structure.group_thoughts(grun.clone()).collect();

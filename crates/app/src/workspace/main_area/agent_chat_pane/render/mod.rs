@@ -926,7 +926,7 @@ fn kept_thoughts(
 
 /// Collapsible header for a consecutive tool-call group. The whole row toggles
 /// the group's fold (`FoldKey::ToolGroup`); shows a chevron, one segment per
-/// category the group holds, and a status-rollup glyph.
+/// category the group holds, a thought count, and a status-rollup glyph.
 #[allow(clippy::too_many_arguments)]
 fn tool_group_bar(
     this: &AgentChatView,
@@ -948,7 +948,7 @@ fn tool_group_bar(
     // it shows in both states. It names each *category* the group holds rather
     // than a bare call count: a run's members are mixed in practice, and "5 tool
     // calls" says nothing about what happened. What it counts is the part of the
-    // group's calls the display filter keeps.
+    // group's calls and thoughts the display filter keeps.
     let header = FoldHeader::with_title(group_category_title(
         this,
         calls,

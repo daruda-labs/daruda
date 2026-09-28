@@ -564,3 +564,19 @@ fn the_stop_marker_is_always_a_top_level_row() {
         );
     }
 }
+
+/// The row a fold on an item resizes, for both kinds that render one item as a
+/// block — a toggled thought inside a group must remeasure its own row, not
+/// fall through to the tail.
+#[test]
+fn item_row_finds_a_thought_inside_a_group() {
+    let rows = [
+        RenderRow::at(RowKind::User(0), false, 0),
+        RenderRow::at(RowKind::AgentItem(1), false, 1),
+        RenderRow::at(RowKind::GroupThought(2), false, 2),
+        RenderRow::at(RowKind::ConclusionItem(3), false, 1),
+    ];
+    assert_eq!(item_row(&rows, 1), Some(1));
+    assert_eq!(item_row(&rows, 2), Some(2));
+    assert_eq!(item_row(&rows, 3), None, "a conclusion has no block fold");
+}
