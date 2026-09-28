@@ -9,6 +9,7 @@ use daruda_store::project::LaneRef;
 use gpui::Context;
 
 use crate::workspace::Workspace;
+use crate::workspace::lane_scoped::{GitLaneState, RefreshSlot};
 use crate::workspace::left_dock::git_ops::lock::GitLock;
 
 impl Workspace {
@@ -19,6 +20,52 @@ impl Workspace {
             daruda_store::project::LaneKind::Git { repo_root, .. } => Some(repo_root.clone()),
             daruda_store::project::LaneKind::Default => None,
         })
+    }
+
+    /// The working directory of a git lane, or `None` for a missing or
+    /// non-git one — which no git read axis reads.
+    pub(super) fn git_lane_path(&self, target: LaneRef) -> Option<PathBuf> {
+        self.lane_for(target)
+            .filter(|lane| lane.is_git())
+            .map(|lane| lane.path.clone())
+    }
+
+    /// Run one git read axis for `target`: claim the slot `slot` picks, run
+    /// `read` off the UI thread, then hand its result to `apply`, repaint, and
+    /// re-run through `rerun` once if a refresh was asked for meanwhile.
+    ///
+    /// Every axis goes through here, so the claim / release / re-run dance is
+    /// written once. A lane torn down while the read ran is detected here
+    /// too: the claim made its entry, so a missing one drops the result
+    /// rather than recreating the state teardown just removed.
+    pub(super) fn run_git_axis<R: Send + 'static>(
+        &mut self,
+        target: LaneRef,
+        slot: fn(&mut GitLaneState) -> &mut RefreshSlot,
+        read: impl FnOnce() -> R + Send + 'static,
+        apply: impl FnOnce(&mut Self, R, &mut Context<Self>) + 'static,
+        rerun: fn(&mut Self, LaneRef, &mut Context<Self>),
+        cx: &mut Context<Self>,
+    ) {
+        if !slot(&mut self.lane_scoped_mut(target).git).claim() {
+            return;
+        }
+        crate::workspace::spawn_helpers::spawn_bg_work_and_mutate(
+            cx,
+            read,
+            move |ws, result, cx| {
+                let Some(state) = ws.lane_scoped.get_mut(&target) else {
+                    return;
+                };
+                let pending = slot(&mut state.git).release();
+                apply(ws, result, cx);
+                cx.notify();
+                if pending {
+                    rerun(ws, target, cx);
+                }
+            },
+        )
+        .detach();
     }
 
     /// Refresh both git read axes for `target`. The entry point for the
@@ -43,29 +90,15 @@ impl Workspace {
     /// This is the axis a fetch, push or branch switch moves, and it reads
     /// refs only — cheap enough to run for every lane of a repo at once.
     pub(super) fn refresh_tracking(&mut self, target: LaneRef, cx: &mut Context<Self>) {
-        let Some(lane) = self.lane_for(target) else {
+        let Some(path) = self.git_lane_path(target) else {
             return;
         };
-        if !lane.is_git() {
-            return;
-        }
-        let path = lane.path.clone();
-        if !self.lane_scoped_mut(target).git.tracking_refresh.claim() {
-            return;
-        }
-
         let path_for_report = path.clone();
-        crate::workspace::spawn_helpers::spawn_bg_work_and_mutate(
-            cx,
+        self.run_git_axis(
+            target,
+            |git| &mut git.tracking_refresh,
             move || crate::lane::git::git_tracking(&path),
             move |ws, result, cx| {
-                // The claim made this lane's entry, so its absence means the
-                // lane was torn down while the read ran: drop the result
-                // rather than recreate the state teardown just removed.
-                let Some(state) = ws.lane_scoped.get_mut(&target) else {
-                    return;
-                };
-                let pending = state.git.tracking_refresh.release();
                 match result {
                     Ok(data) => {
                         // Propagate an external branch switch into the lane's
@@ -95,13 +128,10 @@ impl Workspace {
                         ws.report_error(report, cx);
                     }
                 }
-                cx.notify();
-                if pending {
-                    ws.refresh_tracking(target, cx);
-                }
             },
-        )
-        .detach();
+            Self::refresh_tracking,
+            cx,
+        );
     }
 
     /// Re-read tracking for every lane of `project`. Remote-tracking refs and
@@ -141,31 +171,20 @@ impl Workspace {
         target: LaneRef,
         cx: &mut Context<Self>,
     ) {
-        let Some(wt) = self.lane_for(target) else {
+        let Some(path) = self.git_lane_path(target) else {
             return;
         };
-        let path = wt.path.clone();
-        if !wt.is_git() {
-            return;
-        }
-
-        if !self.lane_scoped_mut(target).git.worktree_refresh.claim() {
-            return;
-        }
-
         let path_for_report = path.clone();
-        crate::workspace::spawn_helpers::spawn_bg_work_and_mutate(
-            cx,
+        self.run_git_axis(
+            target,
+            |git| &mut git.worktree_refresh,
             move || crate::lane::git::git_worktree_status(&path),
             move |ws, result, cx| {
-                // Absent entry = lane torn down mid-read; see `refresh_tracking`.
-                let Some(state) = ws.lane_scoped.get_mut(&target) else {
-                    return;
-                };
-                let pending = state.git.worktree_refresh.release();
                 match result {
                     Ok(data) => {
-                        state.git.worktree = Some(data);
+                        if let Some(state) = ws.lane_scoped.get_mut(&target) {
+                            state.git.worktree = Some(data);
+                        }
                         // Refreshed status updates the file badges.
                         ws.invalidate_visible_files_cache(target);
                         // …and each open file pane's own badge + mode strip,
@@ -191,13 +210,10 @@ impl Workspace {
                         ws.report_error(report, cx);
                     }
                 }
-                cx.notify();
-                if pending {
-                    ws.refresh_worktree_status(target, cx);
-                }
             },
-        )
-        .detach();
+            Self::refresh_worktree_status,
+            cx,
+        );
     }
 
     /// Propagate the live branch into the lane's recorded

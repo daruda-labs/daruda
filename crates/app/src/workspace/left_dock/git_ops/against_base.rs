@@ -63,27 +63,21 @@ impl Workspace {
         if target != self.active {
             return;
         }
-        let Some(lane) = self.lane_for(target) else {
+        let Some(path) = self.git_lane_path(target) else {
             return;
         };
-        if !lane.is_git() {
-            return;
-        }
-        let path = lane.path.clone();
         let base_name = self.base_name_for(target);
-        let state = self.lane_scoped_mut(target);
-        let branch = state.git.tracking.as_ref().and_then(|t| t.branch.clone());
-        let cached: Option<BaseTips> = match state.git.against_base.as_deref() {
+        let git = &self.lane_scoped_mut(target).git;
+        let branch = git.tracking.as_ref().and_then(|t| t.branch.clone());
+        let cached: Option<BaseTips> = match git.against_base.as_deref() {
             Some(Ok(found)) => Some(found.tips.clone()),
             _ => None,
         };
-        if !state.git.against_base_refresh.claim() {
-            return;
-        }
 
         let path_for_report = path.clone();
-        crate::workspace::spawn_helpers::spawn_bg_work_and_mutate(
-            cx,
+        self.run_git_axis(
+            target,
+            |git| &mut git.against_base_refresh,
             move || {
                 let tips = match base::base_tips(&path, base_name.as_deref(), branch.as_deref()) {
                     Ok(tips) => tips,
@@ -95,10 +89,6 @@ impl Workspace {
                 Read::Fresh(base::changes_since(&path, tips))
             },
             move |ws, read, cx| {
-                let pending = ws
-                    .lane_scoped
-                    .get_mut(&target)
-                    .is_some_and(|state| state.git.against_base_refresh.release());
                 if let Read::Fresh(result) = read {
                     if let Err(BaseProblem::Git(message)) = &result {
                         let report = ErrorReport::new(
@@ -112,19 +102,14 @@ impl Workspace {
                         .build();
                         ws.report_error(report, cx);
                     }
-                    // `get_mut`, not `lane_scoped_mut`: a read that outlived
-                    // its lane must not bring the lane's state back.
                     if let Some(state) = ws.lane_scoped.get_mut(&target) {
                         state.git.against_base = Some(std::sync::Arc::new(result));
-                        cx.notify();
                     }
                 }
-                if pending {
-                    ws.refresh_against_base(target, cx);
-                }
             },
-        )
-        .detach();
+            Self::refresh_against_base,
+            cx,
+        );
     }
 
     /// The project's base moved without any ref moving, so nothing else would
