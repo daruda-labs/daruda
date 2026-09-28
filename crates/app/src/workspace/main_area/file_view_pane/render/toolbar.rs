@@ -207,8 +207,8 @@ pub(super) fn render_file_viewer_toolbar(
     let ws_for_menu = cx.entity().downgrade();
 
     let file_status = fv.status();
-    let staged = fv.source.is_index();
-    let file_status_color = file_status.map(|status| git_status_color(status, staged, cx));
+    let committed = fv.source.reads_as_committed();
+    let file_status_color = file_status.map(|status| git_status_color(status, committed, cx));
 
     div()
         .flex()

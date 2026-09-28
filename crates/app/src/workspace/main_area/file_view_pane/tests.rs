@@ -379,3 +379,21 @@ fn a_range_pane_reads_its_pinned_status_and_a_live_pane_its_live_one() {
     fv.live_status = Some('M');
     assert_eq!(fv.status(), Some('M'));
 }
+
+/// The toolbar colours a pane's status by this answer and the against-base
+/// row colours the same file as committed; a range pane must agree with it.
+#[test]
+fn staged_and_range_panes_read_as_committed_and_the_working_tree_does_not() {
+    use super::DiffSource;
+    assert!(!DiffSource::WorkingTree.reads_as_committed());
+    assert!(DiffSource::Index.reads_as_committed());
+    assert!(
+        DiffSource::Range {
+            from: "m".into(),
+            to: "h".into(),
+            old_path: None,
+            status: 'M',
+        }
+        .reads_as_committed()
+    );
+}

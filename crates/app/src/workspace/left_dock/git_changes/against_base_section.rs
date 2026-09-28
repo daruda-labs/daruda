@@ -127,7 +127,8 @@ pub(super) fn base_file_row(
     let filename_color = t.text_muted;
     let diff_add_color = t.file_diff_stat_add;
     let diff_del_color = t.file_diff_stat_del;
-    // Committed changes read in the staged colour: they are past the index.
+    // Always committed — the answer `DiffSource::reads_as_committed` gives the
+    // range pane this row opens, so the row and its pane's badge agree.
     let status_color = git_status_color(file.status, true, cx);
 
     // The section is flat — no directory groups — so the row carries the

@@ -148,6 +148,12 @@ impl DiffSource {
         matches!(self, Self::WorkingTree | Self::Index)
     }
 
+    /// Whether the pane's change is already past the working tree — staged
+    /// or committed — which is what the status colour tells apart.
+    pub(in crate::workspace) fn reads_as_committed(&self) -> bool {
+        matches!(self, Self::Index | Self::Range { .. })
+    }
+
     /// The status letter fixed with a range's commits; `None` for a live pane.
     pub(in crate::workspace) fn pinned_status(&self) -> Option<char> {
         match self {
