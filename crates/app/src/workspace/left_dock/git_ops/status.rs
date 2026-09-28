@@ -31,8 +31,9 @@ impl Workspace {
     }
 
     /// Run one git read axis for `target`: claim the slot `slot` picks, run
-    /// `read` off the UI thread, then hand its result to `apply`, repaint, and
-    /// re-run through `rerun` once if a refresh was asked for meanwhile.
+    /// `read` off the UI thread, then hand its result to `apply` — which says
+    /// whether it changed anything worth a repaint — and re-run through
+    /// `rerun` once if a refresh was asked for meanwhile.
     ///
     /// Every axis goes through here, so the claim / release / re-run dance is
     /// written once. A lane torn down while the read ran is detected here
@@ -43,7 +44,7 @@ impl Workspace {
         target: LaneRef,
         slot: fn(&mut GitLaneState) -> &mut RefreshSlot,
         read: impl FnOnce() -> R + Send + 'static,
-        apply: impl FnOnce(&mut Self, R, &mut Context<Self>) + 'static,
+        apply: impl FnOnce(&mut Self, R, &mut Context<Self>) -> bool + 'static,
         rerun: fn(&mut Self, LaneRef, &mut Context<Self>),
         cx: &mut Context<Self>,
     ) {
@@ -58,8 +59,11 @@ impl Workspace {
                     return;
                 };
                 let pending = slot(&mut state.git).release();
-                apply(ws, result, cx);
-                cx.notify();
+                // A repaint is a whole-window render (Pitfall 10), so a read
+                // that found nothing new asks for none.
+                if apply(ws, result, cx) {
+                    cx.notify();
+                }
                 if pending {
                     rerun(ws, target, cx);
                 }
@@ -128,6 +132,7 @@ impl Workspace {
                         ws.report_error(report, cx);
                     }
                 }
+                true
             },
             Self::refresh_tracking,
             cx,
@@ -210,6 +215,7 @@ impl Workspace {
                         ws.report_error(report, cx);
                     }
                 }
+                true
             },
             Self::refresh_worktree_status,
             cx,

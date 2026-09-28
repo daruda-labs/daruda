@@ -89,23 +89,25 @@ impl Workspace {
                 Read::Fresh(base::changes_since(&path, tips))
             },
             move |ws, read, cx| {
-                if let Read::Fresh(result) = read {
-                    if let Err(BaseProblem::Git(message)) = &result {
-                        let report = ErrorReport::new(
-                            crate::surface::strings::error_git_against_base_failed(),
-                        )
-                        .severity(ErrorSeverity::Warning)
-                        .message(message.clone())
-                        .at(file!(), line!())
-                        .with_context("path", redact_home(&path_for_report))
-                        .dedup("git.against_base")
-                        .build();
-                        ws.report_error(report, cx);
-                    }
-                    if let Some(state) = ws.lane_scoped.get_mut(&target) {
-                        state.git.against_base = Some(std::sync::Arc::new(result));
-                    }
+                // Most ref events land here with both tips unmoved.
+                let Read::Fresh(result) = read else {
+                    return false;
+                };
+                if let Err(BaseProblem::Git(message)) = &result {
+                    let report =
+                        ErrorReport::new(crate::surface::strings::error_git_against_base_failed())
+                            .severity(ErrorSeverity::Warning)
+                            .message(message.clone())
+                            .at(file!(), line!())
+                            .with_context("path", redact_home(&path_for_report))
+                            .dedup("git.against_base")
+                            .build();
+                    ws.report_error(report, cx);
                 }
+                if let Some(state) = ws.lane_scoped.get_mut(&target) {
+                    state.git.against_base = Some(std::sync::Arc::new(result));
+                }
+                true
             },
             Self::refresh_against_base,
             cx,
