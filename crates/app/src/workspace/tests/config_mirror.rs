@@ -155,3 +155,76 @@ async fn a_second_window_still_sees_a_shared_setting_change(cx: &mut TestAppCont
         assert!(now.window_opacity != before.window_opacity);
     });
 }
+
+/// The behaviour behind the baseline test above: the second window really
+/// re-bakes its file panes. The file changes on disk under an open markdown
+/// pane — test builds run no file watcher — so only a reload shows the new
+/// text; the old code let the first window's global write tell the second
+/// window "unchanged", and its pane kept the old text.
+#[gpui::test]
+async fn a_second_window_reloads_its_file_panes_for_a_shared_setting(cx: &mut TestAppContext) {
+    use crate::workspace::main_area::file_view_pane::{DiffSource, FileViewMode, PaneFileContent};
+    use crate::workspace::main_area::tab_ops::OpenIntent;
+
+    let temp = tempfile::tempdir().unwrap();
+    let root = daruda_core::path::canonicalize(temp.path()).unwrap();
+    let doc = root.join("notes.md");
+    std::fs::write(&doc, "first draft\n").unwrap();
+    let (_wh1, first) = build_workspace(cx);
+    let (wh2, second) = build_workspace_with(
+        cx,
+        &Config::default(),
+        Some(daruda_store::project::Project::from_path(&root)),
+    );
+    cx.update_window(wh2.into(), |_, window, cx| {
+        second.update(cx, |ws, cx| {
+            let lane = ws.active.lane;
+            ws.open_pane_file_view(
+                lane,
+                doc.clone(),
+                DiffSource::WorkingTree,
+                FileViewMode::Preview,
+                OpenIntent::Commit,
+                window,
+                cx,
+            );
+        });
+    })
+    .unwrap();
+    cx.run_until_parked();
+    let shows = |cx: &mut TestAppContext, text: &str| {
+        second.read_with(cx, |ws, _| {
+            ws.active_runtime()
+                .panes
+                .iter()
+                .filter_map(|p| p.file_view())
+                .find(|fv| fv.path == doc)
+                .is_some_and(|fv| match &fv.content {
+                    PaneFileContent::LoadedMarkdown { raw_rows, .. } => {
+                        raw_rows.iter().any(|row| row.content.contains(text))
+                    }
+                    _ => false,
+                })
+        })
+    };
+    assert!(shows(cx, "first draft"), "the pane loaded the file");
+
+    std::fs::write(&doc, "second draft\n").unwrap();
+    let unchanged = Config::default();
+    second.update(cx, |ws, cx| ws.apply_config(&unchanged, cx));
+    cx.run_until_parked();
+    assert!(
+        shows(cx, "first draft"),
+        "a reload with nothing moved re-bakes nothing"
+    );
+
+    let mut changed = Config::default();
+    changed.font.editor.size += 3.0;
+    first.update(cx, |ws, cx| ws.apply_config(&changed, cx));
+    second.update(cx, |ws, cx| ws.apply_config(&changed, cx));
+    cx.run_until_parked();
+    assert!(
+        shows(cx, "second draft"),
+        "the second window re-baked its pane"
+    );
+}
