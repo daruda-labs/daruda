@@ -243,3 +243,35 @@ fn a_persisted_range_restores_ahead_of_the_staged_flag() {
         }
     );
 }
+
+/// A git read that outlives its lane — torn down while the read ran — must
+/// drop its result, not bring the lane's state back into the map.
+#[gpui::test]
+fn a_git_read_that_outlives_its_lane_does_not_revive_its_state(cx: &mut TestAppContext) {
+    if !crate::lane::git::has_git() {
+        return;
+    }
+    let temp = tempfile::tempdir().unwrap();
+    let root = feature_repo(temp.path());
+    let (_wh, ws) = build_workspace_with(
+        cx,
+        &daruda_config::Config::default(),
+        Some(daruda_store::project::Project::from_path(&root)),
+    );
+    ws.update(cx, |ws, cx| ws.reconcile_bootstrapped_lanes(cx));
+    cx.run_until_parked();
+    let target = ws.update(cx, |ws, cx| {
+        let target = ws.active;
+        ws.refresh_git_status(target, cx);
+        // What lane teardown does, while both reads are still in flight.
+        ws.lane_scoped.remove(&target);
+        target
+    });
+    cx.run_until_parked();
+    ws.read_with(cx, |ws, _| {
+        assert!(
+            !ws.lane_scoped.contains_key(&target),
+            "a late git read recreated the removed lane's state"
+        );
+    });
+}

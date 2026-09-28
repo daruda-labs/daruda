@@ -59,10 +59,13 @@ impl Workspace {
             cx,
             move || crate::lane::git::git_tracking(&path),
             move |ws, result, cx| {
-                let pending = ws
-                    .lane_scoped
-                    .get_mut(&target)
-                    .is_some_and(|state| state.git.tracking_refresh.release());
+                // The claim made this lane's entry, so its absence means the
+                // lane was torn down while the read ran: drop the result
+                // rather than recreate the state teardown just removed.
+                let Some(state) = ws.lane_scoped.get_mut(&target) else {
+                    return;
+                };
+                let pending = state.git.tracking_refresh.release();
                 match result {
                     Ok(data) => {
                         // Propagate an external branch switch into the lane's
@@ -70,7 +73,9 @@ impl Workspace {
                         // `Lane.kind.branch` instead of re-probing on render,
                         // so this refresh is the only path keeping it current.
                         ws.reconcile_lane_branch(target, data.branch.as_deref(), cx);
-                        ws.lane_scoped_mut(target).git.tracking = Some(data);
+                        if let Some(state) = ws.lane_scoped.get_mut(&target) {
+                            state.git.tracking = Some(data);
+                        }
                         // Every ref move lands here, so this is the one place
                         // the against-base axis needs to hear about it.
                         ws.refresh_against_base(target, cx);
@@ -153,13 +158,14 @@ impl Workspace {
             cx,
             move || crate::lane::git::git_worktree_status(&path),
             move |ws, result, cx| {
-                let pending = ws
-                    .lane_scoped
-                    .get_mut(&target)
-                    .is_some_and(|state| state.git.worktree_refresh.release());
+                // Absent entry = lane torn down mid-read; see `refresh_tracking`.
+                let Some(state) = ws.lane_scoped.get_mut(&target) else {
+                    return;
+                };
+                let pending = state.git.worktree_refresh.release();
                 match result {
                     Ok(data) => {
-                        ws.lane_scoped_mut(target).git.worktree = Some(data);
+                        state.git.worktree = Some(data);
                         // Refreshed status updates the file badges.
                         ws.invalidate_visible_files_cache(target);
                         // …and each open file pane's own badge + mode strip,
