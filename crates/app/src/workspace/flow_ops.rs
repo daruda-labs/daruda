@@ -538,7 +538,7 @@ impl Workspace {
         self.open_pane_file_view(
             self.active.lane,
             report.to_path_buf(),
-            /* staged = */ false,
+            crate::workspace::main_area::file_view_pane::DiffSource::WorkingTree,
             super::main_area::file_view_pane::FileViewMode::Preview,
             super::main_area::tab_ops::OpenIntent::Enter,
             window,

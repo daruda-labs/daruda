@@ -121,7 +121,7 @@ impl Workspace {
             git_changes_panel_focus: Handle(self.git_changes_panel_focus.clone()),
             focused_file_selection: self
                 .focused_file_view()
-                .map(|fv| (fv.lane_id, fv.path.clone(), fv.staged)),
+                .map(|fv| (fv.lane_id, fv.path.clone(), fv.source.clone())),
             git_changes_scroll_handle: Handle(self.git_changes_scroll_handle.clone()),
             lanes_scroll_handle: Handle(self.lanes_scroll_handle.clone()),
             git_commit_input: Handle(self.git_commit_input.clone()),

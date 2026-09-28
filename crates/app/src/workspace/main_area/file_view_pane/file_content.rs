@@ -14,7 +14,7 @@ use super::mermaid_theme::MermaidPalette;
 use super::visual::RasterImage;
 use super::word_diff::apply_word_diff;
 use super::{
-    FileViewMode, PaneFileContent, build_diff_rows, build_raw_rows, count_diff_stats,
+    DiffSource, FileViewMode, PaneFileContent, build_diff_rows, build_raw_rows, count_diff_stats,
     parse_diff_hunks,
 };
 use crate::path_ext::PathExt;
@@ -54,7 +54,7 @@ pub(in crate::workspace) fn load_file_content(
     wt_path: &std::path::Path,
     repo_root: Option<&std::path::Path>,
     path: &std::path::Path,
-    staged: bool,
+    source: &DiffSource,
     mode: FileViewMode,
     file_status: Option<char>,
     syntax_theme: &str,
@@ -65,14 +65,14 @@ pub(in crate::workspace) fn load_file_content(
             wt_path,
             repo_root,
             path,
-            staged,
+            source,
             syntax_theme,
             mermaid_palette,
         ),
         FileViewMode::Changes => LoadOutcome::plain(load_diff(
             repo_root,
             path,
-            staged,
+            source,
             file_status,
             syntax_theme,
             mermaid_palette.dark,
@@ -84,13 +84,13 @@ fn load_raw(
     wt_path: &std::path::Path,
     repo_root: Option<&std::path::Path>,
     path: &std::path::Path,
-    staged: bool,
+    source: &DiffSource,
     syntax_theme: &str,
     mermaid_palette: &MermaidPalette,
 ) -> LoadOutcome {
     use crate::ui::theme;
 
-    let bytes: Result<Vec<u8>, String> = if staged {
+    let bytes: Result<Vec<u8>, String> = if source.is_index() {
         if repo_root.is_none() {
             return LoadOutcome::plain(PaneFileContent::Error(
                 crate::surface::strings::file_viewer_err_no_git_repo(),
@@ -207,7 +207,7 @@ fn in_app_unstaged_diff(repo: &std::path::Path, path: &std::path::Path) -> Optio
 fn load_diff(
     repo_root: Option<&std::path::Path>,
     path: &std::path::Path,
-    staged: bool,
+    source: &DiffSource,
     file_status: Option<char>,
     syntax_theme: &str,
     diagram_dark: bool,
@@ -218,24 +218,22 @@ fn load_diff(
 
     // Untracked files produce no output from `git diff`; use --no-index to
     // show the file content as entirely new (all added lines).
-    let is_untracked = file_status == Some('?') && !staged;
+    let is_untracked = file_status == Some('?') && *source == DiffSource::WorkingTree;
     // `path` is absolute when opened from the left dock.  git diff accepts
     // absolute paths when run from the repo root, so we pass it directly.
     // For legacy relative paths from old session state, behaviour is unchanged.
     let repo = repo_root.expect("repo_root is Some: is_git() was checked at function entry");
-    let diff_result = if is_untracked {
-        crate::lane::git::git_diff_untracked(repo, path)
-    } else if !staged {
+    let diff_result = match source {
+        _ if is_untracked => crate::lane::git::git_diff_untracked(repo, path),
         // Unstaged diff computed in-app with the Histogram algorithm
         // (index ↔ working tree, matching `git diff` with no options).
         // Any failure (binary, unreadable, missing from index, path issue)
         // falls back to `git diff` so behaviour never regresses.
-        match in_app_unstaged_diff(repo, path) {
+        DiffSource::WorkingTree => match in_app_unstaged_diff(repo, path) {
             Some(text) => Ok(text),
-            None => crate::lane::git::git_diff(repo, path, staged),
-        }
-    } else {
-        crate::lane::git::git_diff(repo, path, staged)
+            None => crate::lane::git::git_diff(repo, path, false),
+        },
+        DiffSource::Index => crate::lane::git::git_diff(repo, path, true),
     };
 
     match diff_result {

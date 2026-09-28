@@ -167,7 +167,7 @@ mod tests {
         PaneFileView {
             lane_id: 0,
             path: "test.txt".into(),
-            staged: false,
+            source: crate::workspace::main_area::file_view_pane::DiffSource::WorkingTree,
             file_status: None,
             content: PaneFileContent::LoadedRaw,
             view_mode: FileViewMode::Raw,
@@ -195,7 +195,7 @@ mod tests {
         PaneFileView {
             lane_id: 0,
             path: "test.diff".into(),
-            staged: false,
+            source: crate::workspace::main_area::file_view_pane::DiffSource::WorkingTree,
             file_status: None,
             content: PaneFileContent::LoadedDiff {
                 rows_all,
@@ -215,7 +215,7 @@ mod tests {
         PaneFileView {
             lane_id: 0,
             path: "test.md".into(),
-            staged: false,
+            source: crate::workspace::main_area::file_view_pane::DiffSource::WorkingTree,
             file_status: None,
             content: PaneFileContent::LoadedMarkdown {
                 blocks: parse_markdown(markdown, "default", false),

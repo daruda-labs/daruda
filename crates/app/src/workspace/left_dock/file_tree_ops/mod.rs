@@ -595,7 +595,7 @@ impl Workspace {
         self.open_pane_file_view(
             wt_ref.lane,
             path,
-            /* staged = */ false,
+            crate::workspace::main_area::file_view_pane::DiffSource::WorkingTree,
             FileViewMode::Raw,
             intent,
             window,
@@ -952,7 +952,7 @@ impl Workspace {
             let abs = tree_root.join(&path);
             if self.step_into_open_file_view(
                 Some(abs.clone()),
-                /* staged = */ false,
+                crate::workspace::main_area::file_view_pane::DiffSource::WorkingTree,
                 window,
                 cx,
             ) {

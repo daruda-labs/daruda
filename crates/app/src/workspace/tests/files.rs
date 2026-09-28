@@ -158,7 +158,11 @@ async fn clicking_file_opens_raw_viewer_dedupes_and_selection_moves_independentl
         let fv = ws.focused_file_view().expect("file viewer open");
         assert_eq!(fv.lane_id, id.lane);
         assert_eq!(fv.path, std::path::PathBuf::from("a.txt"));
-        assert!(!fv.staged, "Files view always uses staged=false");
+        assert_eq!(
+            fv.source,
+            crate::workspace::main_area::file_view_pane::DiffSource::WorkingTree,
+            "Files view always shows the working tree"
+        );
         assert!(matches!(
             fv.view_mode,
             crate::workspace::main_area::file_view_pane::FileViewMode::Raw
@@ -1200,7 +1204,7 @@ async fn toggle_hide_unchanged_swaps_diff_context_in_the_toggled_pane(cx: &mut T
             ws.open_git_file_diff(
                 lane_id,
                 std::path::PathBuf::from("f.txt"),
-                false,
+                crate::workspace::main_area::file_view_pane::DiffSource::WorkingTree,
                 crate::workspace::main_area::tab_ops::OpenIntent::Preview,
                 window,
                 cx,
@@ -1342,7 +1346,7 @@ async fn toggle_hide_unchanged_for_pane_targets_the_clicked_pane_not_the_focused
             ws.open_git_file_diff(
                 lane_id,
                 std::path::PathBuf::from("f.txt"),
-                false,
+                crate::workspace::main_area::file_view_pane::DiffSource::WorkingTree,
                 crate::workspace::main_area::tab_ops::OpenIntent::Preview,
                 window,
                 cx,
@@ -1443,7 +1447,7 @@ async fn open_pane_file_view_asserts_lane_id_matches_active_lane(cx: &mut TestAp
             ws.open_pane_file_view(
                 bogus_lane,
                 std::path::PathBuf::from("a.txt"),
-                false,
+                crate::workspace::main_area::file_view_pane::DiffSource::WorkingTree,
                 crate::workspace::main_area::file_view_pane::FileViewMode::Raw,
                 crate::workspace::main_area::tab_ops::OpenIntent::Enter,
                 window,
@@ -1647,7 +1651,7 @@ async fn opening_a_changed_file_without_git_context_still_resolves_its_status(
             ws.open_pane_file_view(
                 id.lane,
                 abs.clone(),
-                false,
+                crate::workspace::main_area::file_view_pane::DiffSource::WorkingTree,
                 FileViewMode::Raw,
                 crate::workspace::main_area::tab_ops::OpenIntent::Enter,
                 window,
@@ -1677,7 +1681,7 @@ async fn opening_a_changed_file_without_git_context_still_resolves_its_status(
             ws.open_pane_file_view(
                 id.lane,
                 abs.clone(),
-                false,
+                crate::workspace::main_area::file_view_pane::DiffSource::WorkingTree,
                 FileViewMode::Raw,
                 crate::workspace::main_area::tab_ops::OpenIntent::Enter,
                 window,

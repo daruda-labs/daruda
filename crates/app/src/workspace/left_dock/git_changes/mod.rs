@@ -533,7 +533,11 @@ fn unified_file_row(
     entry: &UnifiedEntry,
     lane_id: LaneId,
     wt_paths: &LanePaths<'_>,
-    selected: Option<&(LaneId, PathBuf, bool)>,
+    selected: Option<&(
+        LaneId,
+        PathBuf,
+        crate::workspace::main_area::file_view_pane::DiffSource,
+    )>,
     is_cursor: bool,
     snap: &LeftDockSnapshot,
     cx: &mut Context<Dock>,
@@ -807,7 +811,7 @@ fn unified_file_row(
                                 ws.open_git_file_diff(
                                     lane_id,
                                     path_diff.clone(),
-                                    is_staged,
+                                    crate::workspace::main_area::file_view_pane::DiffSource::from_staged(is_staged),
                                     OpenIntent::Commit,
                                     window,
                                     cx,

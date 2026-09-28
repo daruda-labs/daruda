@@ -107,10 +107,36 @@ impl VisualRow {
 // Core types
 // ----------------------------------------------------------------
 
+/// Which snapshot of a file a pane shows — and, in Changes mode, what its
+/// diff compares. Part of a file pane's identity: the same path opened from
+/// two sources is two panes.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(in crate::workspace) enum DiffSource {
+    /// The file on disk; its diff is index → working tree.
+    WorkingTree,
+    /// The staged blob; its diff is HEAD → index.
+    Index,
+}
+
+impl DiffSource {
+    /// The source a Git Changes row names: its staged flag is the whole of it.
+    pub(in crate::workspace) fn from_staged(staged: bool) -> Self {
+        if staged {
+            Self::Index
+        } else {
+            Self::WorkingTree
+        }
+    }
+
+    pub(in crate::workspace) fn is_index(&self) -> bool {
+        matches!(self, Self::Index)
+    }
+}
+
 pub(in crate::workspace) struct PaneFileView {
     pub lane_id: LaneId,
     pub path: PathBuf,
-    pub staged: bool,
+    pub source: DiffSource,
     /// Git status character for the file (M / A / D / R / ? …).
     /// Shown as a badge in the toolbar. `None` when opened without git context.
     pub file_status: Option<char>,
@@ -356,14 +382,14 @@ impl PaneFileView {
     pub(super) fn loading(
         lane_id: LaneId,
         path: PathBuf,
-        staged: bool,
+        source: DiffSource,
         file_status: Option<char>,
         view_mode: FileViewMode,
     ) -> Self {
         Self {
             lane_id,
             path,
-            staged,
+            source,
             file_status,
             content: PaneFileContent::Loading,
             view_mode,
@@ -378,13 +404,13 @@ impl PaneFileView {
         &mut self,
         lane_id: LaneId,
         path: PathBuf,
-        staged: bool,
+        source: DiffSource,
         file_status: Option<char>,
         view_mode: FileViewMode,
     ) {
         self.lane_id = lane_id;
         self.path = path;
-        self.staged = staged;
+        self.source = source;
         self.file_status = file_status;
         self.content = PaneFileContent::Loading;
         self.view_mode = view_mode;

@@ -704,7 +704,7 @@ impl Pane {
             PaneContent::Terminal(_) | PaneContent::FlowGraph(_) => false,
             PaneContent::File(f) => {
                 use super::file_view_pane::PaneFileContent;
-                !f.view.staged
+                f.view.source == super::file_view_pane::DiffSource::WorkingTree
                     && matches!(f.view.content, PaneFileContent::LoadedRaw)
                     && *f.editor_state.read(cx).text() != f.saved_text
             }
@@ -719,7 +719,7 @@ impl Pane {
             PaneContent::Terminal(_) | PaneContent::FlowGraph(_) => false,
             PaneContent::File(f) => {
                 use super::file_view_pane::PaneFileContent;
-                !f.view.staged
+                f.view.source == super::file_view_pane::DiffSource::WorkingTree
                     && matches!(f.view.content, PaneFileContent::LoadedRaw)
                     && f.view.path.is_absolute()
             }

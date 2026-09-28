@@ -2,7 +2,7 @@ use gpui::{App, AppContext as _, Context, Window};
 
 use daruda_store::observability::error_report::{ErrorReport, ErrorSeverity};
 
-use super::file_view_pane::{CharPos, FileViewMode, PaneFileView};
+use super::file_view_pane::{CharPos, DiffSource, FileViewMode, PaneFileView};
 use super::pane::{FileContent, Pane, PaneContent, PaneSpawnError};
 use super::pane_tree::{PaneId, PaneLayout};
 use crate::path_ext::PathExt as _;
@@ -50,7 +50,7 @@ impl Workspace {
     pub(in crate::workspace) fn step_into_open_file_view(
         &mut self,
         path: Option<std::path::PathBuf>,
-        staged: bool,
+        source: DiffSource,
         window: &mut gpui::Window,
         cx: &mut Context<Self>,
     ) -> bool {
@@ -59,15 +59,15 @@ impl Workspace {
         };
         let open = self
             .focused_file_view()
-            .map(|fv| (fv.lane_id, fv.path.clone(), fv.staged));
-        let Some((lane_id, open_path, open_staged)) = open else {
+            .map(|fv| (fv.lane_id, fv.path.clone(), fv.source.clone()));
+        let Some((lane_id, open_path, open_source)) = open else {
             return false;
         };
-        // `staged` is part of the identity for the same reason
+        // `source` is part of the identity for the same reason
         // `find_existing_file_tab` keys on it: the staged diff and the working
         // copy of one path are two different panes, and Enter on one must not
         // walk into the other.
-        if lane_id != self.active.lane || open_path != path || open_staged != staged {
+        if lane_id != self.active.lane || open_path != path || open_source != source {
             return false;
         }
         let pane = self.active_runtime().focused_pane_id;
@@ -157,13 +157,13 @@ impl Workspace {
     }
 
     /// Find an existing single-pane tab showing the given file
-    /// (lane + path + staged). Returns `(tab_index, pane_id)`.
+    /// (lane + path + source). Returns `(tab_index, pane_id)`.
     /// Used by `open_file_in_new_tab` to dedupe.
     pub(in crate::workspace) fn find_existing_file_tab(
         &self,
         lane_id: daruda_store::project::LaneId,
         path: &std::path::Path,
-        staged: bool,
+        source: &DiffSource,
     ) -> Option<(usize, PaneId)> {
         for (i, tab) in self.active_runtime().tabs.iter().enumerate() {
             if let PaneLayout::Pane(pane_id) = tab.layout
@@ -171,7 +171,7 @@ impl Workspace {
                 && let Some(fv) = pane.file_view()
                 && fv.lane_id == lane_id
                 && daruda_core::path::same_path(&fv.path, path)
-                && fv.staged == staged
+                && fv.source == *source
             {
                 return Some((i, pane_id));
             }
@@ -189,7 +189,7 @@ impl Workspace {
         &mut self,
         lane_id: daruda_store::project::LaneId,
         path: std::path::PathBuf,
-        staged: bool,
+        source: DiffSource,
         file_status: Option<char>,
         view_mode: FileViewMode,
         window: &mut Window,
@@ -257,7 +257,7 @@ impl Workspace {
         Pane {
             id: pane_id,
             content: PaneContent::File(FileContent {
-                view: PaneFileView::loading(lane_id, path, staged, file_status, view_mode),
+                view: PaneFileView::loading(lane_id, path, source, file_status, view_mode),
                 scroll_handle: gpui::ScrollHandle::new(),
                 search_input,
                 focus_handle,
@@ -277,7 +277,7 @@ impl Workspace {
             return;
         };
         if !matches!(fc.view.content, PaneFileContent::LoadedRaw)
-            || fc.view.staged
+            || fc.view.source != DiffSource::WorkingTree
             || !fc.view.path.is_absolute()
         {
             return;

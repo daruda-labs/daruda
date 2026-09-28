@@ -115,7 +115,7 @@ impl Workspace {
         self.open_pane_file_view(
             lane_id,
             path,
-            false,
+            crate::workspace::main_area::file_view_pane::DiffSource::WorkingTree,
             crate::workspace::main_area::file_view_pane::FileViewMode::Raw,
             crate::workspace::main_area::tab_ops::OpenIntent::Enter,
             window,

@@ -120,10 +120,14 @@ pub(in crate::workspace) struct LeftDockSnapshot {
     /// the Git Changes body so its keyboard shortcuts fire only when
     /// the panel holds focus.
     pub git_changes_panel_focus: Handle<FocusHandle>,
-    /// `(lane, path, staged)` of the focused file viewer's pane,
+    /// `(lane, path, source)` of the focused file viewer's pane,
     /// or `None` when no file pane is focused. Dock rows render a
     /// "selected" background when this triple matches.
-    pub focused_file_selection: Option<(daruda_store::project::LaneId, std::path::PathBuf, bool)>,
+    pub focused_file_selection: Option<(
+        daruda_store::project::LaneId,
+        std::path::PathBuf,
+        crate::workspace::main_area::file_view_pane::DiffSource,
+    )>,
     pub git_changes_scroll_handle: Handle<gpui::UniformListScrollHandle>,
     /// Scroll handle for the Lanes view card list — the body below the
     /// (fixed) view header. Shared with its scrollbar thumb overlay.

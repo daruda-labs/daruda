@@ -113,7 +113,14 @@ impl Workspace {
             return;
         }
         self.set_git_changes_cursor(lane_id, repo_path, cx);
-        self.open_git_file_diff(lane_id, abs, staged, OpenIntent::Preview, window, cx);
+        self.open_git_file_diff(
+            lane_id,
+            abs,
+            crate::workspace::main_area::file_view_pane::DiffSource::from_staged(staged),
+            OpenIntent::Preview,
+            window,
+            cx,
+        );
     }
 
     /// Move the Git Changes keyboard cursor to the next or previous row.
@@ -196,7 +203,12 @@ impl Workspace {
     ) {
         self.left_dock_preview = None;
         let (path, staged) = self.git_changes_cursor_target();
-        if self.step_into_open_file_view(path, staged, window, cx) {
+        if self.step_into_open_file_view(
+            path,
+            crate::workspace::main_area::file_view_pane::DiffSource::from_staged(staged),
+            window,
+            cx,
+        ) {
             return;
         }
         self.open_git_changes_cursor(OpenIntent::Commit, window, cx);
@@ -256,7 +268,14 @@ impl Workspace {
             return;
         };
         let abs = wt.paths().from_git_status(&cursor);
-        self.open_git_file_diff(active_id, abs, is_staged, intent, window, cx);
+        self.open_git_file_diff(
+            active_id,
+            abs,
+            crate::workspace::main_area::file_view_pane::DiffSource::from_staged(is_staged),
+            intent,
+            window,
+            cx,
+        );
     }
 
     /// Toggle the collapse state of a directory group in the Git Changes

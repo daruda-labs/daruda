@@ -173,7 +173,7 @@ fn selected_text_for_copy_no_selection() {
     let fv = PaneFileView {
         lane_id: 0,
         path: "test.rs".into(),
-        staged: false,
+        source: super::DiffSource::WorkingTree,
         file_status: None,
         content: PaneFileContent::LoadedDiff {
             rows_all,

@@ -728,7 +728,9 @@ impl Workspace {
                         self.create_file_pane(
                             fc.lane_id,
                             fc.path.clone(),
-                            fc.staged,
+                            crate::workspace::main_area::file_view_pane::DiffSource::from_staged(
+                                fc.staged,
+                            ),
                             None,
                             deserialize_view_mode(fc.view_mode),
                             window,
@@ -1119,7 +1121,7 @@ fn serialize_pane_content(
         return Content::File(daruda_store::project::SerializedFileContent {
             lane_id: fv.lane_id,
             path: fv.path.clone(),
-            staged: fv.staged,
+            staged: fv.source.is_index(),
             view_mode: serialize_view_mode(fv.view_mode),
         });
     }

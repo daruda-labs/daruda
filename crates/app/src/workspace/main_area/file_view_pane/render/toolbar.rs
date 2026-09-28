@@ -189,7 +189,7 @@ pub(super) fn render_file_viewer_toolbar(
         .parent()
         .and_then(|p| p.file_name())
         .map(|n| n.to_string_lossy().into_owned());
-    let staged_badge = if fv.staged {
+    let staged_badge = if fv.source.is_index() {
         strings::file_viewer_staged_badge()
     } else {
         String::new()
@@ -207,7 +207,7 @@ pub(super) fn render_file_viewer_toolbar(
     let ws_for_menu = cx.entity().downgrade();
 
     let file_status = fv.file_status;
-    let staged = fv.staged;
+    let staged = fv.source.is_index();
     let file_status_color = file_status.map(|status| git_status_color(status, staged, cx));
 
     div()
@@ -392,10 +392,17 @@ fn toolbar_toggle_button(
 #[cfg(test)]
 mod tests {
     use super::{FileViewMode, PaneFileView, mode_options};
+    use crate::workspace::main_area::file_view_pane::DiffSource;
     use crate::workspace::main_area::file_view_pane::PaneFileContent;
 
     fn view(name: &str, file_status: Option<char>, view_mode: FileViewMode) -> PaneFileView {
-        let mut fv = PaneFileView::loading(0, name.into(), false, file_status, view_mode);
+        let mut fv = PaneFileView::loading(
+            0,
+            name.into(),
+            DiffSource::WorkingTree,
+            file_status,
+            view_mode,
+        );
         fv.content = PaneFileContent::LoadedRaw;
         fv
     }

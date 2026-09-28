@@ -14,7 +14,9 @@ use crate::workspace::main_area::file_view_pane::diff_editor::{
 };
 use crate::workspace::main_area::file_view_pane::file_content::LoadOutcome;
 use crate::workspace::main_area::file_view_pane::mermaid_theme::MermaidPalette;
-use crate::workspace::main_area::file_view_pane::{FileViewMode, PaneFileContent, PaneFileView};
+use crate::workspace::main_area::file_view_pane::{
+    DiffSource, FileViewMode, PaneFileContent, PaneFileView,
+};
 use crate::workspace::main_area::pane::FileContent;
 use crate::workspace::main_area::pane_tree::PaneId;
 use crate::workspace::main_area::tab_ops::{OpenIntent, PaneEntry};
@@ -29,7 +31,7 @@ struct FilePaneLoadRequest {
     pane_id: PaneId,
     owner: LaneRef,
     path: PathBuf,
-    staged: bool,
+    source: DiffSource,
     mode: FileViewMode,
     file_status: Option<char>,
 }
@@ -40,7 +42,7 @@ impl FilePaneLoadRequest {
             pane_id,
             owner,
             path: view.path.clone(),
-            staged: view.staged,
+            source: view.source.clone(),
             mode: view.view_mode,
             file_status: view.file_status,
         }
@@ -49,7 +51,7 @@ impl FilePaneLoadRequest {
     fn matches_view(&self, view: &PaneFileView) -> bool {
         view.lane_id == self.owner.lane
             && view.path == self.path
-            && view.staged == self.staged
+            && view.source == self.source
             && view.view_mode == self.mode
     }
 }
@@ -271,7 +273,7 @@ impl Workspace {
         &mut self,
         lane_id: LaneId,
         path: PathBuf,
-        staged: bool,
+        source: DiffSource,
         intent: OpenIntent,
         window: &mut gpui::Window,
         cx: &mut Context<Self>,
@@ -280,7 +282,7 @@ impl Workspace {
         self.open_pane_file_view(
             lane_id,
             path,
-            staged,
+            source,
             FileViewMode::Changes,
             intent,
             window,
@@ -317,7 +319,7 @@ impl Workspace {
         &mut self,
         lane_id: LaneId,
         path: PathBuf,
-        staged: bool,
+        source: DiffSource,
         initial_mode: FileViewMode,
         intent: OpenIntent,
         window: &mut gpui::Window,
@@ -328,7 +330,7 @@ impl Workspace {
         let file_status = self.git_status_for_path(owner, &path);
 
         // Always dedupe: clicking the same file activates its existing tab.
-        if let Some((tab_idx, pane_id)) = self.find_existing_file_tab(lane_id, &path, staged) {
+        if let Some((tab_idx, pane_id)) = self.find_existing_file_tab(lane_id, &path, &source) {
             // Re-stamp the tab being reused. It was opened against an older
             // the lane's cached status, and the toolbar's mode strip reads
             // `file_status` to decide whether Changes is offered at all.
@@ -379,7 +381,7 @@ impl Workspace {
                 fc.view.replace_with_loading(
                     lane_id,
                     path.clone(),
-                    staged,
+                    source,
                     file_status,
                     effective_mode,
                 );
@@ -421,7 +423,7 @@ impl Workspace {
         let pane = self.create_file_pane(
             lane_id,
             path.clone(),
-            staged,
+            source,
             file_status,
             effective_mode,
             window,
@@ -481,7 +483,7 @@ impl Workspace {
         let pane = self.create_file_pane(
             lane_id,
             path.clone(),
-            /* staged = */ false,
+            DiffSource::WorkingTree,
             /* file_status = */ None,
             effective_mode,
             window,
@@ -805,7 +807,7 @@ impl Workspace {
 
     /// Spawn a background task to load file content for the given mode
     /// and update the matching file pane's `content` on completion. The
-    /// pane is identified by id and validated against `(lane_id, path, staged,
+    /// pane is identified by id and validated against `(lane_id, path, source,
     /// mode)` — if no pane still matches when the load returns (because the
     /// user switched mode or closed the tab), the result is dropped.
     fn load_pane_file_content(&mut self, request: FilePaneLoadRequest, cx: &mut Context<Self>) {
@@ -839,7 +841,7 @@ impl Workspace {
                     &wt_path,
                     repo_root.as_deref(),
                     &path_bg,
-                    request_for_load.staged,
+                    &request_for_load.source,
                     request_for_load.mode,
                     request_for_load.file_status,
                     &syntax_theme,
