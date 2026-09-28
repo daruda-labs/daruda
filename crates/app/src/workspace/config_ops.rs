@@ -2,7 +2,6 @@ use gpui::{Context, Window};
 
 use crate::surface::strings as s;
 use crate::workspace::Workspace;
-use crate::workspace::main_area::agent_chat_pane::transcript_defaults::TranscriptDefaults;
 
 impl Workspace {
     /// Re-resolve the live store with this workspace's project overlay and
@@ -53,279 +52,25 @@ impl Workspace {
     /// swap out avoids Workspace tests (built without the full
     /// `gpui_component::init` chain) painting into uninitialised Globals.
     pub fn apply_config(&mut self, config: &daruda_config::Config, cx: &mut Context<Self>) {
-        // A config reload may create/remove the active project's config
-        // layer; drop the memo so the status-bar dot re-stats on next render.
-        self.cached_project_config = None;
-        // Single source of truth for the config → terminal-config mapping;
-        // its resolved colors patch live panes so all panes match.
-        self.terminal_config = terminal_config_from(config);
-        let fg = self.terminal_config.default_fg;
-        let bg = self.terminal_config.default_bg;
-        let pal = self
-            .terminal_config
-            .palette
-            .expect("terminal_config_from always sets palette");
-        self.font_family = config.font.terminal.family.clone();
-        self.shell_program = config.shell.program.clone();
-        let syntax_theme_changed = self.syntax_theme != config.file_viewer.syntax_theme;
-        self.syntax_theme = config.file_viewer.syntax_theme.clone();
-        self.agent_content_width =
-            crate::workspace::main_area::agent_chat_pane::view::ChatContentWidth::from_config(
-                config.agent.use_reading_width,
-            );
-        self.file_viewer_preview_tab = config.file_viewer.preview_tab;
-        // The agent-chat diff header names this editor in its open-externally
-        // tooltip, so a change has to dirty those cached views below.
-        let preferred_editor_changed = self.preferred_editor != config.editor.preferred;
-        self.preferred_editor = config.editor.preferred.clone();
-        self.notifications = config.notifications.clone();
-        let telegram_recipient_changed =
-            self.telegram.authorized_chat_id != config.telegram.authorized_chat_id;
-        self.telegram = config.telegram.clone();
-        self.clipboard = config.clipboard.clone();
-        self.agent = config.agent.clone();
-        self.agents = config.resolved_agents();
-        self.flow_config = config.flow.clone();
-        self.session_hosts = config.session_hosts.clone();
-        self.session_host_tombstones = config.session_host_tombstones.clone();
-        let agent_names = self
-            .agents
-            .iter()
-            .map(|agent| (agent.id.clone(), agent.name.clone()))
-            .collect::<Vec<_>>();
-        // The transcript defaults a pane follows until the user overrides them.
-        // Applied here as well as at pane creation so an open, untouched pane
-        // tracks a config edit live instead of waiting for the next restore.
-        // Resolved per pane, not once: the defaults are per-agent, and a window
-        // holds panes on different agents.
-        for (_, view) in self.every_agent_chat() {
-            view.update(cx, |view, cx| {
-                if telegram_recipient_changed {
-                    view.permissions_told_to_phone.clear();
-                }
-                let name = agent_names
-                    .iter()
-                    .find(|(id, _)| id == &view.agent_id)
-                    .map(|(_, name)| name.clone())
-                    .unwrap_or_else(|| view.agent_id.clone());
-                if view.agent_name != name {
-                    view.agent_name = name;
-                    cx.notify();
-                }
-                let defaults = TranscriptDefaults::resolve(
-                    self.agents.iter().find(|a| a.id == view.agent_id),
-                    self.agent_content_width,
-                );
-                view.reseed_transcript_defaults(&defaults, cx);
-            });
-        }
-        // Keep the `InputState`'s auto-grow cap in sync with the new
-        // `input_max_rows` value (also baked in at construction). No
-        // `&mut Window` needed, so it runs inline.
-        let new_max_rows = usize::from(config.agent.input_max_rows);
-        self.terminal_input
-            .update(cx, |s, _cx| s.set_auto_grow(1, new_max_rows));
-        // Resync dock height after the cap change (idempotent via guard).
-        // `apply_config` runs inside `observe_global` with no `&mut Window`
-        // and the workspace already borrowed, so re-enter via
-        // `try_update_workspace_window` + `window.defer` to push the
-        // entity-borrowing work past the current observe callback's borrow.
-        let handle = self.window_handle;
-        let ws_weak = cx.weak_entity();
-        crate::windows::try_update_workspace_window(
-            handle,
-            cx,
-            "apply_config.resync_dock",
-            |window, cx| {
-                window.defer(cx, move |window, cx| {
-                    if let Some(ws) = ws_weak.upgrade() {
-                        ws.update(cx, |ws, cx| ws.adapt_dock_to_input_lines(window, cx));
-                    }
-                });
-            },
-        );
-        self.claude.usage_poll = config.usage.poll.clone();
-
-        // Patch all existing pane views (font + colors + opacity) across
-        // every lane, not just the active one, so parked terminals update
-        // too. `set_font` / `apply_font_settings` only invalidate the shape
-        // cache (no resize / `last_viewport` read), so a parked never-painted
-        // view is safe — geometry recomputes on its next paint.
-        let font = daruda_terminal::terminal_font_with_family(&self.font_family);
-        for pane in self
-            .main_area
-            .runtimes
-            .values()
-            .flat_map(|rt| rt.panes.iter())
-        {
-            let Some(view) = pane.terminal_view() else {
-                continue;
-            };
-            view.update(cx, |view, _cx| {
-                view.set_font(font.clone());
-                view.apply_font_settings(
-                    config.font.terminal.size,
-                    config.font.terminal.line_height,
-                    config.font.terminal.cell_width,
-                );
-                view.apply_colors(fg, bg, &pal);
-                view.set_background_alpha(config.window.opacity);
-                view.apply_inset(config.font.terminal.inset_x, config.font.terminal.inset_y);
-                view.set_default_cursor_shape(cursor_shape_from(config.cursor.style));
-                view.apply_input_settings(
-                    config.shell.natural_text_editing,
-                    config.clipboard.streaming_max_bytes,
-                );
-            });
-        }
-        let new_mirrors = crate::workspace::ConfigMirrors::from_config(
-            config,
-            crate::ui::theme::painted_ui_preset(&config.theme.ui_preset, cx),
-        );
-        let filter_changed = self.mirrors.files_show_hidden != new_mirrors.files_show_hidden
-            || self.mirrors.files_use_gitignore != new_mirrors.files_use_gitignore;
-        let icon_changed = self.mirrors.files_icon_color_mode != new_mirrors.files_icon_color_mode;
-        let panels_changed = self.mirrors.panels_grid_columns != new_mirrors.panels_grid_columns;
-        let theme_changed = self.mirrors.painted_ui_preset != new_mirrors.painted_ui_preset;
-        // Diffed against this window's own mirror, not the app-wide globals
-        // written below: those are shared, so after the first window writes
-        // them every later one would read "unchanged".
-        let (was, now) = (&self.mirrors.shared_surface, &new_mirrors.shared_surface);
-        let editor_font_changed = was.editor_font != now.editor_font;
-        let agent_chat_font_changed = was.agent_chat_font != now.agent_chat_font;
-        let agent_chat_reading_width_changed =
-            was.agent_chat_reading_width != now.agent_chat_reading_width;
-        let bg_alpha_changed = was.window_opacity != now.window_opacity;
-        let bg_color_changed = was.terminal_bg != now.terminal_bg;
-        let fg_color_changed = was.terminal_fg != now.terminal_fg;
-        self.mirrors = new_mirrors;
-        if filter_changed {
-            let refs: Vec<_> = self.lane_file_tree_refs().collect();
-            for wt_ref in refs {
-                self.invalidate_visible_files_cache(wt_ref);
-            }
-        }
-        if icon_changed || panels_changed {
-            cx.notify();
-            // `panels_grid_columns` is a BottomDockSnapshot source — no left-dock notify needed.
-        }
-        if filter_changed || icon_changed {
-            // These are `LeftDockSnapshot` sources picked up by the render
-            // staging diff on the next render, so a plain `cx.notify()` suffices.
-            cx.notify();
-        }
-        // Mirror editor metrics before a file-pane reload so both raw and
-        // preview renderers read one fresh domain configuration.
-        crate::ui::theme::set_editor_font_family(cx, config.font.editor.family.clone());
-        crate::ui::theme::set_editor_font_size(cx, config.font.editor.size);
-        crate::ui::theme::set_editor_line_height(cx, config.font.editor.line_height);
-
-        // Agent-chat views are cached child entities, so any prose metric
-        // change must explicitly dirty them below.
-        crate::ui::theme::set_agent_chat_font_family(cx, config.font.agent_chat.family.clone());
-        crate::ui::theme::set_agent_chat_font_size(cx, config.font.agent_chat.size);
-        crate::ui::theme::set_agent_chat_line_height(cx, config.font.agent_chat.line_height);
-        crate::ui::theme::set_agent_chat_reading_width(cx, config.agent.reading_width);
-
-        // Background opacity drives both the terminal pane fill (pushed above)
-        // and the agent-chat pane background. Mirror to the GPUI-side global;
-        // on change, dirty each cached `AgentChatView` below so its `.cached()`
-        // subtree repaints with the new alpha.
-        crate::ui::theme::set_background_alpha(cx, config.window.opacity);
-        // Mirror the terminal fg/bg so the agent-chat pane tracks the terminal
-        // color theme on a live reload too.
-        crate::ui::theme::set_agent_chat_bg(cx, bg.r, bg.g, bg.b);
-        crate::ui::theme::set_agent_chat_fg(cx, fg.r, fg.g, fg.b);
-        let agent_chat_mermaid_theme_changed = bg_color_changed || fg_color_changed;
-        let file_viewer_pane_palette_changed = bg_color_changed || fg_color_changed;
-        // The agent-chat diff embeds bake their palette in, so they only track a
-        // palette move through a rebuild. Both of these move it: the terminal
-        // mirror feeds the hunk-row colours *and* the light/dark syntax variant,
-        // and the syntax-palette name feeds the token colours. A UI-preset switch
-        // needs no entry here — it re-sets the `DarudaTheme` global, and each
-        // view's own observer covers that.
-        let agent_chat_diff_palette_changed =
-            agent_chat_mermaid_theme_changed || syntax_theme_changed;
-        if bg_alpha_changed
-            || agent_chat_mermaid_theme_changed
-            || agent_chat_font_changed
-            || agent_chat_reading_width_changed
-            || agent_chat_diff_palette_changed
-            || preferred_editor_changed
-        {
-            let syntax_theme = self.syntax_theme.clone();
-            let views: Vec<_> = self
-                .every_agent_chat()
-                .map(|(_, view)| view.clone())
-                .collect();
-            for view in views {
-                view.update(cx, |view, cx| {
-                    if agent_chat_mermaid_theme_changed {
-                        view.assets.clear_mermaid();
-                        view.reconcile_mermaid(
-                            !crate::ui::theme::agent_chat_syntax_is_light(cx),
-                            cx,
-                        );
-                    }
-                    if agent_chat_diff_palette_changed {
-                        // Push the new palette name before the pass reads it: an
-                        // idle pane sees no ACP event to carry it in.
-                        view.set_syntax_theme(&syntax_theme);
-                        view.reconcile_embeds_after_theme_change(cx);
-                    }
-                    if agent_chat_reading_width_changed && view.content_width.is_reading() {
-                        view.list_state.remeasure();
-                    }
-                    cx.notify();
-                });
-            }
-        }
-
-        // A UI-theme switch flips the syntax palette's light/dark variant.
-        // Reload open file views to recompute baked diff/markdown spans (and
-        // re-theme mermaid); raw editors recolour from the re-seeded theme.
-        if theme_changed {
-            self.reload_file_panes(cx);
-        }
-        // A syntax-palette switch re-seeds the editor highlight theme and
-        // recomputes baked diff/markdown spans by reloading open file panes.
-        if syntax_theme_changed {
-            crate::ui::theme::set_active_syntax_palette(
-                cx,
-                crate::ui::theme::SyntaxPalette::from_config_name(&self.syntax_theme),
-            );
-            self.reload_file_panes(cx);
-        }
-        // File-viewer pane chrome reads the terminal-mirrored fg/bg at render
-        // time, so the final workspace notify below is enough for toolbar /
-        // search-panel colour changes. Reload for baked content that captures
-        // the pane palette: Markdown raw highlighting / Mermaid rasters from
-        // bg, and diff hunk-header rows from bg + fg.
-        if file_viewer_pane_palette_changed && !theme_changed && !syntax_theme_changed {
-            self.reload_file_panes(cx);
-        }
-        // Reload for a standalone editor-font change, gated to avoid a
-        // double when a theme / syntax / background switch above already
-        // reloaded.
-        if editor_font_changed
-            && !theme_changed
-            && !syntax_theme_changed
-            && !file_viewer_pane_palette_changed
-        {
-            self.reload_file_panes(cx);
-        }
-        // Mirror for the notification-push freshness gate.
-        self.claude.stale_threshold_secs = config.claude_status.stale_threshold_secs;
-        let new_enabled = config.claude_status.enable;
-        if new_enabled != self.claude.claude_status_enabled {
-            self.claude.claude_status_enabled = new_enabled;
+        // What moved is read before anything is written: every pass below
+        // compares against the values this reload replaces.
+        let delta = self.config_delta(config, cx);
+        self.store_config_fields(config, delta.mirrors.clone());
+        self.apply_config_to_agent_chat_defaults(delta.telegram_recipient, cx);
+        self.apply_config_to_input_dock(config, cx);
+        self.apply_config_to_terminals(config, cx);
+        self.apply_config_to_file_tree(&delta, cx);
+        // The shared surface goes to the app-wide globals before anything
+        // that rebuilds against them — chat embeds and file panes.
+        self.write_shared_surface_globals(config, cx);
+        self.rebuild_agent_chat_for_config(&delta, cx);
+        self.rebuild_file_panes_for_config(&delta, cx);
+        if delta.claude_status_enabled {
             self.refresh_jsonl_watcher(cx);
         }
-        // Refresh locale-dependent widget strings. `apply_locale_str` runs
-        // before this method, so `rust_i18n::locale()` already reflects the
-        // new language here.
+        // `apply_locale_str` runs before this method, so `rust_i18n::locale()`
+        // already reflects the new language here.
         self.refresh_locale_strings(cx);
-
         cx.notify();
     }
 
@@ -499,7 +244,7 @@ pub(in crate::workspace) fn effective_config_for(
 }
 
 /// The terminal crate cannot see `daruda_config`, so the shape crosses here.
-fn cursor_shape_from(style: daruda_config::CursorStyle) -> daruda_terminal::CursorShape {
+pub(super) fn cursor_shape_from(style: daruda_config::CursorStyle) -> daruda_terminal::CursorShape {
     match style {
         daruda_config::CursorStyle::Block => daruda_terminal::CursorShape::Block,
         daruda_config::CursorStyle::Underline => daruda_terminal::CursorShape::Underline,

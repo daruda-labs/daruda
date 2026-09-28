@@ -17,6 +17,7 @@ mod claude_session_ops;
 mod claude_status_aggregate;
 pub(in crate::workspace) mod command;
 mod config_ops;
+mod config_passes;
 mod config_sync;
 mod control_flow_ops;
 mod control_lane_ops;
