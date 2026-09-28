@@ -225,7 +225,7 @@ pub(crate) fn schedule_capture(
             cx.background_executor().timer(SCENARIO_RENDER_DELAY).await;
             // Then one more, so anything that only settles on the frame after
             // it was measured is what the capture reads.
-            cx.update(|cx| force_repaint(cx));
+            cx.update(force_repaint);
             cx.background_executor().timer(SCENARIO_RENDER_DELAY).await;
 
             let out = match theme {
