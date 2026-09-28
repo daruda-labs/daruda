@@ -198,6 +198,17 @@ impl Workspace {
         let icon_changed = self.mirrors.files_icon_color_mode != new_mirrors.files_icon_color_mode;
         let panels_changed = self.mirrors.panels_grid_columns != new_mirrors.panels_grid_columns;
         let theme_changed = self.mirrors.ui_preset != new_mirrors.ui_preset;
+        // Diffed against this window's own mirror, not the app-wide globals
+        // written below: those are shared, so after the first window writes
+        // them every later one would read "unchanged".
+        let (was, now) = (&self.mirrors.shared_surface, &new_mirrors.shared_surface);
+        let editor_font_changed = was.editor_font != now.editor_font;
+        let agent_chat_font_changed = was.agent_chat_font != now.agent_chat_font;
+        let agent_chat_reading_width_changed =
+            was.agent_chat_reading_width != now.agent_chat_reading_width;
+        let bg_alpha_changed = was.window_opacity != now.window_opacity;
+        let bg_color_changed = was.terminal_bg != now.terminal_bg;
+        let fg_color_changed = was.terminal_fg != now.terminal_fg;
         self.mirrors = new_mirrors;
         if filter_changed {
             let refs: Vec<_> = self.lane_file_tree_refs().collect();
@@ -216,44 +227,26 @@ impl Workspace {
         }
         // Mirror editor metrics before a file-pane reload so both raw and
         // preview renderers read one fresh domain configuration.
-        let editor_font_changed = crate::ui::theme::editor_font_family(cx).as_ref()
-            != config.font.editor.family.as_str()
-            || (crate::ui::theme::editor_font_size(cx) - config.font.editor.size).abs()
-                > f32::EPSILON
-            || (crate::ui::theme::editor_line_height(cx) - config.font.editor.line_height).abs()
-                > f32::EPSILON;
         crate::ui::theme::set_editor_font_family(cx, config.font.editor.family.clone());
         crate::ui::theme::set_editor_font_size(cx, config.font.editor.size);
         crate::ui::theme::set_editor_line_height(cx, config.font.editor.line_height);
 
         // Agent-chat views are cached child entities, so any prose metric
         // change must explicitly dirty them below.
-        let agent_chat_font_changed = crate::ui::theme::agent_chat_font_family(cx).as_ref()
-            != config.font.agent_chat.family.as_str()
-            || (crate::ui::theme::agent_chat_font_size(cx) - config.font.agent_chat.size).abs()
-                > f32::EPSILON
-            || (crate::ui::theme::agent_chat_line_height(cx) - config.font.agent_chat.line_height)
-                .abs()
-                > f32::EPSILON;
         crate::ui::theme::set_agent_chat_font_family(cx, config.font.agent_chat.family.clone());
         crate::ui::theme::set_agent_chat_font_size(cx, config.font.agent_chat.size);
         crate::ui::theme::set_agent_chat_line_height(cx, config.font.agent_chat.line_height);
-        let agent_chat_reading_width_changed =
-            (crate::ui::theme::agent_chat_reading_width(cx) - config.agent.reading_width).abs()
-                > f32::EPSILON;
         crate::ui::theme::set_agent_chat_reading_width(cx, config.agent.reading_width);
 
         // Background opacity drives both the terminal pane fill (pushed above)
         // and the agent-chat pane background. Mirror to the GPUI-side global;
         // on change, dirty each cached `AgentChatView` below so its `.cached()`
         // subtree repaints with the new alpha.
-        let bg_alpha_changed =
-            (crate::ui::theme::background_alpha(cx) - config.window.opacity).abs() > f32::EPSILON;
         crate::ui::theme::set_background_alpha(cx, config.window.opacity);
         // Mirror the terminal fg/bg so the agent-chat pane tracks the terminal
         // color theme on a live reload too.
-        let bg_color_changed = crate::ui::theme::set_agent_chat_bg(cx, bg.r, bg.g, bg.b);
-        let fg_color_changed = crate::ui::theme::set_agent_chat_fg(cx, fg.r, fg.g, fg.b);
+        crate::ui::theme::set_agent_chat_bg(cx, bg.r, bg.g, bg.b);
+        crate::ui::theme::set_agent_chat_fg(cx, fg.r, fg.g, fg.b);
         let agent_chat_mermaid_theme_changed = bg_color_changed || fg_color_changed;
         let file_viewer_pane_palette_changed = bg_color_changed || fg_color_changed;
         // The agent-chat diff embeds bake their palette in, so they only track a

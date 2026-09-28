@@ -120,3 +120,36 @@ async fn a_system_appearance_flip_leaves_an_explicit_preset_alone(cx: &mut TestA
         );
     });
 }
+
+/// Two windows, one settings change: each diffs against what *it* last
+/// applied. The shared-surface values are also written to app-wide globals,
+/// and diffing against those told only the first window anything moved —
+/// the rest skipped their file-pane reload and chat re-measure.
+#[gpui::test]
+async fn a_second_window_still_sees_a_shared_setting_change(cx: &mut TestAppContext) {
+    let (_wh1, first) = build_workspace(cx);
+    let (_wh2, second) = build_workspace(cx);
+    let before = second.read_with(cx, |ws, _| ws.mirrors.shared_surface.clone());
+
+    let mut changed = Config::default();
+    changed.font.editor.size += 3.0;
+    changed.font.agent_chat.size += 2.0;
+    changed.agent.reading_width += 40.0;
+    changed.window.opacity = 0.5;
+    first.update(cx, |ws, cx| ws.apply_config(&changed, cx));
+
+    second.read_with(cx, |ws, _| {
+        assert!(
+            ws.mirrors.shared_surface == before,
+            "another window's apply must not move this window's baseline"
+        );
+    });
+    second.update(cx, |ws, cx| ws.apply_config(&changed, cx));
+    second.read_with(cx, |ws, _| {
+        let now = &ws.mirrors.shared_surface;
+        assert!(now.editor_font != before.editor_font);
+        assert!(now.agent_chat_font != before.agent_chat_font);
+        assert!(now.agent_chat_reading_width != before.agent_chat_reading_width);
+        assert!(now.window_opacity != before.window_opacity);
+    });
+}

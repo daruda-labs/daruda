@@ -6,7 +6,7 @@
 
 use std::time::Duration;
 
-use daruda_config::{Config, IconColorMode, StatusBarConfig};
+use daruda_config::{Config, HexColor, IconColorMode, StatusBarConfig};
 use gpui::WindowAppearance;
 
 #[derive(Clone)]
@@ -57,6 +57,41 @@ pub(in crate::workspace) struct ConfigMirrors {
     /// Mirror of `daruda_config::AgentConfig::hidden_config_option_descriptions`.
     /// Filters which advertised session config options get an input-dock chip.
     pub hidden_config_option_descriptions: Vec<String>,
+
+    /// The values `apply_config` also writes to app-wide globals in
+    /// `crate::ui::theme`. Kept here so each window diffs against what *it*
+    /// last applied: every window writes the same global, so comparing
+    /// against the global tells only the first window that anything moved.
+    pub shared_surface: SharedSurface,
+}
+
+/// The config slice mirrored into app-wide `crate::ui::theme` globals; see
+/// [`ConfigMirrors::shared_surface`]. Each field gates a rebuild in
+/// `apply_config`, so equality is the whole contract.
+#[derive(Clone, PartialEq)]
+pub(in crate::workspace) struct SharedSurface {
+    pub editor_font: (String, f32, f32),
+    pub agent_chat_font: (String, f32, f32),
+    pub agent_chat_reading_width: f32,
+    pub window_opacity: f32,
+    pub terminal_fg: HexColor,
+    pub terminal_bg: HexColor,
+}
+
+impl SharedSurface {
+    fn from_config(config: &Config) -> Self {
+        let editor = &config.font.editor;
+        let chat = &config.font.agent_chat;
+        let colors = config.effective_colors();
+        Self {
+            editor_font: (editor.family.clone(), editor.size, editor.line_height),
+            agent_chat_font: (chat.family.clone(), chat.size, chat.line_height),
+            agent_chat_reading_width: config.agent.reading_width,
+            window_opacity: config.window.opacity,
+            terminal_fg: colors.foreground,
+            terminal_bg: colors.background,
+        }
+    }
 }
 
 impl ConfigMirrors {
@@ -76,6 +111,7 @@ impl ConfigMirrors {
                 .agent
                 .hidden_config_option_descriptions
                 .clone(),
+            shared_surface: SharedSurface::from_config(config),
         }
     }
 }
