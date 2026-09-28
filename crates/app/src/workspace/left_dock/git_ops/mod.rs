@@ -10,12 +10,14 @@
 //! watchers that catch writes daruda did not make).
 
 pub(super) mod against_base;
+mod external_open;
 pub(super) mod file_view;
 pub(in crate::workspace) mod history;
 pub(super) mod index;
 pub(super) mod init;
 pub(in crate::workspace) mod lock;
 pub(super) mod nav;
+mod pane_status;
 pub(super) mod status;
 pub(in crate::workspace) mod watch;
 
