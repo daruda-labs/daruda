@@ -721,9 +721,10 @@ impl Workspace {
                 use daruda_store::project::SerializedPaneContent as Content;
                 let pane = match content {
                     Content::File(fc) => {
-                        // File pane — `file_status` is not persisted; the git
+                        // File pane — `live_status` is not persisted; the git
                         // badge re-derives on the next `refresh_git_status`, via
-                        // `sync_file_pane_statuses`. Content stays `Loading`
+                        // `sync_file_pane_statuses` (a range pane carries its
+                        // own letter in its source). Content stays `Loading`
                         // until the owning lane becomes active and
                         // `load_pending_file_panes` fires.
                         self.create_file_pane(

@@ -116,7 +116,7 @@ impl Workspace {
 
     /// The project's base moved without any ref moving, so nothing else would
     /// re-read; re-read the active lane if it belongs to `project`. Reached
-    /// only through the project base setters in `project_ops.rs`.
+    /// only through `set_project_default_branch` in `project_ops.rs`.
     pub(in crate::workspace) fn refresh_against_base_for_project(
         &mut self,
         project: daruda_store::project::ProjectId,

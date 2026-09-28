@@ -92,7 +92,7 @@ impl ToolbarControls {
 /// Raw is always available, Preview only for Markdown, Changes only when the
 /// file carries a git status. The live mode is kept regardless of that filter
 /// so the strip always marks exactly one segment — a restored pane keeps its
-/// persisted mode but not its `file_status` (see `persistence.rs`).
+/// persisted mode but not its `live_status` (see `persistence.rs`).
 fn mode_options(fv: &PaneFileView) -> Vec<FileViewMode> {
     [
         (FileViewMode::Raw, true),
@@ -443,10 +443,10 @@ mod tests {
         );
     }
 
-    /// A restored pane keeps its persisted mode but loses `file_status`, so
+    /// A restored pane keeps its persisted mode but loses `live_status`, so
     /// the filter alone would leave the strip with nothing selected.
     #[test]
-    fn live_mode_survives_a_missing_file_status() {
+    fn live_mode_survives_a_missing_live_status() {
         assert_eq!(
             mode_options(&view("a.txt", None, FileViewMode::Changes)),
             vec![FileViewMode::Raw, FileViewMode::Changes]

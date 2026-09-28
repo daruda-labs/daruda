@@ -96,9 +96,8 @@ pub(crate) fn contrast_ratio(fg: gpui::Hsla, bg: gpui::Hsla) -> f32 {
 ///   next independent invalidation.
 ///
 /// Returns `false` and leaves the live theme untouched if `name` is
-/// not bundled or the JSON fails to parse. The caller is responsible
-/// for surfacing user feedback (Settings UI logs a warning, the
-/// reload path is a no-op).
+/// not bundled or the JSON fails to parse — which leaves `UiThemeState`'s
+/// `applied` unset, so the next reconcile tries again.
 pub fn apply_ui_theme(name: &str, cx: &mut gpui::App) -> bool {
     let Some(json) = bundled_theme_json(name) else {
         return false;
@@ -805,13 +804,10 @@ pub fn file_viewer_pane_bg(cx: &App) -> gpui::Hsla {
 }
 
 /// Mirror the resolved terminal background color for the agent-chat render
-/// path. Returns `true` when the value changed, so the reload path can decide
-/// whether to repaint the cached agent-chat views.
-pub fn set_agent_chat_bg(cx: &mut App, r: u8, g: u8, b: u8) -> bool {
-    let next = AgentChatBg { r, g, b };
-    let changed = cx.try_global::<AgentChatBg>() != Some(&next);
-    cx.set_global(next);
-    changed
+/// path. What changed is not this global's to say — every window writes it;
+/// see `workspace::config_sync::SharedSurface`.
+pub fn set_agent_chat_bg(cx: &mut App, r: u8, g: u8, b: u8) {
+    cx.set_global(AgentChatBg { r, g, b });
 }
 
 /// Agent-chat foreground color, mirrored from the terminal color theme's
@@ -916,13 +912,10 @@ pub fn file_viewer_pane_fg_subtle(cx: &App) -> gpui::Hsla {
 }
 
 /// Mirror the resolved terminal foreground color for the agent-chat render
-/// path. Returns `true` when the value changed, so the reload path can decide
-/// whether to repaint the cached agent-chat views.
-pub fn set_agent_chat_fg(cx: &mut App, r: u8, g: u8, b: u8) -> bool {
-    let next = AgentChatFg { r, g, b };
-    let changed = cx.try_global::<AgentChatFg>() != Some(&next);
-    cx.set_global(next);
-    changed
+/// path. What changed is not this global's to say — every window writes it;
+/// see `workspace::config_sync::SharedSurface`.
+pub fn set_agent_chat_fg(cx: &mut App, r: u8, g: u8, b: u8) {
+    cx.set_global(AgentChatFg { r, g, b });
 }
 
 fn neutral_overlay_for(bg: gpui::Hsla) -> gpui::Hsla {

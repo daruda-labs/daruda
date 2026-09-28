@@ -513,12 +513,6 @@ impl Workspace {
         git_project_roots(&self.projects)
     }
 
-    /// Re-detect each git project's `default_branch` from git on
-    /// restore and update the runtime project when it drifted. This
-    /// backfills legacy state files (where `default_branch` is `None`)
-    /// and absorbs external changes (e.g. the repo's `origin/HEAD`
-    /// moved while daruda was closed).
-    ///
     /// Record `project`'s detected default branch, and everything that reads
     /// it: the value persists, and the lane on screen re-reads its changes
     /// against the base it may now have. The one writer of the field, so a
@@ -539,6 +533,12 @@ impl Workspace {
         self.refresh_against_base_for_project(project, cx);
     }
 
+    /// Re-detect each git project's `default_branch` from git on
+    /// restore and update the runtime project when it drifted. This
+    /// backfills legacy state files (where `default_branch` is `None`)
+    /// and absorbs external changes (e.g. the repo's `origin/HEAD`
+    /// moved while daruda was closed).
+    ///
     /// Scope is deliberately narrow — only `default_branch` is
     /// refreshed. No lanes are added or removed; main-lane recovery
     /// belongs to the repo base node, not here.

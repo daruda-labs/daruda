@@ -39,9 +39,8 @@ pub(in crate::workspace) struct ConfigMirrors {
 
     /// The bundled preset `daruda_config::ThemeConfig::ui_preset` paints —
     /// `system` resolved against the OS appearance, or a capture's override.
-    /// A change flips the host
-    /// appearance, so `apply_config` reloads open markdown panes to re-theme
-    /// their rendered diagrams (mermaid) for the new surface.
+    /// A change flips the host appearance, so `apply_config` reloads open
+    /// markdown panes to re-theme their rendered diagrams for the new surface.
     pub painted_ui_preset: String,
 
     /// Mirror of `daruda_config::StatusBarConfig`. Drives which segments

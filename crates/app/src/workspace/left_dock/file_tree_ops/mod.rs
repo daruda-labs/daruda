@@ -580,7 +580,7 @@ impl Workspace {
     /// Open `path` in a new tab as a `PaneContent::File` viewer (Raw by
     /// default; Markdown in Preview). Re-clicking the same `(lane, path)`
     /// reactivates the existing tab. Delegates to `open_pane_file_view`,
-    /// which derives the pane's git `file_status` itself.
+    /// which derives the pane's git status itself.
     ///
     /// `intent` is passed through rather than fixed here: the Files panel's
     /// own rows preview or commit, while opening a task's prompt file is

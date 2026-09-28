@@ -44,7 +44,7 @@ pub(super) fn unified_file_row(
 
     // A range pane shows the same path from commits, not this row's change.
     let is_selected = selected.is_some_and(|(wt, p, source)| {
-        *wt == lane_id && *p == abs_path_for_open && !matches!(source, DiffSource::Range { .. })
+        *wt == lane_id && *p == abs_path_for_open && source.is_live()
     });
 
     // Renamed entries (`R` / `C` status) carry the original path —

@@ -19,8 +19,6 @@ use super::config_ops::{cursor_shape_from, terminal_config_from};
 /// reload also writes (every window writes those, so they would tell only the
 /// first window that anything changed).
 pub(super) struct ConfigDelta {
-    /// The mirrors the reload leaves behind.
-    pub(super) mirrors: ConfigMirrors,
     painted_ui_preset: bool,
     syntax_theme: bool,
     preferred_editor: bool,
@@ -50,18 +48,19 @@ impl ConfigDelta {
 }
 
 impl Workspace {
+    /// The delta, and the mirrors the reload leaves behind.
     pub(super) fn config_delta(
         &self,
         config: &daruda_config::Config,
         cx: &Context<Self>,
-    ) -> ConfigDelta {
+    ) -> (ConfigDelta, ConfigMirrors) {
         let mirrors = ConfigMirrors::from_config(
             config,
             crate::ui::theme::painted_ui_preset(&config.theme.ui_preset, cx),
         );
         let (was, now) = (&self.mirrors, &mirrors);
         let (was_surface, now_surface) = (&was.shared_surface, &now.shared_surface);
-        ConfigDelta {
+        let delta = ConfigDelta {
             painted_ui_preset: was.painted_ui_preset != now.painted_ui_preset,
             syntax_theme: self.syntax_theme != config.file_viewer.syntax_theme,
             // The chat diff header names this editor in its open-externally
@@ -81,8 +80,8 @@ impl Workspace {
             terminal_palette: was_surface.terminal_bg != now_surface.terminal_bg
                 || was_surface.terminal_fg != now_surface.terminal_fg,
             claude_status_enabled: self.claude.claude_status_enabled != config.claude_status.enable,
-            mirrors,
-        }
+        };
+        (delta, mirrors)
     }
 
     /// The plain field copies, and the mirrors. No side effects: the passes

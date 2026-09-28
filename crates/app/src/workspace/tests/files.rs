@@ -1508,7 +1508,7 @@ fn build_committed_git_workspace(
     (wh, ws, id, root, abs, temp)
 }
 
-/// `file_status` is written once at open time and is deliberately not
+/// `live_status` is written once at open time and is deliberately not
 /// persisted, so a restored pane starts with `None` and a pane held open
 /// across an edit or a commit would otherwise keep whatever the opening click
 /// saw — the toolbar's mode strip reads it to decide whether to offer Changes
@@ -1623,11 +1623,11 @@ async fn enter_and_click_open_the_same_files_row_into_one_tab(cx: &mut TestAppCo
     );
 }
 
-/// `file_status` is derived inside `open_pane_file_view`, not supplied by the
+/// `live_status` is derived inside `open_pane_file_view`, not supplied by the
 /// caller: the agent-chat diff header, agent-chat Markdown file links, the
 /// skills panel and the task form all open a file with no git context of their
 /// own, and once the toolbar's mode strip started gating the Changes segment
-/// on `file_status.is_some()` a hardcoded `None` meant a changed file opened
+/// on `status().is_some()` a hardcoded `None` meant a changed file opened
 /// that way offered no diff at all. Also covers the dedupe path, which returns
 /// early on an existing tab and so has to re-stamp it rather than leave the
 /// status frozen at whatever the first open saw.

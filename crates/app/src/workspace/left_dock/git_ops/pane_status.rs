@@ -68,10 +68,11 @@ impl Workspace {
             .copied()
     }
 
-    /// Re-derive every open file pane's `file_status` for `target` from the
-    /// lane's freshly-fetched `git status`.
+    /// Re-derive every open file pane's `live_status` for `target` from the
+    /// lane's freshly-fetched `git status`. A range pane is set to `None`: its
+    /// letter is fixed with its commits and read through `PaneFileView::status`.
     ///
-    /// `file_status` answers "does this file have a pending change?" — the
+    /// `live_status` answers "does this file have a pending change?" — the
     /// viewer toolbar draws its badge from it and offers the Changes segment
     /// only when it is `Some` — but it is written once, at open time, and is
     /// deliberately not persisted. Without this pass a pane restored from disk

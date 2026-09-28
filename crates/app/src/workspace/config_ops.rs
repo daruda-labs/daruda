@@ -43,8 +43,9 @@ impl Workspace {
         self.apply_config(&effective, cx);
     }
 
-    /// Apply a reloaded config to all running panes. Called by the
-    /// config file watcher and the Settings window when the TOML changes.
+    /// Apply a reloaded config to all running panes — through
+    /// [`Self::apply_store_config`] when the settings store changes (a
+    /// file-watch tick or a Settings save) or the OS appearance flips.
     ///
     /// **UI theme:** Workspace does *not* swap the live `DarudaTheme` — the
     /// `crate::ui::theme` state does, told by the settings observer
@@ -54,8 +55,8 @@ impl Workspace {
     pub fn apply_config(&mut self, config: &daruda_config::Config, cx: &mut Context<Self>) {
         // What moved is read before anything is written: every pass below
         // compares against the values this reload replaces.
-        let delta = self.config_delta(config, cx);
-        self.store_config_fields(config, delta.mirrors.clone());
+        let (delta, mirrors) = self.config_delta(config, cx);
+        self.store_config_fields(config, mirrors);
         self.apply_config_to_agent_chat_defaults(delta.telegram_recipient, cx);
         self.apply_config_to_input_dock(config, cx);
         self.apply_config_to_terminals(config, cx);

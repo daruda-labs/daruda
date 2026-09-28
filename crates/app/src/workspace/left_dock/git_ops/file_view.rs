@@ -259,7 +259,7 @@ impl Workspace {
     /// `initial_mode` selects Raw (Files view) or Changes (Git view);
     /// Markdown files open in Preview by default when Raw was requested.
     ///
-    /// The pane's `file_status` is derived here via
+    /// The pane's `live_status` is derived here via
     /// [`Self::git_status_for_path`], never supplied by the caller.
     ///
     /// `intent` says who ends up focused and whether the tab is replaceable;
@@ -432,11 +432,8 @@ impl Workspace {
     ) {
         let effective_mode = FileViewMode::effective_for_path(FileViewMode::Raw, &path);
 
-        let live_status = self.git_status_for_path(
-            self.owner_lane_ref(lane_id),
-            &path,
-            &DiffSource::WorkingTree,
-        );
+        let owner = self.owner_lane_ref(lane_id);
+        let live_status = self.git_status_for_path(owner, &path, &DiffSource::WorkingTree);
         let pane = self.create_file_pane(
             lane_id,
             path.clone(),
@@ -447,7 +444,6 @@ impl Workspace {
             cx,
         );
         let new_pane_id = pane.id;
-        let owner = self.owner_lane_ref(lane_id);
         let load_request = FilePaneLoadRequest::from_view(
             new_pane_id,
             owner,

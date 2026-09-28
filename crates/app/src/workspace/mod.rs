@@ -1000,6 +1000,11 @@ impl Workspace {
             account_login_ops::LOGIN_TIMEOUT,
         );
 
+        // An OS flip while no window was open reached no observer; this
+        // window's own appearance says where the OS is now — told before the
+        // mirrors below read what it paints. Cached on the window, so no
+        // platform call.
+        crate::ui::theme::note_system_appearance(window.appearance(), cx);
         let mut ws = Self {
             uuid: daruda_store::project::WorkspaceUuid::new(),
             main_area: main_area::MainAreaContext::default(),
@@ -1308,10 +1313,6 @@ impl Workspace {
         // `Project::bootstrap_placeholder`).
         ws.reconcile_bootstrapped_lanes(cx);
 
-        // An OS flip while no window was open reached no observer; this
-        // window's own appearance says where the OS is now. Cached on the
-        // window, so no platform call.
-        crate::ui::theme::note_system_appearance(window.appearance(), cx);
         // `window.appearance()` is the value the platform just handed over;
         // asking the platform again from here panics on Linux.
         cx.observe_window_appearance(window, |this: &mut Workspace, window, cx| {

@@ -195,8 +195,8 @@ pub(crate) fn schedule_capture(
         cx.background_executor().timer(settle).await;
 
         // The scenario is applied once; the theme loop then re-themes the open
-        // overlay in place (`apply_ui_theme` refreshes every window), so a batch
-        // never needs to tear down and re-open the overlay between captures.
+        // overlay in place (a capture override repaints every window), so a
+        // batch never needs to tear down and re-open the overlay between shots.
         if let Some(scenario) = scenario {
             cx.update(|cx| apply_scenario(scenario, cx));
         }
