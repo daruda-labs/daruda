@@ -200,11 +200,9 @@ pub(super) fn thinking_block(
     .render(markdown.dim, cx)
 }
 
-/// A thought inside a tool group, shown whole: agents write these a line or
-/// three long, so a fold would hide less than its own header costs and cut the
-/// sentence the reader needs. The group bar already names what it holds, so a
-/// glyph stands in for the "Thinking" label; the group's own fold and window
-/// still bound how many are on screen.
+/// A thought inside a tool group, shown whole with no fold: these run one to
+/// three lines, so a fold would cost more than it hides. A glyph replaces the
+/// "Thinking" label; the group's fold and call window bound how many show.
 pub(super) fn group_thought_block(
     ix: usize,
     text: &str,
@@ -248,7 +246,7 @@ pub(super) fn group_thought_block(
         .into_any_element()
 }
 
-/// A thought's body — shared by both thought rows. The folded one keeps it
+/// A thought's body, shared by both thought rows. [`thinking_block`] keeps it
 /// outside its header's click target, so selecting it cannot fold it.
 fn thought_body(
     ix: usize,

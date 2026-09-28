@@ -26,13 +26,12 @@ const CODEX_SUMMARY: [usize; 3] = [3, 2, 3];
 /// thing that decides whether its calls show — a run of one included. That is
 /// what the `AUTO`, `TAIL`, `SETTLED` and `EXPANDED` ceilings below price: the
 /// bar costs a row, and a shut one takes its calls off the count. Codex reasons
-/// between calls, and a thought after a call stays in its run, so turn 0 is 32
-/// tool bars and 5 thinking bars rather than 58 and 60.
+/// between calls and each thought stays in its run, so turn 0 holds 32 tool
+/// bars and 5 thinking bars.
 const CODEX_EXPANDED: [usize; 3] = [339, 4, 60];
 /// The ceiling with the step axis engaged. Codex's cut is the response-level
 /// one: its runs are short, so most of what goes is whole steps. A step is a
-/// whole narrated run, thoughts included, so five of them hold more rows than
-/// the call-sized fragments the thoughts used to cut them into.
+/// whole narrated run, thoughts included, so five steps hold many rows.
 const CODEX_EXPANDED_TAIL: [usize; 3] = [59, 4, 31];
 const CODEX_SETTLED: [usize; 3] = [3, 2, 22];
 

@@ -605,10 +605,9 @@ fn a_dangling_parent_keeps_a_call_in_the_group_run() {
     ));
 }
 
-/// A thought after a call is a member of the call's group, so the click path
-/// reads it as the group's activity — the same answer the projection gives, or
-/// a first click on a group whose only live member is that thought would flip
-/// it from the wrong state and appear to do nothing.
+/// The click path counts a streaming thought as the group's activity, as the
+/// projection does — otherwise a first click on that group flips it from the
+/// wrong state and seems to do nothing.
 #[test]
 fn a_streaming_thought_keeps_its_tool_group_active() {
     use daruda_acp::ToolStatusView::Completed;

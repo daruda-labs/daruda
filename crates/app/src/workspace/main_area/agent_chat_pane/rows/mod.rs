@@ -115,10 +115,9 @@ pub(in crate::workspace) enum RowKind {
         filtered: FilteredAway,
     },
     AgentItem(usize),
-    /// A thought inside a tool group, rendered as one row among its calls. Its
-    /// own kind rather than an [`RowKind::AgentItem`] because it reads
-    /// differently: the group bar above already says what it is, so it drops
-    /// the label and the fold a free-standing thought carries.
+    /// A thought inside a tool group. Not an [`RowKind::AgentItem`]: the group
+    /// bar already says what it is, so it drops the label and fold a
+    /// free-standing thought carries.
     GroupThought(usize),
     TailMore {
         run_start: usize,
@@ -150,9 +149,9 @@ pub(in crate::workspace) enum RowKind {
         /// than a span: the run covers items that own no row, and the bar
         /// counts and summarizes its calls alone.
         calls: Vec<usize>,
-        /// The thoughts between those calls, in transcript order. Kept apart
-        /// from `calls` because the bar tallies and rolls up calls alone and
-        /// only counts these.
+        /// The thoughts after the group's first call, in transcript order. Kept
+        /// apart from `calls`: the bar tallies and rolls up calls, and only
+        /// counts these.
         thoughts: Vec<usize>,
         collapsed: bool,
     },
@@ -865,9 +864,9 @@ impl<'items, 'rows> RunProjector<'items, 'rows> {
                 let structure = TranscriptStructure::new(items, hierarchy);
                 let grun = structure.tool_run(k, run.end);
                 k = grun.end;
-                // Resolved once: past this line the group is its calls and
-                // thoughts, and `grun` is only the walk's cursor. Reading the span where a
-                // member was meant is what put a nested child in two tallies.
+                // Resolved once: past this line the group is its members, and
+                // `grun` is only the walk's cursor — reading the span in their
+                // place counts a nested child in two tallies.
                 let calls: Vec<usize> = structure.group_calls(grun.clone()).collect();
                 let thoughts: Vec<usize> = structure.group_thoughts(grun.clone()).collect();
                 let members: Vec<usize> = structure.group_members(grun.clone()).collect();
@@ -878,17 +877,13 @@ impl<'items, 'rows> RunProjector<'items, 'rows> {
                 {
                     let gid = tool_id(&items[grun.start]);
                     let group_key = FoldKey::ToolGroup(gid.clone());
+                    // Liveness is read off the members this walk resolved — a
+                    // streaming thought among them holds the group open.
+                    // `fold_context_at` would count a nested child as a member.
+                    let group_active = members.iter().any(|&k| is_active(&items[k]));
                     // The fold setting is the only term: how many calls
                     // happened to land in one run must not change what the
                     // chip's rule for this block says.
-                    //
-                    // Liveness is read off the members this walk resolved.
-                    // `fold_context_at` would rescan from `grun.start` without
-                    // the hierarchy, so a nested child running inside one of
-                    // these cards would read as a member.
-                    // A streaming thought counts too, or it would fold its own
-                    // group shut while it is still being written.
-                    let group_active = members.iter().any(|&k| is_active(&items[k]));
                     let group_collapsed = !fold.is_expanded(
                         &group_key,
                         FoldContext::new(boundary.at(grun.start), group_active),

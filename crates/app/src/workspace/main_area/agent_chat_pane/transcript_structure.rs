@@ -98,18 +98,10 @@ impl<'a> TranscriptStructure<'a> {
     }
 
     /// The stretch of top-level tool calls beginning at `start`, bounded by
-    /// `limit`. It ends at the first item that owns a row and is neither one of
-    /// them nor a thought — an item the walk passes over is spanned, not a
-    /// boundary, or two cards the reader sees side by side would land in
-    /// separate groups.
-    ///
-    /// A thought after a call continues the run: agents narrate before nearly
-    /// every call, and ending the run there gave each call a group of its own.
-    /// The rule reads structure alone, never the display filter, so hiding the
-    /// thoughts cannot leave the run split around them.
-    ///
-    /// The range is what to walk, not what the group holds: ask
-    /// [`Self::group_members`] for the members.
+    /// `limit`, ending at the first row-owning item that is neither a call nor a
+    /// thought — agents narrate before nearly every call. A passed-over item is
+    /// spanned, not a boundary, and the filter is never read, so it cannot split
+    /// a run. Ask [`Self::group_members`] for what the group holds.
     pub(super) fn tool_run(&self, start: usize, limit: usize) -> Range<usize> {
         let mut k = start + 1;
         while k < limit && (!self.owns_a_row(k) || self.top_level_tool(k) || self.is_thought(k)) {
@@ -305,8 +297,8 @@ mod tests {
         }
     }
 
-    /// The shape agents now send before nearly every call: a thought after a
-    /// call is a member, so `U T U` is one run holding both calls.
+    /// `U T U`, the shape agents narrate calls in, is one run holding both
+    /// calls.
     #[test]
     fn a_thought_after_a_call_continues_the_run() {
         let items = [tool("a", None, false), think("why"), tool("b", None, false)];
@@ -319,10 +311,9 @@ mod tests {
         assert_eq!(s.top_level_tool_runs(0..items.len()), 1);
     }
 
-    /// A trailing thought joins the run it follows — while it streams, nothing
-    /// says what comes next, and moving it once the next item lands would shift
-    /// the row under the reader. A thought ahead of the first call is not a
-    /// member, and prose still ends the run.
+    /// A trailing thought joins the run it follows, so the next call landing
+    /// never moves its row. A thought before the first call is not a member,
+    /// and prose ends the run.
     #[test]
     fn a_thought_joins_only_a_run_already_under_way() {
         let trailing = [tool("a", None, false), think("next")];

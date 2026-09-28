@@ -754,15 +754,9 @@ fn abbreviate_tokens(n: u64) -> String {
     }
 }
 
-/// A tool group's title: one icon-and-count segment per category it holds,
-/// most-numerous first. An over-long title is cut by layout rather than trimmed
-/// to the first N categories — a header that dropped a category silently would
-/// under-report what the group did. See [`category_segments`] for why the cut is
-/// a clip and not an ellipsis.
-///
-/// The thoughts between the calls close the title as one more segment, so a
-/// filter that keeps only thoughts reads as what it shows rather than as an
-/// empty tally.
+/// A tool group's title: its category segments, most-numerous first, then a
+/// thought segment so a thoughts-only filter reads as what it shows. Overflow
+/// is clipped by layout — see [`category_segments`] — never dropped silently.
 fn group_category_title(
     this: &AgentChatView,
     calls: &[usize],

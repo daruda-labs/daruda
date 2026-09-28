@@ -961,10 +961,10 @@ fn a_streaming_thought_holds_its_group_open() {
     );
 }
 
-/// A pending permission still ends the group, so it keeps its own row — the
-/// one that escapes every fold — rather than sinking into a group's.
+/// A pending permission ends a group even after a thought, so it keeps its own
+/// row, the one that escapes every fold.
 #[test]
-fn a_permission_still_ends_a_group_that_holds_thoughts() {
+fn a_permission_ends_a_group_that_holds_thoughts() {
     let items = [
         ChatItem::UserText("q".into()),
         tool("a", ToolStatusView::Completed),

@@ -395,13 +395,9 @@ pub(super) fn working_transcript() -> Vec<ChatItem> {
 /// is keyed by, so a scenario can open it without searching the projection.
 pub(super) const THOUGHT_RUN_GID: &str = "shot-thought-0";
 
-/// One stretch of work narrated the way agents now send it: a thought before
-/// nearly every call, all of it one tool group. Long enough for the call
-/// window to hold some of it back, mixed kinds so the bar names more than one
-/// category, and one failed call so the rollup turns.
-///
-/// `working` ends the stretch on a thought still being written, with nothing
-/// after it yet, instead of the answer.
+/// One tool group narrated with a thought before most calls: longer than the
+/// call window, mixed categories, and one failed call so the rollup turns.
+/// `working` ends on a still-streaming thought instead of the answer.
 pub(super) fn thought_run_transcript(working: bool) -> Vec<ChatItem> {
     let steps: [(Option<&str>, Call); 9] = [
         (
