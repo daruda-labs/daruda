@@ -9,7 +9,6 @@
 
 use crate::hooks;
 use crate::windows::open_empty_workspace_window;
-#[cfg(debug_assertions)]
 use daruda_core::process_env;
 use gpui::{Application, QuitMode};
 
@@ -73,37 +72,28 @@ pub(crate) fn init_observability() {
         retention: logs_cfg.retention_duration(),
         max_file_size: logs_cfg.max_file_size_bytes(),
     };
-    // Dev-build ACP wire tap: point `daruda_acp`'s wire logger at a file next to
-    // the NDJSON logs so tool-call / subagent JSON-RPC traffic is captured
-    // automatically in debug builds. Release builds never set this (the tap
-    // stays off); either build can still opt in by exporting the var by hand.
-    // Set BEFORE `LogWriter::init`, which spawns the log-writer worker thread —
-    // afterwards the process is multi-threaded and `set_var` would be unsound.
-    #[cfg(debug_assertions)]
-    if !process_env::ACP_WIRE_LOG.is_present()
-        && let Some(dir) = daruda_store::observability::log_writer::log_dir()
-    {
+    // Diagnostic sinks: the ACP wire tap and the Telegram trace. Debug builds
+    // default both to files beside the NDJSON logs; either build can opt in
+    // by exporting the variable by hand.
+    let log_dir = cfg!(debug_assertions)
+        .then(daruda_store::observability::log_writer::log_dir)
+        .flatten();
+    daruda_acp::wire_log::configure_from_env(log_dir.as_ref().map(|d| d.join("acp-wire.log")));
+    crate::telegram::trace::configure_from_env(
+        log_dir.map(|d| d.join(crate::telegram::trace::TRACE_FILE_NAME)),
+    );
+    // Both are fixed in-process now, so no child — an adapter, a terminal
+    // shell, a `cargo test` an agent runs — may inherit a sink this process
+    // owns: an inherited wire tap rotates the live capture away.
+    // Removed BEFORE `LogWriter::init`, which spawns the log-writer worker
+    // thread — afterwards the process is multi-threaded and `remove_var`
+    // would be unsound.
+    for key in process_env::PROCESS_LOCAL_SINKS {
         // SAFETY: reached before `LogWriter::init` (below) spawns any thread and
         // after `shell_env` on the main thread, so the process is still
         // single-threaded — no other thread can read the environment concurrently.
         unsafe {
-            std::env::set_var(process_env::ACP_WIRE_LOG.name(), dir.join("acp-wire.log"));
-        }
-    }
-    // Dev-build Telegram trace, on the same terms as the wire tap above and
-    // for the same reason: the bridge's per-message traffic and gate
-    // transitions belong in their own file, not in the NDJSON error log.
-    #[cfg(debug_assertions)]
-    if !process_env::TELEGRAM_LOG.is_present()
-        && let Some(dir) = daruda_store::observability::log_writer::log_dir()
-    {
-        // SAFETY: same single-threaded window as the wire-tap `set_var` above —
-        // before `LogWriter::init` spawns the log-writer thread.
-        unsafe {
-            std::env::set_var(
-                process_env::TELEGRAM_LOG.name(),
-                dir.join(crate::telegram::trace::TRACE_FILE_NAME),
-            );
+            std::env::remove_var(key.name());
         }
     }
     daruda_store::observability::log_writer::LogWriter::init(log_policy);

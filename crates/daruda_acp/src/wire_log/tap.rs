@@ -37,28 +37,90 @@ const WHOLE_LINE_PATH: &str = "$line";
 /// Process-global so a marker id is unambiguous across concurrent sidecars.
 static PAYLOAD_IDS: AtomicU64 = AtomicU64::new(1);
 
-/// Attach the wire tap to `agent`, or return it unchanged when
-/// `DARUDA_ACP_WIRE_LOG` is unset or the file can't be opened — so a shipping
-/// build never touches the wire unless explicitly asked.
+/// What the tap writes and how, fixed once per process by [`configure_from_env`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct TapSettings {
+    base: PathBuf,
+    /// Spill threshold in bytes; `0` writes raw lines with no elision.
+    cap: usize,
+    sidecar: bool,
+}
+
+impl TapSettings {
+    /// An explicit base wins over `default_base`; neither leaves the tap off.
+    fn resolve(
+        base: Option<&OsStr>,
+        max_field: Option<&OsStr>,
+        payloads: Option<&OsStr>,
+        default_base: Option<PathBuf>,
+    ) -> Option<Self> {
+        let base = base.map(PathBuf::from).or(default_base)?;
+        let cap = max_field_cap(max_field);
+        Some(Self {
+            base,
+            cap,
+            sidecar: cap > 0 && sidecar_enabled(payloads),
+        })
+    }
+}
+
+static SETTINGS: std::sync::OnceLock<Option<TapSettings>> = std::sync::OnceLock::new();
+
+/// Fix this process's tap from `DARUDA_ACP_WIRE_LOG*`, falling back to
+/// `default_base` when the base is unset. Returns the base in effect.
+///
+/// Held in-process rather than read per session, so the tap belongs to the
+/// process that asked for it: a child that inherits the variables — a
+/// `cargo test` an agent runs — never touches this process's capture. Only
+/// the first call decides; later ones return the same answer.
+pub fn configure_from_env(default_base: Option<PathBuf>) -> Option<&'static Path> {
+    SETTINGS
+        .get_or_init(|| {
+            TapSettings::resolve(
+                process_env::ACP_WIRE_LOG.read_os().as_deref(),
+                process_env::ACP_WIRE_LOG_MAX_FIELD.read_os().as_deref(),
+                process_env::ACP_WIRE_LOG_PAYLOADS.read_os().as_deref(),
+                default_base,
+            )
+        })
+        .as_ref()
+        .map(|settings| settings.base.as_path())
+}
+
+/// The base [`configure_from_env`] fixed; `None` when the tap is off.
+pub fn configured_base() -> Option<&'static Path> {
+    configured().map(|settings| settings.base.as_path())
+}
+
+fn configured() -> Option<&'static TapSettings> {
+    SETTINGS.get().and_then(Option::as_ref)
+}
+
+/// Attach the wire tap to `agent`, or return it unchanged when the process
+/// never configured one or the file can't be opened — so a shipping build
+/// never touches the wire unless explicitly asked.
 ///
 /// `agent_id` (the catalog id, empty for the crate's own examples) is spliced
 /// into the file name so concurrent sessions from different agents land in
 /// separate files instead of interleaving in one.
 pub(crate) fn attach(agent: AcpAgent, agent_id: &str) -> AcpAgent {
-    let Some(base) = process_env::ACP_WIRE_LOG.read_os() else {
+    let Some(settings) = configured() else {
         return agent;
     };
-    let path = wire_log_path_for(Path::new(&base), agent_id);
+    let path = wire_log_path_for(&settings.base, agent_id);
     let Some(slim) = open_log(&path) else {
         return agent;
     };
-    let cap = max_field_cap(process_env::ACP_WIRE_LOG_MAX_FIELD.read_os().as_deref());
-    let sidecar = (cap > 0
-        && sidecar_enabled(process_env::ACP_WIRE_LOG_PAYLOADS.read_os().as_deref()))
-    .then(|| open_log(&payload_sidecar_path(&path)))
-    .flatten();
+    let sidecar = settings
+        .sidecar
+        .then(|| open_log(&payload_sidecar_path(&path)))
+        .flatten();
 
-    let tap = Arc::new(WireTap { slim, sidecar, cap });
+    let tap = Arc::new(WireTap {
+        slim,
+        sidecar,
+        cap: settings.cap,
+    });
     agent.with_debug(move |line, direction| tap.write(line, direction))
 }
 
@@ -335,6 +397,53 @@ mod tests {
             record: true,
             spills: Vec::new(),
         }
+    }
+
+    fn os(value: &str) -> Option<&OsStr> {
+        Some(OsStr::new(value))
+    }
+
+    /// The test binary never calls `configure_from_env`, so whatever the
+    /// environment it inherited says, no session it opens writes a capture.
+    #[test]
+    fn an_unconfigured_process_has_no_tap() {
+        assert_eq!(configured_base(), None);
+    }
+
+    #[test]
+    fn an_explicit_base_wins_over_the_default() {
+        let settings = TapSettings::resolve(
+            os("/tmp/tap/acp.log"),
+            None,
+            None,
+            Some(PathBuf::from("/logs/acp-wire.log")),
+        )
+        .unwrap();
+        assert_eq!(settings.base, PathBuf::from("/tmp/tap/acp.log"));
+    }
+
+    #[test]
+    fn the_default_base_applies_only_when_none_is_set() {
+        let settings =
+            TapSettings::resolve(None, None, None, Some(PathBuf::from("/logs/acp-wire.log")))
+                .unwrap();
+        assert_eq!(
+            settings,
+            TapSettings {
+                base: PathBuf::from("/logs/acp-wire.log"),
+                cap: DEFAULT_MAX_FIELD,
+                sidecar: true,
+            }
+        );
+        assert_eq!(TapSettings::resolve(None, os("0"), None, None), None);
+    }
+
+    #[test]
+    fn no_elision_means_no_sidecar() {
+        let settings = TapSettings::resolve(os("/tmp/a.log"), os("0"), os("on"), None).unwrap();
+        assert_eq!((settings.cap, settings.sidecar), (0, false));
+        let settings = TapSettings::resolve(os("/tmp/a.log"), None, os("off"), None).unwrap();
+        assert_eq!((settings.cap, settings.sidecar), (DEFAULT_MAX_FIELD, false));
     }
 
     #[test]

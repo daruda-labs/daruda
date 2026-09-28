@@ -14,12 +14,14 @@
 //!
 //! | Variable | Default | Effect |
 //! |---|---|---|
-//! | `DARUDA_ACP_WIRE_LOG` | unset (tap off) | slim log path; the app sets it in debug builds |
+//! | `DARUDA_ACP_WIRE_LOG` | unset (tap off) | slim log path; debug builds of the app default it |
 //! | `DARUDA_ACP_WIRE_LOG_MAX_FIELD` | `512` | spill threshold in bytes; `0` disables elision |
 //! | `DARUDA_ACP_WIRE_LOG_PAYLOADS` | on | `0`/`off`/`false`/`no` drops payloads instead of writing the sidecar |
 //!
 //! The canonical names live in `daruda_core::process_env`; value parsing and
-//! wire-log behavior remain here with the feature that owns them.
+//! wire-log behavior remain here with the feature that owns them. They are
+//! read once, by [`configure_from_env`] — a process that never calls it has
+//! no tap, whatever environment it inherited.
 
 use std::path::{Path, PathBuf};
 
@@ -27,8 +29,8 @@ mod replay;
 mod tap;
 
 pub use replay::{Replay, ReplayError, replay_log};
-pub use tap::PREVIOUS_GENERATION_DIR;
 pub(crate) use tap::attach;
+pub use tap::{PREVIOUS_GENERATION_DIR, configure_from_env, configured_base};
 
 /// Opening of a spilled-payload marker. Ends with `:`, so the id follows it directly.
 const MARKER_PREFIX: &str = "@@acp-payload:";

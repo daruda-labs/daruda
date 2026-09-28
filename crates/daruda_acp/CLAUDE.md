@@ -121,8 +121,14 @@ for the feature to work end to end.
 ## Wire tap — reading a capture
 
 Every raw JSON-RPC line is tapped to a file in debug builds (`wire_log.rs`; the
-app points `DARUDA_ACP_WIRE_LOG` at the log dir in `bootstrap.rs`). It is the
-first diagnostic for "did the adapter actually send that" questions.
+app defaults the tap to the log dir in `bootstrap.rs`). It is the first
+diagnostic for "did the adapter actually send that" questions.
+
+The tap is process-local: `wire_log::configure_from_env` reads the
+`DARUDA_ACP_WIRE_LOG*` variables once, and bootstrap then removes them from the
+app's environment. A process that never configures it has no tap — which is
+what keeps a `cargo test` run by an agent inside the app from rotating the
+live capture into `prev/` and deleting it, as an inherited variable once did.
 
 Each agent gets a pair of files: `acp-wire-<agent>.log` is the protocol
 skeleton (one valid-JSON line per wire line), and

@@ -142,10 +142,9 @@ pub(crate) fn schedule_seed(loaded: Loaded, cx: &mut App) {
 /// the recovery copy lives. The move is silent, so say it loudly even though
 /// the load above has already read the file.
 fn warn_if_the_tap_writes_here(path: &Path) {
-    let Some(tap) = process_env::ACP_WIRE_LOG.read_os() else {
+    let Some(tap) = daruda_acp::wire_log::configured_base() else {
         return;
     };
-    let tap = PathBuf::from(tap);
     let Some(tap_dir) = tap.parent() else {
         return;
     };

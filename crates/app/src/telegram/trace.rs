@@ -7,11 +7,11 @@
 //! per-message traffic into the error log would drown the reports that
 //! are, and `LogWriter`'s retention/rolling policy is sized for those.
 //!
-//! Off unless `DARUDA_TELEGRAM_LOG` names a writable path. Debug builds
-//! point it at `<log dir>/telegram.log` from `bootstrap.rs`, matching the
-//! ACP wire tap. Every entry point takes its detail as a closure, so when
-//! the trace is off a call site costs one `OnceLock` read and builds no
-//! string at all.
+//! Off unless `DARUDA_TELEGRAM_LOG` names a writable path when
+//! `bootstrap.rs` calls [`configure_from_env`]. Debug builds default it to
+//! `<log dir>/telegram.log`, matching the ACP wire tap. Every entry point
+//! takes its detail as a closure, so when the trace is off a call site costs
+//! one `OnceLock` read and builds no string at all.
 //!
 //! Volume: the poll loop traces one `poll` line per `getUpdates` return —
 //! roughly one per `global::POLL_TIMEOUT_SECS` while idle, well under a
@@ -32,13 +32,12 @@ use super::client::UpdateKind;
 use std::fs::{File, OpenOptions};
 use std::hash::{DefaultHasher, Hash as _, Hasher as _};
 use std::io::Write as _;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Mutex, OnceLock};
 
-/// Default file name a debug build's `bootstrap` points
-/// [`process_env::TELEGRAM_LOG`] at, beside the NDJSON logs.
-#[cfg(debug_assertions)]
+/// Default file name a debug build's `bootstrap` traces to, beside the
+/// NDJSON logs.
 pub(crate) const TRACE_FILE_NAME: &str = "telegram.log";
 
 /// How much of a message body a preview keeps: long enough to tell which
@@ -66,15 +65,26 @@ const TS_FORMAT: &str = "%Y-%m-%dT%H:%M:%S%.3fZ";
 static ENQUEUED: AtomicU64 = AtomicU64::new(0);
 static DRAINED: AtomicU64 = AtomicU64::new(0);
 
+static PATH: OnceLock<Option<PathBuf>> = OnceLock::new();
 static SINK: OnceLock<Option<Mutex<File>>> = OnceLock::new();
+
+/// Fix this process's trace path from [`process_env::TELEGRAM_LOG`], falling
+/// back to `default` when it is unset. Only the first call decides.
+///
+/// Held in-process for the reason the ACP wire tap is: a child inheriting
+/// the variable must not write into this process's trace.
+pub(crate) fn configure_from_env(default: Option<PathBuf>) {
+    PATH.get_or_init(|| {
+        process_env::TELEGRAM_LOG
+            .read_os()
+            .map(PathBuf::from)
+            .or(default)
+    });
+}
 
 /// The trace file, opened once per process on first use.
 fn sink() -> Option<&'static Mutex<File>> {
-    SINK.get_or_init(|| {
-        let path = process_env::TELEGRAM_LOG.read_os()?;
-        open(Path::new(&path))
-    })
-    .as_ref()
+    SINK.get_or_init(|| open(PATH.get()?.as_deref()?)).as_ref()
 }
 
 /// Open `path` for appending, creating its directory if needed. `None` on any
@@ -329,6 +339,13 @@ fn compose(ts: &str, channel: &str, event: &str, detail: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The test binary never calls `configure_from_env`, so the trace stays
+    /// off whatever environment it inherited.
+    #[test]
+    fn an_unconfigured_process_does_not_trace() {
+        assert!(!is_on());
+    }
 
     #[test]
     fn a_line_puts_the_channel_and_event_ahead_of_the_detail() {

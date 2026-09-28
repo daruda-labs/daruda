@@ -3,7 +3,7 @@
 //! A [`Key`] can only be constructed in this module, so first-party Rust code
 //! cannot introduce another `DARUDA_*` name without extending this registry.
 //! Reading stays uncached: callers that need snapshot semantics own that
-//! decision, and bootstrap code that writes defaults remains at the
+//! decision, and bootstrap code that writes or removes names remains at the
 //! single-threaded process boundary.
 //!
 //! `DARUDA_BIN` is the one shell-only exception. The installed hook reads it
@@ -63,6 +63,17 @@ pub const ACP_WIRE_LOG_MAX_FIELD: Key = Key::new("DARUDA_ACP_WIRE_LOG_MAX_FIELD"
 
 /// Telegram diagnostic trace path. Unset leaves the trace disabled.
 pub const TELEGRAM_LOG: Key = Key::new("DARUDA_TELEGRAM_LOG");
+
+/// Diagnostic sinks the app reads once at bootstrap and then removes from its
+/// own environment. Each names a file owned by the process that opened it; a
+/// child that inherited one — a `cargo test` an agent runs — would write into,
+/// or rotate away, the parent's capture.
+pub const PROCESS_LOCAL_SINKS: [Key; 4] = [
+    ACP_WIRE_LOG,
+    ACP_WIRE_LOG_PAYLOADS,
+    ACP_WIRE_LOG_MAX_FIELD,
+    TELEGRAM_LOG,
+];
 
 /// Screenshot post-launch settle delay in milliseconds.
 pub const SCREENSHOT_SETTLE_MS: Key = Key::new("DARUDA_SCREENSHOT_SETTLE_MS");
