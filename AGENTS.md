@@ -84,7 +84,7 @@ RUSTDOCFLAGS="-D warnings" cargo doc --no-deps \
   -p daruda_flow -p daruda_core -p daruda_update -p ghostty_vt_sys \
   -p ghostty_vt -p daruda_agent
 cargo run -p gen_acp_presets -- --check
-cargo check -p daruda --features screenshot
+cargo clippy -p daruda --all-features --all-targets -- -D warnings
 cargo test -p daruda --features screenshot
 ```
 
@@ -241,7 +241,7 @@ RUSTDOCFLAGS="-D warnings" cargo doc --no-deps \
   -p daruda_flow -p daruda_core -p daruda_update -p ghostty_vt_sys \
   -p ghostty_vt -p daruda_agent
 cargo run -p gen_acp_presets -- --check
-cargo check -p daruda --features screenshot
+cargo clippy -p daruda --all-features --all-targets -- -D warnings
 ```
 
 While iterating, `cargo test -p daruda -- --skip workspace::tests` is the
@@ -262,9 +262,9 @@ read intra-doc links, so a deleted item leaves a dangling `[`Name`]` in the
 prose that explains the module. These six are clean today; the rest carry a
 backlog and join the list a crate at a time as that is worked off. Measured
 2026-09-18: `daruda_config` 8, `daruda_store` 8, `daruda_terminal` 11,
-`daruda_acp` 16, `daruda` 85 — the app crate is most of what is left. `lint-render-purity.sh`, `lint-daruda-path-literals.sh`, `lint-file-size.sh`, `lint-mark-dirty-direct-call.sh`, `lint-fold-header.sh`, `lint-agent-list-sync.sh`, `lint-declarative-context-menu.sh`, `lint-acp-air-gate.sh`, `lint-raw-mouse-button.sh`, `lint-comment-length.sh`, `gen_acp_presets -- --check`, and `cargo check -p daruda --features screenshot` are local/reviewer checks not yet wired into CI.
+`daruda_acp` 16, `daruda` 85 — the app crate is most of what is left. `lint-render-purity.sh`, `lint-daruda-path-literals.sh`, `lint-file-size.sh`, `lint-mark-dirty-direct-call.sh`, `lint-fold-header.sh`, `lint-agent-list-sync.sh`, `lint-declarative-context-menu.sh`, `lint-acp-air-gate.sh`, `lint-raw-mouse-button.sh`, `lint-comment-length.sh`, and `gen_acp_presets -- --check` are local/reviewer checks not yet wired into CI.
 
-That last one is why it is on the list at all. `screenshot` is off by default, so every item it reaches — the `*_for_shot` seams, `screenshot_scenario`'s two modules — looks unused to a build that does not enable it. A visibility-narrowing pass took that at face value and left the feature uncompilable for a while, with nothing to say so. `cargo check` with the feature on is the cheapest thing that notices.
+`cargo clippy -p daruda --all-features` is on the list, and on the macOS job, because every feature is off by default: whatever only `screenshot` or `replay` reaches — the `*_for_shot` seams, `screenshot_scenario`'s two modules, `screenshot.rs` itself — is neither compiled nor linted by the plain clippy run above. A visibility-narrowing pass left the feature uncompilable for a while, and a clippy error in `screenshot.rs` then sat unnoticed for a week, with nothing to say so either time. `--all-features` rather than a named list, so a new feature is covered the day it lands.
 
 `gen_acp_presets -- --check` is the ACP preset drift gate: it regenerates the `// BEGIN GENERATED` block of `crates/daruda_config/src/agent/preset.rs` from the committed `tools/gen_acp_presets/registry-snapshot.json` and fails on any difference. It is offline; `scripts/sync-acp-registry.sh` is the separate path that refreshes the snapshot from the live registry.
 
