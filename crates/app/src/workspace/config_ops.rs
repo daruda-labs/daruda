@@ -68,10 +68,30 @@ impl Workspace {
         if delta.claude_status_enabled {
             self.refresh_jsonl_watcher(cx);
         }
-        // `apply_locale_str` runs before this method, so `rust_i18n::locale()`
-        // already reflects the new language here.
-        self.refresh_locale_strings(cx);
+        self.defer_window_config_passes(cx);
         cx.notify();
+    }
+
+    /// The passes that need this window's `&mut Window` — the dock height,
+    /// and the translated labels and placeholders — run once the current
+    /// update ends. `apply_config` is also reached from *inside* this window's
+    /// update (its appearance observer, a screenshot's theme pass), where the
+    /// window is checked out and re-entering it fails with "window not found".
+    fn defer_window_config_passes(&mut self, cx: &mut Context<Self>) {
+        let ws = cx.weak_entity();
+        cx.defer(move |cx| {
+            // SILENT-OK: a workspace closed before its reload's window work
+            // ran has no window left to update.
+            let Some(ws) = ws.upgrade() else {
+                return;
+            };
+            ws.update(cx, |ws, cx| {
+                ws.resync_input_dock_height(cx);
+                // `apply_locale_str` ran before the reload, so
+                // `rust_i18n::locale()` already reflects the new language.
+                ws.refresh_locale_strings(cx);
+            });
+        });
     }
 
     /// Re-apply translated strings to widgets whose labels are captured at

@@ -159,7 +159,9 @@ impl Workspace {
         }
     }
 
-    /// The bottom input's auto-grow cap, and the dock height that follows it.
+    /// The bottom input's auto-grow cap. The dock height that follows it
+    /// needs the window, so it is [`Self::resync_input_dock_height`]'s, run
+    /// from `apply_config`'s deferred window work.
     pub(super) fn apply_config_to_input_dock(
         &mut self,
         config: &daruda_config::Config,
@@ -169,11 +171,12 @@ impl Workspace {
         let new_max_rows = usize::from(config.agent.input_max_rows);
         self.terminal_input
             .update(cx, |s, _cx| s.set_auto_grow(1, new_max_rows));
-        // Resync the dock height after the cap change (idempotent via guard).
-        // This runs inside `observe_global` with no `&mut Window` and the
-        // workspace already borrowed, so re-enter via
-        // `try_update_workspace_window` + `window.defer` to push the
-        // entity-borrowing work past the current callback's borrow.
+    }
+
+    /// Resync the dock height after an auto-grow cap change (idempotent via
+    /// guard). `window.defer` pushes the entity-borrowing work past the window
+    /// update this re-enters.
+    pub(super) fn resync_input_dock_height(&mut self, cx: &mut Context<Self>) {
         let handle = self.window_handle;
         let ws_weak = cx.weak_entity();
         crate::windows::try_update_workspace_window(
