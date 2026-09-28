@@ -37,6 +37,24 @@ const SHOT_TAIL_WINDOW: usize = 3;
 /// tests assert both sides.
 #[cfg(feature = "screenshot")]
 pub(super) const SHOT_GROUP_TAIL_WINDOW: usize = 2;
+/// The call window the thought-run captures run under — narrower than the seed's
+/// one group, so its boundary row has calls to hold back.
+#[cfg(feature = "screenshot")]
+pub(super) const SHOT_THOUGHT_CALL_WINDOW: usize = 5;
+
+/// Which state of the thought-run seed a capture shows.
+#[cfg(feature = "screenshot")]
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub(crate) enum ThoughtsShot {
+    /// Settled, every kind shown.
+    Settled,
+    /// Mid-turn, ending on a thought with no call after it yet.
+    Working,
+    /// Settled, with the tool facets filtered out — the group reads as what it
+    /// still shows.
+    ThoughtsOnly,
+}
+
 /// Age the running-tool capture backdates its call to, so the badge shows a
 /// number rather than the `0s` a just-started call would.
 #[cfg(feature = "screenshot")]
@@ -937,6 +955,62 @@ impl Workspace {
             // The chip rides the response bar, which the filter popover would
             // cover — the popover has its own scenario (`agent-chat-options`).
             v.screenshot_filter_open = false;
+        });
+    }
+
+    /// Open a stretch of work narrated thought by thought, its one tool group
+    /// open under a call window narrower than it, so the capture shows the
+    /// group's bar, its boundary row above the kept calls, and the thoughts
+    /// among them — the newest one opened in full.
+    #[cfg(feature = "screenshot")]
+    pub(in crate::workspace) fn open_agent_chat_thoughts_for_shot(
+        &mut self,
+        shot: ThoughtsShot,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        use super::fold::FoldKey;
+        use super::rows::tail::{TailLevel, TailWindow};
+        use super::shot_transcript::{THOUGHT_RUN_GID, thought_run_transcript};
+        use crate::transcript::display_filter::{DisplayFilter, FilterFacet};
+
+        self.open_agent_chat_pane_seeded(
+            None,
+            move |v, window, cx| match shot {
+                ThoughtsShot::Working => {
+                    v.seed_working_transcript(thought_run_transcript(true), window, cx)
+                }
+                ThoughtsShot::Settled | ThoughtsShot::ThoughtsOnly => {
+                    v.seed_transcript(thought_run_transcript(false), window, cx)
+                }
+            },
+            window,
+            cx,
+        );
+        let pane_id = self.active_runtime().focused_pane_id;
+        let Some(view) = self.agent_chat_view(pane_id).cloned() else {
+            return;
+        };
+        view.update(cx, |v, cx| {
+            let every_kind = DisplayFilter::default();
+            let filter = match shot {
+                ThoughtsShot::Settled | ThoughtsShot::Working => every_kind,
+                ThoughtsShot::ThoughtsOnly => every_kind.with_section(FilterFacet::Tools, false),
+            };
+            v.set_display_filter_for_shot(filter, cx);
+            v.set_tail_window(
+                TailLevel::Calls,
+                TailWindow::Last(SHOT_THOUGHT_CALL_WINDOW),
+                cx,
+            );
+            v.set_fold_for_shot(FoldKey::ToolGroup(THOUGHT_RUN_GID.into()), true, window, cx);
+            let newest = v
+                .items
+                .iter()
+                .rposition(|item| matches!(item, daruda_acp::ChatItem::Thinking { .. }));
+            if let Some(ix) = newest {
+                v.set_fold_for_shot(FoldKey::Thinking(ix), true, window, cx);
+            }
         });
     }
 

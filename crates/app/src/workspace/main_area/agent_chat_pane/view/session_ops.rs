@@ -739,6 +739,17 @@ impl AgentChatView {
         self.set_display_filter(next, cx);
     }
 
+    /// Pin the filter to `filter` whatever the pane was restored with, so a
+    /// capture shows the same cut on every machine.
+    #[cfg(feature = "screenshot")]
+    pub(in crate::workspace) fn set_display_filter_for_shot(
+        &mut self,
+        filter: DisplayFilter,
+        cx: &mut Context<Self>,
+    ) {
+        self.set_display_filter(filter, cx);
+    }
+
     fn set_display_filter(&mut self, filter: DisplayFilter, cx: &mut Context<Self>) {
         let choice = PaneChoice::Chosen(filter);
         let choice_changed = self.display_filter != choice;

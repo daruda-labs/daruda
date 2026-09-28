@@ -10,6 +10,7 @@
 
 use gpui::{App, Entity, Point, Window, px};
 
+use super::main_area::agent_chat_pane::agent_chat_ops::ThoughtsShot;
 use super::main_area::agent_chat_pane::view::ActivityOptionsTab;
 use super::main_area::tab_ops::OpenIntent;
 use super::{ToggleCommandPalette, Workspace, dialog_helpers};
@@ -79,6 +80,11 @@ const NAME_AGENT_CHAT_SOLE_REPLY: &str = "agent-chat-sole-reply";
 const NAME_AGENT_CHAT_PLAN: &str = "agent-chat-plan";
 const NAME_AGENT_CHAT_RUNNING_TOOL: &str = "agent-chat-running-tool";
 const NAME_AGENT_CHAT_PLAN_STOPPED: &str = "agent-chat-plan-stopped";
+/// CLI tokens for a stretch of work narrated thought by thought — settled, mid-turn
+/// on a thought with no call after it yet, and filtered down to its thoughts.
+const NAME_AGENT_CHAT_THOUGHTS: &str = "agent-chat-thoughts";
+const NAME_AGENT_CHAT_THOUGHTS_WORKING: &str = "agent-chat-thoughts-working";
+const NAME_AGENT_CHAT_THOUGHTS_ONLY: &str = "agent-chat-thoughts-only";
 /// CLI token for the tail window's boundary row, closed.
 const NAME_AGENT_CHAT_TAIL: &str = "agent-chat-tail";
 /// CLI token for the same boundary row, open.
@@ -299,6 +305,11 @@ pub(crate) enum ScreenshotScenario {
     /// that bar's chrome at full width and does *not* exercise the breakpoint
     /// itself.
     AgentChatOptions(ActivityOptionsTab),
+    /// One tool group holding the thoughts between its calls, open under a
+    /// call window narrower than it. How a thought row reads among calls, what
+    /// the bar says once the filter keeps only thoughts, and whether a thought
+    /// still being written stays on screen are only judgeable on screen.
+    AgentChatThoughts(ThoughtsShot),
     /// Open the flow picker, listing the active lane's `.daruda/flows/`.
     /// The only way to see the row highlight, the empty state and the
     /// prompt line — none of which the state tests can look at.
@@ -373,6 +384,13 @@ impl ScreenshotScenario {
             NAME_AGENT_CHAT_SUBAGENT_TAIL => Some(Self::AgentChatSubagentTail),
             NAME_AGENT_CHAT_SUBAGENT_TAIL_OPEN => Some(Self::AgentChatSubagentTailOpen),
             NAME_AGENT_CHAT_OPTIONS => Some(Self::AgentChatOptions(ActivityOptionsTab::Fold)),
+            NAME_AGENT_CHAT_THOUGHTS => Some(Self::AgentChatThoughts(ThoughtsShot::Settled)),
+            NAME_AGENT_CHAT_THOUGHTS_WORKING => {
+                Some(Self::AgentChatThoughts(ThoughtsShot::Working))
+            }
+            NAME_AGENT_CHAT_THOUGHTS_ONLY => {
+                Some(Self::AgentChatThoughts(ThoughtsShot::ThoughtsOnly))
+            }
             NAME_FLOW_PICKER => Some(Self::FlowPicker),
             NAME_FLOW_PROFILE_PICKER => Some(Self::FlowProfilePicker),
             NAME_FLOW_RESUMABLE => Some(Self::FlowResumable),
@@ -687,6 +705,11 @@ pub(crate) fn drive(
                 ws.open_agent_chat_subagent_tail_boundary_for_shot(true, window, cx)
             });
         }
+        ScreenshotScenario::AgentChatThoughts(shot) => {
+            workspace.update(cx, |ws, cx| {
+                ws.open_agent_chat_thoughts_for_shot(shot, window, cx)
+            });
+        }
         ScreenshotScenario::AgentChatOptions(tab) => {
             workspace.update(cx, |ws, cx| {
                 ws.open_agent_chat_options_for_shot(tab, window, cx)
@@ -875,6 +898,20 @@ mod tests {
             ScreenshotScenario::from_cli_name("agent-chat-transport-closed"),
             Some(ScreenshotScenario::AgentChatTransportClosed)
         );
+    }
+
+    #[test]
+    fn every_thoughts_shot_is_addressable() {
+        for (name, shot) in [
+            ("agent-chat-thoughts", ThoughtsShot::Settled),
+            ("agent-chat-thoughts-working", ThoughtsShot::Working),
+            ("agent-chat-thoughts-only", ThoughtsShot::ThoughtsOnly),
+        ] {
+            assert_eq!(
+                ScreenshotScenario::from_cli_name(name),
+                Some(ScreenshotScenario::AgentChatThoughts(shot))
+            );
+        }
     }
 
     /// Every tab the panel offers has to be reachable from the CLI, or a tab

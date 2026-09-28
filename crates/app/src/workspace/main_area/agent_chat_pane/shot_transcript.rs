@@ -391,6 +391,131 @@ pub(super) fn working_transcript() -> Vec<ChatItem> {
     items
 }
 
+/// Id of the first call in [`thought_run_transcript`] — the id its tool group
+/// is keyed by, so a scenario can open it without searching the projection.
+pub(super) const THOUGHT_RUN_GID: &str = "shot-thought-0";
+
+/// One stretch of work narrated the way agents now send it: a thought before
+/// nearly every call, all of it one tool group. Long enough for the call
+/// window to hold some of it back, mixed kinds so the bar names more than one
+/// category, and one failed call so the rollup turns.
+///
+/// `working` ends the stretch on a thought still being written, with nothing
+/// after it yet, instead of the answer.
+pub(super) fn thought_run_transcript(working: bool) -> Vec<ChatItem> {
+    let steps: [(Option<&str>, Call); 9] = [
+        (
+            None,
+            Call::new(
+                "grep -n \"projects\" src/sync/jsonl.rs",
+                ToolKindView::Search,
+                Some("Grep"),
+            ),
+        ),
+        (
+            Some(
+                "The watcher keys a project by its directory name, so the next thing to read is how that name is built.",
+            ),
+            Call::new(
+                "Read src/sync/jsonl.rs (lines 115-160)",
+                ToolKindView::Read,
+                Some("Read"),
+            ),
+        ),
+        (
+            Some(
+                "It is not settled which spelling Claude Code writes, so nothing here should create a directory to cover both.",
+            ),
+            Call::new(
+                "Read src/store/persistence.rs",
+                ToolKindView::Read,
+                Some("Read"),
+            ),
+        ),
+        (
+            None,
+            Call::new(
+                "cargo test -p daruda_store persistence",
+                ToolKindView::Execute,
+                Some("Bash"),
+            ),
+        ),
+        (
+            Some(
+                "The template comment hard-codes `~/.config/daruda/config.toml`, which is wrong on every profile but one.",
+            ),
+            Call::new(
+                "rg -n \"fn config_path\" crates",
+                ToolKindView::Search,
+                Some("Bash"),
+            ),
+        ),
+        (
+            None,
+            Call::new(
+                "cargo check -p daruda_config",
+                ToolKindView::Execute,
+                Some("Bash"),
+            )
+            .failed(),
+        ),
+        (
+            Some(
+                "User config lives at `<data_dir>/config.toml` and project config under `<data_dir>/projects/<x>/`, so the comment can say \"two levels up\" and hold everywhere.",
+            ),
+            Call::new(
+                "Read src/agent/claude_json.rs",
+                ToolKindView::Read,
+                Some("Read"),
+            ),
+        ),
+        (
+            Some(
+                "What is left is the project key in `~/.claude.json`: read and write through whichever existing key names the same path instead of guessing its spelling.",
+            ),
+            Call::new("cargo check -p daruda", ToolKindView::Execute, Some("Bash")),
+        ),
+        (
+            None,
+            Call::new(
+                "cargo test -p daruda claude_json",
+                ToolKindView::Execute,
+                Some("Bash"),
+            ),
+        ),
+    ];
+    let mut items = vec![
+        ChatItem::UserText(PROMPT.to_string()),
+        assistant(
+            "Built. Next is the Claude project directory name encoding.",
+            MessagePhase::Commentary,
+        ),
+    ];
+    for (ix, (thought, call)) in steps.into_iter().enumerate() {
+        if let Some(text) = thought {
+            items.push(thinking(text));
+        }
+        let mut call = tool_call(ix, call);
+        if let ChatItem::ToolCall(tc) = &mut call {
+            tc.id = format!("shot-thought-{ix}");
+        }
+        items.push(call);
+    }
+    if working {
+        items.push(ChatItem::Thinking {
+            text: "The persist side may look projects up by `dir` directly as well; delete and toggle have to follow the same key rule".to_string(),
+            streaming: true,
+            message_id: None,
+        });
+    } else {
+        items.push(assistant(
+            "The watcher and the persist side now resolve a project through the same key, whichever spelling the file already uses.",
+            MessagePhase::Answer,
+        ));
+    }
+    items
+}
+
 fn thinking(text: &str) -> ChatItem {
     ChatItem::Thinking {
         text: text.to_string(),
@@ -495,6 +620,48 @@ mod tests {
             SUBAGENT_CHILDREN.len() > SHOT_GROUP_TAIL_WINDOW,
             "no subagent card long enough for the in-card boundary capture"
         );
+    }
+
+    /// The thought-run captures open one group by its id under a call window
+    /// narrower than it; a seed that split into several groups, or fit inside
+    /// the window, would capture a state the feature does not have.
+    #[test]
+    fn the_thought_run_is_one_group_longer_than_its_window() {
+        use super::super::agent_chat_ops::SHOT_THOUGHT_CALL_WINDOW;
+        use super::super::fold::FoldState;
+        use super::super::rows::tail::StepWindow;
+        use super::super::rows::{LiveSubagentUnits, RowKind, project};
+        use crate::transcript::display_filter::DisplayFilter;
+
+        for working in [false, true] {
+            let items = thought_run_transcript(working);
+            let rows = project(
+                &items,
+                &FoldState::default(),
+                false,
+                &LiveSubagentUnits::of(&items),
+                StepWindow::default(),
+                &DisplayFilter::default(),
+            );
+            let groups: Vec<(&str, usize, usize)> = rows
+                .iter()
+                .filter_map(|r| match &r.kind {
+                    RowKind::ToolGroupHeader {
+                        gid,
+                        calls,
+                        thoughts,
+                        ..
+                    } => Some((gid.as_str(), calls.len(), thoughts.len())),
+                    _ => None,
+                })
+                .collect();
+            let [(gid, calls, thoughts)] = groups[..] else {
+                panic!("one group, got {groups:?}");
+            };
+            assert_eq!(gid, THOUGHT_RUN_GID);
+            assert!(calls > SHOT_THOUGHT_CALL_WINDOW);
+            assert_eq!(thoughts, if working { 6 } else { 5 });
+        }
     }
 
     #[test]
