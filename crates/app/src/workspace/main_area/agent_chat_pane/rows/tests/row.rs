@@ -565,11 +565,10 @@ fn the_stop_marker_is_always_a_top_level_row() {
     }
 }
 
-/// The row a fold on an item resizes, for both kinds that render one item as a
-/// block — a toggled thought inside a group must remeasure its own row, not
-/// fall through to the tail.
+/// `item_row` resolves every kind that renders one item as its own block — a
+/// conclusion missed here keeps its old height when its fold is toggled.
 #[test]
-fn item_row_finds_a_thought_inside_a_group() {
+fn item_row_finds_every_kind_that_renders_one_item() {
     let rows = [
         RenderRow::at(RowKind::User(0), false, 0),
         RenderRow::at(RowKind::AgentItem(1), false, 1),
@@ -578,5 +577,6 @@ fn item_row_finds_a_thought_inside_a_group() {
     ];
     assert_eq!(item_row(&rows, 1), Some(1));
     assert_eq!(item_row(&rows, 2), Some(2));
-    assert_eq!(item_row(&rows, 3), None, "a conclusion has no block fold");
+    assert_eq!(item_row(&rows, 3), Some(3));
+    assert_eq!(item_row(&rows, 0), None, "a prompt owns no block fold");
 }

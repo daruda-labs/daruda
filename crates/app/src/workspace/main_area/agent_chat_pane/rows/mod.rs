@@ -288,13 +288,17 @@ impl RowKind {
     }
 }
 
-/// The row that renders item `ix` as a block of its own — the one whose height
-/// a fold on that item changes in place, or whose height a streamed chunk grows.
-/// `None` for an item that owns no such row (a group bar, a conclusion, a
-/// nested child).
+/// The row that renders item `ix` as a block of its own, which a fold toggle on
+/// that item remeasures in place. `None` for an item that owns no such row (a
+/// group bar, a nested child).
 pub(in crate::workspace) fn item_row(rows: &[RenderRow], ix: usize) -> Option<usize> {
-    rows.iter()
-        .position(|r| matches!(r.kind, RowKind::AgentItem(i) | RowKind::GroupThought(i) if i == ix))
+    rows.iter().position(|r| {
+        matches!(
+            r.kind,
+            RowKind::AgentItem(i) | RowKind::GroupThought(i) | RowKind::ConclusionItem(i)
+                if i == ix
+        )
+    })
 }
 
 impl RenderRow {
