@@ -703,10 +703,7 @@ impl Pane {
             // A graph is a view of a file, never a buffer over it.
             PaneContent::Terminal(_) | PaneContent::FlowGraph(_) => false,
             PaneContent::File(f) => {
-                use super::file_view_pane::PaneFileContent;
-                f.view.source == super::file_view_pane::DiffSource::WorkingTree
-                    && matches!(f.view.content, PaneFileContent::LoadedRaw)
-                    && *f.editor_state.read(cx).text() != f.saved_text
+                f.view.holds_editable_buffer() && *f.editor_state.read(cx).text() != f.saved_text
             }
             PaneContent::TaskEditPane(te) => te.is_dirty(cx),
             PaneContent::AgentChat(_) => false,
@@ -717,12 +714,7 @@ impl Pane {
     pub(super) fn can_save(&self, cx: &App) -> bool {
         match &self.content {
             PaneContent::Terminal(_) | PaneContent::FlowGraph(_) => false,
-            PaneContent::File(f) => {
-                use super::file_view_pane::PaneFileContent;
-                f.view.source == super::file_view_pane::DiffSource::WorkingTree
-                    && matches!(f.view.content, PaneFileContent::LoadedRaw)
-                    && f.view.path.is_absolute()
-            }
+            PaneContent::File(f) => f.view.holds_editable_buffer() && f.view.path.is_absolute(),
             PaneContent::TaskEditPane(te) => {
                 !matches!(te.branch_validation, BranchValidation::Invalid { .. })
                     && !te.title_input.read(cx).value().trim().is_empty()

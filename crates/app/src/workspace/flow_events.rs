@@ -12,6 +12,7 @@
 //! below, and holds the [`CancelToken`](daruda_flow::runner::CancelToken) that
 //! ends it.
 
+use crate::workspace::main_area::file_view_pane::DiffSource;
 use std::path::{Path, PathBuf};
 
 use daruda_flow::event::{FlowEvent, RunEnd};
@@ -187,7 +188,7 @@ impl Workspace {
             self.open_pane_file_view(
                 lane_ref.lane,
                 report,
-                crate::workspace::main_area::file_view_pane::DiffSource::WorkingTree,
+                DiffSource::WorkingTree,
                 super::main_area::file_view_pane::FileViewMode::Preview,
                 super::main_area::tab_ops::OpenIntent::Enter,
                 window,

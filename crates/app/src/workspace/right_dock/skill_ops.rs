@@ -7,6 +7,7 @@
 //! `dialog_helpers`, file-viewer dispatch, Finder spawn, and
 //! plugin-group fold state.
 
+use crate::workspace::main_area::file_view_pane::DiffSource;
 use gpui::{Context, Window};
 
 use crate::surface::strings;
@@ -115,7 +116,7 @@ impl Workspace {
         self.open_pane_file_view(
             lane_id,
             path,
-            crate::workspace::main_area::file_view_pane::DiffSource::WorkingTree,
+            DiffSource::WorkingTree,
             crate::workspace::main_area::file_view_pane::FileViewMode::Raw,
             crate::workspace::main_area::tab_ops::OpenIntent::Enter,
             window,

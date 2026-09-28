@@ -13,6 +13,7 @@
 //! Staging a plain-data snapshot avoids all re-entry and keeps the
 //! render closure free of entity borrows.
 
+use crate::workspace::main_area::file_view_pane::DiffSource;
 use gpui::{FocusHandle, UniformListScrollHandle, WeakEntity};
 
 use crate::files::tree::EntryKind;
@@ -134,7 +135,7 @@ pub(in crate::workspace) struct LeftDockSnapshot {
     pub focused_file_selection: Option<(
         daruda_store::project::LaneId,
         std::path::PathBuf,
-        crate::workspace::main_area::file_view_pane::DiffSource,
+        DiffSource,
     )>,
     pub git_changes_scroll_handle: Handle<gpui::UniformListScrollHandle>,
     /// Scroll handle for the Lanes view card list — the body below the

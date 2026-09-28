@@ -272,14 +272,10 @@ impl Workspace {
 
     /// Save the focused file-view pane to disk (raw mode only).
     pub(in crate::workspace) fn save_focused_file_pane(&mut self, cx: &mut Context<Self>) {
-        use super::file_view_pane::PaneFileContent;
         let Some(fc) = self.focused_file_content_mut() else {
             return;
         };
-        if !matches!(fc.view.content, PaneFileContent::LoadedRaw)
-            || fc.view.source != DiffSource::WorkingTree
-            || !fc.view.path.is_absolute()
-        {
+        if !fc.view.holds_editable_buffer() || !fc.view.path.is_absolute() {
             return;
         }
         let path = fc.view.path.clone();

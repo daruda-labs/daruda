@@ -14,6 +14,7 @@
 //! status update, config change); other `cx.notify()` calls read the
 //! cached `Arc` directly.
 
+use crate::workspace::main_area::file_view_pane::DiffSource;
 use std::collections::{HashSet, VecDeque};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -595,7 +596,7 @@ impl Workspace {
         self.open_pane_file_view(
             wt_ref.lane,
             path,
-            crate::workspace::main_area::file_view_pane::DiffSource::WorkingTree,
+            DiffSource::WorkingTree,
             FileViewMode::Raw,
             intent,
             window,
@@ -950,12 +951,8 @@ impl Workspace {
             // dedupes on `fv.path`, so opening the same file by Enter and by
             // click must produce the same path or it lands in a second tab.
             let abs = tree_root.join(&path);
-            if self.step_into_open_file_view(
-                Some(abs.clone()),
-                crate::workspace::main_area::file_view_pane::DiffSource::WorkingTree,
-                window,
-                cx,
-            ) {
+            if self.step_into_open_file_view(Some(abs.clone()), DiffSource::WorkingTree, window, cx)
+            {
                 return;
             }
             self.open_files_entry(wt_ref, abs, OpenIntent::Commit, window, cx);

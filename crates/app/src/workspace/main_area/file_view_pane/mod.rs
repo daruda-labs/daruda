@@ -142,6 +142,12 @@ impl DiffSource {
         matches!(self, Self::Index)
     }
 
+    /// Whether an edit to this pane's text can be saved back: only the file on
+    /// disk can — the index and a commit are snapshots, not buffers.
+    pub(in crate::workspace) fn is_editable(&self) -> bool {
+        matches!(self, Self::WorkingTree)
+    }
+
     /// Whether the pane tracks the lane as it is now — the working tree or
     /// the index — rather than two fixed commits.
     pub(in crate::workspace) fn is_live(&self) -> bool {
@@ -159,6 +165,46 @@ impl DiffSource {
         match self {
             Self::Range { status, .. } => Some(*status),
             Self::WorkingTree | Self::Index => None,
+        }
+    }
+
+    /// The persisted form: the legacy `staged` flag beside an optional range.
+    pub(in crate::workspace) fn to_serialized(
+        &self,
+    ) -> (bool, Option<daruda_store::project::SerializedDiffRange>) {
+        match self {
+            Self::WorkingTree => (false, None),
+            Self::Index => (true, None),
+            Self::Range {
+                from,
+                to,
+                old_path,
+                status,
+            } => (
+                false,
+                Some(daruda_store::project::SerializedDiffRange {
+                    from: from.clone(),
+                    to: to.clone(),
+                    old_path: old_path.clone(),
+                    status: *status,
+                }),
+            ),
+        }
+    }
+
+    /// Read a persisted pane back. A range wins over `staged`: the two are
+    /// written together only by a build that knew about ranges.
+    pub(in crate::workspace) fn from_serialized(
+        fc: &daruda_store::project::SerializedFileContent,
+    ) -> Self {
+        match &fc.range {
+            Some(range) => Self::Range {
+                from: range.from.clone(),
+                to: range.to.clone(),
+                old_path: range.old_path.clone(),
+                status: range.status,
+            },
+            None => Self::from_staged(fc.staged),
         }
     }
 }
@@ -415,6 +461,12 @@ impl PaneFileView {
     /// pending change. `None` means nothing to diff, so no Changes mode.
     pub(in crate::workspace) fn status(&self) -> Option<char> {
         self.source.pinned_status().or(self.live_status)
+    }
+
+    /// Whether the pane holds text the user can edit and save: raw content of
+    /// the file on disk. The one answer the save, dirty and can-save checks read.
+    pub(in crate::workspace) fn holds_editable_buffer(&self) -> bool {
+        self.source.is_editable() && matches!(self.content, PaneFileContent::LoadedRaw)
     }
 
     pub(super) fn loading(

@@ -1,4 +1,5 @@
 use super::*;
+use crate::workspace::main_area::file_view_pane::DiffSource;
 
 // ---- Lanes ----
 
@@ -682,7 +683,7 @@ fn input_draft_round_trips_across_panes_and_cleans_up(cx: &mut TestAppContext) {
             let file_pane = ws.create_file_pane(
                 lane_id,
                 root.join("note.txt"),
-                crate::workspace::main_area::file_view_pane::DiffSource::WorkingTree,
+                DiffSource::WorkingTree,
                 None,
                 FileViewMode::Preview,
                 window,

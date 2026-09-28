@@ -10,8 +10,8 @@ use crate::lane::git::base::RangeFile;
 use crate::surface::strings as app_strings;
 use crate::ui::theme;
 use crate::workspace::layout::{Dock, LeftDockSnapshot};
+use crate::workspace::left_dock::git_ops::against_base::range_pane_for;
 use crate::workspace::left_dock::git_ops::{git_status_color, git_status_symbol};
-use crate::workspace::main_area::file_view_pane::DiffSource;
 
 use super::unified_list::BaseHeaderRow;
 
@@ -104,22 +104,19 @@ pub(super) fn base_file_row(
 ) -> AnyElement {
     let target = snap.active;
     let lane_id = target.lane;
-    let abs = snap
-        .lanes
-        .iter()
-        .find(|w| w.id == lane_id)
-        .map(|w| w.paths().from_git_status(&file.path));
-    // Only a pane pinned to the commits this row was listed from is this
-    // row's; one left open across a later commit shows an older range.
-    let listed = match snap.git_against_base.as_deref() {
-        Some(Ok(found)) => Some((found.merge_base.as_str(), found.tips.head.as_str())),
-        _ => None,
+    // Lit only for the very pane this row would open; one left open across a
+    // later commit is pinned to an older pair and is not this row's.
+    let is_selected = match (
+        snap.lanes.iter().find(|w| w.id == lane_id),
+        snap.git_against_base.as_deref(),
+        &snap.focused_file_selection,
+    ) {
+        (Some(lane), Some(Ok(found)), Some((focused_lane, focused_path, focused_source))) => {
+            let (abs, source) = range_pane_for(found, file, &lane.paths());
+            *focused_lane == lane_id && *focused_path == abs && *focused_source == source
+        }
+        _ => false,
     };
-    let is_selected = matches!(
-        (&snap.focused_file_selection, &abs, listed),
-        (Some((lane, path, DiffSource::Range { from, to, .. })), Some(abs), Some((mb, head)))
-            if *lane == lane_id && path == abs && from == mb && to == head
-    );
 
     let t = theme::current(cx);
     let row_selected_bg = t.git_file_row_selected_bg;

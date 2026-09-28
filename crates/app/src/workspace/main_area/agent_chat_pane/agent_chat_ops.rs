@@ -10,6 +10,7 @@
 //! [`super::telegram_ops`]; this file only tees into it from
 //! `maybe_notify_agent_event` and `fire_activity_completion`.
 
+use crate::workspace::main_area::file_view_pane::DiffSource;
 use daruda_config::AgentLaunch;
 use daruda_store::agent_vocabulary::VocabEntry;
 use daruda_store::observability::error_report::{ErrorReport, ErrorSeverity};
@@ -1588,7 +1589,7 @@ impl Workspace {
         self.open_pane_file_view(
             lane.lane,
             path,
-            crate::workspace::main_area::file_view_pane::DiffSource::WorkingTree,
+            DiffSource::WorkingTree,
             crate::workspace::main_area::file_view_pane::FileViewMode::Raw,
             crate::workspace::main_area::tab_ops::OpenIntent::Enter,
             window,
@@ -1717,7 +1718,7 @@ impl Workspace {
                 self.open_pane_file_view(
                     lane.lane,
                     path,
-                    crate::workspace::main_area::file_view_pane::DiffSource::WorkingTree,
+                    DiffSource::WorkingTree,
                     crate::workspace::main_area::file_view_pane::FileViewMode::Raw,
                     crate::workspace::main_area::tab_ops::OpenIntent::Enter,
                     window,

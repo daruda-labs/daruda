@@ -1,5 +1,6 @@
 //! Git Changes dock keyboard cursor + directory collapse.
 
+use crate::workspace::main_area::file_view_pane::DiffSource;
 use std::path::PathBuf;
 
 use daruda_store::project::{LaneId, LaneRef};
@@ -116,7 +117,7 @@ impl Workspace {
         self.open_git_file_diff(
             lane_id,
             abs,
-            crate::workspace::main_area::file_view_pane::DiffSource::from_staged(staged),
+            DiffSource::from_staged(staged),
             OpenIntent::Preview,
             window,
             cx,
@@ -203,12 +204,7 @@ impl Workspace {
     ) {
         self.left_dock_preview = None;
         let (path, staged) = self.git_changes_cursor_target();
-        if self.step_into_open_file_view(
-            path,
-            crate::workspace::main_area::file_view_pane::DiffSource::from_staged(staged),
-            window,
-            cx,
-        ) {
+        if self.step_into_open_file_view(path, DiffSource::from_staged(staged), window, cx) {
             return;
         }
         self.open_git_changes_cursor(OpenIntent::Commit, window, cx);
@@ -271,7 +267,7 @@ impl Workspace {
         self.open_git_file_diff(
             active_id,
             abs,
-            crate::workspace::main_area::file_view_pane::DiffSource::from_staged(is_staged),
+            DiffSource::from_staged(is_staged),
             intent,
             window,
             cx,

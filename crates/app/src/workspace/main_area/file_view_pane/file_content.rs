@@ -80,6 +80,12 @@ pub(in crate::workspace) fn load_file_content(
     }
 }
 
+/// Where a pane's bytes come from when they are not the file on disk.
+enum GitBlob<'a> {
+    Index,
+    At(&'a str),
+}
+
 fn load_raw(
     wt_path: &std::path::Path,
     repo_root: Option<&std::path::Path>,
@@ -90,7 +96,17 @@ fn load_raw(
 ) -> LoadOutcome {
     use crate::ui::theme;
 
-    let bytes: Result<Vec<u8>, String> = if *source != DiffSource::WorkingTree {
+    // Every source but the working tree reads a blob out of git.
+    let blob = match source {
+        DiffSource::WorkingTree => None,
+        DiffSource::Index => Some(GitBlob::Index),
+        // A file the range deleted exists only on its `from` side.
+        DiffSource::Range {
+            from, status: 'D', ..
+        } => Some(GitBlob::At(from)),
+        DiffSource::Range { to, .. } => Some(GitBlob::At(to)),
+    };
+    let bytes: Result<Vec<u8>, String> = if let Some(blob) = blob {
         if repo_root.is_none() {
             return LoadOutcome::plain(PaneFileContent::Error(
                 crate::surface::strings::file_viewer_err_no_git_repo(),
@@ -117,15 +133,9 @@ fn load_raw(
         } else {
             path.to_path_buf()
         };
-        match source {
-            // A file the range deleted exists only on its `from` side.
-            DiffSource::Range {
-                from, status: 'D', ..
-            } => crate::lane::git::base::git_show_at(wt_path, from, &repo_rel),
-            DiffSource::Range { to, .. } => {
-                crate::lane::git::base::git_show_at(wt_path, to, &repo_rel)
-            }
-            _ => crate::lane::git::git_show_staged(wt_path, &repo_rel),
+        match blob {
+            GitBlob::Index => crate::lane::git::git_show_staged(wt_path, &repo_rel),
+            GitBlob::At(rev) => crate::lane::git::base::git_show_at(wt_path, rev, &repo_rel),
         }
         .map_err(|e| e.to_string())
     } else {

@@ -19,6 +19,7 @@
 //! leave a run directory behind in whichever repository was open.
 
 use crate::agent::launch_resolve::ConnectCommandError;
+use crate::workspace::main_area::file_view_pane::DiffSource;
 use std::path::{Path, PathBuf};
 
 use daruda_flow::event::{FlowEvent, RunEnd};
@@ -538,7 +539,7 @@ impl Workspace {
         self.open_pane_file_view(
             self.active.lane,
             report.to_path_buf(),
-            crate::workspace::main_area::file_view_pane::DiffSource::WorkingTree,
+            DiffSource::WorkingTree,
             super::main_area::file_view_pane::FileViewMode::Preview,
             super::main_area::tab_ops::OpenIntent::Enter,
             window,

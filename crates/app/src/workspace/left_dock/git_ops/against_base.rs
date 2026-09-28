@@ -9,10 +9,30 @@ use daruda_store::observability::system_info::redact_home;
 use daruda_store::project::LaneRef;
 use gpui::{Context, Window};
 
-use crate::lane::git::base::{self, AgainstBase, BaseProblem, BaseTips};
+use std::path::PathBuf;
+
+use crate::lane::git::base::{self, AgainstBase, BaseProblem, BaseTips, RangeFile};
+use crate::lane::paths::LanePaths;
 use crate::workspace::Workspace;
-use crate::workspace::main_area::file_view_pane::{DiffSource, FileViewMode};
+use crate::workspace::main_area::file_view_pane::DiffSource;
 use crate::workspace::main_area::tab_ops::OpenIntent;
+
+/// The pane a row of `found` opens: `file` at its absolute path, pinned to
+/// the pair the list was read from. The one rule both the open and the row's
+/// highlight read, so a row lights up exactly for the pane it would open.
+pub(in crate::workspace) fn range_pane_for(
+    found: &AgainstBase,
+    file: &RangeFile,
+    paths: &LanePaths<'_>,
+) -> (PathBuf, DiffSource) {
+    let source = DiffSource::Range {
+        from: found.merge_base.clone(),
+        to: found.tips.head.clone(),
+        old_path: file.old_path.as_ref().map(|p| paths.from_git_status(p)),
+        status: file.status,
+    };
+    (paths.from_git_status(&file.path), source)
+}
 
 /// What one background read found.
 enum Read {
@@ -145,22 +165,8 @@ impl Workspace {
         let Some(file) = found.files.iter().find(|f| f.path == repo_rel) else {
             return;
         };
-        let source = DiffSource::Range {
-            from: found.merge_base.clone(),
-            to: found.tips.head.clone(),
-            old_path: file.old_path.as_ref().map(|p| paths.from_git_status(p)),
-            status: file.status,
-        };
-        let abs = paths.from_git_status(&file.path);
-        self.open_pane_file_view(
-            target.lane,
-            abs,
-            source,
-            FileViewMode::Changes,
-            intent,
-            window,
-            cx,
-        );
+        let (abs, source) = range_pane_for(found, file, &paths);
+        self.open_git_file_diff(target.lane, abs, source, intent, window, cx);
     }
 
     /// A click on an against-base row: the panel takes focus, as for the

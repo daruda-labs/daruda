@@ -3,6 +3,7 @@
 
 use super::*;
 use crate::lane::git::base::BaseProblem;
+use crate::workspace::main_area::file_view_pane::DiffSource;
 
 fn run_git(dir: &std::path::Path, args: &[&str]) {
     let status = std::process::Command::new("git")
@@ -115,7 +116,7 @@ fn an_against_base_row_opens_a_diff_pinned_to_its_commits(cx: &mut TestAppContex
     if !crate::lane::git::has_git() {
         return;
     }
-    use crate::workspace::main_area::file_view_pane::{DiffSource, PaneFileContent};
+    use crate::workspace::main_area::file_view_pane::PaneFileContent;
     use crate::workspace::main_area::tab_ops::OpenIntent;
 
     let temp = tempfile::tempdir().unwrap();
@@ -201,8 +202,7 @@ fn an_against_base_row_opens_a_diff_pinned_to_its_commits(cx: &mut TestAppContex
 }
 
 #[test]
-fn a_persisted_range_restores_ahead_of_the_staged_flag() {
-    use crate::workspace::main_area::file_view_pane::DiffSource;
+fn a_persisted_range_restores_ahead_of_the_staged_flag_and_round_trips() {
     use daruda_store::project::{
         SerializedDiffRange, SerializedFileContent, SerializedFileViewMode,
     };
@@ -213,15 +213,9 @@ fn a_persisted_range_restores_ahead_of_the_staged_flag() {
         range: None,
         view_mode: SerializedFileViewMode::Changes,
     };
-    assert_eq!(
-        crate::workspace::persistence::restored_diff_source(&fc),
-        DiffSource::Index
-    );
+    assert_eq!(DiffSource::from_serialized(&fc), DiffSource::Index);
     fc.staged = false;
-    assert_eq!(
-        crate::workspace::persistence::restored_diff_source(&fc),
-        DiffSource::WorkingTree
-    );
+    assert_eq!(DiffSource::from_serialized(&fc), DiffSource::WorkingTree);
     fc.range = Some(SerializedDiffRange {
         from: "m".into(),
         to: "h".into(),
@@ -230,7 +224,7 @@ fn a_persisted_range_restores_ahead_of_the_staged_flag() {
     });
     fc.staged = true;
     assert_eq!(
-        crate::workspace::persistence::restored_diff_source(&fc),
+        DiffSource::from_serialized(&fc),
         DiffSource::Range {
             from: "m".into(),
             to: "h".into(),
@@ -238,6 +232,10 @@ fn a_persisted_range_restores_ahead_of_the_staged_flag() {
             status: 'D',
         }
     );
+    // And writing it back yields the record it came from.
+    let (staged, range) = DiffSource::from_serialized(&fc).to_serialized();
+    assert!(!staged, "a range pane is not staged");
+    assert_eq!(range, fc.range);
 }
 
 /// A git read that outlives its lane — torn down while the read ran — must

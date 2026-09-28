@@ -3,6 +3,7 @@
 //! translating between the in-memory pane tree and the on-disk JSON form.
 //! Owns `LaneRuntime`, the per-lane runtime in the single `runtimes` map.
 
+use crate::workspace::main_area::file_view_pane::DiffSource;
 use std::collections::{BTreeMap, HashMap};
 
 use daruda_store::observability::error_report::{ErrorReport, ErrorSeverity};
@@ -728,7 +729,7 @@ impl Workspace {
                         self.create_file_pane(
                             fc.lane_id,
                             fc.path.clone(),
-                            restored_diff_source(fc),
+                            DiffSource::from_serialized(fc),
                             None,
                             deserialize_view_mode(fc.view_mode),
                             window,
@@ -1116,24 +1117,12 @@ fn serialize_pane_content(
 ) -> daruda_store::project::SerializedPaneContent {
     use daruda_store::project::SerializedPaneContent as Content;
     if let Some(fv) = pane.file_view() {
+        let (staged, range) = fv.source.to_serialized();
         return Content::File(daruda_store::project::SerializedFileContent {
             lane_id: fv.lane_id,
             path: fv.path.clone(),
-            staged: fv.source.is_index(),
-            range: match &fv.source {
-                crate::workspace::main_area::file_view_pane::DiffSource::Range {
-                    from,
-                    to,
-                    old_path,
-                    status,
-                } => Some(daruda_store::project::SerializedDiffRange {
-                    from: from.clone(),
-                    to: to.clone(),
-                    old_path: old_path.clone(),
-                    status: *status,
-                }),
-                _ => None,
-            },
+            staged,
+            range,
             view_mode: serialize_view_mode(fv.view_mode),
         });
     }
@@ -1224,21 +1213,5 @@ fn serialize_layout(
                 ratios: ratios.clone(),
             }
         }
-    }
-}
-
-/// What a persisted file pane shows. A range wins over `staged`: the two were
-/// written together only by a build that knew about ranges.
-pub(in crate::workspace) fn restored_diff_source(
-    fc: &daruda_store::project::SerializedFileContent,
-) -> crate::workspace::main_area::file_view_pane::DiffSource {
-    match &fc.range {
-        Some(range) => crate::workspace::main_area::file_view_pane::DiffSource::Range {
-            from: range.from.clone(),
-            to: range.to.clone(),
-            old_path: range.old_path.clone(),
-            status: range.status,
-        },
-        None => crate::workspace::main_area::file_view_pane::DiffSource::from_staged(fc.staged),
     }
 }

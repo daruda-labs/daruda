@@ -8,6 +8,7 @@
 mod against_base_section;
 pub(super) mod unified_list;
 
+use crate::workspace::main_area::file_view_pane::DiffSource;
 use std::path::PathBuf;
 
 use crate::ui::theme;
@@ -544,11 +545,7 @@ fn unified_file_row(
     entry: &UnifiedEntry,
     lane_id: LaneId,
     wt_paths: &LanePaths<'_>,
-    selected: Option<&(
-        LaneId,
-        PathBuf,
-        crate::workspace::main_area::file_view_pane::DiffSource,
-    )>,
+    selected: Option<&(LaneId, PathBuf, DiffSource)>,
     is_cursor: bool,
     snap: &LeftDockSnapshot,
     cx: &mut Context<Dock>,
@@ -565,12 +562,7 @@ fn unified_file_row(
 
     // A range pane shows the same path from commits, not this row's change.
     let is_selected = selected.is_some_and(|(wt, p, source)| {
-        *wt == lane_id
-            && *p == abs_path_for_open
-            && !matches!(
-                source,
-                crate::workspace::main_area::file_view_pane::DiffSource::Range { .. }
-            )
+        *wt == lane_id && *p == abs_path_for_open && !matches!(source, DiffSource::Range { .. })
     });
 
     // Renamed entries (`R` / `C` status) carry the original path —
@@ -828,7 +820,7 @@ fn unified_file_row(
                                 ws.open_git_file_diff(
                                     lane_id,
                                     path_diff.clone(),
-                                    crate::workspace::main_area::file_view_pane::DiffSource::from_staged(is_staged),
+                                    DiffSource::from_staged(is_staged),
                                     OpenIntent::Commit,
                                     window,
                                     cx,
