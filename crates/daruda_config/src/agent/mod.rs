@@ -727,9 +727,12 @@ impl AgentConfig {
         self.input_max_rows = self
             .input_max_rows
             .clamp(INPUT_MAX_ROWS_MIN, INPUT_MAX_ROWS_MAX);
-        self.reading_width = self
-            .reading_width
-            .clamp(READING_WIDTH_MIN, READING_WIDTH_MAX);
+        self.reading_width = crate::clamp_or(
+            self.reading_width,
+            READING_WIDTH_MIN,
+            READING_WIDTH_MAX,
+            Self::default().reading_width,
+        );
     }
 }
 

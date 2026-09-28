@@ -57,6 +57,18 @@ pub use agent::{
 pub use claude_status::ClaudeStatusConfig;
 pub use clipboard::ClipboardConfig;
 pub use colors::{AnsiPalette, ColorConfig, HexColor};
+
+/// `value` clamped to `[min, max]`, or `fallback` when it is NaN. TOML reads
+/// `nan` as a float and `f32::clamp` passes NaN through, so a NaN size, width
+/// or alpha would otherwise reach every consumer — and, comparing unequal to
+/// itself, read as "changed" on every reload.
+pub(crate) fn clamp_or(value: f32, min: f32, max: f32, fallback: f32) -> f32 {
+    if value.is_nan() {
+        fallback
+    } else {
+        value.clamp(min, max)
+    }
+}
 pub use cursor::{CursorConfig, CursorStyle};
 pub use editor::{
     EditorConfig, ExternalEditorPreset, PRESETS as EXTERNAL_EDITOR_PRESETS,

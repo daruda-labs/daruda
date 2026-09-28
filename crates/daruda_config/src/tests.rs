@@ -1860,3 +1860,29 @@ fn session_hosts_and_tombstones_round_trip_through_config_toml() {
         "{toml_str}"
     );
 }
+
+#[test]
+fn nan_numbers_fall_back_to_their_defaults_instead_of_passing_through() {
+    let input = "[font.editor]\nsize = nan\n[font.agent_chat]\nline_height = nan\n\
+                 [window]\nopacity = nan\n[agent]\nreading_width = nan\n\
+                 [left_dock]\nleft_default_width = nan\n";
+    let mut cfg: Config = toml::from_str(input).unwrap();
+    assert!(cfg.font.editor.size.is_nan(), "TOML really reads `nan`");
+    cfg.clamp();
+    let d = Config::default();
+    assert_eq!(cfg.font.editor.size, d.font.editor.size);
+    assert_eq!(
+        cfg.font.agent_chat.line_height,
+        d.font.agent_chat.line_height
+    );
+    assert_eq!(cfg.window.opacity, d.window.opacity);
+    assert_eq!(cfg.agent.reading_width, d.agent.reading_width);
+    assert_eq!(
+        cfg.left_dock.left_default_width,
+        d.left_dock.left_default_width
+    );
+    // An out-of-range real number still clamps rather than resetting.
+    let mut big: Config = toml::from_str("[font.editor]\nsize = 500.0\n").unwrap();
+    big.clamp();
+    assert_eq!(big.font.editor.size, 72.0);
+}

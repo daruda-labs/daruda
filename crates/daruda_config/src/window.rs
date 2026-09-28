@@ -22,6 +22,6 @@ impl Default for WindowConfig {
 impl WindowConfig {
     /// Clamp opacity to the valid range.
     pub fn clamp(&mut self) {
-        self.opacity = self.opacity.clamp(0.1, 1.0);
+        self.opacity = crate::clamp_or(self.opacity, 0.1, 1.0, Self::default().opacity);
     }
 }

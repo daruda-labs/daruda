@@ -58,6 +58,11 @@ impl Default for LeftDockConfig {
 impl LeftDockConfig {
     /// Clamp numeric fields to their valid ranges.
     pub fn clamp(&mut self) {
-        self.left_default_width = self.left_default_width.clamp(LEFT_MIN_W, LEFT_MAX_W);
+        self.left_default_width = crate::clamp_or(
+            self.left_default_width,
+            LEFT_MIN_W,
+            LEFT_MAX_W,
+            Self::default().left_default_width,
+        );
     }
 }

@@ -85,15 +85,20 @@ impl Default for AgentChatFontConfig {
 impl FontConfig {
     /// Clamp all numeric fields to their valid ranges.
     pub fn clamp(&mut self) {
-        self.terminal.size = self.terminal.size.clamp(6.0, 72.0);
-        self.terminal.line_height = self.terminal.line_height.clamp(0.5, 2.0);
-        self.terminal.cell_width = self.terminal.cell_width.clamp(0.5, 2.0);
-        self.terminal.inset_x = self.terminal.inset_x.clamp(0.0, 32.0);
-        self.terminal.inset_y = self.terminal.inset_y.clamp(0.0, 32.0);
-        self.editor.size = self.editor.size.clamp(6.0, 72.0);
-        self.editor.line_height = self.editor.line_height.clamp(0.5, 2.0);
-        self.agent_chat.size = self.agent_chat.size.clamp(6.0, 72.0);
-        self.agent_chat.line_height = self.agent_chat.line_height.clamp(0.5, 2.0);
+        use crate::clamp_or;
+        let d = Self::default();
+        let t = &mut self.terminal;
+        t.size = clamp_or(t.size, 6.0, 72.0, d.terminal.size);
+        t.line_height = clamp_or(t.line_height, 0.5, 2.0, d.terminal.line_height);
+        t.cell_width = clamp_or(t.cell_width, 0.5, 2.0, d.terminal.cell_width);
+        t.inset_x = clamp_or(t.inset_x, 0.0, 32.0, d.terminal.inset_x);
+        t.inset_y = clamp_or(t.inset_y, 0.0, 32.0, d.terminal.inset_y);
+        let e = &mut self.editor;
+        e.size = clamp_or(e.size, 6.0, 72.0, d.editor.size);
+        e.line_height = clamp_or(e.line_height, 0.5, 2.0, d.editor.line_height);
+        let c = &mut self.agent_chat;
+        c.size = clamp_or(c.size, 6.0, 72.0, d.agent_chat.size);
+        c.line_height = clamp_or(c.line_height, 0.5, 2.0, d.agent_chat.line_height);
     }
 }
 
