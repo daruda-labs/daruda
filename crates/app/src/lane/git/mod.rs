@@ -12,8 +12,10 @@
 //!
 //! The status / diff / staging / commit / push family lives in
 //! [`status`]; this module retains the run-git plumbing, the repo
-//! probe, lane lifecycle, and the merge sub-module.
+//! probe, lane lifecycle, and the merge sub-module. [`base`] answers what a
+//! lane committed since the branch it left.
 
+pub mod base;
 mod command;
 mod status;
 

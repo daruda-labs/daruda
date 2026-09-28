@@ -1,5 +1,6 @@
 mod accounts;
 mod activity_bar_press;
+mod against_base;
 mod agent_chat;
 mod agent_chat_disconnect;
 mod agent_diff_layout;

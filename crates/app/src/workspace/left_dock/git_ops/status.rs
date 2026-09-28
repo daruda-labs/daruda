@@ -71,6 +71,9 @@ impl Workspace {
                         // so this refresh is the only path keeping it current.
                         ws.reconcile_lane_branch(target, data.branch.as_deref(), cx);
                         ws.lane_scoped_mut(target).git.tracking = Some(data);
+                        // Every ref move lands here, so this is the one place
+                        // the against-base axis needs to hear about it.
+                        ws.refresh_against_base(target, cx);
                     }
                     Err(e) => {
                         // Only the header's ahead/behind and the lane badges

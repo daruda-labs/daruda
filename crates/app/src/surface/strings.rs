@@ -6827,6 +6827,10 @@ error_string!(
 );
 error_string!(error_git_status_failed, "error.git_status_failed");
 error_string!(error_git_tracking_failed, "error.git_tracking_failed");
+error_string!(
+    error_git_against_base_failed,
+    "error.git_against_base_failed"
+);
 error_string!(error_git_watcher_error, "error.git_watcher_error");
 error_string!(
     error_git_watcher_init_failed,

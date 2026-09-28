@@ -7,6 +7,7 @@ use std::sync::Arc;
 use crate::files::gitignore::GitignoreSet;
 use crate::files::tree::FileTree;
 use crate::files::watcher::FileTreeWatcher;
+use crate::lane::git::base::{AgainstBase, BaseProblem};
 use crate::lane::git::{GitDirs, GitTracking, GitWorktreeStatus};
 use crate::lane::history::HistoryBuffer;
 use crate::workspace::left_dock::file_tree_ops::{FilesReloadQueue, VisibleEntry};
@@ -91,6 +92,10 @@ pub(in crate::workspace) struct GitLaneState {
     pub worktree: Option<GitWorktreeStatus>,
     pub tracking_refresh: RefreshSlot,
     pub worktree_refresh: RefreshSlot,
+    /// What the lane committed since its base. A third axis riding the
+    /// tracking one: only a ref move can change it. `None` until first read.
+    pub against_base: Option<Result<AgainstBase, BaseProblem>>,
+    pub against_base_refresh: RefreshSlot,
     /// Where this lane's git state lives on disk — needed to watch it.
     pub dirs: GitDirsState,
     /// Lane-relative directory groups, kept only for this app session.

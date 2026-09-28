@@ -9,6 +9,7 @@
 //! (the exclusive-op locks every one of them claims), [`watch`] (the git-dir
 //! watchers that catch writes daruda did not make).
 
+pub(super) mod against_base;
 pub(super) mod file_view;
 pub(in crate::workspace) mod history;
 pub(super) mod index;

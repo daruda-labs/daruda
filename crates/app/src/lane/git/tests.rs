@@ -4,7 +4,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 // Temp-dir helpers — each test gets a unique path so parallel
 // runs don't collide. The directory is created on demand and
 // torn down at the end of the test.
-fn unique_tmpdir(prefix: &str) -> PathBuf {
+pub(super) fn unique_tmpdir(prefix: &str) -> PathBuf {
     static SEQ: AtomicU64 = AtomicU64::new(0);
     let id = SEQ.fetch_add(1, Ordering::Relaxed);
     let pid = std::process::id();
@@ -21,11 +21,11 @@ fn unique_tmpdir(prefix: &str) -> PathBuf {
     daruda_core::path::canonicalize(&dir).unwrap()
 }
 
-fn teardown(path: &Path) {
+pub(super) fn teardown(path: &Path) {
     let _ = std::fs::remove_dir_all(path);
 }
 
-fn commit_initial(repo: &Path) {
+pub(super) fn commit_initial(repo: &Path) {
     // Ensure we have an initial commit so `lane add` can create
     // checkouts — with no commits `add` refuses.
     run_git(repo, ["config", "user.email", "daruda@test"]).unwrap();
@@ -34,7 +34,7 @@ fn commit_initial(repo: &Path) {
 }
 
 // Skip-if-no-git guard for the whole module.
-fn require_git() -> bool {
+pub(super) fn require_git() -> bool {
     has_git()
 }
 
