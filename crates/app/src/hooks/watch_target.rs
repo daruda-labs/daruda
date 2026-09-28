@@ -54,6 +54,23 @@ fn resolved_for(target: &Path, anchor: Option<&Path>) -> PathBuf {
 mod tests {
     use super::*;
 
+    /// A target that does not exist yet is watched through its nearest
+    /// ancestor, and inotify / ReadDirectoryChangesW report events in the
+    /// spelling it was given — those have to match on every platform.
+    #[test]
+    fn a_missing_target_matches_events_in_its_given_spelling() {
+        let temp = tempfile::tempdir().unwrap();
+        let anchor = temp.path().join(".claude");
+        std::fs::create_dir(&anchor).unwrap();
+        let skills = anchor.join("skills");
+
+        let target = WatchTarget::new(&skills, Some(&anchor));
+
+        assert!(target.contains(&skills.join("a").join("SKILL.md")));
+        assert!(target.is(&skills));
+        assert!(!target.contains(&anchor.join("other")));
+    }
+
     /// A symlinked `~/.claude` (a dotfile manager's layout): FSEvents names
     /// the link's target, inotify the link — both are the target's events.
     #[cfg(unix)]
