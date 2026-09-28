@@ -60,13 +60,16 @@ pub fn summary() -> &'static str {
 /// Example: `/Users/alice/git/foo` → `~/git/foo`.
 pub fn redact_home(path: impl AsRef<Path>) -> String {
     let path = path.as_ref();
+    // Resolved as one place, so a symlinked or differently cased spelling of
+    // the home directory (Windows) is still hidden; the tail keeps this
+    // platform's separator rather than mixing in a `/`.
     if let Some(home) = dirs::home_dir()
-        && let Ok(rest) = path.strip_prefix(&home)
+        && let Some(rest) = daruda_core::path::strip_root(path, &home)
     {
         if rest.as_os_str().is_empty() {
             return "~".to_string();
         }
-        return format!("~/{}", rest.to_string_lossy());
+        return format!("~{}{}", std::path::MAIN_SEPARATOR, rest.to_string_lossy());
     }
     path.to_string_lossy().into_owned()
 }
@@ -118,6 +121,23 @@ mod tests {
             !redacted.contains(&home.to_string_lossy().into_owned()),
             "redact_home leaked the literal home prefix"
         );
+    }
+
+    /// The home directory reached another way — here through a symlink —
+    /// is still the user's name, and still hidden.
+    #[cfg(unix)]
+    #[test]
+    fn redact_home_hides_a_symlinked_spelling_of_home() {
+        let Some(home) = dirs::home_dir() else {
+            return;
+        };
+        let dir = tempfile::tempdir().unwrap();
+        let link = dir.path().join("home-link");
+        if daruda_core::path::symlink(&home, &link).is_err() {
+            return;
+        }
+        let redacted = redact_home(&link);
+        assert_eq!(redacted, "~");
     }
 
     #[test]

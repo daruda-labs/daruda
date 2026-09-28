@@ -294,7 +294,10 @@ pub fn spawn_login(
     let tokens = tokenize(command);
     let (program, args) = tokens.split_first().ok_or(LoginError::EmptyCommand)?;
 
-    let mut cmd = daruda_core::process::command(program);
+    let mut cmd = daruda_core::process::command_on_path(
+        program,
+        daruda_core::process::child_path(inject_env.iter().map(|(k, v)| (k, v))),
+    );
     cmd.args(args);
     for name in strip_env {
         cmd.env_remove(name);

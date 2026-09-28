@@ -20,7 +20,7 @@ use std::path::{Path, PathBuf};
 use std::sync::mpsc::{self, RecvTimeoutError};
 use std::time::Duration;
 
-use daruda_core::path::canonicalize_or_self;
+use super::watch_target::WatchTarget;
 
 /// Coalescing window. Same value as Skills — atomic-rename bursts
 /// finish within this much, the panel still reads as live.
@@ -79,10 +79,10 @@ pub fn spawn(
     // have two `.mcp.json` targets (lane root + the focused terminal's cwd),
     // so anchors/matches are sets.
     let mut project_anchors: Vec<PathBuf> = Vec::new();
-    let mut project_matches: Vec<PathBuf> = Vec::new();
+    let mut project_matches: Vec<WatchTarget> = Vec::new();
     for p in &project_paths {
         let anchor = nearest_existing_ancestor_for_file(p, 2);
-        project_matches.push(canonical_match_for_target(p, anchor.as_deref()));
+        project_matches.push(WatchTarget::new(p, anchor.as_deref()));
         if let Some(a) = anchor
             && !project_anchors.contains(&a)
         {
@@ -90,8 +90,7 @@ pub fn spawn(
         }
     }
     let claude_json_anchor = nearest_existing_ancestor_for_file(&claude_json_path, 2);
-    let claude_json_match =
-        canonical_match_for_target(&claude_json_path, claude_json_anchor.as_deref());
+    let claude_json_match = WatchTarget::new(&claude_json_path, claude_json_anchor.as_deref());
     let has_claude_json = claude_json_anchor.is_some();
 
     // Watch the *parent* directory of each target so create events for
@@ -108,9 +107,9 @@ pub fn spawn(
     let classify = move |event: &notify::Event| {
         let mut out = Vec::new();
         for path in &event.paths {
-            if project_matches.iter().any(|m| m == path) {
+            if project_matches.iter().any(|m| m.is(path)) {
                 out.push(WatchedFile::Project);
-            } else if *path == claude_json_match {
+            } else if claude_json_match.is(path) {
                 out.push(WatchedFile::ClaudeJson);
             }
         }
@@ -223,22 +222,6 @@ fn nearest_existing_ancestor_for_file(target: &Path, max_ascend: usize) -> Optio
             }
             _ => return None,
         }
-    }
-}
-
-/// Build the canonical match path for the target file. The anchor is
-/// canonicalized (handles `/var → /private/var`); the file's tail
-/// component is appended verbatim. The renderer compares event paths
-/// against this with `==` (single file, no descendants).
-fn canonical_match_for_target(target: &Path, existing_anchor: Option<&Path>) -> PathBuf {
-    if let Some(anchor) = existing_anchor {
-        let canonical_anchor = canonicalize_or_self(anchor);
-        match target.strip_prefix(anchor) {
-            Ok(tail) if !tail.as_os_str().is_empty() => canonical_anchor.join(tail),
-            _ => canonical_anchor,
-        }
-    } else {
-        canonicalize_or_self(target)
     }
 }
 

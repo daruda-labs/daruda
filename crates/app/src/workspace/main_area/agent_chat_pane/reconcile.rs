@@ -39,6 +39,7 @@ use crate::workspace::main_area::file_view_pane::diff_editor::{DiffColors, DiffE
 use crate::workspace::main_area::file_view_pane::mermaid_theme::MermaidPalette;
 use crate::workspace::main_area::file_view_pane::render::CachedImage;
 use crate::workspace::main_area::file_view_pane::visual;
+use crate::workspace::main_area::link_target;
 
 /// Which tool calls a reconcile pass must revisit.
 ///
@@ -94,53 +95,11 @@ const MAX_RESOURCE_IMAGE_INFLIGHT: usize = 2;
 const MAX_RESOURCE_IMAGE_DIMENSION: u32 = 4096;
 const MAX_RESOURCE_IMAGE_ALLOC_BYTES: u64 = 64 * 1024 * 1024;
 
+/// Resolved by the same rules the resource link's click uses, so the preview
+/// and the opener cannot disagree about which file — or whether an image.
 fn resource_image_path(uri: &str, mime: Option<&str>, cwd: &Path) -> Option<PathBuf> {
-    // A Windows drive letter is also syntactically a URL scheme.
-    let path = if Path::new(uri).is_absolute() {
-        PathBuf::from(uri)
-    } else {
-        match url::Url::parse(uri) {
-            Ok(url) if url.scheme() == "file" => url.to_file_path().ok()?,
-            Ok(_) => return None,
-            Err(_) => {
-                let path = Path::new(uri);
-                if path.is_absolute() {
-                    path.to_path_buf()
-                } else {
-                    cwd.join(path)
-                }
-            }
-        }
-    };
-
-    let declared_mime = mime.map(str::trim).filter(|mime| !mime.is_empty());
-    let is_image = declared_mime.map_or_else(
-        || {
-            path.extension()
-                .and_then(|ext| ext.to_str())
-                .is_some_and(crate::workspace::main_area::link_target::is_image_extension)
-        },
-        supported_resource_image_mime,
-    );
-    is_image.then_some(path)
-}
-
-fn supported_resource_image_mime(mime: &str) -> bool {
-    matches!(
-        mime.split(';')
-            .next()
-            .unwrap_or_default()
-            .trim()
-            .to_ascii_lowercase()
-            .as_str(),
-        "image/png"
-            | "image/jpeg"
-            | "image/jpg"
-            | "image/gif"
-            | "image/webp"
-            | "image/bmp"
-            | "image/x-ms-bmp"
-    )
+    let path = link_target::resource_path(uri, Some(cwd))?;
+    link_target::is_image_resource(&path, mime).then_some(path)
 }
 
 fn resource_image_source(uri: &str, mime: Option<&str>) -> u64 {

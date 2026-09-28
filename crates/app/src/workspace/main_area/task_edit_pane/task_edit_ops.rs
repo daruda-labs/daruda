@@ -975,12 +975,7 @@ impl Workspace {
             self.report_error(report, cx);
             return;
         }
-        let Some(wt_id) = self
-            .active_lanes()
-            .iter()
-            .find(|w| path.starts_with(&w.path))
-            .map(|w| w.id)
-        else {
+        let Some(wt_id) = self.lane_containing(&path) else {
             let report =
                 ErrorReport::new(crate::surface::strings::error_prompt_file_outside_lanes())
                     .severity(ErrorSeverity::Warning)
@@ -1018,12 +1013,7 @@ impl Workspace {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let Some(wt) = self
-            .active_lanes()
-            .iter()
-            .find(|w| path.starts_with(&w.path))
-            .map(|w| w.id)
-        else {
+        let Some(wt) = self.lane_containing(&path) else {
             return;
         };
         self.open_file_split_right(wt, path, pane_id, window, cx);
@@ -1053,4 +1043,17 @@ fn base_lane_options(ws: &Workspace) -> Vec<SelectOption> {
         options.push(SelectOption::new(path_str.to_string(), w.display_name()));
     }
     options
+}
+
+impl Workspace {
+    /// The active lane `path` lies in — the deepest, so a worktree nested
+    /// inside another lane's checkout wins over its parent. Spellings are
+    /// compared as one place, since a prompt path may come through a symlink.
+    fn lane_containing(&self, path: &std::path::Path) -> Option<daruda_store::project::LaneId> {
+        self.active_lanes()
+            .iter()
+            .filter(|w| daruda_core::path::is_within(path, &w.path))
+            .max_by_key(|w| w.path.components().count())
+            .map(|w| w.id)
+    }
 }

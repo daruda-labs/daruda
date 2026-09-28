@@ -1,5 +1,8 @@
 use super::PromptMarkKind;
-use crate::ansi::{self, OSC7_FILE_SCHEME};
+use daruda_core::file_url::FileUrl;
+use daruda_core::path_style::PathStyle;
+
+use crate::ansi;
 use crate::vt_codes::{
     AttentionKind, FtcsCommand, NotificationRequest, OSC_CLIPBOARD, OSC_CWD, OSC_DEFAULT_BG,
     OSC_DEFAULT_FG, OSC_FTCS, OSC_ITERM2, OSC_NOTIFICATION, OSC_NOTIFY_RXVT,
@@ -531,7 +534,8 @@ pub(super) fn commit_osc_payload(ps: u32, payload: &[u8], out: &mut OscDispatch,
             out.title = Some(String::from_utf8_lossy(payload).into_owned());
         }
         v if v == OSC_CWD && track_cwd => {
-            if let Some(path) = parse_osc7_path(payload) {
+            let this_host = daruda_core::host::name();
+            if let Some(path) = parse_osc7_path(payload, PathStyle::local(), this_host.as_deref()) {
                 out.cwd = Some(path);
             }
         }
@@ -617,36 +621,19 @@ fn decode_iterm2_copy_value(value: &str) -> Option<String> {
     Some(String::from_utf8_lossy(&bytes).into_owned())
 }
 
-/// Parse an OSC 7 payload of form `file://hostname/path` into the local
-/// path. Returns None for malformed input. Percent-decoding is applied to
-/// the path so encoded spaces (`%20`) are normalized.
-pub(super) fn parse_osc7_path(payload: &[u8]) -> Option<String> {
-    let s = std::str::from_utf8(payload).ok()?;
-    let after_scheme = s.strip_prefix(OSC7_FILE_SCHEME)?;
-    // Drop the hostname segment (between scheme and the path's leading `/`).
-    let path_start = after_scheme.find('/')?;
-    let raw = &after_scheme[path_start..];
-    Some(percent_decode(raw))
-}
-
-pub(super) fn percent_decode(s: &str) -> String {
-    let bytes = s.as_bytes();
-    let mut out: Vec<u8> = Vec::with_capacity(bytes.len());
-    let mut i = 0;
-    while i < bytes.len() {
-        if bytes[i] == b'%' && i + 2 < bytes.len() {
-            let hi = (bytes[i + 1] as char).to_digit(16);
-            let lo = (bytes[i + 2] as char).to_digit(16);
-            if let (Some(h), Some(l)) = (hi, lo) {
-                out.push(((h << 4) | l) as u8);
-                i += 3;
-                continue;
-            }
-        }
-        out.push(bytes[i]);
-        i += 1;
-    }
-    String::from_utf8_lossy(&out).into_owned()
+/// Parse an OSC 7 payload (`file://<host>/<path>`) into a path on this
+/// machine, spelled in `style`. A named host other than this one — a shell
+/// over SSH — is refused, as Ghostty refuses it (`stream_handler.zig`,
+/// `reportPwd`). Unlike Ghostty, no host or `localhost` is taken as local,
+/// the RFC 8089 reading that iTerm2 and VTE follow.
+pub(super) fn parse_osc7_path(
+    payload: &[u8],
+    style: PathStyle,
+    this_host: Option<&str>,
+) -> Option<String> {
+    let url = FileUrl::parse(std::str::from_utf8(payload).ok()?, style)?;
+    url.names_this_machine(this_host)
+        .then(|| url.path().to_owned())
 }
 
 fn decode_osc_52(payload: &[u8]) -> Option<String> {

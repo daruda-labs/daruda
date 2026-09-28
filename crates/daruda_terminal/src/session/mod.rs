@@ -182,8 +182,8 @@ pub struct TerminalSession {
     synchronized_output: bool,
     title: Option<String>,
     /// Current working directory reported by the shell via OSC 7.
-    /// Format from shell: `file://hostname/path`. We strip the URI prefix
-    /// and store just the local path. None until first OSC 7 sequence.
+    /// Format from shell: `file://hostname/path`. Kept only when the host is
+    /// this machine, as the local path. None until the first one lands.
     cwd: Option<String>,
     clipboard_write: Option<String>,
     parse_tail: Vec<u8>,

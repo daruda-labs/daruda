@@ -10,11 +10,18 @@ use crate::workspace::main_area::pane_tree::PaneId;
 
 use super::adapter::build_popup_menu;
 use super::context::{
-    ClickInfo, ClickLink, LaneAccess, PaneMenuContext, PaneMenuKind, PaneRole, SendTarget,
+    ClickInfo, ClickLink, LaneAccess, PaneMenuContext, PaneMenuKind, PaneRole, ResourceRightClick,
+    SendTarget,
 };
 use super::sections::compose;
 
 impl Workspace {
+    /// Called by a resource card on a right press, ahead of the pane's own
+    /// handler that opens the menu.
+    pub(in crate::workspace) fn record_resource_right_click(&mut self, click: ResourceRightClick) {
+        self.main_area.resource_right_click = Some(click);
+    }
+
     pub(in crate::workspace) fn open_pane_context_menu_at(
         &mut self,
         pane_id: PaneId,
@@ -80,13 +87,18 @@ impl Workspace {
     /// or not it uses it, and the position key means only the press that
     /// recorded it can read it back.
     fn take_pane_click_info(
-        &self,
+        &mut self,
         pane_id: PaneId,
         position: Point<Pixels>,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Option<ClickInfo> {
         let markdown_link = crate::ui::take_right_clicked_link(cx, position);
+        let resource = self
+            .main_area
+            .resource_right_click
+            .take()
+            .filter(|click| click.position == position);
         if let Some(view) = self.terminal_view_for_pane(pane_id) {
             let link = view.read(cx).link_at_window_position(position, window);
             let annotation = view
@@ -99,11 +111,39 @@ impl Workspace {
             return Some(ClickInfo { link, annotation });
         }
 
-        let url = markdown_link?;
+        let link = match resource {
+            Some(click) => {
+                let target =
+                    self.classify_pane_resource(pane_id, &click.uri, click.mime.as_deref(), cx);
+                ClickLink::for_target(click.uri, target)
+            }
+            None => self.classify_markdown_link(pane_id, markdown_link?.into(), cx),
+        };
         Some(ClickInfo {
-            link: Some(self.classify_markdown_link(pane_id, url.into(), cx)),
+            link: Some(link),
             annotation: None,
         })
+    }
+
+    /// The file a pane menu opened by the press at `position` would offer.
+    #[cfg(test)]
+    pub(in crate::workspace) fn pane_menu_file_for_test(
+        &mut self,
+        pane_id: PaneId,
+        position: Point<Pixels>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Option<(
+        std::path::PathBuf,
+        crate::workspace::main_area::link_target::LocalKind,
+    )> {
+        match self
+            .take_pane_click_info(pane_id, position, window, cx)?
+            .link?
+        {
+            ClickLink::File { path, kind, .. } => Some((path, kind)),
+            ClickLink::Web { .. } | ClickLink::Opaque { .. } => None,
+        }
     }
 
     /// The same resolution the left click performs

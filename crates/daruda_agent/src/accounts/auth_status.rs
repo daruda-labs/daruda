@@ -175,7 +175,10 @@ pub fn read_auth_status(
     let tokens = shell_words::split(command).ok()?;
     let (program, args) = tokens.split_first()?;
 
-    let mut cmd = daruda_core::process::command(program);
+    let mut cmd = daruda_core::process::command_on_path(
+        program,
+        daruda_core::process::child_path(inject_env.iter().map(|(k, v)| (k, v))),
+    );
     cmd.args(args);
     for name in strip_env {
         cmd.env_remove(name);

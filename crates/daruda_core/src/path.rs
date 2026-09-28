@@ -32,6 +32,39 @@ pub fn canonicalize_or_self(path: impl AsRef<Path>) -> PathBuf {
     canonicalize(path).unwrap_or_else(|_| path.to_path_buf())
 }
 
+/// Whether `a` and `b` name one place: equal as given, or once both resolve.
+///
+/// For paths from two producers that spell one directory two ways — a picked
+/// root and a stored one, a lane path and what FSEvents or `lsof` report
+/// (`/tmp` vs `/private/tmp`, a symlinked checkout, Windows letter case).
+pub fn same_path(a: &Path, b: &Path) -> bool {
+    a == b || matches!((canonicalize(a), canonicalize(b)), (Ok(a), Ok(b)) if a == b)
+}
+
+/// `path` relative to `root`, read the way [`same_path`] reads them.
+///
+/// The path need not exist — a removal event names what is already gone —
+/// so the root is resolved first, and the path only if it still resolves.
+pub fn strip_root(path: &Path, root: &Path) -> Option<PathBuf> {
+    if let Ok(rel) = path.strip_prefix(root) {
+        return Some(rel.to_path_buf());
+    }
+    let root = canonicalize(root).ok()?;
+    if let Ok(rel) = path.strip_prefix(&root) {
+        return Some(rel.to_path_buf());
+    }
+    canonicalize(path)
+        .ok()?
+        .strip_prefix(&root)
+        .ok()
+        .map(Path::to_path_buf)
+}
+
+/// Whether `path` is `root` or lies under it — see [`strip_root`].
+pub fn is_within(path: &Path, root: &Path) -> bool {
+    strip_root(path, root).is_some()
+}
+
 /// Mode for a directory only its owner may traverse.
 #[cfg(unix)]
 const OWNER_ONLY_DIR: u32 = 0o700;
@@ -109,6 +142,38 @@ pub fn remove_symlink(link: impl AsRef<Path>) -> io::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_path_is_the_same_as_itself_even_when_it_does_not_exist() {
+        let gone = Path::new("/daruda/no/such/dir");
+        assert!(same_path(gone, gone));
+        assert!(!same_path(gone, Path::new("/daruda/no/other")));
+    }
+
+    /// The shape every caller has: one side through a symlink, the other
+    /// resolved — FSEvents reporting `/private/tmp` for a root typed `/tmp`.
+    #[cfg(unix)]
+    #[test]
+    fn a_symlinked_spelling_names_the_same_place() {
+        let temp = tempfile::tempdir().unwrap();
+        let real = temp.path().join("real");
+        std::fs::create_dir(&real).unwrap();
+        let link = temp.path().join("link");
+        symlink(&real, &link).unwrap();
+        let real = canonicalize(&real).unwrap();
+
+        assert!(same_path(&link, &real));
+        std::fs::write(real.join("f"), b"x").unwrap();
+        assert_eq!(strip_root(&real.join("f"), &link), Some(PathBuf::from("f")));
+        assert_eq!(strip_root(&link.join("f"), &real), Some(PathBuf::from("f")));
+        // Removed already: only the root can still be resolved.
+        assert_eq!(
+            strip_root(&real.join("gone"), &link),
+            Some(PathBuf::from("gone"))
+        );
+        assert!(is_within(&real, &link));
+        assert!(!is_within(temp.path(), &link));
+    }
 
     #[test]
     fn canonicalize_resolves_a_relative_path_to_an_absolute_one() {

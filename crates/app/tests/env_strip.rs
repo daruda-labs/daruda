@@ -136,3 +136,29 @@ fn an_unset_with_no_program_is_refused() {
         .expect("spawn daruda --env");
     assert_eq!(out.status.code(), Some(2));
 }
+
+/// What a managed account's launch reaches on Windows: the adapter behind
+/// `--env` is `npx`, which is `npx.cmd`. The wrapper finds it through PATHEXT
+/// in the PATH it hands the child, or the launch fails before it starts.
+#[cfg(windows)]
+#[test]
+fn a_bare_name_behind_the_wrapper_finds_a_cmd_shim_in_the_childs_path() {
+    let dir = tempfile::tempdir().expect("temp dir");
+    std::fs::write(
+        dir.path().join("daruda-probe-shim.cmd"),
+        "@echo off\r\nexit /b 7\r\n",
+    )
+    .expect("write shim");
+    let out = Command::new(DARUDA)
+        .arg("--env")
+        .arg(format!("PATH={}", dir.path().display()))
+        .arg("daruda-probe-shim")
+        .output()
+        .expect("spawn daruda --env");
+    assert_eq!(
+        out.status.code(),
+        Some(7),
+        "the shim did not run: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+}

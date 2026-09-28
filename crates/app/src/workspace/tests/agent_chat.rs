@@ -1399,7 +1399,7 @@ async fn a_remote_panes_links_report_instead_of_opening_a_local_file(cx: &mut Te
             );
             assert!(ws.open_pane_link(pane_id, "/tmp", window, cx));
             assert!(ws.open_pane_link(pane_id, "file:///tmp", window, cx));
-            assert!(ws.open_pane_resource_link(pane_id, "/tmp/shot.png", window, cx));
+            assert!(ws.open_pane_resource_link(pane_id, "/tmp/shot.png", None, window, cx));
         });
     })
     .unwrap();
@@ -1410,6 +1410,55 @@ async fn a_remote_panes_links_report_instead_of_opening_a_local_file(cx: &mut Te
             assert_eq!(report.title, s::diff_remote_path_unsupported());
         }
     });
+}
+
+/// A resource card's pane menu resolves the link as its left click does: by
+/// resource rules and the declared type. Markdown rules would call the
+/// extensionless image a text file, and a missing relative file a plain word.
+#[gpui::test]
+async fn a_resource_links_menu_resolves_it_as_its_click_does(cx: &mut TestAppContext) {
+    use crate::workspace::main_area::link_target::LocalKind;
+    use crate::workspace::main_area::pane_menu::ResourceRightClick;
+    use gpui::{Point, px};
+
+    let dir = tempfile::tempdir().expect("temp dir");
+    std::fs::write(dir.path().join("artifact"), b"x").expect("write artifact");
+    let (window_handle, workspace) = build_workspace(cx);
+    cx.run_until_parked();
+    let pane_id = push_agent_chat_pane(
+        cx,
+        window_handle,
+        &workspace,
+        PaneCwd::Local(dir.path().to_path_buf()),
+    );
+    let at = Point::new(px(10.), px(20.));
+
+    cx.update_window(window_handle.into(), |_, window, cx| {
+        workspace.update(cx, |ws, cx| {
+            let mut menu_file = |uri: &str, mime: Option<&str>, position| {
+                ws.record_resource_right_click(ResourceRightClick {
+                    position: at,
+                    uri: uri.to_string(),
+                    mime: mime.map(str::to_string),
+                });
+                ws.pane_menu_file_for_test(pane_id, position, window, cx)
+            };
+            assert_eq!(
+                menu_file("artifact", Some("image/png"), at),
+                Some((dir.path().join("artifact"), LocalKind::Image))
+            );
+            assert_eq!(
+                menu_file("gone.png", None, at),
+                Some((dir.path().join("gone.png"), LocalKind::Missing))
+            );
+            // Another press's record is not this menu's.
+            assert_eq!(
+                menu_file("artifact", None, Point::new(px(0.), px(0.))),
+                None
+            );
+        });
+    })
+    .unwrap();
 }
 
 /// A resource link whose file is gone reports, where it used to do nothing —
@@ -1432,7 +1481,7 @@ async fn a_missing_resource_link_reports_instead_of_doing_nothing(cx: &mut TestA
 
     cx.update_window(window_handle.into(), |_, window, cx| {
         workspace.update(cx, |ws, cx| {
-            assert!(ws.open_pane_resource_link(pane_id, "gone.png", window, cx));
+            assert!(ws.open_pane_resource_link(pane_id, "gone.png", None, window, cx));
             let absolute = dir.path().join("gone.rs");
             assert!(ws.open_pane_link(pane_id, absolute.to_str().unwrap(), window, cx));
         });

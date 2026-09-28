@@ -4,10 +4,7 @@
 //! `PopupMenuItem` closures are `'static` and free of borrows on the
 //! row or snapshot they were built from.
 
-use gpui::{App, ClickEvent};
-
 use daruda_store::observability::error_report::{ErrorReport, ErrorSeverity};
-use daruda_store::observability::system_info::redact_home;
 use daruda_store::project::{LaneId, LaneRef, ProjectId};
 
 use crate::lane::availability::LaneAvailability;
@@ -64,41 +61,13 @@ pub(super) fn build_context_menu_items(args: CtxMenuArgs) -> Vec<PopupMenuItem> 
         availability,
         removable,
     } = args;
-    let workspace_for_reveal = workspace.clone();
     let path_for_reveal = path_str.clone();
-    let reveal_item = PopupMenuItem::new(surface_strings::ctx_reveal_in_finder()).on_click(
-        move |_ev: &ClickEvent, _window, app_cx: &mut App| {
-            let path = path_for_reveal.clone();
-            let workspace = workspace_for_reveal.clone();
-            // `open -R` reveals (selects) the path in Finder rather than
-            // opening it, so this stays a direct `open` invocation — the
-            // `open` crate only launches the default handler.
-            app_cx
-                .spawn(async move |cx| {
-                    let reveal_path = path.clone();
-                    let result = cx
-                        .background_executor()
-                        .spawn(async move {
-                            daruda_core::process::command("open")
-                                .args(["-R", &reveal_path])
-                                .spawn()
-                                .map(|_| ())
-                        })
-                        .await;
-                    if let Err(e) = result {
-                        let report =
-                            ErrorReport::new(crate::surface::strings::error_reveal_finder_failed())
-                                .severity(ErrorSeverity::Warning)
-                                .from_error(&e)
-                                .at(file!(), line!())
-                                .with_context("path", redact_home(&path))
-                                .dedup("files.reveal")
-                                .build();
-                        // SILENT-OK: workspace may drop before the reveal returns
-                        let _ = workspace.update(cx, |ws, cx| ws.report_error(report, cx));
-                    }
-                })
-                .detach();
+    let reveal_item = ws_popup_menu_item(
+        workspace.clone(),
+        surface_strings::ctx_reveal_in_file_manager(),
+        false,
+        move |ws, _window, cx| {
+            ws.reveal_in_file_manager(std::path::Path::new(&path_for_reveal), cx)
         },
     );
 

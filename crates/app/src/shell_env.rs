@@ -16,8 +16,10 @@ const PATH_END: &str = "__DARUDA_PATH_END__";
 /// subprocess is spawned.
 pub fn hydrate_path_from_login_shell() {
     // A terminal launch already carries the user's `PATH`; nothing to fix, and
-    // spawning a shell would only add startup latency.
-    if std::io::stdout().is_terminal() {
+    // spawning a shell would only add startup latency. Windows reads `PATH`
+    // from the registry for every launch alike, and a `SHELL` pointing at an
+    // MSYS bash would hand back a `:`-joined POSIX list that breaks it.
+    if cfg!(windows) || std::io::stdout().is_terminal() {
         return;
     }
     let Some(shell) = daruda_core::shell::login_shell() else {

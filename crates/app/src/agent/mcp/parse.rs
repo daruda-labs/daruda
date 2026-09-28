@@ -133,7 +133,7 @@ pub fn extract_servers_at(top: &Value, location: &McpLocation, scope: McpScope) 
         McpLocation::ProjectChild(dir) => top
             .get("projects")
             .and_then(Value::as_object)
-            .and_then(|projects| projects.get(dir))
+            .and_then(|projects| projects.get(super::project_key(projects, dir)?))
             .and_then(Value::as_object)
             .and_then(|proj| proj.get("mcpServers"))
             .and_then(Value::as_object),
@@ -353,6 +353,36 @@ mod parse_tests {
             McpScope::Local,
         );
         assert!(none.is_empty());
+    }
+
+    /// Claude Code's key and daruda's lane path can spell one directory two
+    /// ways; the servers under the existing key are this lane's either way.
+    #[test]
+    fn a_project_key_spelled_another_way_still_names_the_lane() {
+        let raw = serde_json::json!({
+            "projects": { "/repo/a/": { "mcpServers": { "local_a": { "command": "a" } } } }
+        });
+        let found = extract_servers_at(
+            &raw,
+            &McpLocation::ProjectChild("/repo/a".into()),
+            McpScope::Local,
+        );
+        assert_eq!(found.len(), 1);
+    }
+
+    /// Git reports `C:/repo`; a picked folder is `C:\repo`.
+    #[cfg(windows)]
+    #[test]
+    fn a_windows_key_matches_across_separators() {
+        let raw = serde_json::json!({
+            "projects": { "C:/repo": { "mcpServers": { "local": { "command": "a" } } } }
+        });
+        let found = extract_servers_at(
+            &raw,
+            &McpLocation::ProjectChild("C:\\repo".into()),
+            McpScope::Local,
+        );
+        assert_eq!(found.len(), 1);
     }
 
     #[test]

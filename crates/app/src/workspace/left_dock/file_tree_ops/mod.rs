@@ -344,9 +344,11 @@ impl Workspace {
                 // reload the parent normally.
                 let Some(root) = root.clone() else { return };
                 if let Some(tree) = self.lane_file_tree_mut(wt_ref) {
+                    // FSEvents reports the resolved path; the root is as the
+                    // lane was opened, which may run through a symlink.
                     for abs in paths {
-                        if let Ok(rel) = abs.strip_prefix(&root) {
-                            tree.remove_subtree(rel);
+                        if let Some(rel) = daruda_core::path::strip_root(&abs, &root) {
+                            tree.remove_subtree(&rel);
                         }
                     }
                 }
@@ -504,8 +506,8 @@ impl Workspace {
                         let parent_id = this
                             .update(cx, |ws, _| {
                                 let tree = ws.lane_file_tree(wt_ref)?;
-                                let rel = abs.strip_prefix(&tree.root).ok()?;
-                                tree.id_for_path(rel)
+                                let rel = daruda_core::path::strip_root(&abs, &tree.root)?;
+                                tree.id_for_path(&rel)
                             })
                             .ok()
                             .flatten();
@@ -768,7 +770,10 @@ impl Workspace {
         let Some(tree) = self.lane_file_tree(wt_ref) else {
             return Vec::new();
         };
-        let status_index = build_status_index(self.lane_git_worktree(wt_ref));
+        let status_index = match self.lane_for(wt_ref) {
+            Some(lane) => build_status_index(self.lane_git_worktree(wt_ref), &lane.paths()),
+            None => std::collections::HashMap::new(),
+        };
         // Keyboard cursor only counts on the active lane; switching
         // lanes clears the cursor.
         let keyboard_focus = if wt_ref == self.active {
@@ -1043,7 +1048,7 @@ impl Workspace {
 
 mod walker;
 use walker::walk_into;
-pub(in crate::workspace) use walker::{VisibleEntry, build_status_index};
+pub(in crate::workspace) use walker::{VisibleEntry, build_status_index, repo_status_index};
 
 /// True if any path in `ev` lies *outside* a `.git/` directory.
 /// Bulk events default to true (path set unknown). Error events

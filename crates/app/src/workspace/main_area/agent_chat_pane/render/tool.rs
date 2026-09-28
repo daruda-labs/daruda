@@ -679,28 +679,37 @@ fn output_block_view(
                 mime, *byte_len,
             )))
             .into_any_element(),
-        ToolOutputBlock::ResourceLink { uri, name, .. } => {
+        ToolOutputBlock::ResourceLink { uri, name, mime } => {
             let cached = resource_images.lock().unwrap().get(&key).cloned();
             // Through the pane's link opener, not the platform's: Codex sends
             // a bare path with no scheme, which `open_url` refuses silently,
             // and only the workspace knows the pane's cwd and the file's kind.
             let links = context.links;
             let uri_for_click = uri.clone();
+            let mime_for_click = mime.clone();
             let link = crate::ui::button(
                 SharedString::from(format!("agent-chat-tool-link-{tool_id}-{ix}")),
                 SharedString::from(name.clone()),
             )
-            .on_click(move |_, window, cx| links.open_resource(&uri_for_click, window, cx));
-            let uri_for_menu = SharedString::from(uri.clone());
+            .on_click(move |_, window, cx| {
+                links.open_resource(&uri_for_click, mime_for_click.as_deref(), window, cx)
+            });
+            let uri_for_menu = uri.clone();
+            let mime_for_menu = mime.clone();
             let card = div()
                 .flex()
                 .flex_col()
                 .gap(px(theme::GAP_SM))
-                // A right press records the link the way inline text does, so
-                // the pane menu offers this resource the same openers a
-                // Markdown link gets (`take_pane_click_info`).
+                // A right press records the resource ahead of the pane's menu,
+                // so the menu resolves it as the left click does
+                // (`take_pane_click_info`).
                 .on_mouse_down(MouseButton::Right, move |event, _window, cx| {
-                    crate::ui::record_right_clicked_link(cx, event.position, uri_for_menu.clone());
+                    links.record_resource_right_click(
+                        event.position,
+                        uri_for_menu.clone(),
+                        mime_for_menu.clone(),
+                        cx,
+                    )
                 });
             match cached {
                 Some(Some(image)) => card

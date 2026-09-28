@@ -306,8 +306,11 @@ fn ensure_mcp_servers_map_at<'a>(
                 .or_insert_with(|| Value::Object(Map::new()))
                 .as_object_mut()
                 .ok_or_else(|| invalid("`projects` is not a JSON object"))?;
+            let key = super::project_key(projects, dir)
+                .cloned()
+                .unwrap_or_else(|| dir.clone());
             projects
-                .entry(dir.clone())
+                .entry(key)
                 .or_insert_with(|| Value::Object(Map::new()))
                 .as_object_mut()
                 .ok_or_else(|| invalid("`projects[<dir>]` is not a JSON object"))?
@@ -441,6 +444,34 @@ mod persist_tests {
         };
         let err = write_server(&mut root, &path, McpScope::User, &TL, &draft).unwrap_err();
         assert!(matches!(err, McpPersistError::DuplicateName { .. }));
+    }
+
+    /// A write lands under the key Claude Code already has for the lane, not
+    /// in a second entry beside it that Claude would never read.
+    #[test]
+    fn a_local_write_reuses_the_existing_spelling_of_the_project_key() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join(".claude.json");
+        let mut root = json!({ "projects": { "/repo/a/": { "history": [1] } } });
+        write_atomic(&path, &root).unwrap();
+        let draft = McpServerDraft {
+            name: "local_a".into(),
+            transport: McpTransport::Stdio,
+            command: Some("node".into()),
+            args: vec![],
+            url: None,
+            env: BTreeMap::new(),
+            headers: BTreeMap::new(),
+            disabled: false,
+            extra: BTreeMap::new(),
+        };
+        let loc = McpLocation::ProjectChild("/repo/a".into());
+        write_server(&mut root, &path, McpScope::Local, &loc, &draft).unwrap();
+
+        let projects = root["projects"].as_object().unwrap();
+        assert_eq!(projects.len(), 1, "no second key: {projects:?}");
+        assert!(projects["/repo/a/"]["mcpServers"]["local_a"].is_object());
+        assert_eq!(projects["/repo/a/"]["history"], json!([1]));
     }
 
     #[test]

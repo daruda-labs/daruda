@@ -44,27 +44,27 @@ fn require_git() -> bool {
 
 #[test]
 fn status_output_parses_index_worktree_renames_and_conflicts() {
-    let data = parse_git_status_output("M  file.rs\n");
+    let data = parse_git_status_output("M  file.rs\0");
     assert_eq!(data.staged.len(), 1, "should have one staged entry");
     assert_eq!(data.staged[0].x, 'M');
     assert_eq!(data.staged[0].path.to_str().unwrap(), "file.rs");
     assert!(data.staged[0].original_path.is_none());
     assert!(data.unstaged.is_empty());
 
-    let data = parse_git_status_output(" M file.rs\n");
+    let data = parse_git_status_output(" M file.rs\0");
     assert!(data.staged.is_empty());
     assert_eq!(data.unstaged.len(), 1);
     assert_eq!(data.unstaged[0].y, 'M');
     assert_eq!(data.unstaged[0].path.to_str().unwrap(), "file.rs");
 
-    let data = parse_git_status_output("?? new.rs\n");
+    let data = parse_git_status_output("?? new.rs\0");
     assert!(data.staged.is_empty());
     assert_eq!(data.unstaged.len(), 1);
     assert_eq!(data.unstaged[0].x, '?');
     assert_eq!(data.unstaged[0].path.to_str().unwrap(), "new.rs");
 
-    // Renamed: destination path appears after " -> ".
-    let data = parse_git_status_output("R  old.rs -> new.rs\n");
+    // Renamed: the destination, then the source as a record of its own.
+    let data = parse_git_status_output("R  new.rs\0old.rs\0");
     assert_eq!(data.staged.len(), 1);
     assert_eq!(data.staged[0].x, 'R');
     assert_eq!(data.staged[0].path.to_str().unwrap(), "new.rs");
@@ -79,11 +79,21 @@ fn status_output_parses_index_worktree_renames_and_conflicts() {
     assert!(data.unstaged.is_empty());
 
     // MM = staged modified + unstaged modified.
-    let data = parse_git_status_output("MM file.rs\n");
+    let data = parse_git_status_output("MM file.rs\0");
     assert_eq!(data.staged.len(), 1, "one staged entry for MM");
     assert_eq!(data.unstaged.len(), 1, "one unstaged entry for MM");
 
-    let data = parse_git_status_output("UU file.rs\n");
+    // A rename reported in the worktree column carries its source record too;
+    // missing it would read `old.rs` as the next entry.
+    let data = parse_git_status_output(" R new.rs\0old.rs\0?? x.rs\0");
+    assert_eq!(data.unstaged.len(), 2);
+    assert_eq!(
+        data.unstaged[0].original_path,
+        Some(PathBuf::from("old.rs"))
+    );
+    assert_eq!(data.unstaged[1].path, PathBuf::from("x.rs"));
+
+    let data = parse_git_status_output("UU file.rs\0");
     assert!(data.staged.is_empty(), "UU must not appear in staged");
     assert_eq!(data.unstaged.len(), 1, "UU must appear in unstaged");
 }
@@ -94,23 +104,74 @@ fn status_output_parses_index_worktree_renames_and_conflicts() {
 
 #[test]
 fn numstat_parses_text_binary_and_empty_input() {
-    let stats = parse_numstat("13\t3\tsrc/lib.rs\n2\t1\tCargo.toml\n");
+    let stats = parse_numstat("13\t3\tsrc/lib.rs\x002\t1\tCargo.toml\0");
     assert_eq!(stats.len(), 2);
     assert_eq!(stats[0], (13, 3, PathBuf::from("src/lib.rs")));
     assert_eq!(stats[1], (2, 1, PathBuf::from("Cargo.toml")));
 
     // git emits `-\t-\t<path>` for binary files. Caller decides
     // whether to skip rendering "+0 -0".
-    let stats = parse_numstat("-\t-\tassets/icon.png\n");
+    let stats = parse_numstat("-\t-\tassets/icon.png\0");
     assert_eq!(stats, vec![(0, 0, PathBuf::from("assets/icon.png"))]);
 
-    let stats = parse_numstat("42\t0\tnew.rs\n");
+    let stats = parse_numstat("42\t0\tnew.rs\0");
     assert_eq!(stats[0], (42, 0, PathBuf::from("new.rs")));
 
-    let stats = parse_numstat("0\t8\told.rs\n");
+    let stats = parse_numstat("0\t8\told.rs\0");
     assert_eq!(stats[0], (0, 8, PathBuf::from("old.rs")));
 
     assert!(parse_numstat("").is_empty());
+
+    // A rename leaves the path empty; source and destination follow.
+    let stats = parse_numstat("0\t0\t\0old name.rs\0새 이름.rs\x001\t0\ta.rs\0");
+    assert_eq!(
+        stats,
+        vec![
+            (0, 0, PathBuf::from("새 이름.rs")),
+            (1, 0, PathBuf::from("a.rs"))
+        ]
+    );
+}
+
+/// What `-z` is for: without it git C-quotes a path holding a space or a
+/// non-ASCII byte (`"\355\225\234…"`), and the quoted text was taken as the
+/// path — so staging, diffs and opening that file all failed.
+#[test]
+fn a_real_status_reports_spaced_and_non_ascii_paths_verbatim() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path();
+    let git = |args: &[&str]| {
+        let out = git_command(root).args(args).output().unwrap();
+        assert!(out.status.success(), "git {args:?}: {out:?}");
+    };
+    git(&["init", "-q"]);
+    git(&["config", "user.email", "t@example.com"]);
+    git(&["config", "user.name", "t"]);
+    std::fs::write(root.join("old name.rs"), "a\nb\n").unwrap();
+    std::fs::write(root.join("한글.md"), "x\n").unwrap();
+    git(&["add", "."]);
+    git(&["commit", "-qm", "init"]);
+    git(&["mv", "old name.rs", "새 이름.rs"]);
+    std::fs::write(root.join("한글.md"), "x\ny\n").unwrap();
+    std::fs::write(root.join("untracked 파일.txt"), "").unwrap();
+
+    let status = git_worktree_status(root).unwrap();
+    let staged: Vec<_> = status.staged.iter().map(|e| e.path.clone()).collect();
+    let unstaged: Vec<_> = status.unstaged.iter().map(|e| e.path.clone()).collect();
+    assert_eq!(staged, vec![PathBuf::from("새 이름.rs")]);
+    assert_eq!(
+        status.staged[0].original_path,
+        Some(PathBuf::from("old name.rs"))
+    );
+    assert_eq!(
+        unstaged,
+        vec![
+            PathBuf::from("한글.md"),
+            PathBuf::from("untracked 파일.txt")
+        ]
+    );
+    assert_eq!(status.diffstat.get(Path::new("한글.md")), Some(&(1, 0)));
+    assert!(status.diffstat.contains_key(Path::new("새 이름.rs")));
 }
 
 // ----------------------------------------------------------------
@@ -754,6 +815,36 @@ fn git_merge_abort_restores_clean_state() {
     teardown(&dir);
 }
 
+/// The conflict list names each file whole — a space in the name used to cut
+/// it at the first word, since the path was read out of git's prose.
+#[test]
+fn a_conflict_reports_a_spaced_file_name_whole() {
+    if !require_git() {
+        return;
+    }
+    let dir = unique_tmpdir("merge_spaced");
+    init(&dir).unwrap();
+    run_git(&dir, ["config", "user.email", "daruda@test"]).unwrap();
+    run_git(&dir, ["config", "user.name", "daruda"]).unwrap();
+    std::fs::write(dir.join("my notes.md"), "base\n").unwrap();
+    run_git(&dir, ["add", "."]).unwrap();
+    run_git(&dir, ["commit", "-m", "base"]).unwrap();
+    run_git(&dir, ["checkout", "-q", "-b", "side"]).unwrap();
+    std::fs::write(dir.join("my notes.md"), "side\n").unwrap();
+    run_git(&dir, ["commit", "-qam", "side"]).unwrap();
+    run_git(&dir, ["checkout", "-q", "-"]).unwrap();
+    std::fs::write(dir.join("my notes.md"), "main\n").unwrap();
+    run_git(&dir, ["commit", "-qam", "main"]).unwrap();
+
+    let files = match git_merge(&dir, "side").unwrap() {
+        MergeOutcome::Conflicts(files) => files,
+        other => panic!("expected a conflict, got {other:?}"),
+    };
+    assert_eq!(files, vec!["my notes.md".to_string()]);
+    git_merge_abort(&dir).unwrap();
+    teardown(&dir);
+}
+
 #[test]
 fn add_worktree_with_explicit_base_ref() {
     if !require_git() {
@@ -866,4 +957,10 @@ fn git_dirs_separate_a_linked_worktree_from_the_shared_repository() {
     assert!(side.git_dir.starts_with(&side.common_dir));
 
     teardown(&dir);
+}
+
+#[test]
+fn a_tree_path_is_slash_separated() {
+    let path: PathBuf = ["src", "a b", "c.rs"].iter().collect();
+    assert_eq!(tree_path(&path), "src/a b/c.rs");
 }

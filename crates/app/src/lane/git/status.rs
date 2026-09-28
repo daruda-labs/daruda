@@ -106,7 +106,7 @@ pub(crate) fn parse_tracking_output(output: &str) -> GitTracking {
     GitTracking::default()
 }
 
-/// Parse the output of `git status --porcelain=v1` into a `GitWorktreeStatus`.
+/// Parse the output of `git status --porcelain=v1 -z` into a `GitWorktreeStatus`.
 ///
 /// Extracted so the logic can be unit-tested without a real git repo.
 /// Conflict entries (where x or y is `'U'`, or both are `'D'` / `'A'`)
@@ -114,29 +114,28 @@ pub(crate) fn parse_tracking_output(output: &str) -> GitTracking {
 /// and must be resolved before committing.
 pub(crate) fn parse_git_status_output(output: &str) -> GitWorktreeStatus {
     let mut data = GitWorktreeStatus::default();
-    for line in output.lines() {
-        let line = line.trim_end();
-        if line.len() < 4 {
+    // `-z` records: `XY PATH`, and for a rename or copy the source path as
+    // the next record. Paths arrive verbatim — no C-style quoting to undo.
+    let mut records = output.split('\0');
+    while let Some(record) = records.next() {
+        let mut chars = record.chars();
+        let (Some(x), Some(y), Some(' ')) = (chars.next(), chars.next(), chars.next()) else {
+            continue;
+        };
+        let path = chars.as_str();
+        if path.is_empty() {
             continue;
         }
-        let x = line.chars().next().unwrap_or(' ');
-        let y = line.chars().nth(1).unwrap_or(' ');
-        let path_str = &line[3..];
-        // Renamed / copied files appear as `old -> new`; capture both
-        // sides so the left dock can render `old → new`. The destination
-        // is the canonical path for stage / unstage / diff ops.
-        let (display, original) = match path_str.rfind(" -> ") {
-            Some(i) => (
-                &path_str[i + 4..],
-                Some(PathBuf::from(path_str[..i].trim())),
-            ),
-            None => (path_str, None),
-        };
-        let file_path = PathBuf::from(display.trim());
+        // Either column can report the rename; git adds the source record
+        // for both, and reading it only for `X` would misalign every entry after.
+        let original = (matches!(x, 'R' | 'C') || matches!(y, 'R' | 'C'))
+            .then(|| records.next())
+            .flatten()
+            .map(PathBuf::from);
         let entry = GitFileEntry {
             x,
             y,
-            path: file_path,
+            path: PathBuf::from(path),
             original_path: original,
         };
         // Conflict pairs must not appear in staged — they block commits.
@@ -175,15 +174,16 @@ pub fn git_tracking(path: &Path) -> Result<GitTracking, GitError> {
     Ok(tracking)
 }
 
-/// `git status --porcelain=v1` for the lane rooted at `path`, plus a
-/// follow-up `git diff HEAD --numstat` to populate per-file diffstat.
-/// Renamed entries in the `XY PATH -> PATH` form show the destination.
+/// `git status --porcelain=v1 -z` for the lane rooted at `path`, plus a
+/// follow-up `git diff HEAD --numstat -z` to populate per-file diffstat.
+/// NUL-separated so a path with a space or non-ASCII byte arrives as
+/// written, not C-quoted; a rename is keyed by its destination.
 ///
 /// The diffstat call is non-fatal — a fresh `git init` repo has no HEAD,
 /// so the call errors and `diffstat` stays empty (dock simply omits
 /// the `+N −M` column for that lane until the first commit lands).
 pub fn git_worktree_status(path: &Path) -> Result<GitWorktreeStatus, GitError> {
-    let raw = run_git(path, ["status", "--porcelain=v1"])?;
+    let raw = run_git(path, ["status", "--porcelain=v1", "-z"])?;
     let mut data = parse_git_status_output(&raw);
     if let Ok(stats) = git_diff_numstat(path) {
         for (added, removed, p) in stats {
@@ -203,21 +203,36 @@ pub fn git_worktree_status(path: &Path) -> Result<GitWorktreeStatus, GitError> {
 /// commits has no HEAD, and `git diff HEAD` exits non-zero. Callers
 /// surface this as "no diffstat available" rather than an error.
 pub fn git_diff_numstat(wt_path: &Path) -> Result<Vec<(u32, u32, PathBuf)>, GitError> {
-    let raw = run_git(wt_path, ["diff", "HEAD", "--numstat"])?;
+    let raw = run_git(wt_path, ["diff", "HEAD", "--numstat", "-z"])?;
     Ok(parse_numstat(&raw))
 }
 
+/// `--numstat -z` records: `ADDED\tREMOVED\tPATH`, or for a rename an empty
+/// path followed by the source and destination as records of their own. The
+/// destination is the key — the one `git status` reports.
 pub(crate) fn parse_numstat(text: &str) -> Vec<(u32, u32, PathBuf)> {
     let mut out = Vec::new();
-    for line in text.lines() {
-        let parts: Vec<&str> = line.splitn(3, '\t').collect();
-        if parts.len() != 3 {
+    let mut records = text.split('\0');
+    while let Some(record) = records.next() {
+        let mut parts = record.splitn(3, '\t');
+        let (Some(added), Some(removed), Some(path)) = (parts.next(), parts.next(), parts.next())
+        else {
             continue;
-        }
-        let added = parts[0].parse().unwrap_or(0);
-        let removed = parts[1].parse().unwrap_or(0);
-        let path = PathBuf::from(parts[2].trim());
-        out.push((added, removed, path));
+        };
+        let path = if path.is_empty() {
+            let _source = records.next();
+            match records.next() {
+                Some(destination) => destination,
+                None => continue,
+            }
+        } else {
+            path
+        };
+        out.push((
+            added.parse().unwrap_or(0),
+            removed.parse().unwrap_or(0),
+            PathBuf::from(path),
+        ));
     }
     out
 }
@@ -338,6 +353,16 @@ pub fn git_head_message(repo_root: &Path) -> Result<String, GitError> {
     run_git(repo_root, ["log", "-1", "--pretty=%B"]).map(|s| s.trim_end().to_string())
 }
 
+/// `path` as a git tree path, which is `/`-separated on every platform — a
+/// `<rev>:<path>` argument is not a pathspec, so git does not translate a
+/// Windows `src\a.rs` for it.
+pub(super) fn tree_path(path: &Path) -> String {
+    path.components()
+        .map(|part| part.as_os_str().to_string_lossy())
+        .collect::<Vec<_>>()
+        .join("/")
+}
+
 /// `git fetch` — download objects and refs from all remotes.
 pub fn git_fetch(repo_root: &Path) -> Result<(), GitError> {
     run_git(repo_root, ["fetch"]).map(|_| ())
@@ -350,7 +375,7 @@ pub fn git_pull(repo_root: &Path) -> Result<(), GitError> {
 
 /// `git show :<path>` — retrieve the staged (index) content of a file as raw bytes.
 pub fn git_show_staged(repo_root: &Path, path: &Path) -> Result<Vec<u8>, GitError> {
-    let arg = format!(":{}", path.to_string_lossy());
+    let arg = format!(":{}", tree_path(path));
     let output = super::git_command(repo_root)
         .args(["show", &arg])
         .output()

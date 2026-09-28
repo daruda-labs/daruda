@@ -4,6 +4,7 @@
 //! Git CLI runs on `cx.background_executor`; post-git state mutations
 //! return via `cx.update`.
 
+use daruda_store::observability::error_report::{ErrorReport, ErrorSeverity};
 use daruda_store::project::{LaneId, LaneRef, LaneSessionHost, ProjectId};
 use daruda_store::tasks::TaskAgentSurface;
 use gpui::{Context, Window};
@@ -1051,11 +1052,38 @@ pub(in crate::workspace) fn lane_checkout_path(
         .file_name()
         .and_then(|n| n.to_str())
         .unwrap_or(UNNAMED_REPO);
-    let suffix = branch.replace('/', "-");
+    // A branch name may hold what a directory name cannot (`a|b`, `x:y`).
+    let suffix = crate::file_name::sanitized(branch);
     repo_root
         .parent()
         .unwrap_or(repo_root)
         .join(format!("{repo_name}-{suffix}"))
+}
+
+impl Workspace {
+    /// Select `path` in the platform's file manager — Finder, File Explorer,
+    /// or the desktop's own. gpui's `reveal_path` reports no failure, so the
+    /// one a lane realistically hits, its folder gone, is checked first.
+    pub(in crate::workspace) fn reveal_in_file_manager(
+        &mut self,
+        path: &std::path::Path,
+        cx: &mut Context<Self>,
+    ) {
+        if !path.exists() {
+            let report = ErrorReport::new(crate::surface::strings::error_reveal_path_missing())
+                .severity(ErrorSeverity::Warning)
+                .at(file!(), line!())
+                .with_context(
+                    "path",
+                    daruda_store::observability::system_info::redact_home(path),
+                )
+                .dedup("files.reveal")
+                .build();
+            self.report_error(report, cx);
+            return;
+        }
+        cx.reveal_path(path);
+    }
 }
 
 /// Effective base ref for a new lane: an explicit user choice wins;
@@ -1071,7 +1099,22 @@ fn resolved_lane_base_ref(
 
 #[cfg(test)]
 mod tests {
-    use super::resolved_lane_base_ref;
+    use super::{lane_checkout_path, resolved_lane_base_ref};
+
+    /// git takes `a|b` as a branch name; Windows will not take it as a
+    /// directory name, so `git worktree add` failed after the form accepted it.
+    #[test]
+    fn a_branch_becomes_a_directory_name_every_platform_takes() {
+        let repo = std::path::Path::new("/work/repo");
+        assert_eq!(
+            lane_checkout_path(repo, "feat/login"),
+            std::path::Path::new("/work/repo-feat-login")
+        );
+        assert_eq!(
+            lane_checkout_path(repo, "fix/a|b\"<c>"),
+            std::path::Path::new("/work/repo-fix-a-b--c-")
+        );
+    }
 
     #[test]
     fn explicit_request_overrides_project_branches() {

@@ -28,7 +28,9 @@ pub(in crate::workspace) fn find_existing_project_uuid_for_root(
 ) -> Option<ProjectUuid> {
     let mut found = None;
     daruda_store::project::for_each_project_state_in(data_dir, |p| {
-        if found.is_none() && p.root == root {
+        // Two spellings of one folder share one UUID, as `has_project_root`
+        // treats them within a window.
+        if found.is_none() && daruda_core::path::same_path(&p.root, root) {
             found = Some(p.uuid);
         }
     });

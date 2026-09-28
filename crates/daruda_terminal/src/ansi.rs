@@ -189,14 +189,6 @@ pub fn lift_rows_to_top(above: u16) -> Vec<u8> {
 }
 
 // ============================================================================
-// URI schemes that appear inside OSC payloads
-// ============================================================================
-
-/// OSC 7 payload format: `file://<hostname>/<path>`. The shell reports
-/// its cwd with this scheme; we strip it and keep the local path.
-pub const OSC7_FILE_SCHEME: &str = "file://";
-
-// ============================================================================
 // Terminal capability query responses
 // ============================================================================
 

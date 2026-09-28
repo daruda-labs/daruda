@@ -1572,22 +1572,35 @@ impl Workspace {
         self.open_link_target(pane_id, target, window, cx)
     }
 
-    /// Open a tool's resource-link URI. Classified as a resource rather than
-    /// as Markdown text, so a relative URI that is gone reports instead of
-    /// doing nothing.
+    /// Classify a tool's resource-link URI as `pane_id`'s session sees it.
+    /// A resource rather than Markdown text, so a relative URI that is gone
+    /// reports instead of doing nothing; `mime` is the tool's declared type,
+    /// which the inline preview trusts too. The click and the pane menu both
+    /// read this.
+    pub(in crate::workspace) fn classify_pane_resource(
+        &self,
+        pane_id: PaneId,
+        uri: &str,
+        mime: Option<&str>,
+        cx: &App,
+    ) -> LinkTarget {
+        if self.diff_pane_is_remote(pane_id, cx) {
+            return link_target::classify_remote(uri);
+        }
+        let cwd = self.agent_chat_local_cwd(pane_id, cx);
+        link_target::classify_resource(uri, mime, cwd.as_deref())
+    }
+
+    /// Open a tool's resource-link URI — see [`Self::classify_pane_resource`].
     pub(in crate::workspace) fn open_pane_resource_link(
         &mut self,
         pane_id: PaneId,
         uri: &str,
+        mime: Option<&str>,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> bool {
-        let target = if self.diff_pane_is_remote(pane_id, cx) {
-            link_target::classify_remote(uri)
-        } else {
-            let cwd = self.agent_chat_local_cwd(pane_id, cx);
-            link_target::classify_resource(uri, cwd.as_deref())
-        };
+        let target = self.classify_pane_resource(pane_id, uri, mime, cx);
         self.open_link_target(pane_id, target, window, cx)
     }
 

@@ -694,6 +694,9 @@ pub fn flow_name_empty() -> String {
 pub fn flow_name_has_separator() -> String {
     rust_i18n::t!("flow.name_has_separator").into_owned()
 }
+pub fn flow_name_unportable() -> String {
+    rust_i18n::t!("flow.name_unportable").into_owned()
+}
 pub fn flow_name_taken() -> String {
     rust_i18n::t!("flow.name_taken").into_owned()
 }
@@ -2856,8 +2859,15 @@ pub const FILES_CHEVRON_PENDING: &str = "…";
 // Lane context menu
 // ----------------------------------------------------------------
 
-pub fn ctx_reveal_in_finder() -> String {
-    rust_i18n::t!("ctx.reveal_in_finder").into_owned()
+/// Named for the platform's own file manager — the one `reveal_path` opens.
+pub fn ctx_reveal_in_file_manager() -> String {
+    if cfg!(target_os = "macos") {
+        rust_i18n::t!("ctx.reveal_in_finder").into_owned()
+    } else if cfg!(windows) {
+        rust_i18n::t!("ctx.reveal_in_file_explorer").into_owned()
+    } else {
+        rust_i18n::t!("ctx.reveal_in_file_manager").into_owned()
+    }
 }
 pub fn ctx_copy_path() -> String {
     rust_i18n::t!("ctx.copy_path").into_owned()
@@ -4056,14 +4066,15 @@ pub fn account_prepare_dir_failed() -> String {
 }
 
 /// Initial contents of a freshly-created
-/// `~/.config/daruda/projects/<repo>-<hash>/config.toml`. The user
+/// `<data dir>/projects/<repo>-<hash>/config.toml`. The user
 /// edits this file directly; daruda re-reads it on the next config
 /// reload (via the recursive watcher under the user config dir).
 pub const PROJECT_CONFIG_TEMPLATE: &str = "\
 # daruda project-local config.
 #
 # Sections specified here override the user-global config
-# (~/.config/daruda/config.toml) for this project's daruda windows.
+# (the config.toml two folders up from this one) for this project's
+# daruda windows.
 # Sections you don't write keep their user-layer values.
 #
 # Phase 1 supports the [shell] section only.
@@ -6758,6 +6769,7 @@ error_string!(
     "error.acp_resume_failed_retrying"
 );
 error_string!(error_cannot_read_directory, "error.cannot_read_directory");
+error_string!(error_reveal_path_missing, "error.reveal_path_missing");
 pub fn error_cannot_read_directory_detail(error: &str) -> String {
     rust_i18n::t!("error.cannot_read_directory_detail", error = error).into_owned()
 }
@@ -6861,7 +6873,6 @@ error_string!(
     error_project_config_open_failed,
     "error.project_config_open_failed"
 );
-error_string!(error_reveal_finder_failed, "error.reveal_finder_failed");
 error_string!(error_skill_delete_failed, "error.skill_delete_failed");
 error_string!(
     error_skill_invocation_failed,

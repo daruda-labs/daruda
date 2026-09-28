@@ -88,7 +88,26 @@ pub(in crate::workspace) fn edits_for_update(
 
     let mut changes = Vec::new();
     diff(&old, &new, &mut Vec::new(), &mut changes);
-    edits_for(text, &changes, &new)
+    let edits = edits_for(text, &changes, &new)?;
+    Ok(in_the_files_line_endings(text, edits))
+}
+
+/// The renderer writes `\n`; a file checked out with CRLF (`core.autocrlf`)
+/// would come back holding both. The file's own ending wins, decided by
+/// whether it has any CRLF at all.
+fn in_the_files_line_endings(text: &str, edits: Vec<Edit>) -> Vec<Edit> {
+    if !text.contains("\r\n") {
+        return edits;
+    }
+    edits
+        .into_iter()
+        .map(|(range, replacement)| {
+            (
+                range,
+                replacement.replace("\r\n", "\n").replace('\n', "\r\n"),
+            )
+        })
+        .collect()
 }
 
 fn to_value(file: &FlowFile) -> Result<Value, FlowEditError> {

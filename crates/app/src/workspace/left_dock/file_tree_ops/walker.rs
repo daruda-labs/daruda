@@ -11,6 +11,7 @@ use std::path::PathBuf;
 use crate::files::gitignore::GitignoreSet;
 use crate::files::tree::{Entry, EntryId, EntryKind, FileTree};
 use crate::lane::git::GitWorktreeStatus;
+use crate::lane::paths::LanePaths;
 
 // ----------------------------------------------------------------
 // VisibleEntry — flattened row for `uniform_list`
@@ -45,11 +46,11 @@ pub(in crate::workspace) struct VisibleEntry {
 // status_index — flatten GitWorktreeStatus into a path → char HashMap
 // ----------------------------------------------------------------
 
-/// Build a lane-relative `path → status char` index. `None`
-/// returns an empty map.
+/// Build a `path → status char` index keyed as git reports paths: relative
+/// to the working-tree root, not to the lane. `None` returns an empty map.
 ///
 /// Staged status wins over unstaged when a path appears in both.
-pub(in crate::workspace) fn build_status_index(
+pub(in crate::workspace) fn repo_status_index(
     status: Option<&GitWorktreeStatus>,
 ) -> HashMap<PathBuf, char> {
     let mut idx: HashMap<PathBuf, char> = HashMap::new();
@@ -61,6 +62,22 @@ pub(in crate::workspace) fn build_status_index(
         idx.entry(e.path.clone()).or_insert(e.y);
     }
     idx
+}
+
+/// [`repo_status_index`] re-keyed lane-relative, the way the file tree names
+/// its entries. The two differ for a lane opened at a subdirectory of its
+/// repository; a change outside that subdirectory is not the lane's to show.
+pub(in crate::workspace) fn build_status_index(
+    status: Option<&GitWorktreeStatus>,
+    paths: &LanePaths<'_>,
+) -> HashMap<PathBuf, char> {
+    repo_status_index(status)
+        .into_iter()
+        .filter_map(|(path, status)| {
+            let lane_relative = paths.to_wt_relative(&paths.from_git_status(&path))?;
+            Some((lane_relative, status))
+        })
+        .collect()
 }
 
 #[allow(clippy::too_many_arguments)]

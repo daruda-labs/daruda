@@ -481,9 +481,9 @@ impl SettingsView {
             );
             return false;
         }
-        let url = match url::Url::from_file_path(&path) {
-            Ok(url) => url,
-            Err(()) => {
+        let url = match daruda_core::file_url::from_local_path(&path) {
+            Some(url) => url,
+            None => {
                 let error = std::io::Error::new(
                     std::io::ErrorKind::InvalidInput,
                     "Config path cannot be represented as a file URL",
@@ -501,7 +501,7 @@ impl SettingsView {
                 return false;
             }
         };
-        cx.open_url(url.as_str());
+        cx.open_url(&url);
         true
     }
 }

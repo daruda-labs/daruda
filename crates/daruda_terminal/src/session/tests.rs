@@ -1,46 +1,106 @@
-use super::scanners::{parse_osc7_path, percent_decode};
+use daruda_core::path_style::PathStyle;
+
+use super::scanners::parse_osc7_path;
 use super::*;
 use crate::coords::ViewportRow;
 use crate::{TerminalConfig, TerminalDims};
 
+/// One directory as this host spells it, and the path a shell writes for it
+/// in a `file://` URL — Windows puts the drive after the leading slash.
+fn this_host_dir() -> (&'static str, &'static str) {
+    if cfg!(windows) {
+        ("/C:/Users/user", "C:\\Users\\user")
+    } else {
+        ("/home/user", "/home/user")
+    }
+}
+
+fn osc7_on_mymac(payload: &[u8]) -> Option<String> {
+    parse_osc7_path(payload, PathStyle::Posix, Some("mymac"))
+}
+
 #[test]
-fn parses_osc7_with_hostname() {
-    let path = parse_osc7_path(b"file://mymac/home/user/projects/daruda").unwrap();
+fn parses_osc7_with_this_hostname() {
+    let path = osc7_on_mymac(b"file://mymac/home/user/projects/daruda").unwrap();
     assert_eq!(path, "/home/user/projects/daruda");
 }
 
 #[test]
 fn parses_osc7_with_empty_hostname() {
-    let path = parse_osc7_path(b"file:///tmp/x").unwrap();
-    assert_eq!(path, "/tmp/x");
+    assert_eq!(osc7_on_mymac(b"file:///tmp/x").as_deref(), Some("/tmp/x"));
+    assert_eq!(
+        osc7_on_mymac(b"file://localhost/tmp/x").as_deref(),
+        Some("/tmp/x")
+    );
+}
+
+/// A shell on another machine (`ssh box`) reports a path that means nothing
+/// here; taking it would point new tabs and the MCP scan at a local
+/// directory that merely shares the name.
+#[test]
+fn refuses_osc7_from_another_host() {
+    assert_eq!(osc7_on_mymac(b"file://box/home/user"), None);
 }
 
 #[test]
 fn percent_decodes_spaces() {
-    assert_eq!(percent_decode("/a%20b/c"), "/a b/c");
+    assert_eq!(osc7_on_mymac(b"file:///a%20b/c").as_deref(), Some("/a b/c"));
+}
+
+/// The Windows reading, asserted from any host: a drive letter keeps no
+/// leading slash, and a path with no drive has no Windows form at all.
+#[test]
+fn osc7_follows_the_windows_style() {
+    let windows = |payload: &[u8]| parse_osc7_path(payload, PathStyle::Windows, Some("mymac"));
+    assert_eq!(
+        windows(b"file:///C:/Users/x").as_deref(),
+        Some("C:\\Users\\x")
+    );
+    assert_eq!(windows(b"file:///home/user"), None);
 }
 
 #[test]
 fn rejects_non_file_scheme() {
-    assert!(parse_osc7_path(b"http://x/y").is_none());
+    assert!(osc7_on_mymac(b"http://x/y").is_none());
 }
 
 #[test]
 fn feed_sets_cwd_via_osc7_bel() {
     let mut session =
         TerminalSession::new(TerminalDims::default(), TerminalConfig::default()).unwrap();
-    session.feed(b"\x1b]7;file://host/home/user\x07").unwrap();
-    assert_eq!(session.cwd(), Some("/home/user"));
+    let (url_path, dir) = this_host_dir();
+    session
+        .feed(format!("\x1b]7;file://localhost{url_path}\x07").as_bytes())
+        .unwrap();
+    assert_eq!(session.cwd(), Some(dir));
 }
 
 #[test]
 fn feed_sets_cwd_via_osc7_st() {
     let mut session =
         TerminalSession::new(TerminalDims::default(), TerminalConfig::default()).unwrap();
+    let (url_path, dir) = this_host_dir();
     session
-        .feed(b"\x1b]7;file://host/tmp/daruda\x1b\\")
+        .feed(format!("\x1b]7;file://localhost{url_path}\x1b\\").as_bytes())
         .unwrap();
-    assert_eq!(session.cwd(), Some("/tmp/daruda"));
+    assert_eq!(session.cwd(), Some(dir));
+}
+
+/// What a shell really sends: its own `gethostname`, not `localhost`.
+#[test]
+fn feed_takes_osc7_from_this_machine_and_not_another() {
+    let host = daruda_core::host::name().expect("this machine has a name");
+    let mut session =
+        TerminalSession::new(TerminalDims::default(), TerminalConfig::default()).unwrap();
+    let (url_path, dir) = this_host_dir();
+    session
+        .feed(format!("\x1b]7;file://{host}{url_path}\x07").as_bytes())
+        .unwrap();
+    assert_eq!(session.cwd(), Some(dir));
+    session
+        .feed(format!("\x1b]7;file://not-this-machine.invalid{url_path}\x07").as_bytes())
+        .unwrap();
+    assert_eq!(session.cwd(), Some(dir));
 }
 
 #[test]
@@ -50,7 +110,9 @@ fn track_cwd_disabled_skips_osc7() {
         ..TerminalConfig::default()
     };
     let mut session = TerminalSession::new(TerminalDims::default(), cfg).unwrap();
-    session.feed(b"\x1b]7;file://host/home/user\x07").unwrap();
+    session
+        .feed(b"\x1b]7;file://localhost/home/user\x07")
+        .unwrap();
     assert_eq!(session.cwd(), None);
 }
 

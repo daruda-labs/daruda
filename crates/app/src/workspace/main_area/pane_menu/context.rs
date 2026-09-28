@@ -5,7 +5,7 @@
 use std::path::PathBuf;
 
 use daruda_terminal::session::interval_tree::{LineRange, MarkId};
-use gpui::SharedString;
+use gpui::{Pixels, Point, SharedString};
 
 use crate::workspace::main_area::link_target::{LinkTarget, LocalKind};
 use crate::workspace::main_area::pane_tree::PaneId;
@@ -53,6 +53,17 @@ pub(super) enum ClickLink {
     Web { url: String },
     /// Neither. Only the text is worth offering.
     Opaque { url: String },
+}
+
+/// A tool resource link under a right press, recorded by its card so the
+/// menu resolves it as the card's left click does — a resource with its
+/// declared type, not Markdown text. Keyed by the press position like the
+/// Markdown record, and taken by every pane menu.
+#[derive(Clone, Debug, PartialEq)]
+pub(in crate::workspace) struct ResourceRightClick {
+    pub(in crate::workspace) position: Point<Pixels>,
+    pub(in crate::workspace) uri: String,
+    pub(in crate::workspace) mime: Option<String>,
 }
 
 impl ClickLink {

@@ -270,6 +270,9 @@ pub(in crate::workspace) enum FlowNameError {
     Empty,
     /// A separator would write outside the flows directory.
     HasSeparator,
+    /// A character or device name Windows will not take — the file travels
+    /// with the checkout, so the host writing it is not the only one.
+    Unportable,
     /// Something already answers to this name in the directory being written.
     Taken,
 }
@@ -284,19 +287,28 @@ pub(in crate::workspace) fn flow_file_name(input: &str) -> Result<String, FlowNa
     if trimmed.is_empty() {
         return Err(FlowNameError::Empty);
     }
-    if trimmed.contains('/') || trimmed.contains(std::path::MAIN_SEPARATOR) {
-        return Err(FlowNameError::HasSeparator);
-    }
-    let named = if trimmed.ends_with(FLOW_EXT_DOT) {
-        trimmed.to_string()
-    } else {
-        format!("{trimmed}{FLOW_EXT_DOT}")
+    // Case-insensitively, and `.yml` too: whatever the listing takes as a
+    // flow is not one to add `.yaml` to.
+    let stem_len = |name: &str| {
+        let lower = name.to_ascii_lowercase();
+        FLOW_EXTENSIONS.iter().find_map(|ext| {
+            let rest = lower.strip_suffix(ext)?.strip_suffix('.')?;
+            Some(rest.len())
+        })
+    };
+    let named = match stem_len(trimmed) {
+        Some(_) => trimmed.to_string(),
+        None => format!("{trimmed}{FLOW_EXT_DOT}"),
     };
     // A name that is only an extension is the empty case wearing a suffix.
-    if named == FLOW_EXT_DOT {
+    if stem_len(&named) == Some(0) {
         return Err(FlowNameError::Empty);
     }
-    Ok(named)
+    match crate::file_name::problem(&named) {
+        Some(crate::file_name::NameProblem::Separator) => Err(FlowNameError::HasSeparator),
+        Some(crate::file_name::NameProblem::Unportable) => Err(FlowNameError::Unportable),
+        None => Ok(named),
+    }
 }
 
 /// The same, refused when `dir` already holds that name. Kept separate from
@@ -326,10 +338,13 @@ fn flow_files_in(dir: &Path) -> Vec<PathBuf> {
         .collect()
 }
 
+/// Case-insensitively: `ship.YAML` is a flow file, not one to add `.yaml` to.
 fn has_flow_extension(path: &Path) -> bool {
-    path.extension()
-        .and_then(|e| e.to_str())
-        .is_some_and(|e| FLOW_EXTENSIONS.contains(&e))
+    path.extension().and_then(|e| e.to_str()).is_some_and(|e| {
+        FLOW_EXTENSIONS
+            .iter()
+            .any(|flow| e.eq_ignore_ascii_case(flow))
+    })
 }
 
 #[cfg(test)]
@@ -524,6 +539,30 @@ mod tests {
             flow_file_name("nested/ship"),
             Err(FlowNameError::HasSeparator)
         );
+        assert_eq!(flow_file_name("ship.YAML").as_deref(), Ok("ship.YAML"));
+        assert_eq!(flow_file_name("ship.yml").as_deref(), Ok("ship.yml"));
+        assert_eq!(flow_file_name(".YML"), Err(FlowNameError::Empty));
+    }
+
+    /// The file travels with the checkout, so a name Windows cannot hold is
+    /// refused on every host. On NTFS `fix: login.yaml` is a stream on `fix`
+    /// and never lists; `C:ship.yaml` lands outside the flows folder.
+    #[test]
+    fn a_name_windows_cannot_hold_is_refused_everywhere() {
+        for name in ["fix: login", "C:ship", "a|b", "con"] {
+            assert_eq!(
+                flow_file_name(name),
+                Err(FlowNameError::Unportable),
+                "{name}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_flow_extension_is_recognised_in_any_case() {
+        assert!(has_flow_extension(Path::new("ship.YAML")));
+        assert!(has_flow_extension(Path::new("ship.Yml")));
+        assert!(!has_flow_extension(Path::new("ship.json")));
     }
 
     /// A name already on disk in that directory is refused rather than

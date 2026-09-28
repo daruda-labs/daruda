@@ -21,3 +21,5 @@ mod context;
 mod ops;
 mod sections;
 mod spec;
+
+pub(in crate::workspace) use context::ResourceRightClick;

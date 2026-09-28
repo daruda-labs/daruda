@@ -161,7 +161,10 @@ impl Workspace {
             .flatten()
         {
             for d in mcp_dirs_up_to_git_root(&start) {
-                if !dirs.contains(&d) {
+                if !dirs
+                    .iter()
+                    .any(|seen| daruda_core::path::same_path(seen, &d))
+                {
                     dirs.push(d);
                 }
             }

@@ -16,6 +16,7 @@ test-support = []
 base64 = "0.22"
 daruda_core = { path = "../daruda_core" }
 daruda_store = { path = "../daruda_store" }
+dirs = "6"
 ghostty_vt = { path = "../ghostty_vt" }
 gpui = { workspace = true }
 portable-pty = "0.9"

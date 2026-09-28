@@ -500,7 +500,8 @@ pub enum MergeOutcome {
 ///
 /// Exit 0 + "Already up to date." stdout → `AlreadyUpToDate`.
 /// Exit 0 otherwise → `Success`.
-/// Exit 1 → stdout is scanned for "CONFLICT" lines → `Conflicts(files)`.
+/// Exit 1 → the unmerged paths, as git lists them → `Conflicts(files)`;
+/// none unmerged → `Err`, since git declined to merge at all.
 /// Any other exit code → `Err(GitError::Exit)`.
 pub fn git_merge(target_path: &Path, source_branch: &str) -> Result<MergeOutcome, GitError> {
     let output = git_command(target_path)
@@ -519,39 +520,26 @@ pub fn git_merge(target_path: &Path, source_branch: &str) -> Result<MergeOutcome
             }
         }
         Some(1) => {
-            // Parse conflicting file paths from git's stdout.
-            //
-            // Common formats (git 2.x):
-            //   CONFLICT (content): Merge conflict in path/to/file
-            //   CONFLICT (add/add): Merge conflict in path/to/file
-            //   CONFLICT (modify/delete): path/to/file deleted in HEAD. ...
-            //   CONFLICT (rename/rename): old renamed to new1 in HEAD and new2 in ...
-            //   CONFLICT (rename/delete): path/to/old renamed to new in HEAD, ...
-            //
-            // Strategy: after "): ", strip the "Merge conflict in " prefix
-            // (content/add), then take the first whitespace-delimited token
-            // as the file path. For rename variants the "old" path (first
-            // token after "): ") is always a real file involved in the
-            // conflict, which is sufficient for display purposes.
-            let files: Vec<String> = stdout
-                .lines()
-                .filter_map(|line| {
-                    let line = line.trim();
-                    if !line.starts_with("CONFLICT") {
-                        return None;
-                    }
-                    let after_colon = line.find("): ")?.checked_add(3).map(|i| &line[i..])?;
-                    let path_start = after_colon
-                        .strip_prefix("Merge conflict in ")
-                        .unwrap_or(after_colon);
-                    let file = path_start.split_whitespace().next()?.trim_end_matches('.');
-                    if file.is_empty() {
-                        None
-                    } else {
-                        Some(file.to_string())
-                    }
-                })
+            // Ask git which paths are unmerged rather than reading them out
+            // of its prose: a `CONFLICT` line spells the path inside a
+            // sentence, so a name with a space was cut at the first word.
+            let unmerged = run_git(
+                target_path,
+                ["diff", "--name-only", "--diff-filter=U", "-z"],
+            )?;
+            let files: Vec<String> = unmerged
+                .split('\0')
+                .filter(|path| !path.is_empty())
+                .map(str::to_string)
                 .collect();
+            // Exit 1 with nothing unmerged leaves nothing to resolve, so it
+            // is reported as the failure it is rather than an empty conflict.
+            if files.is_empty() {
+                return Err(GitError::Exit {
+                    code: output.status.code(),
+                    stderr: String::from_utf8_lossy(&output.stderr).into_owned(),
+                });
+            }
             Ok(MergeOutcome::Conflicts(files))
         }
         _ => Err(GitError::Exit {

@@ -87,7 +87,10 @@ fn split_assignment(arg: &OsStr) -> Option<(OsString, OsString)> {
 /// the wrapper and the pipes are untouched. Windows has no `exec`: the wrapper
 /// stays, the child inherits its handles, and its exit code is forwarded.
 fn run(request: Request) -> i32 {
-    let mut command = daruda_core::process::command(&request.program);
+    // The program is looked up the way a shell would, in the PATH it is about
+    // to get: on Windows `npx` is `npx.cmd`, which a bare spawn cannot find.
+    let path = daruda_core::process::child_path(request.set.iter().map(|(k, v)| (k, v)));
+    let mut command = daruda_core::process::command_on_path(&request.program, path);
     command.args(&request.args);
     for name in &request.unset {
         command.env_remove(name);

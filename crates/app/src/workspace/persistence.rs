@@ -1068,7 +1068,9 @@ fn effective_cwd(
     worktree_root: Option<&std::path::Path>,
 ) -> Option<std::path::PathBuf> {
     saved
-        .filter(|s| worktree_root.is_none_or(|root| s.starts_with(root)))
+        // A shell's `$PWD` keeps the symlinked or typed-case spelling the
+        // lane root may not; either spelling is inside the lane.
+        .filter(|s| worktree_root.is_none_or(|root| daruda_core::path::is_within(s, root)))
         .or_else(|| worktree_root.map(|p| p.to_path_buf()))
 }
 

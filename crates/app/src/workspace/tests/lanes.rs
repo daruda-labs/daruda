@@ -1315,3 +1315,24 @@ async fn a_flow_another_process_runs_here_blocks_removing_the_lane(cx: &mut Test
         );
     });
 }
+
+/// gpui's `reveal_path` reports no failure, so a lane whose folder is gone
+/// would reveal nothing and say nothing; that case is reported instead.
+#[gpui::test]
+async fn revealing_a_folder_that_is_gone_reports_it(cx: &mut TestAppContext) {
+    let (window_handle, workspace) = build_workspace(cx);
+    let before = workspace.read_with(cx, |ws, _| ws.error_history().len());
+    cx.update_window(window_handle.into(), |_, _window, cx| {
+        workspace.update(cx, |ws, cx| {
+            ws.reveal_in_file_manager(std::path::Path::new("/daruda/no/such/lane"), cx);
+        });
+    })
+    .unwrap();
+    workspace.read_with(cx, |ws, _| {
+        assert_eq!(ws.error_history().len(), before + 1);
+        assert_eq!(
+            ws.error_history()[0].title,
+            crate::surface::strings::error_reveal_path_missing()
+        );
+    });
+}

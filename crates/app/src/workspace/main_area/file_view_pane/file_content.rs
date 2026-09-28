@@ -101,9 +101,11 @@ fn load_raw(
         // prefix.  For legacy relative paths (old session state) use as-is.
         let repo_rel: std::path::PathBuf = if path.is_absolute() {
             let r = repo_root.unwrap_or(wt_path);
-            match path.strip_prefix(r) {
-                Ok(rel) => rel.to_path_buf(),
-                Err(_) => {
+            // The path may be spelled otherwise than the root (an agent link
+            // through a symlink); both resolve to one place.
+            match daruda_core::path::strip_root(path, r) {
+                Some(rel) => rel,
+                None => {
                     return LoadOutcome::plain(PaneFileContent::Error(
                         crate::surface::strings::file_viewer_err_staged_outside_repo(
                             &path.display().to_string(),
@@ -148,7 +150,7 @@ fn load_raw(
             };
             let ext = path.extension_str();
 
-            if ext == "md" || ext == "markdown" {
+            if super::is_markdown_path(path) {
                 let mut blocks = super::markdown_viewer::parse_markdown(
                     &text,
                     syntax_theme,
@@ -195,8 +197,8 @@ fn load_raw(
 /// missing from the index, or an IO/path error) so the caller can fall
 /// back to `git diff`.
 fn in_app_unstaged_diff(repo: &std::path::Path, path: &std::path::Path) -> Option<String> {
-    let rel = path.strip_prefix(repo).unwrap_or(path);
-    let old = crate::lane::git::git_show_staged(repo, rel).ok()?;
+    let rel = daruda_core::path::strip_root(path, repo).unwrap_or_else(|| path.to_path_buf());
+    let old = crate::lane::git::git_show_staged(repo, &rel).ok()?;
     let old = String::from_utf8(old).ok()?;
     let new = std::fs::read_to_string(path).ok()?;
     Some(super::line_diff::unified_diff_text(&old, &new))

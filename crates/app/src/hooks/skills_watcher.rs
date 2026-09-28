@@ -20,8 +20,7 @@ use std::path::{Path, PathBuf};
 use std::sync::mpsc::{self, RecvTimeoutError};
 use std::time::Duration;
 
-use daruda_core::path::canonicalize_or_self;
-
+use super::watch_target::WatchTarget;
 use crate::agent::skills::SkillScope;
 
 /// Coalescing window. Atomic-rename saves emit a burst (delete +
@@ -64,7 +63,8 @@ pub fn spawn(
     // canonical match path from whatever ancestor *does* exist — otherwise the
     // raw target path won't match the canonicalised event paths macOS reports
     // through its `/var → /private/var` redirect. See
-    // `canonical_match_for_target` for the derivation.
+    // `WatchTarget` for the derivation — it also keeps the given spelling,
+    // which is what inotify and ReadDirectoryChangesW report.
     let project_anchor = project_dir
         .as_deref()
         .and_then(|p| nearest_existing_ancestor(p, 2));
@@ -77,9 +77,9 @@ pub fn spawn(
 
     let project_match = project_dir
         .as_deref()
-        .map(|p| canonical_match_for_target(p, project_anchor.as_deref()));
-    let personal_match = canonical_match_for_target(&personal_dir, personal_anchor.as_deref());
-    let plugin_match = canonical_match_for_target(&plugin_cache_dir, plugin_anchor.as_deref());
+        .map(|p| WatchTarget::new(p, project_anchor.as_deref()));
+    let personal_match = WatchTarget::new(&personal_dir, personal_anchor.as_deref());
+    let plugin_match = WatchTarget::new(&plugin_cache_dir, plugin_anchor.as_deref());
 
     // Subscribe to the closest existing ancestor when the target skill
     // directory itself doesn't exist yet; the `classify` `starts_with` filter
@@ -107,15 +107,15 @@ pub fn spawn(
         let mut out = Vec::new();
         for path in &event.paths {
             let scope = if let Some(proj) = &project_match
-                && path.starts_with(proj)
+                && proj.contains(path)
             {
                 SkillScope::Project
-            } else if path.starts_with(&plugin_match) {
+            } else if plugin_match.contains(path) {
                 // Plugin cache lives under `~/.claude`, so its prefix overlaps
                 // with personal_match. Test it first so plugin events don't get
                 // mis-routed to the personal scope.
                 SkillScope::Plugin
-            } else if path.starts_with(&personal_match) {
+            } else if personal_match.contains(path) {
                 SkillScope::Personal
             } else {
                 continue;
@@ -236,30 +236,6 @@ fn nearest_existing_ancestor(target: &Path, max_ascend: usize) -> Option<PathBuf
             }
             _ => return None,
         }
-    }
-}
-
-/// Build the canonical path the FSEvent callback should compare
-/// reported event paths against, even when `target` itself doesn't
-/// exist yet.
-///
-/// `target` is the "logical" skills root (e.g. `~/.claude/skills`).
-/// `existing_anchor` is the closest ancestor that actually exists
-/// today (could be `~/.claude` if `skills/` hasn't been created).
-/// We canonicalise the anchor (so symlink redirects line up with what
-/// FSEvents will report) and re-attach the trailing path components
-/// from `target` that lie below the anchor. The result is canonical
-/// up to the anchor and raw thereafter — enough for `starts_with` to
-/// match every future event under `target`.
-fn canonical_match_for_target(target: &Path, existing_anchor: Option<&Path>) -> PathBuf {
-    if let Some(anchor) = existing_anchor {
-        let canonical_anchor = canonicalize_or_self(anchor);
-        match target.strip_prefix(anchor) {
-            Ok(tail) if !tail.as_os_str().is_empty() => canonical_anchor.join(tail),
-            _ => canonical_anchor,
-        }
-    } else {
-        canonicalize_or_self(target)
     }
 }
 

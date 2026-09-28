@@ -249,14 +249,32 @@ pub fn sweep_aside(root: &Path) {
             // and an aside file under it would never be collected otherwise.
             if path.is_dir() {
                 stack.push(path);
-            } else if [ASIDE_SUFFIX, STAGED_SUFFIX]
-                .iter()
-                .any(|mark| path.to_string_lossy().contains(mark))
-            {
+            } else if is_swap_leftover(&path) {
                 let _ = std::fs::remove_file(&path);
             }
         }
     }
+}
+
+/// Whether `path` is a file a swap moved aside or staged. Judged by the
+/// file's own name: the whole path would also match an install directory
+/// that merely contains the marker, and sweep every file under it.
+fn is_swap_leftover(path: &Path) -> bool {
+    let Some(name) = path.file_name().and_then(|name| name.to_str()) else {
+        return false;
+    };
+    if name.ends_with(STAGED_SUFFIX) {
+        return true;
+    }
+    // `<name>.daruda-old`, or `<name>.daruda-old.<n>` — see [`aside`].
+    name.rsplit_once(ASIDE_SUFFIX)
+        .is_some_and(|(stem, attempt)| {
+            !stem.is_empty()
+                && (attempt.is_empty()
+                    || attempt
+                        .strip_prefix('.')
+                        .is_some_and(|n| !n.is_empty() && n.bytes().all(|b| b.is_ascii_digit())))
+        })
 }
 
 /// The subcommand that waits out the process it replaced. Spelled here
@@ -577,6 +595,32 @@ mod tests {
             taken.unwrap(),
             guarded.join(format!("daruda.exe{ASIDE_SUFFIX}.1")),
             "the occupied name must not be handed out again"
+        );
+    }
+
+    /// The marker is read off each file's own name. An install directory
+    /// whose *path* carries it keeps every file; a numbered aside still goes.
+    #[test]
+    fn a_sweep_judges_the_file_name_not_the_path() {
+        let tmp = tempfile::tempdir().unwrap();
+        let install = tmp.path().join(format!("tools{ASIDE_SUFFIX}"));
+        write(&install.join("daruda.exe"), "live");
+        write(
+            &install.join(format!("daruda.exe{ASIDE_SUFFIX}.2")),
+            "stale",
+        );
+        write(
+            &install.join(format!("notes{ASIDE_SUFFIX}.txt")),
+            "user file",
+        );
+
+        sweep_aside(&install);
+
+        assert_eq!(read(&install.join("daruda.exe")), "live");
+        assert!(!install.join(format!("daruda.exe{ASIDE_SUFFIX}.2")).exists());
+        assert_eq!(
+            read(&install.join(format!("notes{ASIDE_SUFFIX}.txt"))),
+            "user file"
         );
     }
 

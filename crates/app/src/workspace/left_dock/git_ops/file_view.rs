@@ -8,7 +8,7 @@ use daruda_store::project::{LaneId, LaneRef};
 use gpui::{Context, Window, point, px};
 
 use crate::workspace::Workspace;
-use crate::workspace::left_dock::file_tree_ops::build_status_index;
+use crate::workspace::left_dock::file_tree_ops::repo_status_index;
 use crate::workspace::main_area::file_view_pane::diff_editor::{
     DiffColors, build_diff_editor_model,
 };
@@ -167,25 +167,19 @@ impl Workspace {
             .and_then(|p| p.file_content_mut())
     }
 
-    /// `absolute path → git status char` for `target`.
-    ///
-    /// A file pane's path is absolute, built by one of two bases: the Git
-    /// Changes view joins `LanePaths::from_git_status` (repo root), the Files
-    /// view joins the lane root. Both are indexed so a pane matches whichever
-    /// way it was opened; where the two roots coincide the entries collapse.
+    /// `absolute path → git status char` for `target`. A file pane's path is
+    /// absolute whichever view opened it, and git's paths resolve against the
+    /// working-tree root — so one conversion covers both, including a change
+    /// outside a subdirectory lane that the Git Changes view still lists.
     fn status_index_by_abs(&self, target: LaneRef) -> std::collections::HashMap<PathBuf, char> {
-        let mut by_abs = std::collections::HashMap::new();
-        let Some(lane_root) = self.lane_for(target).map(|w| w.path.clone()) else {
-            return by_abs;
+        let Some(lane) = self.lane_for(target) else {
+            return std::collections::HashMap::new();
         };
-        let repo_root = self.git_repo_root_for(target);
-        for (rel, status) in build_status_index(self.lane_git_worktree(target)) {
-            if let Some(repo) = repo_root.as_ref() {
-                by_abs.insert(repo.join(&rel), status);
-            }
-            by_abs.insert(lane_root.join(&rel), status);
-        }
-        by_abs
+        let paths = lane.paths();
+        repo_status_index(self.lane_git_worktree(target))
+            .into_iter()
+            .map(|(rel, status)| (paths.from_git_status(&rel), status))
+            .collect()
     }
 
     /// The git status char for `path` in `target` — `None` when the file has
@@ -1049,7 +1043,7 @@ type LaunchCandidate = (&'static str, Vec<std::ffi::OsString>);
 /// CE vs Ultimate) yields one `open -b <id>` candidate per id, since the
 /// bundle id is stable across editions while the `.app` display name isn't;
 /// otherwise `macos_app_name` yields a single `open -a "<name>"` candidate.
-/// Linux: `linux_cli_candidates` each yield a direct CLI-command candidate.
+/// Linux and Windows: `cli_candidates` each yield a direct CLI-command candidate.
 fn preset_launch_candidates(
     path: &std::path::Path,
     preset: &daruda_config::ExternalEditorPreset,
@@ -1078,14 +1072,12 @@ fn preset_launch_candidates(
             )];
         }
         Vec::new()
-    } else if cfg!(target_os = "linux") {
+    } else {
         preset
-            .linux_cli_candidates
+            .cli_candidates
             .iter()
             .map(|cmd| (*cmd, vec![path_arg()]))
             .collect()
-    } else {
-        Vec::new()
     }
 }
 
@@ -1127,7 +1119,7 @@ fn open_with_preset(
         .unwrap_or_default();
     let mut last_err = None;
     for (command, args) in &candidates {
-        match daruda_core::process::command(command)
+        match daruda_core::process::command_on_path(command, None)
             .args(args)
             .stdin(Stdio::null())
             .stdout(Stdio::null())
@@ -1195,7 +1187,8 @@ mod open_with_preset_tests {
                     std::ffi::OsString::from("/tmp/f.rs"),
                 ]
             );
-        } else if cfg!(target_os = "linux") {
+        } else {
+            // Linux and Windows alike: the editor's own CLI.
             assert_eq!(
                 candidates,
                 vec![("code", vec![std::ffi::OsString::from("/tmp/f.rs")])]
@@ -1226,9 +1219,9 @@ mod open_with_preset_tests {
     }
 
     #[test]
-    fn macos_only_preset_has_no_linux_candidates() {
+    fn macos_only_preset_has_no_cli_candidates() {
         let preset = preset_named("xcode");
-        if cfg!(target_os = "linux") {
+        if !cfg!(target_os = "macos") {
             assert!(
                 preset_launch_candidates(std::path::Path::new("/tmp/f.rs"), &preset).is_empty()
             );

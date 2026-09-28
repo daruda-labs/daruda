@@ -352,6 +352,7 @@ impl Workspace {
         let message = match reason {
             FlowNameError::Empty => s::flow_name_empty(),
             FlowNameError::HasSeparator => s::flow_name_has_separator(),
+            FlowNameError::Unportable => s::flow_name_unportable(),
             FlowNameError::Taken => s::flow_name_taken(),
         };
         self.report_error(

@@ -1639,17 +1639,9 @@ impl Workspace {
     /// canonicalized so the symlinked `/tmp` vs `/private/tmp`
     /// flavours on macOS still match.
     pub(crate) fn has_project_root(&self, root: &std::path::Path) -> bool {
-        let canonical = daruda_core::path::canonicalize(root).ok();
-        self.projects.iter().any(|p| {
-            if p.root == root {
-                return true;
-            }
-            let p_canon = daruda_core::path::canonicalize(&p.root).ok();
-            match (canonical.as_ref(), p_canon.as_ref()) {
-                (Some(a), Some(b)) => a == b,
-                _ => false,
-            }
-        })
+        self.projects
+            .iter()
+            .any(|p| daruda_core::path::same_path(&p.root, root))
     }
 
     /// Read-only slice of every runtime project currently in this

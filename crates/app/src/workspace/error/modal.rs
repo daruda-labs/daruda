@@ -97,11 +97,8 @@ impl ErrorReportModal {
             let date_path = log_writer::today_log_path()
                 .filter(|p| p.exists())
                 .unwrap_or(dir);
-            // `Url::from_file_path` percent-encodes; a hand-built `file://` +
-            // display string is refused by the platform opener on a path
-            // with a space, and refused silently.
-            if let Ok(url) = url::Url::from_file_path(&date_path) {
-                cx.open_url(url.as_str());
+            if let Some(url) = daruda_core::file_url::from_local_path(&date_path) {
+                cx.open_url(&url);
             }
         }
     }

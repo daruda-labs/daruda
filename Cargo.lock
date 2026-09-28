@@ -1787,8 +1787,10 @@ version = "0.2.15"
 dependencies = [
  "dunce",
  "libc",
+ "percent-encoding",
  "tempfile",
  "test_process",
+ "url",
  "which",
  "windows-sys 0.61.2",
 ]
@@ -1839,6 +1841,7 @@ dependencies = [
  "criterion",
  "daruda_core",
  "daruda_store",
+ "dirs",
  "ghostty_vt",
  "gpui",
  "portable-pty",

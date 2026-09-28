@@ -10,6 +10,8 @@ use std::io::Cursor;
 use std::path::Path;
 use std::sync::{Arc, OnceLock};
 
+use crate::workspace::main_area::link_target;
+
 /// Render diagrams/images at 2× their intrinsic size so they stay crisp when
 /// the GPUI render layer scales them to fit the pane on HiDPI displays.
 const RASTER_SCALE: f32 = 2.0;
@@ -435,8 +437,9 @@ pub(super) fn render_mermaid_svg(
 
 /// Resolve a markdown image reference to its encoded bytes.
 ///
-/// Policy (locked): only local files (resolved relative to `base_dir`) and
-/// `data:` URIs are loaded. Remote `http(s)` references are refused — a local
+/// Policy (locked): only local files and `data:` URIs are loaded — a local
+/// path resolves as a tool's resource link does (`file://` for this machine,
+/// absolute, or relative to `base_dir`). Any other URL is refused: a local
 /// file viewer must not fetch from the network.
 pub(super) fn load_image_source(url: &str, base_dir: &Path) -> anyhow::Result<Vec<u8>> {
     if let Some(rest) = url.strip_prefix("data:") {
@@ -449,10 +452,11 @@ pub(super) fn load_image_source(url: &str, base_dir: &Path) -> anyhow::Result<Ve
         } else {
             Ok(payload.as_bytes().to_vec())
         }
-    } else if url.starts_with("http://") || url.starts_with("https://") {
-        anyhow::bail!("remote images are not fetched: {url}")
     } else {
-        Ok(std::fs::read(base_dir.join(url))?)
+        let Some(path) = link_target::resource_path(url, Some(base_dir)) else {
+            anyhow::bail!("remote images are not fetched: {url}")
+        };
+        Ok(std::fs::read(path)?)
     }
 }
 
@@ -761,6 +765,33 @@ mod tests {
         let dir = std::env::temp_dir();
         assert!(load_image_source("https://example.com/a.png", &dir).is_err());
         assert!(load_image_source("http://example.com/a.png", &dir).is_err());
+    }
+
+    /// Refused even when joining it onto the base dir would name a real file.
+    /// Unix only: `:` cannot appear in a Windows file name.
+    #[cfg(unix)]
+    #[test]
+    fn refuses_other_url_schemes() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let decoy = dir.path().join("mcp:/server");
+        std::fs::create_dir_all(&decoy).expect("mkdir");
+        std::fs::write(decoy.join("a.png"), b"x").expect("write decoy");
+        assert!(load_image_source("mcp://server/a.png", dir.path()).is_err());
+    }
+
+    /// A `file://` reference is the same file a bare path names — the one
+    /// resolver the agent chat's resource links use.
+    #[test]
+    fn reads_local_image_from_a_file_url() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let png = encode_png(2, 2, [7, 8, 9, 255]);
+        let path = dir.path().join("with space.png");
+        std::fs::write(&path, &png).expect("write png");
+        let url = daruda_core::file_url::from_local_path(&path).expect("file url");
+        assert_eq!(
+            load_image_source(&url, Path::new("/unrelated")).expect("load"),
+            png
+        );
     }
 
     #[test]

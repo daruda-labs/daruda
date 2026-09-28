@@ -96,7 +96,9 @@ fn attribute_one(port: &ScannedPort, lanes: &[LaneCandidate]) -> Option<PortOwne
 /// specific, match. This is what makes a nested worktree win over its
 /// parent when both contain `cwd`.
 fn deepest_matching<'a>(cwd: &Path, lanes: &'a [LaneCandidate]) -> Option<&'a LaneCandidate> {
-    deepest_matching_by(lanes, |lane| cwd.starts_with(&lane.path))
+    // `lsof` / `/proc` report the physical cwd; a lane keeps the path it was
+    // opened by, which may run through a symlink.
+    deepest_matching_by(lanes, |lane| daruda_core::path::is_within(cwd, &lane.path))
 }
 
 fn deepest_matching_by<F>(lanes: &[LaneCandidate], matches: F) -> Option<&LaneCandidate>

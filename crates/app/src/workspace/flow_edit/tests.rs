@@ -835,3 +835,29 @@ fn a_removed_elements_step_reads_nothing_from_the_new_tree() {
         "and one that is going reads as nothing — not as whatever sits at its old index"
     );
 }
+
+/// A checkout with `core.autocrlf` holds the file with CRLF; an edit that
+/// wrote bare `\n` left it with two line endings. Every inserted break follows
+/// the file's own.
+#[test]
+fn an_edit_to_a_crlf_file_writes_crlf() {
+    let crlf = FLOW.replace('\n', "\r\n");
+    let after = edited(&crlf, |file| {
+        file.nodes[1].kind = NodeKindFile::Agent {
+            continue_until: None,
+            max_turns: None,
+            agent: None,
+            prompt: PromptSource::Prompt("build it\nthen check it\n".into()),
+            output: "build.md".into(),
+            output_schema: None,
+            on_fail: Default::default(),
+        };
+    });
+    let lone = after
+        .match_indices('\n')
+        .filter(|(at, _)| !after[..*at].ends_with('\r'))
+        .count();
+    assert_eq!(lone, 0, "a bare LF in:\n{after:?}");
+    assert!(after.contains("    prompt: |\r\n      build it\r\n      then check it\r\n"));
+    daruda_flow::load(&after, None).expect("still loads");
+}

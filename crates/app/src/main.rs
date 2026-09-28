@@ -14,6 +14,7 @@ mod config_watcher;
 mod control;
 mod dir_watch;
 mod env_strip;
+pub(crate) mod file_name;
 pub mod files;
 mod fuzzy;
 mod globals;

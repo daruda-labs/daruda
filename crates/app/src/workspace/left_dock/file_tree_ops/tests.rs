@@ -12,10 +12,36 @@ fn loaded(name: &str, kind: EntryKind) -> LoadedEntry {
     }
 }
 
+fn lane_at(wt: &'static str, repo: &'static str) -> crate::lane::paths::LanePaths<'static> {
+    crate::lane::paths::LanePaths {
+        wt_path: std::path::Path::new(wt),
+        repo_root: Some(std::path::Path::new(repo)),
+    }
+}
+
 #[test]
 fn build_status_index_empty_when_status_none() {
-    let idx = build_status_index(None);
+    let idx = build_status_index(None, &lane_at("/r", "/r"));
     assert!(idx.is_empty());
+}
+
+/// git names paths from the repository root; the tree names them from the
+/// lane. For a lane opened at `repo/sub` every key used to miss.
+#[test]
+fn a_subdirectory_lane_keys_its_status_lane_relative() {
+    let entry = |path: &str| GitFileEntry {
+        x: 'M',
+        y: ' ',
+        path: PathBuf::from(path),
+        ..Default::default()
+    };
+    let status = GitWorktreeStatus {
+        staged: vec![entry("sub/a.rs"), entry("other/b.rs")],
+        ..Default::default()
+    };
+    let idx = build_status_index(Some(&status), &lane_at("/repo/sub", "/repo"));
+    assert_eq!(idx.len(), 1, "a change outside the lane is not the lane's");
+    assert_eq!(idx.get(&PathBuf::from("a.rs")).copied(), Some('M'));
 }
 
 #[test]
@@ -35,7 +61,7 @@ fn build_status_index_staged_overrides_unstaged() {
         }],
         ..Default::default()
     };
-    let idx = build_status_index(Some(&status));
+    let idx = build_status_index(Some(&status), &lane_at("/r", "/r"));
     // Staged char wins for paths in both lists.
     assert_eq!(idx.get(&PathBuf::from("a.txt")).copied(), Some('M'));
 }

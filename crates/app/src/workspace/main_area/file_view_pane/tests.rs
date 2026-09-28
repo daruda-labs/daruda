@@ -348,3 +348,16 @@ fn make_plain_row_helper() {
     assert!(r.spans.is_empty());
     assert!(r.word_changes.is_empty());
 }
+
+/// The toolbar offers Preview by this and the loader parses by it, so one
+/// answer covers both — `README.MD` used to get the button but plain text.
+#[test]
+fn a_markdown_extension_is_recognised_in_any_case() {
+    for name in ["README.md", "README.MD", "notes.Markdown"] {
+        assert!(
+            super::is_markdown_path(std::path::Path::new(name)),
+            "{name}"
+        );
+    }
+    assert!(!super::is_markdown_path(std::path::Path::new("README.txt")));
+}

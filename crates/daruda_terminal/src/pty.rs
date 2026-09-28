@@ -193,17 +193,16 @@ pub fn spawn_pty_real(config: &PtyConfig) -> Result<PtyHandle, PtyError> {
     for (key, value) in &config.env {
         cmd.env(key, value);
     }
-    // Use the requested cwd when it exists on disk; otherwise fall back to
-    // $HOME so the shell never silently inherits the parent process's cwd
-    // (which is $HOME or an arbitrary build directory depending on how
-    // daruda was launched).
+    // Use the requested cwd when it exists on disk; otherwise fall back to the
+    // home directory so the shell never silently inherits the parent
+    // process's cwd. `dirs`, not `$HOME`: Windows has no `HOME`.
     let effective_cwd = config
         .cwd
         .as_ref()
         .filter(|p| p.read_dir().is_ok())
         .cloned()
         .or_else(|| {
-            let home = PathBuf::from(std::env::var_os("HOME")?);
+            let home = dirs::home_dir()?;
             home.is_dir().then_some(home)
         });
     if let Some(cwd) = &effective_cwd {

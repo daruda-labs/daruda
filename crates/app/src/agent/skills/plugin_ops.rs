@@ -91,7 +91,7 @@ pub fn run_plugin_action(
 ) -> Result<String, PluginOpError> {
     // Pre-spawn guard for a clear "claude not found" error.
     which::which("claude").map_err(|_| PluginOpError::NotFound)?;
-    let mut cmd = daruda_core::process::command("claude");
+    let mut cmd = daruda_core::process::command_on_path("claude", None);
     cmd.arg("plugin")
         .arg(action.verb())
         .arg(plugin_id)

@@ -7,6 +7,9 @@
 
 use std::path::{Path, PathBuf};
 
+use daruda_core::file_url;
+use daruda_core::path_style::PathStyle;
+
 /// What a link resolves to once the pane's working directory is known.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(in crate::workspace) enum LinkTarget {
@@ -56,9 +59,47 @@ const BINARY_EXTENSIONS: &[&str] = &[
     "webm", "woff", "woff2", "ttf", "otf", "ico", "icns", "psd", "sqlite", "db",
 ];
 
-pub(in crate::workspace) fn is_image_extension(extension: &str) -> bool {
+fn is_image_extension(extension: &str) -> bool {
     let ext = extension.to_ascii_lowercase();
     IMAGE_EXTENSIONS.contains(&ext.as_str())
+}
+
+/// MIME types the in-app decoder handles — the declared-type twin of
+/// [`IMAGE_EXTENSIONS`].
+fn is_supported_image_mime(mime: &str) -> bool {
+    matches!(
+        mime.split(';')
+            .next()
+            .unwrap_or_default()
+            .trim()
+            .to_ascii_lowercase()
+            .as_str(),
+        "image/png"
+            | "image/jpeg"
+            | "image/jpg"
+            | "image/gif"
+            | "image/webp"
+            | "image/bmp"
+            | "image/x-ms-bmp"
+    )
+}
+
+fn declared_mime(mime: Option<&str>) -> Option<&str> {
+    mime.map(str::trim).filter(|mime| !mime.is_empty())
+}
+
+/// Whether a resource renders as an image: by its declared MIME when the
+/// tool sent one, else by extension. The inline preview and the click both
+/// ask this, so a previewed image never opens as text.
+pub(in crate::workspace) fn is_image_resource(path: &Path, mime: Option<&str>) -> bool {
+    declared_mime(mime).map_or_else(
+        || {
+            path.extension()
+                .and_then(|ext| ext.to_str())
+                .is_some_and(is_image_extension)
+        },
+        is_supported_image_mime,
+    )
 }
 
 fn is_binary_extension(extension: &str) -> bool {
@@ -97,7 +138,7 @@ pub(in crate::workspace) fn classify(link: &str, cwd: Option<&Path>) -> LinkTarg
 pub(in crate::workspace) fn classify_remote(link: &str) -> LinkTarget {
     if link.starts_with('#') {
         LinkTarget::Opaque
-    } else if file_url_path(link).is_some() || !is_external_url(link) {
+    } else if file_url::is_file_url(link) || !is_external_url(link) {
         LinkTarget::Remote
     } else {
         LinkTarget::Web {
@@ -109,28 +150,72 @@ pub(in crate::workspace) fn classify_remote(link: &str) -> LinkTarget {
 /// Classify a tool's resource-link URI. Unlike Markdown text, a resource is a
 /// file by definition, so a relative URI resolves against `cwd` even when
 /// absent (→ `Missing`, which reports) instead of reading as a plain word.
-pub(in crate::workspace) fn classify_resource(uri: &str, cwd: Option<&Path>) -> LinkTarget {
+pub(in crate::workspace) fn classify_resource(
+    uri: &str,
+    mime: Option<&str>,
+    cwd: Option<&Path>,
+) -> LinkTarget {
     if uri.starts_with('#') {
         return LinkTarget::Opaque;
     }
-    let path = if let Some(path) = file_url_path(uri) {
-        path
-    } else if is_external_url(uri) {
-        return LinkTarget::Web {
+    match resource_path(uri, cwd) {
+        Some(path) => {
+            let kind = resource_kind(&path, mime);
+            LinkTarget::Local {
+                path,
+                line: None,
+                kind,
+            }
+        }
+        None if is_external_url(uri) => LinkTarget::Web {
             url: uri.to_string(),
-        };
-    } else if Path::new(uri).is_absolute() {
-        PathBuf::from(uri)
-    } else if let Some(cwd) = cwd {
-        cwd.join(uri)
+        },
+        None => LinkTarget::Opaque,
+    }
+}
+
+/// The local path a URI reference names, without touching the disk: a
+/// `file://` URL for this machine, an absolute path, or a relative one under
+/// `base`. `None` for any other URL. Shared by a tool's resource link (click
+/// and inline preview) and a Markdown image in the file viewer.
+pub(in crate::workspace) fn resource_path(uri: &str, base: Option<&Path>) -> Option<PathBuf> {
+    if file_url::is_file_url(uri) {
+        return file_url::to_local_path(uri, None);
+    }
+    if is_external_url(uri) {
+        return None;
+    }
+    let path = Path::new(uri);
+    // A UNC path is absolute, so only this branch can name a share.
+    if path.is_absolute() {
+        on_local_disk(path)
     } else {
-        return LinkTarget::Opaque;
-    };
-    let kind = kind_of(&path);
-    LinkTarget::Local {
-        path,
-        line: None,
-        kind,
+        base.map(|base| base.join(path))
+    }
+}
+
+/// `path`, unless it names a network share or a device. The link is
+/// untrusted — a README, a tool's output — and on Windows merely probing
+/// `\\host\share` authenticates to that host, so it is refused here, before
+/// any `metadata`, `canonicalize` or read can reach it.
+fn on_local_disk(path: &Path) -> Option<PathBuf> {
+    let spelled = path.to_str()?;
+    (!PathStyle::local().is_network_or_device(spelled)).then(|| path.to_path_buf())
+}
+
+/// [`kind_of`], with a declared MIME overriding the extension's say on
+/// whether a file is an image — the same rule as [`is_image_resource`].
+fn resource_kind(path: &Path, mime: Option<&str>) -> LocalKind {
+    let kind = kind_of(path);
+    if declared_mime(mime).is_none() {
+        return kind;
+    }
+    match kind {
+        LocalKind::Directory | LocalKind::Missing => kind,
+        _ if is_image_resource(path, mime) => LocalKind::Image,
+        // Declared as something other than an image: the OS picks the handler.
+        LocalKind::Image => LocalKind::Binary,
+        other => other,
     }
 }
 
@@ -163,17 +248,15 @@ struct LocalPath {
 /// (`README`) only when it exists under `cwd`, since a word is not a link.
 /// `None` for URLs of any other scheme and for anchors.
 fn local_path(link: &str, cwd: Option<&Path>) -> Option<LocalPath> {
-    let path = if let Some(path) = file_url_path(link) {
+    let path = if let Some(path) = file_url::to_local_path(link, None) {
         path
     } else if is_external_url(link) {
         return None;
     } else {
         let path = PathBuf::from(link);
         if path.is_absolute() {
-            path
-        } else if link.starts_with("./")
-            || link.starts_with("../")
-            || link.contains('/')
+            on_local_disk(&path)?
+        } else if link.contains(|c| PathStyle::local().is_separator(c))
             || cwd
                 .map(|cwd| strip_line_suffix(cwd.join(&path)).path.is_file())
                 .unwrap_or(false)
@@ -184,14 +267,6 @@ fn local_path(link: &str, cwd: Option<&Path>) -> Option<LocalPath> {
         }
     };
     Some(strip_line_suffix(path))
-}
-
-fn file_url_path(link: &str) -> Option<PathBuf> {
-    let url = url::Url::parse(link).ok()?;
-    if url.scheme() != "file" || url.host_str().is_some_and(|host| host != "localhost") {
-        return None;
-    }
-    url.to_file_path().ok()
 }
 
 fn parse_numeric_suffix(suffix: &str) -> Option<Option<usize>> {
@@ -381,6 +456,12 @@ mod tests {
     fn a_remote_session_keeps_urls_and_refuses_every_path() {
         assert_eq!(classify_remote("/tmp"), LinkTarget::Remote);
         assert_eq!(classify_remote("file:///tmp"), LinkTarget::Remote);
+        // No local path form on any host, the way `file:///tmp` has none on
+        // Windows — so this pins the rule on the platform the tests run on.
+        assert_eq!(
+            classify_remote("file://server/share/a.rs"),
+            LinkTarget::Remote
+        );
         assert_eq!(classify_remote("src/main.rs:12"), LinkTarget::Remote);
         assert_eq!(classify_remote("#heading"), LinkTarget::Opaque);
         assert_eq!(
@@ -397,7 +478,7 @@ mod tests {
     fn a_relative_resource_resolves_against_cwd_even_when_absent() {
         let dir = tempfile::tempdir().unwrap();
         assert_eq!(
-            classify_resource("shot.png", Some(dir.path())),
+            classify_resource("shot.png", None, Some(dir.path())),
             LinkTarget::Local {
                 path: dir.path().join("shot.png"),
                 line: None,
@@ -406,19 +487,73 @@ mod tests {
         );
         std::fs::write(dir.path().join("shot.png"), b"x").unwrap();
         assert!(matches!(
-            classify_resource("shot.png", Some(dir.path())),
+            classify_resource("shot.png", None, Some(dir.path())),
             LinkTarget::Local {
                 kind: LocalKind::Image,
                 ..
             }
         ));
-        assert_eq!(classify_resource("shot.png", None), LinkTarget::Opaque);
         assert_eq!(
-            classify_resource("https://example.com/a.png", None),
+            classify_resource("shot.png", None, None),
+            LinkTarget::Opaque
+        );
+        assert_eq!(
+            classify_resource("https://example.com/a.png", None, None),
             LinkTarget::Web {
                 url: "https://example.com/a.png".into()
             }
         );
+    }
+
+    /// The preview trusts a declared MIME over the extension, so the click
+    /// has to as well — or a previewed image opens as text.
+    #[test]
+    fn a_declared_mime_decides_whether_a_resource_is_an_image() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("artifact"), b"x").unwrap();
+        std::fs::write(dir.path().join("picture.png"), b"x").unwrap();
+        let kind =
+            |uri: &str, mime: Option<&str>| match classify_resource(uri, mime, Some(dir.path())) {
+                LinkTarget::Local { path, kind, .. } => {
+                    // A missing file previews nothing, so only a real one can disagree.
+                    if kind != LocalKind::Missing {
+                        assert_eq!(is_image_resource(&path, mime), kind == LocalKind::Image);
+                    }
+                    kind
+                }
+                other => panic!("expected a local target, got {other:?}"),
+            };
+        assert_eq!(kind("artifact", None), LocalKind::Text);
+        assert_eq!(kind("artifact", Some("image/png")), LocalKind::Image);
+        assert_eq!(kind("picture.png", None), LocalKind::Image);
+        assert_eq!(kind("picture.png", Some("text/plain")), LocalKind::Binary);
+        assert_eq!(kind("gone.png", Some("image/png")), LocalKind::Missing);
+    }
+
+    /// A share is refused before the disk is asked about it: on Windows the
+    /// probe itself would authenticate to the attacker's host.
+    #[cfg(windows)]
+    #[test]
+    fn a_network_share_is_never_probed() {
+        for link in ["\\\\evil\\share\\a.png", "//evil/share/a.png"] {
+            assert_eq!(resource_path(link, None), None, "{link}");
+            assert_eq!(classify(link, None), LinkTarget::Opaque, "{link}");
+            assert_eq!(
+                classify_resource(link, None, None),
+                LinkTarget::Opaque,
+                "{link}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_resource_path_is_resolved_without_the_disk() {
+        let cwd = Path::new("/work");
+        assert_eq!(resource_path("a.png", Some(cwd)), Some(cwd.join("a.png")));
+        assert_eq!(resource_path("a.png", None), None);
+        assert_eq!(resource_path("mcp://server/a.png", Some(cwd)), None);
+        assert_eq!(resource_path("https://example.com/a.png", Some(cwd)), None);
+        assert_eq!(resource_path("file://server/share/a.png", Some(cwd)), None);
     }
 
     #[test]

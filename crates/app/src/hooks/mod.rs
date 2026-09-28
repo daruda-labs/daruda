@@ -13,6 +13,7 @@ pub mod jsonl_watcher;
 pub mod mcp_watcher;
 pub mod pty_tracker;
 pub mod skills_watcher;
+mod watch_target;
 pub mod watcher;
 
 #[cfg(test)]

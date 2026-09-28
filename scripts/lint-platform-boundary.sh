@@ -19,6 +19,14 @@
 # | `fs::canonicalize`            | `daruda_core::path::canonicalize`      |
 # | `env::var("SHELL")`           | `daruda_core::shell::interactive`      |
 # | `std::os::unix::fs::symlink`  | `daruda_core::path::symlink`           |
+# | `Url::{to,from}_file_path`, `"file://"` | `daruda_core::file_url`     |
+# | `gethostname` / `GetComputerName*` | `daruda_core::host::name`         |
+# | `env::var("HOME")`             | `dirs::home_dir`                      |
+#
+# The file-URL row is a platform call in disguise: `to_file_path` decodes by
+# the build OS, so "is this a file URL?" came back `false` for `file:///tmp`
+# on Windows only. `file_url` takes the path style as a value, which is what
+# lets the Windows rules be asserted from macOS.
 #
 # Tests are exempt: a fixture spawning `git init` is not the app's
 # behaviour on a user's machine, and forcing it through the gate buys
@@ -63,6 +71,8 @@ cd "$ROOT"
 # reach — a job for the stage that adds the Windows arm, since that is
 # when the divergence starts costing something.
 WHITELIST_PREFIXES=(
+    "crates/daruda_core/src/file_url.rs"
+    "crates/daruda_core/src/host.rs"
     "crates/daruda_core/src/process.rs"
     "crates/daruda_core/src/path.rs"
     "crates/daruda_core/src/shell.rs"
@@ -170,6 +180,15 @@ for file in "${FILES[@]}"; do
         }
         if (/\bstd::os::unix::fs::symlink\b/) {
             print "$ARGV:$.: unix symlink -> daruda_core::path::symlink\n";
+        }
+        if (/\b(to|from)_file_path\s*\(/ || /"file:\/\//) {
+            print "$ARGV:$.: file URL decoding -> daruda_core::file_url\n";
+        }
+        if (/env::var(_os)?\(\s*"HOME"/) {
+            print "$ARGV:$.: \$HOME -> dirs::home_dir (Windows has no HOME)\n";
+        }
+        if (/\bgethostname\b/ || /\bGetComputerName\w*/) {
+            print "$ARGV:$.: host name -> daruda_core::host::name\n";
         }
     ' "$file" || true)
     if [ -n "$hit" ]; then

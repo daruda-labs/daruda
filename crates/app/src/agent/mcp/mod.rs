@@ -72,6 +72,25 @@ impl McpLocation {
     }
 }
 
+/// The key under `projects` that names `dir`: the exact spelling when
+/// present, else one naming the same directory another way — Windows'
+/// `C:/repo` beside `C:\repo`, or a symlinked checkout. Reading and writing
+/// both go through here, so daruda follows the key Claude Code already wrote
+/// instead of starting a second one beside it.
+pub(super) fn project_key<'a>(
+    projects: &'a serde_json::Map<String, serde_json::Value>,
+    dir: &str,
+) -> Option<&'a String> {
+    if let Some((key, _)) = projects.get_key_value(dir) {
+        return Some(key);
+    }
+    // Two old keys for one directory take the first in the map's order;
+    // daruda never writes a second, so only a pre-existing file has both.
+    projects
+        .keys()
+        .find(|key| daruda_core::path::same_path(Path::new(key), Path::new(dir)))
+}
+
 /// MCP transport. Claude Code accepts `stdio` (default), `sse`, `http`.
 /// Daruda treats unknown / missing `type` as `Stdio` if `command` is
 /// present, else `Http` if `url` is present (parser convenience —

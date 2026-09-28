@@ -15,8 +15,9 @@ use serde::{Deserialize, Serialize};
 /// macOS: `macos_bundle_ids` (when non-empty) is a multi-edition fallback
 /// list tried via `open -b <id>`, since a JetBrains IDE's `.app` display name
 /// varies by edition (Community vs Ultimate) but its bundle id doesn't;
-/// otherwise `macos_app_name` is used via `open -a "<name>"`. Linux:
-/// `linux_cli_candidates` are tried in order as direct CLI commands.
+/// otherwise `macos_app_name` is used via `open -a "<name>"`. Linux and
+/// Windows: `cli_candidates` are tried in order as direct CLI commands (on
+/// Windows usually a `.cmd` shim, which the launch resolves through PATHEXT).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ExternalEditorPreset {
     /// The internal key used in `config.toml` (`editor.preferred = "<name>"`)
@@ -28,7 +29,7 @@ pub struct ExternalEditorPreset {
     pub display_name: &'static str,
     pub macos_app_name: Option<&'static str>,
     pub macos_bundle_ids: &'static [&'static str],
-    pub linux_cli_candidates: &'static [&'static str],
+    pub cli_candidates: &'static [&'static str],
 }
 
 /// All built-in editor presets, in the order they appear in the Settings
@@ -42,56 +43,56 @@ pub const PRESETS: &[ExternalEditorPreset] = &[
         display_name: "VS Code",
         macos_app_name: Some("Visual Studio Code"),
         macos_bundle_ids: &[],
-        linux_cli_candidates: &["code"],
+        cli_candidates: &["code"],
     },
     ExternalEditorPreset {
         name: "cursor",
         display_name: "Cursor",
         macos_app_name: Some("Cursor"),
         macos_bundle_ids: &[],
-        linux_cli_candidates: &["cursor"],
+        cli_candidates: &["cursor"],
     },
     ExternalEditorPreset {
         name: "zed",
         display_name: "Zed",
         macos_app_name: Some("Zed"),
         macos_bundle_ids: &[],
-        linux_cli_candidates: &["zed"],
+        cli_candidates: &["zed"],
     },
     ExternalEditorPreset {
         name: "intellij",
         display_name: "IntelliJ IDEA",
         macos_app_name: None,
         macos_bundle_ids: &["com.jetbrains.intellij", "com.jetbrains.intellij.ce"],
-        linux_cli_candidates: &["idea"],
+        cli_candidates: &["idea"],
     },
     ExternalEditorPreset {
         name: "webstorm",
         display_name: "WebStorm",
         macos_app_name: Some("WebStorm"),
         macos_bundle_ids: &[],
-        linux_cli_candidates: &["webstorm"],
+        cli_candidates: &["webstorm"],
     },
     ExternalEditorPreset {
         name: "pycharm",
         display_name: "PyCharm",
         macos_app_name: None,
         macos_bundle_ids: &["com.jetbrains.pycharm", "com.jetbrains.pycharm.ce"],
-        linux_cli_candidates: &["pycharm"],
+        cli_candidates: &["pycharm"],
     },
     ExternalEditorPreset {
         name: "xcode",
         display_name: "Xcode",
         macos_app_name: Some("Xcode"),
         macos_bundle_ids: &[],
-        linux_cli_candidates: &[],
+        cli_candidates: &[],
     },
     ExternalEditorPreset {
         name: "sublime",
         display_name: "Sublime Text",
         macos_app_name: Some("Sublime Text"),
         macos_bundle_ids: &[],
-        linux_cli_candidates: &["subl"],
+        cli_candidates: &["subl"],
     },
 ];
 

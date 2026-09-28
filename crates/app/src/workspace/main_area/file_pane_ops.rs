@@ -170,7 +170,7 @@ impl Workspace {
                 && let Some(pane) = self.active_runtime().panes.iter().find(|p| p.id == pane_id)
                 && let Some(fv) = pane.file_view()
                 && fv.lane_id == lane_id
-                && fv.path == path
+                && daruda_core::path::same_path(&fv.path, path)
                 && fv.staged == staged
             {
                 return Some((i, pane_id));

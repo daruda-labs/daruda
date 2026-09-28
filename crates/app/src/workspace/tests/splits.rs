@@ -387,14 +387,21 @@ async fn test_osc7_updates_pane_cwd_via_view_flush(cx: &mut TestAppContext) {
             .clone()
     });
 
+    // A directory as this host spells it; Windows puts the drive in the URL.
+    let (url_path, dir) = if cfg!(windows) {
+        ("/C:/Users/user", "C:\\Users\\user")
+    } else {
+        ("/home/user", "/home/user")
+    };
     cx.update_window(window_handle.into(), |_, _window, cx| {
         view.update(cx, |this, cx| {
-            this.queue_output_bytes(b"\x1b]7;file://host/home/user\x07", cx);
+            let osc7 = format!("\x1b]7;file://localhost{url_path}\x07");
+            this.queue_output_bytes(osc7.as_bytes(), cx);
             // Bug repro: without flush, terminal_cwd is still None.
             assert_eq!(this.terminal_cwd(), None);
             this.flush_pending_output(cx);
             // After flush the OSC 7 sequence is parsed.
-            assert_eq!(this.terminal_cwd(), Some("/home/user"));
+            assert_eq!(this.terminal_cwd(), Some(dir));
         });
     })
     .unwrap();

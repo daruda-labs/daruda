@@ -1,8 +1,9 @@
 //! Link handling for rendered agent-chat Markdown.
 
-use gpui::{AnyWindowHandle, App, Window};
+use gpui::{AnyWindowHandle, App, Pixels, Point, Window};
 
 use crate::window_registry::WindowRegistry;
+use crate::workspace::main_area::pane_menu::ResourceRightClick;
 use crate::workspace::main_area::pane_tree::PaneId;
 
 #[derive(Clone, Copy)]
@@ -34,14 +35,43 @@ impl AgentChatMarkdownLinks {
 
     /// The opener for a tool's resource-link URI — a file by definition, so
     /// it resolves as one even where the Markdown rules would read a word.
-    pub(super) fn open_resource(self, uri: &str, window: &mut Window, cx: &mut App) {
+    pub(super) fn open_resource(
+        self,
+        uri: &str,
+        mime: Option<&str>,
+        window: &mut Window,
+        cx: &mut App,
+    ) {
         let Some(ws) = WindowRegistry::workspace_for_window(self.window_handle, cx)
             .and_then(|ws| ws.upgrade())
         else {
             return;
         };
         ws.update(cx, |ws, cx| {
-            ws.open_pane_resource_link(self.pane_id, uri, window, cx);
+            ws.open_pane_resource_link(self.pane_id, uri, mime, window, cx);
+        });
+    }
+
+    /// Record a right press on a resource link, so the pane menu that press
+    /// opens classifies it as [`Self::open_resource`] would.
+    pub(super) fn record_resource_right_click(
+        self,
+        position: Point<Pixels>,
+        uri: String,
+        mime: Option<String>,
+        cx: &mut App,
+    ) {
+        let Some(ws) = WindowRegistry::workspace_for_window(self.window_handle, cx)
+            .and_then(|ws| ws.upgrade())
+        else {
+            return;
+        };
+        ws.update(cx, |ws, _| {
+            ws.record_resource_right_click(ResourceRightClick {
+                position,
+                uri,
+                mime,
+            });
         });
     }
 }

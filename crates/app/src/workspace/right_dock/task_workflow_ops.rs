@@ -541,7 +541,8 @@ impl Workspace {
                 let daruda_store::tasks::TaskState::Running { worktree_path } = &task.state else {
                     continue;
                 };
-                if worktree_path != cwd {
+                // A session reports its physical cwd; a lane keeps how it was opened.
+                if !daruda_core::path::same_path(worktree_path, cwd) {
                     continue;
                 }
                 if !task.session_ids.iter().any(|s| s == session_id) {
@@ -643,7 +644,8 @@ impl Workspace {
                 else {
                     continue;
                 };
-                if worktree_path != cwd {
+                // A session reports its physical cwd; a lane keeps how it was opened.
+                if !daruda_core::path::same_path(&worktree_path, cwd) {
                     continue;
                 }
                 task.state = match reason {

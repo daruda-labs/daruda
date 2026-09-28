@@ -988,11 +988,11 @@ pub(in crate::workspace) struct CwdCandidates {
     pub project_root: Option<PathBuf>,
 }
 
-/// $HOME directory as a last-resort cwd when no workspace-level path is
-/// available. Returns `None` only when `HOME` is unset or points at a
-/// non-existent path (unusual but possible in sandboxed environments).
+/// The home directory as a last-resort cwd when no workspace-level path is
+/// available. `None` only when the OS reports none, or it is not an
+/// accessible directory (unusual but possible in sandboxed environments).
 fn home_dir() -> Option<PathBuf> {
-    let home = PathBuf::from(std::env::var_os("HOME")?);
+    let home = dirs::home_dir()?;
     home.is_accessible_dir().then_some(home)
 }
 

@@ -3,6 +3,7 @@ use std::collections::HashMap;
 use daruda_store::project::LaneRef;
 use gpui::Task;
 
+use super::pane_menu::ResourceRightClick;
 use super::pane_tree::{DropHalf, PaneId};
 use crate::workspace::LaneRuntime;
 use crate::workspace::layout::ops::{DividerDrag, PopupMenuDeploy};
@@ -35,6 +36,9 @@ pub(in crate::workspace) struct MainAreaContext {
     pub drag_state: Option<DividerDrag>,
     /// The open right-click menu, if any (root-deployed) — see `PopupMenuDeploy`.
     pub popup_menu_deploy: Option<PopupMenuDeploy>,
+    /// The resource link a right press landed on, until that press's menu
+    /// takes it — see `ResourceRightClick`.
+    pub resource_right_click: Option<ResourceRightClick>,
     /// When `Some(id)`, that pane is rendered full-size; all others hidden.
     pub zoomed_pane_id: Option<PaneId>,
     /// Transient hover target while a Pane header is being dragged:

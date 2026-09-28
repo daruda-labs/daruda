@@ -540,7 +540,9 @@ impl PaneFileView {
     }
 }
 
-fn is_markdown_path(path: &std::path::Path) -> bool {
+/// Case-insensitively — the toolbar offers Preview by this, so the loader
+/// has to parse by it too, or `README.MD` previews as plain text.
+pub(super) fn is_markdown_path(path: &std::path::Path) -> bool {
     path.extension()
         .and_then(|ext| ext.to_str())
         .is_some_and(|ext| ext.eq_ignore_ascii_case("md") || ext.eq_ignore_ascii_case("markdown"))

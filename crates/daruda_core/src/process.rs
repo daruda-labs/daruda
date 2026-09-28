@@ -37,6 +37,67 @@ pub fn command(program: impl AsRef<OsStr>) -> std::process::Command {
     command
 }
 
+/// `program` as the OS will find it for a child whose `PATH` is `path`
+/// (`None`: this process's own).
+///
+/// Windows runs a bare name only as `<name>.exe`, so a `.cmd` shim — `npx`,
+/// an npm-installed `claude`, an editor's CLI — is resolved here through
+/// PATHEXT, the way a shell would. Anything already a path, anything not
+/// found, and every other platform get `program` back as given.
+pub fn resolve_program(program: &OsStr, path: Option<&OsStr>) -> std::path::PathBuf {
+    #[cfg(windows)]
+    if std::path::Path::new(program)
+        .parent()
+        .is_none_or(|parent| parent.as_os_str().is_empty())
+    {
+        let found = match path {
+            Some(path) => which::which_in(
+                program,
+                Some(path),
+                std::env::current_dir().unwrap_or_default(),
+            ),
+            None => which::which(program),
+        };
+        if let Ok(found) = found {
+            return found;
+        }
+    }
+    #[cfg(not(windows))]
+    let _ = path;
+    std::path::PathBuf::from(program)
+}
+
+/// The `PATH` a list of environment assignments gives a child, if it sets
+/// one. The last assignment wins, as it does when they are applied in order;
+/// Windows names the variable case-insensitively (`Path`).
+pub fn child_path<'a, I, K, V>(assignments: I) -> Option<&'a OsStr>
+where
+    I: IntoIterator<Item = (&'a K, &'a V)>,
+    I::IntoIter: DoubleEndedIterator,
+    K: AsRef<OsStr> + ?Sized + 'a,
+    V: AsRef<OsStr> + ?Sized + 'a,
+{
+    assignments
+        .into_iter()
+        .rev()
+        .find(|(name, _)| {
+            let name = name.as_ref();
+            if cfg!(windows) {
+                name.eq_ignore_ascii_case("PATH")
+            } else {
+                name == "PATH"
+            }
+        })
+        .map(|(_, value)| value.as_ref())
+}
+
+/// [`command`] for a program named the way a user types it — see
+/// [`resolve_program`]. `path` is the `PATH` the child will be given, when
+/// the caller sets one.
+pub fn command_on_path(program: impl AsRef<OsStr>, path: Option<&OsStr>) -> std::process::Command {
+    command(resolve_program(program.as_ref(), path))
+}
+
 /// Ask for a child that can be torn down as a tree. Call before `spawn`,
 /// then [`Group::adopt`] on the pid it returns.
 ///
@@ -318,6 +379,45 @@ mod tests {
     use std::time::Duration;
 
     use super::*;
+
+    #[test]
+    fn the_last_path_assignment_is_the_childs() {
+        let env = [("HOME", "/h"), ("PATH", "/a"), ("X", "1"), ("PATH", "/b")];
+        assert_eq!(
+            child_path(env.iter().map(|(k, v)| (k, v))),
+            Some(OsStr::new("/b"))
+        );
+        let none = [("HOME", "/h")];
+        assert_eq!(child_path(none.iter().map(|(k, v)| (k, v))), None);
+    }
+
+    #[test]
+    fn a_path_or_an_unknown_name_resolves_to_itself() {
+        let path = std::path::Path::new("some/dir/tool");
+        assert_eq!(resolve_program(path.as_os_str(), None), path);
+        let unknown = OsStr::new("daruda-no-such-program-anywhere");
+        assert_eq!(
+            resolve_program(unknown, None),
+            std::path::Path::new(unknown)
+        );
+    }
+
+    /// What Windows needs PATHEXT for: `npx` is `npx.cmd`, found in the PATH
+    /// the child will get — not this process's.
+    #[cfg(windows)]
+    #[test]
+    fn a_bare_name_finds_a_cmd_shim_in_the_given_path() {
+        let dir = tempfile::tempdir().unwrap();
+        let shim = dir.path().join("daruda-probe-tool.cmd");
+        std::fs::write(&shim, "@echo off\r\n").unwrap();
+        assert_eq!(
+            resolve_program(
+                OsStr::new("daruda-probe-tool"),
+                Some(dir.path().as_os_str())
+            ),
+            shim
+        );
+    }
 
     #[test]
     fn this_process_is_alive() {

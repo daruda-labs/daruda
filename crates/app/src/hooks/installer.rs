@@ -32,6 +32,9 @@ const MARKER_PATH_FRAGMENT: &str = "/.daruda/hooks/notify.sh";
 /// Wrapper script source — extracted on first install.
 const NOTIFY_SCRIPT: &str = include_str!("notify.sh");
 
+/// Where [`render_notify_script`] writes the installing binary's path.
+const INSTALLED_BIN_PLACEHOLDER: &str = "@INSTALLED_BIN@";
+
 #[derive(Debug)]
 pub enum InstallerError {
     Io(std::io::Error),
@@ -146,7 +149,8 @@ fn write_notify_script(dst: &Path) -> Result<(), InstallerError> {
         fs::create_dir_all(parent)?;
     }
     // Always rewrite so upgrades refresh the wrapper script.
-    fs::write(dst, NOTIFY_SCRIPT)?;
+    let exe = std::env::current_exe().ok();
+    fs::write(dst, render_notify_script(exe.as_deref()))?;
     set_executable(dst)?;
     Ok(())
 }
@@ -165,16 +169,31 @@ fn set_executable(_path: &Path) -> Result<(), InstallerError> {
     Ok(())
 }
 
-/// Per-event command string; Claude Code does not forward event args itself.
-fn command_for_event(notify_script: &Path, event: &str) -> String {
-    // Hooks run in Bash, which accepts forward-slash paths on every host.
-    let path = notify_script.to_string_lossy();
-    let path = if cfg!(windows) {
+/// [`NOTIFY_SCRIPT`] with the installing binary's path filled in — the
+/// fallback that finds daruda when it is on no `PATH` and in no bundle
+/// (a Windows portable zip, a Linux build run from its own directory).
+/// Single-quoted, so no character in the path is special to Bash.
+fn render_notify_script(exe: Option<&Path>) -> String {
+    let quoted = exe.map_or_else(
+        || "''".to_string(),
+        |exe| format!("'{}'", bash_path(exe).replace('\'', r"'\''")),
+    );
+    NOTIFY_SCRIPT.replace(INSTALLED_BIN_PLACEHOLDER, &quoted)
+}
+
+/// Hooks run in Bash, which accepts forward-slash paths on every host.
+fn bash_path(path: &Path) -> String {
+    let path = path.to_string_lossy();
+    if cfg!(windows) {
         path.replace('\\', "/")
     } else {
         path.into_owned()
-    };
-    format!("\"{path}\" {event}")
+    }
+}
+
+/// Per-event command string; Claude Code does not forward event args itself.
+fn command_for_event(notify_script: &Path, event: &str) -> String {
+    format!("\"{}\" {event}", bash_path(notify_script))
 }
 
 // -----------------------------------------------------------------------
@@ -359,6 +378,47 @@ fn notification_matcher_for(event: &str) -> &'static str {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_installing_binary_is_written_in_single_quoted() {
+        let script = render_notify_script(Some(Path::new("/opt/it's here/daruda")));
+        assert!(script.contains(r"INSTALLED_BIN='/opt/it'\''s here/daruda'"));
+        assert!(!script.contains(INSTALLED_BIN_PLACEHOLDER));
+        let none = render_notify_script(None);
+        assert!(none.contains("INSTALLED_BIN=''"));
+    }
+
+    /// The case the fallback exists for: daruda on no `PATH` and in no
+    /// bundle. The script used to exit quietly, and no hook event arrived.
+    #[cfg(unix)]
+    #[test]
+    fn the_script_reaches_the_installing_binary_off_path() {
+        use std::os::unix::fs::PermissionsExt as _;
+        let dir = tempfile::tempdir().unwrap();
+        let log = dir.path().join("called");
+        let fake = dir.path().join("my daruda");
+        fs::write(
+            &fake,
+            format!("#!/bin/sh\necho \"$@\" > '{}'\n", log.display()),
+        )
+        .unwrap();
+        fs::set_permissions(&fake, fs::Permissions::from_mode(0o755)).unwrap();
+        let script = dir.path().join("notify.sh");
+        fs::write(&script, render_notify_script(Some(&fake))).unwrap();
+
+        let status = std::process::Command::new("bash")
+            .arg(&script)
+            .arg("Stop")
+            // A bare environment: no override, and no daruda on this PATH.
+            .env_clear()
+            .env("PATH", "/usr/bin:/bin")
+            .stdin(std::process::Stdio::null())
+            .status()
+            .unwrap();
+
+        assert!(status.success());
+        assert_eq!(fs::read_to_string(&log).unwrap().trim(), "--hook Stop");
+    }
     use tempfile::TempDir;
 
     fn paths_in(dir: &TempDir) -> InstallerPaths {
