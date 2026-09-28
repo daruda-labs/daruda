@@ -353,8 +353,10 @@ impl Fixture {
         let result = smol::block_on(smol::future::or(
             runner.run_agent(&ctx, agent, "write it"),
             smol::future::or(
+                // The person's thinking is the test's own wait, not the
+                // runner failing to return, so the guard starts after it.
                 async {
-                    crate::runner::sleep(HARNESS_GUARD).await;
+                    crate::runner::sleep(HARNESS_GUARD + thinks_for).await;
                     failed(NEVER_RETURNED.to_string())
                 },
                 async {

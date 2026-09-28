@@ -22,7 +22,7 @@ use std::time::{Duration, Instant};
 /// settings budget the handshake gives one reply — and one started with less
 /// than this dies as a `Timeout`, which reports the clock and buries both the
 /// contract breach and the attempt to answer it.
-const NEXT_TURN_FLOOR: Duration = Duration::from_secs(30);
+pub(super) const NEXT_TURN_FLOOR: Duration = Duration::from_secs(30);
 
 /// Whether one more turn on the session that just ended could plausibly
 /// put `breach` right, given what the turn has already spent.

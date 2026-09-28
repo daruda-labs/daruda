@@ -7,6 +7,7 @@
 //! the wire.
 
 use super::*;
+use crate::runner::acp::another_turn::NEXT_TURN_FLOOR;
 
 /// Shell that writes the fixture's output — what an agent doing as it was
 /// asked the second time looks like from outside.
@@ -264,11 +265,14 @@ fn a_long_wait_for_a_person_still_gets_its_correction() {
         "",
     ));
     fixture.owes_its_output();
-    // Just over the correction floor, so a second of the person's time
-    // charged to the node is the difference between sending and not.
-    fixture.timeout = Duration::from_secs(31);
+    // The floor plus `WORK_SLACK`, and the person thinks longer than that
+    // slack: the turn fits only if their time is left off the node's. The
+    // slack covers spawning the adapter and one turn on a slow CI runner.
+    const WORK_SLACK: Duration = Duration::from_secs(5);
+    const THINKS_FOR: Duration = Duration::from_secs(6);
+    fixture.timeout = NEXT_TURN_FLOOR + WORK_SLACK;
 
-    let (result, asked) = fixture.run_answered(&spec(AGENT), Duration::from_secs(2), |_| {
+    let (result, asked) = fixture.run_answered(&spec(AGENT), THINKS_FOR, |_| {
         Person::Answers(PermissionDecision::Allow {
             option_id: "once".to_string(),
         })
@@ -276,7 +280,7 @@ fn a_long_wait_for_a_person_still_gets_its_correction() {
 
     assert_eq!(asked.len(), 1, "the person was asked once");
     assert!(
-        result.waiting.total >= Duration::from_secs(2),
+        result.waiting.total >= THINKS_FOR,
         "the wait was not accounted for: {:?}",
         result.waiting.total
     );
