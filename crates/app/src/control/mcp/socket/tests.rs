@@ -16,7 +16,11 @@ fn a_second_holder_of_the_lock_is_refused() {
     ));
     drop(first);
     // Dropping the guard releases the lock, so a fresh run can take it.
-    if let Err(e) = Ownership::acquire(dir.path()) {
+    let again = crate::test_support::once_released(
+        || Ownership::acquire(dir.path()),
+        |r| matches!(r, Err(SocketError::AlreadyRunning)),
+    );
+    if let Err(e) = again {
         panic!("dropping the claim must release the lock, but: {e}");
     }
 }

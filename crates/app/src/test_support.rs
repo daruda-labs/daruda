@@ -188,3 +188,25 @@ fn control_test_data_dir() -> std::path::PathBuf {
     let pid = std::process::id();
     std::env::temp_dir().join(format!("daruda_control_test_{pid}_{id}"))
 }
+
+/// How long a released flock may still read as held. See [`once_released`].
+const FLOCK_RELEASE_GRACE: std::time::Duration = std::time::Duration::from_secs(2);
+const FLOCK_RETRY_INTERVAL: std::time::Duration = std::time::Duration::from_millis(10);
+
+/// Retry `take` while `held` says the lock is still someone else's.
+///
+/// A flock lives on the open file description, not the descriptor, and a
+/// test elsewhere in the suite that forks a child copies every descriptor
+/// into it until the child execs. So a lock this test just dropped can read
+/// as held for that moment. A lock that was never released still reads as
+/// held once the grace runs out, so a leak fails as it always did.
+pub(crate) fn once_released<T>(mut take: impl FnMut() -> T, held: impl Fn(&T) -> bool) -> T {
+    let deadline = std::time::Instant::now() + FLOCK_RELEASE_GRACE;
+    loop {
+        let attempt = take();
+        if !held(&attempt) || std::time::Instant::now() >= deadline {
+            return attempt;
+        }
+        std::thread::sleep(FLOCK_RETRY_INTERVAL);
+    }
+}

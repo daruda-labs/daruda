@@ -172,8 +172,12 @@ mod tests {
 
         // And it comes free again: the user quits the build that held it.
         drop(held);
+        let again = crate::test_support::once_released(
+            || claim(dir.path(), "bot-token"),
+            |c| matches!(c, Claim::Theirs),
+        );
         assert!(
-            matches!(claim(dir.path(), "bot-token"), Claim::Ours { .. }),
+            matches!(again, Claim::Ours { .. }),
             "a released bot is the next asker's to take"
         );
     }
