@@ -743,6 +743,10 @@ claude:
 # Git Changes view
 git:
   changes_header: "Git Changes — %{branch}"
+  against_base_header: "Against base · vs %{base}"
+  against_base_counts: "%{files} files · %{commits} commits"
+  against_base_missing: "Base %{name} not found"
+  against_base_no_merge_base: "No history shared with the base"
   commit_placeholder: "Commit message… (Cmd+Enter to commit)"
   commit_btn: "Commit"
   push_btn: "Push"

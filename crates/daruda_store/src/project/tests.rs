@@ -65,6 +65,7 @@ fn file_leaf_round_trip_preserves_viewer_state() {
             lane_id: 1,
             path: PathBuf::from("src/main.rs"),
             staged: false,
+            range: None,
             view_mode: SerializedFileViewMode::Raw,
         }),
     };
@@ -1549,4 +1550,50 @@ fn a_pre_split_file_still_carries_its_legacy_filter_through() {
         Some(vec!["tools".to_string(), "tool_edit".to_string()])
     );
     assert_eq!(restored.visible_kinds, None);
+}
+
+#[test]
+fn a_range_file_leaf_round_trips_and_older_files_read_without_one() {
+    let leaf = SerializedLayout::Leaf {
+        pane_id: 3,
+        content: SerializedPaneContent::File(SerializedFileContent {
+            lane_id: 1,
+            path: PathBuf::from("/repo/new.rs"),
+            staged: false,
+            range: Some(SerializedDiffRange {
+                from: "aaa".into(),
+                to: "bbb".into(),
+                old_path: Some(PathBuf::from("/repo/old.rs")),
+            }),
+            view_mode: SerializedFileViewMode::Changes,
+        }),
+    };
+    let json = serde_json::to_string(&leaf).unwrap();
+    let restored: SerializedLayout = serde_json::from_str(&json).unwrap();
+    assert_eq!(restored, leaf);
+
+    // A pane with no range serializes without the key, which is exactly the
+    // shape every file written before the field existed has.
+    let older = serde_json::to_string(&SerializedLayout::Leaf {
+        pane_id: 3,
+        content: SerializedPaneContent::File(SerializedFileContent {
+            lane_id: 1,
+            path: PathBuf::from("a.rs"),
+            staged: true,
+            range: None,
+            view_mode: SerializedFileViewMode::Changes,
+        }),
+    })
+    .unwrap();
+    assert!(!older.contains("range"), "{older}");
+    match serde_json::from_str::<SerializedLayout>(&older).unwrap() {
+        SerializedLayout::Leaf {
+            content: SerializedPaneContent::File(fc),
+            ..
+        } => {
+            assert!(fc.staged);
+            assert_eq!(fc.range, None);
+        }
+        other => panic!("unexpected layout {other:?}"),
+    }
 }

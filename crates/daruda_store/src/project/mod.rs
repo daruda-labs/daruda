@@ -341,7 +341,21 @@ pub struct SerializedFileContent {
     pub path: PathBuf,
     #[serde(default)]
     pub staged: bool,
+    /// A pane pinned to two commits, e.g. a lane's changes since its base.
+    /// Takes precedence over `staged`; absent in files written before it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub range: Option<SerializedDiffRange>,
     pub view_mode: SerializedFileViewMode,
+}
+
+/// The commits a range file pane compares, as SHAs so a restore re-opens the
+/// exact diff rather than whatever the refs point at by then.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct SerializedDiffRange {
+    pub from: String,
+    pub to: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub old_path: Option<PathBuf>,
 }
 
 /// Persisted state for a `PaneContent::FlowGraph` leaf. The flow file's path

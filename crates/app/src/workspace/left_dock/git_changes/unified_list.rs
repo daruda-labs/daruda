@@ -8,6 +8,7 @@
 use std::path::PathBuf;
 
 use crate::lane::git::GitFileEntry;
+use crate::lane::git::base::{AgainstBase, BaseProblem, RangeFile};
 use crate::lane::paths::LanePaths;
 use crate::path_ext::PathExt;
 
@@ -100,6 +101,60 @@ pub(super) fn group_by_dir(
 pub(super) enum GitChangesRow {
     DirHeader(GitDirHeaderRow),
     File(UnifiedEntry),
+    /// The against-base section's header, below every working-tree row.
+    BaseHeader(BaseHeaderRow),
+    /// One file the lane committed since its base.
+    BaseFile(RangeFile),
+}
+
+/// What the against-base section's header says.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(super) enum BaseHeaderRow {
+    Summary {
+        base: String,
+        files: usize,
+        commits: u32,
+        collapsed: bool,
+    },
+    /// The named base resolves to no commit.
+    BaseMissing(String),
+    /// The lane shares no history with its base.
+    NoMergeBase,
+}
+
+/// The against-base section's rows, appended after [`build_rows`]'s. A lane
+/// with nothing to compare — no base, on the base branch, nothing committed —
+/// gets no section at all; a base that cannot be read gets a header saying
+/// why, since the user named it and would otherwise see nothing.
+pub(super) fn base_rows(
+    against: Option<&Result<AgainstBase, BaseProblem>>,
+    collapsed: bool,
+) -> Vec<GitChangesRow> {
+    match against {
+        Some(Ok(found)) if !found.files.is_empty() => {
+            let mut rows = vec![GitChangesRow::BaseHeader(BaseHeaderRow::Summary {
+                base: found.tips.base.label.clone(),
+                files: found.files.len(),
+                commits: found.commits,
+                collapsed,
+            })];
+            if !collapsed {
+                let mut files = found.files.clone();
+                files.sort_by(|a, b| a.path.cmp(&b.path));
+                rows.extend(files.into_iter().map(GitChangesRow::BaseFile));
+            }
+            rows
+        }
+        Some(Err(BaseProblem::NotFound(name))) => {
+            vec![GitChangesRow::BaseHeader(BaseHeaderRow::BaseMissing(
+                name.clone(),
+            ))]
+        }
+        Some(Err(BaseProblem::NoMergeBase)) => {
+            vec![GitChangesRow::BaseHeader(BaseHeaderRow::NoMergeBase)]
+        }
+        _ => Vec::new(),
+    }
 }
 
 /// A directory group's header row. Carries everything the header needs to
@@ -177,7 +232,9 @@ pub(in crate::workspace) fn visible_file_rows(
         .enumerate()
         .filter_map(|(ix, row)| match row {
             GitChangesRow::File(e) => Some((ix, e.path)),
-            GitChangesRow::DirHeader(_) => None,
+            GitChangesRow::DirHeader(_)
+            | GitChangesRow::BaseHeader(_)
+            | GitChangesRow::BaseFile(_) => None,
         })
         .collect()
 }
@@ -408,6 +465,76 @@ mod tests {
             ],
             "row 0 is the `src` directory header"
         );
+    }
+
+    fn against(files: &[&str]) -> Result<AgainstBase, BaseProblem> {
+        use crate::lane::git::base::{BaseTips, ResolvedBase};
+        Ok(AgainstBase {
+            tips: BaseTips {
+                base: ResolvedBase {
+                    label: "origin/main".into(),
+                    sha: "b".into(),
+                },
+                head: "h".into(),
+            },
+            merge_base: "m".into(),
+            files: files
+                .iter()
+                .map(|p| RangeFile {
+                    path: PathBuf::from(p),
+                    old_path: None,
+                    status: 'M',
+                    added: 1,
+                    removed: 0,
+                })
+                .collect(),
+            commits: 2,
+        })
+    }
+
+    #[test]
+    fn base_rows_list_the_section_sorted_under_one_header() {
+        let found = against(&["z.rs", "a.rs"]);
+        let rows = base_rows(Some(&found), false);
+        assert!(matches!(
+            &rows[0],
+            GitChangesRow::BaseHeader(BaseHeaderRow::Summary { base, files: 2, commits: 2, collapsed: false })
+                if base == "origin/main"
+        ));
+        let paths: Vec<_> = rows[1..]
+            .iter()
+            .map(|row| match row {
+                GitChangesRow::BaseFile(f) => f.path.clone(),
+                _ => panic!("only files follow the header"),
+            })
+            .collect();
+        assert_eq!(paths, vec![PathBuf::from("a.rs"), PathBuf::from("z.rs")]);
+        assert_eq!(
+            base_rows(Some(&found), true).len(),
+            1,
+            "a folded section keeps its header"
+        );
+    }
+
+    #[test]
+    fn base_rows_are_absent_with_nothing_to_compare_and_explain_an_unreadable_base() {
+        assert!(base_rows(None, false).is_empty());
+        assert!(base_rows(Some(&against(&[])), false).is_empty());
+        for quiet in [
+            BaseProblem::NoBaseConfigured,
+            BaseProblem::OnBaseBranch,
+            BaseProblem::Git("boom".into()),
+        ] {
+            assert!(base_rows(Some(&Err(quiet)), false).is_empty());
+        }
+        assert!(matches!(
+            base_rows(Some(&Err(BaseProblem::NotFound("dev".into()))), false).as_slice(),
+            [GitChangesRow::BaseHeader(BaseHeaderRow::BaseMissing(name))] if name == "dev"
+        ));
+        assert!(matches!(
+            base_rows(Some(&Err(BaseProblem::NoMergeBase)), false).as_slice(),
+            [GitChangesRow::BaseHeader(BaseHeaderRow::NoMergeBase)]
+        ));
     }
 
     #[test]

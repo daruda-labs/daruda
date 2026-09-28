@@ -94,8 +94,11 @@ pub(in crate::workspace) struct GitLaneState {
     pub worktree_refresh: RefreshSlot,
     /// What the lane committed since its base. A third axis riding the
     /// tracking one: only a ref move can change it. `None` until first read.
-    pub against_base: Option<Result<AgainstBase, BaseProblem>>,
+    /// Shared so the per-render dock snapshot clones a pointer, not the list.
+    pub against_base: Option<Arc<Result<AgainstBase, BaseProblem>>>,
     pub against_base_refresh: RefreshSlot,
+    /// The Git Changes view's against-base section, folded. Session only.
+    pub against_base_collapsed: bool,
     /// Where this lane's git state lives on disk — needed to watch it.
     pub dirs: GitDirsState,
     /// Lane-relative directory groups, kept only for this app session.

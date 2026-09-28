@@ -5,6 +5,7 @@
 //! Checking/unchecking stages or unstages the file without changing its
 //! position in the list.
 
+mod against_base_section;
 pub(super) mod unified_list;
 
 use std::path::PathBuf;
@@ -75,11 +76,17 @@ pub(in crate::workspace) fn render(snap: &LeftDockSnapshot, cx: &mut Context<Doc
 
     body = body.child(view_header(active_id, &branch, snap, cx));
 
+    let base_rows = unified_list::base_rows(
+        snap.git_against_base.as_deref(),
+        snap.git_against_base_collapsed,
+    );
+
     match status {
         None => {
             body = body.child(loading_placeholder(active_id, snap, cx));
         }
-        Some(s) if s.staged.is_empty() && s.unstaged.is_empty() => {
+        // A clean working tree still lists what the lane committed.
+        Some(s) if s.staged.is_empty() && s.unstaged.is_empty() && base_rows.is_empty() => {
             body = body.child(clean_placeholder(cx));
         }
         Some(s) => {
@@ -116,11 +123,9 @@ pub(in crate::workspace) fn render(snap: &LeftDockSnapshot, cx: &mut Context<Doc
             // it rather than borrowed.
             // Safe to unwrap: `is_git()` was checked at the top of this fn.
             let wt_paths = active_wt.unwrap().paths();
-            let rows = std::rc::Rc::new(unified_list::build_rows(
-                s,
-                &snap.git_collapsed_dirs,
-                &wt_paths,
-            ));
+            let mut rows = unified_list::build_rows(s, &snap.git_collapsed_dirs, &wt_paths);
+            rows.extend(base_rows);
+            let rows = std::rc::Rc::new(rows);
             let count = rows.len();
             let rows_for_list = rows.clone();
             let scroll_handle = snap.git_changes_scroll_handle.clone();
@@ -162,6 +167,12 @@ pub(in crate::workspace) fn render(snap: &LeftDockSnapshot, cx: &mut Context<Doc
                                         snap,
                                         cx,
                                     )
+                                }
+                                GitChangesRow::BaseHeader(header) => {
+                                    against_base_section::base_header(ix, header, snap, cx)
+                                }
+                                GitChangesRow::BaseFile(file) => {
+                                    against_base_section::base_file_row(ix, file, snap, cx)
                                 }
                             })
                         })
@@ -552,9 +563,15 @@ fn unified_file_row(
     let has_unstaged = entry.unstaged.is_some();
     let is_untracked = entry.unstaged.as_ref().is_some_and(|u| u.x == '?');
 
-    let is_selected = selected
-        .map(|(wt, p, _s)| *wt == lane_id && *p == abs_path_for_open)
-        .unwrap_or(false);
+    // A range pane shows the same path from commits, not this row's change.
+    let is_selected = selected.is_some_and(|(wt, p, source)| {
+        *wt == lane_id
+            && *p == abs_path_for_open
+            && !matches!(
+                source,
+                crate::workspace::main_area::file_view_pane::DiffSource::Range { .. }
+            )
+    });
 
     // Renamed entries (`R` / `C` status) carry the original path —
     // surface it as `old → new` so the user can see what was renamed

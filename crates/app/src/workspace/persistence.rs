@@ -728,9 +728,7 @@ impl Workspace {
                         self.create_file_pane(
                             fc.lane_id,
                             fc.path.clone(),
-                            crate::workspace::main_area::file_view_pane::DiffSource::from_staged(
-                                fc.staged,
-                            ),
+                            restored_diff_source(fc),
                             None,
                             deserialize_view_mode(fc.view_mode),
                             window,
@@ -1122,6 +1120,18 @@ fn serialize_pane_content(
             lane_id: fv.lane_id,
             path: fv.path.clone(),
             staged: fv.source.is_index(),
+            range: match &fv.source {
+                crate::workspace::main_area::file_view_pane::DiffSource::Range {
+                    from,
+                    to,
+                    old_path,
+                } => Some(daruda_store::project::SerializedDiffRange {
+                    from: from.clone(),
+                    to: to.clone(),
+                    old_path: old_path.clone(),
+                }),
+                _ => None,
+            },
             view_mode: serialize_view_mode(fv.view_mode),
         });
     }
@@ -1212,5 +1222,20 @@ fn serialize_layout(
                 ratios: ratios.clone(),
             }
         }
+    }
+}
+
+/// What a persisted file pane shows. A range wins over `staged`: the two were
+/// written together only by a build that knew about ranges.
+fn restored_diff_source(
+    fc: &daruda_store::project::SerializedFileContent,
+) -> crate::workspace::main_area::file_view_pane::DiffSource {
+    match &fc.range {
+        Some(range) => crate::workspace::main_area::file_view_pane::DiffSource::Range {
+            from: range.from.clone(),
+            to: range.to.clone(),
+            old_path: range.old_path.clone(),
+        },
+        None => crate::workspace::main_area::file_view_pane::DiffSource::from_staged(fc.staged),
     }
 }

@@ -3472,6 +3472,22 @@ pub fn git_commit_placeholder() -> String {
 pub fn git_changes_header(branch: &str) -> String {
     rust_i18n::t!("git.changes_header", branch = branch).into_owned()
 }
+/// Against-base section header in the Git Changes view, naming the base.
+pub fn git_against_base_header(base: &str) -> String {
+    rust_i18n::t!("git.against_base_header", base = base).into_owned()
+}
+/// Against-base section counts: files changed and commits since the base.
+pub fn git_against_base_counts(files: usize, commits: u32) -> String {
+    rust_i18n::t!("git.against_base_counts", files = files, commits = commits).into_owned()
+}
+/// Against-base section when the lane's base names no commit.
+pub fn git_against_base_missing(name: &str) -> String {
+    rust_i18n::t!("git.against_base_missing", name = name).into_owned()
+}
+/// Against-base section when the lane shares no history with its base.
+pub fn git_against_base_no_merge_base() -> String {
+    rust_i18n::t!("git.against_base_no_merge_base").into_owned()
+}
 /// Button label for the commit action in the git commit footer.
 pub fn git_commit_btn() -> String {
     rust_i18n::t!("git.commit_btn").into_owned()

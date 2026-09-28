@@ -90,7 +90,7 @@ fn load_raw(
 ) -> LoadOutcome {
     use crate::ui::theme;
 
-    let bytes: Result<Vec<u8>, String> = if source.is_index() {
+    let bytes: Result<Vec<u8>, String> = if *source != DiffSource::WorkingTree {
         if repo_root.is_none() {
             return LoadOutcome::plain(PaneFileContent::Error(
                 crate::surface::strings::file_viewer_err_no_git_repo(),
@@ -117,7 +117,13 @@ fn load_raw(
         } else {
             path.to_path_buf()
         };
-        crate::lane::git::git_show_staged(wt_path, &repo_rel).map_err(|e| e.to_string())
+        match source {
+            DiffSource::Range { to, .. } => {
+                crate::lane::git::base::git_show_at(wt_path, to, &repo_rel)
+            }
+            _ => crate::lane::git::git_show_staged(wt_path, &repo_rel),
+        }
+        .map_err(|e| e.to_string())
     } else {
         // `path` is absolute when opened from the left dock; fall back via
         // LanePaths::from_git_status for legacy relative paths from old session state.
@@ -234,6 +240,11 @@ fn load_diff(
             None => crate::lane::git::git_diff(repo, path, false),
         },
         DiffSource::Index => crate::lane::git::git_diff(repo, path, true),
+        DiffSource::Range { from, to, old_path } => {
+            let mut paths = vec![path];
+            paths.extend(old_path.as_deref());
+            crate::lane::git::base::git_diff_range(repo, from, to, &paths)
+        }
     };
 
     match diff_result {

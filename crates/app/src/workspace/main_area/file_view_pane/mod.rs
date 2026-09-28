@@ -116,6 +116,13 @@ pub(in crate::workspace) enum DiffSource {
     WorkingTree,
     /// The staged blob; its diff is HEAD → index.
     Index,
+    /// The file as of commit `to`; its diff is `from` → `to`. `old_path` is
+    /// the rename source, needed in the pathspec for git to pair the two.
+    Range {
+        from: String,
+        to: String,
+        old_path: Option<PathBuf>,
+    },
 }
 
 impl DiffSource {

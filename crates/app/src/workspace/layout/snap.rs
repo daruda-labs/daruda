@@ -112,6 +112,14 @@ pub(in crate::workspace) struct LeftDockSnapshot {
     /// Active lane's collapsed dir set (Git Changes view). Keyed by
     /// lane-relative dir string.
     pub git_collapsed_dirs: std::collections::HashSet<String>,
+    /// Active lane's changes since its base; `None` until first read.
+    pub git_against_base: Option<
+        std::sync::Arc<
+            Result<crate::lane::git::base::AgainstBase, crate::lane::git::base::BaseProblem>,
+        >,
+    >,
+    /// Active lane's against-base section is folded.
+    pub git_against_base_collapsed: bool,
     /// Active lane's keyboard cursor in the Git Changes view —
     /// repo-root-relative path of the focused row (or None if no row is
     /// focused). Drives the visual cursor highlight.
@@ -547,6 +555,8 @@ mod tests {
             git_stage_in_flight: false,
             git_op_in_flight: false,
             git_collapsed_dirs: std::collections::HashSet::new(),
+            git_against_base: None,
+            git_against_base_collapsed: false,
             git_changes_cursor: None,
             git_changes_panel_focus: Handle(cx.focus_handle()),
             focused_file_selection: None,

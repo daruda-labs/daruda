@@ -56,7 +56,7 @@ fn a_tracking_refresh_reads_what_the_lane_committed_since_its_base(cx: &mut Test
         let state = &ws.lane_scoped[&target].git;
         let found = state
             .against_base
-            .as_ref()
+            .as_deref()
             .expect("the tracking refresh reads the axis")
             .as_ref()
             .expect("the lane has a base");
@@ -72,8 +72,8 @@ fn a_tracking_refresh_reads_what_the_lane_committed_since_its_base(cx: &mut Test
     cx.run_until_parked();
     ws.read_with(cx, |ws, _| {
         assert_eq!(
-            ws.lane_scoped[&target].git.against_base,
-            Some(Err(BaseProblem::OnBaseBranch))
+            ws.lane_scoped[&target].git.against_base.as_deref(),
+            Some(&Err(BaseProblem::OnBaseBranch))
         );
     });
 }
@@ -104,8 +104,88 @@ fn a_lane_with_no_base_anywhere_says_so(cx: &mut TestAppContext) {
     cx.run_until_parked();
     ws.read_with(cx, |ws, _| {
         assert_eq!(
-            ws.lane_scoped[&target].git.against_base,
-            Some(Err(BaseProblem::NoBaseConfigured))
+            ws.lane_scoped[&target].git.against_base.as_deref(),
+            Some(&Err(BaseProblem::NoBaseConfigured))
         );
     });
+}
+
+#[gpui::test]
+fn an_against_base_row_opens_a_diff_pinned_to_its_commits(cx: &mut TestAppContext) {
+    if !crate::lane::git::has_git() {
+        return;
+    }
+    use crate::workspace::main_area::file_view_pane::{DiffSource, PaneFileContent};
+    use crate::workspace::main_area::tab_ops::OpenIntent;
+
+    let temp = tempfile::tempdir().unwrap();
+    let root = feature_repo(temp.path());
+    let (wh, ws) = build_workspace_with(
+        cx,
+        &daruda_config::Config::default(),
+        Some(daruda_store::project::Project::from_path(&root)),
+    );
+    ws.update(cx, |ws, cx| ws.reconcile_bootstrapped_lanes(cx));
+    cx.run_until_parked();
+    let target = ws.update(cx, |ws, cx| {
+        ws.projects[0].default_branch = Some("main".to_owned());
+        let target = ws.active;
+        ws.refresh_git_status(target, cx);
+        target
+    });
+    cx.run_until_parked();
+
+    let open = |cx: &mut TestAppContext| {
+        cx.update_window(wh.into(), |_, window, cx| {
+            ws.update(cx, |ws, cx| {
+                ws.open_against_base_file(
+                    target,
+                    std::path::PathBuf::from("feature.txt"),
+                    OpenIntent::Commit,
+                    window,
+                    cx,
+                );
+            });
+        })
+        .unwrap();
+        cx.run_until_parked();
+    };
+    open(cx);
+    let tabs = ws.read_with(cx, |ws, _| {
+        let found = ws.lane_scoped[&target]
+            .git
+            .against_base
+            .as_deref()
+            .and_then(|r| r.as_ref().ok())
+            .cloned()
+            .expect("the lane has a base");
+        let fc = ws
+            .focused_file_content()
+            .expect("the range pane is focused");
+        assert_eq!(
+            fc.view.source,
+            DiffSource::Range {
+                from: found.merge_base.clone(),
+                to: found.tips.head.clone(),
+                old_path: None,
+            }
+        );
+        assert_eq!(
+            fc.view.file_status,
+            Some('A'),
+            "status comes from the range"
+        );
+        match &fc.view.content {
+            PaneFileContent::LoadedDiff { added, removed, .. } => {
+                assert_eq!((*added, *removed), (1, 0));
+            }
+            PaneFileContent::Error(e) => panic!("load errored: {e}"),
+            _ => panic!("expected a diff"),
+        }
+        ws.active_runtime().tabs.len()
+    });
+
+    // Opening the same row again finds the pane rather than stacking a tab.
+    open(cx);
+    ws.read_with(cx, |ws, _| assert_eq!(ws.active_runtime().tabs.len(), tabs));
 }

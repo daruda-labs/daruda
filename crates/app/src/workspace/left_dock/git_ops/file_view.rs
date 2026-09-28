@@ -196,11 +196,53 @@ impl Workspace {
     /// had no way to know it and passed `None`, which since the toolbar's mode
     /// strip started gating the Changes segment on `is_some()` meant a changed
     /// file opened from the agent chat, a skill, or a task offered no diff.
-    fn git_status_for_path(&self, target: LaneRef, path: &std::path::Path) -> Option<char> {
+    fn git_status_for_path(
+        &self,
+        target: LaneRef,
+        path: &std::path::Path,
+        source: &DiffSource,
+    ) -> Option<char> {
         let lane_root = self.lane_for(target).map(|w| w.path.clone())?;
-        self.status_index_by_abs(target)
+        self.status_index_for(target, source)
             .get(&abs_pane_path(&lane_root, path))
             .copied()
+    }
+
+    /// The status index a pane of `source` reads: a range pane's status is
+    /// what the lane committed since its base, not what is pending now.
+    fn status_index_for(
+        &self,
+        target: LaneRef,
+        source: &DiffSource,
+    ) -> std::collections::HashMap<PathBuf, char> {
+        match source {
+            DiffSource::Range { .. } => self.against_base_index_by_abs(target),
+            DiffSource::WorkingTree | DiffSource::Index => self.status_index_by_abs(target),
+        }
+    }
+
+    /// `absolute path → status char` for the files `target` committed since
+    /// its base.
+    fn against_base_index_by_abs(
+        &self,
+        target: LaneRef,
+    ) -> std::collections::HashMap<PathBuf, char> {
+        let Some(lane) = self.lane_for(target) else {
+            return std::collections::HashMap::new();
+        };
+        let paths = lane.paths();
+        let Some(Ok(found)) = self
+            .lane_scoped
+            .get(&target)
+            .and_then(|state| state.git.against_base.as_deref())
+        else {
+            return std::collections::HashMap::new();
+        };
+        found
+            .files
+            .iter()
+            .map(|f| (paths.from_git_status(&f.path), f.status))
+            .collect()
     }
 
     /// Record whether the tab at `tab_idx` is the replaceable scratch one.
@@ -327,7 +369,7 @@ impl Workspace {
     ) {
         let entry = intent.pane_entry();
         let owner = self.owner_lane_ref(lane_id);
-        let file_status = self.git_status_for_path(owner, &path);
+        let file_status = self.git_status_for_path(owner, &path, &source);
 
         // Always dedupe: clicking the same file activates its existing tab.
         if let Some((tab_idx, pane_id)) = self.find_existing_file_tab(lane_id, &path, &source) {
@@ -785,6 +827,7 @@ impl Workspace {
             return;
         };
         let by_abs = self.status_index_by_abs(target);
+        let by_abs_range = self.against_base_index_by_abs(target);
 
         let Some(runtime) = self.main_area.runtimes.get_mut(&target) else {
             return;
@@ -794,7 +837,11 @@ impl Workspace {
             let Some(fv) = pane.file_view_mut() else {
                 continue;
             };
-            let next = by_abs.get(&abs_pane_path(&lane_root, &fv.path)).copied();
+            let index = match fv.source {
+                DiffSource::Range { .. } => &by_abs_range,
+                DiffSource::WorkingTree | DiffSource::Index => &by_abs,
+            };
+            let next = index.get(&abs_pane_path(&lane_root, &fv.path)).copied();
             if fv.file_status != next {
                 fv.file_status = next;
                 changed = true;

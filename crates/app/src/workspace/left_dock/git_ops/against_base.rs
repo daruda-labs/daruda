@@ -7,10 +7,12 @@
 use daruda_store::observability::error_report::{ErrorReport, ErrorSeverity};
 use daruda_store::observability::system_info::redact_home;
 use daruda_store::project::LaneRef;
-use gpui::Context;
+use gpui::{Context, Window};
 
 use crate::lane::git::base::{self, AgainstBase, BaseProblem, BaseTips};
 use crate::workspace::Workspace;
+use crate::workspace::main_area::file_view_pane::{DiffSource, FileViewMode};
+use crate::workspace::main_area::tab_ops::OpenIntent;
 
 /// What one background read found.
 enum Read {
@@ -52,7 +54,7 @@ impl Workspace {
         let base_name = self.base_name_for(target);
         let state = self.lane_scoped_mut(target);
         let branch = state.git.tracking.as_ref().and_then(|t| t.branch.clone());
-        let cached: Option<BaseTips> = match &state.git.against_base {
+        let cached: Option<BaseTips> = match state.git.against_base.as_deref() {
             Some(Ok(found)) => Some(found.tips.clone()),
             _ => None,
         };
@@ -91,7 +93,9 @@ impl Workspace {
                         .build();
                         ws.report_error(report, cx);
                     }
-                    ws.lane_scoped_mut(target).git.against_base = Some(result);
+                    ws.lane_scoped_mut(target).git.against_base = Some(std::sync::Arc::new(result));
+                    // A range pane's badge and Changes segment read this axis.
+                    ws.sync_file_pane_statuses(target, cx);
                     cx.notify();
                 }
                 if pending {
@@ -100,5 +104,80 @@ impl Workspace {
             },
         )
         .detach();
+    }
+
+    /// Open one against-base file in the diff viewer, pinned to the commits
+    /// its row was listed from.
+    pub(in crate::workspace) fn open_against_base_file(
+        &mut self,
+        target: LaneRef,
+        repo_rel: std::path::PathBuf,
+        intent: OpenIntent,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(lane) = self.lane_for(target) else {
+            return;
+        };
+        let paths = lane.paths();
+        let Some(Ok(found)) = self
+            .lane_scoped
+            .get(&target)
+            .and_then(|state| state.git.against_base.as_deref())
+        else {
+            return;
+        };
+        let Some(file) = found.files.iter().find(|f| f.path == repo_rel) else {
+            return;
+        };
+        let source = DiffSource::Range {
+            from: found.merge_base.clone(),
+            to: found.tips.head.clone(),
+            old_path: file.old_path.as_ref().map(|p| paths.from_git_status(p)),
+        };
+        let abs = paths.from_git_status(&file.path);
+        self.open_pane_file_view(
+            target.lane,
+            abs,
+            source,
+            FileViewMode::Changes,
+            intent,
+            window,
+            cx,
+        );
+    }
+
+    /// A click on an against-base row: the panel takes focus, as for the
+    /// working-tree rows; a double click hands the file to the OS.
+    pub(in crate::workspace) fn on_against_base_row_click(
+        &mut self,
+        target: LaneRef,
+        repo_rel: std::path::PathBuf,
+        click_count: usize,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.git_changes_panel_focus.clone().focus(window, cx);
+        if click_count >= 2 {
+            if let Some(abs) = self
+                .lane_for(target)
+                .map(|lane| lane.paths().from_git_status(&repo_rel))
+            {
+                self.open_file_externally(target, abs, cx);
+            }
+            return;
+        }
+        self.open_against_base_file(target, repo_rel, OpenIntent::Preview, window, cx);
+    }
+
+    /// Fold or unfold the against-base section of `target`'s Git view.
+    pub(in crate::workspace) fn toggle_against_base_collapse(
+        &mut self,
+        target: LaneRef,
+        cx: &mut Context<Self>,
+    ) {
+        let state = &mut self.lane_scoped_mut(target).git;
+        state.against_base_collapsed = !state.against_base_collapsed;
+        cx.notify();
     }
 }

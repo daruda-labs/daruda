@@ -114,6 +114,14 @@ impl Workspace {
                 .get(&self.active)
                 .map(|state| state.git.collapsed_dirs.clone())
                 .unwrap_or_default(),
+            git_against_base: self
+                .lane_scoped
+                .get(&self.active)
+                .and_then(|state| state.git.against_base.clone()),
+            git_against_base_collapsed: self
+                .lane_scoped
+                .get(&self.active)
+                .is_some_and(|state| state.git.against_base_collapsed),
             git_changes_cursor: self
                 .lane_scoped
                 .get(&self.active)
