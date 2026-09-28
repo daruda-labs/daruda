@@ -317,8 +317,8 @@ pub(super) struct ProjectHeaderArgs {
 /// per-project "create lane" affordance, so the row carries every
 /// project-scoped action.
 ///
-/// `is_collapsed` flips the chevron between `ChevronDown` (expanded)
-/// and `ChevronRight` (collapsed). The chevron carries its own click
+/// `is_collapsed` flips the leading glyph between an open folder
+/// (expanded) and a closed one (collapsed). The glyph carries its own click
 /// handler that toggles the flag; the rest of the row stays bound to
 /// `activate_lane(last_active)` so a header click still snaps the focus.
 pub(super) fn project_header_row(
@@ -428,28 +428,29 @@ pub(super) fn project_header_row(
                 }
             }),
         )
+        // One glyph shows the fold state and toggles it, so no chevron
+        // column sits in front of the name. It stays a quiet outline
+        // whatever weight the name carries.
         .child({
-            let ws_for_chevron = snap.workspace.clone();
-            let chevron_icon = if is_collapsed {
-                crate::ui::icons::CHEVRON_RIGHT
+            let ws_for_toggle = snap.workspace.clone();
+            let folder_icon = if is_collapsed {
+                crate::ui::icons::FOLDER
             } else {
-                crate::ui::icons::EXPAND_MORE
+                crate::ui::icons::FOLDER_OPEN
             };
-            // Keep the chevron and add action on the same chrome grid.
-            crate::ui::button_icon(("project-chevron", project_id as usize), chevron_icon, cx)
-                .on_click(cx.listener(move |_dock, _: &ClickEvent, _window, cx| {
-                    cx.stop_propagation();
-                    if let Some(ws) = ws_for_chevron.upgrade() {
-                        ws.update(cx, |ws, cx| ws.toggle_project_collapse(project_id, cx));
-                    }
-                }))
+            crate::ui::button_icon_glyph(
+                ("project-fold", project_id as usize),
+                folder_icon,
+                theme::LANE_PROJECT_ICON_SIZE,
+                cx,
+            )
+            .on_click(cx.listener(move |_dock, _: &ClickEvent, _window, cx| {
+                cx.stop_propagation();
+                if let Some(ws) = ws_for_toggle.upgrade() {
+                    ws.update(cx, |ws, cx| ws.toggle_project_collapse(project_id, cx));
+                }
+            }))
         })
-        // The folder stays a quiet outline whatever weight the name carries.
-        .child(
-            crate::ui::icons::icon(crate::ui::icons::FOLDER)
-                .with_size(px(theme::LANE_PROJECT_ICON_SIZE))
-                .text_color(t.text_muted),
-        )
         .child(div().flex_1().text_ellipsis().child(name))
         // Keep branch metadata quiet beside the project name.
         .when_some(default_branch.filter(|_| !is_unavailable), |row, branch| {

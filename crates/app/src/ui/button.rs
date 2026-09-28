@@ -75,6 +75,29 @@ pub fn button_icon_danger(id: impl Into<ElementId>, path: &'static str, cx: &App
     )
 }
 
+/// Ghost glyph whose hit target is its own artwork — for a tree row's leading
+/// icon, where a 24px target would push the label off its column.
+pub fn button_icon_glyph(
+    id: impl Into<ElementId>,
+    path: &'static str,
+    size: f32,
+    cx: &App,
+) -> Button {
+    let t = theme::current(cx);
+    button_bare(id)
+        .child(super::icons::icon(path).with_size(px(size)))
+        .w(px(size))
+        .h(px(size))
+        .p(px(0.))
+        .rounded(px(theme::RADIUS_XS))
+        .custom(
+            ButtonCustomVariant::new(cx)
+                .foreground(t.text_muted)
+                .hover(t.dock_icon_active_bg)
+                .active(t.dock_icon_active_bg),
+        )
+}
+
 /// The same metrics on a terminal-mirrored surface, with pane-local colours.
 pub fn button_icon_on_surface(
     id: impl Into<ElementId>,
@@ -372,6 +395,8 @@ mod tests {
         Window, div, size,
     };
 
+    const GLYPH: f32 = 14.0;
+
     #[derive(Default)]
     struct ChromeProbe {
         presses: usize,
@@ -396,6 +421,14 @@ mod tests {
                         .debug_selector(|| "chrome-disabled".into())
                         .disabled(true)
                         .on_click(cx.listener(|this, _, _, _| this.presses += 1)),
+                )
+                .child(
+                    button_icon_glyph("glyph", crate::ui::icons::FOLDER, GLYPH, cx)
+                        .debug_selector(|| "chrome-glyph".into())
+                        .on_click(cx.listener(|this, _, _, cx| {
+                            this.presses += 1;
+                            cx.notify();
+                        })),
                 )
                 .child(
                     crate::ui::tab_bar("tabs")
@@ -429,6 +462,8 @@ mod tests {
         let target = px(theme::CONTROL_TARGET_SIZE);
         assert_eq!(live.size, size(target, target));
         assert_eq!(disabled.size, size(target, target));
+        let glyph = vcx.debug_bounds("chrome-glyph").unwrap();
+        assert_eq!(glyph.size, size(px(GLYPH), px(GLYPH)));
         assert_eq!(
             vcx.debug_bounds("chrome-tab").unwrap().size.height,
             px(theme::TAB_BAR_HEIGHT)
@@ -440,6 +475,8 @@ mod tests {
         vcx.run_until_parked();
         vcx.simulate_click(disabled.center(), Default::default());
         vcx.run_until_parked();
-        assert_eq!(window.read_with(&vcx, |view, _| view.presses).unwrap(), 1);
+        vcx.simulate_click(glyph.center(), Default::default());
+        vcx.run_until_parked();
+        assert_eq!(window.read_with(&vcx, |view, _| view.presses).unwrap(), 2);
     }
 }

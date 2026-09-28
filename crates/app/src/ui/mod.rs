@@ -62,9 +62,9 @@ pub use button::{
     Button, button, button_add_tile, button_bare, button_bare_on_surface, button_chip,
     button_chip_on_surface, button_close, button_danger, button_delete_glyph,
     button_edit_cancel_glyph, button_edit_glyph, button_header_action, button_icon,
-    button_icon_danger, button_icon_on_surface, button_on_surface, button_primary,
-    button_status_pill, button_status_pill_bare, button_toggle_icon, button_window_control,
-    button_window_control_danger, button_with_icon,
+    button_icon_danger, button_icon_glyph, button_icon_on_surface, button_on_surface,
+    button_primary, button_status_pill, button_status_pill_bare, button_toggle_icon,
+    button_window_control, button_window_control_danger, button_with_icon,
 };
 pub use button_group::{ButtonGroup, button_group, button_group_on_surface};
 pub use chart::BarChart;

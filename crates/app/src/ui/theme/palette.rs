@@ -388,7 +388,8 @@ pub const LANE_INDENT_STEP: f32 = 8.0;
 pub const LANE_ACTIVE_BORDER_W: f32 = 2.0;
 /// Group label font size (px) — uppercase eyebrow.
 pub const LANE_GROUP_LABEL_FONT_SIZE: f32 = FONT_SIZE_SM;
-/// Project header — folder glyph, a step below control icons so it reads lighter.
+/// Project header — folder glyph, which is also its collapse toggle; a step
+/// below control icons so it reads lighter.
 pub const LANE_PROJECT_ICON_SIZE: f32 = 14.0;
 /// Group outline — hairline box that marks where a group's members end.
 pub const LANE_GROUP_OUTLINE_W: f32 = 1.0;
@@ -396,9 +397,8 @@ pub const LANE_GROUP_OUTLINE_PAD: f32 = 3.0;
 pub const LANE_GROUP_OUTLINE_RADIUS: f32 = RADIUS_MD;
 /// Added to the list gap so a group sits a little apart from its neighbours.
 pub const LANE_GROUP_OUTLINE_MARGIN_Y: f32 = GAP_XS;
-/// Where a project header's name starts: pad, chevron, gap, folder, gap.
-pub const LANE_PROJECT_NAME_INSET: f32 =
-    LANE_ROW_PAD_X + CONTROL_TARGET_SIZE + LANE_LABEL_GAP + LANE_PROJECT_ICON_SIZE + LANE_LABEL_GAP;
+/// Where a project header's name starts: pad, folder, gap.
+pub const LANE_PROJECT_NAME_INSET: f32 = LANE_ROW_PAD_X + LANE_PROJECT_ICON_SIZE + LANE_LABEL_GAP;
 /// Lane left inset that lands its label on the project name and centres
 /// the status cell under the folder glyph.
 pub const LANE_ROW_INSET_L: f32 =

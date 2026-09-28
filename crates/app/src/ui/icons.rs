@@ -55,11 +55,12 @@ pub const DIFFERENCE: &str = "icons/ui/difference.svg";
 pub const TASKS: &str = "icons/lucide/list-checks.svg";
 pub const FLOWS: &str = "icons/lucide/workflow.svg";
 pub const FOLDER: &str = "icons/lucide/folder.svg";
+pub const FOLDER_OPEN: &str = "icons/lucide/folder-open.svg";
 pub const SESSION: &str = "icons/lucide/message-square.svg";
 pub const SKILL: &str = "icons/lucide/file-text.svg";
 pub const SERVER: &str = "icons/lucide/server.svg";
 #[cfg(test)]
-const LUCIDE: [&str; 6] = [TASKS, FLOWS, FOLDER, SESSION, SKILL, SERVER];
+const LUCIDE: [&str; 7] = [TASKS, FLOWS, FOLDER, FOLDER_OPEN, SESSION, SKILL, SERVER];
 /// Lucide ships at stroke 2; dock rows read at this lighter weight.
 #[cfg(test)]
 const LUCIDE_STROKE: &str = r#"stroke-width="1.65""#;
@@ -113,6 +114,7 @@ mod tests {
             TASKS,
             FLOWS,
             FOLDER,
+            FOLDER_OPEN,
             SESSION,
             SKILL,
             SERVER,
