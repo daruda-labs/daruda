@@ -115,6 +115,11 @@ pub(in crate::workspace) enum RowKind {
         filtered: FilteredAway,
     },
     AgentItem(usize),
+    /// A thought inside a tool group, rendered as one row among its calls. Its
+    /// own kind rather than an [`RowKind::AgentItem`] because it reads
+    /// differently: the group bar above already says what it is, so it drops
+    /// the label a free-standing thought carries.
+    GroupThought(usize),
     TailMore {
         run_start: usize,
         hidden_steps: usize,
@@ -252,6 +257,7 @@ pub(super) enum RowSlot<'a> {
     Interrupted(usize),
     Response(usize),
     AgentItem(usize),
+    GroupThought(usize),
     TailMore(usize),
     ToolGroup(&'a str),
     ToolGroupTail(&'a str),
@@ -271,6 +277,7 @@ impl RowKind {
             RowKind::Interrupted(ix) => RowSlot::Interrupted(*ix),
             RowKind::ResponseHeader { run_start, .. } => RowSlot::Response(*run_start),
             RowKind::AgentItem(ix) => RowSlot::AgentItem(*ix),
+            RowKind::GroupThought(ix) => RowSlot::GroupThought(*ix),
             RowKind::TailMore { run_start, .. } => RowSlot::TailMore(*run_start),
             RowKind::ToolGroupTailMore { gid, .. } => RowSlot::ToolGroupTail(gid.as_str()),
             RowKind::ToolGroupHeader { gid, .. } => RowSlot::ToolGroup(gid.as_str()),
@@ -279,6 +286,14 @@ impl RowKind {
             RowKind::WorkingIndicator => RowSlot::Working,
         }
     }
+}
+
+/// The row that renders item `ix` as a block of its own — the one whose height
+/// a fold on that item changes in place. `None` for an item that owns no such
+/// row (a group bar, a conclusion, a nested child).
+pub(in crate::workspace) fn item_row(rows: &[RenderRow], ix: usize) -> Option<usize> {
+    rows.iter()
+        .position(|r| matches!(r.kind, RowKind::AgentItem(i) | RowKind::GroupThought(i) if i == ix))
 }
 
 impl RenderRow {
@@ -497,7 +512,9 @@ impl<'a> RunRows<'a> {
     fn push_group_children(
         &mut self,
         context: ProjectionContext<'_>,
-        calls: impl Iterator<Item = usize>,
+        // The caller names each child's kind: a thought reads one way inside
+        // a tool group and another inside a thinking group of its own.
+        children: impl Iterator<Item = (usize, RowKind)>,
         folds: GroupFolds,
         indent: u8,
         group: GroupFilter,
@@ -505,8 +522,7 @@ impl<'a> RunRows<'a> {
     ) {
         let items = context.items;
         let filter = context.filter;
-        for j in calls {
-            let kind = RowKind::AgentItem(j);
+        for (j, kind) in children {
             let filtered = !filter.matches(&items[j]);
             // A running call stays on screen through its group's shut bar and
             // shut boundary alike — a launch settles while the work inside its
@@ -905,7 +921,14 @@ impl<'items, 'rows> RunProjector<'items, 'rows> {
                     );
                     out.push_group_children(
                         context,
-                        members.into_iter(),
+                        members.into_iter().map(|j| {
+                            let kind = if structure.is_thought(j) {
+                                RowKind::GroupThought(j)
+                            } else {
+                                RowKind::AgentItem(j)
+                            };
+                            (j, kind)
+                        }),
                         GroupFolds {
                             enclosing: folded,
                             collapsed: group_collapsed,
@@ -949,7 +972,7 @@ impl<'items, 'rows> RunProjector<'items, 'rows> {
                     );
                     out.push_group_children(
                         context,
-                        grun,
+                        grun.map(|j| (j, RowKind::AgentItem(j))),
                         GroupFolds {
                             enclosing: folded,
                             collapsed: group_collapsed,

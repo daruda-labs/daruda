@@ -837,9 +837,7 @@ fn tool_groups(rows: &[RenderRow]) -> Vec<(Vec<usize>, Vec<usize>)> {
 }
 
 fn row_of(rows: &[RenderRow], ix: usize) -> &RenderRow {
-    rows.iter()
-        .find(|r| matches!(r.kind, RowKind::AgentItem(i) if i == ix))
-        .expect("the item owns a row")
+    &rows[item_row(rows, ix).expect("the item owns a row")]
 }
 
 /// `U T U` — the shape agents narrate calls in — is one group whichever of the
@@ -979,4 +977,53 @@ fn a_permission_still_ends_a_group_that_holds_thoughts() {
         tool_groups(&rows),
         vec![(vec![1], vec![2]), (vec![4], vec![])]
     );
+}
+
+/// A thought inside a tool group gets its own row kind; one ahead of the first
+/// call stays an ordinary item under a thinking bar.
+#[test]
+fn a_thought_in_a_tool_group_is_a_group_thought_row() {
+    let items = [
+        ChatItem::UserText("q".into()),
+        think("plan"),
+        tool("a", ToolStatusView::Completed),
+        think("why"),
+        tool("b", ToolStatusView::Completed),
+    ];
+    let rows = project_all(&items);
+    assert!(matches!(
+        rows[item_row(&rows, 1).unwrap()].kind,
+        RowKind::AgentItem(1)
+    ));
+    assert!(matches!(
+        rows[item_row(&rows, 3).unwrap()].kind,
+        RowKind::GroupThought(3)
+    ));
+}
+
+/// The streaming shape: a thought lands after a call before the next call
+/// does. The thought's row and the group's bar keep their slots when the next
+/// call arrives, so nothing the reader is looking at moves.
+#[test]
+fn the_next_call_leaves_a_trailing_thought_where_it_was() {
+    let items = [
+        ChatItem::UserText("q".into()),
+        tool("a", ToolStatusView::Completed),
+        think("why"),
+        tool("b", ToolStatusView::Completed),
+    ];
+    let before = project_all(&items[..3]);
+    let after = project_all(&items);
+    let slot_of = |rows: &[RenderRow], pred: &dyn Fn(&RowKind) -> bool| {
+        rows.iter()
+            .position(|r| pred(&r.kind))
+            .expect("row present")
+    };
+    let thought = |k: &RowKind| matches!(k, RowKind::GroupThought(2));
+    let bar = |k: &RowKind| matches!(k, RowKind::ToolGroupHeader { gid, .. } if gid == "a");
+    for pred in [&thought as &dyn Fn(&RowKind) -> bool, &bar] {
+        let (b, a) = (slot_of(&before, pred), slot_of(&after, pred));
+        assert_eq!(b, a);
+        assert!(before[b].same_slot(&after[a]));
+    }
 }

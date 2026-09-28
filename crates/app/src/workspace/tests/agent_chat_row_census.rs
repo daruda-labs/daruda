@@ -123,6 +123,7 @@ fn kind_label(kind: &RowKind) -> &'static str {
         RowKind::Interrupted(_) => "Interrupted",
         RowKind::ResponseHeader { .. } => "ResponseHeader",
         RowKind::AgentItem(_) => "AgentItem",
+        RowKind::GroupThought(_) => "GroupThought",
         RowKind::TailMore { .. } => "TailMore",
         RowKind::ToolGroupTailMore { .. } => "ToolGroupTailMore",
         RowKind::ToolGroupHeader { .. } => "ToolGroupHeader",
@@ -138,6 +139,7 @@ fn row_reach(kind: &RowKind) -> Option<usize> {
         RowKind::User(i)
         | RowKind::Interrupted(i)
         | RowKind::AgentItem(i)
+        | RowKind::GroupThought(i)
         | RowKind::ConclusionItem(i) => Some(*i),
         RowKind::ResponseHeader { run_start, .. } | RowKind::TailMore { run_start, .. } => {
             Some(*run_start)

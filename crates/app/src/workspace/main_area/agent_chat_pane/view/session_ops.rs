@@ -17,7 +17,7 @@ use super::super::fold::FoldKey;
 use super::super::pane_choice::PaneChoice;
 use super::super::reconcile::ReconcileScope;
 use super::super::rows::tail::{StepWindow, TailLevel, TailWindow};
-use super::super::rows::{RowKind, collect_foldable_keys};
+use super::super::rows::{collect_foldable_keys, item_row};
 use super::super::session_config::SessionConfig;
 use super::super::transcript_defaults::TranscriptDefaults;
 use super::super::window_access::WindowAccess;
@@ -300,10 +300,7 @@ impl AgentChatView {
             // `apply_event`'s tool-update / turn-settled remeasures.
             self.resync_all_row_heights("fold-toggle-wide");
         } else if let Some(item_ix) = item_ix
-            && let Some(row_ix) = self
-                .rows
-                .iter()
-                .position(|r| matches!(r.kind, RowKind::AgentItem(ix) if ix == item_ix))
+            && let Some(row_ix) = item_row(&self.rows, item_ix)
         {
             self.apply_list_sync(ListSync::Rows(row_ix..row_ix + 1), "fold-toggle-row");
         }

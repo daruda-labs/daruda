@@ -61,7 +61,9 @@ fn kinds(rows: &[RenderRow]) -> Vec<(&'static str, bool)> {
                 RowKind::User(_) => "user",
                 RowKind::Interrupted(_) => "interrupted",
                 RowKind::ResponseHeader { .. } => "response",
-                RowKind::AgentItem(_) | RowKind::ConclusionItem(_) => "item",
+                RowKind::AgentItem(_) | RowKind::GroupThought(_) | RowKind::ConclusionItem(_) => {
+                    "item"
+                }
                 RowKind::TailMore { .. } => "tail",
                 RowKind::ToolGroupTailMore { .. } => "grouptail",
                 RowKind::ToolGroupHeader { .. } => "group",
@@ -265,7 +267,9 @@ fn marks(rows: &[RenderRow]) -> Vec<(&'static str, bool)> {
                 RowKind::User(_) => "user",
                 RowKind::Interrupted(_) => "interrupted",
                 RowKind::ResponseHeader { .. } => "response",
-                RowKind::AgentItem(_) | RowKind::ConclusionItem(_) => "item",
+                RowKind::AgentItem(_) | RowKind::GroupThought(_) | RowKind::ConclusionItem(_) => {
+                    "item"
+                }
                 RowKind::TailMore { .. } => "tail",
                 RowKind::ToolGroupTailMore { .. } => "grouptail",
                 RowKind::ToolGroupHeader { .. } => "group",

@@ -115,8 +115,8 @@ impl<'a> RenderAssets<'a> {
 }
 
 use blocks::{
-    MarkdownRender, assistant_markdown, conclusion_block, failure_block, thinking_block,
-    user_bubble,
+    MarkdownRender, assistant_markdown, conclusion_block, failure_block, group_thought_block,
+    thinking_block, user_bubble,
 };
 use chrome::{ActivityBarProps, activity_bar, status_banner, working_indicator};
 use fold_header::{FoldHeader, FoldRow, SummaryLine, interrupted_row, rollup_glyph};
@@ -424,6 +424,29 @@ fn render_row(
         // One block among siblings — it reports nothing about the run, so no
         // rollup glyph; the response bar above it carries the run's.
         RowKind::AgentItem(i) => render_agent_item(this, *i, row, t, window, cx),
+        RowKind::GroupThought(i) => match this.items.get(*i) {
+            Some(ChatItem::Thinking { text, .. }) => {
+                let key = FoldKey::Thinking(*i);
+                let expanded = this.fold.is_expanded(
+                    &key,
+                    fold_context_at(&key, *i, &this.items, this.turn_boundary),
+                );
+                group_thought_block(
+                    *i,
+                    key,
+                    expanded,
+                    text,
+                    thought_icon(),
+                    MarkdownRender::new(
+                        &this.assets.mermaid_images,
+                        this.dim_amount,
+                        AgentChatMarkdownLinks::new(this.pane_id, this.window_handle),
+                    ),
+                    cx,
+                )
+            }
+            _ => gpui::Empty.into_any_element(),
+        },
         RowKind::TailMore {
             run_start,
             hidden_steps,

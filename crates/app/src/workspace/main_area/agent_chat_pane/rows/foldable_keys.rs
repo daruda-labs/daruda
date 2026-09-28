@@ -46,6 +46,7 @@ pub(in crate::workspace) fn collect_foldable_keys(items: &[ChatItem]) -> Vec<Fol
             RowKind::User(_)
             | RowKind::Interrupted(_)
             | RowKind::AgentItem(_)
+            | RowKind::GroupThought(_)
             | RowKind::ConclusionItem(_)
             | RowKind::WorkingIndicator => {}
         }

@@ -195,20 +195,62 @@ pub(super) fn thinking_block(
                     .into_any_element(),
             );
     FoldRow::block(("agent-chat-thinking", ix), key, expanded, header, |cx| {
-        pane_markdown(
-            ("agent-chat-md-thinking", ix),
-            text.to_string(),
-            theme::dim_toward_gray(theme::agent_chat_fg_subtle(cx), markdown.dim),
-            cx,
-        )
-        .code_block_render(mermaid_code_block_render(
-            markdown.mermaid_images,
-            markdown.dim,
-        ))
-        .link_click_handler(markdown.links.handler())
-        .into_any_element()
+        thought_body(ix, text, markdown, cx)
     })
     .render(markdown.dim, cx)
+}
+
+/// A thought inside a tool group: one row among its calls, led by the chevron
+/// like theirs. The group bar already names what it holds, so the row drops the
+/// "Thinking" label for a glyph, and its preview is set in the prose face —
+/// italics over a long line of Korean read worse, not more like reasoning.
+pub(super) fn group_thought_block(
+    ix: usize,
+    key: FoldKey,
+    expanded: bool,
+    text: &str,
+    icon: SharedString,
+    markdown: MarkdownRender<'_>,
+    cx: &mut Context<AgentChatView>,
+) -> AnyElement {
+    let glyph = theme::dim_toward_gray(theme::agent_chat_fg_subtle(cx), markdown.dim);
+    let header = FoldHeader::with_summary(|| SummaryLine::from_markdown(text)).leading(
+        Icon::empty()
+            .path(icon)
+            .xsmall()
+            .text_color(glyph)
+            .into_any_element(),
+    );
+    FoldRow::block(
+        ("agent-chat-group-thought", ix),
+        key,
+        expanded,
+        header,
+        |cx| thought_body(ix, text, markdown, cx),
+    )
+    .render(markdown.dim, cx)
+}
+
+/// A thought's expanded body — shared by both thought rows, and outside the
+/// header's click target, so selecting it cannot fold it.
+fn thought_body(
+    ix: usize,
+    text: &str,
+    markdown: MarkdownRender<'_>,
+    cx: &mut Context<AgentChatView>,
+) -> AnyElement {
+    pane_markdown(
+        ("agent-chat-md-thinking", ix),
+        text.to_string(),
+        theme::dim_toward_gray(theme::agent_chat_fg_subtle(cx), markdown.dim),
+        cx,
+    )
+    .code_block_render(mermaid_code_block_render(
+        markdown.mermaid_images,
+        markdown.dim,
+    ))
+    .link_click_handler(markdown.links.handler())
+    .into_any_element()
 }
 
 /// Surfaced error item — error-tinted block.
