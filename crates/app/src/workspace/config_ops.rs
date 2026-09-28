@@ -15,15 +15,30 @@ impl Workspace {
         self.apply_config(&effective, cx);
     }
 
-    /// An OS light / dark flip, which only a `system` UI preset paints. The
-    /// app-wide swap runs first so the file-pane reload in `apply_config`
-    /// bakes against the new theme; every window repeating it is idempotent.
-    pub(in crate::workspace) fn on_system_appearance_changed(&mut self, cx: &mut Context<Self>) {
+    /// An OS light / dark flip, which only a `system` UI preset paints.
+    ///
+    /// Every window hears the same flip; the first to record it swaps the
+    /// theme app-wide, before its own file-pane reload bakes against it. Each
+    /// window then runs the full `apply_config` — more than a flip needs, but
+    /// it is rare, and a narrower path would be a second sync site for the
+    /// config mirrors.
+    pub(in crate::workspace) fn on_system_appearance_changed(
+        &mut self,
+        appearance: gpui::WindowAppearance,
+        cx: &mut Context<Self>,
+    ) {
+        use crate::ui::theme::{effective_ui_preset, system_appearance};
+        let previous = system_appearance(cx);
+        crate::ui::theme::set_system_appearance(cx, appearance);
         let user = crate::settings_store::SettingsStore::global(cx).user_arc();
-        if user.theme.ui_preset != daruda_config::ui_theme_presets::SYSTEM {
+        let preset = user.theme.ui_preset.as_str();
+        if preset != daruda_config::ui_theme_presets::SYSTEM {
             return;
         }
-        crate::ui::theme::apply_configured_ui_theme(&user.theme.ui_preset, cx);
+        let next = effective_ui_preset(preset, appearance);
+        if effective_ui_preset(preset, previous) != next {
+            crate::ui::theme::apply_ui_theme(next, cx);
+        }
         self.apply_store_config(cx);
     }
 
@@ -43,8 +58,9 @@ impl Workspace {
     /// config file watcher and the Settings window when the TOML changes.
     ///
     /// **UI theme:** Workspace does *not* swap the live `DarudaTheme`
-    /// here — the config watcher (`main.rs::spawn_config_watcher`) owns
-    /// that via `apply_ui_theme` once per reload, app-wide. Keeping the
+    /// here — the settings observer (`globals.rs`) owns that once per
+    /// reload, app-wide, and an OS flip swaps it in
+    /// [`Self::on_system_appearance_changed`] before calling in. Keeping the
     /// swap out avoids Workspace tests (built without the full
     /// `gpui_component::init` chain) painting into uninitialised Globals.
     pub fn apply_config(&mut self, config: &daruda_config::Config, cx: &mut Context<Self>) {
@@ -173,8 +189,10 @@ impl Workspace {
                 );
             });
         }
-        let new_mirrors =
-            crate::workspace::ConfigMirrors::from_config(config, cx.window_appearance());
+        let new_mirrors = crate::workspace::ConfigMirrors::from_config(
+            config,
+            crate::ui::theme::system_appearance(cx),
+        );
         let filter_changed = self.mirrors.files_show_hidden != new_mirrors.files_show_hidden
             || self.mirrors.files_use_gitignore != new_mirrors.files_use_gitignore;
         let icon_changed = self.mirrors.files_icon_color_mode != new_mirrors.files_icon_color_mode;

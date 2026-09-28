@@ -1,5 +1,5 @@
 use daruda_config::{Config, IconColorMode};
-use gpui::TestAppContext;
+use gpui::{BorrowAppContext as _, TestAppContext};
 
 use super::*;
 
@@ -58,4 +58,65 @@ async fn apply_config_syncs_all_mirrors(cx: &mut TestAppContext) {
     ws.update(cx, |ws, cx| ws.toggle_files_show_hidden(cx));
     let after = ws.read_with(cx, |ws, _| ws.mirrors.files_show_hidden);
     assert_eq!(after, !before);
+}
+
+/// An OS flip under `ui_preset = "system"`: the appearance arrives as a value
+/// (the platform must not be asked again from inside the observer), the live
+/// theme follows it, and the mirror that gates the file-pane reload moves.
+#[gpui::test]
+async fn a_system_appearance_flip_swaps_the_theme_and_the_mirror(cx: &mut TestAppContext) {
+    use gpui::WindowAppearance;
+    let (_wh, ws) = build_workspace(cx);
+    cx.update(|cx| {
+        crate::ui::theme::init_if_missing(cx);
+        crate::settings_store::SettingsStore::init(cx);
+        cx.update_global::<crate::settings_store::SettingsStore, _>(|store, _| {
+            let mut cfg = Config::default();
+            cfg.theme.ui_preset = daruda_config::ui_theme_presets::SYSTEM.to_owned();
+            store.set_user_for_testing(cfg);
+        });
+        crate::ui::theme::set_system_appearance(cx, WindowAppearance::Light);
+    });
+
+    ws.update(cx, |ws, cx| {
+        ws.on_system_appearance_changed(WindowAppearance::Dark, cx)
+    });
+    ws.read_with(cx, |ws, cx| {
+        assert!(crate::ui::theme::current(cx).is_dark());
+        assert_eq!(ws.mirrors.ui_preset, "daruda_dark");
+    });
+
+    ws.update(cx, |ws, cx| {
+        ws.on_system_appearance_changed(WindowAppearance::Light, cx)
+    });
+    ws.read_with(cx, |ws, cx| {
+        assert!(!crate::ui::theme::current(cx).is_dark());
+        assert_eq!(ws.mirrors.ui_preset, "daruda_light");
+    });
+}
+
+/// An explicit preset ignores the OS: the flip is recorded, nothing repaints.
+#[gpui::test]
+async fn a_system_appearance_flip_leaves_an_explicit_preset_alone(cx: &mut TestAppContext) {
+    use gpui::WindowAppearance;
+    let (_wh, ws) = build_workspace(cx);
+    cx.update(|cx| {
+        crate::ui::theme::init_if_missing(cx);
+        crate::settings_store::SettingsStore::init(cx);
+        cx.update_global::<crate::settings_store::SettingsStore, _>(|store, _| {
+            store.set_user_for_testing(Config::default());
+        });
+    });
+    ws.update(cx, |ws, cx| {
+        ws.on_system_appearance_changed(WindowAppearance::Light, cx)
+    });
+    ws.read_with(cx, |ws, cx| {
+        assert!(crate::ui::theme::current(cx).is_dark(), "daruda_dark stays");
+        assert_eq!(ws.mirrors.ui_preset, "daruda_dark");
+        assert_eq!(
+            crate::ui::theme::system_appearance(cx),
+            WindowAppearance::Light,
+            "the flip is still recorded for a later switch to `system`"
+        );
+    });
 }

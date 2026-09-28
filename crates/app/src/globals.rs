@@ -26,6 +26,7 @@ pub(crate) fn init_all(cx: &mut App) {
     ui::theme::DarudaTheme::init(cx);
     ui::theme::apply_daruda_palette(cx);
     crate::settings_store::SettingsStore::init(cx);
+    ui::theme::init_system_appearance(cx);
     {
         let user = crate::settings_store::SettingsStore::global(cx).user();
         let preset = user.theme.ui_preset.clone();

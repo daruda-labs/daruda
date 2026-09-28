@@ -130,8 +130,35 @@ pub fn effective_ui_preset(configured: &str, appearance: gpui::WindowAppearance)
 /// Install the theme a configured `theme.ui_preset` paints under the current
 /// OS appearance. Same contract as [`apply_ui_theme`].
 pub fn apply_configured_ui_theme(configured: &str, cx: &mut gpui::App) -> bool {
-    let appearance = cx.window_appearance();
+    let appearance = system_appearance(cx);
     apply_ui_theme(effective_ui_preset(configured, appearance), cx)
+}
+
+/// The OS appearance as last reported: seeded once at startup, then written
+/// only by the window appearance observer, and read by everything else. On
+/// Linux the platform stays borrowed while it delivers a flip, so asking it
+/// again from inside that observer panics — zed keeps the same global.
+struct SystemAppearance(gpui::WindowAppearance);
+
+impl gpui::Global for SystemAppearance {}
+
+/// Seed [`system_appearance`] from the platform. Startup only.
+pub fn init_system_appearance(cx: &mut gpui::App) {
+    let appearance = cx.window_appearance();
+    cx.set_global(SystemAppearance(appearance));
+}
+
+/// The last OS appearance [`set_system_appearance`] recorded. Light before
+/// the seed, which only a test fixture ever sees.
+pub fn system_appearance(cx: &gpui::App) -> gpui::WindowAppearance {
+    cx.try_global::<SystemAppearance>()
+        .map(|a| a.0)
+        .unwrap_or_default()
+}
+
+/// Record the appearance a window observer was just handed.
+pub fn set_system_appearance(cx: &mut gpui::App, appearance: gpui::WindowAppearance) {
+    cx.set_global(SystemAppearance(appearance));
 }
 
 pub use crate::ui::theme::palette::*;
