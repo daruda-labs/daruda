@@ -118,7 +118,7 @@ pub(in crate::workspace) enum RowKind {
     /// A thought inside a tool group, rendered as one row among its calls. Its
     /// own kind rather than an [`RowKind::AgentItem`] because it reads
     /// differently: the group bar above already says what it is, so it drops
-    /// the label a free-standing thought carries.
+    /// the label and the fold a free-standing thought carries.
     GroupThought(usize),
     TailMore {
         run_start: usize,
@@ -289,8 +289,9 @@ impl RowKind {
 }
 
 /// The row that renders item `ix` as a block of its own — the one whose height
-/// a fold on that item changes in place. `None` for an item that owns no such
-/// row (a group bar, a conclusion, a nested child).
+/// a fold on that item changes in place, or whose height a streamed chunk grows.
+/// `None` for an item that owns no such row (a group bar, a conclusion, a
+/// nested child).
 pub(in crate::workspace) fn item_row(rows: &[RenderRow], ix: usize) -> Option<usize> {
     rows.iter()
         .position(|r| matches!(r.kind, RowKind::AgentItem(i) | RowKind::GroupThought(i) if i == ix))

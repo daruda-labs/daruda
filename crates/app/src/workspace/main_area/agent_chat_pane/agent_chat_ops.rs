@@ -961,7 +961,7 @@ impl Workspace {
     /// Open a stretch of work narrated thought by thought, its one tool group
     /// open under a call window narrower than it, so the capture shows the
     /// group's bar, its boundary row above the kept calls, and the thoughts
-    /// among them — the newest one opened in full.
+    /// among them.
     #[cfg(feature = "screenshot")]
     pub(in crate::workspace) fn open_agent_chat_thoughts_for_shot(
         &mut self,
@@ -1004,13 +1004,6 @@ impl Workspace {
                 cx,
             );
             v.set_fold_for_shot(FoldKey::ToolGroup(THOUGHT_RUN_GID.into()), true, window, cx);
-            let newest = v
-                .items
-                .iter()
-                .rposition(|item| matches!(item, daruda_acp::ChatItem::Thinking { .. }));
-            if let Some(ix) = newest {
-                v.set_fold_for_shot(FoldKey::Thinking(ix), true, window, cx);
-            }
         });
     }
 

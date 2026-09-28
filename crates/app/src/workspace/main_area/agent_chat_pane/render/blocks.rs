@@ -195,54 +195,72 @@ pub(super) fn thinking_block(
                     .into_any_element(),
             );
     FoldRow::block(("agent-chat-thinking", ix), key, expanded, header, |cx| {
-        thought_body(ix, text, markdown, cx)
+        thought_body(ix, text, theme::agent_chat_fg_subtle(cx), markdown, cx)
     })
     .render(markdown.dim, cx)
 }
 
-/// A thought inside a tool group: one row among its calls, led by the chevron
-/// like theirs. The group bar already names what it holds, so the row drops the
-/// "Thinking" label for a glyph, and its preview is set in the prose face —
-/// italics over a long line of Korean read worse, not more like reasoning.
+/// A thought inside a tool group, shown whole: agents write these a line or
+/// three long, so a fold would hide less than its own header costs and cut the
+/// sentence the reader needs. The group bar already names what it holds, so a
+/// glyph stands in for the "Thinking" label; the group's own fold and window
+/// still bound how many are on screen.
 pub(super) fn group_thought_block(
     ix: usize,
-    key: FoldKey,
-    expanded: bool,
     text: &str,
     icon: SharedString,
     markdown: MarkdownRender<'_>,
     cx: &mut Context<AgentChatView>,
 ) -> AnyElement {
     let glyph = theme::dim_toward_gray(theme::agent_chat_fg_subtle(cx), markdown.dim);
-    let header = FoldHeader::with_summary(|| SummaryLine::from_markdown(text)).leading(
-        Icon::empty()
-            .path(icon)
-            .xsmall()
-            .text_color(glyph)
-            .into_any_element(),
-    );
-    FoldRow::block(
-        ("agent-chat-group-thought", ix),
-        key,
-        expanded,
-        header,
-        |cx| thought_body(ix, text, markdown, cx),
-    )
-    .render(markdown.dim, cx)
+    // One text line tall, so the glyph sits on the first line however many
+    // the body wraps to.
+    let line = px(theme::agent_chat_font_size(cx) * theme::agent_chat_line_height(cx));
+    div()
+        .w_full()
+        .min_w_0()
+        .flex()
+        .flex_row()
+        .items_start()
+        .gap(px(theme::GAP_SM))
+        .child(
+            div()
+                .flex_none()
+                .h(line)
+                .flex()
+                .items_center()
+                .child(Icon::empty().path(icon).xsmall().text_color(glyph)),
+        )
+        .child(
+            div()
+                .flex_1()
+                .min_w_0()
+                // The pane's own text colour, as prose has: shown whole among
+                // the calls, a thought is read, not skimmed past.
+                .child(thought_body(
+                    ix,
+                    text,
+                    theme::agent_chat_fg(cx),
+                    markdown,
+                    cx,
+                )),
+        )
+        .into_any_element()
 }
 
-/// A thought's expanded body — shared by both thought rows, and outside the
-/// header's click target, so selecting it cannot fold it.
+/// A thought's body — shared by both thought rows. The folded one keeps it
+/// outside its header's click target, so selecting it cannot fold it.
 fn thought_body(
     ix: usize,
     text: &str,
+    color: gpui::Hsla,
     markdown: MarkdownRender<'_>,
     cx: &mut Context<AgentChatView>,
 ) -> AnyElement {
     pane_markdown(
         ("agent-chat-md-thinking", ix),
         text.to_string(),
-        theme::dim_toward_gray(theme::agent_chat_fg_subtle(cx), markdown.dim),
+        theme::dim_toward_gray(color, markdown.dim),
         cx,
     )
     .code_block_render(mermaid_code_block_render(

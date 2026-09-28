@@ -425,26 +425,17 @@ fn render_row(
         // rollup glyph; the response bar above it carries the run's.
         RowKind::AgentItem(i) => render_agent_item(this, *i, row, t, window, cx),
         RowKind::GroupThought(i) => match this.items.get(*i) {
-            Some(ChatItem::Thinking { text, .. }) => {
-                let key = FoldKey::Thinking(*i);
-                let expanded = this.fold.is_expanded(
-                    &key,
-                    fold_context_at(&key, *i, &this.items, this.turn_boundary),
-                );
-                group_thought_block(
-                    *i,
-                    key,
-                    expanded,
-                    text,
-                    thought_icon(),
-                    MarkdownRender::new(
-                        &this.assets.mermaid_images,
-                        this.dim_amount,
-                        AgentChatMarkdownLinks::new(this.pane_id, this.window_handle),
-                    ),
-                    cx,
-                )
-            }
+            Some(ChatItem::Thinking { text, .. }) => group_thought_block(
+                *i,
+                text,
+                thought_icon(),
+                MarkdownRender::new(
+                    &this.assets.mermaid_images,
+                    this.dim_amount,
+                    AgentChatMarkdownLinks::new(this.pane_id, this.window_handle),
+                ),
+                cx,
+            ),
             _ => gpui::Empty.into_any_element(),
         },
         RowKind::TailMore {

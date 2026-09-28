@@ -923,6 +923,28 @@ fn fold_keys_include_response_and_tool_group() {
     );
 }
 
+/// A thought inside a tool group renders whole, so expand/collapse-all has no
+/// fold of its own to reach; one ahead of the first call keeps its own.
+#[test]
+fn fold_keys_skip_a_thought_inside_a_tool_group() {
+    use daruda_acp::ToolStatusView::Completed;
+    let thought = || ChatItem::Thinking {
+        text: "t".to_owned(),
+        streaming: false,
+        message_id: None,
+    };
+    let items = [
+        ChatItem::UserText("u".to_owned()),
+        thought(),
+        ChatItem::ToolCall(tool_call("c1", Completed, 0)),
+        thought(),
+        ChatItem::ToolCall(tool_call("c2", Completed, 0)),
+    ];
+    let keys = collect_foldable_keys(&items);
+    assert!(keys.contains(&FoldKey::Thinking(1)));
+    assert!(!keys.contains(&FoldKey::Thinking(3)));
+}
+
 /// `renders_raw_input` is the single gate shared by the renderer and
 /// `collect_foldable_keys`; pin both the predicate and the resulting fold
 /// coverage so a future edit can't break renderer↔fold sync silently.

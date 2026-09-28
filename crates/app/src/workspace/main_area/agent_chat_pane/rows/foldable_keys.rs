@@ -35,6 +35,14 @@ pub(in crate::workspace) fn collect_foldable_keys(items: &[ChatItem]) -> Vec<Fol
             _ => None,
         })
         .collect();
+    // A thought inside a tool group renders whole, with no fold to set.
+    let group_thoughts: HashSet<usize> = rows
+        .iter()
+        .filter_map(|row| match row.kind {
+            RowKind::GroupThought(ix) => Some(ix),
+            _ => None,
+        })
+        .collect();
     for row in &rows {
         match &row.kind {
             RowKind::ResponseHeader { run_start, .. } => keys.push(FoldKey::Response(*run_start)),
@@ -55,6 +63,7 @@ pub(in crate::workspace) fn collect_foldable_keys(items: &[ChatItem]) -> Vec<Fol
         match item {
             ChatItem::AssistantText { .. } if inline_assistant.contains(&ix) => {}
             ChatItem::AssistantText { .. } => keys.push(FoldKey::Assistant(ix)),
+            ChatItem::Thinking { .. } if group_thoughts.contains(&ix) => {}
             ChatItem::Thinking { .. } => keys.push(FoldKey::Thinking(ix)),
             ChatItem::ToolCall(tc) => {
                 keys.push(tool_fold_key(tc));
