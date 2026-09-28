@@ -77,16 +77,17 @@ pub(super) fn description(section: Section) -> String {
 pub(super) fn icon(section: Section) -> &'static str {
     match section {
         Section::General => icons::SETTINGS,
-        Section::Appearance => icons::MAXIMIZE,
+        Section::Appearance => icons::APPEARANCE,
         Section::Font => icons::TEXT_FIELDS,
         Section::Terminal => icons::TERMINAL,
         Section::Workspace => icons::DOCK,
         Section::Keymap => icons::KEYBOARD,
-        Section::Agent | Section::Orchestrator => icons::AGENT,
+        Section::Agent => icons::AGENT,
+        Section::Orchestrator => icons::ORCHESTRATOR,
         Section::SessionHosts => icons::DNS,
         Section::Accounts => icons::PERSON,
         Section::Notifications => icons::NOTIFICATIONS,
-        Section::RemoteControl => icons::FORWARD,
+        Section::RemoteControl => icons::REMOTE_CONTROL,
         Section::Plugin => icons::EXTENSION,
         Section::About => icons::INFO,
     }
