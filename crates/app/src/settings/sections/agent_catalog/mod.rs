@@ -17,9 +17,11 @@ use daruda_config::PresetLaunchability;
 use gpui::{AnyElement, ClickEvent, IntoElement, SharedString, Window, div, prelude::*, px};
 
 use super::super::{
-    AgentCatalogRow, SettingsView, settings_button as button,
+    AgentCatalogRow, CardFold, SettingsView, settings_button as button,
     settings_button_danger as button_danger,
 };
+
+mod card;
 
 /// The `transport_select` value that means "run the command locally" — the only
 /// transport a preset reference can carry (see [`daruda_config::AgentEntry`]).
@@ -100,7 +102,7 @@ impl SettingsView {
         // Editable rows first, non-editable ones grouped under their own header:
         // a visual grouping, while the model keeps both at their config position.
         for (ordinal, (catalog_index, row)) in self.agent_editable_rows().enumerate() {
-            body = body.child(self.render_agent_catalog_row(catalog_index, ordinal, row, cx));
+            body = body.child(self.render_agent_card(catalog_index, ordinal, row, cx));
         }
 
         if self.agent_unresolved_entries().next().is_some() {
@@ -184,270 +186,6 @@ impl SettingsView {
             .into_any_element()
     }
 
-    /// `catalog_index` addresses the entry for removal; `ordinal` is its
-    /// position among the editable rows, which is what the "Agent N" label
-    /// shows. They differ as soon as a non-editable entry sits in between.
-    fn render_agent_catalog_row(
-        &self,
-        catalog_index: usize,
-        ordinal: usize,
-        row: &AgentCatalogRow,
-        cx: &mut gpui::Context<Self>,
-    ) -> AnyElement {
-        // Built before the theme borrow: these need `&mut Context` to downgrade
-        // the window entity their editors dispatch through.
-        let fold_control =
-            super::agent_transcript::editor::fold_mode_control(catalog_index, row, cx);
-        let filter_control =
-            super::agent_transcript::editor::display_filter_control(catalog_index, row, cx);
-        let t = theme::current(cx);
-        let remove_id = format!("settings-agent-remove-{catalog_index}");
-        let transport_kind = row
-            .transport_select
-            .read(cx)
-            .selected_value()
-            .map(|v| v.to_string())
-            .unwrap_or_else(|| TRANSPORT_RAW.to_string());
-        let provenance = row.provenance(cx);
-
-        let mut header = div()
-            .flex()
-            .flex_row()
-            .items_center()
-            .gap(px(theme::MODAL_FOOTER_GAP))
-            .text_size(px(theme::MODAL_BODY_FONT_SIZE))
-            .text_color(t.text_muted)
-            .child(provenance.source_label());
-        if provenance.is_overridden() {
-            header = header.child(
-                div()
-                    .text_color(t.text_body)
-                    .child(s::settings_agent_row_overridden()),
-            );
-        }
-
-        let mut body = div()
-            .flex()
-            .flex_col()
-            .gap(px(theme::MODAL_PANEL_GAP))
-            .p(px(theme::SETTINGS_CARD_PAD))
-            .border_1()
-            .border_color(t.border)
-            .rounded(px(theme::RADIUS_MD))
-            .child(
-                div()
-                    .flex()
-                    .flex_row()
-                    .items_center()
-                    .justify_between()
-                    .child(
-                        div()
-                            .text_size(px(theme::MODAL_BODY_FONT_SIZE))
-                            .text_color(t.text_primary)
-                            .child(s::settings_agent_catalog_row_label(ordinal + 1)),
-                    )
-                    .child(
-                        button_danger(remove_id, s::settings_agent_remove()).on_click(cx.listener(
-                            move |this, _: &ClickEvent, window, cx| {
-                                this.request_remove_agent_catalog_item(catalog_index, window, cx);
-                            },
-                        )),
-                    ),
-            )
-            .child(header)
-            .child(field_row(
-                s::settings_agent_field_id(),
-                crate::ui::input(&row.id_input, cx, 0),
-            ))
-            .map(|body| {
-                Self::field_with_base(
-                    body,
-                    s::settings_agent_field_name(),
-                    crate::ui::input(&row.name_input, cx, 0),
-                    provenance.name_base.clone(),
-                    cx,
-                )
-            })
-            .map(|body| {
-                Self::field_with_base(
-                    body,
-                    s::settings_agent_field_command(),
-                    crate::ui::input(&row.command_input, cx, 0),
-                    provenance.command_base.clone(),
-                    cx,
-                )
-            })
-            // ssh/docker rows run on a remote host or inside a container, so
-            // a command missing from *this* machine's PATH is expected — the
-            // cached warning ignores transport (see `AgentCatalogRow::path_warning`),
-            // so the exemption is applied here instead of a fresh `which` call.
-            .when(transport_needs_local_path_check(&transport_kind), |body| {
-                body.when_some(row.path_warning.as_deref(), |body, command| {
-                    body.child(crate::ui::alert::warning(
-                        SharedString::from(format!("settings-agent-path-warning-{catalog_index}")),
-                        s::settings_agent_row_command_not_on_path(command),
-                    ))
-                })
-            })
-            .child(field_row(
-                s::settings_agent_field_transport(),
-                crate::ui::select::select(&row.transport_select, cx, 0),
-            ))
-            .when(
-                transport_kind == "ssh" || transport_kind == "docker",
-                |body| {
-                    body.child(
-                        div()
-                            .text_size(px(theme::MODAL_BODY_FONT_SIZE))
-                            .text_color(t.text_muted)
-                            .child(s::settings_agent_transport_deprecated_hint()),
-                    )
-                },
-            )
-            .map(|body| {
-                Self::field_with_base(
-                    body,
-                    s::settings_agent_field_default_mode(),
-                    crate::ui::select::select(&row.default_mode_select, cx, 0),
-                    provenance.default_mode_base.clone(),
-                    cx,
-                )
-            })
-            .map(|body| {
-                Self::field_with_base(
-                    body,
-                    s::settings_agent_field_default_model(),
-                    crate::ui::select::select(&row.default_model_select, cx, 0),
-                    provenance.default_model_base.clone(),
-                    cx,
-                )
-            })
-            .map(|body| {
-                Self::field_with_base(
-                    body,
-                    s::settings_agent_field_env(),
-                    crate::ui::input(&row.env_input, cx, 0),
-                    provenance.env_base.clone(),
-                    cx,
-                )
-            })
-            .child(
-                div()
-                    .text_size(px(theme::MODAL_BODY_FONT_SIZE))
-                    .text_color(t.text_muted)
-                    .child(s::settings_agent_env_description()),
-            )
-            // What the overlay does, and what it does not do. Its own banner
-            // rather than a trailing clause of the muted paragraph above: the
-            // reader this exists for is the one who turned it on, saw no
-            // subagents, and needs to be told the setting is not the thing
-            // that spawns them. `info`, not `warning` — nothing is wrong here,
-            // it is a default-on state whose scope is easy to misread.
-            .when(row.ships_codex_subagent_overlay(cx), |body| {
-                body.child(
-                    div()
-                        .text_size(px(theme::MODAL_BODY_FONT_SIZE))
-                        .text_color(t.text_muted)
-                        .child(s::settings_agent_env_codex_note()),
-                )
-                .child(crate::ui::alert::info(
-                    SharedString::from(format!("settings-agent-env-codex-{catalog_index}")),
-                    s::settings_agent_env_codex_caveat(),
-                ))
-            })
-            .child(Self::section_label(
-                s::settings_agent_section_transcript(),
-                cx,
-            ))
-            .child(
-                div()
-                    .text_size(px(theme::MODAL_BODY_FONT_SIZE))
-                    .text_color(t.text_muted)
-                    .child(s::settings_agent_transcript_description()),
-            )
-            .map(|body| {
-                Self::field_with_base(
-                    body,
-                    s::settings_agent_field_fold_mode(),
-                    fold_control,
-                    provenance.fold_mode_base.clone(),
-                    cx,
-                )
-            })
-            .map(|body| {
-                Self::field_with_base(
-                    body,
-                    s::settings_agent_field_tail_window(),
-                    crate::ui::select::select(&row.tail_window_select, cx, 0),
-                    provenance.tail_window_base.clone(),
-                    cx,
-                )
-            })
-            .map(|body| {
-                Self::field_with_base(
-                    body,
-                    s::settings_agent_field_tail_window_calls(),
-                    crate::ui::select::select(&row.tail_window_calls_select, cx, 0),
-                    provenance.tail_window_calls_base.clone(),
-                    cx,
-                )
-            })
-            .map(|body| {
-                Self::field_with_base(
-                    body,
-                    s::settings_agent_field_display_filter(),
-                    filter_control,
-                    provenance.display_filter_base.clone(),
-                    cx,
-                )
-            });
-
-        // A preset reference is `Raw`-only, so picking a remote transport
-        // detaches the row into a custom copy on commit — say so before commit
-        // silently drops the preset link.
-        if provenance.follows_preset() && transport_kind != TRANSPORT_RAW {
-            body = body.child(
-                div()
-                    .text_size(px(theme::MODAL_BODY_FONT_SIZE))
-                    .text_color(t.banner_warning_text)
-                    .child(s::settings_agent_row_detach_hint()),
-            );
-        }
-
-        // Only one of host/container is meaningful per transport kind — show
-        // just that field, plus a hint pointing at the Lane's own Session
-        // Host setting: unless the lane's session_host is unanswered (the
-        // legacy fallback), this agent-side host/container is ignored in
-        // favor of the lane's — see `Lane::effective_session_host`.
-        if transport_kind == "ssh" {
-            body = body
-                .child(field_row(
-                    s::settings_agent_field_host(),
-                    crate::ui::input(&row.host_input, cx, 0),
-                ))
-                .child(
-                    div()
-                        .text_size(px(theme::MODAL_BODY_FONT_SIZE))
-                        .text_color(t.text_muted)
-                        .child(s::settings_agent_remote_path_hint()),
-                );
-        } else if transport_kind == "docker" {
-            body = body
-                .child(field_row(
-                    s::settings_agent_field_container(),
-                    crate::ui::input(&row.container_input, cx, 0),
-                ))
-                .child(
-                    div()
-                        .text_size(px(theme::MODAL_BODY_FONT_SIZE))
-                        .text_color(t.text_muted)
-                        .child(s::settings_agent_remote_path_hint()),
-                );
-        }
-
-        body.into_any_element()
-    }
-
     /// A labelled control plus the value it inherits when the row states none.
     /// Eight fields render this trio; the base line is what tells an override
     /// from a row that is simply following its preset.
@@ -514,6 +252,13 @@ impl SettingsView {
             return;
         };
         self.add_agent_row(definition, Some(id), window, cx);
+        self.open_last_agent_card(
+            CardFold {
+                expanded: true,
+                advanced: false,
+            },
+            cx,
+        );
     }
 
     /// Append a blank row the user fills in by hand — it references no preset.
@@ -528,6 +273,26 @@ impl SettingsView {
             window,
             cx,
         );
+        // A custom row has no command yet, and the command lives in the
+        // advanced block — so that block opens with it.
+        self.open_last_agent_card(
+            CardFold {
+                expanded: true,
+                advanced: true,
+            },
+            cx,
+        );
+    }
+
+    /// Set the fold of the row just appended, so an added agent opens ready
+    /// to edit instead of arriving folded.
+    fn open_last_agent_card(&mut self, fold: CardFold, cx: &mut gpui::Context<Self>) {
+        if let Some(index) = self.agent_catalog.len().checked_sub(1)
+            && let Some(row) = self.agent_editable_row_mut(index)
+        {
+            row.fold = fold;
+            cx.notify();
+        }
     }
 }
 
@@ -554,6 +319,9 @@ impl RowProvenance {
         self.preset.is_some()
     }
 
+    /// Whether any field departs from the preset — the aggregate the
+    /// provenance tests assert on.
+    #[cfg(test)]
     pub(in crate::settings) fn is_overridden(&self) -> bool {
         self.name_base.is_some()
             || self.command_base.is_some()
@@ -564,13 +332,6 @@ impl RowProvenance {
             || self.tail_window_calls_base.is_some()
             || self.display_filter_base.is_some()
             || self.env_base.is_some()
-    }
-
-    fn source_label(&self) -> String {
-        match &self.preset {
-            Some(preset) => s::settings_agent_row_source_preset(preset),
-            None => s::settings_agent_row_source_custom(),
-        }
     }
 }
 

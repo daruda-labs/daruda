@@ -3065,3 +3065,107 @@ fn focus_section_resets_scroll(cx: &mut TestAppContext) {
         assert_eq!(w.scroll_handle.offset().y, gpui::px(0.));
     });
 }
+
+/// A card opens folded, except for what it hides: a row already running a
+/// command other than its preset's opens with the advanced block showing.
+/// The built-in Claude's own id is not such a difference.
+#[gpui::test]
+fn a_card_opens_its_advanced_block_when_it_runs_something_else(cx: &mut TestAppContext) {
+    let config = daruda_config::Config {
+        agents: vec![
+            daruda_config::AgentEntry::for_definition(
+                daruda_config::AgentDefinition::claude_default(),
+                None,
+            ),
+            daruda_config::AgentEntry::preset_with(
+                "codex-acp",
+                daruda_config::PresetOverrides {
+                    command: Some("npx -y @agentclientprotocol/codex-acp@1.0.0".to_string()),
+                    ..daruda_config::PresetOverrides::default()
+                },
+            ),
+        ],
+        ..daruda_config::Config::default()
+    };
+    let (_wh, win) = build_window_with_config(cx, config);
+    win.read_with(cx, |w, cx| {
+        assert_eq!(w.agent_card_fold_for_test(0), Some(CardFold::default()));
+        assert!(!w.agent_editable_row(0).unwrap().advanced_overridden(cx));
+        assert_eq!(
+            w.agent_card_fold_for_test(1),
+            Some(CardFold {
+                expanded: false,
+                advanced: true,
+            })
+        );
+        assert!(w.agent_editable_row(1).unwrap().advanced_overridden(cx));
+    });
+}
+
+/// An added agent arrives open; a custom one also opens its advanced block,
+/// where the command it still needs lives.
+#[gpui::test]
+fn an_added_card_opens_ready_to_edit(cx: &mut TestAppContext) {
+    let (wh, win) = build_window(cx);
+    assert!(select_agent_preset(&wh, &win, cx, "gemini"));
+    add_selected_agent_preset(&wh, &win, cx);
+    win.read_with(cx, |w, _| {
+        assert_eq!(
+            w.agent_card_fold_for_test(1),
+            Some(CardFold {
+                expanded: true,
+                advanced: false,
+            })
+        );
+    });
+    let settings = win.clone();
+    wh.update(cx, |_root, window, cx| {
+        settings.update(cx, |w, cx| w.add_custom_agent_row_for_test(window, cx));
+    })
+    .unwrap();
+    win.read_with(cx, |w, _| {
+        assert_eq!(
+            w.agent_card_fold_for_test(2),
+            Some(CardFold {
+                expanded: true,
+                advanced: true,
+            })
+        );
+    });
+}
+
+/// Folding is view state: it writes nothing, and a save that rebuilds the
+/// catalog from the written config keeps the card the user is editing open.
+#[gpui::test]
+fn folding_a_card_saves_nothing_and_survives_a_save(cx: &mut TestAppContext) {
+    let (wh, win) = build_window(cx);
+    let before = cx.read(|cx| {
+        crate::settings_store::SettingsStore::global(cx)
+            .user()
+            .agents
+            .clone()
+    });
+    win.update(cx, |w, cx| {
+        w.toggle_agent_card_expanded(0, cx);
+        w.toggle_agent_card_advanced(0, cx);
+    });
+    let after = cx.read(|cx| {
+        crate::settings_store::SettingsStore::global(cx)
+            .user()
+            .agents
+            .clone()
+    });
+    assert_eq!(after, before, "a fold toggle writes nothing");
+
+    // A tail pick persists and then reloads every row from the live config.
+    confirm_agent_row_select(&wh, &win, cx, 0, |r| r.tail_window_select.clone(), "3");
+    win.read_with(cx, |w, _| {
+        assert_eq!(
+            w.agent_card_fold_for_test(0),
+            Some(CardFold {
+                expanded: true,
+                advanced: true,
+            })
+        );
+    });
+}

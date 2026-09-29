@@ -653,8 +653,20 @@ impl BoolSetting {
     }
 }
 
+/// Which parts of a catalog card are open. View state only: never persisted,
+/// and carried across a catalog reload so a save does not fold the card the
+/// user is editing.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(super) struct CardFold {
+    /// The detail fields below the card's header.
+    pub(super) expanded: bool,
+    /// The advanced block inside the details — command, transport, env.
+    pub(super) advanced: bool,
+}
+
 #[derive(Clone)]
 pub(super) struct AgentCatalogRow {
+    pub(super) fold: CardFold,
     /// The preset this row references, when it has one. Kept so saving
     /// re-derives the row's overrides against that preset instead of writing a
     /// frozen copy — an untouched field keeps tracking the preset.
@@ -982,7 +994,8 @@ impl SettingsView {
                 &default_mode,
                 &default_model,
             );
-        AgentCatalogRow {
+        let mut row = AgentCatalogRow {
+            fold: CardFold::default(),
             preset,
             env_input: cx.new(|cx_state| {
                 InputState::new(window, cx_state)
@@ -1044,7 +1057,11 @@ impl SettingsView {
                 select::state_with_options(model_options, Some(&default_model), window, cx)
             }),
             path_warning,
-        }
+        };
+        // A row that already runs something other than its preset opens with
+        // the advanced block showing, so the difference is never hidden.
+        row.fold.advanced = row.advanced_overridden(cx);
+        row
     }
 
     /// Wire one agent-catalog row's inputs to the standard submit /
@@ -2484,18 +2501,28 @@ impl SettingsView {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        let folds: HashMap<String, CardFold> = self
+            .agent_editable_rows()
+            .map(|(_, row)| (row.id_input.read(cx).value().trim().to_string(), row.fold))
+            .collect();
         let vocabulary = &self.agent_vocabulary;
         let catalog = live
             .agents
             .iter()
             .map(|entry| match entry.resolve() {
-                Some(definition) => AgentCatalogItem::Editable(Self::agent_row_from_definition(
-                    &definition,
-                    vocabulary,
-                    entry.preset_id().map(str::to_string),
-                    window,
-                    cx,
-                )),
+                Some(definition) => {
+                    let mut row = Self::agent_row_from_definition(
+                        &definition,
+                        vocabulary,
+                        entry.preset_id().map(str::to_string),
+                        window,
+                        cx,
+                    );
+                    if let Some(fold) = folds.get(&definition.id) {
+                        row.fold = *fold;
+                    }
+                    AgentCatalogItem::Editable(row)
+                }
                 None => AgentCatalogItem::Unresolved(entry.clone()),
             })
             .collect::<Vec<_>>();

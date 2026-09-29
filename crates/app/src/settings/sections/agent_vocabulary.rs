@@ -124,6 +124,54 @@ pub(in crate::settings) fn agent_row_vocabulary_options(
     )
 }
 
+/// `(model, mode)` as a collapsed catalog card names them: the picked value,
+/// or what the adapter itself defaults to when the row picks nothing — the
+/// same names the pickers show, without their "agent default" framing.
+pub(in crate::settings) fn agent_row_summary(
+    vocabulary: &AgentVocabularyCache,
+    agent_id: &str,
+    command: &str,
+    saved_mode: &str,
+    saved_model: &str,
+) -> (String, String) {
+    let seed = daruda_config::agent_vocabulary_seed(command);
+    let (seed_modes, seed_models) = match seed.as_ref() {
+        Some(seed) => (seed.modes.as_slice(), seed.models.as_slice()),
+        None => (&[][..], &[][..]),
+    };
+    (
+        summary_label(
+            known_axis(vocabulary.known_models_for(agent_id, command), seed_models),
+            seed.as_ref().and_then(|seed| seed.default_model.as_deref()),
+            saved_model,
+        ),
+        summary_label(
+            known_axis(vocabulary.known_modes_for(agent_id, command), seed_modes),
+            seed.as_ref().and_then(|seed| seed.default_mode.as_deref()),
+            saved_mode,
+        ),
+    )
+}
+
+/// One axis of [`agent_row_summary`].
+fn summary_label(entries: &[VocabEntry], adapter_default: Option<&str>, saved: &str) -> String {
+    if !saved.is_empty() {
+        return entry_name(entries, saved).to_string();
+    }
+    match adapter_default {
+        Some(id) => entry_name(entries, id).to_string(),
+        None => s::settings_agent_vocabulary_agent_default(),
+    }
+}
+
+/// The advertised name for `id`, or the id itself when nothing names it.
+fn entry_name<'a>(entries: &'a [VocabEntry], id: &'a str) -> &'a str {
+    entries
+        .iter()
+        .find(|entry| entry.id == id)
+        .map_or(id, |entry| entry.name.as_str())
+}
+
 /// What the agent last advertised on one axis, or the adapter seed until it
 /// has advertised anything there.
 fn known_axis<'a>(cached: Option<&'a [VocabEntry]>, seeded: &'a [VocabEntry]) -> &'a [VocabEntry] {
@@ -159,12 +207,7 @@ fn agent_default_label(entries: &[VocabEntry], adapter_default: Option<&str>) ->
     let Some(id) = adapter_default else {
         return s::settings_agent_vocabulary_agent_default();
     };
-    let name = entries
-        .iter()
-        .find(|entry| entry.id == id)
-        .map(|entry| entry.name.as_str())
-        .unwrap_or(id);
-    s::settings_agent_vocabulary_agent_default_named(name)
+    s::settings_agent_vocabulary_agent_default_named(entry_name(entries, id))
 }
 
 #[cfg(test)]
@@ -187,7 +230,7 @@ impl SettingsView {
 
 #[cfg(test)]
 mod tests {
-    use super::{VocabEntry, agent_row_vocabulary_options, vocabulary_options};
+    use super::{VocabEntry, agent_row_summary, agent_row_vocabulary_options, vocabulary_options};
     use daruda_store::agent_vocabulary::AgentVocabularyCache;
 
     fn entries(pairs: &[(&str, &str)]) -> Vec<VocabEntry> {
@@ -239,6 +282,38 @@ mod tests {
     #[test]
     fn an_empty_vocabulary_still_offers_the_agent_default() {
         assert_eq!(values(&vocabulary_options(&[], None, "")), vec![""]);
+    }
+
+    /// A collapsed card names the picked value, or — picking nothing — what
+    /// the adapter itself defaults to, from the same vocabulary the pickers use.
+    #[test]
+    fn the_summary_names_the_pick_or_the_adapter_default() {
+        let command = "npx -y @agentclientprotocol/claude-agent-acp@latest";
+        let mut cache = AgentVocabularyCache::default();
+        cache.record_models(
+            "claude",
+            command,
+            entries(&[("default", "Default (recommended)"), ("opus", "Opus 5.5")]),
+        );
+        cache.record_modes(
+            "claude",
+            command,
+            entries(&[("default", "Manual"), ("plan", "Plan")]),
+        );
+
+        assert_eq!(
+            agent_row_summary(&cache, "claude", command, "", ""),
+            ("Default (recommended)".to_string(), "Manual".to_string())
+        );
+        assert_eq!(
+            agent_row_summary(&cache, "claude", command, "plan", "opus"),
+            ("Opus 5.5".to_string(), "Plan".to_string())
+        );
+        // A pick the vocabulary does not list still names itself.
+        assert_eq!(
+            agent_row_summary(&cache, "claude", command, "legacy", "").1,
+            "legacy"
+        );
     }
 
     #[test]

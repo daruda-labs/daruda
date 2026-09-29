@@ -5364,17 +5364,20 @@ pub fn settings_agent_preset_needs_install_hint(name: &str) -> String {
     rust_i18n::t!("settings.agent_preset_needs_install_hint", name = name).into_owned()
 }
 
-/// Provenance line on a catalog row that references a preset.
-pub fn settings_agent_row_source_preset(preset: &str) -> String {
-    rust_i18n::t!("settings.agent_row_source_preset", preset = preset).into_owned()
+/// Toggle that opens a catalog card's advanced block (command, transport,
+/// environment).
+pub fn settings_agent_card_advanced() -> String {
+    rust_i18n::t!("settings.agent_card_advanced").into_owned()
 }
 
-pub fn settings_agent_row_source_custom() -> String {
-    rust_i18n::t!("settings.agent_row_source_custom").into_owned()
+/// Badge on a catalog card whose advanced settings differ from its preset.
+pub fn settings_agent_card_modified() -> String {
+    rust_i18n::t!("settings.agent_card_modified").into_owned()
 }
 
-pub fn settings_agent_row_overridden() -> String {
-    rust_i18n::t!("settings.agent_row_overridden").into_owned()
+/// A collapsed catalog card's one-line summary of what it will run.
+pub fn settings_agent_card_summary(model: &str, mode: &str) -> String {
+    rust_i18n::t!("settings.agent_card_summary", model = model, mode = mode).into_owned()
 }
 
 /// The preset's own value for a field the row overrides.

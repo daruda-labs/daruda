@@ -485,6 +485,9 @@ pub const SETTINGS_LABEL_W: f32 = 120.0;
 /// off-screen.
 pub const SETTINGS_AGENT_ENV_ROWS_MIN: usize = 2;
 pub const SETTINGS_AGENT_ENV_ROWS_MAX: usize = 6;
+/// Agent logo on a catalog card's header — one step above the menu icons so
+/// the card reads as that agent at a glance.
+pub const SETTINGS_AGENT_CARD_ICON_SIZE: f32 = 20.0;
 
 /// Width of the section-nav sidebar, including its icon and label columns.
 pub const SETTINGS_SIDEBAR_W: f32 = 208.0;
