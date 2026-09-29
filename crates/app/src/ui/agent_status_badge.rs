@@ -72,6 +72,30 @@ pub fn color_for_status(status: SessionStatus, cx: &App) -> Hsla {
     }
 }
 
+/// The colour of a tab's status dot, or `None` for a status that draws no
+/// dot. A dot has no shape to tell states apart, so waiting takes the amber
+/// the Tasks panel gives it rather than the red a failure has; `Idle` and
+/// `Connecting` are the resting states of every agent tab and stay quiet.
+pub fn tab_dot_color(status: SessionStatus, cx: &App) -> Option<Hsla> {
+    if !tab_dot_shows(status) {
+        return None;
+    }
+    Some(match status {
+        SessionStatus::NeedsAttention => theme::WARNING,
+        other => color_for_status(other, cx),
+    })
+}
+
+fn tab_dot_shows(status: SessionStatus) -> bool {
+    matches!(
+        status,
+        SessionStatus::Working
+            | SessionStatus::ExecutingTool
+            | SessionStatus::NeedsAttention
+            | SessionStatus::Failed
+    )
+}
+
 /// Stateless GPUI element rendering one of four animation modes.
 #[derive(IntoElement)]
 pub struct AgentStatusBadge {
@@ -452,6 +476,17 @@ impl RenderOnce for QuadrantGrid {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn only_a_tab_that_wants_a_look_or_is_working_shows_a_dot() {
+        use daruda_agent::SessionStatus as S;
+        for shown in [S::Working, S::ExecutingTool, S::NeedsAttention, S::Failed] {
+            assert!(super::tab_dot_shows(shown), "{shown:?}");
+        }
+        for quiet in [S::Idle, S::Connecting] {
+            assert!(!super::tab_dot_shows(quiet), "{quiet:?}");
+        }
+    }
+
     use super::*;
 
     #[test]

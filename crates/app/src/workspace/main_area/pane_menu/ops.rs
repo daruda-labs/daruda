@@ -317,23 +317,15 @@ impl Workspace {
         SharedString::from(format!(
             "{} - {}",
             pane_label.as_ref(),
-            self.tab_label(tab_index, cx).as_ref()
+            self.send_target_tab_label(tab_index, cx).as_ref()
         ))
     }
 
-    fn tab_label(&self, tab_index: usize, cx: &App) -> SharedString {
-        let Some(tab) = self.active_runtime().tabs.get(tab_index) else {
-            return SharedString::from(s::ctx_send_target_tab_fallback(tab_index + 1));
-        };
-        if let Some(label) = tab.user_label.clone() {
-            return label;
+    fn send_target_tab_label(&self, tab_index: usize, cx: &App) -> SharedString {
+        match self.active_runtime().tabs.get(tab_index) {
+            Some(tab) => self.tab_label(tab, cx),
+            None => SharedString::from(s::ctx_send_target_tab_fallback(tab_index + 1)),
         }
-        self.active_runtime()
-            .panes
-            .iter()
-            .find(|pane| pane.id == tab.last_focused_pane)
-            .and_then(|pane| pane.display_cwd().or_else(|| Some(pane.title(cx))))
-            .unwrap_or_else(|| SharedString::from(s::ctx_send_target_tab_fallback(tab_index + 1)))
     }
 
     pub(super) fn scroll_agent_chat_to_bottom(&mut self, pane_id: PaneId, cx: &mut Context<Self>) {

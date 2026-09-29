@@ -56,7 +56,9 @@ pub mod theme;
 pub mod tooltip;
 
 pub use agent_icon::{agent_icon, agent_menu_icon};
-pub use agent_status_badge::{AgentStatusBadge, IndicatorSize, StatusPulseClock, color_for_status};
+pub use agent_status_badge::{
+    AgentStatusBadge, IndicatorSize, StatusPulseClock, color_for_status, tab_dot_color,
+};
 pub use badge::Badge;
 pub use button::{
     Button, button, button_add_tile, button_bare, button_bare_on_surface, button_chip,

@@ -2,7 +2,7 @@
 //!
 //! Two distinct UI elements live here — keep them straight (see workspace/mod.rs):
 //!   • Tab bar  (top of window)   — built inline in `impl Render`.
-//!                                   Identifiers: `tab_bar`, `tab_titles`, `TAB_BAR_HEIGHT`.
+//!                                   Identifiers: `tab_bar`, `tab_cells`, `TAB_BAR_HEIGHT`.
 //!   • Pane header (per pane)     — built by `pane_header()`, only in split mode.
 //!                                   Identifiers: `pane_header`, `PANE_HEADER_HEIGHT`.
 
@@ -39,6 +39,9 @@ use crate::workspace::root_menu::RootContextMenuExt as _;
 mod center;
 mod landing;
 mod snapshots;
+mod tab_cells;
+
+use tab_cells::TabCell;
 
 pub(super) const PANE_HEADER_HEIGHT: f32 = theme::PANE_HEADER_HEIGHT;
 
@@ -667,89 +670,7 @@ impl Workspace {
         let tab_insertion_line_color = t.terminal_drop_target_bg;
 
         // Pre-collect tab bar data (no entity reads during element construction).
-        // User-set label (Window > Edit Tab Title…) wins; otherwise fall
-        // back to cwd basename, then PTY title — iTerm2's "Show profile
-        // name → working directory" preference.
-        //
-        // Each entry: (index, tab_id, is_active, display_label, file_abs_path,
-        // worktree_root, is_scratch)
-        // tab_id is the stable TabEntry id (drag payload identity, survives
-        // reorder). file_abs_path / worktree_root are Some only for File
-        // panes and drive the right-click "Copy File Path" / "Copy Relative
-        // Path" items.
-        #[allow(clippy::type_complexity)]
-        let tab_titles: Vec<(
-            usize,
-            u64,
-            bool,
-            SharedString,
-            Option<std::path::PathBuf>,
-            Option<std::path::PathBuf>,
-            bool,
-        )> = {
-            // The tab a left-dock preview may take over. Resolved once rather than
-            // per tab: it reads every pane's dirty state, and the answer is one
-            // index either way.
-            let scratch_tab = self.preview_tab_index(cx);
-            self.active_runtime()
-                .tabs
-                .iter()
-                .enumerate()
-                .map(|(i, tab)| {
-                    let pane = self
-                        .active_runtime()
-                        .panes
-                        .iter()
-                        .find(|p| p.id == tab.last_focused_pane);
-                    let base_label = self
-                        .is_orchestrator_tab(tab)
-                        .then(|| crate::surface::strings::orchestrator_label().into())
-                        .or_else(|| tab.user_label.clone())
-                        .or_else(|| {
-                            pane.and_then(|p| {
-                                // File panes: filename is the tab identity; the parent
-                                // directory is shown in the toolbar, not the tab.
-                                (!p.is_file()).then(|| p.display_cwd()).flatten()
-                            })
-                        })
-                        .or_else(|| pane.map(|p| p.title(cx)))
-                        .unwrap_or_else(|| "shell".into());
-                    // Prefix the dirty dot so the user can spot unsaved edits
-                    // in the tab bar at a glance — File panes in Raw mode and
-                    // TaskEdit panes both report them.
-                    let label: SharedString = if pane.map(|p| p.tab_dirty_dot(cx)).unwrap_or(false)
-                    {
-                        SharedString::from(format!(
-                            "{}{}",
-                            crate::surface::strings::TAB_TITLE_DIRTY_DOT,
-                            base_label
-                        ))
-                    } else {
-                        base_label
-                    };
-                    let (file_path, worktree_root) = match pane.and_then(|p| p.file_identity()) {
-                        Some((path, wt_id)) => {
-                            let root = self
-                                .active_lanes()
-                                .iter()
-                                .find(|wt| wt.id == wt_id)
-                                .map(|wt| wt.path.clone());
-                            (Some(path), root)
-                        }
-                        None => (None, None),
-                    };
-                    (
-                        i,
-                        tab.id,
-                        i == self.active_runtime().active_tab_index,
-                        label,
-                        file_path,
-                        worktree_root,
-                        scratch_tab == Some(i),
-                    )
-                })
-                .collect()
-        };
+        let tab_cells = self.tab_cells(cx);
 
         let DockFrame {
             dragged_dock,
@@ -817,12 +738,12 @@ impl Workspace {
 
         // ── Tab bar ──────────────────────────────────────
         // Reorder-insertion indicator: `Some(k)` means "insert the dragged
-        // tab before slot k" (k == tab_titles.len() means "at the end").
+        // tab before slot k" (k == tab_cells.len() means "at the end").
         // Rendered as a border on the adjacent cell (or the "+" button for
         // the end slot) rather than an absolute-positioned overlay, so it
         // never has to re-derive the tab bar's flex-computed x offsets.
         let tab_reorder_preview = self.main_area.tab_reorder_preview.map(|(_, index)| index);
-        let tab_count = tab_titles.len();
+        let tab_count = tab_cells.len();
         let tab_bar = div()
             .flex()
             .flex_row()
@@ -831,8 +752,17 @@ impl Workspace {
             .relative()
             .bg(tab_bar_bg)
             .items_center()
-            .children(tab_titles.into_iter().map(
-                |(i, tab_id, is_active, display, file_path, worktree_root, is_scratch)| {
+            .children(tab_cells.into_iter().map(
+                |TabCell {
+                     index: i,
+                     id: tab_id,
+                     is_active,
+                     label: display,
+                     file_path,
+                     worktree_root,
+                     is_scratch,
+                     status,
+                 }| {
                     let is_orchestrator = self
                         .active_runtime()
                         .tabs
@@ -1097,6 +1027,19 @@ impl Workspace {
 
                             items.into_iter().fold(menu, |m, item| m.item(item))
                         })
+                        .when_some(
+                            status.and_then(|s| crate::ui::tab_dot_color(s, cx)),
+                            |cell, color| {
+                                cell.child(
+                                    div()
+                                        .flex_none()
+                                        .mr(px(theme::TAB_STATUS_DOT_GAP))
+                                        .size(px(theme::TAB_STATUS_DOT_SIZE))
+                                        .rounded_full()
+                                        .bg(color),
+                                )
+                            },
+                        )
                         .child({
                             div()
                                 .flex_1()

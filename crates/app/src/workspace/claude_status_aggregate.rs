@@ -74,26 +74,15 @@ pub(in crate::workspace) fn aggregate_over_panes(
     let acp_map: HashMap<PaneId, SessionStatus> = acp_statuses.iter().copied().collect();
 
     for (pane_id, lane_ref) in pane_lane {
-        // Try PTY-bound session first.
-        if let Some(binding) = bindings.get(pane_id)
-            && let Some(file) = store.get(&binding.session_id)
-        {
-            let sessions = per_lane.entry(*lane_ref).or_default();
-            // One session, one entry — the same session bound to a second
-            // pane (e.g. `claude --resume` of a running session) keeps its
-            // first-pane position and must not inflate the sub-row count.
-            if !sessions.iter().any(|(sid, _)| *sid == binding.session_id) {
-                sessions.push((binding.session_id.clone(), file.status));
-            }
+        let Some((session_id, status)) = pane_session(*pane_id, bindings, store, &acp_map) else {
             continue;
-        }
-        // Try ACP (agent chat) session for this pane.
-        if let Some(&status) = acp_map.get(pane_id) {
-            let synthetic_id = format!("acp:{pane_id}");
-            let sessions = per_lane.entry(*lane_ref).or_default();
-            if !sessions.iter().any(|(sid, _)| *sid == synthetic_id) {
-                sessions.push((synthetic_id, status));
-            }
+        };
+        let sessions = per_lane.entry(*lane_ref).or_default();
+        // One session, one entry — the same session bound to a second
+        // pane (e.g. `claude --resume` of a running session) keeps its
+        // first-pane position and must not inflate the sub-row count.
+        if !sessions.iter().any(|(sid, _)| *sid == session_id) {
+            sessions.push((session_id, status));
         }
     }
 
@@ -110,6 +99,39 @@ pub(in crate::workspace) fn aggregate_over_panes(
         .collect();
 
     (per_lane_status, per_lane_sessions)
+}
+
+/// One pane's session, `(session id, status)`: its PTY-bound Claude session
+/// first, else its agent chat. The one definition the lane and tab
+/// indicators share.
+fn pane_session(
+    pane_id: PaneId,
+    bindings: &HashMap<PaneId, PtyBinding>,
+    store: &daruda_agent::ClaudeStatusStore,
+    acp: &HashMap<PaneId, SessionStatus>,
+) -> Option<(String, SessionStatus)> {
+    if let Some(binding) = bindings.get(&pane_id)
+        && let Some(file) = store.get(&binding.session_id)
+    {
+        return Some((binding.session_id.clone(), file.status));
+    }
+    acp.get(&pane_id)
+        .map(|&status| (format!("acp:{pane_id}"), status))
+}
+
+/// The status a tab shows: the most urgent session among its panes.
+pub(in crate::workspace) fn tab_session_status(
+    pane_ids: &[PaneId],
+    bindings: &HashMap<PaneId, PtyBinding>,
+    store: &daruda_agent::ClaudeStatusStore,
+    acp_statuses: &[(PaneId, SessionStatus)],
+) -> Option<SessionStatus> {
+    let acp: HashMap<PaneId, SessionStatus> = acp_statuses.iter().copied().collect();
+    SessionStatus::aggregate(
+        pane_ids
+            .iter()
+            .filter_map(|id| pane_session(*id, bindings, store, &acp).map(|(_, s)| s)),
+    )
 }
 
 /// `true` when any pane's bound session (PTY or ACP) is in a status whose
@@ -465,6 +487,24 @@ mod tests {
         // Pane (layout) order is observable through the id order.
         let ids: Vec<&str> = sessions.iter().map(|(sid, _)| sid.as_str()).collect();
         assert_eq!(ids, vec!["a", "b"]);
+    }
+
+    /// A tab shows its most urgent pane, PTY session or agent chat alike;
+    /// a tab with no session shows nothing.
+    #[test]
+    fn a_tab_takes_the_most_urgent_of_its_panes() {
+        let bindings: HashMap<PaneId, PtyBinding> = [binding(10, "a")].into_iter().collect();
+        let store = store_with(vec![entry("a", "/x", SessionStatus::Working)]);
+        let acp = [(20u64, SessionStatus::NeedsAttention)];
+        assert_eq!(
+            tab_session_status(&[10, 20], &bindings, &store, &acp),
+            Some(SessionStatus::NeedsAttention)
+        );
+        assert_eq!(
+            tab_session_status(&[10], &bindings, &store, &acp),
+            Some(SessionStatus::Working)
+        );
+        assert_eq!(tab_session_status(&[30], &bindings, &store, &acp), None);
     }
 
     #[test]

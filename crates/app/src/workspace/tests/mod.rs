@@ -51,6 +51,7 @@ mod snapshot_for_disk;
 mod splits;
 mod tab_drag;
 mod tab_merge;
+mod tab_status;
 mod task_edit_tab_cycle;
 mod tasks;
 mod terminal_exit;

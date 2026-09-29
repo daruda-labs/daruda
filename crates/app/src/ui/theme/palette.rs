@@ -2147,6 +2147,9 @@ pub const DRAG_PILL_CURSOR_OFFSET: f32 = 4.0;
 pub const STATUS_INDICATOR_SIZE: f32 = 16.0;
 /// Sub-row per-session badge footprint.
 pub const STATUS_INDICATOR_BADGE_SIZE: f32 = 12.0;
+/// A tab's agent-status dot, and its gap before the label.
+pub const TAB_STATUS_DOT_SIZE: f32 = 6.0;
+pub const TAB_STATUS_DOT_GAP: f32 = GAP_SM;
 /// Width of the cell that holds the indicator inside the lane row,
 /// inserted between the active-row accent bar and the body.
 pub const STATUS_INDICATOR_CELL_WIDTH: f32 = STATUS_INDICATOR_SIZE + GAP_XS;
