@@ -35,6 +35,8 @@ const NAME_SETTINGS: &str = "settings";
 const NAME_SETTINGS_ERROR: &str = "settings-error";
 /// CLI token for Settings with a search query typed: the results page.
 const NAME_SETTINGS_SEARCH: &str = "settings-search";
+/// CLI token for the agent catalog with one card fully open.
+const NAME_AGENT_CATALOG_EXPANDED: &str = "agent-catalog-expanded";
 /// CLI token for the app-drawn window chrome. Forces the Client arm on a host
 /// that would resolve to Native, so the layout is reviewable off its platform.
 const NAME_CLIENT_CHROME: &str = "client-chrome";
@@ -185,6 +187,10 @@ pub(crate) enum ScreenshotScenario {
     /// Settings with a query typed into its search: the results page and the
     /// sidebar narrowed to the pages that matched, with their counts.
     SettingsSearch,
+    /// The agent catalog with its first card and that card's advanced block
+    /// open, and the preset lists narrowed by a query — a restored Settings
+    /// opens every card folded, so the fields inside are reachable no other way.
+    AgentCatalogExpanded,
     /// Deploy the focused pane's right-click menu. The only way to eyeball
     /// menu length, edge-flip and the keybinding column — none of which any
     /// unit test can see.
@@ -349,6 +355,7 @@ impl ScreenshotScenario {
             NAME_SETTINGS => Some(Self::Settings(BuiltinSection::default())),
             NAME_SETTINGS_ERROR => Some(Self::SettingsError),
             NAME_SETTINGS_SEARCH => Some(Self::SettingsSearch),
+            NAME_AGENT_CATALOG_EXPANDED => Some(Self::AgentCatalogExpanded),
             NAME_PANE_CONTEXT_MENU => Some(Self::PaneContextMenu),
             NAME_MERMAID_LIGHTBOX => Some(Self::MermaidLightbox),
             NAME_FLOW_GRAPH => Some(Self::FlowGraph),
@@ -530,6 +537,14 @@ pub(crate) fn drive(
                 ws.open_settings(BuiltinSection::default(), window, cx);
                 if let Some(view) = ws.settings_view().cloned() {
                     view.update(cx, |this, cx| this.seed_search_for_shot(window, cx));
+                }
+            });
+        }
+        ScreenshotScenario::AgentCatalogExpanded => {
+            workspace.update(cx, |ws, cx| {
+                ws.open_settings(BuiltinSection::Agent, window, cx);
+                if let Some(view) = ws.settings_view().cloned() {
+                    view.update(cx, |this, cx| this.seed_agent_catalog_for_shot(window, cx));
                 }
             });
         }
@@ -820,6 +835,10 @@ mod tests {
         assert_eq!(
             ScreenshotScenario::from_cli_name("settings-search"),
             Some(ScreenshotScenario::SettingsSearch)
+        );
+        assert_eq!(
+            ScreenshotScenario::from_cli_name("agent-catalog-expanded"),
+            Some(ScreenshotScenario::AgentCatalogExpanded)
         );
     }
 

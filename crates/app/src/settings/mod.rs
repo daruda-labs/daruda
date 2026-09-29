@@ -2452,6 +2452,31 @@ impl SettingsView {
         cx.notify();
     }
 
+    /// Open the first catalog card and its advanced block, narrow the preset
+    /// lists with a query, and scroll to them — the `--screenshot-scenario
+    /// agent-catalog-expanded` entry point: every part of a card on one screen.
+    #[cfg(feature = "screenshot")]
+    pub(crate) fn seed_agent_catalog_for_shot(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let first = self.agent_editable_rows().map(|(index, _)| index).next();
+        if let Some(index) = first
+            && let Some(row) = self.agent_editable_row_mut(index)
+        {
+            row.fold = CardFold {
+                expanded: true,
+                advanced: true,
+            };
+        }
+        self.agent_catalog_search.update(cx, |input, cx| {
+            input.set_value("gem".to_string(), window, cx);
+        });
+        self.scroll_handle.scroll_to_bottom();
+        cx.notify();
+    }
+
     /// Raise the failure banner with a representative message — the
     /// `--screenshot-scenario settings-error` entry point. No action is
     /// actually attempted; a capture must not depend on a write failing.
