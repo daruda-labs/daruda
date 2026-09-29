@@ -1940,7 +1940,7 @@ fn editing_the_command_field_recomputes_the_path_warning(cx: &mut TestAppContext
 
 /// The cached PATH warning is transport-independent by design — switching a
 /// row to ssh does not clear it. The ssh/docker exemption is applied at
-/// render time instead (`sections::agent::render_agent_catalog_row`, unit-
+/// render time instead (`sections::agent_catalog::render_agent_catalog_row`, unit-
 /// tested by `transport_needs_local_path_check`), since that needs no fresh
 /// `which` call. Save must still succeed: an ssh row's command runs on the
 /// remote host, so this machine's PATH is irrelevant to it.

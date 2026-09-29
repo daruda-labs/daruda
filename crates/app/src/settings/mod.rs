@@ -686,7 +686,7 @@ pub(super) struct AgentCatalogRow {
     /// determined it names a local binary not found on `PATH` — `None` when
     /// no check applies (`npx`/`uvx`/JSON stdio) or the binary was found.
     /// Independent of transport: an ssh/docker row's warning is suppressed at
-    /// render time instead (see `sections::agent::render_agent_catalog_row`),
+    /// render time instead (see `sections::agent_catalog::render_agent_catalog_row`),
     /// since that needs no fresh `which` lookup. Recomputed on construction
     /// and whenever `command_input` changes (see
     /// [`SettingsView::recompute_agent_row_path_warning`]); `which::which`
@@ -3356,7 +3356,7 @@ fn reconcile_session_host_tombstones(
 /// Python venvs, so neither names a binary the user is expected to have
 /// installed locally. Transport (ssh/docker exempts the whole row) is not
 /// considered here — that suppression needs no `which` call, so it is applied
-/// at render time instead (`sections::agent::render_agent_catalog_row`).
+/// at render time instead (`sections::agent_catalog::render_agent_catalog_row`).
 fn path_check_token(command: &str) -> Option<String> {
     let trimmed = command.trim();
     if trimmed.is_empty() || trimmed.starts_with('{') {

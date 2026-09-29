@@ -16,7 +16,7 @@
 
 mod about;
 mod accounts;
-mod agent;
+mod agent_catalog;
 pub(super) mod agent_env;
 pub(super) mod agent_transcript;
 pub(super) mod agent_vocabulary;
