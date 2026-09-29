@@ -1297,8 +1297,8 @@ impl Workspace {
         let workspace_root = self
             .frame_root(key_ctx, cx)
             // Search actions — context-gated via KeyBinding context strings in main.rs.
-            .on_action(cx.listener(|this, _: &SaveFilePane, _window, cx| {
-                this.save_focused_file_pane(cx);
+            .on_action(cx.listener(|this, _: &SaveFilePane, window, cx| {
+                this.save_focused_file_pane(window, cx);
             }))
             .on_action(cx.listener(|this, _: &FileViewerSearchOpen, window, cx| {
                 if let Some(fv) = this.focused_file_view_mut() {

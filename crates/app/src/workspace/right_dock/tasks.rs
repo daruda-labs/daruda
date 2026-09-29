@@ -468,6 +468,10 @@ fn session_status_glyph(status: SessionStatus, cx: &gpui::App) -> (&'static str,
             ux_strings::RIGHT_PANEL_TASK_SESSION_STATUS_NEEDS_ATTENTION,
             theme::WARNING,
         ),
+        SessionStatus::Failed => (
+            ux_strings::RIGHT_PANEL_TASK_SESSION_STATUS_FAILED,
+            theme::current(cx).status_failed_dark,
+        ),
         // `Connecting` and `Idle` both read as "quiet" — a session
         // that hasn't produced any output yet looks the same as one
         // that finished its turn and is waiting for the next prompt.

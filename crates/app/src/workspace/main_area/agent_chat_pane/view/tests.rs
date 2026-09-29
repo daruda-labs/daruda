@@ -1106,6 +1106,24 @@ fn activity_state_maps_permission_turn_and_background_subagent(cx: &mut gpui::Te
         .unwrap();
 }
 
+/// A pane that failed shows on its lane row instead of dropping off it.
+#[gpui::test]
+fn a_failed_pane_reports_failed_to_the_lane_indicator(cx: &mut gpui::TestAppContext) {
+    let window = make_test_view(cx);
+    window
+        .update(cx, |view, _window, _cx| {
+            view.status = super::AgentSessionStatus::Error {
+                message: "adapter exited".into(),
+                remedy: daruda_acp::Remedy::NoneAvailable,
+            };
+            assert_eq!(
+                view.to_session_status(),
+                Some(daruda_agent::SessionStatus::Failed)
+            );
+        })
+        .unwrap();
+}
+
 #[gpui::test]
 fn mode_state_updates_replace_and_survive_config_refresh(cx: &mut gpui::TestAppContext) {
     use daruda_acp::{

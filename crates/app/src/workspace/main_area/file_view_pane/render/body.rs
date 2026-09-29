@@ -105,13 +105,28 @@ pub(super) fn render_file_viewer_body(
             .child(strings::file_viewer_deleted())
             .into_any_element(),
 
-        PaneFileContent::LoadedRaw => frame
+        PaneFileContent::LoadedRaw { truncated } => frame
             .id("file-viewer-body")
             // The code editor stretches via `flex_grow` / `height: 100%`, which
             // only resolves inside a flex parent; without `.flex()` it collapses
             // to its 1-line `min_height`. (Matches the other branches above.)
             .flex()
-            .child(crate::ui::file_viewer_editor(editor_state, cx))
+            .flex_col()
+            .child(
+                div()
+                    .flex()
+                    .flex_1()
+                    .min_h_0()
+                    .child(crate::ui::file_viewer_editor(editor_state, cx)),
+            )
+            .when(*truncated, |body| {
+                body.child(footer_row(
+                    strings::file_viewer_truncated_read_only(theme::FILE_VIEWER_MAX_BYTES),
+                    ctx_text,
+                    editor_font_size,
+                    editor_font_size * theme::editor_line_height(cx),
+                ))
+            })
             .into_any_element(),
 
         PaneFileContent::LoadedDiff {

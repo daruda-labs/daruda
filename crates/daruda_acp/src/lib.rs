@@ -50,10 +50,10 @@ pub use mapping::{
 };
 pub use model::{
     ChatItem, CommandExit, ConfigChoiceView, ConfigOptionCategoryView, ConfigOptionKindView,
-    ConfigOptionView, ConfigValueView, CostView, DiffView, ModeStateView, PermissionChoice,
-    PermissionItem, PermissionKindView, PermissionResolution, PlanEntryView, PlanPriority,
-    PlanStatus, SessionCapabilitiesView, SessionModeView, SlashCommand, SlashCommandInput,
-    ToolCallItem, ToolKindView, ToolOutputBlock, ToolStatusView, UsageView,
+    ConfigOptionView, ConfigValueView, CostView, DEFAULT_MODEL_CHOICE, DiffView, ModeStateView,
+    PermissionChoice, PermissionItem, PermissionKindView, PermissionResolution, PlanEntryView,
+    PlanPriority, PlanStatus, SessionCapabilitiesView, SessionModeView, SlashCommand,
+    SlashCommandInput, ToolCallItem, ToolKindView, ToolOutputBlock, ToolStatusView, UsageView,
 };
 pub use native_subagents::{NativeSubagentRouter, Routed};
 pub use node::{NodeError, NodeProgress, NodeRuntime, command_diagnostic, ensure_node};

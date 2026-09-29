@@ -538,6 +538,11 @@
       "$ref": "#/$defs/Rgba",
       "default": "#9ea3aeff"
     },
+    "status_failed_dark": {
+      "description": "Maps to `palette::STATUS_FAILED_DARK`.",
+      "$ref": "#/$defs/Rgba",
+      "default": "#e06060ff"
+    },
     "status_badge_active_outline": {
       "description": "Maps to `palette::STATUS_BADGE_ACTIVE_OUTLINE`.",
       "$ref": "#/$defs/Rgba",

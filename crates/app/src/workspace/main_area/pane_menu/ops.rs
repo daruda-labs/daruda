@@ -175,7 +175,10 @@ impl Workspace {
                 });
                 Some(PaneMenuSnapshot {
                     selection,
-                    kind: PaneMenuKind::Terminal { annotation_range },
+                    kind: PaneMenuKind::Terminal {
+                        annotation_range,
+                        exited: content.has_exited(),
+                    },
                 })
             }
             PaneContent::AgentChat(content) => {

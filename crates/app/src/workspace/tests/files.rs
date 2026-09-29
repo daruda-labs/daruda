@@ -1118,7 +1118,7 @@ async fn raw_file_load_feeds_editor_text(cx: &mut TestAppContext) {
         assert!(
             matches!(
                 fc.view.content,
-                crate::workspace::main_area::file_view_pane::PaneFileContent::LoadedRaw
+                crate::workspace::main_area::file_view_pane::PaneFileContent::LoadedRaw { .. }
             ),
             "content should settle to LoadedRaw"
         );
@@ -1760,7 +1760,12 @@ async fn installing_content_releases_the_previous_image_table(cx: &mut TestAppCo
                 "seeded table has slot 0"
             );
 
-            fc.install_content(PaneFileContent::LoadedRaw, Vec::new(), Some(window), cx);
+            fc.install_content(
+                PaneFileContent::LoadedRaw { truncated: false },
+                Vec::new(),
+                Some(window),
+                cx,
+            );
             assert!(
                 fc.images_for_test().get(0).is_none(),
                 "install_content must release the previous table, not leave it behind"

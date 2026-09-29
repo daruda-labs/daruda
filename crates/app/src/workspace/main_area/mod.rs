@@ -10,6 +10,7 @@ pub(in crate::workspace) mod agent_chat_pane;
 pub(in crate::workspace) mod bottom_dock;
 pub(in crate::workspace) mod context;
 pub(in crate::workspace) mod file_pane_ops;
+pub(in crate::workspace) mod file_save_ops;
 pub(in crate::workspace) mod file_view_pane;
 pub(in crate::workspace) mod flow_graph_pane;
 pub(in crate::workspace) mod link_target;
@@ -24,6 +25,7 @@ pub(in crate::workspace) mod resize;
 pub(in crate::workspace) mod tab_drag_ops;
 pub(in crate::workspace) mod tab_ops;
 pub(in crate::workspace) mod task_edit_pane;
+mod terminal_exit_ops;
 
 pub(in crate::workspace) use context::MainAreaContext;
 

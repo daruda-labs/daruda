@@ -255,8 +255,12 @@ impl FileViewMode {
 pub(in crate::workspace) enum PaneFileContent {
     Loading,
     /// Raw file content — owned by the `InputState` editor entity, so the
-    /// variant itself carries no data.
-    LoadedRaw,
+    /// variant carries only whether the text was cut at
+    /// `FILE_VIEWER_MAX_BYTES`, which makes the buffer read-only: saving it
+    /// would truncate the file.
+    LoadedRaw {
+        truncated: bool,
+    },
     /// Unified diff content.
     ///
     /// `rows_all` includes context lines; `rows_no_ctx` omits them.
@@ -284,7 +288,7 @@ pub(in crate::workspace) enum PaneFileContent {
 impl PaneFileContent {
     pub(super) fn visible_rows(&self, mode: FileViewMode, hide_unchanged: bool) -> &[VisualRow] {
         match self {
-            PaneFileContent::LoadedRaw => &[],
+            PaneFileContent::LoadedRaw { .. } => &[],
             PaneFileContent::LoadedDiff {
                 rows_all,
                 rows_no_ctx,
@@ -466,7 +470,11 @@ impl PaneFileView {
     /// Whether the pane holds text the user can edit and save: raw content of
     /// the file on disk. The one answer the save, dirty and can-save checks read.
     pub(in crate::workspace) fn holds_editable_buffer(&self) -> bool {
-        self.source.is_editable() && matches!(self.content, PaneFileContent::LoadedRaw)
+        self.source.is_editable()
+            && matches!(
+                self.content,
+                PaneFileContent::LoadedRaw { truncated: false }
+            )
     }
 
     pub(super) fn loading(

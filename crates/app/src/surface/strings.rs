@@ -1205,6 +1205,32 @@ pub fn task_close_dirty_line(title: &str, is_draft: bool) -> String {
     }
 }
 
+/// Written under a shell's last output when it exits in a pane kept open.
+pub fn terminal_process_exited() -> String {
+    rust_i18n::t!("terminal.process_exited").into_owned()
+}
+/// Pane-menu item that starts a fresh shell where one exited.
+pub fn ctx_restart_shell() -> String {
+    rust_i18n::t!("ctx.restart_shell").into_owned()
+}
+
+/// Heading of the prompt that closing a pane still running something raises.
+pub fn close_running_heading() -> String {
+    rust_i18n::t!("modal.close_running_heading").into_owned()
+}
+/// Body of that prompt: the lead-in, then one line per running pane.
+pub fn close_running_detail(titles: &[&str]) -> String {
+    let mut out = rust_i18n::t!("modal.close_running_detail").into_owned();
+    for title in titles {
+        out.push('\n');
+        out.push_str(&rust_i18n::t!("modal.close_running_line", title => *title));
+    }
+    out
+}
+pub fn close_running_confirm() -> String {
+    rust_i18n::t!("modal.close_running_confirm").into_owned()
+}
+
 /// Which panes the batch save could not write, under
 /// [`task_batch_save_failed_title`].
 pub fn task_batch_save_failed_detail(count: usize, panes: &str) -> String {
@@ -1838,6 +1864,30 @@ pub fn file_viewer_more_lines(count: usize) -> String {
     rust_i18n::t!("file_viewer.more_lines", count = count).into_owned()
 }
 
+/// Heading of the prompt a save raises when the file changed on disk since
+/// the pane loaded it.
+pub fn file_save_conflict_heading(name: &str) -> String {
+    rust_i18n::t!("file_viewer.save_conflict_heading", name = name).into_owned()
+}
+pub fn file_save_conflict_detail() -> String {
+    rust_i18n::t!("file_viewer.save_conflict_detail").into_owned()
+}
+pub fn file_save_conflict_overwrite() -> String {
+    rust_i18n::t!("file_viewer.save_conflict_overwrite").into_owned()
+}
+pub fn file_save_conflict_reload() -> String {
+    rust_i18n::t!("file_viewer.save_conflict_reload").into_owned()
+}
+
+/// Footer under a raw file cut at the size cap, which opens read-only.
+pub fn file_viewer_truncated_read_only(max_bytes: usize) -> String {
+    rust_i18n::t!(
+        "file_viewer.truncated_read_only",
+        size = format!("{} MB", max_bytes / (1024 * 1024))
+    )
+    .into_owned()
+}
+
 pub fn file_viewer_byte_truncated(shown: usize, max_bytes: usize, total_count: usize) -> String {
     let size = if max_bytes >= 1024 * 1024 {
         format!("{} MB", max_bytes / (1024 * 1024))
@@ -1908,6 +1958,18 @@ pub fn agent_chat_config_boolean_on() -> String {
 /// [`agent_chat_config_boolean_on`].
 pub fn agent_chat_config_boolean_off() -> String {
     rust_i18n::t!("agent_chat.config_boolean_off").into_owned()
+}
+
+/// A model choice's display label. The default-model entry carries a fixed
+/// "Default (recommended)" name and names the model it resolves to only in its
+/// description, so that model is shown instead.
+pub fn agent_model_choice_label(value: &str, name: &str, description: Option<&str>) -> String {
+    match description {
+        Some(model) if value == daruda_acp::DEFAULT_MODEL_CHOICE && !model.is_empty() => {
+            rust_i18n::t!("agent_chat.config_default_model", model = model).into_owned()
+        }
+        _ => name.to_string(),
+    }
 }
 
 pub fn agent_chat_session_mode_chip(value: &str) -> String {

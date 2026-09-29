@@ -86,6 +86,7 @@
   "status_needs_attention_dark": "#a83232",
   "status_idle_dark": "#3aa05a",
   "status_connecting_dark": "#7a8088",
+  "status_failed_dark": "#a83232",
   "status_badge_active_outline": "#0000001a",
   "badge_bg": "#e4e6ec",
   "banner_error_bg": "#fbe9e9",

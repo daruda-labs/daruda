@@ -84,6 +84,10 @@ pub(in crate::workspace) struct TerminalContent {
     pub(in crate::workspace) view: Entity<TerminalView>,
     /// `None` when the pane was created via stub (test builds).
     pub(super) master: Option<Arc<dyn MasterPty + Send>>,
+    /// The shell's pid, which also names its process group.
+    pub(super) shell_pid: Option<u32>,
+    /// The shell exited and the pane stayed open (`close_pane_on_exit` off).
+    pub(super) exited: bool,
     pub(super) cached_title: SharedString,
     /// Cached cwd (OSC 7) — `None` until the shell first reports it.
     pub(super) cached_cwd: Option<PathBuf>,
@@ -710,6 +714,23 @@ impl Pane {
         }
     }
 
+    /// True when closing the pane would stop work in progress: a job in a
+    /// terminal's foreground, or an agent turn.
+    pub(in crate::workspace) fn runs_work(&self, cx: &App) -> bool {
+        match &self.content {
+            PaneContent::Terminal(t) => {
+                !t.exited
+                    && t.master.as_deref().is_some_and(|master| {
+                        daruda_terminal::pty::runs_foreground_job(master, t.shell_pid)
+                    })
+            }
+            PaneContent::AgentChat(ac) => ac.view.read(cx).is_busy(),
+            PaneContent::File(_) | PaneContent::FlowGraph(_) | PaneContent::TaskEditPane(_) => {
+                false
+            }
+        }
+    }
+
     /// True when the pane's `save` path is meaningful for the user.
     pub(super) fn can_save(&self, cx: &App) -> bool {
         match &self.content {
@@ -796,6 +817,10 @@ fn grid_resize_needed(current: (u16, u16), computed: (u16, u16)) -> bool {
 }
 
 impl TerminalContent {
+    pub(in crate::workspace) fn has_exited(&self) -> bool {
+        self.exited
+    }
+
     /// Update OSC-derived title / cwd in place. Returns `true` iff a
     /// field actually changed, so the caller can scope `cx.notify` to
     /// real updates and skip idempotent OSC repeats.
@@ -1342,6 +1367,21 @@ impl Workspace {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Result<Pane, PaneSpawnError> {
+        let pane_id = self.alloc_id();
+        self.spawn_terminal_pane(pane_id, cwd, account, prepared, window, cx)
+    }
+
+    /// Spawn a shell for the pane `pane_id` — a new one, or one whose shell
+    /// exited and is being started again in place.
+    pub(in crate::workspace) fn spawn_terminal_pane(
+        &mut self,
+        pane_id: PaneId,
+        cwd: Option<PathBuf>,
+        account: daruda_store::accounts::AccountSelection,
+        prepared: Option<&PreparedAccount>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Result<Pane, PaneSpawnError> {
         // Propagate the workspace's terminal config so every pane
         // starts with the same font_size / spacing. Zoom actions
         // diverge each view's runtime font_size individually.
@@ -1375,8 +1415,6 @@ impl Workspace {
         // the session to the pane's measured cols/rows on first layout.
         let session =
             TerminalSession::new(TerminalDims::default(), config).map_err(PaneSpawnError::Vt)?;
-
-        let pane_id = self.alloc_id();
 
         // Wakes the stdout poll out of its idle backoff the instant
         // bytes head for the PTY, so the echo is drained at the fast
@@ -1437,6 +1475,8 @@ impl Workspace {
             content: PaneContent::Terminal(TerminalContent {
                 view,
                 master,
+                shell_pid: pty_pid,
+                exited: false,
                 cached_title: daruda_terminal::ux::strings::fallback_title().into(),
                 cached_cwd: None,
                 _stdout_task: stdout_task,
@@ -1640,6 +1680,12 @@ impl Workspace {
                         .update(|_, app_cx| workspace.read(app_cx).mirrors.close_pane_on_exit)
                         .unwrap_or(false);
 
+                    if !should_close {
+                        // SILENT-OK: the window is gone, and the pane with it
+                        let _ = cx.update(|_, app_cx| {
+                            workspace.update(app_cx, |ws, cx| ws.note_terminal_exited(pane_id, cx));
+                        });
+                    }
                     if should_close {
                         // Self-drop hazard: calling `close_pane_by_id`
                         // inline would remove our own Pane and drop

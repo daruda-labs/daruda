@@ -49,7 +49,7 @@ pub(in crate::workspace) fn render_pane_file_viewer(
     // Raw and diff both render through the shared editor.
     let is_editor_mode = matches!(
         &fv.content,
-        PaneFileContent::LoadedRaw | PaneFileContent::LoadedDiff { .. }
+        PaneFileContent::LoadedRaw { .. } | PaneFileContent::LoadedDiff { .. }
     );
 
     // Preview has variable-height blocks; derive height from measured offset.

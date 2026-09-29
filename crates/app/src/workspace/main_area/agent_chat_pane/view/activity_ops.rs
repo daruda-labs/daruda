@@ -14,12 +14,13 @@ use super::{
 
 impl AgentChatView {
     /// Map to a [`daruda_agent::SessionStatus`] for the lane indicator.
-    /// `None` for states that shouldn't contribute one (dormant `Idle`, dead
-    /// `Error`).
+    /// `None` for a dormant `Idle`, which has nothing to show; a pane in
+    /// `Error` shows as failed rather than dropping off the lane row.
     pub(in crate::workspace) fn to_session_status(&self) -> Option<daruda_agent::SessionStatus> {
         use daruda_agent::SessionStatus;
         match &self.status {
-            AgentSessionStatus::Idle | AgentSessionStatus::Error { .. } => None,
+            AgentSessionStatus::Idle => None,
+            AgentSessionStatus::Error { .. } => Some(SessionStatus::Failed),
             // Runtime prep and the handshake are both connecting sub-phases —
             // same pulsing badge.
             AgentSessionStatus::PreparingRuntime(_)

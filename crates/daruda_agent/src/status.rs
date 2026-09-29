@@ -18,6 +18,8 @@ pub enum SessionStatus {
     Idle,
     /// Session is starting up or status is unknown (no events yet).
     Connecting,
+    /// The session failed and cannot continue until the user acts.
+    Failed,
 }
 
 impl SessionStatus {
@@ -26,14 +28,21 @@ impl SessionStatus {
     /// concurrent Claude sessions).
     ///
     /// Higher number = higher priority = wins the aggregate slot.
-    /// `NeedsAttention > ExecutingTool = Working > Idle > Connecting`.
+    /// `NeedsAttention > Failed > ExecutingTool = Working > Idle > Connecting`.
     pub fn priority(self) -> u8 {
         match self {
-            Self::NeedsAttention => 3,
+            Self::NeedsAttention => 4,
+            Self::Failed => 3,
             Self::ExecutingTool | Self::Working => 2,
             Self::Idle => 1,
             Self::Connecting => 0,
         }
+    }
+
+    /// Whether the badge for this status moves. `Idle` and `Failed` are
+    /// still, so neither keeps the status-pulse clock running.
+    pub fn animates(self) -> bool {
+        !matches!(self, Self::Idle | Self::Failed)
     }
 
     /// Collapse N session statuses into the single highest-priority one
@@ -49,6 +58,33 @@ impl SessionStatus {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A prompt a live agent is blocked on outranks a dead session, which in
+    /// turn outranks a working one — both want the user, the prompt sooner.
+    #[test]
+    fn failed_sits_between_attention_and_work() {
+        assert!(SessionStatus::NeedsAttention.priority() > SessionStatus::Failed.priority());
+        assert!(SessionStatus::Failed.priority() > SessionStatus::Working.priority());
+        assert_eq!(
+            SessionStatus::aggregate([SessionStatus::Working, SessionStatus::Failed]),
+            Some(SessionStatus::Failed)
+        );
+    }
+
+    /// Only a still badge lets the status-pulse clock stop.
+    #[test]
+    fn idle_and_failed_are_the_still_statuses() {
+        assert!(!SessionStatus::Idle.animates());
+        assert!(!SessionStatus::Failed.animates());
+        for moving in [
+            SessionStatus::Working,
+            SessionStatus::ExecutingTool,
+            SessionStatus::NeedsAttention,
+            SessionStatus::Connecting,
+        ] {
+            assert!(moving.animates(), "{moving:?}");
+        }
+    }
 
     #[test]
     fn priority_ordering() {

@@ -270,35 +270,6 @@ impl Workspace {
         }
     }
 
-    /// Save the focused file-view pane to disk (raw mode only).
-    pub(in crate::workspace) fn save_focused_file_pane(&mut self, cx: &mut Context<Self>) {
-        let Some(fc) = self.focused_file_content_mut() else {
-            return;
-        };
-        if !fc.view.holds_editable_buffer() || !fc.view.path.is_absolute() {
-            return;
-        }
-        let path = fc.view.path.clone();
-        let text = fc.editor_state.read(cx).text().to_string();
-        match std::fs::write(&path, text.as_bytes()) {
-            Ok(()) => {
-                if let Some(fc) = self.focused_file_content_mut() {
-                    fc.saved_text = text;
-                }
-                cx.notify();
-            }
-            Err(e) => {
-                let report = ErrorReport::new(crate::surface::strings::error_save_file_failed(
-                    &path.display().to_string(),
-                ))
-                .severity(ErrorSeverity::Error)
-                .from_error(&e)
-                .build();
-                self.report_error(report, cx);
-            }
-        }
-    }
-
     /// View-dispatched mouse-down handler for the file viewer.
     /// Coordinate-to-byte conversion is done in the View; the state
     /// transition lives on `PaneFileView::handle_mouse_down`. No-op

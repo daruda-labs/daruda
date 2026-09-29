@@ -194,8 +194,10 @@ pub(crate) fn register_static_bindings(cx: &mut App) {
 }
 
 pub(crate) fn register_global_actions(cx: &mut App, config: std::sync::Arc<daruda_config::Config>) {
+    // Through each window's close gate: a bare `cx.quit()` never asks
+    // about running work or unsaved edits.
     cx.on_action(|_: &Quit, cx: &mut App| {
-        cx.quit();
+        crate::workspace::Workspace::request_quit(cx);
     });
 
     // Help menu — open URLs in the user's default browser.

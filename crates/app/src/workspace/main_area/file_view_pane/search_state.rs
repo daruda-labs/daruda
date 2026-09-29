@@ -126,7 +126,7 @@ impl PaneFileView {
                 }
             } else {
                 let rows: &[VisualRow] = match &self.content {
-                    PaneFileContent::LoadedRaw => &[],
+                    PaneFileContent::LoadedRaw { .. } => &[],
                     PaneFileContent::LoadedDiff {
                         rows_all,
                         rows_no_ctx,
@@ -169,7 +169,7 @@ mod tests {
             path: "test.txt".into(),
             source: crate::workspace::main_area::file_view_pane::DiffSource::WorkingTree,
             live_status: None,
-            content: PaneFileContent::LoadedRaw,
+            content: PaneFileContent::LoadedRaw { truncated: false },
             view_mode: FileViewMode::Raw,
             hide_unchanged: false,
             selection_drag: SelectionDrag::None,

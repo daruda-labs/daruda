@@ -266,7 +266,7 @@ mod tests {
             path: "test.txt".into(),
             source: crate::workspace::main_area::file_view_pane::DiffSource::WorkingTree,
             live_status: None,
-            content: PaneFileContent::LoadedRaw,
+            content: PaneFileContent::LoadedRaw { truncated: false },
             view_mode: FileViewMode::Raw,
             hide_unchanged: false,
             selection_drag: SelectionDrag::None,

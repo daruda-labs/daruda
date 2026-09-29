@@ -14,7 +14,10 @@
 //! unfamiliar select option (e.g. Codex's `fast-mode` speed toggle) needs no
 //! per-agent UI code.
 
-use daruda_acp::{ConfigOptionKindView, ConfigOptionView, ConfigValueView};
+use daruda_acp::{
+    ConfigChoiceView, ConfigOptionCategoryView, ConfigOptionKindView, ConfigOptionView,
+    ConfigValueView,
+};
 use gpui::{IntoElement, ParentElement as _, SharedString, Styled as _, WeakEntity, px};
 
 use crate::surface::strings;
@@ -97,7 +100,12 @@ fn choices_of(option: &ConfigOptionView) -> (Vec<(ConfigValueView, String)>, Con
         } => (
             options
                 .iter()
-                .map(|c| (ConfigValueView::Id(c.value.clone()), c.name.clone()))
+                .map(|c| {
+                    (
+                        ConfigValueView::Id(c.value.clone()),
+                        choice_label(option.category, c),
+                    )
+                })
                 .collect(),
             ConfigValueView::Id(current_value.clone()),
         ),
@@ -114,6 +122,20 @@ fn choices_of(option: &ConfigOptionView) -> (Vec<(ConfigValueView, String)>, Con
             ],
             ConfigValueView::Bool(*current_value),
         ),
+    }
+}
+
+/// A choice's display name; model choices go through the shared model label
+/// so the chip and Settings name the default model alike.
+fn choice_label(category: ConfigOptionCategoryView, choice: &ConfigChoiceView) -> String {
+    if category == ConfigOptionCategoryView::Model {
+        strings::agent_model_choice_label(
+            &choice.value,
+            &choice.name,
+            choice.description.as_deref(),
+        )
+    } else {
+        choice.name.clone()
     }
 }
 
@@ -177,9 +199,51 @@ fn build_config_menu(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use daruda_acp::DEFAULT_MODEL_CHOICE;
 
     #[test]
     fn visible_label_is_only_the_current_option_value() {
         assert_eq!(visible_config_label("Sonnet 4"), "Sonnet 4");
+    }
+
+    fn choice(value: &str, name: &str, description: Option<&str>) -> ConfigChoiceView {
+        ConfigChoiceView {
+            value: value.to_string(),
+            name: name.to_string(),
+            description: description.map(str::to_string),
+        }
+    }
+
+    #[test]
+    fn default_model_choice_names_the_model_it_resolves_to() {
+        let default = choice(
+            DEFAULT_MODEL_CHOICE,
+            "Default (recommended)",
+            Some("Opus 5.5"),
+        );
+        assert_eq!(
+            choice_label(ConfigOptionCategoryView::Model, &default),
+            "Default (Opus 5.5)"
+        );
+    }
+
+    #[test]
+    fn other_choices_keep_the_adapter_name() {
+        let concrete = choice("opus", "Opus 5.5", Some("For complex work"));
+        assert_eq!(
+            choice_label(ConfigOptionCategoryView::Model, &concrete),
+            "Opus 5.5"
+        );
+        // Effort also has a "default" entry; its description is not a model.
+        let effort = choice(DEFAULT_MODEL_CHOICE, "Default", Some("Adaptive"));
+        assert_eq!(
+            choice_label(ConfigOptionCategoryView::ThoughtLevel, &effort),
+            "Default"
+        );
+        let bare = choice(DEFAULT_MODEL_CHOICE, "Default (recommended)", None);
+        assert_eq!(
+            choice_label(ConfigOptionCategoryView::Model, &bare),
+            "Default (recommended)"
+        );
     }
 }

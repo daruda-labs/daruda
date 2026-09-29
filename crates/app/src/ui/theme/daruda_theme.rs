@@ -150,6 +150,7 @@ daruda_theme_fields! {
     status_needs_attention_dark => STATUS_NEEDS_ATTENTION_DARK,
     status_idle_dark => STATUS_IDLE_DARK,
     status_connecting_dark => STATUS_CONNECTING_DARK,
+    status_failed_dark => STATUS_FAILED_DARK,
     status_badge_active_outline => STATUS_BADGE_ACTIVE_OUTLINE,
     agent_banner_bg => AGENT_BANNER_BG,
     agent_banner_border => AGENT_BANNER_BORDER,

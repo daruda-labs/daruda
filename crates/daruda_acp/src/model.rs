@@ -643,6 +643,10 @@ pub enum ConfigOptionCategoryView {
     Other,
 }
 
+/// The model choice claude-agent-acp offers for "follow the CLI's default";
+/// its `description` names the concrete model that default resolves to.
+pub const DEFAULT_MODEL_CHOICE: &str = "default";
+
 /// One selectable value of a config option (mirror of the protocol's
 /// `SessionConfigSelectOption`).
 #[derive(Debug, Clone, PartialEq, Eq)]
