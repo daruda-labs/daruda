@@ -69,7 +69,10 @@ fn missing_agents_seeds_single_claude_default() {
     let cfg: Config = toml::from_str("").unwrap();
     assert_eq!(
         cfg.agents,
-        vec![AgentEntry::custom(AgentDefinition::claude_default())]
+        vec![AgentEntry::for_definition(
+            AgentDefinition::claude_default(),
+            None
+        )]
     );
     assert_eq!(cfg.resolved_agents()[0].id, "claude");
 }
@@ -111,7 +114,7 @@ fn agents_round_trip_through_toml() {
                     ..PresetOverrides::default()
                 },
             ),
-            AgentEntry::custom(AgentDefinition::claude_default()),
+            AgentEntry::for_definition(AgentDefinition::claude_default(), None),
         ],
         ..Config::default()
     };
@@ -157,7 +160,10 @@ fn load_from_missing_path_normalizes_agents() {
     let cfg = Config::load_from(std::path::Path::new("/nonexistent/daruda/config.toml"));
     assert_eq!(
         cfg.agents,
-        vec![AgentEntry::custom(AgentDefinition::claude_default())]
+        vec![AgentEntry::for_definition(
+            AgentDefinition::claude_default(),
+            None
+        )]
     );
 }
 
@@ -168,7 +174,10 @@ fn explicitly_empty_agents_normalizes_to_claude_default() {
     cfg.clamp();
     assert_eq!(
         cfg.agents,
-        vec![AgentEntry::custom(AgentDefinition::claude_default())]
+        vec![AgentEntry::for_definition(
+            AgentDefinition::claude_default(),
+            None
+        )]
     );
 }
 
@@ -1328,8 +1337,9 @@ fn a_transcript_axis_reset_after_the_legacy_lift_stays_reset() {
     // The user hands the axis back: the catalog states nothing on it.
     let mut agents = lifted.agents.clone();
     for entry in &mut agents {
-        if let AgentSource::Custom(definition) = &mut entry.source {
-            definition.fold_mode = None;
+        match &mut entry.source {
+            AgentSource::Custom(definition) => definition.fold_mode = None,
+            AgentSource::Preset { overrides, .. } => overrides.fold_mode = None,
         }
     }
     apply_settings_patch_to(&SettingsPatch::AgentCatalog(agents), &path).expect("catalog patch");
@@ -1349,7 +1359,7 @@ fn patch_config_file_writes_non_default_agents() {
 
     let cfg = Config {
         agents: vec![
-            AgentEntry::custom(AgentDefinition::claude_default()),
+            AgentEntry::for_definition(AgentDefinition::claude_default(), None),
             AgentEntry::custom(AgentDefinition::codex_default()),
         ],
         ..Config::default()
@@ -1365,7 +1375,7 @@ fn patch_config_file_writes_non_default_agents() {
     assert_eq!(
         reloaded.agents,
         vec![
-            AgentEntry::custom(AgentDefinition::claude_default()),
+            AgentEntry::for_definition(AgentDefinition::claude_default(), None),
             AgentEntry::preset("codex-acp".to_string()),
         ]
     );
@@ -1394,9 +1404,9 @@ fn patch_config_file_round_trips_every_agent_entry_shape() {
                     default_model: Some("gemini-2.5-pro".to_string()),
                     fold_mode: Some(vec!["summary".to_string()]),
                     tail_window: Some(3),
-                    tail_window_calls: None,
                     // An empty visible set, not an absent key.
                     display_filter: Some(Vec::new()),
+                    ..PresetOverrides::default()
                 },
             ),
             AgentEntry::preset("retired-agent".to_string()),
@@ -1523,6 +1533,75 @@ fn resolved_agents_skips_a_switched_off_entry() {
     assert_eq!(ids, ["codex-acp"]);
 }
 
+/// The catalog shape a pre-reference install carries: the built-in Claude
+/// written out as a custom entry, next to a preset reference. Loading has to
+/// recognise that entry as the `claude-acp` preset without touching the id
+/// every pane persists, and a save has to keep it that way on disk.
+#[test]
+fn a_custom_entry_running_a_presets_command_loads_as_that_preset() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("config.toml");
+    std::fs::write(
+        &path,
+        "[[agents]]\n\
+         id = \"claude\"\n\
+         name = \"Claude Code\"\n\
+         command = \"npx -y @agentclientprotocol/claude-agent-acp@latest\"\n\
+         default_mode = \"bypassPermissions\"\n\
+         tail_window = 5\n\
+         \n\
+         [[agents]]\n\
+         preset = \"codex-acp\"\n",
+    )
+    .unwrap();
+
+    let loaded = Config::load_from(&path);
+    assert_eq!(
+        loaded.agents[0],
+        AgentEntry::preset_with(
+            "claude-acp",
+            PresetOverrides {
+                id: Some("claude".to_string()),
+                name: Some("Claude Code".to_string()),
+                default_mode: Some("bypassPermissions".to_string()),
+                tail_window: Some(5),
+                ..PresetOverrides::default()
+            }
+        )
+    );
+    let ids: Vec<String> = loaded.resolved_agents().into_iter().map(|a| a.id).collect();
+    assert_eq!(ids, ["claude", "codex-acp"]);
+
+    patch_config_file_to(&loaded, &path).unwrap();
+    let on_disk: toml::Value = toml::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+    let first = &on_disk["agents"][0];
+    assert_eq!(first["preset"].as_str(), Some("claude-acp"));
+    assert_eq!(first["id"].as_str(), Some("claude"));
+    assert!(
+        first.get("command").is_none(),
+        "a reference copies no command"
+    );
+    assert_eq!(Config::load_from(&path).agents, loaded.agents);
+}
+
+/// A pinned build or a remote launch is not the preset, whatever its id.
+#[test]
+fn a_custom_entry_that_differs_from_every_preset_stays_custom() {
+    let pinned: AgentEntry = toml::from_str(
+        "id = \"claude\"\nname = \"Claude Code\"\n\
+         command = \"npx -y @agentclientprotocol/claude-agent-acp@0.84.0\"\n",
+    )
+    .unwrap();
+    assert_eq!(pinned.preset_id(), None);
+    let remote: AgentEntry = toml::from_str(
+        "id = \"claude\"\nname = \"Claude Code\"\n\
+         [ssh]\nhost = \"vm\"\n\
+         adapter_command = \"npx -y @agentclientprotocol/claude-agent-acp@latest\"\n",
+    )
+    .unwrap();
+    assert_eq!(remote.preset_id(), None);
+}
+
 /// Settings keeps one entry on; a hand-edited file that switches every entry
 /// off still gets the non-empty catalog every consumer relies on.
 #[test]
@@ -1549,7 +1628,10 @@ fn patch_config_file_preserves_implicit_default_agents_when_unmanaged() {
     let reloaded = Config::load_from(&path);
     assert_eq!(
         reloaded.agents,
-        vec![AgentEntry::custom(AgentDefinition::claude_default())]
+        vec![AgentEntry::for_definition(
+            AgentDefinition::claude_default(),
+            None
+        )]
     );
 }
 

@@ -587,12 +587,14 @@ impl AgentDefinition {
 /// Default agent catalog: a single Claude entry. Used as the serde field default
 /// (missing `[[agents]]`) AND to normalize an explicitly-empty catalog.
 ///
-/// Deliberately [`AgentEntry::Custom`], not a reference to the `claude-acp`
-/// preset it shares a command with: `claude` is daruda's own stable id and every
-/// AgentChat pane persists it, so the default must never resolve under the
-/// preset's id instead.
+/// Resolves to the `claude-acp` preset it shares a command with, kept under
+/// daruda's own id `claude` — the id every AgentChat pane persists — so it
+/// follows that preset without ever resolving under the preset's id.
 pub(crate) fn default_agents() -> Vec<AgentEntry> {
-    vec![AgentEntry::custom(AgentDefinition::claude_default())]
+    vec![AgentEntry::for_definition(
+        AgentDefinition::claude_default(),
+        None,
+    )]
 }
 
 /// The app-wide transcript keys a pre-catalog `[agent]` section could state.

@@ -209,9 +209,14 @@ impl SettingsStore {
         let temp_dir = tempfile::tempdir().expect("settings test tempdir");
         let path = temp_dir.path().join("config.toml");
         daruda_config::patch_config_file_to(&cfg, &path).expect("settings test config");
+        // The catalog is read back: load promotes a custom entry that matches a
+        // preset into a reference, and a live store only ever holds the loaded
+        // form — kept as given, it would conflict with its own file. The rest
+        // stays `cfg`, since this writer persists only the Settings-owned keys.
+        let agents = Config::load_from(&path).agents;
+        self.user = Arc::new(Config { agents, ..cfg });
         self.writer.path = path;
         self.writer._temp_dir = Some(temp_dir);
-        self.user = Arc::new(cfg);
     }
 
     /// The temp `config.toml` a test store writes through. Lets a test

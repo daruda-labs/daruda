@@ -143,11 +143,21 @@ fn registry_preset_lookup_declines_an_agent_that_needs_a_manual_install() {
 }
 
 #[test]
-fn default_agents_is_a_single_custom_claude_entry() {
-    // Custom, not a `claude-acp` reference: see `default_agents`.
+fn default_agents_is_a_single_claude_acp_reference_under_the_claude_id() {
     assert_eq!(
         default_agents(),
-        vec![AgentEntry::custom(AgentDefinition::claude_default())]
+        vec![AgentEntry::preset_with(
+            "claude-acp",
+            PresetOverrides {
+                id: Some("claude".to_string()),
+                name: Some("Claude Code".to_string()),
+                ..PresetOverrides::default()
+            }
+        )]
+    );
+    assert_eq!(
+        default_agents()[0].resolve(),
+        Some(AgentDefinition::claude_default())
     );
 }
 

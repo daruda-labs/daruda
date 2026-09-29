@@ -1704,6 +1704,9 @@ fn agent_entry_table(entry: &AgentEntry) -> toml_edit::Table {
     match &entry.source {
         AgentSource::Preset { preset, overrides } => {
             table["preset"] = toml_edit::value(preset.clone());
+            if let Some(id) = &overrides.id {
+                table["id"] = toml_edit::value(id.clone());
+            }
             if let Some(name) = &overrides.name {
                 table["name"] = toml_edit::value(name.clone());
             }

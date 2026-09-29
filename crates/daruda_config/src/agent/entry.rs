@@ -24,8 +24,8 @@ pub struct AgentEntry {
 }
 
 /// Where a catalog entry's definition comes from. The `preset` key decides
-/// the shape, so the two are mutually exclusive by construction: a reference
-/// cannot also carry its own `id`, and a custom entry has no preset to track.
+/// the shape: a reference follows its preset in every field it does not
+/// override, and a custom entry has no preset to track.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum AgentSource {
     /// References the built-in preset `preset`; every field not in `overrides`
@@ -43,6 +43,10 @@ pub enum AgentSource {
 /// Per-field overrides on a preset reference. `None` means "follow the preset".
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct PresetOverrides {
+    /// The agent id panes persist, when it is not the preset's own. Where an
+    /// entry comes from and what it is called are separate facts: daruda's
+    /// built-in Claude is the `claude-acp` preset under the id `claude`.
+    pub id: Option<String>,
     pub name: Option<String>,
     /// Replaces the preset's launch command. A plain command line, never a
     /// remote transport: every preset is [`AgentLaunch::Raw`], and reaching an
@@ -123,6 +127,9 @@ impl AgentSource {
             AgentSource::Custom(definition) => Some(definition.clone()),
             AgentSource::Preset { preset, overrides } => {
                 let mut definition = AgentDefinition::registry_preset(preset)?;
+                if let Some(id) = &overrides.id {
+                    definition.id = id.clone();
+                }
                 if let Some(name) = &overrides.name {
                     definition.name = name.clone();
                 }
@@ -170,22 +177,27 @@ impl AgentSource {
     /// keeps referencing it and each edited field becomes an override.
     ///
     /// With `None` — a hand-written config row, or a definition of unknown
-    /// origin — the entry becomes a reference only on an *exact* match: same id
-    /// and same launch command. A resembling-but-different command stays a
-    /// custom copy, since silently retargeting it at the preset would swap the
-    /// command the user is running.
+    /// origin — the source becomes a reference only on an *exact* match: a
+    /// preset whose launch command it runs verbatim, its id first. A
+    /// resembling-but-different command stays a custom copy, since silently
+    /// retargeting it at the preset would swap the command the user is running.
     pub fn for_definition(definition: AgentDefinition, preset: Option<&str>) -> Self {
         if let Some(entry) = preset.and_then(|preset| Self::reference(preset, &definition)) {
             return entry;
         }
-        // Promotion of an unattributed definition: `reference` already pins the
-        // id, and rejecting a command override pins the command — the two
-        // conditions that make the promotion invisible to everything
-        // downstream, including the per-pane persisted `agent_id`.
-        match Self::reference(&definition.id, &definition) {
-            Some(entry) if !entry.overrides_command() => entry,
-            _ => Self::Custom(definition),
-        }
+        // Promotion of an unattributed definition: `reference` keeps the id as
+        // an override, and rejecting a command override pins the command — the
+        // two conditions that make the promotion invisible to everything
+        // downstream, including the per-pane persisted `agent_id`. The preset
+        // the id names is tried first, so an id that is a preset id stays one.
+        let named = std::iter::once(definition.id.clone());
+        let others = super::preset::presets().map(|preset| preset.id.to_string());
+        named
+            .chain(others)
+            .find_map(|preset| {
+                Self::reference(&preset, &definition).filter(|source| !source.overrides_command())
+            })
+            .unwrap_or(Self::Custom(definition))
     }
 
     /// Whether this entry replaces its preset's launch command.
@@ -195,14 +207,9 @@ impl AgentSource {
 
     /// A reference to `preset` carrying whatever `definition` states
     /// differently, or `None` when that reference could not stand in for
-    /// `definition`: no such preset, a different id (an entry's id *is* its
-    /// preset's id — overriding it would change the identity panes persist), or
-    /// a difference no override can express.
+    /// `definition`: no such preset, or a difference no override can express.
     fn reference(preset: &str, definition: &AgentDefinition) -> Option<Self> {
         let base = AgentDefinition::registry_preset(preset)?;
-        if base.id != definition.id {
-            return None;
-        }
         // A definition that states no environment adopts the preset's — that
         // is what `None` means, and it is what lets a row written before its
         // preset gained an env default pick that default up. Resolved once,
@@ -214,6 +221,7 @@ impl AgentSource {
         let entry = Self::Preset {
             preset: preset.to_string(),
             overrides: PresetOverrides {
+                id: differing(&base.id, &definition.id),
                 name: differing(&base.name, &definition.name),
                 command: match (&base.launch, &definition.launch) {
                     (AgentLaunch::Raw(base), AgentLaunch::Raw(command)) => differing(base, command),
@@ -312,6 +320,7 @@ impl TryFrom<AgentEntryRepr> for AgentSource {
             return Ok(Self::Preset {
                 preset,
                 overrides: PresetOverrides {
+                    id: v.id,
                     name: v.name,
                     command: v.command,
                     default_mode: v.default_mode,
@@ -366,7 +375,7 @@ impl From<AgentSource> for AgentEntryRepr {
             AgentSource::Preset { preset, overrides } => Self {
                 enabled: None,
                 preset: Some(preset),
-                id: None,
+                id: overrides.id,
                 name: overrides.name,
                 command: overrides.command,
                 default_mode: overrides.default_mode,
@@ -455,15 +464,11 @@ mod tests {
             AgentEntry::preset_with(
                 "gemini".to_string(),
                 PresetOverrides {
-                    env: None,
                     name: Some("Gemini (pinned)".to_string()),
                     command: Some("npx -y @google/gemini-cli@0.9.0 --acp".to_string()),
                     default_mode: Some("plan".to_string()),
                     default_model: Some("gemini-2.5-pro".to_string()),
-                    fold_mode: None,
-                    tail_window: None,
-                    tail_window_calls: None,
-                    display_filter: None,
+                    ..PresetOverrides::default()
                 },
             ),
             AgentEntry::custom(custom("hermes", "hermes acp")),
@@ -542,15 +547,9 @@ mod tests {
             AgentEntry::preset_with(
                 "codex-acp".to_string(),
                 PresetOverrides {
-                    env: None,
                     name: Some("My Codex".to_string()),
-                    command: None,
                     default_mode: Some("plan".to_string()),
-                    default_model: None,
-                    fold_mode: None,
-                    tail_window: None,
-                    tail_window_calls: None,
-                    display_filter: None,
+                    ..PresetOverrides::default()
                 }
             )
         );
@@ -572,15 +571,8 @@ mod tests {
             AgentEntry::preset_with(
                 "codex-acp".to_string(),
                 PresetOverrides {
-                    env: None,
-                    name: None,
-                    command: None,
-                    default_mode: None,
                     default_model: Some("gpt-5-codex".to_string()),
-                    fold_mode: None,
-                    tail_window: None,
-                    tail_window_calls: None,
-                    display_filter: None,
+                    ..PresetOverrides::default()
                 }
             )
         );
@@ -590,7 +582,7 @@ mod tests {
     }
 
     #[test]
-    fn a_differing_command_or_id_blocks_promotion() {
+    fn a_differing_command_blocks_promotion_and_a_differing_id_is_kept() {
         let preset = codex_preset();
         // Same id, pinned command: the user is running a specific build, so the
         // entry must not start tracking the preset's `@latest`.
@@ -602,24 +594,33 @@ mod tests {
             AgentEntry::for_definition(pinned.clone(), None),
             AgentEntry::custom(pinned)
         );
-        // Same command, different id: the id is what panes persist, so it wins.
+        // Same command, different id: still that preset, and the id — what
+        // panes persist — survives as an override.
         let renamed_id = AgentDefinition {
             id: "my-codex".to_string(),
             ..preset
         };
+        let entry = AgentEntry::for_definition(renamed_id.clone(), None);
         assert_eq!(
-            AgentEntry::for_definition(renamed_id.clone(), None),
-            AgentEntry::custom(renamed_id)
+            entry,
+            AgentEntry::preset_with(
+                "codex-acp".to_string(),
+                PresetOverrides {
+                    id: Some("my-codex".to_string()),
+                    ..PresetOverrides::default()
+                }
+            )
         );
+        assert_eq!(entry.resolve(), Some(renamed_id));
     }
 
     /// Regression: `claude_default()` shares its command with the `claude-acp`
     /// preset but keeps the id `claude`, which every AgentChat pane persists in
-    /// `SerializedAgentChat.agent_id`. Promoting on the command alone would
-    /// resolve that entry as `claude-acp` and break the restore of every
-    /// existing pane.
+    /// `SerializedAgentChat.agent_id`. It becomes a reference to that preset
+    /// and must still resolve under `claude`, or every existing pane's restore
+    /// breaks.
     #[test]
-    fn the_built_in_claude_default_is_never_promoted() {
+    fn the_built_in_claude_default_references_its_preset_under_its_own_id() {
         let claude = AgentDefinition::claude_default();
         let preset =
             AgentDefinition::registry_preset("claude-acp").expect("claude-acp is runnable");
@@ -627,8 +628,8 @@ mod tests {
         assert_ne!(claude.id, preset.id, "different stable id");
 
         let entry = AgentEntry::for_definition(claude.clone(), None);
-        assert_eq!(entry, AgentEntry::custom(claude.clone()));
-        assert_eq!(entry.resolve().map(|d| d.id), Some(claude.id));
+        assert_eq!(entry.preset_id(), Some("claude-acp"));
+        assert_eq!(entry.resolve(), Some(claude));
     }
 
     #[test]
@@ -644,15 +645,8 @@ mod tests {
             AgentEntry::preset_with(
                 "gemini".to_string(),
                 PresetOverrides {
-                    env: None,
-                    name: None,
                     command: Some("npx -y @google/gemini-cli@0.9.0 --acp".to_string()),
-                    default_mode: None,
-                    default_model: None,
-                    fold_mode: None,
-                    tail_window: None,
-                    tail_window_calls: None,
-                    display_filter: None,
+                    ..PresetOverrides::default()
                 }
             )
         );
@@ -660,17 +654,17 @@ mod tests {
     }
 
     #[test]
-    fn a_known_origin_detaches_when_the_id_or_transport_no_longer_fits() {
+    fn a_known_origin_keeps_an_edited_id_and_detaches_for_a_remote_transport() {
         let preset = AgentDefinition::registry_preset("gemini").expect("gemini is runnable");
-        // Id edited away from the preset's: identity beats origin.
+        // Id edited away from the preset's: the origin still holds, and the
+        // new id is carried as an override.
         let renamed = AgentDefinition {
             id: "my-gemini".to_string(),
             ..preset.clone()
         };
-        assert_eq!(
-            AgentEntry::for_definition(renamed.clone(), Some("gemini")),
-            AgentEntry::custom(renamed)
-        );
+        let entry = AgentEntry::for_definition(renamed.clone(), Some("gemini"));
+        assert_eq!(entry.preset_id(), Some("gemini"));
+        assert_eq!(entry.resolve(), Some(renamed));
         // Switched to a remote transport: no override can express that.
         let remote = AgentDefinition {
             launch: AgentLaunch::Ssh {

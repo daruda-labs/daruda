@@ -686,9 +686,12 @@ fn validate_collects_agent_catalog(cx: &mut TestAppContext) {
         assert_eq!(
             cfg.agents,
             vec![
-                // The built-in default keeps its own stable id — never promoted
-                // to the `claude-acp` preset it shares a command with.
-                daruda_config::AgentEntry::custom(daruda_config::AgentDefinition::claude_default()),
+                // The built-in default references the `claude-acp` preset it
+                // shares a command with, under its own stable id.
+                daruda_config::AgentEntry::for_definition(
+                    daruda_config::AgentDefinition::claude_default(),
+                    None,
+                ),
                 // The added preset is stored as a reference, not a copy.
                 daruda_config::AgentEntry::preset("codex-acp".to_string()),
             ]
@@ -898,15 +901,8 @@ fn editing_one_field_of_a_preset_row_overrides_only_that_field(cx: &mut TestAppC
             daruda_config::AgentEntry::preset_with(
                 "gemini".to_string(),
                 daruda_config::PresetOverrides {
-                    env: None,
                     name: Some("My Gemini".to_string()),
-                    command: None,
-                    default_mode: None,
-                    default_model: None,
-                    fold_mode: None,
-                    tail_window: None,
-                    tail_window_calls: None,
-                    display_filter: None,
+                    ..daruda_config::PresetOverrides::default()
                 }
             )
         );
@@ -2018,8 +2014,10 @@ fn a_launchable_preset_shows_no_install_guidance(cx: &mut TestAppContext) {
 #[gpui::test]
 fn validate_preserves_unresolved_agent_catalog_entries(cx: &mut TestAppContext) {
     let unresolved = daruda_config::AgentEntry::preset("retired-agent".to_string());
-    let claude =
-        daruda_config::AgentEntry::custom(daruda_config::AgentDefinition::claude_default());
+    let claude = daruda_config::AgentEntry::for_definition(
+        daruda_config::AgentDefinition::claude_default(),
+        None,
+    );
     let config = daruda_config::Config {
         // Unresolved first, editable second.
         agents: vec![unresolved.clone(), claude.clone()],
@@ -2169,9 +2167,7 @@ fn a_mode_or_model_pick_persists_for_a_constructor_seeded_row(cx: &mut TestAppCo
             let agents = &crate::settings_store::SettingsStore::global(cx)
                 .user()
                 .agents;
-            let daruda_config::AgentSource::Custom(definition) = &agents[0].source else {
-                panic!("the built-in default is a custom entry");
-            };
+            let definition = agents[0].resolve().expect("the built-in default resolves");
             let (mode, model) = match expected.1 {
                 Some(model) => (None, Some(model.to_string())),
                 None => (Some(expected.0.to_string()), None),
@@ -2269,11 +2265,11 @@ fn a_saved_value_the_vocabulary_does_not_list_is_kept(cx: &mut TestAppContext) {
         default_mode: Some("legacy-mode".to_string()),
         default_model: Some("legacy-model".to_string()),
         ..daruda_config::AgentDefinition::new(
-            // Not a preset id: `AgentEntry::for_definition` promotes a definition
-            // whose id names a known preset, which would make this a Preset entry.
+            // No preset runs this command: `AgentEntry::for_definition` promotes
+            // one that does, which would make this a Preset entry.
             "hand-written".to_string(),
             "Hand Written".to_string(),
-            daruda_config::AgentLaunch::Raw("npx -y @google/gemini-cli@latest --acp".to_string()),
+            daruda_config::AgentLaunch::Raw("hand-written-agent --acp".to_string()),
         )
     });
     let config = daruda_config::Config {
