@@ -21,6 +21,7 @@ mod flow;
 mod git_changes_nav;
 mod git_changes_virtualized;
 mod git_remote;
+mod lane_unread;
 mod left_dock_pulse;
 mod lifecycle;
 mod modal_tab_containment;

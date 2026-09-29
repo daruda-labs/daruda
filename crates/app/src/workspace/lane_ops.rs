@@ -612,6 +612,10 @@ impl Workspace {
         self.main_area.pane_drop_hover = None;
 
         self.active = target;
+        // Seen now. Persisted by the `mutate_durable` each branch below ends on.
+        if let Some(lane) = self.lane_for_mut(target) {
+            lane.is_unread = false;
+        }
 
         // The bottom-dock draft swaps per input pane (via
         // `set_focused_pane`), not per lane — handled on the focus path
