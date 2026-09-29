@@ -1849,6 +1849,8 @@ control:
   listing_header: "Open agent chats"
   listing_row: "%{ordinal}. %{name} (%{agent})%{detail}%{ago}"
   agent_with_tab: "%{agent} · %{tab}"
+  turn_failed: "⚠️ The agent stopped with an error"
+  run_summary: "✅ %{segments}"
   listing_detail: " — %{detail}"
   listing_state: "[%{state}]"
   target_label: "%{name}%{title}"

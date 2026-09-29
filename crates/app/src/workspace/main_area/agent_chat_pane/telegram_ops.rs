@@ -49,6 +49,23 @@ fn preview_for(text: &str, marker: &str) -> String {
     )
 }
 
+/// The finished run in one line — how long it worked and what its tool calls
+/// did, by category. `None` when there is nothing to say.
+fn run_summary_line(summary: &super::view::RunSummary) -> Option<String> {
+    let segments: Vec<String> = summary
+        .worked_for
+        .map(s::format_duration_compact)
+        .into_iter()
+        .chain(
+            summary
+                .tools
+                .iter()
+                .map(|&(category, count)| s::agent_chat_group_category(category.token(), count)),
+        )
+        .collect();
+    (!segments.is_empty()).then(|| s::remote_run_summary(&segments))
+}
+
 /// Compose the permission-wait ping's tail: the localized "waiting for input"
 /// line, then optional tool-title and raw-input-summary lines (the same
 /// `daruda_acp::PermissionItem` fields the in-app card is built from) so the
@@ -180,7 +197,15 @@ impl Workspace {
         pane_id: PaneId,
         cx: &Context<Self>,
     ) -> Option<(String, TelegramTail)> {
-        let header = self.telegram_header(pane_id, cx);
+        let mut header = self.telegram_header(pane_id, cx);
+        if let Some(line) = self
+            .agent_chat_view(pane_id)
+            .and_then(|view| view.read(cx).last_run_summary())
+            .and_then(|summary| run_summary_line(&summary))
+        {
+            header.push('\n');
+            header.push_str(&line);
+        }
         let Some(view) = self.agent_chat_view(pane_id) else {
             return Some((
                 self.pane_title(pane_id, cx),
@@ -275,7 +300,7 @@ impl Workspace {
             return;
         }
         let tail = permission_wait_tail(tool_title, raw_input_summary);
-        let header = self.pane_title(pane_id, cx);
+        let header = self.telegram_header(pane_id, cx);
         let permission = Some(crate::telegram::bridge::PermissionPromptRef { perm_id, buttons });
         let told = if is_telegram_first_response {
             self.relay_to_telegram(pane_id, header, TelegramTail::Plain(tail), permission, cx);
@@ -557,6 +582,27 @@ impl Workspace {
         bridge.send_notice(text);
     }
 
+    /// The ping a turn that ended in an error sends: the usual who-is-this
+    /// header, then the failure lead line and why. Our own copy, so plain.
+    pub(super) fn telegram_failure_parts(
+        &self,
+        pane_id: PaneId,
+        cx: &Context<Self>,
+    ) -> (String, TelegramTail) {
+        let mut tail = s::remote_turn_failed();
+        if let Some(reason) = self
+            .agent_chat_view(pane_id)
+            .and_then(|view| view.read(cx).failure_reason())
+        {
+            tail.push('\n');
+            tail.push_str(&preview_for(
+                &reason,
+                &s::agent_notification_telegram_truncated_marker(),
+            ));
+        }
+        (self.telegram_header(pane_id, cx), TelegramTail::Plain(tail))
+    }
+
     /// Send the "queued behind the current turn" notice — fires the instant
     /// `AgentChatView::send_prompt_text_for_telegram` reports
     /// [`PromptDispatch::Queued`], since a queued reply hasn't reached the
@@ -740,5 +786,7 @@ impl Workspace {
     }
 }
 
+#[cfg(test)]
+mod notify_tests;
 #[cfg(test)]
 mod tests;

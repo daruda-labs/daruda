@@ -205,6 +205,61 @@ impl AgentChatView {
     /// Keyed by the run's first item so the record and the response bar above it
     /// name one thing. A run that put nothing on screen gets no key and no
     /// record — there is no row for it to label.
+    /// What the last run did: how long it worked, when that was recorded, and
+    /// its tool calls by category. `None` when there is no run.
+    pub(in crate::workspace) fn last_run_summary(&self) -> Option<RunSummary> {
+        let run_start = Self::run_start_of(&self.items)?;
+        let calls = self.items[run_start..]
+            .iter()
+            .filter_map(|item| match item {
+                ChatItem::ToolCall(tc) => Some(tc),
+                _ => None,
+            });
+        Some(RunSummary {
+            worked_for: self
+                .activity
+                .turn_records
+                .get(&run_start)
+                .map(|r| r.worked_for),
+            tools: crate::transcript::tool_category::tally_categories(calls),
+        })
+    }
+
+    /// Why the last turn failed: its failure row, else the session's error.
+    pub(in crate::workspace) fn failure_reason(&self) -> Option<String> {
+        let row = Self::run_start_of(&self.items).and_then(|start| {
+            self.items[start..]
+                .iter()
+                .rev()
+                .find_map(|item| match item {
+                    ChatItem::Failure(failure) => {
+                        Some(super::super::agent_chat_helpers::failure_message(failure))
+                    }
+                    _ => None,
+                })
+        });
+        row.or_else(|| match &self.status {
+            AgentSessionStatus::Error { message, .. } => Some(message.clone()),
+            _ => None,
+        })
+    }
+
+    /// Record a settled run of `worked_for` for the current items, as
+    /// [`Self::record_turn`] would at the end of a live turn.
+    #[cfg(test)]
+    pub(in crate::workspace) fn record_turn_for_test(&mut self, worked_for: std::time::Duration) {
+        if let Some(run_start) = Self::run_start_of(&self.items) {
+            self.activity.turn_records.insert(
+                run_start,
+                super::TurnRecord {
+                    worked_for,
+                    finished_at: chrono::Local::now(),
+                    output_tokens: None,
+                },
+            );
+        }
+    }
+
     pub(super) fn record_turn(&mut self, output_tokens: Option<u64>) {
         let Some(run_start) = Self::run_start_of(&self.items) else {
             return;
@@ -235,6 +290,12 @@ impl AgentChatView {
             .map_or(0, |ix| ix + 1);
         (after_prompt < items.len()).then_some(after_prompt)
     }
+}
+
+/// A settled run in brief — what a phone is told alongside the answer.
+pub(in crate::workspace) struct RunSummary {
+    pub(in crate::workspace) worked_for: Option<std::time::Duration>,
+    pub(in crate::workspace) tools: Vec<(crate::transcript::tool_category::ToolCategory, usize)>,
 }
 
 #[cfg(test)]

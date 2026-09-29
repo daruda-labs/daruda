@@ -433,6 +433,10 @@ impl Workspace {
                 self.relay_when_presence_allows(pane_id, header, tail, None, cx);
             }
         }
+        if matches!(outcome, TurnOutcome::Errored) {
+            let (header, tail) = self.telegram_failure_parts(pane_id, cx);
+            self.relay_when_presence_allows(pane_id, header, tail, None, cx);
+        }
         // Every outcome, not just `Completed`: a turn that errored or was
         // stopped has had its phone conversation ended too, and a ledger left
         // behind outlives the turn it describes — the next turn on this pane

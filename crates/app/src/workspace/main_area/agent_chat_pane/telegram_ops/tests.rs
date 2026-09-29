@@ -10,7 +10,9 @@ use daruda_store::project::PaneCwd;
 /// Every relay in this file is about a chat pane, so every one of them must
 /// leave the queue as a pane-attributed ping — a `Notice` here would mean an
 /// agent's own message stopped registering a reply-to.
-fn expect_ping(outbound: crate::telegram::bridge::Outbound) -> crate::telegram::bridge::BridgePing {
+pub(super) fn expect_ping(
+    outbound: crate::telegram::bridge::Outbound,
+) -> crate::telegram::bridge::BridgePing {
     match outbound {
         crate::telegram::bridge::Outbound::Ping(ping) => ping,
         crate::telegram::bridge::Outbound::Notice(text) => {
@@ -1236,7 +1238,7 @@ async fn respond_bot_permission_routes_by_id_under_concurrency(cx: &mut gpui::Te
 /// panic during construction. Local adaptation of
 /// `window_registry.rs`'s test-only `make_window` helper (that helper is
 /// private to its own module, so it isn't reachable from here).
-fn make_window(
+pub(super) fn make_window(
     cx: &mut gpui::TestAppContext,
     config: &daruda_config::Config,
 ) -> (

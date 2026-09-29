@@ -1848,6 +1848,8 @@ control:
   listing_header: "열려 있는 에이전트 대화"
   listing_row: "%{ordinal}. %{name} (%{agent})%{detail}%{ago}"
   agent_with_tab: "%{agent} · %{tab}"
+  turn_failed: "⚠️ 에이전트가 오류로 멈췄습니다"
+  run_summary: "✅ %{segments}"
   listing_detail: " — %{detail}"
   listing_state: "[%{state}]"
   target_label: "%{name}%{title}"
