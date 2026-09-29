@@ -264,6 +264,18 @@ pub(super) fn bool(setting: BoolSetting) -> RowCopy {
             label: s::settings_label_notify_skip_focused,
             hint: s::settings_hint_notify_skip_focused,
         },
+        BoolSetting::GitConfirmCommit => RowCopy {
+            label: s::settings_label_git_confirm_commit,
+            hint: s::settings_hint_git_confirm_commit,
+        },
+        BoolSetting::GitConfirmPush => RowCopy {
+            label: s::settings_label_git_confirm_push,
+            hint: String::new,
+        },
+        BoolSetting::GitDefaultCommitMessage => RowCopy {
+            label: s::settings_label_git_default_commit_message,
+            hint: s::settings_hint_git_default_commit_message,
+        },
         BoolSetting::NotifyHook => RowCopy {
             label: s::settings_label_notify_hook,
             hint: s::settings_hint_notify_hook,

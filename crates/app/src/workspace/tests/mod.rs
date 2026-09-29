@@ -22,6 +22,7 @@ mod files;
 mod flow;
 mod git_changes_nav;
 mod git_changes_virtualized;
+mod git_commit_flow;
 mod git_remote;
 mod lane_unread;
 mod left_dock_pulse;

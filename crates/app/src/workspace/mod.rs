@@ -463,6 +463,8 @@ pub struct Workspace {
     /// `TerminalViewEvent` subscriptions and by the long-running command
     /// timer.
     pub(in crate::workspace) notifications: daruda_config::NotificationsConfig,
+    /// `[git]` — whether the Git panel's commit and push ask first.
+    pub(in crate::workspace) git_config: daruda_config::GitConfig,
     /// Telegram bot bridge settings — gates `relay_to_telegram` (both
     /// `enabled` and a completed pairing are required before a ping is
     /// queued). Mirrored from the live config the same way
@@ -1142,6 +1144,7 @@ impl Workspace {
             file_viewer_preview_tab: config.file_viewer.preview_tab,
             preferred_editor: config.editor.preferred.clone(),
             notifications: config.notifications.clone(),
+            git_config: config.git.clone(),
             telegram: config.telegram.clone(),
             clipboard: config.clipboard.clone(),
             agent: config.agent.clone(),

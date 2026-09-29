@@ -4761,6 +4761,40 @@ pub fn settings_hint_preview_tab() -> String {
     rust_i18n::t!("settings.hint_preview_tab").into_owned()
 }
 
+pub fn settings_card_git() -> String {
+    rust_i18n::t!("settings.card_git").into_owned()
+}
+
+pub fn settings_label_git_confirm_commit() -> String {
+    rust_i18n::t!("settings.label_git_confirm_commit").into_owned()
+}
+
+pub fn settings_hint_git_confirm_commit() -> String {
+    rust_i18n::t!("settings.hint_git_confirm_commit").into_owned()
+}
+
+pub fn settings_label_git_confirm_push() -> String {
+    rust_i18n::t!("settings.label_git_confirm_push").into_owned()
+}
+
+pub fn settings_label_git_default_commit_message() -> String {
+    rust_i18n::t!("settings.label_git_default_commit_message").into_owned()
+}
+
+pub fn settings_hint_git_default_commit_message() -> String {
+    rust_i18n::t!("settings.hint_git_default_commit_message").into_owned()
+}
+
+/// The subject an empty commit message commits as. Repository content rather
+/// than interface copy, so it stays English in every locale — a history mixes
+/// contributors and should read one way.
+pub fn git_default_commit_message(files: &[&str]) -> String {
+    match files {
+        [one] => format!("Update {one}"),
+        many => format!("Update {} files", many.len()),
+    }
+}
+
 pub fn settings_card_files() -> String {
     rust_i18n::t!("settings.card_files").into_owned()
 }

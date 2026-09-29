@@ -795,6 +795,27 @@ pub(super) const BOOL_SETTINGS: &[BoolSpec] = &[
         show: |c| c.notifications.skip_focused_pane,
     },
     BoolSpec {
+        setting: BoolSetting::GitConfirmCommit,
+        get: |w| w.git_confirm_commit,
+        set: |w, v| w.git_confirm_commit = v,
+        patch: SettingsPatch::GitConfirmCommit,
+        show: |c| c.git.confirm_commit,
+    },
+    BoolSpec {
+        setting: BoolSetting::GitConfirmPush,
+        get: |w| w.git_confirm_push,
+        set: |w, v| w.git_confirm_push = v,
+        patch: SettingsPatch::GitConfirmPush,
+        show: |c| c.git.confirm_push,
+    },
+    BoolSpec {
+        setting: BoolSetting::GitDefaultCommitMessage,
+        get: |w| w.git_default_commit_message,
+        set: |w, v| w.git_default_commit_message = v,
+        patch: SettingsPatch::GitDefaultCommitMessage,
+        show: |c| c.git.default_commit_message,
+    },
+    BoolSpec {
         setting: BoolSetting::NotifyHook,
         get: |w| w.notify_hook,
         set: |w, v| w.notify_hook = v,
@@ -1039,6 +1060,9 @@ mod tests {
             | SettingsPatch::NotifyAttention(_)
             | SettingsPatch::NotifyLongRunning(_)
             | SettingsPatch::NotifySkipFocusedPane(_)
+            | SettingsPatch::GitConfirmCommit(_)
+            | SettingsPatch::GitConfirmPush(_)
+            | SettingsPatch::GitDefaultCommitMessage(_)
             | SettingsPatch::NotifyHook(_)
             | SettingsPatch::NotifyAgentCompletion(_)
             | SettingsPatch::NotifyAgentWaiting(_)

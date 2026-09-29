@@ -4,6 +4,7 @@ use daruda_store::observability::error_report::{ErrorReport, ErrorSeverity};
 use daruda_store::observability::system_info::redact_home;
 use gpui::{AppContext as _, Context, Window};
 
+use crate::path_ext::PathExt as _;
 use crate::surface::strings as app_strings;
 use crate::ui::ButtonVariant;
 use crate::workspace::dialog_helpers::open_confirm_dialog;
@@ -47,11 +48,20 @@ impl Workspace {
             return;
         }
 
-        let message = {
+        let typed = {
             let panel = self.git_commit_input.read(cx);
             panel.text(cx).to_string()
         };
-        if message.trim().is_empty() {
+        let staged: Vec<String> = self
+            .lane_git_worktree(self.active)
+            .map(|s| s.staged.iter().map(|e| e.path.file_name_lossy()).collect())
+            .unwrap_or_default();
+        let message = if !typed.trim().is_empty() {
+            typed
+        } else if self.git_config.default_commit_message && !staged.is_empty() {
+            let names: Vec<&str> = staged.iter().map(String::as_str).collect();
+            app_strings::git_default_commit_message(&names)
+        } else {
             let report = ErrorReport::new(app_strings::error_commit_message_empty())
                 .severity(ErrorSeverity::Warning)
                 .at(file!(), line!())
@@ -59,12 +69,15 @@ impl Workspace {
                 .build();
             self.report_error(report, cx);
             return;
+        };
+
+        if !self.git_config.confirm_commit {
+            let wh = window.window_handle();
+            self.do_commit_changes(message, wh, cx);
+            return;
         }
 
-        let staged_count = self
-            .lane_git_worktree(self.active)
-            .map(|s| s.staged.len())
-            .unwrap_or(0);
+        let staged_count = staged.len();
         let first_line = message.lines().next().unwrap_or("").to_string();
         let body = app_strings::git_confirm_commit_body(staged_count, &first_line);
 
@@ -399,6 +412,10 @@ impl Workspace {
             return;
         }
         if self.git_repo_root_for(self.active).is_none() {
+            return;
+        }
+        if !self.git_config.confirm_push {
+            self.do_push(cx);
             return;
         }
 

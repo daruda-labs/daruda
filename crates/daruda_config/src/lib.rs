@@ -15,6 +15,7 @@ pub mod file_viewer;
 pub mod flow;
 pub mod font;
 pub mod general;
+pub mod git;
 pub mod keybindings;
 pub mod left_dock;
 pub mod logs;
@@ -57,6 +58,7 @@ pub use agent::{
 pub use claude_status::ClaudeStatusConfig;
 pub use clipboard::ClipboardConfig;
 pub use colors::{AnsiPalette, ColorConfig, HexColor};
+pub use git::GitConfig;
 
 /// `value` clamped to `[min, max]`, or `fallback` when it is NaN. TOML reads
 /// `nan` as a float and `f32::clamp` passes NaN through, so a NaN size, width
@@ -155,6 +157,7 @@ pub struct Config {
     pub claude_status: ClaudeStatusConfig,
     pub notifications: NotificationsConfig,
     pub clipboard: ClipboardConfig,
+    pub git: GitConfig,
     pub usage: UsageConfig,
     pub panels: PanelsConfig,
     pub status_bar: StatusBarConfig,
@@ -218,6 +221,7 @@ impl Default for Config {
             claude_status: Default::default(),
             notifications: Default::default(),
             clipboard: Default::default(),
+            git: Default::default(),
             usage: Default::default(),
             panels: Default::default(),
             status_bar: Default::default(),
@@ -1441,6 +1445,21 @@ fn patch_settings_document(
             t.insert(
                 "long_running_enabled",
                 toml_edit::value(config.notifications.long_running_enabled),
+            );
+        }),
+        SettingsPatch::GitConfirmCommit(_) => patch_section(doc, "git", |t| {
+            t.insert(
+                "confirm_commit",
+                toml_edit::value(config.git.confirm_commit),
+            );
+        }),
+        SettingsPatch::GitConfirmPush(_) => patch_section(doc, "git", |t| {
+            t.insert("confirm_push", toml_edit::value(config.git.confirm_push));
+        }),
+        SettingsPatch::GitDefaultCommitMessage(_) => patch_section(doc, "git", |t| {
+            t.insert(
+                "default_commit_message",
+                toml_edit::value(config.git.default_commit_message),
             );
         }),
         SettingsPatch::NotifySkipFocusedPane(_) => patch_section(doc, "notifications", |t| {

@@ -60,6 +60,9 @@ pub enum SettingsFieldId {
     NotifyAttention,
     NotifyLongRunning,
     NotifySkipFocusedPane,
+    GitConfirmCommit,
+    GitConfirmPush,
+    GitDefaultCommitMessage,
     NotifyHook,
     NotifyAgentCompletion,
     NotifyAgentWaiting,
@@ -137,6 +140,9 @@ impl SettingsFieldId {
             Self::NotifyAttention => "notifications.attention_enabled",
             Self::NotifyLongRunning => "notifications.long_running_enabled",
             Self::NotifySkipFocusedPane => "notifications.skip_focused_pane",
+            Self::GitConfirmCommit => "git.confirm_commit",
+            Self::GitConfirmPush => "git.confirm_push",
+            Self::GitDefaultCommitMessage => "git.default_commit_message",
             Self::NotifyHook => "notifications.hook_notification_enabled",
             Self::NotifyAgentCompletion => "notifications.agent_completion_enabled",
             Self::NotifyAgentWaiting => "notifications.agent_waiting_enabled",
@@ -223,6 +229,9 @@ pub enum SettingsPatch {
     NotifyAttention(bool),
     NotifyLongRunning(bool),
     NotifySkipFocusedPane(bool),
+    GitConfirmCommit(bool),
+    GitConfirmPush(bool),
+    GitDefaultCommitMessage(bool),
     NotifyHook(bool),
     NotifyAgentCompletion(bool),
     NotifyAgentWaiting(bool),
@@ -304,6 +313,9 @@ impl SettingsPatch {
             Self::NotifyAttention(_) => SettingsFieldId::NotifyAttention,
             Self::NotifyLongRunning(_) => SettingsFieldId::NotifyLongRunning,
             Self::NotifySkipFocusedPane(_) => SettingsFieldId::NotifySkipFocusedPane,
+            Self::GitConfirmCommit(_) => SettingsFieldId::GitConfirmCommit,
+            Self::GitConfirmPush(_) => SettingsFieldId::GitConfirmPush,
+            Self::GitDefaultCommitMessage(_) => SettingsFieldId::GitDefaultCommitMessage,
             Self::NotifyHook(_) => SettingsFieldId::NotifyHook,
             Self::NotifyAgentCompletion(_) => SettingsFieldId::NotifyAgentCompletion,
             Self::NotifyAgentWaiting(_) => SettingsFieldId::NotifyAgentWaiting,
@@ -398,6 +410,9 @@ impl SettingsPatch {
             Self::NotifyAttention(value) => config.notifications.attention_enabled = *value,
             Self::NotifyLongRunning(value) => config.notifications.long_running_enabled = *value,
             Self::NotifySkipFocusedPane(value) => config.notifications.skip_focused_pane = *value,
+            Self::GitConfirmCommit(value) => config.git.confirm_commit = *value,
+            Self::GitConfirmPush(value) => config.git.confirm_push = *value,
+            Self::GitDefaultCommitMessage(value) => config.git.default_commit_message = *value,
             Self::NotifyHook(value) => config.notifications.hook_notification_enabled = *value,
             Self::NotifyAgentCompletion(value) => {
                 config.notifications.agent_completion_enabled = *value
@@ -541,6 +556,11 @@ impl SettingsPatch {
             }
             Self::NotifySkipFocusedPane(_) => {
                 left.notifications.skip_focused_pane != right.notifications.skip_focused_pane
+            }
+            Self::GitConfirmCommit(_) => left.git.confirm_commit != right.git.confirm_commit,
+            Self::GitConfirmPush(_) => left.git.confirm_push != right.git.confirm_push,
+            Self::GitDefaultCommitMessage(_) => {
+                left.git.default_commit_message != right.git.default_commit_message
             }
             Self::NotifyHook(_) => {
                 left.notifications.hook_notification_enabled

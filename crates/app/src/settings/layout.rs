@@ -158,6 +158,14 @@ const WORKSPACE: &[Card] = &[
         ],
     },
     Card::Rows {
+        title: s::settings_card_git,
+        rows: &[
+            b(B::GitConfirmCommit),
+            b(B::GitConfirmPush),
+            b(B::GitDefaultCommitMessage),
+        ],
+    },
+    Card::Rows {
         title: s::settings_card_status_bar,
         rows: &[
             item(Item::ProjectBranch),

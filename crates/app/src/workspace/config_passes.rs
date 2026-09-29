@@ -107,6 +107,7 @@ impl Workspace {
         self.file_viewer_preview_tab = config.file_viewer.preview_tab;
         self.preferred_editor = config.editor.preferred.clone();
         self.notifications = config.notifications.clone();
+        self.git_config = config.git.clone();
         self.telegram = config.telegram.clone();
         self.clipboard = config.clipboard.clone();
         self.agent = config.agent.clone();
