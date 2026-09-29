@@ -624,11 +624,34 @@ pub struct WindowState {
     pub y: f32,
     pub width: f32,
     pub height: f32,
+    /// The display the window was on, by the platform's stable id, so a
+    /// relaunch reopens it there rather than on the primary display.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub display: Option<String>,
+    /// The window was maximized; the rect is the size it restores to.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub maximized: bool,
 }
 
 impl WindowState {
     /// True when the state has usable values (not all-zero default).
     pub fn is_valid(&self) -> bool {
         self.width > 0.0 && self.height > 0.0
+    }
+
+    /// This rect moved wholly onto the display area `(x, y, width,
+    /// height)`: shrunk to it if larger, then slid in from whichever edge it
+    /// hangs over. A window on a monitor since unplugged, or saved on a
+    /// larger one, would otherwise open off screen.
+    pub fn fit_within(&self, x: f32, y: f32, width: f32, height: f32) -> WindowState {
+        let w = self.width.min(width);
+        let h = self.height.min(height);
+        WindowState {
+            x: self.x.clamp(x, x + width - w),
+            y: self.y.clamp(y, y + height - h),
+            width: w,
+            height: h,
+            ..self.clone()
+        }
     }
 }

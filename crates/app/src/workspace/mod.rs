@@ -752,7 +752,7 @@ impl Workspace {
         // captures them between `install_window_close_hook` and the
         // first persist. Mirror that here so the saved state has real
         // geometry instead of `None`.
-        ws.capture_window_bounds(window);
+        ws.capture_window_bounds(window, cx);
         ws.persist_state(cx); // lint-reentrant-reads: test-only constructor, no dock entity is in EntityState::Mut
         ws
     }
@@ -1328,7 +1328,7 @@ impl Workspace {
         crate::platform::window_controls::compact(window);
         cx.observe_window_bounds(window, |this: &mut Workspace, window, cx| {
             crate::platform::window_controls::compact(window);
-            this.capture_window_bounds(window);
+            this.capture_window_bounds(window, cx);
             this.resize_all_tabs(window, cx);
         })
         .detach();
@@ -1340,7 +1340,7 @@ impl Workspace {
         // Save all / Discard all.
         Self::install_window_close_hook(ws_weak.clone(), window, cx);
         // Capture initial bounds so first save carries real geometry.
-        ws.capture_window_bounds(window);
+        ws.capture_window_bounds(window, cx);
 
         // Persist initial state so the project is restorable on next launch.
         ws.persist_state(cx); // lint-reentrant-reads: no dock entity is in EntityState::Mut during construction.

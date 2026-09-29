@@ -805,8 +805,73 @@ fn window_state_is_valid_checks_dimensions() {
         y: 0.0,
         width: 1200.0,
         height: 800.0,
+        ..Default::default()
     };
     assert!(valid.is_valid());
+}
+
+fn rect(x: f32, y: f32, width: f32, height: f32) -> WindowState {
+    WindowState {
+        x,
+        y,
+        width,
+        height,
+        ..Default::default()
+    }
+}
+
+/// A window already on the display is left where it was.
+#[test]
+fn a_window_on_the_display_keeps_its_place() {
+    let fitted = rect(100.0, 80.0, 800.0, 600.0).fit_within(0.0, 0.0, 1920.0, 1080.0);
+    assert_eq!(
+        (fitted.x, fitted.y, fitted.width, fitted.height),
+        (100.0, 80.0, 800.0, 600.0)
+    );
+}
+
+/// One that hangs off an edge — a monitor since unplugged, a smaller one —
+/// slides back until all of it is on the display.
+#[test]
+fn a_window_off_the_display_slides_back_onto_it() {
+    let fitted = rect(2500.0, -300.0, 800.0, 600.0).fit_within(0.0, 0.0, 1920.0, 1080.0);
+    assert_eq!((fitted.x, fitted.y), (1120.0, 0.0));
+    let fitted = rect(1500.0, 900.0, 800.0, 600.0).fit_within(0.0, 0.0, 1920.0, 1080.0);
+    assert_eq!((fitted.x, fitted.y), (1120.0, 480.0));
+}
+
+/// One larger than the display shrinks to it first.
+#[test]
+fn a_window_larger_than_the_display_shrinks_to_it() {
+    let fitted = rect(0.0, 0.0, 3000.0, 2000.0).fit_within(0.0, 0.0, 1440.0, 900.0);
+    assert_eq!(
+        (fitted.x, fitted.y, fitted.width, fitted.height),
+        (0.0, 0.0, 1440.0, 900.0)
+    );
+}
+
+/// The display's own origin counts: a display left of the primary has a
+/// negative one on platforms that report global coordinates.
+#[test]
+fn fitting_honours_the_display_origin() {
+    let fitted = rect(10.0, 10.0, 800.0, 600.0).fit_within(-1920.0, 0.0, 1920.0, 1080.0);
+    assert_eq!((fitted.x, fitted.y), (-800.0, 10.0));
+}
+
+/// The display and maximized state ride along a fit, and old files without
+/// them still load.
+#[test]
+fn a_window_state_without_display_or_maximized_still_loads() {
+    let old: WindowState =
+        serde_json::from_str(r#"{"x":1.0,"y":2.0,"width":3.0,"height":4.0}"#).unwrap();
+    assert_eq!(old.display, None);
+    assert!(!old.maximized);
+    let mut kept = rect(0.0, 0.0, 800.0, 600.0);
+    kept.display = Some("uuid".into());
+    kept.maximized = true;
+    let fitted = kept.fit_within(0.0, 0.0, 1920.0, 1080.0);
+    assert_eq!(fitted.display.as_deref(), Some("uuid"));
+    assert!(fitted.maximized);
 }
 
 #[test]
@@ -1106,6 +1171,7 @@ mod new_schema_fixtures {
                 y: 0.0,
                 width: 800.0,
                 height: 600.0,
+                ..Default::default()
             },
             font_size: 13.0,
             vertical_spacing: 1.0,

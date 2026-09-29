@@ -241,20 +241,31 @@ impl Workspace {
         (workspace, project_states)
     }
 
-    /// Sample the window's windowed bounds into `cached_window_bounds`.
-    /// Skips fullscreen / maximized — persisting those would relaunch in
-    /// that mode; the last windowed geometry stays cached instead.
-    pub(in crate::workspace) fn capture_window_bounds(&mut self, window: &Window) {
+    /// Sample the window's geometry into `cached_window_bounds`: its rect,
+    /// the display it is on, and whether it is maximized. Fullscreen is
+    /// skipped; relaunching into it would take over a Space unasked, so the
+    /// last windowed geometry stays cached instead.
+    pub(in crate::workspace) fn capture_window_bounds(&mut self, window: &Window, cx: &App) {
         let bounds = match window.window_bounds() {
-            gpui::WindowBounds::Windowed(b) => b,
-            gpui::WindowBounds::Maximized(_) | gpui::WindowBounds::Fullscreen(_) => return,
+            gpui::WindowBounds::Windowed(b) | gpui::WindowBounds::Maximized(b) => b,
+            gpui::WindowBounds::Fullscreen(_) => return,
         };
-        let new = daruda_store::project::WindowState {
+        let reported = daruda_store::project::WindowState {
             x: f32::from(bounds.origin.x),
             y: f32::from(bounds.origin.y),
             width: f32::from(bounds.size.width),
             height: f32::from(bounds.size.height),
+            display: window
+                .display(cx)
+                .and_then(|d| d.uuid().ok())
+                .map(|uuid| uuid.to_string()),
+            maximized: false,
         };
+        let new = crate::window_placement::captured_geometry(
+            reported,
+            window.is_maximized(),
+            self.cached_window_bounds.as_ref(),
+        );
         if !new.is_valid() {
             return;
         }

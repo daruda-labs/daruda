@@ -46,6 +46,7 @@ pub mod ui;
 mod update;
 mod watcher_pumps;
 mod watchers_lifecycle;
+mod window_placement;
 pub(crate) mod window_registry;
 mod window_startup;
 mod windows;

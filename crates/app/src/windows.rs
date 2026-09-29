@@ -10,8 +10,7 @@ use daruda_store::observability::error_report::{ErrorReport, ErrorSeverity};
 use daruda_store::observability::log_writer::LogWriter;
 use daruda_store::project::{ProjectState, WorkspaceState, WorkspaceUuid};
 use gpui::{
-    App, Bounds, Point, Size, TitlebarOptions, WindowBackgroundAppearance, WindowBounds,
-    WindowOptions, point, prelude::*, px,
+    App, TitlebarOptions, WindowBackgroundAppearance, WindowOptions, point, prelude::*, px,
 };
 
 use crate::window_registry::WindowRegistry;
@@ -143,10 +142,9 @@ pub(crate) fn try_open_workspace_window(
     if let Some((ws, _)) = saved.as_ref()
         && ws.window.is_valid()
     {
-        window_opts.window_bounds = Some(WindowBounds::Windowed(Bounds::new(
-            Point::new(px(ws.window.x), px(ws.window.y)),
-            Size::new(px(ws.window.width), px(ws.window.height)),
-        )));
+        let (bounds, display) = crate::window_placement::restored_placement(&ws.window, cx);
+        window_opts.window_bounds = Some(bounds);
+        window_opts.display_id = display;
     }
 
     cx.open_window(window_opts, |window, cx| {
