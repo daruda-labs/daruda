@@ -11,12 +11,23 @@ use super::{
     AgentDefinition, AgentDefinitionRepr, AgentLaunch, DockerLaunchRepr, EnvRepr, SshLaunchRepr,
 };
 
-/// A persisted catalog entry. The `preset` key decides the shape, so the two
-/// are mutually exclusive by construction: a reference cannot also carry its
-/// own `id`, and a custom entry has no preset to track.
+/// A persisted catalog entry: where its definition comes from, plus whether
+/// the user has it switched on. The two are independent — any source can be
+/// turned off, and turning one off keeps every field it states.
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(try_from = "AgentEntryRepr", into = "AgentEntryRepr")]
-pub enum AgentEntry {
+pub struct AgentEntry {
+    /// `false` keeps the entry, and every override it carries, out of
+    /// [`crate::Config::resolved_agents`].
+    pub enabled: bool,
+    pub source: AgentSource,
+}
+
+/// Where a catalog entry's definition comes from. The `preset` key decides
+/// the shape, so the two are mutually exclusive by construction: a reference
+/// cannot also carry its own `id`, and a custom entry has no preset to track.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum AgentSource {
     /// References the built-in preset `preset`; every field not in `overrides`
     /// resolves from it. An entry naming a preset daruda cannot launch is kept
     /// as it is and simply skipped by [`crate::Config::resolved_agents`].
@@ -36,7 +47,7 @@ pub struct PresetOverrides {
     /// Replaces the preset's launch command. A plain command line, never a
     /// remote transport: every preset is [`AgentLaunch::Raw`], and reaching an
     /// adapter over ssh/docker describes a different agent rather than an
-    /// override of this one — that is a [`AgentEntry::Custom`] entry.
+    /// override of this one — that is a [`AgentSource::Custom`] entry.
     pub command: Option<String>,
     pub default_mode: Option<String>,
     pub default_model: Option<String>,
@@ -59,24 +70,58 @@ impl AgentEntry {
 
     /// A reference to preset `preset` carrying `overrides`.
     pub fn preset_with(preset: impl Into<String>, overrides: PresetOverrides) -> Self {
-        AgentEntry::Preset {
+        Self::enabled(AgentSource::Preset {
             preset: preset.into(),
             overrides,
-        }
+        })
     }
 
     /// A self-contained entry for `definition`.
     pub fn custom(definition: AgentDefinition) -> Self {
-        AgentEntry::Custom(definition)
+        Self::enabled(AgentSource::Custom(definition))
     }
 
-    /// The runnable definition this entry stands for, or `None` when the preset
-    /// it references carries no launch command — an id daruda no longer knows,
-    /// or one that still needs a manual install.
+    fn enabled(source: AgentSource) -> Self {
+        Self {
+            enabled: true,
+            source,
+        }
+    }
+
+    /// The same entry, switched off.
+    pub fn disabled(self) -> Self {
+        Self {
+            enabled: false,
+            ..self
+        }
+    }
+
+    /// The runnable definition this entry stands for, whether or not it is
+    /// switched on — see [`AgentSource::resolve`].
+    pub fn resolve(&self) -> Option<AgentDefinition> {
+        self.source.resolve()
+    }
+
+    /// The preset this entry references, or `None` for a custom entry.
+    pub fn preset_id(&self) -> Option<&str> {
+        self.source.preset_id()
+    }
+
+    /// The entry that persists `definition`, switched on — see
+    /// [`AgentSource::for_definition`].
+    pub fn for_definition(definition: AgentDefinition, preset: Option<&str>) -> Self {
+        Self::enabled(AgentSource::for_definition(definition, preset))
+    }
+}
+
+impl AgentSource {
+    /// The runnable definition this source stands for, or `None` when the
+    /// preset it references carries no launch command — an id daruda no longer
+    /// knows, or one that still needs a manual install.
     pub fn resolve(&self) -> Option<AgentDefinition> {
         match self {
-            AgentEntry::Custom(definition) => Some(definition.clone()),
-            AgentEntry::Preset { preset, overrides } => {
+            AgentSource::Custom(definition) => Some(definition.clone()),
+            AgentSource::Preset { preset, overrides } => {
                 let mut definition = AgentDefinition::registry_preset(preset)?;
                 if let Some(name) = &overrides.name {
                     definition.name = name.clone();
@@ -110,15 +155,15 @@ impl AgentEntry {
         }
     }
 
-    /// The preset this entry references, or `None` for a custom entry.
+    /// The preset this source references, or `None` for a custom one.
     pub fn preset_id(&self) -> Option<&str> {
         match self {
-            AgentEntry::Preset { preset, .. } => Some(preset),
-            AgentEntry::Custom(_) => None,
+            AgentSource::Preset { preset, .. } => Some(preset),
+            AgentSource::Custom(_) => None,
         }
     }
 
-    /// The entry that persists `definition`.
+    /// The source that persists `definition`.
     ///
     /// `preset` is the preset the definition was resolved from, when the caller
     /// knows it (an editor working on an already-referencing row): the entry
@@ -145,7 +190,7 @@ impl AgentEntry {
 
     /// Whether this entry replaces its preset's launch command.
     fn overrides_command(&self) -> bool {
-        matches!(self, AgentEntry::Preset { overrides, .. } if overrides.command.is_some())
+        matches!(self, AgentSource::Preset { overrides, .. } if overrides.command.is_some())
     }
 
     /// A reference to `preset` carrying whatever `definition` states
@@ -209,7 +254,7 @@ fn differing(base: &str, value: &str) -> Option<String> {
 }
 
 /// Private wire representation for [`AgentEntry`]. Every key is optional and
-/// `preset` alone selects the variant — a plain struct rather than
+/// `preset` alone selects the [`AgentSource`] variant — a plain struct rather than
 /// `#[serde(untagged)]`, whose failure message names none of the keys the user
 /// actually got wrong.
 ///
@@ -217,6 +262,10 @@ fn differing(base: &str, value: &str) -> Option<String> {
 /// value after a table within the same entry.
 #[derive(Serialize, Deserialize)]
 struct AgentEntryRepr {
+    /// Written only as `false`: an entry that states nothing is switched on,
+    /// which keeps every file written before the key existed meaning the same.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    enabled: Option<bool>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     preset: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -246,6 +295,16 @@ struct AgentEntryRepr {
 }
 
 impl TryFrom<AgentEntryRepr> for AgentEntry {
+    type Error = String;
+
+    fn try_from(v: AgentEntryRepr) -> Result<Self, Self::Error> {
+        let enabled = v.enabled.unwrap_or(true);
+        let source = AgentSource::try_from(v)?;
+        Ok(AgentEntry { enabled, source })
+    }
+}
+
+impl TryFrom<AgentEntryRepr> for AgentSource {
     type Error = String;
 
     fn try_from(v: AgentEntryRepr) -> Result<Self, Self::Error> {
@@ -294,8 +353,18 @@ impl TryFrom<AgentEntryRepr> for AgentEntry {
 
 impl From<AgentEntry> for AgentEntryRepr {
     fn from(v: AgentEntry) -> Self {
+        Self {
+            enabled: (!v.enabled).then_some(false),
+            ..Self::from(v.source)
+        }
+    }
+}
+
+impl From<AgentSource> for AgentEntryRepr {
+    fn from(v: AgentSource) -> Self {
         match v {
-            AgentEntry::Preset { preset, overrides } => Self {
+            AgentSource::Preset { preset, overrides } => Self {
+                enabled: None,
                 preset: Some(preset),
                 id: None,
                 name: overrides.name,
@@ -310,9 +379,10 @@ impl From<AgentEntry> for AgentEntryRepr {
                 ssh: None,
                 docker: None,
             },
-            AgentEntry::Custom(definition) => {
+            AgentSource::Custom(definition) => {
                 let repr = AgentDefinitionRepr::from(definition);
                 Self {
+                    enabled: None,
                     preset: None,
                     id: Some(repr.id),
                     name: Some(repr.name),
@@ -428,7 +498,7 @@ mod tests {
         let entry: AgentEntry =
             toml::from_str("id = \"hermes\"\nname = \"Hermes Agent\"\ncommand = \"hermes acp\"\n")
                 .expect("deserialize");
-        let AgentEntry::Custom(definition) = &entry else {
+        let AgentSource::Custom(definition) = &entry.source else {
             panic!("no preset carries the id `hermes`, so it cannot be a reference: {entry:?}");
         };
         assert_eq!(definition.id, "hermes");

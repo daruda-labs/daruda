@@ -48,11 +48,11 @@ use std::{io::Write as _, path::PathBuf};
 pub use account_env::{AccountEnv, account_env};
 pub use agent::{
     ACP_REGISTRY_URL, ACP_REGISTRY_VERSION, AgentConfig, AgentDefinition, AgentEntry, AgentLaunch,
-    AgentPreset, AgentVocabularySeed, CODEX_CONFIG_ENV, LaunchTransport, PresetLaunchability,
-    PresetOverrides, READING_WIDTH_DEFAULT, READING_WIDTH_MAX, READING_WIDTH_MIN, TAIL_WINDOW_ALL,
-    TAIL_WINDOW_CHOICES, TAIL_WINDOW_DEFAULT, account_recipe_for_local_command, agent_preset,
-    agent_presets, agent_vocabulary_seed, assemble_launch_command, canonical_env,
-    is_valid_env_name,
+    AgentPreset, AgentSource, AgentVocabularySeed, CODEX_CONFIG_ENV, LaunchTransport,
+    PresetLaunchability, PresetOverrides, READING_WIDTH_DEFAULT, READING_WIDTH_MAX,
+    READING_WIDTH_MIN, TAIL_WINDOW_ALL, TAIL_WINDOW_CHOICES, TAIL_WINDOW_DEFAULT,
+    account_recipe_for_local_command, agent_preset, agent_presets, agent_vocabulary_seed,
+    assemble_launch_command, canonical_env, is_valid_env_name,
 };
 pub use claude_status::ClaudeStatusConfig;
 pub use clipboard::ClipboardConfig;
@@ -288,8 +288,10 @@ impl Config {
         migrate_legacy_transcript(&mut self.agents, &legacy_transcript);
     }
 
-    /// The launchable agent catalog: every [`AgentEntry`] that resolves, in
-    /// config order. An entry referencing a preset daruda no longer knows is
+    /// The launchable agent catalog: every switched-on [`AgentEntry`] that
+    /// resolves, in config order. A switched-off entry stays in [`Self::agents`]
+    /// with its overrides, for Settings to switch back on. An entry
+    /// referencing a preset daruda no longer knows is
     /// skipped — it stays in [`Self::agents`] (so a save preserves it and the
     /// Settings editor can flag it) but never reaches the runtime, where a
     /// nameless, commandless agent would only be selectable-then-broken.
@@ -298,8 +300,12 @@ impl Config {
     /// same non-empty-catalog invariant [`Self::clamp`] enforces for an
     /// explicitly-empty array — every consumer relies on `catalog[0]` existing.
     pub fn resolved_agents(&self) -> Vec<AgentDefinition> {
-        let resolved: Vec<AgentDefinition> =
-            self.agents.iter().filter_map(AgentEntry::resolve).collect();
+        let resolved: Vec<AgentDefinition> = self
+            .agents
+            .iter()
+            .filter(|entry| entry.enabled)
+            .filter_map(AgentEntry::resolve)
+            .collect();
         if resolved.is_empty() {
             return agent::default_agents()
                 .iter()
@@ -414,13 +420,13 @@ fn set_agent_entry_transcript(
     tail_window: Option<u8>,
     display_filter: Option<Vec<String>>,
 ) {
-    match entry {
-        AgentEntry::Preset { overrides, .. } => {
+    match &mut entry.source {
+        AgentSource::Preset { overrides, .. } => {
             overrides.fold_mode = overrides.fold_mode.take().or(fold_mode);
             overrides.tail_window = overrides.tail_window.take().or(tail_window);
             overrides.display_filter = overrides.display_filter.take().or(display_filter);
         }
-        AgentEntry::Custom(definition) => {
+        AgentSource::Custom(definition) => {
             definition.fold_mode = definition.fold_mode.take().or(fold_mode);
             definition.tail_window = definition.tail_window.take().or(tail_window);
             definition.display_filter = definition.display_filter.take().or(display_filter);
@@ -429,11 +435,11 @@ fn set_agent_entry_transcript(
 }
 
 fn set_agent_entry_default_mode(entry: &mut AgentEntry, mode: &str) {
-    match entry {
-        AgentEntry::Preset { overrides, .. } => {
+    match &mut entry.source {
+        AgentSource::Preset { overrides, .. } => {
             overrides.default_mode = Some(mode.to_string());
         }
-        AgentEntry::Custom(definition) => {
+        AgentSource::Custom(definition) => {
             definition.default_mode = Some(mode.to_string());
         }
     }
@@ -1691,8 +1697,12 @@ fn string_array(values: &[String]) -> toml_edit::Item {
 /// value after a table to that table.
 fn agent_entry_table(entry: &AgentEntry) -> toml_edit::Table {
     let mut table = toml_edit::Table::new();
-    match entry {
-        AgentEntry::Preset { preset, overrides } => {
+    // Same rule as the serde path: only a switched-off entry says so.
+    if !entry.enabled {
+        table["enabled"] = toml_edit::value(false);
+    }
+    match &entry.source {
+        AgentSource::Preset { preset, overrides } => {
             table["preset"] = toml_edit::value(preset.clone());
             if let Some(name) = &overrides.name {
                 table["name"] = toml_edit::value(name.clone());
@@ -1720,7 +1730,7 @@ fn agent_entry_table(entry: &AgentEntry) -> toml_edit::Table {
                 table["env"] = env_table(env);
             }
         }
-        AgentEntry::Custom(agent) => {
+        AgentSource::Custom(agent) => {
             table["id"] = toml_edit::value(agent.id.clone());
             table["name"] = toml_edit::value(agent.name.clone());
             // A remote launch has no flat `command` key; it yields the sub-table

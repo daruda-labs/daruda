@@ -11,7 +11,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
 pub use assemble::{LaunchTransport, assemble_launch_command, is_valid_env_name};
-pub use entry::{AgentEntry, PresetOverrides};
+pub use entry::{AgentEntry, AgentSource, PresetOverrides};
 pub use preset::{
     ACP_REGISTRY_URL, ACP_REGISTRY_VERSION, AgentPreset, CODEX_CONFIG_ENV, PresetLaunchability,
     preset as agent_preset, presets as agent_presets,

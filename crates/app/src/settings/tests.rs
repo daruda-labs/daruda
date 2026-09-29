@@ -2169,7 +2169,7 @@ fn a_mode_or_model_pick_persists_for_a_constructor_seeded_row(cx: &mut TestAppCo
             let agents = &crate::settings_store::SettingsStore::global(cx)
                 .user()
                 .agents;
-            let daruda_config::AgentEntry::Custom(definition) = &agents[0] else {
+            let daruda_config::AgentSource::Custom(definition) = &agents[0].source else {
                 panic!("the built-in default is a custom entry");
             };
             let (mode, model) = match expected.1 {

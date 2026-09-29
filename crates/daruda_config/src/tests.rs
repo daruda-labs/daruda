@@ -1328,7 +1328,7 @@ fn a_transcript_axis_reset_after_the_legacy_lift_stays_reset() {
     // The user hands the axis back: the catalog states nothing on it.
     let mut agents = lifted.agents.clone();
     for entry in &mut agents {
-        if let AgentEntry::Custom(definition) = entry {
+        if let AgentSource::Custom(definition) = &mut entry.source {
             definition.fold_mode = None;
         }
     }
@@ -1470,6 +1470,71 @@ fn patch_config_file_keeps_a_cleared_env_override_apart_from_an_absent_one() {
     };
     patch_config_file_to(&cfg, &path).unwrap();
     assert_eq!(Config::load_from(&path).agents, vec![cleared]);
+}
+
+/// Switching an entry off keeps every field it states, on both write paths —
+/// and only the switched-off one says so on disk, so a file written before
+/// the key existed reads back with every entry on.
+#[test]
+fn a_switched_off_entry_round_trips_with_its_overrides() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("config.toml");
+
+    let off = AgentEntry::preset_with(
+        "gemini".to_string(),
+        PresetOverrides {
+            default_mode: Some("plan".to_string()),
+            ..PresetOverrides::default()
+        },
+    )
+    .disabled();
+    let cfg = Config {
+        agents: vec![AgentEntry::preset("codex-acp".to_string()), off.clone()],
+        ..Config::default()
+    };
+    patch_config_file_to(&cfg, &path).unwrap();
+
+    let on_disk: toml::Value = toml::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+    let written: Vec<Option<&toml::Value>> = on_disk["agents"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|entry| entry.get("enabled"))
+        .collect();
+    assert_eq!(written, [None, Some(&toml::Value::Boolean(false))]);
+    assert_eq!(Config::load_from(&path).agents, cfg.agents);
+
+    let serde_round_trip: AgentEntry = toml::from_str(&toml::to_string(&off).unwrap()).unwrap();
+    assert_eq!(serde_round_trip, off);
+    let legacy: AgentEntry = toml::from_str("preset = \"gemini\"").unwrap();
+    assert!(legacy.enabled);
+}
+
+#[test]
+fn resolved_agents_skips_a_switched_off_entry() {
+    let cfg = Config {
+        agents: vec![
+            AgentEntry::preset("gemini".to_string()).disabled(),
+            AgentEntry::preset("codex-acp".to_string()),
+        ],
+        ..Config::default()
+    };
+    let ids: Vec<String> = cfg.resolved_agents().into_iter().map(|a| a.id).collect();
+    assert_eq!(ids, ["codex-acp"]);
+}
+
+/// Settings keeps one entry on; a hand-edited file that switches every entry
+/// off still gets the non-empty catalog every consumer relies on.
+#[test]
+fn a_catalog_with_every_entry_off_falls_back_to_the_default() {
+    let cfg = Config {
+        agents: vec![AgentEntry::preset("codex-acp".to_string()).disabled()],
+        ..Config::default()
+    };
+    assert_eq!(
+        cfg.resolved_agents(),
+        vec![AgentDefinition::claude_default()]
+    );
 }
 
 #[test]
