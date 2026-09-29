@@ -160,7 +160,8 @@ pub struct SettingsView {
     /// an agent one, and applies to every agent.
     agent_use_reading_width: bool,
     // Agent
-    agent_preset_select: Entity<SelectState>,
+    /// Filters the catalog's available and needs-install lists by name or id.
+    agent_catalog_search: Entity<InputState>,
     agent_use_modifier_to_send: bool,
     /// The agent catalog in `config.toml` order, editable and non-editable
     /// entries in one list. Reach it through [`Self::agent_catalog_is_empty`] /
@@ -666,6 +667,9 @@ pub(super) struct CardFold {
 
 #[derive(Clone)]
 pub(super) struct AgentCatalogRow {
+    /// Whether the entry is switched on — written as `enabled = false` when
+    /// not, with every other field kept.
+    pub(super) enabled: bool,
     pub(super) fold: CardFold,
     /// The preset this row references, when it has one. Kept so saving
     /// re-derives the row's overrides against that preset instead of writing a
@@ -953,6 +957,31 @@ impl SettingsView {
         state
     }
 
+    /// The catalog item one persisted entry stands for: an editable row when
+    /// it resolves, the entry kept verbatim when it does not. The one place a
+    /// row learns what the entry says beyond its definition.
+    fn agent_catalog_item(
+        entry: &daruda_config::AgentEntry,
+        vocabulary: &daruda_store::agent_vocabulary::AgentVocabularyCache,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> AgentCatalogItem {
+        match entry.resolve() {
+            Some(definition) => {
+                let mut row = Self::agent_row_from_definition(
+                    &definition,
+                    vocabulary,
+                    entry.preset_id().map(str::to_string),
+                    window,
+                    cx,
+                );
+                row.enabled = entry.enabled;
+                AgentCatalogItem::Editable(row)
+            }
+            None => AgentCatalogItem::Unresolved(entry.clone()),
+        }
+    }
+
     fn agent_row_from_definition(
         definition: &daruda_config::AgentDefinition,
         vocabulary: &daruda_store::agent_vocabulary::AgentVocabularyCache,
@@ -995,6 +1024,7 @@ impl SettingsView {
                 &default_model,
             );
         let mut row = AgentCatalogRow {
+            enabled: true,
             fold: CardFold::default(),
             preset,
             env_input: cx.new(|cx_state| {
@@ -1859,26 +1889,9 @@ impl SettingsView {
             )
         });
 
-        let agent_preset = SharedString::from("codex-acp");
-        let agent_preset_select = cx.new(|cx| {
-            // Every built-in preset, launchable or not. A preset that needs a
-            // manual install cannot become a row, so its label says so and the
-            // section swaps the Add button for install instructions — hiding it
-            // instead left the user with no sign the agent exists at all.
-            let opts = daruda_config::agent_presets()
-                .map(|preset| {
-                    let label = match preset.launchability {
-                        daruda_config::PresetLaunchability::Runnable { .. } => {
-                            s::settings_agent_preset_option(preset.name, preset.id)
-                        }
-                        daruda_config::PresetLaunchability::NeedsManualInstall { .. } => {
-                            s::settings_agent_preset_option_needs_install(preset.name, preset.id)
-                        }
-                    };
-                    SelectOption::new(preset.id, label)
-                })
-                .collect();
-            select::state_with_options(opts, Some(&agent_preset), window, cx)
+        let agent_catalog_search = cx.new(|cx_state| {
+            InputState::new(window, cx_state)
+                .placeholder(s::settings_agent_catalog_search_placeholder())
         });
 
         // Settings has no `data_dir` field of its own, but vocabulary is shared
@@ -1896,16 +1909,7 @@ impl SettingsView {
         let agent_catalog: Vec<AgentCatalogItem> = config
             .agents
             .iter()
-            .map(|entry| match entry.resolve() {
-                Some(definition) => AgentCatalogItem::Editable(Self::agent_row_from_definition(
-                    &definition,
-                    &agent_vocabulary,
-                    entry.preset_id().map(str::to_string),
-                    window,
-                    cx,
-                )),
-                None => AgentCatalogItem::Unresolved(entry.clone()),
-            })
+            .map(|entry| Self::agent_catalog_item(entry, &agent_vocabulary, window, cx))
             .collect();
 
         let session_host_rows: Vec<SessionHostRow> = config
@@ -1964,13 +1968,12 @@ impl SettingsView {
         ] {
             input_subscriptions.push(Self::subscribe_select_setting(state, setting, window, cx));
         }
-        // Picking a preset swaps the Add button for install instructions when
-        // that preset ships binaries only — repaint so the swap is immediate.
+        // The query narrows the preset lists as it is typed.
         input_subscriptions.push(cx.subscribe_in(
-            &agent_preset_select,
+            &agent_catalog_search,
             window,
-            |_this, _state, ev: &select::ConfirmEvent, _window, cx| {
-                if matches!(ev, select::SelectEvent::Confirm(_)) {
+            |_this, _state, ev: &InputEvent, _window, cx| {
+                if matches!(ev, InputEvent::Change) {
                     cx.notify();
                 }
             },
@@ -2106,7 +2109,7 @@ impl SettingsView {
             agent_chat_font_size_input,
             agent_chat_line_height_input,
             cursor_style_select,
-            agent_preset_select,
+            agent_catalog_search,
             agent_use_modifier_to_send: config.agent.use_modifier_to_send,
             agent_use_reading_width: config.agent.use_reading_width,
             agent_catalog,
@@ -2509,21 +2512,14 @@ impl SettingsView {
         let catalog = live
             .agents
             .iter()
-            .map(|entry| match entry.resolve() {
-                Some(definition) => {
-                    let mut row = Self::agent_row_from_definition(
-                        &definition,
-                        vocabulary,
-                        entry.preset_id().map(str::to_string),
-                        window,
-                        cx,
-                    );
-                    if let Some(fold) = folds.get(&definition.id) {
-                        row.fold = *fold;
-                    }
-                    AgentCatalogItem::Editable(row)
+            .map(|entry| {
+                let mut item = Self::agent_catalog_item(entry, vocabulary, window, cx);
+                if let AgentCatalogItem::Editable(row) = &mut item
+                    && let Some(fold) = folds.get(row.id_input.read(cx).value().trim())
+                {
+                    row.fold = *fold;
                 }
-                None => AgentCatalogItem::Unresolved(entry.clone()),
+                item
             })
             .collect::<Vec<_>>();
         for item in &catalog {
@@ -2933,7 +2929,7 @@ impl SettingsView {
                     }
                 })
             })?;
-            agents.push(daruda_config::AgentEntry::for_definition(
+            let entry = daruda_config::AgentEntry::for_definition(
                 daruda_config::AgentDefinition {
                     default_mode: row.default_mode(cx),
                     default_model: row.default_model(cx),
@@ -2945,7 +2941,8 @@ impl SettingsView {
                     ..daruda_config::AgentDefinition::new(id, name, launch)
                 },
                 row.preset.as_deref(),
-            ));
+            );
+            agents.push(if row.enabled { entry } else { entry.disabled() });
         }
         if agents.is_empty() {
             return Err(SharedString::from(s::settings_err_agent_catalog_empty()));

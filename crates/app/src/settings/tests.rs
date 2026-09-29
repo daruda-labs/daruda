@@ -706,35 +706,16 @@ fn validate_collects_agent_catalog(cx: &mut TestAppContext) {
     });
 }
 
-/// Test-only — pick `preset_id` in the catalog's preset dropdown, exactly as
-/// clicking the dropdown does. Returns whether the dropdown offered that id at
-/// all (`set_selected_value` clears the selection for an unknown value).
-fn select_agent_preset(
+/// Test-only — switch a built-in preset on from the catalog's available list.
+fn enable_agent_preset(
     wh: &WindowHandle<gpui_component::Root>,
     win: &Entity<SettingsView>,
     cx: &mut TestAppContext,
     preset_id: &str,
-) -> bool {
-    let state = win.read_with(cx, |w, _| w.agent_preset_select.clone());
-    let value = SharedString::from(preset_id.to_owned());
-    wh.update(cx, |_root, window, cx| {
-        state.update(cx, |s, cx| s.set_selected_value(&value, window, cx));
-    })
-    .expect("settings window should still be open during the test");
-    win.read_with(cx, |w, cx| {
-        w.agent_preset_select.read(cx).selected_value() == Some(&value)
-    })
-}
-
-/// Test-only — click "Add Preset" for whatever the dropdown currently holds.
-fn add_selected_agent_preset(
-    wh: &WindowHandle<gpui_component::Root>,
-    win: &Entity<SettingsView>,
-    cx: &mut TestAppContext,
 ) {
     let win = win.clone();
     wh.update(cx, |_root, window, cx| {
-        win.update(cx, |w, cx| w.add_selected_preset_row_for_test(window, cx));
+        win.update(cx, |w, cx| w.enable_agent_preset(preset_id, window, cx));
     })
     .expect("settings window should still be open during the test");
 }
@@ -835,38 +816,12 @@ fn set_agent_row_input(
     .expect("settings window should still be open during the test");
 }
 
-/// The dropdown offers the whole preset table, not just the launchable subset —
-/// hiding the rest left the user with no sign those agents exist.
+/// Switching a preset on saves a reference to it rather than a frozen copy of
+/// its fields.
 #[gpui::test]
-fn the_preset_dropdown_offers_every_built_in_preset(cx: &mut TestAppContext) {
+fn enabling_a_preset_collects_a_reference(cx: &mut TestAppContext) {
     let (wh, win) = build_window(cx);
-    let mut needs_install = 0;
-    for preset in daruda_config::agent_presets() {
-        assert!(
-            select_agent_preset(&wh, &win, cx, preset.id),
-            "the preset dropdown is missing {}",
-            preset.id
-        );
-        if matches!(
-            preset.launchability,
-            daruda_config::PresetLaunchability::NeedsManualInstall { .. }
-        ) {
-            needs_install += 1;
-        }
-    }
-    assert!(
-        needs_install > 0,
-        "the table has manual-install presets, so the dropdown must have been exercised with some"
-    );
-}
-
-/// The real "Add Preset" path: pick an id, click Add, and the row is saved as a
-/// reference to that preset rather than a frozen copy of its fields.
-#[gpui::test]
-fn adding_a_preset_from_the_dropdown_collects_a_reference(cx: &mut TestAppContext) {
-    let (wh, win) = build_window(cx);
-    assert!(select_agent_preset(&wh, &win, cx, "gemini"));
-    add_selected_agent_preset(&wh, &win, cx);
+    enable_agent_preset(&wh, &win, cx, "gemini");
     win.read_with(cx, |w, cx| {
         assert_eq!(w.agent_editable_rows().count(), 2);
         let cfg = w.validate(cx).expect("agent catalog must validate");
@@ -890,8 +845,7 @@ fn adding_a_preset_from_the_dropdown_collects_a_reference(cx: &mut TestAppContex
 #[gpui::test]
 fn editing_one_field_of_a_preset_row_overrides_only_that_field(cx: &mut TestAppContext) {
     let (wh, win) = build_window(cx);
-    assert!(select_agent_preset(&wh, &win, cx, "gemini"));
-    add_selected_agent_preset(&wh, &win, cx);
+    enable_agent_preset(&wh, &win, cx, "gemini");
     set_agent_row_input(&wh, &win, cx, 1, |r| r.name_input.clone(), "My Gemini");
 
     win.read_with(cx, |w, cx| {
@@ -923,8 +877,7 @@ fn editing_one_field_of_a_preset_row_overrides_only_that_field(cx: &mut TestAppC
 #[gpui::test]
 fn switching_a_preset_row_to_ssh_detaches_it_into_a_custom_entry(cx: &mut TestAppContext) {
     let (wh, win) = build_window(cx);
-    assert!(select_agent_preset(&wh, &win, cx, "gemini"));
-    add_selected_agent_preset(&wh, &win, cx);
+    enable_agent_preset(&wh, &win, cx, "gemini");
     select_agent_transport(&wh, &win, cx, 1, "ssh");
     set_agent_row_input(&wh, &win, cx, 1, |r| r.host_input.clone(), "vm-work");
 
@@ -1409,8 +1362,7 @@ fn a_fresh_row_leaves_every_transcript_axis_unset(cx: &mut TestAppContext) {
 #[gpui::test]
 fn a_transcript_pick_on_a_preset_row_reports_the_preset_value(cx: &mut TestAppContext) {
     let (wh, win) = build_window(cx);
-    assert!(select_agent_preset(&wh, &win, cx, "gemini"));
-    add_selected_agent_preset(&wh, &win, cx);
+    enable_agent_preset(&wh, &win, cx, "gemini");
     win.read_with(cx, |w, cx| {
         let provenance = w.agent_editable_row(1).unwrap().provenance(cx);
         assert_eq!(provenance.fold_mode_base, None, "untouched, so it follows");
@@ -1487,8 +1439,7 @@ fn an_agents_environment_survives_a_save_that_never_touched_it(cx: &mut TestAppC
 #[gpui::test]
 fn clearing_a_preset_shipping_environment_opts_the_row_out(cx: &mut TestAppContext) {
     let (wh, win) = build_window(cx);
-    assert!(select_agent_preset(&wh, &win, cx, "codex-acp"));
-    add_selected_agent_preset(&wh, &win, cx);
+    enable_agent_preset(&wh, &win, cx, "codex-acp");
 
     let preset_env = daruda_config::AgentDefinition::registry_preset("codex-acp")
         .expect("codex-acp is runnable")
@@ -1561,8 +1512,7 @@ fn only_a_row_launching_the_codex_overlay_carries_its_note(cx: &mut TestAppConte
         "the default claude row ships no overlay"
     );
 
-    assert!(select_agent_preset(&wh, &win, cx, "codex-acp"));
-    add_selected_agent_preset(&wh, &win, cx);
+    enable_agent_preset(&wh, &win, cx, "codex-acp");
     assert!(ships(&win, cx, 1), "the codex row inherits the overlay");
 
     set_agent_row_input(&wh, &win, cx, 1, |r| r.env_input.clone(), "");
@@ -1607,8 +1557,7 @@ fn the_codex_caveat_names_every_way_codex_is_asked_to_delegate() {
 #[gpui::test]
 fn a_typed_environment_overrides_and_an_empty_one_stays_unstated(cx: &mut TestAppContext) {
     let (wh, win) = build_window(cx);
-    assert!(select_agent_preset(&wh, &win, cx, "gemini"));
-    add_selected_agent_preset(&wh, &win, cx);
+    enable_agent_preset(&wh, &win, cx, "gemini");
 
     // `gemini` ships no environment, so an untouched field states none.
     win.read_with(cx, |w, cx| {
@@ -1967,44 +1916,6 @@ fn switching_transport_does_not_clear_the_cached_path_warning(cx: &mut TestAppCo
             w.validate(cx).is_ok(),
             "an ssh row's command runs remotely, so Save must succeed regardless"
         );
-    });
-}
-
-/// Picking a preset that ships binaries only must not silently do nothing:
-/// no row is added, and the section has an install page to point at instead.
-#[gpui::test]
-fn picking_a_preset_that_needs_a_manual_install_adds_no_row(cx: &mut TestAppContext) {
-    let (wh, win) = build_window(cx);
-    assert!(select_agent_preset(&wh, &win, cx, "cursor"));
-    win.read_with(cx, |w, cx| {
-        let (name, install_url) = w
-            .selected_preset_needs_install(cx)
-            .expect("cursor ships prebuilt binaries, so it cannot be launched as-is");
-        assert_eq!(name, "Cursor");
-        assert!(install_url.starts_with("https://"), "{install_url}");
-    });
-
-    add_selected_agent_preset(&wh, &win, cx);
-    win.read_with(cx, |w, cx| {
-        assert_eq!(
-            w.agent_editable_rows().count(),
-            1,
-            "a preset with no launch command must not become a row"
-        );
-        assert!(
-            w.selected_preset_needs_install(cx).is_some(),
-            "the install guidance stays up after the click"
-        );
-    });
-}
-
-/// A launchable pick clears the install guidance — the two states are exclusive.
-#[gpui::test]
-fn a_launchable_preset_shows_no_install_guidance(cx: &mut TestAppContext) {
-    let (wh, win) = build_window(cx);
-    assert!(select_agent_preset(&wh, &win, cx, "codex-acp"));
-    win.read_with(cx, |w, cx| {
-        assert!(w.selected_preset_needs_install(cx).is_none());
     });
 }
 
@@ -3102,21 +3013,15 @@ fn a_card_opens_its_advanced_block_when_it_runs_something_else(cx: &mut TestAppC
     });
 }
 
-/// An added agent arrives open; a custom one also opens its advanced block,
-/// where the command it still needs lives.
+/// Switching a preset on is the whole gesture, so its card arrives folded; a
+/// custom agent opens both its details and its advanced block, where the
+/// command it still needs lives.
 #[gpui::test]
-fn an_added_card_opens_ready_to_edit(cx: &mut TestAppContext) {
+fn a_custom_card_opens_ready_to_edit_and_a_preset_arrives_folded(cx: &mut TestAppContext) {
     let (wh, win) = build_window(cx);
-    assert!(select_agent_preset(&wh, &win, cx, "gemini"));
-    add_selected_agent_preset(&wh, &win, cx);
+    enable_agent_preset(&wh, &win, cx, "gemini");
     win.read_with(cx, |w, _| {
-        assert_eq!(
-            w.agent_card_fold_for_test(1),
-            Some(CardFold {
-                expanded: true,
-                advanced: false,
-            })
-        );
+        assert_eq!(w.agent_card_fold_for_test(1), Some(CardFold::default()));
     });
     let settings = win.clone();
     wh.update(cx, |_root, window, cx| {
@@ -3168,4 +3073,67 @@ fn folding_a_card_saves_nothing_and_survives_a_save(cx: &mut TestAppContext) {
             })
         );
     });
+}
+
+/// A preset that ships binaries only has nothing to run, so switching it on
+/// adds no entry.
+#[gpui::test]
+fn enabling_a_preset_that_needs_a_manual_install_adds_no_row(cx: &mut TestAppContext) {
+    let (wh, win) = build_window(cx);
+    enable_agent_preset(&wh, &win, cx, "cursor");
+    win.read_with(cx, |w, _| assert_eq!(w.agent_editable_rows().count(), 1));
+}
+
+/// Switching an entry off keeps it — every field it states included — and
+/// saves it as off; the runtime catalog then leaves it out.
+#[gpui::test]
+fn switching_an_entry_off_keeps_its_fields(cx: &mut TestAppContext) {
+    let (wh, win) = build_window(cx);
+    enable_agent_preset(&wh, &win, cx, "gemini");
+    confirm_agent_row_select(&wh, &win, cx, 1, |r| r.tail_window_select.clone(), "3");
+    win.update(cx, |w, cx| w.set_agent_enabled(1, false, cx));
+
+    cx.read(|cx| {
+        let user = crate::settings_store::SettingsStore::global(cx).user();
+        let gemini = &user.agents[1];
+        assert!(!gemini.enabled);
+        assert_eq!(gemini.resolve().and_then(|d| d.tail_window), Some(3));
+        let ids: Vec<String> = user.resolved_agents().into_iter().map(|a| a.id).collect();
+        assert_eq!(ids, ["claude"]);
+    });
+}
+
+/// The only agent still on cannot be switched off: a new chat always has one
+/// to open with.
+#[gpui::test]
+fn the_last_agent_on_cannot_be_switched_off(cx: &mut TestAppContext) {
+    let (wh, win) = build_window(cx);
+    enable_agent_preset(&wh, &win, cx, "gemini");
+    win.update(cx, |w, cx| w.set_agent_enabled(0, false, cx));
+    win.update(cx, |w, cx| {
+        assert!(w.agent_is_last_enabled(1));
+        w.set_agent_enabled(1, false, cx);
+    });
+    win.read_with(cx, |w, _| {
+        assert!(w.agent_editable_row(1).unwrap().enabled, "refused");
+        assert_eq!(
+            w.agent_default_index(),
+            Some(1),
+            "the next one on is the default"
+        );
+    });
+}
+
+/// "Make default" moves the entry to the front — the first entry on is the
+/// one a new chat opens with.
+#[gpui::test]
+fn making_an_entry_the_default_moves_it_first(cx: &mut TestAppContext) {
+    let (wh, win) = build_window(cx);
+    enable_agent_preset(&wh, &win, cx, "gemini");
+    win.update(cx, |w, cx| w.make_agent_default(1, cx));
+    cx.read(|cx| {
+        let user = crate::settings_store::SettingsStore::global(cx).user();
+        assert_eq!(user.resolved_agents()[0].id, "gemini");
+    });
+    win.read_with(cx, |w, _| assert_eq!(w.agent_default_index(), Some(0)));
 }

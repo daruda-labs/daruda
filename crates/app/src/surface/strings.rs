@@ -5325,14 +5325,6 @@ pub fn settings_agent_remote_path_hint() -> String {
     rust_i18n::t!("settings.agent_remote_path_hint").into_owned()
 }
 
-pub fn settings_agent_preset() -> String {
-    rust_i18n::t!("settings.agent_preset").into_owned()
-}
-
-pub fn settings_agent_add_preset() -> String {
-    rust_i18n::t!("settings.agent_add_preset").into_owned()
-}
-
 pub fn settings_agent_add_custom() -> String {
     rust_i18n::t!("settings.agent_add_custom").into_owned()
 }
@@ -5340,28 +5332,8 @@ pub fn settings_agent_remove() -> String {
     rust_i18n::t!("settings.agent_remove").into_owned()
 }
 
-/// Preset dropdown label for a preset daruda can launch as it stands.
-pub fn settings_agent_preset_option(name: &str, id: &str) -> String {
-    rust_i18n::t!("settings.agent_preset_option", name = name, id = id).into_owned()
-}
-
-/// Preset dropdown label for a preset that ships binaries only, so picking it
-/// cannot add a catalog row.
-pub fn settings_agent_preset_option_needs_install(name: &str, id: &str) -> String {
-    rust_i18n::t!(
-        "settings.agent_preset_option_needs_install",
-        name = name,
-        id = id
-    )
-    .into_owned()
-}
-
 pub fn settings_agent_preset_install_page() -> String {
     rust_i18n::t!("settings.agent_preset_install_page").into_owned()
-}
-
-pub fn settings_agent_preset_needs_install_hint(name: &str) -> String {
-    rust_i18n::t!("settings.agent_preset_needs_install_hint", name = name).into_owned()
 }
 
 /// Toggle that opens a catalog card's advanced block (command, transport,
@@ -5373,6 +5345,41 @@ pub fn settings_agent_card_advanced() -> String {
 /// Badge on a catalog card whose advanced settings differ from its preset.
 pub fn settings_agent_card_modified() -> String {
     rust_i18n::t!("settings.agent_card_modified").into_owned()
+}
+
+/// Badge on the catalog card a new chat opens with.
+pub fn settings_agent_card_default() -> String {
+    rust_i18n::t!("settings.agent_card_default").into_owned()
+}
+
+/// Button that makes a catalog card's agent the default.
+pub fn settings_agent_card_make_default() -> String {
+    rust_i18n::t!("settings.agent_card_make_default").into_owned()
+}
+
+/// Why the only agent still on cannot be switched off.
+pub fn settings_agent_card_last_enabled() -> String {
+    rust_i18n::t!("settings.agent_card_last_enabled").into_owned()
+}
+
+/// Heading over the catalog entries.
+pub fn settings_agent_group_in_use() -> String {
+    rust_i18n::t!("settings.agent_group_in_use").into_owned()
+}
+
+/// Heading over the runnable presets no entry uses yet.
+pub fn settings_agent_group_available() -> String {
+    rust_i18n::t!("settings.agent_group_available").into_owned()
+}
+
+/// Heading over the presets that need a manual install.
+pub fn settings_agent_group_needs_install() -> String {
+    rust_i18n::t!("settings.agent_group_needs_install").into_owned()
+}
+
+/// Placeholder for the search over the preset lists.
+pub fn settings_agent_catalog_search_placeholder() -> String {
+    rust_i18n::t!("settings.agent_catalog_search_placeholder").into_owned()
 }
 
 /// A collapsed catalog card's one-line summary of what it will run.

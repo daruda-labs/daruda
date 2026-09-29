@@ -10,7 +10,10 @@ use crate::ui::field_row;
 use crate::ui::theme;
 use gpui::{AnyElement, ClickEvent, IntoElement, SharedString, div, prelude::*, px};
 
-use super::super::super::{AgentCatalogRow, SettingsView, settings_button_danger as button_danger};
+use super::super::super::{
+    AgentCatalogRow, SettingsView, settings_button as button,
+    settings_button_danger as button_danger,
+};
 use super::{TRANSPORT_RAW, transport_needs_local_path_check};
 
 impl SettingsView {
@@ -33,6 +36,11 @@ impl SettingsView {
             .border_1()
             .border_color(t.border)
             .rounded(px(theme::RADIUS_MD))
+            // A switched-off entry keeps its card, dimmed, so switching it
+            // back on is where the user left it.
+            .when(!row.enabled, |card| {
+                card.opacity(theme::SETTINGS_DEPENDENT_OFF_OPACITY)
+            })
             .child(header);
         if row.fold.expanded {
             card = card.child(self.render_agent_card_details(catalog_index, row, cx));
@@ -82,44 +90,76 @@ impl SettingsView {
                     .text_color(t.text_primary)
                     .child(title),
             );
+        if self.agent_default_index() == Some(catalog_index) {
+            title_row = title_row.child(crate::ui::badge::Badge::new(
+                s::settings_agent_card_default(),
+            ));
+        }
         if row.advanced_overridden(cx) {
             title_row = title_row.child(crate::ui::badge::Badge::new(
                 s::settings_agent_card_modified(),
             ));
         }
 
+        let enabled = row.enabled;
+        let locked = self.agent_is_last_enabled(catalog_index);
+        let mut switch = crate::ui::switch(
+            SharedString::from(format!("settings-agent-card-enabled-{catalog_index}")),
+            enabled,
+            cx,
+        )
+        .on_click(cx.listener(move |this, _: &ClickEvent, _window, cx| {
+            this.set_agent_enabled(catalog_index, !enabled, cx);
+        }));
+        if locked {
+            switch = crate::ui::Disableable::disabled(switch, true)
+                .tooltip(s::settings_agent_card_last_enabled());
+        }
+
         div()
-            .id(SharedString::from(format!(
-                "settings-agent-card-header-{catalog_index}"
-            )))
             .flex()
             .flex_row()
             .items_center()
             .gap(px(theme::MODAL_FOOTER_GAP))
-            .cursor_pointer()
-            .on_click(cx.listener(move |this, _: &ClickEvent, _window, cx| {
-                this.toggle_agent_card_expanded(catalog_index, cx);
-            }))
-            .child(crate::ui::agent_icon(
-                icon,
-                px(theme::SETTINGS_AGENT_CARD_ICON_SIZE),
-                t.text_body,
-            ))
+            // The icon and text are the fold target; the switch and chevron
+            // beside them are controls of their own, outside it.
             .child(
                 div()
+                    .id(SharedString::from(format!(
+                        "settings-agent-card-header-{catalog_index}"
+                    )))
                     .flex_1()
                     .min_w_0()
                     .flex()
-                    .flex_col()
-                    .child(title_row)
+                    .flex_row()
+                    .items_center()
+                    .gap(px(theme::MODAL_FOOTER_GAP))
+                    .cursor_pointer()
+                    .on_click(cx.listener(move |this, _: &ClickEvent, _window, cx| {
+                        this.toggle_agent_card_expanded(catalog_index, cx);
+                    }))
+                    .child(crate::ui::agent_icon(
+                        icon,
+                        px(theme::SETTINGS_AGENT_CARD_ICON_SIZE),
+                        t.text_body,
+                    ))
                     .child(
                         div()
-                            .text_size(px(theme::MODAL_BODY_FONT_SIZE))
-                            .text_color(t.text_muted)
-                            .truncate()
-                            .child(s::settings_agent_card_summary(&model, &mode)),
+                            .flex_1()
+                            .min_w_0()
+                            .flex()
+                            .flex_col()
+                            .child(title_row)
+                            .child(
+                                div()
+                                    .text_size(px(theme::MODAL_BODY_FONT_SIZE))
+                                    .text_color(t.text_muted)
+                                    .truncate()
+                                    .child(s::settings_agent_card_summary(&model, &mode)),
+                            ),
                     ),
             )
+            .child(switch)
             .child(
                 crate::ui::disclosure::disclosure(
                     SharedString::from(format!("settings-agent-card-fold-{catalog_index}")),
@@ -234,6 +274,26 @@ impl SettingsView {
                     cx,
                 )
             })
+            .when(
+                row.enabled && self.agent_default_index() != Some(catalog_index),
+                |body| {
+                    body.child(
+                        div().flex().flex_row().child(
+                            button(
+                                SharedString::from(format!(
+                                    "settings-agent-card-make-default-{catalog_index}"
+                                )),
+                                s::settings_agent_card_make_default(),
+                            )
+                            .on_click(cx.listener(
+                                move |this, _: &ClickEvent, _window, cx| {
+                                    this.make_agent_default(catalog_index, cx);
+                                },
+                            )),
+                        ),
+                    )
+                },
+            )
             .child(
                 div()
                     .id(SharedString::from(format!(

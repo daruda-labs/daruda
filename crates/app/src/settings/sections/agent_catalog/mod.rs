@@ -17,25 +17,38 @@ use daruda_config::PresetLaunchability;
 use gpui::{AnyElement, ClickEvent, IntoElement, SharedString, Window, div, prelude::*, px};
 
 use super::super::{
-    AgentCatalogRow, CardFold, SettingsView, settings_button as button,
+    AgentCatalogItem, AgentCatalogRow, CardFold, SettingsView, settings_button as button,
     settings_button_danger as button_danger,
 };
 
+mod available;
 mod card;
+mod groups;
 
 /// The `transport_select` value that means "run the command locally" — the only
 /// transport a preset reference can carry (see [`daruda_config::AgentEntry`]).
 const TRANSPORT_RAW: &str = "raw";
 
 impl SettingsView {
-    /// The `[[agents]]` catalog: preset picker, editable rows, and the entries
-    /// that resolve to nothing.
+    /// The `[[agents]]` catalog: the entries in use, then the built-in presets
+    /// no entry uses yet — runnable ones first, then the ones that need an
+    /// install — and the entries that resolve to nothing.
     pub(in crate::settings) fn render_agent_catalog(
         &self,
         cx: &mut gpui::Context<Self>,
     ) -> AnyElement {
         let description_color = theme::current(cx).text_muted;
-        let needs_install = self.selected_preset_needs_install(cx);
+        let used: Vec<String> = self
+            .agent_catalog
+            .iter()
+            .filter_map(|item| match item {
+                AgentCatalogItem::Editable(row) => row.preset.clone(),
+                AgentCatalogItem::Unresolved(entry) => entry.preset_id().map(str::to_string),
+            })
+            .collect();
+        let used: Vec<&str> = used.iter().map(String::as_str).collect();
+        let query = self.agent_catalog_search.read(cx).value().to_string();
+        let presets = groups::preset_groups(daruda_config::agent_presets(), &used, &query);
 
         let mut body = div()
             .flex()
@@ -47,47 +60,7 @@ impl SettingsView {
                     .text_color(description_color)
                     .child(s::settings_agent_catalog_description()),
             )
-            .child(field_row(
-                s::settings_agent_preset(),
-                div()
-                    .flex()
-                    .flex_row()
-                    .items_center()
-                    .gap(px(theme::MODAL_FOOTER_GAP))
-                    .child(div().flex_1().child(crate::ui::select::select(
-                        &self.agent_preset_select,
-                        cx,
-                        0,
-                    )))
-                    .child(match needs_install {
-                        Some((_, install_url)) => button(
-                            "settings-agent-preset-install",
-                            s::settings_agent_preset_install_page(),
-                        )
-                        .on_click(cx.listener(
-                            move |_this, _: &ClickEvent, _window, cx| {
-                                cx.open_url(install_url);
-                            },
-                        )),
-                        None => button("settings-agent-add-preset", s::settings_agent_add_preset())
-                            .on_click(cx.listener(|this, _: &ClickEvent, window, cx| {
-                                this.add_selected_preset_row(window, cx);
-                            })),
-                    })
-                    .child(
-                        button("settings-agent-add-custom", s::settings_agent_add_custom())
-                            .on_click(cx.listener(|this, _: &ClickEvent, window, cx| {
-                                this.add_custom_agent_row(window, cx);
-                            })),
-                    ),
-            ));
-
-        if let Some((name, _)) = needs_install {
-            body = body.child(crate::ui::alert::info(
-                "settings-agent-preset-needs-install",
-                s::settings_agent_preset_needs_install_hint(name),
-            ));
-        }
+            .child(Self::section_label(s::settings_agent_group_in_use(), cx));
 
         // Same predicate catalog validation uses, so the placeholder cannot
         // claim an empty catalog while the same catalog is valid.
@@ -99,11 +72,16 @@ impl SettingsView {
                     .child(s::settings_agent_catalog_empty()),
             );
         }
-        // Editable rows first, non-editable ones grouped under their own header:
-        // a visual grouping, while the model keeps both at their config position.
         for (ordinal, (catalog_index, row)) in self.agent_editable_rows().enumerate() {
             body = body.child(self.render_agent_card(catalog_index, ordinal, row, cx));
         }
+        body = body.child(div().flex().flex_row().child(
+            button("settings-agent-add-custom", s::settings_agent_add_custom()).on_click(
+                cx.listener(|this, _: &ClickEvent, window, cx| {
+                    this.add_custom_agent_row(window, cx);
+                }),
+            ),
+        ));
 
         if self.agent_unresolved_entries().next().is_some() {
             body = body.child(Self::section_label(
@@ -115,7 +93,8 @@ impl SettingsView {
             }
         }
 
-        body.into_any_element()
+        body.child(self.render_preset_lists(presets, cx))
+            .into_any_element()
     }
 
     /// A catalog entry with no editable row: it names a preset daruda cannot
@@ -211,54 +190,84 @@ impl SettingsView {
             .child(label)
     }
 
-    /// The preset picked in the dropdown, launchable or not.
-    fn selected_preset(&self, cx: &gpui::App) -> Option<daruda_config::AgentPreset> {
-        self.agent_preset_select
-            .read(cx)
-            .selected_value()
-            .and_then(|id| daruda_config::agent_preset(id.as_ref()))
+    /// Switch a built-in preset on: append an entry that references it. The
+    /// card arrives folded — picking an agent to use is the whole gesture. A
+    /// preset that needs a manual install has no command, so it adds nothing.
+    pub(in crate::settings) fn enable_agent_preset(
+        &mut self,
+        preset_id: &str,
+        window: &mut Window,
+        cx: &mut gpui::Context<Self>,
+    ) {
+        let Some(definition) = daruda_config::AgentDefinition::registry_preset(preset_id) else {
+            return;
+        };
+        self.add_agent_row(definition, Some(preset_id.to_string()), window, cx);
     }
 
-    /// `(display name, install page)` when the picked preset ships binaries
-    /// instead of a command daruda can run. `Some` is exactly the state in which
-    /// the section swaps the Add button for that install page and explains why —
-    /// leaving Add in place would make it a button that does nothing.
-    pub(in crate::settings) fn selected_preset_needs_install(
-        &self,
-        cx: &gpui::App,
-    ) -> Option<(&'static str, &'static str)> {
-        let preset = self.selected_preset(cx)?;
-        match preset.launchability {
-            PresetLaunchability::NeedsManualInstall { install_url } => {
-                Some((preset.name, install_url))
-            }
-            PresetLaunchability::Runnable { .. } => None,
+    /// Switch an entry on or off, keeping every field it states. The last
+    /// entry still on cannot be switched off — the card disables its switch —
+    /// so this refuses it too rather than trust the caller.
+    pub(in crate::settings) fn set_agent_enabled(
+        &mut self,
+        catalog_index: usize,
+        enabled: bool,
+        cx: &mut gpui::Context<Self>,
+    ) {
+        if !enabled && self.agent_is_last_enabled(catalog_index) {
+            return;
         }
+        let Some(row) = self.agent_editable_row_mut(catalog_index) else {
+            return;
+        };
+        if row.enabled == enabled {
+            return;
+        }
+        row.enabled = enabled;
+        // Nothing reached disk, so the row must not go on claiming it did.
+        if !self.persist_agent_catalog(cx)
+            && let Some(row) = self.agent_editable_row_mut(catalog_index)
+        {
+            row.enabled = !enabled;
+        }
+        cx.notify();
     }
 
-    /// Append a row for the preset currently picked in the dropdown. A preset
-    /// that needs a manual install has no command, so it adds nothing — the
-    /// section renders its install page instead of this button.
-    fn add_selected_preset_row(&mut self, window: &mut Window, cx: &mut gpui::Context<Self>) {
-        let Some(id) = self
-            .agent_preset_select
-            .read(cx)
-            .selected_value()
-            .map(|id| id.to_string())
-        else {
+    /// Make an entry the default by moving it to the front: the first entry
+    /// that is on is the one a new chat opens with.
+    pub(in crate::settings) fn make_agent_default(
+        &mut self,
+        catalog_index: usize,
+        cx: &mut gpui::Context<Self>,
+    ) {
+        if catalog_index == 0 || catalog_index >= self.agent_catalog.len() {
             return;
-        };
-        let Some(definition) = daruda_config::AgentDefinition::registry_preset(&id) else {
-            return;
-        };
-        self.add_agent_row(definition, Some(id), window, cx);
-        self.open_last_agent_card(
-            CardFold {
-                expanded: true,
-                advanced: false,
-            },
-            cx,
-        );
+        }
+        let item = self.agent_catalog.remove(catalog_index);
+        self.agent_catalog.insert(0, item);
+        if !self.persist_agent_catalog(cx) {
+            let item = self.agent_catalog.remove(0);
+            self.agent_catalog.insert(catalog_index, item);
+        }
+        cx.notify();
+    }
+
+    /// The catalog index of the entry a new chat opens with — the first
+    /// editable one that is switched on.
+    pub(in crate::settings) fn agent_default_index(&self) -> Option<usize> {
+        self.agent_editable_rows()
+            .find(|(_, row)| row.enabled)
+            .map(|(index, _)| index)
+    }
+
+    /// Whether `catalog_index` is the only entry still switched on.
+    pub(in crate::settings) fn agent_is_last_enabled(&self, catalog_index: usize) -> bool {
+        let enabled: Vec<bool> = self
+            .agent_catalog
+            .iter()
+            .map(|item| matches!(item, AgentCatalogItem::Editable(row) if row.enabled))
+            .collect();
+        groups::is_last_enabled(&enabled, catalog_index)
     }
 
     /// Append a blank row the user fills in by hand — it references no preset.
@@ -471,19 +480,9 @@ fn transport_needs_local_path_check(kind: &str) -> bool {
 
 #[cfg(test)]
 impl SettingsView {
-    /// Test-only entry into [`Self::add_selected_preset_row`] — the click
+    /// Test-only entry into [`Self::add_custom_agent_row`] — the click
     /// handler that drives it lives inside a closure and isn't directly
     /// callable from tests.
-    pub(in crate::settings) fn add_selected_preset_row_for_test(
-        &mut self,
-        window: &mut Window,
-        cx: &mut gpui::Context<Self>,
-    ) {
-        self.add_selected_preset_row(window, cx);
-    }
-
-    /// Test-only entry into [`Self::add_custom_agent_row`] — same reason as
-    /// [`Self::add_selected_preset_row_for_test`].
     pub(in crate::settings) fn add_custom_agent_row_for_test(
         &mut self,
         window: &mut Window,
