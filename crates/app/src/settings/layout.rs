@@ -140,6 +140,10 @@ const TERMINAL: &[Card] = &[
         title: s::settings_card_cursor,
         rows: &[sel(S::CursorStyle)],
     },
+    Card::Rows {
+        title: s::settings_card_clipboard,
+        rows: &[b(B::ClipboardCopyOnSelect)],
+    },
     Card::Advanced(&[t(T::ClipboardStreamingMaxBytes)]),
 ];
 

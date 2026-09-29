@@ -10,6 +10,9 @@ pub struct ClipboardConfig {
     /// `EndCopy` arrives or the buffer reaches this cap, at which
     /// point the partial payload is discarded.
     pub streaming_max_bytes: usize,
+    /// Put a finished terminal selection on the clipboard without a Copy,
+    /// as iTerm2 and Ghostty can.
+    pub copy_on_select: bool,
 }
 
 const DEFAULT_STREAMING_MAX_BYTES: usize = 10 * 1024 * 1024;
@@ -18,6 +21,7 @@ impl Default for ClipboardConfig {
     fn default() -> Self {
         Self {
             streaming_max_bytes: DEFAULT_STREAMING_MAX_BYTES,
+            copy_on_select: false,
         }
     }
 }

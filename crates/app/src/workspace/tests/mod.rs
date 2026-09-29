@@ -11,6 +11,7 @@ mod close_running;
 mod config_mirror;
 mod context_menu_ops;
 mod control_surface;
+mod copy_on_select;
 mod diag_scroll;
 mod dnd;
 mod dock;

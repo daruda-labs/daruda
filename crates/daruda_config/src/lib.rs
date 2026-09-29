@@ -1447,6 +1447,12 @@ fn patch_settings_document(
                 toml_edit::value(config.notifications.long_running_enabled),
             );
         }),
+        SettingsPatch::ClipboardCopyOnSelect(_) => patch_section(doc, "clipboard", |t| {
+            t.insert(
+                "copy_on_select",
+                toml_edit::value(config.clipboard.copy_on_select),
+            );
+        }),
         SettingsPatch::GitConfirmCommit(_) => patch_section(doc, "git", |t| {
             t.insert(
                 "confirm_commit",

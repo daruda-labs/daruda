@@ -306,6 +306,7 @@ pub(in crate::workspace) fn terminal_config_from(
         background_alpha: config.window.opacity,
         osc1337_max_bytes: config.clipboard.streaming_max_bytes,
         natural_text_editing: config.shell.natural_text_editing,
+        copy_on_select: config.clipboard.copy_on_select,
         default_cursor_shape: cursor_shape_from(config.cursor.style),
         // ── not yet wired to daruda_config (named to force completeness) ──
         update_window_title: true,
@@ -328,6 +329,14 @@ mod tests {
         // Regression guard: the creation site must honor the user's
         // scrollback value immediately, not only after a config reload.
         assert_eq!(terminal_config_from(&c).max_scrollback, 5000);
+    }
+
+    #[test]
+    fn terminal_config_carries_copy_on_select() {
+        let mut c = daruda_config::Config::default();
+        assert!(!terminal_config_from(&c).copy_on_select);
+        c.clipboard.copy_on_select = true;
+        assert!(terminal_config_from(&c).copy_on_select);
     }
 
     #[test]

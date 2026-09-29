@@ -795,6 +795,13 @@ pub(super) const BOOL_SETTINGS: &[BoolSpec] = &[
         show: |c| c.notifications.skip_focused_pane,
     },
     BoolSpec {
+        setting: BoolSetting::ClipboardCopyOnSelect,
+        get: |w| w.clipboard_copy_on_select,
+        set: |w, v| w.clipboard_copy_on_select = v,
+        patch: SettingsPatch::ClipboardCopyOnSelect,
+        show: |c| c.clipboard.copy_on_select,
+    },
+    BoolSpec {
         setting: BoolSetting::GitConfirmCommit,
         get: |w| w.git_confirm_commit,
         set: |w, v| w.git_confirm_commit = v,
@@ -1060,6 +1067,7 @@ mod tests {
             | SettingsPatch::NotifyAttention(_)
             | SettingsPatch::NotifyLongRunning(_)
             | SettingsPatch::NotifySkipFocusedPane(_)
+            | SettingsPatch::ClipboardCopyOnSelect(_)
             | SettingsPatch::GitConfirmCommit(_)
             | SettingsPatch::GitConfirmPush(_)
             | SettingsPatch::GitDefaultCommitMessage(_)

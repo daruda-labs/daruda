@@ -237,6 +237,7 @@ pub struct SettingsView {
     notify_attention: bool,
     notify_long_running: bool,
     notify_skip_focused_pane: bool,
+    clipboard_copy_on_select: bool,
     git_confirm_commit: bool,
     git_confirm_push: bool,
     git_default_commit_message: bool,
@@ -471,6 +472,7 @@ pub(super) enum BoolSetting {
     NotifyAgentCompletion,
     NotifyAgentWaiting,
     TelegramOnlyWhenAway,
+    ClipboardCopyOnSelect,
     GitConfirmCommit,
     GitConfirmPush,
     GitDefaultCommitMessage,
@@ -604,7 +606,7 @@ impl SelectSetting {
 
 impl BoolSetting {
     #[cfg(test)]
-    const ALL: [Self; 25] = [
+    const ALL: [Self; 26] = [
         Self::AgentUseModifierToSend,
         Self::AgentUseReadingWidth,
         Self::ShellClosePaneOnExit,
@@ -624,6 +626,7 @@ impl BoolSetting {
         Self::NotifyAgentCompletion,
         Self::NotifyAgentWaiting,
         Self::TelegramOnlyWhenAway,
+        Self::ClipboardCopyOnSelect,
         Self::GitConfirmCommit,
         Self::GitConfirmPush,
         Self::GitDefaultCommitMessage,
@@ -656,6 +659,7 @@ impl BoolSetting {
             Self::NotifyAgentCompletion => (),
             Self::NotifyAgentWaiting => (),
             Self::TelegramOnlyWhenAway => (),
+            Self::ClipboardCopyOnSelect => (),
             Self::GitConfirmCommit => (),
             Self::GitConfirmPush => (),
             Self::GitDefaultCommitMessage => (),
@@ -2180,6 +2184,7 @@ impl SettingsView {
             notify_attention: config.notifications.attention_enabled,
             notify_long_running: config.notifications.long_running_enabled,
             notify_skip_focused_pane: config.notifications.skip_focused_pane,
+            clipboard_copy_on_select: config.clipboard.copy_on_select,
             git_confirm_commit: config.git.confirm_commit,
             git_confirm_push: config.git.confirm_push,
             git_default_commit_message: config.git.default_commit_message,

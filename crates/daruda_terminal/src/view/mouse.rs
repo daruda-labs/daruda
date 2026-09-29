@@ -352,6 +352,8 @@ impl TerminalView {
             if let Some(selection) = self.state.selection {
                 if selection.is_empty() {
                     self.state.selection = None;
+                } else if event.button == MouseButton::Left {
+                    self.copy_settled_selection(cx);
                 }
                 cx.notify();
             }
@@ -515,10 +517,11 @@ impl TerminalView {
             && event.pressed_button != Some(MouseButton::Left)
         {
             self.end_mouse_drag();
-            if let Some(sel) = self.state.selection
-                && sel.is_empty()
-            {
-                self.state.selection = None;
+            match self.state.selection {
+                Some(sel) if sel.is_empty() => self.state.selection = None,
+                // A drag let go outside the pane still settles a selection.
+                Some(_) => self.copy_settled_selection(cx),
+                None => {}
             }
             cx.notify();
             return;

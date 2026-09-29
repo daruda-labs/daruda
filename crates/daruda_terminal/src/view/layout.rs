@@ -126,9 +126,8 @@ impl TerminalView {
 
     /// Push input behaviour from config into the running session. See
     /// [`crate::TerminalSession::apply_input_settings`].
-    pub fn apply_input_settings(&mut self, natural_text_editing: bool, osc1337_max_bytes: usize) {
-        self.session
-            .apply_input_settings(natural_text_editing, osc1337_max_bytes);
+    pub fn apply_input_settings(&mut self, settings: crate::InputSettings) {
+        self.session.apply_input_settings(settings);
     }
 
     /// Push the fallback cursor shape from config at runtime. Paint-only:

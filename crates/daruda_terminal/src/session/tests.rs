@@ -123,8 +123,14 @@ fn input_settings_apply_to_a_running_session() {
     let mut session =
         TerminalSession::new(TerminalDims::default(), TerminalConfig::default()).unwrap();
     assert!(session.natural_text_editing());
-    session.apply_input_settings(false, 4096);
+    assert!(!session.copy_on_select(), "copy-on-select is opt-in");
+    session.apply_input_settings(crate::InputSettings {
+        natural_text_editing: false,
+        osc1337_max_bytes: 4096,
+        copy_on_select: true,
+    });
     assert!(!session.natural_text_editing());
+    assert!(session.copy_on_select());
 }
 
 // OSC 133 (FinalTerm / shell integration) ------------------------

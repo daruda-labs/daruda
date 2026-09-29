@@ -60,6 +60,7 @@ pub enum SettingsFieldId {
     NotifyAttention,
     NotifyLongRunning,
     NotifySkipFocusedPane,
+    ClipboardCopyOnSelect,
     GitConfirmCommit,
     GitConfirmPush,
     GitDefaultCommitMessage,
@@ -140,6 +141,7 @@ impl SettingsFieldId {
             Self::NotifyAttention => "notifications.attention_enabled",
             Self::NotifyLongRunning => "notifications.long_running_enabled",
             Self::NotifySkipFocusedPane => "notifications.skip_focused_pane",
+            Self::ClipboardCopyOnSelect => "clipboard.copy_on_select",
             Self::GitConfirmCommit => "git.confirm_commit",
             Self::GitConfirmPush => "git.confirm_push",
             Self::GitDefaultCommitMessage => "git.default_commit_message",
@@ -229,6 +231,7 @@ pub enum SettingsPatch {
     NotifyAttention(bool),
     NotifyLongRunning(bool),
     NotifySkipFocusedPane(bool),
+    ClipboardCopyOnSelect(bool),
     GitConfirmCommit(bool),
     GitConfirmPush(bool),
     GitDefaultCommitMessage(bool),
@@ -313,6 +316,7 @@ impl SettingsPatch {
             Self::NotifyAttention(_) => SettingsFieldId::NotifyAttention,
             Self::NotifyLongRunning(_) => SettingsFieldId::NotifyLongRunning,
             Self::NotifySkipFocusedPane(_) => SettingsFieldId::NotifySkipFocusedPane,
+            Self::ClipboardCopyOnSelect(_) => SettingsFieldId::ClipboardCopyOnSelect,
             Self::GitConfirmCommit(_) => SettingsFieldId::GitConfirmCommit,
             Self::GitConfirmPush(_) => SettingsFieldId::GitConfirmPush,
             Self::GitDefaultCommitMessage(_) => SettingsFieldId::GitDefaultCommitMessage,
@@ -410,6 +414,7 @@ impl SettingsPatch {
             Self::NotifyAttention(value) => config.notifications.attention_enabled = *value,
             Self::NotifyLongRunning(value) => config.notifications.long_running_enabled = *value,
             Self::NotifySkipFocusedPane(value) => config.notifications.skip_focused_pane = *value,
+            Self::ClipboardCopyOnSelect(value) => config.clipboard.copy_on_select = *value,
             Self::GitConfirmCommit(value) => config.git.confirm_commit = *value,
             Self::GitConfirmPush(value) => config.git.confirm_push = *value,
             Self::GitDefaultCommitMessage(value) => config.git.default_commit_message = *value,
@@ -556,6 +561,9 @@ impl SettingsPatch {
             }
             Self::NotifySkipFocusedPane(_) => {
                 left.notifications.skip_focused_pane != right.notifications.skip_focused_pane
+            }
+            Self::ClipboardCopyOnSelect(_) => {
+                left.clipboard.copy_on_select != right.clipboard.copy_on_select
             }
             Self::GitConfirmCommit(_) => left.git.confirm_commit != right.git.confirm_commit,
             Self::GitConfirmPush(_) => left.git.confirm_push != right.git.confirm_push,

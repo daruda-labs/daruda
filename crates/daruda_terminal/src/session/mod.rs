@@ -812,12 +812,17 @@ impl TerminalSession {
         self.config.natural_text_editing
     }
 
-    /// Push the config-owned input behaviour into a running session: the
-    /// natural-editing remap and the OSC 1337 clipboard budget are read per
-    /// keystroke and per chunk, so a change applies from the next one.
-    pub fn apply_input_settings(&mut self, natural_text_editing: bool, osc1337_max_bytes: usize) {
-        self.config.natural_text_editing = natural_text_editing;
-        self.config.osc1337_max_bytes = osc1337_max_bytes;
+    pub(crate) fn copy_on_select(&self) -> bool {
+        self.config.copy_on_select
+    }
+
+    /// Push the config-owned input behaviour into a running session: each
+    /// setting is read per keystroke, chunk or selection, so a change applies
+    /// from the next one.
+    pub fn apply_input_settings(&mut self, settings: crate::InputSettings) {
+        self.config.natural_text_editing = settings.natural_text_editing;
+        self.config.osc1337_max_bytes = settings.osc1337_max_bytes;
+        self.config.copy_on_select = settings.copy_on_select;
     }
 
     /// Initial font point size. Used by `TerminalView` at construction

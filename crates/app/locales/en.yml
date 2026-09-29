@@ -860,6 +860,8 @@ settings:
   hint_preview_tab: "Browsing reuses one tab until you edit or pin the file."
   card_files: "Files"
   card_git: "Git"
+  label_copy_on_select: "Copy on select"
+  hint_copy_on_select: "A finished terminal selection goes to the clipboard on its own."
   label_git_confirm_commit: "Confirm before committing"
   hint_git_confirm_commit: "Amending always asks — it rewrites history."
   label_git_confirm_push: "Confirm before pushing"

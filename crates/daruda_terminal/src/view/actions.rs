@@ -19,8 +19,41 @@ impl TerminalView {
         self.paste_text(&text, cx);
     }
 
+    /// Copy-on-select: a left-button selection that just settled goes to the
+    /// clipboard as a Copy would put it there. The setting is checked first:
+    /// reading the selection flushes a pending Hangul syllable.
+    pub(super) fn copy_settled_selection(&mut self, cx: &mut Context<Self>) {
+        if !self.session.copy_on_select() {
+            return;
+        }
+        self.write_selection_to_clipboard(cx);
+    }
+
+    /// Select the live viewport and let the selection settle, as a drag
+    /// released over the pane would — without a mouse to drive it.
+    #[cfg(any(test, feature = "test-support"))]
+    pub fn settle_viewport_selection_for_test(&mut self, cx: &mut Context<Self>) {
+        let vp_offset = self.session.viewport_row_offset();
+        let last_row = vp_offset + self.state.viewport_lines.len().saturating_sub(1) as u32;
+        let last_byte = self
+            .state
+            .viewport_lines
+            .last()
+            .map(|l| l.len())
+            .unwrap_or(0);
+        self.state.selection = Some(ByteSelection::linear(
+            ScreenPos::viewport(vp_offset, 0),
+            ScreenPos::viewport(last_row, last_byte),
+        ));
+        self.copy_settled_selection(cx);
+    }
+
     pub(super) fn on_copy(&mut self, _: &Copy, _window: &mut Window, cx: &mut Context<Self>) {
-        let Some(text) = self.selection_text(cx) else {
+        self.write_selection_to_clipboard(cx);
+    }
+
+    fn write_selection_to_clipboard(&mut self, cx: &mut Context<Self>) {
+        let Some(text) = self.selection_text(cx).filter(|t| !t.is_empty()) else {
             return;
         };
 

@@ -16,6 +16,15 @@ impl Default for TerminalDims {
     }
 }
 
+/// The config-owned input behaviour a running session re-reads per keystroke,
+/// per chunk or per selection — what a live config reload pushes into it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct InputSettings {
+    pub natural_text_editing: bool,
+    pub osc1337_max_bytes: usize,
+    pub copy_on_select: bool,
+}
+
 #[derive(Clone, Copy, Debug)]
 pub struct TerminalConfig {
     pub default_fg: Rgb,
@@ -75,6 +84,9 @@ pub struct TerminalConfig {
     /// Editing" preset. See `view::keybindings`. Mirrors
     /// `daruda_config::ShellConfig::natural_text_editing`.
     pub natural_text_editing: bool,
+    /// Put a finished mouse selection on the clipboard without a Copy.
+    /// Mirrors `daruda_config::ClipboardConfig::copy_on_select`.
+    pub copy_on_select: bool,
     /// Horizontal inset (left/right padding) inside the terminal pane,
     /// in pixels. iTerm2 `TerminalMargin`. Mirrors
     /// `daruda_config::FontConfig::inset_x`. The pane background fills the
@@ -167,6 +179,7 @@ impl Default for TerminalConfig {
             background_alpha: 1.0,
             osc1337_max_bytes: 10 * 1024 * 1024,
             natural_text_editing: true,
+            copy_on_select: false,
             inset_x: DEFAULT_INSET_X,
             inset_y: DEFAULT_INSET_Y,
             default_cursor_shape: CursorShape::Block,

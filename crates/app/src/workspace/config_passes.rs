@@ -230,10 +230,11 @@ impl Workspace {
                 view.set_background_alpha(config.window.opacity);
                 view.apply_inset(config.font.terminal.inset_x, config.font.terminal.inset_y);
                 view.set_default_cursor_shape(cursor_shape_from(config.cursor.style));
-                view.apply_input_settings(
-                    config.shell.natural_text_editing,
-                    config.clipboard.streaming_max_bytes,
-                );
+                view.apply_input_settings(daruda_terminal::InputSettings {
+                    natural_text_editing: config.shell.natural_text_editing,
+                    osc1337_max_bytes: config.clipboard.streaming_max_bytes,
+                    copy_on_select: config.clipboard.copy_on_select,
+                });
             });
         }
     }

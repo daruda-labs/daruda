@@ -4781,6 +4781,14 @@ pub fn settings_hint_preview_tab() -> String {
     rust_i18n::t!("settings.hint_preview_tab").into_owned()
 }
 
+pub fn settings_label_copy_on_select() -> String {
+    rust_i18n::t!("settings.label_copy_on_select").into_owned()
+}
+
+pub fn settings_hint_copy_on_select() -> String {
+    rust_i18n::t!("settings.hint_copy_on_select").into_owned()
+}
+
 pub fn settings_card_git() -> String {
     rust_i18n::t!("settings.card_git").into_owned()
 }
