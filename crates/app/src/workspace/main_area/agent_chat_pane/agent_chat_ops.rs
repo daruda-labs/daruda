@@ -304,14 +304,7 @@ impl Workspace {
         else {
             return;
         };
-        self.relay_permission_wait_to_telegram(
-            pane_id,
-            *id,
-            &card.options,
-            card.tool_title.as_deref(),
-            card.raw_input_summary.as_deref(),
-            cx,
-        );
+        self.relay_permission_wait_to_telegram(pane_id, &card, cx);
     }
 
     /// Record what this pane's agent just advertised into the persisted

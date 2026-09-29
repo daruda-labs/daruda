@@ -253,8 +253,8 @@ pub struct PermissionPromptRef {
 pub enum MessageTail {
     /// Plain text — escaped for the transport, never markdown-parsed.
     Plain(String),
-    /// Genuine markdown (the agent's own response text) — translated into
-    /// whatever subset the transport accepts.
+    /// Intentional markdown (an agent response, or app copy whose dynamic
+    /// segments were escaped) — translated into the transport's subset.
     Markdown(String),
 }
 

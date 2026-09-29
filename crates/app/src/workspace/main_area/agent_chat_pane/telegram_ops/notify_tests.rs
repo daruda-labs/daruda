@@ -3,7 +3,7 @@
 
 use futures::{FutureExt as _, StreamExt as _};
 
-use super::tests::{expect_ping, make_window};
+use super::tests::{expect_ping, make_window, prompt};
 use crate::surface::strings as s;
 use crate::telegram::bridge::{Outbound, TelegramTail};
 use crate::workspace::main_area::pane_tree::PaneId;
@@ -68,10 +68,14 @@ async fn a_permission_wait_says_which_project_agent_and_tab_asks(cx: &mut gpui::
     }];
     workspace.update(cx, |ws, cx| {
         name_tab(ws, pane, "review", cx);
-        ws.relay_permission_wait_to_telegram(pane, 7, &options, Some("Write x.rs"), None, cx);
+        ws.relay_permission_wait_to_telegram(pane, &prompt(7, &options, Some("Write x.rs")), cx);
         let ping = sent(&mut outbound);
-        assert_eq!(ping.header, ws.telegram_header(pane, cx));
-        assert!(ping.header.contains("review"), "{}", ping.header);
+        let project = ws.project_name_for_pane(pane).expect("an owning project");
+        let agent = ws.agent_chat_view(pane).unwrap().read(cx).agent_name.clone();
+        assert_eq!(
+            ping.header,
+            format!("{project}\n{}", s::remote_agent_with_tab(&agent, "review"))
+        );
     });
 }
 
@@ -155,11 +159,17 @@ async fn a_completed_run_is_summarised_in_one_line(cx: &mut gpui::TestAppContext
     workspace.update(cx, |ws, cx| {
         let view = ws.agent_chat_view(pane).cloned().unwrap();
         view.update(cx, |v, _| {
+            let mut nested = tool("nested", K::Execute);
+            let ChatItem::ToolCall(nested_call) = &mut nested else {
+                unreachable!()
+            };
+            nested_call.parent_tool_id = Some("e1".into());
             v.items = vec![
                 ChatItem::UserText("go".into()),
                 tool("e1", K::Edit),
                 tool("e2", K::Edit),
                 tool("x1", K::Execute),
+                nested,
                 ChatItem::AssistantText {
                     text: "done".into(),
                     streaming: false,
@@ -183,5 +193,66 @@ async fn a_completed_run_is_summarised_in_one_line(cx: &mut gpui::TestAppContext
             summary.contains(&s::agent_chat_group_category("run", 1)),
             "{summary}"
         );
+        assert!(!summary.contains(&s::agent_chat_group_category("run", 2)));
     });
+}
+
+/// A request to change a file shows the change, so it can be judged on the
+/// phone rather than approved blind.
+#[gpui::test]
+async fn a_permission_to_edit_a_file_shows_the_edit(cx: &mut gpui::TestAppContext) {
+    let (mut outbound, workspace, pane) = bridged_pane(cx);
+    let prompt = daruda_acp::PermissionItem {
+        id: 7,
+        tool_call_id: "t1".into(),
+        tool_title: Some("Edit x.rs".into()),
+        raw_input_summary: None,
+        options: vec![PermissionChoice {
+            option_id: "allow_once".into(),
+            name: "Allow".into(),
+            kind: PermissionKindView::AllowOnce,
+        }],
+        resolved: None,
+    };
+    workspace.update(cx, |ws, cx| {
+        let view = ws.agent_chat_view(pane).cloned().unwrap();
+        view.update(cx, |v, _| {
+            let ChatItem::ToolCall(mut call) = tool("t1", daruda_acp::ToolKindView::Edit) else {
+                unreachable!()
+            };
+            call.diffs = vec![daruda_acp::DiffView {
+                path: "/repo/x.rs".into(),
+                old_text: Some("old line\n".into()),
+                new_text: "new line\n".into(),
+            }];
+            v.items.push(ChatItem::ToolCall(call));
+        });
+        ws.relay_permission_wait_to_telegram(pane, &prompt, cx);
+        let TelegramTail::Markdown(tail) = sent(&mut outbound).tail else {
+            panic!("a diff preview is intentional markdown");
+        };
+        assert!(
+            tail.contains("```diff\nx.rs\n- old line\n+ new line\n```"),
+            "{tail}"
+        );
+    });
+}
+
+/// A terminal hook cannot carry a response button, but its blocking notice
+/// still reaches the paired phone as an unattributed notice.
+#[gpui::test]
+async fn a_terminal_hook_notice_reaches_the_phone_without_buttons(cx: &mut gpui::TestAppContext) {
+    let (mut outbound, workspace, _pane) = bridged_pane(cx);
+    workspace.update(cx, |ws, cx| {
+        ws.relay_presence_notice_to_phone("Claude Code needs permission\n/repo".into(), cx);
+    });
+    let message = outbound
+        .next()
+        .now_or_never()
+        .flatten()
+        .expect("a notice was sent");
+    let Outbound::Notice(text) = message else {
+        panic!("a terminal hook must not target an agent pane");
+    };
+    assert!(text.contains("needs permission"), "{text}");
 }

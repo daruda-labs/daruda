@@ -200,19 +200,15 @@ impl AgentChatView {
 }
 
 impl AgentChatView {
-    /// File what the turn that just ended cost, under the run it belongs to.
-    ///
-    /// Keyed by the run's first item so the record and the response bar above it
-    /// name one thing. A run that put nothing on screen gets no key and no
-    /// record — there is no row for it to label.
-    /// What the last run did: how long it worked, when that was recorded, and
-    /// its tool calls by category. `None` when there is no run.
+    /// What the last run did: how long it worked and its top-level tool calls
+    /// by category. `None` when there is no run.
     pub(in crate::workspace) fn last_run_summary(&self) -> Option<RunSummary> {
         let run_start = Self::run_start_of(&self.items)?;
+        let hierarchy = super::super::tool_hierarchy::ToolHierarchy::build(&self.items);
         let calls = self.items[run_start..]
             .iter()
             .filter_map(|item| match item {
-                ChatItem::ToolCall(tc) => Some(tc),
+                ChatItem::ToolCall(tc) if !hierarchy.is_nested_child(tc) => Some(tc),
                 _ => None,
             });
         Some(RunSummary {
@@ -260,6 +256,9 @@ impl AgentChatView {
         }
     }
 
+    /// File what the turn that just ended cost, under the run it belongs to.
+    /// Keying by the run's first item makes this record and its response bar
+    /// name the same run; a run with no row gets no record.
     pub(super) fn record_turn(&mut self, output_tokens: Option<u64>) {
         let Some(run_start) = Self::run_start_of(&self.items) else {
             return;

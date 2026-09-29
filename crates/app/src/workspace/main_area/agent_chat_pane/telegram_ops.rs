@@ -19,6 +19,7 @@ use crate::workspace::main_area::pane_tree::PaneId;
 
 use super::view::PromptDispatch;
 
+mod diff_preview;
 mod turn;
 
 pub(in crate::workspace) use turn::{FirstResponseOutcome, PhoneTurn};
@@ -71,7 +72,7 @@ fn run_summary_line(summary: &super::view::RunSummary) -> Option<String> {
 /// `daruda_acp::PermissionItem` fields the in-app card is built from) so the
 /// phone message names *what* is being asked. An empty string is treated as
 /// absent (defensive; the source already filters it).
-fn permission_wait_tail(tool_title: Option<&str>, raw_input_summary: Option<&str>) -> String {
+fn permission_wait_text(tool_title: Option<&str>, raw_input_summary: Option<&str>) -> String {
     let mut tail = s::agent_notification_waiting();
     for line in [tool_title, raw_input_summary] {
         if let Some(line) = line.filter(|l| !l.is_empty()) {
@@ -80,6 +81,46 @@ fn permission_wait_tail(tool_title: Option<&str>, raw_input_summary: Option<&str
         }
     }
     tail
+}
+
+/// The permission body, with an optional bounded file-change preview. Plain
+/// administrative lines are escaped before the tail becomes Markdown; only
+/// the preview is intentionally formatted, as a fenced `diff` block.
+fn permission_wait_tail(
+    prompt: &daruda_acp::PermissionItem,
+    diffs: &[daruda_acp::DiffView],
+) -> TelegramTail {
+    let text = permission_wait_text(
+        prompt.tool_title.as_deref(),
+        prompt.raw_input_summary.as_deref(),
+    );
+    let Some(preview) = diff_preview::diff_preview(diffs, s::agent_chat_diff_fallback_truncated)
+    else {
+        return TelegramTail::Plain(text);
+    };
+    TelegramTail::Markdown(format!(
+        "{}\n\n{}",
+        diff_preview::escape_markdown_text(&text),
+        diff_preview::fenced_diff(&preview)
+    ))
+}
+
+/// Diffs on the tool call a permission card belongs to. Empty when the
+/// adapter did not send the tool card before asking, or the card is synthetic.
+fn permission_diffs<'a>(
+    view: &'a super::view::AgentChatView,
+    tool_call_id: &str,
+) -> &'a [daruda_acp::DiffView] {
+    view.items
+        .iter()
+        .rev()
+        .find_map(|item| match item {
+            daruda_acp::ChatItem::ToolCall(call) if call.id == tool_call_id => {
+                Some(call.diffs.as_slice())
+            }
+            _ => None,
+        })
+        .unwrap_or_default()
 }
 
 /// Compose the "went straight to a tool call" first-response ack's tail: the
@@ -269,53 +310,51 @@ impl Workspace {
     /// offered — skips the relay entirely (not a broken partial ping) if
     /// the agent supplied no options at all (shouldn't happen for a real
     /// permission request, but nothing to build a keyboard from if it
-    /// somehow does). `tool_title` / `raw_input_summary` are the same
-    /// `daruda_acp::PermissionItem` fields the in-app card is built
+    /// somehow does). The prompt is the same `daruda_acp::PermissionItem`
+    /// the in-app card is built
     /// from — see [`permission_wait_tail`] — so the phone ping names the
     /// actual action awaiting approval instead of just "waiting for your
     /// input". A permission wait during a phone-started turn bypasses
     /// presence — the first visible response directly here, later ones
     /// through the ledger check in [`Self::relay_when_presence_allows`].
-    /// Always a [`TelegramTail::Plain`] tail: none of
-    /// `tool_title`, `raw_input_summary`, or the "waiting" label is
-    /// agent-authored markdown — see [`TelegramTail`]'s doc comment for why
-    /// that matters.
+    /// The tail stays plain unless a file diff is available. With a diff, the
+    /// administrative text is escaped and the preview alone is fenced.
     pub(super) fn relay_permission_wait_to_telegram(
         &mut self,
         pane_id: PaneId,
-        perm_id: u64,
-        options: &[daruda_acp::PermissionChoice],
-        tool_title: Option<&str>,
-        raw_input_summary: Option<&str>,
+        prompt: &daruda_acp::PermissionItem,
         cx: &mut Context<Self>,
     ) {
         let is_telegram_first_response = self
             .agent_chat_view(pane_id)
             .is_some_and(|view| view.read(cx).is_phone_turn_waiting());
-        let buttons = permission_buttons(options);
+        let buttons = permission_buttons(&prompt.options);
         if buttons.is_empty() {
             if is_telegram_first_response {
                 self.relay_first_response_fallback_to_telegram(pane_id, cx);
             }
             return;
         }
-        let tail = permission_wait_tail(tool_title, raw_input_summary);
+        let tail = self
+            .agent_chat_view(pane_id)
+            .map(|view| {
+                let view = view.read(cx);
+                permission_wait_tail(prompt, permission_diffs(&view, &prompt.tool_call_id))
+            })
+            .unwrap_or_else(|| permission_wait_tail(prompt, &[]));
         let header = self.telegram_header(pane_id, cx);
-        let permission = Some(crate::telegram::bridge::PermissionPromptRef { perm_id, buttons });
+        let permission = Some(crate::telegram::bridge::PermissionPromptRef {
+            perm_id: prompt.id,
+            buttons,
+        });
         let told = if is_telegram_first_response {
-            self.relay_to_telegram(pane_id, header, TelegramTail::Plain(tail), permission, cx);
+            self.relay_to_telegram(pane_id, header, tail, permission, cx);
             true
         } else {
-            self.relay_when_presence_allows(
-                pane_id,
-                header,
-                TelegramTail::Plain(tail),
-                permission,
-                cx,
-            )
+            self.relay_when_presence_allows(pane_id, header, tail, permission, cx)
         };
         if told {
-            self.mark_permission_told_to_phone(pane_id, perm_id, cx);
+            self.mark_permission_told_to_phone(pane_id, prompt.id, cx);
         }
     }
 
@@ -358,14 +397,7 @@ impl Workspace {
                 untold_permissions(v)
             });
             for prompt in untold {
-                self.relay_permission_wait_to_telegram(
-                    pane_id,
-                    prompt.id,
-                    &prompt.options,
-                    prompt.tool_title.as_deref(),
-                    prompt.raw_input_summary.as_deref(),
-                    cx,
-                );
+                self.relay_permission_wait_to_telegram(pane_id, &prompt, cx);
             }
         }
     }
@@ -579,6 +611,41 @@ impl Workspace {
             });
             return;
         };
+        bridge.send_notice(text);
+    }
+
+    /// Relay an unsolicited, pane-less notice under each channel's presence
+    /// rule. Hook notifications use this shape because a terminal permission
+    /// cannot be answered through the hook protocol, so no button is valid.
+    pub(in crate::workspace) fn relay_presence_notice_to_phone(
+        &self,
+        text: String,
+        cx: &Context<Self>,
+    ) {
+        let away = crate::app_presence::is_away(cx);
+        crate::remote_channel::global::RemoteChannels::send_notice_with_delivery(
+            text.clone(),
+            crate::remote_channel::global::Delivery::Presence { away },
+            cx,
+        );
+        let Some(bridge) = self.telegram_bridge(cx) else {
+            trace::delivery("relay.gated", || {
+                format!(
+                    "entry=presence_notice reason=bridge text={}",
+                    trace::digest(&text)
+                )
+            });
+            return;
+        };
+        if !away && self.telegram.only_when_away {
+            trace::delivery("relay.gated", || {
+                format!(
+                    "entry=presence_notice reason=presence text={}",
+                    trace::digest(&text)
+                )
+            });
+            return;
+        }
         bridge.send_notice(text);
     }
 
