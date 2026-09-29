@@ -334,6 +334,7 @@ fn a_prompt_a_permission_and_a_failure_survive_every_filter() {
     assert!(f.matches(&ChatItem::UserText("q".into())));
     assert!(f.matches(&ChatItem::Permission(PermissionItem {
         id: 0,
+        tool_call_id: String::new(),
         tool_title: Some("Write /tmp/x".into()),
         raw_input_summary: None,
         options: Vec::new(),

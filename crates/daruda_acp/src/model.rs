@@ -302,6 +302,9 @@ pub struct PermissionItem {
     /// correlates a specific card to its park when several permissions are
     /// outstanding at once (parallel tool calls) — not just the trailing one.
     pub id: u64,
+    /// The tool call this request is about — the key to its diffs and output
+    /// in the transcript.
+    pub tool_call_id: String,
     /// Title of the tool call needing approval, if the agent supplied one.
     pub tool_title: Option<String>,
     /// A short, safe one-line summary of the tool's raw input (e.g.

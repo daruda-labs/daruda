@@ -150,7 +150,7 @@ pub(in crate::workspace) struct ClaudeContext {
 
     /// `[claude_status] stale_threshold_secs` mirror — the same age past
     /// which cold restore resets a session also expires its blocking
-    /// notification for the desktop-push gate (see
+    /// notification for the local/remote push gate (see
     /// `maybe_push_hook_notification`). Updated in `apply_config`.
     pub(in crate::workspace) stale_threshold_secs: u64,
 
@@ -196,8 +196,8 @@ pub(in crate::workspace) struct ClaudeContext {
     /// `Running`.
     pub(in crate::workspace) tool_use_failure_counts: HashMap<String, u32>,
 
-    /// Last blocking-notification timestamp already surfaced as a
-    /// desktop push, per session. The status-dir watcher can re-deliver
+    /// Last blocking-notification timestamp already handled by this workspace,
+    /// per session. The status-dir watcher can re-deliver
     /// the same file (FSEvents coalescing / duplicate events) and every
     /// hook write replaces the store entry, so neither the store nor the
     /// `update` return value dedups for us. Fire a push only when the
@@ -271,10 +271,10 @@ impl Workspace {
                         self.apply_task_session_ended(&file.session_id, reason, cx);
                     }
                     // Blocking hook notifications surface as a one-shot
-                    // desktop push here rather than latching the lane
+                    // local + remote push here rather than latching the lane
                     // indicator (see `daruda_agent::hooks::fsm`). Called
                     // before `update` consumes `file`.
-                    self.maybe_push_hook_notification(&file);
+                    self.maybe_push_hook_notification(&file, cx);
                     #[cfg(debug_assertions)]
                     let dbg_probe = self.probe_lane_status(&file.session_id);
                     #[cfg(debug_assertions)]
@@ -338,7 +338,7 @@ impl Workspace {
         }
     }
 
-    /// Raise a transient desktop push for a blocking Claude
+    /// Raise transient desktop and remote pushes for a blocking Claude
     /// `Notification` (permission prompt / idle prompt / elicitation
     /// dialog). These do not latch the lane indicator into a
     /// persistent `NeedsAttention` (see `daruda_agent::hooks::fsm`), so
@@ -351,6 +351,7 @@ impl Workspace {
     fn maybe_push_hook_notification(
         &mut self,
         file: &daruda_agent::hooks::status_file::StatusFile,
+        cx: &Context<Self>,
     ) {
         use crate::surface::strings as s;
         use daruda_agent::hooks::events::NotificationType;
@@ -404,7 +405,23 @@ impl Workspace {
             return;
         }
 
-        crate::platform::notifications::show(&title, &redact_home(&file.cwd));
+        let pane_id = self.session_pane_id(&file.session_id);
+        let location = redact_home(&file.cwd);
+        crate::platform::notifications::show(&title, &location);
+        // The global watcher fans this event into every open workspace. Only
+        // the one tracking the terminal's process may relay it to the phone.
+        if pane_id.is_some() {
+            self.relay_presence_notice_to_phone(format!("{title}\n{location}"), cx);
+        }
+    }
+
+    /// The pane bound to `session_id`, if this workspace owns its terminal.
+    fn session_pane_id(&self, session_id: &str) -> Option<PaneId> {
+        self.claude
+            .pty_claude_bindings
+            .iter()
+            .find(|(_, binding)| binding.session_id == session_id)
+            .map(|(pane_id, _)| *pane_id)
     }
 
     /// `true` when the pane bound to `session_id` is on screen.
@@ -412,11 +429,8 @@ impl Workspace {
     /// once per blocking notification). `false` when the session has no
     /// live pane binding.
     fn session_pane_on_screen(&self, session_id: &str) -> bool {
-        self.claude
-            .pty_claude_bindings
-            .iter()
-            .find(|(_, b)| b.session_id == session_id)
-            .is_some_and(|(pane_id, _)| self.pane_on_screen(*pane_id))
+        self.session_pane_id(session_id)
+            .is_some_and(|pane_id| self.pane_on_screen(pane_id))
     }
 
     /// Fold a plan-rate fetch result into `key`'s cached outcome. Called by the

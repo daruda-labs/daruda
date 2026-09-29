@@ -123,6 +123,7 @@ pub fn permission_item(
     let raw_input = existing_raw_input(items, &request.tool_call.tool_call_id.0).or(own_raw_input);
     ChatItem::Permission(PermissionItem {
         id,
+        tool_call_id: request.tool_call.tool_call_id.0.to_string(),
         tool_title: request.tool_call.fields.title.clone(),
         raw_input_summary: summarize_raw_input(raw_input),
         options: request.options.iter().map(choice_of).collect(),
@@ -2868,11 +2869,9 @@ mod tests {
     }
 
     #[test]
-    fn permission_item_carries_the_request_id() {
-        // The card records the daruda-internal request id so the host can
-        // correlate a specific card to its park when several permissions are
-        // outstanding at once (parallel tool calls). Without this, the host
-        // can only track one at a time and mis-routes the rest.
+    fn permission_item_carries_both_correlation_ids() {
+        // The request id correlates the card to its parked response; the tool
+        // call id correlates it to the file diff the user is deciding on.
         let request = RequestPermissionRequest::new(
             "s1",
             ToolCallUpdate::new("t1", ToolCallUpdateFields::default()),
@@ -2887,6 +2886,7 @@ mod tests {
             panic!("expected permission item");
         };
         assert_eq!(card.id, 42);
+        assert_eq!(card.tool_call_id, "t1");
     }
 
     #[test]

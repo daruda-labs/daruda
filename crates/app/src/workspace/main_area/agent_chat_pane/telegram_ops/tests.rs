@@ -10,7 +10,9 @@ use daruda_store::project::PaneCwd;
 /// Every relay in this file is about a chat pane, so every one of them must
 /// leave the queue as a pane-attributed ping — a `Notice` here would mean an
 /// agent's own message stopped registering a reply-to.
-fn expect_ping(outbound: crate::telegram::bridge::Outbound) -> crate::telegram::bridge::BridgePing {
+pub(super) fn expect_ping(
+    outbound: crate::telegram::bridge::Outbound,
+) -> crate::telegram::bridge::BridgePing {
     match outbound {
         crate::telegram::bridge::Outbound::Ping(ping) => ping,
         crate::telegram::bridge::Outbound::Notice(text) => {
@@ -767,10 +769,7 @@ async fn telegram_reply_ack_paths_cover_queue_overdue_and_empty_permission(
         });
         ws.relay_permission_wait_to_telegram(
             pane_id,
-            7,
-            &[],
-            Some("Tool without choices"),
-            None,
+            &prompt(7, &[], Some("Tool without choices")),
             cx,
         );
     });
@@ -928,6 +927,7 @@ async fn an_outstanding_permission_declined_while_present_is_offered_once_the_us
         view.update(cx, |v, _| {
             v.items = vec![ChatItem::Permission(PermissionItem {
                 id: 7,
+                tool_call_id: String::new(),
                 tool_title: Some("Write /tmp/x.rs".to_string()),
                 raw_input_summary: None,
                 options: options.clone(),
@@ -938,7 +938,11 @@ async fn an_outstanding_permission_declined_while_present_is_offered_once_the_us
 
         // Fires while the user is at the desk: declined, nothing queued.
         crate::app_presence::seed_for_test(AwaySignal::HERE, true, Some(Duration::ZERO), cx);
-        ws.relay_permission_wait_to_telegram(pane, 7, &options, Some("Write /tmp/x.rs"), None, cx);
+        ws.relay_permission_wait_to_telegram(
+            pane,
+            &prompt(7, &options, Some("Write /tmp/x.rs")),
+            cx,
+        );
         assert!(outbound.next().now_or_never().is_none());
         // A sweep while still present must not change that.
         ws.relay_outstanding_permissions(cx);
@@ -1017,6 +1021,7 @@ async fn permission_delivery_history_tracks_recipient_and_connection(
     let add_request = |view: &mut super::super::view::AgentChatView| {
         view.items.push(ChatItem::Permission(PermissionItem {
             id: 0,
+            tool_call_id: String::new(),
             tool_title: Some("Write /tmp/x.rs".into()),
             raw_input_summary: None,
             options: options.clone(),
@@ -1072,10 +1077,7 @@ async fn permission_delivery_history_tracks_recipient_and_connection(
             crate::app_presence::seed_for_test(AwaySignal::HERE, true, Some(Duration::ZERO), cx);
             ws.relay_permission_wait_to_telegram(
                 pane,
-                0,
-                &options,
-                Some("Write /tmp/x.rs"),
-                None,
+                &prompt(0, &options, Some("Write /tmp/x.rs")),
                 cx,
             );
             view.update(cx, |v, _| add_request(v));
@@ -1126,6 +1128,7 @@ async fn respond_bot_permission_routes_by_id_under_concurrency(cx: &mut gpui::Te
     let card = |id: u64| {
         ChatItem::Permission(PermissionItem {
             id,
+            tool_call_id: String::new(),
             tool_title: Some(format!("Write /tmp/{id}")),
             raw_input_summary: None,
             options: vec![
@@ -1231,12 +1234,28 @@ async fn respond_bot_permission_routes_by_id_under_concurrency(cx: &mut gpui::Te
     });
 }
 
+/// A pending permission card the relays can be handed.
+pub(super) fn prompt(
+    id: u64,
+    options: &[PermissionChoice],
+    tool_title: Option<&str>,
+) -> daruda_acp::PermissionItem {
+    daruda_acp::PermissionItem {
+        id,
+        tool_call_id: String::new(),
+        tool_title: tool_title.map(str::to_string),
+        raw_input_summary: None,
+        options: options.to_vec(),
+        resolved: None,
+    }
+}
+
 /// Construct a Workspace wrapped in `gpui_component::Root` — matches the
 /// production windowing path so APIs that walk the window root don't
 /// panic during construction. Local adaptation of
 /// `window_registry.rs`'s test-only `make_window` helper (that helper is
 /// private to its own module, so it isn't reachable from here).
-fn make_window(
+pub(super) fn make_window(
     cx: &mut gpui::TestAppContext,
     config: &daruda_config::Config,
 ) -> (

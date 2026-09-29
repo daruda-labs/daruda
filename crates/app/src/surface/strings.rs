@@ -3181,6 +3181,15 @@ pub fn rename_tab_modal_title() -> String {
 pub fn ctx_rename_tab() -> String {
     rust_i18n::t!("ctx.rename_tab").into_owned()
 }
+/// The finished-run line under a completion ping's header, from its
+/// already-formatted segments (duration, "3 files edited", …).
+pub fn remote_run_summary(segments: &[String]) -> String {
+    rust_i18n::t!("control.run_summary", segments = segments.join(" · ")).into_owned()
+}
+/// Lead line of the phone message a turn that ended in an error sends.
+pub fn remote_turn_failed() -> String {
+    rust_i18n::t!("control.turn_failed").into_owned()
+}
 /// The agent line of a remote message about a chat in a tab the user named.
 pub fn remote_agent_with_tab(agent: &str, tab: &str) -> String {
     rust_i18n::t!("control.agent_with_tab", agent = agent, tab = tab).into_owned()

@@ -148,14 +148,29 @@ impl RemoteChannels {
     }
 
     pub fn send_notice(text: String, cx: &App) {
+        Self::send_notice_with_delivery(text, Delivery::Explicit, cx);
+    }
+
+    /// Send a pane-less notice under the same explicit/presence policy pings
+    /// use. Returns whether at least one live connection accepted it.
+    pub fn send_notice_with_delivery(text: String, delivery: Delivery, cx: &App) -> bool {
         let Some(bridge) = cx.try_global::<Self>() else {
-            return;
+            return false;
         };
+        let away = match delivery {
+            Delivery::Explicit => true,
+            Delivery::Presence { away } => away,
+        };
+        let mut queued = false;
         for id in bridge.connections.keys() {
             if let Some(connection) = bridge.live(id, cx) {
-                bridge.enqueue(connection, Outbound::Notice(text.clone()));
+                if !away && connection.config.only_when_away {
+                    continue;
+                }
+                queued |= bridge.enqueue(connection, Outbound::Notice(text.clone()));
             }
         }
+        queued
     }
 
     fn enqueue(&self, connection: &Connection, outbound: Outbound) -> bool {

@@ -38,6 +38,7 @@ fn tool(id: &str, status: ToolStatusView) -> ChatItem {
 fn perm(resolved: bool) -> ChatItem {
     ChatItem::Permission(PermissionItem {
         id: 0,
+        tool_call_id: String::new(),
         tool_title: Some("Write /tmp/x".to_owned()),
         raw_input_summary: None,
         options: Vec::new(),

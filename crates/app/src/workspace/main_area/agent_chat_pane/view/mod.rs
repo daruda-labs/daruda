@@ -859,6 +859,7 @@ pub(in crate::workspace) struct AgentChatView {
 }
 
 mod activity_ops;
+pub(in crate::workspace) use activity_ops::RunSummary;
 mod apply_event;
 pub(super) mod list_sync;
 mod queue_ops;
