@@ -1,4 +1,4 @@
-//! Codex plan-limit windows from ChatGPT's `backend-api/codex/usage`.
+//! Codex plan-limit windows from ChatGPT's `backend-api/wham/usage`.
 //!
 //! Up to two windows (`primary_window` / `secondary_window`), each reporting
 //! its own length — a monthly one on a Team plan, shorter ones elsewhere — so
@@ -21,7 +21,7 @@ use crate::accounts::PlanInfo;
 use crate::accounts::codex::system_codex_home;
 use crate::http::{FetchError, Header, get_json};
 
-const USAGE_URL: &str = "https://chatgpt.com/backend-api/codex/usage";
+const USAGE_URL: &str = "https://chatgpt.com/backend-api/wham/usage";
 const STATUS_URL: &str = "https://status.openai.com/api/v2/status.json";
 
 /// Plaintext credential file codex writes inside its `CODEX_HOME`.
@@ -75,7 +75,7 @@ fn read_credentials(home: &Path) -> Result<Credentials, FetchError> {
     })
 }
 
-/// Parse the JSON body returned by `backend-api/codex/usage`. Split out so it
+/// Parse the JSON body returned by `backend-api/wham/usage`. Split out so it
 /// can be unit-tested against fixtures without a network mock.
 ///
 /// Unlike Anthropic, the plan tier rides in the usage response rather than the
@@ -137,6 +137,11 @@ fn parse_window(value: &Value, name: &str) -> Result<Option<UsageWindow>, FetchE
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn usage_url_matches_the_chatgpt_rate_limit_route() {
+        assert_eq!(USAGE_URL, "https://chatgpt.com/backend-api/wham/usage");
+    }
 
     /// The shape a live Team-plan account returned on 2026-07-28: one monthly
     /// window, no secondary.
