@@ -11,7 +11,6 @@
 //! dispatch here, mirroring the [`super::plugin`] submodule.
 
 use crate::surface::strings as s;
-use crate::ui::field_row;
 use crate::ui::theme;
 use daruda_config::PresetLaunchability;
 use gpui::{AnyElement, ClickEvent, IntoElement, SharedString, Window, div, prelude::*, px};
@@ -165,31 +164,6 @@ impl SettingsView {
             .into_any_element()
     }
 
-    /// A labelled control plus the value it inherits when the row states none.
-    /// Eight fields render this trio; the base line is what tells an override
-    /// from a row that is simply following its preset.
-    fn field_with_base(
-        body: gpui::Div,
-        label: String,
-        control: impl IntoElement,
-        base: Option<String>,
-        cx: &gpui::App,
-    ) -> gpui::Div {
-        body.child(field_row(label, control))
-            .when_some(base, |body, base| {
-                body.child(Self::preset_base_value(base, cx))
-            })
-    }
-
-    /// The preset's own value for a field the row above overrides — muted, so
-    /// the editable value stays the one that reads as current.
-    fn preset_base_value(label: String, cx: &gpui::App) -> impl IntoElement {
-        div()
-            .text_size(px(theme::MODAL_BODY_FONT_SIZE))
-            .text_color(theme::current(cx).text_muted)
-            .child(label)
-    }
-
     /// Switch a built-in preset on: append an entry that references it. The
     /// card arrives folded — picking an agent to use is the whole gesture. A
     /// preset that needs a manual install has no command, so it adds nothing.
@@ -240,7 +214,13 @@ impl SettingsView {
         catalog_index: usize,
         cx: &mut gpui::Context<Self>,
     ) {
-        if catalog_index == 0 || catalog_index >= self.agent_catalog.len() {
+        // Only an entry that is on can be the one a new chat opens with; the
+        // card hides the button otherwise, and this refuses it too.
+        let switched_on = matches!(
+            self.agent_catalog.get(catalog_index),
+            Some(AgentCatalogItem::Editable(row)) if row.enabled
+        );
+        if catalog_index == 0 || !switched_on {
             return;
         }
         let item = self.agent_catalog.remove(catalog_index);
@@ -305,141 +285,56 @@ impl SettingsView {
     }
 }
 
-/// Where a catalog row's values come from, and which of them the row states
-/// differently from that source. Each `*_base` holds the ready-to-render label
-/// for the preset's own value, and is `None` when the field still follows the
-/// preset (or when the row has no preset at all).
-pub(in crate::settings) struct RowProvenance {
-    /// The preset this row references, `None` for a custom row.
-    pub(in crate::settings) preset: Option<String>,
-    pub(in crate::settings) name_base: Option<String>,
-    pub(in crate::settings) command_base: Option<String>,
-    pub(in crate::settings) default_mode_base: Option<String>,
-    pub(in crate::settings) default_model_base: Option<String>,
-    pub(in crate::settings) fold_mode_base: Option<String>,
-    pub(in crate::settings) tail_window_base: Option<String>,
-    pub(in crate::settings) tail_window_calls_base: Option<String>,
-    pub(in crate::settings) display_filter_base: Option<String>,
-    pub(in crate::settings) env_base: Option<String>,
-}
-
-impl RowProvenance {
-    fn follows_preset(&self) -> bool {
-        self.preset.is_some()
-    }
-
-    /// Whether any field departs from the preset — the aggregate the
-    /// provenance tests assert on.
-    #[cfg(test)]
-    pub(in crate::settings) fn is_overridden(&self) -> bool {
-        self.name_base.is_some()
-            || self.command_base.is_some()
-            || self.default_mode_base.is_some()
-            || self.default_model_base.is_some()
-            || self.fold_mode_base.is_some()
-            || self.tail_window_base.is_some()
-            || self.tail_window_calls_base.is_some()
-            || self.display_filter_base.is_some()
-            || self.env_base.is_some()
-    }
-}
-
 impl AgentCatalogRow {
-    /// Diff this row's current field values against the preset it references.
-    pub(in crate::settings) fn provenance(&self, cx: &gpui::App) -> RowProvenance {
-        let Some(preset) = self.preset.clone() else {
-            return RowProvenance {
-                preset: None,
-                name_base: None,
-                command_base: None,
-                default_mode_base: None,
-                default_model_base: None,
-                fold_mode_base: None,
-                tail_window_base: None,
-                tail_window_calls_base: None,
-                display_filter_base: None,
-                env_base: None,
-            };
-        };
-        // A row only carries a preset id it resolved from, so the lookup holds.
-        let base = daruda_config::AgentDefinition::registry_preset(&preset);
-        let base_command = match base.as_ref().map(|b| &b.launch) {
-            Some(daruda_config::AgentLaunch::Raw(command)) => command.clone(),
-            _ => String::new(),
-        };
-        let base_env = base
-            .as_ref()
-            .and_then(|b| b.env.clone())
-            .unwrap_or_default();
-        let base_name = base.map(|b| b.name).unwrap_or_default();
-        // Presets state none of the mode, model or transcript axes, so any
-        // value on one of them is an override — labelled "not set" rather than
-        // shown as an empty preset value.
-        RowProvenance {
-            preset: Some(preset),
-            name_base: overridden_base(&self.name_input.read(cx).value(), &base_name)
-                .map(s::settings_agent_override_preset_value),
-            command_base: overridden_base(&self.command_input.read(cx).value(), &base_command)
-                .map(s::settings_agent_override_preset_value),
-            default_mode_base: self
-                .default_mode(cx)
-                .map(|_| s::settings_agent_override_preset_value_unset()),
-            default_model_base: self
-                .default_model(cx)
-                .map(|_| s::settings_agent_override_preset_value_unset()),
-            fold_mode_base: self
-                .fold_mode()
-                .map(|_| s::settings_agent_override_preset_value_unset()),
-            tail_window_base: self
-                .tail_window(cx)
-                .map(|_| s::settings_agent_override_preset_value_unset()),
-            tail_window_calls_base: self
-                .tail_window_calls(cx)
-                .map(|_| s::settings_agent_override_preset_value_unset()),
-            display_filter_base: self
-                .display_filter()
-                .map(|_| s::settings_agent_override_preset_value_unset()),
-            // Diffed on parsed pairs rather than on the raw text, so
-            // reformatting a line is not reported as an override — and a
-            // preset that ships no environment shows "not set" like the
-            // other stateless axes rather than an empty value.
-            env_base: (!super::agent_env::env_follows_base(
-                &self.env_input.read(cx).value(),
-                &base_env,
-            ))
-            .then(|| {
-                if base_env.is_empty() {
-                    s::settings_agent_override_preset_value_unset()
-                } else {
-                    s::settings_agent_override_preset_value(&super::agent_env::env_base_summary(
-                        &base_env,
-                    ))
+    /// Whether the command field runs something other than the preset's
+    /// command. A custom row has no preset to differ from.
+    pub(in crate::settings) fn command_overridden(&self, cx: &gpui::App) -> bool {
+        self.preset_definition()
+            .is_some_and(|base| match base.launch {
+                daruda_config::AgentLaunch::Raw(command) => {
+                    differs(&self.command_input.read(cx).value(), &command)
                 }
-            }),
-        }
+                _ => false,
+            })
+    }
+
+    /// Whether the environment field states something other than the
+    /// preset's own environment. A field that states nothing follows the
+    /// preset; one that states pairs is compared on them, so reformatting a
+    /// line is not a difference.
+    pub(in crate::settings) fn env_overridden(&self, cx: &gpui::App) -> bool {
+        self.preset.is_some()
+            && !matches!(self.stated_env(cx), Ok(None))
+            && !super::agent_env::env_follows_base(
+                &self.env_input.read(cx).value(),
+                &self.preset_env().unwrap_or_default(),
+            )
+    }
+
+    fn preset_definition(&self) -> Option<daruda_config::AgentDefinition> {
+        self.preset
+            .as_deref()
+            .and_then(daruda_config::AgentDefinition::registry_preset)
     }
 
     /// The environment this row writes — `Err` naming what the user has to
-    /// fix first. Resolved against the preset's own environment, since that
-    /// is what decides whether an emptied field clears it or simply states
-    /// none (see [`super::agent_env::stated_env`]).
+    /// fix first. Resolved against the environment the field was built from,
+    /// since that is what decides whether an emptied field clears it or
+    /// simply states none (see [`super::agent_env::stated_env`]).
     pub(in crate::settings) fn stated_env(
         &self,
         cx: &gpui::App,
     ) -> Result<Option<Vec<(String, String)>>, super::agent_env::EnvFieldError> {
         super::agent_env::stated_env(
             &self.env_input.read(cx).value(),
-            self.preset_env().as_deref(),
+            self.env_field_base.as_deref(),
         )
     }
 
     /// The environment this row's preset ships, `None` for a custom row or a
     /// preset that ships none.
     fn preset_env(&self) -> Option<Vec<(String, String)>> {
-        self.preset
-            .as_deref()
-            .and_then(daruda_config::AgentDefinition::registry_preset)
-            .and_then(|preset| preset.env)
+        self.preset_definition().and_then(|preset| preset.env)
     }
 
     /// Whether the adapter this row launches gets codex's native-subagent
@@ -464,10 +359,10 @@ impl AgentCatalogRow {
     }
 }
 
-/// `Some(base)` when the row's `current` value differs from the preset's `base`,
-/// i.e. the field is overridden and the preset value is worth showing.
-fn overridden_base<'a>(current: &str, base: &'a str) -> Option<&'a str> {
-    (current.trim() != base).then_some(base)
+/// Whether a field's `current` text states something other than `base`.
+/// Surrounding whitespace is trimmed on save, so it is no difference.
+fn differs(current: &str, base: &str) -> bool {
+    current.trim() != base
 }
 
 /// Whether a catalog row's local-PATH warning should be shown for `kind`. An
@@ -494,19 +389,19 @@ impl SettingsView {
 
 #[cfg(test)]
 mod tests {
-    use super::{overridden_base, transport_needs_local_path_check};
+    use super::{differs, transport_needs_local_path_check};
 
     #[test]
     fn an_untouched_field_reports_no_override() {
-        assert_eq!(overridden_base("Codex", "Codex"), None);
+        assert!(!differs("Codex", "Codex"));
         // Trailing whitespace is trimmed on save, so it is not an override.
-        assert_eq!(overridden_base("  Codex  ", "Codex"), None);
+        assert!(!differs("  Codex  ", "Codex"));
     }
 
     #[test]
-    fn a_changed_field_reports_the_preset_value() {
-        assert_eq!(overridden_base("My Codex", "Codex"), Some("Codex"));
-        assert_eq!(overridden_base("", "Codex"), Some("Codex"));
+    fn a_changed_field_differs() {
+        assert!(differs("My Codex", "Codex"));
+        assert!(differs("", "Codex"));
     }
 
     #[test]

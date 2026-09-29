@@ -5449,17 +5449,6 @@ pub fn settings_agent_card_summary(model: &str, mode: &str) -> String {
     rust_i18n::t!("settings.agent_card_summary", model = model, mode = mode).into_owned()
 }
 
-/// The preset's own value for a field the row overrides.
-pub fn settings_agent_override_preset_value(value: &str) -> String {
-    rust_i18n::t!("settings.agent_override_preset_value", value = value).into_owned()
-}
-
-/// Same as [`settings_agent_override_preset_value`] for a field the preset
-/// leaves unset (`default_mode` and `default_model` are the two).
-pub fn settings_agent_override_preset_value_unset() -> String {
-    rust_i18n::t!("settings.agent_override_preset_value_unset").into_owned()
-}
-
 pub fn settings_agent_row_detach_hint() -> String {
     rust_i18n::t!("settings.agent_row_detach_hint").into_owned()
 }

@@ -54,8 +54,8 @@ impl SettingsView {
 
 impl AgentCatalogRow {
     /// The pinned session mode, or `None` for the empty "agent default"
-    /// sentinel. The one reading both collect paths and `provenance` share,
-    /// so none of them can disagree about what "no override" looks like.
+    /// sentinel. The one reading both collect paths share, so neither can
+    /// disagree about what "no override" looks like.
     pub(in crate::settings) fn default_mode(&self, cx: &gpui::App) -> Option<String> {
         selected_override(&self.default_mode_select, cx)
     }

@@ -829,19 +829,13 @@ fn enabling_a_preset_collects_a_reference(cx: &mut TestAppContext) {
             cfg.agents[1],
             daruda_config::AgentEntry::preset("gemini".to_string())
         );
-        // Nothing was edited, so the row reports no override to diff.
-        assert!(
-            !w.agent_editable_row(1)
-                .unwrap()
-                .provenance(cx)
-                .is_overridden()
-        );
+        // Nothing was edited, so nothing it runs differs from the preset.
+        assert!(!w.agent_editable_row(1).unwrap().advanced_overridden(cx));
     });
 }
 
 /// Editing one field of a preset row overrides that field only — every other
-/// field keeps following the preset, and the row shows the preset's own value
-/// next to the one that changed.
+/// field keeps following the preset.
 #[gpui::test]
 fn editing_one_field_of_a_preset_row_overrides_only_that_field(cx: &mut TestAppContext) {
     let (wh, win) = build_window(cx);
@@ -860,15 +854,12 @@ fn editing_one_field_of_a_preset_row_overrides_only_that_field(cx: &mut TestAppC
                 }
             )
         );
-        let provenance = w.agent_editable_row(1).unwrap().provenance(cx);
-        assert!(provenance.is_overridden());
-        let base = daruda_config::AgentDefinition::registry_preset("gemini").expect("runnable");
-        let name_diff = provenance
-            .name_base
-            .expect("the renamed field shows its base");
-        assert!(name_diff.contains(&base.name), "{name_diff}");
-        assert_eq!(provenance.command_base, None, "command still follows");
-        assert_eq!(provenance.default_mode_base, None, "mode still follows");
+        let row = w.agent_editable_row(1).unwrap();
+        assert!(!row.command_overridden(cx), "command still follows");
+        assert!(
+            !row.advanced_overridden(cx),
+            "a rename changes nothing that runs"
+        );
     });
 }
 
@@ -1356,36 +1347,17 @@ fn a_fresh_row_leaves_every_transcript_axis_unset(cx: &mut TestAppContext) {
     });
 }
 
-/// A preset states none of the transcript axes, so stating a value on one is
-/// an override and the row shows the preset's own "not set" beneath it —
-/// exactly how Session mode and Model already read.
+/// A preset states none of the transcript axes, so picking a value on one is
+/// saved as an override of that axis alone.
 #[gpui::test]
-fn a_transcript_pick_on_a_preset_row_reports_the_preset_value(cx: &mut TestAppContext) {
+fn a_transcript_pick_on_a_preset_row_is_saved_as_an_override(cx: &mut TestAppContext) {
     let (wh, win) = build_window(cx);
     enable_agent_preset(&wh, &win, cx, "gemini");
-    win.read_with(cx, |w, cx| {
-        let provenance = w.agent_editable_row(1).unwrap().provenance(cx);
-        assert_eq!(provenance.fold_mode_base, None, "untouched, so it follows");
-        assert!(!provenance.is_overridden());
-    });
-
     win.update(cx, |w, cx| {
         w.select_agent_row_fold_preset(1, Some(FoldPreset::Summary), cx)
     });
 
-    win.read_with(cx, |w, cx| {
-        let provenance = w.agent_editable_row(1).unwrap().provenance(cx);
-        assert_eq!(
-            provenance.fold_mode_base,
-            Some(crate::surface::strings::settings_agent_override_preset_value_unset())
-        );
-        assert!(provenance.is_overridden());
-        assert_eq!(provenance.tail_window_base, None, "the other axes follow");
-        assert_eq!(provenance.display_filter_base, None);
-    });
-
-    // Provenance is a display read; the entry is what reaches disk. A preset row
-    // carries its overrides through `PresetOverrides`, which is the one
+    // A preset row carries its overrides through `PresetOverrides`, the one
     // persistence path a `Custom` row never exercises.
     win.read_with(cx, |w, cx| {
         let cfg = w.validate(cx).expect("agent catalog must validate");
@@ -1455,9 +1427,8 @@ fn clearing_a_preset_shipping_environment_opts_the_row_out(cx: &mut TestAppConte
             "the untouched row states nothing of its own"
         );
         assert_eq!(cfg.resolved_agents()[1].env.as_ref(), Some(&preset_env));
-        assert_eq!(
-            w.agent_editable_row(1).unwrap().provenance(cx).env_base,
-            None,
+        assert!(
+            !w.agent_editable_row(1).unwrap().env_overridden(cx),
             "showing the preset's own value is not an override"
         );
     });
@@ -1482,13 +1453,10 @@ fn clearing_a_preset_shipping_environment_opts_the_row_out(cx: &mut TestAppConte
             Some(Vec::new()),
             "the launched environment must be empty, not the preset's"
         );
-        let env_base = w
-            .agent_editable_row(1)
-            .unwrap()
-            .provenance(cx)
-            .env_base
-            .expect("the cleared field shows what it opted out of");
-        assert!(env_base.contains("CODEX_CONFIG"), "{env_base}");
+        assert!(
+            w.agent_editable_row(1).unwrap().env_overridden(cx),
+            "clearing the preset's environment is an override"
+        );
     });
 }
 
@@ -1590,11 +1558,7 @@ fn a_typed_environment_overrides_and_an_empty_one_stays_unstated(cx: &mut TestAp
             )
         );
         assert!(
-            w.agent_editable_row(1)
-                .unwrap()
-                .provenance(cx)
-                .env_base
-                .is_some(),
+            w.agent_editable_row(1).unwrap().env_overridden(cx),
             "a row that states one where the preset states none is an override"
         );
     });
@@ -3136,4 +3100,152 @@ fn making_an_entry_the_default_moves_it_first(cx: &mut TestAppContext) {
         assert_eq!(user.resolved_agents()[0].id, "gemini");
     });
     win.read_with(cx, |w, _| assert_eq!(w.agent_default_index(), Some(0)));
+}
+
+/// Clicking a card's chevrons in the rendered window flips each fold exactly
+/// once. The advanced chevron sits inside a row that owns the same toggle, and
+/// gpui fires every hovered ancestor's click: a listener on both would undo
+/// itself, which calling the toggle directly can never show.
+#[gpui::test]
+fn clicking_a_cards_chevrons_flips_each_fold_once(cx: &mut TestAppContext) {
+    use gpui::{VisualTestContext, size};
+
+    let (window, settings) = build_window(cx);
+    cx.simulate_window_resize(window.into(), size(px(1400.), px(6000.)));
+    let mut vcx = VisualTestContext::from_window(window.into(), cx);
+    vcx.update(|window, cx| {
+        settings.update(cx, |settings, cx| {
+            settings.focus_section(BuiltinSection::Agent, window, cx);
+            settings.toggle_agent_card_expanded(0, cx);
+        });
+    });
+    vcx.run_until_parked();
+
+    let click = |vcx: &mut VisualTestContext, selector: &'static str| {
+        let bounds = vcx
+            .debug_bounds(selector)
+            .unwrap_or_else(|| panic!("{selector} is on screen"));
+        vcx.simulate_click(bounds.center(), Default::default());
+        vcx.run_until_parked();
+    };
+    let fold = |vcx: &mut VisualTestContext| {
+        settings.read_with(vcx, |w, _| w.agent_card_fold_for_test(0).unwrap())
+    };
+
+    click(&mut vcx, "agent-card-advanced-fold-0");
+    assert!(
+        fold(&mut vcx).advanced,
+        "one click opens the advanced block"
+    );
+    click(&mut vcx, "agent-card-advanced-fold-0");
+    assert!(!fold(&mut vcx).advanced, "and one more folds it");
+
+    click(&mut vcx, "agent-card-fold-0");
+    assert!(
+        !fold(&mut vcx).expanded,
+        "the header chevron folds the card"
+    );
+}
+
+/// A custom row that runs a preset's command verbatim is saved as a reference
+/// to that preset; the row then says so too, so the catalog stops offering
+/// the preset as unused — switching it on again would add the same agent twice.
+#[gpui::test]
+fn a_custom_row_saved_as_a_preset_reference_takes_that_preset(cx: &mut TestAppContext) {
+    let (wh, win) = build_window(cx);
+    let settings = win.clone();
+    wh.update(cx, |_root, window, cx| {
+        settings.update(cx, |w, cx| w.add_custom_agent_row_for_test(window, cx));
+    })
+    .unwrap();
+    let gemini = daruda_config::AgentDefinition::registry_preset("gemini").expect("runnable");
+    let daruda_config::AgentLaunch::Raw(command) = gemini.launch else {
+        panic!("a preset runs a plain command");
+    };
+    set_agent_row_input(&wh, &win, cx, 1, |r| r.id_input.clone(), "my-gemini");
+    set_agent_row_input(&wh, &win, cx, 1, |r| r.name_input.clone(), "My Gemini");
+    set_agent_row_input(&wh, &win, cx, 1, |r| r.command_input.clone(), &command);
+    win.read_with(cx, |w, _| {
+        assert_eq!(w.agent_editable_row(1).unwrap().preset, None)
+    });
+
+    win.update(cx, |w, cx| assert!(w.persist_agent_catalog(cx)));
+
+    win.read_with(cx, |w, _| {
+        assert_eq!(
+            w.agent_editable_row(1).unwrap().preset.as_deref(),
+            Some("gemini"),
+            "the row takes the origin its saved entry has"
+        );
+    });
+    cx.read(|cx| {
+        let user = crate::settings_store::SettingsStore::global(cx).user();
+        assert_eq!(user.agents[1].preset_id(), Some("gemini"));
+        assert_eq!(user.resolved_agents()[1].id, "my-gemini");
+    });
+}
+
+/// Only an entry that is on can become the default; the method refuses a
+/// switched-off one even though the card never offers it.
+#[gpui::test]
+fn a_switched_off_entry_cannot_be_made_the_default(cx: &mut TestAppContext) {
+    let (wh, win) = build_window(cx);
+    enable_agent_preset(&wh, &win, cx, "gemini");
+    win.update(cx, |w, cx| {
+        w.set_agent_enabled(1, false, cx);
+        w.make_agent_default(1, cx);
+    });
+    cx.read(|cx| {
+        let user = crate::settings_store::SettingsStore::global(cx).user();
+        assert_eq!(
+            user.agents[0].resolve().map(|d| d.id).as_deref(),
+            Some("claude")
+        );
+    });
+}
+
+/// A custom row that runs a preset's command and states no environment is
+/// saved as a reference that follows the preset's environment — and has to
+/// keep following it on every later save. Its empty field never held the
+/// preset's environment, so emptiness is not the user clearing it.
+#[gpui::test]
+fn a_promoted_rows_empty_environment_keeps_following_the_preset(cx: &mut TestAppContext) {
+    let (wh, win) = build_window(cx);
+    let settings = win.clone();
+    wh.update(cx, |_root, window, cx| {
+        settings.update(cx, |w, cx| w.add_custom_agent_row_for_test(window, cx));
+    })
+    .unwrap();
+    let codex = daruda_config::AgentDefinition::registry_preset("codex-acp").expect("runnable");
+    let daruda_config::AgentLaunch::Raw(command) = codex.launch.clone() else {
+        panic!("a preset runs a plain command");
+    };
+    set_agent_row_input(&wh, &win, cx, 1, |r| r.id_input.clone(), "my-codex");
+    set_agent_row_input(&wh, &win, cx, 1, |r| r.name_input.clone(), "My Codex");
+    set_agent_row_input(&wh, &win, cx, 1, |r| r.command_input.clone(), &command);
+
+    for save in ["first", "second"] {
+        win.update(cx, |w, cx| {
+            assert!(w.persist_agent_catalog(cx), "{save} save")
+        });
+        cx.read(|cx| {
+            let user = crate::settings_store::SettingsStore::global(cx).user();
+            assert_eq!(
+                user.agents[1],
+                daruda_config::AgentEntry::preset_with(
+                    "codex-acp",
+                    daruda_config::PresetOverrides {
+                        id: Some("my-codex".to_string()),
+                        name: Some("My Codex".to_string()),
+                        ..daruda_config::PresetOverrides::default()
+                    }
+                ),
+                "{save} save states no environment of its own"
+            );
+            assert_eq!(user.resolved_agents()[1].env, codex.env, "{save} save");
+        });
+    }
+    win.read_with(cx, |w, cx| {
+        assert!(!w.agent_editable_row(1).unwrap().env_overridden(cx));
+    });
 }

@@ -77,21 +77,10 @@ pub(in crate::settings) enum EnvFieldError {
     UnusableName(String),
 }
 
-/// The environment `base` ships, as the muted line under an overridden field.
-/// One line rather than the field's own block, since that is the shape every
-/// other inherited-base row on this page takes.
-pub(in crate::settings) fn env_base_summary(base: &[(String, String)]) -> String {
-    base.iter()
-        .map(|(key, value)| format!("{key}={value}"))
-        .collect::<Vec<_>>()
-        .join(" ")
-}
-
-/// Whether `text` states the same environment as `base` — the comparison
-/// behind the field's inherited-base line, made on parsed pairs rather than
-/// raw text so `K = v` does not read as an override of `K=v`. Text that does
-/// not parse is not the preset's value either, so it reads as an override;
-/// saving is what reports why.
+/// Whether `text` states the same environment as `base` — compared on parsed
+/// pairs rather than raw text so `K = v` does not read as an override of
+/// `K=v`. Text that does not parse is not the preset's value either, so it
+/// reads as an override; saving is what reports why.
 pub(in crate::settings) fn env_follows_base(text: &str, base: &[(String, String)]) -> bool {
     let parsed: Option<BTreeMap<String, String>> = parse_env_lines(text).ok();
     parsed.is_some_and(|parsed| parsed.into_iter().collect::<Vec<_>>() == base)
@@ -199,14 +188,5 @@ mod tests {
         assert!(!env_follows_base("A=1\nB=2\nC=3", &base));
         // Unparseable text is not the preset's value either.
         assert!(!env_follows_base("nonsense", &base));
-    }
-
-    #[test]
-    fn a_base_summary_stays_on_one_line() {
-        assert_eq!(
-            env_base_summary(&pairs(&[("A", "1"), ("B", "2")])),
-            "A=1 B=2"
-        );
-        assert_eq!(env_base_summary(&[]), "");
     }
 }

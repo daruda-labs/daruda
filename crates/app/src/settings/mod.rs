@@ -708,6 +708,11 @@ pub(super) struct AgentCatalogRow {
     /// [`SettingsView::recompute_agent_row_path_warning`]); `which::which`
     /// is I/O, so `render` only ever reads this field, never calls it.
     pub(super) path_warning: Option<String>,
+    /// The environment the Environment field's text was built against: its
+    /// preset's for a row loaded as a reference, none for a custom row. An
+    /// emptied field clears only what it was shown, so this — not the row's
+    /// current preset, which a save can promote it to — decides that.
+    pub(super) env_field_base: Option<Vec<(String, String)>>,
     /// Fold rules a fresh chat pane under this agent starts on, or `None` to
     /// write no key — which resolves to the built-in. Edited through the same
     /// editor the chat pane opens; see [`sections::agent_transcript`].
@@ -1023,6 +1028,10 @@ impl SettingsView {
                 &default_mode,
                 &default_model,
             );
+        let env_field_base = preset
+            .as_deref()
+            .and_then(daruda_config::AgentDefinition::registry_preset)
+            .and_then(|base| base.env);
         let mut row = AgentCatalogRow {
             enabled: true,
             fold: CardFold::default(),
@@ -1087,6 +1096,7 @@ impl SettingsView {
                 select::state_with_options(model_options, Some(&default_model), window, cx)
             }),
             path_warning,
+            env_field_base,
         };
         // A row that already runs something other than its preset opens with
         // the advanced block showing, so the difference is never hidden.
@@ -2890,6 +2900,20 @@ impl SettingsView {
         }
     }
 
+    /// Make each row's preset the one its saved entry references. Saving can
+    /// promote a custom row whose command is a preset's, or detach a preset
+    /// row onto a remote transport; the row has to say what the file now says,
+    /// or the catalog would still offer that preset as unused. `origins` is
+    /// one per catalog item, in order — the shape `collect_agent_catalog`
+    /// returns.
+    fn adopt_saved_agent_origins(&mut self, origins: Vec<Option<String>>) {
+        for (item, origin) in self.agent_catalog.iter_mut().zip(origins) {
+            if let AgentCatalogItem::Editable(row) = item {
+                row.preset = origin;
+            }
+        }
+    }
+
     fn collect_agent_catalog(
         &self,
         cx: &gpui::App,
@@ -2978,7 +3002,16 @@ impl SettingsView {
     fn persist_agent_catalog(&mut self, cx: &mut Context<Self>) -> bool {
         match self.collect_agent_catalog(cx) {
             Ok(agents) => {
-                self.apply_settings_patch(daruda_config::SettingsPatch::AgentCatalog(agents), cx)
+                let origins: Vec<Option<String>> = agents
+                    .iter()
+                    .map(|entry| entry.preset_id().map(str::to_string))
+                    .collect();
+                let saved = self
+                    .apply_settings_patch(daruda_config::SettingsPatch::AgentCatalog(agents), cx);
+                if saved {
+                    self.adopt_saved_agent_origins(origins);
+                }
+                saved
             }
             Err(message) => {
                 self.error = Some(message);

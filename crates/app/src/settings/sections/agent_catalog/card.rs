@@ -161,17 +161,21 @@ impl SettingsView {
             )
             .child(switch)
             .child(
-                crate::ui::disclosure::disclosure(
-                    SharedString::from(format!("settings-agent-card-fold-{catalog_index}")),
-                    row.fold.expanded,
-                )
-                .axis(crate::ui::disclosure::DisclosureAxis::Vertical)
-                .color(t.text_muted)
-                .on_toggle(cx.listener(
-                    move |this, _: &ClickEvent, _window, cx| {
-                        this.toggle_agent_card_expanded(catalog_index, cx);
-                    },
-                )),
+                div()
+                    .debug_selector(move || format!("agent-card-fold-{catalog_index}"))
+                    .child(
+                        crate::ui::disclosure::disclosure(
+                            SharedString::from(format!("settings-agent-card-fold-{catalog_index}")),
+                            row.fold.expanded,
+                        )
+                        .axis(crate::ui::disclosure::DisclosureAxis::Vertical)
+                        .color(t.text_muted)
+                        .on_toggle(cx.listener(
+                            move |this, _: &ClickEvent, _window, cx| {
+                                this.toggle_agent_card_expanded(catalog_index, cx);
+                            },
+                        )),
+                    ),
             )
             .into_any_element()
     }
@@ -195,39 +199,23 @@ impl SettingsView {
             .advanced
             .then(|| self.render_agent_card_advanced(catalog_index, row, cx));
         let t = theme::current(cx);
-        let provenance = row.provenance(cx);
 
         div()
             .flex()
             .flex_col()
             .gap(px(theme::MODAL_PANEL_GAP))
-            .map(|body| {
-                Self::field_with_base(
-                    body,
-                    s::settings_agent_field_name(),
-                    crate::ui::input(&row.name_input, cx, 0),
-                    provenance.name_base.clone(),
-                    cx,
-                )
-            })
-            .map(|body| {
-                Self::field_with_base(
-                    body,
-                    s::settings_agent_field_default_mode(),
-                    crate::ui::select::select(&row.default_mode_select, cx, 0),
-                    provenance.default_mode_base.clone(),
-                    cx,
-                )
-            })
-            .map(|body| {
-                Self::field_with_base(
-                    body,
-                    s::settings_agent_field_default_model(),
-                    crate::ui::select::select(&row.default_model_select, cx, 0),
-                    provenance.default_model_base.clone(),
-                    cx,
-                )
-            })
+            .child(field_row(
+                s::settings_agent_field_name(),
+                crate::ui::input(&row.name_input, cx, 0),
+            ))
+            .child(field_row(
+                s::settings_agent_field_default_mode(),
+                crate::ui::select::select(&row.default_mode_select, cx, 0),
+            ))
+            .child(field_row(
+                s::settings_agent_field_default_model(),
+                crate::ui::select::select(&row.default_model_select, cx, 0),
+            ))
             .child(Self::section_label(
                 s::settings_agent_section_transcript(),
                 cx,
@@ -238,42 +226,19 @@ impl SettingsView {
                     .text_color(t.text_muted)
                     .child(s::settings_agent_transcript_description()),
             )
-            .map(|body| {
-                Self::field_with_base(
-                    body,
-                    s::settings_agent_field_fold_mode(),
-                    fold_control,
-                    provenance.fold_mode_base.clone(),
-                    cx,
-                )
-            })
-            .map(|body| {
-                Self::field_with_base(
-                    body,
-                    s::settings_agent_field_tail_window(),
-                    crate::ui::select::select(&row.tail_window_select, cx, 0),
-                    provenance.tail_window_base.clone(),
-                    cx,
-                )
-            })
-            .map(|body| {
-                Self::field_with_base(
-                    body,
-                    s::settings_agent_field_tail_window_calls(),
-                    crate::ui::select::select(&row.tail_window_calls_select, cx, 0),
-                    provenance.tail_window_calls_base.clone(),
-                    cx,
-                )
-            })
-            .map(|body| {
-                Self::field_with_base(
-                    body,
-                    s::settings_agent_field_display_filter(),
-                    filter_control,
-                    provenance.display_filter_base.clone(),
-                    cx,
-                )
-            })
+            .child(field_row(s::settings_agent_field_fold_mode(), fold_control))
+            .child(field_row(
+                s::settings_agent_field_tail_window(),
+                crate::ui::select::select(&row.tail_window_select, cx, 0),
+            ))
+            .child(field_row(
+                s::settings_agent_field_tail_window_calls(),
+                crate::ui::select::select(&row.tail_window_calls_select, cx, 0),
+            ))
+            .child(field_row(
+                s::settings_agent_field_display_filter(),
+                filter_control,
+            ))
             .when(
                 row.enabled && self.agent_default_index() != Some(catalog_index),
                 |body| {
@@ -311,18 +276,22 @@ impl SettingsView {
                     }))
                     .child(s::settings_agent_card_advanced())
                     .child(
-                        crate::ui::disclosure::disclosure(
-                            SharedString::from(format!(
-                                "settings-agent-card-advanced-fold-{catalog_index}"
-                            )),
-                            row.fold.advanced,
-                        )
-                        .color(t.text_muted)
-                        .on_toggle(cx.listener(
-                            move |this, _: &ClickEvent, _window, cx| {
-                                this.toggle_agent_card_advanced(catalog_index, cx);
-                            },
-                        )),
+                        div()
+                            .debug_selector(move || {
+                                format!("agent-card-advanced-fold-{catalog_index}")
+                            })
+                            .child(
+                                // No click of its own: the row above owns it,
+                                // and gpui bubbles a click to every hovered
+                                // ancestor, so a second listener would undo it.
+                                crate::ui::disclosure::disclosure(
+                                    SharedString::from(format!(
+                                        "settings-agent-card-advanced-fold-{catalog_index}"
+                                    )),
+                                    row.fold.advanced,
+                                )
+                                .color(t.text_muted),
+                            ),
                     ),
             )
             .children(advanced)
@@ -344,7 +313,6 @@ impl SettingsView {
             .selected_value()
             .map(|v| v.to_string())
             .unwrap_or_else(|| TRANSPORT_RAW.to_string());
-        let provenance = row.provenance(cx);
         let remove_id = format!("settings-agent-remove-{catalog_index}");
 
         let mut body = div()
@@ -358,15 +326,10 @@ impl SettingsView {
                 s::settings_agent_field_id(),
                 crate::ui::input(&row.id_input, cx, 0),
             ))
-            .map(|body| {
-                Self::field_with_base(
-                    body,
-                    s::settings_agent_field_command(),
-                    crate::ui::input(&row.command_input, cx, 0),
-                    provenance.command_base.clone(),
-                    cx,
-                )
-            })
+            .child(field_row(
+                s::settings_agent_field_command(),
+                crate::ui::input(&row.command_input, cx, 0),
+            ))
             // ssh/docker rows run on a remote host or inside a container, so
             // a command missing from *this* machine's PATH is expected — the
             // cached warning ignores transport (see `AgentCatalogRow::path_warning`),
@@ -398,7 +361,7 @@ impl SettingsView {
         // A preset reference is `Raw`-only, so picking a remote transport
         // detaches the row into a custom copy on commit — say so before commit
         // silently drops the preset link.
-        if provenance.follows_preset() && transport_kind != TRANSPORT_RAW {
+        if row.preset.is_some() && transport_kind != TRANSPORT_RAW {
             body = body.child(
                 div()
                     .text_size(px(theme::MODAL_BODY_FONT_SIZE))
@@ -438,15 +401,10 @@ impl SettingsView {
                 );
         }
 
-        body.map(|body| {
-            Self::field_with_base(
-                body,
-                s::settings_agent_field_env(),
-                crate::ui::input(&row.env_input, cx, 0),
-                provenance.env_base.clone(),
-                cx,
-            )
-        })
+        body.child(field_row(
+            s::settings_agent_field_env(),
+            crate::ui::input(&row.env_input, cx, 0),
+        ))
         .child(
             div()
                 .text_size(px(theme::MODAL_BODY_FONT_SIZE))
@@ -512,14 +470,12 @@ impl AgentCatalogRow {
     /// preset to differ from. The id is left out: it names the entry, it does
     /// not change what runs.
     pub(in crate::settings) fn advanced_overridden(&self, cx: &gpui::App) -> bool {
-        let provenance = self.provenance(cx);
         let remote = self
             .transport_select
             .read(cx)
             .selected_value()
             .is_some_and(|kind| kind.as_ref() != TRANSPORT_RAW);
-        provenance.follows_preset()
-            && (provenance.command_base.is_some() || provenance.env_base.is_some() || remote)
+        self.preset.is_some() && (self.command_overridden(cx) || self.env_overridden(cx) || remote)
     }
 }
 

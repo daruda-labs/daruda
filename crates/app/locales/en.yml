@@ -1126,8 +1126,6 @@ settings:
   agent_group_available: "Available"
   agent_group_needs_install: "Needs install"
   agent_catalog_search_placeholder: "Search agents"
-  agent_override_preset_value: "Preset: %{value}"
-  agent_override_preset_value_unset: "Preset: not set"
   agent_row_detach_hint: "A remote transport cannot be expressed as a preset override — saving turns this row into a custom entry and it stops following the preset."
   agent_unresolved_section: "NOT AVAILABLE"
   agent_unresolved_unknown: "\"%{preset}\" is not a preset daruda knows, so this agent is not offered in any Agent Chat pane. The entry is kept in config.toml untouched — remove it there if you no longer need it."

@@ -1125,8 +1125,6 @@ settings:
   agent_group_available: "사용 가능"
   agent_group_needs_install: "설치 필요"
   agent_catalog_search_placeholder: "에이전트 검색"
-  agent_override_preset_value: "프리셋: %{value}"
-  agent_override_preset_value_unset: "프리셋: 설정 없음"
   agent_row_detach_hint: "원격 전송 방식은 프리셋 재정의로 표현할 수 없습니다 — 저장하면 이 행은 직접 등록한 항목이 되고 프리셋을 더 이상 따르지 않습니다."
   agent_unresolved_section: "사용할 수 없음"
   agent_unresolved_unknown: "\"%{preset}\"은 daruda가 아는 프리셋이 아니어서 이 에이전트는 어떤 에이전트 채팅 패널에도 표시되지 않습니다. 항목은 config.toml에 그대로 남아 있으니 필요 없으면 거기서 제거하세요."

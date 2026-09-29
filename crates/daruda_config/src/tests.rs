@@ -1584,6 +1584,24 @@ fn a_custom_entry_running_a_presets_command_loads_as_that_preset() {
     assert_eq!(Config::load_from(&path).agents, loaded.agents);
 }
 
+/// A custom entry that states no environment and is promoted to a preset
+/// reference adopts that preset's environment — `None` means "follow the
+/// preset", which is how codex rows pick up the native-subagent overlay.
+#[test]
+fn a_promoted_entry_without_an_environment_takes_the_presets() {
+    let entry: AgentEntry = toml::from_str(
+        "id = \"my-codex\"\nname = \"My Codex\"\n\
+         command = \"npx -y @agentclientprotocol/codex-acp@latest\"\n",
+    )
+    .unwrap();
+    assert_eq!(entry.preset_id(), Some("codex-acp"));
+    let env = entry.resolve().and_then(|d| d.env).unwrap_or_default();
+    assert!(
+        env.iter().any(|(name, _)| name == CODEX_CONFIG_ENV),
+        "{env:?}"
+    );
+}
+
 /// A pinned build or a remote launch is not the preset, whatever its id.
 #[test]
 fn a_custom_entry_that_differs_from_every_preset_stays_custom() {
