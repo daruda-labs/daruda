@@ -104,7 +104,7 @@ fn apply_pending_file_viewer_scroll(
     };
 
     match &fc.view.content {
-        PaneFileContent::LoadedRaw | PaneFileContent::LoadedDiff { .. } => {
+        PaneFileContent::LoadedRaw { .. } | PaneFileContent::LoadedDiff { .. } => {
             fc.view.clear_pending_scroll_line();
             let editor = fc.editor_state.clone();
             editor.update(cx, |state, cx| {
@@ -608,7 +608,8 @@ impl Workspace {
         if !is_file {
             return;
         }
-        self.close_pane_by_id(id, window, cx);
+        // Through the prompting close, so an unsaved buffer is asked about.
+        self.close_focused_pane(window, cx);
     }
 
     /// Scroll the focused file pane's body so the currently focused
@@ -707,7 +708,7 @@ impl Workspace {
                     continue;
                 };
                 match &f.view.content {
-                    PaneFileContent::LoadedRaw => raw_editors.push(f.editor_state.clone()),
+                    PaneFileContent::LoadedRaw { .. } => raw_editors.push(f.editor_state.clone()),
                     PaneFileContent::LoadedDiff { .. } | PaneFileContent::LoadedMarkdown { .. } => {
                         reloads.push(FilePaneLoadRequest::from_view(pane.id, *lane_ref, &f.view));
                     }
@@ -828,17 +829,22 @@ impl Workspace {
                             apply_pending_file_viewer_scroll_without_window(fc, cx);
                         }
                     }
-                    LoadOutcome::Raw { text } => {
+                    LoadOutcome::Raw { text, truncated } => {
                         // The editor entity owns the raw text from here on;
                         // feed it exactly once and clear any diff config left
                         // over from a previous mode (read-only + decorations).
                         fc.saved_text = text.clone();
-                        fc.install_content(PaneFileContent::LoadedRaw, Vec::new(), None, cx);
+                        fc.install_content(
+                            PaneFileContent::LoadedRaw { truncated },
+                            Vec::new(),
+                            None,
+                            cx,
+                        );
                         let pending_scroll_line = fc.view.take_pending_scroll_line();
                         let editor = fc.editor_state.clone();
                         configure_file_editor(cx, editor, move |state, window, cx_s| {
                             state.set_value(text, window, cx_s);
-                            state.set_disabled(false, cx_s);
+                            state.set_disabled(truncated, cx_s);
                             state.set_line_decorations(Vec::new(), cx_s);
                             state.set_highlight_override(None, cx_s);
                             if let Some(line) = pending_scroll_line {

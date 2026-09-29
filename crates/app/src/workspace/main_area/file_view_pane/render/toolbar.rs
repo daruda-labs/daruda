@@ -403,7 +403,7 @@ mod tests {
             live_status,
             view_mode,
         );
-        fv.content = PaneFileContent::LoadedRaw;
+        fv.content = PaneFileContent::LoadedRaw { truncated: false };
         fv
     }
 

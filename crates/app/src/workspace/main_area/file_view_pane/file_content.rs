@@ -34,8 +34,9 @@ pub(in crate::workspace) enum LoadOutcome {
         content: PaneFileContent,
         rasters: Vec<Option<RasterImage>>,
     },
-    /// Raw file text for the editor. Stored content becomes `LoadedRaw`.
-    Raw { text: String },
+    /// Raw file text for the editor. Stored content becomes `LoadedRaw`;
+    /// `truncated` says the text stops at `FILE_VIEWER_MAX_BYTES`.
+    Raw { text: String, truncated: bool },
 }
 
 impl LoadOutcome {
@@ -45,6 +46,16 @@ impl LoadOutcome {
             content,
             rasters: Vec::new(),
         }
+    }
+}
+
+/// Whether `path` still holds `baseline`, the text a raw pane loaded or last
+/// wrote. A missing file does not; an unreadable one is left for the write to
+/// report.
+pub(in crate::workspace) fn disk_holds(path: &std::path::Path, baseline: &str) -> bool {
+    match std::fs::read(path) {
+        Ok(bytes) => bytes == baseline.as_bytes(),
+        Err(e) => e.kind() != std::io::ErrorKind::NotFound,
     }
 }
 
@@ -207,7 +218,10 @@ fn load_raw(
                 };
             }
 
-            LoadOutcome::Raw { text }
+            LoadOutcome::Raw {
+                text,
+                truncated: byte_truncated,
+            }
         }
     }
 }

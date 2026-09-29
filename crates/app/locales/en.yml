@@ -262,7 +262,7 @@ task:
   error_write_prompt: "write prompt: %{error}"
   close_dirty_line: "• %{title}"
   close_dirty_line_draft: "• %{title} (new task)"
-  batch_save_failed_detail: "%{count} pane(s) had invalid input and were not saved: %{panes}"
+  batch_save_failed_detail: "%{count} pane(s) were not saved and stay open: %{panes}"
   lane_description: "task: %{title}"
   picker_title_start: "Start Task"
   picker_title_cancel: "Cancel Task"
@@ -298,10 +298,10 @@ task:
   watcher_keep_mine: "Keep my version"
   watcher_diff: "Diff"
   watcher_heading_suffix: "” changed on disk"
-  batch_close_heading: "Save changes to the following tasks before closing?"
+  batch_close_heading: "Save changes to the following before closing?"
   batch_save_all: "Save all"
   batch_discard_all: "Discard all"
-  batch_save_failed_title: "Some tasks couldn't be saved"
+  batch_save_failed_title: "Some panes couldn't be saved"
   done_flavour_stop: "Stop"
   done_flavour_prompt_input_exit: "Prompt Exit"
   done_flavour_logout: "Logout"
@@ -321,6 +321,11 @@ file_viewer:
   err_no_git_repo: "No git repository root"
   err_staged_outside_repo: "staged path %{path} is not inside repo root %{root}"
   untitled_tab_title: "(file)"
+  truncated_read_only: "File exceeds %{size} — showing the first %{size}, read-only so a save cannot cut the file"
+  save_conflict_heading: "%{name} changed on disk"
+  save_conflict_detail: "Another program changed or removed this file after you opened it. Overwrite replaces that version with yours; Reload discards your edits."
+  save_conflict_overwrite: "Overwrite"
+  save_conflict_reload: "Reload from disk"
   byte_truncated_full: "File exceeds %{size} — showing first %{shown} of %{total_count}+ lines"
   byte_truncated_short: "File exceeds %{size} — showing first %{shown} lines"
   deleted: "File deleted"
@@ -540,6 +545,7 @@ ui:
 
 # Context menus and worktree modals
 ctx:
+  restart_shell: "Restart Shell"
   reload_flow_graph: "Reload from Disk"
   reveal_in_finder: "Reveal in Finder"
   reveal_in_file_explorer: "Reveal in File Explorer"
@@ -584,6 +590,10 @@ ctx:
 
 # Modals (rename / merge / panel / group)
 modal:
+  close_running_heading: "Stop what's running?"
+  close_running_detail: "Closing ends the process or agent turn in:"
+  close_running_line: "• %{title}"
+  close_running_confirm: "Close anyway"
   close_project_body: "Close project \"%{name}\"?"
   close_project_title: "Close Project"
   delete_macro_body: "Delete macro “%{label}”?"
@@ -1504,6 +1514,7 @@ notification:
 
 # Terminal annotations (SP-1)
 terminal:
+  process_exited: "[Process exited — restart it from the pane menu]"
   annotation_action_add: "Add annotation"
   annotation_action_add_disabled_tooltip: "Select text on a single line first"
   annotation_action_delete: "Delete annotation"

@@ -26,6 +26,7 @@ mod control_ops;
 /// Re-exported because `telegram::global`'s poll loop folds per-window answers
 /// and lives outside `crate::workspace`.
 pub(crate) use control_ops::{ChatLabel, SlashClaim};
+mod close_guard_ops;
 pub(crate) mod delete_project_modal;
 pub(crate) mod dialog_helpers;
 mod dnd_ops;
@@ -1972,7 +1973,7 @@ impl Workspace {
                     self.on_edit_window_title(&EditWindowTitle, window, cx);
                 }
                 "zoom_window" => self.on_zoom_window(&ZoomWindow, window, cx),
-                "quit" => cx.quit(),
+                "quit" => Self::request_quit(cx),
                 _ => {
                     // Per-section settings entries follow the
                     // `open_settings.<slug>` pattern used by the

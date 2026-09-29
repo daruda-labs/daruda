@@ -170,6 +170,8 @@ pub(super) struct SendTarget {
 pub(super) enum PaneMenuKind {
     Terminal {
         annotation_range: Option<LineRange>,
+        /// The shell exited and the pane stayed open — offers a restart.
+        exited: bool,
     },
     AgentChat {
         busy: bool,

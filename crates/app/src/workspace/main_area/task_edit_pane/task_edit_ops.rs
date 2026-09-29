@@ -370,10 +370,13 @@ impl Workspace {
         cx.notify();
     }
 
+    /// Searches every lane: a window-close "Save all" commits a pane parked
+    /// in a lane that is not on screen.
     fn task_edit_content_mut_for(&mut self, pane_id: PaneId) -> Option<&mut TaskEditContent> {
-        self.active_runtime_mut()
-            .panes
-            .iter_mut()
+        self.main_area
+            .runtimes
+            .values_mut()
+            .flat_map(|rt| rt.panes.iter_mut())
             .find(|p| p.id == pane_id)?
             .task_edit_content_mut()
     }
@@ -684,9 +687,10 @@ impl Workspace {
         cx: &Context<Self>,
     ) -> Option<TaskEditFormSnapshot> {
         let te = self
-            .active_runtime()
-            .panes
-            .iter()
+            .main_area
+            .runtimes
+            .values()
+            .flat_map(|rt| rt.panes.iter())
             .find(|p| p.id == pane_id)?
             .task_edit_content()?;
         Some(TaskEditFormSnapshot {

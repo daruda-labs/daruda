@@ -99,7 +99,6 @@ impl WindowRegistry {
     }
 
     /// All registered workspace window handles.
-    #[allow(dead_code)]
     pub(crate) fn all_handles(cx: &App) -> Vec<AnyWindowHandle> {
         cx.try_global::<WindowRegistry>()
             .map(|r| r.workspaces.iter().map(|(h, _)| *h).collect())

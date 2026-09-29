@@ -147,6 +147,25 @@ impl PtyHandle {
     }
 }
 
+/// Whether a job other than the shell holds the terminal's foreground — a
+/// build, an agent CLI, a pager. The shell leads its own process group, so
+/// any other foreground group is a job it started. `false` where the platform
+/// cannot tell (Windows ConPTY has no process groups).
+pub fn runs_foreground_job(master: &(dyn MasterPty + Send), shell_pid: Option<u32>) -> bool {
+    #[cfg(unix)]
+    {
+        match (master.process_group_leader(), shell_pid) {
+            (Some(group), Some(shell)) => i64::from(group) != i64::from(shell),
+            _ => false,
+        }
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = (master, shell_pid);
+        false
+    }
+}
+
 /// Spawn a PTY session with the given configuration.
 ///
 /// Under test this delegates to [`spawn_pty_stub`] so that tests which
@@ -375,6 +394,34 @@ mod tests {
             handle.write(b"\x1b[1;1R").expect("answer cursor query");
         }
         handle
+    }
+
+    /// The shell at its prompt is not a job; a command it runs is, until it
+    /// exits.
+    #[cfg(unix)]
+    #[test]
+    fn a_running_command_holds_the_foreground_until_it_exits() {
+        let config = PtyConfig {
+            shell: test_shell().to_string(),
+            ..PtyConfig::default()
+        };
+        let handle = spawn_test_pty(&config);
+        let master = handle.master.clone().expect("real pty");
+        let shell = handle.child_pid;
+        let settles_to = |want: bool| {
+            let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+            while std::time::Instant::now() < deadline {
+                if runs_foreground_job(master.as_ref(), shell) == want {
+                    return true;
+                }
+                std::thread::sleep(std::time::Duration::from_millis(20));
+            }
+            false
+        };
+        assert!(settles_to(false), "an idle shell is not a job");
+        handle.write(b"sleep 2\n").unwrap();
+        assert!(settles_to(true), "the command holds the foreground");
+        assert!(settles_to(false), "and hands it back when it exits");
     }
 
     #[test]

@@ -25,6 +25,18 @@ impl PaneMenuSource for TerminalMenu {
     fn head(ctx: &PaneMenuContext) -> Vec<MenuEntry> {
         let mut entries = Vec::new();
 
+        if let PaneMenuKind::Terminal { exited: true, .. } = ctx.kind {
+            let pane_id = ctx.pane_id;
+            entries.push(item(
+                s::ctx_restart_shell(),
+                ItemState::Enabled,
+                Activate::Op(Box::new(move |ws, window, cx| {
+                    ws.restart_terminal_pane(pane_id, window, cx);
+                })),
+            ));
+            entries.push(MenuEntry::Separator);
+        }
+
         entries.extend(link_entries(ctx));
 
         entries.push(item(
@@ -66,7 +78,9 @@ impl PaneMenuSource for TerminalMenu {
 
         entries.push(MenuEntry::Separator);
         match &ctx.kind {
-            PaneMenuKind::Terminal { annotation_range } => {
+            PaneMenuKind::Terminal {
+                annotation_range, ..
+            } => {
                 let pane_id = ctx.pane_id;
                 if let Some(range) = *annotation_range {
                     entries.push(item(
@@ -505,6 +519,7 @@ mod tests {
             role,
             ..base(PaneMenuKind::Terminal {
                 annotation_range: None,
+                exited: false,
             })
         }
     }
@@ -872,6 +887,19 @@ mod tests {
         assert!(!labels.contains(&s::ctx_open_link_in_file_view()));
     }
 
+    /// Only a terminal whose shell exited offers a restart.
+    #[test]
+    fn restart_shell_is_offered_only_once_the_shell_exited() {
+        let terminal = |exited| {
+            labels(&compose(&base(PaneMenuKind::Terminal {
+                annotation_range: None,
+                exited,
+            })))
+        };
+        assert!(terminal(true).contains(&s::ctx_restart_shell()));
+        assert!(!terminal(false).contains(&s::ctx_restart_shell()));
+    }
+
     /// No right-click on a link means no link section at all — the chat menu
     /// is what it always was.
     #[test]
@@ -888,6 +916,7 @@ mod tests {
         let ctx = PaneMenuContext {
             kind: PaneMenuKind::Terminal {
                 annotation_range: Some(line_range()),
+                exited: false,
             },
             ..terminal_context(PaneRole::Solo)
         };
