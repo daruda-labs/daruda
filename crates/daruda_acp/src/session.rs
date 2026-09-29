@@ -78,6 +78,39 @@ use crate::native_subagents::{NativeSubagentRouter, Routed};
 /// handler once the host calls [`AcpSessionHandle::respond_permission`].
 type PermissionParks = Arc<Mutex<HashMap<u64, oneshot::Sender<PermissionDecision>>>>;
 
+/// Whether failing to restore may create a different conversation.
+pub enum SessionResume {
+    Fresh,
+    BestEffort(SessionId),
+    Required(SessionId),
+}
+
+impl From<Option<SessionId>> for SessionResume {
+    fn from(id: Option<SessionId>) -> Self {
+        match id {
+            Some(id) => Self::BestEffort(id),
+            None => Self::Fresh,
+        }
+    }
+}
+
+impl SessionResume {
+    fn resolve(
+        self,
+        supports_load: bool,
+    ) -> Result<(Option<SessionId>, Option<String>), agent_client_protocol::Error> {
+        match self {
+            Self::Required(id) if supports_load => Ok((Some(id), None)),
+            Self::Required(_) => Err(agent_client_protocol::Error::new(
+                -32601,
+                "This agent does not support session/load; the saved conversation was not replaced.",
+            )),
+            Self::BestEffort(id) => Ok(resolve_resume(Some(id), supports_load)),
+            Self::Fresh => Ok(resolve_resume(None, supports_load)),
+        }
+    }
+}
+
 /// The host's decision on a permission request, in this crate's own vocabulary
 /// so the host never touches protocol types. `option_id` is the choice the
 /// host picked from the request's `options` (see [`crate::model::PermissionChoice`]).
@@ -441,10 +474,11 @@ pub fn connect_prepared_session(
     initial_model: Option<String>,
     initial_modes: Vec<String>,
     restore_mode: Option<String>,
-    resume: Option<SessionId>,
+    resume: impl Into<SessionResume>,
     agent_id: &str,
     mcp_servers: Vec<McpServer>,
 ) -> Result<(AcpSessionHandle, UnboundedReceiver<AcpEvent>), AcpClientError> {
+    let resume = resume.into();
     let agent = prepared
         .agent()
         .map(|agent| crate::wire_log::attach(agent, agent_id))?;
@@ -843,12 +877,13 @@ async fn run_connection(
     initial_model: Option<String>,
     initial_modes: Vec<String>,
     restore_mode: Option<String>,
-    resume: Option<SessionId>,
+    resume: impl Into<SessionResume>,
     mcp_servers: Vec<McpServer>,
     command_rx: UnboundedReceiver<Command>,
     event_tx: UnboundedSender<AcpEvent>,
     permission_parks: PermissionParks,
 ) -> Result<(), AcpClientError> {
+    let resume = resume.into();
     let notif_tx = event_tx.clone();
     let perm_event_tx = event_tx.clone();
     let next_permission_id = Arc::new(AtomicU64::new(0));
@@ -974,7 +1009,7 @@ async fn run_connection(
                     // downgrade to a fresh session (with a Notice) when the agent can't
                     // replay history, so a resume against a non-load agent no longer
                     // fails the whole connect.
-                    let (resume, resume_notice) = resolve_resume(resume, capabilities.load);
+                    let (resume, resume_notice) = resume.resolve(capabilities.load)?;
                     if let Some(notice) = resume_notice {
                         let _ = event_tx.unbounded_send(AcpEvent::Notice(notice));
                     }
@@ -1572,6 +1607,64 @@ fn resolve_resume(
 mod tests {
 
     #[test]
+    fn required_resume_wire_never_sends_session_new() {
+        use agent_client_protocol::{Channel, RawJsonRpcMessage, TransportFrame};
+        use futures::SinkExt as _;
+        for supports_load in [false, true] {
+            let (transport, mut peer) = Channel::duplex();
+            let (_commands, command_rx) = unbounded();
+            let (event_tx, _events) = unbounded();
+            smol::block_on(async {
+                let peer_task = smol::spawn(async move {
+                    let mut methods = Vec::new();
+                    while let Some(TransportFrame::Single(RawJsonRpcMessage::Request(request))) =
+                        peer.rx.next().await
+                    {
+                        methods.push(request.method.to_string());
+                        let response = match request.method.as_ref() {
+                            "initialize" => Ok(
+                                serde_json::json!({"protocolVersion": 1, "agentCapabilities": {"loadSession": supports_load}}),
+                            ),
+                            "session/load" => Err(agent_client_protocol::Error::invalid_params()),
+                            method => panic!("unexpected request during strict restore: {method}"),
+                        };
+                        peer.tx
+                            .send(TransportFrame::Single(RawJsonRpcMessage::response(
+                                request.id, response,
+                            )))
+                            .await
+                            .unwrap();
+                    }
+                    methods
+                });
+                let result = run_connection(
+                    transport,
+                    PathBuf::from("."),
+                    None,
+                    Vec::new(),
+                    None,
+                    SessionResume::Required(SessionId::from("task-session")),
+                    Vec::new(),
+                    command_rx,
+                    event_tx,
+                    Arc::new(Mutex::new(HashMap::new())),
+                )
+                .await;
+                assert!(result.is_err());
+                let methods = peer_task.await;
+                assert_eq!(
+                    methods,
+                    if supports_load {
+                        vec!["initialize", "session/load"]
+                    } else {
+                        vec!["initialize"]
+                    }
+                );
+            });
+        }
+    }
+
+    #[test]
     fn transport_eof_during_initialize_or_prompt_terminates_without_turn_failed() {
         use agent_client_protocol::{Channel, RawJsonRpcMessage, TransportFrame};
         use futures::SinkExt as _;
@@ -1898,6 +1991,15 @@ mod tests {
         let (to_load, notice) = resolve_resume(Some(id.clone()), true);
         assert_eq!(to_load, Some(id));
         assert!(notice.is_none(), "supported resume needs no notice");
+    }
+
+    #[test]
+    fn required_resume_never_downgrades_to_new_session() {
+        let id = SessionId::from("task-session");
+        assert!(SessionResume::Required(id.clone()).resolve(false).is_err());
+        let (session, notice) = SessionResume::Required(id.clone()).resolve(true).unwrap();
+        assert_eq!(session, Some(id));
+        assert!(notice.is_none());
     }
 
     #[test]

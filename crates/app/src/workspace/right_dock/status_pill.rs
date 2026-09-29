@@ -38,6 +38,8 @@ pub(super) fn status_pill(
     let task_id = task.id.clone();
     let workspace = snap.workspace.clone();
     let state = task.state.clone();
+    let can_open_chat = task.agent_surface == daruda_store::tasks::TaskAgentSurface::AgentChat
+        && task.execution.is_some();
 
     let pill_id = SharedString::from(format!("task-pill-{}", task.id));
     let bg = pill_background(&state, cx);
@@ -48,6 +50,11 @@ pub(super) fn status_pill(
         .bg(bg)
         .rounded(px(theme::RIGHT_PANEL_STATUS_PILL_RADIUS_PX))
         .dropdown_menu(move |menu, _window, _cx| {
+            let menu = if can_open_chat {
+                menu.item(chat_item(&task_id, &workspace))
+            } else {
+                menu
+            };
             build_state_menu(&state, &task_id, &workspace, menu)
         })
 }
@@ -142,6 +149,16 @@ fn open_item(task_id: &str, workspace: &gpui::WeakEntity<Workspace>) -> PopupMen
         if let Some(w) = ws.upgrade() {
             let id = id.clone();
             w.update(app, |this, cx| this.focus_task_lane(&id, window, cx));
+        }
+    })
+}
+
+fn chat_item(task_id: &str, workspace: &gpui::WeakEntity<Workspace>) -> PopupMenuItem {
+    let ws = workspace.clone();
+    let id = task_id.to_string();
+    PopupMenuItem::new(strings::task_action_open_chat()).on_click(move |_, window, app| {
+        if let Some(w) = ws.upgrade() {
+            w.update(app, |this, cx| this.open_task_chat(&id, window, cx));
         }
     })
 }

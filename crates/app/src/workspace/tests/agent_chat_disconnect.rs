@@ -47,6 +47,7 @@ fn idle_agent_chat_eof_leaves_another_same_cwd_task_running(cx: &mut TestAppCont
             let idle = pane(ws, window, cx);
             let active = pane(ws, window, cx);
             let task = running_task(cx);
+            ws.bind_task_chat_execution(&task, active, cx);
             ws.agent_chat_view(active).unwrap().update(cx, |view, cx| {
                 view.set_turn_in_flight();
                 view.tick_activity(std::time::Instant::now(), cx);
@@ -79,6 +80,7 @@ fn active_agent_chat_eof_completes_once_through_the_activity_edge(cx: &mut TestA
             let pane = pane(ws, window, cx);
             let view = ws.agent_chat_view(pane).cloned().unwrap();
             let task = running_task(cx);
+            ws.bind_task_chat_execution(&task, pane, cx);
             view.update(cx, |view, cx| {
                 view.set_turn_in_flight();
                 view.tick_activity(std::time::Instant::now(), cx);
@@ -131,6 +133,7 @@ fn agent_chat_startup_eof_still_fails_a_task_waiting_to_dispatch(cx: &mut TestAp
         workspace.update(cx, |ws, cx| {
             let pane = pane(ws, window, cx);
             let task = running_task(cx);
+            ws.bind_task_chat_execution(&task, pane, cx);
             ws.agent_chat_view(pane).unwrap().update(cx, |view, cx| {
                 view.begin_connect(Some("saved-session".into()), cx);
                 view.send_prompt_text("task prompt".into(), cx);

@@ -35,6 +35,13 @@ impl Workspace {
             return;
         };
         let task_id = if running {
+            task.execution = Some(daruda_store::tasks::TaskExecution {
+                id: "screenshot-task-run".into(),
+                agent_id: self.agents[0].id.clone(),
+                account_id: None,
+                cwd: lane_path.clone(),
+                session_id: Some("screenshot-task-session".into()),
+            });
             task.state = daruda_store::tasks::TaskState::Running {
                 worktree_path: lane_path,
             };

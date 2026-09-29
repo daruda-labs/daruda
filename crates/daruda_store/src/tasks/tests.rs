@@ -24,6 +24,28 @@ fn sample_task() -> Task {
     )
 }
 
+#[test]
+fn execution_identity_round_trips_and_legacy_tasks_have_none() {
+    let mut task = sample_task();
+    let mut legacy = serde_json::to_value(&task).unwrap();
+    legacy.as_object_mut().unwrap().remove("execution");
+    assert!(
+        serde_json::from_value::<Task>(legacy)
+            .unwrap()
+            .execution
+            .is_none()
+    );
+    task.execution = Some(super::TaskExecution {
+        id: "run-1".into(),
+        agent_id: "claude".into(),
+        account_id: Some(crate::accounts::AccountId(uuid::Uuid::new_v4())),
+        cwd: PathBuf::from("/repo/task"),
+        session_id: Some("session-1".into()),
+    });
+    let restored: Task = serde_json::from_str(&serde_json::to_string(&task).unwrap()).unwrap();
+    assert_eq!(restored.execution, task.execution);
+}
+
 // ---------------------------------------------------------------------------
 // Task::new + ULID monotonicity
 // ---------------------------------------------------------------------------

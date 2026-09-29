@@ -39,6 +39,9 @@ pub(in crate::workspace) fn render(
         .as_ref()
         .is_none_or(|state| matches!(state, TaskState::Backlog));
     let has_worktree = state.as_ref().and_then(TaskState::worktree_path).is_some();
+    let can_open_chat = task.is_some_and(|task| {
+        task.agent_surface == TaskAgentSurface::AgentChat && task.execution.is_some()
+    });
     let subtasks = task
         .map(|task| task.subtasks.clone())
         .unwrap_or_else(|| te.draft_subtasks.clone());
@@ -138,6 +141,21 @@ pub(in crate::workspace) fn render(
                         .flex()
                         .flex_none()
                         .gap(px(theme::GAP_LG))
+                        .when(can_open_chat, |row| {
+                            row.child(
+                                ui::button_icon(
+                                    ("task-edit-chat", pane_id as usize),
+                                    ui::icons::AGENT,
+                                    cx,
+                                )
+                                .tooltip(strings::task_action_open_chat())
+                                .on_click(cx.listener(
+                                    move |this, _, window, cx| {
+                                        this.open_editor_task_chat(pane_id, window, cx)
+                                    },
+                                )),
+                            )
+                        })
                         .when(has_worktree, |row| {
                             row.child(
                                 ui::button_icon(

@@ -29,6 +29,7 @@ fn seed_running_task(
             worktree_path: PathBuf::from("/tmp/wt"),
         };
         task.session_ids.push(session_id.to_string());
+        task.agent_surface = daruda_store::tasks::TaskAgentSurface::Terminal;
         let id = task.id.clone();
         cx.update_global::<crate::agent::tasks_global::GlobalTasks, _>(|g, _| {
             g.add(task);
@@ -187,6 +188,7 @@ fn apply_task_session_changed_attaches_idempotently_then_error_ends(cx: &mut Tes
     let (_wh, workspace) = build_workspace(cx);
     workspace.update(cx, |ws, cx| {
         let mut task = Task::new("a".into(), "b".into(), None);
+        task.agent_surface = daruda_store::tasks::TaskAgentSurface::Terminal;
         task.state = TaskState::Running {
             worktree_path: PathBuf::from("/tmp/wt"),
         };
@@ -214,88 +216,6 @@ fn apply_task_session_changed_attaches_idempotently_then_error_ends(cx: &mut Tes
             }
             other => panic!("expected Error, got {other:?}"),
         }
-    });
-}
-
-fn seed_agent_chat_running_task(
-    workspace: &gpui::Entity<crate::workspace::Workspace>,
-    cx: &mut TestAppContext,
-    worktree_path: &str,
-) -> String {
-    workspace.update(cx, |_ws, cx| {
-        let mut task = Task::new("acp-task".into(), "".into(), None);
-        task.state = TaskState::Running {
-            worktree_path: PathBuf::from(worktree_path),
-        };
-        let id = task.id.clone();
-        cx.update_global::<crate::agent::tasks_global::GlobalTasks, _>(|g, _| {
-            g.add(task);
-        });
-        id
-    })
-}
-
-/// `Running` AgentChat-surfaced tasks (no hook session ids — ACP sessions never
-/// write status files) reconcile by lane cwd and terminal reason.
-#[gpui::test]
-fn apply_agent_chat_task_ended_matches_cwd_and_maps_reason(cx: &mut TestAppContext) {
-    let (_wh, workspace) = build_workspace(cx);
-    let done_id = seed_agent_chat_running_task(&workspace, cx, "/tmp/acp-wt-done");
-    let error_id = seed_agent_chat_running_task(&workspace, cx, "/tmp/acp-wt-error");
-
-    workspace.update(cx, |ws, cx| {
-        // A non-matching cwd is a no-op — the task stays Running.
-        ws.apply_agent_chat_task_ended(&PathBuf::from("/tmp/other"), SessionEndReason::Stop, cx);
-        assert!(matches!(
-            cx.global::<crate::agent::tasks_global::GlobalTasks>()
-                .get(&done_id)
-                .unwrap()
-                .state,
-            TaskState::Running { .. }
-        ));
-
-        // The matching cwd with a completion reason → Done.
-        ws.apply_agent_chat_task_ended(
-            &PathBuf::from("/tmp/acp-wt-done"),
-            SessionEndReason::Stop,
-            cx,
-        );
-        let g = cx.global::<crate::agent::tasks_global::GlobalTasks>();
-        let t = g.get(&done_id).unwrap();
-        match &t.state {
-            TaskState::Done { end_reason, .. } => assert_eq!(*end_reason, SessionEndReason::Stop),
-            other => panic!("expected Done, got {other:?}"),
-        }
-        assert!(t.finished_at.is_some(), "completion stamps finished_at");
-
-        ws.apply_agent_chat_task_ended(
-            &PathBuf::from("/tmp/acp-wt-error"),
-            SessionEndReason::Error,
-            cx,
-        );
-        let g = cx.global::<crate::agent::tasks_global::GlobalTasks>();
-        match &g.get(&error_id).unwrap().state {
-            TaskState::Error { message, .. } => assert_eq!(
-                message,
-                &crate::surface::strings::task_error_session_failed()
-            ),
-            other => panic!("expected Error, got {other:?}"),
-        }
-
-        // Idempotent: a second call finds no Running task and no-ops (stays
-        // Error, not overwritten).
-        ws.apply_agent_chat_task_ended(
-            &PathBuf::from("/tmp/acp-wt-error"),
-            SessionEndReason::Stop,
-            cx,
-        );
-        assert!(matches!(
-            cx.global::<crate::agent::tasks_global::GlobalTasks>()
-                .get(&error_id)
-                .unwrap()
-                .state,
-            TaskState::Error { .. }
-        ));
     });
 }
 

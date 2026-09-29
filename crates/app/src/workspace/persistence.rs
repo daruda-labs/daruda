@@ -759,8 +759,33 @@ impl Workspace {
                         // owning agent when still in the catalog (session id kept),
                         // else the default agent (session id dropped — it belongs
                         // to a now-absent agent and could not resume).
-                        let (agent_id, keep_session) =
-                            self.resolve_restored_agent(ac.agent_id.clone());
+                        let task_chat = ac.session_id.is_some()
+                            && cx
+                                .global::<crate::agent::tasks_global::GlobalTasks>()
+                                .tasks
+                                .iter()
+                                .any(|task| {
+                                    task.agent_surface
+                                        == daruda_store::tasks::TaskAgentSurface::AgentChat
+                                        && task.execution.as_ref().is_some_and(|run| {
+                                            ac.agent_id.as_ref() == Some(&run.agent_id)
+                                                && ac.session_id == run.session_id
+                                                && ac.account_id == run.account_id
+                                                && ac
+                                                    .cwd
+                                                    .as_ref()
+                                                    .and_then(PaneCwd::as_local)
+                                                    .is_some_and(|cwd| {
+                                                        daruda_core::path::same_path(cwd, &run.cwd)
+                                                    })
+                                        })
+                                });
+                        // A task's conversation must never switch agent or account on restore.
+                        let (agent_id, keep_session) = if task_chat {
+                            (ac.agent_id.clone().unwrap(), true)
+                        } else {
+                            self.resolve_restored_agent(ac.agent_id.clone())
+                        };
                         let is_remote = matches!(ac.cwd, Some(PaneCwd::Remote(_)));
                         let pane_recipe = self
                             .agent_launch_for(&agent_id)
@@ -779,8 +804,11 @@ impl Workspace {
                         );
                         // The constructor seeds the domain default — patch in
                         // the persisted selection now that the pane exists.
-                        let account =
-                            restored_agent_account(ac.account_id, pane_recipe, &self.accounts);
+                        let account = if task_chat {
+                            daruda_store::accounts::AccountSelection::from_persisted(ac.account_id)
+                        } else {
+                            restored_agent_account(ac.account_id, pane_recipe, &self.accounts)
+                        };
                         if let Some(content) = restored.agent_chat_content_mut() {
                             content.account = account;
                             // Seed the last-known mode so the lazy connect can

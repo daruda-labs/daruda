@@ -152,6 +152,17 @@ fn legacy_agent_surface() -> TaskAgentSurface {
     TaskAgentSurface::Terminal
 }
 
+/// Durable identity of a task execution; pane ids do not survive restarts.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TaskExecution {
+    pub id: String,
+    pub agent_id: String,
+    pub account_id: Option<crate::accounts::AccountId>,
+    pub cwd: PathBuf,
+    /// Absent until the adapter or CLI reports its session identity.
+    pub session_id: Option<String>,
+}
+
 /// One row in the Tasks tab. `branch_name` is derived once at creation
 /// time and stays stable across Reopen / Retry so the lane path
 /// remains predictable for the user.
@@ -192,6 +203,9 @@ pub struct Task {
     #[serde(default = "legacy_agent_surface")]
     pub agent_surface: TaskAgentSurface,
 
+    #[serde(default)]
+    pub execution: Option<TaskExecution>,
+
     /// `false` skips the trailing newline so the user must press Enter
     /// in the terminal to dispatch the command (UX opt-out).
     #[serde(default = "default_auto_execute")]
@@ -226,6 +240,7 @@ impl Task {
             branch_name,
             agent_type: AgentType::default(),
             agent_surface: TaskAgentSurface::default(),
+            execution: None,
             auto_execute: true,
             subtasks: Vec::new(),
         }

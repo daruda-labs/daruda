@@ -33,5 +33,5 @@ pub use prompt_file::{
 };
 pub use task::{
     AgentType, SCHEMA_VERSION, SessionEndReason, SubTask, TASK_TOOL_USE_FAILURE_THRESHOLD, Task,
-    TaskAgentSurface, TaskFilter, TaskId, TaskState, TasksState,
+    TaskAgentSurface, TaskExecution, TaskFilter, TaskId, TaskState, TasksState,
 };

@@ -319,6 +319,8 @@ impl TaskEditContent {
 /// via `cx` instead, the same way `Pane::is_dirty` / `Pane::can_save` already
 /// read `f.editor_state` / `te.title_input` live for File / TaskEdit content.
 pub(in crate::workspace) struct AgentChatContent {
+    /// Only the pane that dispatched this execution can finish its task.
+    pub(in crate::workspace) task_run: Option<(TaskId, String)>,
     /// The self-owned chat view entity. Embedded by the pane walker via
     /// `AnyView::cached(..)`, so its `cx.notify()` dirties only its subtree.
     pub(in crate::workspace) view: Entity<AgentChatView>,

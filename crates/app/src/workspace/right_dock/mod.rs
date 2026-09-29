@@ -15,6 +15,7 @@ pub(in crate::workspace) mod section_view;
 pub(in crate::workspace) mod skill_ops;
 pub(in crate::workspace) mod skills;
 pub(in crate::workspace) mod status_pill;
+pub(in crate::workspace) mod task_chat_ops;
 pub(in crate::workspace) mod task_ops;
 pub(in crate::workspace) mod task_picker_modal;
 pub(in crate::workspace) mod task_workflow_ops;

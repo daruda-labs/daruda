@@ -1149,6 +1149,18 @@ pub fn task_action_start() -> String {
 pub fn task_action_open() -> String {
     rust_i18n::t!("task.action_open").into_owned()
 }
+pub fn task_action_open_chat() -> String {
+    rust_i18n::t!("task.action_open_chat").into_owned()
+}
+pub fn task_chat_missing_session() -> String {
+    rust_i18n::t!("task.chat_missing_session").into_owned()
+}
+pub fn task_chat_missing_agent() -> String {
+    rust_i18n::t!("task.chat_missing_agent").into_owned()
+}
+pub fn task_chat_missing_worktree() -> String {
+    rust_i18n::t!("task.chat_missing_worktree").into_owned()
+}
 pub fn task_action_stop() -> String {
     rust_i18n::t!("task.action_stop").into_owned()
 }

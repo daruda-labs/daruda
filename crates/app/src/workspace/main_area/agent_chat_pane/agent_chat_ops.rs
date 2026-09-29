@@ -445,15 +445,7 @@ impl Workspace {
             }
             TurnOutcome::Errored => daruda_store::tasks::SessionEndReason::Error,
         };
-        // Task tracking matches `worktree_path` against a real path, so a
-        // `PaneCwd::Remote` pane has nothing to match — `into_local` skips it.
-        if let Some(cwd) = self
-            .agent_chat_view(pane_id)
-            .and_then(|v| v.read(cx).cwd.clone())
-            .and_then(PaneCwd::into_local)
-        {
-            self.apply_agent_chat_task_ended(&cwd, reason, cx);
-        }
+        self.apply_agent_chat_task_ended(pane_id, reason, cx);
         // Last, because handing `outcome` on moves it — the matches above
         // bind nothing and so only read it.
         self.answer_waiting_ask(pane_id, outcome, cx);
@@ -634,6 +626,7 @@ impl Workspace {
         Pane {
             id: pane_id,
             content: PaneContent::AgentChat(AgentChatContent {
+                task_run: None,
                 view,
                 cwd,
                 account,
@@ -1324,6 +1317,7 @@ impl Workspace {
         rt.panes.push(Pane {
             id: pane_id,
             content: PaneContent::AgentChat(AgentChatContent {
+                task_run: None,
                 view,
                 cwd,
                 account,

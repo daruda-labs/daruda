@@ -24,6 +24,7 @@ use serde::Deserialize;
 
 use crate::workspace::Workspace;
 use crate::workspace::lane_ops::CreateWorktreePlan;
+use crate::workspace::main_area::agent_chat_pane::view::AgentSessionStatus;
 
 /// Subset of the `TodoWrite` tool's `tool_input.todos[]` shape.
 /// Claude Code includes more fields (`activeForm`, sometimes free-form
@@ -314,6 +315,19 @@ impl Workspace {
                 self.send_to_pane(pane_id, cmd.as_bytes())
             }
             daruda_store::tasks::TaskAgentSurface::AgentChat => {
+                self.bind_task_chat_execution(task_id, pane_id, cx);
+                let pane_in_error = self.agent_chat_view(pane_id).is_some_and(|view| {
+                    matches!(view.read(cx).status, AgentSessionStatus::Error { .. })
+                });
+                if pane_in_error {
+                    self.fail_task_dispatch(
+                        task_id,
+                        worktree_path,
+                        crate::surface::strings::task_error_prompt_undelivered(),
+                        cx,
+                    );
+                    return;
+                }
                 // The ACP session *is* the agent — there is no `claude …` CLI
                 // wrapper to build. Deliver the rendered prompt (the same text
                 // the Terminal path writes into `task-<branch>.md`) as an ACP
@@ -416,6 +430,7 @@ impl Workspace {
         for sid in &cleared_sessions {
             self.claude.tool_use_failure_counts.remove(sid);
         }
+        self.cancel_task_chat_execution(task_id, cx);
         self.save_tasks_dirty(cx);
         cx.notify();
     }
@@ -541,6 +556,9 @@ impl Workspace {
                 let daruda_store::tasks::TaskState::Running { worktree_path } = &task.state else {
                     continue;
                 };
+                if task.agent_surface != daruda_store::tasks::TaskAgentSurface::Terminal {
+                    continue;
+                }
                 // A session reports its physical cwd; a lane keeps how it was opened.
                 if !daruda_core::path::same_path(worktree_path, cwd) {
                     continue;
@@ -578,6 +596,9 @@ impl Workspace {
         let dirty = cx.update_global::<GlobalTasks, bool>(|g, _| {
             let mut dirty = false;
             for task in g.tasks.iter_mut() {
+                if task.agent_surface != daruda_store::tasks::TaskAgentSurface::Terminal {
+                    continue;
+                }
                 if !task.session_ids.iter().any(|s| s == session_id) {
                     continue;
                 }
@@ -615,39 +636,27 @@ impl Workspace {
         }
     }
 
-    /// Reconcile an **AgentChat-surfaced** task's lifecycle from its ACP
-    /// session, keyed by the lane working directory `cwd`.
-    ///
-    /// Terminal tasks reconcile through the `~/.daruda/status/*.json` hook files
-    /// the `claude` CLI writes, matched by `session_id`
-    /// ([`Self::apply_task_session_ended`]). ACP sessions never write those
-    /// files, so an AgentChat task would otherwise sit in `Running` forever.
-    /// The ACP event pump instead calls this on `TurnEnded` (→ `Done`) and on a
-    /// terminal `Error` / connect failure (→ `Error`).
-    ///
-    /// Every `Running` task whose lane matches `cwd` transitions per `reason`
-    /// (the same reason→state mapping as `apply_task_session_ended`). AgentChat
-    /// tasks are single-turn — one dispatched prompt is the whole task — so the
-    /// first `TurnEnded` completes it; later turns find no `Running` match and
-    /// no-op. A pane with no backing task (a manually-opened agent chat) also
-    /// matches nothing, so this is a safe no-op there.
+    /// Only the pane that dispatched this execution may settle its task.
+    /// Restoring history or a stale execution's late event owns no new work.
     pub(in crate::workspace) fn apply_agent_chat_task_ended(
         &mut self,
-        cwd: &Path,
+        pane_id: crate::workspace::main_area::pane_tree::PaneId,
         reason: daruda_store::tasks::SessionEndReason,
         cx: &mut Context<Self>,
     ) {
+        let Some(owner) = self.task_chat_owner(pane_id, cx) else {
+            return;
+        };
         let dirty = cx.update_global::<GlobalTasks, bool>(|g, _| {
             let mut dirty = false;
             for task in g.tasks.iter_mut() {
+                if task.id != owner {
+                    continue;
+                }
                 let daruda_store::tasks::TaskState::Running { worktree_path } = task.state.clone()
                 else {
                     continue;
                 };
-                // A session reports its physical cwd; a lane keeps how it was opened.
-                if !daruda_core::path::same_path(&worktree_path, cwd) {
-                    continue;
-                }
                 task.state = match reason {
                     daruda_store::tasks::SessionEndReason::Error => {
                         daruda_store::tasks::TaskState::Error {
@@ -727,6 +736,7 @@ impl Workspace {
     fn session_owned_by_running_task(session_id: &str, cx: &Context<Self>) -> bool {
         cx.global::<GlobalTasks>().tasks.iter().any(|task| {
             matches!(task.state, daruda_store::tasks::TaskState::Running { .. })
+                && task.agent_surface == daruda_store::tasks::TaskAgentSurface::Terminal
                 && task.session_ids.iter().any(|s| s == session_id)
         })
     }

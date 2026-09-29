@@ -418,6 +418,20 @@ impl Workspace {
         }
     }
 
+    pub(super) fn open_editor_task_chat(
+        &mut self,
+        pane: PaneId,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if let Some(id) = self
+            .task_edit_content_for_pane(pane)
+            .and_then(|te| te.task_id.clone())
+        {
+            self.open_task_chat(&id, window, cx);
+        }
+    }
+
     /// Dynamically install the prompt-file FS watcher on a TaskEdit
     /// pane that's still open when its task transitions Backlog →
     /// Running. At pane-open time the lane didn't exist

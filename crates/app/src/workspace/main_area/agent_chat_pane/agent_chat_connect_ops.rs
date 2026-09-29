@@ -126,6 +126,7 @@ fn fail_connect_account_prepare(
             ws.notify_status_docks(cx);
         }
         ws.report_error(report, cx);
+        ws.apply_agent_chat_task_ended(pane_id, daruda_store::tasks::SessionEndReason::Error, cx);
     }) {
         Ok(()) => {}
         // Window gone before the toast could land — keep the log record.
@@ -538,7 +539,7 @@ impl Workspace {
     /// Open the live ACP session for an already-pushed pane and store the
     /// event-pump task on its view; closing the pane drops both. `resume`
     /// carries the persisted session id: `Some` branches `session/load`,
-    /// `None` starts a fresh `session/new`. A failed resume retries once fresh.
+    /// `None` starts `session/new`. Only non-task resumes may retry fresh.
     pub(super) fn connect_agent_chat(
         &mut self,
         pane_id: PaneId,
@@ -547,8 +548,42 @@ impl Workspace {
         cx: &mut Context<Self>,
     ) {
         let node_root = daruda_store::persistence::node_install_dir();
+        let strict_restore = resume.is_some() && self.is_task_chat_restore(pane_id, cx);
+
+        if strict_restore && let Some(view) = self.agent_chat_view(pane_id).cloned() {
+            let chat = view.read(cx);
+            let account = self
+                .main_area
+                .runtimes
+                .values()
+                .flat_map(|rt| rt.panes.iter())
+                .find(|pane| pane.id == pane_id)
+                .and_then(|pane| pane.agent_chat_content())
+                .and_then(|chat| chat.account.to_persisted());
+            if !self.task_chat_identity_available(&chat.agent_id, account) {
+                view.update(cx, |v, cx| {
+                    v.set_error(
+                        s::task_chat_missing_agent(),
+                        daruda_acp::Remedy::Configure,
+                        cx,
+                    )
+                });
+                self.notify_status_docks(cx);
+                self.apply_agent_chat_task_ended(
+                    pane_id,
+                    daruda_store::tasks::SessionEndReason::Error,
+                    cx,
+                );
+                return;
+            }
+        }
 
         let Some(plan) = self.prepare_agent_chat_connection(pane_id, &cwd, cx) else {
+            self.apply_agent_chat_task_ended(
+                pane_id,
+                daruda_store::tasks::SessionEndReason::Error,
+                cx,
+            );
             return;
         };
         let AgentChatConnectionPlan {
@@ -693,7 +728,10 @@ impl Workspace {
                         initial_model,
                         initial_modes,
                         restore_mode,
-                        resume.map(daruda_acp::SessionId::new),
+                        match resume.map(daruda_acp::SessionId::new) {
+                            Some(id) if strict_restore => daruda_acp::SessionResume::Required(id),
+                            other => other.into(),
+                        },
                         &agent_id,
                         mcp_servers,
                     )
@@ -738,6 +776,7 @@ impl Workspace {
                         // The stale id is left persisted — a successful fresh
                         // session overwrites it via the `Connected` persist trigger.
                         if was_resume
+                            && !strict_restore
                             && !connected_seen
                             && let daruda_acp::AcpEvent::Error(failure) = &event
                             && !matches!(failure, daruda_acp::AcpFailure::TransportClosed { .. })
@@ -823,6 +862,9 @@ impl Workspace {
                                 v.apply_event(event, &syntax_theme, is_light, cx)
                             });
                             ws.relay_phone_ack_effect(pane_id, telegram_first_response, cx);
+                            if is_connected {
+                                ws.record_task_chat_session(pane_id, cx);
+                            }
                             // Advance the activity span now that the event folded
                             // in. When this event drove the last busy→idle
                             // transition (the turn ended and no subagent is still
@@ -912,18 +954,11 @@ impl Workspace {
                             // Connecting badge doesn't linger after the pulse
                             // stops.
                             ws.notify_status_docks(cx);
-                            // A connect failure ends any AgentChat-surfaced task
-                            // rooted at this lane in `Error` (it can never run),
-                            // keyed by cwd since ACP writes no status-file hooks.
-                            if let Some(cwd) =
-                                view.read(cx).cwd.clone().and_then(PaneCwd::into_local)
-                            {
-                                ws.apply_agent_chat_task_ended(
-                                    &cwd,
-                                    daruda_store::tasks::SessionEndReason::Error,
-                                    cx,
-                                );
-                            }
+                            ws.apply_agent_chat_task_ended(
+                                pane_id,
+                                daruda_store::tasks::SessionEndReason::Error,
+                                cx,
+                            );
                         }
                         let report =
                             ErrorReport::new(crate::surface::strings::error_acp_connect_failed())
@@ -983,13 +1018,11 @@ impl Workspace {
         let edge = view.update(cx, |v, cx| v.tick_activity(std::time::Instant::now(), cx));
         if let Some(outcome) = edge {
             self.fire_activity_completion(pane_id, outcome, cx);
-        } else if failed_to_start_prompt
-            && let Some(cwd) = view.read(cx).cwd.clone().and_then(PaneCwd::into_local)
-        {
+        } else if failed_to_start_prompt {
             // Startup can fail before a task's buffered prompt starts a turn;
             // there is no activity completion edge in that case.
             self.apply_agent_chat_task_ended(
-                &cwd,
+                pane_id,
                 daruda_store::tasks::SessionEndReason::Error,
                 cx,
             );
@@ -1014,6 +1047,19 @@ impl Workspace {
         let Some(cwd) = view.read(cx).cwd.clone() else {
             return; // no cwd → never had a session
         };
+        for pane in self
+            .main_area
+            .runtimes
+            .values_mut()
+            .flat_map(|rt| rt.panes.iter_mut())
+        {
+            if pane.id == pane_id {
+                if let Some(chat) = pane.agent_chat_content_mut() {
+                    chat.task_run = None;
+                }
+                break;
+            }
+        }
         view.update(cx, |v, cx| v.reset_for_new_session(cx));
         self.mutate_durable(cx, |_, _| {});
         self.notify_status_docks(cx);
