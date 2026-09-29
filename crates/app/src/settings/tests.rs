@@ -670,7 +670,7 @@ fn validate_collects_agent_catalog(cx: &mut TestAppContext) {
     let win_for_add = win.clone();
     cx.update_window(wh.into(), |_, window, cx| {
         win_for_add.update(cx, |w, cx| {
-            // What the "Add Preset" button does.
+            // What switching a preset on does.
             w.add_agent_row(
                 daruda_config::AgentDefinition::codex_default(),
                 Some("codex-acp".to_string()),

@@ -1303,8 +1303,8 @@ impl SettingsView {
     }
 
     /// Append a catalog row. `preset` names the preset `definition` came from
-    /// (the "Add Preset" button), so the saved entry references it rather than
-    /// copying its fields; `None` adds a custom row.
+    /// (one switched on from the catalog), so the saved entry references it
+    /// rather than copying its fields; `None` adds a custom row.
     pub(super) fn add_agent_row(
         &mut self,
         definition: daruda_config::AgentDefinition,

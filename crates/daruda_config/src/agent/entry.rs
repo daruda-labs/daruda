@@ -515,9 +515,9 @@ mod tests {
 
     #[test]
     fn an_exact_copy_of_a_preset_is_promoted_to_a_reference() {
-        // What `Add Preset` used to write into config.toml: the preset's own id,
-        // name and command, copied flat. Promoting it on load is what makes the
-        // reference model apply to existing configs without a migration.
+        // A flat copy of a preset — its own id, name and command — as older
+        // configs hold it. Promoting it on load is what makes the reference
+        // model apply to existing configs without a migration.
         let preset = codex_preset();
         let AgentLaunch::Raw(command) = &preset.launch else {
             panic!("presets launch Raw");

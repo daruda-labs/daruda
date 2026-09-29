@@ -1,14 +1,11 @@
-//! Agent page: send-key policy, the `[[agents]]` catalog, and the Claude
-//! status hook toggle.
+//! The `[[agents]]` catalog on the Agents & Chat page: the entries in use as
+//! cards, then the built-in presets no entry uses yet.
 //!
-//! The catalog editor reads the **persisted** layer (`Config.agents`, split at
-//! window-open time into [`SettingsView::agent_rows`] plus
+//! The editor reads the **persisted** layer (`Config.agents`, one catalog
+//! item per entry — see [`SettingsView::agent_editable_rows`] and
 //! [`SettingsView::agent_unresolved_entries`]) rather than the resolved
 //! runtime catalog — an entry that resolves to nothing has to stay visible, or
 //! the user has no way to find out why an agent never shows up.
-//!
-//! Method visibility is `pub(in crate::settings)` so `render` can
-//! dispatch here, mirroring the [`super::plugin`] submodule.
 
 use crate::surface::strings as s;
 use crate::ui::theme;
@@ -74,13 +71,6 @@ impl SettingsView {
         for (ordinal, (catalog_index, row)) in self.agent_editable_rows().enumerate() {
             body = body.child(self.render_agent_card(catalog_index, ordinal, row, cx));
         }
-        body = body.child(div().flex().flex_row().child(
-            button("settings-agent-add-custom", s::settings_agent_add_custom()).on_click(
-                cx.listener(|this, _: &ClickEvent, window, cx| {
-                    this.add_custom_agent_row(window, cx);
-                }),
-            ),
-        ));
 
         if self.agent_unresolved_entries().next().is_some() {
             body = body.child(Self::section_label(
@@ -92,7 +82,16 @@ impl SettingsView {
             }
         }
 
-        body.child(self.render_preset_lists(presets, cx))
+        // Last, after every built-in choice: an agent no preset covers.
+        let no_match = groups::query_matched_nothing(&used, &query);
+        body.child(self.render_preset_lists(presets, no_match, cx))
+            .child(div().flex().flex_row().child(
+                button("settings-agent-add-custom", s::settings_agent_add_custom()).on_click(
+                    cx.listener(|this, _: &ClickEvent, window, cx| {
+                        this.add_custom_agent_row(window, cx);
+                    }),
+                ),
+            ))
             .into_any_element()
     }
 

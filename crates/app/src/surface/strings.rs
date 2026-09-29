@@ -1964,11 +1964,9 @@ pub fn agent_chat_config_boolean_off() -> String {
 /// "Default (recommended)" name and names the model it resolves to only in its
 /// description, so that model is shown instead.
 pub fn agent_model_choice_label(value: &str, name: &str, description: Option<&str>) -> String {
-    match description {
-        Some(model) if value == daruda_acp::DEFAULT_MODEL_CHOICE && !model.is_empty() => {
-            rust_i18n::t!("agent_chat.config_default_model", model = model).into_owned()
-        }
-        _ => name.to_string(),
+    match daruda_acp::resolved_default_model(value, description) {
+        Some(model) => rust_i18n::t!("agent_chat.config_default_model", model = model).into_owned(),
+        None => name.to_string(),
     }
 }
 
@@ -5442,6 +5440,11 @@ pub fn settings_agent_group_needs_install() -> String {
 /// Placeholder for the search over the preset lists.
 pub fn settings_agent_catalog_search_placeholder() -> String {
     rust_i18n::t!("settings.agent_catalog_search_placeholder").into_owned()
+}
+
+/// Shown when the search matches no preset in either list.
+pub fn settings_agent_catalog_no_match() -> String {
+    rust_i18n::t!("settings.agent_catalog_no_match").into_owned()
 }
 
 /// A collapsed catalog card's one-line summary of what it will run.

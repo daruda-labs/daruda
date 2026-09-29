@@ -647,6 +647,12 @@ pub enum ConfigOptionCategoryView {
 /// its `description` names the concrete model that default resolves to.
 pub const DEFAULT_MODEL_CHOICE: &str = "default";
 
+/// The concrete model a model choice stands for when it is the
+/// [`DEFAULT_MODEL_CHOICE`] and the adapter named one in its description.
+pub fn resolved_default_model<'a>(value: &str, description: Option<&'a str>) -> Option<&'a str> {
+    description.filter(|model| value == DEFAULT_MODEL_CHOICE && !model.is_empty())
+}
+
 /// One selectable value of a config option (mirror of the protocol's
 /// `SessionConfigSelectOption`).
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -1251,5 +1257,19 @@ mod tests {
         // mode state it already has rather than blanking it.
         let options = mode_and_model_options("default", &[]);
         assert_eq!(ModeStateView::from_config_options(&options), None);
+    }
+
+    #[test]
+    fn only_the_default_choice_resolves_to_its_described_model() {
+        assert_eq!(
+            resolved_default_model(DEFAULT_MODEL_CHOICE, Some("Opus 5.5")),
+            Some("Opus 5.5")
+        );
+        assert_eq!(resolved_default_model(DEFAULT_MODEL_CHOICE, Some("")), None);
+        assert_eq!(resolved_default_model(DEFAULT_MODEL_CHOICE, None), None);
+        assert_eq!(
+            resolved_default_model("opus", Some("For complex work")),
+            None
+        );
     }
 }

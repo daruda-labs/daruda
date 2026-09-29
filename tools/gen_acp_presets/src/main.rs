@@ -52,6 +52,10 @@ struct Registry {
 struct RegistryAgent {
     id: String,
     name: String,
+    /// One line on what the agent is, shown beside its name. Defaulted so an
+    /// entry that states none still generates, with nothing to show.
+    #[serde(default)]
+    description: String,
     repository: Option<String>,
     website: Option<String>,
     distribution: Distribution,
@@ -120,6 +124,7 @@ enum Launchability {
 struct Preset {
     id: String,
     name: String,
+    description: String,
     launchability: Launchability,
 }
 
@@ -250,6 +255,7 @@ fn presets_of(registry: &Registry) -> Result<Vec<Preset>, GenError> {
             Ok(Preset {
                 id: agent.id.clone(),
                 name: agent.name.clone(),
+                description: agent.description.trim().to_string(),
                 launchability: launchability_of(agent)?,
             })
         })
@@ -290,6 +296,10 @@ fn render_block(registry: &Registry, presets: &[Preset]) -> String {
         out.push_str("    AgentPreset {\n");
         out.push_str(&format!("        id: {},\n", rust_str(&preset.id)));
         out.push_str(&format!("        name: {},\n", rust_str(&preset.name)));
+        out.push_str(&format!(
+            "        description: {},\n",
+            rust_str(&preset.description)
+        ));
         match &preset.launchability {
             Launchability::Runnable(command) => {
                 out.push_str("        launchability: PresetLaunchability::Runnable {\n");
@@ -532,6 +542,24 @@ mod tests {
             repin_latest("fast-agent-acp==0.9.28"),
             "fast-agent-acp@latest"
         );
+    }
+
+    /// The description is carried into the generated preset, and an entry
+    /// that gives none still generates rather than failing the whole block.
+    #[test]
+    fn the_description_is_carried_and_optional() {
+        let registry: Registry = serde_json::from_str(
+            r#"{ "version": "1", "agents": [
+                 { "id": "a", "name": "A", "description": "  An agent.  ",
+                   "distribution": { "npx": { "package": "a@1.0.0" } } },
+                 { "id": "b", "name": "B",
+                   "distribution": { "npx": { "package": "b@1.0.0" } } } ] }"#,
+        )
+        .expect("fixture parses");
+        let presets = presets_of(&registry).expect("fixture generates");
+        assert_eq!(presets[0].description, "An agent.");
+        assert_eq!(presets[1].description, "");
+        assert!(render_block(&registry, &presets).contains("description: \"An agent.\","));
     }
 
     #[test]

@@ -12,10 +12,16 @@ pub(super) struct PresetGroups {
     pub(super) needs_install: Vec<AgentPreset>,
 }
 
+impl PresetGroups {
+    fn is_empty(&self) -> bool {
+        self.available.is_empty() && self.needs_install.is_empty()
+    }
+}
+
 /// `presets` minus the ones `used` names, in their own order, narrowed to
-/// those whose name or id contains `query` (case-insensitive; empty keeps
-/// all). A preset an entry already references lives on that entry's card, so
-/// offering it again would add a second copy of an agent the user has.
+/// those whose name, id or description contains `query` (case-insensitive;
+/// empty keeps all). A preset an entry already references lives on that
+/// entry's card, so offering it again would add a second copy of an agent.
 pub(super) fn preset_groups(
     presets: impl IntoIterator<Item = AgentPreset>,
     used: &[&str],
@@ -26,6 +32,7 @@ pub(super) fn preset_groups(
         query.is_empty()
             || preset.name.to_lowercase().contains(&query)
             || preset.id.to_lowercase().contains(&query)
+            || preset.description.to_lowercase().contains(&query)
     };
     let mut groups = PresetGroups::default();
     for preset in presets {
@@ -38,6 +45,14 @@ pub(super) fn preset_groups(
         }
     }
     groups
+}
+
+/// Whether `query` is what emptied both preset lists — not a catalog that
+/// already uses every preset, where there is nothing left to match.
+pub(super) fn query_matched_nothing(used: &[&str], query: &str) -> bool {
+    !query.trim().is_empty()
+        && preset_groups(daruda_config::agent_presets(), used, query).is_empty()
+        && !preset_groups(daruda_config::agent_presets(), used, "").is_empty()
 }
 
 /// Whether switching `index` off would leave no agent on. Settings keeps one
@@ -75,13 +90,31 @@ mod tests {
     }
 
     #[test]
-    fn the_query_matches_name_or_id_ignoring_case() {
+    fn the_query_matches_name_id_or_description_ignoring_case() {
         let by_name = preset_groups(daruda_config::agent_presets(), &[], "GEMINI");
         assert_eq!(ids(&by_name.available), ["gemini"]);
         let by_id = preset_groups(daruda_config::agent_presets(), &[], "codex-a");
         assert_eq!(ids(&by_id.available), ["codex-acp"]);
+        // "Tencent" is only in Codebuddy's description.
+        let by_description = preset_groups(daruda_config::agent_presets(), &[], "tencent");
+        assert_eq!(ids(&by_description.available), ["codebuddy-code"]);
         let none = preset_groups(daruda_config::agent_presets(), &[], "no-such-agent");
         assert_eq!(none, PresetGroups::default());
+    }
+
+    #[test]
+    fn only_a_query_that_rejects_every_unused_preset_matched_nothing() {
+        assert!(query_matched_nothing(&[], "no-such-agent"));
+        assert!(!query_matched_nothing(&[], "gemini"), "it matches one");
+        assert!(
+            !query_matched_nothing(&[], "  "),
+            "a blank query filters nothing"
+        );
+        let every: Vec<&str> = daruda_config::agent_presets().map(|p| p.id).collect();
+        assert!(
+            !query_matched_nothing(&every, "no-such-agent"),
+            "with every preset in use there was nothing left to match"
+        );
     }
 
     #[test]

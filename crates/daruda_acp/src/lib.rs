@@ -54,6 +54,7 @@ pub use model::{
     PermissionChoice, PermissionItem, PermissionKindView, PermissionResolution, PlanEntryView,
     PlanPriority, PlanStatus, SessionCapabilitiesView, SessionModeView, SlashCommand,
     SlashCommandInput, ToolCallItem, ToolKindView, ToolOutputBlock, ToolStatusView, UsageView,
+    resolved_default_model,
 };
 pub use native_subagents::{NativeSubagentRouter, Routed};
 pub use node::{NodeError, NodeProgress, NodeRuntime, command_diagnostic, ensure_node};

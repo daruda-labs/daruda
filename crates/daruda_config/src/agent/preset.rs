@@ -24,6 +24,8 @@ pub enum PresetLaunchability {
 pub struct AgentPreset {
     pub id: &'static str,
     pub name: &'static str,
+    /// The registry's one-line summary of the agent, empty when it gives none.
+    pub description: &'static str,
     pub launchability: PresetLaunchability,
 }
 
@@ -101,6 +103,7 @@ pub const REGISTRY_PRESETS: &[AgentPreset] = &[
     AgentPreset {
         id: "agoragentic-acp",
         name: "Agoragentic",
+        description: "Agent marketplace with 174+ AI capabilities. Browse, invoke, and pay for agent services settled in USDC on Base L2.",
         launchability: PresetLaunchability::Runnable {
             command: "npx -y agoragentic-mcp@latest --acp",
         },
@@ -108,6 +111,7 @@ pub const REGISTRY_PRESETS: &[AgentPreset] = &[
     AgentPreset {
         id: "amp-acp",
         name: "Amp",
+        description: "ACP wrapper for Amp - the frontier coding agent",
         launchability: PresetLaunchability::NeedsManualInstall {
             install_url: "https://github.com/tao12345666333/amp-acp",
         },
@@ -115,6 +119,7 @@ pub const REGISTRY_PRESETS: &[AgentPreset] = &[
     AgentPreset {
         id: "auggie",
         name: "Auggie CLI",
+        description: "Augment Code's powerful software agent, backed by industry-leading context engine",
         launchability: PresetLaunchability::Runnable {
             command: "AUGMENT_DISABLE_AUTO_UPDATE=1 npx -y @augmentcode/auggie@latest --acp",
         },
@@ -122,6 +127,7 @@ pub const REGISTRY_PRESETS: &[AgentPreset] = &[
     AgentPreset {
         id: "autohand",
         name: "Autohand Code",
+        description: "Autohand Code - AI coding agent powered by Autohand AI",
         launchability: PresetLaunchability::Runnable {
             command: "npx -y @autohandai/autohand-acp@latest",
         },
@@ -129,6 +135,7 @@ pub const REGISTRY_PRESETS: &[AgentPreset] = &[
     AgentPreset {
         id: "claude-acp",
         name: "Claude Agent",
+        description: "ACP wrapper for Anthropic's Claude",
         launchability: PresetLaunchability::Runnable {
             command: "npx -y @agentclientprotocol/claude-agent-acp@latest",
         },
@@ -136,6 +143,7 @@ pub const REGISTRY_PRESETS: &[AgentPreset] = &[
     AgentPreset {
         id: "cline",
         name: "Cline",
+        description: "Autonomous coding agent CLI - capable of creating/editing files, running commands, using the browser, and more",
         launchability: PresetLaunchability::Runnable {
             command: "npx -y cline@latest --acp",
         },
@@ -143,6 +151,7 @@ pub const REGISTRY_PRESETS: &[AgentPreset] = &[
     AgentPreset {
         id: "codebuddy-code",
         name: "Codebuddy Code",
+        description: "Tencent Cloud's official intelligent coding tool",
         launchability: PresetLaunchability::Runnable {
             command: "npx -y @tencent-ai/codebuddy-code@latest --acp",
         },
@@ -150,6 +159,7 @@ pub const REGISTRY_PRESETS: &[AgentPreset] = &[
     AgentPreset {
         id: "codex-acp",
         name: "Codex",
+        description: "ACP adapter for OpenAI's coding assistant",
         launchability: PresetLaunchability::Runnable {
             command: "npx -y @agentclientprotocol/codex-acp@latest",
         },
@@ -157,6 +167,7 @@ pub const REGISTRY_PRESETS: &[AgentPreset] = &[
     AgentPreset {
         id: "cortex-code",
         name: "Cortex Code",
+        description: "Snowflake's Cortex Code coding agent",
         launchability: PresetLaunchability::NeedsManualInstall {
             install_url: "https://docs.snowflake.com/en/user-guide/cortex-code/cortex-code",
         },
@@ -164,6 +175,7 @@ pub const REGISTRY_PRESETS: &[AgentPreset] = &[
     AgentPreset {
         id: "corust-agent",
         name: "Corust Agent",
+        description: "Co-building with a seasoned Rust partner.",
         launchability: PresetLaunchability::NeedsManualInstall {
             install_url: "https://corust.ai/",
         },
@@ -171,6 +183,7 @@ pub const REGISTRY_PRESETS: &[AgentPreset] = &[
     AgentPreset {
         id: "crow-cli",
         name: "crow-cli",
+        description: "Minimal ACP Native Coding Agent",
         launchability: PresetLaunchability::NeedsManualInstall {
             install_url: "https://crow-ai.dev",
         },
@@ -178,6 +191,7 @@ pub const REGISTRY_PRESETS: &[AgentPreset] = &[
     AgentPreset {
         id: "cursor",
         name: "Cursor",
+        description: "Cursor's coding agent",
         launchability: PresetLaunchability::NeedsManualInstall {
             install_url: "https://cursor.com/docs/cli/acp",
         },
@@ -185,6 +199,7 @@ pub const REGISTRY_PRESETS: &[AgentPreset] = &[
     AgentPreset {
         id: "deepagents",
         name: "DeepAgents",
+        description: "Batteries-included AI coding and general purpose agent powered by LangChain.",
         launchability: PresetLaunchability::Runnable {
             command: "npx -y deepagents-acp@latest",
         },
@@ -192,6 +207,7 @@ pub const REGISTRY_PRESETS: &[AgentPreset] = &[
     AgentPreset {
         id: "devin",
         name: "Devin",
+        description: "Devin CLI coding agent by Cognition",
         launchability: PresetLaunchability::NeedsManualInstall {
             install_url: "https://docs.devin.ai/cli",
         },
@@ -199,6 +215,7 @@ pub const REGISTRY_PRESETS: &[AgentPreset] = &[
     AgentPreset {
         id: "dimcode",
         name: "DimCode",
+        description: "A coding agent that puts leading models at your command.",
         launchability: PresetLaunchability::Runnable {
             command: "npx -y dimcode@latest acp",
         },
@@ -206,6 +223,7 @@ pub const REGISTRY_PRESETS: &[AgentPreset] = &[
     AgentPreset {
         id: "dirac",
         name: "Dirac",
+        description: "Reduces API costs by more than 50%, produces better and faster work. Uses Hash anchored parallel edits, AST manipulation and a whole lot of neat optimizations. Fully Open Source.",
         launchability: PresetLaunchability::Runnable {
             command: "npx -y dirac-cli@latest --acp",
         },
@@ -213,6 +231,7 @@ pub const REGISTRY_PRESETS: &[AgentPreset] = &[
     AgentPreset {
         id: "factory-droid",
         name: "Factory Droid",
+        description: "Factory Droid - AI coding agent powered by Factory AI",
         launchability: PresetLaunchability::Runnable {
             command: "DROID_DISABLE_AUTO_UPDATE=true FACTORY_DROID_AUTO_UPDATE_ENABLED=false npx -y droid@latest exec --output-format acp-daemon",
         },
@@ -220,6 +239,7 @@ pub const REGISTRY_PRESETS: &[AgentPreset] = &[
     AgentPreset {
         id: "fast-agent",
         name: "fast-agent",
+        description: "Code and build agents with comprehensive multi-provider support",
         launchability: PresetLaunchability::Runnable {
             command: "uvx fast-agent-acp@latest -x",
         },
@@ -227,6 +247,7 @@ pub const REGISTRY_PRESETS: &[AgentPreset] = &[
     AgentPreset {
         id: "gemini",
         name: "Gemini CLI",
+        description: "Google's official CLI for Gemini",
         launchability: PresetLaunchability::Runnable {
             command: "npx -y @google/gemini-cli@latest --acp",
         },
@@ -234,6 +255,7 @@ pub const REGISTRY_PRESETS: &[AgentPreset] = &[
     AgentPreset {
         id: "github-copilot-cli",
         name: "GitHub Copilot",
+        description: "GitHub's AI pair programmer",
         launchability: PresetLaunchability::Runnable {
             command: "npx -y @github/copilot@latest --acp",
         },
@@ -241,6 +263,7 @@ pub const REGISTRY_PRESETS: &[AgentPreset] = &[
     AgentPreset {
         id: "glm-acp-agent",
         name: "GLM Agent",
+        description: "ACP agent powered by Zhipu AI's GLM Coding Plan models (glm-5.1, glm-5-turbo, glm-4.7, glm-4.5-air). Supports streaming, tool calls, mid-session model switching, image input via Z.AI Coding Plan Vision MCP, and session load/fork/resume with on-disk persistence.",
         launchability: PresetLaunchability::Runnable {
             command: "npx -y glm-acp-agent@latest",
         },
@@ -248,6 +271,7 @@ pub const REGISTRY_PRESETS: &[AgentPreset] = &[
     AgentPreset {
         id: "goose",
         name: "goose",
+        description: "A local, extensible, open source AI agent that automates engineering tasks",
         launchability: PresetLaunchability::NeedsManualInstall {
             install_url: "https://block.github.io/goose/",
         },
@@ -255,6 +279,7 @@ pub const REGISTRY_PRESETS: &[AgentPreset] = &[
     AgentPreset {
         id: "grok-build",
         name: "Grok Build",
+        description: "xAI's coding agent and CLI",
         launchability: PresetLaunchability::Runnable {
             command: "npx -y @xai-official/grok@latest agent stdio",
         },
@@ -262,6 +287,7 @@ pub const REGISTRY_PRESETS: &[AgentPreset] = &[
     AgentPreset {
         id: "harn",
         name: "Harn",
+        description: "Harn runs .harn agent pipelines as a native ACP coding agent over stdio.",
         launchability: PresetLaunchability::NeedsManualInstall {
             install_url: "https://harnlang.com",
         },
@@ -269,6 +295,7 @@ pub const REGISTRY_PRESETS: &[AgentPreset] = &[
     AgentPreset {
         id: "junie",
         name: "Junie",
+        description: "AI Coding Agent by JetBrains",
         launchability: PresetLaunchability::NeedsManualInstall {
             install_url: "https://junie.jetbrains.com",
         },
@@ -276,6 +303,7 @@ pub const REGISTRY_PRESETS: &[AgentPreset] = &[
     AgentPreset {
         id: "kilo",
         name: "Kilo",
+        description: "The open source coding agent",
         launchability: PresetLaunchability::Runnable {
             command: "npx -y @kilocode/cli@latest acp",
         },
@@ -283,6 +311,7 @@ pub const REGISTRY_PRESETS: &[AgentPreset] = &[
     AgentPreset {
         id: "kimi",
         name: "Kimi CLI",
+        description: "Moonshot AI's coding assistant",
         launchability: PresetLaunchability::NeedsManualInstall {
             install_url: "https://moonshotai.github.io/kimi-cli/",
         },
@@ -290,6 +319,7 @@ pub const REGISTRY_PRESETS: &[AgentPreset] = &[
     AgentPreset {
         id: "minion-code",
         name: "Minion Code",
+        description: "An enhanced AI code assistant built on the Minion framework with rich development tools",
         launchability: PresetLaunchability::Runnable {
             command: "uvx minion-code@latest acp",
         },
@@ -297,6 +327,7 @@ pub const REGISTRY_PRESETS: &[AgentPreset] = &[
     AgentPreset {
         id: "mistral-vibe",
         name: "Mistral Vibe",
+        description: "Mistral's open-source coding assistant",
         launchability: PresetLaunchability::NeedsManualInstall {
             install_url: "https://mistral.ai/products/vibe",
         },
@@ -304,6 +335,7 @@ pub const REGISTRY_PRESETS: &[AgentPreset] = &[
     AgentPreset {
         id: "nova",
         name: "Nova",
+        description: "Nova by Compass AI - a fully-fledged software engineer at your command",
         launchability: PresetLaunchability::Runnable {
             command: "npx -y @compass-ai/nova@latest acp",
         },
@@ -311,6 +343,7 @@ pub const REGISTRY_PRESETS: &[AgentPreset] = &[
     AgentPreset {
         id: "opencode",
         name: "OpenCode",
+        description: "The open source coding agent",
         launchability: PresetLaunchability::NeedsManualInstall {
             install_url: "https://opencode.ai",
         },
@@ -318,6 +351,7 @@ pub const REGISTRY_PRESETS: &[AgentPreset] = &[
     AgentPreset {
         id: "pi-acp",
         name: "pi ACP",
+        description: "ACP adapter for pi coding agent",
         launchability: PresetLaunchability::Runnable {
             command: "npx -y pi-acp@latest",
         },
@@ -325,6 +359,7 @@ pub const REGISTRY_PRESETS: &[AgentPreset] = &[
     AgentPreset {
         id: "poolside",
         name: "Poolside",
+        description: "Poolside's coding agent",
         launchability: PresetLaunchability::NeedsManualInstall {
             install_url: "https://poolside.ai",
         },
@@ -332,6 +367,7 @@ pub const REGISTRY_PRESETS: &[AgentPreset] = &[
     AgentPreset {
         id: "qoder",
         name: "Qoder CLI",
+        description: "AI coding assistant with agentic capabilities",
         launchability: PresetLaunchability::Runnable {
             command: "npx -y @qoder-ai/qodercli@latest --acp",
         },
@@ -339,6 +375,7 @@ pub const REGISTRY_PRESETS: &[AgentPreset] = &[
     AgentPreset {
         id: "qwen-code",
         name: "Qwen Code",
+        description: "Alibaba's Qwen coding assistant",
         launchability: PresetLaunchability::Runnable {
             command: "npx -y @qwen-code/qwen-code@latest --acp --experimental-skills",
         },
@@ -346,6 +383,7 @@ pub const REGISTRY_PRESETS: &[AgentPreset] = &[
     AgentPreset {
         id: "sigit",
         name: "siGit Code",
+        description: "Local-first coding agent. Runs entirely on your machine with optional on-device LLM inference via Onde.",
         launchability: PresetLaunchability::Runnable {
             command: "npx -y @smbcloud/sigit@latest",
         },
@@ -353,6 +391,7 @@ pub const REGISTRY_PRESETS: &[AgentPreset] = &[
     AgentPreset {
         id: "stakpak",
         name: "Stakpak",
+        description: "Open-source DevOps agent in Rust with enterprise-grade security",
         launchability: PresetLaunchability::NeedsManualInstall {
             install_url: "https://stakpak.dev",
         },
@@ -360,6 +399,7 @@ pub const REGISTRY_PRESETS: &[AgentPreset] = &[
     AgentPreset {
         id: "vtcode",
         name: "VT Code",
+        description: "An open-source coding agent with LLM-native code understanding and robust shell safety. Supports multiple LLM providers with automatic failover and efficient context management.",
         launchability: PresetLaunchability::NeedsManualInstall {
             install_url: "https://github.com/vinhnx/VTCode/blob/main/docs/guides/zed-acp.md",
         },

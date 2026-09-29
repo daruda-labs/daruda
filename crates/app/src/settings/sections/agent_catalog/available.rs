@@ -10,12 +10,13 @@ use super::super::super::{SettingsView, settings_button as button};
 use super::groups::PresetGroups;
 
 impl SettingsView {
-    /// Search, then the available and needs-install lists. A list the query
-    /// empties still shows its header, so narrowing never hides where an
-    /// agent would be.
+    /// The available heading and its search, then both lists. The
+    /// needs-install list drops its heading when it has nothing to show; a
+    /// query that matches nothing in either list says so instead.
     pub(super) fn render_preset_lists(
         &self,
         presets: PresetGroups,
+        no_match: bool,
         cx: &mut gpui::Context<Self>,
     ) -> AnyElement {
         let mut body = div()
@@ -24,13 +25,23 @@ impl SettingsView {
             .gap(px(theme::MODAL_PANEL_GAP))
             .child(Self::section_label(s::settings_agent_group_available(), cx))
             .child(crate::ui::input(&self.agent_catalog_search, cx, 0));
+        if no_match {
+            body = body.child(
+                div()
+                    .text_size(px(theme::MODAL_BODY_FONT_SIZE))
+                    .text_color(theme::current(cx).text_muted)
+                    .child(s::settings_agent_catalog_no_match()),
+            );
+        }
         for preset in presets.available {
             body = body.child(Self::render_available_preset(preset, cx));
         }
-        body = body.child(Self::section_label(
-            s::settings_agent_group_needs_install(),
-            cx,
-        ));
+        if !presets.needs_install.is_empty() {
+            body = body.child(Self::section_label(
+                s::settings_agent_group_needs_install(),
+                cx,
+            ));
+        }
         for preset in presets.needs_install {
             body = body.child(Self::render_needs_install_preset(preset, cx));
         }
@@ -69,7 +80,8 @@ impl SettingsView {
         Self::preset_row(preset, install, cx)
     }
 
-    /// Icon, name and id on the left, `action` on the right.
+    /// Icon, name and the registry's one-line description on the left,
+    /// `action` on the right.
     fn preset_row(
         preset: AgentPreset,
         action: impl IntoElement,
@@ -91,12 +103,17 @@ impl SettingsView {
                     .flex_1()
                     .min_w_0()
                     .flex()
-                    .flex_row()
-                    .items_center()
-                    .gap(px(theme::MODAL_FOOTER_GAP))
+                    .flex_col()
                     .text_size(px(theme::MODAL_BODY_FONT_SIZE))
                     .child(div().text_color(t.text_primary).child(preset.name))
-                    .child(div().text_color(t.text_muted).truncate().child(preset.id)),
+                    .when(!preset.description.is_empty(), |text| {
+                        text.child(
+                            div()
+                                .text_color(t.text_muted)
+                                .truncate()
+                                .child(preset.description),
+                        )
+                    }),
             )
             .child(action)
             .into_any_element()
