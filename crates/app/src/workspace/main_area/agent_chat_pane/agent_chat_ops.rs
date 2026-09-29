@@ -476,7 +476,7 @@ impl Workspace {
         }
         lane.is_unread = true;
         self.mutate_durable(cx, |_, _| {});
-        cx.notify();
+        self.notify_status_docks(cx);
     }
 
     /// Answer a `daruda_chat_ask` waiting on this pane, if one is.

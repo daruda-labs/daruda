@@ -15,6 +15,7 @@ mod copy_on_select;
 mod diag_scroll;
 mod dnd;
 mod dock;
+mod dock_badge;
 mod durable;
 mod error_modal;
 mod error_ops;

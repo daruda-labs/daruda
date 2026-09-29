@@ -613,8 +613,10 @@ impl Workspace {
 
         self.active = target;
         // Seen now. Persisted by the `mutate_durable` each branch below ends on.
-        if let Some(lane) = self.lane_for_mut(target) {
-            lane.is_unread = false;
+        if let Some(lane) = self.lane_for_mut(target)
+            && std::mem::take(&mut lane.is_unread)
+        {
+            Self::refresh_dock_badge(cx);
         }
 
         // The bottom-dock draft swaps per input pane (via

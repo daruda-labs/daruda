@@ -30,6 +30,7 @@ mod close_guard_ops;
 pub(crate) mod delete_project_modal;
 pub(crate) mod dialog_helpers;
 mod dnd_ops;
+mod dock_badge_ops;
 mod durable;
 pub(in crate::workspace) mod error;
 pub(in crate::workspace) mod flow_ask_modal;
@@ -1360,12 +1361,17 @@ impl Workspace {
         let weak = cx.entity().downgrade();
         let window_handle = window.window_handle();
         crate::window_registry::WindowRegistry::register(window_handle, weak.clone(), cx);
+        // A restored workspace can open with unread worktrees and no status
+        // change yet to recount them.
+        Self::refresh_dock_badge(cx);
         cx.on_release(move |ws: &mut Workspace, cx: &mut gpui::App| {
             // Before deregistering: a login this window owned can no longer be
             // finished by anyone, and the process-wide slot it holds would
             // block every other window until the login timed out.
             ws.release_pending_login_on_close(cx);
             crate::window_registry::WindowRegistry::deregister(&weak, cx);
+            // This window's worktrees leave the Dock badge's count.
+            Workspace::refresh_dock_badge(cx);
         })
         .detach();
 
@@ -1710,9 +1716,11 @@ impl Workspace {
 
     /// Refresh both dock badges after an agent session-status change.
     /// One notify re-stages both snapshots; each dock's staging diff
-    /// repaints it only on a real change.
+    /// repaints it only on a real change. The app's Dock badge is recounted
+    /// with them.
     pub(crate) fn notify_status_docks(&self, cx: &mut Context<Self>) {
         cx.notify();
+        Self::refresh_dock_badge(cx);
     }
 
     /// Drive the AgentChat status pulse and paint one final settled frame

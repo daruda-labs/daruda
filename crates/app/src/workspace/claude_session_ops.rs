@@ -285,7 +285,7 @@ impl Workspace {
                         file.source,
                     );
                     if self.claude.claude_status.update(file) {
-                        cx.notify();
+                        self.notify_status_docks(cx);
                         #[cfg(debug_assertions)]
                         {
                             let (sid, cwd, event, source) = dbg_fields;
@@ -328,7 +328,7 @@ impl Workspace {
                     .as_ref()
                     .map(|_| self.probe_lane_status(&session_id));
                 if self.claude.claude_status.remove(&session_id).is_some() {
-                    cx.notify();
+                    self.notify_status_docks(cx);
                     #[cfg(debug_assertions)]
                     if let (Some((cwd, source)), Some(probe)) = (dbg_entry, dbg_probe) {
                         self.log_lane_status_change(probe, &session_id, &cwd, "removed", source);
@@ -534,7 +534,8 @@ impl Workspace {
         }
         // Dropped bindings feed the left-dock per-lane agent badges and
         // `agent_active_session_id`; a workspace render re-stages the dock
-        // snapshot and the staging diff invalidates the `.cached()` dock.
-        cx.notify();
+        // snapshot and the staging diff invalidates the `.cached()` dock. The
+        // panes going away may also have been what the Dock badge counted.
+        self.notify_status_docks(cx);
     }
 }

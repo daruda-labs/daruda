@@ -29,7 +29,25 @@ use daruda_terminal::AttentionKind;
 #[path = "attention_windows.rs"]
 mod windows;
 #[cfg(windows)]
-pub use windows::{apply, is_app_active, system_idle_seconds};
+pub use windows::{apply, is_app_active, set_badge_count, system_idle_seconds};
+
+/// Show `count` on the Dock icon; `0` clears the badge. A no-op off the main
+/// thread, which `NSApplication` requires.
+#[cfg(target_os = "macos")]
+pub fn set_badge_count(count: usize) {
+    let Some(mtm) = objc2_foundation::MainThreadMarker::new() else {
+        return;
+    };
+    let label = (count > 0).then(|| objc2_foundation::NSString::from_str(&count.to_string()));
+    objc2_app_kit::NSApplication::sharedApplication(mtm)
+        .dockTile()
+        .setBadgeLabel(label.as_deref());
+}
+
+/// Linux has no badge every desktop honours (Unity's launcher API is the only
+/// one, and most docks ignore it), so the count stays in-app.
+#[cfg(target_os = "linux")]
+pub fn set_badge_count(_count: usize) {}
 
 /// True when the daruda window is currently the focused app.
 /// Used by notification gating: the "skip the focused pane" rule

@@ -91,7 +91,7 @@ impl Workspace {
                 let (sid, cwd, event, source) = dbg_fields;
                 self.log_lane_status_change(dbg_probe, &sid, &cwd, &event, source);
             }
-            cx.notify();
+            self.notify_status_docks(cx);
         }
     }
 }

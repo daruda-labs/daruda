@@ -72,8 +72,9 @@ impl Workspace {
                     // `pty_claude_bindings` change → `agent_active_session_id`
                     // in the left dock snapshot changes; a workspace render
                     // re-stages the dock and the staging diff invalidates the
-                    // `.cached()` left dock.
-                    cx.notify();
+                    // `.cached()` left dock. A bound session also counts
+                    // toward the Dock badge.
+                    self.notify_status_docks(cx);
                 }
             }
             PtyTrackerEvent::DeadSession { session_id } => {
@@ -91,7 +92,7 @@ impl Workspace {
                         // waiting for the cold-restore TTL pass.
                         let _ = sf::delete(&sf::lock_path_for(&dir, &session_id));
                     }
-                    cx.notify();
+                    self.notify_status_docks(cx);
                 }
             }
         }
