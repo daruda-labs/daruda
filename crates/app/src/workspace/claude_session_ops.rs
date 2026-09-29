@@ -395,11 +395,11 @@ impl Workspace {
             .last_pushed_notification
             .insert(file.session_id.clone(), file.timestamp);
 
-        // Focus gate — silence when daruda is foreground and the
-        // session's own pane is focused, mirroring `handle_view_event`.
+        // In-view gate — silence when daruda is foreground and the
+        // session's own pane is on screen, mirroring `handle_view_event`.
         if self.notifications.skip_focused_pane
             && crate::platform::attention::is_app_active()
-            && self.session_pane_is_focused(&file.session_id)
+            && self.session_pane_on_screen(&file.session_id)
         {
             return;
         }
@@ -407,16 +407,16 @@ impl Workspace {
         crate::platform::notifications::show(&title, &redact_home(&file.cwd));
     }
 
-    /// `true` when the pane bound to `session_id` is the focused pane.
+    /// `true` when the pane bound to `session_id` is on screen.
     /// Reverse-scans the bindings (debug-free, low frequency — fired
     /// once per blocking notification). `false` when the session has no
     /// live pane binding.
-    fn session_pane_is_focused(&self, session_id: &str) -> bool {
+    fn session_pane_on_screen(&self, session_id: &str) -> bool {
         self.claude
             .pty_claude_bindings
             .iter()
             .find(|(_, b)| b.session_id == session_id)
-            .is_some_and(|(pane_id, _)| *pane_id == self.active_runtime().focused_pane_id)
+            .is_some_and(|(pane_id, _)| self.pane_on_screen(*pane_id))
     }
 
     /// Fold a plan-rate fetch result into `key`'s cached outcome. Called by the

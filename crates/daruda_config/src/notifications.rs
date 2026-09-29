@@ -26,8 +26,10 @@ pub struct NotificationsConfig {
     /// no effect when `long_running_enabled` is false. iTerm2 default
     /// is 30s.
     pub long_running_threshold_secs: u64,
-    /// Suppress notifications for the pane that currently has focus so
-    /// foreground work does not bounce its own dock icon. Only applies
+    /// Suppress notifications for a pane on screen — every pane of the
+    /// visible tab's split, not only the focused one — so work the user is
+    /// watching does not bounce its own dock icon. The key keeps its name
+    /// for existing config files. Only applies
     /// when the daruda app itself is the active app — backgrounded
     /// notifications always surface regardless of which pane fired.
     pub skip_focused_pane: bool,

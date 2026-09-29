@@ -235,28 +235,28 @@ fn resolve_new_pane_cwd_core(
 }
 
 /// Whether to raise the notification: the channel must be enabled, and it is
-/// suppressed only when the app is foreground AND the firing pane is focused
-/// (the user is already looking at it). Mirrors the hook-notification gate.
+/// suppressed only when the app is foreground AND the firing pane is on
+/// screen (the user is already looking at it). Mirrors the hook-notification
+/// gate.
 fn should_notify_agent_event(
     enabled: bool,
-    skip_focused_pane: bool,
+    skip_pane_in_view: bool,
     app_active: bool,
-    is_focused_pane: bool,
+    pane_on_screen: bool,
 ) -> bool {
-    enabled && !(skip_focused_pane && app_active && is_focused_pane)
+    enabled && !(skip_pane_in_view && app_active && pane_on_screen)
 }
 
 impl Workspace {
     /// Show a desktop notification `body` for `pane_id`, gated by `enabled`
-    /// and the shared focus rule. A parked-lane pane never matches the
-    /// focused-pane id, so its completion/wait always fires.
+    /// and the shared in-view rule. A parked-lane pane is never on screen, so
+    /// its completion/wait always fires.
     fn notify_agent_pane(&self, pane_id: PaneId, enabled: bool, body: String, cx: &Context<Self>) {
-        let is_focused = self.active_runtime().focused_pane_id == pane_id;
         if !should_notify_agent_event(
             enabled,
             self.notifications.skip_focused_pane,
             crate::platform::attention::is_app_active(),
-            is_focused,
+            self.pane_on_screen(pane_id),
         ) {
             return;
         }

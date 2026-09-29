@@ -905,12 +905,12 @@ fn handle_view_event(
     use crate::surface::{constants::APP_NAME, strings as s};
     use daruda_terminal::{NotificationRequest, TerminalViewEvent};
 
-    // The focused pane is silenced only when daruda itself is the
+    // A pane in view is silenced only when daruda itself is the
     // foreground app — backgrounded notifications always surface
     // because the user, by definition, is not looking at the pane.
     let suppressed_by_focus = workspace.notifications.skip_focused_pane
         && platform::attention::is_app_active()
-        && workspace.active_runtime().focused_pane_id == pane_id;
+        && workspace.pane_on_screen(pane_id);
 
     match event {
         TerminalViewEvent::AttentionRequested(kind) => {
