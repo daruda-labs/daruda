@@ -265,16 +265,13 @@ impl Workspace {
         );
     }
 
-    /// Open a confirm dialog before discarding working-tree changes for a
-    /// file. The actual git operation runs in [`Self::do_discard_file`] only
-    /// after the user confirms. Both untracked deletes (`git clean -f`)
-    /// and tracked restores (`git restore`) are irreversible, so the
-    /// confirm body spells out which one the user is about to do.
+    /// Confirm, then put `path` back to HEAD — staged and unstaged changes
+    /// alike. The body says whether the file is restored or deleted: both
+    /// are irreversible.
     pub(in crate::workspace) fn on_discard_file(
         &mut self,
         lane_id: LaneId,
         path: PathBuf,
-        is_untracked: bool,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
@@ -288,8 +285,16 @@ impl Workspace {
         {
             return;
         }
+        let target = LaneRef {
+            project: self.active.project,
+            lane: lane_id,
+        };
         let filename = path.file_name_lossy();
-        let body = app_strings::git_confirm_discard_body(&filename, is_untracked);
+        let body = match self.discard_kind(target, &path) {
+            DiscardKind::Untracked => app_strings::git_confirm_discard_untracked_body(&filename),
+            DiscardKind::Added => app_strings::git_confirm_discard_added_body(&filename),
+            DiscardKind::Tracked => app_strings::git_confirm_discard_tracked_body(&filename),
+        };
 
         let weak = cx.weak_entity();
         open_confirm_dialog(
@@ -299,10 +304,8 @@ impl Workspace {
             ButtonVariant::Danger,
             move |_, _window, app_cx| {
                 if let Some(ws) = weak.upgrade() {
-                    let path = path.clone();
-                    ws.update(app_cx, |ws, cx| {
-                        ws.do_discard_file(lane_id, path, is_untracked, cx)
-                    });
+                    let pinned = vec![path.clone()];
+                    ws.update(app_cx, |ws, cx| ws.discard_changes(lane_id, pinned, cx));
                 }
             },
             window,
@@ -310,61 +313,94 @@ impl Workspace {
         );
     }
 
-    /// Discard working-tree changes for a file. For untracked files, deletes
-    /// the file (`git clean -f`); for tracked files, restores the last committed
-    /// state (`git restore`). Caller must have obtained user confirmation via
-    /// [`Self::on_discard_file`].
-    fn do_discard_file(
+    /// Confirm, then put every changed file in the lane back to HEAD and
+    /// delete its untracked files. Ignored files are left alone. The files
+    /// counted are the ones discarded: a file that appears while the dialog
+    /// is up is not among them.
+    pub(in crate::workspace) fn on_discard_all(
         &mut self,
         lane_id: LaneId,
-        path: PathBuf,
-        is_untracked: bool,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if self.git_lock_held(GitLock::Index) {
+            return;
+        }
+        let target = LaneRef {
+            project: self.active.project,
+            lane: lane_id,
+        };
+        let Some(status) = self.lane_git_worktree(target) else {
+            return;
+        };
+        let mut pinned: Vec<PathBuf> = Vec::new();
+        let mut untracked = 0;
+        for entry in status.staged.iter().chain(&status.unstaged) {
+            if pinned.contains(&entry.path) {
+                continue;
+            }
+            pinned.push(entry.path.clone());
+            if entry.x == '?' {
+                untracked += 1;
+            }
+        }
+        if pinned.is_empty() {
+            return;
+        }
+        let tracked = pinned.len() - untracked;
+        let weak = cx.weak_entity();
+        open_confirm_dialog(
+            app_strings::git_confirm_discard_all_title(),
+            app_strings::git_confirm_discard_all_body(tracked, untracked),
+            app_strings::git_confirm_discard_ok(),
+            ButtonVariant::Danger,
+            move |_, _window, app_cx| {
+                if let Some(ws) = weak.upgrade() {
+                    let pinned = pinned.clone();
+                    ws.update(app_cx, |ws, cx| ws.discard_changes(lane_id, pinned, cx));
+                }
+            },
+            window,
+            cx,
+        );
+    }
+
+    /// Put `pinned` back to HEAD. The status is read afresh off the UI thread,
+    /// so a path an agent committed or changed meanwhile is judged by what it
+    /// is now. The caller has already asked.
+    pub(in crate::workspace) fn discard_changes(
+        &mut self,
+        lane_id: LaneId,
+        pinned: Vec<PathBuf>,
         cx: &mut Context<Self>,
     ) {
         let target = LaneRef {
             project: self.active.project,
             lane: lane_id,
         };
-        let Some(wt) = self.lane_for(target) else {
+        let Some(wt_top) = self
+            .lane_for(target)
+            .and_then(|wt| wt.git_worktree_root())
+            .map(std::path::Path::to_path_buf)
+        else {
             return;
         };
-        let wt_path = wt.path.clone();
-        let repo_root = self.git_repo_root_for(target);
-        // `path` is a repo-root-relative pathspec (from git status output).
-        // `git restore`/`git clean` must run from the lane directory with a
-        // lane-relative path — use LanePaths for the two-step conversion.
-        let paths = crate::lane::paths::LanePaths {
-            wt_path: &wt_path,
-            repo_root: repo_root.as_deref(),
-        };
-        let abs = paths.from_git_status(&path);
-        let wt_rel_path = paths.to_wt_relative(&abs).unwrap_or(path);
-        let path_for_report = wt_path.clone();
-        let rel_for_report = wt_rel_path.clone();
+        if pinned.is_empty() {
+            return;
+        }
+        let path_for_report = wt_top.clone();
         self.spawn_locked_git_work(
             GitLock::Index,
             target,
             cx,
-            move || {
-                if is_untracked {
-                    crate::lane::git::git_clean_untracked(&wt_path, &wt_rel_path)
-                } else {
-                    crate::lane::git::git_discard_working(&wt_path, &wt_rel_path)
-                }
-            },
+            move || crate::lane::git::discard::discard(&wt_top, &pinned),
             move |ws, result, cx| {
                 if let Err(e) = result {
-                    let title = if is_untracked {
-                        app_strings::error_git_clean_failed()
-                    } else {
-                        app_strings::error_git_restore_failed()
-                    };
-                    let report = ErrorReport::new(title)
+                    let report = ErrorReport::new(app_strings::error_git_restore_failed())
                         .severity(ErrorSeverity::Error)
                         .from_error(&e)
                         .at(file!(), line!())
                         .with_context("path", redact_home(&path_for_report))
-                        .with_context("file", redact_home(&rel_for_report))
                         .dedup("git.discard")
                         .build();
                     ws.report_error(report, cx);
@@ -373,4 +409,34 @@ impl Workspace {
             },
         );
     }
+
+    /// What discarding `path` does, read off the panel's status — for the
+    /// confirm's wording only; the discard itself re-reads it. A merge
+    /// conflict sits in the unstaged set, so a staged addition is a real one.
+    fn discard_kind(&self, target: LaneRef, path: &std::path::Path) -> DiscardKind {
+        let Some(status) = self.lane_git_worktree(target) else {
+            return DiscardKind::Tracked;
+        };
+        if status
+            .staged
+            .iter()
+            .any(|e| e.path == path && matches!(e.x, 'A' | 'C'))
+        {
+            return DiscardKind::Added;
+        }
+        if status.unstaged.iter().any(|e| e.path == path && e.x == '?') {
+            return DiscardKind::Untracked;
+        }
+        DiscardKind::Tracked
+    }
+}
+
+/// How a discard confirm describes the file it acts on.
+enum DiscardKind {
+    /// Goes back to the committed version.
+    Tracked,
+    /// Added since the last commit, so it is deleted.
+    Added,
+    /// Never tracked, so it is deleted.
+    Untracked,
 }

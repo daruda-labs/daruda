@@ -306,20 +306,6 @@ pub(super) fn compute_dir_state(entries: &[UnifiedEntry]) -> DirStageState {
     }
 }
 
-/// Whether the "Discard Changes" context-menu item should be disabled
-/// for a row in the given (is_staged, has_unstaged) state.
-///
-/// `git restore` only touches the working tree, so a purely staged row
-/// (`M `, `A `, `D `) has nothing to discard without first unstaging —
-/// surface that by greying out the item. Untracked (`??`) routes to
-/// `git clean -f`, which always has something to discard, so the row is
-/// `is_staged = false, has_unstaged = true` and stays enabled. Combined
-/// states (`MM`, `MD`, `AM`, etc.) have a working-tree change to discard
-/// and stay enabled.
-pub(super) fn discard_disabled(is_staged: bool, has_unstaged: bool) -> bool {
-    is_staged && !has_unstaged
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -424,35 +410,6 @@ mod tests {
         let collapsed: HashSet<String> = HashSet::new();
         let paths = ordered_visible_paths(&status, &collapsed, &paths_for(root));
         assert_eq!(paths, vec![PathBuf::from("file.rs")]);
-    }
-
-    #[test]
-    fn discard_disabled_truth_table() {
-        // (is_staged, has_unstaged) → disabled
-        let cases = [
-            // `M ` / `A ` / `D ` — staged only, nothing in working tree.
-            ((true, false), true, "staged-only must be disabled"),
-            // `MM` / `MD` / `AM` — staged + working-tree change.
-            ((true, true), false, "staged + unstaged must be enabled"),
-            // ` M` — unstaged modification.
-            ((false, true), false, "unstaged-only must be enabled"),
-            // `??` — untracked, `has_unstaged = true` via porcelain Y='?'.
-            ((false, true), false, "untracked must be enabled"),
-            // Defensive: nothing on either side shouldn't happen, but
-            // it logically has nothing to discard either.
-            (
-                (false, false),
-                false,
-                "no changes — enabled (no-op fallback)",
-            ),
-        ];
-        for ((is_staged, has_unstaged), expected, msg) in cases {
-            assert_eq!(
-                discard_disabled(is_staged, has_unstaged),
-                expected,
-                "{msg}: ({is_staged}, {has_unstaged})"
-            );
-        }
     }
 
     /// A directory header owns a row of its own, so the cursor's position in

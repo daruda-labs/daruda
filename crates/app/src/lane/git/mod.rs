@@ -17,6 +17,7 @@
 
 pub mod base;
 mod command;
+pub mod discard;
 mod status;
 
 pub(crate) use command::git_command;
@@ -555,23 +556,6 @@ pub fn git_merge(target_path: &Path, source_branch: &str) -> Result<MergeOutcome
 /// restore the target lane to its pre-merge state.
 pub fn git_merge_abort(target_path: &Path) -> Result<(), GitError> {
     run_git(target_path, ["merge", "--abort"]).map(|_| ())
-}
-
-/// `git restore -- <path>` — discard working-tree changes for a tracked file.
-pub fn git_discard_working(wt_path: &Path, path: &Path) -> Result<(), GitError> {
-    let args: Vec<&OsStr> = vec![OsStr::new("restore"), OsStr::new("--"), path.as_os_str()];
-    run_git(wt_path, args).map(|_| ())
-}
-
-/// `git clean -f -- <path>` — delete an untracked file.
-pub fn git_clean_untracked(wt_path: &Path, path: &Path) -> Result<(), GitError> {
-    let args: Vec<&OsStr> = vec![
-        OsStr::new("clean"),
-        OsStr::new("-f"),
-        OsStr::new("--"),
-        path.as_os_str(),
-    ];
-    run_git(wt_path, args).map(|_| ())
 }
 
 // ----------------------------------------------------------------

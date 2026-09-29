@@ -19,7 +19,7 @@ use crate::workspace::main_area::tab_ops::OpenIntent;
 use crate::workspace::path_drag::PathDrag;
 use crate::workspace::root_menu::RootContextMenuExt as _;
 
-use super::unified_list::{UnifiedEntry, discard_disabled};
+use super::unified_list::UnifiedEntry;
 
 #[allow(clippy::too_many_arguments)]
 pub(super) fn unified_file_row(
@@ -39,8 +39,6 @@ pub(super) fn unified_file_row(
     let abs_path_for_open = wt_paths.from_git_status(&path);
     let abs_path_for_ctx_diff = abs_path_for_open.clone();
     let is_staged = entry.staged.is_some();
-    let has_unstaged = entry.unstaged.is_some();
-    let is_untracked = entry.unstaged.as_ref().is_some_and(|u| u.x == '?');
 
     // A range pane shows the same path from commits, not this row's change.
     let is_selected = selected.is_some_and(|(wt, p, source)| {
@@ -313,26 +311,16 @@ pub(super) fn unified_file_row(
                 ),
             );
 
-            menu.separator().item(
-                PopupMenuItem::new(app_strings::ctx_git_discard())
-                    .on_click(move |_, window, cx| {
+            menu.separator()
+                .item(PopupMenuItem::new(app_strings::ctx_git_discard()).on_click(
+                    move |_, window, cx| {
                         if let Some(w) = ws_discard.upgrade() {
                             w.update(cx, |ws, cx| {
-                                ws.on_discard_file(
-                                    lane_id,
-                                    path_discard.clone(),
-                                    is_untracked,
-                                    window,
-                                    cx,
-                                )
+                                ws.on_discard_file(lane_id, path_discard.clone(), window, cx)
                             });
                         }
-                    })
-                    // Discard is dangerous — disable only when the file has no
-                    // working-tree changes to discard (purely staged, like `M `).
-                    // For `MM` (staged + unstaged) and untracked, leave it enabled.
-                    .disabled(discard_disabled(is_staged, has_unstaged)),
-            )
+                    },
+                ))
         })
         .into_any_element()
 }

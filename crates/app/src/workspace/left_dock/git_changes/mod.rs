@@ -313,7 +313,7 @@ fn view_header(
 }
 
 // ----------------------------------------------------------------
-// Summary bar — file counts + Stage All / Unstage All toggle
+// Summary bar — file counts + Discard all + Stage All / Unstage All toggle
 // ----------------------------------------------------------------
 
 fn summary_bar(
@@ -351,6 +351,36 @@ fn summary_bar(
         app_strings::git_stage_all()
     };
 
+    let colors = (toggle_inflight, toggle_idle, toggle_hover);
+    let discard_ws = workspace.clone();
+    let discard_all = summary_action(
+        "git-discard-all",
+        app_strings::git_discard_all(),
+        in_flight,
+        colors,
+        cx.listener(move |_dock, _: &MouseDownEvent, window, cx| {
+            if let Some(ws) = discard_ws.upgrade() {
+                ws.update(cx, |ws, cx| ws.on_discard_all(lane_id, window, cx));
+            }
+        }),
+    );
+    let stage_toggle = summary_action(
+        "git-stage-toggle",
+        btn_label,
+        in_flight,
+        colors,
+        cx.listener(move |_dock, _: &MouseDownEvent, _window, cx| {
+            let Some(ws) = workspace.upgrade() else {
+                return;
+            };
+            if all_staged {
+                ws.update(cx, |ws, cx| ws.unstage_all(lane_id, cx));
+            } else {
+                ws.update(cx, |ws, cx| ws.stage_all(lane_id, cx));
+            }
+        }),
+    );
+
     div()
         .flex()
         .flex_row()
@@ -363,31 +393,32 @@ fn summary_bar(
         .child(label)
         .child(
             div()
-                .id("git-stage-toggle")
-                .text_color(if in_flight {
-                    toggle_inflight
-                } else {
-                    toggle_idle
-                })
-                .when(!in_flight, move |d| {
-                    d.cursor_pointer()
-                        .hover(move |d| d.text_color(toggle_hover))
-                        .on_mouse_down(
-                            MouseButton::Left,
-                            cx.listener(move |_dock, _: &MouseDownEvent, _window, cx| {
-                                let Some(ws) = workspace.upgrade() else {
-                                    return;
-                                };
-                                if all_staged {
-                                    ws.update(cx, |ws, cx| ws.unstage_all(lane_id, cx));
-                                } else {
-                                    ws.update(cx, |ws, cx| ws.stage_all(lane_id, cx));
-                                }
-                            }),
-                        )
-                })
-                .child(btn_label),
+                .flex()
+                .flex_row()
+                .gap(px(theme::GIT_HEADER_PAD_X))
+                .child(discard_all)
+                .child(stage_toggle),
         )
+}
+
+/// One of the summary bar's text buttons — muted, inert while a git
+/// operation runs.
+fn summary_action(
+    id: &'static str,
+    label: String,
+    in_flight: bool,
+    (inflight, idle, hover): (gpui::Hsla, gpui::Hsla, gpui::Hsla),
+    on_press: impl Fn(&MouseDownEvent, &mut gpui::Window, &mut gpui::App) + 'static,
+) -> impl IntoElement {
+    div()
+        .id(id)
+        .text_color(if in_flight { inflight } else { idle })
+        .when(!in_flight, move |d| {
+            d.cursor_pointer()
+                .hover(move |d| d.text_color(hover))
+                .on_mouse_down(MouseButton::Left, on_press)
+        })
+        .child(label)
 }
 
 // ----------------------------------------------------------------

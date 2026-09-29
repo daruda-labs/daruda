@@ -102,9 +102,12 @@ impl Workspace {
         cx.notify();
         crate::workspace::spawn_helpers::spawn_bg_work_and_mutate(cx, bg, move |ws, result, cx| {
             ws.set_git_lock(lock, false, cx);
-            let succeeded = result.is_ok();
+            // An index op can fail half-applied (a batch that removed some
+            // files before a later path failed), so its view is re-read either
+            // way; a failed repo op moved nothing to re-read.
+            let reread = result.is_ok() || matches!(lock, GitLock::Index);
             on_result(ws, result, cx);
-            if succeeded {
+            if reread {
                 ws.invalidate_after_git_work(lock, target, cx);
             }
         })

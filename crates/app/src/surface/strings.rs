@@ -3584,12 +3584,32 @@ pub fn git_confirm_discard_title() -> String {
 pub fn git_confirm_discard_ok() -> String {
     rust_i18n::t!("git.confirm_discard_ok").into_owned()
 }
-pub fn git_confirm_discard_body(filename: &str, is_untracked: bool) -> String {
-    if is_untracked {
-        rust_i18n::t!("git.confirm_discard_untracked_body", filename = filename).into_owned()
-    } else {
-        rust_i18n::t!("git.confirm_discard_tracked_body", filename = filename).into_owned()
-    }
+/// Title of the confirm "Discard all" raises.
+pub fn git_confirm_discard_all_title() -> String {
+    rust_i18n::t!("git.confirm_discard_all_title").into_owned()
+}
+/// Its body: how many tracked files go back to HEAD, how many untracked
+/// files are deleted.
+pub fn git_confirm_discard_all_body(tracked: usize, untracked: usize) -> String {
+    rust_i18n::t!(
+        "git.confirm_discard_all_body",
+        tracked = tracked,
+        untracked = untracked
+    )
+    .into_owned()
+}
+/// The Git panel summary bar's discard-everything button.
+pub fn git_discard_all() -> String {
+    rust_i18n::t!("git.discard_all").into_owned()
+}
+pub fn git_confirm_discard_tracked_body(filename: &str) -> String {
+    rust_i18n::t!("git.confirm_discard_tracked_body", filename = filename).into_owned()
+}
+pub fn git_confirm_discard_added_body(filename: &str) -> String {
+    rust_i18n::t!("git.confirm_discard_added_body", filename = filename).into_owned()
+}
+pub fn git_confirm_discard_untracked_body(filename: &str) -> String {
+    rust_i18n::t!("git.confirm_discard_untracked_body", filename = filename).into_owned()
 }
 
 /// Single-conflict banner shown at the top of the Git Changes view when
