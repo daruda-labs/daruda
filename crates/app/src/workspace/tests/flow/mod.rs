@@ -119,19 +119,15 @@ async fn a_flow_on_a_lane_with_an_unusable_host_is_refused_not_run_locally(
 /// command is overridden with raw JSON hits it.
 #[gpui::test]
 async fn a_flow_naming_an_unlaunchable_agent_is_refused_with_the_reason(cx: &mut TestAppContext) {
-    let json_stdio_with_env = daruda_config::AgentEntry::Custom(daruda_config::AgentDefinition {
-        id: "claude".to_string(),
-        name: "Claude".to_string(),
-        launch: daruda_config::AgentLaunch::Raw(
-            r#"{"command":"/opt/adapters/acp","args":[]}"#.to_string(),
-        ),
-        default_mode: None,
-        default_model: None,
-        fold_mode: None,
-        tail_window: None,
-        tail_window_calls: None,
-        display_filter: None,
+    let json_stdio_with_env = daruda_config::AgentEntry::custom(daruda_config::AgentDefinition {
         env: Some(vec![("CODEX_CONFIG".to_string(), "{}".to_string())]),
+        ..daruda_config::AgentDefinition::new(
+            "claude".to_string(),
+            "Claude".to_string(),
+            daruda_config::AgentLaunch::Raw(
+                r#"{"command":"/opt/adapters/acp","args":[]}"#.to_string(),
+            ),
+        )
     });
     let (_lane, ws, flow_path, _wh) =
         workspace_with_a_flow_and_agents(cx, ONE_AGENT, vec![json_stdio_with_env]);

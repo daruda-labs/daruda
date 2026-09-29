@@ -688,12 +688,9 @@ fn validate_collects_agent_catalog(cx: &mut TestAppContext) {
             vec![
                 // The built-in default keeps its own stable id — never promoted
                 // to the `claude-acp` preset it shares a command with.
-                daruda_config::AgentEntry::Custom(daruda_config::AgentDefinition::claude_default()),
+                daruda_config::AgentEntry::custom(daruda_config::AgentDefinition::claude_default()),
                 // The added preset is stored as a reference, not a copy.
-                daruda_config::AgentEntry::Preset {
-                    preset: "codex-acp".to_string(),
-                    overrides: daruda_config::PresetOverrides::default(),
-                },
+                daruda_config::AgentEntry::preset("codex-acp".to_string()),
             ]
         );
         assert_eq!(
@@ -872,10 +869,7 @@ fn adding_a_preset_from_the_dropdown_collects_a_reference(cx: &mut TestAppContex
         let cfg = w.validate(cx).expect("agent catalog must validate");
         assert_eq!(
             cfg.agents[1],
-            daruda_config::AgentEntry::Preset {
-                preset: "gemini".to_string(),
-                overrides: daruda_config::PresetOverrides::default(),
-            }
+            daruda_config::AgentEntry::preset("gemini".to_string())
         );
         // Nothing was edited, so the row reports no override to diff.
         assert!(
@@ -901,9 +895,9 @@ fn editing_one_field_of_a_preset_row_overrides_only_that_field(cx: &mut TestAppC
         let cfg = w.validate(cx).expect("agent catalog must validate");
         assert_eq!(
             cfg.agents[1],
-            daruda_config::AgentEntry::Preset {
-                preset: "gemini".to_string(),
-                overrides: daruda_config::PresetOverrides {
+            daruda_config::AgentEntry::preset_with(
+                "gemini".to_string(),
+                daruda_config::PresetOverrides {
                     env: None,
                     name: Some("My Gemini".to_string()),
                     command: None,
@@ -913,8 +907,8 @@ fn editing_one_field_of_a_preset_row_overrides_only_that_field(cx: &mut TestAppC
                     tail_window: None,
                     tail_window_calls: None,
                     display_filter: None,
-                },
-            }
+                }
+            )
         );
         let provenance = w.agent_editable_row(1).unwrap().provenance(cx);
         assert!(provenance.is_overridden());
@@ -946,21 +940,14 @@ fn switching_a_preset_row_to_ssh_detaches_it_into_a_custom_entry(cx: &mut TestAp
         };
         assert_eq!(
             cfg.agents[1],
-            daruda_config::AgentEntry::Custom(daruda_config::AgentDefinition {
-                id: base.id,
-                name: base.name,
-                launch: daruda_config::AgentLaunch::Ssh {
+            daruda_config::AgentEntry::custom(daruda_config::AgentDefinition::new(
+                base.id,
+                base.name,
+                daruda_config::AgentLaunch::Ssh {
                     adapter_command: command,
                     host: "vm-work".to_string(),
-                },
-                default_mode: None,
-                default_model: None,
-                fold_mode: None,
-                tail_window: None,
-                tail_window_calls: None,
-                display_filter: None,
-                env: None,
-            })
+                }
+            ))
         );
     });
 }
@@ -971,21 +958,14 @@ fn switching_a_preset_row_to_ssh_detaches_it_into_a_custom_entry(cx: &mut TestAp
 /// byte-for-byte, untouched.
 #[gpui::test]
 fn an_existing_ssh_row_round_trips_unchanged_through_save(cx: &mut TestAppContext) {
-    let ssh_entry = daruda_config::AgentEntry::Custom(daruda_config::AgentDefinition {
-        id: "remote-claude".to_string(),
-        name: "Remote Claude".to_string(),
-        launch: daruda_config::AgentLaunch::Ssh {
+    let ssh_entry = daruda_config::AgentEntry::custom(daruda_config::AgentDefinition::new(
+        "remote-claude".to_string(),
+        "Remote Claude".to_string(),
+        daruda_config::AgentLaunch::Ssh {
             adapter_command: "npx -y @agentclientprotocol/claude-agent-acp@latest".to_string(),
             host: "vm-work".to_string(),
         },
-        default_mode: None,
-        default_model: None,
-        fold_mode: None,
-        tail_window: None,
-        tail_window_calls: None,
-        display_filter: None,
-        env: None,
-    });
+    ));
     let config = daruda_config::Config {
         agents: vec![ssh_entry.clone()],
         ..Default::default()
@@ -1000,21 +980,14 @@ fn an_existing_ssh_row_round_trips_unchanged_through_save(cx: &mut TestAppContex
 /// Same as the `Ssh` case, for `Docker`.
 #[gpui::test]
 fn an_existing_docker_row_round_trips_unchanged_through_save(cx: &mut TestAppContext) {
-    let docker_entry = daruda_config::AgentEntry::Custom(daruda_config::AgentDefinition {
-        id: "remote-codex".to_string(),
-        name: "Remote Codex".to_string(),
-        launch: daruda_config::AgentLaunch::Docker {
+    let docker_entry = daruda_config::AgentEntry::custom(daruda_config::AgentDefinition::new(
+        "remote-codex".to_string(),
+        "Remote Codex".to_string(),
+        daruda_config::AgentLaunch::Docker {
             adapter_command: "npx -y @agentclientprotocol/codex-acp@latest".to_string(),
             container: "dev-1".to_string(),
         },
-        default_mode: None,
-        default_model: None,
-        fold_mode: None,
-        tail_window: None,
-        tail_window_calls: None,
-        display_filter: None,
-        env: None,
-    });
+    ));
     let config = daruda_config::Config {
         agents: vec![docker_entry.clone()],
         ..Default::default()
@@ -1036,21 +1009,19 @@ fn hand_tuned_transcript_config() -> (Vec<String>, Vec<String>, daruda_config::C
     let fold_mode = vec!["summary".to_string(), "last.thinking=expanded".to_string()];
     let display_filter = vec!["prose".to_string(), "tool_read".to_string()];
     let tuned = daruda_config::AgentDefinition {
-        id: "hand-tuned-claude".to_string(),
-        name: "Hand Tuned".to_string(),
-        launch: daruda_config::AgentLaunch::Raw(
-            "npx -y @agentclientprotocol/claude-agent-acp@latest".to_string(),
-        ),
-        default_mode: None,
-        default_model: None,
         fold_mode: Some(fold_mode.clone()),
         tail_window: Some(12),
-        tail_window_calls: None,
         display_filter: Some(display_filter.clone()),
-        env: None,
+        ..daruda_config::AgentDefinition::new(
+            "hand-tuned-claude".to_string(),
+            "Hand Tuned".to_string(),
+            daruda_config::AgentLaunch::Raw(
+                "npx -y @agentclientprotocol/claude-agent-acp@latest".to_string(),
+            ),
+        )
     };
     let config = daruda_config::Config {
-        agents: vec![daruda_config::AgentEntry::Custom(tuned)],
+        agents: vec![daruda_config::AgentEntry::custom(tuned)],
         ..Default::default()
     };
     (fold_mode, display_filter, config)
@@ -1218,7 +1189,7 @@ fn handing_an_axis_back_writes_no_key(cx: &mut TestAppContext) {
 #[gpui::test]
 fn a_row_that_wrote_no_key_reopens_on_the_built_in_value(cx: &mut TestAppContext) {
     let config = daruda_config::Config {
-        agents: vec![daruda_config::AgentEntry::Custom(
+        agents: vec![daruda_config::AgentEntry::custom(
             daruda_config::AgentDefinition::claude_default(),
         )],
         ..daruda_config::Config::default()
@@ -1385,19 +1356,16 @@ fn an_untouched_axis_keeps_tokens_this_build_cannot_state(cx: &mut TestAppContex
     let stored_fold = vec!["summary".to_string(), "last.notebook=collapsed".to_string()];
     let stored_filter = vec!["prose".to_string(), "brand_new_facet".to_string()];
     let tuned = daruda_config::AgentDefinition {
-        id: "forward".to_string(),
-        name: "Forward".to_string(),
-        launch: daruda_config::AgentLaunch::Raw("npx -y some-acp".to_string()),
-        default_mode: None,
-        default_model: None,
         fold_mode: Some(stored_fold.clone()),
-        tail_window: None,
-        tail_window_calls: None,
         display_filter: Some(stored_filter.clone()),
-        env: None,
+        ..daruda_config::AgentDefinition::new(
+            "forward".to_string(),
+            "Forward".to_string(),
+            daruda_config::AgentLaunch::Raw("npx -y some-acp".to_string()),
+        )
     };
     let config = daruda_config::Config {
-        agents: vec![daruda_config::AgentEntry::Custom(tuned)],
+        agents: vec![daruda_config::AgentEntry::custom(tuned)],
         ..Default::default()
     };
     let (_wh, win) = build_window_with_config(cx, config);
@@ -1475,13 +1443,13 @@ fn a_transcript_pick_on_a_preset_row_reports_the_preset_value(cx: &mut TestAppCo
         let cfg = w.validate(cx).expect("agent catalog must validate");
         assert_eq!(
             cfg.agents[1],
-            daruda_config::AgentEntry::Preset {
-                preset: "gemini".to_string(),
-                overrides: daruda_config::PresetOverrides {
+            daruda_config::AgentEntry::preset_with(
+                "gemini".to_string(),
+                daruda_config::PresetOverrides {
                     fold_mode: Some(vec!["summary".to_string()]),
                     ..daruda_config::PresetOverrides::default()
-                },
-            },
+                }
+            ),
             "the picked axis is an override; the untouched ones stay unset"
         );
     });
@@ -1497,25 +1465,21 @@ fn an_agents_environment_survives_a_save_that_never_touched_it(cx: &mut TestAppC
         r#"{"features":{"multi_agent_v2":true}}"#.to_string(),
     )];
     let stated = daruda_config::AgentDefinition {
-        id: "stated".to_string(),
-        name: "Stated".to_string(),
-        launch: daruda_config::AgentLaunch::Raw("npx -y some-acp".to_string()),
-        default_mode: None,
-        default_model: None,
-        fold_mode: None,
-        tail_window: None,
-        tail_window_calls: None,
-        display_filter: None,
         env: Some(env.clone()),
+        ..daruda_config::AgentDefinition::new(
+            "stated".to_string(),
+            "Stated".to_string(),
+            daruda_config::AgentLaunch::Raw("npx -y some-acp".to_string()),
+        )
     };
     let config = daruda_config::Config {
-        agents: vec![daruda_config::AgentEntry::Custom(stated.clone())],
+        agents: vec![daruda_config::AgentEntry::custom(stated.clone())],
         ..Default::default()
     };
     let (_wh, win) = build_window_with_config(cx, config);
     win.read_with(cx, |w, cx| {
         let cfg = w.validate(cx).expect("agent catalog must validate");
-        assert_eq!(cfg.agents, vec![daruda_config::AgentEntry::Custom(stated)]);
+        assert_eq!(cfg.agents, vec![daruda_config::AgentEntry::custom(stated)]);
         assert_eq!(cfg.resolved_agents()[0].env, Some(env));
     });
 }
@@ -1540,10 +1504,7 @@ fn clearing_a_preset_shipping_environment_opts_the_row_out(cx: &mut TestAppConte
         let cfg = w.validate(cx).expect("agent catalog must validate");
         assert_eq!(
             cfg.agents[1],
-            daruda_config::AgentEntry::Preset {
-                preset: "codex-acp".to_string(),
-                overrides: daruda_config::PresetOverrides::default(),
-            },
+            daruda_config::AgentEntry::preset("codex-acp".to_string()),
             "the untouched row states nothing of its own"
         );
         assert_eq!(cfg.resolved_agents()[1].env.as_ref(), Some(&preset_env));
@@ -1560,13 +1521,13 @@ fn clearing_a_preset_shipping_environment_opts_the_row_out(cx: &mut TestAppConte
         let cfg = w.validate(cx).expect("agent catalog must validate");
         assert_eq!(
             cfg.agents[1],
-            daruda_config::AgentEntry::Preset {
-                preset: "codex-acp".to_string(),
-                overrides: daruda_config::PresetOverrides {
+            daruda_config::AgentEntry::preset_with(
+                "codex-acp".to_string(),
+                daruda_config::PresetOverrides {
                     env: Some(Vec::new()),
                     ..daruda_config::PresetOverrides::default()
-                },
-            },
+                }
+            ),
             "an emptied field is an explicit clear, not a return to the preset"
         );
         assert_eq!(
@@ -1672,16 +1633,16 @@ fn a_typed_environment_overrides_and_an_empty_one_stays_unstated(cx: &mut TestAp
         let cfg = w.validate(cx).expect("agent catalog must validate");
         assert_eq!(
             cfg.agents[1],
-            daruda_config::AgentEntry::Preset {
-                preset: "gemini".to_string(),
-                overrides: daruda_config::PresetOverrides {
+            daruda_config::AgentEntry::preset_with(
+                "gemini".to_string(),
+                daruda_config::PresetOverrides {
                     env: Some(vec![
                         ("B".to_string(), "two words".to_string()),
                         ("RUST_LOG".to_string(), "debug".to_string()),
                     ]),
                     ..daruda_config::PresetOverrides::default()
-                },
-            }
+                }
+            )
         );
         assert!(
             w.agent_editable_row(1)
@@ -1853,19 +1814,16 @@ fn an_environment_name_that_could_break_out_of_the_shell_blocks_the_save(cx: &mu
 #[gpui::test]
 fn a_transcript_value_the_controls_state_loads_onto_them(cx: &mut TestAppContext) {
     let stated = daruda_config::AgentDefinition {
-        id: "stated".to_string(),
-        name: "Stated".to_string(),
-        launch: daruda_config::AgentLaunch::Raw("npx -y some-acp".to_string()),
-        default_mode: None,
-        default_model: None,
         fold_mode: Some(vec!["summary".to_string()]),
         tail_window: Some(5),
-        tail_window_calls: None,
-        display_filter: None,
-        env: None,
+        ..daruda_config::AgentDefinition::new(
+            "stated".to_string(),
+            "Stated".to_string(),
+            daruda_config::AgentLaunch::Raw("npx -y some-acp".to_string()),
+        )
     };
     let config = daruda_config::Config {
-        agents: vec![daruda_config::AgentEntry::Custom(stated)],
+        agents: vec![daruda_config::AgentEntry::custom(stated)],
         ..Default::default()
     };
     let (wh, win) = build_window_with_config(cx, config);
@@ -1931,20 +1889,13 @@ fn a_custom_row_with_a_missing_command_warns_but_still_saves(cx: &mut TestAppCon
     cx.update_window(wh.into(), |_, window, cx| {
         win.update(cx, |w, cx| {
             w.add_agent_row(
-                daruda_config::AgentDefinition {
-                    id: "local-cli".to_string(),
-                    name: "Local CLI".to_string(),
-                    launch: daruda_config::AgentLaunch::Raw(
+                daruda_config::AgentDefinition::new(
+                    "local-cli".to_string(),
+                    "Local CLI".to_string(),
+                    daruda_config::AgentLaunch::Raw(
                         "daruda-settings-path-warning-test-missing-binary acp".to_string(),
                     ),
-                    default_mode: None,
-                    default_model: None,
-                    fold_mode: None,
-                    tail_window: None,
-                    tail_window_calls: None,
-                    display_filter: None,
-                    env: None,
-                },
+                ),
                 None,
                 window,
                 cx,
@@ -2066,12 +2017,9 @@ fn a_launchable_preset_shows_no_install_guidance(cx: &mut TestAppContext) {
 /// part of the user's config on an unrelated settings change.
 #[gpui::test]
 fn validate_preserves_unresolved_agent_catalog_entries(cx: &mut TestAppContext) {
-    let unresolved = daruda_config::AgentEntry::Preset {
-        preset: "retired-agent".to_string(),
-        overrides: daruda_config::PresetOverrides::default(),
-    };
+    let unresolved = daruda_config::AgentEntry::preset("retired-agent".to_string());
     let claude =
-        daruda_config::AgentEntry::Custom(daruda_config::AgentDefinition::claude_default());
+        daruda_config::AgentEntry::custom(daruda_config::AgentDefinition::claude_default());
     let config = daruda_config::Config {
         // Unresolved first, editable second.
         agents: vec![unresolved.clone(), claude.clone()],
@@ -2098,10 +2046,7 @@ fn validate_preserves_unresolved_agent_catalog_entries(cx: &mut TestAppContext) 
     // of any unrelated setting must go through. `preset = "cursor"` reaches
     // this with a preset daruda ships today — the manual-install ones resolve
     // to nothing.
-    let needs_install = daruda_config::AgentEntry::Preset {
-        preset: "cursor".to_string(),
-        overrides: daruda_config::PresetOverrides::default(),
-    };
+    let needs_install = daruda_config::AgentEntry::preset("cursor".to_string());
     let config = daruda_config::Config {
         agents: vec![needs_install.clone()],
         ..daruda_config::Config::default()
@@ -2132,14 +2077,11 @@ fn validate_preserves_unresolved_agent_catalog_entries(cx: &mut TestAppContext) 
 /// that sits *after* a non-editable entry must not drop the wrong entry.
 #[gpui::test]
 fn removing_a_row_after_an_unresolved_entry_drops_the_right_one(cx: &mut TestAppContext) {
-    let unresolved = daruda_config::AgentEntry::Preset {
-        preset: "retired-agent".to_string(),
-        overrides: daruda_config::PresetOverrides::default(),
-    };
+    let unresolved = daruda_config::AgentEntry::preset("retired-agent".to_string());
     let config = daruda_config::Config {
         agents: vec![
             unresolved.clone(),
-            daruda_config::AgentEntry::Custom(daruda_config::AgentDefinition::claude_default()),
+            daruda_config::AgentEntry::custom(daruda_config::AgentDefinition::claude_default()),
         ],
         ..daruda_config::Config::default()
     };
@@ -2168,8 +2110,8 @@ fn validate_rejects_agent_catalog_errors(cx: &mut TestAppContext) {
 
     let config = daruda_config::Config {
         agents: vec![
-            daruda_config::AgentEntry::Custom(daruda_config::AgentDefinition::codex_default()),
-            daruda_config::AgentEntry::Custom(daruda_config::AgentDefinition::codex_default()),
+            daruda_config::AgentEntry::custom(daruda_config::AgentDefinition::codex_default()),
+            daruda_config::AgentEntry::custom(daruda_config::AgentDefinition::codex_default()),
         ],
         ..daruda_config::Config::default()
     };
@@ -2323,21 +2265,16 @@ fn changing_a_rows_command_invalidates_cached_vocabulary_from_the_old_adapter(
 /// Settings would silently drop it on the next save.
 #[gpui::test]
 fn a_saved_value_the_vocabulary_does_not_list_is_kept(cx: &mut TestAppContext) {
-    let entry = daruda_config::AgentEntry::Custom(daruda_config::AgentDefinition {
-        // Not a preset id: `AgentEntry::for_definition` promotes a definition
-        // whose id names a known preset, which would make this a Preset entry.
-        id: "hand-written".to_string(),
-        name: "Hand Written".to_string(),
-        launch: daruda_config::AgentLaunch::Raw(
-            "npx -y @google/gemini-cli@latest --acp".to_string(),
-        ),
+    let entry = daruda_config::AgentEntry::custom(daruda_config::AgentDefinition {
         default_mode: Some("legacy-mode".to_string()),
         default_model: Some("legacy-model".to_string()),
-        fold_mode: None,
-        tail_window: None,
-        tail_window_calls: None,
-        display_filter: None,
-        env: None,
+        ..daruda_config::AgentDefinition::new(
+            // Not a preset id: `AgentEntry::for_definition` promotes a definition
+            // whose id names a known preset, which would make this a Preset entry.
+            "hand-written".to_string(),
+            "Hand Written".to_string(),
+            daruda_config::AgentLaunch::Raw("npx -y @google/gemini-cli@latest --acp".to_string()),
+        )
     });
     let config = daruda_config::Config {
         agents: vec![entry.clone()],
@@ -2511,10 +2448,10 @@ async fn the_orchestrator_pickers_follow_a_change_made_while_settings_is_open(
     let added: SharedString = "codex-acp".into();
     assert!(!can_pick(&added, |w| &w.orchestrator_agent_select, cx));
     let with_codex = daruda_config::Config {
-        agents: vec![daruda_config::AgentEntry::Preset {
-            preset: "codex-acp".to_string(),
-            overrides: Default::default(),
-        }],
+        agents: vec![daruda_config::AgentEntry::preset_with(
+            "codex-acp".to_string(),
+            Default::default(),
+        )],
         ..daruda_config::Config::default()
     };
     cx.update(|cx| {

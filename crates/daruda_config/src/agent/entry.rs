@@ -52,6 +52,24 @@ pub struct PresetOverrides {
 }
 
 impl AgentEntry {
+    /// A reference to preset `preset` that follows it in every field.
+    pub fn preset(preset: impl Into<String>) -> Self {
+        Self::preset_with(preset, PresetOverrides::default())
+    }
+
+    /// A reference to preset `preset` carrying `overrides`.
+    pub fn preset_with(preset: impl Into<String>, overrides: PresetOverrides) -> Self {
+        AgentEntry::Preset {
+            preset: preset.into(),
+            overrides,
+        }
+    }
+
+    /// A self-contained entry for `definition`.
+    pub fn custom(definition: AgentDefinition) -> Self {
+        AgentEntry::Custom(definition)
+    }
+
     /// The runnable definition this entry stands for, or `None` when the preset
     /// it references carries no launch command — an id daruda no longer knows,
     /// or one that still needs a manual install.
@@ -324,30 +342,17 @@ mod tests {
     }
 
     fn custom(id: &str, command: &str) -> AgentDefinition {
-        AgentDefinition {
-            id: id.to_string(),
-            name: id.to_string(),
-            launch: AgentLaunch::Raw(command.to_string()),
-            default_mode: None,
-            default_model: None,
-            fold_mode: None,
-            tail_window: None,
-            tail_window_calls: None,
-            display_filter: None,
-            env: None,
-        }
+        AgentDefinition::new(
+            id.to_string(),
+            id.to_string(),
+            AgentLaunch::Raw(command.to_string()),
+        )
     }
 
     #[test]
     fn a_bare_preset_reference_resolves_to_the_preset() {
         let entry: AgentEntry = toml::from_str("preset = \"codex-acp\"").expect("deserialize");
-        assert_eq!(
-            entry,
-            AgentEntry::Preset {
-                preset: "codex-acp".to_string(),
-                overrides: PresetOverrides::default(),
-            }
-        );
+        assert_eq!(entry, AgentEntry::preset("codex-acp".to_string()));
         assert_eq!(entry.resolve(), Some(codex_preset()));
     }
 
@@ -376,13 +381,10 @@ mod tests {
     #[test]
     fn a_reference_and_its_overrides_round_trip_through_toml() {
         for entry in [
-            AgentEntry::Preset {
-                preset: "codex-acp".to_string(),
-                overrides: PresetOverrides::default(),
-            },
-            AgentEntry::Preset {
-                preset: "gemini".to_string(),
-                overrides: PresetOverrides {
+            AgentEntry::preset("codex-acp".to_string()),
+            AgentEntry::preset_with(
+                "gemini".to_string(),
+                PresetOverrides {
                     env: None,
                     name: Some("Gemini (pinned)".to_string()),
                     command: Some("npx -y @google/gemini-cli@0.9.0 --acp".to_string()),
@@ -393,22 +395,19 @@ mod tests {
                     tail_window_calls: None,
                     display_filter: None,
                 },
-            },
-            AgentEntry::Custom(custom("hermes", "hermes acp")),
-            AgentEntry::Custom(AgentDefinition {
-                id: "remote".to_string(),
-                name: "Remote".to_string(),
-                launch: AgentLaunch::Ssh {
-                    adapter_command: "npx -y some-acp".to_string(),
-                    host: "vm-work".to_string(),
-                },
+            ),
+            AgentEntry::custom(custom("hermes", "hermes acp")),
+            AgentEntry::custom(AgentDefinition {
                 default_mode: Some("plan".to_string()),
                 default_model: Some("claude-opus-4".to_string()),
-                fold_mode: None,
-                tail_window: None,
-                tail_window_calls: None,
-                display_filter: None,
-                env: None,
+                ..AgentDefinition::new(
+                    "remote".to_string(),
+                    "Remote".to_string(),
+                    AgentLaunch::Ssh {
+                        adapter_command: "npx -y some-acp".to_string(),
+                        host: "vm-work".to_string(),
+                    },
+                )
             }),
         ] {
             let toml_str = toml::to_string(&entry).expect("serialize");
@@ -419,11 +418,8 @@ mod tests {
 
     #[test]
     fn a_bare_reference_writes_only_the_preset_key() {
-        let toml_str = toml::to_string(&AgentEntry::Preset {
-            preset: "codex-acp".to_string(),
-            overrides: PresetOverrides::default(),
-        })
-        .expect("serialize");
+        let toml_str =
+            toml::to_string(&AgentEntry::preset("codex-acp".to_string())).expect("serialize");
         assert_eq!(toml_str, "preset = \"codex-acp\"\n");
     }
 
@@ -456,13 +452,7 @@ mod tests {
             preset.id, preset.name, command
         );
         let entry: AgentEntry = toml::from_str(&toml_str).expect("deserialize");
-        assert_eq!(
-            entry,
-            AgentEntry::Preset {
-                preset: "codex-acp".to_string(),
-                overrides: PresetOverrides::default(),
-            }
-        );
+        assert_eq!(entry, AgentEntry::preset("codex-acp".to_string()));
         assert_eq!(entry.resolve(), Some(preset));
     }
 
@@ -479,9 +469,9 @@ mod tests {
         let entry: AgentEntry = toml::from_str(&toml_str).expect("deserialize");
         assert_eq!(
             entry,
-            AgentEntry::Preset {
-                preset: "codex-acp".to_string(),
-                overrides: PresetOverrides {
+            AgentEntry::preset_with(
+                "codex-acp".to_string(),
+                PresetOverrides {
                     env: None,
                     name: Some("My Codex".to_string()),
                     command: None,
@@ -491,8 +481,8 @@ mod tests {
                     tail_window: None,
                     tail_window_calls: None,
                     display_filter: None,
-                },
-            }
+                }
+            )
         );
     }
 
@@ -509,9 +499,9 @@ mod tests {
         let entry: AgentEntry = toml::from_str(&toml_str).expect("deserialize");
         assert_eq!(
             entry,
-            AgentEntry::Preset {
-                preset: "codex-acp".to_string(),
-                overrides: PresetOverrides {
+            AgentEntry::preset_with(
+                "codex-acp".to_string(),
+                PresetOverrides {
                     env: None,
                     name: None,
                     command: None,
@@ -521,8 +511,8 @@ mod tests {
                     tail_window: None,
                     tail_window_calls: None,
                     display_filter: None,
-                },
-            }
+                }
+            )
         );
         let resolved = entry.resolve().expect("codex-acp is runnable");
         assert_eq!(resolved.default_model.as_deref(), Some("gpt-5-codex"));
@@ -540,7 +530,7 @@ mod tests {
         };
         assert_eq!(
             AgentEntry::for_definition(pinned.clone(), None),
-            AgentEntry::Custom(pinned)
+            AgentEntry::custom(pinned)
         );
         // Same command, different id: the id is what panes persist, so it wins.
         let renamed_id = AgentDefinition {
@@ -549,7 +539,7 @@ mod tests {
         };
         assert_eq!(
             AgentEntry::for_definition(renamed_id.clone(), None),
-            AgentEntry::Custom(renamed_id)
+            AgentEntry::custom(renamed_id)
         );
     }
 
@@ -567,7 +557,7 @@ mod tests {
         assert_ne!(claude.id, preset.id, "different stable id");
 
         let entry = AgentEntry::for_definition(claude.clone(), None);
-        assert_eq!(entry, AgentEntry::Custom(claude.clone()));
+        assert_eq!(entry, AgentEntry::custom(claude.clone()));
         assert_eq!(entry.resolve().map(|d| d.id), Some(claude.id));
     }
 
@@ -581,9 +571,9 @@ mod tests {
         let entry = AgentEntry::for_definition(edited.clone(), Some("gemini"));
         assert_eq!(
             entry,
-            AgentEntry::Preset {
-                preset: "gemini".to_string(),
-                overrides: PresetOverrides {
+            AgentEntry::preset_with(
+                "gemini".to_string(),
+                PresetOverrides {
                     env: None,
                     name: None,
                     command: Some("npx -y @google/gemini-cli@0.9.0 --acp".to_string()),
@@ -593,8 +583,8 @@ mod tests {
                     tail_window: None,
                     tail_window_calls: None,
                     display_filter: None,
-                },
-            }
+                }
+            )
         );
         assert_eq!(entry.resolve(), Some(edited));
     }
@@ -609,7 +599,7 @@ mod tests {
         };
         assert_eq!(
             AgentEntry::for_definition(renamed.clone(), Some("gemini")),
-            AgentEntry::Custom(renamed)
+            AgentEntry::custom(renamed)
         );
         // Switched to a remote transport: no override can express that.
         let remote = AgentDefinition {
@@ -621,7 +611,7 @@ mod tests {
         };
         assert_eq!(
             AgentEntry::for_definition(remote.clone(), Some("gemini")),
-            AgentEntry::Custom(remote)
+            AgentEntry::custom(remote)
         );
     }
 
@@ -642,10 +632,7 @@ mod tests {
     fn a_preset_row_that_also_needs_a_manual_install_resolves_to_nothing() {
         // `cursor` is in the preset table but ships only binary archives, so it
         // has no launch command — same outcome as an unknown id.
-        let entry = AgentEntry::Preset {
-            preset: "cursor".to_string(),
-            overrides: PresetOverrides::default(),
-        };
+        let entry = AgentEntry::preset("cursor".to_string());
         assert_eq!(entry.resolve(), None);
     }
 
@@ -654,10 +641,7 @@ mod tests {
     #[test]
     fn a_row_follows_its_presets_env_until_it_states_one() {
         let preset = codex_preset();
-        let follower = AgentEntry::Preset {
-            preset: "codex-acp".to_string(),
-            overrides: PresetOverrides::default(),
-        };
+        let follower = AgentEntry::preset("codex-acp".to_string());
         assert_eq!(
             follower.resolve().expect("codex-acp is runnable").env,
             preset.env,
@@ -676,13 +660,13 @@ mod tests {
         let entry = AgentEntry::for_definition(stated.clone(), Some("codex-acp"));
         assert_eq!(
             entry,
-            AgentEntry::Preset {
-                preset: "codex-acp".to_string(),
-                overrides: PresetOverrides {
+            AgentEntry::preset_with(
+                "codex-acp".to_string(),
+                PresetOverrides {
                     env: stated.env.clone(),
                     ..PresetOverrides::default()
-                },
-            }
+                }
+            )
         );
         assert_eq!(entry.resolve(), Some(stated));
     }
@@ -703,10 +687,7 @@ mod tests {
         let entry = AgentEntry::for_definition(legacy, None);
         assert_eq!(
             entry,
-            AgentEntry::Preset {
-                preset: "codex-acp".to_string(),
-                overrides: PresetOverrides::default(),
-            },
+            AgentEntry::preset("codex-acp".to_string()),
             "a flat row with no env key must promote to a bare reference"
         );
         assert_eq!(
@@ -753,13 +734,13 @@ mod tests {
         let entry = AgentEntry::for_definition(cleared.clone(), Some("codex-acp"));
         assert_eq!(
             entry,
-            AgentEntry::Preset {
-                preset: "codex-acp".to_string(),
-                overrides: PresetOverrides {
+            AgentEntry::preset_with(
+                "codex-acp".to_string(),
+                PresetOverrides {
                     env: Some(Vec::new()),
                     ..PresetOverrides::default()
-                },
-            },
+                }
+            ),
             "clearing a shipping env is an override, not a return to the preset"
         );
         assert_eq!(entry.resolve(), Some(cleared));
@@ -774,34 +755,31 @@ mod tests {
         let preset = codex_preset();
         for (entry, expected) in [
             (
-                AgentEntry::Preset {
-                    preset: "codex-acp".to_string(),
-                    overrides: PresetOverrides::default(),
-                },
+                AgentEntry::preset("codex-acp".to_string()),
                 preset.env.clone(),
             ),
             (
-                AgentEntry::Preset {
-                    preset: "codex-acp".to_string(),
-                    overrides: PresetOverrides {
+                AgentEntry::preset_with(
+                    "codex-acp".to_string(),
+                    PresetOverrides {
                         env: Some(Vec::new()),
                         ..PresetOverrides::default()
                     },
-                },
+                ),
                 Some(Vec::new()),
             ),
             (
-                AgentEntry::Preset {
-                    preset: "codex-acp".to_string(),
-                    overrides: PresetOverrides {
+                AgentEntry::preset_with(
+                    "codex-acp".to_string(),
+                    PresetOverrides {
                         env: Some(vec![("K".to_string(), "v".to_string())]),
                         ..PresetOverrides::default()
                     },
-                },
+                ),
                 Some(vec![("K".to_string(), "v".to_string())]),
             ),
             (
-                AgentEntry::Custom(AgentDefinition {
+                AgentEntry::custom(AgentDefinition {
                     env: Some(Vec::new()),
                     ..custom("hermes", "hermes acp")
                 }),
@@ -824,20 +802,17 @@ mod tests {
     /// above writes the table that opts out of exactly that.
     #[test]
     fn an_unstated_env_writes_no_key_and_an_empty_one_writes_a_table() {
-        let bare = toml::to_string(&AgentEntry::Preset {
-            preset: "codex-acp".to_string(),
-            overrides: PresetOverrides::default(),
-        })
-        .expect("serialize");
+        let bare =
+            toml::to_string(&AgentEntry::preset("codex-acp".to_string())).expect("serialize");
         assert!(!bare.contains("env"), "{bare}");
 
-        let cleared = toml::to_string(&AgentEntry::Preset {
-            preset: "codex-acp".to_string(),
-            overrides: PresetOverrides {
+        let cleared = toml::to_string(&AgentEntry::preset_with(
+            "codex-acp".to_string(),
+            PresetOverrides {
                 env: Some(Vec::new()),
                 ..PresetOverrides::default()
             },
-        })
+        ))
         .expect("serialize");
         assert!(cleared.contains("[env]"), "{cleared}");
     }

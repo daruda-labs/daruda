@@ -2908,9 +2908,6 @@ impl SettingsView {
             })?;
             agents.push(daruda_config::AgentEntry::for_definition(
                 daruda_config::AgentDefinition {
-                    id,
-                    name,
-                    launch,
                     default_mode: row.default_mode(cx),
                     default_model: row.default_model(cx),
                     fold_mode: row.fold_mode(),
@@ -2918,6 +2915,7 @@ impl SettingsView {
                     tail_window_calls: row.tail_window_calls(cx),
                     display_filter: row.display_filter(),
                     env,
+                    ..daruda_config::AgentDefinition::new(id, name, launch)
                 },
                 row.preset.as_deref(),
             ));

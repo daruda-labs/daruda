@@ -366,7 +366,7 @@ fn hidden_orchestrator_tracks_live_config_updates(cx: &mut TestAppContext) {
             ..ws.agents[0].clone()
         };
         let mut config = daruda_config::Config {
-            agents: vec![daruda_config::AgentEntry::Custom(agent.clone())],
+            agents: vec![daruda_config::AgentEntry::custom(agent.clone())],
             ..daruda_config::Config::default()
         };
         config.file_viewer.syntax_theme = "InspiredGitHub".into();
@@ -535,7 +535,7 @@ fn clicking_the_chip_starts_a_session_from_inside_the_windows_dispatch(cx: &mut 
     let mut config = daruda_config::Config::default();
     let mut agent = config.resolved_agents().remove(0);
     agent.launch = daruda_config::AgentLaunch::Raw(test_process::command_line(&["--exit", "1"]));
-    config.agents = vec![daruda_config::AgentEntry::Custom(agent)];
+    config.agents = vec![daruda_config::AgentEntry::custom(agent)];
     config.orchestrator.enabled = true;
     let (window, workspace) = build_workspace_with(cx, &config, None);
     cx.update(|cx| {

@@ -519,18 +519,11 @@ impl SettingsView {
     /// Append a blank row the user fills in by hand — it references no preset.
     fn add_custom_agent_row(&mut self, window: &mut Window, cx: &mut gpui::Context<Self>) {
         self.add_agent_row(
-            daruda_config::AgentDefinition {
-                id: String::new(),
-                name: String::new(),
-                launch: daruda_config::AgentLaunch::Raw(String::new()),
-                default_mode: None,
-                default_model: None,
-                fold_mode: None,
-                tail_window: None,
-                tail_window_calls: None,
-                display_filter: None,
-                env: None,
-            },
+            daruda_config::AgentDefinition::new(
+                String::new(),
+                String::new(),
+                daruda_config::AgentLaunch::Raw(String::new()),
+            ),
             None,
             window,
             cx,

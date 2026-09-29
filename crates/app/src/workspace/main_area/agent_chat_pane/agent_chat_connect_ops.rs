@@ -1170,16 +1170,12 @@ mod tests {
     fn agent_default_mode_reads_the_matching_catalog_entry() {
         let agents = vec![
             AgentDefinition {
-                id: "other".to_string(),
-                name: "Other".to_string(),
-                launch: AgentLaunch::Raw("run-other".to_string()),
                 default_mode: Some("yolo".to_string()),
-                default_model: None,
-                fold_mode: None,
-                tail_window: None,
-                tail_window_calls: None,
-                display_filter: None,
-                env: None,
+                ..AgentDefinition::new(
+                    "other".to_string(),
+                    "Other".to_string(),
+                    AgentLaunch::Raw("run-other".to_string()),
+                )
             },
             AgentDefinition::claude_default(),
         ];
@@ -1200,16 +1196,12 @@ mod tests {
     fn agent_default_model_reads_the_matching_catalog_entry() {
         let agents = vec![
             AgentDefinition {
-                id: "other".to_string(),
-                name: "Other".to_string(),
-                launch: AgentLaunch::Raw("run-other".to_string()),
-                default_mode: None,
                 default_model: Some("opus".to_string()),
-                fold_mode: None,
-                tail_window: None,
-                tail_window_calls: None,
-                display_filter: None,
-                env: None,
+                ..AgentDefinition::new(
+                    "other".to_string(),
+                    "Other".to_string(),
+                    AgentLaunch::Raw("run-other".to_string()),
+                )
             },
             AgentDefinition::claude_default(),
         ];

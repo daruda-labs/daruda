@@ -2083,18 +2083,11 @@ mod tests {
     #[test]
     fn restored_selects_owner_among_multiple_agents() {
         let agents = vec![
-            AgentDefinition {
-                id: "other".to_string(),
-                name: "Other".to_string(),
-                launch: AgentLaunch::Raw("run-other".to_string()),
-                default_mode: None,
-                default_model: None,
-                fold_mode: None,
-                tail_window: None,
-                tail_window_calls: None,
-                display_filter: None,
-                env: None,
-            },
+            AgentDefinition::new(
+                "other".to_string(),
+                "Other".to_string(),
+                AgentLaunch::Raw("run-other".to_string()),
+            ),
             AgentDefinition::claude_default(),
         ];
         // The default (catalog[0]) is "other", but a persisted claude owner that
@@ -2111,18 +2104,11 @@ mod tests {
 
     fn two_agent_catalog() -> Vec<AgentDefinition> {
         vec![
-            AgentDefinition {
-                id: "other".to_string(),
-                name: "Other".to_string(),
-                launch: AgentLaunch::Raw("run-other".to_string()),
-                default_mode: None,
-                default_model: None,
-                fold_mode: None,
-                tail_window: None,
-                tail_window_calls: None,
-                display_filter: None,
-                env: None,
-            },
+            AgentDefinition::new(
+                "other".to_string(),
+                "Other".to_string(),
+                AgentLaunch::Raw("run-other".to_string()),
+            ),
             AgentDefinition::claude_default(),
         ]
     }

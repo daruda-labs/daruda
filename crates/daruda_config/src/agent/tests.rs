@@ -147,23 +147,20 @@ fn default_agents_is_a_single_custom_claude_entry() {
     // Custom, not a `claude-acp` reference: see `default_agents`.
     assert_eq!(
         default_agents(),
-        vec![AgentEntry::Custom(AgentDefinition::claude_default())]
+        vec![AgentEntry::custom(AgentDefinition::claude_default())]
     );
 }
 
 #[test]
 fn agent_definition_field_round_trip() {
     let d = AgentDefinition {
-        id: "codex".to_string(),
-        name: "Codex".to_string(),
-        launch: AgentLaunch::Raw("codex acp".to_string()),
         default_mode: Some("yolo".to_string()),
         default_model: Some("gpt-5-codex".to_string()),
-        fold_mode: None,
-        tail_window: None,
-        tail_window_calls: None,
-        display_filter: None,
-        env: None,
+        ..AgentDefinition::new(
+            "codex".to_string(),
+            "Codex".to_string(),
+            AgentLaunch::Raw("codex acp".to_string()),
+        )
     };
     let toml_str = toml::to_string(&d).expect("serialize");
     let back: AgentDefinition = toml::from_str(&toml_str).expect("deserialize");
@@ -173,19 +170,17 @@ fn agent_definition_field_round_trip() {
 #[test]
 fn per_agent_transcript_defaults_round_trip() {
     let d = AgentDefinition {
-        id: "codex".to_string(),
-        name: "Codex".to_string(),
-        launch: AgentLaunch::Raw("codex acp".to_string()),
-        default_mode: None,
-        default_model: None,
         fold_mode: Some(vec!["summary".to_string()]),
         tail_window: Some(3),
-        tail_window_calls: None,
         // The empty list is a value of its own here (an empty visible set), so
         // it has to survive the trip as `Some([])` rather than collapse to
         // `None` — see the field's doc.
         display_filter: Some(Vec::new()),
-        env: None,
+        ..AgentDefinition::new(
+            "codex".to_string(),
+            "Codex".to_string(),
+            AgentLaunch::Raw("codex acp".to_string()),
+        )
     };
     let toml_str = toml::to_string(&d).expect("serialize");
     let back: AgentDefinition = toml::from_str(&toml_str).expect("deserialize");
@@ -198,28 +193,26 @@ fn per_agent_transcript_defaults_round_trip() {
 #[test]
 fn per_agent_transcript_defaults_round_trip_through_a_catalog_entry() {
     for entry in [
-        AgentEntry::Custom(AgentDefinition {
-            id: "hermes".to_string(),
-            name: "Hermes".to_string(),
-            launch: AgentLaunch::Raw("hermes acp".to_string()),
-            default_mode: None,
-            default_model: None,
+        AgentEntry::custom(AgentDefinition {
             fold_mode: Some(vec!["expanded".to_string()]),
             tail_window: Some(10),
-            tail_window_calls: None,
             display_filter: Some(vec!["prose".to_string()]),
-            env: None,
+            ..AgentDefinition::new(
+                "hermes".to_string(),
+                "Hermes".to_string(),
+                AgentLaunch::Raw("hermes acp".to_string()),
+            )
         }),
-        AgentEntry::Preset {
-            preset: "codex-acp".to_string(),
-            overrides: PresetOverrides {
+        AgentEntry::preset_with(
+            "codex-acp".to_string(),
+            PresetOverrides {
                 fold_mode: Some(vec!["summary".to_string()]),
                 tail_window: Some(1),
                 tail_window_calls: None,
                 display_filter: Some(Vec::new()),
                 ..PresetOverrides::default()
             },
-        },
+        ),
     ] {
         let toml_str = toml::to_string(&entry).expect("serialize");
         let back: AgentEntry = toml::from_str(&toml_str).expect("deserialize");
@@ -280,19 +273,15 @@ fn default_model_round_trips_alongside_a_launch_sub_table() {
     // `default_model` is a scalar key and `ssh` is a sub-table, and TOML
     // forbids a value after a table within the same entry.
     let d = AgentDefinition {
-        id: "remote-agent".to_string(),
-        name: "Remote Agent".to_string(),
-        launch: AgentLaunch::Ssh {
-            adapter_command: "npx -y some-acp".to_string(),
-            host: "vm-work".to_string(),
-        },
-        default_mode: None,
         default_model: Some("claude-opus-4".to_string()),
-        fold_mode: None,
-        tail_window: None,
-        tail_window_calls: None,
-        display_filter: None,
-        env: None,
+        ..AgentDefinition::new(
+            "remote-agent".to_string(),
+            "Remote Agent".to_string(),
+            AgentLaunch::Ssh {
+                adapter_command: "npx -y some-acp".to_string(),
+                host: "vm-work".to_string(),
+            },
+        )
     };
     let toml_str = toml::to_string(&d).expect("serialize");
     let back: AgentDefinition = toml::from_str(&toml_str).expect("deserialize");
@@ -322,21 +311,14 @@ fn migration_command_toml_deserializes_to_raw_unchanged() {
 
 #[test]
 fn ssh_launch_toml_round_trips() {
-    let d = AgentDefinition {
-        id: "remote-agent".to_string(),
-        name: "Remote Agent".to_string(),
-        launch: AgentLaunch::Ssh {
+    let d = AgentDefinition::new(
+        "remote-agent".to_string(),
+        "Remote Agent".to_string(),
+        AgentLaunch::Ssh {
             adapter_command: "npx -y some-acp".to_string(),
             host: "vm-work".to_string(),
         },
-        default_mode: None,
-        default_model: None,
-        fold_mode: None,
-        tail_window: None,
-        tail_window_calls: None,
-        display_filter: None,
-        env: None,
-    };
+    );
     let toml_str = toml::to_string(&d).expect("serialize");
     assert!(toml_str.contains("[ssh]"));
     assert!(toml_str.contains("host = \"vm-work\""));
@@ -348,21 +330,14 @@ fn ssh_launch_toml_round_trips() {
 
 #[test]
 fn docker_launch_toml_round_trips() {
-    let d = AgentDefinition {
-        id: "docker-agent".to_string(),
-        name: "Docker Agent".to_string(),
-        launch: AgentLaunch::Docker {
+    let d = AgentDefinition::new(
+        "docker-agent".to_string(),
+        "Docker Agent".to_string(),
+        AgentLaunch::Docker {
             adapter_command: "npx -y some-acp".to_string(),
             container: "ubuntu-dev".to_string(),
         },
-        default_mode: None,
-        default_model: None,
-        fold_mode: None,
-        tail_window: None,
-        tail_window_calls: None,
-        display_filter: None,
-        env: None,
-    };
+    );
     let toml_str = toml::to_string(&d).expect("serialize");
     assert!(toml_str.contains("[docker]"));
     assert!(toml_str.contains("container = \"ubuntu-dev\""));
@@ -988,30 +963,26 @@ fn env_round_trips_through_a_definition_and_a_catalog_entry() {
         "canonicalizing is what makes the order independent of the source"
     );
     let definition = AgentDefinition {
-        id: "hermes".to_string(),
-        name: "Hermes".to_string(),
-        launch: AgentLaunch::Raw("hermes acp".to_string()),
-        default_mode: None,
-        default_model: None,
-        fold_mode: None,
-        tail_window: None,
-        tail_window_calls: None,
-        display_filter: None,
         env: Some(env.clone()),
+        ..AgentDefinition::new(
+            "hermes".to_string(),
+            "Hermes".to_string(),
+            AgentLaunch::Raw("hermes acp".to_string()),
+        )
     };
     let toml_str = toml::to_string(&definition).expect("serialize");
     let back: AgentDefinition = toml::from_str(&toml_str).expect("deserialize");
     assert_eq!(back, definition, "{toml_str}");
 
     for entry in [
-        AgentEntry::Custom(definition.clone()),
-        AgentEntry::Preset {
-            preset: "codex-acp".to_string(),
-            overrides: PresetOverrides {
+        AgentEntry::custom(definition.clone()),
+        AgentEntry::preset_with(
+            "codex-acp".to_string(),
+            PresetOverrides {
                 env: Some(env.clone()),
                 ..PresetOverrides::default()
             },
-        },
+        ),
     ] {
         let toml_str = toml::to_string(&entry).expect("serialize");
         let back: AgentEntry = toml::from_str(&toml_str).expect("deserialize");
@@ -1100,10 +1071,7 @@ fn a_row_restating_its_presets_environment_keeps_following_it_after_a_round_trip
     // preset it actually agrees with.
     assert_eq!(
         AgentEntry::for_definition(resolved, Some("codex-acp")),
-        AgentEntry::Preset {
-            preset: "codex-acp".to_string(),
-            overrides: PresetOverrides::default(),
-        },
+        AgentEntry::preset("codex-acp".to_string()),
         "restating the preset's own environment is not an override"
     );
 }
@@ -1114,19 +1082,20 @@ fn a_row_restating_its_presets_environment_keeps_following_it_after_a_round_trip
 #[test]
 fn env_round_trips_alongside_a_launch_sub_table_and_the_scalar_keys() {
     let definition = AgentDefinition {
-        id: "remote-agent".to_string(),
-        name: "Remote Agent".to_string(),
-        launch: AgentLaunch::Ssh {
-            adapter_command: "npx -y some-acp".to_string(),
-            host: "vm-work".to_string(),
-        },
         default_mode: Some("plan".to_string()),
         default_model: Some("claude-opus-4".to_string()),
         fold_mode: Some(vec!["summary".to_string()]),
         tail_window: Some(3),
-        tail_window_calls: None,
         display_filter: Some(Vec::new()),
         env: Some(vec![("CODEX_CONFIG".to_string(), "{}".to_string())]),
+        ..AgentDefinition::new(
+            "remote-agent".to_string(),
+            "Remote Agent".to_string(),
+            AgentLaunch::Ssh {
+                adapter_command: "npx -y some-acp".to_string(),
+                host: "vm-work".to_string(),
+            },
+        )
     };
     let toml_str = toml::to_string(&definition).expect("serialize");
     let back: AgentDefinition = toml::from_str(&toml_str).expect("deserialize");
@@ -1143,7 +1112,7 @@ fn a_definition_without_env_stays_absent() {
     assert_eq!(definition.env, None);
     let toml_str = toml::to_string(&definition).expect("serialize");
     assert!(!toml_str.contains("env"), "{toml_str}");
-    let entry = AgentEntry::Custom(definition);
+    let entry = AgentEntry::custom(definition);
     let toml_str = toml::to_string(&entry).expect("serialize");
     assert!(!toml_str.contains("env"), "{toml_str}");
 }
@@ -1235,13 +1204,13 @@ fn a_preset_overrides_env_name_is_refused_on_load_too() {
     .expect("the entry still loads");
     assert_eq!(
         entry,
-        AgentEntry::Preset {
-            preset: "codex-acp".to_string(),
-            overrides: PresetOverrides {
+        AgentEntry::preset_with(
+            "codex-acp".to_string(),
+            PresetOverrides {
                 env: Some(vec![("CODEX_CONFIG".to_string(), "{}".to_string())]),
                 ..PresetOverrides::default()
-            },
-        }
+            }
+        )
     );
 }
 

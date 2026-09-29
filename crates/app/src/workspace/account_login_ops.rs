@@ -1817,18 +1817,11 @@ mod tests {
     }
 
     fn agent(id: &str, command: &str) -> daruda_config::AgentDefinition {
-        daruda_config::AgentDefinition {
-            id: id.to_string(),
-            name: id.to_string(),
-            launch: daruda_config::AgentLaunch::Raw(command.to_string()),
-            default_mode: None,
-            default_model: None,
-            fold_mode: None,
-            tail_window: None,
-            tail_window_calls: None,
-            display_filter: None,
-            env: None,
-        }
+        daruda_config::AgentDefinition::new(
+            id.to_string(),
+            id.to_string(),
+            daruda_config::AgentLaunch::Raw(command.to_string()),
+        )
     }
 
     #[test]
@@ -1879,38 +1872,24 @@ mod tests {
         // Ssh/Docker/`{{cwd}}` launches derive to no recipe at all, so none
         // of them can serve the request — the built-in must still answer it.
         let agents = vec![
-            daruda_config::AgentDefinition {
-                id: "remote-ssh".to_string(),
-                name: "remote-ssh".to_string(),
-                launch: daruda_config::AgentLaunch::Ssh {
+            daruda_config::AgentDefinition::new(
+                "remote-ssh".to_string(),
+                "remote-ssh".to_string(),
+                daruda_config::AgentLaunch::Ssh {
                     adapter_command: "npx -y @agentclientprotocol/claude-agent-acp@latest"
                         .to_string(),
                     host: "box".to_string(),
                 },
-                default_mode: None,
-                default_model: None,
-                fold_mode: None,
-                tail_window: None,
-                tail_window_calls: None,
-                display_filter: None,
-                env: None,
-            },
-            daruda_config::AgentDefinition {
-                id: "remote-docker".to_string(),
-                name: "remote-docker".to_string(),
-                launch: daruda_config::AgentLaunch::Docker {
+            ),
+            daruda_config::AgentDefinition::new(
+                "remote-docker".to_string(),
+                "remote-docker".to_string(),
+                daruda_config::AgentLaunch::Docker {
                     adapter_command: "npx -y @agentclientprotocol/claude-agent-acp@latest"
                         .to_string(),
                     container: "dev".to_string(),
                 },
-                default_mode: None,
-                default_model: None,
-                fold_mode: None,
-                tail_window: None,
-                tail_window_calls: None,
-                display_filter: None,
-                env: None,
-            },
+            ),
             agent(
                 "remote-cwd",
                 "npx -y @agentclientprotocol/claude-agent-acp@latest --cwd {{cwd}}",

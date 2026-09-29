@@ -597,18 +597,11 @@ async fn deliver_text_to_pane_routes_by_kind(cx: &mut TestAppContext) {
 /// persisted `agent_id` is threaded through `restore_from_disk` (not just the
 /// pure `resolve_restored_agent` seam covered by unit tests).
 fn codex_agent() -> daruda_config::AgentDefinition {
-    daruda_config::AgentDefinition {
-        id: "codex".to_string(),
-        name: "Codex".to_string(),
-        launch: daruda_config::AgentLaunch::Raw("codex-acp".to_string()),
-        default_mode: None,
-        default_model: None,
-        fold_mode: None,
-        tail_window: None,
-        tail_window_calls: None,
-        display_filter: None,
-        env: None,
-    }
+    daruda_config::AgentDefinition::new(
+        "codex".to_string(),
+        "Codex".to_string(),
+        daruda_config::AgentLaunch::Raw("codex-acp".to_string()),
+    )
 }
 
 /// The restore-visible slice of one agent-chat pane. A struct rather than a
@@ -866,18 +859,11 @@ async fn agent_chat_agent_id_restore_handles_present_and_removed_owner(cx: &mut 
 /// pick. `claude_default()` is catalog[0] (the session default); `codex` is the
 /// distinct target.
 fn codex() -> daruda_config::AgentDefinition {
-    daruda_config::AgentDefinition {
-        id: "codex".to_string(),
-        name: "Codex".to_string(),
-        launch: daruda_config::AgentLaunch::Raw("codex-acp".to_string()),
-        default_mode: None,
-        default_model: None,
-        fold_mode: None,
-        tail_window: None,
-        tail_window_calls: None,
-        display_filter: None,
-        env: None,
-    }
+    daruda_config::AgentDefinition::new(
+        "codex".to_string(),
+        "Codex".to_string(),
+        daruda_config::AgentLaunch::Raw("codex-acp".to_string()),
+    )
 }
 
 /// The inaccessible-lane guard in `open_agent_chat_pane_with_agent` fires
@@ -1647,7 +1633,7 @@ async fn a_config_reload_moves_an_untouched_panes_transcript_settings(cx: &mut T
 /// tests open their panes on that id, so this is how a changed config reaches
 /// them now that the entry is the only layer above the built-in values.
 fn claude_entry_with(tail_window: u8, fold_mode: &str) -> daruda_config::AgentEntry {
-    daruda_config::AgentEntry::Custom(daruda_config::AgentDefinition {
+    daruda_config::AgentEntry::custom(daruda_config::AgentDefinition {
         tail_window: Some(tail_window),
         fold_mode: Some(vec![fold_mode.to_string()]),
         ..daruda_config::AgentDefinition::claude_default()
@@ -1668,7 +1654,7 @@ fn transcript_agent_entry(
     fold_mode: &str,
     filter: FilterFacet,
 ) -> daruda_config::AgentEntry {
-    daruda_config::AgentEntry::Custom(daruda_config::AgentDefinition {
+    daruda_config::AgentEntry::custom(daruda_config::AgentDefinition {
         id: id.to_string(),
         name: id.to_string(),
         fold_mode: Some(vec![fold_mode.to_string()]),

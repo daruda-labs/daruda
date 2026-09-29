@@ -36,9 +36,6 @@ impl AgentPreset {
             return None;
         };
         Some(AgentDefinition {
-            id: self.id.to_string(),
-            name: self.name.to_string(),
-            launch: AgentLaunch::Raw(command.to_string()),
             // Presets carry no mode: daruda doesn't know what any given
             // registry adapter advertises, so the global default applies until
             // the user sets one.
@@ -51,14 +48,16 @@ impl AgentPreset {
             // user states per agent, so the `[agent]` section applies until
             // they do.
             fold_mode: None,
-            tail_window: None,
-            tail_window_calls: None,
-            display_filter: None,
             // Nor an environment, as a rule: what a given adapter needs to be
             // told is adapter-specific, so a preset states one only where
             // daruda knows the answer — looked up from the hand-maintained
             // table below the generated block.
             env: preset_env_default(self.id),
+            ..AgentDefinition::new(
+                self.id.to_string(),
+                self.name.to_string(),
+                AgentLaunch::Raw(command.to_string()),
+            )
         })
     }
 }

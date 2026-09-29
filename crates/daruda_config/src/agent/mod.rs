@@ -530,6 +530,23 @@ impl From<AgentDefinitionRepr> for AgentDefinition {
 }
 
 impl AgentDefinition {
+    /// A definition carrying only what every agent needs; every optional
+    /// field starts unset, so a caller states just what it overrides.
+    pub fn new(id: impl Into<String>, name: impl Into<String>, launch: AgentLaunch) -> Self {
+        Self {
+            id: id.into(),
+            name: name.into(),
+            launch,
+            default_mode: None,
+            default_model: None,
+            fold_mode: None,
+            tail_window: None,
+            tail_window_calls: None,
+            display_filter: None,
+            env: None,
+        }
+    }
+
     /// The built-in Claude Code agent, used when config declares no `[[agents]]`.
     /// The command mirrors daruda_acp's default adapter launch; the "@latest"
     /// tag keeps us on the newest adapter (which advertises model/effort/mode as
@@ -575,7 +592,7 @@ impl AgentDefinition {
 /// AgentChat pane persists it, so the default must never resolve under the
 /// preset's id instead.
 pub(crate) fn default_agents() -> Vec<AgentEntry> {
-    vec![AgentEntry::Custom(AgentDefinition::claude_default())]
+    vec![AgentEntry::custom(AgentDefinition::claude_default())]
 }
 
 /// The app-wide transcript keys a pre-catalog `[agent]` section could state.

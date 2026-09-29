@@ -69,7 +69,7 @@ fn missing_agents_seeds_single_claude_default() {
     let cfg: Config = toml::from_str("").unwrap();
     assert_eq!(
         cfg.agents,
-        vec![AgentEntry::Custom(AgentDefinition::claude_default())]
+        vec![AgentEntry::custom(AgentDefinition::claude_default())]
     );
     assert_eq!(cfg.resolved_agents()[0].id, "claude");
 }
@@ -99,26 +99,19 @@ command = \"my-agent --acp\"\n";
 fn agents_round_trip_through_toml() {
     let cfg = Config {
         agents: vec![
-            AgentEntry::Custom(AgentDefinition {
-                id: "codex".to_string(),
-                name: "Codex".to_string(),
-                launch: AgentLaunch::Raw("codex acp".to_string()),
-                default_mode: None,
-                default_model: None,
-                fold_mode: None,
-                tail_window: None,
-                tail_window_calls: None,
-                display_filter: None,
-                env: None,
-            }),
-            AgentEntry::Preset {
-                preset: "codex-acp".to_string(),
-                overrides: PresetOverrides {
+            AgentEntry::custom(AgentDefinition::new(
+                "codex".to_string(),
+                "Codex".to_string(),
+                AgentLaunch::Raw("codex acp".to_string()),
+            )),
+            AgentEntry::preset_with(
+                "codex-acp".to_string(),
+                PresetOverrides {
                     name: Some("Codex (renamed)".to_string()),
                     ..PresetOverrides::default()
                 },
-            },
-            AgentEntry::Custom(AgentDefinition::claude_default()),
+            ),
+            AgentEntry::custom(AgentDefinition::claude_default()),
         ],
         ..Config::default()
     };
@@ -164,7 +157,7 @@ fn load_from_missing_path_normalizes_agents() {
     let cfg = Config::load_from(std::path::Path::new("/nonexistent/daruda/config.toml"));
     assert_eq!(
         cfg.agents,
-        vec![AgentEntry::Custom(AgentDefinition::claude_default())]
+        vec![AgentEntry::custom(AgentDefinition::claude_default())]
     );
 }
 
@@ -175,7 +168,7 @@ fn explicitly_empty_agents_normalizes_to_claude_default() {
     cfg.clamp();
     assert_eq!(
         cfg.agents,
-        vec![AgentEntry::Custom(AgentDefinition::claude_default())]
+        vec![AgentEntry::custom(AgentDefinition::claude_default())]
     );
 }
 
@@ -1356,8 +1349,8 @@ fn patch_config_file_writes_non_default_agents() {
 
     let cfg = Config {
         agents: vec![
-            AgentEntry::Custom(AgentDefinition::claude_default()),
-            AgentEntry::Custom(AgentDefinition::codex_default()),
+            AgentEntry::custom(AgentDefinition::claude_default()),
+            AgentEntry::custom(AgentDefinition::codex_default()),
         ],
         ..Config::default()
     };
@@ -1372,11 +1365,8 @@ fn patch_config_file_writes_non_default_agents() {
     assert_eq!(
         reloaded.agents,
         vec![
-            AgentEntry::Custom(AgentDefinition::claude_default()),
-            AgentEntry::Preset {
-                preset: "codex-acp".to_string(),
-                overrides: PresetOverrides::default(),
-            },
+            AgentEntry::custom(AgentDefinition::claude_default()),
+            AgentEntry::preset("codex-acp".to_string()),
         ]
     );
     assert_eq!(reloaded.resolved_agents(), cfg.resolved_agents());
@@ -1393,13 +1383,10 @@ fn patch_config_file_round_trips_every_agent_entry_shape() {
 
     let cfg = Config {
         agents: vec![
-            AgentEntry::Preset {
-                preset: "codex-acp".to_string(),
-                overrides: PresetOverrides::default(),
-            },
-            AgentEntry::Preset {
-                preset: "gemini".to_string(),
-                overrides: PresetOverrides {
+            AgentEntry::preset("codex-acp".to_string()),
+            AgentEntry::preset_with(
+                "gemini".to_string(),
+                PresetOverrides {
                     env: Some(vec![("RUST_LOG".to_string(), "debug".to_string())]),
                     name: Some("Gemini (pinned)".to_string()),
                     command: Some("npx -y @google/gemini-cli@0.9.0 --acp".to_string()),
@@ -1411,24 +1398,20 @@ fn patch_config_file_round_trips_every_agent_entry_shape() {
                     // An empty visible set, not an absent key.
                     display_filter: Some(Vec::new()),
                 },
-            },
-            AgentEntry::Preset {
-                preset: "retired-agent".to_string(),
-                overrides: PresetOverrides::default(),
-            },
-            AgentEntry::Custom(AgentDefinition {
-                id: "hermes".to_string(),
-                name: "Hermes Agent".to_string(),
-                launch: AgentLaunch::Raw("hermes acp".to_string()),
+            ),
+            AgentEntry::preset("retired-agent".to_string()),
+            AgentEntry::custom(AgentDefinition {
                 default_mode: Some("yolo".to_string()),
-                default_model: None,
                 fold_mode: Some(vec!["expanded".to_string()]),
                 tail_window: Some(10),
-                tail_window_calls: None,
                 display_filter: Some(vec!["prose".to_string(), "tools".to_string()]),
-                env: None,
+                ..AgentDefinition::new(
+                    "hermes".to_string(),
+                    "Hermes Agent".to_string(),
+                    AgentLaunch::Raw("hermes acp".to_string()),
+                )
             }),
-            AgentEntry::Custom(AgentDefinition {
+            AgentEntry::custom(AgentDefinition {
                 // A table key, like the `ssh` sub-table below it — TOML
                 // forbids a value after a table, so the writer has to emit
                 // both after every scalar.
@@ -1436,18 +1419,15 @@ fn patch_config_file_round_trips_every_agent_entry_shape() {
                     "CODEX_CONFIG".to_string(),
                     r#"{"features":{"multi_agent_v2":true}}"#.to_string(),
                 )]),
-                id: "remote".to_string(),
-                name: "Remote".to_string(),
-                launch: AgentLaunch::Ssh {
-                    adapter_command: "npx -y some-acp".to_string(),
-                    host: "vm-work".to_string(),
-                },
-                default_mode: None,
                 default_model: Some("claude-opus-4".to_string()),
-                fold_mode: None,
-                tail_window: None,
-                tail_window_calls: None,
-                display_filter: None,
+                ..AgentDefinition::new(
+                    "remote".to_string(),
+                    "Remote".to_string(),
+                    AgentLaunch::Ssh {
+                        adapter_command: "npx -y some-acp".to_string(),
+                        host: "vm-work".to_string(),
+                    },
+                )
             }),
         ],
         ..Config::default()
@@ -1477,13 +1457,13 @@ fn patch_config_file_keeps_a_cleared_env_override_apart_from_an_absent_one() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("config.toml");
 
-    let cleared = AgentEntry::Preset {
-        preset: "codex-acp".to_string(),
-        overrides: PresetOverrides {
+    let cleared = AgentEntry::preset_with(
+        "codex-acp".to_string(),
+        PresetOverrides {
             env: Some(Vec::new()),
             ..PresetOverrides::default()
         },
-    };
+    );
     let cfg = Config {
         agents: vec![cleared.clone()],
         ..Config::default()
@@ -1504,7 +1484,7 @@ fn patch_config_file_preserves_implicit_default_agents_when_unmanaged() {
     let reloaded = Config::load_from(&path);
     assert_eq!(
         reloaded.agents,
-        vec![AgentEntry::Custom(AgentDefinition::claude_default())]
+        vec![AgentEntry::custom(AgentDefinition::claude_default())]
     );
 }
 

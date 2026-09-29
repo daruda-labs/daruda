@@ -175,21 +175,14 @@ fn seed_default_account(
 }
 
 fn legacy_ssh_claude_agent() -> daruda_config::AgentDefinition {
-    daruda_config::AgentDefinition {
-        id: "legacy-ssh-claude".to_string(),
-        name: "Legacy SSH Claude".to_string(),
-        launch: daruda_config::AgentLaunch::Ssh {
+    daruda_config::AgentDefinition::new(
+        "legacy-ssh-claude".to_string(),
+        "Legacy SSH Claude".to_string(),
+        daruda_config::AgentLaunch::Ssh {
             adapter_command: "npx -y @agentclientprotocol/claude-agent-acp@latest".to_string(),
             host: "old-box".to_string(),
         },
-        default_mode: None,
-        default_model: None,
-        fold_mode: None,
-        tail_window: None,
-        tail_window_calls: None,
-        display_filter: None,
-        env: None,
-    }
+    )
 }
 
 /// A freshly created agent-chat pane must be seeded with its own auth
@@ -271,7 +264,7 @@ async fn new_locally_resolved_legacy_agent_pane_uses_domain_default(cx: &mut Tes
     let mut config = daruda_config::Config::default();
     config
         .agents
-        .push(daruda_config::AgentEntry::Custom(legacy_agent));
+        .push(daruda_config::AgentEntry::custom(legacy_agent));
     let (window_handle, workspace) = build_workspace_with(cx, &config, None);
     cx.run_until_parked();
 
@@ -567,12 +560,12 @@ async fn restore_resets_only_a_cross_domain_agent_chat_pin(cx: &mut TestAppConte
     let legacy_agent = legacy_ssh_claude_agent();
     let legacy_id = legacy_agent.id.clone();
     let mut config = daruda_config::Config::default();
-    config.agents.push(daruda_config::AgentEntry::Custom(
+    config.agents.push(daruda_config::AgentEntry::custom(
         daruda_config::AgentDefinition::codex_default(),
     ));
     config
         .agents
-        .push(daruda_config::AgentEntry::Custom(legacy_agent));
+        .push(daruda_config::AgentEntry::custom(legacy_agent));
     let (window_handle, workspace) = build_workspace_with(cx, &config, None);
     cx.run_until_parked();
 
@@ -874,8 +867,8 @@ async fn right_dock_snapshot_threads_focused_domain_and_override(cx: &mut TestAp
     // domain reads back as `Unsupported` instead of `Exactly(Codex)`.
     let config = daruda_config::Config {
         agents: vec![
-            daruda_config::AgentEntry::Custom(daruda_config::AgentDefinition::claude_default()),
-            daruda_config::AgentEntry::Custom(daruda_config::AgentDefinition::codex_default()),
+            daruda_config::AgentEntry::custom(daruda_config::AgentDefinition::claude_default()),
+            daruda_config::AgentEntry::custom(daruda_config::AgentDefinition::codex_default()),
         ],
         ..Default::default()
     };
