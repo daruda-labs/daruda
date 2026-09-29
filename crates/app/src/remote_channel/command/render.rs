@@ -268,7 +268,7 @@ fn row_text(ordinal: u32, row: &ListingRow) -> String {
     s::control_listing_row(
         ordinal,
         &row.name,
-        &row.summary.agent_name,
+        &agent_label(&row.summary),
         &detail_of(&row.summary),
         &ago_of(&row.summary),
     )
@@ -329,9 +329,19 @@ pub(crate) fn title_suffix(summary: &ChatSummary) -> String {
 /// confirms a selection, so unlike a row it cannot fall back to nothing.
 fn bare_label(summary: &ChatSummary) -> String {
     summary
-        .title
+        .tab_name
         .clone()
+        .or_else(|| summary.title.clone())
         .unwrap_or_else(|| summary.agent_name.clone())
+}
+
+/// The agent a row names, with the tab's name beside it when the user gave
+/// one — two chats in one worktree otherwise read alike.
+fn agent_label(summary: &ChatSummary) -> String {
+    match &summary.tab_name {
+        Some(tab) => s::remote_agent_with_tab(&summary.agent_name, tab),
+        None => summary.agent_name.clone(),
+    }
 }
 
 /// How long ago this pane last did anything, or nothing at all when the stamp
@@ -427,6 +437,33 @@ mod tests {
         assert!(keyboard.rows.iter().all(|r| r.len() <= BUTTONS_PER_ROW));
     }
 
+    /// A tab the user named reaches the phone beside the agent, and is what a
+    /// selection is confirmed by — two chats in one worktree read alike
+    /// without it.
+    #[test]
+    fn a_named_tab_is_carried_beside_the_agent() {
+        let mut summary = ChatSummary {
+            target: PaneRef {
+                workspace: Default::default(),
+                pane: 1,
+            },
+            agent: "claude".into(),
+            agent_name: "Claude Code".into(),
+            is_active_lane: true,
+            activity: Activity::Idle,
+            health: Health::Ok,
+            unread: false,
+            title: Some("session title".into()),
+            last_activity: None,
+            tab_name: None,
+        };
+        assert_eq!(agent_label(&summary), "Claude Code");
+        assert_eq!(bare_label(&summary), "session title");
+        summary.tab_name = Some("review".into());
+        assert_eq!(agent_label(&summary), "Claude Code · review");
+        assert_eq!(bare_label(&summary), "review");
+    }
+
     /// A row names the agent running the pane — the one thing that decides
     /// which chat a person wants, and which no other field carries. The glyph
     /// column is drawn only for a pane that has a session: after a restore a
@@ -450,6 +487,7 @@ mod tests {
                 unread: false,
                 title: title.map(str::to_owned),
                 last_activity: None,
+                tab_name: None,
             };
         let listing = Listing {
             windows: vec![WindowGroup {

@@ -144,6 +144,7 @@ impl Workspace {
                         unread,
                         title: v.activity_title().and_then(sanitize_title),
                         last_activity: last_activity_unix(v),
+                        tab_name: self.pane_tab_name(pane_id),
                     },
                 ))
             })

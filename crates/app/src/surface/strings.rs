@@ -3115,6 +3115,18 @@ pub fn create_panel_tab_modal_title() -> String {
 pub fn create_panel_tab_placeholder() -> String {
     rust_i18n::t!("modal.create_panel_tab_placeholder").into_owned()
 }
+/// Title of the dialog that names a main-area tab.
+pub fn rename_tab_modal_title() -> String {
+    rust_i18n::t!("modal.rename_tab_title").into_owned()
+}
+/// Tab-strip menu item and double-click action that names a tab.
+pub fn ctx_rename_tab() -> String {
+    rust_i18n::t!("ctx.rename_tab").into_owned()
+}
+/// The agent line of a remote message about a chat in a tab the user named.
+pub fn remote_agent_with_tab(agent: &str, tab: &str) -> String {
+    rust_i18n::t!("control.agent_with_tab", agent = agent, tab = tab).into_owned()
+}
 pub fn rename_panel_tab_modal_title() -> String {
     rust_i18n::t!("modal.rename_panel_tab_title").into_owned()
 }

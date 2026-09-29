@@ -61,6 +61,9 @@ pub(crate) struct ChatSummary {
     /// Unix seconds.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub last_activity: Option<u64>,
+    /// The name the user gave the pane's tab; `None` when they gave none.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tab_name: Option<String>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -510,6 +513,7 @@ mod tests {
             unread: true,
             title: Some("restore picker invariants".into()),
             last_activity: Some(1_757_000_000),
+            tab_name: None,
         }
     }
 

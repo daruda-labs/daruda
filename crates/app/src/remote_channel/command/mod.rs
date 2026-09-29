@@ -307,6 +307,7 @@ pub(crate) mod tests {
             unread: false,
             title: None,
             last_activity: None,
+            tab_name: None,
         }
     }
 

@@ -23,6 +23,7 @@ pub(in crate::workspace) mod pane_tree;
 pub(in crate::workspace) mod prompt_watcher;
 pub(in crate::workspace) mod resize;
 pub(in crate::workspace) mod tab_drag_ops;
+mod tab_name_ops;
 pub(in crate::workspace) mod tab_ops;
 pub(in crate::workspace) mod task_edit_pane;
 mod terminal_exit_ops;

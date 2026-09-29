@@ -145,6 +145,10 @@ impl Workspace {
         match self.agent_chat_view(pane_id) {
             Some(view) => {
                 let agent = view.read(cx).agent_name.clone();
+                let agent = match self.pane_tab_name(pane_id) {
+                    Some(tab) => s::remote_agent_with_tab(&agent, &tab),
+                    None => agent,
+                };
                 match project_line {
                     Some(project) => format!("{project}\n{agent}"),
                     None => agent,

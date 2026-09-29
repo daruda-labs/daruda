@@ -544,6 +544,7 @@ ui:
 
 # Context menus and worktree modals
 ctx:
+  rename_tab: "탭 이름 변경…"
   restart_shell: "셸 다시 시작"
   reload_flow_graph: "디스크에서 다시 읽기"
   reveal_in_finder: "Finder에서 보기"
@@ -589,6 +590,7 @@ ctx:
 
 # Modals (rename / merge / panel / group)
 modal:
+  rename_tab_title: "탭 이름 변경"
   close_running_heading: "실행 중인 작업을 중지할까요?"
   close_running_detail: "닫으면 다음 패널에서 실행 중인 프로세스나 에이전트 작업이 끝납니다:"
   close_running_line: "• %{title}"
@@ -1835,6 +1837,7 @@ orchestrator:
 control:
   listing_header: "열려 있는 에이전트 대화"
   listing_row: "%{ordinal}. %{name} (%{agent})%{detail}%{ago}"
+  agent_with_tab: "%{agent} · %{tab}"
   listing_detail: " — %{detail}"
   listing_state: "[%{state}]"
   target_label: "%{name}%{title}"

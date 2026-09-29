@@ -758,6 +758,7 @@ impl Workspace {
                      id: tab_id,
                      is_active,
                      label: display,
+                     title,
                      file_path,
                      worktree_root,
                      is_scratch,
@@ -830,10 +831,11 @@ impl Workspace {
                         })
                         .on_mouse_down(
                             MouseButton::Left,
-                            cx.listener(move |this, _, window, cx| {
-                                this.activate_tab(i, window, cx);
+                            cx.listener(move |this, event: &MouseDownEvent, window, cx| {
+                                this.on_tab_press(i, tab_id, event.click_count, window, cx);
                             }),
                         )
+                        .tooltip(crate::ui::tooltip::text(title))
                         .on_mouse_down(
                             MouseButton::Middle,
                             cx.listener(move |this, _, window, cx| {
@@ -865,7 +867,19 @@ impl Workspace {
                         .root_context_menu(ws.clone(), move |menu, _window, _cx| {
                             use crate::surface::strings as s;
 
-                            let mut items: Vec<PopupMenuItem> = vec![
+                            let mut items: Vec<PopupMenuItem> = Vec::new();
+                            if !is_orchestrator {
+                                items.push(ws_popup_menu_item(
+                                    ws.clone(),
+                                    s::ctx_rename_tab(),
+                                    false,
+                                    move |this, win, cx| {
+                                        this.open_rename_tab_dialog(tab_id, win, cx)
+                                    },
+                                ));
+                                items.push(PopupMenuItem::separator());
+                            }
+                            items.extend([
                                 ws_popup_menu_item(
                                     ws.clone(),
                                     s::ctx_close_tab(),
@@ -913,7 +927,7 @@ impl Workspace {
                                         this.mutate_durable(cx, |ws, cx| ws.move_tab_right(i, cx));
                                     },
                                 ),
-                            ];
+                            ]);
 
                             // Split + New Tab — terminal tabs only.
                             if !is_file {

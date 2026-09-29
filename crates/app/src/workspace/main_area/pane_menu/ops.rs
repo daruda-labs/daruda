@@ -322,10 +322,11 @@ impl Workspace {
     }
 
     fn send_target_tab_label(&self, tab_index: usize, cx: &App) -> SharedString {
-        match self.active_runtime().tabs.get(tab_index) {
-            Some(tab) => self.tab_label(tab, cx),
-            None => SharedString::from(s::ctx_send_target_tab_fallback(tab_index + 1)),
-        }
+        self.active_runtime()
+            .tabs
+            .get(tab_index)
+            .and_then(|tab| self.tab_label(tab, cx))
+            .unwrap_or_else(|| SharedString::from(s::ctx_send_target_tab_fallback(tab_index + 1)))
     }
 
     pub(super) fn scroll_agent_chat_to_bottom(&mut self, pane_id: PaneId, cx: &mut Context<Self>) {

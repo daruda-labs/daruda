@@ -545,6 +545,7 @@ ui:
 
 # Context menus and worktree modals
 ctx:
+  rename_tab: "Rename Tab…"
   restart_shell: "Restart Shell"
   reload_flow_graph: "Reload from Disk"
   reveal_in_finder: "Reveal in Finder"
@@ -590,6 +591,7 @@ ctx:
 
 # Modals (rename / merge / panel / group)
 modal:
+  rename_tab_title: "Rename Tab"
   close_running_heading: "Stop what's running?"
   close_running_detail: "Closing ends the process or agent turn in:"
   close_running_line: "• %{title}"
@@ -1836,6 +1838,7 @@ orchestrator:
 control:
   listing_header: "Open agent chats"
   listing_row: "%{ordinal}. %{name} (%{agent})%{detail}%{ago}"
+  agent_with_tab: "%{agent} · %{tab}"
   listing_detail: " — %{detail}"
   listing_state: "[%{state}]"
   target_label: "%{name}%{title}"
