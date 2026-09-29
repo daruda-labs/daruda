@@ -1315,6 +1315,34 @@ pub fn task_edit_notes_hint() -> String {
     rust_i18n::t!("task.edit_notes_hint").into_owned()
 }
 
+pub fn task_edit_new() -> String {
+    rust_i18n::t!("task.edit_new").into_owned()
+}
+pub fn task_edit_back() -> String {
+    rust_i18n::t!("task.edit_back").into_owned()
+}
+pub fn task_edit_settings() -> String {
+    rust_i18n::t!("task.edit_settings").into_owned()
+}
+pub fn task_edit_unsaved() -> String {
+    rust_i18n::t!("task.edit_unsaved").into_owned()
+}
+pub fn task_edit_save_start() -> String {
+    rust_i18n::t!("task.edit_save_start").into_owned()
+}
+pub fn task_edit_branch_auto() -> String {
+    rust_i18n::t!("task.edit_branch_auto").into_owned()
+}
+pub fn task_edit_subtasks_progress(done: usize, total: usize) -> String {
+    rust_i18n::t!("task.edit_subtasks_progress", done = done, total = total).into_owned()
+}
+pub fn task_edit_error() -> String {
+    rust_i18n::t!("task.edit_error").into_owned()
+}
+pub fn task_edit_cancelled() -> String {
+    rust_i18n::t!("task.edit_cancelled").into_owned()
+}
+
 /// Field label for the base-lane selector on the TaskEdit pane.
 pub fn task_edit_base_label() -> String {
     rust_i18n::t!("task.edit_base_label").into_owned()
@@ -2217,6 +2245,24 @@ pub fn timestamp_time_only() -> String {
 /// counts; the separator between them is the locale's business.
 pub fn agent_chat_context_meter(used: &str, size: &str) -> String {
     rust_i18n::t!("agent_chat.context_meter", used = used, size = size).into_owned()
+}
+
+/// Inline label on the context meter for an agent that reports cumulative
+/// session cost. Its own pattern, so where the amount sits is the locale's.
+pub fn agent_chat_context_meter_with_cost(
+    used: &str,
+    size: &str,
+    amount: &str,
+    currency: &str,
+) -> String {
+    rust_i18n::t!(
+        "agent_chat.context_meter_with_cost",
+        used = used,
+        size = size,
+        amount = amount,
+        currency = currency
+    )
+    .into_owned()
 }
 
 /// Tooltip on the context meter: the current context-window fill. `used`/`size`

@@ -390,17 +390,23 @@ fn context_meter(u: &UsageView) -> ContextMeter {
         .checked_div(u.size)
         .map(|p| p.min(100) as u8)
         .unwrap_or(0);
-    ContextMeter {
-        label: s::agent_chat_context_meter(&used, &size),
-        tooltip: match &u.cost {
-            Some(c) => s::agent_chat_context_tooltip_with_cost(
-                &used,
-                &size,
-                percent,
-                &format!("{:.2}", c.amount),
-                &c.currency,
-            ),
-            None => s::agent_chat_context_tooltip(&used, &size, percent),
+    match &u.cost {
+        Some(c) => {
+            let amount = format!("{:.2}", c.amount);
+            ContextMeter {
+                label: s::agent_chat_context_meter_with_cost(&used, &size, &amount, &c.currency),
+                tooltip: s::agent_chat_context_tooltip_with_cost(
+                    &used,
+                    &size,
+                    percent,
+                    &amount,
+                    &c.currency,
+                ),
+            }
+        }
+        None => ContextMeter {
+            label: s::agent_chat_context_meter(&used, &size),
+            tooltip: s::agent_chat_context_tooltip(&used, &size, percent),
         },
     }
 }
@@ -414,15 +420,23 @@ fn last_active_tooltip(iso: &str) -> SharedString {
     SharedString::from(s::agent_chat_last_active_tooltip(&when))
 }
 
-/// Compact token count for the context meter: exact below 1000, otherwise
-/// rounded to the nearest thousand with a `k` suffix (e.g. 53_000 → `53k`,
-/// 200_000 → `200k`). Precision loss at the low end is irrelevant for a
-/// context-window gauge whose values run in the tens of thousands.
+/// Compact token count for the context meter: exact below 1000, whole
+/// thousands with `k` below a million, then millions to one decimal with a
+/// trailing `.0` dropped (53_000 → `53k`, 1_000_000 → `1M`, 1_500_000 →
+/// `1.5M`). Precision loss is irrelevant for a context-window gauge.
 fn format_token_count(n: u64) -> String {
+    let thousands = n.saturating_add(500) / 1000;
     if n < 1000 {
         n.to_string()
+    } else if thousands < 1000 {
+        format!("{thousands}k")
     } else {
-        format!("{}k", (n + 500) / 1000)
+        // Branch on the rounded thousands so 999_600 reads `1M`, not `1000k`.
+        let tenths = n.saturating_add(50_000) / 100_000;
+        match tenths % 10 {
+            0 => format!("{}M", tenths / 10),
+            frac => format!("{}.{frac}M", tenths / 10),
+        }
     }
 }
 

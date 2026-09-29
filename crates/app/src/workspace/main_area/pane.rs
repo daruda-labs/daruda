@@ -161,6 +161,11 @@ pub(in crate::workspace) struct TaskEditContent {
     /// further title changes stop auto-deriving the branch so we
     /// don't trample the override.
     pub(super) branch_override: bool,
+    pub(super) branch_seed: String,
+    pub(super) draft_subtasks: Vec<daruda_store::tasks::SubTask>,
+    pub(super) preview_prompt: bool,
+    pub(super) settings_open: bool,
+    pub(super) notes_open: bool,
     pub(super) branch_validation: BranchValidation,
     /// Dropdown mapping lane picks to `Task::base_worktree_path`. The
     /// empty-string sentinel means "no explicit base — branch from the
@@ -245,6 +250,7 @@ impl BranchValidation {
 /// because of line-ending differences.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub(in crate::workspace) struct TaskEditSnapshot {
+    pub(super) draft_subtasks: Vec<daruda_store::tasks::SubTask>,
     pub(super) title: String,
     pub(super) branch: String,
     pub(super) prompt: String,
@@ -273,6 +279,7 @@ impl TaskEditContent {
     /// a user edit.
     pub(in crate::workspace) fn current_snapshot(&self, cx: &App) -> TaskEditSnapshot {
         TaskEditSnapshot {
+            draft_subtasks: self.draft_subtasks.clone(),
             title: self.title_input.read(cx).text().to_string(),
             branch: self.branch_input.read(cx).text().to_string(),
             prompt: normalize_newlines(self.prompt_state.read(cx).text().to_string().as_str()),
@@ -293,6 +300,10 @@ impl TaskEditContent {
     /// the value they wrote, so a successful save clears the flag.
     pub(in crate::workspace) fn is_dirty(&self, cx: &App) -> bool {
         self.current_snapshot(cx) != self.saved_snapshot
+    }
+
+    pub(in crate::workspace) fn can_save(&self, cx: &App) -> bool {
+        !self.title_input.read(cx).value().trim().is_empty() && !self.branch_validation.is_invalid()
     }
 }
 
@@ -736,10 +747,7 @@ impl Pane {
         match &self.content {
             PaneContent::Terminal(_) | PaneContent::FlowGraph(_) => false,
             PaneContent::File(f) => f.view.holds_editable_buffer() && f.view.path.is_absolute(),
-            PaneContent::TaskEditPane(te) => {
-                !matches!(te.branch_validation, BranchValidation::Invalid { .. })
-                    && !te.title_input.read(cx).value().trim().is_empty()
-            }
+            PaneContent::TaskEditPane(te) => te.can_save(cx),
             PaneContent::AgentChat(_) => false,
         }
     }

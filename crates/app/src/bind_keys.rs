@@ -88,6 +88,11 @@ pub(crate) fn register_static_bindings(cx: &mut App) {
         // File viewer
         KeyBinding::new(k::SHORTCUT_SAVE_FILE_PANE, SaveFilePane, Some("FileViewer")),
         KeyBinding::new(
+            k::SHORTCUT_SAVE_FILE_PANE,
+            SaveFilePane,
+            Some("TaskEditPane"),
+        ),
+        KeyBinding::new(
             k::SHORTCUT_FILE_VIEWER_SEARCH_OPEN,
             FileViewerSearchOpen,
             Some("FileViewer"),

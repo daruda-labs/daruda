@@ -500,6 +500,19 @@ pub struct CostView {
     pub currency: String,
 }
 
+impl UsageView {
+    /// Fold this report over the previous one. `cost` is optional per update and
+    /// an absent one means "not reported this time", not zero: claude-agent-acp
+    /// prices only its `result` updates, so its mid-turn fills carry none.
+    #[must_use]
+    pub fn carrying_cost_from(mut self, previous: Option<&UsageView>) -> Self {
+        if self.cost.is_none() {
+            self.cost = previous.and_then(|p| p.cost.clone());
+        }
+        self
+    }
+}
+
 impl From<&agent_client_protocol::schema::v1::UsageUpdate> for UsageView {
     fn from(u: &agent_client_protocol::schema::v1::UsageUpdate) -> Self {
         Self {
@@ -1270,6 +1283,41 @@ mod tests {
         assert_eq!(
             resolved_default_model("opus", Some("For complex work")),
             None
+        );
+    }
+
+    /// A mid-turn fill that prices nothing keeps the last reported cost, and a
+    /// priced report replaces it.
+    #[test]
+    fn a_report_without_cost_carries_the_previous_one() {
+        let priced = UsageView {
+            used: 10,
+            size: 100,
+            cost: Some(CostView {
+                amount: 1.5,
+                currency: "USD".to_owned(),
+            }),
+        };
+        let unpriced = UsageView {
+            used: 20,
+            size: 100,
+            cost: None,
+        };
+        let carried = unpriced.clone().carrying_cost_from(Some(&priced));
+        assert_eq!(carried.used, 20);
+        assert_eq!(carried.cost, priced.cost);
+        assert_eq!(unpriced.clone().carrying_cost_from(None).cost, None);
+
+        let repriced = UsageView {
+            cost: Some(CostView {
+                amount: 2.0,
+                currency: "USD".to_owned(),
+            }),
+            ..unpriced
+        };
+        assert_eq!(
+            repriced.clone().carrying_cost_from(Some(&priced)).cost,
+            repriced.cost
         );
     }
 }

@@ -24,8 +24,8 @@ fn the_last_active_tooltip_echoes_a_timestamp_it_cannot_parse() {
     }
 }
 
-/// Percent is integer-truncated, and the cost joins the tooltip only when the
-/// agent reports one.
+/// Percent is integer-truncated, and the cost joins the label and the tooltip
+/// only when the agent reports one.
 #[test]
 fn context_meter_derives_label_and_tooltip() {
     let priced = UsageView {
@@ -37,7 +37,7 @@ fn context_meter_derives_label_and_tooltip() {
         }),
     };
     let meter = context_meter(&priced);
-    assert_eq!(meter.label, "53k / 200k");
+    assert_eq!(meter.label, "53k / 200k \u{b7} 1.25 USD");
     assert_eq!(
         meter.tooltip,
         "Context: 53k / 200k tokens (26%) \u{b7} 1.25 USD"
@@ -47,10 +47,9 @@ fn context_meter_derives_label_and_tooltip() {
         cost: None,
         ..priced
     };
-    assert_eq!(
-        context_meter(&free).tooltip,
-        "Context: 53k / 200k tokens (26%)"
-    );
+    let meter = context_meter(&free);
+    assert_eq!(meter.label, "53k / 200k");
+    assert_eq!(meter.tooltip, "Context: 53k / 200k tokens (26%)");
 }
 
 /// A window the agent reports as size 0 must not divide by it.
@@ -84,6 +83,18 @@ fn every_locale_places_the_context_cost_itself() {
             tip.contains("53k") && tip.contains("1.25") && tip.contains("USD"),
             "locale {locale} rendered {tip:?}"
         );
+        let label = rust_i18n::t!(
+            "agent_chat.context_meter_with_cost",
+            locale = locale,
+            used = "53k",
+            size = "200k",
+            amount = "1.25",
+            currency = "USD"
+        );
+        assert!(
+            label.contains("53k") && label.contains("1.25") && label.contains("USD"),
+            "locale {locale} rendered {label:?}"
+        );
     }
 }
 
@@ -97,9 +108,19 @@ fn format_token_count_cases() {
         (1500, "2k"),
         (53_000, "53k"),
         (200_000, "200k"),
+        (861_072, "861k"),
+        (999_499, "999k"),
+        (999_600, "1M"),
+        (1_000_000, "1M"),
+        (1_500_000, "1.5M"),
+        (1_949_999, "1.9M"),
+        (2_000_000, "2M"),
     ] {
         assert_eq!(format_token_count(tokens), expected);
     }
+    // The count is whatever the agent sent: rounding saturates instead of
+    // overflowing, so the last digit may be off but the call never panics.
+    assert!(format_token_count(u64::MAX).ends_with('M'));
 }
 
 /// A pane nobody has touched: every axis — and every level of the tail axis —

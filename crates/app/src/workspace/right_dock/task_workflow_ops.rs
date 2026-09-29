@@ -424,7 +424,7 @@ impl Workspace {
     /// Lazily transitions to `Error { "lane gone" }` when the
     /// path no longer exists on disk, so a deleted-from-the-
     /// outside checkout doesn't dangle in `Running` forever.
-    pub(super) fn focus_task_lane(
+    pub(in crate::workspace) fn focus_task_lane(
         &mut self,
         task_id: &str,
         window: &mut Window,

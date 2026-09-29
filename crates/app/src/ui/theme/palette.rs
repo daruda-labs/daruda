@@ -2271,6 +2271,12 @@ pub const TASK_EDIT_BRANCH_INVALID_BORDER_W: f32 = 1.0;
 /// Corner radius matched to the embedded `TextInput` so the error
 /// border doesn't show as a square halo around a rounded widget (px).
 pub const TASK_EDIT_BRANCH_INVALID_RADIUS: f32 = RADIUS_SM;
+pub const TASK_EDIT_HEADER_H: f32 = 40.0;
+pub const TASK_EDIT_FOOTER_H: f32 = 48.0;
+pub const TASK_EDIT_MAX_WIDTH: f32 = 800.0;
+pub const TASK_EDIT_PREVIEW_MIN_H: f32 = 240.0;
+pub const TASK_EDIT_PROMPT_ROWS: usize = 10;
+pub const TASK_EDIT_NOTES_ROWS: usize = 4;
 /// Horizontal padding inside the pill — slightly wider than the
 /// default xsmall padding so the chevron `▾` has room to breathe and
 /// the state label stays visually centered.

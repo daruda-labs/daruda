@@ -55,7 +55,6 @@ mod tab_drag;
 mod tab_merge;
 mod tab_names;
 mod tab_status;
-mod task_edit_tab_cycle;
 mod tasks;
 mod terminal_exit;
 

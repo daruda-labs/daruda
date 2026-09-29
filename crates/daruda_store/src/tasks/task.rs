@@ -54,13 +54,13 @@ pub enum AgentType {
 /// - `AgentChat` — attach an in-app ACP agent-chat session to the lane
 ///   and deliver the task prompt as an ACP turn.
 ///
-/// `#[default] Terminal` keeps every pre-existing task (and any task
-/// created without an explicit choice) on the CLI path.
+/// New tasks default to Agent Chat; legacy saved tasks without an
+/// execution surface retain Terminal through the field's serde default.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum TaskAgentSurface {
-    #[default]
     Terminal,
+    #[default]
     AgentChat,
 }
 
@@ -148,6 +148,10 @@ fn default_auto_execute() -> bool {
     true
 }
 
+fn legacy_agent_surface() -> TaskAgentSurface {
+    TaskAgentSurface::Terminal
+}
+
 /// One row in the Tasks tab. `branch_name` is derived once at creation
 /// time and stays stable across Reopen / Retry so the lane path
 /// remains predictable for the user.
@@ -176,17 +180,16 @@ pub struct Task {
     #[serde(default)]
     pub base_worktree_path: Option<PathBuf>,
 
-    /// Sanitized title + ULID 4-char suffix. Stable across Reopen /
+    /// Title slug + random ULID suffix. Stable across Reopen /
     /// Retry — never regenerated.
     pub branch_name: String,
 
     #[serde(default)]
     pub agent_type: AgentType,
 
-    /// Execution surface for this task's lane — Terminal CLI (default)
-    /// or in-app Agent Chat (ACP). `#[serde(default)]` so task JSON
-    /// written before this field existed loads as `Terminal`.
-    #[serde(default)]
+    /// New tasks use Agent Chat (ACP). Saved tasks without this field
+    /// retain Terminal CLI execution.
+    #[serde(default = "legacy_agent_surface")]
     pub agent_surface: TaskAgentSurface,
 
     /// `false` skips the trailing newline so the user must press Enter

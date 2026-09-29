@@ -166,7 +166,7 @@ impl AgentChatView {
                 self.session_config.config_options = options;
             }
             AcpEvent::UsageChanged(usage) => {
-                self.session_usage = Some(usage);
+                self.session_usage = Some(usage.carrying_cost_from(self.session_usage.as_ref()));
             }
             AcpEvent::ModeChanged { state } => {
                 self.last_known_mode_id = Some(state.current.clone());

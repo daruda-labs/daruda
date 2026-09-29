@@ -203,8 +203,18 @@ fn task_serde_round_trip_preserves_all_fields() {
 }
 
 #[test]
-fn task_new_defaults_agent_surface_to_terminal() {
-    assert_eq!(sample_task().agent_surface, TaskAgentSurface::Terminal);
+fn task_new_defaults_agent_surface_to_agent_chat() {
+    assert_eq!(TaskAgentSurface::default(), TaskAgentSurface::AgentChat);
+    assert_eq!(sample_task().agent_surface, TaskAgentSurface::AgentChat);
+}
+
+#[test]
+fn task_serde_preserves_explicit_terminal_surface() {
+    let mut task = sample_task();
+    task.agent_surface = TaskAgentSurface::Terminal;
+    let json = serde_json::to_string(&task).expect("serialize");
+    let restored: Task = serde_json::from_str(&json).expect("deserialize");
+    assert_eq!(restored.agent_surface, TaskAgentSurface::Terminal);
 }
 
 #[test]
@@ -217,7 +227,7 @@ fn agent_surface_serializes_as_snake_case() {
 
 #[test]
 fn task_loads_with_default_for_new_optional_fields() {
-    // JSON missing session_ids / notes / finished_at / agent_type /
+    // JSON missing session_ids / notes / finished_at / agent_type / agent_surface /
     // base_worktree_path / auto_execute / subtasks — must default cleanly.
     let json = r#"{
         "id": "01HX",
@@ -237,7 +247,7 @@ fn task_loads_with_default_for_new_optional_fields() {
     assert_eq!(
         t.agent_surface,
         TaskAgentSurface::Terminal,
-        "agent_surface default is Terminal"
+        "legacy tasks without agent_surface retain Terminal"
     );
     assert!(t.auto_execute, "auto_execute default is true");
     assert!(t.subtasks.is_empty(), "subtasks defaults to empty vec");
@@ -474,17 +484,15 @@ fn tasks_state_filter_by_state_returns_matching_subset() {
 // ---------------------------------------------------------------------------
 
 #[test]
-fn derive_branch_name_falls_back_when_title_has_spaces() {
-    // sanitize_branch_name rejects spaces outright (no auto-kebab),
-    // so a title with spaces takes the fallback path.
+fn derive_branch_name_uses_title_words() {
     let b = derive_branch_name("Fix auth bug", "01HX9YZAAA000000000000");
-    assert_eq!(b, "task-01hx9yza", "spaces in title trip sanitize fallback");
+    assert_eq!(b, "fix-auth-bug-00000000");
 }
 
 #[test]
 fn derive_branch_name_keeps_valid_kebab() {
     let b = derive_branch_name("fix-auth-bug", "01HX9YZAAA");
-    assert_eq!(b, "fix-auth-bug-01hx");
+    assert_eq!(b, "fix-auth-bug-hx9yzaaa");
 }
 
 #[test]
@@ -493,26 +501,33 @@ fn derive_branch_name_truncates_long_titles_to_40_chars() {
     let b = derive_branch_name(long, "01HX9YZAAA");
     let prefix = "abcdefghijabcdefghijabcdefghijabcdefghij";
     assert_eq!(prefix.chars().count(), 40);
-    assert_eq!(b, format!("{prefix}-01hx"));
+    assert_eq!(b, format!("{prefix}-hx9yzaaa"));
 }
 
 #[test]
 fn derive_branch_name_falls_back_when_title_is_empty_or_special() {
     // empty -> fallback
     let b = derive_branch_name("   ", "01HXABCDEFGHIJ");
-    assert_eq!(b, "task-01hxabcd");
+    assert_eq!(b, "task-cdefghij");
 
-    // sanitize-rejected (path-traversal) -> fallback
+    // Punctuation cannot introduce path traversal into the generated name.
     let b = derive_branch_name("..foo", "01HXABCDEFGHIJ");
-    assert_eq!(b, "task-01hxabcd");
+    assert_eq!(b, "foo-cdefghij");
 }
 
 #[test]
 fn derive_branch_name_handles_korean_title() {
-    // sanitize_branch_name rejects spaces / control chars but accepts
-    // CJK characters. Truncation must be character-based, not byte-based.
+    // Truncation must preserve complete CJK characters.
     let b = derive_branch_name("한글-제목-입니다", "01HXabcd");
-    assert_eq!(b, "한글-제목-입니다-01hx");
+    assert_eq!(b, "한글-제목-입니다-01hxabcd");
+}
+
+#[test]
+fn derive_branch_name_distinguishes_ids_from_the_same_millisecond() {
+    let a = derive_branch_name("Same title", "01J00000000000000000000001");
+    let b = derive_branch_name("Same title", "01J00000000000000000000002");
+    assert_ne!(a, b);
+    assert!(daruda_core::git::validate_branch_name(&a).is_ok());
 }
 
 // ---------------------------------------------------------------------------

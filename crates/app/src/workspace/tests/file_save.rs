@@ -9,7 +9,7 @@ fn open_temp_file(
     cx: &mut TestAppContext,
     body: &[u8],
 ) -> (
-    gpui::WindowHandle<Workspace>,
+    gpui::WindowHandle<crate::ui::Root>,
     gpui::Entity<Workspace>,
     tempfile::TempDir,
 ) {
@@ -18,16 +18,21 @@ fn open_temp_file(
     init_gpui_component(cx);
     let config = daruda_config::Config::default();
     let project = daruda_store::project::Project::from_path(temp.path());
+    let workspace_for_root = std::cell::RefCell::new(None);
     let wh = cx.add_window(|window, cx| {
-        Workspace::new_with_project_for_test(
-            &config,
-            Some(project),
-            fresh_test_data_dir(),
-            window,
-            cx,
-        )
+        let workspace = cx.new(|cx| {
+            Workspace::new_with_project_for_test(
+                &config,
+                Some(project),
+                fresh_test_data_dir(),
+                window,
+                cx,
+            )
+        });
+        *workspace_for_root.borrow_mut() = Some(workspace.clone());
+        crate::ui::Root::new(workspace, window, cx)
     });
-    let ws = wh.root(cx).unwrap();
+    let ws = workspace_for_root.into_inner().unwrap();
     cx.update(|cx| {
         crate::window_registry::WindowRegistry::register(wh.into(), ws.downgrade(), cx);
     });
@@ -59,7 +64,7 @@ fn open_temp_file(
 }
 
 fn type_text(
-    wh: gpui::WindowHandle<Workspace>,
+    wh: gpui::WindowHandle<crate::ui::Root>,
     ws: &gpui::Entity<Workspace>,
     cx: &mut TestAppContext,
     text: &str,
@@ -78,7 +83,11 @@ fn type_text(
     cx.run_until_parked();
 }
 
-fn save(wh: gpui::WindowHandle<Workspace>, ws: &gpui::Entity<Workspace>, cx: &mut TestAppContext) {
+fn save(
+    wh: gpui::WindowHandle<crate::ui::Root>,
+    ws: &gpui::Entity<Workspace>,
+    cx: &mut TestAppContext,
+) {
     cx.update_window(wh.into(), |_, window, cx| {
         ws.update(cx, |ws, cx| ws.save_focused_file_pane(window, cx));
     })
@@ -158,7 +167,7 @@ async fn a_file_deleted_on_disk_counts_as_changed(cx: &mut TestAppContext) {
 }
 
 fn close_active_tab(
-    wh: gpui::WindowHandle<Workspace>,
+    wh: gpui::WindowHandle<crate::ui::Root>,
     ws: &gpui::Entity<Workspace>,
     cx: &mut TestAppContext,
 ) {

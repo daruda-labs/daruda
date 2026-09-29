@@ -151,6 +151,9 @@ const PANE_MENU_ANCHOR_Y: f32 = 160.;
 /// One scenario per capture — these overlays are mutually exclusive on screen.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum ScreenshotScenario {
+    TaskEditor,
+    TaskEditorPreview,
+    TaskEditorRunning,
     OrchestratorChip,
     OrchestratorTab,
     /// Open the command palette (`CommandPaletteState::open`).
@@ -343,6 +346,9 @@ impl ScreenshotScenario {
     /// default section.
     pub(crate) fn from_cli_name(name: &str) -> Option<Self> {
         match name {
+            "task-editor" => Some(Self::TaskEditor),
+            "task-editor-preview" => Some(Self::TaskEditorPreview),
+            "task-editor-running" => Some(Self::TaskEditorRunning),
             NAME_ORCHESTRATOR_CHIP => Some(Self::OrchestratorChip),
             NAME_ORCHESTRATOR_TAB => Some(Self::OrchestratorTab),
             NAME_COMMAND_PALETTE => Some(Self::CommandPalette),
@@ -429,6 +435,21 @@ pub(crate) fn drive(
     cx: &mut App,
 ) {
     match scenario {
+        ScreenshotScenario::TaskEditor => {
+            workspace.update(cx, |ws, cx| {
+                ws.seed_task_editor_for_shot(false, false, window, cx)
+            });
+        }
+        ScreenshotScenario::TaskEditorPreview => {
+            workspace.update(cx, |ws, cx| {
+                ws.seed_task_editor_for_shot(true, false, window, cx)
+            });
+        }
+        ScreenshotScenario::TaskEditorRunning => {
+            workspace.update(cx, |ws, cx| {
+                ws.seed_task_editor_for_shot(false, true, window, cx)
+            });
+        }
         ScreenshotScenario::ClientChrome => {
             crate::title_bar::force_client_chrome_for_shot();
             workspace.update(cx, |_, cx| cx.notify());

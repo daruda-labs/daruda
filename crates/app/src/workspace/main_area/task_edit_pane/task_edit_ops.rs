@@ -13,7 +13,7 @@
 use daruda_store::observability::error_report::{ErrorReport, ErrorSeverity};
 use daruda_store::observability::log_writer::LogWriter;
 use daruda_store::observability::system_info::redact_home;
-use daruda_store::tasks::{Task, TaskAgentSurface, TaskId, branch::derive_branch_name};
+use daruda_store::tasks::{SubTask, Task, TaskAgentSurface, TaskId, branch::derive_branch_name};
 use gpui::{AppContext as _, BorrowAppContext as _, Context, Focusable as _, SharedString, Window};
 
 use crate::ui::select::{SelectOption, state_with_options};
@@ -79,6 +79,9 @@ impl Workspace {
         self.set_focused_pane(pane_id, window, cx);
         self.bump_activity(pane_id);
         self.focus_pane(pane_id, window, cx);
+        if let Some(te) = self.task_edit_content_for_pane(pane_id) {
+            te.title_input.read(cx).focus_handle(cx).focus(window, cx);
+        }
         cx.notify();
     }
 
@@ -153,17 +156,24 @@ impl Workspace {
         let prompt_state = make_markdown_prose_state(
             &prompt,
             crate::surface::strings::task_edit_prompt_placeholder(),
-            20,
+            crate::ui::theme::TASK_EDIT_PROMPT_ROWS,
             window,
             cx,
         );
         let notes_state = make_markdown_prose_state(
             &notes,
             crate::surface::strings::task_edit_notes_placeholder(),
-            4,
+            crate::ui::theme::TASK_EDIT_NOTES_ROWS,
             window,
             cx,
         );
+        let [prompt_sub, notes_sub] = [&prompt_state, &notes_state].map(|state| {
+            cx.subscribe(state, |_, _, event: &InputEvent, cx| {
+                if matches!(event, InputEvent::Change) {
+                    cx.notify();
+                }
+            })
+        });
 
         let title_sub = cx.subscribe_in(
             &title_input,
@@ -251,7 +261,12 @@ impl Workspace {
 
         let branch_validation = validate_branch(&branch_name);
 
+        let branch_seed = initial
+            .as_ref()
+            .map(|task| task.id.clone())
+            .unwrap_or_else(|| Task::new(String::new(), String::new(), None).id);
         let saved_snapshot = TaskEditSnapshot {
+            draft_subtasks: Vec::new(),
             title: title.clone(),
             branch: branch_name.clone(),
             prompt: normalize_newlines(&prompt),
@@ -264,12 +279,8 @@ impl Workspace {
                 .unwrap_or_default(),
         };
 
-        // Install the FS watcher when the task has a lane
-        // and the prompt file is already on disk. Backlog tasks have
-        // no lane yet; drafts have neither. Subsequent
-        // `start_task` runs that materialise the lane are out of
-        // scope for this PR — reopening the pane after Start picks
-        // up the watcher.
+        // Running tasks watch immediately; Start attaches the watcher once
+        // it has materialized the task's prompt file.
         let (_prompt_watcher, _prompt_pump) =
             install_prompt_watcher(initial.as_ref(), pane_id, window, cx);
 
@@ -285,6 +296,11 @@ impl Workspace {
                         .map(|t| derive_branch_name(&t.title, &t.id) != branch_name)
                         .unwrap_or(false),
                 branch_validation,
+                branch_seed,
+                draft_subtasks: Vec::new(),
+                preview_prompt: false,
+                settings_open: false,
+                notes_open: !notes.is_empty(),
                 prompt_state,
                 notes_state,
                 auto_execute,
@@ -299,6 +315,8 @@ impl Workspace {
                     base_sub,
                     new_subtask_sub,
                     rename_subtask_sub,
+                    prompt_sub,
+                    notes_sub,
                 ],
                 _prompt_watcher,
                 _prompt_pump,
@@ -310,9 +328,7 @@ impl Workspace {
         }
     }
 
-    /// Auto-derive branch from title — fires from the title input's
-    /// `Changed` event. No-op once the user has manually edited the
-    /// branch (`branch_override = true`).
+    /// Refresh the tab title and, for an unoverridden draft, its branch.
     pub(super) fn refresh_task_edit_branch(
         &mut self,
         pane_id: PaneId,
@@ -325,29 +341,22 @@ impl Workspace {
         let Some(te) = pane.task_edit_content() else {
             return;
         };
-        if te.branch_override {
-            return;
-        }
         let title = te.title_input.read(cx).value().to_string();
-        // ULID-shaped id for draft panes: real tasks reuse their own
-        // ULID, drafts use the task_id or a temporary "draft" stamp
-        // so the suffix is stable across keystrokes within a session.
-        let ulid_stamp = te
-            .task_id
-            .clone()
-            .unwrap_or_else(|| "draftdraftdraftdraft".to_string());
-        let derived = derive_branch_name(&title, &ulid_stamp);
         let branch_entity = te.branch_input.clone();
-        branch_entity.update(cx, |inp, cx_state| {
-            inp.set_value(derived.clone(), window, cx_state)
-        });
+        let derived = (te.task_id.is_none() && !te.branch_override)
+            .then(|| derive_branch_name(&title, &te.branch_seed));
         if let Some(te) = self.task_edit_content_mut_for(pane_id) {
-            te.branch_validation = validate_branch(&derived);
             te.cached_title = if title.is_empty() {
                 crate::surface::strings::command_new_task().into()
             } else {
                 SharedString::from(title)
             };
+            if let Some(branch) = &derived {
+                te.branch_validation = validate_branch(branch);
+            }
+        }
+        if let Some(derived) = derived {
+            branch_entity.update(cx, |input, cx| input.set_value(derived, window, cx));
         }
         cx.notify();
     }
@@ -364,7 +373,8 @@ impl Workspace {
             None => return,
         };
         if let Some(te) = self.task_edit_content_mut_for(pane_id) {
-            te.branch_override = true;
+            let title = te.title_input.read(cx).value();
+            te.branch_override = branch_text != derive_branch_name(&title, &te.branch_seed);
             te.branch_validation = validate_branch(&branch_text);
         }
         cx.notify();
@@ -397,9 +407,10 @@ impl Workspace {
     /// `task_id` to dispatch `open_task_prompt_file`).
     pub(super) fn task_edit_content_for_pane(&self, pane_id: PaneId) -> Option<&TaskEditContent> {
         let pane = self
-            .active_runtime()
-            .panes
-            .iter()
+            .main_area
+            .runtimes
+            .values()
+            .flat_map(|runtime| runtime.panes.iter())
             .find(|p| p.id == pane_id)?;
         match &pane.content {
             PaneContent::TaskEditPane(te) => Some(te),
@@ -420,131 +431,30 @@ impl Workspace {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let Some(pane_id) = self.find_task_edit_pane(task_id) else {
-            return;
-        };
-        let already_attached = self
-            .active_runtime()
-            .panes
-            .iter()
-            .find(|p| p.id == pane_id)
-            .and_then(|p| p.task_edit_content())
-            .map(|te| te._prompt_watcher.is_some())
-            .unwrap_or(true);
-        if already_attached {
-            return;
-        }
+        // Starting a task activates its new lane; the authoring tab stays
+        // in the source lane, and may be open in more than one lane.
+        let panes: Vec<_> = self
+            .main_area
+            .runtimes
+            .values()
+            .flat_map(|runtime| runtime.panes.iter())
+            .filter_map(|pane| {
+                let te = pane.task_edit_content()?;
+                (te.task_id.as_deref() == Some(task_id) && te._prompt_watcher.is_none())
+                    .then_some(pane.id)
+            })
+            .collect();
         let task = cx
             .global::<crate::agent::tasks_global::GlobalTasks>()
             .get(task_id)
             .cloned();
-        let (handle, pump) = install_prompt_watcher(task.as_ref(), pane_id, window, cx);
-        if let Some(te) = self.task_edit_content_mut_for(pane_id) {
-            te._prompt_watcher = handle;
-            te._prompt_pump = pump;
+        for pane_id in panes {
+            let (handle, pump) = install_prompt_watcher(task.as_ref(), pane_id, window, cx);
+            if let Some(te) = self.task_edit_content_mut_for(pane_id) {
+                te._prompt_watcher = handle;
+                te._prompt_pump = pump;
+            }
         }
-    }
-
-    /// `[+ Add subtask…]` row submitted (Enter). Routes the text into
-    /// `add_subtask`, then clears the input so the next entry can
-    /// start fresh. No-op for draft panes — subtasks attach to
-    /// persisted tasks only — drafts show a "save
-    /// first" hint in place of the list.
-    pub(super) fn submit_new_subtask(
-        &mut self,
-        pane_id: PaneId,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
-        let Some(pane) = self.active_runtime().panes.iter().find(|p| p.id == pane_id) else {
-            return;
-        };
-        let Some(te) = pane.task_edit_content() else {
-            return;
-        };
-        let Some(task_id) = te.task_id.clone() else {
-            return;
-        };
-        let text = te.new_subtask_input.read(cx).value().to_string();
-        let input = te.new_subtask_input.clone();
-        if text.trim().is_empty() {
-            return;
-        }
-        self.add_subtask(&task_id, text, cx);
-        input.update(cx, |inp, cx_state| {
-            inp.set_value(String::new(), window, cx_state)
-        });
-    }
-
-    /// Begin an inline rename of `subtask_id`. Stamps the shared
-    /// rename input with the current title and routes focus to it so
-    /// the user can edit immediately. Only one rename can be active at
-    /// a time (single shared input).
-    pub(super) fn enter_rename_subtask(
-        &mut self,
-        pane_id: PaneId,
-        subtask_id: String,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
-        let Some(pane) = self.active_runtime().panes.iter().find(|p| p.id == pane_id) else {
-            return;
-        };
-        let Some(te) = pane.task_edit_content() else {
-            return;
-        };
-        let Some(task_id) = te.task_id.clone() else {
-            return;
-        };
-        let input_entity = te.editing_subtask_input.clone();
-        let title = cx
-            .global::<crate::agent::tasks_global::GlobalTasks>()
-            .get(&task_id)
-            .and_then(|t| t.subtasks.iter().find(|s| s.id == subtask_id).cloned())
-            .map(|s| s.title)
-            .unwrap_or_default();
-        input_entity.update(cx, |inp, cx_state| inp.set_value(title, window, cx_state));
-        if let Some(te) = self.task_edit_content_mut_for(pane_id) {
-            te.editing_subtask = Some(subtask_id);
-        }
-        let handle = input_entity.read(cx).focus_handle(cx);
-        window.focus(&handle, cx);
-        cx.notify();
-    }
-
-    /// Commit the inline rename — flushes the input's text into
-    /// `rename_subtask` and clears the editing state. Empty / unchanged
-    /// titles are dropped by `rename_subtask` itself.
-    pub(super) fn commit_rename_subtask(&mut self, pane_id: PaneId, cx: &mut Context<Self>) {
-        let Some(pane) = self.active_runtime().panes.iter().find(|p| p.id == pane_id) else {
-            return;
-        };
-        let Some(te) = pane.task_edit_content() else {
-            return;
-        };
-        let Some(task_id) = te.task_id.clone() else {
-            return;
-        };
-        let Some(subtask_id) = te.editing_subtask.clone() else {
-            return;
-        };
-        let new_title = te.editing_subtask_input.read(cx).text().to_string();
-        self.rename_subtask(&task_id, &subtask_id, new_title, cx);
-        if let Some(te) = self.task_edit_content_mut_for(pane_id) {
-            te.editing_subtask = None;
-        }
-        cx.notify();
-    }
-
-    /// Cancel the inline rename without touching the underlying
-    /// subtask. Reached from the TaskEdit pane's outer Esc handler —
-    /// `gpui_component::Input` doesn't emit a Cancel event of its own,
-    /// so Escape routing lives one level up in `task_edit_pane::render`.
-    pub(super) fn cancel_rename_subtask(&mut self, pane_id: PaneId, cx: &mut Context<Self>) {
-        if let Some(te) = self.task_edit_content_mut_for(pane_id) {
-            te.editing_subtask = None;
-        }
-        cx.notify();
     }
 
     /// Persist the TaskEdit pane (`pane_id`) into `GlobalTasks`. When
@@ -583,7 +493,7 @@ impl Workspace {
         cx: &mut Context<Self>,
     ) -> Option<TaskId> {
         let form = self.read_task_edit_form(pane_id, cx)?;
-        if matches!(form.branch_validation, BranchValidation::Invalid { .. }) {
+        if form.title.trim().is_empty() || form.branch_validation.is_invalid() {
             return None;
         }
 
@@ -603,6 +513,8 @@ impl Workspace {
 
         let task_id = match &form.task_id {
             Some(id) => {
+                cx.global::<crate::agent::tasks_global::GlobalTasks>()
+                    .get(id)?;
                 self.update_task(
                     id,
                     form.title.clone(),
@@ -624,6 +536,7 @@ impl Workspace {
                 if !form.branch.is_empty() {
                     task.branch_name = form.branch.clone();
                 }
+                task.subtasks = form.draft_subtasks.clone();
                 task.notes = form.notes.clone();
                 task.auto_execute = form.auto_execute;
                 task.agent_surface = form.agent_surface;
@@ -640,7 +553,9 @@ impl Workspace {
         // as dirty after a successful save.
         if let Some(te) = self.task_edit_content_mut_for(pane_id) {
             te.task_id = Some(task_id.clone());
+            te.draft_subtasks.clear();
             te.saved_snapshot = crate::workspace::main_area::pane::TaskEditSnapshot {
+                draft_subtasks: Vec::new(),
                 title: form.title.clone(),
                 branch: form.branch.clone(),
                 prompt: normalize_newlines(&form.prompt),
@@ -652,31 +567,6 @@ impl Workspace {
         }
 
         Some(task_id)
-    }
-
-    /// Close the TaskEdit pane without saving. The full dirty-prompt
-    /// flow lives on `close_pane_by_id`; this is the explicit Discard
-    /// path the form footer dispatches to.
-    pub(super) fn discard_task_edit_pane(
-        &mut self,
-        pane_id: PaneId,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
-        // Mark the pane as non-dirty so the close prompt
-        // doesn't second-guess the user's explicit Discard. Routes
-        // through `current_snapshot` so any new field on
-        // `TaskEditSnapshot` (e.g. `base_value`) is captured by
-        // a single source of truth rather than duplicated here.
-        if let Some(pane) = self.active_runtime().panes.iter().find(|p| p.id == pane_id)
-            && let Some(te) = pane.task_edit_content()
-        {
-            let snapshot = te.current_snapshot(cx);
-            if let Some(te) = self.task_edit_content_mut_for(pane_id) {
-                te.saved_snapshot = snapshot;
-            }
-        }
-        self.close_pane_by_id(pane_id, window, cx);
     }
 
     /// Read the current form values without holding a `&mut self`
@@ -694,6 +584,7 @@ impl Workspace {
             .find(|p| p.id == pane_id)?
             .task_edit_content()?;
         Some(TaskEditFormSnapshot {
+            draft_subtasks: te.draft_subtasks.clone(),
             task_id: te.task_id.clone(),
             title: te.title_input.read(cx).text().to_string(),
             branch: te.branch_input.read(cx).text().to_string(),
@@ -715,6 +606,7 @@ impl Workspace {
 /// Plain-data form snapshot used by `save_task_edit_pane` so the save
 /// path doesn't keep a borrow on `self.active_runtime().panes` past the read step.
 struct TaskEditFormSnapshot {
+    draft_subtasks: Vec<SubTask>,
     task_id: Option<TaskId>,
     title: String,
     branch: String,
@@ -746,10 +638,7 @@ fn prompt_file_path_for(task: &Task) -> Option<std::path::PathBuf> {
     )
 }
 
-/// Install the watcher + pump for `task`'s prompt file. Returns a
-/// `(path, handle, pump)` triple so the builder can stash all three
-/// on `TaskEditContent`. All three are `None` when the task isn't in
-/// a state that has a prompt file on disk.
+/// Install the watcher and pump when the task has a prompt file on disk.
 fn install_prompt_watcher(
     initial: Option<&Task>,
     pane_id: PaneId,
@@ -840,7 +729,13 @@ impl Workspace {
             }
         };
 
-        let Some(pane) = self.active_runtime().panes.iter().find(|p| p.id == pane_id) else {
+        let Some(pane) = self
+            .main_area
+            .runtimes
+            .values()
+            .flat_map(|runtime| runtime.panes.iter())
+            .find(|p| p.id == pane_id)
+        else {
             return;
         };
         let Some(te) = pane.task_edit_content() else {
