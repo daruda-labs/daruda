@@ -126,7 +126,10 @@ fn model_vocabulary(options: &[daruda_acp::ConfigOptionView]) -> Vec<VocabEntry>
         .map(|(_, _, choices)| {
             choices
                 .iter()
-                .map(|c| VocabEntry::new(c.value.clone(), c.name.clone()))
+                .map(|c| {
+                    VocabEntry::new(c.value.clone(), c.name.clone())
+                        .with_description(c.description.clone())
+                })
                 .collect()
         })
         .unwrap_or_default()

@@ -1910,6 +1910,18 @@ pub fn agent_chat_config_boolean_off() -> String {
     rust_i18n::t!("agent_chat.config_boolean_off").into_owned()
 }
 
+/// A model choice's display label. The default-model entry carries a fixed
+/// "Default (recommended)" name and names the model it resolves to only in its
+/// description, so that model is shown instead.
+pub fn agent_model_choice_label(value: &str, name: &str, description: Option<&str>) -> String {
+    match description {
+        Some(model) if value == daruda_acp::DEFAULT_MODEL_CHOICE && !model.is_empty() => {
+            rust_i18n::t!("agent_chat.config_default_model", model = model).into_owned()
+        }
+        _ => name.to_string(),
+    }
+}
+
 pub fn agent_chat_session_mode_chip(value: &str) -> String {
     rust_i18n::t!("agent_chat.session_mode_chip", value = value).into_owned()
 }

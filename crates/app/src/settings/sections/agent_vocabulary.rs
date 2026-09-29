@@ -115,11 +115,13 @@ pub(in crate::settings) fn agent_row_vocabulary_options(
             known_axis(vocabulary.known_modes_for(agent_id, command), seed_modes),
             seed.as_ref().and_then(|seed| seed.default_mode.as_deref()),
             saved_mode,
+            mode_label,
         ),
         vocabulary_options(
             known_axis(vocabulary.known_models_for(agent_id, command), seed_models),
             seed.as_ref().and_then(|seed| seed.default_model.as_deref()),
             saved_model,
+            model_label,
         ),
     )
 }
@@ -130,6 +132,15 @@ fn known_axis<'a>(cached: Option<&'a [VocabEntry]>, seeded: &'a [VocabEntry]) ->
     cached.unwrap_or(seeded)
 }
 
+fn mode_label(entry: &VocabEntry) -> String {
+    entry.name.clone()
+}
+
+/// Same label the agent-chat model chip shows for this choice.
+fn model_label(entry: &VocabEntry) -> String {
+    s::agent_model_choice_label(&entry.id, &entry.name, entry.description.as_deref())
+}
+
 /// The `(agent default[ — name])` entry first, then the vocabulary, then
 /// `saved` if the vocabulary does not list it — so a value set before the
 /// agent was ever connected is never silently dropped.
@@ -137,15 +148,16 @@ fn vocabulary_options(
     entries: &[VocabEntry],
     adapter_default: Option<&str>,
     saved: &str,
+    label: fn(&VocabEntry) -> String,
 ) -> Vec<SelectOption> {
     let mut options = vec![SelectOption::new(
         "",
-        agent_default_label(entries, adapter_default),
+        agent_default_label(entries, adapter_default, label),
     )];
     options.extend(
         entries
             .iter()
-            .map(|entry| SelectOption::new(entry.id.clone(), entry.name.clone())),
+            .map(|entry| SelectOption::new(entry.id.clone(), label(entry))),
     );
     if !saved.is_empty() && !entries.iter().any(|entry| entry.id == saved) {
         options.push(SelectOption::new(saved.to_string(), saved.to_string()));
@@ -155,16 +167,20 @@ fn vocabulary_options(
 
 /// Label for the "no override" entry. It names the adapter's own default when
 /// daruda knows it, so picking it is a stated choice rather than a blank.
-fn agent_default_label(entries: &[VocabEntry], adapter_default: Option<&str>) -> String {
+fn agent_default_label(
+    entries: &[VocabEntry],
+    adapter_default: Option<&str>,
+    label: fn(&VocabEntry) -> String,
+) -> String {
     let Some(id) = adapter_default else {
         return s::settings_agent_vocabulary_agent_default();
     };
     let name = entries
         .iter()
         .find(|entry| entry.id == id)
-        .map(|entry| entry.name.as_str())
-        .unwrap_or(id);
-    s::settings_agent_vocabulary_agent_default_named(name)
+        .map(label)
+        .unwrap_or_else(|| id.to_string());
+    s::settings_agent_vocabulary_agent_default_named(&name)
 }
 
 #[cfg(test)]
@@ -197,6 +213,8 @@ mod tests {
             .collect()
     }
 
+    const CLAUDE: &str = "npx -y @agentclientprotocol/claude-agent-acp@latest";
+
     fn values(options: &[super::SelectOption]) -> Vec<String> {
         options.iter().map(|o| o.value.to_string()).collect()
     }
@@ -205,7 +223,12 @@ mod tests {
     /// maps back to "no override", so it must never be a real mode id.
     #[test]
     fn the_agent_default_entry_comes_first_and_carries_an_empty_value() {
-        let options = vocabulary_options(&entries(&[("plan", "Plan")]), Some("plan"), "");
+        let options = vocabulary_options(
+            &entries(&[("plan", "Plan")]),
+            Some("plan"),
+            "",
+            super::mode_label,
+        );
         assert_eq!(values(&options), vec!["", "plan"]);
         assert!(
             options[0].label.contains("Plan"),
@@ -216,8 +239,14 @@ mod tests {
 
     #[test]
     fn an_unknown_adapter_default_leaves_the_entry_unnamed() {
-        let unlisted = vocabulary_options(&entries(&[("plan", "Plan")]), None, "");
-        let named = vocabulary_options(&entries(&[("plan", "Plan")]), Some("plan"), "");
+        let unlisted =
+            vocabulary_options(&entries(&[("plan", "Plan")]), None, "", super::mode_label);
+        let named = vocabulary_options(
+            &entries(&[("plan", "Plan")]),
+            Some("plan"),
+            "",
+            super::mode_label,
+        );
         assert_ne!(unlisted[0].label, named[0].label);
         assert_eq!(values(&unlisted), vec!["", "plan"]);
     }
@@ -226,19 +255,59 @@ mod tests {
     /// selectable, or opening Settings would drop it on the next save.
     #[test]
     fn a_saved_value_outside_the_vocabulary_is_appended() {
-        let options = vocabulary_options(&entries(&[("plan", "Plan")]), None, "legacy");
+        let options = vocabulary_options(
+            &entries(&[("plan", "Plan")]),
+            None,
+            "legacy",
+            super::mode_label,
+        );
         assert_eq!(values(&options), vec!["", "plan", "legacy"]);
     }
 
     #[test]
     fn a_saved_value_already_in_the_vocabulary_is_not_duplicated() {
-        let options = vocabulary_options(&entries(&[("plan", "Plan")]), None, "plan");
+        let options = vocabulary_options(
+            &entries(&[("plan", "Plan")]),
+            None,
+            "plan",
+            super::mode_label,
+        );
         assert_eq!(values(&options), vec!["", "plan"]);
     }
 
     #[test]
     fn an_empty_vocabulary_still_offers_the_agent_default() {
-        assert_eq!(values(&vocabulary_options(&[], None, "")), vec![""]);
+        assert_eq!(
+            values(&vocabulary_options(&[], None, "", super::mode_label)),
+            vec![""]
+        );
+    }
+
+    /// The default model names what it resolves to, the same label the
+    /// agent-chat chip shows.
+    #[test]
+    fn the_default_model_names_the_model_it_resolves_to() {
+        let mut cache = AgentVocabularyCache::default();
+        cache.record_models(
+            "claude",
+            CLAUDE,
+            vec![
+                VocabEntry::new("default", "Default (recommended)")
+                    .with_description(Some("Opus 5.5".to_string())),
+                VocabEntry::new("opus", "Opus 5.5")
+                    .with_description(Some("For complex work".to_string())),
+            ],
+        );
+
+        let (_modes, models) = agent_row_vocabulary_options(&cache, "claude", CLAUDE, "", "");
+
+        let labels: Vec<String> = models.iter().map(|o| o.label.to_string()).collect();
+        assert_eq!(labels[1..], ["Default (Opus 5.5)", "Opus 5.5"]);
+        assert!(
+            labels[0].contains("Default (Opus 5.5)"),
+            "the agent-default entry names the resolved model: {}",
+            labels[0]
+        );
     }
 
     #[test]

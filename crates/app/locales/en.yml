@@ -351,6 +351,7 @@ agent_chat:
   diagram_copied: "Copied"
   config_boolean_on: "On"
   config_boolean_off: "Off"
+  config_default_model: "Default (%{model})"
   session_mode_chip: "Session: %{value}"
   config_chip: "%{name}: %{value}"
   tab_title: "Agent"

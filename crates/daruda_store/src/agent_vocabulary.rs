@@ -32,6 +32,10 @@ pub const SCHEMA_VERSION: u32 = 2;
 pub struct VocabEntry {
     pub id: String,
     pub name: String,
+    /// The adapter's secondary text; for Claude's `default` model it names the
+    /// model that default resolves to.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
 }
 
 impl VocabEntry {
@@ -39,7 +43,13 @@ impl VocabEntry {
         Self {
             id: id.into(),
             name: name.into(),
+            description: None,
         }
+    }
+
+    pub fn with_description(mut self, description: Option<String>) -> Self {
+        self.description = description;
+        self
     }
 }
 
@@ -272,6 +282,26 @@ mod tests {
             .iter()
             .map(|(id, name)| VocabEntry::new(*id, *name))
             .collect()
+    }
+
+    /// A cache written before entries carried a description still loads, and
+    /// an entry without one writes no `description` key.
+    #[test]
+    fn description_is_optional_on_disk() {
+        let old: VocabEntry = serde_json::from_str(r#"{"id":"opus","name":"Opus"}"#).unwrap();
+        assert_eq!(old, VocabEntry::new("opus", "Opus"));
+        assert_eq!(
+            serde_json::to_string(&old).unwrap(),
+            r#"{"id":"opus","name":"Opus"}"#
+        );
+
+        let described =
+            VocabEntry::new("default", "Default").with_description(Some("Opus 5.5".to_string()));
+        let json = serde_json::to_string(&described).unwrap();
+        assert_eq!(
+            serde_json::from_str::<VocabEntry>(&json).unwrap(),
+            described
+        );
     }
 
     #[test]

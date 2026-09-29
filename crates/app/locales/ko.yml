@@ -350,6 +350,7 @@ agent_chat:
   diagram_copied: "복사됨"
   config_boolean_on: "켬"
   config_boolean_off: "끔"
+  config_default_model: "기본값 (%{model})"
   session_mode_chip: "세션: %{value}"
   config_chip: "%{name}: %{value}"
   tab_title: "에이전트"
