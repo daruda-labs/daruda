@@ -112,8 +112,8 @@ pub(in crate::workspace) fn aggregate_over_panes(
     (per_lane_status, per_lane_sessions)
 }
 
-/// `true` when any pane's bound session (PTY or ACP) is in a non-`Idle`
-/// status. The status-pulse gate reads this instead of the per-lane
+/// `true` when any pane's bound session (PTY or ACP) is in a status whose
+/// badge moves (see [`SessionStatus::animates`]). The status-pulse gate reads this instead of the per-lane
 /// aggregate: the aggregate's max-priority collapse would hide a
 /// `Connecting` session (priority 0) behind an `Idle` sibling (priority 1)
 /// even though its sub-row badge animates. Short-circuits without
@@ -129,14 +129,14 @@ pub(in crate::workspace) fn any_pane_session_animating(
         let pty_animating = bindings
             .get(pane_id)
             .and_then(|binding| store.get(&binding.session_id))
-            .is_some_and(|file| !matches!(file.status, SessionStatus::Idle));
+            .is_some_and(|file| file.status.animates());
         if pty_animating {
             return true;
         }
         // ACP (agent chat) session.
         acp_statuses
             .iter()
-            .any(|(pid, status)| pid == pane_id && !matches!(status, SessionStatus::Idle))
+            .any(|(pid, status)| pid == pane_id && status.animates())
     })
 }
 
@@ -332,6 +332,7 @@ fn status_label(status: Option<SessionStatus>) -> &'static str {
         Some(SessionStatus::NeedsAttention) => "NeedsAttention",
         Some(SessionStatus::Idle) => "Idle",
         Some(SessionStatus::Connecting) => "Connecting",
+        Some(SessionStatus::Failed) => "Failed",
         None => "(none)",
     }
 }

@@ -68,6 +68,7 @@ pub fn color_for_status(status: SessionStatus, cx: &App) -> Hsla {
         SessionStatus::NeedsAttention => t.status_needs_attention_dark,
         SessionStatus::Idle => t.status_idle_dark,
         SessionStatus::Connecting => t.status_connecting_dark,
+        SessionStatus::Failed => t.status_failed_dark,
     }
 }
 
@@ -120,6 +121,7 @@ impl RenderOnce for AgentStatusBadge {
             SessionStatus::NeedsAttention => needs_attention_grid(dim, self.color, tick),
             SessionStatus::Working => dot_grid(dim, self.color, tick),
             SessionStatus::ExecutingTool => quadrant_grid(dim, self.color, tick),
+            SessionStatus::Failed => failed_grid(dim, self.color),
         };
         if self.active {
             wrap_active(inner, dim, cx).into_any_element()
@@ -188,6 +190,19 @@ fn connecting_grid(size: Pixels, color: Hsla, tick: u64) -> gpui::AnyElement {
         dim: size,
         color,
         phase,
+    }
+    .into_any_element()
+}
+
+// ── Failed ───────────────────────────────────────────────────────────────────
+
+/// A still cross (×): Connecting's plus↔cross blink stopped on the cross, so
+/// the shape, not only the red, tells it from NeedsAttention's full grid.
+fn failed_grid(size: Pixels, color: Hsla) -> gpui::AnyElement {
+    ConnectingGrid {
+        dim: size,
+        color,
+        phase: 0.5,
     }
     .into_any_element()
 }

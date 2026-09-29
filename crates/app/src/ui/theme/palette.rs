@@ -2175,6 +2175,7 @@ pub const STATUS_WORKING_DARK: Hsla = hsla(210.0, 1.0, 0.68, 1.0);
 pub const STATUS_EXECUTING_TOOL_DARK: Hsla = hsla(43.0, 0.96, 0.56, 1.0);
 pub const STATUS_NEEDS_ATTENTION_DARK: Hsla = hsla(0.0, 0.84, 0.60, 1.0);
 pub const STATUS_IDLE_DARK: Hsla = hsla(160.0, 0.64, 0.52, 1.0);
+pub const STATUS_FAILED_DARK: Hsla = ERROR;
 pub const STATUS_CONNECTING_DARK: Hsla = hsla(220.0, 0.09, 0.65, 1.0);
 pub const STATUS_BADGES_ROW_GAP: f32 = 5.0;
 pub const STATUS_BADGES_ROW_TOP_MARGIN: f32 = 3.0;
