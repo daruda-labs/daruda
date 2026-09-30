@@ -1334,7 +1334,7 @@ pub fn task_picker_empty_delete() -> String {
 
 /// `[📄 Open file]` button shown next to the Prompt section header in
 /// the TaskEdit pane. Click opens
-/// `<wt>/.daruda/task-<branch>.md` in a fresh file viewer tab when
+/// the task's prompt file (`prompt_file_path`) in a fresh file viewer tab when
 /// the task has a lane (Backlog / draft tasks disable the button
 /// since no on-disk file exists yet).
 pub fn task_edit_open_file_button() -> String {
@@ -1366,8 +1366,8 @@ pub fn task_edit_unsaved() -> String {
 pub fn task_edit_save_start() -> String {
     rust_i18n::t!("task.edit_save_start").into_owned()
 }
-pub fn task_edit_branch_auto() -> String {
-    rust_i18n::t!("task.edit_branch_auto").into_owned()
+pub fn task_edit_branch_regenerate() -> String {
+    rust_i18n::t!("task.edit_branch_regenerate").into_owned()
 }
 pub fn task_edit_subtasks_progress(done: usize, total: usize) -> String {
     rust_i18n::t!("task.edit_subtasks_progress", done = done, total = total).into_owned()
@@ -1377,6 +1377,28 @@ pub fn task_edit_error() -> String {
 }
 pub fn task_edit_cancelled() -> String {
     rust_i18n::t!("task.edit_cancelled").into_owned()
+}
+
+/// Where a task runs: a worktree it creates, or one already registered.
+pub fn task_edit_run_in_label() -> String {
+    rust_i18n::t!("task.edit_run_in_label").into_owned()
+}
+pub fn task_edit_run_in_new() -> String {
+    rust_i18n::t!("task.edit_run_in_new").into_owned()
+}
+pub fn task_edit_run_in_existing() -> String {
+    rust_i18n::t!("task.edit_run_in_existing").into_owned()
+}
+pub fn task_edit_run_in_lane_placeholder() -> String {
+    rust_i18n::t!("task.edit_run_in_lane_placeholder").into_owned()
+}
+/// Warning under the lane picker: another task already runs in that lane.
+pub fn task_edit_run_in_lane_busy(title: &str) -> String {
+    rust_i18n::t!("task.edit_run_in_lane_busy", title = title).into_owned()
+}
+/// A new-worktree branch that a registered lane already checks out.
+pub fn task_edit_branch_exists() -> String {
+    rust_i18n::t!("task.edit_branch_exists").into_owned()
 }
 
 /// Field label for the base-lane selector on the TaskEdit pane.
@@ -1474,7 +1496,7 @@ pub fn task_edit_cancel() -> String {
 pub const TAB_TITLE_DIRTY_DOT: &str = "● ";
 
 /// Prompt-file watcher conflict prompt. Fires when an
-/// external editor rewrites `<wt>/.daruda/task-<branch>.md` and the
+/// external editor rewrites the task's prompt file and the
 /// pane already has unsaved edits.
 pub const PROMPT_WATCHER_HEADING_PREFIX: &str = "“";
 pub fn prompt_watcher_heading_suffix() -> String {
@@ -7133,6 +7155,7 @@ error_string!(
 error_string!(error_skill_rename_failed, "error.skill_rename_failed");
 error_string!(error_status_bar_save_failed, "error.status_bar_save_failed");
 error_string!(error_tasks_require_git_repo, "error.tasks_require_git_repo");
+error_string!(error_task_lane_missing, "error.task_lane_missing");
 error_string!(error_tasks_save_failed, "error.tasks_save_failed");
 error_string!(error_task_escalation_orphan, "error.task_escalation_orphan");
 /// Toast body under [`error_task_escalation_orphan`]. The title alone does not

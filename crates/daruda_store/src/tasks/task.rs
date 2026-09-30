@@ -148,6 +148,18 @@ fn default_auto_execute() -> bool {
     true
 }
 
+/// Where a task runs when started. Saved tasks without this field create a
+/// fresh worktree, which is the only behaviour older builds know.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum TaskRunIn {
+    /// `git worktree add -b <branch_name>` from `base_worktree_path`.
+    #[default]
+    NewWorktree,
+    /// A registered lane at `path`, run in place without touching git.
+    ExistingLane { path: PathBuf },
+}
+
 fn legacy_agent_surface() -> TaskAgentSurface {
     TaskAgentSurface::Terminal
 }
@@ -194,9 +206,9 @@ impl TaskExecution {
     }
 }
 
-/// One row in the Tasks tab. `branch_name` is derived once at creation
-/// time and stays stable across Reopen / Retry so the lane path
-/// remains predictable for the user.
+/// One row in the Tasks tab. `branch_name` may change only while the task
+/// is in Backlog; once started it names the lane and stays fixed across
+/// Reopen / Retry.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Task {
     pub id: TaskId,
@@ -218,13 +230,17 @@ pub struct Task {
     pub notes: String,
 
     /// Lane to branch from. `None` = the active lane at Start
-    /// time (resolved by the caller).
+    /// time (resolved by the caller). Only read under `TaskRunIn::NewWorktree`.
     #[serde(default)]
     pub base_worktree_path: Option<PathBuf>,
 
-    /// Title slug + random ULID suffix. Stable across Reopen /
-    /// Retry — never regenerated.
+    /// `task-<ULID tail>` unless the user named it; stable once started.
+    /// Only read under `TaskRunIn::NewWorktree` — an existing lane's branch
+    /// is read from the lane at Start, since it can change after saving.
     pub branch_name: String,
+
+    #[serde(default)]
+    pub run_in: TaskRunIn,
 
     #[serde(default)]
     pub agent_type: AgentType,
@@ -250,13 +266,13 @@ pub struct Task {
 }
 
 impl Task {
-    /// Build a fresh task in the `Backlog` state. `branch_name` is
-    /// derived from `title` + ULID; callers may overwrite it before
-    /// inserting if they need a custom value.
+    /// Build a fresh task in the `Backlog` state. `branch_name` defaults to
+    /// `task-<ULID tail>`; callers may overwrite it before inserting if they
+    /// need a custom value.
     pub fn new(title: String, prompt: String, base_worktree_path: Option<PathBuf>) -> Self {
         let now = Utc::now();
         let id = ulid::Ulid::new().to_string();
-        let branch_name = super::branch::derive_branch_name(&title, &id);
+        let branch_name = super::branch::branch_name_for(&id);
         Self {
             id,
             title,
@@ -269,6 +285,7 @@ impl Task {
             notes: String::new(),
             base_worktree_path,
             branch_name,
+            run_in: TaskRunIn::default(),
             agent_type: AgentType::default(),
             agent_surface: TaskAgentSurface::default(),
             execution: None,

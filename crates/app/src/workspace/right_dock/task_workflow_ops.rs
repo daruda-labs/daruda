@@ -104,11 +104,11 @@ impl Workspace {
             .unwrap_or(false)
     }
 
-    /// Start a Backlog task: open the lane (`git worktree add`),
-    /// then write the prompt file and dispatch the `claude` command
-    /// into the new pane's PTY. Mirrors superset-desktop's
-    /// `agent-command.ts` + `terminal-adapter.ts` flow but in a
-    /// single GPUI spawn.
+    /// Start a Backlog task: open the lane (`git worktree add`, or a new
+    /// tab in an existing lane for `TaskRunIn::ExistingLane`), then write
+    /// the prompt file and dispatch the `claude` command into the pane.
+    /// Mirrors superset-desktop's `agent-command.ts` + `terminal-adapter.ts`
+    /// flow but in a single GPUI spawn.
     pub(in crate::workspace) fn start_task(
         &mut self,
         task_id: &str,
@@ -121,6 +121,11 @@ impl Workspace {
             return;
         };
         if !matches!(task.state, daruda_store::tasks::TaskState::Backlog) {
+            return;
+        }
+        // An existing lane needs no git repo, lock or checkout.
+        if let daruda_store::tasks::TaskRunIn::ExistingLane { path } = &task.run_in {
+            self.start_task_in_existing_lane(&task, path, window, cx);
             return;
         }
         let Some(repo_root) = self.git_repo_root() else {
@@ -238,6 +243,7 @@ impl Workspace {
                                         ws.dispatch_claude_for_task(
                                             &task_id,
                                             &plan.new_path,
+                                            &plan.branch,
                                             pane_id,
                                             window,
                                             cx,
@@ -271,10 +277,11 @@ impl Workspace {
     /// `activate_lane` does call `focus_pane` on the happy path,
     /// but routing the command through the pane the lane spawned
     /// is bug-resistant against any future change to focus handling.
-    fn dispatch_claude_for_task(
+    pub(super) fn dispatch_claude_for_task(
         &mut self,
         task_id: &str,
         worktree_path: &Path,
+        branch: &str,
         pane_id: crate::workspace::main_area::pane_tree::PaneId,
         window: &mut Window,
         cx: &mut Context<Self>,
@@ -282,7 +289,7 @@ impl Workspace {
         let Some(task) = cx.global::<GlobalTasks>().get(task_id).cloned() else {
             return;
         };
-        let rendered = daruda_store::tasks::prompt_file::render_task_prompt(&task);
+        let rendered = daruda_store::tasks::prompt_file::render_task_prompt(&task, branch);
         // Whether the prompt reached the pane. Each surface reports it; a
         // `false` (pane closed / kind can't receive) routes the task to `Error`
         // instead of a `Running` state that would never be driven. This is
@@ -292,22 +299,19 @@ impl Workspace {
         // rather than silently stranding the task in `Running`.
         let delivered = match task.agent_surface {
             daruda_store::tasks::TaskAgentSurface::Terminal => {
-                let prompt_path = match daruda_store::tasks::prompt_file::write_prompt_file(
-                    worktree_path,
-                    &task.branch_name,
-                    &rendered,
-                ) {
-                    Ok(p) => p,
-                    Err(e) => {
-                        self.fail_task_dispatch(
-                            task_id,
-                            worktree_path,
-                            crate::surface::strings::task_error_write_prompt(&e.to_string()),
-                            cx,
-                        );
-                        return;
-                    }
-                };
+                let prompt_path =
+                    daruda_store::tasks::prompt_file::prompt_file_path(&task, worktree_path);
+                if let Err(e) =
+                    daruda_store::tasks::prompt_file::write_prompt_file(&prompt_path, &rendered)
+                {
+                    self.fail_task_dispatch(
+                        task_id,
+                        worktree_path,
+                        crate::surface::strings::task_error_write_prompt(&e.to_string()),
+                        cx,
+                    );
+                    return;
+                }
                 self.bind_task_cli_execution(task_id, pane_id, worktree_path, cx);
                 let cmd = daruda_store::tasks::prompt_file::build_claude_command(
                     &prompt_path,
@@ -495,9 +499,13 @@ impl Workspace {
     /// dropped from `Task::state`; user must press [Start] to spawn
     /// a fresh lane.
     pub(in crate::workspace) fn reopen_task(&mut self, task_id: &str, cx: &mut Context<Self>) {
+        let own_lane = self.own_lane_for_task(task_id, cx);
         let cleared = cx.update_global::<GlobalTasks, Vec<String>>(|g, _| {
             if let Some(task) = g.get_mut(task_id) {
                 let ids = std::mem::take(&mut task.session_ids);
+                if let Some(path) = own_lane {
+                    task.run_in = daruda_store::tasks::TaskRunIn::ExistingLane { path };
+                }
                 task.state = daruda_store::tasks::TaskState::Backlog;
                 task.finished_at = None;
                 task.updated_at = Utc::now();
@@ -513,6 +521,11 @@ impl Workspace {
         cx.notify();
     }
 
+    fn own_lane_for_task(&self, task_id: &str, cx: &Context<Self>) -> Option<std::path::PathBuf> {
+        let task = cx.global::<GlobalTasks>().get(task_id)?;
+        self.own_lane_for_rerun(task)
+    }
+
     /// `Reopen` + `start_task` in one click — for the `[Retry]`
     /// affordance on `Error` rows.
     pub(super) fn retry_task(
@@ -521,9 +534,13 @@ impl Workspace {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        let own_lane = self.own_lane_for_task(task_id, cx);
         let cleared = cx.update_global::<GlobalTasks, Vec<String>>(|g, _| {
             if let Some(task) = g.get_mut(task_id) {
                 let ids = std::mem::take(&mut task.session_ids);
+                if let Some(path) = own_lane {
+                    task.run_in = daruda_store::tasks::TaskRunIn::ExistingLane { path };
+                }
                 task.state = daruda_store::tasks::TaskState::Backlog;
                 task.updated_at = Utc::now();
                 ids

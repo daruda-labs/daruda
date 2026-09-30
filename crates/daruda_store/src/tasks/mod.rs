@@ -28,12 +28,12 @@ pub mod task;
 #[cfg(test)]
 mod tests;
 
-pub use branch::derive_branch_name;
+pub use branch::{branch_name_for, random_branch_name};
 pub use persistence::{load_tasks, load_tasks_in, save_tasks, save_tasks_in, tasks_path_in};
 pub use prompt_file::{
-    build_claude_command, render_task_prompt, task_prompt_file_path, write_prompt_file,
+    build_claude_command, prompt_file_path, render_task_prompt, write_prompt_file,
 };
 pub use task::{
     AgentType, SCHEMA_VERSION, SessionEndReason, SubTask, TASK_TOOL_USE_FAILURE_THRESHOLD, Task,
-    TaskAgentSurface, TaskExecution, TaskFilter, TaskId, TaskState, TasksState,
+    TaskAgentSurface, TaskExecution, TaskFilter, TaskId, TaskRunIn, TaskState, TasksState,
 };

@@ -17,6 +17,7 @@ pub(in crate::workspace) mod skills;
 pub(in crate::workspace) mod status_pill;
 pub(in crate::workspace) mod task_chat_ops;
 pub(in crate::workspace) mod task_cli_ops;
+pub(in crate::workspace) mod task_existing_lane_ops;
 pub(in crate::workspace) mod task_ops;
 pub(in crate::workspace) mod task_picker_modal;
 pub(in crate::workspace) mod task_workflow_ops;

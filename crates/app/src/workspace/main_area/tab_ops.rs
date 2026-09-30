@@ -259,17 +259,30 @@ impl Workspace {
     }
 
     pub(in crate::workspace) fn add_tab(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.insert_terminal_tab(None, window, cx);
+    }
+
+    /// Open a terminal tab in the active lane at `cwd` (`None` = the
+    /// inherited default) and focus it. `None` when the lane cannot host one
+    /// or the PTY failed to spawn (already reported).
+    pub(in crate::workspace) fn insert_terminal_tab(
+        &mut self,
+        cwd: Option<std::path::PathBuf>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Option<PaneId> {
         // An inaccessible active lane renders the empty-state; spawning a tab
         // would root a PTY at the dead lane path and escape it. No-op. (A
         // workspace with no project at all still allows tabs.)
         if self.active_lane_is_inaccessible() {
-            return;
+            return None;
         }
-        let pane = match self.create_pane(window, cx) {
+        let cwd = cwd.or_else(|| self.default_cwd_for_new_pane());
+        let pane = match self.create_pane_at(cwd, window, cx) {
             Ok(p) => p,
             Err(e) => {
                 self.report_pane_error(&crate::surface::strings::pane_context_new_tab(), e, cx);
-                return;
+                return None;
             }
         };
         let pane_id = pane.id;
@@ -292,6 +305,7 @@ impl Workspace {
         self.focus_pane(pane_id, window, cx);
         self.resize_all_tabs(window, cx);
         cx.notify();
+        Some(pane_id)
     }
 
     /// Total open tabs across every lane runtime in the window (all

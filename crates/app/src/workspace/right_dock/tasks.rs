@@ -538,13 +538,12 @@ mod tests {
     use chrono::{TimeZone, Utc};
     use daruda_store::tasks::{SubTask, Task};
 
-    /// Use a space-free title so `sanitize_branch_name` accepts it
-    /// verbatim — that keeps `branch_name` predictable for the
-    /// substring assertion below. Titles with spaces drop into the
-    /// `task-<ulid>` fallback, which would make the branch_name hit
-    /// case fragile.
+    /// The branch is set apart from every other field, so a branch hit
+    /// cannot pass by matching the title instead.
     fn fresh_task() -> Task {
-        Task::new("fix-bug".into(), "prompt body".into(), None)
+        let mut task = Task::new("fix-bug".into(), "prompt body".into(), None);
+        task.branch_name = "feat-login".into();
+        task
     }
 
     /// Title / prompt / notes / branch_name stay matched even once
@@ -556,7 +555,7 @@ mod tests {
         assert!(matches_task(&t, "fix"), "title hit");
         assert!(matches_task(&t, "prompt"), "prompt hit");
         assert!(matches_task(&t, "auth"), "notes hit");
-        assert!(matches_task(&t, "fix-bug"), "branch_name hit");
+        assert!(matches_task(&t, "feat-login"), "branch_name hit");
         assert!(!matches_task(&t, "zzz"), "no match → false");
     }
 

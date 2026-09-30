@@ -61,7 +61,7 @@ impl Workspace {
         let prompt = te.prompt_state.clone();
         title.update(cx, |s, cx| s.set_value(task.title, window, cx));
         prompt.update(cx, |s, cx| s.set_value(task.prompt, window, cx));
-        self.refresh_task_edit_branch(pane_id, window, cx);
+        self.refresh_task_edit_title(pane_id, cx);
         if let Some(te) = self.task_edit_content_mut_for_pane(pane_id) {
             te.preview_prompt = preview;
             te.settings_open = preview || running;
@@ -283,16 +283,24 @@ impl Workspace {
         cx.notify();
     }
 
-    pub(super) fn reset_task_branch(
+    /// Replace the branch with a fresh `task-<random>` name.
+    pub(super) fn regenerate_task_branch(
         &mut self,
         pane_id: PaneId,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        let Some(te) = self.task_edit_content_for_pane(pane_id) else {
+            return;
+        };
+        let branch = daruda_store::tasks::random_branch_name();
+        let branch_input = te.branch_input.clone();
+        let validation = self.branch_validation_for(&branch, true);
         if let Some(te) = self.task_edit_content_mut_for_pane(pane_id) {
-            te.branch_override = false;
+            te.branch_validation = validation;
         }
-        self.refresh_task_edit_branch(pane_id, window, cx);
+        branch_input.update(cx, |input, cx| input.set_value(branch, window, cx));
+        cx.notify();
     }
 
     pub(super) fn toggle_editor_subtask(

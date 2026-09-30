@@ -1,18 +1,20 @@
 //! Prompt-first task form with contextual execution controls.
 
 mod editor_ops;
+pub(in crate::workspace) mod run_in_ops;
 pub(super) mod task_edit_ops;
 
 use daruda_store::tasks::{SubTask, TaskAgentSurface, TaskExecution, TaskState};
 use gpui::{Context, IntoElement, MouseButton, SharedString, div, prelude::*, px};
 
 use super::super::Workspace;
-use super::pane::{BranchValidation, TaskEditContent};
+use super::pane::{BranchValidation, RunInChoice, TaskEditContent};
 use super::pane_tree::PaneId;
 use crate::agent::tasks_global::GlobalTasks;
 use crate::surface::strings;
 use crate::ui::{self, ButtonVariants as _, Disableable as _, theme};
 use crate::ui::{button, checkbox};
+use run_in_ops::task_running_in;
 
 pub(in crate::workspace) fn render(
     pane_id: PaneId,
@@ -355,7 +357,9 @@ fn settings(
     if !te.settings_open {
         return section;
     }
-    let branch = if te.task_id.is_some() {
+    // A Backlog task has not created its lane yet, so its branch is still
+    // free to change; once started, it names that lane.
+    let branch = if !editable {
         div()
             .text_size(px(theme::FONT_SIZE_SM))
             .child(
@@ -384,20 +388,22 @@ fn settings(
                     )
                     .child(
                         ui::button_icon(
-                            ("task-edit-reset-branch", pane_id as usize),
-                            ui::icons::UNDO,
+                            ("task-edit-regenerate-branch", pane_id as usize),
+                            ui::icons::REFRESH,
                             cx,
                         )
-                        .tooltip(strings::task_edit_branch_auto())
-                        .disabled(!te.branch_override)
+                        .tooltip(strings::task_edit_branch_regenerate())
                         .on_click(cx.listener(
-                            move |this, _, window, cx| this.reset_task_branch(pane_id, window, cx),
+                            move |this, _, window, cx| {
+                                this.regenerate_task_branch(pane_id, window, cx)
+                            },
                         )),
                     ),
             )
             .when(te.branch_validation.is_invalid(), |column| {
                 let message = match &te.branch_validation {
                     BranchValidation::Invalid { reason } => reason.clone(),
+                    BranchValidation::Exists => strings::task_edit_branch_exists().into(),
                     _ => SharedString::default(),
                 };
                 column.child(
@@ -409,49 +415,57 @@ fn settings(
             })
             .into_any_element()
     };
-    section = section
-        .child(field(strings::task_edit_branch_label(), branch, cx))
-        .child(field(
-            strings::task_edit_base_label(),
-            ui::select::select(&te.base_select, cx, 4)
+    section = section.child(field(
+        strings::task_edit_run_in_label(),
+        run_in(pane_id, te, editable, cx).into_any_element(),
+        cx,
+    ));
+    section = match te.run_in {
+        RunInChoice::NewWorktree => section
+            .child(field(strings::task_edit_branch_label(), branch, cx))
+            .child(field(
+                strings::task_edit_base_label(),
+                ui::select::select(&te.base_select, cx, 4)
+                    .disabled(!editable)
+                    .placeholder(strings::task_edit_base_active_label())
+                    .into_any_element(),
+                cx,
+            )),
+        RunInChoice::ExistingLane => section,
+    };
+    section = section.child(field(
+        strings::task_edit_surface_label(),
+        div()
+            .flex()
+            .flex_wrap()
+            .gap(px(theme::GAP_LG))
+            .child(
+                ui::radio(
+                    ("task-edit-surface-terminal", pane_id as usize),
+                    strings::task_edit_surface_terminal(),
+                    5,
+                )
                 .disabled(!editable)
-                .placeholder(strings::task_edit_base_active_label())
-                .into_any_element(),
-            cx,
-        ))
-        .child(field(
-            strings::task_edit_surface_label(),
-            div()
-                .flex()
-                .flex_wrap()
-                .gap(px(theme::GAP_LG))
-                .child(
-                    ui::radio(
-                        ("task-edit-surface-terminal", pane_id as usize),
-                        strings::task_edit_surface_terminal(),
-                        5,
-                    )
-                    .disabled(!editable)
-                    .checked(te.agent_surface == TaskAgentSurface::Terminal)
-                    .on_click(cx.listener(move |this, _, _, cx| {
-                        this.set_task_surface(pane_id, TaskAgentSurface::Terminal, cx)
-                    })),
+                .checked(te.agent_surface == TaskAgentSurface::Terminal)
+                .on_click(cx.listener(move |this, _, _, cx| {
+                    this.set_task_surface(pane_id, TaskAgentSurface::Terminal, cx)
+                })),
+            )
+            .child(
+                ui::radio(
+                    ("task-edit-surface-chat", pane_id as usize),
+                    strings::task_edit_surface_agent_chat(),
+                    6,
                 )
-                .child(
-                    ui::radio(
-                        ("task-edit-surface-chat", pane_id as usize),
-                        strings::task_edit_surface_agent_chat(),
-                        6,
-                    )
-                    .disabled(!editable)
-                    .checked(te.agent_surface == TaskAgentSurface::AgentChat)
-                    .on_click(cx.listener(move |this, _, _, cx| {
-                        this.set_task_surface(pane_id, TaskAgentSurface::AgentChat, cx)
-                    })),
-                )
-                .into_any_element(),
-            cx,
-        ));
+                .disabled(!editable)
+                .checked(te.agent_surface == TaskAgentSurface::AgentChat)
+                .on_click(cx.listener(move |this, _, _, cx| {
+                    this.set_task_surface(pane_id, TaskAgentSurface::AgentChat, cx)
+                })),
+            )
+            .into_any_element(),
+        cx,
+    ));
     if te.agent_surface == TaskAgentSurface::Terminal {
         section = section.child(
             checkbox(
@@ -467,6 +481,64 @@ fn settings(
         );
     }
     section
+}
+
+/// New / Existing worktree radios; under Existing, the lane picker and a
+/// warning when another task already runs in the picked lane.
+fn run_in(
+    pane_id: PaneId,
+    te: &TaskEditContent,
+    editable: bool,
+    cx: &mut Context<Workspace>,
+) -> impl IntoElement {
+    let radios = div().flex().flex_wrap().gap(px(theme::GAP_LG)).children(
+        [
+            (
+                RunInChoice::NewWorktree,
+                strings::task_edit_run_in_new(),
+                "task-edit-run-in-new",
+            ),
+            (
+                RunInChoice::ExistingLane,
+                strings::task_edit_run_in_existing(),
+                "task-edit-run-in-existing",
+            ),
+        ]
+        .map(|(choice, label, id)| {
+            ui::radio((id, pane_id as usize), label, 3)
+                .disabled(!editable)
+                .checked(te.run_in == choice)
+                .on_click(
+                    cx.listener(move |this, _, _, cx| this.set_task_run_in(pane_id, choice, cx)),
+                )
+        }),
+    );
+    let mut column = div().flex().flex_col().gap(px(theme::GAP_SM)).child(radios);
+    if te.run_in == RunInChoice::ExistingLane {
+        column = column.child(
+            ui::select::select(&te.lane_select, cx, 4)
+                .disabled(!editable)
+                .placeholder(strings::task_edit_run_in_lane_placeholder()),
+        );
+        let lane = te.lane_value(cx);
+        let busy = (!lane.is_empty())
+            .then(|| {
+                task_running_in(
+                    cx.global::<GlobalTasks>(),
+                    std::path::Path::new(&lane),
+                    te.task_id.as_deref(),
+                )
+            })
+            .flatten()
+            .map(|task| strings::task_edit_run_in_lane_busy(&task.title));
+        column = column.children(busy.map(|message| {
+            div()
+                .text_size(px(theme::FONT_SIZE_SM))
+                .text_color(theme::WARNING)
+                .child(message)
+        }));
+    }
+    column
 }
 
 fn notes(pane_id: PaneId, te: &TaskEditContent, cx: &mut Context<Workspace>) -> impl IntoElement {

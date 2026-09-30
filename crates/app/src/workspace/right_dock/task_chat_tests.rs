@@ -100,6 +100,32 @@ fn task_chat_open_selects_existing_tab_without_duplicate_or_reconnect(cx: &mut T
     .unwrap();
 }
 
+/// Tasks sharing one lane share its cwd; each must still reopen its own chat.
+#[gpui::test]
+fn task_chats_in_one_lane_each_reopen_their_own_pane(cx: &mut TestAppContext) {
+    let (window, workspace) = build_workspace(cx);
+    cx.update_window(window.into(), |_, window, cx| {
+        workspace.update(cx, |ws, cx| {
+            let first_pane = pane(ws, window, cx);
+            let second_pane = pane(ws, window, cx);
+            ws.agent_chat_view(second_pane)
+                .unwrap()
+                .update(cx, |view, _| {
+                    view.session_id = Some("second-session".into())
+                });
+            let first = task(cx);
+            let second = task(cx);
+            ws.bind_task_chat_execution(&first, first_pane, cx);
+            ws.bind_task_chat_execution(&second, second_pane, cx);
+            ws.open_task_chat(&first, window, cx);
+            assert_eq!(ws.active_runtime().focused_pane_id, first_pane);
+            ws.open_task_chat(&second, window, cx);
+            assert_eq!(ws.active_runtime().focused_pane_id, second_pane);
+        })
+    })
+    .unwrap();
+}
+
 #[gpui::test]
 fn task_chat_changed_session_cannot_replace_identity_or_finish_task(cx: &mut TestAppContext) {
     let (window, workspace) = build_workspace(cx);

@@ -13,20 +13,20 @@
 use daruda_store::observability::error_report::{ErrorReport, ErrorSeverity};
 use daruda_store::observability::log_writer::LogWriter;
 use daruda_store::observability::system_info::redact_home;
-use daruda_store::tasks::{SubTask, Task, TaskAgentSurface, TaskId, branch::derive_branch_name};
+use daruda_store::tasks::{SubTask, Task, TaskAgentSurface, TaskId, TaskRunIn, random_branch_name};
 use gpui::{AppContext as _, BorrowAppContext as _, Context, Focusable as _, SharedString, Window};
 
 use crate::ui::select::{SelectOption, state_with_options};
 use crate::ui::{InputEvent, InputState, make_markdown_prose_state};
 use crate::workspace::Workspace;
 use crate::workspace::main_area::pane::{
-    BranchValidation, Pane, PaneContent, TaskEditContent, TaskEditSnapshot,
+    BranchValidation, Pane, PaneContent, RunInChoice, TaskEditContent, TaskEditSnapshot,
 };
 use crate::workspace::main_area::pane_tree::{PaneId, PaneLayout};
 
 /// Validate a branch-input string, reporting which rule it broke so the
-/// form can show a precise red label. An empty field is not an error — Save
-/// derives the branch from the title at submit time.
+/// form can show a precise red label. An empty field is not an error — a
+/// draft then gets its default `task-<id>` branch, a saved task keeps its own.
 pub(super) fn validate_branch(text: &str) -> BranchValidation {
     match daruda_core::git::validate_branch_name(text) {
         Ok(_) => BranchValidation::Valid,
@@ -118,11 +118,12 @@ impl Workspace {
                 t.auto_execute,
                 t.agent_surface,
             ),
+            // A draft opens with a usable branch already filled in.
             None => (
                 String::new(),
                 String::new(),
                 String::new(),
-                String::new(),
+                random_branch_name(),
                 true,
                 TaskAgentSurface::default(),
             ),
@@ -178,9 +179,9 @@ impl Workspace {
         let title_sub = cx.subscribe_in(
             &title_input,
             window,
-            move |this, _inp, ev: &InputEvent, window, cx| {
+            move |this, _inp, ev: &InputEvent, _window, cx| {
                 if matches!(ev, InputEvent::Change) {
-                    this.refresh_task_edit_branch(pane_id, window, cx);
+                    this.refresh_task_edit_title(pane_id, cx);
                 }
             },
         );
@@ -259,12 +260,30 @@ impl Workspace {
             SharedString::from(title.clone())
         };
 
-        let branch_validation = validate_branch(&branch_name);
-
-        let branch_seed = initial
+        let editable = initial
             .as_ref()
-            .map(|task| task.id.clone())
-            .unwrap_or_else(|| Task::new(String::new(), String::new(), None).id);
+            .is_none_or(|t| matches!(t.state, daruda_store::tasks::TaskState::Backlog));
+        let branch_validation = self.branch_validation_for(&branch_name, editable);
+        let run_in = super::run_in_ops::run_in_choice(initial.as_ref());
+        let lane_initial = super::run_in_ops::initial_lane(initial.as_ref(), self);
+        let lane_select = cx.new(|cx| {
+            state_with_options(
+                super::run_in_ops::lane_options(self),
+                lane_initial.as_ref(),
+                window,
+                cx,
+            )
+        });
+        let lane_sub = cx.subscribe_in(
+            &lane_select,
+            window,
+            move |_this, _state, ev: &crate::ui::select::ConfirmEvent, _window, cx| {
+                if matches!(ev, crate::ui::select::SelectEvent::Confirm(_)) {
+                    cx.notify();
+                }
+            },
+        );
+
         let saved_snapshot = TaskEditSnapshot {
             draft_subtasks: Vec::new(),
             title: title.clone(),
@@ -276,6 +295,14 @@ impl Workspace {
             base_value: base_initial
                 .as_ref()
                 .map(|s| s.to_string())
+                .unwrap_or_default(),
+            run_in,
+            // Read back, not `lane_initial`: a lane no longer registered is
+            // not selected, and the baseline must match what the form shows.
+            lane_value: lane_select
+                .read(cx)
+                .selected_value()
+                .map(|v| v.to_string())
                 .unwrap_or_default(),
         };
 
@@ -290,13 +317,7 @@ impl Workspace {
                 task_id,
                 title_input,
                 branch_input,
-                branch_override: !branch_name.is_empty()
-                    && initial
-                        .as_ref()
-                        .map(|t| derive_branch_name(&t.title, &t.id) != branch_name)
-                        .unwrap_or(false),
                 branch_validation,
-                branch_seed,
                 draft_subtasks: Vec::new(),
                 preview_prompt: false,
                 settings_open: false,
@@ -309,10 +330,13 @@ impl Workspace {
                 cached_title,
                 saved_snapshot,
                 base_select,
+                run_in,
+                lane_select,
                 _subscriptions: vec![
                     title_sub,
                     branch_sub,
                     base_sub,
+                    lane_sub,
                     new_subtask_sub,
                     rename_subtask_sub,
                     prompt_sub,
@@ -328,54 +352,38 @@ impl Workspace {
         }
     }
 
-    /// Refresh the tab title and, for an unoverridden draft, its branch.
-    pub(super) fn refresh_task_edit_branch(
-        &mut self,
-        pane_id: PaneId,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
-        let Some(pane) = self.active_runtime().panes.iter().find(|p| p.id == pane_id) else {
-            return;
-        };
-        let Some(te) = pane.task_edit_content() else {
+    /// Refresh the tab title from the title input.
+    pub(super) fn refresh_task_edit_title(&mut self, pane_id: PaneId, cx: &mut Context<Self>) {
+        let Some(te) = self.task_edit_content_for_pane(pane_id) else {
             return;
         };
         let title = te.title_input.read(cx).value().to_string();
-        let branch_entity = te.branch_input.clone();
-        let derived = (te.task_id.is_none() && !te.branch_override)
-            .then(|| derive_branch_name(&title, &te.branch_seed));
         if let Some(te) = self.task_edit_content_mut_for(pane_id) {
             te.cached_title = if title.is_empty() {
                 crate::surface::strings::command_new_task().into()
             } else {
                 SharedString::from(title)
             };
-            if let Some(branch) = &derived {
-                te.branch_validation = validate_branch(branch);
-            }
-        }
-        if let Some(derived) = derived {
-            branch_entity.update(cx, |input, cx| input.set_value(derived, window, cx));
         }
         cx.notify();
     }
 
-    /// User typed into the branch input directly — flip
-    /// `branch_override` so subsequent title edits stop overwriting
-    /// the user's value, and re-validate.
+    /// User typed into the branch input directly — re-validate.
     pub(super) fn on_task_edit_branch_typed(&mut self, pane_id: PaneId, cx: &mut Context<Self>) {
-        let branch_text = match self.active_runtime().panes.iter().find(|p| p.id == pane_id) {
-            Some(p) => match p.task_edit_content() {
-                Some(te) => te.branch_input.read(cx).text().to_string(),
+        let (branch_text, editable) =
+            match self.active_runtime().panes.iter().find(|p| p.id == pane_id) {
+                Some(p) => match p.task_edit_content() {
+                    Some(te) => (
+                        te.branch_input.read(cx).text().to_string(),
+                        super::run_in_ops::location_editable(te, cx.global()),
+                    ),
+                    None => return,
+                },
                 None => return,
-            },
-            None => return,
-        };
+            };
+        let validation = self.branch_validation_for(&branch_text, editable);
         if let Some(te) = self.task_edit_content_mut_for(pane_id) {
-            let title = te.title_input.read(cx).value();
-            te.branch_override = branch_text != derive_branch_name(&title, &te.branch_seed);
-            te.branch_validation = validate_branch(&branch_text);
+            te.branch_validation = validation;
         }
         cx.notify();
     }
@@ -507,9 +515,15 @@ impl Workspace {
         cx: &mut Context<Self>,
     ) -> Option<TaskId> {
         let form = self.read_task_edit_form(pane_id, cx)?;
-        if form.title.trim().is_empty() || form.branch_validation.is_invalid() {
+        if form.title.trim().is_empty() {
             return None;
         }
+        // `None` once started: where the task runs is then fixed.
+        let run_in = if form.editable {
+            Some(self.commit_task_run_in(pane_id, &form)?)
+        } else {
+            None
+        };
 
         // Empty sentinel → `None`; non-empty → registered lane
         // path. The path is round-tripped as a string through the
@@ -519,11 +533,19 @@ impl Workspace {
         // `branch_for_worktree_path` and falls back to git's default
         // when the lookup misses, so the worst case is the same
         // behaviour as `None`.
-        let base_path: Option<std::path::PathBuf> = if form.base_value.is_empty() {
+        // A base is only branched from when a worktree is created.
+        let base_path: Option<std::path::PathBuf> = if form.base_value.is_empty()
+            || matches!(run_in, Some(TaskRunIn::ExistingLane { .. }))
+        {
             None
         } else {
             Some(std::path::PathBuf::from(&form.base_value))
         };
+
+        // The rule walk trims, so the value it accepted is the one stored.
+        let branch = daruda_core::git::validate_branch_name(&form.branch)
+            .ok()
+            .map(str::to_owned);
 
         let task_id = match &form.task_id {
             Some(id) => {
@@ -531,12 +553,16 @@ impl Workspace {
                     .get(id)?;
                 self.update_task(
                     id,
-                    form.title.clone(),
-                    form.prompt.clone(),
-                    form.notes.clone(),
-                    form.auto_execute,
-                    form.agent_surface,
-                    base_path.clone(),
+                    crate::workspace::right_dock::task_ops::TaskEdits {
+                        title: form.title.clone(),
+                        prompt: form.prompt.clone(),
+                        notes: form.notes.clone(),
+                        auto_execute: form.auto_execute,
+                        agent_surface: form.agent_surface,
+                        base_worktree_path: base_path.clone(),
+                        branch,
+                        run_in,
+                    },
                     cx,
                 );
                 id.clone()
@@ -547,9 +573,10 @@ impl Workspace {
                     form.prompt.clone(),
                     base_path.clone(),
                 );
-                if !form.branch.is_empty() {
-                    task.branch_name = form.branch.clone();
+                if let Some(branch) = branch {
+                    task.branch_name = branch;
                 }
+                task.run_in = run_in.unwrap_or_default();
                 task.subtasks = form.draft_subtasks.clone();
                 task.notes = form.notes.clone();
                 task.auto_execute = form.auto_execute;
@@ -577,10 +604,37 @@ impl Workspace {
                 auto_execute: form.auto_execute,
                 agent_surface: form.agent_surface,
                 base_value: form.base_value.clone(),
+                run_in: form.run_in,
+                lane_value: form.lane_value.clone(),
             };
         }
 
         Some(task_id)
+    }
+
+    /// The location a still-editable form commits to, or `None` when it is
+    /// not savable. The branch is checked again here because a lane created
+    /// after the form opened can have taken it since the last keystroke.
+    fn commit_task_run_in(
+        &mut self,
+        pane_id: PaneId,
+        form: &TaskEditFormSnapshot,
+    ) -> Option<TaskRunIn> {
+        match form.run_in {
+            RunInChoice::NewWorktree => {
+                let validation = self.branch_validation_for(&form.branch, true);
+                let invalid = validation.is_invalid();
+                if let Some(te) = self.task_edit_content_mut_for(pane_id) {
+                    te.branch_validation = validation;
+                }
+                (!invalid).then_some(TaskRunIn::NewWorktree)
+            }
+            RunInChoice::ExistingLane => {
+                (!form.lane_value.is_empty()).then(|| TaskRunIn::ExistingLane {
+                    path: std::path::PathBuf::from(&form.lane_value),
+                })
+            }
+        }
     }
 
     /// Read the current form values without holding a `&mut self`
@@ -606,7 +660,9 @@ impl Workspace {
             notes: te.notes_state.read(cx).text().to_string(),
             auto_execute: te.auto_execute,
             agent_surface: te.agent_surface,
-            branch_validation: te.branch_validation.clone(),
+            editable: super::run_in_ops::location_editable(te, cx.global()),
+            run_in: te.run_in,
+            lane_value: te.lane_value(cx),
             base_value: te
                 .base_select
                 .read(cx)
@@ -628,7 +684,10 @@ struct TaskEditFormSnapshot {
     notes: String,
     auto_execute: bool,
     agent_surface: TaskAgentSurface,
-    branch_validation: BranchValidation,
+    /// Whether the task has yet to start, so its location may still change.
+    editable: bool,
+    run_in: RunInChoice,
+    lane_value: String,
     /// Selected `base_select` value — empty string sentinel for "use
     /// active lane", otherwise an absolute path string.
     base_value: String,
@@ -641,15 +700,11 @@ pub(super) fn normalize_newlines(s: &str) -> String {
     s.replace("\r\n", "\n")
 }
 
-/// Resolve the on-disk prompt file path for `task` — only meaningful
-/// once the task has been started (i.e. has a lane). Returns
-/// `None` for Backlog / drafts.
+/// The on-disk prompt file for `task` — only meaningful once the task has
+/// been started (i.e. has a lane). Returns `None` for Backlog / drafts.
 fn prompt_file_path_for(task: &Task) -> Option<std::path::PathBuf> {
     let wt = task.state.worktree_path()?;
-    Some(
-        wt.join(".daruda")
-            .join(format!("task-{}.md", task.branch_name)),
-    )
+    Some(daruda_store::tasks::prompt_file_path(task, wt))
 }
 
 /// Install the watcher and pump when the task has a prompt file on disk.

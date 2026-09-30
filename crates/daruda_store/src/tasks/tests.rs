@@ -5,15 +5,14 @@ use std::path::PathBuf;
 
 use chrono::Utc;
 
-use super::branch::derive_branch_name;
+use super::branch::{branch_name_for, random_branch_name};
 use super::persistence::{load_tasks_in, save_tasks_in, tasks_path_in};
 use super::prompt_file::{
-    PROMPT_DIR_NAME, build_claude_command, render_task_prompt, task_prompt_file_path,
-    write_prompt_file,
+    PROMPT_DIR_NAME, build_claude_command, prompt_file_path, render_task_prompt, write_prompt_file,
 };
 use super::task::{
     AgentType, SCHEMA_VERSION, SessionEndReason, SubTask, Task, TaskAgentSurface, TaskFilter,
-    TaskState, TasksState,
+    TaskRunIn, TaskState, TasksState,
 };
 
 fn sample_task() -> Task {
@@ -22,6 +21,22 @@ fn sample_task() -> Task {
         "Login flow drops the token on refresh.".to_string(),
         Some(PathBuf::from("/repo/main")),
     )
+}
+
+#[test]
+fn run_in_round_trips_and_legacy_tasks_create_a_worktree() {
+    let mut task = sample_task();
+    let mut legacy = serde_json::to_value(&task).unwrap();
+    legacy.as_object_mut().unwrap().remove("run_in");
+    assert_eq!(
+        serde_json::from_value::<Task>(legacy).unwrap().run_in,
+        TaskRunIn::NewWorktree
+    );
+    task.run_in = TaskRunIn::ExistingLane {
+        path: PathBuf::from("/repo/main"),
+    };
+    let json = serde_json::to_string(&task).unwrap();
+    assert_eq!(serde_json::from_str::<Task>(&json).unwrap(), task);
 }
 
 #[test]
@@ -65,10 +80,9 @@ fn task_new_assigns_ulid_and_backlog_state() {
 }
 
 #[test]
-fn task_new_branch_name_uses_derive_branch_name() {
+fn task_new_branch_name_ignores_the_title() {
     let t = sample_task();
-    let expected = derive_branch_name("Fix auth bug", &t.id);
-    assert_eq!(t.branch_name, expected);
+    assert_eq!(t.branch_name, branch_name_for(&t.id));
 }
 
 #[test]
@@ -507,50 +521,24 @@ fn tasks_state_filter_by_state_returns_matching_subset() {
 // ---------------------------------------------------------------------------
 
 #[test]
-fn derive_branch_name_uses_title_words() {
-    let b = derive_branch_name("Fix auth bug", "01HX9YZAAA000000000000");
-    assert_eq!(b, "fix-auth-bug-00000000");
+fn branch_name_is_task_plus_the_lowercased_ulid_tail() {
+    assert_eq!(branch_name_for("01HXABCDEFGHIJ"), "task-cdefghij");
 }
 
 #[test]
-fn derive_branch_name_keeps_valid_kebab() {
-    let b = derive_branch_name("fix-auth-bug", "01HX9YZAAA");
-    assert_eq!(b, "fix-auth-bug-hx9yzaaa");
-}
-
-#[test]
-fn derive_branch_name_truncates_long_titles_to_40_chars() {
-    let long = "abcdefghijabcdefghijabcdefghijabcdefghij-extra-extra";
-    let b = derive_branch_name(long, "01HX9YZAAA");
-    let prefix = "abcdefghijabcdefghijabcdefghijabcdefghij";
-    assert_eq!(prefix.chars().count(), 40);
-    assert_eq!(b, format!("{prefix}-hx9yzaaa"));
-}
-
-#[test]
-fn derive_branch_name_falls_back_when_title_is_empty_or_special() {
-    // empty -> fallback
-    let b = derive_branch_name("   ", "01HXABCDEFGHIJ");
-    assert_eq!(b, "task-cdefghij");
-
-    // Punctuation cannot introduce path traversal into the generated name.
-    let b = derive_branch_name("..foo", "01HXABCDEFGHIJ");
-    assert_eq!(b, "foo-cdefghij");
-}
-
-#[test]
-fn derive_branch_name_handles_korean_title() {
-    // Truncation must preserve complete CJK characters.
-    let b = derive_branch_name("한글-제목-입니다", "01HXabcd");
-    assert_eq!(b, "한글-제목-입니다-01hxabcd");
-}
-
-#[test]
-fn derive_branch_name_distinguishes_ids_from_the_same_millisecond() {
-    let a = derive_branch_name("Same title", "01J00000000000000000000001");
-    let b = derive_branch_name("Same title", "01J00000000000000000000002");
+fn branch_names_differ_for_ids_from_the_same_millisecond() {
+    let a = branch_name_for("01J00000000000000000000001");
+    let b = branch_name_for("01J00000000000000000000002");
     assert_ne!(a, b);
     assert!(daruda_core::git::validate_branch_name(&a).is_ok());
+}
+
+#[test]
+fn random_branch_names_are_valid_and_fresh() {
+    let a = random_branch_name();
+    assert!(a.starts_with("task-"));
+    assert!(daruda_core::git::validate_branch_name(&a).is_ok());
+    assert_ne!(a, random_branch_name());
 }
 
 // ---------------------------------------------------------------------------
@@ -558,34 +546,46 @@ fn derive_branch_name_distinguishes_ids_from_the_same_millisecond() {
 // ---------------------------------------------------------------------------
 
 #[test]
-fn task_prompt_file_path_is_under_daruda_subdir() {
-    let p = task_prompt_file_path(&PathBuf::from("/repo/wt"), "fix-auth-01hx");
+fn new_worktree_prompt_file_is_named_by_branch() {
+    let t = sample_task();
     assert_eq!(
-        p,
+        prompt_file_path(&t, &PathBuf::from("/repo/wt")),
         PathBuf::from("/repo/wt")
             .join(PROMPT_DIR_NAME)
-            .join("task-fix-auth-01hx.md"),
+            .join(format!("task-{}.md", t.branch_name)),
+    );
+}
+
+/// Two tasks sharing one lane must not overwrite each other's prompt.
+#[test]
+fn existing_lane_prompt_file_is_named_by_task_id() {
+    let mut t = sample_task();
+    t.run_in = TaskRunIn::ExistingLane {
+        path: PathBuf::from("/repo/main"),
+    };
+    assert_eq!(
+        prompt_file_path(&t, &PathBuf::from("/repo/main")),
+        PathBuf::from("/repo/main")
+            .join(PROMPT_DIR_NAME)
+            .join(format!("task-{}.md", t.id)),
     );
 }
 
 #[test]
 fn write_prompt_file_creates_dir_and_writes_contents() {
     let tmp = tempfile::tempdir().expect("tempdir");
-    let path = write_prompt_file(tmp.path(), "branch-aaaa", "hello world").expect("write succeeds");
-    assert!(path.exists(), "prompt file written");
+    let path = prompt_file_path(&sample_task(), tmp.path());
+    write_prompt_file(&path, "hello world").expect("write succeeds");
     let contents = std::fs::read_to_string(&path).expect("read");
     assert_eq!(contents, "hello world");
-    assert_eq!(
-        path.parent().unwrap().file_name().unwrap(),
-        std::ffi::OsStr::new(PROMPT_DIR_NAME),
-    );
 }
 
 #[test]
 fn write_prompt_file_overwrites_existing_file() {
     let tmp = tempfile::tempdir().expect("tempdir");
-    write_prompt_file(tmp.path(), "branch-aaaa", "first").expect("write 1");
-    let path = write_prompt_file(tmp.path(), "branch-aaaa", "second").expect("write 2");
+    let path = prompt_file_path(&sample_task(), tmp.path());
+    write_prompt_file(&path, "first").expect("write 1");
+    write_prompt_file(&path, "second").expect("write 2");
     let contents = std::fs::read_to_string(&path).expect("read");
     assert_eq!(contents, "second");
 }
@@ -619,9 +619,8 @@ fn build_claude_command_escapes_single_quotes_in_path() {
 #[test]
 fn render_task_prompt_wraps_user_prompt_with_metadata() {
     let t = sample_task();
-    let out = render_task_prompt(&t);
-    assert!(out.starts_with("Task: \"Fix auth bug\""));
-    assert!(out.contains(&t.branch_name));
+    let out = render_task_prompt(&t, "feature-x");
+    assert!(out.starts_with("Task: \"Fix auth bug\" (feature-x)"));
     assert!(out.contains("Status: Backlog"));
     assert!(out.contains(&t.prompt));
     assert!(out.contains(&format!("update task \"{}\"", t.id)));

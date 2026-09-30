@@ -11,32 +11,37 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use super::task::Task;
+use super::task::{Task, TaskRunIn};
 
 /// Subdirectory inside the lane where prompt files live.
 pub const PROMPT_DIR_NAME: &str = ".daruda";
 
 /// Filename prefix for task prompt files. Final form is
-/// `task-<branch>.md`.
+/// `task-<stem>.md`; see [`prompt_file_path`] for the stem.
 pub const PROMPT_FILE_PREFIX: &str = "task-";
 
 /// Filename extension used for task prompt files (markdown).
 pub const PROMPT_FILE_EXT: &str = "md";
 
-/// Returns the canonical path daruda will write the prompt to. Pure —
-/// the directory is *not* created here so callers can decide whether
-/// to materialize lazily.
-pub fn task_prompt_file_path(worktree_path: &Path, branch_name: &str) -> PathBuf {
-    worktree_path.join(PROMPT_DIR_NAME).join(format!(
-        "{}{}.{}",
-        PROMPT_FILE_PREFIX, branch_name, PROMPT_FILE_EXT
-    ))
+/// Where `task`'s prompt file lives inside `worktree`. Pure — the directory
+/// is *not* created here. A fresh worktree belongs to one task, so its
+/// branch names the file; an existing lane may host several tasks at once,
+/// so there the task id does.
+pub fn prompt_file_path(task: &Task, worktree: &Path) -> PathBuf {
+    let stem = match &task.run_in {
+        TaskRunIn::NewWorktree => task.branch_name.as_str(),
+        TaskRunIn::ExistingLane { .. } => task.id.as_str(),
+    };
+    worktree
+        .join(PROMPT_DIR_NAME)
+        .join(format!("{PROMPT_FILE_PREFIX}{stem}.{PROMPT_FILE_EXT}"))
 }
 
 /// Wrap the user's raw prompt with task metadata + a closing instruction
 /// telling Claude to update the task on completion. Mirrors superset's
-/// `agent-prompt-template.ts`.
-pub fn render_task_prompt(task: &Task) -> String {
+/// `agent-prompt-template.ts`. `branch` is what the header names — the
+/// caller resolves it, since an existing lane's branch is read at Start.
+pub fn render_task_prompt(task: &Task, branch: &str) -> String {
     let state_label = match &task.state {
         super::task::TaskState::Backlog => "Backlog",
         super::task::TaskState::Running { .. } => "Running",
@@ -55,26 +60,20 @@ pub fn render_task_prompt(task: &Task) -> String {
          changes, verify them when practical, and update task \"{id}\" with a short \
          summary when done.\n",
         title = task.title,
-        branch = task.branch_name,
         status = state_label,
         body = task.prompt,
         id = task.id,
     )
 }
 
-/// Materialize the prompt file. Creates `<lane>/.daruda/` if it
-/// doesn't exist. Overwrites any existing file at the same path so
-/// Reopen / Retry always reflects the latest prompt.
-pub fn write_prompt_file(
-    worktree_path: &Path,
-    branch_name: &str,
-    rendered_prompt: &str,
-) -> std::io::Result<PathBuf> {
-    let dir = worktree_path.join(PROMPT_DIR_NAME);
-    fs::create_dir_all(&dir)?;
-    let path = task_prompt_file_path(worktree_path, branch_name);
-    fs::write(&path, rendered_prompt)?;
-    Ok(path)
+/// Materialize the prompt file at `path` (from [`prompt_file_path`]),
+/// creating its directory. Overwrites any existing file so Reopen / Retry
+/// always reflects the latest prompt.
+pub fn write_prompt_file(path: &Path, rendered_prompt: &str) -> std::io::Result<()> {
+    if let Some(dir) = path.parent() {
+        fs::create_dir_all(dir)?;
+    }
+    fs::write(path, rendered_prompt)
 }
 
 /// Build the shell line daruda sends to the active pane's PTY. The

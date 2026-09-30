@@ -160,11 +160,6 @@ pub(in crate::workspace) struct TaskEditContent {
     pub(in crate::workspace) task_id: Option<TaskId>,
     pub(in crate::workspace) title_input: Entity<crate::ui::InputState>,
     pub(in crate::workspace) branch_input: Entity<crate::ui::InputState>,
-    /// `true` once the user has manually edited the branch field —
-    /// further title changes stop auto-deriving the branch so we
-    /// don't trample the override.
-    pub(super) branch_override: bool,
-    pub(super) branch_seed: String,
     pub(super) draft_subtasks: Vec<daruda_store::tasks::SubTask>,
     pub(super) preview_prompt: bool,
     pub(super) settings_open: bool,
@@ -175,6 +170,10 @@ pub(in crate::workspace) struct TaskEditContent {
     /// active lane at run time"; every other value is the absolute path of a
     /// registered lane. Sits in the focus chain between prompt and notes.
     pub(in crate::workspace) base_select: Entity<crate::ui::select::SelectState>,
+    pub(super) run_in: RunInChoice,
+    /// Registered lanes keyed by absolute path; read under
+    /// `RunInChoice::ExistingLane` only.
+    pub(in crate::workspace) lane_select: Entity<crate::ui::select::SelectState>,
     /// Prompt editor state (`code_editor("markdown")` for line numbers +
     /// syntax highlight), shared with the renderer via
     /// `crate::ui::markdown_editor(&state)`.
@@ -224,23 +223,38 @@ pub(in crate::workspace) struct TaskEditContent {
 /// the inline red-border + reason label under the field.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(super) enum BranchValidation {
-    /// Empty input → Save will auto-derive from title at submit time.
+    /// Empty input → a draft gets its default `task-<id>` branch on Save;
+    /// a saved task keeps its own.
     Empty,
     /// Passes git ref-name rules.
     Valid,
     /// Fails one of the git ref-name rules. The `reason` is the
     /// short human-readable cause displayed under the field.
     Invalid { reason: SharedString },
+    /// A registered lane already checks this branch out, so
+    /// `git worktree add -b` would refuse it at Start.
+    Exists,
+}
+
+/// Where the TaskEdit form will run the task. The existing lane itself is
+/// the value of `TaskEditContent::lane_select`.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(in crate::workspace) enum RunInChoice {
+    #[default]
+    NewWorktree,
+    ExistingLane,
 }
 
 impl BranchValidation {
     /// Whether the field is currently in an unrecoverable invalid
     /// state — i.e. `Save Draft` / `Start` must stay disabled and the
     /// branch input should render with a red border. `Empty` is *not*
-    /// invalid; it just defers the resolution to auto-derive at save
-    /// time.
+    /// invalid: Save falls back to the task's default or current branch.
     pub(in crate::workspace) fn is_invalid(&self) -> bool {
-        matches!(self, BranchValidation::Invalid { .. })
+        matches!(
+            self,
+            BranchValidation::Invalid { .. } | BranchValidation::Exists
+        )
     }
 }
 
@@ -265,6 +279,9 @@ pub(in crate::workspace) struct TaskEditSnapshot {
     /// keeps the dirty-comparison `==` path trivial — the user-facing
     /// sentinel is `""` either way.
     pub(super) base_value: String,
+    pub(super) run_in: RunInChoice,
+    /// `lane_select`'s value, `""` when nothing is picked.
+    pub(super) lane_value: String,
 }
 
 /// CRLF → LF normaliser used by both the renderer's snapshot builder
@@ -295,7 +312,18 @@ impl TaskEditContent {
                 .selected_value()
                 .map(|v| v.to_string())
                 .unwrap_or_default(),
+            run_in: self.run_in,
+            lane_value: self.lane_value(cx),
         }
+    }
+
+    /// The picked lane's path, `""` when none is picked.
+    pub(in crate::workspace) fn lane_value(&self, cx: &App) -> String {
+        self.lane_select
+            .read(cx)
+            .selected_value()
+            .map(|v| v.to_string())
+            .unwrap_or_default()
     }
 
     /// True when the current form values differ from the last saved
@@ -306,7 +334,16 @@ impl TaskEditContent {
     }
 
     pub(in crate::workspace) fn can_save(&self, cx: &App) -> bool {
-        !self.title_input.read(cx).value().trim().is_empty() && !self.branch_validation.is_invalid()
+        let editable = crate::workspace::main_area::task_edit_pane::run_in_ops::location_editable(
+            self,
+            cx.global(),
+        );
+        let located = !editable
+            || match self.run_in {
+                RunInChoice::NewWorktree => !self.branch_validation.is_invalid(),
+                RunInChoice::ExistingLane => !self.lane_value(cx).is_empty(),
+            };
+        !self.title_input.read(cx).value().trim().is_empty() && located
     }
 }
 
@@ -631,8 +668,8 @@ impl Pane {
     }
 
     /// Mutable counterpart to `task_edit_content`. Used by save /
-    /// validation / watcher callbacks that need to flip
-    /// `branch_override`, refresh `saved_snapshot`, or re-render the
+    /// validation / watcher callbacks that need to refresh
+    /// `saved_snapshot`, or re-render the
     /// pane after a state mutation.
     pub(in crate::workspace) fn task_edit_content_mut(&mut self) -> Option<&mut TaskEditContent> {
         match &mut self.content {
@@ -1354,6 +1391,17 @@ impl Workspace {
         cx: &mut Context<Self>,
     ) -> Result<Pane, PaneSpawnError> {
         let cwd = self.default_cwd_for_new_pane();
+        self.create_pane_at(cwd, window, cx)
+    }
+
+    /// `create_pane` rooted at `cwd` rather than the inherited default — a
+    /// task started in a lane must run at that lane's root.
+    pub(in crate::workspace) fn create_pane_at(
+        &mut self,
+        cwd: Option<PathBuf>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Result<Pane, PaneSpawnError> {
         let account = self.default_account_selection_for_new_pane(None);
         let prepared =
             resolve_pane_account(&self.accounts, &self.data_dir, account, AccountDomain::Any);

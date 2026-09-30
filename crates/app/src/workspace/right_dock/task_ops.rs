@@ -20,6 +20,20 @@ use gpui::{BorrowAppContext, Context, Window};
 use super::task_picker_modal::{TaskPickAction, TaskPickerModal};
 use crate::workspace::Workspace;
 
+/// The form-editable fields of a saved task, as `update_task` applies them.
+pub(in crate::workspace) struct TaskEdits {
+    pub(in crate::workspace) title: String,
+    pub(in crate::workspace) prompt: String,
+    pub(in crate::workspace) notes: String,
+    pub(in crate::workspace) auto_execute: bool,
+    pub(in crate::workspace) agent_surface: daruda_store::tasks::TaskAgentSurface,
+    pub(in crate::workspace) base_worktree_path: Option<std::path::PathBuf>,
+    /// Trimmed and validated; `None` keeps the current branch.
+    pub(in crate::workspace) branch: Option<String>,
+    /// `None` keeps where the task runs.
+    pub(in crate::workspace) run_in: Option<daruda_store::tasks::TaskRunIn>,
+}
+
 impl Workspace {
     // ------------------------------------------------------------------
     // Filter / expansion / persistence
@@ -154,33 +168,31 @@ impl Workspace {
     /// (`Backlog`, `Running`, …) is intentionally *not* part of the
     /// editable surface — that is driven by the workflow.
     ///
-    /// `base_worktree_path = None` maps to "use the project's active
-    /// lane at start_task time". Re-editing a
-    /// `Running` / `Done` task's base has no immediate effect — the
-    /// field is consulted only when a Backlog task transitions to
-    /// `Running` via `start_task`.
-    // Every call site passes named locals, so the long argument list
-    // stays readable despite the count.
-    #[allow(clippy::too_many_arguments)]
+    /// Where the task runs is only consulted when a Backlog task starts, so
+    /// `edits.branch` applies to a Backlog task alone; once started, the
+    /// branch names the lane it created and stays fixed.
     pub(in crate::workspace) fn update_task(
         &mut self,
         task_id: &str,
-        title: String,
-        prompt: String,
-        notes: String,
-        auto_execute: bool,
-        agent_surface: daruda_store::tasks::TaskAgentSurface,
-        base_worktree_path: Option<std::path::PathBuf>,
+        edits: TaskEdits,
         cx: &mut Context<Self>,
     ) {
         cx.update_global::<GlobalTasks, _>(|g, _| {
             if let Some(task) = g.get_mut(task_id) {
-                task.title = title;
-                task.prompt = prompt;
-                task.notes = notes;
-                task.auto_execute = auto_execute;
-                task.agent_surface = agent_surface;
-                task.base_worktree_path = base_worktree_path;
+                task.title = edits.title;
+                task.prompt = edits.prompt;
+                task.notes = edits.notes;
+                task.auto_execute = edits.auto_execute;
+                task.agent_surface = edits.agent_surface;
+                task.base_worktree_path = edits.base_worktree_path;
+                if matches!(task.state, daruda_store::tasks::TaskState::Backlog) {
+                    if let Some(branch) = edits.branch {
+                        task.branch_name = branch;
+                    }
+                    if let Some(run_in) = edits.run_in {
+                        task.run_in = run_in;
+                    }
+                }
                 task.updated_at = Utc::now();
             }
         });
