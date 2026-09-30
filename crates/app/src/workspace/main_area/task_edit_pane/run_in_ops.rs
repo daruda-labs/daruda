@@ -42,13 +42,15 @@ pub(super) fn run_in_choice(task: Option<&Task>) -> RunInChoice {
     }
 }
 
-/// Whether where the task runs can still change — a draft, or a task that
-/// has not started (and so has not created its lane).
+/// Whether a form's task has yet to start — a draft (`None`) or a Backlog
+/// task — so where it runs, its branch and Start are still open to it.
+pub(in crate::workspace) fn not_started(task: Option<&Task>) -> bool {
+    task.is_none_or(|task| matches!(task.state, TaskState::Backlog))
+}
+
+/// [`not_started`] for the task `te` edits.
 pub(in crate::workspace) fn location_editable(te: &TaskEditContent, tasks: &GlobalTasks) -> bool {
-    te.task_id
-        .as_deref()
-        .and_then(|id| tasks.get(id))
-        .is_none_or(|task| matches!(task.state, TaskState::Backlog))
+    not_started(te.task_id.as_deref().and_then(|id| tasks.get(id)))
 }
 
 /// Another task already running in `lane`, for the picker's warning.

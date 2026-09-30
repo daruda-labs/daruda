@@ -495,35 +495,12 @@ impl Workspace {
         }
     }
 
-    /// Move a terminal-state task back to `Backlog`. Lane path is
-    /// dropped from `Task::state`; user must press [Start] to spawn
-    /// a fresh lane.
+    /// Move a terminal-state task back to `Backlog`; the next [Start] runs
+    /// it again (see `return_task_to_backlog` for where).
     pub(in crate::workspace) fn reopen_task(&mut self, task_id: &str, cx: &mut Context<Self>) {
-        let own_lane = self.own_lane_for_task(task_id, cx);
-        let cleared = cx.update_global::<GlobalTasks, Vec<String>>(|g, _| {
-            if let Some(task) = g.get_mut(task_id) {
-                let ids = std::mem::take(&mut task.session_ids);
-                if let Some(path) = own_lane {
-                    task.run_in = daruda_store::tasks::TaskRunIn::ExistingLane { path };
-                }
-                task.state = daruda_store::tasks::TaskState::Backlog;
-                task.finished_at = None;
-                task.updated_at = Utc::now();
-                ids
-            } else {
-                Vec::new()
-            }
-        });
-        for sid in &cleared {
-            self.claude.tool_use_failure_counts.remove(sid);
-        }
+        self.return_task_to_backlog(task_id, cx);
         self.save_tasks_dirty(cx);
         cx.notify();
-    }
-
-    fn own_lane_for_task(&self, task_id: &str, cx: &Context<Self>) -> Option<std::path::PathBuf> {
-        let task = cx.global::<GlobalTasks>().get(task_id)?;
-        self.own_lane_for_rerun(task)
     }
 
     /// `Reopen` + `start_task` in one click — for the `[Retry]`
@@ -534,24 +511,32 @@ impl Workspace {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let own_lane = self.own_lane_for_task(task_id, cx);
+        self.return_task_to_backlog(task_id, cx);
+        self.start_task(task_id, window, cx);
+    }
+
+    /// Put a finished task back in Backlog so it can run again — in the lane
+    /// its earlier run created, while that lane is still registered.
+    fn return_task_to_backlog(&mut self, task_id: &str, cx: &mut Context<Self>) {
+        let own_lane = cx
+            .global::<GlobalTasks>()
+            .get(task_id)
+            .and_then(|task| self.own_lane_for_rerun(task));
         let cleared = cx.update_global::<GlobalTasks, Vec<String>>(|g, _| {
-            if let Some(task) = g.get_mut(task_id) {
-                let ids = std::mem::take(&mut task.session_ids);
-                if let Some(path) = own_lane {
-                    task.run_in = daruda_store::tasks::TaskRunIn::ExistingLane { path };
-                }
-                task.state = daruda_store::tasks::TaskState::Backlog;
-                task.updated_at = Utc::now();
-                ids
-            } else {
-                Vec::new()
+            let Some(task) = g.get_mut(task_id) else {
+                return Vec::new();
+            };
+            if let Some(path) = own_lane {
+                task.run_in = daruda_store::tasks::TaskRunIn::ExistingLane { path };
             }
+            task.state = daruda_store::tasks::TaskState::Backlog;
+            task.finished_at = None;
+            task.updated_at = Utc::now();
+            std::mem::take(&mut task.session_ids)
         });
         for sid in &cleared {
             self.claude.tool_use_failure_counts.remove(sid);
         }
-        self.start_task(task_id, window, cx);
     }
 
     // ------------------------------------------------------------------

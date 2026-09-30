@@ -151,6 +151,7 @@ fn finished_task(lane: &Path, cx: &mut Context<Workspace>) -> String {
         worktree_path: lane.to_path_buf(),
         message: "failed".into(),
     };
+    task.finished_at = Some(chrono::Utc::now());
     let id = task.id.clone();
     cx.update_global::<GlobalTasks, _>(|tasks, _| {
         tasks.add(task);
@@ -191,6 +192,8 @@ fn retry_runs_again_in_the_lane_the_task_created(cx: &mut TestAppContext) {
                     worktree_path: lane_path
                 }
             );
+            let task = cx.global::<GlobalTasks>().get(&id).unwrap();
+            assert_eq!(task.finished_at, None, "the old run's end is cleared");
         })
     })
     .unwrap();

@@ -257,9 +257,7 @@ impl Workspace {
             SharedString::from(title.clone())
         };
 
-        let editable = initial
-            .as_ref()
-            .is_none_or(|t| matches!(t.state, daruda_store::tasks::TaskState::Backlog));
+        let editable = super::run_in_ops::not_started(initial.as_ref());
         let branch_validation = self.branch_validation_for(&branch_name, editable);
         let run_in = super::run_in_ops::run_in_choice(initial.as_ref());
         let lane_initial = super::run_in_ops::initial_lane(initial.as_ref(), self);

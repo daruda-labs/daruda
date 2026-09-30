@@ -40,9 +40,7 @@ pub(in crate::workspace) fn render(
         .as_deref()
         .and_then(|id| cx.global::<GlobalTasks>().get(id));
     let state = task.map(|task| task.state.clone());
-    let can_start = state
-        .as_ref()
-        .is_none_or(|state| matches!(state, TaskState::Backlog));
+    let can_start = run_in_ops::not_started(task);
     let has_worktree = state.as_ref().and_then(TaskState::worktree_path).is_some();
     let can_open_chat = task.is_some_and(|task| {
         task.execution
