@@ -61,10 +61,8 @@ fn existing_lane_start_opens_a_tab_there_instead_of_a_worktree(cx: &mut TestAppC
     .unwrap();
 }
 
-/// The test PTY is a stub whose stdin is never read, so delivery itself
-/// cannot succeed here; the tab and the prompt file are what this pins.
 #[gpui::test]
-fn existing_lane_terminal_start_writes_the_prompt_file_in_that_lane(cx: &mut TestAppContext) {
+fn existing_lane_terminal_start_runs_with_the_prompt_file_in_that_lane(cx: &mut TestAppContext) {
     let root = tempfile::tempdir().unwrap();
     let project = daruda_store::project::Project::from_path(root.path());
     let (window, workspace) =
@@ -85,6 +83,12 @@ fn existing_lane_terminal_start_writes_the_prompt_file_in_that_lane(cx: &mut Tes
             assert!(prompt.ends_with(format!("task-{id}.md")));
             let body = std::fs::read_to_string(prompt).unwrap();
             assert!(body.starts_with("Task: \"Fix it\" ("));
+            assert_eq!(
+                state(&id, cx),
+                TaskState::Running {
+                    worktree_path: lane_path
+                }
+            );
         })
     })
     .unwrap();

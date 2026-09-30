@@ -337,15 +337,16 @@ pub fn spawn_pty(config: &PtyConfig) -> Result<PtyHandle, PtyError> {
 ///
 /// The senders are deliberately never dropped: a pane treats a signalled
 /// *or* a disconnected `exit_rx` as shell termination, so letting them fall
-/// out of scope would close every tab a test opens. One small leak per
-/// stubbed pane, in test builds only.
+/// out of scope would close every tab a test opens. The stdin receiver is
+/// kept too, so a write succeeds as it would on a live shell. One small
+/// leak per stubbed pane, in test builds only.
 #[cfg(any(test, feature = "test-support"))]
 pub fn spawn_pty_stub() -> Result<PtyHandle, PtyError> {
-    let (stdin_tx, _stdin_rx) = mpsc::channel::<Vec<u8>>();
+    let (stdin_tx, stdin_rx) = mpsc::channel::<Vec<u8>>();
     let (stdout_tx, stdout_rx) = mpsc::channel::<Vec<u8>>();
     let (exit_tx, exit_rx) = mpsc::channel::<()>();
     let (error_tx, error_rx) = mpsc::channel::<ErrorReport>();
-    std::mem::forget((stdout_tx, exit_tx, error_tx));
+    std::mem::forget((stdin_rx, stdout_tx, exit_tx, error_tx));
     Ok(PtyHandle {
         stdin_tx,
         stdout_rx,
@@ -371,6 +372,18 @@ pub fn compute_grid_size(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A pane writes into its PTY without knowing it is stubbed, so the
+    /// stub must accept input and stay "running" like a live shell.
+    #[test]
+    fn stub_accepts_input_and_reports_no_exit() {
+        let handle = spawn_pty_stub().expect("stub");
+        assert!(handle.stdin_tx.send(b"echo hi\n".to_vec()).is_ok());
+        assert!(matches!(
+            handle.exit_rx.try_recv(),
+            Err(mpsc::TryRecvError::Empty)
+        ));
+    }
 
     fn test_shell() -> &'static str {
         if cfg!(windows) { "cmd.exe" } else { "sh" }
