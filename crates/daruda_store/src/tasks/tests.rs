@@ -8,7 +8,8 @@ use chrono::Utc;
 use super::branch::{branch_name_for, random_branch_name};
 use super::persistence::{load_tasks_in, save_tasks_in, tasks_path_in};
 use super::prompt_file::{
-    PROMPT_DIR_NAME, build_claude_command, prompt_file_path, render_task_prompt, write_prompt_file,
+    PROMPT_DIR_NAME, build_claude_command, existing_prompt_file_path, prompt_file_path,
+    render_task_prompt, write_prompt_file,
 };
 use super::task::{
     AgentType, SCHEMA_VERSION, SessionEndReason, SubTask, Task, TaskAgentSurface, TaskFilter,
@@ -545,30 +546,32 @@ fn random_branch_names_are_valid_and_fresh() {
 // Prompt file + claude command
 // ---------------------------------------------------------------------------
 
+/// Named by id alone, so neither a branch shaped `task-…` nor a Retry that
+/// moves the task into its own lane changes the name.
 #[test]
-fn new_worktree_prompt_file_is_named_by_branch() {
-    let t = sample_task();
-    assert_eq!(
-        prompt_file_path(&t, &PathBuf::from("/repo/wt")),
-        PathBuf::from("/repo/wt")
-            .join(PROMPT_DIR_NAME)
-            .join(format!("task-{}.md", t.branch_name)),
-    );
+fn prompt_file_is_named_by_task_id_wherever_the_task_runs() {
+    let mut t = sample_task();
+    let wt = PathBuf::from("/repo/wt");
+    let expected = wt.join(PROMPT_DIR_NAME).join(format!("task-{}.md", t.id));
+    assert_eq!(prompt_file_path(&t, &wt), expected);
+    t.run_in = TaskRunIn::ExistingLane { path: wt.clone() };
+    assert_eq!(prompt_file_path(&t, &wt), expected);
 }
 
-/// Two tasks sharing one lane must not overwrite each other's prompt.
 #[test]
-fn existing_lane_prompt_file_is_named_by_task_id() {
-    let mut t = sample_task();
-    t.run_in = TaskRunIn::ExistingLane {
-        path: PathBuf::from("/repo/main"),
-    };
-    assert_eq!(
-        prompt_file_path(&t, &PathBuf::from("/repo/main")),
-        PathBuf::from("/repo/main")
-            .join(PROMPT_DIR_NAME)
-            .join(format!("task-{}.md", t.id)),
-    );
+fn reading_falls_back_to_a_branch_named_file_only_when_it_is_the_one_on_disk() {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let t = sample_task();
+    let by_id = prompt_file_path(&t, tmp.path());
+    let by_branch = tmp
+        .path()
+        .join(PROMPT_DIR_NAME)
+        .join(format!("task-{}.md", t.branch_name));
+    assert_eq!(existing_prompt_file_path(&t, tmp.path()), by_id);
+    write_prompt_file(&by_branch, "older build").expect("write");
+    assert_eq!(existing_prompt_file_path(&t, tmp.path()), by_branch);
+    write_prompt_file(&by_id, "current").expect("write");
+    assert_eq!(existing_prompt_file_path(&t, tmp.path()), by_id);
 }
 
 #[test]

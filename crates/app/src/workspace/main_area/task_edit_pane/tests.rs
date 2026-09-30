@@ -171,8 +171,10 @@ fn task_editor_save_keeps_pane_and_draft_subtasks(cx: &mut TestAppContext) {
     .unwrap();
 }
 
+/// Saving a renamed task persists the title and leaves its stored branch
+/// alone; the draft form's live behavior is pinned below.
 #[gpui::test]
-fn task_editor_title_edits_keep_custom_and_saved_branches(cx: &mut TestAppContext) {
+fn task_editor_saving_a_rename_keeps_the_stored_branch(cx: &mut TestAppContext) {
     let (window, ws) = build_workspace(cx);
     cx.update_window(window.into(), |_, window, cx| {
         ws.update(cx, |ws, cx| {
@@ -207,10 +209,10 @@ fn task_editor_title_edits_keep_custom_and_saved_branches(cx: &mut TestAppContex
     .unwrap();
 }
 
-/// The title never reshapes the branch: a slug of Hangul, spaces or
-/// punctuation reads badly as a ref and would shift under every keystroke.
+/// While a draft is typed, the title never reshapes the branch — neither
+/// the prefilled name nor one the user entered.
 #[gpui::test]
-fn task_editor_title_edits_never_touch_the_branch(cx: &mut TestAppContext) {
+fn task_editor_typing_a_title_never_touches_the_branch(cx: &mut TestAppContext) {
     let (window, ws) = build_workspace(cx);
     cx.update_window(window.into(), |_, window, cx| {
         ws.update(cx, |ws, cx| {

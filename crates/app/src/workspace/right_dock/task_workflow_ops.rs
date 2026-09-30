@@ -268,7 +268,7 @@ impl Workspace {
             .detach();
     }
 
-    /// Write `<lane>/.daruda/task-<branch>.md` and dispatch the
+    /// Write `<lane>/.daruda/task-<id>.md` and dispatch the
     /// `claude --dangerously-skip-permissions "$(cat '...')"` command
     /// into the freshly-created pane. Marks the task `Running` on
     /// success, `Error` on prompt-file write failure.
@@ -335,7 +335,7 @@ impl Workspace {
                 }
                 // The ACP session *is* the agent — there is no `claude …` CLI
                 // wrapper to build. Deliver the rendered prompt (the same text
-                // the Terminal path writes into `task-<branch>.md`) as an ACP
+                // the Terminal path writes into `task-<id>.md`) as an ACP
                 // turn. `finalize_create_lane` already spawned + focused the
                 // agent-chat pane, which started the lazy connect; the pane's
                 // pending-prompt queue buffers this turn and drains it one-per-

@@ -191,7 +191,7 @@ pub(in crate::workspace) struct TaskEditContent {
     /// `current_snapshot()` after every successful save.
     pub(super) saved_snapshot: TaskEditSnapshot,
     pub(super) _subscriptions: Vec<Subscription>,
-    /// FS watcher on `<lane>/.daruda/task-<branch>.md`. `None`
+    /// FS watcher on `<lane>/.daruda/task-<id>.md`. `None`
     /// when the task is still in `Backlog` (no lane yet) or the
     /// file didn't exist at pane-open time. Dropped with the pane —
     /// `PromptFileWatcherHandle` shuts down the underlying threads.

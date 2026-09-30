@@ -704,7 +704,7 @@ pub(super) fn normalize_newlines(s: &str) -> String {
 /// been started (i.e. has a lane). Returns `None` for Backlog / drafts.
 fn prompt_file_path_for(task: &Task) -> Option<std::path::PathBuf> {
     let wt = task.state.worktree_path()?;
-    Some(daruda_store::tasks::prompt_file_path(task, wt))
+    Some(daruda_store::tasks::existing_prompt_file_path(task, wt))
 }
 
 /// Install the watcher and pump when the task has a prompt file on disk.
@@ -766,7 +766,7 @@ fn install_prompt_watcher(
 
 impl Workspace {
     /// Dispatched by the prompt-file watcher when an external editor
-    /// rewrites `<wt>/.daruda/task-<branch>.md`. Reloads the editor
+    /// rewrites `<wt>/.daruda/task-<id>.md`. Reloads the editor
     /// silently when the pane is clean; surfaces a conflict prompt
     /// (Use disk version / Keep my version / Diff) when the pane is
     /// dirty.
@@ -910,7 +910,7 @@ impl Workspace {
         cx.notify();
     }
 
-    /// Open `<wt>/.daruda/task-<branch>.md` in a fresh file viewer
+    /// Open `<wt>/.daruda/task-<id>.md` in a fresh file viewer
     /// tab (`[📄 Open file]` button). No-op for tasks that
     /// haven't been started yet — Backlog tasks have no lane
     /// path, and Started tasks whose prompt file disappeared (e.g.

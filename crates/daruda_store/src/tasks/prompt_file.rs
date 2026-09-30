@@ -11,27 +11,37 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use super::task::{Task, TaskRunIn};
+use super::task::Task;
 
 /// Subdirectory inside the lane where prompt files live.
 pub const PROMPT_DIR_NAME: &str = ".daruda";
 
-/// Filename prefix for task prompt files. Final form is
-/// `task-<stem>.md`; see [`prompt_file_path`] for the stem.
+/// Filename prefix for task prompt files. Final form is `task-<id>.md`.
 pub const PROMPT_FILE_PREFIX: &str = "task-";
 
 /// Filename extension used for task prompt files (markdown).
 pub const PROMPT_FILE_EXT: &str = "md";
 
-/// Where `task`'s prompt file lives inside `worktree`. Pure — the directory
-/// is *not* created here. A fresh worktree belongs to one task, so its
-/// branch names the file; an existing lane may host several tasks at once,
-/// so there the task id does.
+/// Where `task`'s prompt file is written inside `worktree`. Pure — the
+/// directory is *not* created here. Named by the task id: a lane may host
+/// several tasks, and a task's branch and lane can change while its id cannot.
 pub fn prompt_file_path(task: &Task, worktree: &Path) -> PathBuf {
-    let stem = match &task.run_in {
-        TaskRunIn::NewWorktree => task.branch_name.as_str(),
-        TaskRunIn::ExistingLane { .. } => task.id.as_str(),
-    };
+    prompt_file_named(worktree, &task.id)
+}
+
+/// The prompt file to read for `task` — [`prompt_file_path`], unless only a
+/// file an older build wrote is on disk, which it named by the branch.
+pub fn existing_prompt_file_path(task: &Task, worktree: &Path) -> PathBuf {
+    let path = prompt_file_path(task, worktree);
+    let by_branch = prompt_file_named(worktree, &task.branch_name);
+    if !path.exists() && by_branch.exists() {
+        by_branch
+    } else {
+        path
+    }
+}
+
+fn prompt_file_named(worktree: &Path, stem: &str) -> PathBuf {
     worktree
         .join(PROMPT_DIR_NAME)
         .join(format!("{PROMPT_FILE_PREFIX}{stem}.{PROMPT_FILE_EXT}"))

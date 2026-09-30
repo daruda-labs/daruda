@@ -31,7 +31,8 @@ mod tests;
 pub use branch::{branch_name_for, random_branch_name};
 pub use persistence::{load_tasks, load_tasks_in, save_tasks, save_tasks_in, tasks_path_in};
 pub use prompt_file::{
-    build_claude_command, prompt_file_path, render_task_prompt, write_prompt_file,
+    build_claude_command, existing_prompt_file_path, prompt_file_path, render_task_prompt,
+    write_prompt_file,
 };
 pub use task::{
     AgentType, SCHEMA_VERSION, SessionEndReason, SubTask, TASK_TOOL_USE_FAILURE_THRESHOLD, Task,
