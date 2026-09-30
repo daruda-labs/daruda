@@ -155,12 +155,43 @@ fn legacy_agent_surface() -> TaskAgentSurface {
 /// Durable identity of a task execution; pane ids do not survive restarts.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TaskExecution {
+    #[serde(default)]
+    pub source: super::TaskExecutionSource,
     pub id: String,
     pub agent_id: String,
     pub account_id: Option<crate::accounts::AccountId>,
     pub cwd: PathBuf,
     /// Absent until the adapter or CLI reports its session identity.
     pub session_id: Option<String>,
+}
+
+impl TaskExecution {
+    /// A run that has just started: fresh identity, no session yet.
+    pub fn begin(
+        source: super::TaskExecutionSource,
+        agent_id: String,
+        account_id: Option<crate::accounts::AccountId>,
+        cwd: PathBuf,
+    ) -> Self {
+        Self {
+            source,
+            id: uuid::Uuid::new_v4().to_string(),
+            agent_id,
+            account_id,
+            cwd,
+            session_id: None,
+        }
+    }
+
+    /// Whether "Open Agent Chat" has something to open. An Agent Chat run owns
+    /// a pane from the start; a CLI run has nothing to load until its exact
+    /// session is known.
+    pub fn chat_available(&self) -> bool {
+        match self.source {
+            super::TaskExecutionSource::AgentChat => true,
+            super::TaskExecutionSource::ClaudeCli { .. } => self.session_id.is_some(),
+        }
+    }
 }
 
 /// One row in the Tasks tab. `branch_name` is derived once at creation

@@ -577,6 +577,7 @@ async fn restore_resets_only_a_cross_domain_agent_chat_pin(cx: &mut TestAppConte
     let agent_leaf = |pane_id: u64, agent_id: String| SerializedLayout::Leaf {
         pane_id,
         content: SerializedPaneContent::AgentChat(SerializedAgentChatContent {
+            access: Default::default(),
             cwd: Some(PaneCwd::Local(std::env::temp_dir())),
             session_id: None,
             title: None,

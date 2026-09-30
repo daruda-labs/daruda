@@ -36,6 +36,7 @@ impl Workspace {
         };
         let task_id = if running {
             task.execution = Some(daruda_store::tasks::TaskExecution {
+                source: Default::default(),
                 id: "screenshot-task-run".into(),
                 agent_id: self.agents[0].id.clone(),
                 account_id: None,

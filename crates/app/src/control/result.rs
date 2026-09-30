@@ -408,6 +408,7 @@ pub(crate) enum ControlError {
     AgentLimitReached,
     /// The addressed pane already holds as many queued prompts as it may.
     QueueFull,
+    TargetReadOnly,
     /// The orchestrator addressed its own pane, which would make a turn that
     /// makes a turn.
     SelfTargetRefused,
@@ -466,6 +467,7 @@ impl std::fmt::Display for ControlError {
             Self::ApprovalTimedOut => write!(f, "the approval went unanswered"),
             Self::AgentLimitReached => write!(f, "agent worktree budget spent"),
             Self::QueueFull => write!(f, "prompt queue full"),
+            Self::TargetReadOnly => write!(f, "chat is read-only"),
             Self::SelfTargetRefused => write!(f, "an agent may not prompt itself"),
             Self::LaneCreateFailed { detail } => {
                 write!(f, "worktree creation failed: {detail}")

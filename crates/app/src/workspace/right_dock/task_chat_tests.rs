@@ -222,7 +222,7 @@ fn task_chat_disk_restore_preserves_missing_agent_and_account(cx: &mut TestAppCo
             assert_eq!(chat.agent_id, "removed-agent");
             assert_eq!(chat.account.to_persisted(), Some(account));
             assert!(chat.task_run.is_none());
-            assert!(chat.view.read(cx).handle.is_none());
+            assert!(chat.view.read(cx).any_handle().is_none());
             assert!(matches!(
                 cx.global::<GlobalTasks>().get(&id).unwrap().state,
                 TaskState::Running { .. }

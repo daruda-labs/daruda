@@ -467,6 +467,7 @@ impl Workspace {
             Some(PromptDispatch::SentNow) => Ok(SendDisposition::Delivered),
             Some(PromptDispatch::Queued) => Ok(SendDisposition::Queued),
             Some(PromptDispatch::QueueFull) => Err(ControlError::QueueFull),
+            Some(PromptDispatch::ReadOnly) => Err(ControlError::TargetReadOnly),
             None => Ok(SendDisposition::HandledLocally),
         }
     }

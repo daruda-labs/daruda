@@ -38,8 +38,10 @@ pub(super) fn status_pill(
     let task_id = task.id.clone();
     let workspace = snap.workspace.clone();
     let state = task.state.clone();
-    let can_open_chat = task.agent_surface == daruda_store::tasks::TaskAgentSurface::AgentChat
-        && task.execution.is_some();
+    let can_open_chat = task
+        .execution
+        .as_ref()
+        .is_some_and(daruda_store::tasks::TaskExecution::chat_available);
 
     let pill_id = SharedString::from(format!("task-pill-{}", task.id));
     let bg = pill_background(&state, cx);

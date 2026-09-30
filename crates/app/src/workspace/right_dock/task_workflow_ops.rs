@@ -308,6 +308,7 @@ impl Workspace {
                         return;
                     }
                 };
+                self.bind_task_cli_execution(task_id, pane_id, worktree_path, cx);
                 let cmd = daruda_store::tasks::prompt_file::build_claude_command(
                     &prompt_path,
                     task.auto_execute,
@@ -540,27 +541,27 @@ impl Workspace {
     // Claude hook → task state mapping
     // ------------------------------------------------------------------
 
-    /// Attach `session_id` to every `Running` task whose lane
-    /// matches the hook's `cwd`. Idempotent — duplicate registrations
-    /// are skipped so the same hook firing twice doesn't grow the
-    /// `session_ids` vec without bound.
+    /// Attach `session_id` to the `Running` task whose CLI run owns it.
+    /// Idempotent — duplicate registrations are skipped so the same hook
+    /// firing twice doesn't grow the `session_ids` vec without bound.
     pub(in crate::workspace) fn apply_task_session_changed(
         &mut self,
-        cwd: &Path,
         session_id: &str,
         cx: &mut Context<Self>,
     ) {
         let dirty = cx.update_global::<GlobalTasks, bool>(|g, _| {
             let mut dirty = false;
             for task in g.tasks.iter_mut() {
-                let daruda_store::tasks::TaskState::Running { worktree_path } = &task.state else {
+                if !matches!(task.state, daruda_store::tasks::TaskState::Running { .. }) {
                     continue;
-                };
+                }
                 if task.agent_surface != daruda_store::tasks::TaskAgentSurface::Terminal {
                     continue;
                 }
-                // A session reports its physical cwd; a lane keeps how it was opened.
-                if !daruda_core::path::same_path(worktree_path, cwd) {
+                if !task.execution.as_ref().is_some_and(|run| {
+                    run.source.cli_process().is_some()
+                        && run.session_id.as_deref() == Some(session_id)
+                }) {
                     continue;
                 }
                 if !task.session_ids.iter().any(|s| s == session_id) {

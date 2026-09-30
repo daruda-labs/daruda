@@ -1155,6 +1155,30 @@ pub fn task_action_open_chat() -> String {
 pub fn task_chat_missing_session() -> String {
     rust_i18n::t!("task.chat_missing_session").into_owned()
 }
+pub fn task_cli_read_only() -> String {
+    rust_i18n::t!("task.cli_read_only").into_owned()
+}
+pub fn task_cli_running() -> String {
+    rust_i18n::t!("task.cli_running").into_owned()
+}
+pub fn task_cli_unknown() -> String {
+    rust_i18n::t!("task.cli_unknown").into_owned()
+}
+pub fn task_cli_exited() -> String {
+    rust_i18n::t!("task.cli_exited").into_owned()
+}
+pub fn task_cli_run_missing() -> String {
+    rust_i18n::t!("task.cli_run_missing").into_owned()
+}
+pub fn task_cli_refresh() -> String {
+    rust_i18n::t!("task.cli_refresh").into_owned()
+}
+pub fn task_cli_continue() -> String {
+    rust_i18n::t!("task.cli_continue").into_owned()
+}
+pub fn task_cli_not_exited() -> String {
+    rust_i18n::t!("task.cli_not_exited").into_owned()
+}
 pub fn task_chat_missing_agent() -> String {
     rust_i18n::t!("task.chat_missing_agent").into_owned()
 }

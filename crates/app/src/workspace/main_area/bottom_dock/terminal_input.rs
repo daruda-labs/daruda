@@ -15,6 +15,9 @@ use crate::workspace::path_drag::PathDrag;
 
 /// Build the terminal input panel body.
 pub(super) fn render_body(snap: &BottomDockSnapshot, cx: &mut Context<Dock>) -> AnyElement {
+    if let Some(cli) = &snap.agent_cli_snapshot {
+        return render_cli_snapshot(snap, cli, cx);
+    }
     let state = snap.terminal_input.clone();
     let state_for_path = state.clone();
     let state_for_external = state.clone();
@@ -129,4 +132,62 @@ pub(super) fn render_body(snap: &BottomDockSnapshot, cx: &mut Context<Dock>) -> 
         )
         .child(cell)
         .into_any_element()
+}
+
+/// Read-only CLI history takes the composer's place: a snapshot can only be
+/// reloaded, and continued once the original process is confirmed gone.
+fn render_cli_snapshot(
+    snap: &BottomDockSnapshot,
+    cli: &crate::workspace::layout::snap::CliSnapshot,
+    cx: &mut Context<Dock>,
+) -> AnyElement {
+    use crate::surface::strings as s;
+    use crate::ui::{self, Disableable as _};
+    use daruda_store::tasks::CliProcessState;
+
+    let label = match cli.process {
+        None => s::task_cli_run_missing(),
+        Some(CliProcessState::Discovering | CliProcessState::Unknown) => s::task_cli_unknown(),
+        Some(CliProcessState::Running { .. }) => s::task_cli_running(),
+        Some(CliProcessState::ExitConfirmed { .. }) => s::task_cli_exited(),
+    };
+    let exited = matches!(cli.process, Some(CliProcessState::ExitConfirmed { .. }));
+    let pane_id = cli.pane_id;
+    let refresh_ws = snap.workspace.clone();
+    let continue_ws = snap.workspace.clone();
+    let row = div()
+        .flex()
+        .flex_row()
+        .items_center()
+        .gap(px(theme::GAP_LG))
+        .child(
+            div()
+                .flex_1()
+                .min_w_0()
+                .text_color(theme::current(cx).text_muted)
+                .text_size(px(theme::FONT_SIZE_SM))
+                .child(label),
+        )
+        .child(
+            ui::button_icon("cli-refresh", ui::icons::REFRESH, cx)
+                .tooltip(s::task_cli_refresh())
+                .disabled(cli.loading)
+                .on_click(move |_, _, cx| {
+                    if let Some(ws) = refresh_ws.upgrade() {
+                        ws.update(cx, |ws, cx| ws.refresh_cli_chat(pane_id, cx));
+                    }
+                }),
+        )
+        .when(exited, |row| {
+            row.child(
+                ui::button("cli-continue", s::task_cli_continue())
+                    .disabled(cli.loading)
+                    .on_click(move |_, _, cx| {
+                        if let Some(ws) = continue_ws.upgrade() {
+                            ws.update(cx, |ws, cx| ws.continue_cli_chat(pane_id, cx));
+                        }
+                    }),
+            )
+        });
+    super::bottom_panel_body().child(row).into_any_element()
 }

@@ -34,7 +34,13 @@ pub struct PidSessionMeta {
 /// Resolve `~/.claude/sessions/`. Returns `None` if `dirs::home_dir`
 /// fails (extremely rare on a real macOS install).
 pub fn default_sessions_dir() -> Option<PathBuf> {
-    Some(dirs::home_dir()?.join(".claude").join("sessions"))
+    Some(sessions_dir_in(&dirs::home_dir()?.join(".claude")))
+}
+
+/// The sessions directory a `claude` running with `config_dir` as its
+/// config home writes into — `CLAUDE_CONFIG_DIR` for a managed account.
+pub fn sessions_dir_in(config_dir: &std::path::Path) -> PathBuf {
+    config_dir.join("sessions")
 }
 
 /// Read `~/.claude/sessions/<pid>.json` for the given PID. Missing or
@@ -53,11 +59,39 @@ pub fn read_session_meta_in(dir: &Path, pid: u32) -> Option<PidSessionMeta> {
     serde_json::from_slice(&bytes).ok()
 }
 
+/// Whether `pid` is still the process writing `session_id`. `claude` keeps
+/// `<dir>/<pid>.json` for its whole life, so a missing file or one naming
+/// another session means that process is gone — the PID reused, or the CLI
+/// moved on to a new session. A file present but unreadable (mid-write)
+/// proves nothing and keeps the claim.
+pub fn pid_holds_session(dir: &Path, pid: u32, session_id: &str) -> bool {
+    match fs::read(dir.join(format!("{pid}.json"))) {
+        Ok(bytes) => serde_json::from_slice::<PidSessionMeta>(&bytes)
+            .map_or(true, |meta| meta.session_id == session_id),
+        Err(error) => error.kind() != std::io::ErrorKind::NotFound,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use serde_json::json;
     use tempfile::TempDir;
+
+    #[test]
+    fn a_pid_holds_its_session_until_the_file_goes_or_names_another() {
+        let dir = TempDir::new().unwrap();
+        assert!(!pid_holds_session(dir.path(), 7, "a"));
+        write_meta(
+            dir.path(),
+            7,
+            json!({"pid": 7, "sessionId": "a", "cwd": "/w"}),
+        );
+        assert!(pid_holds_session(dir.path(), 7, "a"));
+        assert!(!pid_holds_session(dir.path(), 7, "b"));
+        std::fs::write(dir.path().join("7.json"), "{half").unwrap();
+        assert!(pid_holds_session(dir.path(), 7, "b"));
+    }
 
     fn write_meta(dir: &Path, pid: u32, json_obj: serde_json::Value) {
         let path = dir.join(format!("{pid}.json"));

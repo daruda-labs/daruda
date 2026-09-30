@@ -169,7 +169,7 @@ impl Workspace {
                     | AgentSessionStatus::Connecting
                     | AgentSessionStatus::Handshaking(_)
             );
-        switch_kind(busy, has_conversation(&v.items))
+        switch_kind(busy, v.is_read_only() || has_conversation(&v.items))
     }
 
     /// `SwitchKind::InPlace` for an Agent chat pane: set the pane's account
@@ -401,7 +401,9 @@ impl Workspace {
         {
             let account = match &mut p.content {
                 pane::PaneContent::Terminal(t) => &mut t.account,
-                pane::PaneContent::AgentChat(ac) => &mut ac.account,
+                pane::PaneContent::AgentChat(ac) if !ac.view.read(cx).is_read_only() => {
+                    &mut ac.account
+                }
                 _ => continue,
             };
             if dangling(*account) {

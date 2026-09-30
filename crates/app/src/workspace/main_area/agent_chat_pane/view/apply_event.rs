@@ -393,10 +393,7 @@ impl AgentChatView {
                     }
                     _ => message,
                 };
-                self.status = AgentSessionStatus::Error {
-                    message: error_message,
-                    remedy: failure.remedy(),
-                };
+                self.set_error(error_message, failure.remedy(), cx);
                 // A session-level error terminates every outstanding turn,
                 // including any cancel we were still awaiting an ack for — close
                 // the cancel window so a post-reconnect turn isn't misread.
@@ -433,7 +430,7 @@ impl AgentChatView {
                 // "Working". With `None`, a post-error prompt buffers instead of
                 // stranding. (Distinct from `TurnFailed`, which keeps the handle:
                 // there the connection is still alive.)
-                self.handle = None;
+                self.detach_handle();
             }
         }
         // Single dispatch point for every arm's `phone_turn_action` above

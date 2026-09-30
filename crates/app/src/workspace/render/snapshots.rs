@@ -294,6 +294,15 @@ impl Workspace {
                 },
             );
         BottomDockSnapshot {
+            agent_cli_snapshot: self.agent_chat_view(focused_id).and_then(|view| {
+                let v = view.read(cx);
+                let run = v.mirrored_run()?;
+                Some(crate::workspace::layout::snap::CliSnapshot {
+                    pane_id: focused_id,
+                    process: self.cli_run_process(run, cx),
+                    loading: v.status.is_connecting(),
+                })
+            }),
             terminal_input_visible: self.terminal_input_visible,
             active_tab_id,
             tab_summaries,

@@ -36,6 +36,7 @@ fn execution_identity_round_trips_and_legacy_tasks_have_none() {
             .is_none()
     );
     task.execution = Some(super::TaskExecution {
+        source: Default::default(),
         id: "run-1".into(),
         agent_id: "claude".into(),
         account_id: Some(crate::accounts::AccountId(uuid::Uuid::new_v4())),

@@ -1303,6 +1303,7 @@ impl Workspace {
         // `data_dir`. Production paths all share the default
         // `~/.config/daruda/`; tests inject a fresh per-test dir.
         crate::agent::tasks_global::load_from_dir(cx, &ws.data_dir);
+        ws.restore_task_cli_tracking(cx);
         // Kick off the pulse / duration tick if `load_from_dir`
         // restored any `Running` task — the `GlobalTasks` observe
         // subscription wouldn't fire here because the set_global call

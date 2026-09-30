@@ -73,6 +73,9 @@ const NAME_AGENT_CHAT_NARROWED: &str = "agent-chat-narrowed";
 /// CLI token for the transcript with the custom fold editor open.
 const NAME_AGENT_CHAT_FOLD: &str = "agent-chat-fold";
 const NAME_AGENT_CHAT_INTERRUPTED: &str = "agent-chat-interrupted";
+/// CLI tokens for a CLI task's read-only transcript, running and exited.
+const NAME_AGENT_CHAT_CLI_RUNNING: &str = "agent-chat-cli-running";
+const NAME_AGENT_CHAT_CLI_ENDED: &str = "agent-chat-cli-ended";
 /// CLI token for the queued-prompt strip holding a queue a Stop parked.
 const NAME_AGENT_CHAT_QUEUE_PARKED: &str = "agent-chat-queue-parked";
 /// CLI token for the same strip once an empty Enter armed the resume gesture.
@@ -256,6 +259,12 @@ pub(crate) enum ScreenshotScenario {
     /// it — and it is the one row whose whole job is to read as an edge rather
     /// than a message, which only a capture can confirm.
     AgentChatInterrupted,
+    /// A Terminal task's conversation mirrored read-only while its CLI runs:
+    /// the composer gives way to a status row with only a refresh control.
+    AgentChatCliRunning,
+    /// The same mirror once the CLI's exit is confirmed, which is the only
+    /// state that offers continuing in Agent Chat.
+    AgentChatCliEnded,
     /// The queued-prompt strip holding a queue a Stop parked. The strip is
     /// reachable no other way — a restored pane has no queue — and its Resume
     /// button now shares a line with the key hint for the keyboard path.
@@ -384,6 +393,8 @@ impl ScreenshotScenario {
             NAME_AGENT_CHAT_NARROWED => Some(Self::AgentChatNarrowed),
             NAME_AGENT_CHAT_FOLD => Some(Self::AgentChatFold),
             NAME_AGENT_CHAT_INTERRUPTED => Some(Self::AgentChatInterrupted),
+            NAME_AGENT_CHAT_CLI_RUNNING => Some(Self::AgentChatCliRunning),
+            NAME_AGENT_CHAT_CLI_ENDED => Some(Self::AgentChatCliEnded),
             NAME_AGENT_CHAT_QUEUE_PARKED => Some(Self::AgentChatQueueParked),
             NAME_AGENT_CHAT_QUEUE_ARMED => Some(Self::AgentChatQueueArmed),
             NAME_AGENT_CHAT_SOLE_REPLY => Some(Self::AgentChatSoleReply),
@@ -675,6 +686,14 @@ pub(crate) fn drive(
             workspace.update(cx, |ws, cx| {
                 ws.open_agent_chat_interrupted_transcript_for_shot(window, cx)
             });
+        }
+        ScreenshotScenario::AgentChatCliRunning => {
+            workspace.update(cx, |ws, cx| {
+                ws.open_cli_snapshot_for_shot(false, window, cx)
+            });
+        }
+        ScreenshotScenario::AgentChatCliEnded => {
+            workspace.update(cx, |ws, cx| ws.open_cli_snapshot_for_shot(true, window, cx));
         }
         ScreenshotScenario::AgentChatQueueParked => {
             workspace.update(cx, |ws, cx| {

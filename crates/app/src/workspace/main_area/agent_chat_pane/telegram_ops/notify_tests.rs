@@ -71,7 +71,12 @@ async fn a_permission_wait_says_which_project_agent_and_tab_asks(cx: &mut gpui::
         ws.relay_permission_wait_to_telegram(pane, &prompt(7, &options, Some("Write x.rs")), cx);
         let ping = sent(&mut outbound);
         let project = ws.project_name_for_pane(pane).expect("an owning project");
-        let agent = ws.agent_chat_view(pane).unwrap().read(cx).agent_name.clone();
+        let agent = ws
+            .agent_chat_view(pane)
+            .unwrap()
+            .read(cx)
+            .agent_name
+            .clone();
         assert_eq!(
             ping.header,
             format!("{project}\n{}", s::remote_agent_with_tab(&agent, "review"))

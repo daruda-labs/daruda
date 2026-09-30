@@ -177,6 +177,7 @@ fn agent_chat_content_round_trip_preserves_account_id() {
     use crate::accounts::AccountId;
     let id = AccountId::new();
     let content = SerializedAgentChatContent {
+        access: Default::default(),
         cwd: Some(PaneCwd::Local(PathBuf::from("/repo/lane"))),
         session_id: None,
         title: None,
@@ -201,12 +202,32 @@ fn agent_chat_content_round_trip_preserves_account_id() {
     assert!(legacy.account_id.is_none());
 }
 
+/// A CLI snapshot pane must come back read-only, naming the same run; a pane
+/// saved before access was recorded is an ordinary interactive chat.
+#[test]
+fn agent_chat_access_round_trips_and_legacy_is_interactive() {
+    use crate::tasks::AgentChatAccess;
+    let mut content: SerializedAgentChatContent =
+        serde_json::from_str(r#"{"cwd":"/repo/lane","session_id":"cli"}"#).unwrap();
+    assert_eq!(content.access, AgentChatAccess::Interactive);
+
+    content.access = AgentChatAccess::CliSnapshot(crate::tasks::ExecutionRef {
+        task_id: "task".into(),
+        execution_id: "run".into(),
+    });
+    let json = serde_json::to_string(&content).unwrap();
+    let restored: SerializedAgentChatContent = serde_json::from_str(&json).unwrap();
+    assert_eq!(restored.access, content.access);
+    assert_eq!(restored.session_id.as_deref(), Some("cli"));
+}
+
 #[test]
 fn agent_chat_content_round_trip_preserves_mode_id() {
     // A restart resumes the session via `session/load`; the persisted mode
     // id is what lets the host reapply the last-known mode afterward (see
     // `SerializedAgentChatContent::mode_id`).
     let content = SerializedAgentChatContent {
+        access: Default::default(),
         cwd: Some(PaneCwd::Local(PathBuf::from("/repo/lane"))),
         session_id: Some("sess-abc123".to_string()),
         title: None,
@@ -236,6 +257,7 @@ fn agent_chat_content_round_trip_preserves_model_id() {
     // Every connect reapplies this pane's model, so the pick has to survive
     // the restart that ends the session it was made in.
     let content = SerializedAgentChatContent {
+        access: Default::default(),
         cwd: Some(PaneCwd::Local(PathBuf::from("/repo/lane"))),
         session_id: Some("sess-abc123".to_string()),
         title: None,
@@ -272,6 +294,7 @@ fn agent_chat_content_round_trip_preserves_model_id() {
 #[test]
 fn agent_chat_content_width_round_trips_and_an_absent_key_follows_config() {
     let base = SerializedAgentChatContent {
+        access: Default::default(),
         cwd: Some(PaneCwd::Local(PathBuf::from("/repo/lane"))),
         session_id: Some("sess-abc123".to_string()),
         title: None,
@@ -320,6 +343,7 @@ fn agent_chat_content_width_round_trips_and_an_absent_key_follows_config() {
 #[test]
 fn agent_chat_display_filter_round_trips_and_legacy_stays_unset() {
     let content = SerializedAgentChatContent {
+        access: Default::default(),
         cwd: Some(PaneCwd::Local(PathBuf::from("/repo/lane"))),
         session_id: None,
         title: None,
@@ -365,6 +389,7 @@ fn agent_chat_display_filter_round_trips_and_legacy_stays_unset() {
 #[test]
 fn agent_chat_fold_mode_round_trips_and_legacy_stays_unset() {
     let content = SerializedAgentChatContent {
+        access: Default::default(),
         cwd: Some(PaneCwd::Local(PathBuf::from("/repo/lane"))),
         session_id: None,
         title: None,
@@ -420,6 +445,7 @@ fn agent_chat_fold_mode_round_trips_and_legacy_stays_unset() {
 #[test]
 fn agent_chat_tail_window_round_trips_and_legacy_stays_unset() {
     let content = SerializedAgentChatContent {
+        access: Default::default(),
         cwd: Some(PaneCwd::Local(PathBuf::from("/repo/lane"))),
         session_id: None,
         title: None,
@@ -558,6 +584,7 @@ fn a_future_view_preference_degrades_instead_of_losing_the_project() {
 #[test]
 fn unset_view_preferences_are_left_out_of_the_json() {
     let content = SerializedAgentChatContent {
+        access: Default::default(),
         cwd: Some(PaneCwd::Local(PathBuf::from("/repo/lane"))),
         session_id: None,
         title: None,
@@ -591,6 +618,7 @@ fn agent_chat_leaf_round_trip_preserves_cwd() {
     let leaf = SerializedLayout::Leaf {
         pane_id: 9,
         content: SerializedPaneContent::AgentChat(SerializedAgentChatContent {
+            access: Default::default(),
             cwd: Some(PaneCwd::Local(PathBuf::from("/repo/lane"))),
             session_id: Some("sess-abc123".to_string()),
             title: Some("Fix the parser".to_string()),
@@ -632,6 +660,7 @@ fn agent_chat_leaf_round_trip_preserves_remote_cwd() {
     let leaf = SerializedLayout::Leaf {
         pane_id: 9,
         content: SerializedPaneContent::AgentChat(SerializedAgentChatContent {
+            access: Default::default(),
             cwd: Some(PaneCwd::Remote("host:/repo/lane".to_string())),
             session_id: None,
             title: None,
@@ -1578,6 +1607,7 @@ fn a_leaf_naming_two_kinds_takes_the_first() {
 #[test]
 fn a_pane_writes_the_new_visible_kinds_field_and_never_the_legacy_one() {
     let content = SerializedAgentChatContent {
+        access: Default::default(),
         cwd: Some(PaneCwd::Local(PathBuf::from("/repo/lane"))),
         session_id: None,
         title: None,

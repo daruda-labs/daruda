@@ -136,6 +136,9 @@ agent-client-protocol = "2.0"
 # the normal dependency so only test targets get it: a workspace test that
 # opens a tab would otherwise fork a real login shell.
 daruda_terminal = { path = "../daruda_terminal", features = ["test-support"] }
+# A detached session handle lets a test watch what a pane sends, and when it
+# lets go, without an adapter process behind it.
+daruda_acp = { path = "../daruda_acp", features = ["test-support"] }
 gpui = { workspace = true, features = ["test-support"] }
 serde_json = "1"
 # Tokenizes an assembled launch command the way the ACP launcher does, so a

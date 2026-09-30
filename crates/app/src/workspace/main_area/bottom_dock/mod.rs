@@ -57,6 +57,9 @@ pub(in crate::workspace) fn render_body(
     snap: &BottomDockSnapshot,
     cx: &mut Context<Dock>,
 ) -> AnyElement {
+    if snap.agent_cli_snapshot.is_some() {
+        return terminal_input::render_body(snap, cx);
+    }
     if snap.terminal_input_visible {
         let input = terminal_input::render_body(snap, cx);
         // The queued-prompt strip (if any) sits ABOVE the input panel; both

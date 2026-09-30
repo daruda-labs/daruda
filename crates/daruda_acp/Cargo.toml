@@ -13,6 +13,10 @@ workspace = true
 [dev-dependencies]
 test_process = { path = "../../tools/test_process" }
 
+[features]
+# Exposes `AcpSessionHandle::detached_for_test` to host test targets.
+test-support = []
+
 [dependencies]
 daruda_core = { path = "../daruda_core" }
 # `unstable_auth_methods` is what makes the agent advertise its terminal login

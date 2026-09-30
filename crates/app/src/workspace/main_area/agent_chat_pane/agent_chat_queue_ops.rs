@@ -82,6 +82,17 @@ impl Workspace {
         origin: PromptOrigin,
         cx: &mut Context<Self>,
     ) -> Option<PromptDispatch> {
+        if self.agent_chat_view(pane_id)?.read(cx).is_read_only() {
+            self.report_error(
+                ErrorReport::new(s::task_cli_read_only())
+                    .severity(ErrorSeverity::Info)
+                    .at(file!(), line!())
+                    .dedup("task.cli.read_only")
+                    .build(),
+                cx,
+            );
+            return Some(PromptDispatch::ReadOnly);
+        }
         let dispatch = classify_slash(&text);
         match dispatch {
             SlashDispatch::Local(LocalSlashCommand::Clear) => {

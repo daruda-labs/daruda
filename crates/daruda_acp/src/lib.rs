@@ -58,6 +58,8 @@ pub use model::{
 };
 pub use native_subagents::{NativeSubagentRouter, Routed};
 pub use node::{NodeError, NodeProgress, NodeRuntime, command_diagnostic, ensure_node};
+#[cfg(any(test, feature = "test-support"))]
+pub use session::HandleProbe;
 pub use session::{
     AcpEvent, AcpSessionHandle, ConnectPhase, InfoFieldChange, PermissionDecision, SessionResume,
     connect_agent_session, connect_agent_session_with_model, connect_prepared_session,

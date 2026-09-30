@@ -3,7 +3,7 @@
 mod editor_ops;
 pub(super) mod task_edit_ops;
 
-use daruda_store::tasks::{SubTask, TaskAgentSurface, TaskState};
+use daruda_store::tasks::{SubTask, TaskAgentSurface, TaskExecution, TaskState};
 use gpui::{Context, IntoElement, MouseButton, SharedString, div, prelude::*, px};
 
 use super::super::Workspace;
@@ -40,7 +40,9 @@ pub(in crate::workspace) fn render(
         .is_none_or(|state| matches!(state, TaskState::Backlog));
     let has_worktree = state.as_ref().and_then(TaskState::worktree_path).is_some();
     let can_open_chat = task.is_some_and(|task| {
-        task.agent_surface == TaskAgentSurface::AgentChat && task.execution.is_some()
+        task.execution
+            .as_ref()
+            .is_some_and(TaskExecution::chat_available)
     });
     let subtasks = task
         .map(|task| task.subtasks.clone())

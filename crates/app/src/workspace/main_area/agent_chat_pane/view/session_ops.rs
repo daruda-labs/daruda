@@ -55,7 +55,7 @@ impl AgentChatView {
     /// `TurnEnded`, leaving the turn pulsing forever otherwise. A later
     /// `TurnEnded` for this turn is idempotent.
     pub(in crate::workspace) fn cancel_turn(&mut self, cx: &mut Context<Self>) {
-        if let Some(handle) = &self.handle {
+        if let Some(handle) = self.live_handle() {
             handle.cancel();
         }
         // Settle the turn *locally and immediately* — responsive and hung-safe: a
@@ -208,7 +208,7 @@ impl AgentChatView {
                 PermissionDecision::Reject { option_id }
             }
         };
-        if let Some(handle) = &self.handle {
+        if let Some(handle) = self.live_handle() {
             handle.respond_permission(request_id, decision);
         }
         // The card is now resolved, so it no longer force-stays-visible under a
@@ -786,10 +786,14 @@ impl AgentChatView {
     /// agent over the live handle (no-op when the handle is absent). A
     /// `ModeChanged` replaces the whole state if the agent disagrees.
     pub(in crate::workspace) fn set_mode(&mut self, mode_id: String, cx: &mut Context<Self>) {
+        // A mirror shows the CLI's mode; the pick would only be local.
+        if self.is_read_only() {
+            return;
+        }
         self.session_config
             .set_current_mode_optimistically(mode_id.clone());
         self.last_known_mode_id = Some(mode_id.clone());
-        if let Some(h) = &self.handle {
+        if let Some(h) = self.live_handle() {
             h.set_mode(mode_id);
         }
         cx.notify();
@@ -805,6 +809,11 @@ impl AgentChatView {
         value: daruda_acp::ConfigValueView,
         cx: &mut Context<Self>,
     ) {
+        // A mirror shows the CLI's options; the pick would only be local, and
+        // the model it remembers must stay the run's.
+        if self.is_read_only() {
+            return;
+        }
         // Only the model axis is remembered, and only when this call names it.
         let picked_model = match &value {
             daruda_acp::ConfigValueView::Id(picked) => {
@@ -830,7 +839,7 @@ impl AgentChatView {
     ) {
         self.session_config
             .set_option_value_optimistically(&config_id, &value);
-        if let Some(h) = &self.handle {
+        if let Some(h) = self.live_handle() {
             h.set_config_option(config_id, value);
         }
         cx.notify();
@@ -842,7 +851,7 @@ impl AgentChatView {
     /// callers differ there (fresh conversation vs. resume via `session/load`).
     fn teardown_transient_session_state(&mut self) {
         cancel_pending_permission(self);
-        self.handle = None;
+        self.detach_handle();
         self._event_pump = None;
         self.items.clear();
         self.queue.pending_prompts.clear();
@@ -876,6 +885,10 @@ impl AgentChatView {
     /// session id. The caller supersedes this with a fresh `connect_agent_chat`
     /// right after, so the view never sits handle-less for a render.
     pub(in crate::workspace) fn reset_for_new_session(&mut self, cx: &mut Context<Self>) {
+        // A mirror has no conversation of its own to clear.
+        if self.is_read_only() {
+            return;
+        }
         self.teardown_transient_session_state();
         // Clear the persisted id so a restart resumes the fresh session, not
         // the cleared conversation (Connected re-persists the new id).

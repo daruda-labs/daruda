@@ -16,6 +16,7 @@
 //!   phone-relayed replies / permission decisions routed back into a pane.
 
 pub(super) mod agent_chat_connect_ops;
+pub(in crate::workspace) mod agent_chat_event_ops;
 pub(in crate::workspace) mod agent_chat_helpers;
 pub(in crate::workspace) mod agent_chat_ops;
 pub(super) mod agent_chat_queue_ops;

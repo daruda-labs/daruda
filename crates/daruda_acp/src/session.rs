@@ -353,6 +353,42 @@ pub struct AcpSessionHandle {
     permission_parks: PermissionParks,
 }
 
+/// Test-only view of a detached handle's command channel: what the host sent
+/// through it, and whether the host still holds it.
+#[cfg(any(test, feature = "test-support"))]
+pub struct HandleProbe(UnboundedReceiver<Command>);
+
+#[cfg(any(test, feature = "test-support"))]
+impl HandleProbe {
+    /// Count the commands sent since the last call, and report whether the
+    /// handle has been dropped (the channel closed behind them).
+    pub fn drain(&mut self) -> (usize, bool) {
+        use futures::channel::mpsc::TryRecvError;
+        let mut sent = 0;
+        loop {
+            match self.0.try_recv() {
+                Ok(_) => sent += 1,
+                Err(TryRecvError::Closed) => return (sent, true),
+                Err(TryRecvError::Empty) => return (sent, false),
+            }
+        }
+    }
+}
+
+#[cfg(any(test, feature = "test-support"))]
+impl AcpSessionHandle {
+    /// A handle with no connection behind it, for host tests that need a
+    /// "live" session without spawning an adapter.
+    pub fn detached_for_test() -> (Self, HandleProbe) {
+        let (commands, command_rx) = unbounded::<Command>();
+        let handle = Self {
+            commands,
+            permission_parks: Arc::new(Mutex::new(HashMap::new())),
+        };
+        (handle, HandleProbe(command_rx))
+    }
+}
+
 impl AcpSessionHandle {
     /// Queue a user prompt for the next turn. Returns immediately; the turn's
     /// completion surfaces as [`AcpEvent::TurnEnded`].

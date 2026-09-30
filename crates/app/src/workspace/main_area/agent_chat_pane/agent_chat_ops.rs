@@ -1354,7 +1354,7 @@ impl Workspace {
     /// split: it parks the pane out of `Idle` before focus would otherwise send
     /// `maybe_connect_agent_chat` off to spawn a real adapter behind it.
     #[cfg(feature = "devtools")]
-    pub(super) fn open_agent_chat_pane_seeded(
+    pub(in crate::workspace) fn open_agent_chat_pane_seeded(
         &mut self,
         agent_id: Option<&str>,
         seed: impl FnOnce(&mut AgentChatView, &mut Window, &mut Context<AgentChatView>),

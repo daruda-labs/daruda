@@ -1,7 +1,7 @@
 use futures::{FutureExt as _, StreamExt as _};
 use gpui::AppContext as _;
 
-use super::{permission_buttons, permission_wait_tail, preview_for};
+use super::{permission_buttons, permission_wait_text, preview_for};
 use crate::surface::strings as s;
 use crate::telegram::bridge::PermissionDecision;
 use daruda_acp::{PermissionChoice, PermissionKindView};
@@ -333,14 +333,14 @@ async fn opting_out_of_the_presence_gate_sends_while_the_user_is_present(
 }
 
 #[test]
-fn permission_wait_tail_formats_title_summary_fallback_and_empty_values() {
+fn permission_wait_text_formats_title_summary_fallback_and_empty_values() {
     assert_eq!(
-        permission_wait_tail(Some("Write /tmp/x.rs"), None),
+        permission_wait_text(Some("Write /tmp/x.rs"), None),
         format!("{}\n{}", s::agent_notification_waiting(), "Write /tmp/x.rs")
     );
 
     assert_eq!(
-        permission_wait_tail(Some("Run npm install"), Some("command: npm install")),
+        permission_wait_text(Some("Run npm install"), Some("command: npm install")),
         format!(
             "{}\n{}\n{}",
             s::agent_notification_waiting(),
@@ -350,17 +350,17 @@ fn permission_wait_tail_formats_title_summary_fallback_and_empty_values() {
     );
 
     assert_eq!(
-        permission_wait_tail(None, Some("file: /tmp/x.rs")),
+        permission_wait_text(None, Some("file: /tmp/x.rs")),
         format!("{}\n{}", s::agent_notification_waiting(), "file: /tmp/x.rs")
     );
 
     assert_eq!(
-        permission_wait_tail(None, None),
+        permission_wait_text(None, None),
         s::agent_notification_waiting()
     );
 
     assert_eq!(
-        permission_wait_tail(Some(""), Some("")),
+        permission_wait_text(Some(""), Some("")),
         s::agent_notification_waiting()
     );
 }
@@ -1263,9 +1263,17 @@ pub(super) fn make_window(
     gpui::Entity<super::Workspace>,
 ) {
     crate::test_support::init_gpui_component(cx);
+    // A pane's phone pings name the project that owns it, so the workspace
+    // opens one — a plain directory under the test's own data dir.
+    let data_dir = test_data_dir();
+    let root = data_dir.join("repo");
+    std::fs::create_dir_all(&root).expect("a project directory under the test data dir");
+    let project = daruda_store::project::Project::from_path(root);
     let workspace_for_root = std::cell::RefCell::new(None);
     let wh = cx.add_window(|window, cx| {
-        let workspace = cx.new(|cx| super::Workspace::new(config, test_data_dir(), window, cx));
+        let workspace = cx.new(|cx| {
+            super::Workspace::new_with_project(config, Some(project.clone()), data_dir, window, cx)
+        });
         *workspace_for_root.borrow_mut() = Some(workspace.clone());
         gpui_component::Root::new(workspace, window, cx)
     });

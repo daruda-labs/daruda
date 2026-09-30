@@ -825,7 +825,7 @@ pub(super) fn cancel_pending_permission(view: &mut AgentChatView) {
         return;
     }
     for id in std::mem::take(&mut view.pending_permissions) {
-        if let Some(handle) = &view.handle {
+        if let Some(handle) = view.any_handle() {
             handle.respond_permission(id, daruda_acp::PermissionDecision::Cancelled);
         }
     }

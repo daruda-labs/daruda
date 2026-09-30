@@ -1,7 +1,7 @@
 //! PTY-tracker event pump — bridges the GPUI-free `hooks::pty_tracker`
 //! channel into the GPUI Workspace entity.
 //!
-//! The tracker emits `BindingChanged` / `DeadSession` diff events over an
+//! The tracker emits `BindingChanged` / `SessionProcessExited` events over an
 //! `mpsc::Receiver`. GPUI tasks can't block on a std channel, so a 100 ms
 //! timer drains every queued event per tick — a burst (e.g. tab close) would
 //! lag a single read-per-tick.
@@ -49,14 +49,16 @@ pub(in crate::workspace) fn spawn(
 }
 
 impl Workspace {
-    /// Apply one tracker event. Updates `pty_claude_bindings` for
-    /// `BindingChanged`; for `DeadSession`, drops the session from
-    /// the in-memory store and deletes its on-disk status file so
-    /// the indicator vanishes within a poll cycle of `claude`
-    /// crashing without firing `SessionEnd`.
+    /// Apply one tracker event. Updates `pty_claude_bindings` and the owning
+    /// task run for `BindingChanged`. `SessionProcessExited` is the one proof
+    /// a CLI is gone (its PID left the OS table), so it confirms the task
+    /// run's exit and sweeps the session's status file.
     pub fn apply_pty_tracker_event(&mut self, event: PtyTrackerEvent, cx: &mut Context<Self>) {
         match event {
             PtyTrackerEvent::BindingChanged { pane_id, binding } => {
+                if let Some(binding) = &binding {
+                    self.record_task_cli_binding(pane_id, binding, cx);
+                }
                 let changed = match binding {
                     Some(new) => {
                         let prev = self.claude.pty_claude_bindings.get(&pane_id);
@@ -77,14 +79,18 @@ impl Workspace {
                     self.notify_status_docks(cx);
                 }
             }
-            PtyTrackerEvent::DeadSession { session_id } => {
+            PtyTrackerEvent::SessionProcessExited {
+                session_id,
+                claude_pid,
+            } => {
+                self.record_task_cli_exit(&session_id, claude_pid, cx);
                 self.claude.last_pushed_notification.remove(&session_id);
                 if self.claude.claude_status.remove(&session_id).is_some() {
                     if let Ok(dir) = daruda_agent::hooks::status_file::default_dir() {
                         use daruda_agent::hooks::status_file as sf;
                         let _ = sf::delete(&sf::path_for(&dir, &session_id));
-                        // `claude` is gone (the tracker found no live
-                        // descendant), so no NEW hook can spawn for this
+                        // `claude` is gone (the OS no longer has its PID),
+                        // so no NEW hook can spawn for this
                         // session. At most one straggler hook subprocess may
                         // still hold the flock; POSIX unlink keeps its open
                         // fd valid, and a single writer needs no

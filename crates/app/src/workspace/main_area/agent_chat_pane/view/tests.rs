@@ -1642,7 +1642,7 @@ fn transport_eof_localizes_and_preserves_the_session_for_reconnect(cx: &mut gpui
             assert_ne!(message, "Incoming transport closed");
             assert_eq!(view.session_id.as_deref(), Some("saved-session"));
             assert!(view.turn_is_idle());
-            assert!(view.handle.is_none());
+            assert!(view.any_handle().is_none());
             assert!(
                 !view.needs_disconnect_error(),
                 "do not emit a duplicate terminal failure"
@@ -1672,7 +1672,7 @@ fn preparation_failure_releases_replay_without_losing_the_resume_target(
             );
             assert!(!view.is_replaying());
             assert!(view.turn_is_idle());
-            assert!(view.handle.is_none());
+            assert!(view.any_handle().is_none());
             assert_eq!(view.session_id.as_deref(), Some("saved-session"));
             let super::AgentSessionStatus::Error { message, remedy } = &view.status else {
                 panic!("preparation failure must terminate the attempt");

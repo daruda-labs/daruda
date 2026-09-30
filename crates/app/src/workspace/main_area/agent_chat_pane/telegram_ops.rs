@@ -339,7 +339,7 @@ impl Workspace {
             .agent_chat_view(pane_id)
             .map(|view| {
                 let view = view.read(cx);
-                permission_wait_tail(prompt, permission_diffs(&view, &prompt.tool_call_id))
+                permission_wait_tail(prompt, permission_diffs(view, &prompt.tool_call_id))
             })
             .unwrap_or_else(|| permission_wait_tail(prompt, &[]));
         let header = self.telegram_header(pane_id, cx);
@@ -620,7 +620,7 @@ impl Workspace {
     pub(in crate::workspace) fn relay_presence_notice_to_phone(
         &self,
         text: String,
-        cx: &Context<Self>,
+        cx: &mut Context<Self>,
     ) {
         let away = crate::app_presence::is_away(cx);
         crate::remote_channel::global::RemoteChannels::send_notice_with_delivery(
@@ -810,6 +810,7 @@ impl Workspace {
                 self.relay_queue_full_notice_to_telegram(pane_id, cx)
             }
             Some(PromptDispatch::SentNow) => {}
+            Some(PromptDispatch::ReadOnly) => return false,
             None => self.relay_first_response_fallback_to_telegram(pane_id, cx),
         }
         true

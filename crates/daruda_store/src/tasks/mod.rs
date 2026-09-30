@@ -16,6 +16,8 @@
 //! forward-compatible codex / gemini / copilot / cursor-agent support (G5).
 
 pub mod branch;
+pub mod cli;
+pub use cli::{AgentChatAccess, CliProcessState, ExecutionRef, TaskExecutionSource};
 pub mod persistence;
 pub mod prompt_file;
 /// Branch-name rules live in `daruda_core::git` — shared with the app so a

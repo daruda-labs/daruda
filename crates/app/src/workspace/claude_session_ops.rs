@@ -256,7 +256,17 @@ impl Workspace {
         match event {
             StatusEvent::Changed(path) => match daruda_agent::hooks::status_file::read(&path) {
                 Ok(Some(file)) => {
-                    self.apply_task_session_changed(&file.cwd, &file.session_id, cx);
+                    self.record_task_cli_transcript(
+                        &file.session_id,
+                        file.transcript_path.as_deref(),
+                        cx,
+                    );
+                    // A session starting or ending is the moment its process
+                    // may have appeared or gone; a tool call's update is not.
+                    if matches!(file.last_event.as_str(), "SessionStart" | "SessionEnd") {
+                        self.claude.pty_tracker.poke();
+                    }
+                    self.apply_task_session_changed(&file.session_id, cx);
                     if file.last_event == "PostToolUseFailure" {
                         self.bump_tool_use_failure(&file.session_id, cx);
                     }
@@ -310,6 +320,7 @@ impl Workspace {
                 }
             },
             StatusEvent::Removed { session_id, .. } => {
+                self.claude.pty_tracker.poke();
                 self.claude.tool_use_failure_counts.remove(&session_id);
                 self.claude.last_pushed_notification.remove(&session_id);
                 self.apply_task_session_ended(
@@ -351,7 +362,7 @@ impl Workspace {
     fn maybe_push_hook_notification(
         &mut self,
         file: &daruda_agent::hooks::status_file::StatusFile,
-        cx: &Context<Self>,
+        cx: &mut Context<Self>,
     ) {
         use crate::surface::strings as s;
         use daruda_agent::hooks::events::NotificationType;

@@ -105,6 +105,9 @@ impl AgentChatView {
         origin: PromptOrigin,
         cx: &mut Context<Self>,
     ) -> PromptDispatch {
+        if self.is_read_only() {
+            return PromptDispatch::ReadOnly;
+        }
         // Editing an existing queued prompt: replace that slot's text in place
         // (order preserved) and return — this is not a new turn or a new queue
         // entry. `.take()` clears the editing flag whether or not the target is
@@ -128,7 +131,7 @@ impl AgentChatView {
             return PromptDispatch::Queued;
         }
         let ready = matches!(self.status, AgentSessionStatus::Connected)
-            && self.handle.is_some()
+            && self.live_handle().is_some()
             && self.queue.turn.can_dispatch();
         let dispatch = if ready {
             // Connected and idle: send now, mark the turn in flight, and echo.
@@ -136,7 +139,7 @@ impl AgentChatView {
             // same string — see [`Self::wire_text`]. Resolved before the handle
             // is borrowed, because taking the briefing needs `&mut self`.
             let wire = self.wire_text(&text);
-            if let Some(handle) = &self.handle {
+            if let Some(handle) = self.live_handle() {
                 handle.send_prompt(wire);
             }
             self.queue.turn.start(std::time::Instant::now());
@@ -446,7 +449,7 @@ impl AgentChatView {
         // is still outstanding (`cancel_in_flight`): a handle exists before the
         // ACP handshake/load has completed, but prompt delivery is only safe once
         // `Connected` has opened the session's prompt loop.
-        if !matches!(self.status, AgentSessionStatus::Connected) || self.handle.is_none() {
+        if !matches!(self.status, AgentSessionStatus::Connected) || self.live_handle().is_none() {
             return;
         };
         let Some(text) = self.drain_next_queued_prompt(cx) else {
@@ -455,7 +458,7 @@ impl AgentChatView {
         // `drain_next_queued_prompt` already echoed `text`; the wire gets the
         // briefed form, which is why the two are separate strings.
         let wire = self.wire_text(&text);
-        if let Some(handle) = &self.handle {
+        if let Some(handle) = self.live_handle() {
             handle.send_prompt(wire);
         }
         cx.notify();

@@ -6,7 +6,7 @@ use std::sync::mpsc;
 use std::time::Duration;
 
 use daruda_store::project::PaneCwd;
-use daruda_store::tasks::{TaskAgentSurface, TaskId};
+use daruda_store::tasks::{ExecutionRef, TaskAgentSurface, TaskId};
 use daruda_terminal::view::{TerminalInput, TerminalLayout, TerminalView};
 use daruda_terminal::{TerminalDims, TerminalSession};
 use futures::StreamExt as _;
@@ -81,6 +81,9 @@ pub(in crate::workspace) struct FlowGraphContent {
 /// title / cwd that OSC 0/2 + OSC 7 scanners feed back to the workspace
 /// for tab strip + status bar rendering.
 pub(in crate::workspace) struct TerminalContent {
+    /// The task run this terminal was opened for: the first `claude` bound
+    /// here is that run's session.
+    pub(in crate::workspace) task_run: Option<ExecutionRef>,
     pub(in crate::workspace) view: Entity<TerminalView>,
     /// `None` when the pane was created via stub (test builds).
     pub(super) master: Option<Arc<dyn MasterPty + Send>>,
@@ -320,7 +323,7 @@ impl TaskEditContent {
 /// read `f.editor_state` / `te.title_input` live for File / TaskEdit content.
 pub(in crate::workspace) struct AgentChatContent {
     /// Only the pane that dispatched this execution can finish its task.
-    pub(in crate::workspace) task_run: Option<(TaskId, String)>,
+    pub(in crate::workspace) task_run: Option<ExecutionRef>,
     /// The self-owned chat view entity. Embedded by the pane walker via
     /// `AnyView::cached(..)`, so its `cx.notify()` dirties only its subtree.
     pub(in crate::workspace) view: Entity<AgentChatView>,
@@ -1483,6 +1486,7 @@ impl Workspace {
         Ok(Pane {
             id: pane_id,
             content: PaneContent::Terminal(TerminalContent {
+                task_run: None,
                 view,
                 master,
                 shell_pid: pty_pid,

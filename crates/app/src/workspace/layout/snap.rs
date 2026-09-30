@@ -235,6 +235,16 @@ pub(in crate::workspace) struct QueuedPromptsSnapshot {
     pub resume_armed: bool,
 }
 
+/// The CLI status row a mirrored pane shows in place of the composer.
+#[derive(PartialEq)]
+pub(in crate::workspace) struct CliSnapshot {
+    pub pane_id: super::super::main_area::pane_tree::PaneId,
+    /// `None` when the run the pane mirrors no longer exists — the task was
+    /// deleted or re-run — which offers nothing to continue.
+    pub process: Option<daruda_store::tasks::CliProcessState>,
+    pub loading: bool,
+}
+
 /// Point-in-time copy of `Workspace` fields consumed by the bottom
 /// dock's `impl Render`.
 ///
@@ -246,6 +256,7 @@ pub(in crate::workspace) struct QueuedPromptsSnapshot {
 /// [`diff_policy`](super::diff_policy) marker, same as the other two docks.
 #[derive(PartialEq)]
 pub(in crate::workspace) struct BottomDockSnapshot {
+    pub agent_cli_snapshot: Option<CliSnapshot>,
     pub terminal_input_visible: bool,
     pub active_tab_id: Option<daruda_store::panels::TabId>,
     pub tab_summaries: Vec<(daruda_store::panels::TabId, String, usize)>,

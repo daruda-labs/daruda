@@ -759,30 +759,38 @@ impl Workspace {
                         // owning agent when still in the catalog (session id kept),
                         // else the default agent (session id dropped — it belongs
                         // to a now-absent agent and could not resume).
-                        let task_chat = ac.session_id.is_some()
-                            && cx
-                                .global::<crate::agent::tasks_global::GlobalTasks>()
-                                .tasks
-                                .iter()
-                                .any(|task| {
-                                    task.agent_surface
-                                        == daruda_store::tasks::TaskAgentSurface::AgentChat
-                                        && task.execution.as_ref().is_some_and(|run| {
-                                            ac.agent_id.as_ref() == Some(&run.agent_id)
-                                                && ac.session_id == run.session_id
-                                                && ac.account_id == run.account_id
-                                                && ac
-                                                    .cwd
-                                                    .as_ref()
-                                                    .and_then(PaneCwd::as_local)
-                                                    .is_some_and(|cwd| {
-                                                        daruda_core::path::same_path(cwd, &run.cwd)
-                                                    })
-                                        })
-                                });
+                        let task_chat = ac.access.is_read_only()
+                            || ac.session_id.is_some()
+                                && cx
+                                    .global::<crate::agent::tasks_global::GlobalTasks>()
+                                    .tasks
+                                    .iter()
+                                    .any(|task| {
+                                        task.agent_surface
+                                            == daruda_store::tasks::TaskAgentSurface::AgentChat
+                                            && task.execution.as_ref().is_some_and(|run| {
+                                                ac.agent_id.as_ref() == Some(&run.agent_id)
+                                                    && ac.session_id == run.session_id
+                                                    && ac.account_id == run.account_id
+                                                    && ac
+                                                        .cwd
+                                                        .as_ref()
+                                                        .and_then(PaneCwd::as_local)
+                                                        .is_some_and(|cwd| {
+                                                            daruda_core::path::same_path(
+                                                                cwd, &run.cwd,
+                                                            )
+                                                        })
+                                            })
+                                    });
                         // A task's conversation must never switch agent or account on restore.
                         let (agent_id, keep_session) = if task_chat {
-                            (ac.agent_id.clone().unwrap(), true)
+                            // A record without an agent is hand-edited; the
+                            // default agent is where every other pane lands.
+                            let agent = ac.agent_id.clone().unwrap_or_else(|| {
+                                daruda_config::AgentDefinition::claude_default().id
+                            });
+                            (agent, true)
                         } else {
                             self.resolve_restored_agent(ac.agent_id.clone())
                         };
@@ -810,6 +818,9 @@ impl Workspace {
                             restored_agent_account(ac.account_id, pane_recipe, &self.accounts)
                         };
                         if let Some(content) = restored.agent_chat_content_mut() {
+                            content
+                                .view
+                                .update(cx, |view, _| view.set_access(ac.access.clone()));
                             content.account = account;
                             // Seed the last-known mode so the lazy connect can
                             // reapply it on resume (`connect_agent_chat`'s
@@ -1169,6 +1180,7 @@ fn serialize_pane_content(
     if let Some(ac) = pane.agent_chat_content() {
         let v = ac.view.read(cx);
         return Content::AgentChat(daruda_store::project::SerializedAgentChatContent {
+            access: v.access(),
             cwd: ac.cwd.clone(),
             session_id: v.session_id.clone(),
             title: v.session_title.clone(),

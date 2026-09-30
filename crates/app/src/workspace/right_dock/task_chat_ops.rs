@@ -3,7 +3,7 @@
 use daruda_store::accounts::AccountSelection;
 use daruda_store::observability::error_report::{ErrorReport, ErrorSeverity};
 use daruda_store::project::{LaneRef, PaneCwd};
-use daruda_store::tasks::{TaskAgentSurface, TaskExecution};
+use daruda_store::tasks::{ExecutionRef, TaskAgentSurface, TaskExecution};
 use gpui::{BorrowAppContext as _, Context, Window};
 
 use crate::agent::tasks_global::GlobalTasks;
@@ -49,14 +49,17 @@ impl Workspace {
         else {
             return;
         };
-        let execution = TaskExecution {
-            id: uuid::Uuid::new_v4().to_string(),
-            agent_id: chat.agent_id.clone(),
-            account_id: chat.account.to_persisted(),
+        let mut execution = TaskExecution::begin(
+            Default::default(),
+            chat.agent_id.clone(),
+            chat.account.to_persisted(),
             cwd,
-            session_id: chat.view.read(cx).session_id.clone(),
-        };
-        chat.task_run = Some((task_id.to_string(), execution.id.clone()));
+        );
+        execution.session_id = chat.view.read(cx).session_id.clone();
+        chat.task_run = Some(ExecutionRef {
+            task_id: task_id.to_string(),
+            execution_id: execution.id.clone(),
+        });
         cx.update_global::<GlobalTasks, _>(|tasks, _| {
             if let Some(task) = tasks.get_mut(task_id) {
                 task.execution = Some(execution);
@@ -77,11 +80,11 @@ impl Workspace {
             .flat_map(|rt| rt.panes.iter())
             .find(|pane| pane.id == pane_id)?
             .agent_chat_content()?;
-        let (id, run) = chat.task_run.as_ref()?;
-        let task = cx.global::<GlobalTasks>().get(id)?;
-        let execution = task.execution.as_ref()?;
+        let run = chat.task_run.as_ref()?;
+        let tasks = cx.global::<GlobalTasks>();
+        let task = tasks.get(&run.task_id)?;
+        let execution = run.resolve(tasks)?;
         (task.agent_surface == TaskAgentSurface::AgentChat
-            && execution.id == *run
             && chat.agent_id == execution.agent_id
             && chat.account.to_persisted() == execution.account_id
             && chat
@@ -93,7 +96,7 @@ impl Workspace {
                 .session_id
                 .as_ref()
                 .is_none_or(|id| chat.view.read(cx).session_id.as_ref() == Some(id)))
-        .then(|| id.clone())
+        .then(|| run.task_id.clone())
     }
 
     pub(in crate::workspace) fn cancel_task_chat_execution(
@@ -107,8 +110,7 @@ impl Workspace {
             .values()
             .flat_map(|runtime| runtime.panes.iter())
             .find_map(|pane| {
-                (self.task_chat_owner(pane.id, cx).as_deref() == Some(task_id))
-                    .then_some(pane.id)
+                (self.task_chat_owner(pane.id, cx).as_deref() == Some(task_id)).then_some(pane.id)
             });
         let Some(pane_id) = pane_id else {
             return;
@@ -171,7 +173,7 @@ impl Workspace {
         })
     }
 
-    fn task_chat_error(&mut self, message: String, cx: &mut Context<Self>) {
+    pub(super) fn task_chat_error(&mut self, message: String, cx: &mut Context<Self>) {
         self.report_error(
             ErrorReport::new(message)
                 .severity(ErrorSeverity::Warning)
@@ -206,10 +208,6 @@ impl Workspace {
         let Some(task) = cx.global::<GlobalTasks>().get(task_id).cloned() else {
             return;
         };
-        if task.agent_surface != TaskAgentSurface::AgentChat {
-            self.task_chat_error(s::task_chat_missing_session(), cx);
-            return;
-        }
         let Some(execution) = task.execution else {
             self.task_chat_error(s::task_chat_missing_session(), cx);
             return;
@@ -258,6 +256,16 @@ impl Workspace {
         );
         if let Some(chat) = pane.agent_chat_content_mut() {
             chat.account = AccountSelection::from_persisted(execution.account_id);
+            if execution.source.cli_process().is_some() {
+                chat.view.update(cx, |view, _| {
+                    view.set_access(daruda_store::tasks::AgentChatAccess::CliSnapshot(
+                        ExecutionRef {
+                            task_id: task_id.to_string(),
+                            execution_id: execution.id,
+                        },
+                    ));
+                });
+            }
         }
         let pane_id = pane.id;
         let tab_id = self.alloc_id();

@@ -1,20 +1,16 @@
-//! Track which `claude` process lives inside each daruda pane.
+//! Track which `claude` process lives inside each daruda pane, and when a
+//! process once seen running a session stops running it.
 //!
-//! Event-driven, no idle poll: a background thread wakes on
-//! `~/.claude/sessions/` changes or pane register/unregister pokes, then walks
-//! each session PID's parent chain toward registered PTY shell PIDs. Quiet
-//! directories cost zero wakeups; lingering dead sessions are pruned on the
-//! next wake or by cold-restore TTL rather than by polling.
-//!
-//! Emits binding diffs so the UI can highlight the focused pane's session and
-//! drop status entries no longer attributable to any live pane.
+//! Session-file changes rebind panes; a known process gets a cheap check each
+//! second, and a task launch rescans only while it waits to bind. Detaching a
+//! pane or deleting a status file never proves exit.
 
 use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, mpsc};
 use std::thread;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use daruda_agent::pty_link;
 
@@ -23,6 +19,11 @@ pub type PaneId = u64;
 
 /// Coalescing window for register fan-out and atomic-rename wake bursts.
 const DEBOUNCE: Duration = Duration::from_millis(100);
+const PROCESS_CHECK_INTERVAL: Duration = Duration::from_secs(1);
+/// How long a task pane keeps rescanning for a CLI that has not bound yet —
+/// covers a slow first launch. Past it, a `claude` that never started stops
+/// costing a rescan a second; hook and FSEvents pokes still resolve it.
+const TASK_DISCOVERY_WINDOW: Duration = Duration::from_secs(120);
 
 /// Upper bound on how far up a `claude` PID's parent chain we walk
 /// looking for a registered pane shell. Real process trees between a
@@ -48,10 +49,9 @@ pub enum PtyTrackerEvent {
         pane_id: PaneId,
         binding: Option<PtyBinding>,
     },
-    /// A session_id we previously reported via `BindingChanged` no
-    /// longer maps to any live `claude` process. The consumer should
-    /// drop it from its store + delete the on-disk status file.
-    DeadSession { session_id: String },
+    /// A previously observed PID no longer runs its session: gone from the
+    /// OS process table, or its session file is gone or names another session.
+    SessionProcessExited { session_id: String, claude_pid: u32 },
 }
 
 /// Internal wake reason for the tracker thread. `Poke` triggers a
@@ -96,14 +96,47 @@ pub struct PtyTracker {
 #[derive(Default)]
 struct TrackerInner {
     /// Registered panes — caller updates on pane create / close.
-    panes: HashMap<PaneId, u32>,
+    panes: HashMap<PaneId, PaneEntry>,
     /// Last-known per-pane binding. Used to suppress duplicate
     /// `BindingChanged` events when nothing actually changed.
     bindings: HashMap<PaneId, Option<PtyBinding>>,
-    /// Live session_ids reported across any pane during the most
-    /// recent resolution. A session_id from a previous pass missing
-    /// here triggers `DeadSession`.
-    last_live_sessions: HashSet<String>,
+    /// Retained after pane detachment until the OS confirms exit.
+    known_processes: HashMap<String, KnownProcess>,
+}
+
+/// One registered pane: its PTY shell, and the task launch it hosts if any.
+#[derive(Clone, Debug, PartialEq)]
+struct PaneEntry {
+    shell_pid: u32,
+    task: Option<TaskLaunch>,
+}
+
+/// A task CLI expected in a pane. Its account's session directory is scanned
+/// for as long as the pane lives, since the FSEvents watch covers only the
+/// default directory; the rescan-a-second discovery stops at `discover_until`
+/// or at the first binding.
+#[derive(Clone, Debug, PartialEq)]
+struct TaskLaunch {
+    sessions_dir: PathBuf,
+    discover_until: Option<Instant>,
+}
+
+impl TrackerInner {
+    fn discovering(&self) -> bool {
+        self.panes.values().any(|pane| {
+            pane.task
+                .as_ref()
+                .is_some_and(|t| t.discover_until.is_some())
+        })
+    }
+}
+
+/// A `claude` seen running a session, and the directory its session file
+/// lives in — the file is how a reused PID is told apart from the original.
+#[derive(Clone, Debug, PartialEq)]
+struct KnownProcess {
+    pid: u32,
+    sessions_dir: PathBuf,
 }
 
 impl PtyTracker {
@@ -133,9 +166,14 @@ impl PtyTracker {
     /// its binding (a `claude` may already be running inside it).
     /// Idempotent.
     pub fn register(&self, pane_id: PaneId, root_pid: u32) {
-        if let Ok(mut inner) = self.inner.lock() {
-            inner.panes.insert(pane_id, root_pid);
-        }
+        lock_inner(&self.inner)
+            .panes
+            .entry(pane_id)
+            .and_modify(|pane| pane.shell_pid = root_pid)
+            .or_insert(PaneEntry {
+                shell_pid: root_pid,
+                task: None,
+            });
         self.poke();
     }
 
@@ -143,13 +181,40 @@ impl PtyTracker {
     /// the tracker so any binding it had is cleared with
     /// `BindingChanged { binding: None }`.
     pub fn unregister(&self, pane_id: PaneId) {
-        if let Ok(mut inner) = self.inner.lock() {
-            inner.panes.remove(&pane_id);
+        lock_inner(&self.inner).panes.remove(&pane_id);
+        self.poke();
+    }
+
+    /// Scan `sessions_dir` for the pane's task CLI and poll until it binds;
+    /// an account-scoped directory has no FSEvents watch of its own. A pane
+    /// not registered yet is ignored — its shell is what the walk ends at.
+    pub fn track_task(&self, pane_id: PaneId, sessions_dir: PathBuf) {
+        if let Some(pane) = lock_inner(&self.inner).panes.get_mut(&pane_id) {
+            pane.task = Some(TaskLaunch {
+                sessions_dir,
+                discover_until: Some(Instant::now() + TASK_DISCOVERY_WINDOW),
+            });
         }
         self.poke();
     }
 
-    fn poke(&self) {
+    /// Restore a previously observed process without relying on a new PTY.
+    pub fn track_session(&self, session_id: String, pid: u32, sessions_dir: PathBuf) {
+        lock_inner(&self.inner)
+            .known_processes
+            .insert(session_id, KnownProcess { pid, sessions_dir });
+        self.poke();
+    }
+
+    /// Whether a process observed running `session_id` has not been confirmed
+    /// gone yet.
+    pub fn is_running(&self, session_id: &str) -> bool {
+        lock_inner(&self.inner)
+            .known_processes
+            .contains_key(session_id)
+    }
+
+    pub fn poke(&self) {
         // SILENT-OK: a dead channel means the tracker thread already
         // exited (Workspace teardown) — nothing left to wake.
         let _ = self.wake_tx.send(Wake::Poke);
@@ -162,6 +227,26 @@ impl PtyTracker {
             .lock()
             .map(|inner| inner.panes.keys().copied().collect())
             .unwrap_or_default()
+    }
+
+    /// Test-only introspection — the PID awaiting OS exit for `session_id`.
+    #[cfg(test)]
+    pub fn known_process(&self, session_id: &str) -> Option<u32> {
+        lock_inner(&self.inner)
+            .known_processes
+            .get(session_id)
+            .map(|known| known.pid)
+    }
+
+    /// Test-only introspection — whether `pane_id` is still waiting for its
+    /// task CLI to bind.
+    #[cfg(test)]
+    pub fn awaits_binding(&self, pane_id: PaneId) -> bool {
+        lock_inner(&self.inner)
+            .panes
+            .get(&pane_id)
+            .and_then(|pane| pane.task.as_ref())
+            .is_some_and(|task| task.discover_until.is_some())
     }
 }
 
@@ -207,9 +292,34 @@ fn run(
     }
 
     loop {
-        match wake_rx.recv() {
+        let (poll, discovering) = {
+            let mut guard = lock_inner(&inner);
+            expire_discovery(&mut guard.panes, Instant::now());
+            let discovering = guard.discovering();
+            (
+                discovering || !guard.known_processes.is_empty(),
+                discovering,
+            )
+        };
+        let wake = if poll {
+            wake_rx.recv_timeout(PROCESS_CHECK_INTERVAL)
+        } else {
+            wake_rx
+                .recv()
+                .map_err(|_| mpsc::RecvTimeoutError::Disconnected)
+        };
+        match wake {
             Ok(Wake::Poke) => {}
-            Ok(Wake::Shutdown) | Err(_) => return,
+            // A quiet second only has to ask whether known processes still
+            // run; the full rescan waits for a poke unless a task is binding.
+            Err(mpsc::RecvTimeoutError::Timeout) if !discovering => {
+                if !emit_exits(&inner, &event_tx) {
+                    return;
+                }
+                continue;
+            }
+            Err(mpsc::RecvTimeoutError::Timeout) => {}
+            Ok(Wake::Shutdown) | Err(mpsc::RecvTimeoutError::Disconnected) => return,
         }
         // Coalesce a burst, then drain everything pending so one
         // re-resolution covers it. A shutdown anywhere in the burst
@@ -289,7 +399,8 @@ fn list_session_metas(dir: &Path) -> Vec<pty_link::PidSessionMeta> {
 
 /// One resolution pass: snapshot the registered panes, re-resolve their
 /// bindings from the current session files, diff against the previous
-/// pass, and emit `BindingChanged` / `DeadSession`. Returns `false`
+/// pass, and emit `BindingChanged`; then emit `SessionProcessExited` for
+/// every known PID the OS no longer has. Returns `false`
 /// when the event consumer has disconnected so the caller stops the
 /// thread.
 fn resolve_and_emit(
@@ -302,17 +413,39 @@ fn resolve_and_emit(
     use sysinfo::{Pid, ProcessesToUpdate};
 
     // Snapshot registered panes. With none registered the new state is
-    // empty, so any lingering bindings flush to `None` / `DeadSession`
-    // exactly once and subsequent empty passes are no-ops.
-    let panes: HashMap<PaneId, u32> = {
+    // empty, so any lingering bindings flush to `None` exactly once; known
+    // processes outlive their pane and are still checked below.
+    let (panes, task_dirs): (HashMap<PaneId, u32>, HashSet<PathBuf>) = {
         let guard = lock_inner(inner);
-        guard.panes.clone()
+        (
+            guard
+                .panes
+                .iter()
+                .map(|(id, pane)| (*id, pane.shell_pid))
+                .collect(),
+            guard
+                .panes
+                .values()
+                .filter_map(|pane| pane.task.as_ref())
+                .map(|task| task.sessions_dir.clone())
+                .filter(|dir| dir.as_path() != sessions_dir)
+                .collect(),
+        )
     };
 
-    let (new_bindings, live_sessions) = if panes.is_empty() {
-        (HashMap::new(), HashSet::new())
+    // Which directory each session file came from, so a bound process can
+    // later be checked against its own file.
+    let mut dir_of_pid: HashMap<u32, PathBuf> = HashMap::new();
+    let new_bindings = if panes.is_empty() {
+        HashMap::new()
     } else {
-        let sessions = list_session_metas(sessions_dir);
+        let mut sessions = Vec::new();
+        for dir in std::iter::once(sessions_dir.to_path_buf()).chain(task_dirs) {
+            for meta in list_session_metas(&dir) {
+                dir_of_pid.insert(meta.pid, dir.clone());
+                sessions.push(meta);
+            }
+        }
         // `parent_of` refreshes only the single PID asked for — a few
         // cheap `sysctl` calls per session, never the whole table. A
         // dead PID refreshes to absent, so its walk yields no parent and
@@ -333,14 +466,20 @@ fn resolve_and_emit(
 
     // Diff + commit under the lock so a concurrent register/unregister
     // doesn't tear the bindings map.
-    let (binding_events, dead) = {
-        let mut guard = lock_inner(inner);
-        let binding_events = binding_change_events(&guard.bindings, &new_bindings);
-        guard.bindings = new_bindings;
-        let dead = dead_sessions(&guard.last_live_sessions, &live_sessions);
-        guard.last_live_sessions = live_sessions;
-        (binding_events, dead)
-    };
+    let PassOutcome {
+        binding_events,
+        exited,
+    } = commit_pass(
+        &mut lock_inner(inner),
+        new_bindings,
+        &|pid| {
+            dir_of_pid
+                .get(&pid)
+                .cloned()
+                .unwrap_or_else(|| sessions_dir.to_path_buf())
+        },
+        &still_runs,
+    );
 
     // A send error means the GPUI consumer has dropped — our cue to
     // stop the tracker thread.
@@ -352,15 +491,44 @@ fn resolve_and_emit(
             return false;
         }
     }
-    for session_id in dead {
+    send_exits(event_tx, exited)
+}
+
+/// The per-second check between rescans: confirm and report exits only.
+fn emit_exits(inner: &Arc<Mutex<TrackerInner>>, event_tx: &mpsc::Sender<PtyTrackerEvent>) -> bool {
+    let exited = confirmed_exits(&mut lock_inner(inner).known_processes, &still_runs);
+    send_exits(event_tx, exited)
+}
+
+fn send_exits(event_tx: &mpsc::Sender<PtyTrackerEvent>, exited: Vec<(String, u32)>) -> bool {
+    for (session_id, claude_pid) in exited {
         if event_tx
-            .send(PtyTrackerEvent::DeadSession { session_id })
+            .send(PtyTrackerEvent::SessionProcessExited {
+                session_id,
+                claude_pid,
+            })
             .is_err()
         {
             return false;
         }
     }
     true
+}
+
+/// The OS-facing liveness rule: the PID exists and is still the process its
+/// session file names.
+fn still_runs(session_id: &str, known: &KnownProcess) -> bool {
+    daruda_core::process::is_alive(known.pid)
+        && pty_link::pid_holds_session(&known.sessions_dir, known.pid, session_id)
+}
+
+/// Stop the discovery rescan for task panes whose window has passed.
+fn expire_discovery(panes: &mut HashMap<PaneId, PaneEntry>, now: Instant) {
+    for task in panes.values_mut().filter_map(|pane| pane.task.as_mut()) {
+        if task.discover_until.is_some_and(|deadline| now >= deadline) {
+            task.discover_until = None;
+        }
+    }
 }
 
 /// Lock `inner`, recovering from poisoning — a panicked holder leaves
@@ -430,28 +598,17 @@ fn resolve_pane_bindings(
 
 /// One full re-resolution. Returns the new per-pane bindings —
 /// covering *every* registered pane, `None` where no live session
-/// resolves — plus the set of session ids seen live this pass (used to
-/// diff `DeadSession`).
+/// resolves.
 fn rescan(
     panes: &HashMap<PaneId, u32>,
     sessions: &[pty_link::PidSessionMeta],
     parent_of: &dyn Fn(u32) -> Option<u32>,
-) -> (HashMap<PaneId, Option<PtyBinding>>, HashSet<String>) {
+) -> HashMap<PaneId, Option<PtyBinding>> {
     let resolved = resolve_pane_bindings(panes, sessions, parent_of);
-    let mut bindings = HashMap::with_capacity(panes.len());
-    let mut live = HashSet::new();
-    for pane_id in panes.keys() {
-        match resolved.get(pane_id) {
-            Some(b) => {
-                live.insert(b.session_id.clone());
-                bindings.insert(*pane_id, Some(b.clone()));
-            }
-            None => {
-                bindings.insert(*pane_id, None);
-            }
-        }
-    }
-    (bindings, live)
+    panes
+        .keys()
+        .map(|pane_id| (*pane_id, resolved.get(pane_id).cloned()))
+        .collect()
 }
 
 /// Per-pane binding changes between the previous resolution and the
@@ -480,231 +637,61 @@ fn binding_change_events(
     events
 }
 
-/// Session ids that were live last pass but aren't now.
-fn dead_sessions(prev_live: &HashSet<String>, now_live: &HashSet<String>) -> Vec<String> {
-    prev_live.difference(now_live).cloned().collect()
+/// What one resolution pass has to report.
+struct PassOutcome {
+    binding_events: Vec<(PaneId, Option<PtyBinding>)>,
+    /// `(session_id, claude_pid)` for every known process no longer running.
+    exited: Vec<(String, u32)>,
+}
+
+/// Fold one pass's bindings into the tracker state: every bound PID becomes
+/// known until the OS confirms it gone, and a bound task pane stops the
+/// discovery poll.
+fn commit_pass(
+    inner: &mut TrackerInner,
+    new_bindings: HashMap<PaneId, Option<PtyBinding>>,
+    dir_of_pid: &dyn Fn(u32) -> PathBuf,
+    still_runs: &dyn Fn(&str, &KnownProcess) -> bool,
+) -> PassOutcome {
+    let binding_events = binding_change_events(&inner.bindings, &new_bindings);
+    for (pane_id, binding) in &new_bindings {
+        if let Some(binding) = binding {
+            if let Some(task) = inner.panes.get_mut(pane_id).and_then(|p| p.task.as_mut()) {
+                task.discover_until = None;
+            }
+            inner.known_processes.insert(
+                binding.session_id.clone(),
+                KnownProcess {
+                    pid: binding.claude_pid,
+                    sessions_dir: dir_of_pid(binding.claude_pid),
+                },
+            );
+        }
+    }
+    inner.bindings = new_bindings;
+    let exited = confirmed_exits(&mut inner.known_processes, still_runs);
+    PassOutcome {
+        binding_events,
+        exited,
+    }
+}
+
+/// Forget only processes confirmed gone, independent of pane bindings.
+fn confirmed_exits(
+    known: &mut HashMap<String, KnownProcess>,
+    still_runs: &dyn Fn(&str, &KnownProcess) -> bool,
+) -> Vec<(String, u32)> {
+    let exited: Vec<_> = known
+        .iter()
+        .filter(|(session, process)| !still_runs(session, process))
+        .map(|(session, process)| (session.clone(), process.pid))
+        .collect();
+    for (session, _) in &exited {
+        known.remove(session);
+    }
+    exited
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn binding_identity_is_pid_and_session() {
-        // The diff loop's duplicate suppression compares each poll's
-        // freshly-built binding against the previous one — equality
-        // must hold across polls for an unchanged (pid, session).
-        let base = PtyBinding {
-            claude_pid: 7,
-            session_id: "sess".into(),
-        };
-        assert_eq!(base, base.clone());
-        assert_ne!(
-            base,
-            PtyBinding {
-                claude_pid: 8,
-                ..base.clone()
-            }
-        );
-        assert_ne!(
-            base,
-            PtyBinding {
-                session_id: "other".into(),
-                ..base.clone()
-            }
-        );
-    }
-
-    fn meta(pid: u32, session: &str) -> pty_link::PidSessionMeta {
-        pty_link::PidSessionMeta {
-            pid,
-            session_id: session.into(),
-            cwd: std::path::PathBuf::from("/tmp"),
-        }
-    }
-
-    #[test]
-    fn resolves_binding_when_claude_is_direct_child_of_pane_shell() {
-        // pane 1's PTY shell is pid 100; the `claude` process (pid 200)
-        // is its direct child. The session file is keyed by 200.
-        let panes = HashMap::from([(1u64, 100u32)]);
-        let sessions = vec![meta(200, "sess-a")];
-        // 200 → 100 (shell) → 1 (login shell / launchd).
-        let parent_of = |pid: u32| match pid {
-            200 => Some(100),
-            100 => Some(1),
-            _ => None,
-        };
-
-        let bindings = resolve_pane_bindings(&panes, &sessions, &parent_of);
-
-        assert_eq!(
-            bindings.get(&1),
-            Some(&PtyBinding {
-                claude_pid: 200,
-                session_id: "sess-a".into(),
-            })
-        );
-    }
-
-    #[test]
-    fn resolves_binding_through_an_intermediate_process() {
-        // claude (300) runs as `node` (250) which is a child of the
-        // pane shell (100): 300 → 250 → 100. The walk must climb two
-        // hops to reach the registered shell.
-        let panes = HashMap::from([(7u64, 100u32)]);
-        let sessions = vec![meta(300, "sess-b")];
-        let parent_of = |pid: u32| match pid {
-            300 => Some(250),
-            250 => Some(100),
-            100 => Some(1),
-            _ => None,
-        };
-
-        let bindings = resolve_pane_bindings(&panes, &sessions, &parent_of);
-
-        assert_eq!(bindings.get(&7).map(|b| b.claude_pid), Some(300));
-    }
-
-    #[test]
-    fn no_binding_when_claude_is_not_under_any_registered_shell() {
-        // claude (200) belongs to a shell (999) daruda never registered.
-        let panes = HashMap::from([(1u64, 100u32)]);
-        let sessions = vec![meta(200, "stray")];
-        let parent_of = |pid: u32| match pid {
-            200 => Some(999),
-            999 => Some(1),
-            _ => None,
-        };
-
-        let bindings = resolve_pane_bindings(&panes, &sessions, &parent_of);
-
-        assert!(bindings.is_empty());
-    }
-
-    #[test]
-    fn resolves_independent_bindings_for_multiple_panes() {
-        let panes = HashMap::from([(1u64, 100u32), (2u64, 200u32)]);
-        let sessions = vec![meta(110, "sess-1"), meta(210, "sess-2")];
-        let parent_of = |pid: u32| match pid {
-            110 => Some(100),
-            210 => Some(200),
-            100 | 200 => Some(1),
-            _ => None,
-        };
-
-        let bindings = resolve_pane_bindings(&panes, &sessions, &parent_of);
-
-        assert_eq!(bindings.get(&1).map(|b| &b.session_id[..]), Some("sess-1"));
-        assert_eq!(bindings.get(&2).map(|b| &b.session_id[..]), Some("sess-2"));
-    }
-
-    #[test]
-    fn parent_cycle_does_not_hang_the_walk() {
-        // A pathological 200 ↔ 201 cycle that never reaches a shell.
-        let panes = HashMap::from([(1u64, 100u32)]);
-        let sessions = vec![meta(200, "loop")];
-        let parent_of = |pid: u32| match pid {
-            200 => Some(201),
-            201 => Some(200),
-            _ => None,
-        };
-
-        let bindings = resolve_pane_bindings(&panes, &sessions, &parent_of);
-
-        assert!(bindings.is_empty());
-    }
-
-    fn binding(pid: u32, session: &str) -> PtyBinding {
-        PtyBinding {
-            claude_pid: pid,
-            session_id: session.into(),
-        }
-    }
-
-    #[test]
-    fn rescan_covers_every_pane_and_collects_live_sessions() {
-        // pane 1 has a resolvable claude; pane 2 does not.
-        let panes = HashMap::from([(1u64, 100u32), (2u64, 500u32)]);
-        let sessions = vec![meta(110, "sess-1")];
-        let parent_of = |pid: u32| match pid {
-            110 => Some(100),
-            100 | 500 => Some(1),
-            _ => None,
-        };
-
-        let (bindings, live) = rescan(&panes, &sessions, &parent_of);
-
-        assert_eq!(bindings.get(&1), Some(&Some(binding(110, "sess-1"))));
-        assert_eq!(bindings.get(&2), Some(&None));
-        assert_eq!(live, HashSet::from(["sess-1".to_string()]));
-    }
-
-    #[test]
-    fn binding_change_events_reports_gain_loss_and_change() {
-        let prev = HashMap::from([
-            (1u64, Some(binding(10, "a"))), // unchanged
-            (2u64, Some(binding(20, "b"))), // claude exits → None
-            (3u64, Some(binding(30, "c"))), // swapped for a different session
-        ]);
-        let new = HashMap::from([
-            (1u64, Some(binding(10, "a"))),
-            (2u64, None),
-            (3u64, Some(binding(31, "c2"))),
-            (4u64, Some(binding(40, "d"))), // brand-new pane binding
-        ]);
-
-        let mut events = binding_change_events(&prev, &new);
-        events.sort_by_key(|(pane, _)| *pane);
-
-        assert_eq!(
-            events,
-            vec![
-                (2u64, None),
-                (3u64, Some(binding(31, "c2"))),
-                (4u64, Some(binding(40, "d"))),
-            ]
-        );
-    }
-
-    #[test]
-    fn binding_change_events_reports_none_for_unregistered_pane() {
-        // Pane 2 was bound last pass but is gone from `new` (the caller
-        // unregistered it) — must still emit a clearing `None`.
-        let prev = HashMap::from([
-            (1u64, Some(binding(10, "a"))),
-            (2u64, Some(binding(20, "b"))),
-        ]);
-        let new = HashMap::from([(1u64, Some(binding(10, "a")))]);
-
-        let events = binding_change_events(&prev, &new);
-
-        assert_eq!(events, vec![(2u64, None)]);
-    }
-
-    #[test]
-    fn dead_sessions_are_those_live_before_but_not_now() {
-        let prev = HashSet::from(["a".to_string(), "b".to_string()]);
-        let now = HashSet::from(["a".to_string()]);
-
-        assert_eq!(dead_sessions(&prev, &now), vec!["b".to_string()]);
-    }
-
-    #[test]
-    fn register_and_unregister_round_trip() {
-        let (tracker, _rx) = PtyTracker::spawn();
-        tracker.register(1, 1234);
-        tracker.register(2, 5678);
-        {
-            let inner = tracker.inner.lock().unwrap();
-            assert_eq!(inner.panes.len(), 2);
-            assert_eq!(inner.panes.get(&1), Some(&1234));
-        }
-        tracker.unregister(1);
-        {
-            let inner = tracker.inner.lock().unwrap();
-            assert_eq!(inner.panes.len(), 1);
-            assert!(!inner.panes.contains_key(&1));
-        }
-    }
-}
+#[path = "pty_tracker_tests.rs"]
+mod tests;

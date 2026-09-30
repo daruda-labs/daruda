@@ -68,7 +68,10 @@ fn changed_lines(diff: &DiffView) -> Vec<String> {
                 similar::ChangeTag::Insert => '+',
                 similar::ChangeTag::Equal => return None,
             };
-            Some(format!("{sign} {}", change.value().trim_end_matches(['\n', '\r'])))
+            Some(format!(
+                "{sign} {}",
+                change.value().trim_end_matches(['\n', '\r'])
+            ))
         })
         .collect()
 }
@@ -147,7 +150,10 @@ mod tests {
 
     #[test]
     fn a_change_that_changes_nothing_has_no_preview() {
-        assert_eq!(diff_preview(&[diff("same.rs", Some("a\n"), "a\n")], more), None);
+        assert_eq!(
+            diff_preview(&[diff("same.rs", Some("a\n"), "a\n")], more),
+            None
+        );
         assert_eq!(diff_preview(&[], more), None);
     }
 
@@ -155,7 +161,10 @@ mod tests {
     fn a_large_change_stops_at_the_budget_and_says_how_much_is_left() {
         let new: String = (0..40).map(|i| format!("line {i}\n")).collect();
         let preview = diff_preview(&[diff("big.rs", None, &new)], more).unwrap();
-        assert_eq!(preview.lines().filter(|l| l.starts_with('+')).count(), PREVIEW_LINES);
+        assert_eq!(
+            preview.lines().filter(|l| l.starts_with('+')).count(),
+            PREVIEW_LINES
+        );
         assert!(preview.ends_with(&more(40 - PREVIEW_LINES)), "{preview}");
     }
 

@@ -192,13 +192,26 @@ fn apply_task_session_changed_attaches_idempotently_then_error_ends(cx: &mut Tes
         task.state = TaskState::Running {
             worktree_path: PathBuf::from("/tmp/wt"),
         };
+        // Attachment follows the run's recorded session, never the cwd alone.
+        task.execution = Some(daruda_store::tasks::TaskExecution {
+            source: daruda_store::tasks::TaskExecutionSource::ClaudeCli {
+                transcript_path: None,
+                process: daruda_store::tasks::CliProcessState::Running { pid: 1 },
+            },
+            id: "run".into(),
+            agent_id: "claude".into(),
+            account_id: None,
+            cwd: PathBuf::from("/tmp/wt"),
+            session_id: Some("sess-2".into()),
+        });
         let id = task.id.clone();
         cx.update_global::<crate::agent::tasks_global::GlobalTasks, _>(|g, _| {
             g.add(task);
         });
 
-        ws.apply_task_session_changed(&PathBuf::from("/tmp/wt"), "sess-2", cx);
-        ws.apply_task_session_changed(&PathBuf::from("/tmp/wt"), "sess-2", cx);
+        ws.apply_task_session_changed("sess-other", cx);
+        ws.apply_task_session_changed("sess-2", cx);
+        ws.apply_task_session_changed("sess-2", cx);
 
         let g = cx.global::<crate::agent::tasks_global::GlobalTasks>();
         let t = g.get(&id).unwrap();

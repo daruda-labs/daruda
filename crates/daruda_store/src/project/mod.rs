@@ -459,6 +459,8 @@ impl PaneCwd {
 /// replays it from the resumed session.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct SerializedAgentChatContent {
+    #[serde(default)]
+    pub access: crate::tasks::AgentChatAccess,
     /// Lane working directory the agent session is rooted at. `None`
     /// when the pane was opened without a resolvable lane cwd.
     #[serde(default, skip_serializing_if = "Option::is_none")]

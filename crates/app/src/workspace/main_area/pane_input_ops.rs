@@ -88,6 +88,12 @@ impl Workspace {
         }
 
         if pane.is_agent_chat() {
+            if pane
+                .agent_chat_view()
+                .is_some_and(|view| view.read(cx).is_read_only())
+            {
+                return false;
+            }
             if matches!(input.intent, PaneTextIntent::Command { submit: true }) {
                 // Trim at the single dispatch point: an empty / whitespace-
                 // only submit (e.g. an "Enter-only" macro — empty `send` +

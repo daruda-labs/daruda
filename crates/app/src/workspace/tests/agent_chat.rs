@@ -115,7 +115,7 @@ async fn open_agent_chat_pane_creates_agent_chat_leaf(cx: &mut TestAppContext) {
                     "payload must be the reason, not the prefix the banner re-adds"
                 );
                 assert!(view.items.is_empty(), "items start empty");
-                assert!(view.handle.is_none(), "no session without a cwd");
+                assert!(view.any_handle().is_none(), "no session without a cwd");
             }
             _ => panic!("expected an AgentChat pane"),
         }
@@ -633,7 +633,7 @@ fn restored_chats(ws: &Workspace, cx: &gpui::App) -> Vec<RestoredChat> {
                 session_id: view.session_id.clone(),
                 title: view.session_title.clone(),
                 replaying: view.is_replaying(),
-                dormant: view.handle.is_none(),
+                dormant: view.any_handle().is_none(),
                 content_width: view.content_width,
                 tail_steps: view.tail_steps,
                 tail_calls: view.tail_calls,
@@ -957,7 +957,10 @@ async fn switch_agent_preserves_source_and_split_inherits_agent(cx: &mut TestApp
                 src_view.agent_id, claude_id,
                 "the source pane keeps chatting under its own agent"
             );
-            assert!(src_view.handle.is_none(), "the source session is untouched");
+            assert!(
+                src_view.any_handle().is_none(),
+                "the source session is untouched"
+            );
 
             // The new pane runs under the target agent.
             let new_id = ws

@@ -199,6 +199,7 @@ fn render_error(error: &ControlError) -> String {
         ControlError::ApprovalTimedOut => s::control_error_approval_timed_out(),
         ControlError::AgentLimitReached => s::control_error_agent_limit_reached(),
         ControlError::QueueFull => s::control_error_queue_full(),
+        ControlError::TargetReadOnly => s::task_cli_read_only(),
         ControlError::SelfTargetRefused => s::control_error_self_target_refused(),
         ControlError::LaneCreateBusy => s::control_error_lane_create_busy(),
         // The phone gets the localized sentence, not git's words: a person
