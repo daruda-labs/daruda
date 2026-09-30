@@ -13,14 +13,15 @@
 use daruda_store::observability::error_report::{ErrorReport, ErrorSeverity};
 use daruda_store::observability::log_writer::LogWriter;
 use daruda_store::observability::system_info::redact_home;
-use daruda_store::tasks::{SubTask, Task, TaskAgentSurface, TaskId, TaskRunIn, random_branch_name};
+use daruda_store::tasks::{Task, TaskAgentSurface, TaskId, TaskRunIn, random_branch_name};
 use gpui::{AppContext as _, BorrowAppContext as _, Context, Focusable as _, SharedString, Window};
 
 use crate::ui::select::{SelectOption, state_with_options};
 use crate::ui::{InputEvent, InputState, make_markdown_prose_state};
 use crate::workspace::Workspace;
 use crate::workspace::main_area::pane::{
-    BranchValidation, Pane, PaneContent, RunInChoice, TaskEditContent, TaskEditSnapshot,
+    BranchValidation, Pane, PaneContent, RunInChoice, TaskEditContent, TaskEditValues,
+    normalize_newlines,
 };
 use crate::workspace::main_area::pane_tree::{PaneId, PaneLayout};
 
@@ -284,71 +285,54 @@ impl Workspace {
             },
         );
 
-        let saved_snapshot = TaskEditSnapshot {
-            draft_subtasks: Vec::new(),
-            title: title.clone(),
-            branch: branch_name.clone(),
-            prompt: normalize_newlines(&prompt),
-            notes: normalize_newlines(&notes),
-            auto_execute,
-            agent_surface,
-            base_value: base_initial
-                .as_ref()
-                .map(|s| s.to_string())
-                .unwrap_or_default(),
-            run_in,
-            // Read back, not `lane_initial`: a lane no longer registered is
-            // not selected, and the baseline must match what the form shows.
-            lane_value: lane_select
-                .read(cx)
-                .selected_value()
-                .map(|v| v.to_string())
-                .unwrap_or_default(),
-        };
-
         // Running tasks watch immediately; Start attaches the watcher once
         // it has materialized the task's prompt file.
         let (_prompt_watcher, _prompt_pump) =
             install_prompt_watcher(initial.as_ref(), pane_id, window, cx);
 
+        let mut content = TaskEditContent {
+            task_id,
+            title_input,
+            branch_input,
+            branch_validation,
+            draft_subtasks: Vec::new(),
+            preview_prompt: false,
+            settings_open: false,
+            notes_open: !notes.is_empty(),
+            prompt_state,
+            notes_state,
+            auto_execute,
+            agent_surface,
+            focus_handle,
+            cached_title,
+            // Replaced below by what the built form actually shows.
+            saved_snapshot: TaskEditValues::default(),
+            base_select,
+            run_in,
+            lane_select,
+            _subscriptions: vec![
+                title_sub,
+                branch_sub,
+                base_sub,
+                lane_sub,
+                new_subtask_sub,
+                rename_subtask_sub,
+                prompt_sub,
+                notes_sub,
+            ],
+            _prompt_watcher,
+            _prompt_pump,
+            new_subtask_input,
+            editing_subtask: None,
+            editing_subtask_input,
+            body_scroll_handle: gpui::ScrollHandle::new(),
+        };
+        // The baseline is what the form shows: a base or lane no longer
+        // registered is not selected, and must not read as an edit.
+        content.saved_snapshot = content.current_snapshot(cx);
         Pane {
             id: pane_id,
-            content: PaneContent::TaskEditPane(TaskEditContent {
-                task_id,
-                title_input,
-                branch_input,
-                branch_validation,
-                draft_subtasks: Vec::new(),
-                preview_prompt: false,
-                settings_open: false,
-                notes_open: !notes.is_empty(),
-                prompt_state,
-                notes_state,
-                auto_execute,
-                agent_surface,
-                focus_handle,
-                cached_title,
-                saved_snapshot,
-                base_select,
-                run_in,
-                lane_select,
-                _subscriptions: vec![
-                    title_sub,
-                    branch_sub,
-                    base_sub,
-                    lane_sub,
-                    new_subtask_sub,
-                    rename_subtask_sub,
-                    prompt_sub,
-                    notes_sub,
-                ],
-                _prompt_watcher,
-                _prompt_pump,
-                new_subtask_input,
-                editing_subtask: None,
-                editing_subtask_input,
-                body_scroll_handle: gpui::ScrollHandle::new(),
-            }),
+            content: PaneContent::TaskEditPane(content),
         }
     }
 
@@ -515,12 +499,13 @@ impl Workspace {
         cx: &mut Context<Self>,
     ) -> Option<TaskId> {
         let form = self.read_task_edit_form(pane_id, cx)?;
-        if form.title.trim().is_empty() {
+        let values = &form.values;
+        if values.title.trim().is_empty() {
             return None;
         }
         // `None` once started: where the task runs is then fixed.
         let run_in = if form.editable {
-            Some(self.commit_task_run_in(pane_id, &form)?)
+            Some(self.commit_task_run_in(pane_id, values)?)
         } else {
             None
         };
@@ -534,16 +519,16 @@ impl Workspace {
         // when the lookup misses, so the worst case is the same
         // behaviour as `None`.
         // A base is only branched from when a worktree is created.
-        let base_path: Option<std::path::PathBuf> = if form.base_value.is_empty()
+        let base_path: Option<std::path::PathBuf> = if values.base_value.is_empty()
             || matches!(run_in, Some(TaskRunIn::ExistingLane { .. }))
         {
             None
         } else {
-            Some(std::path::PathBuf::from(&form.base_value))
+            Some(std::path::PathBuf::from(&values.base_value))
         };
 
         // The rule walk trims, so the value it accepted is the one stored.
-        let branch = daruda_core::git::validate_branch_name(&form.branch)
+        let branch = daruda_core::git::validate_branch_name(&values.branch)
             .ok()
             .map(str::to_owned);
 
@@ -554,11 +539,11 @@ impl Workspace {
                 self.update_task(
                     id,
                     crate::workspace::right_dock::task_ops::TaskEdits {
-                        title: form.title.clone(),
-                        prompt: form.prompt.clone(),
-                        notes: form.notes.clone(),
-                        auto_execute: form.auto_execute,
-                        agent_surface: form.agent_surface,
+                        title: values.title.clone(),
+                        prompt: values.prompt.clone(),
+                        notes: values.notes.clone(),
+                        auto_execute: values.auto_execute,
+                        agent_surface: values.agent_surface,
                         base_worktree_path: base_path.clone(),
                         branch,
                         run_in,
@@ -569,18 +554,18 @@ impl Workspace {
             }
             None => {
                 let mut task = daruda_store::tasks::Task::new(
-                    form.title.clone(),
-                    form.prompt.clone(),
+                    values.title.clone(),
+                    values.prompt.clone(),
                     base_path.clone(),
                 );
                 if let Some(branch) = branch {
                     task.branch_name = branch;
                 }
                 task.run_in = run_in.unwrap_or_default();
-                task.subtasks = form.draft_subtasks.clone();
-                task.notes = form.notes.clone();
-                task.auto_execute = form.auto_execute;
-                task.agent_surface = form.agent_surface;
+                task.subtasks = values.draft_subtasks.clone();
+                task.notes = values.notes.clone();
+                task.auto_execute = values.auto_execute;
+                task.agent_surface = values.agent_surface;
                 let new_id = task.id.clone();
                 cx.update_global::<crate::agent::tasks_global::GlobalTasks, _>(|g, _| {
                     g.add(task);
@@ -595,18 +580,7 @@ impl Workspace {
         if let Some(te) = self.task_edit_content_mut_for(pane_id) {
             te.task_id = Some(task_id.clone());
             te.draft_subtasks.clear();
-            te.saved_snapshot = crate::workspace::main_area::pane::TaskEditSnapshot {
-                draft_subtasks: Vec::new(),
-                title: form.title.clone(),
-                branch: form.branch.clone(),
-                prompt: normalize_newlines(&form.prompt),
-                notes: normalize_newlines(&form.notes),
-                auto_execute: form.auto_execute,
-                agent_surface: form.agent_surface,
-                base_value: form.base_value.clone(),
-                run_in: form.run_in,
-                lane_value: form.lane_value.clone(),
-            };
+            te.saved_snapshot = te.current_snapshot(cx);
         }
 
         Some(task_id)
@@ -615,11 +589,7 @@ impl Workspace {
     /// The location a still-editable form commits to, or `None` when it is
     /// not savable. The branch is checked again here because a lane created
     /// after the form opened can have taken it since the last keystroke.
-    fn commit_task_run_in(
-        &mut self,
-        pane_id: PaneId,
-        form: &TaskEditFormSnapshot,
-    ) -> Option<TaskRunIn> {
+    fn commit_task_run_in(&mut self, pane_id: PaneId, form: &TaskEditValues) -> Option<TaskRunIn> {
         match form.run_in {
             RunInChoice::NewWorktree => {
                 let validation = self.branch_validation_for(&form.branch, true);
@@ -639,11 +609,7 @@ impl Workspace {
 
     /// Read the current form values without holding a `&mut self`
     /// borrow on `self.active_runtime().panes` past the snapshot.
-    fn read_task_edit_form(
-        &self,
-        pane_id: PaneId,
-        cx: &Context<Self>,
-    ) -> Option<TaskEditFormSnapshot> {
+    fn read_task_edit_form(&self, pane_id: PaneId, cx: &Context<Self>) -> Option<TaskEditForm> {
         let te = self
             .main_area
             .runtimes
@@ -651,53 +617,21 @@ impl Workspace {
             .flat_map(|rt| rt.panes.iter())
             .find(|p| p.id == pane_id)?
             .task_edit_content()?;
-        Some(TaskEditFormSnapshot {
-            draft_subtasks: te.draft_subtasks.clone(),
+        Some(TaskEditForm {
             task_id: te.task_id.clone(),
-            title: te.title_input.read(cx).text().to_string(),
-            branch: te.branch_input.read(cx).text().to_string(),
-            prompt: te.prompt_state.read(cx).text().to_string(),
-            notes: te.notes_state.read(cx).text().to_string(),
-            auto_execute: te.auto_execute,
-            agent_surface: te.agent_surface,
             editable: super::run_in_ops::location_editable(te, cx.global()),
-            run_in: te.run_in,
-            lane_value: te.lane_value(cx),
-            base_value: te
-                .base_select
-                .read(cx)
-                .selected_value()
-                .map(|v| v.to_string())
-                .unwrap_or_default(),
+            values: te.current_snapshot(cx),
         })
     }
 }
 
-/// Plain-data form snapshot used by `save_task_edit_pane` so the save
-/// path doesn't keep a borrow on `self.active_runtime().panes` past the read step.
-struct TaskEditFormSnapshot {
-    draft_subtasks: Vec<SubTask>,
+/// What Save reads off the pane in one step, so it holds no borrow of
+/// `self.active_runtime().panes` past the read.
+struct TaskEditForm {
     task_id: Option<TaskId>,
-    title: String,
-    branch: String,
-    prompt: String,
-    notes: String,
-    auto_execute: bool,
-    agent_surface: TaskAgentSurface,
     /// Whether the task has yet to start, so its location may still change.
     editable: bool,
-    run_in: RunInChoice,
-    lane_value: String,
-    /// Selected `base_select` value — empty string sentinel for "use
-    /// active lane", otherwise an absolute path string.
-    base_value: String,
-}
-
-/// CRLF → LF for dirty-comparison snapshots. External editors (vim,
-/// VS Code on Windows) may rewrite the prompt file with CRLF; we
-/// don't want that to register as a user edit.
-pub(super) fn normalize_newlines(s: &str) -> String {
-    s.replace("\r\n", "\n")
+    values: TaskEditValues,
 }
 
 /// The on-disk prompt file for `task` — only meaningful once the task has
@@ -823,7 +757,7 @@ impl Workspace {
         let disk_normalized = normalize_newlines(&disk_content);
         if editor_normalized == disk_normalized {
             if let Some(te) = self.task_edit_content_mut_for_pane(pane_id) {
-                te.saved_snapshot.prompt = disk_normalized;
+                te.saved_snapshot.prompt = disk_content;
             }
             return;
         }
@@ -905,7 +839,7 @@ impl Workspace {
     ) {
         prompt_entity.update(cx, |state, cx| state.set_value(content.clone(), window, cx));
         if let Some(te) = self.task_edit_content_mut_for_pane(pane_id) {
-            te.saved_snapshot.prompt = normalize_newlines(&content);
+            te.saved_snapshot.prompt = content;
         }
         cx.notify();
     }

@@ -592,3 +592,32 @@ fn task_editor_draft_prefills_a_branch_and_regenerates_it(cx: &mut TestAppContex
     })
     .unwrap();
 }
+
+/// A prompt that differs from the saved one only by CRLF line endings —
+/// what an external editor may write back — is not an edit.
+#[gpui::test]
+fn task_editor_crlf_only_prompt_change_is_not_dirty(cx: &mut TestAppContext) {
+    let (window, ws) = build_workspace(cx);
+    cx.update_window(window.into(), |_, window, cx| {
+        ws.update(cx, |ws, cx| {
+            let task = Task::new("Lines".into(), "one\ntwo".into(), None);
+            let id = task.id.clone();
+            cx.update_global::<GlobalTasks, _>(|g, _| {
+                g.add(task);
+            });
+            ws.open_task_edit_pane(Some(id), window, cx);
+            let pane = ws.active_runtime().focused_pane_id;
+            let prompt = ws
+                .task_edit_content_for_pane(pane)
+                .unwrap()
+                .prompt_state
+                .clone();
+            assert!(!ws.task_edit_content_for_pane(pane).unwrap().is_dirty(cx));
+            prompt.update(cx, |s, cx| s.set_value("one\r\ntwo", window, cx));
+            assert!(!ws.task_edit_content_for_pane(pane).unwrap().is_dirty(cx));
+            prompt.update(cx, |s, cx| s.set_value("one\r\nthree", window, cx));
+            assert!(ws.task_edit_content_for_pane(pane).unwrap().is_dirty(cx));
+        });
+    })
+    .unwrap();
+}

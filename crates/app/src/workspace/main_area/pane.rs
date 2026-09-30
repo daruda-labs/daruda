@@ -189,7 +189,7 @@ pub(in crate::workspace) struct TaskEditContent {
     pub(super) cached_title: SharedString,
     /// Baseline snapshot for dirty comparison. Reset to
     /// `current_snapshot()` after every successful save.
-    pub(super) saved_snapshot: TaskEditSnapshot,
+    pub(super) saved_snapshot: TaskEditValues,
     pub(super) _subscriptions: Vec<Subscription>,
     /// FS watcher on `<lane>/.daruda/task-<id>.md`. `None`
     /// when the task is still in `Backlog` (no lane yet) or the
@@ -262,11 +262,10 @@ impl BranchValidation {
 /// on `TaskEditContent::saved_snapshot` and is recomputed via
 /// `current_snapshot()` on every dirty check / save.
 ///
-/// Newline normalisation (CRLF → LF) lives in `current_snapshot()` so
-/// disk files written by external editors don't show as dirty just
-/// because of line-ending differences.
+/// Holds the text as typed; line endings are normalised only when two
+/// snapshots are compared, so a CRLF disk reload doesn't read as an edit.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
-pub(in crate::workspace) struct TaskEditSnapshot {
+pub(in crate::workspace) struct TaskEditValues {
     pub(super) draft_subtasks: Vec<daruda_store::tasks::SubTask>,
     pub(super) title: String,
     pub(super) branch: String,
@@ -284,26 +283,33 @@ pub(in crate::workspace) struct TaskEditSnapshot {
     pub(super) lane_value: String,
 }
 
-/// CRLF → LF normaliser used by both the renderer's snapshot builder
-/// and the save path so dirty comparisons never trip on line-ending
-/// differences.
+/// CRLF → LF normaliser for dirty comparisons, so they never trip on
+/// line-ending differences.
 pub(in crate::workspace) fn normalize_newlines(s: &str) -> String {
     s.replace("\r\n", "\n")
 }
 
+impl TaskEditValues {
+    /// The same values with CRLF folded to LF, for comparing two snapshots.
+    fn normalized(&self) -> Self {
+        Self {
+            prompt: normalize_newlines(&self.prompt),
+            notes: normalize_newlines(&self.notes),
+            ..self.clone()
+        }
+    }
+}
+
 impl TaskEditContent {
-    /// Build a fresh snapshot of the form's current state for dirty
-    /// comparison. The two markdown editors and the title /
-    /// branch inputs are read through their entity handles; newline
-    /// endings are normalised so a CRLF disk reload doesn't read as
-    /// a user edit.
-    pub(in crate::workspace) fn current_snapshot(&self, cx: &App) -> TaskEditSnapshot {
-        TaskEditSnapshot {
+    /// The form's current values, read through the input entities — what
+    /// Save persists and what the dirty check compares.
+    pub(in crate::workspace) fn current_snapshot(&self, cx: &App) -> TaskEditValues {
+        TaskEditValues {
             draft_subtasks: self.draft_subtasks.clone(),
             title: self.title_input.read(cx).text().to_string(),
             branch: self.branch_input.read(cx).text().to_string(),
-            prompt: normalize_newlines(self.prompt_state.read(cx).text().to_string().as_str()),
-            notes: normalize_newlines(self.notes_state.read(cx).text().to_string().as_str()),
+            prompt: self.prompt_state.read(cx).text().to_string(),
+            notes: self.notes_state.read(cx).text().to_string(),
             auto_execute: self.auto_execute,
             agent_surface: self.agent_surface,
             base_value: self
@@ -330,7 +336,7 @@ impl TaskEditContent {
     /// snapshot. The save / discard paths reset `saved_snapshot` to
     /// the value they wrote, so a successful save clears the flag.
     pub(in crate::workspace) fn is_dirty(&self, cx: &App) -> bool {
-        self.current_snapshot(cx) != self.saved_snapshot
+        self.current_snapshot(cx).normalized() != self.saved_snapshot.normalized()
     }
 
     pub(in crate::workspace) fn can_save(&self, cx: &App) -> bool {
