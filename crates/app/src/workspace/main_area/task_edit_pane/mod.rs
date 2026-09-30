@@ -2,19 +2,20 @@
 
 mod editor_ops;
 pub(in crate::workspace) mod run_in_ops;
+pub(in crate::workspace) mod state;
 pub(super) mod task_edit_ops;
 
 use daruda_store::tasks::{SubTask, TaskAgentSurface, TaskExecution, TaskState};
 use gpui::{Context, IntoElement, MouseButton, SharedString, div, prelude::*, px};
 
 use super::super::Workspace;
-use super::pane::{BranchValidation, RunInChoice, TaskEditContent};
 use super::pane_tree::PaneId;
 use crate::agent::tasks_global::GlobalTasks;
 use crate::surface::strings;
 use crate::ui::{self, ButtonVariants as _, Disableable as _, theme};
 use crate::ui::{button, checkbox};
 use run_in_ops::task_running_in;
+use state::{BranchValidation, RunInChoice, TaskEditContent};
 
 pub(in crate::workspace) fn render(
     pane_id: PaneId,

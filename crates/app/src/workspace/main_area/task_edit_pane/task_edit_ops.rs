@@ -16,13 +16,13 @@ use daruda_store::observability::system_info::redact_home;
 use daruda_store::tasks::{Task, TaskAgentSurface, TaskId, TaskRunIn, random_branch_name};
 use gpui::{AppContext as _, BorrowAppContext as _, Context, Focusable as _, SharedString, Window};
 
+use super::state::{
+    BranchValidation, RunInChoice, TaskEditContent, TaskEditValues, normalize_newlines,
+};
 use crate::ui::select::{SelectOption, state_with_options};
 use crate::ui::{InputEvent, InputState, make_markdown_prose_state};
 use crate::workspace::Workspace;
-use crate::workspace::main_area::pane::{
-    BranchValidation, Pane, PaneContent, RunInChoice, TaskEditContent, TaskEditValues,
-    normalize_newlines,
-};
+use crate::workspace::main_area::pane::{Pane, PaneContent};
 use crate::workspace::main_area::pane_tree::{PaneId, PaneLayout};
 
 /// Validate a branch-input string, reporting which rule it broke so the

@@ -7,10 +7,10 @@ use daruda_store::project::LaneKind;
 use daruda_store::tasks::{Task, TaskRunIn, TaskState};
 use gpui::{Context, SharedString};
 
+use super::state::{BranchValidation, RunInChoice, TaskEditContent};
 use crate::agent::tasks_global::GlobalTasks;
 use crate::ui::select::SelectOption;
 use crate::workspace::Workspace;
-use crate::workspace::main_area::pane::{BranchValidation, RunInChoice, TaskEditContent};
 use crate::workspace::main_area::pane_tree::PaneId;
 
 use super::task_edit_ops::validate_branch;

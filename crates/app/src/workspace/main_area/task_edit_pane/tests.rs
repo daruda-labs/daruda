@@ -1,5 +1,5 @@
 use crate::agent::tasks_global::GlobalTasks;
-use crate::workspace::main_area::pane::{BranchValidation, RunInChoice};
+use crate::workspace::main_area::task_edit_pane::state::{BranchValidation, RunInChoice};
 use crate::workspace::tests::build_workspace;
 use daruda_store::tasks::{Task, TaskRunIn};
 use gpui::{
