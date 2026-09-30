@@ -1,7 +1,9 @@
 //! Prompt-first task form with contextual execution controls.
 
 mod editor_ops;
+mod prompt_file_ops;
 pub(in crate::workspace) mod run_in_ops;
+mod save_ops;
 pub(in crate::workspace) mod state;
 pub(super) mod task_edit_ops;
 
