@@ -235,7 +235,11 @@ impl AgentChatView {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if self.fold.is_expanded(&key, fold_context(&key, &self.items)) != expanded {
+        if self
+            .fold
+            .is_expanded(&key, fold_context(&key, &self.items, &self.live_units))
+            != expanded
+        {
             self.toggle_fold(key, window, cx);
         }
     }
@@ -249,7 +253,7 @@ impl AgentChatView {
         // Resolve the context via the shared `fold_context` — the same source
         // `rows::project` uses to derive the default collapsed state — so the
         // first click flips the *visible* state rather than a stale re-derivation.
-        let ctx = fold_context(&key, &self.items);
+        let ctx = fold_context(&key, &self.items, &self.live_units);
         // Resolve before the key moves into `fold.toggle` below: a nested fold
         // (a tool card's own body, one of its diffs, its raw-input disclosure,
         // or a nested subagent card) only changes its *owning row's* rendered

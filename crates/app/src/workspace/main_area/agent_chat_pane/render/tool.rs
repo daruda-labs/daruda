@@ -30,7 +30,7 @@ use crate::workspace::main_area::agent_chat_pane::agent_chat_helpers::{
     TurnBoundary, diff_editor_key, fold_context_at, renders_raw_input,
     renders_subagent_instructions, suppresses_live_subagent_output, tool_fold_key, tool_image_key,
 };
-use crate::workspace::main_area::agent_chat_pane::fold::{FoldContext, FoldKey, FoldState};
+use crate::workspace::main_area::agent_chat_pane::fold::{FoldKey, FoldState};
 use crate::workspace::main_area::agent_chat_pane::output_editor::{
     output_editor_key, output_editor_source,
 };
@@ -116,9 +116,8 @@ pub(super) fn tool_card(
     // caller that got that pair wrong would give the card a key its own toggle
     // never reads. Both call paths used to restate this.
     let key = tool_fold_key(tc);
-    let expanded = fold.is_expanded(&key, fold_context_at(&key, ix, items, boundary));
+    let expanded = fold.is_expanded(&key, fold_context_at(&key, ix, items, boundary, live_units));
     let markdown_links = AgentChatMarkdownLinks::new(pane_id, window_handle);
-    let turn = boundary.at(ix);
     // A subagent parent (Task/Agent) whose flattened children keep running past
     // its own completion must not read "done": the adapter marks the parent
     // `Completed` when its SDK call returns, but the child tool calls stream in
@@ -234,7 +233,10 @@ pub(super) fn tool_card(
             // expanded, so the pretty-print of a large `raw_input` blob stays off the
             // render hot path (GPUI has no partial redraw) with no manual gate.
             let raw_key = FoldKey::ToolRawInput(tc.id.clone());
-            let raw_expanded = fold.is_expanded(&raw_key, FoldContext::new(turn, false));
+            let raw_expanded = fold.is_expanded(
+                &raw_key,
+                fold_context_at(&raw_key, ix, items, boundary, live_units),
+            );
             let raw_header = FoldHeader::bare().leading(
                 div()
                     .flex_none()
@@ -340,7 +342,10 @@ pub(super) fn tool_card(
             );
         }
         for (di, diff) in tc.diffs.iter().enumerate() {
-            let editor = assets.diff_editors.get(&diff_editor_key(&tc.id, di));
+            let diff_key = diff_editor_key(&tc.id, di);
+            let editor = assets.diff_editors.get(&diff_key);
+            let diff_context =
+                fold_context_at(&FoldKey::Diff(diff_key), ix, items, boundary, live_units);
             body = body.child(diff_block(
                 &tc.id,
                 di,
@@ -348,7 +353,7 @@ pub(super) fn tool_card(
                 editor,
                 assets.diff_stats,
                 fold,
-                turn,
+                diff_context,
                 t,
                 dim,
                 pane_id,
@@ -385,8 +390,10 @@ pub(super) fn tool_card(
         // window, the live escape and the nesting cap together — is decided by
         // `SubagentChildren`, so this loop only iterates the answer.
         let tail_key = FoldKey::SubagentTail(tc.id.clone());
-        let tail_revealed =
-            fold.is_expanded(&tail_key, fold_context_at(&tail_key, ix, items, boundary));
+        let tail_revealed = fold.is_expanded(
+            &tail_key,
+            fold_context_at(&tail_key, ix, items, boundary, live_units),
+        );
         let children = SubagentChildren::of(
             items,
             tc.id.as_str(),

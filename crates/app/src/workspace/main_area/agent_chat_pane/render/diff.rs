@@ -12,7 +12,6 @@ use super::DiffStats;
 use super::embed::bounded_editor_embed;
 use super::fold_header::{FoldHeader, FoldRow};
 use crate::surface::strings as s;
-use crate::transcript::fold_mode::TurnPosition;
 use crate::ui::theme;
 use crate::ui::{ButtonVariants as _, Icon, Sizable as _, button_bare, copy_button};
 use crate::window_registry::WindowRegistry;
@@ -44,7 +43,7 @@ pub(super) fn diff_block(
     editor: Option<&Entity<crate::ui::InputState>>,
     diff_stats: &DiffStats,
     fold: &FoldState,
-    turn: TurnPosition,
+    context: FoldContext,
     t: &theme::DarudaTheme,
     dim: f32,
     pane_id: PaneId,
@@ -54,9 +53,7 @@ pub(super) fn diff_block(
 ) -> AnyElement {
     let diff_key = diff_editor_key(tool_id, di);
     let key = FoldKey::Diff(diff_key.clone());
-    // A diff is never "running", so only its turn position can move the default
-    // — which a `past.diff=` / `last.diff=` rule is free to do.
-    let expanded = fold.is_expanded(&key, FoldContext::new(turn, false));
+    let expanded = fold.is_expanded(&key, context);
 
     let path_string = diff.path.display().to_string();
     // The path is the block's identity, shown in both fold states, so it takes

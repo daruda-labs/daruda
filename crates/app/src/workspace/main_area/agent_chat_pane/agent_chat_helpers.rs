@@ -16,7 +16,7 @@ use gpui::{AppContext as _, Context, Entity};
 
 use super::fold::{FoldContext, FoldKey};
 use super::tool_hierarchy::ToolHierarchy;
-use super::tool_status::{LiveSubagentUnits, effective_tool_status};
+use super::tool_status::{LiveSubagentUnits, effective_tool_status, tool_or_subtree_live};
 // Re-exported so the callers and tests that reach these through this module
 // keep one path; `transcript_structure` is where the rules live.
 use super::transcript_structure::{TranscriptStructure, run_active};
@@ -652,9 +652,13 @@ impl TurnBoundary {
 }
 
 /// Resolve a key's activity and turn position from the conversation.
-pub(super) fn fold_context(key: &FoldKey, items: &[daruda_acp::ChatItem]) -> FoldContext {
+pub(super) fn fold_context(
+    key: &FoldKey,
+    items: &[daruda_acp::ChatItem],
+    live_units: &LiveSubagentUnits,
+) -> FoldContext {
     match fold_key_index(key, items) {
-        Some(ix) => fold_context_at(key, ix, items, TurnBoundary::of(items)),
+        Some(ix) => fold_context_at(key, ix, items, TurnBoundary::of(items), live_units),
         None => FoldContext::new(TurnPosition::Past, false),
     }
 }
@@ -665,8 +669,9 @@ pub(super) fn fold_context_at(
     ix: usize,
     items: &[daruda_acp::ChatItem],
     boundary: TurnBoundary,
+    live_units: &LiveSubagentUnits,
 ) -> FoldContext {
-    let context = FoldContext::new(boundary.at(ix), fold_active_at(key, ix, items));
+    let context = FoldContext::new(boundary.at(ix), fold_active_at(key, ix, items, live_units));
     match (key, items.get(ix)) {
         (FoldKey::Tool(_), Some(daruda_acp::ChatItem::ToolCall(tc))) => {
             context.with_tool_category(crate::transcript::tool_category::classify_tool(tc))
@@ -714,16 +719,31 @@ fn tool_item_index(items: &[daruda_acp::ChatItem], tool_id: &str) -> Option<usiz
 #[cfg(test)]
 pub(super) fn fold_active(key: &FoldKey, items: &[daruda_acp::ChatItem]) -> bool {
     match fold_key_index(key, items) {
-        Some(ix) => fold_active_at(key, ix, items),
+        Some(ix) => fold_active_at(key, ix, items, &LiveSubagentUnits::of(items)),
         None => false,
     }
 }
 
-fn fold_active_at(key: &FoldKey, ix: usize, items: &[daruda_acp::ChatItem]) -> bool {
+/// What a `running` rule reads for `key` — the input to
+/// [`BlockRule::WhileRunning`](crate::transcript::fold_mode::BlockRule::WhileRunning).
+fn fold_active_at(
+    key: &FoldKey,
+    ix: usize,
+    items: &[daruda_acp::ChatItem],
+    live_units: &LiveSubagentUnits,
+) -> bool {
     use daruda_acp::ChatItem;
     match key {
-        FoldKey::Assistant(_) | FoldKey::Thinking(_) | FoldKey::Tool(_) => {
+        FoldKey::Assistant(_) | FoldKey::Thinking(_) => {
             items.get(ix).map(is_active).unwrap_or(false)
+        }
+        // Everything a call owns runs while the call does, a launch's
+        // flattened children included — the same reading its badge takes.
+        FoldKey::Tool(_) | FoldKey::Subagent(_) | FoldKey::Diff(_) | FoldKey::ToolRawInput(_) => {
+            matches!(
+                items.get(ix),
+                Some(ChatItem::ToolCall(tc)) if tool_or_subtree_live(tc, live_units)
+            )
         }
         // Keyed by the response's own first item (`rows::project` passes
         // `run.start`), so the run includes that item. Asked through
@@ -735,26 +755,20 @@ fn fold_active_at(key: &FoldKey, ix: usize, items: &[daruda_acp::ChatItem]) -> b
         // group's liveness must not read one — otherwise a call that belongs to
         // an inner card holds the group force-expanded.
         //
-        // The hierarchy is built here rather than passed in because no
-        // paint-path caller reaches this arm: `render` and `reconcile` ask only
-        // about `Assistant` / `Thinking` / `Tool` / `Subagent` / tail keys,
-        // leaving projection and the click path, neither of which repaints.
+        // The hierarchy is built here rather than passed in because only the
+        // click path reaches this arm: the projection asks `group_active` of
+        // the structure it already holds, and no render asks about a group.
         FoldKey::ToolGroup(_) => {
             let hierarchy = ToolHierarchy::build(items);
             let structure = TranscriptStructure::new(items, &hierarchy);
-            structure
-                .group_members(structure.tool_run(ix, items.len()))
-                .any(|k| is_active(&items[k]))
+            structure.group_active(structure.tool_run(ix, items.len()))
         }
         FoldKey::ThinkingGroup(_) => items.get(ix..).is_some_and(|rest| {
             rest.iter()
                 .take_while(|item| matches!(item, ChatItem::Thinking { .. }))
                 .any(is_active)
         }),
-        FoldKey::Diff(_)
-        | FoldKey::ToolRawInput(_)
-        | FoldKey::Subagent(_)
-        | FoldKey::Tail(_)
+        FoldKey::Tail(_)
         | FoldKey::ToolGroupTail(_)
         | FoldKey::SubagentTail(_)
         | FoldKey::Filtered(_) => false,

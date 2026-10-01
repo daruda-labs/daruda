@@ -166,10 +166,8 @@ impl Workspace {
         let title = pane.title(cx);
         let is_dirty = te.is_dirty(cx);
 
-        // If the disk content already matches what's in the editor
-        // (modulo CRLF), this is almost certainly a save-side echo
-        // from our own `write_prompt_file`. Don't bother the user —
-        // just re-baseline so the pane stays clean.
+        // Disk content matching the editor (modulo CRLF) is the echo of
+        // Start's own `write_prompt_file`: re-baseline instead of asking.
         let editor_normalized =
             normalize_newlines(prompt_entity.read(cx).text().to_string().as_str());
         let disk_normalized = normalize_newlines(&disk_content);
@@ -319,13 +317,9 @@ impl Workspace {
         );
     }
 
-    /// Helper used by the conflict prompt's `[Diff]` branch.
-    /// Opens `path` in a file viewer pane *split to the right of* the
-    /// owning TaskEdit pane so the user sees the in-pane editor on
-    /// the left and the disk version on the right simultaneously
-    /// The two-pane layout lets the user compare in-pane edits against
-    /// the on-disk version side-by-side. Falls back silently when the
-    /// path isn't inside any known lane.
+    /// The conflict prompt's `[Diff]`: open `path` split to the right of the
+    /// TaskEdit pane, so its edits and the disk version sit side by side.
+    /// Does nothing when the path isn't inside any known lane.
     fn open_disk_file_for_diff(
         &mut self,
         pane_id: PaneId,

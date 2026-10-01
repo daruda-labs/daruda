@@ -484,7 +484,7 @@ fn render_row(
                 let key = FoldKey::Assistant(*i);
                 let expanded = this.fold.is_expanded(
                     &key,
-                    fold_context_at(&key, *i, &this.items, this.turn_boundary),
+                    fold_context_at(&key, *i, &this.items, this.turn_boundary, &this.live_units),
                 );
                 conclusion_block(
                     *i,
@@ -1094,7 +1094,8 @@ fn render_item(
         ChatItem::AssistantText { text, .. } => assistant_markdown(ix, text, markdown, cx),
         ChatItem::Thinking { text, .. } => {
             let key = FoldKey::Thinking(ix);
-            let expanded = fold.is_expanded(&key, fold_context_at(&key, ix, items, boundary));
+            let expanded =
+                fold.is_expanded(&key, fold_context_at(&key, ix, items, boundary, live_units));
             thinking_block(ix, key, expanded, text, markdown, cx).into_any_element()
         }
         ChatItem::ToolCall(tc) => tool_card(

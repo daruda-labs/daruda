@@ -37,10 +37,7 @@ pub(super) fn response_run(items: &[ChatItem], start: usize) -> Range<usize> {
     start.min(end)..end
 }
 
-/// Whether an item is still being produced — the input to
-/// [`FoldPolicy::ExpandedWhileActive`].
-///
-/// [`FoldPolicy::ExpandedWhileActive`]: super::fold::FoldPolicy::ExpandedWhileActive
+/// Whether an item is still being produced, by its own status alone.
 pub(super) fn is_active(item: &ChatItem) -> bool {
     match item {
         ChatItem::AssistantText { streaming, .. } | ChatItem::Thinking { streaming, .. } => {
@@ -130,6 +127,13 @@ impl<'a> TranscriptStructure<'a> {
         run: Range<usize>,
     ) -> impl Iterator<Item = usize> + Clone + 'a {
         run.filter(move |&ix| self.owns_a_row(ix))
+    }
+
+    /// Whether a run's group is still being produced — what its fold rule
+    /// reads. Members' own status only, no subtree: a nested child belongs to
+    /// an inner card, and a live call already escapes the group's fold.
+    pub(super) fn group_active(self, run: Range<usize>) -> bool {
+        self.group_members(run).any(|ix| is_active(&self.items[ix]))
     }
 
     /// How many separate top-level tool runs `run` holds. One run means the

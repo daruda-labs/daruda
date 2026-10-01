@@ -254,3 +254,28 @@ fn existing_lane_start_reports_a_registered_lane_whose_directory_is_gone(cx: &mu
     })
     .unwrap();
 }
+
+/// A Retry whose Start stops early (here: no git repo) still leaves the task
+/// in Backlog on disk, not only in memory — a restart would otherwise bring
+/// back the old Error.
+#[gpui::test]
+fn retry_that_cannot_start_persists_the_backlog_state(cx: &mut TestAppContext) {
+    let (window, workspace) = crate::workspace::tests::build_workspace(cx);
+    let id = cx
+        .update_window(window.into(), |_, window, cx| {
+            workspace.update(cx, |ws, cx| {
+                let id = finished_task(&PathBuf::from("/nonexistent/daruda-lane"), cx);
+                ws.retry_task(&id, window, cx);
+                assert_eq!(state(&id, cx), TaskState::Backlog);
+                id
+            })
+        })
+        .unwrap();
+    cx.run_until_parked();
+    let data_dir = workspace.read_with(cx, |ws, _| ws.data_dir.clone());
+    let saved = daruda_store::tasks::load_tasks_in(&data_dir).expect("tasks saved");
+    assert_eq!(
+        saved.tasks.iter().find(|t| t.id == id).map(|t| &t.state),
+        Some(&TaskState::Backlog)
+    );
+}

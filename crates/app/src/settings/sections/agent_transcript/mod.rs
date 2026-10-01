@@ -498,7 +498,7 @@ mod tests {
         assert_eq!(mode.preset(), None, "no preset states this matrix");
         assert_eq!(
             mode.rule(TurnPosition::Last, FoldBlock::Thinking),
-            BlockRule::Expanded
+            Some(BlockRule::Expanded)
         );
         assert_eq!(
             FoldMode::from_tokens(mode.tokens().iter().map(String::as_str)),

@@ -1220,7 +1220,7 @@ fn a_rule_edit_back_onto_a_preset_keeps_the_matrix_recallable(cx: &mut TestAppCo
     let matrix = FoldPreset::Summary.mode().with_rule(
         TurnPosition::Last,
         FoldBlock::Diff,
-        BlockRule::Expanded,
+        BlockRule::Collapsed,
     );
     win.update(cx, |w, cx| {
         w.select_agent_row_fold_preset(0, Some(FoldPreset::Summary), cx);

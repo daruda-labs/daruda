@@ -2708,16 +2708,16 @@ pub fn agent_chat_fold_editor_earlier_turns() -> String {
     rust_i18n::t!("agent_chat.fold_editor_earlier_turns").into_owned()
 }
 
-pub fn agent_chat_fold_editor_rule_builtin() -> String {
-    rust_i18n::t!("agent_chat.fold_editor_rule_builtin").into_owned()
-}
-
 pub fn agent_chat_fold_editor_rule_expanded() -> String {
     rust_i18n::t!("agent_chat.fold_editor_rule_expanded").into_owned()
 }
 
 pub fn agent_chat_fold_editor_rule_collapsed() -> String {
     rust_i18n::t!("agent_chat.fold_editor_rule_collapsed").into_owned()
+}
+
+pub fn agent_chat_fold_editor_rule_running() -> String {
+    rust_i18n::t!("agent_chat.fold_editor_rule_running").into_owned()
 }
 
 /// The fold panel's footer: hand the axis back to the configured default.

@@ -93,28 +93,50 @@ impl FoldBlock {
     }
 }
 
-/// A mode's override for one matrix cell.
-#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+/// How one matrix cell folds its block.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub(crate) enum BlockRule {
-    #[default]
-    Builtin,
     Expanded,
     Collapsed,
+    /// Open while the block is still being produced, folded once it settles.
+    WhileRunning,
 }
 
 impl BlockRule {
-    pub(crate) fn token(self) -> Option<&'static str> {
+    /// Rules in menu order.
+    pub(crate) const ALL: [BlockRule; 3] = [Self::Expanded, Self::Collapsed, Self::WhileRunning];
+
+    pub(crate) fn token(self) -> &'static str {
         match self {
-            Self::Builtin => None,
-            Self::Expanded => Some("expanded"),
-            Self::Collapsed => Some("collapsed"),
+            Self::Expanded => "expanded",
+            Self::Collapsed => "collapsed",
+            Self::WhileRunning => "running",
         }
     }
 
     fn from_token(token: &str) -> Option<Self> {
-        [Self::Expanded, Self::Collapsed]
-            .into_iter()
-            .find(|r| r.token() == Some(token))
+        Self::ALL.into_iter().find(|r| r.token() == token)
+    }
+
+    /// Whether a block under this rule is open, given whether it still runs.
+    pub(crate) fn is_expanded(self, active: bool) -> bool {
+        match self {
+            Self::Expanded => true,
+            Self::Collapsed => false,
+            Self::WhileRunning => active,
+        }
+    }
+}
+
+/// The rule every cell starts on — what the `summary` preset states.
+const fn base_rule(block: FoldBlock) -> BlockRule {
+    match block {
+        FoldBlock::Response
+        | FoldBlock::ToolGroup
+        | FoldBlock::Thinking
+        | FoldBlock::ThinkingGroup => BlockRule::WhileRunning,
+        FoldBlock::Assistant | FoldBlock::Diff => BlockRule::Expanded,
+        FoldBlock::Tool | FoldBlock::Subagent | FoldBlock::RawInput => BlockRule::Collapsed,
     }
 }
 
@@ -145,7 +167,7 @@ impl FoldPreset {
     }
 
     pub(crate) fn mode(self) -> FoldMode {
-        let mut mode = FoldMode::neutral();
+        let mut mode = FoldMode::base();
         match self {
             Self::Auto => mode.set(TurnPosition::Last, FoldBlock::Response, BlockRule::Expanded),
             Self::Summary => {}
@@ -170,8 +192,12 @@ impl FoldPreset {
 }
 
 /// One [`BlockRule`] per turn position and block kind.
+///
+/// The [`FoldBlock::Tool`] row is not a cell of its own: a tool card always
+/// folds by its category, so the row reads and writes every category at once.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub(crate) struct FoldMode {
+    /// The `Tool` slot holds its base value and is never read.
     rules: [[BlockRule; FoldBlock::ALL.len()]; TurnPosition::ALL.len()],
     tool_rules: [[BlockRule; ToolCategory::ALL.len()]; TurnPosition::ALL.len()],
 }
@@ -183,19 +209,40 @@ impl Default for FoldMode {
 }
 
 impl FoldMode {
-    fn neutral() -> Self {
+    fn base() -> Self {
         Self {
-            rules: [[BlockRule::Builtin; FoldBlock::ALL.len()]; TurnPosition::ALL.len()],
-            tool_rules: [[BlockRule::Builtin; ToolCategory::ALL.len()]; TurnPosition::ALL.len()],
+            rules: [FoldBlock::ALL.map(base_rule); TurnPosition::ALL.len()],
+            tool_rules: [[base_rule(FoldBlock::Tool); ToolCategory::ALL.len()];
+                TurnPosition::ALL.len()],
         }
     }
 
-    pub(crate) fn rule(self, turn: TurnPosition, block: FoldBlock) -> BlockRule {
-        self.rules[turn.index()][block.index()]
+    /// The categories the tool row stands for.
+    fn tool_card_categories() -> impl Iterator<Item = ToolCategory> {
+        ToolCategory::ALL
+            .into_iter()
+            .filter(|category| category.folds_as_a_tool_card())
+    }
+
+    /// The rule a block row states. `None` only for [`FoldBlock::Tool`] whose
+    /// categories disagree, which no single rule describes.
+    pub(crate) fn rule(self, turn: TurnPosition, block: FoldBlock) -> Option<BlockRule> {
+        if block != FoldBlock::Tool {
+            return Some(self.rules[turn.index()][block.index()]);
+        }
+        let mut rules = Self::tool_card_categories().map(|c| self.tool_rule(turn, c));
+        let first = rules.next()?;
+        rules.all(|rule| rule == first).then_some(first)
     }
 
     fn set(&mut self, turn: TurnPosition, block: FoldBlock, rule: BlockRule) {
-        self.rules[turn.index()][block.index()] = rule;
+        if block == FoldBlock::Tool {
+            for category in Self::tool_card_categories() {
+                self.tool_rules[turn.index()][category.index()] = rule;
+            }
+        } else {
+            self.rules[turn.index()][block.index()] = rule;
+        }
     }
 
     pub(crate) fn with_rule(
@@ -212,13 +259,17 @@ impl FoldMode {
         self.tool_rules[turn.index()][category.index()]
     }
 
+    /// A category outside the tool row folds by its own block, so a rule for
+    /// it would never apply and is dropped.
     pub(crate) fn with_tool_rule(
         mut self,
         turn: TurnPosition,
         category: ToolCategory,
         rule: BlockRule,
     ) -> Self {
-        self.tool_rules[turn.index()][category.index()] = rule;
+        if category.folds_as_a_tool_card() {
+            self.tool_rules[turn.index()][category.index()] = rule;
+        }
         self
     }
 
@@ -227,37 +278,59 @@ impl FoldMode {
         FoldPreset::ALL.into_iter().find(|p| p.mode() == self)
     }
 
-    /// Parse tokens left-to-right; presets replace the matrix and cell tokens
-    /// override it. Unknown tokens are ignored for forward compatibility.
+    /// Parse tokens left-to-right; a preset replaces the matrix and cell tokens
+    /// override it. Within one preset's cells a category token narrows the
+    /// `tool` row wherever it is written. Unknown tokens are ignored.
     pub(crate) fn from_tokens<'a>(tokens: impl IntoIterator<Item = &'a str>) -> Self {
         let mut mode = Self::default();
+        let mut categories = Vec::new();
         for token in tokens {
             if let Some(preset) = FoldPreset::from_token(token) {
                 mode = preset.mode();
-            } else if let Some((turn, category, rule)) = parse_tool_cell(token) {
-                mode.tool_rules[turn.index()][category.index()] = rule;
+                categories.clear();
+            } else if let Some(cell) = parse_tool_cell(token) {
+                categories.push(cell);
             } else if let Some((turn, block, rule)) = parse_cell(token) {
                 mode.set(turn, block, rule);
             }
         }
+        for (turn, category, rule) in categories {
+            mode = mode.with_tool_rule(turn, category, rule);
+        }
         mode
     }
 
-    /// Serialize as a preset or a neutral base plus cell overrides.
+    /// Serialize as a preset, or as `summary` plus the cells that differ from it.
     pub(crate) fn tokens(self) -> Vec<String> {
         if let Some(preset) = self.preset() {
             return vec![preset.token().to_owned()];
         }
+        let base = Self::base();
         let mut out = vec![FoldPreset::Summary.token().to_owned()];
         for turn in TurnPosition::ALL {
             for block in FoldBlock::ALL {
-                if let Some(rule) = self.rule(turn, block).token() {
-                    out.push(format!("{}.{}={rule}", turn.token(), block.token()));
-                }
-            }
-            for category in ToolCategory::ALL {
-                if let Some(rule) = self.tool_rule(turn, category).token() {
-                    out.push(format!("{}.tool.{}={rule}", turn.token(), category.token()));
+                match self.rule(turn, block) {
+                    Some(rule) if Some(rule) == base.rule(turn, block) => {}
+                    Some(rule) => out.push(format!(
+                        "{}.{}={}",
+                        turn.token(),
+                        block.token(),
+                        rule.token()
+                    )),
+                    // A mixed tool row: each category that left the base.
+                    None => {
+                        for category in Self::tool_card_categories() {
+                            let rule = self.tool_rule(turn, category);
+                            if rule != base.tool_rule(turn, category) {
+                                out.push(format!(
+                                    "{}.tool.{}={}",
+                                    turn.token(),
+                                    category.token(),
+                                    rule.token()
+                                ));
+                            }
+                        }
+                    }
                 }
             }
         }
@@ -302,12 +375,13 @@ mod tests {
     #[test]
     fn auto_pins_only_the_newest_response() {
         let auto = FoldPreset::Auto.mode();
+        let summary = FoldPreset::Summary.mode();
         for turn in TurnPosition::ALL {
             for block in FoldBlock::ALL {
                 let expected = if (turn, block) == (TurnPosition::Last, FoldBlock::Response) {
-                    BlockRule::Expanded
+                    Some(BlockRule::Expanded)
                 } else {
-                    BlockRule::Builtin
+                    summary.rule(turn, block)
                 };
                 assert_eq!(auto.rule(turn, block), expected, "{turn:?}/{block:?}");
             }
@@ -315,13 +389,13 @@ mod tests {
     }
 
     #[test]
-    fn summary_is_wholly_neutral() {
+    fn summary_states_the_base_rule_for_every_cell() {
         let summary = FoldPreset::Summary.mode();
         for turn in TurnPosition::ALL {
             for block in FoldBlock::ALL {
                 assert_eq!(
                     summary.rule(turn, block),
-                    BlockRule::Builtin,
+                    Some(base_rule(block)),
                     "{turn:?}/{block:?}"
                 );
             }
@@ -333,16 +407,85 @@ mod tests {
         let ex = FoldPreset::Expanded.mode();
         assert_eq!(
             ex.rule(TurnPosition::Past, FoldBlock::Response),
-            BlockRule::Expanded
+            Some(BlockRule::Expanded)
         );
         assert_eq!(
             ex.rule(TurnPosition::Last, FoldBlock::Response),
-            BlockRule::Expanded
+            Some(BlockRule::Expanded)
         );
         for block in [FoldBlock::ToolGroup, FoldBlock::ThinkingGroup] {
-            assert_eq!(ex.rule(TurnPosition::Last, block), BlockRule::Expanded);
-            assert_eq!(ex.rule(TurnPosition::Past, block), BlockRule::Builtin);
+            assert_eq!(
+                ex.rule(TurnPosition::Last, block),
+                Some(BlockRule::Expanded)
+            );
+            assert_eq!(
+                ex.rule(TurnPosition::Past, block),
+                Some(BlockRule::WhileRunning)
+            );
         }
+    }
+
+    #[test]
+    fn while_running_follows_activity_and_the_others_ignore_it() {
+        for active in [true, false] {
+            assert!(BlockRule::Expanded.is_expanded(active));
+            assert!(!BlockRule::Collapsed.is_expanded(active));
+            assert_eq!(BlockRule::WhileRunning.is_expanded(active), active);
+        }
+    }
+
+    #[test]
+    fn the_tool_row_writes_every_tool_card_category() {
+        let mode = FoldPreset::Summary.mode().with_rule(
+            TurnPosition::Last,
+            FoldBlock::Tool,
+            BlockRule::WhileRunning,
+        );
+        for category in ToolCategory::ALL
+            .into_iter()
+            .filter(|c| c.folds_as_a_tool_card())
+        {
+            assert_eq!(
+                mode.tool_rule(TurnPosition::Last, category),
+                BlockRule::WhileRunning,
+                "{category:?}"
+            );
+            assert_eq!(
+                mode.tool_rule(TurnPosition::Past, category),
+                BlockRule::Collapsed,
+                "{category:?}"
+            );
+        }
+        assert_eq!(
+            mode.rule(TurnPosition::Last, FoldBlock::Tool),
+            Some(BlockRule::WhileRunning)
+        );
+    }
+
+    #[test]
+    fn a_mixed_tool_row_states_no_single_rule() {
+        let mode = FoldPreset::Summary.mode().with_tool_rule(
+            TurnPosition::Last,
+            ToolCategory::Edit,
+            BlockRule::Expanded,
+        );
+        assert_eq!(mode.rule(TurnPosition::Last, FoldBlock::Tool), None);
+        assert_eq!(
+            mode.rule(TurnPosition::Past, FoldBlock::Tool),
+            Some(BlockRule::Collapsed)
+        );
+    }
+
+    #[test]
+    fn a_rule_for_a_category_outside_the_tool_row_is_dropped() {
+        let summary = FoldPreset::Summary.mode();
+        let mode =
+            summary.with_tool_rule(TurnPosition::Last, ToolCategory::Agent, BlockRule::Expanded);
+        assert_eq!(mode, summary);
+        assert_eq!(
+            FoldMode::from_tokens(["summary", "last.tool.agent=expanded"]),
+            summary
+        );
     }
 
     #[test]
@@ -385,11 +528,17 @@ mod tests {
         let mut mode = FoldPreset::Summary.mode();
         mode.set(TurnPosition::Last, FoldBlock::Tool, BlockRule::Expanded);
         mode.set(TurnPosition::Past, FoldBlock::Diff, BlockRule::Collapsed);
+        mode.set(
+            TurnPosition::Past,
+            FoldBlock::Assistant,
+            BlockRule::WhileRunning,
+        );
         assert_eq!(mode.preset(), None, "no preset covers this");
         assert_eq!(
             mode.tokens(),
             vec![
                 "summary".to_owned(),
+                "past.assistant=running".to_owned(),
                 "past.diff=collapsed".to_owned(),
                 "last.tool=expanded".to_owned(),
             ]
@@ -405,13 +554,17 @@ mod tests {
         let mode = FoldPreset::Auto
             .mode()
             .with_tool_rule(TurnPosition::Last, ToolCategory::Edit, BlockRule::Expanded)
-            .with_tool_rule(TurnPosition::Past, ToolCategory::Run, BlockRule::Collapsed);
+            .with_tool_rule(
+                TurnPosition::Past,
+                ToolCategory::Run,
+                BlockRule::WhileRunning,
+            );
         assert_eq!(mode.preset(), None);
         assert_eq!(
             mode.tokens(),
             vec![
                 "summary".to_owned(),
-                "past.tool.run=collapsed".to_owned(),
+                "past.tool.run=running".to_owned(),
                 "last.response=expanded".to_owned(),
                 "last.tool.edit=expanded".to_owned(),
             ]
@@ -427,13 +580,35 @@ mod tests {
         let mode = FoldMode::from_tokens(["auto", "last.tool=expanded"]);
         assert_eq!(
             mode.rule(TurnPosition::Last, FoldBlock::Response),
-            BlockRule::Expanded
+            Some(BlockRule::Expanded)
         );
         assert_eq!(
             mode.rule(TurnPosition::Last, FoldBlock::Tool),
-            BlockRule::Expanded
+            Some(BlockRule::Expanded)
         );
         assert_eq!(mode.preset(), None);
+    }
+
+    /// A category token narrows the `tool` row on either side of it, so a
+    /// hand-ordered config cannot change meaning.
+    #[test]
+    fn a_category_token_narrows_the_tool_row_in_either_order() {
+        let narrowed =
+            FoldMode::from_tokens(["summary", "last.tool=expanded", "last.tool.read=collapsed"]);
+        assert_eq!(
+            narrowed.tool_rule(TurnPosition::Last, ToolCategory::Read),
+            BlockRule::Collapsed
+        );
+        assert_eq!(
+            narrowed.tool_rule(TurnPosition::Last, ToolCategory::Edit),
+            BlockRule::Expanded
+        );
+        let reordered =
+            FoldMode::from_tokens(["summary", "last.tool.read=collapsed", "last.tool=expanded"]);
+        assert_eq!(reordered, narrowed);
+        // A preset still discards every category written before it.
+        let reset = FoldMode::from_tokens(["last.tool.read=expanded", "summary"]);
+        assert_eq!(reset, FoldPreset::Summary.mode());
     }
 
     #[test]
@@ -455,15 +630,16 @@ mod tests {
             "last.wormhole=expanded",
             "last.tool=sideways",
             "last.tool",
-            "last.tool=collapsed",
+            "last.tool=running",
+            "last.tool=builtin",
         ]);
         assert_eq!(
             mode.rule(TurnPosition::Last, FoldBlock::Tool),
-            BlockRule::Collapsed
+            Some(BlockRule::WhileRunning)
         );
         assert_eq!(
             mode.tokens(),
-            vec!["summary".to_owned(), "last.tool=collapsed".to_owned()]
+            vec!["summary".to_owned(), "last.tool=running".to_owned()]
         );
     }
 
@@ -481,6 +657,8 @@ mod tests {
         for p in FoldPreset::ALL {
             assert_eq!(FoldPreset::from_token(p.token()), Some(p));
         }
-        assert_eq!(BlockRule::Builtin.token(), None);
+        for rule in BlockRule::ALL {
+            assert_eq!(BlockRule::from_token(rule.token()), Some(rule));
+        }
     }
 }

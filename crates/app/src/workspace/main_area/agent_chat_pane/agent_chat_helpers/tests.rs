@@ -586,6 +586,55 @@ fn a_group_ignores_a_nested_child_when_judging_its_own_liveness() {
     ));
 }
 
+/// A launch keeps running while its flattened children do, after its own call
+/// settled — so a `running` rule keeps its card open as the badge reads it.
+#[test]
+fn a_subagent_reads_active_while_a_child_still_runs() {
+    use daruda_acp::ToolStatusView::{Completed, InProgress};
+    let mut child = tool_call("t-child", InProgress, 0);
+    child.parent_tool_id = Some("t-parent".to_owned());
+    let mut items = vec![
+        ChatItem::UserText("q".to_owned()),
+        ChatItem::ToolCall(tool_call("t-parent", Completed, 0)),
+        ChatItem::ToolCall(child),
+    ];
+    let key = FoldKey::Subagent("t-parent".to_owned());
+    assert!(fold_active(&key, &items));
+    if let ChatItem::ToolCall(tc) = &mut items[2] {
+        tc.status = Completed;
+    }
+    assert!(!fold_active(&key, &items));
+}
+
+/// The fold a `running` rule derives from that reading: the card stays open
+/// until the last child settles, not when the launch's own call does.
+#[test]
+fn a_running_rule_holds_a_subagent_open_through_its_children() {
+    use crate::transcript::fold_mode::FoldMode;
+    use crate::workspace::main_area::agent_chat_pane::fold::FoldState;
+    use daruda_acp::ToolStatusView::{Completed, InProgress};
+    let mut child = tool_call("t-child", InProgress, 0);
+    child.parent_tool_id = Some("t-parent".to_owned());
+    let mut items = vec![
+        ChatItem::UserText("q".to_owned()),
+        ChatItem::ToolCall(tool_call("t-parent", Completed, 0)),
+        ChatItem::ToolCall(child),
+    ];
+    let state = FoldState::with_mode(FoldMode::from_tokens(["summary", "last.subagent=running"]));
+    let key = FoldKey::Subagent("t-parent".to_owned());
+    let expanded = |items: &[ChatItem]| {
+        state.is_expanded(
+            &key,
+            fold_context(&key, items, &LiveSubagentUnits::of(items)),
+        )
+    };
+    assert!(expanded(&items));
+    if let ChatItem::ToolCall(tc) = &mut items[2] {
+        tc.status = Completed;
+    }
+    assert!(!expanded(&items));
+}
+
 /// A `parent_tool_id` naming a call `items` never carried leaves the child
 /// top-level, so it stays a member of the run — the boundary rule is presence
 /// of the parent, not merely having named one.
@@ -658,12 +707,15 @@ fn fold_active_resolves_per_key() {
     assert!(fold_active(&FoldKey::Response(1), &items));
     // Activity is independent of whether a key belongs to the newest turn.
     assert!(!fold_active(&FoldKey::Response(4), &items));
-    // Policy-independent keys ignore `active`.
-    assert!(!fold_active(&FoldKey::Diff("t-live#0".to_owned()), &items));
-    assert!(!fold_active(
+    // A call's own blocks run while the call does.
+    assert!(fold_active(&FoldKey::Diff("t-live#0".to_owned()), &items));
+    assert!(fold_active(
         &FoldKey::ToolRawInput("t-live".to_owned()),
         &items
     ));
+    assert!(!fold_active(&FoldKey::Diff("t-done#0".to_owned()), &items));
+    // Chip-owned keys never read as running.
+    assert!(!fold_active(&FoldKey::Tail(1), &items));
     // Unknown ids / out-of-range indices are inactive, not a panic.
     assert!(!fold_active(&FoldKey::Assistant(99), &items));
     assert!(!fold_active(&FoldKey::Tool("nope".to_owned()), &items));

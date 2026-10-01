@@ -1732,11 +1732,11 @@ fn reset_for_new_session_clears_conversation_state(cx: &mut gpui::TestAppContext
                 status: PlanStatus::Pending,
             });
             view.fold
-                .toggle(FoldKey::Tool("call-1".into()), FoldContext::past(true));
+                .toggle(FoldKey::Thinking(1), FoldContext::past(true));
             assert!(
                 !view
                     .fold
-                    .is_expanded(&FoldKey::Tool("call-1".into()), FoldContext::past(true)),
+                    .is_expanded(&FoldKey::Thinking(1), FoldContext::past(true)),
                 "sanity: override collapsed the block while active"
             );
             view.fold.set_mode(FoldPreset::Expanded.mode());
@@ -1775,8 +1775,8 @@ fn reset_for_new_session_clears_conversation_state(cx: &mut gpui::TestAppContext
             assert!(view.plan.is_empty(), "reset clears the execution plan");
             assert!(
                 view.fold
-                    .is_expanded(&FoldKey::Tool("call-1".into()), FoldContext::past(true)),
-                "reset drops fold overrides back to the natural default"
+                    .is_expanded(&FoldKey::Thinking(1), FoldContext::past(true)),
+                "reset drops fold overrides back to the mode's rule"
             );
             assert_eq!(
                 view.fold.chosen_mode(),

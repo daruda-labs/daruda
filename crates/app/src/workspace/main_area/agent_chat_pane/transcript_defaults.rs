@@ -213,7 +213,7 @@ mod tests {
                 crate::transcript::fold_mode::TurnPosition::Past,
                 crate::transcript::fold_mode::FoldBlock::Thinking,
             ),
-            crate::transcript::fold_mode::BlockRule::Collapsed
+            Some(crate::transcript::fold_mode::BlockRule::Collapsed)
         );
     }
 

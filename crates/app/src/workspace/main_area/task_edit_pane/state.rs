@@ -137,20 +137,55 @@ pub(in crate::workspace) struct TaskEditValues {
     pub(in crate::workspace::main_area) lane_value: String,
 }
 
-/// CRLF → LF normaliser for dirty comparisons, so they never trip on
-/// line-ending differences.
+/// CRLF → LF normaliser, so comparisons never trip on line-ending
+/// differences.
 pub(in crate::workspace) fn normalize_newlines(s: &str) -> String {
     s.replace("\r\n", "\n")
 }
 
+/// `a == b` with every CRLF read as LF, compared without allocating.
+fn eq_ignoring_crlf(a: &str, b: &str) -> bool {
+    fn chars(s: &str) -> impl Iterator<Item = char> + '_ {
+        let mut it = s.chars().peekable();
+        std::iter::from_fn(move || {
+            let c = it.next()?;
+            if c == '\r' && it.peek() == Some(&'\n') {
+                it.next()
+            } else {
+                Some(c)
+            }
+        })
+    }
+    chars(a).eq(chars(b))
+}
+
 impl TaskEditValues {
-    /// The same values with CRLF folded to LF, for comparing two snapshots.
-    fn normalized(&self) -> Self {
-        Self {
-            prompt: normalize_newlines(&self.prompt),
-            notes: normalize_newlines(&self.notes),
-            ..self.clone()
-        }
+    /// Whether the user would see these as different — CRLF and LF alike.
+    /// Listing every field makes a new one a compile error until it is
+    /// compared here.
+    fn differs_from(&self, other: &Self) -> bool {
+        let Self {
+            draft_subtasks,
+            title,
+            branch,
+            prompt,
+            notes,
+            auto_execute,
+            agent_surface,
+            base_value,
+            run_in,
+            lane_value,
+        } = self;
+        *draft_subtasks != other.draft_subtasks
+            || *title != other.title
+            || *branch != other.branch
+            || !eq_ignoring_crlf(prompt, &other.prompt)
+            || !eq_ignoring_crlf(notes, &other.notes)
+            || *auto_execute != other.auto_execute
+            || *agent_surface != other.agent_surface
+            || *base_value != other.base_value
+            || *run_in != other.run_in
+            || *lane_value != other.lane_value
     }
 }
 
@@ -190,7 +225,7 @@ impl TaskEditContent {
     /// snapshot. The save / discard paths reset `saved_snapshot` to
     /// the value they wrote, so a successful save clears the flag.
     pub(in crate::workspace) fn is_dirty(&self, cx: &App) -> bool {
-        self.current_snapshot(cx).normalized() != self.saved_snapshot.normalized()
+        self.current_snapshot(cx).differs_from(&self.saved_snapshot)
     }
 
     pub(in crate::workspace) fn can_save(&self, cx: &App) -> bool {
@@ -233,6 +268,19 @@ mod tests {
             notes: "c\r\nd".into(),
             ..TaskEditValues::default()
         };
-        assert_eq!(lf.normalized(), crlf.normalized());
+        assert!(!lf.differs_from(&crlf));
+        let edited = TaskEditValues {
+            notes: "c\r\ne".into(),
+            ..crlf
+        };
+        assert!(lf.differs_from(&edited));
+    }
+
+    #[test]
+    fn crlf_is_ignored_but_a_lone_cr_is_not() {
+        use super::eq_ignoring_crlf;
+        assert!(eq_ignoring_crlf("a\r\nb\r\n", "a\nb\n"));
+        assert!(!eq_ignoring_crlf("a\rb", "a\nb"));
+        assert!(!eq_ignoring_crlf("a\r\n", "a"));
     }
 }

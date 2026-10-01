@@ -13,12 +13,6 @@ use crate::transcript::tool_category::ToolCategory;
 use crate::ui::theme;
 use crate::ui::{Disableable as _, Divider, Selectable as _, button, button_group, tab, tab_bar};
 
-const RULES: [BlockRule; 3] = [
-    BlockRule::Builtin,
-    BlockRule::Expanded,
-    BlockRule::Collapsed,
-];
-
 pub(crate) type FoldRuleEdit = Rc<dyn Fn(FoldMode, &mut Window, &mut App)>;
 pub(crate) type FoldPresetPress = Rc<dyn Fn(Option<FoldPreset>, &mut Window, &mut App)>;
 pub(crate) type FoldTurnPress = Rc<dyn Fn(TurnPosition, &mut App)>;
@@ -244,7 +238,7 @@ fn tool_rule_row(
             turn.token(),
             category.token()
         )),
-        mode.tool_rule(turn, category),
+        Some(mode.tool_rule(turn, category)),
         cx,
         move |rule, window, app| on_change(mode.with_tool_rule(turn, category, rule), window, app),
     )
@@ -254,7 +248,8 @@ fn rule_row(
     label: String,
     nested: bool,
     id: SharedString,
-    current: BlockRule,
+    // `None` selects nothing: the tool row over categories that disagree.
+    current: Option<BlockRule>,
     cx: &App,
     on_change: impl Fn(BlockRule, &mut Window, &mut App) + 'static,
 ) -> AnyElement {
@@ -279,16 +274,16 @@ fn rule_row(
         )
         .child(
             button_group(id, cx)
-                .children(RULES.into_iter().map(|rule| {
+                .children(BlockRule::ALL.into_iter().map(|rule| {
                     button(
-                        SharedString::from(format!("{button_id_prefix}-{}", rule_token(rule))),
+                        SharedString::from(format!("{button_id_prefix}-{}", rule.token())),
                         rule_label(rule),
                     )
-                    .selected(rule == current)
+                    .selected(Some(rule) == current)
                 }))
                 .on_click(move |indices, window, app| {
-                    if let Some(&ix) = indices.first() {
-                        on_change(RULES[ix], window, app);
+                    if let Some(&rule) = indices.first().and_then(|&ix| BlockRule::ALL.get(ix)) {
+                        on_change(rule, window, app);
                     }
                 }),
         )
@@ -301,10 +296,6 @@ fn preset_token(preset: FoldPreset) -> &'static str {
         FoldPreset::Summary => "summary",
         FoldPreset::Expanded => "expanded",
     }
-}
-
-fn rule_token(rule: BlockRule) -> &'static str {
-    rule.token().unwrap_or("builtin")
 }
 
 fn preset_label(preset: FoldPreset) -> String {
@@ -324,9 +315,9 @@ fn turn_label(turn: TurnPosition) -> String {
 
 fn rule_label(rule: BlockRule) -> String {
     match rule {
-        BlockRule::Builtin => s::agent_chat_fold_editor_rule_builtin(),
         BlockRule::Expanded => s::agent_chat_fold_editor_rule_expanded(),
         BlockRule::Collapsed => s::agent_chat_fold_editor_rule_collapsed(),
+        BlockRule::WhileRunning => s::agent_chat_fold_editor_rule_running(),
     }
 }
 
@@ -374,7 +365,7 @@ mod tests {
         for category in ToolCategory::ALL {
             assert!(!tool_category_label(category).is_empty(), "{category:?}");
         }
-        for rule in RULES {
+        for rule in BlockRule::ALL {
             assert!(!rule_label(rule).is_empty(), "{rule:?}");
         }
         for turn in TurnPosition::ALL {
@@ -420,7 +411,7 @@ mod tests {
         let matrix = FoldPreset::Summary.mode().with_rule(
             TurnPosition::Last,
             FoldBlock::Diff,
-            BlockRule::Expanded,
+            BlockRule::Collapsed,
         );
         edited.remember(FoldPreset::Auto.mode(), matrix);
         assert!(PresetSegment::Custom.is_enabled(FoldPreset::Auto.mode(), edited));

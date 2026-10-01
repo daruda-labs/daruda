@@ -11,7 +11,7 @@ use daruda_acp::{ChatItem, ToolCallItem};
 use super::agent_chat_helpers::{TurnBoundary, fold_context_at};
 use super::fold::{FoldContext, FoldKey, FoldState};
 use super::tool_hierarchy::ToolHierarchy;
-use super::transcript_structure::{TranscriptStructure, is_active, response_run};
+use super::transcript_structure::{TranscriptStructure, response_run};
 // Re-exported so the many callers that reach these through `rows` keep one
 // path; `tool_status` is the definition site and what breaks the cycle with
 // `agent_chat_helpers`.
@@ -382,7 +382,7 @@ pub(super) fn project_with_filter_index<'a>(
         let filter_key = FoldKey::Filtered(run.start);
         let filter_revealed = fold.is_expanded(
             &filter_key,
-            fold_context_at(&filter_key, run.start, items, boundary),
+            fold_context_at(&filter_key, run.start, items, boundary, live_units),
         );
 
         // Every response that renders anything gets a bar — it is where the
@@ -391,8 +391,10 @@ pub(super) fn project_with_filter_index<'a>(
         let renders_something = tools >= 1 || blocks >= 1;
         let run_indent = if renders_something {
             let key = FoldKey::Response(run.start);
-            let collapsed =
-                !fold.is_expanded(&key, fold_context_at(&key, run.start, items, boundary));
+            let collapsed = !fold.is_expanded(
+                &key,
+                fold_context_at(&key, run.start, items, boundary, live_units),
+            );
             let bar_ix = rows.len();
             rows.push(
                 RenderRow::at(
@@ -822,7 +824,7 @@ impl<'items, 'rows> RunProjector<'items, 'rows> {
         let tail_key = FoldKey::Tail(run.start);
         let tail_revealed = fold.is_expanded(
             &tail_key,
-            fold_context_at(&tail_key, run.start, items, boundary),
+            fold_context_at(&tail_key, run.start, items, boundary, live_units),
         );
         let window = UnitWindow::over_tool_runs(run.clone(), context);
         let mut out = RunRows::new(
@@ -873,14 +875,16 @@ impl<'items, 'rows> RunProjector<'items, 'rows> {
                 // Members, not calls: a filter that keeps only thoughts still
                 // leaves the group something to show.
                 let group = GroupFilter::of(members.iter().copied(), items, filter);
-                let group_live = run_is_live(items, calls.iter().copied(), live_units);
+                // Two questions about one run: whether the header escapes the
+                // fold above it (any call or its subtree still works), and what
+                // the group's own `running` rule reads (its members).
+                let escapes_enclosing_fold = run_is_live(items, calls.iter().copied(), live_units);
                 {
                     let gid = tool_id(&items[grun.start]);
                     let group_key = FoldKey::ToolGroup(gid.clone());
-                    // Liveness is read off the members this walk resolved — a
-                    // streaming thought among them holds the group open.
-                    // `fold_context_at` would count a nested child as a member.
-                    let group_active = members.iter().any(|&k| is_active(&items[k]));
+                    // The same reading `fold_context_at` takes, asked of the
+                    // structure this walk already built rather than a new one.
+                    let group_active = structure.group_active(grun.clone());
                     // The fold setting is the only term: how many calls
                     // happened to land in one run must not change what the
                     // chip's rule for this block says.
@@ -891,7 +895,7 @@ impl<'items, 'rows> RunProjector<'items, 'rows> {
                     let group_tail_key = FoldKey::ToolGroupTail(gid.clone());
                     let group_tail_revealed = fold.is_expanded(
                         &group_tail_key,
-                        fold_context_at(&group_tail_key, grun.start, items, boundary),
+                        fold_context_at(&group_tail_key, grun.start, items, boundary, live_units),
                     );
                     let group_cut = UnitWindow::over_group_calls(&calls, grun.start, context);
                     out.push(
@@ -901,7 +905,7 @@ impl<'items, 'rows> RunProjector<'items, 'rows> {
                             thoughts,
                             collapsed: group_collapsed,
                         },
-                        folded && !group_live,
+                        folded && !escapes_enclosing_fold,
                         group.hides_the_header(),
                         base_indent,
                     );
@@ -957,7 +961,7 @@ impl<'items, 'rows> RunProjector<'items, 'rows> {
                     let group_key = FoldKey::ThinkingGroup(gstart);
                     let group_collapsed = !fold.is_expanded(
                         &group_key,
-                        fold_context_at(&group_key, gstart, items, boundary),
+                        fold_context_at(&group_key, gstart, items, boundary, live_units),
                     );
                     let group = GroupFilter::of(grun.clone(), items, filter);
                     out.push(

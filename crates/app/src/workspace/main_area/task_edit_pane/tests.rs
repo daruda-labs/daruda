@@ -621,3 +621,36 @@ fn task_editor_crlf_only_prompt_change_is_not_dirty(cx: &mut TestAppContext) {
     })
     .unwrap();
 }
+
+/// A base lane that is no longer registered cannot be selected; the form
+/// must not read as edited for it, neither when opened nor after a save.
+#[gpui::test]
+fn task_editor_unregistered_base_is_clean_at_open_and_after_save(cx: &mut TestAppContext) {
+    let (_root, window, ws) = build_workspace_with_project(cx);
+    cx.update_window(window.into(), |_, window, cx| {
+        ws.update(cx, |ws, cx| {
+            let task = Task::new(
+                "Old base".into(),
+                String::new(),
+                Some(std::path::PathBuf::from("/nonexistent/daruda-base")),
+            );
+            let id = task.id.clone();
+            cx.update_global::<GlobalTasks, _>(|g, _| {
+                g.add(task);
+            });
+            ws.open_task_edit_pane(Some(id), window, cx);
+            let pane = ws.active_runtime().focused_pane_id;
+            assert!(!ws.task_edit_content_for_pane(pane).unwrap().is_dirty(cx));
+            let title = ws
+                .task_edit_content_for_pane(pane)
+                .unwrap()
+                .title_input
+                .clone();
+            title.update(cx, |s, cx| s.set_value("Renamed", window, cx));
+            assert!(ws.task_edit_content_for_pane(pane).unwrap().is_dirty(cx));
+            ws.commit_task_edit_pane(pane, cx).unwrap();
+            assert!(!ws.task_edit_content_for_pane(pane).unwrap().is_dirty(cx));
+        });
+    })
+    .unwrap();
+}

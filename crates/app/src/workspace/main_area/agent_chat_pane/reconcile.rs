@@ -164,9 +164,9 @@ impl AgentChatView {
     ///
     /// A collapsed card renders no body: `FoldRow::block` only runs its body
     /// closure when expanded, and the diff / output blocks (with the `+N −M`
-    /// stat) are built inside it. Since `FoldKey::Tool` is `ExpandedWhileActive`,
-    /// every settled past card is collapsed — which is most of a long
-    /// conversation. Mirrors the render's own gate exactly
+    /// stat) are built inside it. `FoldKey::Tool` opens only by a fold rule or a
+    /// click, so most cards of a long conversation are collapsed. Mirrors the
+    /// render's own gate exactly
     /// (`fold.is_expanded(&tool_fold_key(tc), fold_context_at(..))`); a nested
     /// subagent child is judged by its own key alone, which can only *over*-build
     /// (a child expanded under a collapsed parent), never leave a rendered body
@@ -179,8 +179,10 @@ impl AgentChatView {
             return false;
         };
         let key = tool_fold_key(tc);
-        self.fold
-            .is_expanded(&key, fold_context_at(&key, ix, &self.items, boundary))
+        self.fold.is_expanded(
+            &key,
+            fold_context_at(&key, ix, &self.items, boundary, &self.live_units),
+        )
     }
 
     /// Re-run the embed reconcilers after a fold change, which is the other way
@@ -818,6 +820,18 @@ mod tests {
         WindowAccess::ByHandle(v.window_handle)
     }
 
+    /// A view whose fold mode opens every tool card, for the tests that need a
+    /// card's body — and so its embeds — on screen.
+    fn make_tools_expanded_view(
+        cx: &mut TestAppContext,
+    ) -> gpui::WindowHandle<super::AgentChatView> {
+        let window = make_test_view(cx);
+        window
+            .update(cx, |v, _, _| v.fold.set_mode(all_tools_expanded()))
+            .expect("the window is open");
+        window
+    }
+
     /// A syntax theme id the diff reconciler's highlight pass can resolve.
     const SYNTAX_THEME: &str = "base16-ocean.dark";
 
@@ -834,7 +848,7 @@ mod tests {
     /// its scroll position).
     #[gpui::test]
     fn a_theme_swap_rebuilds_diff_embeds_and_leaves_output_embeds_alone(cx: &mut TestAppContext) {
-        let window = make_test_view(cx);
+        let window = make_tools_expanded_view(cx);
         let view = window.root(cx).expect("the view is the window root");
 
         cx.update(|cx| crate::ui::theme::set_agent_chat_bg(cx, 0, 0, 0));
@@ -884,7 +898,7 @@ mod tests {
     /// the view's own observer is the whole delivery path.
     #[gpui::test]
     fn setting_the_theme_global_rebuilds_diff_embeds_through_the_observer(cx: &mut TestAppContext) {
-        let window = make_test_view(cx);
+        let window = make_tools_expanded_view(cx);
         let view = window.root(cx).expect("the view is the window root");
 
         view.update(cx, |v, cx| {
@@ -927,11 +941,10 @@ mod tests {
         tool_call_with(Vec::new(), diffs)
     }
 
-    /// Live (`InProgress`), so `ExpandedWhileActive` leaves the card expanded and
-    /// its body — the diff / output blocks the embeds back — is on screen. A
-    /// settled card is collapsed and by design has no embeds at all (see
-    /// `a_collapsed_tool_card_gets_no_embed_editors`), so the editor-lifecycle
-    /// tests below have to start from a live card.
+    /// Live (`InProgress`). Running does not open a tool card, so the
+    /// editor-lifecycle tests put it on screen with [`make_tools_expanded_view`]
+    /// — a collapsed card by design has no embeds at all (see
+    /// `a_collapsed_tool_card_gets_no_embed_editors`).
     fn tool_call_with(output: Vec<ToolOutputBlock>, diffs: Vec<DiffView>) -> ChatItem {
         ChatItem::ToolCall(ToolCallItem {
             id: "call_1".to_string(),
@@ -1330,7 +1343,7 @@ mod tests {
     #[cfg(feature = "devtools")]
     #[gpui::test]
     fn seeding_a_transcript_builds_its_diff_embeds(cx: &mut TestAppContext) {
-        let window = make_test_view(cx);
+        let window = make_tools_expanded_view(cx);
 
         // No `set_syntax_theme` here on purpose: the palette a diff embed is
         // fingerprinted against is a construction seed, so seeding is enough.
@@ -1380,8 +1393,7 @@ mod tests {
         let view = window.root(cx).expect("the view is the window root");
 
         view.update(cx, |v, cx| {
-            // Settled → `ExpandedWhileActive` derives collapsed, and no user
-            // override says otherwise.
+            // No fold rule or user override opens it.
             v.items = vec![settled_tool("call_a", vec![raw("big output")])];
             v.reconcile_output_editors(&ReconcileScope::All, &mut by_handle(v), cx);
         });
@@ -1393,12 +1405,28 @@ mod tests {
         });
     }
 
+    /// A running call opens no card on its own: only the fold mode or a click
+    /// does, so with neither its body is off screen and needs no editor.
+    #[gpui::test]
+    fn a_live_tool_card_without_a_fold_rule_gets_no_embed_editors(cx: &mut TestAppContext) {
+        let window = make_test_view(cx);
+        let view = window.root(cx).expect("the view is the window root");
+
+        view.update(cx, |v, cx| {
+            v.items = vec![tool_named("call_a", vec![raw("streaming output")])];
+            v.reconcile_output_editors(&ReconcileScope::All, &mut by_handle(v), cx);
+        });
+        view.read_with(cx, |v, _| {
+            assert!(v.assets.output_editors.is_empty());
+        });
+    }
+
     /// The counterpart: a card whose body *is* on screen must have its editor, or
     /// the body falls back to the inline per-line text walk the embed exists to
-    /// avoid. A live card is expanded by `ExpandedWhileActive`.
+    /// avoid.
     #[gpui::test]
-    fn a_live_tool_cards_editors_are_materialized(cx: &mut TestAppContext) {
-        let window = make_test_view(cx);
+    fn an_expanded_live_tool_cards_editors_are_materialized(cx: &mut TestAppContext) {
+        let window = make_tools_expanded_view(cx);
         let view = window.root(cx).expect("the view is the window root");
 
         view.update(cx, |v, cx| {
@@ -1602,6 +1630,8 @@ mod tests {
     /// track what is on screen, not how long the conversation has run.
     #[gpui::test]
     fn live_embed_editors_stay_bounded_as_the_conversation_grows(cx: &mut TestAppContext) {
+        use super::super::fold::FoldKey;
+
         let window = make_test_view(cx);
         let view = window.root(cx).expect("the view is the window root");
 
@@ -1611,13 +1641,14 @@ mod tests {
         items.push(tool_named("call_live", vec![raw("streaming")]));
         view.update(cx, |v, cx| {
             v.items = items;
+            v.fold.set_all([FoldKey::Tool("call_live".into())], true);
             v.reconcile_output_editors(&ReconcileScope::All, &mut by_handle(v), cx);
         });
         view.read_with(cx, |v, _| {
             assert_eq!(
                 v.assets.output_editors.len(),
                 1,
-                "only the in-flight card's body is on screen"
+                "only the opened card's body is on screen"
             );
         });
     }
@@ -1637,7 +1668,7 @@ mod tests {
     /// scoped pass that kept doing so would drop every other tool's editor.
     #[gpui::test]
     fn a_scoped_reconcile_leaves_other_tools_editors_alone(cx: &mut TestAppContext) {
-        let window = make_test_view(cx);
+        let window = make_tools_expanded_view(cx);
         let view = window.root(cx).expect("the view is the window root");
 
         view.update(cx, |v, cx| {
@@ -1689,7 +1720,7 @@ mod tests {
     /// its indexes no longer reach.
     #[gpui::test]
     fn a_scoped_reconcile_still_evicts_its_own_vanished_keys(cx: &mut TestAppContext) {
-        let window = make_test_view(cx);
+        let window = make_tools_expanded_view(cx);
         let view = window.root(cx).expect("the view is the window root");
 
         view.update(cx, |v, cx| {
@@ -1730,7 +1761,7 @@ mod tests {
     /// it. No scoped pass can see that, which is why the variant exists.
     #[gpui::test]
     fn the_all_scope_evicts_a_tool_that_left_the_conversation(cx: &mut TestAppContext) {
-        let window = make_test_view(cx);
+        let window = make_tools_expanded_view(cx);
         let view = window.root(cx).expect("the view is the window root");
 
         view.update(cx, |v, cx| {
@@ -1759,7 +1790,7 @@ mod tests {
     /// turn. A scoped pass must touch one call's content, not all of it.
     #[gpui::test]
     fn a_scoped_diff_reconcile_does_not_rehash_the_whole_conversation(cx: &mut TestAppContext) {
-        let window = make_test_view(cx);
+        let window = make_tools_expanded_view(cx);
         let view = window.root(cx).expect("the view is the window root");
 
         // 200 settled calls, ~128 KiB of diff text each: ~25 MiB the full pass
@@ -1828,7 +1859,7 @@ mod tests {
     /// `a_fold_click_inside_the_window_update_cycle_builds_its_editors`.
     #[gpui::test]
     fn output_editors_are_built_reused_rebuilt_and_dropped(cx: &mut TestAppContext) {
-        let window = make_test_view(cx);
+        let window = make_tools_expanded_view(cx);
         let view = window.root(cx).expect("the view is the window root");
 
         let reconcile_with = |cx: &mut TestAppContext, output: Vec<ToolOutputBlock>| {
@@ -1903,7 +1934,7 @@ mod tests {
     /// unchanged keeps the editor it already has.
     #[gpui::test]
     fn diff_editors_are_dropped_when_their_diff_is_gone(cx: &mut TestAppContext) {
-        let window = make_test_view(cx);
+        let window = make_tools_expanded_view(cx);
         let view = window.root(cx).expect("the view is the window root");
 
         let reconcile_with = |cx: &mut TestAppContext, items: Vec<ChatItem>| {

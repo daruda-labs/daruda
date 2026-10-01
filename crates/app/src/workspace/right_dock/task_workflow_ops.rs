@@ -499,8 +499,6 @@ impl Workspace {
     /// it again (see `return_task_to_backlog` for where).
     pub(in crate::workspace) fn reopen_task(&mut self, task_id: &str, cx: &mut Context<Self>) {
         self.return_task_to_backlog(task_id, cx);
-        self.save_tasks_dirty(cx);
-        cx.notify();
     }
 
     /// `Reopen` + `start_task` in one click — for the `[Retry]`
@@ -516,7 +514,8 @@ impl Workspace {
     }
 
     /// Put a finished task back in Backlog so it can run again — in the lane
-    /// its earlier run created, while that lane is still registered.
+    /// its earlier run created, while that lane is still registered. Saved
+    /// here, since a Retry's Start may stop before it saves anything.
     fn return_task_to_backlog(&mut self, task_id: &str, cx: &mut Context<Self>) {
         let own_lane = cx
             .global::<GlobalTasks>()
@@ -537,6 +536,8 @@ impl Workspace {
         for sid in &cleared {
             self.claude.tool_use_failure_counts.remove(sid);
         }
+        self.save_tasks_dirty(cx);
+        cx.notify();
     }
 
     // ------------------------------------------------------------------

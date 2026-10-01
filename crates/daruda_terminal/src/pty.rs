@@ -331,15 +331,9 @@ pub fn spawn_pty(config: &PtyConfig) -> Result<PtyHandle, PtyError> {
     spawn_pty_real(config)
 }
 
-/// Zero-cost stub used by dependent crates' tests. Returns live but silent
-/// channels and no underlying subprocess — shell startup cost is eliminated
-/// while the pane still reads as a running shell.
-///
-/// The senders are deliberately never dropped: a pane treats a signalled
-/// *or* a disconnected `exit_rx` as shell termination, so letting them fall
-/// out of scope would close every tab a test opens. The stdin receiver is
-/// kept too, so a write succeeds as it would on a live shell. One small
-/// leak per stubbed pane, in test builds only.
+/// Zero-cost stub for dependent crates' tests: live but silent channels and
+/// no subprocess. Every other channel end is leaked on purpose — a dropped
+/// exit sender reads as shell exit, a dropped stdin receiver fails writes.
 #[cfg(any(test, feature = "test-support"))]
 pub fn spawn_pty_stub() -> Result<PtyHandle, PtyError> {
     let (stdin_tx, stdin_rx) = mpsc::channel::<Vec<u8>>();

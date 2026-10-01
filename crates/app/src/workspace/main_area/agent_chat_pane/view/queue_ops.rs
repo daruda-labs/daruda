@@ -302,7 +302,8 @@ impl AgentChatView {
             .map(|anchor| anchor + 1)
             .filter(|&run_start| {
                 let key = FoldKey::Response(run_start);
-                self.fold.is_expanded(&key, fold_context(&key, &self.items))
+                self.fold
+                    .is_expanded(&key, fold_context(&key, &self.items, &self.live_units))
             });
         self.fold.hold_response(held);
     }
