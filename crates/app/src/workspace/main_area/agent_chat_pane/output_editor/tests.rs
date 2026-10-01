@@ -181,34 +181,27 @@ fn fingerprint_tracks_text_and_language() {
     );
 }
 
-/// The strip below the last row, shared by every case.
-fn strip() -> f32 {
-    theme::SCROLLBAR_W + theme::SCROLLBAR_MARGIN_R
-}
-
+/// The embed is exactly its rows: a wrapped editor never scrolls sideways, so
+/// there is no strip under the last row for a horizontal thumb to ride on.
 #[test]
 fn bounded_embed_height_cases() {
     let row_height = 20.0;
     let max_rows = 12;
     assert_eq!(
         bounded_embed_height(3, max_rows, row_height),
-        px(3.0 * row_height + strip())
+        px(3.0 * row_height)
     );
 
     assert_eq!(
         bounded_embed_height(max_rows, max_rows, row_height),
-        px(max_rows as f32 * row_height + strip())
-    );
-    assert_eq!(
-        bounded_embed_height(max_rows, max_rows, row_height),
-        px(max_rows as f32 * row_height + strip())
+        px(max_rows as f32 * row_height)
     );
 
     // The bound is what makes `InputState` shape only the visible rows, so
     // it must not grow with the output.
     assert_eq!(
         bounded_embed_height(11_000, max_rows, row_height),
-        px(max_rows as f32 * row_height + strip())
+        px(max_rows as f32 * row_height)
     );
 }
 

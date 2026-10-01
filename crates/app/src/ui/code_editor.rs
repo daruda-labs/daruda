@@ -166,7 +166,7 @@ pub fn file_viewer_editor(state: &Entity<InputState>, cx: &App) -> Input {
 /// actually changed, so a gesture at either extreme still bubbles to the
 /// transcript instead of being captured. The built-in scrollbar is suppressed —
 /// the host overlays its own thin daruda thumbs
-/// (`crate::ui::scrollbar::{vertical,horizontal}_thumb`, paired with
+/// (`crate::ui::scrollbar::vertical_thumb`, paired with
 /// `InputState::last_bounds`/`scroll_size`), matching every other scrollable
 /// surface in the app instead of gpui_component's globally-themed bar.
 pub fn embedded_code_viewer(state: &Entity<InputState>, background: Hsla, cx: &App) -> Input {

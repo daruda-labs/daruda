@@ -619,6 +619,46 @@ forces the re-read. The same holds for `crates/app/locales/`.
 
 ---
 
+## `crates/gpui_component/src/input/state.rs` — vendored, **a re-wrap reaches the host**
+
+Applied in place, on the same terms as the sections above. Separate from
+`gpui-component-input-state-ime-selection.patch`, which targets the same file
+but is recorded as a `.patch`; this one is a comment-marked hunk.
+
+### Why
+
+`InputState::set_input_bounds` runs from `TextElement::paint`. When the painted
+width differs from the last one it re-wraps the text, updates the row count
+`display_rows()` reports, and calls `cx.notify()` — from inside the draw. gpui
+drops that notify: `WindowInvalidator::invalidate_view` records the entity but
+skips `dirty = true` while a draw phase is active, and `Window::draw` clears
+`dirty_views` once the frame is painted (the same behaviour the ferrum_flow
+viewport patch below works around). So a host that sizes itself from
+`display_rows()` — the agent-chat embed, which caps its box at the editor's
+row count — painted the editor at its *logical* line count and stayed there
+until an unrelated event happened to dirty the window. With soft wrap on, that
+is every long line on every first paint, every rebuilt editor, and every pane
+resize.
+
+### What diverges
+
+One hunk: the `cx.notify()` at the end of `set_input_bounds` becomes
+`cx.defer(move |cx| cx.notify(entity_id))`. Deferred, it lands after the frame,
+where gpui honours it — the window goes dirty and the host view re-renders at
+the re-wrapped count. It fires only on a width change, so nothing is added to
+the steady-state frame.
+
+### Re-vendor procedure
+
+Copy upstream `state.rs` in, re-apply the IME `.patch`, then restore the
+deferred notify. Paired tests in `crates/app/src/workspace/tests/` fail
+loudly if you forget — `agent_output_layout::long_output_lines_wrap_to_the_embed_width`
+(its "after a streamed update" stage is the exact repro: a rebuilt editor whose
+embed stayed at the logical height) and
+`agent_diff_layout::long_diff_lines_wrap_to_the_embed_width`.
+
+---
+
 ## `crates/ferrum_flow/` — vendored, **seven source patches**
 
 Provenance for a vendored crate, plus the source deltas it now carries.

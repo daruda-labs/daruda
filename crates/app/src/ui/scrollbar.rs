@@ -10,8 +10,8 @@
 //! (handle types differ) and pass plain pixels in.
 //!
 //! [`horizontal_thumb`] is the X-axis mirror, for a region whose content
-//! overflows sideways (an agent-chat embed's long, non-wrapped lines) — same
-//! [`thumb_geometry`] math, transposed onto the width/left/bottom axis.
+//! overflows sideways — same [`thumb_geometry`] math, transposed onto the
+//! width/left/bottom axis.
 
 use std::cell::Cell;
 use std::rc::Rc;
@@ -70,11 +70,9 @@ pub fn vertical_thumb(
 }
 
 /// [`vertical_thumb`]'s horizontal mirror — for content that overflows on the X
-/// axis (an agent-chat embed's long, non-wrapped lines). `scroll_offset_x` is the handle's
-/// `offset().x` (negative as content scrolls right). Unlike [`vertical_thumb`]
-/// there is no `top_offset` — an embed reserves its own bottom strip (see
-/// `bounded_embed_height`) so the thumb sits flush at the bottom of its
-/// container.
+/// axis. `scroll_offset_x` is the handle's `offset().x` (negative as content
+/// scrolls right). Unlike [`vertical_thumb`] there is no `top_offset`: the thumb
+/// sits flush at the bottom of its container.
 ///
 /// Debug selector (test hook): the `id` string, as in [`vertical_thumb`].
 pub fn horizontal_thumb(

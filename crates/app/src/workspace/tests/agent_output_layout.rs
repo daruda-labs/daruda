@@ -44,7 +44,8 @@ fn default_max_height() -> f32 {
 }
 
 /// The row count `calculate_visible_range` may report at most: a full viewport
-/// plus its `extra_rows = 1` and the row that straddles the bottom edge.
+/// plus its `extra_rows = 1`, and one more of slack so a rounding of the row
+/// height cannot flip the band.
 fn max_visible_rows() -> usize {
     capped_rows() + 2
 }
@@ -62,14 +63,14 @@ struct OutputProbe {
 }
 
 impl OutputProbe {
-    /// Mirrors `output_editor::create_output_editor`: multi-line, no soft wrap,
+    /// Mirrors `output_editor::create_output_editor`: multi-line, soft-wrapped,
     /// code-editor mode with no gutter, value set, then read-only.
     fn new(rows: usize, window: &mut Window, cx: &mut Context<Self>) -> Self {
         let text = numbered_lines(rows);
         let editor = cx.new(|cx_state| {
             let mut state = crate::ui::InputState::new(window, cx_state)
                 .multi_line(true)
-                .soft_wrap(false)
+                .soft_wrap(true)
                 .code_editor(crate::ui::highlighter::PLAIN_LANGUAGE)
                 .line_number(false);
             state.set_value(text, window, cx_state);
@@ -145,7 +146,7 @@ async fn large_output_embed_is_capped_and_shapes_only_visible_rows(cx: &mut Test
     assert_eq!(
         wrapper.size.height,
         bounded_embed_height(LARGE_ROWS, capped_rows(), default_row_height()),
-        "the embed is pinned at the cap plus the thumb strip"
+        "the embed is pinned at the cap"
     );
     assert!(
         wrapper.size.height < px(LARGE_ROWS as f32 * default_row_height()),
@@ -232,6 +233,22 @@ fn render_shell_output_card(
     gpui::AnyWindowHandle,
     Entity<crate::workspace::main_area::agent_chat_pane::view::AgentChatView>,
 ) {
+    let mut printed = numbered_lines(rows);
+    if trailing_newline {
+        printed.push('\n');
+    }
+    render_shell_output_card_with(cx, printed)
+}
+
+/// [`render_shell_output_card`] for an arbitrary `printed` body: one completed
+/// `b1` shell call, its card expanded, painted and settled.
+fn render_shell_output_card_with(
+    cx: &mut TestAppContext,
+    printed: String,
+) -> (
+    gpui::AnyWindowHandle,
+    Entity<crate::workspace::main_area::agent_chat_pane::view::AgentChatView>,
+) {
     use crate::workspace::main_area::pane::PaneContent;
     use agent_client_protocol::schema::v1::{
         SessionUpdate, ToolCall, ToolCallStatus, ToolCallUpdate, ToolCallUpdateFields, ToolKind,
@@ -256,10 +273,6 @@ fn render_shell_output_card(
             .expect("agent chat pane present")
     });
 
-    let mut printed = numbered_lines(rows);
-    if trailing_newline {
-        printed.push('\n');
-    }
     view.update(cx, |v, cx| {
         let mut fields = ToolCallUpdateFields::default();
         fields.status = Some(ToolCallStatus::Completed);
@@ -293,6 +306,136 @@ fn render_shell_output_card(
         .unwrap();
     cx.run_until_parked();
     (window_handle.into(), view)
+}
+
+/// Replace the `b1` call's output with `printed`, the way a streamed command's
+/// next chunk reaches the reconciler: through the `content` channel, which the
+/// mapper treats as a whole-body replacement — `raw_output` only ever fills an
+/// empty body (`push_raw_output_fallback`). Fenced, as the Claude adapter's
+/// `markdownEscape` delivers shell bytes, so the block still qualifies for the
+/// embed.
+fn update_shell_output(
+    cx: &mut TestAppContext,
+    view: &Entity<crate::workspace::main_area::agent_chat_pane::view::AgentChatView>,
+    printed: String,
+) {
+    use agent_client_protocol::schema::v1::{
+        Content, ContentBlock, SessionUpdate, TextContent, ToolCallContent, ToolCallStatus,
+        ToolCallUpdate, ToolCallUpdateFields,
+    };
+
+    view.update(cx, |v, cx| {
+        let mut fields = ToolCallUpdateFields::default();
+        fields.status = Some(ToolCallStatus::Completed);
+        fields.content = Some(vec![ToolCallContent::Content(Content::new(
+            ContentBlock::Text(TextContent::new(format!("```\n{printed}\n```"))),
+        ))]);
+        v.apply_event(
+            daruda_acp::AcpEvent::Update(Box::new(SessionUpdate::ToolCallUpdate(
+                ToolCallUpdate::new("b1", fields),
+            ))),
+            "",
+            false,
+            cx,
+        );
+    });
+    cx.run_until_parked();
+}
+
+/// The `b1` editor's wrap facts: display rows, and its viewport vs content
+/// widths. `rows` above the logical line count is the wrap itself; content no
+/// wider than the viewport is the absence of the sideways scroll it replaces.
+fn output_editor_wrap_facts(
+    cx: &mut TestAppContext,
+    view: &Entity<crate::workspace::main_area::agent_chat_pane::view::AgentChatView>,
+) -> (usize, gpui::Pixels, gpui::Pixels) {
+    view.read_with(cx, |v, cx| {
+        let state = v
+            .assets
+            .output_editors
+            .get("b1#0")
+            .expect("output editor built for the shell output")
+            .read(cx);
+        (
+            state.display_rows(),
+            state
+                .last_bounds()
+                .expect("the embedded editor painted")
+                .size
+                .width,
+            state.scroll_size().width,
+        )
+    })
+}
+
+/// A long output line wraps to the embed's width instead of running past it
+/// behind a horizontal scroller — and the embed's height is the wrapped row
+/// count, not the logical one, at every point the row count can move: the first
+/// paint, a streamed update (which rebuilds the editor from scratch), and a
+/// narrower pane.
+#[gpui::test]
+async fn long_output_lines_wrap_to_the_embed_width(cx: &mut TestAppContext) {
+    let long_line = "word ".repeat(24).trim_end().to_string();
+    let printed = format!("first\n{long_line}\nlast");
+    const LOGICAL_ROWS: usize = 3;
+    let (window_handle, view) = render_shell_output_card_with(cx, printed.clone());
+
+    let assert_wrapped = |cx: &mut TestAppContext, logical: usize, stage: &str| -> usize {
+        let (rows, viewport_w, content_w) = output_editor_wrap_facts(cx, &view);
+        assert!(
+            rows > logical,
+            "{stage}: {rows} display rows for {logical} lines — the long line did not wrap"
+        );
+        assert!(
+            rows < capped_rows(),
+            "{stage}: fixture wrapped to {rows} rows, past the {}-row cap — the height \
+             would say nothing about wrapping",
+            capped_rows()
+        );
+        assert!(
+            content_w <= viewport_w,
+            "{stage}: content {content_w:?} wider than the {viewport_w:?} viewport — \
+             the embed still scrolls sideways"
+        );
+        let mut vcx = gpui::VisualTestContext::from_window(window_handle, cx);
+        let embed = vcx
+            .debug_bounds("agent-chat-out-embed-b1#0")
+            .expect("the bounded embed painted");
+        assert_eq!(
+            embed.size.height,
+            bounded_embed_height(rows, capped_rows(), default_row_height()),
+            "{stage}: the embed's height does not follow the wrapped row count"
+        );
+        rows
+    };
+
+    let first_paint = assert_wrapped(cx, LOGICAL_ROWS, "first paint");
+
+    // A streamed chunk: the reconciler rebuilds the editor, whose fresh wrapper
+    // has not seen a width yet. It must settle on the wrapped count again.
+    update_shell_output(cx, &view, format!("{printed}\n{long_line}"));
+    let streamed = assert_wrapped(cx, LOGICAL_ROWS + 1, "after a streamed update");
+    assert!(
+        streamed > first_paint,
+        "a second long line must add wrapped rows ({first_paint} → {streamed})"
+    );
+
+    // The pane narrows: every row re-wraps at the new width and the embed's
+    // height follows, with nothing but the list's own re-measure to carry it.
+    // 640px is well under the reading width the column is otherwise capped at,
+    // so the embed itself gets narrower — a wider window would only shrink the
+    // margins around it.
+    let viewport = cx
+        .update_window(window_handle, |_, window, _| window.viewport_size())
+        .expect("the window is open");
+    gpui::VisualTestContext::from_window(window_handle, cx)
+        .simulate_resize(size(px(640.), viewport.height));
+    cx.run_until_parked();
+    let narrowed = assert_wrapped(cx, LOGICAL_ROWS + 1, "after narrowing the pane");
+    assert!(
+        narrowed > streamed,
+        "a narrower pane must wrap the long lines onto more rows ({streamed} → {narrowed})"
+    );
 }
 
 /// Append `count` further completed shell cards to `view`, so the transcript

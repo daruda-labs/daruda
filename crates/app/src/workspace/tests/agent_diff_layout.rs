@@ -37,7 +37,8 @@ fn default_row_height() -> f32 {
 }
 
 /// The row count `calculate_visible_range` may report at most: a full viewport
-/// plus its `extra_rows = 1` and the row that straddles the bottom edge.
+/// plus its `extra_rows = 1`, and one more of slack so a rounding of the row
+/// height cannot flip the band.
 fn max_visible_rows() -> usize {
     capped_rows() + 2
 }
@@ -49,7 +50,7 @@ struct DiffProbe {
 
 impl DiffProbe {
     /// Mirrors `agent_chat_helpers::create_diff_editor` construction:
-    /// multi-line, no soft wrap, code-editor mode, `rows` seeded to the
+    /// multi-line, soft-wrapped, code-editor mode, `rows` seeded to the
     /// display-row count, value set, then read-only.
     fn new(text: &str, window: &mut Window, cx: &mut Context<Self>) -> Self {
         let rows = text.lines().count().max(1);
@@ -57,7 +58,7 @@ impl DiffProbe {
         let editor = cx.new(|cx_state| {
             let mut state = crate::ui::InputState::new(window, cx_state)
                 .multi_line(true)
-                .soft_wrap(false)
+                .soft_wrap(true)
                 .code_editor("rust")
                 .rows(rows);
             state.set_value(text, window, cx_state);
@@ -150,7 +151,7 @@ async fn diff_editor_keeps_seeded_rows_and_paints_full_height(cx: &mut TestAppCo
     );
     assert_eq!(
         wrapper.size.height, expected,
-        "an uncapped diff measures its content plus the thumb strip"
+        "an uncapped diff measures exactly its content"
     );
     let editor_h = editor_bounds
         .expect("the editor text element painted at least once")
@@ -499,6 +500,116 @@ async fn a_large_write_diff_renders_through_the_capped_embed(cx: &mut TestAppCon
     assert!(
         scroll_h >= px(rows as f32 * default_row_height()),
         "scroll extent {scroll_h:?} does not cover the full diff — rows lost"
+    );
+}
+
+/// A diff line longer than the embed wraps inside it — gutter and all — rather
+/// than running out past the card behind a horizontal scroller, and the embed's
+/// height is the wrapped row count. The screenshot that motivated this was a
+/// memory-file `Edit` whose prose lines ran to several hundred characters.
+#[gpui::test]
+async fn long_diff_lines_wrap_to_the_embed_width(cx: &mut TestAppContext) {
+    use crate::workspace::main_area::pane::PaneContent;
+    use agent_client_protocol::schema::v1::{
+        Diff, SessionUpdate, ToolCall, ToolCallContent, ToolCallStatus, ToolCallUpdate,
+        ToolCallUpdateFields, ToolKind,
+    };
+
+    let (window_handle, workspace) = super::build_workspace(cx);
+    cx.run_until_parked();
+    cx.update_window(window_handle.into(), |_, window, cx| {
+        workspace.update(cx, |ws, cx| ws.open_agent_chat_pane(window, cx));
+    })
+    .unwrap();
+    cx.run_until_parked();
+
+    let view = workspace.read_with(cx, |ws, _| {
+        ws.active_runtime()
+            .panes
+            .iter()
+            .find_map(|p| match &p.content {
+                PaneContent::AgentChat(ac) => Some(ac.view.clone()),
+                _ => None,
+            })
+            .expect("agent chat pane present")
+    });
+
+    let long_line = "word ".repeat(40).trim_end().to_string();
+    let old_text = "---\nname: note\n---\n".to_string();
+    let new_text = format!("{old_text}\n{long_line}\n");
+    view.update(cx, |v, cx| {
+        let mut fields = ToolCallUpdateFields::default();
+        fields.status = Some(ToolCallStatus::Completed);
+        v.apply_event(
+            daruda_acp::AcpEvent::Update(Box::new(SessionUpdate::ToolCall(
+                ToolCall::new("e1", "Edit /tmp/memory/note.md")
+                    .kind(ToolKind::Edit)
+                    .content(vec![ToolCallContent::Diff(
+                        Diff::new("/tmp/memory/note.md", new_text).old_text(old_text),
+                    )]),
+            ))),
+            "",
+            false,
+            cx,
+        );
+        v.apply_event(
+            daruda_acp::AcpEvent::Update(Box::new(SessionUpdate::ToolCallUpdate(
+                ToolCallUpdate::new("e1", fields),
+            ))),
+            "",
+            false,
+            cx,
+        );
+    });
+    cx.run_until_parked();
+    fold_in_window(cx, window_handle.into(), &view, |v, window, cx| {
+        v.set_all_folds(true, window, cx)
+    });
+    cx.run_until_parked();
+    cx.update_window(window_handle.into(), |_, window, _| window.refresh())
+        .unwrap();
+    cx.run_until_parked();
+
+    let (logical_rows, rows, viewport_w, content_w) = view.read_with(cx, |v, cx| {
+        let state = v
+            .assets
+            .diff_editors
+            .get("e1#0")
+            .expect("diff editor built for the edit")
+            .read(cx);
+        (
+            state.value().lines().count(),
+            state.display_rows(),
+            state
+                .last_bounds()
+                .expect("the embedded editor painted")
+                .size
+                .width,
+            state.scroll_size().width,
+        )
+    });
+    assert!(
+        rows > logical_rows,
+        "{rows} display rows for {logical_rows} diff lines — the long line did not wrap"
+    );
+    assert!(
+        content_w <= viewport_w,
+        "content {content_w:?} wider than the {viewport_w:?} viewport — the diff still \
+         scrolls sideways"
+    );
+
+    let mut vcx = gpui::VisualTestContext::from_window(window_handle.into(), cx);
+    let embed = vcx
+        .debug_bounds("agent-chat-out-embed-diff-e1#0")
+        .expect("the bounded embed painted — diff_body did not embed the editor");
+    assert_eq!(
+        embed.size.height,
+        bounded_embed_height(
+            rows,
+            theme::AGENT_CHAT_DIFF_EMBED_MAX_ROWS,
+            default_row_height(),
+        ),
+        "the diff embed's height does not follow the wrapped row count"
     );
 }
 

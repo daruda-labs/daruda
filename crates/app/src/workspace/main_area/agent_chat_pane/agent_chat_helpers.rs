@@ -557,9 +557,10 @@ fn diff_stat_from_hunks(
 
 /// Create + configure a read-only diff editor entity against the live window
 /// `access` resolves. Mirrors the File viewer's editor construction
-/// (`multi_line` + `soft_wrap(false)` + `code_editor`) and the diff-config it
-/// applies (`set_disabled(true)` for read-only + decorations + injected
-/// highlight spans). Returns `None` if the owning window is gone.
+/// (`multi_line` + `code_editor`) and the diff-config it applies
+/// (`set_disabled(true)` for read-only + decorations + injected highlight
+/// spans), but wrapped where the viewer scrolls sideways — an embed has no
+/// width of its own to spend. Returns `None` if the owning window is gone.
 ///
 /// The by-handle half of [`WindowAccess`] uses the view's stored handle rather
 /// than `WindowRegistry::handle_for_workspace(cx.entity_id())` because after the
@@ -576,10 +577,10 @@ pub(super) fn create_diff_editor(
     match access.with(cx, move |window, cx_w| {
         cx_w.new(|cx_state| {
             // One synthetic-buffer line per decoration (no trailing newline in
-            // `model.text`), so this is the editor's display-row count. Seeding
-            // it up front makes `display_rows()` correct from the first render
-            // — the diff body reads it to size the (parent-height-less) editor
-            // to its full content instead of a collapsed single line.
+            // `model.text`), so this is the editor's display-row count until its
+            // first paint wraps it to a width. Seeding it makes `display_rows()`
+            // size the (parent-height-less) editor to its content on that first
+            // render instead of a collapsed single line.
             let rows = model.decorations.len().max(1);
             // `language` selects CodeEditor mode (gutter, indent guides), not
             // the colours: `set_highlight_override` below short-circuits the
@@ -587,7 +588,7 @@ pub(super) fn create_diff_editor(
             // is not valid source for any grammar.
             let mut state = gpui_component::input::InputState::new(window, cx_state)
                 .multi_line(true)
-                .soft_wrap(false)
+                .soft_wrap(true)
                 .code_editor(language)
                 .rows(rows);
             state.set_value(model.text, window, cx_state);

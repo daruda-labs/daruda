@@ -12,7 +12,6 @@ use gpui::{AppContext as _, Context, Entity, Pixels, SharedString, px};
 use super::view::AgentChatView;
 use super::window_access::WindowAccess;
 use crate::ui::highlighter::{PLAIN_LANGUAGE, language_for_name};
-use crate::ui::theme;
 use crate::workspace::main_area::pane_tree::PaneId;
 
 /// A tool-output block's verbatim body plus the language it can be highlighted
@@ -161,12 +160,10 @@ pub(super) fn embed_text_height(rows: usize, row_height: f32) -> Pixels {
 }
 
 /// Height of a `rows`-row embed: its text extent or the configured-row cap,
-/// whichever is smaller, plus a strip for the custom horizontal thumb —
-/// `SCROLLBAR_W` (its height) plus `SCROLLBAR_MARGIN_R`
-/// (`horizontal_thumb`'s `.bottom()` inset).
-/// Below the cap that strip is empty, so the thumb clears the last text row;
-/// once the cap engages the editor fills the whole box and whatever row the
-/// strip lands on shows through beneath the thumb.
+/// whichever is smaller. `rows` is the editor's *display* rows — the wrapped
+/// count once it has painted at a width — so the box is exactly its text and
+/// carries no strip for a horizontal thumb: a wrapped editor never scrolls
+/// sideways.
 ///
 /// `max_rows` is the caller's: a diff and a verbatim output are worth different
 /// budgets (see [`theme::AGENT_CHAT_DIFF_EMBED_MAX_ROWS`]).
@@ -177,7 +174,7 @@ pub(in crate::workspace) fn bounded_embed_height(
 ) -> Pixels {
     let text_h = f32::from(embed_text_height(rows, row_height));
     let max_h = max_rows.max(1) as f32 * row_height;
-    px(text_h.min(max_h) + theme::SCROLLBAR_W + theme::SCROLLBAR_MARGIN_R)
+    px(text_h.min(max_h))
 }
 
 /// Drop one trailing line terminator, so the editor's row count is the number
@@ -215,13 +212,13 @@ pub(super) fn create_output_editor(
     let text = without_trailing_terminator(text);
     match access.with(cx, move |window, cx_w| {
         cx_w.new(|cx_state| {
-            // Wrapping re-wraps the whole text on every width change and makes
-            // `display_rows()` width-dependent, so the chat list's measured row
-            // height would move with the pane width. Off, height is a pure
-            // function of content — same choice as the file viewer's editor.
+            // Wrapped, unlike the file viewer's editor: a long output line reads
+            // in place instead of behind a sideways scroll. The wrap makes
+            // `display_rows()` width-dependent, which the embed's height absorbs
+            // — see `render/embed.rs` for how that stays in step with the list.
             let mut state = crate::ui::InputState::new(window, cx_state)
                 .multi_line(true)
-                .soft_wrap(false)
+                .soft_wrap(true)
                 // The built-in tree-sitter path extracts styles for the visible
                 // range only; a `set_highlight_override` would instead colour
                 // the entire text on the main thread at creation.

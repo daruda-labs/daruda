@@ -2299,7 +2299,13 @@ impl InputState {
 
                 self.text_wrapper.set_wrap_width(wrap_width, cx);
                 self.mode.update_auto_grow(&self.text_wrapper);
-                cx.notify();
+                // daruda vendor patch — this runs from `TextElement::paint`, and
+                // gpui drops a notify raised mid-draw (`invalidate_view` skips
+                // `dirty` while a draw phase is active; `draw` then clears
+                // `dirty_views`). Deferred, it lands after the frame, so a host
+                // sizing itself from `display_rows()` sees the re-wrapped count.
+                let entity_id = cx.entity_id();
+                cx.defer(move |cx| cx.notify(entity_id));
             }
         }
     }
