@@ -741,7 +741,7 @@ fn zoomable_image(id: impl Into<ElementId>, image: &CachedImage) -> AnyElement {
     let image_for_click = image.clone();
     div()
         .id(id)
-        .w(px(image.logical_width()))
+        .w(px(image.block_width()))
         .max_w_full()
         .cursor_pointer()
         .on_click(move |_, window, cx| {
@@ -1171,6 +1171,107 @@ mod tests {
         assert_eq!(
             exit_badge_label(&exit),
             Some(s::agent_chat_tool_exit_signal("SIGKILL"))
+        );
+    }
+
+    /// A tool image wider than its card shrinks to the card *and its height
+    /// shrinks with it*: the box it occupies is the image, with no blank band
+    /// above or below. `img` derives a definite height from the declared width
+    /// before `max_w_full` narrows it, so a height left to `img` keeps the
+    /// unshrunk value and `ObjectFit::Contain` letterboxes the bitmap inside it.
+    #[gpui::test]
+    async fn a_shrunk_tool_image_keeps_its_aspect_ratio(cx: &mut gpui::TestAppContext) {
+        use gpui::{InteractiveElement as _, VisualTestContext};
+
+        const CARD_W: f32 = 400.;
+        // Twice as wide as the card, and short enough that the 600px height
+        // cap cannot be what decides the answer.
+        let raster = crate::workspace::main_area::file_view_pane::visual::RasterImage {
+            width: 800,
+            height: 400,
+            bgra: vec![0; 800 * 400 * 4],
+            scale: 1.0,
+        };
+        let image = CachedImage::from_raster(raster).expect("valid raster");
+
+        struct Probe(CachedImage);
+        impl gpui::Render for Probe {
+            fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+                div().w(px(CARD_W)).flex().flex_col().child(
+                    div()
+                        .debug_selector(|| "image-box".into())
+                        .child(zoomable_image("probe-image", &self.0)),
+                )
+            }
+        }
+
+        crate::test_support::init_gpui_component(cx);
+        let (_, vcx) = cx.add_window_view(|_, _| Probe(image));
+        vcx.run_until_parked();
+        vcx.update(|window, _| window.refresh());
+        vcx.run_until_parked();
+        let bounds = VisualTestContext::debug_bounds(vcx, "image-box").expect("painted");
+        assert_eq!(
+            bounds.size.width,
+            px(CARD_W),
+            "the image shrinks to the card"
+        );
+        assert_eq!(
+            bounds.size.height,
+            px(CARD_W / 2.),
+            "an 800x400 image shrunk to {CARD_W}px wide must be {}px tall, not \
+             letterboxed inside its unshrunk height",
+            CARD_W / 2.
+        );
+    }
+
+    /// The other axis of the same rule: an image taller than the height cap is
+    /// laid out at the width that makes it exactly the cap tall, so the box is
+    /// still the image — no band beside it for a click to land on.
+    #[gpui::test]
+    async fn a_height_capped_tool_image_keeps_its_aspect_ratio(cx: &mut gpui::TestAppContext) {
+        use gpui::{InteractiveElement as _, VisualTestContext};
+
+        let cap = theme::MD_IMAGE_MAX_HEIGHT;
+        // Ten times taller than wide, and narrow enough that the card's width
+        // cannot be what decides the answer.
+        let raster = crate::workspace::main_area::file_view_pane::visual::RasterImage {
+            width: 100,
+            height: 1000,
+            bgra: vec![0; 100 * 1000 * 4],
+            scale: 1.0,
+        };
+        let image = CachedImage::from_raster(raster).expect("valid raster");
+
+        struct Probe(CachedImage);
+        impl gpui::Render for Probe {
+            fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+                // `items_start`: a stretched child would report the column's
+                // width, not the hit target's.
+                div().w(px(800.)).flex().flex_col().items_start().child(
+                    div()
+                        .debug_selector(|| "click-box".into())
+                        .child(zoomable_image("probe-image", &self.0)),
+                )
+            }
+        }
+
+        crate::test_support::init_gpui_component(cx);
+        let (_, vcx) = cx.add_window_view(|_, _| Probe(image));
+        vcx.run_until_parked();
+        vcx.update(|window, _| window.refresh());
+        vcx.run_until_parked();
+        let bounds = VisualTestContext::debug_bounds(vcx, "click-box").expect("painted");
+        assert_eq!(
+            bounds.size.height,
+            px(cap),
+            "the image is capped at {cap}px"
+        );
+        assert_eq!(
+            bounds.size.width,
+            px(cap / 10.),
+            "a 1:10 image capped at {cap}px tall must be {}px wide",
+            cap / 10.
         );
     }
 }

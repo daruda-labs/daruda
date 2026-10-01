@@ -52,6 +52,7 @@ pub(super) fn render_md_image(
 pub(in crate::workspace) struct CachedImage {
     image: std::sync::Arc<RenderImage>,
     logical_w: f32,
+    logical_h: f32,
 }
 
 impl CachedImage {
@@ -59,21 +60,32 @@ impl CachedImage {
     /// producer (`visual.rs`) already emits GPUI's byte order, so there is
     /// nothing to copy or swap here.
     pub(in crate::workspace) fn from_raster(raster: RasterImage) -> Option<Self> {
-        let (logical_w, _) = raster.logical_size();
+        let (logical_w, logical_h) = raster.logical_size();
         let buffer = image::RgbaImage::from_raw(raster.width, raster.height, raster.bgra)?;
         let image = std::sync::Arc::new(RenderImage::new(vec![image::Frame::new(buffer)]));
-        Some(Self { image, logical_w })
+        Some(Self {
+            image,
+            logical_w,
+            logical_h,
+        })
     }
 
     /// Block-layout element at logical size, capped to the container and max
     /// image height while preserving the cached texture id. For decorative
     /// images only — see [`Self::block_diagram`] for diagrams.
+    ///
+    /// The height cap is applied as a width: an image taller than the cap is
+    /// laid out at the width that makes it exactly the cap tall, so the box
+    /// stays the image's own shape instead of gaining side bands.
     pub(in crate::workspace) fn block(&self) -> AnyElement {
-        img(ImageSource::Render(self.image.clone()))
-            .w(px(self.logical_w))
-            .max_w_full()
-            .max_h(px(theme::MD_IMAGE_MAX_HEIGHT))
-            .into_any_element()
+        self.fitted(self.block_width())
+    }
+
+    /// The width [`Self::block`] lays out at before the container narrows it —
+    /// for a host wrapping it in a hit target that must match the image.
+    pub(in crate::workspace) fn block_width(&self) -> f32 {
+        self.logical_w
+            .min(theme::MD_IMAGE_MAX_HEIGHT * self.aspect_ratio())
     }
 
     /// Diagram-layout element: capped to the container width only, height
@@ -81,9 +93,37 @@ impl CachedImage {
     /// already scrolls, so a tall one just takes more scroll room instead of
     /// being squeezed to `MD_IMAGE_MAX_HEIGHT` like a decorative image.
     pub(in crate::workspace) fn block_diagram(&self) -> AnyElement {
-        img(ImageSource::Render(self.image.clone()))
-            .w(px(self.logical_w))
+        self.fitted(self.logical_w)
+    }
+
+    /// Width over height, guarded so a degenerate raster cannot divide by zero.
+    fn aspect_ratio(&self) -> f32 {
+        self.logical_w / self.logical_h.max(1.)
+    }
+
+    /// The image at `width`, shrunk to the container, with its height following
+    /// whatever width it ends up at.
+    ///
+    /// The height cannot be left to `img`: it fixes an unset height from the
+    /// *declared* width before layout (gpui `img.rs` `request_layout`), so when
+    /// `max_w_full` then narrows the box the height keeps the unshrunk value and
+    /// `ObjectFit::Contain` letterboxes the bitmap inside it — a blank band
+    /// above and below every image wider than its pane. The wrapper carries the
+    /// aspect ratio for taffy to resolve against the final width; the image is
+    /// pinned to fill it, both sides set so `img` derives neither.
+    fn fitted(&self, width: f32) -> AnyElement {
+        div()
+            .relative()
+            .flex_none()
+            .w(px(width))
             .max_w_full()
+            .aspect_ratio(self.aspect_ratio())
+            .child(
+                img(ImageSource::Render(self.image.clone()))
+                    .absolute()
+                    .inset_0()
+                    .size_full(),
+            )
             .into_any_element()
     }
 
