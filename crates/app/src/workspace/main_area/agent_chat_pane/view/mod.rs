@@ -291,6 +291,39 @@ pub(in crate::workspace) enum ActivityState {
     AwaitingPermission,
 }
 
+/// How a tool-group summary names each category: `Compact` is the icon and
+/// its count, `Labeled` adds the category's words ("3 commands").
+///
+/// No `Default`, for the reason [`ChatContentWidth`] has none: the starting
+/// value is `agent.tool_summary_labels`'s answer.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(in crate::workspace) enum ToolSummaryStyle {
+    Compact,
+    Labeled,
+}
+
+impl ToolSummaryStyle {
+    pub(in crate::workspace) fn from_config(tool_summary_labels: bool) -> Self {
+        if tool_summary_labels {
+            Self::Labeled
+        } else {
+            Self::Compact
+        }
+    }
+
+    /// One segment's text: the bare count, or `labeled`'s words for it.
+    pub(in crate::workspace) fn segment(
+        self,
+        count: usize,
+        labeled: impl FnOnce(usize) -> String,
+    ) -> String {
+        match self {
+            Self::Compact => count.to_string(),
+            Self::Labeled => labeled(count),
+        }
+    }
+}
+
 /// AgentChat conversation content-column width mode. `Reading` constrains each
 /// row to the configured reading width; `Full` spends the whole pane.
 ///

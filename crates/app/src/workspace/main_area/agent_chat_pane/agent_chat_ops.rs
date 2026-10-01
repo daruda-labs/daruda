@@ -591,7 +591,7 @@ impl Workspace {
         // re-applies these through `reseed_transcript_defaults`.
         let defaults = TranscriptDefaults::resolve(
             self.agents.iter().find(|a| a.id == agent_id),
-            self.agent_content_width,
+            self.agent_reader_defaults,
         );
         // Seeded here so a pane can build diff embeds before its first event.
         let syntax_theme = self.syntax_theme.clone();

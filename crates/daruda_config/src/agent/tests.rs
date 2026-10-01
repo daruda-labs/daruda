@@ -86,6 +86,22 @@ fn use_reading_width_defaults_on_and_round_trips_when_turned_off() {
 }
 
 #[test]
+fn tool_summary_labels_defaults_true_and_round_trips() {
+    assert!(AgentConfig::default().tool_summary_labels);
+
+    let cfg = AgentConfig {
+        tool_summary_labels: false,
+        ..AgentConfig::default()
+    };
+    let toml_str = toml::to_string(&cfg).expect("serialize");
+    let back: AgentConfig = toml::from_str(&toml_str).expect("deserialize");
+    assert!(!back.tool_summary_labels);
+
+    let omitted: AgentConfig = toml::from_str("input_max_rows = 5").expect("deserialize");
+    assert!(omitted.tool_summary_labels);
+}
+
+#[test]
 fn use_modifier_to_send_defaults_false_and_round_trips() {
     // Default matches Zed's agent panel: Enter sends, Shift+Enter newline.
     assert!(!AgentConfig::default().use_modifier_to_send);

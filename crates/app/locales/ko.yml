@@ -1035,6 +1035,8 @@ settings:
   label_use_gitignore: ".gitignore 적용"
   label_syntax_theme: "구문 테마"
   label_agent_use_reading_width: "에이전트 채팅을 읽기 너비로 제한"
+  label_agent_tool_summary_labels: "도구 요약에 종류 이름 표시"
+  hint_agent_tool_summary_labels: "아이콘과 개수만 보이는 대신 \"명령 3개\"처럼 이름을 함께 표시합니다."
   syntax_theme_daruda: "Daruda (추천)"
   syntax_theme_one_dark: "One"
   syntax_theme_tokyo_night: "Tokyo Night"

@@ -21,6 +21,7 @@ pub enum SettingsFieldId {
     CursorStyle,
     AgentUseModifierToSend,
     AgentUseReadingWidth,
+    AgentToolSummaryLabels,
     AgentCatalog,
     SessionHosts,
     RenderMaxFps,
@@ -102,6 +103,7 @@ impl SettingsFieldId {
             Self::CursorStyle => "cursor.style",
             Self::AgentUseModifierToSend => "agent.use_modifier_to_send",
             Self::AgentUseReadingWidth => "agent.use_reading_width",
+            Self::AgentToolSummaryLabels => "agent.tool_summary_labels",
             Self::AgentCatalog => "agents",
             Self::SessionHosts => "session_hosts",
             Self::RenderMaxFps => "render.max_fps",
@@ -186,6 +188,7 @@ pub enum SettingsPatch {
     CursorStyle(CursorStyle),
     AgentUseModifierToSend(bool),
     AgentUseReadingWidth(bool),
+    AgentToolSummaryLabels(bool),
     AgentCatalog(Vec<AgentEntry>),
     SessionHosts {
         entries: Vec<SessionHostEntry>,
@@ -276,6 +279,7 @@ impl SettingsPatch {
             Self::CursorStyle(_) => SettingsFieldId::CursorStyle,
             Self::AgentUseModifierToSend(_) => SettingsFieldId::AgentUseModifierToSend,
             Self::AgentUseReadingWidth(_) => SettingsFieldId::AgentUseReadingWidth,
+            Self::AgentToolSummaryLabels(_) => SettingsFieldId::AgentToolSummaryLabels,
             Self::AgentCatalog(_) => SettingsFieldId::AgentCatalog,
             Self::SessionHosts { .. } => SettingsFieldId::SessionHosts,
             Self::RenderMaxFps(_) => SettingsFieldId::RenderMaxFps,
@@ -362,6 +366,7 @@ impl SettingsPatch {
             Self::CursorStyle(value) => config.cursor.style = *value,
             Self::AgentUseModifierToSend(value) => config.agent.use_modifier_to_send = *value,
             Self::AgentUseReadingWidth(value) => config.agent.use_reading_width = *value,
+            Self::AgentToolSummaryLabels(value) => config.agent.tool_summary_labels = *value,
             Self::AgentCatalog(value) => config.agents = value.clone(),
             Self::SessionHosts {
                 entries,
@@ -477,6 +482,9 @@ impl SettingsPatch {
             }
             Self::AgentUseReadingWidth(_) => {
                 left.agent.use_reading_width != right.agent.use_reading_width
+            }
+            Self::AgentToolSummaryLabels(_) => {
+                left.agent.tool_summary_labels != right.agent.tool_summary_labels
             }
             Self::AgentCatalog(_) => left.agents != right.agents,
             Self::SessionHosts { .. } => {

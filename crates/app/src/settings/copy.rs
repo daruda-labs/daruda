@@ -212,6 +212,10 @@ pub(super) fn bool(setting: BoolSetting) -> RowCopy {
             label: s::settings_label_agent_use_reading_width,
             hint: s::settings_hint_reading_width,
         },
+        BoolSetting::AgentToolSummaryLabels => RowCopy {
+            label: s::settings_label_agent_tool_summary_labels,
+            hint: s::settings_hint_agent_tool_summary_labels,
+        },
         BoolSetting::ShellClosePaneOnExit => RowCopy {
             label: s::settings_label_close_on_exit,
             hint: String::new,

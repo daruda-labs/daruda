@@ -776,6 +776,10 @@ pub fn patch_config_file_to(config: &Config, path: &std::path::Path) -> Result<(
             "use_reading_width",
             toml_edit::value(config.agent.use_reading_width),
         );
+        t.insert(
+            "tool_summary_labels",
+            toml_edit::value(config.agent.tool_summary_labels),
+        );
         remove_legacy_agent_keys(t);
     });
 
@@ -1251,6 +1255,12 @@ fn patch_settings_document(
             t.insert(
                 "use_reading_width",
                 toml_edit::value(config.agent.use_reading_width),
+            );
+        }),
+        SettingsPatch::AgentToolSummaryLabels(_) => patch_section(doc, "agent", |t| {
+            t.insert(
+                "tool_summary_labels",
+                toml_edit::value(config.agent.tool_summary_labels),
             );
         }),
         SettingsPatch::AgentCatalog(_) => replace_agents(doc, &config.agents),

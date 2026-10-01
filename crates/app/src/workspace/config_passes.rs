@@ -100,9 +100,9 @@ impl Workspace {
         self.font_family = config.font.terminal.family.clone();
         self.shell_program = config.shell.program.clone();
         self.syntax_theme = config.file_viewer.syntax_theme.clone();
-        self.agent_content_width =
-            crate::workspace::main_area::agent_chat_pane::view::ChatContentWidth::from_config(
-                config.agent.use_reading_width,
+        self.agent_reader_defaults =
+            crate::workspace::main_area::agent_chat_pane::transcript_defaults::ReaderDefaults::from_config(
+                &config.agent,
             );
         self.file_viewer_preview_tab = config.file_viewer.preview_tab;
         self.preferred_editor = config.editor.preferred.clone();
@@ -152,7 +152,7 @@ impl Workspace {
                 }
                 let defaults = TranscriptDefaults::resolve(
                     self.agents.iter().find(|a| a.id == view.agent_id),
-                    self.agent_content_width,
+                    self.agent_reader_defaults,
                 );
                 view.reseed_transcript_defaults(&defaults, cx);
             });

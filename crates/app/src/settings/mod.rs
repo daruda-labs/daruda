@@ -159,6 +159,8 @@ pub struct SettingsView {
     /// On the General page beside the themes: it is a reading preference, not
     /// an agent one, and applies to every agent.
     agent_use_reading_width: bool,
+    /// Whether tool-group summaries spell each category out beside its icon.
+    agent_tool_summary_labels: bool,
     // Agent
     /// Filters the catalog's available and needs-install lists by name or id.
     agent_catalog_search: Entity<InputState>,
@@ -454,6 +456,7 @@ enum SelectSetting {
 pub(super) enum BoolSetting {
     AgentUseModifierToSend,
     AgentUseReadingWidth,
+    AgentToolSummaryLabels,
     ShellClosePaneOnExit,
     WindowBlur,
     FilesShowHidden,
@@ -606,9 +609,10 @@ impl SelectSetting {
 
 impl BoolSetting {
     #[cfg(test)]
-    const ALL: [Self; 26] = [
+    const ALL: [Self; 27] = [
         Self::AgentUseModifierToSend,
         Self::AgentUseReadingWidth,
+        Self::AgentToolSummaryLabels,
         Self::ShellClosePaneOnExit,
         Self::WindowBlur,
         Self::FilesShowHidden,
@@ -642,6 +646,7 @@ impl BoolSetting {
         match self {
             Self::AgentUseModifierToSend => (),
             Self::AgentUseReadingWidth => (),
+            Self::AgentToolSummaryLabels => (),
             Self::ShellClosePaneOnExit => (),
             Self::WindowBlur => (),
             Self::FilesShowHidden => (),
@@ -2138,6 +2143,7 @@ impl SettingsView {
             agent_catalog_search,
             agent_use_modifier_to_send: config.agent.use_modifier_to_send,
             agent_use_reading_width: config.agent.use_reading_width,
+            agent_tool_summary_labels: config.agent.tool_summary_labels,
             agent_catalog,
             agent_vocabulary,
             session_host_rows,

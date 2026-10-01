@@ -398,7 +398,9 @@ impl AgentChatView {
         cx: &mut Context<Self>,
     ) {
         // Remembered so a later reset can hand an axis back to *this* default
-        // without the view resolving config on its own.
+        // without the view resolving config on its own. The summary style has
+        // no pane override, so render reads it straight from here.
+        let summary_changed = self.defaults.tool_summary != defaults.tool_summary;
         self.defaults = *defaults;
         let before = (
             self.tail_steps,
@@ -423,6 +425,9 @@ impl AgentChatView {
                 self.content_width,
             )
         {
+            if summary_changed {
+                cx.notify();
+            }
             return;
         }
         // A width change reflows every row, so the cached heights are stale —

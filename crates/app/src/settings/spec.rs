@@ -704,6 +704,13 @@ pub(super) const BOOL_SETTINGS: &[BoolSpec] = &[
         show: |c| c.agent.use_reading_width,
     },
     BoolSpec {
+        setting: BoolSetting::AgentToolSummaryLabels,
+        get: |w| w.agent_tool_summary_labels,
+        set: |w, v| w.agent_tool_summary_labels = v,
+        patch: SettingsPatch::AgentToolSummaryLabels,
+        show: |c| c.agent.tool_summary_labels,
+    },
+    BoolSpec {
         setting: BoolSetting::ShellClosePaneOnExit,
         get: |w| w.close_pane_on_exit,
         set: |w, v| w.close_pane_on_exit = v,
@@ -1031,6 +1038,7 @@ mod tests {
             | SettingsPatch::CursorStyle(_)
             | SettingsPatch::AgentUseModifierToSend(_)
             | SettingsPatch::AgentUseReadingWidth(_)
+            | SettingsPatch::AgentToolSummaryLabels(_)
             | SettingsPatch::RenderMaxFps(_)
             | SettingsPatch::ShellClosePaneOnExit(_)
             | SettingsPatch::WindowOpacity(_)

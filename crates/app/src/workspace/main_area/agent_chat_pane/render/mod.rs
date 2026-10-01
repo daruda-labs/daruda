@@ -775,6 +775,8 @@ fn group_category_title(
 
 /// A tally rendered as one icon-and-count segment per category, separated and
 /// most-numerous first, then a thought segment when `thoughts` is non-zero.
+/// Whether each count also carries its words is the pane's
+/// [`ToolSummaryStyle`](super::view::ToolSummaryStyle).
 /// Shared by the two bars that carry one — they differ in *what* they count (a
 /// group's own calls, filter-aware; a turn's top-level calls, filter-blind) but
 /// not in how it reads.
@@ -803,17 +805,21 @@ fn category_segments(
         .flex()
         .flex_row()
         .items_center();
+    let style = this.defaults.tool_summary;
     let segments = tally
         .iter()
         .map(|&(category, count)| {
             (
                 category_icon(category),
-                s::agent_chat_group_category(category.token(), count),
+                style.segment(count, |n| s::agent_chat_group_category(category.token(), n)),
             )
         })
-        .chain(
-            (thoughts > 0).then(|| (thought_icon(), s::agent_chat_thinking_group_count(thoughts))),
-        );
+        .chain((thoughts > 0).then(|| {
+            (
+                thought_icon(),
+                style.segment(thoughts, s::agent_chat_thinking_group_count),
+            )
+        }));
     for (ix, (icon, label)) in segments.enumerate() {
         if ix > 0 {
             row = row.child(

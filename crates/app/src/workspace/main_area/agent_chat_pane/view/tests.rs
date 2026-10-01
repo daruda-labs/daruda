@@ -84,6 +84,7 @@ fn add_test_view(cx: &mut gpui::TestAppContext) -> gpui::WindowHandle<super::Age
             super::super::transcript_defaults::TranscriptDefaults {
                 tail: super::super::rows::tail::StepWindow::default(),
                 content_width: super::ChatContentWidth::Reading,
+                tool_summary: super::ToolSummaryStyle::Labeled,
                 fold_mode: crate::transcript::fold_mode::FoldMode::default(),
                 filter: crate::transcript::display_filter::DisplayFilter::default(),
             },
@@ -1917,6 +1918,7 @@ use crate::transcript::display_filter::{DisplayFilter, FilterFacet};
 fn other_defaults() -> TranscriptDefaults {
     TranscriptDefaults {
         content_width: super::super::view::ChatContentWidth::Full,
+        tool_summary: super::super::view::ToolSummaryStyle::Compact,
         // Distinct per level, so a reset that hands back the wrong level's
         // default is caught rather than landing on a value that happens to
         // match.

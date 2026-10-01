@@ -658,6 +658,10 @@ pub struct AgentConfig {
     /// reading-width mode — the column [`Self::use_reading_width`] turns on.
     /// Clamped to [`READING_WIDTH_MIN`]..=[`READING_WIDTH_MAX`] at load time.
     pub reading_width: f32,
+    /// Whether a tool-group summary spells each category out ("3 commands")
+    /// rather than showing its icon and count alone. Off trades the words for
+    /// a row that keeps mixed groups on one line.
+    pub tool_summary_labels: bool,
     /// Session config options to hide from the input-dock chip row, matched by
     /// the option's advertised `description` (exact string). Presentation-only:
     /// the option stays in the session state and the agent can still change it.
@@ -720,6 +724,7 @@ impl Default for AgentConfig {
             input_max_rows: INPUT_MAX_ROWS_DEFAULT,
             use_reading_width: USE_READING_WIDTH_DEFAULT,
             reading_width: READING_WIDTH_DEFAULT,
+            tool_summary_labels: true,
             hidden_config_option_descriptions: default_hidden_config_option_descriptions(),
         }
     }

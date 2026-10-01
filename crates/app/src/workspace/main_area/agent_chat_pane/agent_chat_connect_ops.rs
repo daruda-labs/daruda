@@ -285,7 +285,7 @@ impl Workspace {
         let effective_id = resolve_open_agent_id(&self.agents, self.last_agent_id.as_deref());
         let defaults = TranscriptDefaults::resolve(
             self.agents.iter().find(|a| a.id == effective_id),
-            self.agent_content_width,
+            self.agent_reader_defaults,
         );
         if let Some(view) = self.agent_chat_view(pane_id).cloned() {
             let id = effective_id.clone();

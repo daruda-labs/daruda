@@ -4609,6 +4609,14 @@ pub fn settings_label_agent_use_reading_width() -> String {
     rust_i18n::t!("settings.label_agent_use_reading_width").into_owned()
 }
 
+pub fn settings_label_agent_tool_summary_labels() -> String {
+    rust_i18n::t!("settings.label_agent_tool_summary_labels").into_owned()
+}
+
+pub fn settings_hint_agent_tool_summary_labels() -> String {
+    rust_i18n::t!("settings.hint_agent_tool_summary_labels").into_owned()
+}
+
 pub fn settings_syntax_theme_daruda() -> String {
     rust_i18n::t!("settings.syntax_theme_daruda").into_owned()
 }

@@ -1,10 +1,10 @@
 //! The transcript-presentation defaults a chat pane starts on, as config
 //! states them.
 
-use daruda_config::{AgentDefinition, TAIL_WINDOW_DEFAULT};
+use daruda_config::{AgentConfig, AgentDefinition, TAIL_WINDOW_DEFAULT};
 
 use super::rows::tail::{StepWindow, TailWindow};
-use super::view::ChatContentWidth;
+use super::view::{ChatContentWidth, ToolSummaryStyle};
 use crate::transcript::display_filter::DisplayFilter;
 use crate::transcript::fold_mode::FoldMode;
 
@@ -17,26 +17,44 @@ use crate::transcript::fold_mode::FoldMode;
 /// depends on what the agent emits: one agent produces no reasoning at all,
 /// another produces it constantly. An axis the entry does not state falls
 /// straight to the built-in value — there is no layer between the two.
-/// [`Self::content_width`] is the exception: it is app-wide, since how wide a
-/// column reads is a property of the reader rather than of the agent.
+/// [`Self::content_width`] and [`Self::tool_summary`] are the exceptions — see
+/// [`ReaderDefaults`].
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub(in crate::workspace) struct TranscriptDefaults {
     pub(super) tail: StepWindow,
     pub(super) fold_mode: FoldMode,
     pub(super) filter: DisplayFilter,
     pub(super) content_width: ChatContentWidth,
+    pub(super) tool_summary: ToolSummaryStyle,
+}
+
+/// The presentation axes config states once for every agent: how wide a
+/// column reads and how terse a summary may be are properties of the reader,
+/// not of what an agent emits. The Workspace holds the one mirror of these.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub(in crate::workspace) struct ReaderDefaults {
+    pub(in crate::workspace) content_width: ChatContentWidth,
+    pub(in crate::workspace) tool_summary: ToolSummaryStyle,
+}
+
+impl ReaderDefaults {
+    pub(in crate::workspace) fn from_config(agent: &AgentConfig) -> Self {
+        Self {
+            content_width: ChatContentWidth::from_config(agent.use_reading_width),
+            tool_summary: ToolSummaryStyle::from_config(agent.tool_summary_labels),
+        }
+    }
 }
 
 impl TranscriptDefaults {
     /// Resolve for the agent a pane runs under. `definition` is that agent's
     /// catalog entry, or `None` for an id no longer in the catalog — which
     /// resolves the same as an entry that states nothing of its own.
-    /// `content_width` is app-wide, so it arrives already resolved — the
-    /// Workspace holds the one mirror of `agent.use_reading_width`, the way it
-    /// holds `syntax_theme`.
+    /// `reader` is app-wide, so it arrives already resolved — the Workspace
+    /// holds its one mirror, the way it holds `syntax_theme`.
     pub(in crate::workspace) fn resolve(
         definition: Option<&AgentDefinition>,
-        content_width: ChatContentWidth,
+        reader: ReaderDefaults,
     ) -> Self {
         let fold_tokens: &[String] = definition
             .and_then(|d| d.fold_mode.as_deref())
@@ -58,7 +76,8 @@ impl TranscriptDefaults {
         let filter = definition.and_then(|d| d.display_filter.as_ref());
         Self {
             tail,
-            content_width,
+            content_width: reader.content_width,
+            tool_summary: reader.tool_summary,
             fold_mode: FoldMode::from_tokens(fold_tokens.iter().map(String::as_str)),
             filter: filter.map_or_else(DisplayFilter::default, |tokens| {
                 DisplayFilter::from_stored(tokens)
@@ -77,6 +96,10 @@ mod tests {
         AgentDefinition::claude_default()
     }
 
+    fn reader() -> ReaderDefaults {
+        ReaderDefaults::from_config(&AgentConfig::default())
+    }
+
     /// The visible set with only thinking rows checked.
     fn thinking_only() -> DisplayFilter {
         DisplayFilter::from_tokens([FilterFacet::Thinking.token()])
@@ -87,7 +110,7 @@ mod tests {
     #[test]
     fn an_entry_that_states_nothing_yields_the_built_in_defaults() {
         for entry in [None, Some(definition())] {
-            let defaults = TranscriptDefaults::resolve(entry.as_ref(), ChatContentWidth::Reading);
+            let defaults = TranscriptDefaults::resolve(entry.as_ref(), reader());
             assert_eq!(defaults.tail, StepWindow::default());
             assert_eq!(defaults.fold_mode, FoldMode::default());
             assert_eq!(defaults.filter, DisplayFilter::default());
@@ -103,7 +126,7 @@ mod tests {
             display_filter: Some(vec![FilterFacet::Tools.token().to_string()]),
             ..definition()
         };
-        let defaults = TranscriptDefaults::resolve(Some(&definition), ChatContentWidth::Reading);
+        let defaults = TranscriptDefaults::resolve(Some(&definition), reader());
         assert_eq!(
             defaults.tail,
             StepWindow {
@@ -127,7 +150,7 @@ mod tests {
             tail_window_calls: None,
             ..definition()
         };
-        let defaults = TranscriptDefaults::resolve(Some(&definition), ChatContentWidth::Reading);
+        let defaults = TranscriptDefaults::resolve(Some(&definition), reader());
         assert_eq!(
             defaults.tail,
             StepWindow {
@@ -150,7 +173,7 @@ mod tests {
             tail_window_calls: Some(5),
             ..definition()
         };
-        let defaults = TranscriptDefaults::resolve(Some(&definition), ChatContentWidth::Reading);
+        let defaults = TranscriptDefaults::resolve(Some(&definition), reader());
         assert_eq!(
             defaults.tail,
             StepWindow {
@@ -168,8 +191,8 @@ mod tests {
             display_filter: Some(Vec::new()),
             ..definition()
         };
-        let empty = TranscriptDefaults::resolve(Some(&emptied), ChatContentWidth::Reading).filter;
-        let absent = TranscriptDefaults::resolve(None, ChatContentWidth::Reading).filter;
+        let empty = TranscriptDefaults::resolve(Some(&emptied), reader()).filter;
+        let absent = TranscriptDefaults::resolve(None, reader()).filter;
         assert_ne!(empty, absent);
         assert!(absent.shows_everything());
         assert!(
@@ -190,7 +213,7 @@ mod tests {
             ..definition()
         };
         assert_eq!(
-            TranscriptDefaults::resolve(Some(&emptied), ChatContentWidth::Reading).fold_mode,
+            TranscriptDefaults::resolve(Some(&emptied), reader()).fold_mode,
             FoldMode::default()
         );
     }
@@ -206,7 +229,7 @@ mod tests {
             ]),
             ..definition()
         };
-        let mode = TranscriptDefaults::resolve(Some(&tuned), ChatContentWidth::Reading).fold_mode;
+        let mode = TranscriptDefaults::resolve(Some(&tuned), reader()).fold_mode;
         assert_eq!(mode.preset(), None, "a matrix, not a preset");
         assert_eq!(
             mode.rule(
@@ -217,6 +240,29 @@ mod tests {
         );
     }
 
+    /// The summary style is app-wide: it comes from `[agent]` and reaches
+    /// every pane whatever its agent's catalog entry states.
+    #[test]
+    fn the_tool_summary_style_follows_the_agent_section() {
+        assert_eq!(reader().tool_summary, ToolSummaryStyle::Labeled);
+        let compact = ReaderDefaults::from_config(&AgentConfig {
+            tool_summary_labels: false,
+            ..AgentConfig::default()
+        });
+        assert_eq!(compact.tool_summary, ToolSummaryStyle::Compact);
+        for entry in [None, Some(definition())] {
+            let defaults = TranscriptDefaults::resolve(entry.as_ref(), compact);
+            assert_eq!(defaults.tool_summary, ToolSummaryStyle::Compact);
+        }
+    }
+
+    #[test]
+    fn a_compact_segment_is_the_bare_count() {
+        let words = |n: usize| format!("{n} commands");
+        assert_eq!(ToolSummaryStyle::Compact.segment(3, words), "3");
+        assert_eq!(ToolSummaryStyle::Labeled.segment(3, words), "3 commands");
+    }
+
     #[test]
     fn a_stated_filter_narrows_the_visible_set() {
         let narrowed = AgentDefinition {
@@ -224,7 +270,7 @@ mod tests {
             ..definition()
         };
         assert_eq!(
-            TranscriptDefaults::resolve(Some(&narrowed), ChatContentWidth::Reading).filter,
+            TranscriptDefaults::resolve(Some(&narrowed), reader()).filter,
             thinking_only()
         );
     }

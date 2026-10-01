@@ -203,6 +203,7 @@ const AGENT: &[Card] = &[
                 B::AgentUseReadingWidth,
                 &[Target::Text(T::AgentReadingWidth)],
             ),
+            b(B::AgentToolSummaryLabels),
             b(B::AgentUseModifierToSend),
             t(T::AgentInputMaxRows),
         ],
