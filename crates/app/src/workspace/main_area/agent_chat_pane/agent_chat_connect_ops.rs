@@ -33,7 +33,6 @@ struct AgentChatConnectionPlan {
     connect_cwd: PathBuf,
     initial_model: Option<String>,
     initial_modes: Vec<String>,
-    restore_mode: Option<String>,
     prepared: Option<PreparedAccount>,
     /// MCP servers this session may reach. Non-empty for exactly one pane —
     /// the orchestrator's — because a lane agent holding daruda's tools could
@@ -52,48 +51,6 @@ fn runtime_prep_phase(progress: NodeProgress) -> Option<RuntimePrepPhase> {
         NodeProgress::Verifying => Some(RuntimePrepPhase::Verifying),
         NodeProgress::Extracting => Some(RuntimePrepPhase::Extracting),
     }
-}
-
-/// The session mode this agent's catalog entry asks for, when it sets one.
-/// `None` for an agent that doesn't set one, or an id no longer in the catalog
-/// — the global default then applies.
-fn agent_default_mode<'a>(
-    agents: &'a [daruda_config::AgentDefinition],
-    agent_id: &str,
-) -> Option<&'a str> {
-    agents
-        .iter()
-        .find(|a| a.id == agent_id)?
-        .default_mode
-        .as_deref()
-}
-
-/// The model this agent's catalog entry asks its panes to start on. `None` for
-/// an agent that pins no model, or an id no longer in the catalog — the
-/// adapter's own choice then stands.
-fn agent_default_model<'a>(
-    agents: &'a [daruda_config::AgentDefinition],
-    agent_id: &str,
-) -> Option<&'a str> {
-    agents
-        .iter()
-        .find(|a| a.id == agent_id)?
-        .default_model
-        .as_deref()
-}
-
-/// The model requested during the ACP handshake. A pane's explicit pick wins
-/// over the catalog default; availability is checked by `daruda_acp` against
-/// the live agent advertisement before any mode or queued prompt is applied.
-fn connect_model_preference(
-    remembered: Option<&str>,
-    agent_default: Option<&str>,
-) -> Option<String> {
-    remembered
-        .or(agent_default)
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-        .map(str::to_string)
 }
 
 /// Abort a connect whose selected account's config dir could not be
@@ -372,16 +329,16 @@ impl Workspace {
             env: agent_env,
         } = self.resolve_pane_launch(pane_id, cx)?;
         // Read back after `resolve_pane_launch` so any stale-id reconcile it did
-        // is picked up. Only keys the dev-build wire-tap file name — never
-        // affects the launch itself.
-        let agent_id = self.agent_chat_view(pane_id)?.read(cx).agent_id.clone();
-        let remembered_model = self
-            .agent_chat_view(pane_id)
-            .and_then(|v| v.read(cx).last_known_model_id.clone());
-        let initial_model = connect_model_preference(
-            remembered_model.as_deref(),
-            agent_default_model(&self.agents, &agent_id),
-        );
+        // is picked up: the preferences below resolve against that agent, and
+        // the id keys the dev-build wire-tap file name.
+        let view = self.agent_chat_view(pane_id)?.read(cx);
+        let agent_id = view.agent_id.clone();
+        // Requested on every connect, a resume (`session/load`) included: a
+        // value the adapter reports for itself never outranks these.
+        let daruda_config::SessionPreferences {
+            model: initial_model,
+            modes: initial_modes,
+        } = view.session_preferences(&self.agents);
         let vocabulary_source = crate::lane::session_host::adapter_command(&launch)
             .trim()
             .to_string();
@@ -390,16 +347,6 @@ impl Workspace {
                 view.agent_vocabulary_source = Some(vocabulary_source);
             });
         }
-        // Priority-ordered modes to try on a fresh `session/new`.
-        let initial_modes = daruda_config::agent::connect_mode_priority(agent_default_mode(
-            &self.agents,
-            &agent_id,
-        ));
-        // The mode this pane's session was last known to be in — reapplied
-        // after a resume (`session/load`) via `session/set_mode`.
-        let restore_mode = self
-            .agent_chat_view(pane_id)
-            .and_then(|v| v.read(cx).last_known_mode_id.clone());
 
         // Resolve the pane's owning lane so remote-ness is decided by the
         // lane's session host, not by whatever host (if any) `launch` itself
@@ -507,7 +454,6 @@ impl Workspace {
             connect_cwd,
             initial_model,
             initial_modes,
-            restore_mode,
             prepared,
             mcp_servers: self.mcp_servers_for_pane(pane_id, cx),
         })
@@ -639,14 +585,12 @@ impl Workspace {
             connect_cwd,
             mut initial_model,
             mut initial_modes,
-            mut restore_mode,
             prepared,
             mut mcp_servers,
         } = plan;
         if read_only {
             initial_model = None;
             initial_modes.clear();
-            restore_mode = None;
         }
         if snapshot {
             mcp_servers.clear();
@@ -782,7 +726,6 @@ impl Workspace {
                         connect_cwd,
                         initial_model,
                         initial_modes,
-                        restore_mode,
                         session_resume(resume, strict_restore),
                         &agent_id,
                         mcp_servers,
@@ -1088,13 +1031,9 @@ fn retries_fresh(
 
 #[cfg(test)]
 mod tests {
-    use super::{
-        agent_default_mode, agent_default_model, connect_model_preference, login_revives_pane,
-        notice_dedup_key, retries_fresh, session_resume,
-    };
+    use super::{login_revives_pane, notice_dedup_key, retries_fresh, session_resume};
     use crate::workspace::account_login_ops::LoginTarget;
     use daruda_acp::Remedy;
-    use daruda_config::{AgentDefinition, AgentLaunch};
     use daruda_store::accounts::AccountRecipeId;
 
     fn claude_system() -> LoginTarget {
@@ -1193,91 +1132,6 @@ mod tests {
             None,
             Some(Remedy::Reauthenticate)
         ));
-    }
-
-    #[test]
-    fn agent_default_mode_reads_the_matching_catalog_entry() {
-        let agents = vec![
-            AgentDefinition {
-                default_mode: Some("yolo".to_string()),
-                ..AgentDefinition::new(
-                    "other".to_string(),
-                    "Other".to_string(),
-                    AgentLaunch::Raw("run-other".to_string()),
-                )
-            },
-            AgentDefinition::claude_default(),
-        ];
-        assert_eq!(agent_default_mode(&agents, "other"), Some("yolo"));
-        assert_eq!(
-            agent_default_mode(&agents, &AgentDefinition::claude_default().id),
-            None,
-            "an entry without an override leaves the global default to apply"
-        );
-        assert_eq!(
-            agent_default_mode(&agents, "gone"),
-            None,
-            "an id no longer in the catalog is not an override"
-        );
-    }
-
-    #[test]
-    fn agent_default_model_reads_the_matching_catalog_entry() {
-        let agents = vec![
-            AgentDefinition {
-                default_model: Some("opus".to_string()),
-                ..AgentDefinition::new(
-                    "other".to_string(),
-                    "Other".to_string(),
-                    AgentLaunch::Raw("run-other".to_string()),
-                )
-            },
-            AgentDefinition::claude_default(),
-        ];
-        assert_eq!(agent_default_model(&agents, "other"), Some("opus"));
-        assert_eq!(
-            agent_default_model(&agents, &AgentDefinition::claude_default().id),
-            None,
-            "an entry without a model leaves the adapter's own pick standing"
-        );
-        assert_eq!(
-            agent_default_model(&agents, "gone"),
-            None,
-            "an id no longer in the catalog pins nothing"
-        );
-    }
-
-    #[test]
-    fn a_remembered_model_outranks_the_agent_default() {
-        assert_eq!(
-            connect_model_preference(Some("haiku"), Some("sonnet")),
-            Some("haiku".to_string()),
-            "the pane's own pick wins"
-        );
-        assert_eq!(
-            connect_model_preference(None, Some("sonnet")),
-            Some("sonnet".to_string()),
-            "a pane that never picked starts on the agent's default"
-        );
-        assert_eq!(
-            connect_model_preference(None, None),
-            None,
-            "neither axis names a model — nothing to apply"
-        );
-    }
-
-    #[test]
-    fn empty_model_preferences_leave_the_adapters_pick_standing() {
-        assert_eq!(
-            connect_model_preference(Some("  "), Some("sonnet")),
-            None,
-            "an explicit but empty remembered value does not fall back to the catalog default"
-        );
-        assert_eq!(
-            connect_model_preference(None, Some("  ")),
-            None,
-            "an empty catalog default requests no handshake change"
-        );
     }
 
     /// An exact resume asks the adapter for that session and nothing else,

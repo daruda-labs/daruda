@@ -108,9 +108,6 @@ impl AgentChatView {
             } => {
                 self.status = AgentSessionStatus::Connected;
                 self.agent_program = program;
-                if let Some(state) = &modes {
-                    self.last_known_mode_id = Some(state.current.clone());
-                }
                 self.session_config.modes = modes;
                 self.session_config.config_options = config_options;
                 self.session_capabilities = capabilities;
@@ -169,7 +166,6 @@ impl AgentChatView {
                 self.session_usage = Some(usage.carrying_cost_from(self.session_usage.as_ref()));
             }
             AcpEvent::ModeChanged { state } => {
-                self.last_known_mode_id = Some(state.current.clone());
                 self.session_config.modes = Some(state);
             }
             AcpEvent::Update(update) => {

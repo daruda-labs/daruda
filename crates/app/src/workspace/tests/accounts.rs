@@ -583,7 +583,7 @@ async fn restore_resets_only_a_cross_domain_agent_chat_pin(cx: &mut TestAppConte
             title: None,
             agent_id: Some(agent_id),
             account_id: Some(claude_account),
-            mode_id: None,
+            picked_mode_id: None,
             model_id: None,
             content_width: None,
             tail_window: None,

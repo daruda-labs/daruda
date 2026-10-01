@@ -822,14 +822,10 @@ impl Workspace {
                                 .view
                                 .update(cx, |view, _| view.set_access(ac.access.clone()));
                             content.account = account;
-                            // Seed the last-known mode so the lazy connect can
-                            // reapply it on resume (`connect_agent_chat`'s
-                            // `restore_mode`) — a no-op when this agent's session
-                            // id was dropped above (fresh session applies
-                            // `initial_modes` instead).
-                            let mode_id = ac.mode_id.clone();
-                            // Same for the model: the lazy connect reapplies it
-                            // over whatever the adapter picks for itself.
+                            // The user's mode and model picks: the lazy connect
+                            // requests them over the agent's defaults and over
+                            // whatever the adapter picks for itself.
+                            let mode_id = ac.picked_mode_id.clone();
                             let model_id = ac.model_id.clone();
                             let content_width =
                                 ac.content_width.map(deserialize_chat_content_width);
@@ -858,8 +854,8 @@ impl Workspace {
                                 )
                             });
                             content.view.update(cx, |v, _| {
-                                v.last_known_mode_id = mode_id;
-                                v.last_known_model_id = model_id;
+                                v.picked_mode_id = mode_id;
+                                v.picked_model_id = model_id;
                                 if let Some(width) = content_width {
                                     v.content_width = width;
                                     v.content_width_chosen = true;
@@ -1186,8 +1182,8 @@ fn serialize_pane_content(
             title: v.session_title.clone(),
             agent_id: Some(v.agent_id.clone()),
             account_id: ac.account.to_persisted(),
-            mode_id: v.last_known_mode_id.clone(),
-            model_id: v.last_known_model_id.clone(),
+            picked_mode_id: v.picked_mode_id.clone(),
+            model_id: v.picked_model_id.clone(),
             // Written only once the pane's own toggle has moved it, so an
             // untouched pane keeps following `agent.use_reading_width`.
             content_width: v

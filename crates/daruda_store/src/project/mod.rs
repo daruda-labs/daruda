@@ -483,19 +483,13 @@ pub struct SerializedAgentChatContent {
     /// (ambient environment, no config-dir override).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub account_id: Option<crate::accounts::AccountId>,
-    /// ACP session-mode id the host last saw this session in (e.g.
-    /// `"acceptEdits"`), persisted so a resumed session (`session/load`) can
-    /// have it reapplied via `session/set_mode`. `None` when the agent has no
-    /// modes, or none was ever observed.
-    ///
-    /// WORKAROUND: `session/load`'s response can in principle report the
-    /// resumed session's real mode, but at least one shipped adapter
-    /// (`claude-agent-acp`) recomputes it from static settings on every
-    /// process launch instead of the session's actual last mode — so the
-    /// host tracks and reapplies it itself. See `daruda_acp::session`'s
-    /// `restore_mode` parameter.
+    /// Session-mode id this pane's user explicitly picked (e.g.
+    /// `"acceptEdits"`), requested on every connect ahead of the agent's
+    /// `default_mode`. A mode the adapter switched to on its own is never
+    /// recorded. The superseded `mode_id` key mirrored those switches, so it
+    /// is not read back.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub mode_id: Option<String>,
+    pub picked_mode_id: Option<String>,
     /// Model id this pane's user explicitly picked. Persisted so the next
     /// connection can request it during the handshake; an agent catalog's
     /// `default_model` is deliberately not recorded here, because it must stay

@@ -664,22 +664,18 @@ pub(in crate::workspace) struct AgentChatView {
     /// session or seeded from restore. Present → the lazy connect resumes via
     /// `session/load` instead of starting fresh.
     pub(in crate::workspace) session_id: Option<String>,
-    /// ACP session-mode id this session was last known to be in, mirrored on
-    /// every `Connected`/`ModeChanged` and persisted so a resume can reapply
-    /// it via `session/set_mode`.
-    ///
-    /// WORKAROUND: `claude-agent-acp` recomputes its mode from `settings.json`
-    /// on every process launch instead of the session's actual last mode, so
-    /// `session/load`'s response alone can't be trusted. The host tracks and
-    /// reapplies this itself until that's fixed upstream.
-    pub(in crate::workspace) last_known_mode_id: Option<String>,
+    /// Session-mode id the *user* picked for this pane — set only by the mode
+    /// chip and its cycle shortcut, never mirrored from what the adapter
+    /// reports, so a mode the adapter switched to on its own cannot outrank
+    /// the agent's `default_mode`. Persisted, and requested on every connect.
+    pub(in crate::workspace) picked_mode_id: Option<String>,
     /// Model id the *user* picked for this pane — set only by the model chip,
     /// never mirrored from what the adapter reports and never written by the
     /// connect-time apply of the agent's `default_model` (that would make the
     /// setting unchangeable, since a pick outranks it). Persisted, and
     /// reapplied on every connect, so the pick outlives both the session it
     /// was made in and the app run.
-    pub(in crate::workspace) last_known_model_id: Option<String>,
+    pub(in crate::workspace) picked_model_id: Option<String>,
     /// Whether a resume (`session/load`) is replaying its history. While
     /// `Loading`, `apply_event` accumulates items but skips the per-event
     /// rebuild + notify (O(n²) over the replay) until `Connected` clears it.
@@ -888,7 +884,6 @@ impl AgentChatView {
         cwd: Option<PaneCwd>,
         status: AgentSessionStatus,
         session_id: Option<String>,
-        mode_id: Option<String>,
         agent_id: String,
         agent_name: String,
         title: Option<String>,
@@ -917,10 +912,10 @@ impl AgentChatView {
             cwd,
             status,
             session_id,
-            last_known_mode_id: mode_id,
-            // Patched in by session restore right after construction, same as
-            // the mode id above — see `Workspace::rebuild_layout`.
-            last_known_model_id: None,
+            // Both picks are patched in by session restore right after
+            // construction — see `Workspace::rebuild_layout`.
+            picked_mode_id: None,
+            picked_model_id: None,
             agent_id,
             agent_program: None,
             agent_vocabulary_source: None,

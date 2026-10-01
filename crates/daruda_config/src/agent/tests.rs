@@ -3,26 +3,64 @@
 
 use super::*;
 
-#[test]
-fn connect_mode_priority_is_empty_without_an_agent_default() {
-    // No per-agent override: the candidate list is empty, so the adapter's
-    // own default mode applies untouched.
-    assert_eq!(connect_mode_priority(None), Vec::<String>::new());
-    // Whitespace-only is no override either.
-    assert_eq!(connect_mode_priority(Some("   ")), Vec::<String>::new());
+fn agent_with(default_model: Option<&str>, default_mode: Option<&str>) -> AgentDefinition {
+    AgentDefinition {
+        default_model: default_model.map(str::to_string),
+        default_mode: default_mode.map(str::to_string),
+        ..AgentDefinition::new(
+            "other".to_string(),
+            "Other".to_string(),
+            AgentLaunch::Raw("run-other".to_string()),
+        )
+    }
 }
 
 #[test]
-fn connect_mode_priority_is_just_the_agent_default() {
+fn session_preferences_are_empty_without_a_pick_or_an_agent_default() {
+    // Nothing to request: the adapter's own model and mode apply untouched.
     assert_eq!(
-        connect_mode_priority(Some("yolo")),
-        vec!["yolo".to_string()]
+        SessionPreferences::resolve(Some(&agent_with(None, None)), None, None),
+        SessionPreferences::default()
     );
-    // Surrounding whitespace is trimmed.
+    // Whitespace-only is neither a pick nor an override.
     assert_eq!(
-        connect_mode_priority(Some("  plan  ")),
-        vec!["plan".to_string()]
+        SessionPreferences::resolve(
+            Some(&agent_with(Some(" "), Some("   "))),
+            Some(""),
+            Some(" ")
+        ),
+        SessionPreferences::default()
     );
+    // An id no longer in the catalog contributes no defaults.
+    assert_eq!(
+        SessionPreferences::resolve(None, None, None),
+        SessionPreferences::default()
+    );
+}
+
+#[test]
+fn session_preferences_without_a_pick_are_the_agent_defaults() {
+    let agent = agent_with(Some("  opus "), Some("  plan  "));
+    let preferences = SessionPreferences::resolve(Some(&agent), None, None);
+    assert_eq!(preferences.model.as_deref(), Some("opus"));
+    assert_eq!(preferences.modes, vec!["plan".to_string()]);
+}
+
+/// The mode default stays behind the pick as its fallback, for an adapter that
+/// no longer advertises the picked mode. A model has no such fallback: the
+/// pick alone is requested.
+#[test]
+fn session_preferences_put_each_pick_ahead_of_the_agent_default() {
+    let agent = agent_with(Some("sonnet"), Some("bypassPermissions"));
+    let preferences = SessionPreferences::resolve(Some(&agent), Some("haiku"), Some("plan"));
+    assert_eq!(preferences.model.as_deref(), Some("haiku"));
+    assert_eq!(
+        preferences.modes,
+        vec!["plan".to_string(), "bypassPermissions".to_string()]
+    );
+    // A pick equal to the default is listed once.
+    let same = SessionPreferences::resolve(Some(&agent), None, Some(" bypassPermissions "));
+    assert_eq!(same.modes, vec!["bypassPermissions".to_string()]);
 }
 
 /// On by default, so a fresh pane reads as a column rather than a full-width

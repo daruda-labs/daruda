@@ -606,11 +606,6 @@ impl Workspace {
                     cwd,
                     status,
                     session_id,
-                    // Session restore (`Workspace::rebuild_layout` in
-                    // `persistence.rs`) patches the persisted mode id in
-                    // afterward via `agent_chat_content_mut`, same as it does
-                    // for `content.account` — see that call site.
-                    None,
                     agent_id,
                     agent_name,
                     title,
@@ -1416,8 +1411,8 @@ impl Workspace {
         // The bottom-input placeholder includes the current mode name;
         // refresh it now that the mode has changed.
         self.refresh_terminal_input_placeholder(cx);
-        // Persist the new `last_known_mode_id` so a resume after restart
-        // reapplies it (see that field's doc).
+        // Persist the new `picked_mode_id` so the next connect requests it
+        // (see that field's doc).
         self.mutate_durable(cx, |_, _| {});
     }
 
@@ -1425,7 +1420,7 @@ impl Workspace {
     /// the *user* asked for it. Shim for the config chips: routes
     /// `(config_id, value)` into the view, which optimistically updates and
     /// sends `session/set_config_option`. The only path that can move
-    /// `last_known_model_id`, so it is also the only place that saves it.
+    /// `picked_model_id`, so it is also the only place that saves it.
     pub(in crate::workspace) fn set_agent_config_option(
         &mut self,
         pane_id: PaneId,
@@ -1436,11 +1431,11 @@ impl Workspace {
         let Some(view) = self.agent_chat_view(pane_id).cloned() else {
             return;
         };
-        let model_before = view.read(cx).last_known_model_id.clone();
+        let model_before = view.read(cx).picked_model_id.clone();
         view.update(cx, |v, cx| v.set_config_option(config_id, value, cx));
-        // Only a `Model`-category pick moves `last_known_model_id`; persist it
+        // Only a `Model`-category pick moves `picked_model_id`; persist it
         // so the next connect starts on it (see that field's doc).
-        if view.read(cx).last_known_model_id != model_before {
+        if view.read(cx).picked_model_id != model_before {
             self.mutate_durable(cx, |_, _| {});
         }
     }
@@ -1463,8 +1458,8 @@ impl Workspace {
         // The bottom-input placeholder includes the current mode name;
         // refresh it now that the mode has cycled.
         self.refresh_terminal_input_placeholder(cx);
-        // Persist the new `last_known_mode_id` so a resume after restart
-        // reapplies it (see that field's doc).
+        // Persist the new `picked_mode_id` so the next connect requests it
+        // (see that field's doc).
         self.mutate_durable(cx, |_, _| {});
         true
     }

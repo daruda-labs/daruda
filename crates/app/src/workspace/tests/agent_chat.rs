@@ -2336,7 +2336,7 @@ async fn a_model_pick_is_remembered_and_survives_a_restore(cx: &mut TestAppConte
                     daruda_acp::ConfigValueView::Id("high".to_string()),
                     cx,
                 );
-                assert_eq!(view.read(cx).last_known_model_id, None);
+                assert_eq!(view.read(cx).picked_model_id, None);
 
                 ws.set_agent_config_option(
                     pane_id,
@@ -2345,7 +2345,7 @@ async fn a_model_pick_is_remembered_and_survives_a_restore(cx: &mut TestAppConte
                     cx,
                 );
                 assert_eq!(
-                    view.read(cx).last_known_model_id.as_deref(),
+                    view.read(cx).picked_model_id.as_deref(),
                     Some("sonnet"),
                     "the chip pick is remembered so the next connect reapplies it"
                 );
@@ -2393,13 +2393,213 @@ async fn a_model_pick_is_remembered_and_survives_a_restore(cx: &mut TestAppConte
             .expect("restored agent chat pane present")
             .read(cx);
         assert_eq!(
-            view.last_known_model_id.as_deref(),
+            view.picked_model_id.as_deref(),
             Some("sonnet"),
             "a restored pane still knows its model, so its lazy connect reapplies it"
         );
     });
 
     let _ = std::fs::remove_dir_all(&project_root);
+}
+
+/// Only the user's pick is remembered: a mode the adapter reports — at connect
+/// or by switching on its own — must not outrank the agent's `default_mode` on
+/// the next connect.
+#[gpui::test]
+async fn only_a_user_mode_pick_is_remembered(cx: &mut TestAppContext) {
+    use daruda_acp::{AcpEvent, ModeStateView, SessionCapabilitiesView, SessionModeView};
+
+    let modes = |current: &str| ModeStateView {
+        available: ["default", "plan", "bypassPermissions"]
+            .into_iter()
+            .map(|id| SessionModeView {
+                id: id.into(),
+                name: id.into(),
+                description: None,
+            })
+            .collect(),
+        current: current.into(),
+    };
+    let (window_handle, workspace) = build_workspace(cx);
+    cx.run_until_parked();
+    let pane_id = cx
+        .update_window(window_handle.into(), |_, window, cx| {
+            workspace.update(cx, |ws, cx| {
+                let pane = ws.create_agent_chat_pane(
+                    Some(PaneCwd::Local(std::env::temp_dir())),
+                    None,
+                    daruda_config::AgentDefinition::claude_default().id,
+                    None,
+                    window,
+                    cx,
+                );
+                let id = pane.id;
+                ws.active_runtime_mut().panes.push(pane);
+                id
+            })
+        })
+        .unwrap();
+    cx.run_until_parked();
+
+    let picked = workspace.update(cx, |ws, cx| {
+        ws.fold_agent_chat_event(
+            pane_id,
+            AcpEvent::Connected {
+                program: None,
+                session_id: "s1".into(),
+                modes: Some(modes("default")),
+                config_options: Vec::new(),
+                capabilities: SessionCapabilitiesView::default(),
+                login_methods: Vec::new(),
+            },
+            cx,
+        );
+        ws.fold_agent_chat_event(
+            pane_id,
+            AcpEvent::ModeChanged {
+                state: modes("plan"),
+            },
+            cx,
+        );
+        agent_view(ws, pane_id).read(cx).picked_mode_id.clone()
+    });
+    assert_eq!(picked, None, "a mode the adapter reported is not a pick");
+
+    let picked = workspace.update(cx, |ws, cx| {
+        let view = agent_view(ws, pane_id);
+        view.update(cx, |v, cx| v.set_mode("bypassPermissions".into(), cx));
+        ws.fold_agent_chat_event(
+            pane_id,
+            AcpEvent::ModeChanged {
+                state: modes("default"),
+            },
+            cx,
+        );
+        view.read(cx).picked_mode_id.clone()
+    });
+    assert_eq!(
+        picked.as_deref(),
+        Some("bypassPermissions"),
+        "the adapter switching on its own leaves the user's pick standing"
+    );
+}
+
+/// A `default_mode` / `default_model` edit reaches a session that is already
+/// running, for every axis its user has not picked — and stays a default,
+/// never becoming the pane's own pick.
+#[gpui::test]
+async fn a_config_edit_moves_live_sessions_off_unpicked_defaults(cx: &mut TestAppContext) {
+    use daruda_acp::{ModeStateView, SessionModeView};
+
+    let config_with = |model: &str, mode: &str| daruda_config::Config {
+        agents: vec![daruda_config::AgentEntry::custom(
+            daruda_config::AgentDefinition {
+                default_model: Some(model.to_string()),
+                default_mode: Some(mode.to_string()),
+                ..daruda_config::AgentDefinition::claude_default()
+            },
+        )],
+        ..daruda_config::Config::default()
+    };
+    let agent_id = daruda_config::AgentDefinition::claude_default().id;
+    let (window_handle, workspace) =
+        super::build_workspace_with(cx, &config_with("sonnet", "default"), None);
+    cx.run_until_parked();
+
+    // `untouched` follows the agent on both axes; `picked` chose its mode.
+    let (untouched, picked, mut probes) = cx
+        .update_window(window_handle.into(), |_, window, cx| {
+            workspace.update(cx, |ws, cx| {
+                let untouched = open_agent_chat_pane_on(ws, &agent_id, window, cx);
+                let picked = open_agent_chat_pane_on(ws, &agent_id, window, cx);
+                let mut probes = Vec::new();
+                for id in [untouched, picked] {
+                    ws.fold_agent_chat_event(
+                        id,
+                        daruda_acp::AcpEvent::Connected {
+                            program: None,
+                            session_id: format!("s{id}"),
+                            modes: Some(ModeStateView {
+                                available: ["default", "plan", "bypassPermissions"]
+                                    .into_iter()
+                                    .map(|id| SessionModeView {
+                                        id: id.into(),
+                                        name: id.into(),
+                                        description: None,
+                                    })
+                                    .collect(),
+                                current: "default".into(),
+                            }),
+                            config_options: model_options(&[
+                                ("sonnet", "Sonnet"),
+                                ("opus", "Opus"),
+                            ]),
+                            capabilities: daruda_acp::SessionCapabilitiesView::default(),
+                            login_methods: Vec::new(),
+                        },
+                        cx,
+                    );
+                    let (handle, probe) = daruda_acp::AcpSessionHandle::detached_for_test();
+                    probes.push(probe);
+                    agent_view(ws, id).update(cx, |v, _| v.attach_handle(handle));
+                }
+                agent_view(ws, picked).update(cx, |v, cx| v.set_mode("plan".into(), cx));
+                for probe in &mut probes {
+                    probe.drain();
+                }
+                (untouched, picked, probes)
+            })
+        })
+        .unwrap();
+
+    workspace.update(cx, |ws, cx| {
+        ws.reload_config(&config_with("opus", "bypassPermissions"), cx)
+    });
+    cx.run_until_parked();
+
+    let state =
+        |id: PaneId, cx: &mut TestAppContext| {
+            workspace.read_with(cx, |ws, cx| {
+                let v = agent_view(ws, id).read(cx);
+                let model = v.session_config.config_options.iter().find_map(|o| {
+                    match (&o.category, &o.kind) {
+                        (
+                            daruda_acp::ConfigOptionCategoryView::Model,
+                            daruda_acp::ConfigOptionKindView::Select { current_value, .. },
+                        ) => Some(current_value.clone()),
+                        _ => None,
+                    }
+                });
+                (
+                    model,
+                    v.session_config.mode_for_chip().map(|m| m.current.clone()),
+                    v.picked_model_id.clone(),
+                    v.picked_mode_id.clone(),
+                )
+            })
+        };
+    assert_eq!(
+        state(untouched, cx),
+        (
+            Some("opus".to_string()),
+            Some("bypassPermissions".to_string()),
+            None,
+            None
+        ),
+        "an untouched pane follows both edited defaults without picking them"
+    );
+    assert_eq!(probes[0].drain().0, 2, "one request per moved axis");
+    assert_eq!(
+        state(picked, cx),
+        (
+            Some("opus".to_string()),
+            Some("plan".to_string()),
+            None,
+            Some("plan".to_string())
+        ),
+        "a picked mode stands; the unpicked model still follows"
+    );
+    assert_eq!(probes[1].drain().0, 1, "only the model is requested");
 }
 
 /// The inline "Working…" row is projected from `activity_state()`, which is a

@@ -176,9 +176,8 @@ pub enum ConnectPhase {
     CreatingSession,
     /// `session/load` sent — resuming a persisted session id.
     LoadingSession,
-    /// `session/set_mode` sent to apply the configured initial mode on a
-    /// freshly created session, or the persisted `restore_mode` on a resumed
-    /// one.
+    /// `session/set_mode` sent to apply the host's requested mode, on a
+    /// fresh and a resumed session alike.
     ApplyingMode,
 }
 
@@ -452,22 +451,14 @@ impl AcpSessionHandle {
 /// Open a long-lived ACP session against `command`, rooted at `cwd`.
 ///
 /// `initial_modes` is a priority-ordered list of ACP mode ids (e.g.
-/// `["bypassPermissions", "auto"]`) to apply right after a *fresh*
-/// `session/new` via `session/set_mode`. The first mode the adapter both
+/// `["bypassPermissions", "auto"]`) to apply via `session/set_mode` once the
+/// session exists — after `session/new` and `session/load` alike. The first mode the adapter both
 /// advertises and accepts wins; a candidate that is unadvertised or whose
 /// `set_mode` is rejected falls through to the next, so a preferred-but-unavailable
 /// mode degrades to its fallback instead of leaving the session in an arbitrary
 /// state. If none apply (empty list, no advertised candidate, or the adapter
 /// doesn't support modes), `Connected` is emitted with whatever mode the
 /// adapter defaults to.
-///
-/// `restore_mode` is the single mode id the host last saw this *resumed*
-/// session in (persisted across restarts), applied the same way on a real
-/// `session/load` instead of `initial_modes`. Some adapters recompute their
-/// advertised mode from static config on every process launch rather than the
-/// resumed session's actual last mode (see the `restore_mode` application
-/// site in [`run_connection`] for the specifics); this is the host's
-/// workaround for that.
 ///
 /// Spawns the protocol connection as a detached smol task and returns a handle
 /// plus the event receiver. The task runs until the handle is dropped (command
@@ -482,7 +473,6 @@ pub fn connect_session(
     command: AdapterCommand,
     cwd: PathBuf,
     initial_modes: Vec<String>,
-    restore_mode: Option<String>,
     resume: Option<SessionId>,
     agent_id: &str,
 ) -> Result<(AcpSessionHandle, UnboundedReceiver<AcpEvent>), AcpClientError> {
@@ -491,7 +481,6 @@ pub fn connect_session(
         cwd,
         None,
         initial_modes,
-        restore_mode,
         resume,
         agent_id,
         Vec::new(),
@@ -509,7 +498,6 @@ pub fn connect_prepared_session(
     cwd: PathBuf,
     initial_model: Option<String>,
     initial_modes: Vec<String>,
-    restore_mode: Option<String>,
     resume: impl Into<SessionResume>,
     agent_id: &str,
     mcp_servers: Vec<McpServer>,
@@ -537,7 +525,6 @@ pub fn connect_prepared_session(
             cwd,
             initial_model,
             initial_modes,
-            restore_mode,
             resume,
             mcp_servers,
             command_rx,
@@ -583,7 +570,6 @@ pub fn connect_agent_session(
     node_install_dir: PathBuf,
     cwd: PathBuf,
     initial_modes: Vec<String>,
-    restore_mode: Option<String>,
     resume: Option<SessionId>,
     agent_id: &str,
     progress: &mut dyn FnMut(crate::node::NodeProgress),
@@ -599,7 +585,6 @@ pub fn connect_agent_session(
         cwd,
         None,
         initial_modes,
-        restore_mode,
         resume,
         agent_id,
         Vec::new(),
@@ -617,7 +602,6 @@ pub fn connect_agent_session_with_model(
     cwd: PathBuf,
     initial_model: Option<String>,
     initial_modes: Vec<String>,
-    restore_mode: Option<String>,
     resume: Option<SessionId>,
     agent_id: &str,
     mcp_servers: Vec<McpServer>,
@@ -634,7 +618,6 @@ pub fn connect_agent_session_with_model(
         cwd,
         initial_model,
         initial_modes,
-        restore_mode,
         resume,
         agent_id,
         mcp_servers,
@@ -912,7 +895,6 @@ async fn run_connection(
     cwd: PathBuf,
     initial_model: Option<String>,
     initial_modes: Vec<String>,
-    restore_mode: Option<String>,
     resume: impl Into<SessionResume>,
     mcp_servers: Vec<McpServer>,
     command_rx: UnboundedReceiver<Command>,
@@ -1028,7 +1010,7 @@ async fn run_connection(
             // `prompt_loop` below is deliberately outside every timeout here —
             // a live, quiet session is normal.
             let _ = event_tx.unbounded_send(AcpEvent::ConnectProgress(ConnectPhase::Handshaking));
-            let (capabilities, login_methods, program, resume, fresh) =
+            let (capabilities, login_methods, program, resume) =
                 with_connect_timeout("initialize", CONNECT_HANDSHAKE_TIMEOUT, async {
                     let init = connection
                         .send_request(
@@ -1049,13 +1031,7 @@ async fn run_connection(
                     if let Some(notice) = resume_notice {
                         let _ = event_tx.unbounded_send(AcpEvent::Notice(notice));
                     }
-                    // Whether this connect ends up creating a *fresh* session (either no
-                    // resume was requested, or a requested resume was downgraded because
-                    // the agent doesn't advertise `session/load`). The configured initial
-                    // mode is applied only on a fresh session; a real load preserves the
-                    // resumed session's own mode.
-                    let fresh = resume.is_none();
-                    Ok((capabilities, login_methods, program, resume, fresh))
+                    Ok((capabilities, login_methods, program, resume))
                 })
                 .await?;
             // Before the branch below: a `session/load` inside it replays the
@@ -1134,23 +1110,12 @@ async fn run_connection(
             )
             .await;
 
-            // Apply the configured initial mode on a *fresh* session (including a
-            // resume downgraded to session/new): `initial_modes`, a
-            // priority-ordered candidate list. On a *real* `session/load`, try
-            // `restore_mode` instead — the single mode id the host last saw this
-            // session in.
+            // Apply the host's requested mode on every connect, a `session/load`
+            // included: the host decides which mode a session runs in, so
+            // whatever the adapter reports after a load (`claude-agent-acp`
+            // recomputes it from `settings.json` per launch) does not stand.
             //
-            // WORKAROUND: the protocol lets `session/load`'s response carry the
-            // resumed session's real mode, so in principle this candidate loop
-            // should be unnecessary on a resume. But `claude-agent-acp` never
-            // persists mode per session — it recomputes `permissionMode` from
-            // `settings.json` on every process launch — so the value the load
-            // response reports is the settings default, not the session's actual
-            // last mode. Root cause is upstream (`claude-agent-acp`'s
-            // `createSession`), out of scope here; `restore_mode` (persisted by
-            // the host itself) papers over it until that adapter fixes it.
-            //
-            // Either way: try each candidate in turn and stop at the first the
+            // Try each candidate in turn and stop at the first the
             // adapter both advertises and accepts. A candidate that is not
             // advertised is skipped without a request; one whose set_mode is
             // rejected falls through to the next, so a preferred-but-unavailable
@@ -1161,15 +1126,10 @@ async fn run_connection(
             // succeeded and is usable. Leave mode_state.current at the adapter's
             // real current mode (the chip reflects that), emit a Notice so the
             // host can log it, and continue to Connected.
-            let mode_candidates: Vec<String> = if fresh {
-                initial_modes
-            } else {
-                restore_mode.into_iter().collect()
-            };
             if let Some(mode_state) = modes.as_mut() {
                 let mut applied = false;
                 let mut last_reject: Option<(String, String)> = None;
-                for id in &mode_candidates {
+                for id in &initial_modes {
                     // Not advertised — this candidate can't apply; try the next.
                     if !mode_state.available.iter().any(|m| &m.id == id) {
                         continue;
@@ -1678,7 +1638,6 @@ mod tests {
                     PathBuf::from("."),
                     None,
                     Vec::new(),
-                    None,
                     SessionResume::Required(SessionId::from("task-session")),
                     Vec::new(),
                     command_rx,
@@ -1737,7 +1696,7 @@ mod tests {
                 });
                 let result = with_connect_timeout("EOF regression", Duration::from_secs(2), async {
                     let resume = (close_method == "session/load").then(|| SessionId::from("saved-session"));
-                    run_connection(transport, PathBuf::from("."), None, Vec::new(), None, resume, Vec::new(), command_rx,
+                    run_connection(transport, PathBuf::from("."), None, Vec::new(), resume, Vec::new(), command_rx,
                         event_tx, Arc::new(Mutex::new(HashMap::new())))
                         .await.map_err(|error| match error {
                             AcpClientError::Protocol(AcpFailure::TransportClosed { .. }) => {
@@ -2244,7 +2203,6 @@ mod tests {
                 Some("opus".to_string()),
                 vec!["plan".to_string()],
                 None,
-                None,
                 Vec::new(),
                 command_rx,
                 event_tx,
@@ -2303,6 +2261,86 @@ mod tests {
                 requests.lock().unwrap().as_slice(),
                 ["model:opus", "mode:plan", "prompt"]
             );
+
+            drop(command_tx);
+            let _ = connection.await;
+        });
+    }
+
+    /// A resume reports the adapter's own mode (`claude-agent-acp` recomputes
+    /// it per launch); the host's requested mode still has to win.
+    #[test]
+    fn a_resumed_session_applies_the_requested_mode() {
+        use agent_client_protocol::schema::v1::{
+            InitializeResponse, LoadSessionResponse, SessionMode, SessionModeState,
+            SetSessionModeResponse,
+        };
+
+        let requests = Arc::new(Mutex::new(Vec::<String>::new()));
+        let agent = Agent
+            .builder()
+            .on_receive_request(
+                async |_req: InitializeRequest, responder, _conn| {
+                    responder.respond(
+                        InitializeResponse::new(ProtocolVersion::V1).agent_capabilities(
+                            agent_client_protocol::schema::v1::AgentCapabilities::new()
+                                .load_session(true),
+                        ),
+                    )
+                },
+                agent_client_protocol::on_receive_request!(),
+            )
+            .on_receive_request(
+                async |_req: LoadSessionRequest, responder, _conn| {
+                    responder.respond(LoadSessionResponse::new().modes(SessionModeState::new(
+                        "default",
+                        vec![
+                            SessionMode::new("default", "Default"),
+                            SessionMode::new("bypassPermissions", "Bypass"),
+                        ],
+                    )))
+                },
+                agent_client_protocol::on_receive_request!(),
+            )
+            .on_receive_request(
+                {
+                    let requests = requests.clone();
+                    async move |req: SetSessionModeRequest, responder, _conn| {
+                        requests.lock().unwrap().push(req.mode_id.to_string());
+                        responder.respond(SetSessionModeResponse::new())
+                    }
+                },
+                agent_client_protocol::on_receive_request!(),
+            );
+
+        let (command_tx, command_rx) = unbounded::<Command>();
+        let (event_tx, mut event_rx) = unbounded::<AcpEvent>();
+        let permission_parks: PermissionParks = Arc::new(Mutex::new(HashMap::new()));
+
+        smol::block_on(async {
+            let connection = smol::spawn(run_connection(
+                agent,
+                PathBuf::from("."),
+                None,
+                vec!["bypassPermissions".to_string()],
+                Some(SessionId::from("sess-resumed")),
+                Vec::new(),
+                command_rx,
+                event_tx,
+                permission_parks,
+            ));
+
+            let modes = loop {
+                match next_event_within(&mut event_rx).await {
+                    Some(AcpEvent::Connected { modes, .. }) => {
+                        break modes.expect("the load advertised modes");
+                    }
+                    Some(_) => {}
+                    None => panic!("connection never reached Connected"),
+                }
+            };
+            assert_eq!(modes.current, "bypassPermissions");
+            assert_eq!(requests.lock().unwrap().as_slice(), ["bypassPermissions"]);
 
             drop(command_tx);
             let _ = connection.await;
@@ -2527,7 +2565,6 @@ mod tests {
                 PathBuf::from("."),
                 None,
                 Vec::new(),
-                None,
                 Some(SessionId::from("sess-root")),
                 Vec::new(),
                 command_rx,
@@ -2588,7 +2625,6 @@ mod tests {
                 PathBuf::from("."),
                 None,
                 Vec::new(),
-                None,
                 None,
                 Vec::new(),
                 command_rx,
@@ -2715,7 +2751,6 @@ mod tests {
                 None,
                 Vec::new(),
                 None,
-                None,
                 Vec::new(),
                 command_rx,
                 event_tx,
@@ -2783,7 +2818,6 @@ mod tests {
                 PathBuf::from("."),
                 None,
                 Vec::new(),
-                None,
                 None,
                 Vec::new(),
                 command_rx,
@@ -2948,7 +2982,6 @@ mod tests {
                 None,
                 Vec::new(),
                 None,
-                None,
                 Vec::new(),
                 command_rx,
                 event_tx,
@@ -2993,7 +3026,6 @@ mod tests {
                 PathBuf::from("."),
                 None,
                 Vec::new(),
-                None,
                 None,
                 Vec::new(),
                 command_rx,
@@ -3053,7 +3085,6 @@ mod tests {
                 PathBuf::from("."),
                 None,
                 Vec::new(),
-                None,
                 None,
                 Vec::new(),
                 command_rx,

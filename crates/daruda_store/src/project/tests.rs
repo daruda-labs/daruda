@@ -183,7 +183,7 @@ fn agent_chat_content_round_trip_preserves_account_id() {
         title: None,
         agent_id: Some("claude".to_string()),
         account_id: Some(id),
-        mode_id: None,
+        picked_mode_id: None,
         model_id: None,
         content_width: None,
         tail_window: None,
@@ -222,10 +222,9 @@ fn agent_chat_access_round_trips_and_legacy_is_interactive() {
 }
 
 #[test]
-fn agent_chat_content_round_trip_preserves_mode_id() {
-    // A restart resumes the session via `session/load`; the persisted mode
-    // id is what lets the host reapply the last-known mode afterward (see
-    // `SerializedAgentChatContent::mode_id`).
+fn agent_chat_content_round_trip_preserves_picked_mode_id() {
+    // Every connect requests the pane's own pick ahead of the agent default,
+    // so it has to survive the restart that ends the session it was made in.
     let content = SerializedAgentChatContent {
         access: Default::default(),
         cwd: Some(PaneCwd::Local(PathBuf::from("/repo/lane"))),
@@ -233,7 +232,7 @@ fn agent_chat_content_round_trip_preserves_mode_id() {
         title: None,
         agent_id: Some("claude".to_string()),
         account_id: None,
-        mode_id: Some("acceptEdits".to_string()),
+        picked_mode_id: Some("acceptEdits".to_string()),
         model_id: None,
         content_width: None,
         tail_window: None,
@@ -244,12 +243,17 @@ fn agent_chat_content_round_trip_preserves_mode_id() {
     };
     let json = serde_json::to_string(&content).unwrap();
     let restored: SerializedAgentChatContent = serde_json::from_str(&json).unwrap();
-    assert_eq!(restored.mode_id, Some("acceptEdits".to_string()));
+    assert_eq!(restored.picked_mode_id, Some("acceptEdits".to_string()));
+}
 
-    // Legacy payload (pre-mode_id) still loads, defaulting to None.
-    let legacy_json = r#"{"cwd":"/repo/lane"}"#;
-    let legacy: SerializedAgentChatContent = serde_json::from_str(legacy_json).unwrap();
-    assert!(legacy.mode_id.is_none());
+/// The superseded `mode_id` key recorded whatever mode the adapter reported,
+/// its own switches included, so reading it back would outrank the agent's
+/// `default_mode` with a value nobody picked.
+#[test]
+fn the_superseded_mode_id_key_is_not_read_as_a_pick() {
+    let legacy: SerializedAgentChatContent =
+        serde_json::from_str(r#"{"cwd":"/repo/lane","mode_id":"auto"}"#).unwrap();
+    assert!(legacy.picked_mode_id.is_none());
 }
 
 #[test]
@@ -263,7 +267,7 @@ fn agent_chat_content_round_trip_preserves_model_id() {
         title: None,
         agent_id: Some("claude".to_string()),
         account_id: None,
-        mode_id: None,
+        picked_mode_id: None,
         model_id: Some("opus".to_string()),
         content_width: None,
         tail_window: None,
@@ -281,10 +285,10 @@ fn agent_chat_content_round_trip_preserves_model_id() {
     assert_eq!(restored.model_id, Some("opus".to_string()));
 
     // Legacy payload (pre-model_id) still loads, defaulting to None.
-    let legacy_json = r#"{"cwd":"/repo/lane","mode_id":"acceptEdits"}"#;
+    let legacy_json = r#"{"cwd":"/repo/lane","picked_mode_id":"acceptEdits"}"#;
     let legacy: SerializedAgentChatContent = serde_json::from_str(legacy_json).unwrap();
     assert!(legacy.model_id.is_none());
-    assert_eq!(legacy.mode_id, Some("acceptEdits".to_string()));
+    assert_eq!(legacy.picked_mode_id, Some("acceptEdits".to_string()));
 }
 
 /// Both widths survive a save, and an absent key means "follow config". Both
@@ -300,7 +304,7 @@ fn agent_chat_content_width_round_trips_and_an_absent_key_follows_config() {
         title: None,
         agent_id: Some("claude".to_string()),
         account_id: None,
-        mode_id: None,
+        picked_mode_id: None,
         model_id: None,
         content_width: None,
         tail_window: None,
@@ -349,7 +353,7 @@ fn agent_chat_display_filter_round_trips_and_legacy_stays_unset() {
         title: None,
         agent_id: Some("claude".to_string()),
         account_id: None,
-        mode_id: None,
+        picked_mode_id: None,
         model_id: None,
         content_width: None,
         tail_window: None,
@@ -395,7 +399,7 @@ fn agent_chat_fold_mode_round_trips_and_legacy_stays_unset() {
         title: None,
         agent_id: Some("claude".to_string()),
         account_id: None,
-        mode_id: None,
+        picked_mode_id: None,
         model_id: None,
         content_width: None,
         tail_window: None,
@@ -451,7 +455,7 @@ fn agent_chat_tail_window_round_trips_and_legacy_stays_unset() {
         title: None,
         agent_id: Some("claude".to_string()),
         account_id: None,
-        mode_id: None,
+        picked_mode_id: None,
         model_id: None,
         content_width: None,
         tail_window: Some(SerializedChatTailWindow::Last(5)),
@@ -590,7 +594,7 @@ fn unset_view_preferences_are_left_out_of_the_json() {
         title: None,
         agent_id: None,
         account_id: None,
-        mode_id: None,
+        picked_mode_id: None,
         model_id: None,
         content_width: None,
         tail_window: None,
@@ -624,7 +628,7 @@ fn agent_chat_leaf_round_trip_preserves_cwd() {
             title: Some("Fix the parser".to_string()),
             agent_id: Some("claude".to_string()),
             account_id: None,
-            mode_id: None,
+            picked_mode_id: None,
             model_id: None,
             content_width: None,
             tail_window: None,
@@ -666,7 +670,7 @@ fn agent_chat_leaf_round_trip_preserves_remote_cwd() {
             title: None,
             agent_id: None,
             account_id: None,
-            mode_id: None,
+            picked_mode_id: None,
             model_id: None,
             content_width: None,
             tail_window: None,
@@ -1613,7 +1617,7 @@ fn a_pane_writes_the_new_visible_kinds_field_and_never_the_legacy_one() {
         title: None,
         agent_id: Some("claude".to_string()),
         account_id: None,
-        mode_id: None,
+        picked_mode_id: None,
         model_id: None,
         content_width: None,
         tail_window: None,

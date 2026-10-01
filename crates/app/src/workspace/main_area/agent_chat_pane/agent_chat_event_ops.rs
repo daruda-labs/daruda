@@ -57,10 +57,6 @@ impl Workspace {
         // is triggered below when either changes.
         let session_id_before = view.read(cx).session_id.clone();
         let title_before = view.read(cx).session_title.clone();
-        // Also persisted (see `last_known_mode_id`'s doc) —
-        // reapplied on the next resume to work around
-        // `claude-agent-acp` not restoring it itself.
-        let mode_id_before = view.read(cx).last_known_mode_id.clone();
         // Capture current mode before the event so we can
         // detect `Connected` (modes arriving) and
         // `ModeChanged` (current switching) and refresh the
@@ -112,10 +108,7 @@ impl Workspace {
         // token-streaming events.
         {
             let v = view.read(cx);
-            if v.session_id != session_id_before
-                || v.session_title != title_before
-                || v.last_known_mode_id != mode_id_before
-            {
+            if v.session_id != session_id_before || v.session_title != title_before {
                 self.mutate_durable(cx, |_, _| {});
             }
         }

@@ -56,8 +56,10 @@ impl Workspace {
         // What moved is read before anything is written: every pass below
         // compares against the values this reload replaces.
         let (delta, mirrors) = self.config_delta(config, cx);
+        let previous_agents = self.agents.clone();
         self.store_config_fields(config, mirrors);
         self.apply_config_to_agent_chat_defaults(delta.telegram_recipient, cx);
+        self.apply_config_to_agent_sessions(&previous_agents, cx);
         self.apply_config_to_input_dock(config, cx);
         self.apply_config_to_terminals(config, cx);
         self.apply_config_to_file_tree(&delta, cx);

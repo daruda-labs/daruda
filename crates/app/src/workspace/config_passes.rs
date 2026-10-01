@@ -159,6 +159,30 @@ impl Workspace {
         }
     }
 
+    /// Each live chat session follows an edited `default_model` /
+    /// `default_mode` of its agent, unless its user picked that axis — the
+    /// same rule a connect applies, compared against `previous_agents`.
+    pub(super) fn apply_config_to_agent_sessions(
+        &mut self,
+        previous_agents: &[daruda_config::AgentDefinition],
+        cx: &mut Context<Self>,
+    ) {
+        let mut mode_switched = false;
+        for (_, view) in self.every_agent_chat() {
+            let was = view.read(cx).session_preferences(previous_agents);
+            let now = view.read(cx).session_preferences(&self.agents);
+            if was != now {
+                mode_switched |= view.update(cx, |view, cx| {
+                    view.follow_session_preferences(&was, &now, cx)
+                });
+            }
+        }
+        // The bottom-input placeholder names the focused pane's mode.
+        if mode_switched {
+            self.refresh_terminal_input_placeholder(cx);
+        }
+    }
+
     /// The bottom input's auto-grow cap. The dock height that follows it
     /// needs the window, so it is [`Self::resync_input_dock_height`]'s, run
     /// from `apply_config`'s deferred window work.

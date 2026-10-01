@@ -148,7 +148,6 @@ impl AcpRunner {
             None,
             agent.mode.clone().into_iter().collect(),
             None,
-            None,
             &agent.id,
             Vec::new(),
         );

@@ -782,21 +782,80 @@ impl AgentChatView {
         cx.notify();
     }
 
-    /// Switch the active session mode: show the pick immediately, then ask the
-    /// agent over the live handle (no-op when the handle is absent). A
-    /// `ModeChanged` replaces the whole state if the agent disagrees.
+    /// Switch the active session mode on the *user's* behalf and remember it
+    /// as this pane's own pick. A `ModeChanged` replaces the whole state if
+    /// the agent disagrees.
     pub(in crate::workspace) fn set_mode(&mut self, mode_id: String, cx: &mut Context<Self>) {
         // A mirror shows the CLI's mode; the pick would only be local.
         if self.is_read_only() {
             return;
         }
+        self.picked_mode_id = Some(mode_id.clone());
+        self.send_mode(mode_id, cx);
+    }
+
+    /// The protocol half [`Self::set_mode`] shares with a followed default:
+    /// show the mode immediately, then ask the agent over the live handle
+    /// (no-op when absent).
+    fn send_mode(&mut self, mode_id: String, cx: &mut Context<Self>) {
         self.session_config
             .set_current_mode_optimistically(mode_id.clone());
-        self.last_known_mode_id = Some(mode_id.clone());
         if let Some(h) = self.live_handle() {
             h.set_mode(mode_id);
         }
         cx.notify();
+    }
+
+    /// What this pane asks its agent for under `agents` — its own picks ahead
+    /// of the catalog defaults.
+    pub(in crate::workspace) fn session_preferences(
+        &self,
+        agents: &[daruda_config::AgentDefinition],
+    ) -> daruda_config::SessionPreferences {
+        daruda_config::SessionPreferences::resolve(
+            agents.iter().find(|a| a.id == self.agent_id),
+            self.picked_model_id.as_deref(),
+            self.picked_mode_id.as_deref(),
+        )
+    }
+
+    /// Carry a config edit into the live session: each axis whose preference
+    /// moved (`was` → `now`) is requested again, without becoming a pick. A
+    /// pane not yet connected needs nothing — its connect reads `now`.
+    /// `true` when the mode was switched.
+    pub(in crate::workspace) fn follow_session_preferences(
+        &mut self,
+        was: &daruda_config::SessionPreferences,
+        now: &daruda_config::SessionPreferences,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        if self.is_read_only() || self.live_handle().is_none() {
+            return false;
+        }
+        // Model first: a model switch can rebuild the advertised modes.
+        if was.model != now.model
+            && let Some(model) = &now.model
+            && let Some((option_id, current, choices)) =
+                model_select(&self.session_config.config_options)
+            && current != model
+            && choices.iter().any(|c| &c.value == model)
+        {
+            let option_id = option_id.to_string();
+            let value = daruda_acp::ConfigValueView::Id(model.clone());
+            self.send_config_option(option_id, value, cx);
+        }
+        if was.modes != now.modes
+            && let Some(state) = &self.session_config.modes
+            && let Some(mode) = now
+                .modes
+                .iter()
+                .find(|id| state.available.iter().any(|m| &m.id == *id))
+            && *mode != state.current
+        {
+            self.send_mode(mode.clone(), cx);
+            return true;
+        }
+        false
     }
 
     /// Change a select config option on the *user's* behalf (the config
@@ -824,7 +883,7 @@ impl AgentChatView {
             daruda_acp::ConfigValueView::Bool(_) => None,
         };
         if let Some(model) = picked_model {
-            self.last_known_model_id = Some(model);
+            self.picked_model_id = Some(model);
         }
         self.send_config_option(config_id, value, cx);
     }

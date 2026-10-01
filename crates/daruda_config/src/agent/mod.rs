@@ -26,7 +26,8 @@ pub struct AgentDefinition {
     pub id: String,
     pub name: String,
     pub launch: AgentLaunch,
-    /// Session mode to request when a fresh session with this agent connects.
+    /// Session mode a pane under this agent runs in unless its user picked
+    /// one — requested on every connect and on a live config edit.
     ///
     /// A free-form id rather than an enum because modes are agent-advertised:
     /// this catalog holds Cline, Codex and a dozen other adapters whose
@@ -34,7 +35,8 @@ pub struct AgentDefinition {
     /// per model. An id the agent doesn't advertise is skipped at connect,
     /// falling through to the adapter's own default.
     pub default_mode: Option<String>,
-    /// Model id to request when a fresh session with this agent connects.
+    /// Model a pane under this agent runs on unless its user picked one —
+    /// requested on every connect and on a live config edit.
     ///
     /// A free-form id rather than an enum because model ids are
     /// runtime/account/plan dependent: Claude resolves its list from the SDK
@@ -755,18 +757,44 @@ impl AgentConfig {
     }
 }
 
-/// Mode candidate to try when a fresh session connects: the agent's own
-/// `default_mode`, when its catalog entry sets one. Empty when it doesn't —
-/// the adapter's own default mode applies.
-///
-/// `daruda_acp` applies the first candidate the adapter both advertises and
-/// accepts, so an agent whose vocabulary doesn't include this candidate falls
-/// through to its own default. That is what makes a per-agent override safe
-/// to state as free-form text.
-pub fn connect_mode_priority(agent_default_mode: Option<&str>) -> Vec<String> {
-    agent_default_mode
-        .map(str::trim)
-        .filter(|id| !id.is_empty())
-        .map(|id| vec![id.to_string()])
-        .unwrap_or_default()
+/// What a chat pane asks its agent for: the pane's own picks, each ahead of
+/// the agent's catalog default. The one rule behind both a connect and a live
+/// config edit, so the two cannot disagree on which value wins.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct SessionPreferences {
+    /// `None` leaves the adapter's own model standing.
+    pub model: Option<String>,
+    /// Priority-ordered: the first candidate the agent advertises applies, so
+    /// one outside its vocabulary falls through to the next. That is what
+    /// makes a per-agent override safe to state as free-form text. Empty
+    /// leaves the adapter's own mode standing.
+    pub modes: Vec<String>,
+}
+
+impl SessionPreferences {
+    /// `agent` is `None` for an id no longer in the catalog — only the
+    /// pane's picks then apply.
+    pub fn resolve(
+        agent: Option<&AgentDefinition>,
+        picked_model: Option<&str>,
+        picked_mode: Option<&str>,
+    ) -> Self {
+        let model = [picked_model, agent.and_then(|a| a.default_model.as_deref())]
+            .into_iter()
+            .flatten()
+            .map(str::trim)
+            .find(|id| !id.is_empty())
+            .map(str::to_string);
+        let mut modes: Vec<String> = Vec::new();
+        for id in [picked_mode, agent.and_then(|a| a.default_mode.as_deref())]
+            .into_iter()
+            .flatten()
+        {
+            let id = id.trim();
+            if !id.is_empty() && !modes.iter().any(|m| m == id) {
+                modes.push(id.to_string());
+            }
+        }
+        Self { model, modes }
+    }
 }

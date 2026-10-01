@@ -78,7 +78,6 @@ fn add_test_view(cx: &mut gpui::TestAppContext) -> gpui::WindowHandle<super::Age
             None,
             super::AgentSessionStatus::Idle,
             None,
-            None,
             "claude".to_string(),
             "Claude".to_string(),
             None,

@@ -493,7 +493,7 @@ fn cli_snapshot_refuses_every_input_path(cx: &mut TestAppContext) {
             let view = ws.agent_chat_view(id).unwrap().clone();
             let before = {
                 let v = view.read(cx);
-                (v.last_known_mode_id.clone(), v.last_known_model_id.clone())
+                (v.picked_mode_id.clone(), v.picked_model_id.clone())
             };
 
             ws.send_agent_prompt_text(id, "must not send".into(), cx);
@@ -535,7 +535,7 @@ fn cli_snapshot_refuses_every_input_path(cx: &mut TestAppContext) {
             assert_eq!(v.session_id.as_deref(), Some("cli-session"));
             assert!(v.is_read_only());
             assert_eq!(
-                (v.last_known_mode_id.clone(), v.last_known_model_id.clone()),
+                (v.picked_mode_id.clone(), v.picked_model_id.clone()),
                 before
             );
             assert!(ws.task_chat_owner(id, cx).is_none());
