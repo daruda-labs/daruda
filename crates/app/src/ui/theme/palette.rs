@@ -72,6 +72,8 @@ pub const AGENT_CHAT_HOVER_TINT_ALPHA: f32 = 0.03;
 /// step stronger than the fill tint, drawn from the same neutral overlay so
 /// the edge tracks the background instead of a fixed line color.
 pub const AGENT_CHAT_CARD_BORDER_ALPHA: f32 = 0.12;
+/// Command chips stay bounded so a long executable cannot displace the status.
+pub const AGENT_CHAT_COMMAND_TAG_MAX_W: f32 = 88.;
 /// Alpha for the resting edge of an *interactive* control on a pane-local
 /// surface (the Activity Bar's chips), white over a dark background.
 ///
@@ -161,6 +163,13 @@ pub const ACCENT_FG: Hsla = hsla(0.0, 0.0, 1.0, 1.0);
 // Agent action states (Cursor timeline palette, dark-adapted)
 // ---------------------------------------------------------------------------
 
+/// Mint — Reading files / context (#8fcca8, DESIGN.md).
+pub const AGENT_READING: Hsla = hsla(144.6, 0.374, 0.680, 1.0);
+/// Lavender — Writing / editing output (#b09bcc, DESIGN.md).
+pub const AGENT_EDITING: Hsla = hsla(265.7, 0.325, 0.704, 1.0);
+/// Same semantic hues, darkened for readable text on light pane backgrounds.
+pub const AGENT_READING_LIGHT: Hsla = with_lightness(AGENT_READING, 0.31);
+pub const AGENT_EDITING_LIGHT: Hsla = with_lightness(AGENT_EDITING, 0.43);
 /// Gold — Executing tool / running command (#ccaa6e).
 pub const AGENT_RUNNING: Hsla = hsla(38.4, 0.480, 0.616, 1.0);
 
@@ -2691,6 +2700,30 @@ mod tests {
         let (a, b) = (lum(fg), lum(bg));
         let (hi, lo) = if a > b { (a, b) } else { (b, a) };
         (hi + 0.05) / (lo + 0.05)
+    }
+
+    #[test]
+    fn command_effect_chips_clear_contrast_on_dark_and_light_panes() {
+        for (colors, pane) in [
+            ([AGENT_READING, AGENT_EDITING], base16(0x1e_1e_1e)),
+            (
+                [AGENT_READING_LIGHT, AGENT_EDITING_LIGHT],
+                base16(0xf9_fa_fb),
+            ),
+        ] {
+            for color in colors {
+                let fg = gpui::Rgba::from(color);
+                let bg = gpui::Rgba::from(pane);
+                let a = AGENT_CHAT_CARD_TINT_ALPHA;
+                let fill = gpui::Rgba {
+                    r: fg.r * a + bg.r * (1.0 - a),
+                    g: fg.g * a + bg.g * (1.0 - a),
+                    b: fg.b * a + bg.b * (1.0 - a),
+                    a: 1.0,
+                };
+                assert!(wcag_contrast(color, fill.into()) >= 4.5);
+            }
+        }
     }
 
     #[test]

@@ -2365,10 +2365,10 @@ pub fn agent_chat_thinking_label() -> String {
 /// (Read/Edit/Search/…) — the full title moves to the expanded body instead,
 /// so the header never grows with a long or multiline title.
 pub fn agent_chat_tool_kind_read() -> String {
-    rust_i18n::t!("agent_chat.tool_kind_read").into_owned()
+    rust_i18n::t!("common.read").into_owned()
 }
 pub fn agent_chat_tool_kind_edit() -> String {
-    rust_i18n::t!("agent_chat.tool_kind_edit").into_owned()
+    rust_i18n::t!("common.btn_edit").into_owned()
 }
 pub fn agent_chat_tool_kind_delete() -> String {
     rust_i18n::t!("agent_chat.tool_kind_delete").into_owned()
@@ -2898,6 +2898,18 @@ pub fn agent_chat_tool_status_cancelled() -> String {
 /// Chip marking a shell command launched detached (`run_in_background: true`).
 pub fn agent_chat_tool_background() -> String {
     rust_i18n::t!("agent_chat.tool_background").into_owned()
+}
+
+pub fn agent_chat_command_effect_read() -> String {
+    rust_i18n::t!("common.read").into_owned()
+}
+
+pub fn agent_chat_command_effect_edit() -> String {
+    rust_i18n::t!("common.btn_edit").into_owned()
+}
+
+pub fn agent_chat_command_more(count: usize) -> String {
+    rust_i18n::t!("agent_chat.command_more", count = count).into_owned()
 }
 
 /// Badge naming a shell tool call's nonzero exit code, e.g. "Exit 1".

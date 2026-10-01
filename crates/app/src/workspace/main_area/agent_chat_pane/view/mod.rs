@@ -37,6 +37,7 @@ use super::rows::{FilterMatchIndex, LiveSubagentUnits, RenderRow};
 use super::session_config::SessionConfig;
 use super::telegram_ops::{FirstResponseOutcome, PhoneTurn};
 use super::transcript_defaults::TranscriptDefaults;
+use crate::transcript::command_analysis::CommandAnalysisIndex;
 use crate::transcript::display_filter::DisplayFilter;
 use crate::transcript::editor::state::FoldEditorState;
 use crate::workspace::main_area::pane_tree::PaneId;
@@ -820,6 +821,8 @@ pub(in crate::workspace) struct AgentChatView {
     pub(super) live_units: LiveSubagentUnits,
     /// Cached subtree-aware display-filter matches.
     pub(super) filter_matches: FilterMatchIndex,
+    /// Structured command metadata, refreshed from raw input in `rebuild_rows`.
+    pub(super) command_analysis: CommandAnalysisIndex,
     /// Cached start of the newest turn.
     pub(super) turn_boundary: super::agent_chat_helpers::TurnBoundary,
     /// Workspace-resolved syntax-highlight theme id for this pane's diff embeds.
@@ -995,6 +998,7 @@ impl AgentChatView {
             rows_activity: ActivityState::Idle,
             live_units: LiveSubagentUnits::default(),
             filter_matches: FilterMatchIndex::default(),
+            command_analysis: CommandAnalysisIndex::default(),
             turn_boundary: Default::default(),
             syntax_theme,
             activity_title: None,

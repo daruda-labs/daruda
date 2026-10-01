@@ -206,6 +206,15 @@ Three groups of changes captured in a single diff:
 
 ---
 
+## `crates/gpui_component/Cargo.toml` - shared command grammars
+
+The Bash and Python grammars match the app's command-analysis dependencies:
+`tree-sitter-bash = "0.25.1"` and `tree-sitter-python = "0.25.0"`.
+Each grammar exports unversioned C symbols, so linking different versions for
+highlighting and analysis can resolve both consumers to the same native parser.
+Keep these dependencies aligned when re-vendoring. The app's
+`links_the_current_grammar_abi` test guards against linking an older parser.
+
 ## `crates/gpui_component/src/highlighter/` — vendored, **compiled-query cache**
 
 Applied in place, like `gpui-component-root.patch` above: daruda is the

@@ -577,6 +577,7 @@ impl AgentChatView {
     /// `remeasure_items` over just the changed span with an `Absolute` anchor
     /// so reading history during streaming never drifts.
     pub(super) fn rebuild_rows(&mut self) {
+        self.command_analysis.reconcile(&self.items);
         let old = std::mem::take(&mut self.rows);
         // The inline working indicator means "answering" — suppress it while
         // blocked on a permission prompt (the card + footer already say so).

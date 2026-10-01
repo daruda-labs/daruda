@@ -23,6 +23,7 @@ use super::mermaid::{mermaid_code_block_render, mermaid_fence_element};
 use super::status_icon::status_icon_with_age;
 use super::tail_row::call_boundary_label;
 use crate::surface::strings as s;
+use crate::transcript::command_analysis::{CommandAnalysis, CommandAnalysisIndex, CommandEffect};
 use crate::transcript::tool_category::{ToolCategory, is_mcp_tool_name};
 use crate::ui::theme;
 use crate::ui::{Icon, IconName, IconNamed as _, Sizable as _};
@@ -71,6 +72,7 @@ pub(super) struct CardContext<'a> {
     pub(super) items: &'a [ChatItem],
     pub(super) live_units: &'a LiveSubagentUnits,
     pub(super) filter_matches: &'a FilterMatchIndex,
+    pub(super) command_analysis: &'a CommandAnalysisIndex,
     pub(super) filter_revealed: bool,
     pub(super) boundary: TurnBoundary,
     pub(super) assets: RenderAssets<'a>,
@@ -100,6 +102,7 @@ pub(super) fn tool_card(
         items,
         live_units,
         filter_matches,
+        command_analysis,
         filter_revealed,
         boundary,
         assets,
@@ -158,6 +161,7 @@ pub(super) fn tool_card(
                             .text_size(font_size)
                             .child(SharedString::from(tool_header_label(tc))),
                     )
+                    .children(command_tags(&tc.id, command_analysis.get(&tc.id), dim, cx))
                     .into_any_element(),
             );
     // Detached shell command (`run_in_background: true`): the tool completes
@@ -765,11 +769,84 @@ fn tool_title_summary(title: &str) -> String {
     }
 }
 
-/// The header's primary label. Prefers the agent's own tool name (`Bash`,
-/// `Grep`, …) — the vocabulary the user knows from its CLI — over the
-/// normalized kind, which the leading icon already conveys. A nameless launch
-/// falls back to "Subagent" rather than the kind, which would call a delegated
-/// run "Think".
+/// Render cached metadata only; raw command parsing belongs to row reconciliation.
+fn command_tags(
+    tool_id: &str,
+    analysis: Option<&CommandAnalysis>,
+    dim: f32,
+    cx: &App,
+) -> Vec<AnyElement> {
+    let Some(analysis) = analysis else {
+        return Vec::new();
+    };
+    let Some(program) = analysis.programs.first() else {
+        return Vec::new();
+    };
+    let bg = theme::dim_toward_gray(theme::agent_chat_tint(cx), dim);
+    let border = theme::dim_toward_gray(theme::agent_chat_border_tint(cx), dim);
+    let fg = theme::dim_toward_gray(theme::agent_chat_fg_muted(cx), dim);
+    let badge = |label: String| {
+        crate::ui::Badge::new(label)
+            .monospace()
+            .bg_color(bg)
+            .border_color(border)
+            .text_color(fg)
+    };
+    let mut tags = vec![
+        div()
+            .id(SharedString::from(format!("command-program-{tool_id}")))
+            .flex()
+            .min_w_0()
+            .max_w(px(theme::AGENT_CHAT_COMMAND_TAG_MAX_W))
+            .child(badge(program.clone()).truncate())
+            .tooltip(crate::ui::tooltip::text(program.clone()))
+            .into_any_element(),
+    ];
+    if analysis.programs.len() > 1 {
+        tags.push(
+            div()
+                .id(SharedString::from(format!("command-programs-{tool_id}")))
+                .child(badge(s::agent_chat_command_more(
+                    analysis.programs.len() - 1,
+                )))
+                .tooltip(crate::ui::tooltip::text(analysis.programs.join(", ")))
+                .into_any_element(),
+        );
+    }
+    if let Some(effect) = analysis.effect {
+        let light = theme::agent_chat_syntax_is_light(cx);
+        let (label, color) = match (effect, light) {
+            (CommandEffect::Read, false) => {
+                (s::agent_chat_command_effect_read(), theme::AGENT_READING)
+            }
+            (CommandEffect::Read, true) => (
+                s::agent_chat_command_effect_read(),
+                theme::AGENT_READING_LIGHT,
+            ),
+            (CommandEffect::Edit, false) => {
+                (s::agent_chat_command_effect_edit(), theme::AGENT_EDITING)
+            }
+            (CommandEffect::Edit, true) => (
+                s::agent_chat_command_effect_edit(),
+                theme::AGENT_EDITING_LIGHT,
+            ),
+        };
+        let color = theme::dim_toward_gray(color, dim);
+        tags.push(
+            badge(label)
+                .text_color(color)
+                .bg_color(theme::with_alpha(color, theme::AGENT_CHAT_CARD_TINT_ALPHA))
+                .border_color(theme::with_alpha(
+                    color,
+                    theme::AGENT_CHAT_CARD_BORDER_ALPHA,
+                ))
+                .into_any_element(),
+        );
+    }
+    tags
+}
+
+/// Prefer the agent's tool name; nameless launches fall back to "Subagent".
 fn tool_header_label(tc: &ToolCallItem) -> String {
     tc.tool_name.clone().unwrap_or_else(|| {
         if tc.is_subagent_launch() {

@@ -95,6 +95,31 @@ mod tests {
     }
 
     #[test]
+    fn command_grammars_keep_their_highlight_queries_valid() {
+        for (name, language) in [
+            (
+                "bash",
+                tree_sitter::Language::from(tree_sitter_bash::LANGUAGE),
+            ),
+            (
+                "python",
+                tree_sitter::Language::from(tree_sitter_python::LANGUAGE),
+            ),
+        ] {
+            let config = highlightable_config(name).unwrap();
+            assert_eq!(config.language, language);
+            tree_sitter_highlight::HighlightConfiguration::new(
+                config.language,
+                name,
+                &config.highlights,
+                &config.injections,
+                &config.locals,
+            )
+            .unwrap();
+        }
+    }
+
+    #[test]
     fn resolves_extensions_the_registry_knows_by_name() {
         // Regression: `.java` fell through a hand-maintained table to the
         // empty string and the raw file viewer opened it as plain text,

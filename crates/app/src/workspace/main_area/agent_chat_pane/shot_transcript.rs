@@ -546,7 +546,8 @@ fn tool_call(ix: usize, call: Call) -> ChatItem {
             })
             .collect(),
         output: Vec::new(),
-        raw_input: None,
+        raw_input: (call.kind == ToolKindView::Execute)
+            .then(|| serde_json::json!({ "command": call.title })),
         locations: Vec::new(),
         parent_tool_id: None,
         exit: None,

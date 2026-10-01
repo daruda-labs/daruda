@@ -7,6 +7,7 @@
 //! owns the other, so the model and the editor that writes it live here and
 //! both hosts reach in.
 
+pub(crate) mod command_analysis;
 pub(crate) mod display_filter;
 pub(crate) mod editor;
 pub(crate) mod fold_mode;

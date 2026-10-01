@@ -94,6 +94,44 @@ fn add_test_view(cx: &mut gpui::TestAppContext) -> gpui::WindowHandle<super::Age
     })
 }
 
+#[gpui::test]
+fn command_analysis_follows_transcript_rebuilds(cx: &mut gpui::TestAppContext) {
+    use crate::transcript::command_analysis::CommandEffect;
+    let handle = make_test_view(cx);
+    handle
+        .update(cx, |view, _window, _cx| {
+            let mut item = tool_call(
+                "shell",
+                daruda_acp::ToolStatusView::Completed,
+                Some("parent"),
+            );
+            let daruda_acp::ChatItem::ToolCall(call) = &mut item else {
+                panic!("tool fixture");
+            };
+            call.kind = daruda_acp::ToolKindView::Execute;
+            call.raw_input = Some(serde_json::json!({ "command": "git status" }));
+            view.items = vec![item];
+            view.rebuild_rows();
+            assert_eq!(
+                view.command_analysis.get("shell").unwrap().effect,
+                Some(CommandEffect::Read)
+            );
+            let daruda_acp::ChatItem::ToolCall(call) = &mut view.items[0] else {
+                panic!("tool fixture");
+            };
+            call.raw_input = Some(serde_json::json!({ "command": "rm file" }));
+            view.rebuild_rows();
+            assert_eq!(
+                view.command_analysis.get("shell").unwrap().effect,
+                Some(CommandEffect::Edit)
+            );
+            view.items.clear();
+            view.rebuild_rows();
+            assert!(view.command_analysis.get("shell").is_none());
+        })
+        .expect("window is live");
+}
+
 /// The contract the orchestrator briefing rests on: the agent is told more
 /// than the transcript shows, exactly once.
 ///
