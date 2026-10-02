@@ -7,9 +7,9 @@ use gpui::{AnyElement, Context};
 
 use super::axis_chip::axis_chip_label;
 use crate::surface::strings as s;
-use crate::transcript::editor::ResetSpec;
 use crate::transcript::editor::fold::{FoldEditorActions, fold_editor, mode_value};
 use crate::transcript::editor::state::FoldEditorState;
+use crate::transcript::editor::{ResetSpec, SaveSpec};
 use crate::transcript::fold_mode::FoldMode;
 use crate::ui::theme;
 use crate::workspace::main_area::agent_chat_pane::pane_choice::PaneChoice;
@@ -51,6 +51,7 @@ pub(super) fn fold_mode_panel(
     let history_rules_view = view.clone();
     let tools_view = view.clone();
     let reset_view = view.clone();
+    let save_view = view.clone();
     fold_editor(
         mode_choice.value(),
         editor_state,
@@ -75,6 +76,14 @@ pub(super) fn fold_mode_panel(
             reset: Some(ResetSpec {
                 label: s::agent_chat::use_agent_defaults(),
                 source: pane_source(mode_choice.is_following()),
+                save: Some(SaveSpec {
+                    label: s::agent_chat::save_as_agent_default(),
+                    on_save: Rc::new(move |_window, app| {
+                        if let Some(view) = save_view.upgrade() {
+                            view.update(app, |v, cx| v.save_fold_mode_as_agent_default(cx));
+                        }
+                    }),
+                }),
                 // Offered on a value that already equals the default: what the
                 // button undoes is the *override*, not the value.
                 overridden: !mode_choice.is_following(),

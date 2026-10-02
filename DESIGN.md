@@ -554,7 +554,7 @@ text:          agent-chat size (config `font.agent_chat.size`, default 13px = ui
 | Zone | Content | Style |
 |------|---------|-------|
 | Left | Agent icon (16px) + session title, ellipsized | icon `pane-fg-muted`, title `pane-fg` |
-| Centre | Context-window meter (`53k / 200k`) | `pane-fg-muted`, detail + cost in tooltip |
+| Centre | Context-window meter (`53k / 200k`) | `pane-fg-muted` at the chip label's size (pane font × 12/13), 8px each side; detail + cost in tooltip |
 | Right | Transcript controls | see below |
 
 - The bar renders even while the conversation is empty or still connecting, so
@@ -594,7 +594,8 @@ icon button (carries a glyph — expand all / collapse all / reading width / vie
 
 - **A chip gets a border and a glyph does not.** The chips sit next to the
   context meter, which is static text in `pane-fg-muted` at the same size — a
-  borderless word is indistinguishable from a readout. A glyph needs no frame to
+  borderless word is indistinguishable from a readout. The meter keeps 8px off
+  the chip so the reading does not run into its edge. A glyph needs no frame to
   read as a control, and boxing three of them adds frames without information.
   (Same reasoning, same fix as StatusBar's pill buttons.)
 - **"Off its default" means the pane stopped *following* the default, not that
@@ -670,6 +671,10 @@ footer:        48px min, 10 / 14px insets, hairline above; source status left
                defaults". Settings: "Built-in default" / "Set for this agent"
                → "Use built-in defaults". Reset is enabled exactly when the
                host says the axis is overridden, not when its value differs.
+               Chat adds "Save as agent default" beside reset while the axis
+               is overridden: it writes the pane's value into that agent's
+               `[[agents]]` entry (no key for a built-in value) and the pane
+               follows it again; other panes following the agent reseed.
 ```
 
 The panel body scales with `font.agent_chat.size`, not the UI type ladder, even

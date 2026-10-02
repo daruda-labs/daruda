@@ -52,8 +52,9 @@ pub use agent::{
     AgentPreset, AgentSource, AgentVocabularySeed, CODEX_CONFIG_ENV, LaunchTransport,
     PresetLaunchability, PresetOverrides, READING_WIDTH_DEFAULT, READING_WIDTH_MAX,
     READING_WIDTH_MIN, SessionPreferences, TAIL_WINDOW_ALL, TAIL_WINDOW_CHOICES,
-    TAIL_WINDOW_DEFAULT, account_recipe_for_local_command, agent_preset, agent_presets,
-    agent_vocabulary_seed, assemble_launch_command, canonical_env, is_valid_env_name,
+    TAIL_WINDOW_DEFAULT, TranscriptDefault, account_recipe_for_local_command, agent_preset,
+    agent_presets, agent_vocabulary_seed, assemble_launch_command, canonical_env,
+    is_valid_env_name, with_transcript_default,
 };
 pub use claude_status::ClaudeStatusConfig;
 pub use clipboard::ClipboardConfig;

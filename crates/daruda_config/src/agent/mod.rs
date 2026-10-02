@@ -3,6 +3,7 @@ pub mod entry;
 pub mod preset;
 #[cfg(test)]
 mod tests;
+pub mod transcript_default;
 pub mod vocabulary;
 
 use crate::account_env::AccountEnv;
@@ -16,6 +17,7 @@ pub use preset::{
     ACP_REGISTRY_URL, ACP_REGISTRY_VERSION, AgentPreset, CODEX_CONFIG_ENV, PresetLaunchability,
     preset as agent_preset, presets as agent_presets,
 };
+pub use transcript_default::{TranscriptDefault, with_transcript_default};
 pub use vocabulary::{AgentVocabularySeed, seed_for_command as agent_vocabulary_seed};
 
 /// A selectable ACP agent: an id, a display name, and how its ACP adapter is

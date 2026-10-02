@@ -7,9 +7,9 @@ use gpui::{AnyElement, Context, IntoElement, SharedString, prelude::*, px};
 use super::axis_chip::axis_chip_label;
 use crate::surface::strings as s;
 use crate::transcript::display_filter::DisplayFilter;
-use crate::transcript::editor::ResetSpec;
 use crate::transcript::editor::filter::{FilterEditorActions, filter_editor, filter_value};
 use crate::transcript::editor::state::FilterEditorState;
+use crate::transcript::editor::{ResetSpec, SaveSpec};
 use crate::ui::theme;
 use crate::ui::theme::PaneSurfaceTokens;
 use crate::ui::{Selectable as _, button_chip_on_surface};
@@ -43,6 +43,7 @@ pub(super) fn filter_panel(
     let section_view = view.clone();
     let disclose_view = view.clone();
     let reset_view = view.clone();
+    let save_view = view.clone();
     filter_editor(
         choice.value(),
         editor_state,
@@ -67,6 +68,14 @@ pub(super) fn filter_panel(
             reset: Some(ResetSpec {
                 label: s::agent_chat::use_agent_defaults(),
                 source: super::fold_mode::pane_source(choice.is_following()),
+                save: Some(SaveSpec {
+                    label: s::agent_chat::save_as_agent_default(),
+                    on_save: Rc::new(move |_window, app| {
+                        if let Some(view) = save_view.upgrade() {
+                            view.update(app, |v, cx| v.save_display_filter_as_agent_default(cx));
+                        }
+                    }),
+                }),
                 // Offered on a value that already equals the default: what the
                 // button undoes is the *override*, not the value.
                 overridden: !choice.is_following(),

@@ -7,8 +7,8 @@ use std::rc::Rc;
 
 use super::axis_chip::axis_chip_label;
 use crate::surface::strings as s;
-use crate::transcript::editor::ResetSpec;
 use crate::transcript::editor::range::{RangeLevel, range_editor};
+use crate::transcript::editor::{ResetSpec, SaveSpec};
 use crate::ui::theme;
 use crate::workspace::main_area::agent_chat_pane::pane_choice::PaneChoice;
 use crate::workspace::main_area::agent_chat_pane::rows::tail::{TailLevel, TailWindow};
@@ -56,6 +56,7 @@ pub(super) fn tail_window_panel(
 ) -> AnyElement {
     let change = view.clone();
     let reset = view.clone();
+    let save_view = view.clone();
     range_editor(
         &format!("agent-chat-{pane_id}"),
         [current.steps.value().size(), current.calls.value().size()],
@@ -74,6 +75,14 @@ pub(super) fn tail_window_panel(
         Some(ResetSpec {
             label: s::agent_chat::use_agent_defaults(),
             source: super::fold_mode::pane_source(current.is_following()),
+            save: Some(SaveSpec {
+                label: s::agent_chat::save_as_agent_default(),
+                on_save: Rc::new(move |_window, app| {
+                    if let Some(view) = save_view.upgrade() {
+                        view.update(app, |v, cx| v.save_tail_window_as_agent_default(cx));
+                    }
+                }),
+            }),
             overridden: !current.is_following(),
             on_reset: Rc::new(move |_, app| {
                 if let Some(view) = reset.upgrade() {

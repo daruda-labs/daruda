@@ -796,6 +796,7 @@ impl Workspace {
                 v.set_tail_window(level, TailWindow::last(TAIL_WINDOW_CHOICES[0]), cx);
             }
             v.set_activity_options_tab(tab, cx);
+            v.seed_usage_for_shot(cx);
             v.screenshot_options_open = true;
         });
     }

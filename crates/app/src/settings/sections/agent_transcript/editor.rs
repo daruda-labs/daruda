@@ -223,6 +223,7 @@ fn fold_panel(
             reset: Some(ResetSpec {
                 label: s::agent_chat::use_built_in(),
                 source: row_source(overridden),
+                save: None,
                 // What the button undoes is the written key, so a row that
                 // writes none has nothing to hand back.
                 overridden,
@@ -323,6 +324,7 @@ pub(in crate::settings) fn range_control(
                 Some(ResetSpec {
                     label: s::agent_chat::use_built_in(),
                     source: row_source(overridden),
+                    save: None,
                     overridden,
                     on_reset: Rc::new(move |window, app| {
                         if let Some(settings) = reset.upgrade() {
@@ -380,6 +382,7 @@ fn filter_panel(
             reset: Some(ResetSpec {
                 label: s::agent_chat::use_built_in(),
                 source: row_source(overridden),
+                save: None,
                 overridden,
                 on_reset: Rc::new(move |_window, app| {
                     if let Some(w) = reset.upgrade() {

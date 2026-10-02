@@ -906,6 +906,7 @@ pub(in crate::workspace) struct AgentChatView {
 }
 
 mod activity_ops;
+mod agent_default_ops;
 pub(in crate::workspace) use activity_ops::RunSummary;
 mod apply_event;
 pub(super) mod list_sync;

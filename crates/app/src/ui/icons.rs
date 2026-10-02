@@ -29,6 +29,7 @@ pub const CLOSE: &str = "icons/ui/close.svg";
 pub const DELETE: &str = "icons/ui/delete.svg";
 pub const EDIT: &str = "icons/ui/edit.svg";
 pub const UNDO: &str = "icons/ui/undo.svg";
+pub const SAVE: &str = "icons/ui/save.svg";
 pub const ADD: &str = "icons/ui/add.svg";
 pub const MINIMIZE: &str = "icons/ui/minimize.svg";
 pub const MAXIMIZE: &str = "icons/ui/crop-square.svg";
@@ -91,6 +92,7 @@ mod tests {
             DELETE,
             EDIT,
             UNDO,
+            SAVE,
             ADD,
             MINIMIZE,
             MAXIMIZE,

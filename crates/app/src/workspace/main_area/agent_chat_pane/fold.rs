@@ -145,6 +145,13 @@ impl FoldState {
         self.decide_mode(PaneChoice::Seeded(mode));
     }
 
+    /// Keep the mode on screen but as config's own — what saving it as the
+    /// agent default leaves behind. Nothing is decided, so the send-time hold
+    /// that [`Self::reset_mode`] releases stays.
+    pub(super) fn follow_current_mode(&mut self) {
+        self.mode = PaneChoice::Seeded(self.mode.value());
+    }
+
     fn decide_mode(&mut self, mode: PaneChoice<FoldMode>) {
         self.mode = mode;
         // Deciding the mode — picking one or handing the axis back to config —

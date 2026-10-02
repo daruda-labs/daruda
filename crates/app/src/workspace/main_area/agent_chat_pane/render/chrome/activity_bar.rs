@@ -175,7 +175,10 @@ pub(in crate::workspace::main_area::agent_chat_pane::render) fn activity_bar(
                 div()
                     .id(("agent-chat-context-meter", props.pane_id as usize))
                     .flex_none()
-                    .text_size(px(theme::agent_chat_font_size(cx)))
+                    .mx(px(theme::AGENT_CHAT_METER_GAP))
+                    .text_size(px(
+                        theme::agent_chat_font_size(cx) * theme::AGENT_CHAT_METER_FONT_RATIO
+                    ))
                     .text_color(surface.foreground_muted)
                     .child(SharedString::from(meter.label))
                     .tooltip(crate::ui::tooltip::text(SharedString::from(meter.tooltip))),

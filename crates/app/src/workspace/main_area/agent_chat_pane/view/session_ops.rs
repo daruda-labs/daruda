@@ -227,6 +227,19 @@ impl AgentChatView {
     /// block the other way — and a screenshot has no way to report that it did.
     /// Reads the same source `toggle_fold` reads, so it is exact rather than a
     /// guess about the configured default.
+    /// Put a context-window reading on the bar, as the first `UsageUpdate`
+    /// would — the meter sits beside the View trigger, and a seeded transcript
+    /// carries no session to report one.
+    #[cfg(feature = "screenshot")]
+    pub(in crate::workspace) fn seed_usage_for_shot(&mut self, cx: &mut Context<Self>) {
+        self.session_usage = Some(daruda_acp::UsageView {
+            used: 53_000,
+            size: 200_000,
+            cost: None,
+        });
+        cx.notify();
+    }
+
     #[cfg(feature = "screenshot")]
     pub(in crate::workspace) fn set_fold_for_shot(
         &mut self,
@@ -361,7 +374,7 @@ impl AgentChatView {
     /// way a reset *erases* a stored override. Deferred because the save
     /// re-enters the workspace, which is still mid-update while the chip
     /// handler that called this runs.
-    fn persist_pane_prefs(&self, cx: &mut Context<Self>) {
+    pub(super) fn persist_pane_prefs(&self, cx: &mut Context<Self>) {
         let window_handle = self.window_handle;
         cx.defer(move |cx| {
             if let Some(workspace) =

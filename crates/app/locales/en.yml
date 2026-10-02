@@ -775,6 +775,7 @@ agent_chat:
   fold_editor_collapse_history: "Fold completed previous responses on a new request"
   use_agent_defaults: "Use agent defaults"
   use_built_in: "Use built-in defaults"
+  save_as_agent_default: "Save as agent default"
   view_options_label: "View"
   fold_editor_rule_expanded: "Expanded"
   fold_editor_rule_collapsed: "Collapsed"

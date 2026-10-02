@@ -527,6 +527,7 @@ agent_chat:
   fold_editor_collapse_history: "새 요청을 보내면 완료된 이전 응답 접기"
   use_agent_defaults: "에이전트 기본값 사용"
   use_built_in: "내장 기본값 사용"
+  save_as_agent_default: "에이전트 기본값으로 저장"
   view_options_label: "보기"
   fold_editor_rule_expanded: "펼침"
   fold_editor_rule_collapsed: "접힘"

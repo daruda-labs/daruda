@@ -93,6 +93,7 @@ impl AssetSource for DarudaAssets {
             "icons/ui/delete.svg" | "icons/delete.svg" => icon!("ui/delete.svg"),
             "icons/ui/edit.svg" | "icons/edit.svg" => icon!("ui/edit.svg"),
             "icons/ui/undo.svg" => icon!("ui/undo.svg"),
+            "icons/ui/save.svg" => icon!("ui/save.svg"),
             "icons/ui/history.svg" => icon!("ui/history.svg"),
             "icons/ui/visibility.svg" => icon!("ui/visibility.svg"),
             "icons/ui/add.svg" | "icons/plus.svg" => icon!("ui/add.svg"),

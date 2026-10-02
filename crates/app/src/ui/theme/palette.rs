@@ -1099,6 +1099,14 @@ pub const AGENT_CHAT_CHIP_RADIUS: f32 = RADIUS_SM;
 /// (which spaces text runs): the chips carry a hairline, and adjacent boxes two
 /// pixels apart read as one segmented strip rather than three controls.
 pub const AGENT_CHAT_BAR_CONTROL_GAP: f32 = GAP_SM;
+/// Space (px) on each side of the Activity Bar's context meter. Its own
+/// value because the meter is bare text beside a bordered chip: at the bar's
+/// 2px text gap the reading runs into the chip's edge.
+pub const AGENT_CHAT_METER_GAP: f32 = GAP_LG;
+/// The context meter's text size as a fraction of the pane's font size —
+/// 12px at the default 13, the size of the chip label it sits beside, so the
+/// two read on one baseline instead of the meter looking a step louder.
+pub const AGENT_CHAT_METER_FONT_RATIO: f32 = 12.0 / 13.0;
 /// Left dock default width (px).
 pub const DOCK_LEFT_DEFAULT_W: f32 = 250.0;
 /// Left dock minimum width (px).

@@ -30,6 +30,15 @@ pub(crate) struct ResetSpec {
     pub source: String,
     pub overridden: bool,
     pub on_reset: ResetPress,
+    /// Keeping the override instead, as the default it departed from — the
+    /// chat pane's "save as agent default". Offered only while overridden.
+    pub save: Option<SaveSpec>,
+}
+
+/// The footer's save command: its label and what it runs.
+pub(crate) struct SaveSpec {
+    pub label: String,
+    pub on_save: ResetPress,
 }
 
 /// The editor's three text roles, derived from one base size so a configured
@@ -269,17 +278,38 @@ pub(crate) fn reset_footer(
             text,
         )))
         .child(
-            crate::ui::button_bare(id)
-                .ghost()
-                .tab_stop(true)
-                .icon(Icon::empty().path(icons::UNDO))
+            div()
+                .flex_none()
+                .flex()
+                .items_center()
+                .gap(px(theme::GAP_SM))
+                .when_some(reset.save.filter(|_| reset.overridden), |commands, save| {
+                    commands.child(
+                        crate::ui::button_bare(SharedString::from(format!("{id}-save")))
+                            .ghost()
+                            .tab_stop(true)
+                            .icon(Icon::empty().path(icons::SAVE))
+                            .child(
+                                div()
+                                    .text_size(px(text.aux))
+                                    .child(SharedString::from(save.label)),
+                            )
+                            .on_click(move |_, window, app| (save.on_save)(window, app)),
+                    )
+                })
                 .child(
-                    div()
-                        .text_size(px(text.aux))
-                        .child(SharedString::from(reset.label)),
-                )
-                .disabled(!reset.overridden)
-                .on_click(move |_, window, app| (reset.on_reset)(window, app)),
+                    crate::ui::button_bare(id)
+                        .ghost()
+                        .tab_stop(true)
+                        .icon(Icon::empty().path(icons::UNDO))
+                        .child(
+                            div()
+                                .text_size(px(text.aux))
+                                .child(SharedString::from(reset.label)),
+                        )
+                        .disabled(!reset.overridden)
+                        .on_click(move |_, window, app| (reset.on_reset)(window, app)),
+                ),
         )
 }
 
