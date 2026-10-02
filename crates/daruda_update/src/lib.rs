@@ -8,8 +8,9 @@ pub mod check;
 pub mod install;
 pub mod release;
 pub mod swap;
+pub mod verify;
 
-pub use check::{check_latest, download_asset};
+pub use check::{check_latest, download_verified};
 pub use install::{install_dmg, relaunch};
 pub use release::{ReleaseInfo, asset_suffix, parse_release};
 pub use swap::{AWAIT_EXIT_SUBCOMMAND, install_zip, relaunch_from, sweep_aside};
@@ -35,4 +36,10 @@ pub enum UpdateError {
     Sync(String),
     #[error("refusing to download from untrusted host: {0}")]
     UntrustedHost(String),
+    #[error("release publishes no {0} to verify its package against")]
+    NoChecksums(&'static str),
+    #[error("{0} is not listed in the release checksums")]
+    MissingChecksum(String),
+    #[error("{0} does not match its published checksum")]
+    ChecksumMismatch(String),
 }

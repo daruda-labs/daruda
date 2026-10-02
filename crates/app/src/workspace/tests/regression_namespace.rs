@@ -1,6 +1,6 @@
 //! Fan-out regression: confirm `persist_state` writes one workspace
 //! file (not one per project) and one project file per project.
-//! Includes an io.whatap-style scenario: two workspaces holding the
+//! Includes a shared-root scenario: two workspaces holding the
 //! same project root should not pollute each other's snapshot.
 
 use super::*;

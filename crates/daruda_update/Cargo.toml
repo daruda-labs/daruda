@@ -15,6 +15,7 @@ daruda_core = { path = "../daruda_core" }
 semver = "1"
 serde = { workspace = true }
 serde_json = { workspace = true }
+sha2 = "0.10"
 tempfile = "3"
 thiserror = "2"
 ureq = { version = "2", default-features = false, features = ["tls"] }

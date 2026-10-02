@@ -88,6 +88,32 @@ pub fn create_owner_only_dir(dir: &Path) -> io::Result<()> {
     builder.create(dir)
 }
 
+/// Mode for a file only its owner may read or write.
+#[cfg(unix)]
+const OWNER_ONLY_FILE: u32 = 0o600;
+
+/// Open `path` through `options` so only its owner may read or write it. A
+/// file created here never exists with a wider mode, and one that already
+/// did is narrowed — a log written before this rule must not stay readable.
+///
+/// Windows: the user profile's inherited ACL, as for [`create_owner_only_dir`].
+pub fn open_owner_only(
+    options: &mut std::fs::OpenOptions,
+    path: &Path,
+) -> io::Result<std::fs::File> {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::{OpenOptionsExt as _, PermissionsExt as _};
+        let file = options.mode(OWNER_ONLY_FILE).open(path)?;
+        file.set_permissions(std::fs::Permissions::from_mode(OWNER_ONLY_FILE))?;
+        Ok(file)
+    }
+    #[cfg(not(unix))]
+    {
+        options.open(path)
+    }
+}
+
 /// Create `link` pointing at `target`, which need not exist yet.
 ///
 /// Windows fixes file-or-directory at creation and cannot change its mind, so
@@ -142,6 +168,37 @@ pub fn remove_symlink(link: impl AsRef<Path>) -> io::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(unix)]
+    fn mode_of(path: &Path) -> u32 {
+        use std::os::unix::fs::PermissionsExt as _;
+        std::fs::metadata(path).unwrap().permissions().mode() & 0o777
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn an_owner_only_file_is_created_narrow_and_an_existing_one_is_narrowed() {
+        use std::os::unix::fs::PermissionsExt as _;
+        let dir = tempfile::tempdir().unwrap();
+        let fresh = dir.path().join("fresh.log");
+        open_owner_only(
+            std::fs::OpenOptions::new().create(true).append(true),
+            &fresh,
+        )
+        .unwrap();
+        assert_eq!(mode_of(&fresh), 0o600);
+
+        let old = dir.path().join("old.log");
+        std::fs::write(&old, b"before").unwrap();
+        std::fs::set_permissions(&old, std::fs::Permissions::from_mode(0o644)).unwrap();
+        open_owner_only(std::fs::OpenOptions::new().append(true), &old).unwrap();
+        assert_eq!(mode_of(&old), 0o600);
+        assert_eq!(
+            std::fs::read(&old).unwrap(),
+            b"before",
+            "appending keeps the bytes"
+        );
+    }
 
     #[test]
     fn a_path_is_the_same_as_itself_even_when_it_does_not_exist() {

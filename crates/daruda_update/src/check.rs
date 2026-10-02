@@ -7,7 +7,7 @@
 
 use crate::{ReleaseInfo, UpdateError, parse_release};
 use std::fs::File;
-use std::io;
+use std::io::{self, Read as _};
 use std::path::Path;
 use std::time::Duration;
 
@@ -25,6 +25,9 @@ const TRUSTED_ASSET_DOMAIN: &str = "githubusercontent.com";
 
 /// Upper bound on redirect hops we will follow when downloading a DMG.
 const MAX_REDIRECTS: usize = 5;
+
+/// Upper bound on the checksums file; the real one is a few hundred bytes.
+const MAX_CHECKSUMS_BYTES: u64 = 64 * 1024;
 
 /// GET the latest stable release from GitHub and compare against `current`.
 /// GitHub's `/releases/latest` endpoint already excludes prereleases and drafts.
@@ -62,11 +65,50 @@ pub fn check_latest(current: &semver::Version) -> Result<Option<ReleaseInfo>, Up
 /// (`release-assets.githubusercontent.com`); without per-hop validation a
 /// hijacked redirect could stream bytes from an arbitrary (even plain-`http`)
 /// host.
+/// Unverified on its own — [`download_verified`] is the entry callers use.
+fn download_asset(url: &str, dest: &Path) -> Result<(), UpdateError> {
+    // Overall cap; large for a package download.
+    let response = get_trusted(url, Duration::from_secs(300))?;
+    let mut reader = response.into_reader();
+    let mut file = File::create(dest).map_err(|e| UpdateError::Io(e.to_string()))?;
+    io::copy(&mut reader, &mut file).map_err(|e| UpdateError::Io(e.to_string()))?;
+    Ok(())
+}
+
+/// Download `info`'s package to `dest` and check it against the digest the
+/// release publishes beside it. A package that fails the check is deleted, so
+/// nothing downstream can install it.
 /// Blocking; call off the main thread.
-pub fn download_asset(url: &str, dest: &Path) -> Result<(), UpdateError> {
+pub fn download_verified(info: &ReleaseInfo, dest: &Path) -> Result<(), UpdateError> {
+    let sums = fetch_checksums(&info.checksums_url)?;
+    download_asset(&info.asset_url, dest)?;
+    let verified = crate::verify::verify_package(dest, &info.asset_name, &sums);
+    if verified.is_err() {
+        // Best effort: the error below is what stops the install either way.
+        std::fs::remove_file(dest).ok();
+    }
+    verified
+}
+
+/// The release's checksums file, read whole. It lists two packages, so
+/// anything past [`MAX_CHECKSUMS_BYTES`] is not the file the workflow wrote.
+fn fetch_checksums(url: &str) -> Result<String, UpdateError> {
+    let response = get_trusted(url, Duration::from_secs(30))?;
+    let mut sums = String::new();
+    response
+        .into_reader()
+        .take(MAX_CHECKSUMS_BYTES)
+        .read_to_string(&mut sums)
+        .map_err(|e| UpdateError::Http(e.to_string()))?;
+    Ok(sums)
+}
+
+/// GET `url`, following redirects by hand so every hop's host is checked
+/// against the allowlist before it is contacted.
+fn get_trusted(url: &str, timeout: Duration) -> Result<ureq::Response, UpdateError> {
     let agent = ureq::AgentBuilder::new()
         .redirects(0) // we follow manually so we can re-validate each hop
-        .timeout(Duration::from_secs(300)) // overall cap; large for a package download
+        .timeout(timeout)
         .build();
 
     let mut current = url.to_string();
@@ -87,10 +129,7 @@ pub fn download_asset(url: &str, dest: &Path) -> Result<(), UpdateError> {
             continue;
         }
 
-        let mut reader = response.into_reader();
-        let mut file = File::create(dest).map_err(|e| UpdateError::Io(e.to_string()))?;
-        io::copy(&mut reader, &mut file).map_err(|e| UpdateError::Io(e.to_string()))?;
-        return Ok(());
+        return Ok(response);
     }
 
     Err(UpdateError::Http("too many redirects".to_string()))
@@ -203,6 +242,26 @@ mod tests {
         let dest = std::env::temp_dir().join("daruda-update-should-not-exist.dmg");
         let result = download_asset("https://evil.example/x.dmg", &dest);
         assert!(matches!(result, Err(UpdateError::UntrustedHost(_))));
+    }
+
+    /// The checksums are fetched under the same host rule as the package, and
+    /// first: a release pointing them elsewhere downloads nothing.
+    #[test]
+    fn download_verified_rejects_untrusted_checksums_before_any_download() {
+        let dest = tempfile::tempdir().unwrap().path().join("daruda.dmg");
+        let info = ReleaseInfo {
+            version: semver::Version::new(0, 3, 0),
+            tag: "v0.3.0".into(),
+            asset_url: "https://github.com/x.dmg".into(),
+            asset_name: "x.dmg".into(),
+            checksums_url: "https://evil.example/SHA256SUMS.txt".into(),
+            notes: String::new(),
+        };
+        assert!(matches!(
+            download_verified(&info, &dest),
+            Err(UpdateError::UntrustedHost(_))
+        ));
+        assert!(!dest.exists());
     }
 
     #[test]

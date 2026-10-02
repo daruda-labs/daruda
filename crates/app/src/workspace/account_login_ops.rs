@@ -19,7 +19,9 @@ use std::time::Duration;
 
 use gpui::{App, Context, Window};
 
-use daruda_agent::accounts::{LoginOutcome, account_config_dir, recipe_for, spawn_login};
+use daruda_agent::accounts::{
+    LoginError, LoginOutcome, LoginProcess, account_config_dir, recipe_for, spawn_login,
+};
 use daruda_store::accounts::{AccountId, AccountRecipeId, AccountsState, ManagedAccount};
 use daruda_store::observability::error_report::{ErrorReport, ErrorSeverity};
 
@@ -449,7 +451,7 @@ impl Workspace {
                     inject.push(pair);
                 }
 
-                match spawn_login(&command, &inject, &env.strip, LOGIN_TIMEOUT) {
+                match spawn_agent_login(&command, &inject, &env.strip, LOGIN_TIMEOUT) {
                     Ok(login_process) => {
                         let handle = login_process.handle();
                         ws.login.pending = PendingLogin::InProgress {
@@ -868,6 +870,11 @@ impl Workspace {
             let reading = cx
                 .background_executor()
                 .spawn(async move {
+                    // Tests must never run the agent CLI (see `spawn_agent_login`);
+                    // no reading is what a CLI that never answers yields.
+                    if cfg!(test) {
+                        return None;
+                    }
                     let mut inject = env.inject.clone();
                     if let Some(pair) = resolve_node_path_env(&probe_command) {
                         inject.push(pair);
@@ -1517,6 +1524,10 @@ pub(in crate::workspace) fn resolve_node_path_env(command: &str) -> Option<(Stri
     if !daruda_acp::node::command_needs_node(command) {
         return None;
     }
+    // Tests must never provision Node: without a system one, this downloads it.
+    if cfg!(test) {
+        return None;
+    }
     let node_install_dir = daruda_store::persistence::node_install_dir();
     match daruda_acp::ensure_node(&node_install_dir, &mut |_| {}) {
         Ok(daruda_acp::NodeRuntime::Managed { node_dir }) => Some((
@@ -1526,6 +1537,23 @@ pub(in crate::workspace) fn resolve_node_path_env(command: &str) -> Option<(Stri
         Ok(daruda_acp::NodeRuntime::System) | Err(_) => None,
     }
 }
+
+/// [`spawn_login`], except under test: a test must never run the agent CLI,
+/// whose login opens the user's browser and, on a default install, is
+/// fetched from the npm registry by `npx` first.
+fn spawn_agent_login(
+    command: &str,
+    inject_env: &[(String, String)],
+    strip_env: &[&str],
+    timeout: Duration,
+) -> Result<LoginProcess, LoginError> {
+    if cfg!(test) {
+        return Err(LoginError::Spawn(OFFLINE_LOGIN.to_owned()));
+    }
+    spawn_login(command, inject_env, strip_env, timeout)
+}
+
+const OFFLINE_LOGIN: &str = "agent CLIs are not run in tests";
 
 /// Matches an existing managed account in the *same auth domain* with the
 /// *same* email *and* the same organization — a duplicate login for an

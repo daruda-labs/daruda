@@ -6,6 +6,7 @@
 //! calls. `bridge` owns the offset; `global`'s poll loop owns the timer.
 
 use std::io::Read;
+use std::sync::atomic::{AtomicI64, Ordering};
 use std::time::Duration;
 
 use serde::Deserialize;
@@ -166,6 +167,12 @@ pub fn send_message(
     parse_mode: Option<&str>,
     keyboard: Option<InlineKeyboard>,
 ) -> Result<i64, ClientError> {
+    // Tests must never hit the network (see `get_updates`): answer as a
+    // delivered message with a fresh id, which is all a caller keeps.
+    if cfg!(test) {
+        static NEXT_OFFLINE_MESSAGE_ID: AtomicI64 = AtomicI64::new(1);
+        return Ok(NEXT_OFFLINE_MESSAGE_ID.fetch_add(1, Ordering::Relaxed));
+    }
     let mut payload = serde_json::json!({
         "chat_id": chat_id,
         "text": text,
@@ -203,6 +210,9 @@ pub fn answer_callback(
     callback_id: &str,
     text: Option<&str>,
 ) -> Result<(), ClientError> {
+    if cfg!(test) {
+        return Ok(());
+    }
     let mut payload = serde_json::json!({ "callback_query_id": callback_id });
     if let Some(text) = text {
         payload["text"] = serde_json::json!(clamp_callback_text(text));
@@ -229,6 +239,9 @@ pub fn edit_message_text(
     message_id: i64,
     text: &str,
 ) -> Result<(), ClientError> {
+    if cfg!(test) {
+        return Ok(());
+    }
     let payload = serde_json::json!({
         "chat_id": chat_id,
         "message_id": message_id,
@@ -531,6 +544,15 @@ mod tests {
             updates.is_empty(),
             "test-stubbed get_updates yields nothing"
         );
+    }
+
+    #[test]
+    fn outbound_calls_are_stubbed_under_test_no_network() {
+        let first = send_message("dummy-token", 1, "hi", None, None).expect("stub sends");
+        let second = send_message("dummy-token", 1, "hi", None, None).expect("stub sends");
+        assert_ne!(first, second, "each stubbed send gets its own message id");
+        answer_callback("dummy-token", "callback", Some("ok")).expect("stub acks");
+        edit_message_text("dummy-token", 1, first, "edited").expect("stub edits");
     }
 
     #[test]

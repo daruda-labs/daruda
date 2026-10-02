@@ -180,9 +180,9 @@ mod tests {
                 "type": "terminal",
                 "args": ["--cli", "auth", "login", "--claudeai"],
                 "_meta": { "terminal-auth": {
-                    "command": "/Users/woo/.nvm/versions/node/v22.19.0/bin/node",
+                    "command": "/Users/x/.nvm/versions/node/v22.19.0/bin/node",
                     "args": [
-                        "/Users/woo/Library/Application Support/daruda/node/npx-cache/_npx/b555b4fead8494dc/node_modules/.bin/claude-agent-acp",
+                        "/Users/x/Library/Application Support/daruda/node/npx-cache/_npx/b555b4fead8494dc/node_modules/.bin/claude-agent-acp",
                         "--cli", "auth", "login", "--claudeai"
                     ],
                     "label": "Claude Login"
@@ -195,9 +195,9 @@ mod tests {
                 "type": "terminal",
                 "args": ["--cli", "auth", "login", "--console"],
                 "_meta": { "terminal-auth": {
-                    "command": "/Users/woo/.nvm/versions/node/v22.19.0/bin/node",
+                    "command": "/Users/x/.nvm/versions/node/v22.19.0/bin/node",
                     "args": [
-                        "/Users/woo/Library/Application Support/daruda/node/npx-cache/_npx/b555b4fead8494dc/node_modules/.bin/claude-agent-acp",
+                        "/Users/x/Library/Application Support/daruda/node/npx-cache/_npx/b555b4fead8494dc/node_modules/.bin/claude-agent-acp",
                         "--cli", "auth", "login", "--console"
                     ],
                     "label": "Anthropic Console Login"
@@ -261,7 +261,7 @@ mod tests {
     }
 
     /// The agent's own paths contain spaces. Joining on a space would run
-    /// `/Users/woo/Library/Application` and pass the rest as arguments.
+    /// `/Users/x/Library/Application` and pass the rest as arguments.
     #[test]
     fn the_shell_line_quotes_paths_that_contain_spaces() {
         let methods = parse_login_methods(&captured());
@@ -271,14 +271,14 @@ mod tests {
             .expect("the capture carries a terminal-auth block")
             .to_shell_line();
         assert!(
-            line.contains("'/Users/woo/Library/Application Support/daruda/node/npx-cache/_npx/b555b4fead8494dc/node_modules/.bin/claude-agent-acp'"),
+            line.contains("'/Users/x/Library/Application Support/daruda/node/npx-cache/_npx/b555b4fead8494dc/node_modules/.bin/claude-agent-acp'"),
             "the spaced path must survive as one word: {line}"
         );
         assert!(line.ends_with("--cli auth login --claudeai"));
         // Round-trips back to the exact argv the agent handed over.
         let parsed = shell_words::split(&line).expect("the line re-splits");
         assert_eq!(parsed.len(), 6);
-        assert_eq!(parsed[0], "/Users/woo/.nvm/versions/node/v22.19.0/bin/node");
+        assert_eq!(parsed[0], "/Users/x/.nvm/versions/node/v22.19.0/bin/node");
     }
 
     /// Without the companion `_meta` flag only `args` arrives. That is the

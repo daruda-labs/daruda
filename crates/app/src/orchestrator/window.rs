@@ -26,9 +26,27 @@ impl std::fmt::Display for OpenError {
 /// tools, not the filesystem — reading and editing code is a lane agent's job
 /// — so it is rooted somewhere with nothing in it but its own instructions.
 pub(crate) fn cwd() -> Result<std::path::PathBuf, OpenError> {
-    let dir = daruda_store::persistence::default_data_dir().join("orchestrator");
+    cwd_in(&data_root())
+}
+
+/// [`cwd`] under an explicit data dir.
+fn cwd_in(data_dir: &std::path::Path) -> Result<std::path::PathBuf, OpenError> {
+    let dir = data_dir.join("orchestrator");
     std::fs::create_dir_all(&dir).map_err(|e| OpenError::CwdUnavailable(e.to_string()))?;
     Ok(dir)
+}
+
+/// The profile's data dir. Under test a per-process temp dir instead, so
+/// opening the orchestrator never rewrites files in the real profile.
+fn data_root() -> std::path::PathBuf {
+    #[cfg(test)]
+    {
+        std::env::temp_dir().join(format!("daruda_orchestrator_test_{}", std::process::id()))
+    }
+    #[cfg(not(test))]
+    {
+        daruda_store::persistence::default_data_dir()
+    }
 }
 
 /// Leave the briefing in `dir` as a standing instruction file.
@@ -116,13 +134,16 @@ mod tests {
     }
 
     #[test]
-    fn the_cwd_is_created_under_the_profile_data_dir() {
-        let dir = cwd().expect("cwd");
+    fn the_cwd_is_created_under_the_data_dir() {
+        let data = tempfile::tempdir().expect("tempdir");
+        let dir = cwd_in(data.path()).expect("cwd");
         assert!(dir.is_dir());
-        assert!(dir.starts_with(daruda_store::persistence::default_data_dir()));
-        assert_eq!(
-            dir.file_name().and_then(|n| n.to_str()),
-            Some("orchestrator")
-        );
+        assert_eq!(dir, data.path().join("orchestrator"));
+    }
+
+    /// A test opening the orchestrator must not write into the real profile.
+    #[test]
+    fn tests_never_root_the_cwd_in_the_profile() {
+        assert!(!data_root().starts_with(daruda_store::persistence::default_data_dir()));
     }
 }

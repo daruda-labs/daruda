@@ -27,6 +27,9 @@ use crate::surface::strings as s;
 use crate::workspace::Workspace;
 use crate::workspace::main_area::pane_tree::PaneId;
 
+/// Why a connect fails under test, where no adapter is ever launched.
+const OFFLINE_ADAPTER: &str = "adapters are not launched in tests";
+
 struct AgentChatConnectionPlan {
     agent_id: String,
     launch_spec: daruda_acp::LaunchSpec,
@@ -714,6 +717,14 @@ impl Workspace {
                         );
                     };
                     let context = PreparationContext::new(&canceled, &notice);
+                    // Tests must never launch a real adapter: preparing one runs
+                    // `npm` against the registry into the shared node root, and
+                    // the adapter itself signs in with the user's account.
+                    if cfg!(test) {
+                        return Err(
+                            daruda_acp::NodeError::Download(OFFLINE_ADAPTER.to_owned()).into()
+                        );
+                    }
                     let adapter = daruda_acp::launch_env::prepare_adapter(
                         &launch_spec,
                         &node_root,

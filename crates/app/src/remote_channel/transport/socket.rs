@@ -17,6 +17,13 @@ pub fn connect(url: &str) -> Result<Socket> {
     let host = parsed
         .host_str()
         .ok_or_else(|| TransportError::Message("Gateway URL has no host".into()))?;
+    // The DNS lookup below is already network; tests stop before it, as
+    // `http::call` does.
+    if cfg!(test) {
+        return Err(TransportError::Message(
+            "Network calls are disabled in tests".into(),
+        ));
+    }
     let addresses = (host, parsed.port().unwrap_or(443))
         .to_socket_addrs()
         .map_err(|_| TransportError::Message("Gateway DNS lookup failed".into()))?;

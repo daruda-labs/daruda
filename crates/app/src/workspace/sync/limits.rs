@@ -20,9 +20,12 @@
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::time::Duration;
+use std::time::{Duration, SystemTime};
 
-use daruda_agent::{ActivityStats, ProviderUsage, ServiceStatus, activity, service_status, usage};
+use daruda_agent::{
+    ActivityStats, DayActivity, ProviderUsage, ServiceStatus, StatusIndicator, UsageWindow,
+    WindowScope, activity, service_status, usage,
+};
 use daruda_config::PollConfig;
 use daruda_store::accounts::{AccountRecipeId, AccountSelection};
 use daruda_store::observability::error_report::{ErrorReport, ErrorSeverity};
@@ -38,6 +41,11 @@ use crate::workspace::main_area::pane::FocusedAccount;
 /// quickly without spinning on `read_with` while idle.
 const IDLE_RECHECK: Duration = Duration::from_secs(PollConfig::MIN_POLL_SECS);
 const STARTUP_JITTER_MAX_SECS: u64 = 15;
+const OFFLINE_WINDOW: Duration = Duration::from_secs(5 * 60 * 60);
+const OFFLINE_UTILIZATION: f32 = 25.0;
+const OFFLINE_ACTIVITY_DATE: &str = "2026-01-01";
+const OFFLINE_ACTIVITY_TURNS: u64 = 12;
+const OFFLINE_ACTIVITY_TOKENS: u64 = 34_000;
 
 static PUMP_SEQUENCE: AtomicU64 = AtomicU64::new(0);
 
@@ -330,6 +338,11 @@ fn fetch_limits(
     recipe: AccountRecipeId,
     config_dir: Option<&Path>,
 ) -> Result<ProviderUsage, daruda_agent::FetchError> {
+    // Tests must never reach the provider: every test `Workspace` starts these
+    // pumps, and the request carries the user's real OAuth token.
+    if cfg!(test) {
+        return Ok(offline_usage(recipe));
+    }
     let result = usage::source_for(recipe).fetch(config_dir);
     if let Err(error) = &result {
         log_limits_fetch_failure(recipe, config_dir, error);
@@ -338,14 +351,55 @@ fn fetch_limits(
 }
 
 fn fetch_status(recipe: AccountRecipeId) -> Result<ServiceStatus, daruda_agent::FetchError> {
+    if cfg!(test) {
+        return Ok(offline_status());
+    }
     service_status::fetch_service_status(usage::source_for(recipe).status_url())
+}
+
+/// Fixed snapshot answering [`fetch_limits`] under test.
+fn offline_usage(recipe: AccountRecipeId) -> ProviderUsage {
+    let window = UsageWindow {
+        window: OFFLINE_WINDOW,
+        utilization: OFFLINE_UTILIZATION,
+        resets_at: None,
+        scope: WindowScope::Overall,
+    };
+    ProviderUsage::new(recipe, vec![window], None)
+}
+
+/// Fixed "operational" answer for [`fetch_status`] under test.
+fn offline_status() -> ServiceStatus {
+    ServiceStatus {
+        indicator: StatusIndicator::None,
+        description: String::new(),
+        fetched_at: Some(SystemTime::now()),
+    }
 }
 
 /// Dispatch one domain's local activity aggregation through the provider
 /// strategy owned by `daruda_agent`. `config_dir` is that recipe's resolved
 /// managed-account dir (`None` = system default).
 fn fetch_activity_in(recipe: AccountRecipeId, config_dir: Option<&Path>) -> Option<ActivityStats> {
+    // Tests must never scan the user's own session logs, nor write the
+    // derived cache into the real profile.
+    if cfg!(test) {
+        return Some(offline_activity());
+    }
     activity::source_for(recipe).fetch(config_dir)
+}
+
+/// Fixed one-day aggregate answering [`fetch_activity_in`] under test. No
+/// recent sessions: those would offer restore rows no test seeded.
+fn offline_activity() -> ActivityStats {
+    ActivityStats {
+        daily: vec![DayActivity {
+            date: OFFLINE_ACTIVITY_DATE.to_owned(),
+            turns: OFFLINE_ACTIVITY_TURNS,
+            tokens: OFFLINE_ACTIVITY_TOKENS,
+        }],
+        recent_sessions: Vec::new(),
+    }
 }
 
 /// Result envelope so every endpoint can share a single

@@ -6,6 +6,8 @@
 use crate::UpdateError;
 use serde::Deserialize;
 
+use crate::verify::CHECKSUMS_ASSET;
+
 /// A parsed, newer-than-current release ready to be downloaded and installed.
 #[derive(Clone, Debug)]
 pub struct ReleaseInfo {
@@ -14,6 +16,10 @@ pub struct ReleaseInfo {
     pub tag: String,
     /// The `browser_download_url` of this platform's package.
     pub asset_url: String,
+    /// The package's file name — the key the checksums list it under.
+    pub asset_name: String,
+    /// The `browser_download_url` of the release's checksums file.
+    pub checksums_url: String,
     /// The release body/notes, verbatim.
     pub notes: String,
 }
@@ -101,17 +107,24 @@ fn parse_release_with_suffix(
         return Ok(None);
     }
 
-    let asset_url = release
+    let package = release
         .assets
         .iter()
         .find(|asset| asset.name.to_lowercase().ends_with(suffix))
-        .map(|asset| asset.browser_download_url.clone())
         .ok_or(UpdateError::NoAssetForPlatform(suffix))?;
+    // A package that cannot be verified is not offered at all.
+    let checksums = release
+        .assets
+        .iter()
+        .find(|asset| asset.name == CHECKSUMS_ASSET)
+        .ok_or(UpdateError::NoChecksums(CHECKSUMS_ASSET))?;
 
     Ok(Some(ReleaseInfo {
         version,
         tag: release.tag_name,
-        asset_url,
+        asset_url: package.browser_download_url.clone(),
+        asset_name: package.name.clone(),
+        checksums_url: checksums.browser_download_url.clone(),
         notes: release.body.unwrap_or_default(),
     }))
 }
@@ -125,7 +138,8 @@ mod tests {
         \"body\": \"## Changes\\n- fixed things\",\
         \"assets\": [\
             { \"name\": \"daruda-0.3.0.dmg\", \"browser_download_url\": \"https://github.com/daruda-labs/daruda/releases/download/v0.3.0/daruda-0.3.0.dmg\" },\
-            { \"name\": \"something-else.txt\", \"browser_download_url\": \"https://example.com/other\" }\
+            { \"name\": \"something-else.txt\", \"browser_download_url\": \"https://example.com/other\" },\
+            { \"name\": \"SHA256SUMS.txt\", \"browser_download_url\": \"https://github.com/daruda-labs/daruda/releases/download/v0.3.0/SHA256SUMS.txt\" }\
         ]\
     }";
 
@@ -135,7 +149,8 @@ mod tests {
         \"tag_name\": \"v0.3.0\",\
         \"assets\": [\
             { \"name\": \"daruda-0.3.0.dmg\", \"browser_download_url\": \"https://github.com/d/mac\" },\
-            { \"name\": \"daruda-0.3.0-windows-x86_64.zip\", \"browser_download_url\": \"https://github.com/d/win\" }\
+            { \"name\": \"daruda-0.3.0-windows-x86_64.zip\", \"browser_download_url\": \"https://github.com/d/win\" },\
+            { \"name\": \"SHA256SUMS.txt\", \"browser_download_url\": \"https://github.com/d/sums\" }\
         ]\
     }";
 
@@ -192,6 +207,11 @@ mod tests {
             info.asset_url,
             "https://github.com/daruda-labs/daruda/releases/download/v0.3.0/daruda-0.3.0.dmg"
         );
+        assert_eq!(info.asset_name, "daruda-0.3.0.dmg");
+        assert_eq!(
+            info.checksums_url,
+            "https://github.com/daruda-labs/daruda/releases/download/v0.3.0/SHA256SUMS.txt"
+        );
         assert_eq!(info.version, semver::Version::parse("0.3.0").unwrap());
         assert_eq!(info.tag, "v0.3.0");
         assert_eq!(info.notes, "## Changes\n- fixed things");
@@ -233,6 +253,20 @@ mod tests {
             result,
             Err(UpdateError::NoAssetForPlatform(".dmg"))
         ));
+    }
+
+    /// A package with nothing to verify it against is not offered.
+    #[test]
+    fn a_release_without_checksums_is_refused() {
+        let json = r#"{
+            "tag_name": "v0.3.0",
+            "assets": [
+                { "name": "daruda-0.3.0.dmg", "browser_download_url": "https://github.com/d/mac" }
+            ]
+        }"#;
+        let current = semver::Version::parse("0.2.0").unwrap();
+        let result = parse_release_with_suffix(json, &current, ".dmg");
+        assert!(matches!(result, Err(UpdateError::NoChecksums(_))));
     }
 
     #[test]

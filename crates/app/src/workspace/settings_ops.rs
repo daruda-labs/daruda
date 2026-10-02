@@ -32,7 +32,9 @@ impl Workspace {
         let view = match self.settings.as_ref() {
             Some(host) => host.view.clone(),
             None => {
-                let view = cx.new(|cx| SettingsView::new_with_section(section, window, cx));
+                let data_dir = self.data_dir.clone();
+                let view =
+                    cx.new(|cx| SettingsView::new_with_section(section, data_dir, window, cx));
                 let close = cx.subscribe_in(
                     &view,
                     window,

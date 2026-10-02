@@ -136,7 +136,7 @@ fn a_run_whose_lock_vanished_reports_nothing_extra() {
 fn a_request_with_a_relative_path_never_starts() {
     let dir = tempfile::tempdir().expect("tempdir");
     let mut request = request_for(CHAIN, dir.path());
-    request.cwd = std::path::PathBuf::from("Users/woo/git/temp");
+    request.cwd = std::path::PathBuf::from("Users/x/git/temp");
     request.run_dir = request.cwd.join(".daruda/flow-runs/01J");
 
     let runner = FakeRunner::new();

@@ -50,20 +50,46 @@ pub struct PlanInfo {
 /// [`FetchError::NoToken`] so callers render one "unavailable" state.
 #[cfg(target_os = "macos")]
 pub fn read_system_credentials() -> Result<(String, PlanInfo), FetchError> {
-    use std::process::Command;
-    let out = Command::new("security")
-        .args(["find-generic-password", "-s", SYSTEM_KEYCHAIN_SERVICE, "-w"])
-        .output()
-        .map_err(|_| FetchError::NoToken)?;
-    if !out.status.success() {
+    let KeychainLookup::Found(secret) = find_keychain_secret(SYSTEM_KEYCHAIN_SERVICE) else {
         return Err(FetchError::NoToken);
-    }
-    let raw = String::from_utf8(out.stdout).map_err(|_| FetchError::NoToken)?;
+    };
+    let raw = String::from_utf8(secret).map_err(|_| FetchError::NoToken)?;
     parse_credentials(&raw)
+}
+
+/// What one Keychain lookup found.
+#[cfg(target_os = "macos")]
+enum KeychainLookup {
+    Found(Vec<u8>),
+    Missing,
+    /// `security` itself could not run.
+    Failed,
+}
+
+/// The one place this module reads the Keychain. A test never reaches the
+/// user's login keychain: under test the store answers as an empty one.
+#[cfg(target_os = "macos")]
+fn find_keychain_secret(service: &str) -> KeychainLookup {
+    if cfg!(test) {
+        return KeychainLookup::Missing;
+    }
+    match std::process::Command::new("security")
+        .args(["find-generic-password", "-s", service, "-w"])
+        .output()
+    {
+        Ok(out) if out.status.success() => KeychainLookup::Found(out.stdout),
+        Ok(_) => KeychainLookup::Missing,
+        Err(_) => KeychainLookup::Failed,
+    }
 }
 
 #[cfg(not(target_os = "macos"))]
 pub fn read_system_credentials() -> Result<(String, PlanInfo), FetchError> {
+    // The ambient login is the user's own; under test it reads as absent, as
+    // the Keychain does on macOS.
+    if cfg!(test) {
+        return Err(FetchError::NoToken);
+    }
     let path = credentials_path().ok_or(FetchError::NoToken)?;
     let raw = std::fs::read_to_string(path).map_err(|_| FetchError::NoToken)?;
     parse_credentials(&raw)
@@ -130,16 +156,12 @@ pub fn read_scoped_credentials(config_dir: &Path) -> Result<(String, PlanInfo), 
 
 #[cfg(target_os = "macos")]
 fn read_scoped_keychain_credentials(config_dir: &Path) -> Result<(String, PlanInfo), AccountError> {
-    use std::process::Command;
-    let service = scoped_keychain_service(config_dir);
-    let out = Command::new("security")
-        .args(["find-generic-password", "-s", &service, "-w"])
-        .output()
-        .map_err(|_| AccountError::Keychain)?;
-    if !out.status.success() {
-        return Err(AccountError::Credentials(FetchError::NoToken));
-    }
-    let raw = String::from_utf8(out.stdout).map_err(|_| AccountError::Keychain)?;
+    let secret = match find_keychain_secret(&scoped_keychain_service(config_dir)) {
+        KeychainLookup::Found(secret) => secret,
+        KeychainLookup::Missing => return Err(AccountError::Credentials(FetchError::NoToken)),
+        KeychainLookup::Failed => return Err(AccountError::Keychain),
+    };
+    let raw = String::from_utf8(secret).map_err(|_| AccountError::Keychain)?;
     Ok(parse_credentials(&raw)?)
 }
 
@@ -177,23 +199,22 @@ fn read_credentials_file(config_dir: &Path) -> Result<(String, PlanInfo), Accoun
 pub fn system_credentials_digest() -> Option<String> {
     #[cfg(target_os = "macos")]
     {
-        use sha2::{Digest, Sha256};
-        use std::process::Command;
-        let out = Command::new("security")
-            .args(["find-generic-password", "-s", SYSTEM_KEYCHAIN_SERVICE, "-w"])
-            .output()
-            .ok()?;
-        if !out.status.success() {
-            return None;
+        match find_keychain_secret(SYSTEM_KEYCHAIN_SERVICE) {
+            KeychainLookup::Found(secret) => Some(secret_digest(&secret)),
+            KeychainLookup::Missing | KeychainLookup::Failed => None,
         }
-        let mut hasher = Sha256::new();
-        hasher.update(&out.stdout);
-        Some(format!("{:x}", hasher.finalize()))
     }
     #[cfg(not(target_os = "macos"))]
     {
         None
     }
+}
+
+/// Hex SHA-256 of a credential store entry, so a comparison never holds it.
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+fn secret_digest(secret: &[u8]) -> String {
+    use sha2::{Digest, Sha256};
+    format!("{:x}", Sha256::digest(secret))
 }
 
 /// Best-effort delete of the scoped macOS Keychain item a Claude Code
@@ -214,6 +235,10 @@ pub fn delete_scoped_credentials(config_dir: &Path) {
     use daruda_store::observability::log_writer::LogWriter;
     use std::process::{Command, Stdio};
 
+    // Same rule as `find_keychain_secret`: a test never touches the keychain.
+    if cfg!(test) {
+        return;
+    }
     let service = scoped_keychain_service(config_dir);
     let output = Command::new("security")
         .args(["delete-generic-password", "-s", &service])
@@ -373,20 +398,31 @@ mod tests {
         assert!(read_scoped_credentials(dir.path()).is_err());
     }
 
-    /// Reading it twice with nothing in between must agree — otherwise the
-    /// comparison this exists for would report a clobber on every login.
+    /// The same entry must digest alike — otherwise the comparison this
+    /// exists for would report a clobber on every login.
     #[test]
-    fn the_ambient_digest_is_stable_across_reads() {
-        assert_eq!(system_credentials_digest(), system_credentials_digest());
+    fn the_digest_is_stable_for_the_same_entry() {
+        let entry = br#"{"claudeAiOauth":{"accessToken":"sk-ant-oat01-x"}}"#;
+        assert_eq!(secret_digest(entry), secret_digest(entry));
+        assert_ne!(secret_digest(entry), secret_digest(b"another entry"));
     }
 
     /// And it must never be the secret itself.
     #[test]
-    fn the_ambient_digest_is_a_digest() {
-        if let Some(d) = system_credentials_digest() {
-            assert_eq!(d.len(), 64, "sha256 hex");
-            assert!(d.chars().all(|c| c.is_ascii_hexdigit()));
-            assert!(!d.contains("sk-ant"));
-        }
+    fn the_digest_is_sha256_hex_not_the_secret() {
+        assert_eq!(
+            secret_digest(b"abc"),
+            "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
+        );
+        let digest = secret_digest(br#"{"accessToken":"sk-ant-oat01-x"}"#);
+        assert!(!digest.contains("sk-ant"));
+    }
+
+    /// Tests never read the user's own sign-in: the ambient store answers as
+    /// an empty one.
+    #[test]
+    fn the_ambient_store_reads_as_empty_under_test() {
+        assert_eq!(system_credentials_digest(), None);
+        assert!(read_system_credentials().is_err());
     }
 }

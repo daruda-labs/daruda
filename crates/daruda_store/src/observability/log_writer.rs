@@ -210,7 +210,7 @@ impl LogWriter {
         GLOBAL.get_or_init(|| {
             let dir = log_dir();
             if let Some(d) = &dir {
-                if let Err(e) = fs::create_dir_all(d) {
+                if let Err(e) = daruda_core::path::create_owner_only_dir(d) {
                     eprintln!(
                         "daruda: log writer disabled — could not create {}: {e}",
                         d.display()
@@ -263,9 +263,14 @@ impl LogWriter {
 pub fn write_panic_log(report: &ErrorReport) -> Option<PathBuf> {
     let path = fresh_panic_log_path()?;
     if let Some(parent) = path.parent() {
-        let _ = fs::create_dir_all(parent);
+        let _ = daruda_core::path::create_owner_only_dir(parent);
     }
-    match fs::write(&path, report.to_plain_text()) {
+    let written = daruda_core::path::open_owner_only(
+        OpenOptions::new().create(true).write(true).truncate(true),
+        &path,
+    )
+    .and_then(|mut file| file.write_all(report.to_plain_text().as_bytes()));
+    match written {
         Ok(()) => Some(path),
         Err(e) => {
             eprintln!(
@@ -421,12 +426,12 @@ impl OpenFile {
 
 fn open_append(path: &Path) -> Option<File> {
     if let Some(parent) = path.parent()
-        && let Err(e) = fs::create_dir_all(parent)
+        && let Err(e) = daruda_core::path::create_owner_only_dir(parent)
     {
         eprintln!("daruda: log writer cannot create {}: {e}", parent.display());
         return None;
     }
-    match OpenOptions::new().create(true).append(true).open(path) {
+    match daruda_core::path::open_owner_only(OpenOptions::new().create(true).append(true), path) {
         Ok(f) => Some(f),
         Err(e) => {
             eprintln!("daruda: log writer cannot open {}: {e}", path.display());

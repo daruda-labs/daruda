@@ -297,14 +297,18 @@ fn open_log(path: &Path) -> Option<Mutex<File>> {
     // handles, and a non-append writer keeps its own offset, so it overwrites
     // whatever its sibling appended past it.
     let truncate = first_open(path) && !rotate(path);
-    std::fs::OpenOptions::new()
-        .create(true)
-        .append(!truncate)
-        .truncate(truncate)
-        .write(truncate)
-        .open(path)
-        .ok()
-        .map(Mutex::new)
+    // A capture holds whole transcripts — every file an agent read and every
+    // command's output — so it is the owner's alone.
+    daruda_core::path::open_owner_only(
+        std::fs::OpenOptions::new()
+            .create(true)
+            .append(!truncate)
+            .truncate(truncate)
+            .write(truncate),
+        path,
+    )
+    .ok()
+    .map(Mutex::new)
 }
 
 /// Move the previous run's capture aside, keeping one generation. Returns
@@ -321,7 +325,8 @@ fn rotate(path: &Path) -> bool {
     }
     let target = previous_generation_path(path);
     target.parent().is_some_and(|dir| {
-        std::fs::create_dir_all(dir).is_ok() && std::fs::rename(path, &target).is_ok()
+        daruda_core::path::create_owner_only_dir(dir).is_ok()
+            && std::fs::rename(path, &target).is_ok()
     })
 }
 

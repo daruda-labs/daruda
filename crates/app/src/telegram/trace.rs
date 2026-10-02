@@ -91,12 +91,10 @@ fn sink() -> Option<&'static Mutex<File>> {
 /// failure — a trace that cannot be written must never take the bridge down.
 fn open(path: &Path) -> Option<Mutex<File>> {
     if let Some(parent) = path.parent().filter(|p| !p.as_os_str().is_empty()) {
-        std::fs::create_dir_all(parent).ok()?;
+        daruda_core::path::create_owner_only_dir(parent).ok()?;
     }
-    OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(path)
+    // The trace carries chat text, so it is the owner's alone.
+    daruda_core::path::open_owner_only(OpenOptions::new().create(true).append(true), path)
         .ok()
         .map(Mutex::new)
 }

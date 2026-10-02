@@ -80,12 +80,12 @@ mod tests {
         // Simulate an interactive shell emitting an OSC 7 escape and a newline
         // around the bracketed value.
         let noisy = format!(
-            "\u{1b}]7;file://host/Users/woo\u{7}{}\n",
-            wrap("/Users/woo/.nvm/versions/node/v22.19.0/bin:/usr/bin"),
+            "\u{1b}]7;file://host/Users/x\u{7}{}\n",
+            wrap("/Users/x/.nvm/versions/node/v22.19.0/bin:/usr/bin"),
         );
         assert_eq!(
             extract_path(&noisy).as_deref(),
-            Some("/Users/woo/.nvm/versions/node/v22.19.0/bin:/usr/bin"),
+            Some("/Users/x/.nvm/versions/node/v22.19.0/bin:/usr/bin"),
         );
     }
 

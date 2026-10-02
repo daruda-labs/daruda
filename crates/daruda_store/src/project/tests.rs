@@ -1277,7 +1277,7 @@ mod new_schema {
 
     #[test]
     fn recent_entry_roundtrip() {
-        let e = RecentEntry::now(WorkspaceUuid::new(), "io.whatap".into());
+        let e = RecentEntry::now(WorkspaceUuid::new(), "com.example.app".into());
         let json = serde_json::to_string(&e).unwrap();
         let back: RecentEntry = serde_json::from_str(&json).unwrap();
         assert_eq!(e, back);

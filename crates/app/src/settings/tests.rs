@@ -40,6 +40,13 @@ impl gpui::Render for DialogHost {
 }
 
 /// Press Enter in the window, which the open dialog takes as OK.
+/// A data dir no other fixture shares, so Settings never reads the real profile.
+fn test_data_dir() -> std::path::PathBuf {
+    static COUNTER: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    let id = COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    std::env::temp_dir().join(format!("daruda_settings_test_{}_{id}", std::process::id()))
+}
+
 fn confirm_dialog(cx: &mut TestAppContext, wh: WindowHandle<gpui_component::Root>) {
     let mut vcx = gpui::VisualTestContext::from_window(wh.into(), cx);
     vcx.run_until_parked();
@@ -66,7 +73,7 @@ fn build_window_with_config(
     });
     let settings_for_root = std::cell::RefCell::new(None);
     let wh = cx.add_window(|window, cx| {
-        let settings = cx.new(|cx| SettingsView::new(window, cx));
+        let settings = cx.new(|cx| SettingsView::new(test_data_dir(), window, cx));
         *settings_for_root.borrow_mut() = Some(settings.clone());
         let host = cx.new(|_| DialogHost { view: settings });
         gpui_component::Root::new(host, window, cx)
@@ -2232,8 +2239,9 @@ fn basic_toggles_and_section_focus(cx: &mut TestAppContext) {
 
     let settings_for_root = std::cell::RefCell::new(None);
     let _wh = cx.add_window(|window, cx| {
-        let settings =
-            cx.new(|cx| SettingsView::new_with_section(BuiltinSection::Keymap, window, cx));
+        let settings = cx.new(|cx| {
+            SettingsView::new_with_section(BuiltinSection::Keymap, test_data_dir(), window, cx)
+        });
         *settings_for_root.borrow_mut() = Some(settings.clone());
         gpui_component::Root::new(settings, window, cx)
     });

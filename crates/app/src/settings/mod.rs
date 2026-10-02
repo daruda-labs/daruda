@@ -180,6 +180,8 @@ pub struct SettingsView {
     /// open. A row falls back to [`daruda_config::agent_vocabulary_seed`] per
     /// axis when this has nothing for its current id and command.
     pub(super) agent_vocabulary: daruda_store::agent_vocabulary::AgentVocabularyCache,
+    /// The hosting workspace's data dir — the store `agent_vocabulary` mirrors.
+    data_dir: std::path::PathBuf,
     /// The session host registry (`[[session_hosts]]`) in `config.toml`
     /// order — named, reusable SSH/Docker targets a lane's `session_host`
     /// can reference by id instead of repeating the same target/container
@@ -819,8 +821,8 @@ impl SessionHostRow {
 }
 
 impl SettingsView {
-    pub fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
-        Self::new_with_section(BuiltinSection::default(), window, cx)
+    pub fn new(data_dir: std::path::PathBuf, window: &mut Window, cx: &mut Context<Self>) -> Self {
+        Self::new_with_section(BuiltinSection::default(), data_dir, window, cx)
     }
 
     fn subscribe_draft_input(
@@ -1531,6 +1533,7 @@ impl SettingsView {
 
     pub fn new_with_section(
         active: BuiltinSection,
+        data_dir: std::path::PathBuf,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Self {
@@ -1938,12 +1941,10 @@ impl SettingsView {
                 .placeholder(s::settings::agent_catalog_search_placeholder())
         });
 
-        // Settings has no `data_dir` field of its own, but vocabulary is shared
-        // app-wide so every open window sees a connection's advertisement.
-        let agent_vocabulary_data_dir = daruda_store::persistence::default_data_dir();
-        crate::workspace::agent_vocabulary_global::install_path(cx, &agent_vocabulary_data_dir);
-        let agent_vocabulary =
-            crate::workspace::agent_vocabulary_global::snapshot(cx, &agent_vocabulary_data_dir);
+        // Vocabulary is shared app-wide so every open window sees a
+        // connection's advertisement; it is read from the host's store.
+        crate::workspace::agent_vocabulary_global::install_path(cx, &data_dir);
+        let agent_vocabulary = crate::workspace::agent_vocabulary_global::snapshot(cx, &data_dir);
 
         // Entries that resolve get an editable row; entries that don't (a preset
         // id daruda no longer knows, or one that needs a manual install) have no
@@ -2111,9 +2112,8 @@ impl SettingsView {
         let _agent_vocabulary_global_subscription = cx.observe_global_in::<
             crate::workspace::agent_vocabulary_global::AgentVocabularyGlobal,
         >(window, |this, window, cx| {
-            let data_dir = daruda_store::persistence::default_data_dir();
             this.agent_vocabulary =
-                crate::workspace::agent_vocabulary_global::snapshot(cx, &data_dir);
+                crate::workspace::agent_vocabulary_global::snapshot(cx, &this.data_dir);
             for index in 0..this.agent_catalog.len() {
                 this.refresh_agent_row_vocabulary(index, window, cx);
             }
@@ -2159,6 +2159,7 @@ impl SettingsView {
             agent_tool_summary_labels: config.agent.tool_summary_labels,
             agent_catalog,
             agent_vocabulary,
+            data_dir,
             session_host_rows,
             accounts,
             orchestrator_enabled: config.orchestrator.enabled,

@@ -5,7 +5,7 @@
 //! registered behind a `GlobalUpdater` marker so any view can resolve the
 //! live handle via [`Updater::get`] and drive it with `entity.update(...)`.
 //!
-//! The three blocking `daruda_update` calls (`check_latest`, `download_asset`,
+//! The three blocking `daruda_update` calls (`check_latest`, `download_verified`,
 //! `install_dmg`) run on `cx.background_executor()`; every status transition
 //! flips back onto the foreground inside `this.update(cx, ...)` so `cx.notify`
 //! fires on the GPUI main thread. `daruda_update` stays GPUI-free — this file
@@ -137,7 +137,7 @@ impl Updater {
         cx.spawn(async move |this, cx| {
             let result = cx
                 .background_executor()
-                .spawn(async move { daruda_update::check_latest(&current) })
+                .spawn(async move { check_latest(&current) })
                 .await;
             // SILENT-OK: app shutting down mid-update; the entity update is moot
             let _ = this.update(cx, |updater, cx| updater.apply_check_result(result, cx));
@@ -162,15 +162,15 @@ impl Updater {
 
         cx.spawn(async move |this, cx| {
             let dest = std::env::temp_dir().join(format!("daruda-update-{}.dmg", info.version));
-            let url = info.asset_url.clone();
+            let release = info.clone();
             let dest_for_dl = dest.clone();
 
             // hop A — download to a temp path on the background executor.
             let downloaded = cx
                 .background_executor()
-                .spawn(async move {
-                    daruda_update::download_asset(&url, &dest_for_dl).map(|()| dest_for_dl)
-                })
+                .spawn(
+                    async move { download_package(&release, &dest_for_dl).map(|()| dest_for_dl) },
+                )
                 .await;
 
             let dmg = match downloaded {
@@ -274,6 +274,25 @@ impl Updater {
 
 /// `<…>/target/{debug,release}` — where cargo puts a build, and the one
 /// place a portable install never is.
+/// Tests must never reach GitHub: under test every check answers "up to date".
+fn check_latest(current: &semver::Version) -> Result<Option<ReleaseInfo>, UpdateError> {
+    if cfg!(test) {
+        return Ok(None);
+    }
+    daruda_update::check_latest(current)
+}
+
+/// The release's package, verified against its published checksum. Under
+/// test no release is ever offered, so a download has nothing to fetch.
+fn download_package(release: &ReleaseInfo, dest: &Path) -> Result<(), UpdateError> {
+    if cfg!(test) {
+        return Err(UpdateError::Http(OFFLINE_DOWNLOAD.to_owned()));
+    }
+    daruda_update::download_verified(release, dest)
+}
+
+const OFFLINE_DOWNLOAD: &str = "network is disabled in tests";
+
 fn is_cargo_output(dir: &Path) -> bool {
     matches!(
         dir.file_name().and_then(|name| name.to_str()),
@@ -359,6 +378,25 @@ mod tests {
     }
 
     #[test]
+    fn network_calls_are_stubbed_under_test() {
+        let current = semver::Version::new(0, 2, 0);
+        assert!(matches!(check_latest(&current), Ok(None)));
+        let release = ReleaseInfo {
+            version: semver::Version::new(0, 3, 0),
+            tag: "v0.3.0".to_string(),
+            asset_url: "https://github.com/x.dmg".to_string(),
+            asset_name: "x.dmg".to_string(),
+            checksums_url: "https://github.com/SHA256SUMS.txt".to_string(),
+            notes: String::new(),
+        };
+        let dest = std::env::temp_dir().join("daruda-update-offline.dmg");
+        assert!(matches!(
+            download_package(&release, &dest),
+            Err(UpdateError::Http(_))
+        ));
+    }
+
+    #[test]
     fn is_busy_true_for_in_flight_states() {
         for status in [
             AutoUpdateStatus::Checking,
@@ -378,6 +416,8 @@ mod tests {
             version: semver::Version::new(0, 3, 0),
             tag: "v0.3.0".to_string(),
             asset_url: "https://github.com/x.dmg".to_string(),
+            asset_name: "x.dmg".to_string(),
+            checksums_url: "https://github.com/SHA256SUMS.txt".to_string(),
             notes: String::new(),
         };
         for status in [
