@@ -51,7 +51,7 @@ impl Workspace {
         }
         // `None` once started: where the task runs is then fixed.
         let run_in = if form.editable {
-            Some(self.commit_task_run_in(pane_id, values)?)
+            Some(self.commit_task_run_in(pane_id, values, form.project)?)
         } else {
             None
         };
@@ -93,14 +93,16 @@ impl Workspace {
                         base_worktree_path: base_path.clone(),
                         branch,
                         run_in,
+                        project: form.project.filter(|_| form.editable),
                     },
                     cx,
                 );
                 id.clone()
             }
             None => {
-                // A task belongs to the project it was written in.
-                let project = self.active_project()?.uuid;
+                // A new task belongs to the project the form names; with none
+                // open, it has nowhere to run.
+                let project = form.project?;
                 let mut task = daruda_store::tasks::Task::new(
                     project,
                     values.title.clone(),
@@ -138,10 +140,15 @@ impl Workspace {
     /// The location a still-editable form commits to, or `None` when it is
     /// not savable. The branch is checked again here because a lane created
     /// after the form opened can have taken it since the last keystroke.
-    fn commit_task_run_in(&mut self, pane_id: PaneId, form: &TaskEditValues) -> Option<TaskRunIn> {
+    fn commit_task_run_in(
+        &mut self,
+        pane_id: PaneId,
+        form: &TaskEditValues,
+        project: Option<daruda_store::project::ProjectUuid>,
+    ) -> Option<TaskRunIn> {
         match form.run_in {
             RunInChoice::NewWorktree => {
-                let validation = self.branch_validation_for(&form.branch, true);
+                let validation = self.branch_validation_for(&form.branch, true, project);
                 let invalid = validation.is_invalid();
                 if let Some(te) = self.task_edit_content_mut_for(pane_id) {
                     te.branch_validation = validation;
@@ -169,6 +176,7 @@ impl Workspace {
         Some(TaskEditForm {
             task_id: te.task_id.clone(),
             editable: super::run_in_ops::location_editable(te, cx.global()),
+            project: te.project(cx),
             values: te.current_snapshot(cx),
         })
     }
@@ -180,5 +188,6 @@ struct TaskEditForm {
     task_id: Option<TaskId>,
     /// Whether the task has yet to start, so its location may still change.
     editable: bool,
+    project: Option<daruda_store::project::ProjectUuid>,
     values: TaskEditValues,
 }

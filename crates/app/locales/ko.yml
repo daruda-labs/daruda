@@ -302,6 +302,7 @@ task:
   edit_subtasks_progress: "하위 작업 (%{done}/%{total})"
   edit_error: "오류"
   edit_cancelled: "취소됨"
+  edit_project_label: "프로젝트"
   edit_run_in_label: "Worktree"
   edit_run_in_new: "새로 만들기"
   edit_run_in_existing: "기존"

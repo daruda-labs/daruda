@@ -299,7 +299,8 @@ impl Workspace {
         };
         let branch = daruda_store::tasks::random_branch_name();
         let branch_input = te.branch_input.clone();
-        let validation = self.branch_validation_for(&branch, true);
+        let project = te.project(cx);
+        let validation = self.branch_validation_for(&branch, true, project);
         if let Some(te) = self.task_edit_content_mut_for_pane(pane_id) {
             te.branch_validation = validation;
         }

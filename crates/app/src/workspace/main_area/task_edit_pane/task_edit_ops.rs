@@ -10,6 +10,7 @@
 //! silent filter behind `sanitize_branch_name` can never disagree on what
 //! git accepts.
 
+use daruda_store::project::ProjectUuid;
 use daruda_store::tasks::{Task, TaskAgentSurface, TaskId, random_branch_name};
 use gpui::{AppContext as _, Context, Focusable as _, SharedString, Window};
 
@@ -227,7 +228,31 @@ impl Workspace {
         // by absolute path. Building the option list once here keeps
         // the dropdown stable across rerenders — re-deriving on every
         // frame would burn allocations and reset list-search state.
-        let base_options = base_lane_options(self);
+        // The task's own project when it is open here, else the active one.
+        let project = initial
+            .as_ref()
+            .map(|t| t.project)
+            .filter(|uuid| self.project_by_uuid(*uuid).is_some())
+            .or_else(|| self.active_project().map(|p| p.uuid));
+        let project_select = cx.new(|cx| {
+            state_with_options(
+                project_options(self),
+                project.map(super::state::project_value).as_ref(),
+                window,
+                cx,
+            )
+        });
+        let project_sub = cx.subscribe_in(
+            &project_select,
+            window,
+            move |this, _state, ev: &crate::ui::select::ConfirmEvent, window, cx| {
+                if matches!(ev, crate::ui::select::SelectEvent::Confirm(_)) {
+                    this.on_task_edit_project_changed(pane_id, window, cx);
+                }
+            },
+        );
+
+        let base_options = base_lane_options(self, project);
         let base_initial: Option<SharedString> = initial
             .as_ref()
             .and_then(|t| t.base_worktree_path.as_ref())
@@ -258,12 +283,12 @@ impl Workspace {
         };
 
         let editable = super::run_in_ops::not_started(initial.as_ref());
-        let branch_validation = self.branch_validation_for(&branch_name, editable);
+        let branch_validation = self.branch_validation_for(&branch_name, editable, project);
         let run_in = super::run_in_ops::run_in_choice(initial.as_ref());
-        let lane_initial = super::run_in_ops::initial_lane(initial.as_ref(), self);
+        let lane_initial = super::run_in_ops::initial_lane(initial.as_ref(), self, project);
         let lane_select = cx.new(|cx| {
             state_with_options(
-                super::run_in_ops::lane_options(self),
+                super::run_in_ops::lane_options(self, project),
                 lane_initial.as_ref(),
                 window,
                 cx,
@@ -301,10 +326,12 @@ impl Workspace {
             cached_title,
             // Replaced below by what the built form actually shows.
             saved_snapshot: TaskEditValues::default(),
+            project_select,
             base_select,
             run_in,
             lane_select,
             _subscriptions: vec![
+                project_sub,
                 title_sub,
                 branch_sub,
                 base_sub,
@@ -348,18 +375,52 @@ impl Workspace {
 
     /// User typed into the branch input directly — re-validate.
     pub(super) fn on_task_edit_branch_typed(&mut self, pane_id: PaneId, cx: &mut Context<Self>) {
-        let (branch_text, editable) =
+        let (branch_text, editable, project) =
             match self.active_runtime().panes.iter().find(|p| p.id == pane_id) {
                 Some(p) => match p.task_edit_content() {
                     Some(te) => (
                         te.branch_input.read(cx).text().to_string(),
                         super::run_in_ops::location_editable(te, cx.global()),
+                        te.project(cx),
                     ),
                     None => return,
                 },
                 None => return,
             };
-        let validation = self.branch_validation_for(&branch_text, editable);
+        let validation = self.branch_validation_for(&branch_text, editable, project);
+        if let Some(te) = self.task_edit_content_mut_for(pane_id) {
+            te.branch_validation = validation;
+        }
+        cx.notify();
+    }
+
+    /// The base and run-in pickers name the project's lanes, so another
+    /// project leaves both pointing at lanes it does not have: refill them
+    /// and drop the picks.
+    pub(super) fn on_task_edit_project_changed(
+        &mut self,
+        pane_id: PaneId,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(te) = self.task_edit_content_for_pane(pane_id) else {
+            return;
+        };
+        let project = te.project(cx);
+        let branch = te.branch_input.read(cx).text().to_string();
+        let editable = super::run_in_ops::location_editable(te, cx.global());
+        let (base_select, lane_select) = (te.base_select.clone(), te.lane_select.clone());
+        let base_options = base_lane_options(self, project);
+        let lane_options = super::run_in_ops::lane_options(self, project);
+        base_select.update(cx, |state, cx| {
+            state.set_items(base_options, window, cx);
+            state.set_selected_value(&SharedString::default(), window, cx);
+        });
+        lane_select.update(cx, |state, cx| {
+            state.set_items(lane_options, window, cx);
+            state.set_selected_index(None, window, cx);
+        });
+        let validation = self.branch_validation_for(&branch, editable, project);
         if let Some(te) = self.task_edit_content_mut_for(pane_id) {
             te.branch_validation = validation;
         }
@@ -422,14 +483,21 @@ impl Workspace {
     }
 }
 
-/// Build the `base_select` option list from the workspace's current
-/// lanes. The leading empty-string option is the "no explicit
-/// base — defer to the active lane at `start_task` time"
-/// sentinel; remaining entries are keyed by absolute path so
-/// `commit_task_edit_pane` can round-trip the user's pick back into
-/// `Task::base_worktree_path: Option<PathBuf>`.
-fn base_lane_options(ws: &Workspace) -> Vec<SelectOption> {
-    let lanes = ws.active_lanes();
+/// Every project open in this window, keyed by `ProjectUuid`.
+fn project_options(ws: &Workspace) -> Vec<SelectOption> {
+    ws.projects
+        .iter()
+        .map(|p| SelectOption::new(super::state::project_value(p.uuid), p.name.clone()))
+        .collect()
+}
+
+/// Build the `base_select` option list from `project`'s lanes. The
+/// leading empty-string option is the "no explicit base — the project's
+/// base branch at `start_task` time" sentinel; remaining entries are keyed
+/// by absolute path so `commit_task_edit_pane` can round-trip the user's
+/// pick back into `Task::base_worktree_path: Option<PathBuf>`.
+fn base_lane_options(ws: &Workspace, project: Option<ProjectUuid>) -> Vec<SelectOption> {
+    let lanes = ws.task_project_lanes(project);
     let mut options = Vec::with_capacity(lanes.len() + 1);
     options.push(SelectOption::new(
         "",

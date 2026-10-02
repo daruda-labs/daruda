@@ -417,6 +417,14 @@ fn settings(
             .into_any_element()
     };
     section = section.child(field(
+        strings::task::edit_project_label(),
+        ui::select::select(&te.project_select, cx, 3)
+            .disabled(!editable)
+            .placeholder(strings::task::project_not_open())
+            .into_any_element(),
+        cx,
+    ));
+    section = section.child(field(
         strings::task::edit_run_in_label(),
         run_in(pane_id, te, editable, cx).into_any_element(),
         cx,

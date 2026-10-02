@@ -1,6 +1,7 @@
 //! The TaskEdit form's state — the entities a pane holds, the values Save
 //! reads off them, and the checks that gate Save.
 
+use daruda_store::project::ProjectUuid;
 use daruda_store::tasks::{TaskAgentSurface, TaskId};
 use gpui::{App, Entity, FocusHandle, ScrollHandle, SharedString, Subscription, Task};
 
@@ -19,6 +20,10 @@ pub(in crate::workspace) struct TaskEditContent {
     pub(in crate::workspace::main_area) settings_open: bool,
     pub(in crate::workspace::main_area) notes_open: bool,
     pub(in crate::workspace::main_area) branch_validation: BranchValidation,
+    /// The project the task belongs to, keyed by `ProjectUuid`. Its lanes
+    /// are what `base_select` and `lane_select` offer, so picking another
+    /// project rebuilds both.
+    pub(in crate::workspace) project_select: Entity<crate::ui::select::SelectState>,
     /// Dropdown mapping lane picks to `Task::base_worktree_path`. The
     /// empty-string sentinel means "no explicit base — branch from the
     /// active lane at run time"; every other value is the absolute path of a
@@ -135,6 +140,17 @@ pub(in crate::workspace) struct TaskEditValues {
     pub(in crate::workspace::main_area) run_in: RunInChoice,
     /// `lane_select`'s value, `""` when nothing is picked.
     pub(in crate::workspace::main_area) lane_value: String,
+    /// `project_select`'s value, `""` when nothing is picked.
+    pub(in crate::workspace::main_area) project_value: String,
+}
+
+/// `project_select`'s option value for `uuid`.
+pub(in crate::workspace) fn project_value(uuid: ProjectUuid) -> SharedString {
+    SharedString::from(uuid.as_inner().to_string())
+}
+
+fn project_from_value(value: &str) -> Option<ProjectUuid> {
+    uuid::Uuid::parse_str(value).ok().map(ProjectUuid)
 }
 
 /// CRLF → LF normaliser, so comparisons never trip on line-ending
@@ -175,6 +191,7 @@ impl TaskEditValues {
             base_value,
             run_in,
             lane_value,
+            project_value,
         } = self;
         *draft_subtasks != other.draft_subtasks
             || *title != other.title
@@ -186,6 +203,7 @@ impl TaskEditValues {
             || *base_value != other.base_value
             || *run_in != other.run_in
             || *lane_value != other.lane_value
+            || *project_value != other.project_value
     }
 }
 
@@ -209,7 +227,18 @@ impl TaskEditContent {
                 .unwrap_or_default(),
             run_in: self.run_in,
             lane_value: self.lane_value(cx),
+            project_value: self
+                .project_select
+                .read(cx)
+                .selected_value()
+                .map(|v| v.to_string())
+                .unwrap_or_default(),
         }
+    }
+
+    /// The picked project, `None` when none is (no project is open).
+    pub(in crate::workspace) fn project(&self, cx: &App) -> Option<ProjectUuid> {
+        project_from_value(self.project_select.read(cx).selected_value()?)
     }
 
     /// The picked lane's path, `""` when none is picked.

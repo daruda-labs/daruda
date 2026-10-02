@@ -3,7 +3,7 @@
 
 use std::path::Path;
 
-use daruda_store::project::LaneKind;
+use daruda_store::project::{LaneKind, ProjectUuid};
 use daruda_store::tasks::{Task, TaskRunIn, TaskState};
 use gpui::{Context, SharedString};
 
@@ -15,9 +15,9 @@ use crate::workspace::main_area::pane_tree::PaneId;
 
 use super::task_edit_ops::validate_branch;
 
-/// The picker's options: every lane of the active project, by path.
-pub(super) fn lane_options(ws: &Workspace) -> Vec<SelectOption> {
-    ws.active_lanes()
+/// The picker's options: every lane of `project`, by path.
+pub(super) fn lane_options(ws: &Workspace, project: Option<ProjectUuid>) -> Vec<SelectOption> {
+    ws.task_project_lanes(project)
         .iter()
         .filter_map(|lane| {
             let path = lane.path.to_str()?.to_string();
@@ -26,11 +26,17 @@ pub(super) fn lane_options(ws: &Workspace) -> Vec<SelectOption> {
         .collect()
 }
 
-/// The lane a draft or saved task preselects: its own, else the active one.
-pub(super) fn initial_lane(task: Option<&Task>, ws: &Workspace) -> Option<SharedString> {
+/// The lane a draft or saved task preselects: its own, else the active one
+/// when that lane is in the task's project.
+pub(super) fn initial_lane(
+    task: Option<&Task>,
+    ws: &Workspace,
+    project: Option<ProjectUuid>,
+) -> Option<SharedString> {
     let path = match task.map(|t| &t.run_in) {
         Some(TaskRunIn::ExistingLane { path }) => path.clone(),
-        _ => ws.active_lane()?.path.clone(),
+        _ if ws.active_project().map(|p| p.uuid) == project => ws.active_lane()?.path.clone(),
+        _ => return None,
     };
     path.to_str().map(|s| SharedString::from(s.to_string()))
 }
@@ -71,14 +77,19 @@ impl Workspace {
     /// check git would otherwise fail at Start: a registered lane already
     /// has this branch checked out. A started task's branch is its own
     /// lane's, so it skips that check.
-    pub(super) fn branch_validation_for(&self, text: &str, editable: bool) -> BranchValidation {
+    pub(super) fn branch_validation_for(
+        &self,
+        text: &str,
+        editable: bool,
+        project: Option<ProjectUuid>,
+    ) -> BranchValidation {
         let validation = validate_branch(text);
         if validation != BranchValidation::Valid || !editable {
             return validation;
         }
         let branch = text.trim();
         let taken = self
-            .active_lanes()
+            .task_project_lanes(project)
             .iter()
             .any(|lane| matches!(&lane.kind, LaneKind::Git { branch: Some(b), .. } if b == branch));
         if taken {
@@ -86,6 +97,14 @@ impl Workspace {
         } else {
             validation
         }
+    }
+
+    /// The lanes of the project a task form names; none when that project
+    /// is not open here.
+    pub(super) fn task_project_lanes(&self, project: Option<ProjectUuid>) -> &[crate::lane::Lane] {
+        project
+            .and_then(|uuid| self.project_by_uuid(uuid))
+            .map_or(&[], |p| p.lanes.as_slice())
     }
 
     pub(super) fn set_task_run_in(

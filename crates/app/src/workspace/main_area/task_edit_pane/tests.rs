@@ -690,3 +690,93 @@ fn task_editor_unregistered_base_is_clean_at_open_and_after_save(cx: &mut TestAp
     })
     .unwrap();
 }
+
+/// Another project's lanes replace the base and run-in choices, and the
+/// task moves to that project on save.
+#[gpui::test]
+fn task_editor_project_change_refills_lane_pickers_and_saves(cx: &mut TestAppContext) {
+    let (_a, window, ws) = build_workspace_with_project(cx);
+    let b_root = tempfile::tempdir().unwrap();
+    cx.update_window(window.into(), |_, window, cx| {
+        ws.update(cx, |ws, cx| {
+            let a = ws.projects[0].uuid;
+            let a_lane = ws.projects[0].lanes[0].path.clone();
+            ws.add_project(b_root.path().to_path_buf(), window, cx);
+            let b = ws.projects[1].uuid;
+            let mut task = Task::new(a, "Move".into(), String::new(), Some(a_lane.clone()));
+            task.run_in = TaskRunIn::ExistingLane { path: a_lane };
+            let id = task.id.clone();
+            cx.update_global::<GlobalTasks, _>(|g, _| {
+                g.add(task);
+            });
+            ws.open_task_edit_pane(Some(id.clone()), window, cx);
+            let pane = ws.active_runtime().focused_pane_id;
+            let te = ws.task_edit_content_for_pane(pane).unwrap();
+            assert_eq!(te.project(cx), Some(a));
+            assert!(!te.lane_value(cx).is_empty(), "A's lane is preselected");
+            let project_select = te.project_select.clone();
+            project_select.update(cx, |s, cx| {
+                s.set_selected_value(
+                    &crate::workspace::main_area::task_edit_pane::state::project_value(b),
+                    window,
+                    cx,
+                )
+            });
+            ws.on_task_edit_project_changed(pane, window, cx);
+            let te = ws.task_edit_content_for_pane(pane).unwrap();
+            assert_eq!(te.lane_value(cx), "", "A's lane is not B's to pick");
+            assert_eq!(
+                te.base_select
+                    .read(cx)
+                    .selected_value()
+                    .map(|v| v.to_string()),
+                Some(String::new()),
+                "the base falls back to B's own"
+            );
+            ws.set_task_run_in(pane, RunInChoice::NewWorktree, cx);
+            ws.commit_task_edit_pane(pane, cx).unwrap();
+            assert_eq!(cx.global::<GlobalTasks>().get(&id).unwrap().project, b);
+        });
+    })
+    .unwrap();
+}
+
+/// A started task's project names the repository its lane is in, so the
+/// form cannot move it.
+#[gpui::test]
+fn task_editor_keeps_a_started_tasks_project(cx: &mut TestAppContext) {
+    let (_a, window, ws) = build_workspace_with_project(cx);
+    let b_root = tempfile::tempdir().unwrap();
+    cx.update_window(window.into(), |_, window, cx| {
+        ws.update(cx, |ws, cx| {
+            let a = ws.projects[0].uuid;
+            ws.add_project(b_root.path().to_path_buf(), window, cx);
+            let b = ws.projects[1].uuid;
+            let mut task = Task::new(a, "Running".into(), String::new(), None);
+            task.state = daruda_store::tasks::TaskState::Running {
+                worktree_path: std::path::PathBuf::from("/tmp/elsewhere"),
+            };
+            let id = task.id.clone();
+            cx.update_global::<GlobalTasks, _>(|g, _| {
+                g.add(task);
+            });
+            ws.open_task_edit_pane(Some(id.clone()), window, cx);
+            let pane = ws.active_runtime().focused_pane_id;
+            let project_select = ws
+                .task_edit_content_for_pane(pane)
+                .unwrap()
+                .project_select
+                .clone();
+            project_select.update(cx, |s, cx| {
+                s.set_selected_value(
+                    &crate::workspace::main_area::task_edit_pane::state::project_value(b),
+                    window,
+                    cx,
+                )
+            });
+            ws.commit_task_edit_pane(pane, cx).unwrap();
+            assert_eq!(cx.global::<GlobalTasks>().get(&id).unwrap().project, a);
+        });
+    })
+    .unwrap();
+}

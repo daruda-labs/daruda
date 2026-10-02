@@ -93,7 +93,7 @@ pub(in crate::workspace) fn content(
                                 .text_size(px(theme::FONT_SIZE_SM))
                                 .text_color(t.text_muted)
                                 .child(match state.page {
-                                    Page::Tasks => strings::task::scope_all(),
+                                    Page::Tasks => right_dock::tasks::page_subtitle(snap),
                                     Page::Flows => lane,
                                 }),
                         )

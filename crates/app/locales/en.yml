@@ -355,6 +355,7 @@ task:
   edit_error: "Error"
   edit_cancelled: "Cancelled"
   # Where a task runs: a worktree it creates, or one already registered.
+  edit_project_label: "Project"
   edit_run_in_label: "Worktree"
   edit_run_in_new: "New"
   edit_run_in_existing: "Existing"

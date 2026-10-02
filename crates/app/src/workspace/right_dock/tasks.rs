@@ -68,6 +68,19 @@ pub(in crate::workspace) fn render(snap: &RightDockSnapshot, cx: &gpui::App) -> 
     body.into_any_element()
 }
 
+/// What the page's subtitle says the list holds: the active project's
+/// name, or every project's tasks.
+pub(in crate::workspace) fn page_subtitle(snap: &RightDockSnapshot) -> String {
+    let active = snap
+        .task_projects
+        .active
+        .and_then(|uuid| snap.task_projects.name(uuid));
+    match (snap.task_scope, active) {
+        (TaskScope::ActiveProject, Some(name)) => name.to_owned(),
+        _ => strings::task::scope_all(),
+    }
+}
+
 /// Lowercase substring match across `title`, `prompt`, `notes`, the
 /// derived `branch_name`, and every `SubTask::title` (manual and
 /// auto-injected). Session-id prefixes are excluded (UUID false

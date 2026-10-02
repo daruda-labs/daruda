@@ -32,6 +32,8 @@ pub(in crate::workspace) struct TaskEdits {
     pub(in crate::workspace) branch: Option<String>,
     /// `None` keeps where the task runs.
     pub(in crate::workspace) run_in: Option<daruda_store::tasks::TaskRunIn>,
+    /// `None` keeps the task's project.
+    pub(in crate::workspace) project: Option<daruda_store::project::ProjectUuid>,
 }
 
 impl Workspace {
@@ -196,6 +198,9 @@ impl Workspace {
                     }
                     if let Some(run_in) = edits.run_in {
                         task.run_in = run_in;
+                    }
+                    if let Some(project) = edits.project {
+                        task.project = project;
                     }
                 }
                 task.updated_at = Utc::now();
