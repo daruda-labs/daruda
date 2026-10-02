@@ -255,6 +255,50 @@ pub(crate) struct LaneEntry {
     pub chats: u32,
 }
 
+/// Where a task stands, in the words the Tasks UI uses.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub(crate) enum TaskStatus {
+    Backlog,
+    Running,
+    Done,
+    Error,
+    Cancelled,
+}
+
+impl TaskStatus {
+    pub(crate) fn of(state: &daruda_store::tasks::TaskState) -> Self {
+        use daruda_store::tasks::TaskState;
+        match state {
+            TaskState::Backlog => Self::Backlog,
+            TaskState::Running { .. } => Self::Running,
+            TaskState::Done { .. } => Self::Done,
+            TaskState::Error { .. } => Self::Error,
+            TaskState::Cancelled { .. } => Self::Cancelled,
+        }
+    }
+}
+
+/// The project a task belongs to, as an open window holds it.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub(crate) struct TaskProject {
+    pub workspace: daruda_store::project::WorkspaceUuid,
+    pub project: daruda_store::project::ProjectId,
+    pub name: String,
+}
+
+/// One task. `task` is its id, the handle every task tool takes.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub(crate) struct TaskEntry {
+    pub task: String,
+    pub title: String,
+    pub status: TaskStatus,
+    /// `None` when no open window has the task's project, which is also
+    /// when it cannot be started or opened.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub project: Option<TaskProject>,
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub(crate) struct BriefSummary {
     pub working: u32,
@@ -345,6 +389,27 @@ pub(crate) enum ControlResult {
         target: PaneRef,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         text: Option<String>,
+    },
+    TaskList {
+        tasks: Vec<TaskEntry>,
+    },
+    TaskCreated {
+        task: String,
+    },
+    /// The task is running: in `lane`, and in `chat` when it runs as an
+    /// agent chat. A terminal task has no chat to address.
+    TaskStarted {
+        task: String,
+        lane: LaneHandle,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        chat: Option<PaneRef>,
+    },
+    TaskStopped {
+        task: String,
+    },
+    TaskOpened {
+        task: String,
+        chat: PaneRef,
     },
 }
 
@@ -444,6 +509,24 @@ pub(crate) enum ControlError {
     /// Two `git worktree add` runs against one repo can leave a half-created
     /// checkout, so the second one waits its turn rather than racing.
     LaneCreateBusy,
+    TaskNotFound,
+    /// Only a Backlog task starts; this one has run already.
+    TaskNotBacklog,
+    /// Only a running task stops.
+    TaskNotRunning,
+    /// No open window has the task's project, so it has nowhere to run.
+    TaskProjectNotOpen,
+    /// The task did not start. `detail` is what went wrong — git's words, or
+    /// the reason the prompt never reached the pane — for the same reason
+    /// [`Self::LaneCreateFailed`] carries git's.
+    TaskStartFailed {
+        detail: String,
+    },
+    TaskTitleEmpty,
+    /// The task has not run, or its run has not reported a session yet.
+    TaskNoSession,
+    /// The agent or account the task's run used is no longer configured.
+    TaskAgentUnavailable,
 }
 
 impl std::fmt::Display for ControlError {
@@ -476,6 +559,14 @@ impl std::fmt::Display for ControlError {
             Self::ApprovalUnavailable => write!(f, "no way to ask the user"),
             Self::ApprovalsPending => write!(f, "too many approvals already waiting"),
             Self::LaneCreateBusy => write!(f, "a worktree is already being created there"),
+            Self::TaskNotFound => write!(f, "no such task"),
+            Self::TaskNotBacklog => write!(f, "task has already run"),
+            Self::TaskNotRunning => write!(f, "task is not running"),
+            Self::TaskProjectNotOpen => write!(f, "task's project is not open"),
+            Self::TaskStartFailed { detail } => write!(f, "task did not start: {detail}"),
+            Self::TaskTitleEmpty => write!(f, "task title is empty"),
+            Self::TaskNoSession => write!(f, "task has no session to open"),
+            Self::TaskAgentUnavailable => write!(f, "task's agent is no longer configured"),
         }
     }
 }

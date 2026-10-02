@@ -124,6 +124,13 @@ pub(crate) enum ResolvedCommand {
     Read {
         target: PaneRef,
     },
+    /// Every task, in every project. Tasks are app-wide, so like the other
+    /// listings this names nothing.
+    TaskList,
+    /// Cancel a running task, as the Tasks UI's Cancel does.
+    TaskStop {
+        task: String,
+    },
 }
 
 /// A command that cannot be answered in one turn of the event loop.
@@ -154,6 +161,19 @@ pub(crate) enum GatedCommand {
         lane: crate::control::result::LaneHandle,
         agent: Option<String>,
     },
+    /// A Backlog task in `project`. With `worktree` it runs in that existing
+    /// worktree; without, Start creates one.
+    TaskCreate {
+        workspace: daruda_store::project::WorkspaceUuid,
+        project: daruda_store::project::ProjectId,
+        title: String,
+        prompt: String,
+        worktree: Option<crate::control::result::LaneHandle>,
+    },
+    /// Start a Backlog task, and wait until it is running.
+    TaskStart { task: String },
+    /// Bring up the chat a task's run belongs to.
+    TaskOpen { task: String },
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]

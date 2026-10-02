@@ -10,8 +10,8 @@ fn agents() -> Vec<daruda_config::AgentDefinition> {
 }
 
 #[test]
-fn twelve_tools_are_exposed() {
-    assert_eq!(ToolTable::all(&agents()).describe().len(), 12);
+fn seventeen_tools_are_exposed() {
+    assert_eq!(ToolTable::all(&agents()).describe().len(), 17);
 }
 
 #[test]
@@ -115,8 +115,9 @@ fn the_gate_and_the_description_agree() {
     }
 }
 
-/// Only the two creation tools are gated. A read that asked for approval
-/// would make the orchestrator useless without a phone in hand.
+/// Only the tools that bring something into being are gated — a worktree, a
+/// chat, a task, a task's run, a task's reopened chat. A read that asked for
+/// approval would make the orchestrator useless without a phone in hand.
 #[test]
 fn exactly_the_creation_tools_are_gated() {
     let gated: Vec<&str> = TABLE
@@ -124,7 +125,16 @@ fn exactly_the_creation_tools_are_gated() {
         .filter(|t| t.gate == Gate::NeedsApproval)
         .map(|t| t.name)
         .collect();
-    assert_eq!(gated, vec!["daruda_worktree_create", "daruda_chat_new"]);
+    assert_eq!(
+        gated,
+        vec![
+            "daruda_worktree_create",
+            "daruda_chat_new",
+            "daruda_task_create",
+            "daruda_task_start",
+            "daruda_task_open",
+        ]
+    );
 }
 
 /// A required key the properties do not define cannot be supplied, so the

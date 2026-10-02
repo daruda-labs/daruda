@@ -331,7 +331,9 @@ fn guard_immediate(
         | ResolvedCommand::Stop { .. }
         | ResolvedCommand::Read { .. }
         | ResolvedCommand::Flow(_)
-        | ResolvedCommand::AskOrchestrator { .. } => Ok(()),
+        | ResolvedCommand::AskOrchestrator { .. }
+        | ResolvedCommand::TaskList
+        | ResolvedCommand::TaskStop { .. } => Ok(()),
     }
 }
 

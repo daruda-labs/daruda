@@ -1,6 +1,6 @@
 //! The tool table daruda advertises. GPUI-free.
 //!
-//! Twelve tools, all for the orchestrator. A lane's own agent gets none — it
+//! Seventeen tools, all for the orchestrator. A lane's own agent gets none — it
 //! reads untrusted text and could be steered into calling them — so there is
 //! no per-caller filtering here.
 //! Descriptions and schemas are English and not localized: a tool definition
@@ -34,6 +34,11 @@ pub(crate) enum ToolId {
     FlowList,
     FlowRun,
     FlowStop,
+    TaskList,
+    TaskCreate,
+    TaskStart,
+    TaskStop,
+    TaskOpen,
 }
 
 /// Whether a tool's effect needs the user's say-so before it runs.
@@ -263,6 +268,42 @@ fn flow_run_properties() -> serde_json::Value {
     })
 }
 
+/// The `task` argument every task tool but the listing takes.
+fn task_property() -> serde_json::Value {
+    serde_json::json!({
+        "type": "string",
+        "description": "Task id, copied verbatim from daruda_task_list's `task`.",
+    })
+}
+
+fn task_properties() -> serde_json::Value {
+    serde_json::json!({ "task": task_property() })
+}
+
+fn task_create_properties() -> serde_json::Value {
+    let mut worktree = lane_ref_schema();
+    worktree["description"] = serde_json::json!(
+        "Run in this existing worktree of the same project, copied verbatim from \
+         daruda_worktree_list's `target`. Omit to have Start create a new one."
+    );
+    serde_json::json!({
+        "workspace": {
+            "type": "string",
+            "description": "Window uuid, from daruda_worktree_list's `target.workspace`.",
+        },
+        "project": {
+            "type": "integer",
+            "description": "Project id, from the same row's `target.project`.",
+        },
+        "title": { "type": "string", "description": "Short title for the task." },
+        "prompt": {
+            "type": "string",
+            "description": "What the agent that runs the task is asked to do.",
+        },
+        "worktree": worktree,
+    })
+}
+
 /// The table, for a test that has to walk every row.
 #[cfg(test)]
 pub(crate) fn table_for_test() -> &'static [Tool] {
@@ -402,6 +443,57 @@ static TABLE: &[Tool] = &[
         gate: Gate::Open,
         properties: flow_stop_properties,
         required: &["worktree"],
+    },
+    Tool {
+        id: ToolId::TaskList,
+        name: "daruda_task_list",
+        description: "List every task in every project, with its status and the project \
+                      it belongs to. A task with no `project` is in one daruda does not \
+                      have open, and cannot be started or opened.",
+        gate: Gate::Open,
+        properties: no_properties,
+        required: &[],
+    },
+    Tool {
+        id: ToolId::TaskCreate,
+        name: "daruda_task_create",
+        description: "Add a task to a project's backlog; it does not start it. Take \
+                      `workspace` and `project` from a daruda_worktree_list row. Needs the \
+                      user's approval: the call waits for them to tap, and fails if they \
+                      refuse or do not answer.",
+        gate: Gate::NeedsApproval,
+        properties: task_create_properties,
+        required: &["workspace", "project", "title", "prompt"],
+    },
+    Tool {
+        id: ToolId::TaskStart,
+        name: "daruda_task_start",
+        description: "Start a backlog task: it opens its worktree and hands the task's \
+                      prompt to an agent there. Answers once it is running, with the \
+                      worktree and — when it runs as a chat — the chat's `target`. Needs \
+                      the user's approval, like daruda_worktree_create.",
+        gate: Gate::NeedsApproval,
+        properties: task_properties,
+        required: &["task"],
+    },
+    Tool {
+        id: ToolId::TaskStop,
+        name: "daruda_task_stop",
+        description: "Cancel a running task. Its worktree is kept.",
+        gate: Gate::Open,
+        properties: task_properties,
+        required: &["task"],
+    },
+    Tool {
+        id: ToolId::TaskOpen,
+        name: "daruda_task_open",
+        description: "Open the chat a task's run belongs to, reloading its conversation \
+                      when no tab shows it, and answer with that chat's `target` — so a \
+                      finished task can be continued with daruda_chat_send. Needs the \
+                      user's approval, like daruda_chat_new.",
+        gate: Gate::NeedsApproval,
+        properties: task_properties,
+        required: &["task"],
     },
 ];
 

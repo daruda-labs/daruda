@@ -10,11 +10,12 @@
 
 use gpui::{App, AppContext as _};
 
+use crate::agent::tasks_global::GlobalTasks;
 use crate::control::approval::ApprovalOutcome;
 use crate::control::result::{
     Activity, BriefSummary, ChatSummary, ControlError, ControlOutcome, ControlResult, FlowEntry,
-    Health, LaneGroup, LaneHandle, Listing, PaneAnswer, ProjectGroup, SendDisposition, WindowGroup,
-    ask_disposition,
+    Health, LaneGroup, LaneHandle, Listing, PaneAnswer, ProjectGroup, SendDisposition, TaskEntry,
+    TaskProject, TaskStatus, WindowGroup, ask_disposition,
 };
 use crate::control::spec::{GatedCommand, ResolvedCommand, ResolvedFlowCommand};
 use crate::surface::strings as s;
@@ -146,7 +147,82 @@ pub(crate) fn run(cmd: ResolvedCommand, cx: &mut App) -> ControlOutcome {
             target,
             answer: PaneAnswer::Queued,
         }),
+        ResolvedCommand::TaskList => Ok(ControlResult::TaskList {
+            tasks: task_list(cx),
+        }),
+        ResolvedCommand::TaskStop { task } => {
+            in_task_window(&task, cx, |ws, _window, cx| ws.control_task_stop(&task, cx))
+                .map(|()| ControlResult::TaskStopped { task })
+        }
     }
+}
+
+/// Every task, grouped by project — by name, the projects no window has
+/// open last — and newest first within one.
+fn task_list(cx: &mut App) -> Vec<TaskEntry> {
+    let mut projects: Vec<(daruda_store::project::ProjectUuid, TaskProject)> = Vec::new();
+    WindowRegistry::for_each_workspace(cx, |ws, _window, _cx| {
+        for (uuid, project) in ws.control_task_projects() {
+            // The first window holding a project is the one a start uses.
+            if !projects.iter().any(|(seen, _)| *seen == uuid) {
+                projects.push((uuid, project));
+            }
+        }
+    });
+    let mut tasks: Vec<(&daruda_store::tasks::Task, Option<TaskProject>)> = cx
+        .global::<GlobalTasks>()
+        .tasks
+        .iter()
+        .map(|task| {
+            let project = projects
+                .iter()
+                .find(|(uuid, _)| *uuid == task.project)
+                .map(|(_, p)| p.clone());
+            (task, project)
+        })
+        .collect();
+    tasks.sort_by(|(a, pa), (b, pb)| {
+        let name = |p: &Option<TaskProject>| p.as_ref().map(|p| p.name.clone());
+        pa.is_none()
+            .cmp(&pb.is_none())
+            .then_with(|| name(pa).cmp(&name(pb)))
+            .then_with(|| a.project.cmp(&b.project))
+            .then_with(|| b.created_at.cmp(&a.created_at))
+    });
+    tasks
+        .into_iter()
+        .map(|(task, project)| TaskEntry {
+            task: task.id.clone(),
+            title: task.title.clone(),
+            status: TaskStatus::of(&task.state),
+            project,
+        })
+        .collect()
+}
+
+/// Run `f` in the first window that holds `task`'s project — the same one
+/// [`task_list`] names for it.
+fn in_task_window<T>(
+    task: &str,
+    cx: &mut App,
+    mut f: impl FnMut(
+        &mut Workspace,
+        &mut gpui::Window,
+        &mut gpui::Context<Workspace>,
+    ) -> Result<T, ControlError>,
+) -> Result<T, ControlError> {
+    let project = cx
+        .global::<GlobalTasks>()
+        .get(task)
+        .map(|t| t.project)
+        .ok_or(ControlError::TaskNotFound)?;
+    let mut out = None;
+    WindowRegistry::for_each_workspace(cx, |ws, window, cx| {
+        if out.is_none() && ws.control_has_project_uuid(project) {
+            out = Some(f(ws, window, cx));
+        }
+    });
+    out.unwrap_or(Err(ControlError::TaskProjectNotOpen))
 }
 
 /// Prompt a pane and hand back a promise of the turn's answer.
@@ -381,7 +457,46 @@ fn guard_gated(cmd: &GatedCommand, cx: &mut App) -> Result<(), ControlError> {
         GatedCommand::ChatNew { lane, .. } => {
             in_lane_window(*lane, cx, |_ws, _window, _cx| Ok(())).map(|_| ())
         }
+        GatedCommand::TaskCreate {
+            workspace,
+            project,
+            title,
+            ..
+        } => {
+            if title.trim().is_empty() {
+                return Err(ControlError::TaskTitleEmpty);
+            }
+            in_project_window(*workspace, *project, cx, |_ws, _window, _cx| Ok(()))
+        }
+        // Only a start that creates a worktree spends the budget, as
+        // `daruda_worktree_create` does; an existing one is already there.
+        GatedCommand::TaskStart { task } => {
+            let tasks = cx.global::<GlobalTasks>();
+            let found = tasks.get(task).ok_or(ControlError::TaskNotFound)?;
+            if !matches!(found.state, daruda_store::tasks::TaskState::Backlog) {
+                return Err(ControlError::TaskNotBacklog);
+            }
+            let creates_lane = task_creates_lane(found);
+            in_task_window(task, cx, |_ws, _window, _cx| Ok(()))?;
+            if creates_lane {
+                crate::control::guards::guard_agent_budget(cx)?;
+            }
+            Ok(())
+        }
+        GatedCommand::TaskOpen { task } => in_task_window(task, cx, |_ws, _window, _cx| Ok(())),
     }
+}
+
+fn task_creates_lane(task: &daruda_store::tasks::Task) -> bool {
+    matches!(task.run_in, daruda_store::tasks::TaskRunIn::NewWorktree)
+}
+
+/// A task's title, for the sentence that asks about it.
+fn task_title(task: &str, cx: &App) -> String {
+    cx.global::<GlobalTasks>()
+        .get(task)
+        .map(|t| t.title.clone())
+        .unwrap_or_default()
 }
 
 /// Run `f` against the window `workspace` names, when `holds` agrees it is the
@@ -454,12 +569,60 @@ fn approval_summary(cmd: &GatedCommand, cx: &mut App) -> String {
             .unwrap_or_default();
             s::control::approval_chat_new(&path)
         }
+        GatedCommand::TaskCreate {
+            workspace,
+            project,
+            title,
+            ..
+        } => {
+            let name = in_project_window(*workspace, *project, cx, |ws, _window, _cx| {
+                Ok(ws.control_project_name(*project))
+            })
+            .unwrap_or_default();
+            s::control::approval_task_create(title.trim(), &name)
+        }
+        GatedCommand::TaskStart { task } => s::control::approval_task_start(task_title(task, cx)),
+        GatedCommand::TaskOpen { task } => s::control::approval_task_open(task_title(task, cx)),
     }
 }
 
 /// Do the thing, now that the user has said yes.
 async fn perform_gated(cmd: GatedCommand, cx: &mut gpui::AsyncApp) -> ControlOutcome {
     let created = match cmd {
+        GatedCommand::TaskCreate {
+            workspace,
+            project,
+            title,
+            prompt,
+            worktree,
+        } => {
+            return cx.update(|cx| {
+                in_project_window(workspace, project, cx, |ws, _window, cx| {
+                    ws.control_task_create(
+                        project,
+                        &title,
+                        prompt.clone(),
+                        worktree.map(LaneHandle::lane_ref),
+                        cx,
+                    )
+                })
+                .map(|task| ControlResult::TaskCreated { task })
+            });
+        }
+        GatedCommand::TaskStart { task } => return start_task(task, cx).await,
+        GatedCommand::TaskOpen { task } => {
+            return cx.update(|cx| {
+                let chat = in_task_window(&task, cx, |ws, window, cx| {
+                    let pane = ws.control_task_open(&task, window, cx)?;
+                    Ok(PaneRef {
+                        workspace: ws.uuid(),
+                        pane,
+                    })
+                })?;
+                announce_chat(chat, cx);
+                Ok(ControlResult::TaskOpened { task, chat })
+            });
+        }
         GatedCommand::ChatNew { lane, agent } => cx
             .update(|cx| {
                 in_lane_window(lane, cx, |ws, window, cx| {
@@ -496,6 +659,35 @@ async fn perform_gated(cmd: GatedCommand, cx: &mut gpui::AsyncApp) -> ControlOut
             target: chat,
             agent,
         },
+    })
+}
+
+/// Start a task in the window that holds its project, and wait until it
+/// runs.
+async fn start_task(task: String, cx: &mut gpui::AsyncApp) -> ControlOutcome {
+    let creates_lane = cx.update(|cx| {
+        cx.global::<GlobalTasks>()
+            .get(&task)
+            .is_some_and(task_creates_lane)
+    });
+    let (workspace, rx) = cx.update(|cx| {
+        in_task_window(&task, cx, |ws, window, cx| {
+            Ok((ws.uuid(), ws.control_task_start(&task, window, cx)))
+        })
+    })?;
+    let (lane, pane) = rx.recv().await.unwrap_or(Err(ControlError::TargetGone))?;
+    if creates_lane {
+        // Spent only now: a refused or failed start costs the agent nothing.
+        cx.update(crate::control::guards::note_agent_created_lane);
+    }
+    let chat = pane.map(|pane| PaneRef { workspace, pane });
+    if let Some(chat) = chat {
+        cx.update(|cx| announce_chat(chat, cx));
+    }
+    Ok(ControlResult::TaskStarted {
+        task,
+        lane: LaneHandle::new(workspace, lane),
+        chat,
     })
 }
 
@@ -944,3 +1136,7 @@ mod tests {
         });
     }
 }
+
+#[cfg(test)]
+#[path = "exec_task_tests.rs"]
+mod task_tests;

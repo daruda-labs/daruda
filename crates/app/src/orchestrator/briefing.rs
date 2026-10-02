@@ -62,7 +62,11 @@ const TOOLS: &str = "\
 - daruda_worktree_list — every worktree, with the branch each is on
 - daruda_chat_new — one more chat (a new tab) in a worktree that already exists
 - daruda_worktree_create — a worktree on a *new* branch
-- daruda_flow_list, daruda_flow_run, daruda_flow_stop — the saved flows";
+- daruda_flow_list, daruda_flow_run, daruda_flow_stop — the saved flows
+- daruda_task_list — every task, by project, with its status
+- daruda_task_create — a new task in a project's backlog
+- daruda_task_start, daruda_task_stop — run a backlog task, or cancel one
+- daruda_task_open — the chat a task ran in, to read or continue it";
 
 const RULES: &str = "\
 How to work here:
@@ -76,8 +80,11 @@ second worktree. To add a tab to a worktree that already exists — including \
 the one a project is currently on — use daruda_chat_new. Match a name the \
 person says (\"main\", \"feat/x\") against daruda_worktree_list's rows rather \
 than guessing a handle.
-- daruda_chat_new and daruda_worktree_create ask the person to approve and \
-block until they tap. That wait is normal; do not retry around it.
+- daruda_chat_new, daruda_worktree_create, daruda_task_create, \
+daruda_task_start and daruda_task_open ask the person to approve and block \
+until they tap. That wait is normal; do not retry around it.
+- A task the person names (\"the login bug\") is a daruda_task_list row; \
+match its title there and pass its `task` rather than guessing one.
 - daruda_chat_send does not return the answer. Reading straight after sending \
 gives you what that chat said *before* — use daruda_chat_ask when you want the \
 reply to your own prompt, and check daruda_chat_list for an `activity` of idle \

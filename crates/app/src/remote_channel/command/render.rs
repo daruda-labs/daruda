@@ -9,7 +9,8 @@
 use super::{Absorbed, CommandState, ListingRow};
 use crate::control::result::{
     Activity, AskDisposition, ChatSummary, ControlError, ControlOutcome, ControlResult,
-    FlowOriginKind, Health, Listing, PaneAnswer, SendDisposition, StopDisposition,
+    FlowOriginKind, Health, Listing, PaneAnswer, SendDisposition, StopDisposition, TaskEntry,
+    TaskProject, TaskStatus,
 };
 use crate::control::spec::{Ordinal, ParseError};
 use crate::remote_channel::bridge::InlineKeyboard;
@@ -179,6 +180,51 @@ fn render_result(result: &ControlResult, state: &CommandState) -> RenderedReply 
             AskDisposition::Queued => s::control::sent_queued(),
             AskDisposition::HandledLocally => s::control::sent_handled_locally(),
         }),
+        ControlResult::TaskList { tasks } => plain(render_task_list(tasks)),
+        ControlResult::TaskCreated { .. } => plain(s::control::task_created()),
+        ControlResult::TaskStarted { .. } => plain(s::control::task_started()),
+        ControlResult::TaskStopped { .. } => plain(s::control::task_stopped()),
+        ControlResult::TaskOpened { .. } => plain(s::control::task_opened()),
+    }
+}
+
+/// `/task`'s reply: one header per project, then its tasks, numbered in
+/// listing order across the whole reply. The executor already sorted them by
+/// project, so a header goes wherever the project changes.
+fn render_task_list(tasks: &[TaskEntry]) -> String {
+    if tasks.is_empty() {
+        return s::control::task_list_empty();
+    }
+    let mut lines = Vec::new();
+    let mut current: Option<Option<&TaskProject>> = None;
+    for (index, task) in tasks.iter().enumerate() {
+        let project = task.project.as_ref();
+        let same = current.is_some_and(|seen| {
+            seen.map(|p| (p.workspace, p.project)) == project.map(|p| (p.workspace, p.project))
+        });
+        if !same {
+            lines.push(match project {
+                Some(p) => s::control::task_list_project(&p.name),
+                None => s::control::task_list_project_not_open(),
+            });
+            current = Some(project);
+        }
+        lines.push(s::control::task_list_row(
+            index + 1,
+            &task.title,
+            task_status_label(task.status),
+        ));
+    }
+    lines.join("\n")
+}
+
+fn task_status_label(status: TaskStatus) -> String {
+    match status {
+        TaskStatus::Backlog => s::control::task_status_backlog(),
+        TaskStatus::Running => s::control::task_status_running(),
+        TaskStatus::Done => s::control::task_status_done(),
+        TaskStatus::Error => s::control::task_status_error(),
+        TaskStatus::Cancelled => s::control::task_status_cancelled(),
     }
 }
 
@@ -212,6 +258,15 @@ fn render_error(error: &ControlError) -> String {
         ControlError::LaneNameInvalid => s::control::error_lane_name_invalid(),
         ControlError::ApprovalUnavailable => s::control::error_approval_unavailable(),
         ControlError::ApprovalsPending => s::control::error_approvals_pending(),
+        ControlError::TaskNotFound => s::control::error_task_not_found(),
+        ControlError::TaskNotBacklog => s::control::error_task_not_backlog(),
+        ControlError::TaskNotRunning => s::control::error_task_not_running(),
+        ControlError::TaskProjectNotOpen => s::control::error_task_project_not_open(),
+        // Same as a failed worktree: the detail is for the model and the log.
+        ControlError::TaskStartFailed { .. } => s::control::error_task_start_failed(),
+        ControlError::TaskTitleEmpty => s::control::error_task_title_empty(),
+        ControlError::TaskNoSession => s::control::error_task_no_session(),
+        ControlError::TaskAgentUnavailable => s::control::error_task_agent_unavailable(),
     }
 }
 

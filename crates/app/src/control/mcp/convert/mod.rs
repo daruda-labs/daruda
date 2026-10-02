@@ -107,6 +107,23 @@ pub(crate) fn to_command(id: ToolId, args: &Value) -> Result<Command, ConvertErr
             lane: lane_arg(args, "worktree")?,
             agent: optional_string_arg(args, "agent")?,
         }),
+        ToolId::TaskList => Command::Immediate(ResolvedCommand::TaskList),
+        ToolId::TaskStop => Command::Immediate(ResolvedCommand::TaskStop {
+            task: string_arg(args, "task")?,
+        }),
+        ToolId::TaskCreate => Command::Gated(GatedCommand::TaskCreate {
+            workspace: uuid_arg(args, "workspace")?,
+            project: u64_arg(args, "project")?,
+            title: string_arg(args, "title")?,
+            prompt: string_arg(args, "prompt")?,
+            worktree: optional_lane_arg(args, "worktree")?,
+        }),
+        ToolId::TaskStart => Command::Gated(GatedCommand::TaskStart {
+            task: string_arg(args, "task")?,
+        }),
+        ToolId::TaskOpen => Command::Gated(GatedCommand::TaskOpen {
+            task: string_arg(args, "task")?,
+        }),
     };
     Ok(command)
 }
@@ -198,6 +215,14 @@ fn pane_arg(args: &Value, name: &'static str) -> Result<PaneRef, ConvertError> {
 fn lane_arg(args: &Value, name: &'static str) -> Result<LaneHandle, ConvertError> {
     serde_json::from_value(field(args, name)?.clone())
         .map_err(|_| ConvertError::BadArgument { name })
+}
+
+/// `None` for absent or null; still an error for present-but-malformed.
+fn optional_lane_arg(args: &Value, name: &'static str) -> Result<Option<LaneHandle>, ConvertError> {
+    match args.get(name) {
+        None | Some(Value::Null) => Ok(None),
+        Some(_) => lane_arg(args, name).map(Some),
+    }
 }
 
 fn uuid_arg(
