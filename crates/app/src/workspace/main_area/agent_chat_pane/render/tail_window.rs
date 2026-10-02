@@ -73,7 +73,8 @@ pub(super) fn tail_window_panel(
         }),
         Some(ResetSpec {
             label: s::agent_chat::use_agent_defaults(),
-            disabled: current.is_following(),
+            source: super::fold_mode::pane_source(current.is_following()),
+            overridden: !current.is_following(),
             on_reset: Rc::new(move |_, app| {
                 if let Some(view) = reset.upgrade() {
                     view.update(app, |v, cx| v.reset_tail_window(cx));

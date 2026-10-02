@@ -1,25 +1,28 @@
-//! The display-filter editor: one checkbox per facet, grouped by axis, with a
-//! tri-state toggle over each parented section.
+//! The display-filter editor: one checkbox per facet, one section per axis,
+//! with a tri-state toggle, a count and a disclosure over each parented one.
 
 use std::rc::Rc;
 
 use gpui::{AnyElement, App, IntoElement, SharedString, div, prelude::*, px};
 
-use super::{ResetSpec, panel_heading, reset_footer, scroll_region};
+use super::state::FilterEditorState;
+use super::{ResetSpec, TextRoles, editor_column, reset_footer, scroll_content, scroll_region};
 use crate::surface::strings as s;
 use crate::transcript::display_filter::{DisplayFilter, FilterAxis, FilterFacet, SectionState};
-use crate::ui::checkbox;
-use crate::ui::theme;
+use crate::ui::{ButtonVariants as _, Icon, IconName, button_bare, checkbox, theme};
 
 /// What the editor does with a click. A section toggle is its own action rather
 /// than a run of facet toggles: setting a whole section is one move, and the
 /// tri-state parent has to be able to say so.
 pub(crate) type FilterFacetPress = Rc<dyn Fn(FilterFacet, &mut App)>;
 pub(crate) type FilterSectionPress = Rc<dyn Fn(FilterFacet, bool, &mut App)>;
+pub(crate) type FilterDisclosePress = Rc<dyn Fn(FilterAxis, &mut App)>;
 
 pub(crate) struct FilterEditorActions {
     pub on_toggle: FilterFacetPress,
     pub on_section: FilterSectionPress,
+    /// Opens or shuts a parented section's child rows — presentation only.
+    pub on_disclose: FilterDisclosePress,
     pub reset: Option<ResetSpec>,
 }
 
@@ -45,53 +48,150 @@ pub(crate) fn filter_value(filter: DisplayFilter) -> String {
 
 pub(crate) fn filter_editor(
     current: DisplayFilter,
+    state: FilterEditorState,
     id_prefix: &str,
     font_size: f32,
     actions: FilterEditorActions,
     cx: &App,
 ) -> AnyElement {
-    let mut facets = scroll_region(SharedString::from(format!(
-        "{id_prefix}-filter-facets-scroll"
-    )));
-    for axis in FilterAxis::ALL {
-        if axis.parent().is_none() {
-            facets = facets.child(panel_heading(axis_label(axis), cx));
-        }
-        let rows = axis
-            .rows()
-            .into_iter()
-            .map(|facet| filter_checkbox(current, facet, id_prefix, &actions));
-        match axis.parent() {
-            // A parent toggle owns its rows, so they nest under it.
-            Some(parent) => {
-                facets = facets
-                    .child(parent_checkbox(current, parent, id_prefix, &actions))
+    let text = TextRoles::from_base(font_size);
+    let t = theme::current(cx);
+    let last = FilterAxis::ALL.len() - 1;
+    let facets =
+        scroll_content().children(FilterAxis::ALL.into_iter().enumerate().map(|(ix, axis)| {
+            // Nested rows read a step under their parent; a flat section's rows are
+            // its top level.
+            let row_size = if axis.parent().is_some() {
+                text.aux
+            } else {
+                text.body
+            };
+            let rows = axis.rows().into_iter().map(|facet| {
+                child_row(
+                    filter_checkbox(current, facet, id_prefix, &actions).text_size(px(row_size)),
+                )
+            });
+            let section = div()
+                .flex()
+                .flex_col()
+                .when(ix > 0, |section| section.pt(px(theme::GAP_LG)))
+                .when(ix < last, |section| {
+                    section
+                        .pb(px(theme::GAP_LG))
+                        .border_b_1()
+                        .border_color(t.border)
+                });
+            match axis.parent() {
+                // A parent toggle owns its rows, so they nest under it.
+                Some(parent) => {
+                    let open = state.is_open(axis);
+                    section
+                        .child(parent_row(
+                            current, axis, parent, open, id_prefix, text, &actions, cx,
+                        ))
+                        .when(open, |section| {
+                            section.child(
+                                div()
+                                    .ml(px(theme::TRANSCRIPT_EDITOR_NEST_INDENT))
+                                    .grid()
+                                    .grid_cols(2)
+                                    .gap_x(px(theme::GAP_LG))
+                                    .children(rows),
+                            )
+                        })
+                }
+                None => section
                     .child(
                         div()
-                            .ml(px(theme::TRANSCRIPT_EDITOR_NEST_INDENT))
-                            .grid()
-                            .grid_cols(2)
-                            .gap(px(theme::GAP_SM))
-                            .children(rows),
-                    );
+                            .text_size(px(text.aux))
+                            .text_color(t.text_muted)
+                            .pb(px(theme::GAP_SM))
+                            .child(SharedString::from(axis_label(axis))),
+                    )
+                    .children(rows),
             }
-            None => facets = facets.children(rows),
-        }
-    }
-    div()
-        .flex_1()
-        .min_h(px(0.))
-        .overflow_hidden()
-        .flex()
-        .flex_col()
-        .gap(px(theme::GAP_SM))
-        .text_size(px(font_size))
-        .child(facets)
+        }));
+    editor_column(text)
+        .child(scroll_region(
+            format!("{id_prefix}-filter-facets-scroll"),
+            facets,
+        ))
         .child(reset_footer(
             SharedString::from(format!("{id_prefix}-filter-reset")),
             actions.reset,
+            text,
+            cx,
         ))
         .into_any_element()
+}
+
+fn child_row(child: impl IntoElement) -> impl IntoElement {
+    div()
+        .min_h(px(theme::TRANSCRIPT_EDITOR_CHILD_ROW_MIN_H))
+        .flex()
+        .items_center()
+        .child(child)
+}
+
+/// A section's head: its tri-state toggle, how many of its rows are on, and the
+/// disclosure for those rows. The three are separate controls, so opening the
+/// rows never toggles them.
+#[allow(clippy::too_many_arguments)]
+fn parent_row(
+    current: DisplayFilter,
+    axis: FilterAxis,
+    parent: FilterFacet,
+    open: bool,
+    id_prefix: &str,
+    text: TextRoles,
+    actions: &FilterEditorActions,
+    cx: &App,
+) -> impl IntoElement + use<> {
+    let rows = axis.rows();
+    let selected = rows
+        .iter()
+        .filter(|&&facet| current.contains(facet))
+        .count();
+    let on_disclose = actions.on_disclose.clone();
+    div()
+        .min_h(px(theme::TRANSCRIPT_EDITOR_PARENT_ROW_MIN_H))
+        .flex()
+        .items_center()
+        .gap(px(theme::GAP_LG))
+        .child(
+            div().flex_1().min_w_0().child(
+                parent_checkbox(current, parent, id_prefix, actions).text_size(px(text.body)),
+            ),
+        )
+        .child(
+            div()
+                .flex_none()
+                .text_size(px(text.aux))
+                .text_color(theme::current(cx).text_muted)
+                .child(SharedString::from(s::agent_chat::filter_section_count(
+                    selected,
+                    rows.len(),
+                ))),
+        )
+        .child(
+            button_bare(SharedString::from(format!(
+                "{id_prefix}-filter-disclose-{}",
+                parent.token()
+            )))
+            .ghost()
+            .tab_stop(true)
+            .icon(Icon::new(if open {
+                IconName::ChevronDown
+            } else {
+                IconName::ChevronRight
+            }))
+            .tooltip(SharedString::from(if open {
+                s::agent_chat::filter_section_hide()
+            } else {
+                s::agent_chat::filter_section_show()
+            }))
+            .on_click(move |_, _, app| on_disclose(axis, app)),
+        )
 }
 
 /// A parented section's own toggle. Tri-state: checked when every row under it
@@ -106,7 +206,7 @@ fn parent_checkbox(
     parent: FilterFacet,
     id_prefix: &str,
     actions: &FilterEditorActions,
-) -> impl IntoElement + use<> {
+) -> crate::ui::Checkbox {
     let state = current.section_state(parent);
     let on_section = actions.on_section.clone();
     checkbox(
@@ -124,7 +224,7 @@ fn filter_checkbox(
     facet: FilterFacet,
     id_prefix: &str,
     actions: &FilterEditorActions,
-) -> impl IntoElement + use<> {
+) -> crate::ui::Checkbox {
     let on_toggle = actions.on_toggle.clone();
     checkbox(
         SharedString::from(format!("{id_prefix}-filter-{}", facet.token())),

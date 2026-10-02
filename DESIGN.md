@@ -636,10 +636,14 @@ trigger's label, never changes which controls the panel offers.
 **Options panel (View)**
 
 The single panel has three tabs: Fold, Visible items and Activity range.
-Settings > Agents & Chat uses the same editors for agent defaults.
+Settings > Agents & Chat uses the same editors for agent defaults: one popover
+per axis, titled with the axis, opened from a field
+that shows the value on the left and its source plus caret on the right — a
+long value truncates (full text in the tooltip) and never pushes them.
 
 The panel is app chrome, not pane surface — it floats, so it takes the level-4
-rung and its chrome comes from the shared `Popover`:
+rung and its chrome comes from the shared `Popover` (its own padding stripped;
+every band owns its insets):
 
 ```
 background:    surface-4  (float_panel_bg)
@@ -647,13 +651,25 @@ border:        1px hairline, opaque (1.06:1 — see Known Gaps)
 border-radius: sm (4px) — small attached overlays; large floating surfaces
                (dialog, palette, toast) take lg (8px)
 shadow:        yes (level-4 exception)
-width:         454px
-max-height:    640px
-section-heading: agent-chat size, subtle
-row-gap:       xs (4px); nested rows indent 20px
-footer:        Each axis has a reset: "Use agent defaults" in chat,
-               "Use built-in defaults" in Settings. Chat disables reset only
-               while following config, not merely when its value matches.
+width:         454px outer, border included
+max-height:    640px outer, and never past the window edge below the trigger
+text roles:    title = base, rows = base × 12/13, aux = base × 11/13
+               (base 13px: 13 / 12 / 11)
+header:        title · close; 14 / 16 / 10px insets. No scope line — the
+               footer's source status already says where the values apply
+tabs:          icon + label, underline selection, hairline below (chat only)
+body:          16px inset, scrolls alone with a visible thumb in its right
+               inset; sections 16px apart
+fold table:    42% label / 29% / 29% tracks, 8px gutter before each phase;
+               34px min rows with a hairline above, 28px min phase controls
+               (value left, caret right); nested rows indent 20px
+cleanup band:  fold tab only; pinned under the body, 12 / 16px insets
+footer:        48px min, 10 / 14px insets, hairline above; source status left
+               (pin in accent when overridden), reset command right. Chat:
+               "Following agent defaults" / "This chat only" → "Use agent
+               defaults". Settings: "Built-in default" / "Set for this agent"
+               → "Use built-in defaults". Reset is enabled exactly when the
+               host says the axis is overridden, not when its value differs.
 ```
 
 The panel body scales with `font.agent_chat.size`, not the UI type ladder, even
@@ -661,23 +677,34 @@ though it is app chrome — it is read alongside the pane it configures. That is
 deliberate exception to §Typography's 10–13px band, which the pane's own
 user-set size can leave in either direction.
 
-- **Both dimensions cap at 80% of the window**, so the panel can never grow past
-  the frame it opens in. Width is capped as well as height because the editor is
-  454px and daruda's minimum window is not much wider. Overlapping the docks
-  beside the pane is *not* what the cap is for — a popover anchored in a narrow
-  pane covers its neighbours the way a context menu does, and that is fine.
+- **Both dimensions keep 12px from the window edges**, so the panel can never
+  grow past the frame it opens in. Height is measured from the trigger down, so
+  the popover's window snap has no reason to lift the panel over its trigger;
+  below 320px of room it takes 320px anyway and the snap does lift it — covering
+  the trigger beats a panel too short to reach its footer. Overlapping the docks
+  beside the pane is fine: a popover in a narrow pane covers its neighbours the
+  way a context menu does.
 - Fold rules use independent **In progress / After completion** columns. Each
   cell offers Expanded or Collapsed, covering all four lifecycle combinations.
-  Tool categories and previous-response overrides sit behind disclosures.
+  An Expanded cell is lifted a rung (fill, edge and label all step up), so the
+  two values differ by more than hue; the column headings carry a shape icon
+  each, toned only as an echo. Rows read in transcript order, not storage
+  order. Tool categories open from the Tool call label itself; previous-response
+  overrides sit behind a disclosure row under the table.
 - **Previous response cleanup is separate from lifecycle rules.** Its checkbox
   collapses completed historical responses, including their final answers,
   after a new request. It defaults off; explicit per-block expansion and
   permission prompts remain respected. Ordinary folding keeps the final answer.
-- Visible items uses hierarchical checkboxes, with two columns for nested
-  facets and a tri-state parent. All unchecked means all optional items hidden;
-  prompts and permission requests remain available.
-- Activity range offers `All / 1 / 3 / 5 / 10` for response steps and tool calls.
-  An existing custom size receives its own selected choice. Picking `All` pins
+- Visible items uses hierarchical checkboxes, one section per axis with a
+  hairline between, two columns for nested facets and a tri-state parent whose
+  row also carries a `checked / total` count and its own disclosure (open by
+  default, presentation only — it never changes the filter). All unchecked
+  means all optional items hidden; prompts and permission requests remain
+  available.
+- Activity range offers `All / 1 / 3 / 5 / 10` for response steps and tool calls,
+  as equal choices 4px apart (32px min) that wrap rather than shrink, the
+  selected one in the segment strip's accent fill. An existing custom size
+  receives its own selected choice. Picking `All` pins
   that value; the footer returns both levels to their default source.
 
 **Disclosure rows inside the transcript**

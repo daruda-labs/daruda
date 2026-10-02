@@ -21,14 +21,16 @@ use super::super::tail_window::{TailChoices, tail_window_chip_label};
 use crate::surface::strings as s;
 use crate::surface::timestamp;
 use crate::transcript::display_filter::DisplayFilter;
-use crate::transcript::editor::state::FoldEditorState;
-use crate::transcript::editor::{fixed_region, panel_root};
+use crate::transcript::editor::state::{FilterEditorState, FoldEditorState};
+use crate::transcript::editor::{
+    TextRoles, aux_icon, dismiss_press, panel_header, panel_root, tabs_band,
+};
 use crate::transcript::fold_mode::FoldMode;
 use crate::ui::theme;
 use crate::ui::theme::PaneSurfaceTokens;
 use crate::ui::{
     Disableable as _, Icon, IconName, Popover, Selectable as _, Sizable as _,
-    button_bare_on_surface, button_chip_on_surface, tab_bar,
+    button_bare_on_surface, button_chip_on_surface, icons, tab_bar,
 };
 use crate::workspace::main_area::agent_chat_pane::pane_choice::PaneChoice;
 use crate::workspace::main_area::agent_chat_pane::view::{
@@ -60,6 +62,8 @@ pub(in crate::workspace::main_area::agent_chat_pane::render) struct ActivityBarP
     pub fold_mode: PaneChoice<FoldMode>,
     /// The fold editor's own state — see `AgentChatView`.
     pub fold_editor: FoldEditorState,
+    /// Which Visible-items sections are shut — see `AgentChatView`.
+    pub filter_editor: FilterEditorState,
     pub activity_options_tab: ActivityOptionsTab,
     pub compact_options: bool,
     pub options_popover_open: bool,
@@ -233,6 +237,7 @@ fn view_options_chip(
     let pane_id = props.pane_id;
     let mode = props.fold_mode;
     let fold_editor = props.fold_editor;
+    let filter_editor = props.filter_editor;
     let filter = props.display_filter;
     let tail = props.tail;
     let active_tab = props.activity_options_tab;
@@ -244,6 +249,8 @@ fn view_options_chip(
     )))
     .default_open(props.options_popover_open)
     .anchor(Anchor::TopRight)
+    // The panel owns its insets band by band; see `panel_root`.
+    .p_0()
     .trigger(
         (if props.compact_options {
             button_bare_on_surface(("agent-chat-view-options", pane_id as usize), surface, cx)
@@ -264,44 +271,76 @@ fn view_options_chip(
         })
         .tooltip(SharedString::from(tooltip)),
     )
-    .content(move |_, window, cx| {
+    .content(move |state, window, cx| {
         activity_options_panel(
             &view,
             pane_id,
-            mode,
-            fold_editor,
-            filter,
-            tail,
+            OptionsPanelValues {
+                mode,
+                fold_editor,
+                filter,
+                filter_editor,
+                tail,
+            },
             active_tab,
+            state,
             window,
             cx,
         )
     })
 }
 
-#[allow(clippy::too_many_arguments)]
-fn activity_options_panel(
-    view: &gpui::WeakEntity<AgentChatView>,
-    pane_id: PaneId,
+/// What the panel's three editors read, as one copy taken at render time.
+struct OptionsPanelValues {
     mode: PaneChoice<FoldMode>,
     fold_editor: FoldEditorState,
     filter: PaneChoice<DisplayFilter>,
+    filter_editor: FilterEditorState,
     tail: TailChoices,
+}
+
+fn activity_options_panel(
+    view: &gpui::WeakEntity<AgentChatView>,
+    pane_id: PaneId,
+    values: OptionsPanelValues,
     active_tab: ActivityOptionsTab,
+    state: &crate::ui::PopoverState,
     window: &Window,
     cx: &mut Context<crate::ui::PopoverState>,
 ) -> AnyElement {
     let panel = match active_tab {
-        ActivityOptionsTab::Fold => {
-            super::super::fold_mode::fold_mode_panel(view, mode, fold_editor, pane_id, cx)
-        }
-        ActivityOptionsTab::Filter => super::super::filter::filter_panel(view, filter, pane_id, cx),
+        ActivityOptionsTab::Fold => super::super::fold_mode::fold_mode_panel(
+            view,
+            values.mode,
+            values.fold_editor,
+            pane_id,
+            cx,
+        ),
+        ActivityOptionsTab::Filter => super::super::filter::filter_panel(
+            view,
+            values.filter,
+            values.filter_editor,
+            pane_id,
+            cx,
+        ),
         ActivityOptionsTab::RecentSteps => {
-            super::super::tail_window::tail_window_panel(view, tail, pane_id, cx)
+            super::super::tail_window::tail_window_panel(view, values.tail, pane_id, cx)
         }
     };
-    panel_root(theme::TRANSCRIPT_EDITOR_RULES_PANEL_W, window)
-        .child(fixed_region().child(activity_options_tabs(view, active_tab, pane_id)))
+    let text = TextRoles::from_base(theme::agent_chat_font_size(cx));
+    let close = dismiss_press(window, cx);
+    panel_root(window, state)
+        .child(panel_header(
+            SharedString::from(format!("agent-chat-view-options-close-{pane_id}")),
+            s::agent_chat::view_options_title(),
+            text,
+            close,
+            cx,
+        ))
+        .child(tabs_band(
+            activity_options_tabs(view, active_tab, pane_id, cx),
+            cx,
+        ))
         .child(panel)
         .into_any_element()
 }
@@ -310,22 +349,28 @@ fn activity_options_tabs(
     view: &gpui::WeakEntity<AgentChatView>,
     active: ActivityOptionsTab,
     pane_id: PaneId,
+    cx: &gpui::App,
 ) -> impl IntoElement + use<> {
     let view = view.clone();
+    let tab_icon_color = theme::current(cx).text_muted;
+    let text = TextRoles::from_base(theme::agent_chat_font_size(cx));
     tab_bar(SharedString::from(format!(
         "agent-chat-view-options-tabs-{pane_id}"
     )))
+    // The factory's `text_xs` would hold the labels at 12px while the rest of
+    // the panel follows the configured size.
+    .text_size(px(text.body))
     .selected_index(
         ActivityOptionsTab::ALL
             .iter()
             .position(|tab| *tab == active)
             .unwrap_or(0),
     )
-    .children(
-        ActivityOptionsTab::ALL
-            .into_iter()
-            .map(|tab| crate::ui::tab(SharedString::from(activity_options_label(tab)))),
-    )
+    .children(ActivityOptionsTab::ALL.into_iter().map(|tab| {
+        // A prefix, not `Tab::icon`, which makes an icon-only tab.
+        crate::ui::tab(SharedString::from(activity_options_label(tab)))
+            .prefix(aux_icon(activity_options_icon(tab), tab_icon_color))
+    }))
     .on_click(move |ix, _window, app| {
         if let Some(view) = view.upgrade() {
             view.update(app, |v, cx| {
@@ -333,6 +378,14 @@ fn activity_options_tabs(
             });
         }
     })
+}
+
+fn activity_options_icon(tab: ActivityOptionsTab) -> &'static str {
+    match tab {
+        ActivityOptionsTab::Fold => icons::UNFOLD_LESS,
+        ActivityOptionsTab::Filter => icons::VISIBILITY,
+        ActivityOptionsTab::RecentSteps => icons::HISTORY,
+    }
 }
 
 fn activity_options_label(tab: ActivityOptionsTab) -> String {

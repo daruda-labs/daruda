@@ -1016,17 +1016,75 @@ pub const AGENT_CHAT_TITLE_MIN_W: f32 = 180.0;
 /// [`AGENT_CHAT_MSG_FONT_SIZE`] and exists so the derivation has one home.
 pub const AGENT_CHAT_COMPACT_OPTIONS_W: f32 =
     AGENT_CHAT_TITLE_MIN_W + AGENT_CHAT_OPTIONS_CLUSTER_W + 2.0 * AGENT_CHAT_PAD_X;
-/// Width (px) of the fold-rule editor and the combined options popover.
+/// Outer width (px) of a transcript-editor popover, its border included.
 pub const TRANSCRIPT_EDITOR_RULES_PANEL_W: f32 = 454.0;
-/// Max height (px) of the fold-rule editor popover.
+/// Max outer height (px) of a transcript-editor popover.
 pub const TRANSCRIPT_EDITOR_RULES_PANEL_MAX_H: f32 = 640.0;
-pub const TRANSCRIPT_EDITOR_RULE_COLUMN_W: f32 = 88.0;
-/// Largest fraction of the window a transcript-editor popover may claim, on
-/// either axis. Width is capped as well as height because the fold editor is
-/// 454px and the window can be narrower than that leaves room for — not to keep
-/// the panel off whatever sits beside it, which it does not do and is not meant
-/// to.
-pub const TRANSCRIPT_EDITOR_VIEWPORT_FRACTION: f32 = 0.8;
+/// Border (px) the shared `Popover` chrome draws around the panel. The panel
+/// subtracts it so [`TRANSCRIPT_EDITOR_RULES_PANEL_W`] is the outer box.
+pub const TRANSCRIPT_EDITOR_PANEL_BORDER: f32 = 1.0;
+/// Gap (px) the vendored `Popover` leaves between trigger and panel (`top_1`).
+pub const TRANSCRIPT_EDITOR_TRIGGER_GAP: f32 = 4.0;
+/// Space (px) a transcript-editor popover keeps from each window edge. Width is
+/// capped as well as height because the editor is 454px and the window can be
+/// narrower — not to keep the panel off the docks beside it, which it overlaps.
+pub const TRANSCRIPT_EDITOR_WINDOW_MARGIN: f32 = 12.0;
+/// Shortest panel (px) the height cap may leave: header, tabs, a few rows and
+/// the footer. A trigger with less room below it gets this much anyway and the
+/// popover's window snap lifts it over the trigger — covering the control beats
+/// opening a panel too short to reach its own footer.
+pub const TRANSCRIPT_EDITOR_MIN_PANEL_H: f32 = 320.0;
+/// Header insets (px): title row above the tabs.
+pub const TRANSCRIPT_EDITOR_HEADER_PAD_TOP: f32 = 14.0;
+pub const TRANSCRIPT_EDITOR_HEADER_PAD_BOTTOM: f32 = 10.0;
+/// Horizontal inset (px) shared by header, body, cleanup band and footer, so
+/// every band starts on one edge.
+pub const TRANSCRIPT_EDITOR_PAD_X: f32 = 16.0;
+/// Vertical inset (px) of the scrolling body.
+pub const TRANSCRIPT_EDITOR_BODY_PAD_Y: f32 = 16.0;
+/// Inset (px) of the tab strip, a step inside the bands so the first label's
+/// underline lines up with the text edge.
+pub const TRANSCRIPT_EDITOR_TABS_PAD_X: f32 = 14.0;
+/// Gap (px) between tabs.
+pub const TRANSCRIPT_EDITOR_TAB_GAP: f32 = 12.0;
+/// Space (px) between major sections of a panel body.
+pub const TRANSCRIPT_EDITOR_SECTION_GAP: f32 = 16.0;
+/// Vertical inset (px) of the previous-response cleanup band.
+pub const TRANSCRIPT_EDITOR_BAND_PAD_Y: f32 = 12.0;
+/// Footer insets (px) and minimum height, which grows when the text wraps.
+pub const TRANSCRIPT_EDITOR_FOOTER_PAD_X: f32 = 14.0;
+pub const TRANSCRIPT_EDITOR_FOOTER_PAD_Y: f32 = 10.0;
+pub const TRANSCRIPT_EDITOR_FOOTER_MIN_H: f32 = 48.0;
+/// Text roles as fractions of the editor's base size (13px by default): the
+/// panel title keeps the base, rows read a step under it, and headings, counts
+/// and source lines a step under that. Fractions, so a larger configured font
+/// scales every role together.
+pub const TRANSCRIPT_EDITOR_BODY_RATIO: f32 = 12.0 / 13.0;
+pub const TRANSCRIPT_EDITOR_AUX_RATIO: f32 = 11.0 / 13.0;
+/// Glyph size (px) beside a heading, scope or source line.
+pub const TRANSCRIPT_EDITOR_AUX_ICON: f32 = 13.0;
+/// Fold-table tracks, as fractions of the body width: one label column and two
+/// lifecycle columns.
+pub const TRANSCRIPT_EDITOR_LABEL_TRACK: f32 = 0.42;
+pub const TRANSCRIPT_EDITOR_PHASE_TRACK: f32 = 0.29;
+/// Gutter (px) in front of each lifecycle column.
+pub const TRANSCRIPT_EDITOR_PHASE_GUTTER: f32 = 8.0;
+/// Fold-table row pitch and the phase control inside it (px), both minimums.
+pub const TRANSCRIPT_EDITOR_ROW_MIN_H: f32 = 34.0;
+pub const TRANSCRIPT_EDITOR_CELL_MIN_H: f32 = 28.0;
+/// Inner horizontal padding (px) of a phase control.
+pub const TRANSCRIPT_EDITOR_CELL_PAD_X: f32 = 8.0;
+/// Preset strip segment minimum height (px).
+pub const TRANSCRIPT_EDITOR_PRESET_MIN_H: f32 = 28.0;
+/// Range choice minimum height (px) and the gap between choices.
+pub const TRANSCRIPT_EDITOR_CHOICE_MIN_H: f32 = 32.0;
+pub const TRANSCRIPT_EDITOR_CHOICE_GAP: f32 = 4.0;
+/// Narrowest a range choice may get before the row wraps (px), so a sixth,
+/// custom choice moves to a new line instead of squeezing its text.
+pub const TRANSCRIPT_EDITOR_CHOICE_MIN_W: f32 = 52.0;
+/// Visible-items row heights (px): a parent row and a child row.
+pub const TRANSCRIPT_EDITOR_PARENT_ROW_MIN_H: f32 = 32.0;
+pub const TRANSCRIPT_EDITOR_CHILD_ROW_MIN_H: f32 = 28.0;
 /// Indent (px) for a nested row inside a transcript editor.
 pub const TRANSCRIPT_EDITOR_NEST_INDENT: f32 = 20.0;
 /// Corner radius (px) of an Activity Bar chip. `RADIUS_SM`, not the 2px

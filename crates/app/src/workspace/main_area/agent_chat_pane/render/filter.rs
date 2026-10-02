@@ -9,6 +9,7 @@ use crate::surface::strings as s;
 use crate::transcript::display_filter::DisplayFilter;
 use crate::transcript::editor::ResetSpec;
 use crate::transcript::editor::filter::{FilterEditorActions, filter_editor, filter_value};
+use crate::transcript::editor::state::FilterEditorState;
 use crate::ui::theme;
 use crate::ui::theme::PaneSurfaceTokens;
 use crate::ui::{Selectable as _, button_chip_on_surface};
@@ -34,14 +35,17 @@ pub(super) fn display_filter_chip_label(filter: PaneChoice<DisplayFilter>) -> St
 pub(super) fn filter_panel(
     view: &gpui::WeakEntity<AgentChatView>,
     choice: PaneChoice<DisplayFilter>,
+    editor_state: FilterEditorState,
     pane_id: PaneId,
     cx: &mut Context<crate::ui::PopoverState>,
 ) -> AnyElement {
     let toggle_view = view.clone();
     let section_view = view.clone();
+    let disclose_view = view.clone();
     let reset_view = view.clone();
     filter_editor(
         choice.value(),
+        editor_state,
         &format!("agent-chat-{pane_id}"),
         theme::agent_chat_font_size(cx),
         FilterEditorActions {
@@ -55,11 +59,17 @@ pub(super) fn filter_panel(
                     view.update(app, |v, cx| v.set_filter_section(parent, on, cx));
                 }
             }),
+            on_disclose: Rc::new(move |axis, app| {
+                if let Some(view) = disclose_view.upgrade() {
+                    view.update(app, |v, cx| v.toggle_filter_editor_section(axis, cx));
+                }
+            }),
             reset: Some(ResetSpec {
                 label: s::agent_chat::use_agent_defaults(),
+                source: super::fold_mode::pane_source(choice.is_following()),
                 // Offered on a value that already equals the default: what the
                 // button undoes is the *override*, not the value.
-                disabled: choice.is_following(),
+                overridden: !choice.is_following(),
                 on_reset: Rc::new(move |_window, app| {
                     if let Some(view) = reset_view.upgrade() {
                         view.update(app, |v, cx| v.reset_display_filter(cx));

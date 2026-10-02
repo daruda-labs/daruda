@@ -54,6 +54,8 @@ pub const EXPAND: &str = "icons/ui/open-in-full.svg";
 pub const HISTORY: &str = "icons/ui/history.svg";
 pub const VISIBILITY: &str = "icons/ui/visibility.svg";
 pub const DIFFERENCE: &str = "icons/ui/difference.svg";
+pub const UNFOLD_LESS: &str = "icons/ui/unfold-less.svg";
+pub const CHECK_CIRCLE: &str = "icons/ui/check-circle.svg";
 // Lucide outlines; every file must carry `LUCIDE_STROKE`.
 pub const TASKS: &str = "icons/lucide/list-checks.svg";
 pub const FLOWS: &str = "icons/lucide/workflow.svg";
@@ -114,6 +116,8 @@ mod tests {
             HISTORY,
             VISIBILITY,
             DIFFERENCE,
+            UNFOLD_LESS,
+            CHECK_CIRCLE,
             TASKS,
             FLOWS,
             FOLDER,

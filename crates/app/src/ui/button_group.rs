@@ -40,14 +40,20 @@ pub use gpui_component::button::ButtonGroup;
 /// the ≥4.5:1 label and the accent-filled selected segment identify both the
 /// control and its state, so the frame is refinement.
 pub fn button_group(id: impl Into<ElementId>, cx: &App) -> ButtonGroup {
+    ButtonGroup::new(id).small().custom(choice_variant(cx))
+}
+
+/// The strip's segment chrome on its own, for single-select choices laid out
+/// apart rather than joined — each one a separate outlined control with the
+/// same resting and selected tones as a [`button_group`] segment.
+pub fn choice_variant(cx: &App) -> ButtonCustomVariant {
     let t = theme::current(cx);
-    let variant = ButtonCustomVariant::new(cx)
+    ButtonCustomVariant::new(cx)
         .foreground(t.text_muted)
         .selected_foreground(theme::ACCENT_FG)
         .border(t.border)
         .hover(t.button_widget_bg_hover)
-        .active(theme::PRIMARY);
-    ButtonGroup::new(id).small().custom(variant)
+        .active(theme::PRIMARY)
 }
 
 /// Same strip for a pane-local surface (file viewer, agent chat) — segments

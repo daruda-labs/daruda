@@ -1,6 +1,7 @@
 //! What the fold editor remembers between frames, as distinct from the matrix
 //! it edits.
 
+use crate::transcript::display_filter::FilterAxis;
 use crate::transcript::fold_mode::{FoldMode, FoldPreset, TurnPosition};
 
 /// Which disclosures are open and the hand-edited matrix `Custom` re-selects.
@@ -86,6 +87,35 @@ impl FoldEditorState {
             None => self.custom?,
         };
         Some(matrix.with_collapse_history(current.collapse_history()))
+    }
+}
+
+/// Which Visible-items sections have their child rows shut.
+///
+/// Presentation only, like [`FoldEditorState`]: a shut section still filters
+/// exactly as its checkboxes say. Every section starts open, so a fresh editor
+/// shows every facet it can change.
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+pub(crate) struct FilterEditorState {
+    shut: [bool; FilterAxis::ALL.len()],
+}
+
+impl FilterEditorState {
+    pub(crate) fn is_open(self, axis: FilterAxis) -> bool {
+        !self.shut[axis_slot(axis)]
+    }
+
+    pub(crate) fn toggle(&mut self, axis: FilterAxis) {
+        let slot = &mut self.shut[axis_slot(axis)];
+        *slot = !*slot;
+    }
+}
+
+fn axis_slot(axis: FilterAxis) -> usize {
+    match axis {
+        FilterAxis::Kind => 0,
+        FilterAxis::Reply => 1,
+        FilterAxis::Tool => 2,
     }
 }
 
@@ -191,6 +221,27 @@ mod tests {
             state.segment_target(None, current),
             Some(matrix().with_collapse_history(true))
         );
+    }
+
+    #[test]
+    fn every_filter_section_starts_open_and_toggles_alone() {
+        let mut state = FilterEditorState::default();
+        for axis in FilterAxis::ALL {
+            assert!(state.is_open(axis), "{axis:?}");
+        }
+        state.toggle(FilterAxis::Tool);
+        assert!(!state.is_open(FilterAxis::Tool));
+        assert!(state.is_open(FilterAxis::Reply), "the other section stays");
+        state.toggle(FilterAxis::Tool);
+        assert!(state.is_open(FilterAxis::Tool));
+    }
+
+    #[test]
+    fn every_axis_has_its_own_slot() {
+        let mut slots: Vec<_> = FilterAxis::ALL.into_iter().map(axis_slot).collect();
+        slots.sort_unstable();
+        slots.dedup();
+        assert_eq!(slots.len(), FilterAxis::ALL.len());
     }
 
     #[test]

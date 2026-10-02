@@ -708,6 +708,17 @@ impl AgentChatView {
             .is_some_and(|w| f32::from(w) <= crate::ui::theme::agent_chat_compact_options_w(cx))
     }
 
+    /// Open or shut one Visible-items section's child rows. Presentation only:
+    /// the filter is not touched.
+    pub(in crate::workspace) fn toggle_filter_editor_section(
+        &mut self,
+        axis: crate::transcript::display_filter::FilterAxis,
+        cx: &mut Context<Self>,
+    ) {
+        self.filter_editor.toggle(axis);
+        cx.notify();
+    }
+
     pub(in crate::workspace) fn toggle_fold_editor_history_rules(
         &mut self,
         cx: &mut Context<Self>,

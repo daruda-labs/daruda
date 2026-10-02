@@ -34,6 +34,28 @@ where
     move |menu, window, cx| f(menu.small(), window, cx)
 }
 
+/// [`menu_builder`] for a menu opened from inside another float — a popover
+/// panel's own dropdown. Both would otherwise share one surface and a 1.06:1
+/// hairline, so the menu vanished into the panel behind it. It takes the next
+/// lift above the float and a `text_subtle` edge (>= 3:1 in both themes).
+pub fn stacked_menu_builder<F>(
+    f: F,
+) -> impl Fn(PopupMenu, &mut Window, &mut Context<PopupMenu>) -> PopupMenu + 'static
+where
+    F: Fn(PopupMenu, &mut Window, &mut Context<PopupMenu>) -> PopupMenu + 'static,
+{
+    move |menu, window, cx| f(menu.small().chrome(stacked_menu_chrome), window, cx)
+}
+
+/// The stacked menu's fill and edge, from the active theme.
+fn stacked_menu_chrome(cx: &App) -> (gpui::Hsla, gpui::Hsla) {
+    stacked_menu_chrome_of(super::theme::current(cx))
+}
+
+fn stacked_menu_chrome_of(t: &super::theme::DarudaTheme) -> (gpui::Hsla, gpui::Hsla) {
+    (t.float_panel_bg.blend(t.overlay_active), t.text_subtle)
+}
+
 /// Render a `PopupMenu` at a fixed window position — the one way a
 /// right-click menu is painted, from the workspace root so no ancestor clip
 /// can reach it (see `Workspace::open_context_menu` and
@@ -78,4 +100,22 @@ pub fn popup_menu_deferred(
 }
 
 #[cfg(test)]
-mod tests {}
+mod tests {
+    use super::stacked_menu_chrome_of;
+    use crate::ui::theme::{DarudaTheme, contrast_ratio};
+
+    /// In both shipped themes the stacked menu leaves the float rung, and its
+    /// edge holds the 3:1 a control boundary needs against the panel behind.
+    #[test]
+    fn a_stacked_menu_stands_off_the_float_it_opens_over() {
+        let light: DarudaTheme =
+            serde_json::from_str(include_str!("../../../../assets/themes/daruda_light.json"))
+                .unwrap();
+        for theme in [DarudaTheme::default(), light] {
+            let (bg, border) = stacked_menu_chrome_of(&theme);
+            assert_ne!(bg, theme.float_panel_bg);
+            assert!(contrast_ratio(border, theme.float_panel_bg) >= 3.0);
+            assert!(contrast_ratio(border, bg) >= 3.0);
+        }
+    }
+}

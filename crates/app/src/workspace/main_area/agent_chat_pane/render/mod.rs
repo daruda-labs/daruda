@@ -197,6 +197,7 @@ pub(super) fn render(view: &AgentChatView, cx: &mut Context<AgentChatView>) -> i
             display_filter: content.display_filter,
             fold_mode: content.fold.mode_choice(),
             fold_editor: content.fold_editor,
+            filter_editor: content.filter_editor,
             activity_options_tab: active_tab,
             compact_options,
             options_popover_open: options_popover_open || fold_popover_open || filter_popover_open,

@@ -353,6 +353,7 @@ fn scroll_at_bottom(offset_y: f32, max_y: f32, slack: f32) -> bool {
 pub struct ScrollArea {
     id: SharedString,
     max_h: Pixels,
+    fill: bool,
     handle: Option<ScrollHandle>,
     style: StyleRefinement,
     content: AnyElement,
@@ -369,6 +370,7 @@ pub fn scroll_area(
     ScrollArea {
         id: id.into(),
         max_h,
+        fill: false,
         handle: None,
         style: StyleRefinement::default(),
         content: content.into_any_element(),
@@ -380,6 +382,14 @@ impl ScrollArea {
     /// callers (or tests) that read scroll offsets back.
     pub fn track(mut self, handle: &ScrollHandle) -> Self {
         self.handle = Some(handle.clone());
+        self
+    }
+
+    /// Take whatever height the flex column above leaves, instead of capping
+    /// at `max_h` — for a body between pinned bands (a popover panel's header
+    /// and footer). No gutter: the caller's own inset must clear the thumb.
+    pub fn fill(mut self) -> Self {
+        self.fill = true;
         self
     }
 }
@@ -406,16 +416,28 @@ impl RenderOnce for ScrollArea {
         let id = self.id;
         let wrapper_selector = format!("{id}-wrapper");
         let layer_selector = format!("{id}-scrollbar-layer");
+        let fill = self.fill;
         div()
             .relative()
             .debug_selector(move || wrapper_selector)
-            .max_h(self.max_h)
+            .map(|wrapper| {
+                if fill {
+                    wrapper.flex_1().min_h(px(0.)).flex().flex_col()
+                } else {
+                    wrapper.max_h(self.max_h)
+                }
+            })
             .refine_style(&self.style)
             .child(
                 div()
                     .id(ElementId::Name(id.clone()))
-                    .max_h(self.max_h)
-                    .pr(px(theme::SCROLL_AREA_GUTTER))
+                    .map(|body| {
+                        if fill {
+                            body.flex_1().min_h(px(0.))
+                        } else {
+                            body.max_h(self.max_h).pr(px(theme::SCROLL_AREA_GUTTER))
+                        }
+                    })
                     .overflow_y_scroll()
                     .track_scroll(&handle)
                     .child(self.content),

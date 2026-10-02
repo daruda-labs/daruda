@@ -26,6 +26,16 @@ pub(super) fn fold_mode_chip_label(mode: PaneChoice<FoldMode>) -> String {
     )
 }
 
+/// The footer's source line for one pane axis: following the agent's stated
+/// value, or set on this chat alone. Shared by the three axis panels.
+pub(super) fn pane_source(following: bool) -> String {
+    if following {
+        s::agent_chat::source_following_agent()
+    } else {
+        s::agent_chat::source_this_chat()
+    }
+}
+
 /// The shared editor, bound to this pane: every click is a one-line dispatch to
 /// an `AgentChatView` method, and the footer hands the axis back to the agent's
 /// stated value rather than setting one.
@@ -64,9 +74,10 @@ pub(super) fn fold_mode_panel(
             }),
             reset: Some(ResetSpec {
                 label: s::agent_chat::use_agent_defaults(),
+                source: pane_source(mode_choice.is_following()),
                 // Offered on a value that already equals the default: what the
                 // button undoes is the *override*, not the value.
-                disabled: mode_choice.is_following(),
+                overridden: !mode_choice.is_following(),
                 on_reset: Rc::new(move |window, app| {
                     if let Some(view) = reset_view.upgrade() {
                         view.update(app, |v, cx| v.reset_fold_mode(window, cx));
@@ -81,4 +92,32 @@ pub(super) fn fold_mode_panel(
         },
         cx,
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::transcript::fold_mode::FoldPreset;
+
+    /// A pane that chose the very value it would follow is still an override:
+    /// its footer says so and offers the hand-back.
+    #[test]
+    fn a_chosen_value_equal_to_the_default_still_reads_as_this_chat() {
+        let default = FoldPreset::Auto.mode();
+        let seeded = PaneChoice::Seeded(default);
+        let chosen = PaneChoice::Chosen(default);
+        assert_eq!(seeded.value(), chosen.value());
+        assert_eq!(
+            pane_source(seeded.is_following()),
+            s::agent_chat::source_following_agent()
+        );
+        assert_eq!(
+            pane_source(chosen.is_following()),
+            s::agent_chat::source_this_chat()
+        );
+        assert_ne!(
+            s::agent_chat::source_following_agent(),
+            s::agent_chat::source_this_chat()
+        );
+    }
 }

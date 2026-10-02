@@ -68,7 +68,7 @@ pub use button::{
     button_primary, button_status_pill, button_status_pill_bare, button_toggle_icon,
     button_window_control, button_window_control_danger, button_with_icon,
 };
-pub use button_group::{ButtonGroup, button_group, button_group_on_surface};
+pub use button_group::{ButtonGroup, button_group, button_group_on_surface, choice_variant};
 pub use chart::BarChart;
 pub use checkbox::{Checkbox, checkbox};
 pub use code_copy_button::{code_copy_button, copy_button};
@@ -91,7 +91,9 @@ pub use input_panel::{
 pub use label::Label;
 pub use macro_key::{KeyDisplay, MacroKey};
 pub use markdown::{Markdown, markdown};
-pub use menu::{DropdownMenu, PopupMenu, PopupMenuItem, menu_builder, popup_menu_deferred};
+pub use menu::{
+    DropdownMenu, PopupMenu, PopupMenuItem, menu_builder, popup_menu_deferred, stacked_menu_builder,
+};
 pub use picker_row::{picker_empty, picker_row};
 pub use placeholder::placeholder_text;
 pub use popover::{Popover, PopoverState};

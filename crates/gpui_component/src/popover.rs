@@ -217,6 +217,11 @@ impl PopoverState {
         self.open
     }
 
+    /// Window-space bounds of the trigger, as of its last paint.
+    pub fn trigger_bounds(&self) -> Option<Bounds<Pixels>> {
+        self.trigger_bounds
+    }
+
     /// Dismiss the popover if it is open.
     pub fn dismiss(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if self.open {

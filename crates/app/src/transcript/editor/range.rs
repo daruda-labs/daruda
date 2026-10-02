@@ -5,9 +5,11 @@ use std::rc::Rc;
 use daruda_config::{TAIL_WINDOW_ALL, TAIL_WINDOW_CHOICES};
 use gpui::{AnyElement, App, IntoElement, SharedString, Window, div, prelude::*, px};
 
-use super::{ResetSpec, panel_heading, reset_footer, scroll_region};
+use super::{
+    ResetSpec, TextRoles, aux_icon, editor_column, reset_footer, scroll_content, scroll_region,
+};
 use crate::surface::strings as s;
-use crate::ui::{Selectable as _, button, button_group, theme};
+use crate::ui::{ButtonVariants as _, Selectable as _, button_bare, choice_variant, icons, theme};
 
 /// The two windows, in panel order. Each host maps it onto its own store.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -24,6 +26,13 @@ impl RangeLevel {
         match self {
             Self::Steps => 0,
             Self::Calls => 1,
+        }
+    }
+
+    fn icon(self) -> &'static str {
+        match self {
+            Self::Steps => icons::TASKS,
+            Self::Calls => icons::BUILD,
         }
     }
 
@@ -46,43 +55,68 @@ pub(crate) fn range_editor(
     reset: Option<ResetSpec>,
     cx: &App,
 ) -> AnyElement {
-    let mut content = scroll_region(SharedString::from(format!("{id}-range-scroll")));
-    for level in RangeLevel::ALL {
-        let value = values[level.index()];
-        let choices = choices(value);
-        let on_change = on_change.clone();
-        let slot = level.index();
-        content = content.child(panel_heading(level.heading(), cx)).child(
-            button_group(SharedString::from(format!("{id}-range-{slot}")), cx)
-                .w_full()
-                .children(choices.iter().map(|&size| {
-                    button(
-                        SharedString::from(format!("{id}-range-{slot}-{size}")),
-                        value_label(size),
-                    )
-                    .tab_stop(true)
-                    .flex_1()
-                    .selected(size == value)
-                }))
-                .on_click(move |indices, window, app| {
-                    if let Some(&size) = indices.first().and_then(|&i| choices.get(i)) {
-                        on_change(level, size, window, app);
-                    }
-                }),
-        );
-    }
-    div()
-        .flex_1()
-        .min_h(px(0.))
-        .overflow_hidden()
-        .flex()
-        .flex_col()
-        .gap(px(theme::GAP_LG))
-        .text_size(px(font_size))
-        .child(content)
+    let text = TextRoles::from_base(font_size);
+    let t = theme::current(cx);
+    let content =
+        scroll_content().children(RangeLevel::ALL.into_iter().enumerate().map(|(ix, level)| {
+            let value = values[level.index()];
+            let slot = level.index();
+            let on_change = on_change.clone();
+            div()
+                .flex()
+                .flex_col()
+                .gap(px(theme::GAP_LG))
+                .when(ix > 0, |section| {
+                    section
+                        .mt(px(theme::TRANSCRIPT_EDITOR_SECTION_GAP))
+                        .pt(px(theme::TRANSCRIPT_EDITOR_SECTION_GAP))
+                        .border_t_1()
+                        .border_color(t.border)
+                })
+                .child(
+                    div()
+                        .flex()
+                        .items_center()
+                        .gap(px(theme::GAP_LG))
+                        .text_color(t.text_body)
+                        .child(aux_icon(level.icon(), t.text_muted))
+                        .child(SharedString::from(level.heading())),
+                )
+                .child(
+                    // Apart rather than joined, and wrapping rather than
+                    // shrinking: a custom sixth size takes a line of its own
+                    // before any label gets squeezed.
+                    div()
+                        .w_full()
+                        .flex()
+                        .flex_wrap()
+                        .gap(px(theme::TRANSCRIPT_EDITOR_CHOICE_GAP))
+                        .children(choices(value).into_iter().map(|size| {
+                            let on_change = on_change.clone();
+                            button_bare(SharedString::from(format!("{id}-range-{slot}-{size}")))
+                                .custom(choice_variant(cx))
+                                .tab_stop(true)
+                                .flex_1()
+                                .min_w(px(theme::TRANSCRIPT_EDITOR_CHOICE_MIN_W))
+                                .h_auto()
+                                .min_h(px(theme::TRANSCRIPT_EDITOR_CHOICE_MIN_H))
+                                .selected(size == value)
+                                .child(
+                                    div()
+                                        .text_size(px(text.body))
+                                        .child(SharedString::from(value_label(size))),
+                                )
+                                .on_click(move |_, window, app| on_change(level, size, window, app))
+                        })),
+                )
+        }));
+    editor_column(text)
+        .child(scroll_region(format!("{id}-range-scroll"), content))
         .child(reset_footer(
             SharedString::from(format!("{id}-range-reset")),
             reset,
+            text,
+            cx,
         ))
         .into_any_element()
 }

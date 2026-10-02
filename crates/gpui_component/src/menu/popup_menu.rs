@@ -296,6 +296,10 @@ pub struct PopupMenu {
     min_width: Option<Pixels>,
     max_width: Option<Pixels>,
     max_height: Option<Pixels>,
+    /// Fill and edge replacing the float chrome — for a menu opened over
+    /// another float, where the shared chrome is indistinguishable from it.
+    /// Resolved each render, so a theme change repaints an open menu.
+    chrome: Option<Rc<dyn Fn(&App) -> (gpui::Hsla, gpui::Hsla)>>,
     bounds: Bounds<Pixels>,
     size: Size,
     check_side: Side,
@@ -322,6 +326,7 @@ impl PopupMenu {
             min_width: None,
             max_width: None,
             max_height: None,
+            chrome: None,
             check_side: Side::Left,
             bounds: Bounds::default(),
             scrollable: false,
@@ -360,6 +365,13 @@ impl PopupMenu {
     /// Set max width of the popup menu, default is 500px
     pub fn max_w(mut self, width: impl Into<Pixels>) -> Self {
         self.max_width = Some(width.into());
+        self
+    }
+
+    /// Paint this menu with its own fill and edge instead of the shared float
+    /// chrome. Default `None` keeps `popover_style`.
+    pub fn chrome(mut self, colors: impl Fn(&App) -> (gpui::Hsla, gpui::Hsla) + 'static) -> Self {
+        self.chrome = Some(Rc::new(colors));
         self
     }
 
@@ -1294,6 +1306,10 @@ impl Render for PopupMenu {
                 this.dismiss(&Cancel, window, cx);
             }))
             .popover_style(cx)
+            .when_some(
+                self.chrome.as_ref().map(|colors| colors(cx)),
+                |this, (bg, border)| this.bg(bg).border_color(border),
+            )
             .text_color(cx.theme().popover_foreground)
             .relative()
             .child(

@@ -37,6 +37,9 @@ const NAME_SETTINGS_ERROR: &str = "settings-error";
 const NAME_SETTINGS_SEARCH: &str = "settings-search";
 /// CLI token for the agent catalog with one card fully open.
 const NAME_AGENT_CATALOG_EXPANDED: &str = "agent-catalog-expanded";
+/// CLI token for a catalog row with one transcript editor open. Bare opens the
+/// fold editor; `agent-catalog-editor:<axis>` names `fold`, `filter` or `range`.
+const NAME_AGENT_CATALOG_EDITOR: &str = "agent-catalog-editor";
 /// CLI token for the app-drawn window chrome. Forces the Client arm on a host
 /// that would resolve to Native, so the layout is reviewable off its platform.
 const NAME_CLIENT_CHROME: &str = "client-chrome";
@@ -197,6 +200,10 @@ pub(crate) enum ScreenshotScenario {
     /// open, and the preset lists narrowed by a query — a restored Settings
     /// opens every card folded, so the fields inside are reachable no other way.
     AgentCatalogExpanded,
+    /// The first catalog row with one transcript editor's popover open — the
+    /// Settings host of the shared editors, whose panel a closed field cannot
+    /// show.
+    AgentCatalogEditor(crate::settings::EditorShot),
     /// Deploy the focused pane's right-click menu. The only way to eyeball
     /// menu length, edge-flip and the keybinding column — none of which any
     /// unit test can see.
@@ -371,6 +378,9 @@ impl ScreenshotScenario {
             NAME_SETTINGS_ERROR => Some(Self::SettingsError),
             NAME_SETTINGS_SEARCH => Some(Self::SettingsSearch),
             NAME_AGENT_CATALOG_EXPANDED => Some(Self::AgentCatalogExpanded),
+            NAME_AGENT_CATALOG_EDITOR => {
+                Some(Self::AgentCatalogEditor(crate::settings::EditorShot::Fold))
+            }
             NAME_PANE_CONTEXT_MENU => Some(Self::PaneContextMenu),
             NAME_MERMAID_LIGHTBOX => Some(Self::MermaidLightbox),
             NAME_FLOW_GRAPH => Some(Self::FlowGraph),
@@ -426,6 +436,12 @@ impl ScreenshotScenario {
                 .and_then(|rest| rest.strip_prefix(':'))
                 .and_then(ActivityOptionsTab::from_token)
                 .map(Self::AgentChatOptions)
+                .or_else(|| {
+                    name.strip_prefix(NAME_AGENT_CATALOG_EDITOR)
+                        .and_then(|rest| rest.strip_prefix(':'))
+                        .and_then(crate::settings::EditorShot::from_token)
+                        .map(Self::AgentCatalogEditor)
+                })
                 .or_else(|| Self::settings_section_from_cli_name(name)),
         }
     }
@@ -577,6 +593,16 @@ pub(crate) fn drive(
                 ws.open_settings(BuiltinSection::Agent, window, cx);
                 if let Some(view) = ws.settings_view().cloned() {
                     view.update(cx, |this, cx| this.seed_agent_catalog_for_shot(window, cx));
+                }
+            });
+        }
+        ScreenshotScenario::AgentCatalogEditor(axis) => {
+            workspace.update(cx, |ws, cx| {
+                ws.open_settings(BuiltinSection::Agent, window, cx);
+                if let Some(view) = ws.settings_view().cloned() {
+                    view.update(cx, |this, cx| {
+                        this.seed_agent_catalog_editor_for_shot(axis, window, cx)
+                    });
                 }
             });
         }
@@ -992,6 +1018,31 @@ mod tests {
         }
         assert_eq!(
             ScreenshotScenario::from_cli_name("agent-chat-options:nope"),
+            None
+        );
+    }
+
+    /// Each Settings editor is reachable open, or its panel loses capture
+    /// coverage — a closed field shows only the trigger.
+    #[test]
+    fn every_catalog_editor_is_addressable_by_its_own_token() {
+        use crate::settings::EditorShot;
+        assert_eq!(
+            ScreenshotScenario::from_cli_name("agent-catalog-editor"),
+            Some(ScreenshotScenario::AgentCatalogEditor(EditorShot::Fold))
+        );
+        for axis in EditorShot::ALL {
+            assert_eq!(
+                ScreenshotScenario::from_cli_name(&format!(
+                    "agent-catalog-editor:{}",
+                    axis.token()
+                )),
+                Some(ScreenshotScenario::AgentCatalogEditor(axis)),
+                "{axis:?}"
+            );
+        }
+        assert_eq!(
+            ScreenshotScenario::from_cli_name("agent-catalog-editor:nope"),
             None
         );
     }

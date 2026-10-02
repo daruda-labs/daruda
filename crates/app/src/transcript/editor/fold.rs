@@ -2,17 +2,21 @@
 
 use std::rc::Rc;
 
-use gpui::{AnyElement, App, IntoElement, SharedString, Window, div, prelude::*, px};
+use gpui::{
+    AnyElement, App, Div, IntoElement, SharedString, Window, div, prelude::*, px, relative,
+};
 
 use super::state::FoldEditorState;
-use super::{ResetSpec, fixed_region, panel_heading, reset_footer, scroll_region};
+use super::{
+    ResetSpec, TextRoles, aux_icon, aux_line, editor_column, fixed_band, reset_footer,
+    scroll_content, scroll_region,
+};
 use crate::surface::strings as s;
 use crate::transcript::fold_mode::{FoldBlock, FoldMode, FoldPreset, TurnPosition};
 use crate::transcript::tool_category::ToolCategory;
-use crate::ui::theme;
 use crate::ui::{
-    ButtonVariants as _, Disableable as _, Divider, DropdownMenu as _, IconName, PopupMenuItem,
-    Selectable as _, Sizable as _, button, button_group, checkbox,
+    ButtonCustomVariant, ButtonVariants as _, Disableable as _, DropdownMenu as _, Icon, IconName,
+    PopupMenuItem, Selectable as _, button_bare, button_group, checkbox, icons, theme,
 };
 
 pub(crate) type FoldRuleEdit = Rc<dyn Fn(FoldMode, &mut Window, &mut App)>;
@@ -42,6 +46,20 @@ pub(crate) fn mode_value(mode: FoldMode) -> String {
     }
 }
 
+/// The table's row order: what a response shows first reads first. Separate
+/// from [`FoldBlock::ALL`], whose order is the storage and token order.
+const EDITOR_ORDER: [FoldBlock; FoldBlock::ALL.len()] = [
+    FoldBlock::Response,
+    FoldBlock::Assistant,
+    FoldBlock::ToolGroup,
+    FoldBlock::Tool,
+    FoldBlock::Subagent,
+    FoldBlock::ThinkingGroup,
+    FoldBlock::Thinking,
+    FoldBlock::Diff,
+    FoldBlock::RawInput,
+];
+
 pub(crate) fn fold_editor(
     mode: FoldMode,
     state: FoldEditorState,
@@ -50,67 +68,74 @@ pub(crate) fn fold_editor(
     actions: FoldEditorActions,
     cx: &App,
 ) -> AnyElement {
+    let text = TextRoles::from_base(font_size);
     let on_history = actions.on_change.clone();
     let history_mode = mode.with_collapse_history(!mode.collapse_history());
     let advanced = state.history_rules_open();
     let on_history_rules = actions.on_history_rules.clone();
-    let mut rows = rule_rows(mode, TurnPosition::Last, state, id_prefix, &actions);
-    rows.push(
-        button(
-            SharedString::from(format!("{id_prefix}-fold-advanced")),
-            s::agent_chat::fold_editor_history_rules(),
+
+    let mut body = scroll_content()
+        .child(preset_group(mode, state, id_prefix, text, &actions, cx))
+        .child(
+            div()
+                .mt(px(theme::TRANSCRIPT_EDITOR_SECTION_GAP))
+                .child(rule_headings(text, cx)),
         )
-        .ghost()
-        .xsmall()
-        .tab_stop(true)
-        .justify_start()
-        .icon(if advanced {
-            IconName::ChevronDown
-        } else {
-            IconName::ChevronRight
-        })
-        .on_click(move |_, _, app| on_history_rules(app))
-        .into_any_element(),
-    );
-    if advanced {
-        rows.push(rule_headings(cx).into_any_element());
-        rows.extend(rule_rows(
+        .children(rule_rows(
             mode,
-            TurnPosition::Past,
+            TurnPosition::Last,
             state,
             id_prefix,
+            text,
             &actions,
-        ));
+            cx,
+        ))
+        .child(separated_row(cx).child(disclosure(
+            SharedString::from(format!("{id_prefix}-fold-advanced")),
+            s::agent_chat::fold_editor_history_rules(),
+            advanced,
+            text,
+            None,
+            Rc::new(move |app| on_history_rules(app)),
+        )));
+    if advanced {
+        body = body
+            .child(div().mt(px(theme::GAP_LG)).child(rule_headings(text, cx)))
+            .children(rule_rows(
+                mode,
+                TurnPosition::Past,
+                state,
+                id_prefix,
+                text,
+                &actions,
+                cx,
+            ));
     }
 
-    div()
-        .flex_1()
-        .min_h(px(0.))
-        .overflow_hidden()
-        .flex()
-        .flex_col()
-        .gap(px(theme::GAP_LG))
-        .text_size(px(font_size))
+    let t = theme::current(cx);
+    editor_column(text)
+        .child(scroll_region(
+            format!("{id_prefix}-fold-rules-scroll"),
+            body,
+        ))
         .child(
-            fixed_region()
+            fixed_band(cx)
+                .py(px(theme::TRANSCRIPT_EDITOR_BAND_PAD_Y))
                 .gap(px(theme::GAP_LG))
-                .child(preset_group(mode, state, id_prefix, &actions, cx))
-                .child(rule_headings(cx)),
-        )
-        .child(
-            scroll_region(SharedString::from(format!("{id_prefix}-fold-rules-scroll")))
-                .children(rows),
-        )
-        .child(
-            fixed_region()
-                .child(Divider::horizontal())
-                .child(panel_heading(s::agent_chat::fold_editor_history(), cx))
+                .child(aux_line(
+                    icons::HISTORY,
+                    t.text_muted,
+                    s::agent_chat::fold_editor_history(),
+                    t.text_muted,
+                    text,
+                ))
                 .child(
                     checkbox(
                         SharedString::from(format!("{id_prefix}-fold-history")),
                         s::agent_chat::fold_editor_collapse_history(),
                         0,
                     )
+                    .text_size(px(text.body))
                     .checked(mode.collapse_history())
                     .on_click(move |_, window, app| on_history(history_mode, window, app)),
                 ),
@@ -118,6 +143,8 @@ pub(crate) fn fold_editor(
         .child(reset_footer(
             SharedString::from(format!("{id_prefix}-fold-reset")),
             actions.reset,
+            text,
+            cx,
         ))
         .into_any_element()
 }
@@ -127,68 +154,162 @@ fn rule_rows(
     turn: TurnPosition,
     state: FoldEditorState,
     id: &str,
+    text: TextRoles,
     actions: &FoldEditorActions,
+    cx: &App,
 ) -> Vec<AnyElement> {
     let mut rows = Vec::new();
-    for block in FoldBlock::ALL {
-        rows.push(block_rule_row(mode, turn, block, id, actions));
-        if block == FoldBlock::Tool {
+    for block in EDITOR_ORDER {
+        let tools_open = state.tools_open(turn);
+        let label = if block == FoldBlock::Tool {
             let on_tools = actions.on_tools.clone();
-            rows.push(
-                button(
-                    SharedString::from(format!("{id}-fold-tools-{}", turn.token())),
-                    s::agent_chat::fold_editor_tool_categories(),
-                )
-                .ghost()
-                .xsmall()
-                .tab_stop(true)
-                .justify_start()
-                .icon(if state.tools_open(turn) {
-                    IconName::ChevronDown
-                } else {
-                    IconName::ChevronRight
-                })
-                .on_click(move |_, _, app| on_tools(turn, app))
-                .into_any_element(),
+            disclosure(
+                SharedString::from(format!("{id}-fold-tools-{}", turn.token())),
+                block_label(block),
+                tools_open,
+                text,
+                Some(s::agent_chat::fold_editor_tool_categories()),
+                Rc::new(move |app| on_tools(turn, app)),
+            )
+        } else {
+            row_label(block_label(block), false, text, cx).into_any_element()
+        };
+        rows.push(block_rule_row(
+            mode, turn, block, label, id, text, actions, cx,
+        ));
+        if block == FoldBlock::Tool && tools_open {
+            rows.extend(
+                ToolCategory::ALL
+                    .into_iter()
+                    .filter(|c| c.folds_as_a_tool_card())
+                    .map(|c| tool_rule_row(mode, turn, c, id, text, actions, cx)),
             );
-            if state.tools_open(turn) {
-                rows.extend(
-                    ToolCategory::ALL
-                        .into_iter()
-                        .filter(|c| c.folds_as_a_tool_card())
-                        .map(|c| tool_rule_row(mode, turn, c, id, actions)),
-                );
-            }
         }
     }
     rows
 }
 
-fn rule_headings(cx: &App) -> impl IntoElement {
+/// One line of the table: a label track and two lifecycle tracks. Headings,
+/// block rows, category rows and the history rows all go through it, so they
+/// cannot drift off one grid.
+fn table_row(label: impl IntoElement, phases: [AnyElement; 2]) -> Div {
     div()
+        .w_full()
         .flex()
         .items_center()
-        .gap(px(theme::GAP_SM))
         .child(
             div()
-                .flex_1()
+                .w(relative(theme::TRANSCRIPT_EDITOR_LABEL_TRACK))
                 .min_w_0()
-                .child(panel_heading(s::agent_chat::fold_editor_rules(), cx)),
+                .child(label),
         )
-        .children(
-            [
+        .children(phases.into_iter().map(|phase| {
+            div()
+                .w(relative(theme::TRANSCRIPT_EDITOR_PHASE_TRACK))
+                .min_w_0()
+                .pl(px(theme::TRANSCRIPT_EDITOR_PHASE_GUTTER))
+                .child(phase)
+        }))
+}
+
+/// A row of the rule list: the baseline pitch with a hairline above it.
+fn separated_row(cx: &App) -> Div {
+    div()
+        .w_full()
+        .min_h(px(theme::TRANSCRIPT_EDITOR_ROW_MIN_H))
+        .flex()
+        .items_center()
+        .border_t_1()
+        .border_color(theme::current(cx).border)
+}
+
+fn rule_headings(text: TextRoles, cx: &App) -> impl IntoElement {
+    let t = theme::current(cx);
+    let phase = |icon: &'static str, tone, label: String| {
+        div()
+            .flex()
+            .items_center()
+            .justify_center()
+            .gap(px(theme::GAP_STANDARD))
+            .text_color(t.text_muted)
+            .child(aux_icon(icon, tone))
+            .child(SharedString::from(label))
+            .into_any_element()
+    };
+    table_row(
+        div()
+            .text_color(t.text_body)
+            .child(SharedString::from(s::agent_chat::fold_editor_rules())),
+        [
+            // The glyphs carry the lifecycle by shape; the tones only echo it.
+            phase(
+                icons::REFRESH,
+                t.banner_warning_text,
                 s::agent_chat::fold_editor_during(),
+            ),
+            phase(
+                icons::CHECK_CIRCLE,
+                t.banner_success_text,
                 s::agent_chat::fold_editor_after(),
-            ]
-            .into_iter()
-            .map(|label| {
-                div()
-                    .flex_none()
-                    .w(px(theme::TRANSCRIPT_EDITOR_RULE_COLUMN_W))
-                    .text_center()
-                    .child(panel_heading(label, cx))
-            }),
+            ),
+        ],
+    )
+    .pb(px(theme::GAP_LG))
+    .text_size(px(text.aux))
+}
+
+fn row_label(label: String, nested: bool, text: TextRoles, cx: &App) -> Div {
+    let t = theme::current(cx);
+    div()
+        .min_w_0()
+        .overflow_hidden()
+        .whitespace_nowrap()
+        .text_ellipsis()
+        .text_size(px(text.body))
+        .text_color(if nested { t.text_muted } else { t.text_body })
+        .when(nested, |label| {
+            label.pl(px(theme::TRANSCRIPT_EDITOR_NEST_INDENT))
+        })
+        .child(SharedString::from(label))
+}
+
+/// A label that opens or shuts what sits under it. Its own control, so a press
+/// on it never reaches the phase controls beside it.
+fn disclosure(
+    id: SharedString,
+    label: String,
+    open: bool,
+    text: TextRoles,
+    tooltip: Option<String>,
+    on_toggle: Rc<dyn Fn(&mut App)>,
+) -> AnyElement {
+    button_bare(id)
+        .ghost()
+        .tab_stop(true)
+        .justify_start()
+        .h_auto()
+        .min_h(px(theme::TRANSCRIPT_EDITOR_CELL_MIN_H))
+        .px(px(0.))
+        .max_w_full()
+        .child(Icon::new(if open {
+            IconName::ChevronDown
+        } else {
+            IconName::ChevronRight
+        }))
+        .child(
+            div()
+                .min_w_0()
+                .overflow_hidden()
+                .whitespace_nowrap()
+                .text_ellipsis()
+                .text_size(px(text.body))
+                .child(SharedString::from(label)),
         )
+        .when_some(tooltip, |button, tip| {
+            button.tooltip(SharedString::from(tip))
+        })
+        .on_click(move |_, _, app| on_toggle(app))
+        .into_any_element()
 }
 
 /// The strip's segments: the three presets plus the state a hand-edited matrix
@@ -249,15 +370,25 @@ fn preset_group(
     mode: FoldMode,
     state: FoldEditorState,
     id_prefix: &str,
+    text: TextRoles,
     actions: &FoldEditorActions,
     cx: &App,
 ) -> impl IntoElement + use<> {
     let on_preset = actions.on_preset.clone();
     button_group(SharedString::from(format!("{id_prefix}-fold-presets")), cx)
+        .w_full()
         .children(PresetSegment::ALL.into_iter().map(|segment| {
-            button(
-                SharedString::from(format!("{id_prefix}-fold-preset-{}", segment.token())),
-                segment.label(),
+            button_bare(SharedString::from(format!(
+                "{id_prefix}-fold-preset-{}",
+                segment.token()
+            )))
+            .flex_1()
+            .h_auto()
+            .min_h(px(theme::TRANSCRIPT_EDITOR_PRESET_MIN_H))
+            .child(
+                div()
+                    .text_size(px(text.body))
+                    .child(SharedString::from(segment.label())),
             )
             .tab_stop(true)
             .selected(segment.is_selected(mode))
@@ -271,17 +402,20 @@ fn preset_group(
         })
 }
 
+#[allow(clippy::too_many_arguments)]
 fn block_rule_row(
     mode: FoldMode,
     turn: TurnPosition,
     block: FoldBlock,
+    label: AnyElement,
     id_prefix: &str,
+    text: TextRoles,
     actions: &FoldEditorActions,
+    cx: &App,
 ) -> AnyElement {
     let on_change = actions.on_change.clone();
     rule_row(
-        block_label(block),
-        false,
+        label,
         SharedString::from(format!(
             "{id_prefix}-fold-rule-{}-{}",
             turn.token(),
@@ -291,9 +425,11 @@ fn block_rule_row(
             mode.phase(turn, block, true),
             mode.phase(turn, block, false),
         ],
+        text,
         Rc::new(move |active, expanded, window, app| {
             on_change(mode.with_phase(turn, block, active, expanded), window, app)
         }),
+        cx,
     )
 }
 
@@ -302,12 +438,13 @@ fn tool_rule_row(
     turn: TurnPosition,
     category: ToolCategory,
     id_prefix: &str,
+    text: TextRoles,
     actions: &FoldEditorActions,
+    cx: &App,
 ) -> AnyElement {
     let on_change = actions.on_change.clone();
     rule_row(
-        tool_category_label(category),
-        true,
+        row_label(tool_category_label(category), true, text, cx).into_any_element(),
         SharedString::from(format!(
             "{id_prefix}-fold-tool-rule-{}-{}",
             turn.token(),
@@ -317,6 +454,7 @@ fn tool_rule_row(
             Some(mode.tool_rule(turn, category).is_expanded(true)),
             Some(mode.tool_rule(turn, category).is_expanded(false)),
         ],
+        text,
         Rc::new(move |active, expanded, window, app| {
             on_change(
                 mode.with_tool_phase(turn, category, active, expanded),
@@ -324,66 +462,101 @@ fn tool_rule_row(
                 app,
             )
         }),
+        cx,
     )
 }
 
 type PhaseEdit = Rc<dyn Fn(bool, bool, &mut Window, &mut App)>;
+/// One cell's pick: the value chosen for that cell's own phase.
+type PhasePick = Rc<dyn Fn(bool, &mut Window, &mut App)>;
 
 fn rule_row(
-    label: String,
-    nested: bool,
+    label: AnyElement,
     id: SharedString,
     current: [Option<bool>; 2],
+    text: TextRoles,
     on_change: PhaseEdit,
+    cx: &App,
 ) -> AnyElement {
-    div()
+    let [during, after] = [true, false].map(|active| {
+        let value = if active { current[0] } else { current[1] };
+        phase_control(
+            SharedString::from(format!("{id}-{active}")),
+            value,
+            text,
+            {
+                let on_change = on_change.clone();
+                let pick: PhasePick =
+                    Rc::new(move |expanded, window, app| on_change(active, expanded, window, app));
+                pick
+            },
+            cx,
+        )
+    });
+    separated_row(cx)
+        .child(table_row(label, [during, after]))
+        .into_any_element()
+}
+
+/// One lifecycle cell: the value on the left, the menu caret on the right.
+///
+/// Expanded is lifted a rung — fill, edge and label all step up — so the two
+/// values differ by more than hue. A mixed tool row stays on the resting rung.
+fn phase_control(
+    id: SharedString,
+    value: Option<bool>,
+    text: TextRoles,
+    on_pick: PhasePick,
+    cx: &App,
+) -> AnyElement {
+    let t = theme::current(cx);
+    let lifted = value == Some(true);
+    let variant = ButtonCustomVariant::new(cx)
+        .color(if lifted {
+            t.overlay_prominent
+        } else {
+            t.modal_input_bg
+        })
+        .border(if lifted { t.text_subtle } else { t.border })
+        .foreground(if lifted { t.text_primary } else { t.text_muted })
+        .hover(t.button_widget_bg_hover)
+        .active(t.overlay_active);
+    let label = match value {
+        Some(value) => expansion_label(value),
+        None => s::agent_chat::fold_editor_mixed(),
+    };
+    button_bare(id)
+        .custom(variant)
+        .tab_stop(true)
         .w_full()
-        .flex()
-        .flex_row()
-        .items_center()
-        .gap(px(theme::GAP_SM))
+        .h_auto()
+        .min_h(px(theme::TRANSCRIPT_EDITOR_CELL_MIN_H))
+        .px(px(theme::TRANSCRIPT_EDITOR_CELL_PAD_X))
+        // A column whose items stretch makes the vendored label row span the
+        // control, so the value can sit left and the caret right.
+        .flex_col()
+        .items_stretch()
         .child(
             div()
                 .flex_1()
                 .min_w_0()
-                .when(nested, |label| {
-                    label.pl(px(theme::TRANSCRIPT_EDITOR_NEST_INDENT))
-                })
                 .overflow_hidden()
                 .whitespace_nowrap()
                 .text_ellipsis()
+                .text_size(px(text.aux))
                 .child(SharedString::from(label)),
         )
-        .children(
-            [true, false]
-                .into_iter()
-                .zip(current)
-                .map(|(active, value)| {
-                    let on_change = on_change.clone();
-                    let label = match value {
-                        Some(value) => expansion_label(value),
-                        None => s::agent_chat::fold_editor_mixed(),
-                    };
-                    button(SharedString::from(format!("{id}-{active}")), label)
-                        .outline()
-                        .xsmall()
-                        .tab_stop(true)
-                        .w(px(theme::TRANSCRIPT_EDITOR_RULE_COLUMN_W))
-                        .child(crate::ui::Icon::new(IconName::ChevronDown))
-                        .dropdown_menu(crate::ui::menu_builder(move |menu, _, _| {
-                            [true, false].into_iter().fold(menu, |menu, expanded| {
-                                let on_change = on_change.clone();
-                                menu.item(
-                                    PopupMenuItem::new(expansion_label(expanded))
-                                        .checked(value == Some(expanded))
-                                        .on_click(move |_, window, app| {
-                                            on_change(active, expanded, window, app)
-                                        }),
-                                )
-                            })
-                        }))
-                }),
-        )
+        .child(Icon::new(IconName::ChevronDown))
+        .dropdown_menu(crate::ui::stacked_menu_builder(move |menu, _, _| {
+            [true, false].into_iter().fold(menu, |menu, expanded| {
+                let on_pick = on_pick.clone();
+                menu.item(
+                    PopupMenuItem::new(expansion_label(expanded))
+                        .checked(value == Some(expanded))
+                        .on_click(move |_, window, app| on_pick(expanded, window, app)),
+                )
+            })
+        }))
         .into_any_element()
 }
 
@@ -507,6 +680,30 @@ mod tests {
             PresetSegment::Custom.is_enabled(matrix, fresh),
             "already on one"
         );
+    }
+
+    /// The display order is the table's alone: every block appears once, and
+    /// the storage order it departs from is untouched.
+    #[test]
+    fn the_table_lists_every_block_exactly_once() {
+        for block in FoldBlock::ALL {
+            assert_eq!(
+                EDITOR_ORDER.iter().filter(|&&b| b == block).count(),
+                1,
+                "{block:?}"
+            );
+        }
+    }
+
+    /// The tracks fill the row exactly, so headings and rows share one grid.
+    #[test]
+    fn the_table_tracks_fill_the_row() {
+        let total =
+            theme::TRANSCRIPT_EDITOR_LABEL_TRACK + 2.0 * theme::TRANSCRIPT_EDITOR_PHASE_TRACK;
+        assert!((total - 1.0).abs() < 1e-6, "{total}");
+        const {
+            assert!(theme::TRANSCRIPT_EDITOR_ROW_MIN_H >= theme::TRANSCRIPT_EDITOR_CELL_MIN_H);
+        }
     }
 
     #[test]

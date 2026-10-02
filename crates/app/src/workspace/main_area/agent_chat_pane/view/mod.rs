@@ -39,7 +39,7 @@ use super::telegram_ops::{FirstResponseOutcome, PhoneTurn};
 use super::transcript_defaults::TranscriptDefaults;
 use crate::transcript::command_analysis::CommandAnalysisIndex;
 use crate::transcript::display_filter::DisplayFilter;
-use crate::transcript::editor::state::FoldEditorState;
+use crate::transcript::editor::state::{FilterEditorState, FoldEditorState};
 use crate::workspace::main_area::pane_tree::PaneId;
 
 /// How long a subagent's run stays "active" after its last child tool event
@@ -771,6 +771,9 @@ pub(in crate::workspace) struct AgentChatView {
     /// its `Custom` segment restores. Session-only: the mode itself is
     /// persisted, so only "press a preset then come back" is scoped here.
     pub(super) fold_editor: FoldEditorState,
+    /// Which Visible-items sections are shut. Session-only presentation, like
+    /// `fold_editor`: the filter itself is what persists.
+    pub(super) filter_editor: FilterEditorState,
     /// Active section in the compact Activity Bar's combined options popover.
     pub(super) activity_options_tab: ActivityOptionsTab,
     #[cfg(feature = "screenshot")]
@@ -972,6 +975,7 @@ impl AgentChatView {
             assets: AssetCache::default(),
             fold: FoldState::with_mode(defaults.fold_mode),
             fold_editor: FoldEditorState::default(),
+            filter_editor: FilterEditorState::default(),
             activity_options_tab: ActivityOptionsTab::Fold,
             #[cfg(feature = "screenshot")]
             screenshot_filter_open: false,

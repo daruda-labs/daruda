@@ -797,7 +797,7 @@ agent_chat:
   # Heading of the recent-steps panel's step-level group.
   tail_level_steps: "Recent steps per response"
   # Heading of the recent-steps panel's call-level group.
-  tail_level_calls: "Recent calls per step"
+  tail_level_calls: "Recent tool calls per step"
   # An Activity Bar chip's label with the mark that says this pane has taken
   # the axis off the configured default. A dot, so it costs the chip no reading
   # and no restatement of the value it already carries.
@@ -808,6 +808,17 @@ agent_chat:
   view_options_fold: "Fold"
   view_options_filter: "Visible items"
   recent_steps_label: "Activity range"
+  # Transcript-editor popover header title.
+  view_options_title: "View options"
+  # Footer and Settings-field source line: where the axis value comes from.
+  source_following_agent: "Following agent defaults"
+  source_this_chat: "This chat only"
+  source_built_in: "Built-in default"
+  source_agent_set: "Set for this agent"
+  # A Visible-items section's checked rows over its total.
+  filter_section_count: "%{selected} / %{total}"
+  filter_section_show: "Show items"
+  filter_section_hide: "Hide items"
   tool_output_truncated: "… (truncated, %{size} total)"
   # Placeholder shown in place of a tool's image output block while its base64
   # payload is still being decoded (or hasn't been scanned yet) — decode runs
@@ -1574,9 +1585,6 @@ settings:
   # Deliberately not "Custom": the Fold field one row above says that, and there
   # it names a hand-edited matrix the editor can state — the opposite of this.
   agent_tail_window_off_list: "Other (from config)"
-  # A transcript axis a row leaves to the built-in: the value it resolves to,
-  # marked so it does not read as a value this row states.
-  agent_transcript_built_in: "%{value} (built-in)"
   # Hint line shown under the host/container field for an `ssh`/`docker`
   # row, pointing at the Lane's remote-path setting that
   # `AgentLaunch::wrap` substitutes in at connect time.

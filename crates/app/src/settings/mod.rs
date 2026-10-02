@@ -39,7 +39,7 @@ use gpui::{
 use crate::lane::session_host;
 use crate::surface::strings as s;
 use crate::transcript::display_filter::DisplayFilter;
-use crate::transcript::editor::state::FoldEditorState;
+use crate::transcript::editor::state::{FilterEditorState, FoldEditorState};
 use crate::transcript::fold_mode::FoldMode;
 use crate::ui::select::{self, SelectOption, SelectState};
 use crate::ui::{InputEvent, InputState};
@@ -110,6 +110,9 @@ pub enum LoginRequest {
 }
 
 impl EventEmitter<SettingsEvent> for SettingsView {}
+
+#[cfg(feature = "screenshot")]
+pub(crate) use sections::agent_transcript::editor::EditorShot;
 
 pub struct SettingsView {
     panel_focus_handle: FocusHandle,
@@ -744,6 +747,13 @@ pub(super) struct AgentCatalogRow {
     /// Where this row's fold editor is looking. Not part of the value: the pane
     /// editing the same agent keeps its own — see [`FoldEditorState`].
     pub(super) fold_editor: FoldEditorState,
+    /// Which of this row's Visible-items sections are shut — presentation
+    /// only, like `fold_editor`.
+    pub(super) filter_editor: FilterEditorState,
+    /// The transcript editor this row renders already open — the
+    /// `--screenshot-scenario agent-catalog-editor` seam. Nothing else sets it.
+    #[cfg(feature = "screenshot")]
+    pub(super) shot_editor: Option<sections::agent_transcript::editor::EditorShot>,
     /// Visible row kinds a fresh chat pane starts on. Same `None`-is-built-in
     /// rule as `fold_mode`.
     pub(super) display_filter: Option<DisplayFilter>,
@@ -1073,6 +1083,9 @@ impl SettingsView {
             fold_mode: transcript.fold_mode,
             fold_mode_loaded: transcript.fold_mode_loaded,
             fold_editor: FoldEditorState::default(),
+            filter_editor: FilterEditorState::default(),
+            #[cfg(feature = "screenshot")]
+            shot_editor: None,
             display_filter: transcript.display_filter,
             display_filter_loaded: transcript.display_filter_loaded,
             tail_window_select: transcript.tail_window_select,
@@ -2506,6 +2519,44 @@ impl SettingsView {
                 advanced: true,
             };
         }
+        self.agent_catalog_search.update(cx, |input, cx| {
+            input.set_value("gem".to_string(), window, cx);
+        });
+        self.scroll_handle.scroll_to_bottom();
+        cx.notify();
+    }
+
+    /// Open the first catalog card with one transcript editor showing — the
+    /// `--screenshot-scenario agent-catalog-editor:<axis>` entry point. The
+    /// fold axis is taken off the built-in in memory only, with its tool
+    /// categories open, so the override pin, a hand-edited matrix and the
+    /// nested rows are all on screen; nothing is written to the config.
+    #[cfg(feature = "screenshot")]
+    pub(crate) fn seed_agent_catalog_editor_for_shot(
+        &mut self,
+        axis: sections::agent_transcript::editor::EditorShot,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        use crate::transcript::fold_mode::{BlockRule, FoldBlock, FoldPreset, TurnPosition};
+        let first = self.agent_editable_rows().map(|(index, _)| index).next();
+        if let Some(index) = first
+            && let Some(row) = self.agent_editable_row_mut(index)
+        {
+            row.fold = CardFold {
+                expanded: true,
+                advanced: true,
+            };
+            row.fold_mode = Some(FoldPreset::Summary.mode().with_rule(
+                TurnPosition::Last,
+                FoldBlock::Thinking,
+                BlockRule::Collapsed,
+            ));
+            row.fold_editor.toggle_tools(TurnPosition::Last);
+            row.shot_editor = Some(axis);
+        }
+        // The same scroll as `agent-catalog-expanded`: it puts the card's
+        // transcript fields high on screen, with room below for the panel.
         self.agent_catalog_search.update(cx, |input, cx| {
             input.set_value("gem".to_string(), window, cx);
         });

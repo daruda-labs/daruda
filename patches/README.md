@@ -435,9 +435,18 @@ menus and the macro-tile menu all get it from one place. Every call site is a
 dedicated trigger control, so nothing depended on the press also reaching the
 surface behind it.
 
+A second, read-only addition: `PopoverState::trigger_bounds()`. The panel's
+content builder already receives the `PopoverState`, but the bounds it keeps are
+private, so a panel could not size itself to the space left *below* its trigger.
+Capped at the window alone, a tall panel in a short window is shifted up by
+`snap_to_window_with_margin` until it covers the control that opened it. The
+transcript editors (`crates/app/src/transcript/editor/mod.rs`, `panel_max_h`)
+read it.
+
 ### Re-vendor procedure
 
-Copy upstream `popover.rs` in and re-add the `stop_propagation`. Paired tests in
+Copy upstream `popover.rs` in and re-add the `stop_propagation` and the
+`trigger_bounds` accessor. Paired tests in
 `crates/app/src/ui/popover.rs`
 (`pressing_a_panel_trigger_does_not_activate_the_surface_under_it`,
 `pressing_a_dropdown_trigger_does_not_activate_the_surface_under_it`) fail loudly if

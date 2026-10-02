@@ -248,6 +248,21 @@ impl SettingsView {
         cx.notify();
     }
 
+    /// Open or shut one Visible-items section on this row's editor. The
+    /// filter value, and so the file, is untouched.
+    pub(in crate::settings) fn toggle_agent_row_filter_disclosure(
+        &mut self,
+        catalog_index: usize,
+        axis: crate::transcript::display_filter::FilterAxis,
+        cx: &mut gpui::Context<Self>,
+    ) {
+        let Some(row) = self.agent_editable_row_mut(catalog_index) else {
+            return;
+        };
+        row.filter_editor.toggle(axis);
+        cx.notify();
+    }
+
     pub(in crate::settings) fn set_agent_row_range_size(
         &mut self,
         index: usize,
