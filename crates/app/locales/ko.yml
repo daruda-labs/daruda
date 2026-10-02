@@ -1901,6 +1901,10 @@ control:
   error_no_active_lane: "활성 워크트리가 없습니다."
   usage_use: "사용법: /use <번호> 또는 /use -"
   usage_say: "사용법: /say <번호> <메시지>"
+  usage_task: "사용법: /task, 또는 /task start|stop|open <번호>"
+  task_starting: "%{title}을(를) 시작합니다. 실행되면 알려 드릴게요."
+  task_started_terminal: "%{title}이(가) daruda의 터미널에서 실행 중입니다."
+  task_start_failed: "%{title}이(가) 시작되지 않았습니다: %{reason}"
   approval_lane_create: "daruda가 워크트리 %{name}을(를) 만들려고 합니다. 허용할까요?"
   approval_chat_new: "daruda가 %{path}에 대화를 하나 더 열려고 합니다. 허용할까요?"
   approval_allow: "허용"
@@ -1969,6 +1973,7 @@ control:
     say - Send to a target
     stop - Stop the running turn
     flow - Run or list flows
+    task - List, start, stop or open tasks
     brief - One-line summary
     daruda - Ask daruda in plain words
 remote_channel:

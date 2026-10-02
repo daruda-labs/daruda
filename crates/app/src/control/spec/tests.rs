@@ -202,3 +202,35 @@ fn non_numeric_ordinal_is_rejected() {
         })
     );
 }
+
+#[test]
+fn task_lists_bare_and_names_a_row_for_each_action() {
+    assert_eq!(parse("/task"), Ok(ControlCommand::Task(TaskCommand::List)));
+    assert_eq!(
+        parse("/task start 2"),
+        Ok(ControlCommand::Task(TaskCommand::Start(Ordinal(2))))
+    );
+    assert_eq!(
+        parse("/Task Stop 1"),
+        Ok(ControlCommand::Task(TaskCommand::Stop(Ordinal(1))))
+    );
+    assert_eq!(
+        parse("/task open 3"),
+        Ok(ControlCommand::Task(TaskCommand::Open(Ordinal(3))))
+    );
+}
+
+#[test]
+fn task_without_a_known_action_or_a_number_shows_its_usage() {
+    for input in ["/task foo", "/task start", "/task delete 1"] {
+        assert_eq!(
+            parse(input),
+            Err(ParseError::MissingArgument { command: "task" }),
+            "{input}"
+        );
+    }
+    assert_eq!(
+        parse("/task start x"),
+        Err(ParseError::BadOrdinal { input: "x".into() })
+    );
+}

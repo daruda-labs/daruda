@@ -8,9 +8,12 @@
 //! This file owns that state and the resolution of a parsed command against
 //! it; turning an outcome into a message a phone shows is [`render`]'s.
 
-use crate::control::result::{ChatSummary, ControlError, ControlOutcome, ControlResult, Listing};
+use crate::control::result::{
+    ChatSummary, ControlError, ControlOutcome, ControlResult, Listing, TaskEntry,
+};
 use crate::control::spec::{
-    ControlCommand, FlowCommand, Ordinal, ResolvedCommand, ResolvedFlowCommand, UseTarget,
+    ControlCommand, FlowCommand, Ordinal, ResolvedCommand, ResolvedFlowCommand, TaskCommand,
+    UseTarget,
 };
 use crate::remote_channel::bridge::PaneRef;
 use crate::surface::strings as s;
@@ -66,6 +69,10 @@ pub(crate) struct CommandState {
     /// listings differ.
     generation: u64,
     selected: Option<PaneRef>,
+    /// Index `i` holds the task `/task start {i + 1}` names. The last
+    /// `/task` listing's, apart from `rows` so neither listing renumbers the
+    /// other.
+    task_rows: Vec<String>,
 }
 
 impl Default for CommandState {
@@ -74,6 +81,7 @@ impl Default for CommandState {
             rows: Vec::new(),
             generation: uuid::Uuid::new_v4().as_u128() as u64,
             selected: None,
+            task_rows: Vec::new(),
         }
     }
 }
@@ -82,6 +90,19 @@ impl CommandState {
     pub(crate) fn record_listing(&mut self, listing: &Listing) {
         self.rows = flatten(listing);
         self.generation = self.generation.wrapping_add(1);
+    }
+
+    /// Number the tasks in the order the reply lists them.
+    pub(crate) fn record_task_listing(&mut self, tasks: &[TaskEntry]) {
+        self.task_rows = tasks.iter().map(|t| t.task.clone()).collect();
+    }
+
+    /// The task at a row of the last `/task` listing.
+    pub(crate) fn resolve_task(&self, ordinal: Ordinal) -> Result<String, ControlError> {
+        self.index_of(ordinal)
+            .and_then(|i| self.task_rows.get(i))
+            .cloned()
+            .ok_or(ControlError::TaskNotFound)
     }
 
     pub(crate) fn resolve(&self, ordinal: Ordinal) -> Result<PaneRef, ControlError> {
@@ -180,7 +201,7 @@ impl CommandState {
 
 mod render;
 
-pub(crate) use render::{RenderedReply, render, render_parse_error};
+pub(crate) use render::{RenderedReply, render, render_error, render_parse_error};
 
 /// What the poll loop should do with a parsed command.
 pub(crate) enum Resolution {
@@ -199,6 +220,12 @@ pub(crate) enum Resolution {
     /// [`Self::Ask`]: the target is real, just not resolvable from the
     /// ordinal table alone.
     RunFlow(String),
+    /// `/task start <n>` — answered at once, its outcome later, so the caller
+    /// finishes it rather than `control::exec::run`.
+    StartTask(String),
+    /// `/task open <n>` — the opened chat becomes the phone's target, which
+    /// needs the bridge this step does not have.
+    OpenTask(String),
 }
 
 /// Turn ordinals into concrete panes, and handle the one command that is
@@ -245,6 +272,19 @@ pub(crate) fn resolve_command(command: ControlCommand, state: &mut CommandState)
             Ok(target) => Resolution::Run(ResolvedCommand::Stop { target }, Some(target)),
             Err(e) => Resolution::Answer(Err(e)),
         },
+        ControlCommand::Task(TaskCommand::List) => Resolution::Run(ResolvedCommand::TaskList, None),
+        ControlCommand::Task(TaskCommand::Stop(ordinal)) => match state.resolve_task(ordinal) {
+            Ok(task) => Resolution::Run(ResolvedCommand::TaskStop { task }, None),
+            Err(e) => Resolution::Answer(Err(e)),
+        },
+        ControlCommand::Task(TaskCommand::Start(ordinal)) => match state.resolve_task(ordinal) {
+            Ok(task) => Resolution::StartTask(task),
+            Err(e) => Resolution::Answer(Err(e)),
+        },
+        ControlCommand::Task(TaskCommand::Open(ordinal)) => match state.resolve_task(ordinal) {
+            Ok(task) => Resolution::OpenTask(task),
+            Err(e) => Resolution::Answer(Err(e)),
+        },
     }
 }
 
@@ -260,6 +300,10 @@ pub(crate) fn absorb(
     match outcome {
         Ok(ControlResult::Listing(listing)) => {
             state.record_listing(listing);
+            Absorbed::Nothing
+        }
+        Ok(ControlResult::TaskList { tasks }) => {
+            state.record_task_listing(tasks);
             Absorbed::Nothing
         }
         Err(ControlError::TargetGone) => match addressed {
@@ -478,6 +522,61 @@ pub(crate) mod tests {
         state.select(Some(a));
         absorb(&Err(ControlError::TargetGone), Some(a), &mut state);
         assert_eq!(state.selected(), None);
+    }
+
+    fn task_entry(id: &str) -> crate::control::result::TaskEntry {
+        crate::control::result::TaskEntry {
+            task: id.into(),
+            title: id.into(),
+            status: crate::control::result::TaskStatus::Backlog,
+            project: None,
+        }
+    }
+
+    /// `/task` numbers its own rows: listing tasks leaves `/use 1` naming the
+    /// chat it named, and a task number names a task.
+    #[test]
+    fn task_ordinals_are_apart_from_chat_ordinals() {
+        let (a, b) = (pane(10), pane(20));
+        let mut state = CommandState::default();
+        absorb(
+            &Ok(ControlResult::Listing(listing_of(&[a, b]))),
+            None,
+            &mut state,
+        );
+        absorb(
+            &Ok(ControlResult::TaskList {
+                tasks: vec![task_entry("t1"), task_entry("t2")],
+            }),
+            None,
+            &mut state,
+        );
+        assert_eq!(state.resolve(Ordinal(1)), Ok(a));
+        assert_eq!(state.resolve_task(Ordinal(2)), Ok("t2".to_owned()));
+        assert_eq!(
+            state.resolve_task(Ordinal(3)),
+            Err(ControlError::TaskNotFound)
+        );
+        match resolve_command(
+            ControlCommand::Task(TaskCommand::Start(Ordinal(1))),
+            &mut state,
+        ) {
+            Resolution::StartTask(task) => assert_eq!(task, "t1"),
+            _ => panic!("a task start is finished by the caller"),
+        }
+    }
+
+    /// Before any `/task`, there is no row for a number to name.
+    #[test]
+    fn a_task_number_before_any_listing_names_nothing() {
+        let mut state = CommandState::default();
+        match resolve_command(
+            ControlCommand::Task(TaskCommand::Stop(Ordinal(1))),
+            &mut state,
+        ) {
+            Resolution::Answer(outcome) => assert_eq!(outcome, Err(ControlError::TaskNotFound)),
+            _ => panic!("answered without the executor"),
+        }
     }
 
     #[test]

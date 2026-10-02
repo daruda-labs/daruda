@@ -101,6 +101,18 @@ impl TelegramBridge {
         });
         true
     }
+    /// Queue a notice that answers the phone. `false` when nothing can send.
+    pub(crate) fn notify(text: String, cx: &App) -> bool {
+        if !Self::deliverable(cx) {
+            return false;
+        }
+        let Some(bridge) = cx.try_global::<TelegramBridge>() else {
+            return false;
+        };
+        bridge.send_notice(text);
+        true
+    }
+
     /// Queue a pane-attributed ping for the outbound send loop.
     pub(crate) fn send(&self, ping: BridgePing) {
         if !self.claim.serves() {

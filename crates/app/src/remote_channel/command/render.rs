@@ -182,6 +182,7 @@ fn render_result(result: &ControlResult, state: &CommandState) -> RenderedReply 
         }),
         ControlResult::TaskList { tasks } => plain(render_task_list(tasks)),
         ControlResult::TaskCreated { .. } => plain(s::control::task_created()),
+        ControlResult::TaskStarting { title, .. } => plain(s::control::task_starting(title)),
         ControlResult::TaskStarted { .. } => plain(s::control::task_started()),
         ControlResult::TaskStopped { .. } => plain(s::control::task_stopped()),
         ControlResult::TaskOpened { .. } => plain(s::control::task_opened()),
@@ -228,7 +229,7 @@ fn task_status_label(status: TaskStatus) -> String {
     }
 }
 
-fn render_error(error: &ControlError) -> String {
+pub(crate) fn render_error(error: &ControlError) -> String {
     match error {
         ControlError::OrdinalNotFound { ordinal } => s::control::error_ordinal_not_found(*ordinal),
         ControlError::NoTargetSelected => s::control::error_no_target(),
@@ -435,6 +436,7 @@ fn usage_for(command: &str) -> String {
     match command {
         "say" => s::control::usage_say(),
         "daruda" => s::control::usage_daruda(),
+        "task" => s::control::usage_task(),
         _ => s::control::usage_use(),
     }
 }

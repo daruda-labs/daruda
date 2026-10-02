@@ -244,6 +244,133 @@ mod tests {
         );
     }
 
+    /// `/task` numbers the tasks, and `/task start <n>` starts the one at
+    /// that number. A task in an existing worktree needs no git, so its start
+    /// is answered in the same reply.
+    #[gpui::test]
+    async fn task_start_runs_the_task_the_listing_numbered(cx: &mut gpui::TestAppContext) {
+        use crate::control::spec::{ControlCommand, Ordinal, TaskCommand};
+        let fixture = crate::test_support::workspace_with_agent_chat(cx);
+        let task = fixture.workspace.update(cx, |ws, cx| {
+            let lane = ws.control_active_lane();
+            ws.control_task_create(lane.project, "Here", "p".into(), Some(lane), cx)
+                .expect("created")
+        });
+        cx.update(|cx| crate::telegram::global::install_for_test(true, Some(42), cx));
+        let mut async_cx = cx.to_async();
+        let mut run = |command| {
+            let aimed = super::Aimed {
+                action: InboundAction::RunCommand { command },
+                adopted: None,
+            };
+            match super::handle(aimed, &super::Target::Telegram, &mut async_cx) {
+                super::Effect::Reply(reply) => reply.text,
+                _ => panic!("a command is answered"),
+            }
+        };
+
+        let listing = run(ControlCommand::Task(TaskCommand::List));
+        assert!(listing.contains("1. Here"), "{listing}");
+        let started = run(ControlCommand::Task(TaskCommand::Start(Ordinal(1))));
+        assert_eq!(started, crate::surface::strings::control::task_started());
+        let again = run(ControlCommand::Task(TaskCommand::Start(Ordinal(1))));
+        assert_eq!(
+            again,
+            crate::remote_channel::command::render_error(
+                &crate::control::result::ControlError::TaskNotBacklog
+            )
+        );
+        cx.update(|cx| {
+            let state = &cx
+                .global::<crate::agent::tasks_global::GlobalTasks>()
+                .get(&task)
+                .unwrap()
+                .state;
+            assert_ne!(*state, daruda_store::tasks::TaskState::Backlog);
+        });
+    }
+
+    /// A start that fails after the reply — here git refuses a branch that
+    /// is already checked out — reaches the phone as a notice of its own.
+    #[gpui::test]
+    async fn a_task_start_that_fails_later_is_told_as_a_notice(cx: &mut gpui::TestAppContext) {
+        use crate::control::spec::{ControlCommand, Ordinal, TaskCommand};
+        use gpui::BorrowAppContext as _;
+        if !crate::lane::git::has_git() {
+            return;
+        }
+        let fixture = crate::test_support::workspace_for_control(cx);
+        for args in [
+            &["init", "-q", "-b", "main"][..],
+            &["config", "user.email", "daruda@test"],
+            &["config", "user.name", "daruda"],
+            &["commit", "-q", "--allow-empty", "-m", "initial"],
+        ] {
+            let status = std::process::Command::new("git")
+                .current_dir(fixture.root())
+                .args(args)
+                .status()
+                .unwrap();
+            assert!(status.success(), "git {args:?}");
+        }
+        fixture
+            .workspace
+            .update(cx, |ws, cx| ws.reconcile_bootstrapped_lanes_for_test(cx));
+        cx.run_until_parked();
+        let task = fixture.workspace.update(cx, |ws, cx| {
+            let project = ws.control_active_lane().project;
+            ws.control_task_create(project, "Clash", "p".into(), None, cx)
+                .expect("created")
+        });
+        let mut outbound = cx.update(|cx| {
+            cx.update_global::<crate::agent::tasks_global::GlobalTasks, _>(|g, _| {
+                g.get_mut(&task).unwrap().branch_name = "main".into();
+            });
+            crate::settings_store::SettingsStore::init(cx);
+            cx.update_global::<crate::settings_store::SettingsStore, _>(|store, _| {
+                store.set_user_for_testing(daruda_config::Config {
+                    telegram: daruda_config::TelegramConfig {
+                        enabled: true,
+                        authorized_chat_id: Some(42),
+                        ..Default::default()
+                    },
+                    ..daruda_config::Config::default()
+                });
+            });
+            crate::telegram::global::install_for_test(true, Some(42), cx)
+        });
+        let mut async_cx = cx.to_async();
+        let mut run = |command| {
+            let aimed = super::Aimed {
+                action: InboundAction::RunCommand { command },
+                adopted: None,
+            };
+            match super::handle(aimed, &super::Target::Telegram, &mut async_cx) {
+                super::Effect::Reply(reply) => reply.text,
+                _ => panic!("a command is answered"),
+            }
+        };
+        run(ControlCommand::Task(TaskCommand::List));
+        let reply = run(ControlCommand::Task(TaskCommand::Start(Ordinal(1))));
+        assert_eq!(
+            reply,
+            crate::surface::strings::control::task_starting("Clash")
+        );
+        cx.run_until_parked();
+
+        let expected = crate::surface::strings::control::task_start_failed(
+            "Clash",
+            crate::surface::strings::control::error_task_start_failed(),
+        );
+        let mut notices = Vec::new();
+        while let Ok(message) = outbound.try_recv() {
+            if let crate::remote_channel::bridge::Outbound::Notice(text) = message {
+                notices.push(text);
+            }
+        }
+        assert_eq!(notices, vec![expected]);
+    }
+
     #[gpui::test]
     async fn unsupported_actions_do_not_require_connection_state(cx: &mut gpui::TestAppContext) {
         let effect = super::handle(

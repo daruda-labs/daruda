@@ -53,6 +53,11 @@ pub(crate) fn run_command(
             }),
             None,
         ),
+        command::Resolution::StartTask(task) => (start_task(task, cx), None),
+        command::Resolution::OpenTask(task) => (
+            cx.update(|cx| crate::control::exec::open_task(task, cx)),
+            None,
+        ),
         command::Resolution::Run(resolved, addressed) => (
             cx.update(|cx| crate::control::exec::run(resolved, cx)),
             addressed,
@@ -63,6 +68,41 @@ pub(crate) fn run_command(
         let absorbed = command::absorb(&outcome, addressed, state);
         Some(command::render(&outcome, absorbed, state))
     })
+}
+
+/// Start a task for the phone. The reply says whether it was accepted; once
+/// git and the agent are up, the outcome follows as its own message — a
+/// chat announced as the new target, or a notice.
+fn start_task(task: String, cx: &mut gpui::AsyncApp) -> ControlOutcome {
+    let pending = cx.update(|cx| crate::control::exec::begin_task_start(task, cx))?;
+    if let Some(outcome) = cx.update(|cx| pending.try_finish(cx)) {
+        return outcome;
+    }
+    let accepted = ControlResult::TaskStarting {
+        task: pending.task.clone(),
+        title: pending.title.clone(),
+    };
+    cx.spawn(async move |cx| {
+        let title = pending.title.clone();
+        let outcome = pending.finish(cx).await;
+        cx.update(|cx| match outcome {
+            // A chat was announced as the phone's new target on the way.
+            Ok(ControlResult::TaskStarted { chat: Some(_), .. }) => {}
+            Ok(_) => crate::remote_channel::send_notice_everywhere(
+                crate::surface::strings::control::task_started_terminal(&title),
+                cx,
+            ),
+            Err(e) => crate::remote_channel::send_notice_everywhere(
+                crate::surface::strings::control::task_start_failed(
+                    &title,
+                    command::render_error(&e),
+                ),
+                cx,
+            ),
+        });
+    })
+    .detach();
+    Ok(accepted)
 }
 
 /// Answer a message that named a pane which is no longer there, and stop

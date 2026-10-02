@@ -54,6 +54,10 @@ pub(crate) struct ControlFixture {
 impl ControlFixture {
     /// The agent-chat pane this fixture opened. Panics on the variant that
     /// opens none, which is the point of the `Option`.
+    pub(crate) fn root(&self) -> &std::path::Path {
+        self._root.path()
+    }
+
     pub(crate) fn pane(&self) -> u64 {
         self.pane.expect("this fixture opened an agent chat pane")
     }

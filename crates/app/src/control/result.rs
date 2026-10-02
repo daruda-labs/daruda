@@ -396,6 +396,12 @@ pub(crate) enum ControlResult {
     TaskCreated {
         task: String,
     },
+    /// The phone's start was accepted; its outcome follows as a message of
+    /// its own, since a reply to a text command cannot wait for git.
+    TaskStarting {
+        task: String,
+        title: String,
+    },
     /// The task is running: in `lane`, and in `chat` when it runs as an
     /// agent chat. A terminal task has no chat to address.
     TaskStarted {

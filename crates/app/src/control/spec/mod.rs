@@ -30,6 +30,16 @@ pub(crate) enum FlowCommand {
     Run { name: String },
 }
 
+/// `/task` and its three actions, each naming a row of the last `/task`
+/// listing. Those ordinals are the task listing's own, apart from `/list`'s.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) enum TaskCommand {
+    List,
+    Start(Ordinal),
+    Stop(Ordinal),
+    Open(Ordinal),
+}
+
 /// What the executor runs. `Run` carries the worktree it lands in, so the
 /// answer is no longer the first place a caller learns where that was.
 ///
@@ -65,6 +75,7 @@ pub(crate) enum ControlCommand {
         target: Option<Ordinal>,
     },
     Flow(FlowCommand),
+    Task(TaskCommand),
     Brief,
     /// `/daruda <text>` — the only variant that costs an LLM turn, and the
     /// only one this parser does not read past.
@@ -194,7 +205,9 @@ pub(crate) enum ParseError {
 }
 
 /// Every command name we own. Also the suggestion pool for a typo.
-const COMMANDS: [&str; 7] = ["list", "use", "say", "stop", "flow", "brief", "daruda"];
+const COMMANDS: [&str; 8] = [
+    "list", "use", "say", "stop", "flow", "task", "brief", "daruda",
+];
 
 /// The token `/use -` uses to drop the current selection.
 const CLEAR_TOKEN: &str = "-";
@@ -259,6 +272,25 @@ pub(crate) fn parse(input: &str) -> Result<ControlCommand, ParseError> {
                 name: unquote(name).to_string(),
             },
         })),
+        "task" => {
+            let Some(rest) = rest else {
+                return Ok(ControlCommand::Task(TaskCommand::List));
+            };
+            let mut split = rest.splitn(2, char::is_whitespace);
+            let action = split.next().unwrap_or_default().to_ascii_lowercase();
+            let action: fn(Ordinal) -> TaskCommand = match action.as_str() {
+                "start" => TaskCommand::Start,
+                "stop" => TaskCommand::Stop,
+                "open" => TaskCommand::Open,
+                _ => return Err(ParseError::MissingArgument { command: "task" }),
+            };
+            let token = split
+                .next()
+                .map(str::trim)
+                .filter(|t| !t.is_empty())
+                .ok_or(ParseError::MissingArgument { command: "task" })?;
+            Ok(ControlCommand::Task(action(ordinal(token)?)))
+        }
         other => Err(ParseError::Unknown {
             input: other.to_string(),
             suggestion: nearest(other),

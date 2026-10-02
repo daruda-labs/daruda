@@ -579,6 +579,11 @@ impl Workspace {
     /// Genuinely non-git projects share the single-`Default` shape;
     /// for them discovery returns the same shape and the upgrade is a
     /// no-op.
+    #[cfg(test)]
+    pub(crate) fn reconcile_bootstrapped_lanes_for_test(&mut self, cx: &mut Context<Self>) {
+        self.reconcile_bootstrapped_lanes(cx);
+    }
+
     pub(in crate::workspace) fn reconcile_bootstrapped_lanes(&mut self, cx: &mut Context<Self>) {
         let targets: Vec<(ProjectId, PathBuf)> = self
             .projects

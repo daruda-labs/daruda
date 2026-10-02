@@ -60,6 +60,30 @@ pub(crate) fn announce_chat_created(
     }
 }
 
+/// Tell every channel that can hear it something owed to a command the phone
+/// sent earlier. Best effort, like [`announce_chat_created`].
+pub(crate) fn send_notice_everywhere(text: String, cx: &gpui::App) {
+    use daruda_store::observability::{
+        error_report::{ErrorReport, ErrorSeverity},
+        log_writer::LogWriter,
+    };
+    let remote = global::RemoteChannels::send_notice_with_delivery(
+        text.clone(),
+        global::Delivery::Explicit,
+        cx,
+    );
+    let telegram = crate::telegram::global::TelegramBridge::notify(text, cx);
+    if !telegram && !remote {
+        LogWriter::log(
+            ErrorReport::new("Notice not sent: no remote channel can deliver it")
+                .severity(ErrorSeverity::Warning)
+                .at(file!(), line!())
+                .dedup("notice.undeliverable")
+                .build(),
+        );
+    }
+}
+
 /// Report one remote-channel failure. `#[track_caller]` puts the call site in
 /// the log instead of this helper, and `dedup` must be unique per site: a
 /// shared key merges a different failure into a live toast's repeat count.

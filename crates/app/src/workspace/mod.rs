@@ -27,6 +27,7 @@ mod control_task_ops;
 /// Re-exported because `telegram::global`'s poll loop folds per-window answers
 /// and lives outside `crate::workspace`.
 pub(crate) use control_ops::{ChatLabel, SlashClaim};
+pub(crate) use control_task_ops::ControlTaskStart;
 mod close_guard_ops;
 pub(crate) mod delete_project_modal;
 pub(crate) mod dialog_helpers;

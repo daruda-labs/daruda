@@ -610,19 +610,7 @@ async fn perform_gated(cmd: GatedCommand, cx: &mut gpui::AsyncApp) -> ControlOut
             });
         }
         GatedCommand::TaskStart { task } => return start_task(task, cx).await,
-        GatedCommand::TaskOpen { task } => {
-            return cx.update(|cx| {
-                let chat = in_task_window(&task, cx, |ws, window, cx| {
-                    let pane = ws.control_task_open(&task, window, cx)?;
-                    Ok(PaneRef {
-                        workspace: ws.uuid(),
-                        pane,
-                    })
-                })?;
-                announce_chat(chat, cx);
-                Ok(ControlResult::TaskOpened { task, chat })
-            });
-        }
+        GatedCommand::TaskOpen { task } => return cx.update(|cx| open_task(task, cx)),
         GatedCommand::ChatNew { lane, agent } => cx
             .update(|cx| {
                 in_lane_window(lane, cx, |ws, window, cx| {
@@ -662,33 +650,93 @@ async fn perform_gated(cmd: GatedCommand, cx: &mut gpui::AsyncApp) -> ControlOut
     })
 }
 
-/// Start a task in the window that holds its project, and wait until it
-/// runs.
+/// A start for the agent: approved already, so this only waits for it.
 async fn start_task(task: String, cx: &mut gpui::AsyncApp) -> ControlOutcome {
     let creates_lane = cx.update(|cx| {
         cx.global::<GlobalTasks>()
             .get(&task)
             .is_some_and(task_creates_lane)
     });
-    let (workspace, rx) = cx.update(|cx| {
-        in_task_window(&task, cx, |ws, window, cx| {
-            Ok((ws.uuid(), ws.control_task_start(&task, window, cx)))
-        })
-    })?;
-    let (lane, pane) = rx.recv().await.unwrap_or(Err(ControlError::TargetGone))?;
-    if creates_lane {
+    let outcome = cx.update(|cx| begin_task_start(task, cx))?.finish(cx).await;
+    if creates_lane && outcome.is_ok() {
         // Spent only now: a refused or failed start costs the agent nothing.
         cx.update(crate::control::guards::note_agent_created_lane);
     }
-    let chat = pane.map(|pane| PaneRef { workspace, pane });
-    if let Some(chat) = chat {
-        cx.update(|cx| announce_chat(chat, cx));
-    }
-    Ok(ControlResult::TaskStarted {
+    outcome
+}
+
+/// A task start under way, in the window that holds the task's project.
+pub(crate) struct PendingTaskStart {
+    pub(crate) task: String,
+    pub(crate) title: String,
+    workspace: daruda_store::project::WorkspaceUuid,
+    answer: smol::channel::Receiver<crate::workspace::ControlTaskStart>,
+}
+
+/// Start `task` and hand back what to wait on. A refusal taken before git
+/// runs is already in the answer — see [`PendingTaskStart::try_finish`].
+pub(crate) fn begin_task_start(
+    task: String,
+    cx: &mut App,
+) -> Result<PendingTaskStart, ControlError> {
+    let title = task_title(&task, cx);
+    let (workspace, answer) = in_task_window(&task, cx, |ws, window, cx| {
+        Ok((ws.uuid(), ws.control_task_start(&task, window, cx)))
+    })?;
+    Ok(PendingTaskStart {
         task,
-        lane: LaneHandle::new(workspace, lane),
-        chat,
+        title,
+        workspace,
+        answer,
     })
+}
+
+impl PendingTaskStart {
+    /// The outcome if it is already known: a refusal, or a start that had
+    /// no git to wait for.
+    pub(crate) fn try_finish(&self, cx: &mut App) -> Option<ControlOutcome> {
+        let outcome = self.answer.try_recv().ok()?;
+        Some(self.started(outcome, cx))
+    }
+
+    pub(crate) async fn finish(self, cx: &mut gpui::AsyncApp) -> ControlOutcome {
+        let outcome = self
+            .answer
+            .recv()
+            .await
+            .unwrap_or(Err(ControlError::TargetGone));
+        cx.update(|cx| self.started(outcome, cx))
+    }
+
+    /// Name a started task's chat for the phone, which then talks to it.
+    fn started(&self, outcome: crate::workspace::ControlTaskStart, cx: &mut App) -> ControlOutcome {
+        let (lane, pane) = outcome?;
+        let chat = pane.map(|pane| PaneRef {
+            workspace: self.workspace,
+            pane,
+        });
+        if let Some(chat) = chat {
+            announce_chat(chat, cx);
+        }
+        Ok(ControlResult::TaskStarted {
+            task: self.task.clone(),
+            lane: LaneHandle::new(self.workspace, lane),
+            chat,
+        })
+    }
+}
+
+/// Bring up the chat `task` ran in and make it the phone's target.
+pub(crate) fn open_task(task: String, cx: &mut App) -> ControlOutcome {
+    let chat = in_task_window(&task, cx, |ws, window, cx| {
+        let pane = ws.control_task_open(&task, window, cx)?;
+        Ok(PaneRef {
+            workspace: ws.uuid(),
+            pane,
+        })
+    })?;
+    announce_chat(chat, cx);
+    Ok(ControlResult::TaskOpened { task, chat })
 }
 
 /// Name the new chat for the phone and point the phone at it, handing the

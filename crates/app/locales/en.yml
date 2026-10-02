@@ -2817,6 +2817,15 @@ control:
   error_no_active_lane: "No active worktree."
   usage_use: "Usage: /use <number> or /use -"
   usage_say: "Usage: /say <number> <message>"
+  usage_task: "Usage: /task, or /task start|stop|open <number>"
+  # Told when /task start was accepted; the worktree and agent come up next,
+  # and the outcome follows as its own message.
+  task_starting: "Starting %{title}. I'll tell you when it's running."
+  # The follow-up when a started task runs in a terminal: there is no chat
+  # for the phone to talk to.
+  task_started_terminal: "%{title} is running in a terminal in daruda."
+  # The follow-up when a start failed after it was accepted.
+  task_start_failed: "%{title} did not start: %{reason}"
   approval_lane_create: "daruda wants to create the worktree %{name}. Allow?"
   approval_chat_new: "daruda wants to open another chat in %{path}. Allow?"
   approval_allow: "Allow"
@@ -2896,6 +2905,7 @@ control:
     say - Send to a target
     stop - Stop the running turn
     flow - Run or list flows
+    task - List, start, stop or open tasks
     brief - One-line summary
     daruda - Ask daruda in plain words
 remote_channel:
