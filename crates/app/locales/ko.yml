@@ -1513,6 +1513,7 @@ error:
   status_bar_save_failed: "상태바 토글 저장 실패"
   tasks_require_git_repo: "작업에는 Git 저장소가 필요합니다"
   task_lane_missing: "이 작업이 실행될 worktree가 열려 있지 않습니다"
+  task_project_not_open: "이 작업의 프로젝트가 이 창에 열려 있지 않습니다"
   tasks_save_failed: "작업 저장 실패"
   task_escalation_orphan: "도구 사용 실패를 연결할 작업이 없습니다"
   task_escalation_orphan_detail: "세션 %{session}이(가) 에스컬레이션 임계치에 도달했지만 이 세션을 가진 실행 중 작업이 없습니다 (%{escalation})"

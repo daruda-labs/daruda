@@ -6,10 +6,15 @@ use std::path::PathBuf;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
+use crate::project::ProjectUuid;
+
 /// Persistence schema version. Bump when the structural contract
 /// changes in a way `#[serde(default)]` on new fields cannot transparently
 /// absorb (e.g. an enum variant whose disappearance must be migrated).
-pub const SCHEMA_VERSION: u32 = 1;
+///
+/// 2 made [`Task::project`] required. A v1 file has no project to recover
+/// one from, so the loader drops its tasks rather than migrating them.
+pub const SCHEMA_VERSION: u32 = 2;
 
 /// Number of `PostToolUseFailure` hook events on the same Claude
 /// session before daruda escalates the owning task to `Error`. The
@@ -212,6 +217,9 @@ impl TaskExecution {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Task {
     pub id: TaskId,
+    /// The project whose repository a new worktree is created in, and whose
+    /// lanes the base and run-in choices name.
+    pub project: ProjectUuid,
     pub title: String,
     pub prompt: String,
     pub state: TaskState,
@@ -229,8 +237,8 @@ pub struct Task {
     #[serde(default)]
     pub notes: String,
 
-    /// Lane to branch from. `None` = the active lane at Start
-    /// time (resolved by the caller). Only read under `TaskRunIn::NewWorktree`.
+    /// Lane to branch from. `None` = the project's base branch, resolved
+    /// at Start. Only read under `TaskRunIn::NewWorktree`.
     #[serde(default)]
     pub base_worktree_path: Option<PathBuf>,
 
@@ -269,12 +277,18 @@ impl Task {
     /// Build a fresh task in the `Backlog` state. `branch_name` defaults to
     /// `task-<ULID tail>`; callers may overwrite it before inserting if they
     /// need a custom value.
-    pub fn new(title: String, prompt: String, base_worktree_path: Option<PathBuf>) -> Self {
+    pub fn new(
+        project: ProjectUuid,
+        title: String,
+        prompt: String,
+        base_worktree_path: Option<PathBuf>,
+    ) -> Self {
         let now = Utc::now();
         let id = ulid::Ulid::new().to_string();
         let branch_name = super::branch::branch_name_for(&id);
         Self {
             id,
+            project,
             title,
             prompt,
             state: TaskState::Backlog,

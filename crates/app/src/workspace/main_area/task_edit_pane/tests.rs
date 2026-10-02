@@ -64,7 +64,7 @@ fn task_editor_watches_prompt_after_start_parks_its_lane(cx: &mut TestAppContext
 
 #[gpui::test]
 fn task_editor_save_shortcut_and_tab_order(cx: &mut TestAppContext) {
-    let (window, ws) = build_workspace(cx);
+    let (_project, window, ws) = build_workspace_with_project(cx);
     let mut vcx = VisualTestContext::from_window(window.into(), cx);
     vcx.cx.update(crate::bind_keys::register_static_bindings);
     vcx.update(|window, cx| {
@@ -135,7 +135,7 @@ fn task_editor_rejects_blank_titles_and_invalid_branches(cx: &mut TestAppContext
 
 #[gpui::test]
 fn task_editor_save_keeps_pane_and_draft_subtasks(cx: &mut TestAppContext) {
-    let (window, ws) = build_workspace(cx);
+    let (_project, window, ws) = build_workspace_with_project(cx);
     cx.update_window(window.into(), |_, window, cx| {
         ws.update(cx, |ws, cx| {
             ws.open_task_edit_pane(None, window, cx);
@@ -178,7 +178,12 @@ fn task_editor_saving_a_rename_keeps_the_stored_branch(cx: &mut TestAppContext) 
     let (window, ws) = build_workspace(cx);
     cx.update_window(window.into(), |_, window, cx| {
         ws.update(cx, |ws, cx| {
-            let task = Task::new("Original".into(), String::new(), None);
+            let task = Task::new(
+                daruda_store::project::ProjectUuid::default(),
+                "Original".into(),
+                String::new(),
+                None,
+            );
             let branch = task.branch_name.clone();
             let id = task.id.clone();
             cx.update_global::<GlobalTasks, _>(|g, _| {
@@ -266,7 +271,7 @@ fn task_editor_close_preserves_unsaved_draft_until_confirmed(cx: &mut TestAppCon
 
 #[gpui::test]
 fn task_editor_distinct_drafts_and_empty_branch_save(cx: &mut TestAppContext) {
-    let (window, ws) = build_workspace(cx);
+    let (_project, window, ws) = build_workspace_with_project(cx);
     cx.update_window(window.into(), |_, window, cx| {
         ws.update(cx, |ws, cx| {
             let mut branches = Vec::new();
@@ -309,7 +314,7 @@ fn task_editor_distinct_drafts_and_empty_branch_save(cx: &mut TestAppContext) {
 
 #[gpui::test]
 fn task_editor_stores_the_branch_trimmed(cx: &mut TestAppContext) {
-    let (window, ws) = build_workspace(cx);
+    let (_project, window, ws) = build_workspace_with_project(cx);
     cx.update_window(window.into(), |_, window, cx| {
         ws.update(cx, |ws, cx| {
             ws.open_task_edit_pane(None, window, cx);
@@ -336,8 +341,18 @@ fn task_editor_edits_a_backlog_branch_but_not_a_started_one(cx: &mut TestAppCont
     let (window, ws) = build_workspace(cx);
     cx.update_window(window.into(), |_, window, cx| {
         ws.update(cx, |ws, cx| {
-            let backlog = Task::new("Backlog".into(), String::new(), None);
-            let mut running = Task::new("Running".into(), String::new(), None);
+            let backlog = Task::new(
+                daruda_store::project::ProjectUuid::default(),
+                "Backlog".into(),
+                String::new(),
+                None,
+            );
+            let mut running = Task::new(
+                daruda_store::project::ProjectUuid::default(),
+                "Running".into(),
+                String::new(),
+                None,
+            );
             running.state = daruda_store::tasks::TaskState::Running {
                 worktree_path: std::env::temp_dir(),
             };
@@ -483,7 +498,12 @@ fn task_editor_saves_a_running_task_whose_lane_holds_its_branch(cx: &mut TestApp
     let (_root, window, ws) = build_workspace_with_project(cx);
     cx.update_window(window.into(), |_, window, cx| {
         ws.update(cx, |ws, cx| {
-            let mut task = Task::new("Running".into(), String::new(), None);
+            let mut task = Task::new(
+                daruda_store::project::ProjectUuid::default(),
+                "Running".into(),
+                String::new(),
+                None,
+            );
             let lane = push_git_lane(ws, &task.branch_name);
             task.state = daruda_store::tasks::TaskState::Running {
                 worktree_path: lane,
@@ -516,7 +536,12 @@ fn task_editor_location_change_is_dirty_until_saved(cx: &mut TestAppContext) {
     let (_root, window, ws) = build_workspace_with_project(cx);
     cx.update_window(window.into(), |_, window, cx| {
         ws.update(cx, |ws, cx| {
-            let task = Task::new("Move me".into(), String::new(), None);
+            let task = Task::new(
+                daruda_store::project::ProjectUuid::default(),
+                "Move me".into(),
+                String::new(),
+                None,
+            );
             let id = task.id.clone();
             cx.update_global::<GlobalTasks, _>(|g, _| {
                 g.add(task);
@@ -540,7 +565,12 @@ fn task_editor_saves_a_reopened_task(cx: &mut TestAppContext) {
     let (_root, window, ws) = build_workspace_with_project(cx);
     cx.update_window(window.into(), |_, window, cx| {
         ws.update(cx, |ws, cx| {
-            let mut task = Task::new("Reopened".into(), String::new(), None);
+            let mut task = Task::new(
+                daruda_store::project::ProjectUuid::default(),
+                "Reopened".into(),
+                String::new(),
+                None,
+            );
             let lane = push_git_lane(ws, &task.branch_name);
             std::fs::create_dir_all(&lane).unwrap();
             task.state = daruda_store::tasks::TaskState::Done {
@@ -600,7 +630,12 @@ fn task_editor_crlf_only_prompt_change_is_not_dirty(cx: &mut TestAppContext) {
     let (window, ws) = build_workspace(cx);
     cx.update_window(window.into(), |_, window, cx| {
         ws.update(cx, |ws, cx| {
-            let task = Task::new("Lines".into(), "one\ntwo".into(), None);
+            let task = Task::new(
+                daruda_store::project::ProjectUuid::default(),
+                "Lines".into(),
+                "one\ntwo".into(),
+                None,
+            );
             let id = task.id.clone();
             cx.update_global::<GlobalTasks, _>(|g, _| {
                 g.add(task);
@@ -630,6 +665,7 @@ fn task_editor_unregistered_base_is_clean_at_open_and_after_save(cx: &mut TestAp
     cx.update_window(window.into(), |_, window, cx| {
         ws.update(cx, |ws, cx| {
             let task = Task::new(
+                daruda_store::project::ProjectUuid::default(),
                 "Old base".into(),
                 String::new(),
                 Some(std::path::PathBuf::from("/nonexistent/daruda-base")),

@@ -28,7 +28,12 @@ fn pane(ws: &mut Workspace, window: &mut Window, cx: &mut Context<Workspace>) ->
 }
 
 fn running_task(cx: &mut Context<Workspace>) -> String {
-    let mut task = Task::new("ACP task".into(), "prompt".into(), None);
+    let mut task = Task::new(
+        daruda_store::project::ProjectUuid::default(),
+        "ACP task".into(),
+        "prompt".into(),
+        None,
+    );
     task.state = TaskState::Running {
         worktree_path: std::env::temp_dir(),
     };

@@ -11,6 +11,8 @@ use super::prompt_file::{
     PROMPT_DIR_NAME, build_claude_command, existing_prompt_file_path, prompt_file_path,
     render_task_prompt, write_prompt_file,
 };
+use crate::project::ProjectUuid;
+
 use super::task::{
     AgentType, SCHEMA_VERSION, SessionEndReason, SubTask, Task, TaskAgentSurface, TaskFilter,
     TaskRunIn, TaskState, TasksState,
@@ -18,6 +20,7 @@ use super::task::{
 
 fn sample_task() -> Task {
     Task::new(
+        ProjectUuid::new(),
         "Fix auth bug".to_string(),
         "Login flow drops the token on refresh.".to_string(),
         Some(PathBuf::from("/repo/main")),
@@ -269,6 +272,7 @@ fn task_loads_with_default_for_new_optional_fields() {
     // base_worktree_path / auto_execute / subtasks — must default cleanly.
     let json = r#"{
         "id": "01HX",
+        "project": "6f1c2b8e-0d4a-4f7e-9a51-3b2c1d0e9f8a",
         "title": "X",
         "prompt": "hi",
         "state": { "state": "backlog" },
@@ -364,6 +368,7 @@ fn legacy_task_json_without_subtasks_loads_with_empty_vec() {
             "schema_version": {SCHEMA_VERSION},
             "tasks": [{{
                 "id": "01HX",
+                "project": "6f1c2b8e-0d4a-4f7e-9a51-3b2c1d0e9f8a",
                 "title": "Legacy",
                 "prompt": "",
                 "state": {{ "state": "backlog" }},
@@ -678,6 +683,44 @@ fn load_rejects_higher_schema_version() {
         load_tasks_in(tmp.path()).is_none(),
         "loader must refuse newer schema"
     );
+}
+
+/// v1 rows name no project, so they cannot be kept — the file loads as an
+/// empty current-version list instead of being treated as corrupt.
+#[test]
+fn load_drops_tasks_from_before_project_scoping() {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let json = serde_json::json!({
+        "schema_version": 1,
+        "tasks": [{
+            "id": "01HX",
+            "title": "Unscoped",
+            "prompt": "",
+            "state": { "state": "backlog" },
+            "created_at": "2026-05-08T00:00:00Z",
+            "updated_at": "2026-05-08T00:00:00Z",
+            "branch_name": "task-01hx"
+        }],
+    });
+    std::fs::write(
+        tasks_path_in(tmp.path()),
+        serde_json::to_string(&json).unwrap(),
+    )
+    .unwrap();
+
+    assert_eq!(load_tasks_in(tmp.path()), Some(TasksState::default()));
+}
+
+#[test]
+fn save_and_load_preserve_the_project() {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let task = sample_task();
+    let project = task.project;
+    let mut state = TasksState::default();
+    state.add(task);
+    save_tasks_in(tmp.path(), &state).expect("save");
+    let loaded = load_tasks_in(tmp.path()).expect("load");
+    assert_eq!(loaded.tasks[0].project, project);
 }
 
 #[test]

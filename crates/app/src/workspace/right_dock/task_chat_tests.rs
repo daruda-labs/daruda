@@ -7,7 +7,12 @@ use daruda_store::tasks::{SessionEndReason, Task, TaskState};
 use gpui::{AppContext as _, TestAppContext};
 
 fn task(cx: &mut Context<Workspace>) -> String {
-    let mut task = Task::new("Task".into(), "Prompt".into(), None);
+    let mut task = Task::new(
+        daruda_store::project::ProjectUuid::default(),
+        "Task".into(),
+        "Prompt".into(),
+        None,
+    );
     task.state = TaskState::Running {
         worktree_path: std::env::temp_dir(),
     };

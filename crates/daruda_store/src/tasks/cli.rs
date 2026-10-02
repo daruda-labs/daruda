@@ -217,7 +217,12 @@ mod tests {
     #[test]
     fn a_ref_resolves_only_the_run_it_names() {
         let mut tasks = super::super::TasksState::default();
-        let mut task = super::super::Task::new("t".into(), "p".into(), None);
+        let mut task = super::super::Task::new(
+            crate::project::ProjectUuid::new(),
+            "t".into(),
+            "p".into(),
+            None,
+        );
         task.execution = Some(super::super::TaskExecution::begin(
             TaskExecutionSource::AgentChat,
             "claude".into(),

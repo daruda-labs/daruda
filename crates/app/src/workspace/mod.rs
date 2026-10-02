@@ -1520,6 +1520,15 @@ impl Workspace {
         self.projects.iter().find(|p| p.id == id)
     }
 
+    /// The project open in this window under `uuid`, the durable name a task
+    /// and a persisted state file use for it.
+    pub(in crate::workspace) fn project_by_uuid(
+        &self,
+        uuid: daruda_store::project::ProjectUuid,
+    ) -> Option<&crate::project::Project> {
+        self.projects.iter().find(|p| p.uuid == uuid)
+    }
+
     pub(in crate::workspace) fn project_for_mut(
         &mut self,
         id: daruda_store::project::ProjectId,

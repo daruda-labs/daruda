@@ -385,8 +385,13 @@ impl Workspace {
             .active_lane()
             .map(|lane| lane.path.clone())
             .unwrap_or_else(std::env::temp_dir);
-        let mut task =
-            daruda_store::tasks::Task::new("CLI task".into(), "Fix the parser".into(), None);
+        let project = self.active_project().map(|p| p.uuid).unwrap_or_default();
+        let mut task = daruda_store::tasks::Task::new(
+            project,
+            "CLI task".into(),
+            "Fix the parser".into(),
+            None,
+        );
         let process = if exited {
             CliProcessState::ExitConfirmed {
                 ended_at: Utc::now(),

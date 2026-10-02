@@ -10,7 +10,7 @@ use std::path::PathBuf;
 use super::build_workspace;
 
 use daruda_store::tasks::{SessionEndReason, TASK_TOOL_USE_FAILURE_THRESHOLD, Task, TaskState};
-use gpui::{BorrowAppContext, TestAppContext};
+use gpui::{AppContext as _, BorrowAppContext, TestAppContext};
 
 /// Insert a `Running` task with one attached session and return the
 /// task id. Shared fixture for the escalation-counter tests.
@@ -21,6 +21,7 @@ fn seed_running_task(
 ) -> String {
     workspace.update(cx, |_ws, cx| {
         let mut task = Task::new(
+            daruda_store::project::ProjectUuid::default(),
             "fix-bug".to_string(),
             "Investigate the auth flow.".to_string(),
             None,
@@ -187,7 +188,12 @@ fn classify_hook_end_reason_maps_known_events() {
 fn apply_task_session_changed_attaches_idempotently_then_error_ends(cx: &mut TestAppContext) {
     let (_wh, workspace) = build_workspace(cx);
     workspace.update(cx, |ws, cx| {
-        let mut task = Task::new("a".into(), "b".into(), None);
+        let mut task = Task::new(
+            daruda_store::project::ProjectUuid::default(),
+            "a".into(),
+            "b".into(),
+            None,
+        );
         task.agent_surface = daruda_store::tasks::TaskAgentSurface::Terminal;
         task.state = TaskState::Running {
             worktree_path: PathBuf::from("/tmp/wt"),
@@ -243,7 +249,12 @@ fn seed_backlog_task(
     cx: &mut TestAppContext,
 ) -> String {
     workspace.update(cx, |_ws, cx| {
-        let task = Task::new("subtask-host".into(), "".into(), None);
+        let task = Task::new(
+            daruda_store::project::ProjectUuid::default(),
+            "subtask-host".into(),
+            "".into(),
+            None,
+        );
         let id = task.id.clone();
         cx.update_global::<crate::agent::tasks_global::GlobalTasks, _>(|g, _| {
             g.add(task);
@@ -334,7 +345,12 @@ fn seed_running_task_with_subtasks(
     session_id: &str,
 ) -> String {
     workspace.update(cx, |_ws, cx| {
-        let mut task = Task::new("host".into(), "".into(), None);
+        let mut task = Task::new(
+            daruda_store::project::ProjectUuid::default(),
+            "host".into(),
+            "".into(),
+            None,
+        );
         task.state = TaskState::Running {
             worktree_path: PathBuf::from("/tmp/wt"),
         };
@@ -354,7 +370,12 @@ fn apply_todo_write_merges_auto_items_and_keeps_boundaries(cx: &mut TestAppConte
     let manual_task_id = seed_running_task_with_subtasks(&workspace, cx, "sess-todo-3");
     let bad_task_id = seed_running_task_with_subtasks(&workspace, cx, "sess-todo-bad");
     let isolated_task_id = workspace.update(cx, |_ws, cx| {
-        let mut task = Task::new("host".into(), "".into(), None);
+        let mut task = Task::new(
+            daruda_store::project::ProjectUuid::default(),
+            "host".into(),
+            "".into(),
+            None,
+        );
         task.state = TaskState::Running {
             worktree_path: PathBuf::from("/tmp/wt"),
         };
@@ -478,6 +499,80 @@ fn apply_todo_write_merges_auto_items_and_keeps_boundaries(cx: &mut TestAppConte
         assert!(
             t.subtasks.is_empty(),
             "no task owns sess-unknown, so the merge is a no-op",
+        );
+    });
+}
+
+fn git_repo(dir: &std::path::Path) {
+    for args in [
+        &["init", "-q", "-b", "main"][..],
+        &["config", "user.email", "daruda@test"],
+        &["config", "user.name", "daruda"],
+        &["commit", "-q", "--allow-empty", "-m", "initial"],
+    ] {
+        let status = std::process::Command::new("git")
+            .current_dir(dir)
+            .args(args)
+            .status()
+            .unwrap();
+        assert!(status.success(), "git {args:?} failed in {dir:?}");
+    }
+}
+
+/// A task's worktree is made in the repository of the project it belongs
+/// to, not in whichever project the window happens to be showing.
+#[gpui::test]
+fn a_task_starts_in_its_own_project_while_another_is_active(cx: &mut TestAppContext) {
+    if !crate::lane::git::has_git() {
+        return;
+    }
+    let temp = tempfile::tempdir().unwrap();
+    let (a_root, b_root) = (temp.path().join("a"), temp.path().join("b"));
+    for root in [&a_root, &b_root] {
+        std::fs::create_dir_all(root).unwrap();
+        git_repo(root);
+    }
+    let (window, ws) = super::build_workspace_with(
+        cx,
+        &daruda_config::Config::default(),
+        Some(daruda_store::project::Project::from_path(&a_root)),
+    );
+    ws.update(cx, |ws, cx| ws.reconcile_bootstrapped_lanes(cx));
+    cx.run_until_parked();
+    let (task_id, expected) = cx
+        .update_window(window.into(), |_, window, cx| {
+            ws.update(cx, |ws, cx| {
+                let a = &ws.projects[0];
+                let (a_id, a_uuid) = (a.id, a.uuid);
+                ws.add_project(b_root.clone(), window, cx);
+                assert_ne!(ws.active.project, a_id, "project B is the active one");
+                let mut task = Task::new(a_uuid, "In A".into(), "prompt".into(), None);
+                task.agent_surface = daruda_store::tasks::TaskAgentSurface::Terminal;
+                let expected = crate::workspace::lane_ops::lane_checkout_path(
+                    &ws.git_repo_root_for_project(a_id)
+                        .expect("A is a git project"),
+                    &task.branch_name,
+                );
+                let id = task.id.clone();
+                cx.update_global::<crate::agent::tasks_global::GlobalTasks, _>(|g, _| {
+                    g.add(task);
+                });
+                ws.start_task(&id, window, cx);
+                (id, expected)
+            })
+        })
+        .unwrap();
+    cx.run_until_parked();
+    ws.read_with(cx, |_, cx| {
+        let task = cx
+            .global::<crate::agent::tasks_global::GlobalTasks>()
+            .get(&task_id)
+            .unwrap();
+        assert_eq!(
+            task.state.worktree_path(),
+            Some(&expected),
+            "{:?}",
+            task.state
         );
     });
 }

@@ -14,6 +14,7 @@ use crate::observability::error_report::{ErrorReport, ErrorSeverity};
 use crate::observability::log_writer::LogWriter;
 use crate::observability::system_info::redact_home;
 use crate::persistence::{LoadOutcome, load_json_file, save_json_atomic};
+use serde::Deserialize;
 
 use super::task::{SCHEMA_VERSION, TasksState};
 
@@ -26,41 +27,67 @@ pub fn tasks_path_in(data_dir: &Path) -> PathBuf {
 /// Load `tasks.json` from `data_dir`. Returns `None` on missing file
 /// or parse error; the shared loader logs the latter once with a
 /// `daruda_tasks:` prefix so corrupt files are observable instead of
-/// silently dropped (CLAUDE.md G5 forward-only compatibility note —
-/// data loss must not be quiet).
+/// silently dropped (data loss must not be quiet).
 ///
 /// A `schema_version` strictly greater than `SCHEMA_VERSION` is
 /// rejected rather than silently dropping fields the older daruda
-/// cannot preserve. Lower versions load through unchanged — every
-/// variant of v1 is backward-compatible with `#[serde(default)]`
-/// fallbacks, so a v0 file (currently nonexistent) would deserialize
-/// as long as the v0 shape is a strict subset of the v1 shape. Bump
-/// `SCHEMA_VERSION` + add an explicit migration the moment that stops
-/// being true.
+/// cannot preserve. A lower one loads as an empty list: v1 tasks name no
+/// project, and there is nothing to recover one from. The version is read
+/// first because a v1 row would not parse as a v2 `Task` at all.
 pub fn load_tasks_in(data_dir: &Path) -> Option<TasksState> {
     let path = tasks_path_in(data_dir);
-    let state: TasksState = match load_json_file::<TasksState>("tasks", &path) {
-        LoadOutcome::Parsed(s) => s,
+    let version = match load_json_file::<VersionProbe>("tasks", &path) {
+        LoadOutcome::Parsed(probe) => probe.schema_version,
         LoadOutcome::Missing | LoadOutcome::Corrupt => return None,
     };
-    if state.schema_version > SCHEMA_VERSION {
+    if version > SCHEMA_VERSION {
         LogWriter::log(
             ErrorReport::new("tasks.json from a newer daruda — refusing to load")
                 .severity(ErrorSeverity::Warning)
                 .message(format!(
-                    "tasks.json schema_version {} > supported {}",
-                    state.schema_version, SCHEMA_VERSION,
+                    "tasks.json schema_version {version} > supported {SCHEMA_VERSION}",
                 ))
                 .at(file!(), line!())
                 .with_context("path", redact_home(&path))
-                .with_context("found", state.schema_version.to_string())
+                .with_context("found", version.to_string())
                 .with_context("supported", SCHEMA_VERSION.to_string())
                 .dedup("tasks.schema.too_new")
                 .build(),
         );
         return None;
     }
-    Some(state)
+    if version < SCHEMA_VERSION {
+        let dropped = match load_json_file::<RowCount>("tasks", &path) {
+            LoadOutcome::Parsed(rows) => rows.tasks.len(),
+            LoadOutcome::Missing | LoadOutcome::Corrupt => 0,
+        };
+        LogWriter::log(
+            ErrorReport::new("tasks.json predates project-scoped tasks — starting empty")
+                .severity(ErrorSeverity::Info)
+                .at(file!(), line!())
+                .with_context("path", redact_home(&path))
+                .with_context("found", version.to_string())
+                .with_context("dropped", dropped.to_string())
+                .dedup("tasks.schema.dropped_unscoped")
+                .build(),
+        );
+        return Some(TasksState::default());
+    }
+    load_json_file::<TasksState>("tasks", &path).into_option()
+}
+
+/// Just the version, so it can be read from a file whose rows no longer
+/// parse.
+#[derive(Deserialize)]
+struct VersionProbe {
+    schema_version: u32,
+}
+
+/// Just the row count of a file being discarded, for the log line.
+#[derive(Deserialize)]
+struct RowCount {
+    #[serde(default)]
+    tasks: Vec<serde::de::IgnoredAny>,
 }
 
 /// Save `tasks.json` atomically — same-FS tempfile + rename.

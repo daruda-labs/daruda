@@ -2209,6 +2209,7 @@ error:
   status_bar_save_failed: "Failed to save status bar toggle"
   tasks_require_git_repo: "Tasks require a git repo"
   task_lane_missing: "The worktree this task runs in is not open"
+  task_project_not_open: "This task's project is not open in this window"
   tasks_save_failed: "Tasks save failed"
   task_escalation_orphan: "Tool-use-failure escalation has no matching task"
   # Toast body under [`error_task_escalation_orphan`]. The title alone does not

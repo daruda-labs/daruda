@@ -99,7 +99,10 @@ impl Workspace {
                 id.clone()
             }
             None => {
+                // A task belongs to the project it was written in.
+                let project = self.active_project()?.uuid;
                 let mut task = daruda_store::tasks::Task::new(
+                    project,
                     values.title.clone(),
                     values.prompt.clone(),
                     base_path.clone(),

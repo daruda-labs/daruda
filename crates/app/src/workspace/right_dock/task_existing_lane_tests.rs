@@ -13,7 +13,12 @@ fn existing_lane_task(
     surface: TaskAgentSurface,
     cx: &mut Context<Workspace>,
 ) -> String {
-    let mut task = Task::new("Fix it".into(), "Prompt".into(), None);
+    let mut task = Task::new(
+        daruda_store::project::ProjectUuid::default(),
+        "Fix it".into(),
+        "Prompt".into(),
+        None,
+    );
     task.agent_surface = surface;
     task.run_in = TaskRunIn::ExistingLane {
         path: path.to_path_buf(),
@@ -149,7 +154,12 @@ fn existing_lane_start_keeps_the_task_in_backlog_when_the_lane_is_gone(cx: &mut 
 }
 
 fn finished_task(lane: &Path, cx: &mut Context<Workspace>) -> String {
-    let mut task = Task::new("Again".into(), "Prompt".into(), None);
+    let mut task = Task::new(
+        daruda_store::project::ProjectUuid::default(),
+        "Again".into(),
+        "Prompt".into(),
+        None,
+    );
     task.agent_surface = TaskAgentSurface::AgentChat;
     task.state = TaskState::Error {
         worktree_path: lane.to_path_buf(),

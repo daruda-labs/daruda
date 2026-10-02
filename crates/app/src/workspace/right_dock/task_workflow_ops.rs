@@ -128,7 +128,16 @@ impl Workspace {
             self.start_task_in_existing_lane(&task, path, window, cx);
             return;
         }
-        let Some(repo_root) = self.git_repo_root() else {
+        let Some(project_id) = self.project_by_uuid(task.project).map(|p| p.id) else {
+            let report = ErrorReport::new(crate::surface::strings::error::task_project_not_open())
+                .severity(ErrorSeverity::Info)
+                .at(file!(), line!())
+                .dedup("tasks.project_not_open")
+                .build();
+            self.report_error(report, cx);
+            return;
+        };
+        let Some(repo_root) = self.git_repo_root_for_project(project_id) else {
             let report = ErrorReport::new(crate::surface::strings::error::tasks_require_git_repo())
                 .severity(ErrorSeverity::Info)
                 .at(file!(), line!())
@@ -155,15 +164,11 @@ impl Workspace {
             .as_deref()
             .and_then(|p| self.branch_for_worktree_path(p));
 
-        // active_project is guaranteed by git_repo_root() succeeding above
-        let Some(project_id) = self.active_project().map(|p| p.id) else {
-            return;
-        };
         let plan = CreateWorktreePlan {
             branch: task.branch_name.clone(),
             new_path: new_path.clone(),
             repo_root: repo_root.clone(),
-            base_ref: self.resolve_lane_base_ref(base_ref),
+            base_ref: self.resolve_lane_base_ref_for(project_id, base_ref),
             description: Some(crate::surface::strings::task::lane_description(&task.title)),
             // Task-driven lanes have no create-form host picker — they stay
             // at `Lane::git`'s default (unanswered/Local), same as before

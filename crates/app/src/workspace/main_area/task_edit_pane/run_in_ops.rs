@@ -111,7 +111,12 @@ mod tests {
     use crate::agent::tasks_global::GlobalTasks;
 
     fn running(title: &str, lane: &str) -> Task {
-        let mut task = Task::new(title.into(), String::new(), None);
+        let mut task = Task::new(
+            daruda_store::project::ProjectUuid::default(),
+            title.into(),
+            String::new(),
+            None,
+        );
         task.state = TaskState::Running {
             worktree_path: PathBuf::from(lane),
         };

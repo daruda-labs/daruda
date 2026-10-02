@@ -395,10 +395,15 @@ impl Workspace {
     /// (e.g. the `[+]` button) build a `CreateWorktreeModal` without
     /// traversing the lane list.
     pub(in crate::workspace) fn git_repo_root(&self) -> Option<std::path::PathBuf> {
-        self.active_lanes().iter().find_map(|w| match &w.kind {
-            daruda_store::project::LaneKind::Git { repo_root, .. } => Some(repo_root.clone()),
-            _ => None,
-        })
+        git_repo_root_of(self.active_lanes())
+    }
+
+    /// [`Self::git_repo_root`] for a named project rather than the active one.
+    pub(in crate::workspace) fn git_repo_root_for_project(
+        &self,
+        project: ProjectId,
+    ) -> Option<std::path::PathBuf> {
+        git_repo_root_of(&self.project_for(project)?.lanes)
     }
 
     /// Post-git UI-thread work: spawn a pane at the new checkout, wrap it
@@ -1033,6 +1038,13 @@ impl Workspace {
                 .and_then(crate::project::Project::effective_base_branch),
         )
     }
+}
+
+fn git_repo_root_of(lanes: &[crate::lane::Lane]) -> Option<std::path::PathBuf> {
+    lanes.iter().find_map(|w| match &w.kind {
+        daruda_store::project::LaneKind::Git { repo_root, .. } => Some(repo_root.clone()),
+        _ => None,
+    })
 }
 
 /// Repo-basename fallback when a path has no final component. Never displayed

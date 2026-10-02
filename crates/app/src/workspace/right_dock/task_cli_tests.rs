@@ -17,7 +17,12 @@ use daruda_store::tasks::{AgentChatAccess, SessionEndReason, Task, TaskAgentSurf
 use gpui::{AppContext as _, TestAppContext, Window};
 
 fn cli_task(cwd: &Path, cx: &mut gpui::App) -> String {
-    let mut task = Task::new("CLI".into(), "prompt".into(), None);
+    let mut task = Task::new(
+        daruda_store::project::ProjectUuid::default(),
+        "CLI".into(),
+        "prompt".into(),
+        None,
+    );
     task.agent_surface = TaskAgentSurface::Terminal;
     task.state = TaskState::Running {
         worktree_path: cwd.to_path_buf(),

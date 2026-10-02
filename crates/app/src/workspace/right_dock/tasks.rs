@@ -541,7 +541,12 @@ mod tests {
     /// The branch is set apart from every other field, so a branch hit
     /// cannot pass by matching the title instead.
     fn fresh_task() -> Task {
-        let mut task = Task::new("fix-bug".into(), "prompt body".into(), None);
+        let mut task = Task::new(
+            daruda_store::project::ProjectUuid::default(),
+            "fix-bug".into(),
+            "prompt body".into(),
+            None,
+        );
         task.branch_name = "feat-login".into();
         task
     }
