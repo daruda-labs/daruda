@@ -382,3 +382,27 @@ fn task_chat_closed_pane_reopens_exact_session_without_execution_ownership(
     })
     .unwrap();
 }
+
+/// Opening answers with the pane it brought up, or why it could not.
+#[gpui::test]
+fn task_chat_open_answers_with_the_pane_or_why_not(cx: &mut TestAppContext) {
+    let (window, workspace) = build_workspace(cx);
+    cx.update_window(window.into(), |_, window, cx| {
+        workspace.update(cx, |ws, cx| {
+            assert_eq!(
+                ws.begin_task_chat_open("missing", window, cx),
+                Err(TaskChatError::NotFound)
+            );
+            let never_ran = task(cx);
+            assert_eq!(
+                ws.begin_task_chat_open(&never_ran, window, cx),
+                Err(TaskChatError::NoSession)
+            );
+            let pane = pane(ws, window, cx);
+            let id = task(cx);
+            ws.bind_task_chat_execution(&id, pane, cx);
+            assert_eq!(ws.begin_task_chat_open(&id, window, cx), Ok(pane));
+        })
+    })
+    .unwrap();
+}

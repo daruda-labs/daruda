@@ -24,6 +24,30 @@ fn matches_session(chat: &AgentChatContent, execution: &TaskExecution, cx: &gpui
             .is_some_and(|cwd| daruda_core::path::same_path(cwd, &execution.cwd))
 }
 
+/// Why a task's chat could not be brought up.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum TaskChatError {
+    NotFound,
+    /// The task has not run, or its run has not reported a session yet.
+    NoSession,
+    /// The agent or account the run used is no longer configured.
+    AgentUnavailable,
+    /// The worktree the run happened in is gone.
+    WorktreeMissing,
+}
+
+impl TaskChatError {
+    /// What the desktop says; `None` for a task the Tasks UI cannot name.
+    fn message(self) -> Option<String> {
+        match self {
+            Self::NotFound => None,
+            Self::NoSession => Some(s::task::chat_missing_session()),
+            Self::AgentUnavailable => Some(s::task::chat_missing_agent()),
+            Self::WorktreeMissing => Some(s::task::chat_missing_worktree()),
+        }
+    }
+}
+
 impl Workspace {
     pub(in crate::workspace) fn bind_task_chat_execution(
         &mut self,
@@ -199,19 +223,35 @@ impl Workspace {
         })
     }
 
+    /// Show the chat a task's run belongs to, from the Tasks UI. A failure
+    /// raises its toast here.
     pub(in crate::workspace) fn open_task_chat(
         &mut self,
         task_id: &str,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let Some(task) = cx.global::<GlobalTasks>().get(task_id).cloned() else {
-            return;
-        };
-        let Some(execution) = task.execution else {
-            self.task_chat_error(s::task::chat_missing_session(), cx);
-            return;
-        };
+        if let Err(e) = self.begin_task_chat_open(task_id, window, cx)
+            && let Some(message) = e.message()
+        {
+            self.task_chat_error(message, cx);
+        }
+    }
+
+    /// Bring up the chat a task's run belongs to: the pane already showing
+    /// it, else a new one that loads that exact session.
+    pub(crate) fn begin_task_chat_open(
+        &mut self,
+        task_id: &str,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Result<PaneId, TaskChatError> {
+        let task = cx
+            .global::<GlobalTasks>()
+            .get(task_id)
+            .cloned()
+            .ok_or(TaskChatError::NotFound)?;
+        let execution = task.execution.ok_or(TaskChatError::NoSession)?;
         let existing = self.main_area.runtimes.iter().find_map(|(lane, rt)| {
             rt.panes.iter().find_map(|pane| {
                 let chat = pane.agent_chat_content()?;
@@ -221,15 +261,11 @@ impl Workspace {
         });
         if let Some((lane, pane)) = existing {
             self.reveal_task_chat(lane, pane, window, cx);
-            return;
+            return Ok(pane);
         }
-        let Some(session_id) = execution.session_id else {
-            self.task_chat_error(s::task::chat_missing_session(), cx);
-            return;
-        };
+        let session_id = execution.session_id.ok_or(TaskChatError::NoSession)?;
         if !self.task_chat_identity_available(&execution.agent_id, execution.account_id) {
-            self.task_chat_error(s::task::chat_missing_agent(), cx);
-            return;
+            return Err(TaskChatError::AgentUnavailable);
         }
         let lane = self.projects.iter().find_map(|project| {
             project
@@ -241,10 +277,9 @@ impl Workspace {
                     lane: lane.id,
                 })
         });
-        let Some(lane) = lane.filter(|_| execution.cwd.is_dir()) else {
-            self.task_chat_error(s::task::chat_missing_worktree(), cx);
-            return;
-        };
+        let lane = lane
+            .filter(|_| execution.cwd.is_dir())
+            .ok_or(TaskChatError::WorktreeMissing)?;
         self.activate_lane(lane, window, cx);
         let mut pane = self.create_agent_chat_pane(
             Some(PaneCwd::Local(execution.cwd)),
@@ -278,6 +313,7 @@ impl Workspace {
         });
         self.reveal_task_chat(lane, pane_id, window, cx);
         self.mutate_durable(cx, |_, _| {});
+        Ok(pane_id)
     }
 
     fn reveal_task_chat(
