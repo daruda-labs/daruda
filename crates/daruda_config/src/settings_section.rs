@@ -13,7 +13,7 @@
 //! outer enum, so a new `Plugin` arm becomes a compiler-enforced
 //! follow-up rather than a sweeping refactor.
 //!
-//! User-visible labels live in `app/src/surface/strings.rs` (G4); this
+//! User-visible labels live in `app/src/surface/strings/` (G4); this
 //! crate ships only the closed enum + slug helpers used for routing.
 
 /// A page in the Settings window. Only constructs `Builtin(...)` today; the

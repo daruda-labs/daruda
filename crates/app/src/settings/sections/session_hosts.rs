@@ -30,10 +30,10 @@ impl SettingsView {
                 div()
                     .text_size(px(theme::MODAL_BODY_FONT_SIZE))
                     .text_color(description_color)
-                    .child(s::settings_session_hosts_description()),
+                    .child(s::settings::session_hosts_description()),
             )
             .child(div().flex().flex_row().child(
-                button("settings-session-host-add", s::settings_session_host_add()).on_click(
+                button("settings-session-host-add", s::settings::session_host_add()).on_click(
                     cx.listener(|this, _: &ClickEvent, window, cx| {
                         this.add_session_host_row(window, cx);
                     }),
@@ -45,7 +45,7 @@ impl SettingsView {
                 div()
                     .text_size(px(theme::MODAL_BODY_FONT_SIZE))
                     .text_color(description_color)
-                    .child(s::settings_session_hosts_empty()),
+                    .child(s::settings::session_hosts_empty()),
             );
         }
 
@@ -84,10 +84,10 @@ impl SettingsView {
                         div()
                             .text_size(px(theme::MODAL_BODY_FONT_SIZE))
                             .text_color(t.text_primary)
-                            .child(s::settings_session_host_row_label(index + 1)),
+                            .child(s::settings::session_host_row_label(index + 1)),
                     )
                     .child(
-                        button_danger(remove_id, s::settings_session_host_remove()).on_click(
+                        button_danger(remove_id, s::settings::session_host_remove()).on_click(
                             cx.listener(move |this, _: &ClickEvent, window, cx| {
                                 this.request_remove_session_host_row(index, window, cx);
                             }),
@@ -95,11 +95,11 @@ impl SettingsView {
                     ),
             )
             .child(field_row(
-                s::settings_session_host_field_label(),
+                s::settings::session_host_field_label(),
                 crate::ui::input(&row.label_input, cx, 0),
             ))
             .child(field_row(
-                s::settings_session_host_field_kind(),
+                s::settings::session_host_field_kind(),
                 crate::ui::select::select(&row.kind_select, cx, 0),
             ));
 
@@ -107,12 +107,12 @@ impl SettingsView {
         // that field, mirroring the agent catalog row's ssh/docker split.
         if is_docker {
             body = body.child(field_row(
-                s::settings_session_host_field_container(),
+                s::settings::session_host_field_container(),
                 crate::ui::input(&row.container_input, cx, 0),
             ));
         } else {
             body = body.child(field_row(
-                s::settings_session_host_field_target(),
+                s::settings::session_host_field_target(),
                 crate::ui::input(&row.target_input, cx, 0),
             ));
         }

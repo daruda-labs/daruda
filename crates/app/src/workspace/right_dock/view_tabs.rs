@@ -18,15 +18,15 @@ fn entries() -> Vec<(RightDockView, gpui::SharedString)> {
     vec![
         (
             RightDockView::Usage,
-            strings::right_panel_tab_usage().into(),
+            strings::dock::right_tab_usage().into(),
         ),
         (
             RightDockView::Skills,
-            strings::right_panel_tab_skills().into(),
+            strings::dock::right_tab_skills().into(),
         ),
         (
             RightDockView::Tools,
-            strings::right_panel_tab_tools().into(),
+            strings::dock::right_tab_tools().into(),
         ),
     ]
 }

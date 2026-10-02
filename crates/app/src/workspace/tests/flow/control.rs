@@ -713,7 +713,7 @@ async fn a_phone_started_run_reports_its_outcome_back(cx: &mut TestAppContext) {
         crate::telegram::bridge::Outbound::Notice(text) => {
             assert_eq!(
                 text,
-                crate::surface::strings::control_flow_finished_notice()
+                crate::surface::strings::control::flow_finished_notice()
             );
         }
         // A ping would register a reply-to, so answering "flow finished" would

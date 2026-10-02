@@ -31,7 +31,7 @@ pub(super) fn render_body(snap: &BottomDockSnapshot, cx: &mut Context<Dock>) -> 
     // (md: 6px), overriding `Button::small()`'s 24px default.
     let submit = match snap.agent_stop_pane {
         Some(pane_id) => {
-            crate::ui::button_danger("send", crate::surface::strings::bottom_input_stop_button())
+            crate::ui::button_danger("send", crate::surface::strings::common::btn_stop())
                 .h(px(theme::BUTTON_HEIGHT))
                 .rounded(px(theme::RADIUS_MD))
                 .on_click(cx.listener(move |_dock, _: &ClickEvent, _window, cx| {
@@ -40,16 +40,14 @@ pub(super) fn render_body(snap: &BottomDockSnapshot, cx: &mut Context<Dock>) -> 
                     }
                 }))
         }
-        None => {
-            crate::ui::button_primary("send", crate::surface::strings::bottom_input_send_button())
-                .h(px(theme::BUTTON_HEIGHT))
-                .rounded(px(theme::RADIUS_MD))
-                .on_click(cx.listener(move |_dock, _: &ClickEvent, window, cx| {
-                    if let Some(ws) = workspace.upgrade() {
-                        ws.update(cx, |ws, cx| ws.send_terminal_input(window, cx));
-                    }
-                }))
-        }
+        None => crate::ui::button_primary("send", crate::surface::strings::common::btn_submit())
+            .h(px(theme::BUTTON_HEIGHT))
+            .rounded(px(theme::RADIUS_MD))
+            .on_click(cx.listener(move |_dock, _: &ClickEvent, window, cx| {
+                if let Some(ws) = workspace.upgrade() {
+                    ws.update(cx, |ws, cx| ws.send_terminal_input(window, cx));
+                }
+            })),
     };
     // When the focused pane is an Agent chat pane, selector chips sit to the
     // left of the Submit button (all in the input's right-hand action column):
@@ -146,10 +144,10 @@ fn render_cli_snapshot(
     use daruda_store::tasks::CliProcessState;
 
     let label = match cli.process {
-        None => s::task_cli_run_missing(),
-        Some(CliProcessState::Discovering | CliProcessState::Unknown) => s::task_cli_unknown(),
-        Some(CliProcessState::Running { .. }) => s::task_cli_running(),
-        Some(CliProcessState::ExitConfirmed { .. }) => s::task_cli_exited(),
+        None => s::task::cli_run_missing(),
+        Some(CliProcessState::Discovering | CliProcessState::Unknown) => s::task::cli_unknown(),
+        Some(CliProcessState::Running { .. }) => s::task::cli_running(),
+        Some(CliProcessState::ExitConfirmed { .. }) => s::task::cli_exited(),
     };
     let exited = matches!(cli.process, Some(CliProcessState::ExitConfirmed { .. }));
     let pane_id = cli.pane_id;
@@ -170,7 +168,7 @@ fn render_cli_snapshot(
         )
         .child(
             ui::button_icon("cli-refresh", ui::icons::REFRESH, cx)
-                .tooltip(s::task_cli_refresh())
+                .tooltip(s::task::cli_refresh())
                 .disabled(cli.loading)
                 .on_click(move |_, _, cx| {
                     if let Some(ws) = refresh_ws.upgrade() {
@@ -180,7 +178,7 @@ fn render_cli_snapshot(
         )
         .when(exited, |row| {
             row.child(
-                ui::button("cli-continue", s::task_cli_continue())
+                ui::button("cli-continue", s::task::cli_continue())
                     .disabled(cli.loading)
                     .on_click(move |_, _, cx| {
                         if let Some(ws) = continue_ws.upgrade() {

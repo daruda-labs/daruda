@@ -37,12 +37,12 @@ pub(in crate::workspace) fn render(snap: &RightDockSnapshot, cx: &gpui::App) -> 
     // open a flow at least as often as to watch one, and until now the only
     // way in was knowing the command palette had an entry for it.
     body = body.child(
-        crate::ui::SectionHeader::new(strings::right_panel_flows_heading())
+        crate::ui::SectionHeader::new(strings::flow::panel_flows_heading())
             .actions(new_flow_button(snap, cx)),
     );
     if snap.flow_files.is_empty() {
         body = body.child(
-            crate::ui::placeholder_text(strings::right_panel_flows_empty())
+            crate::ui::placeholder_text(strings::flow::panel_flows_empty())
                 .text_size(px(theme::DOCK_PLACEHOLDER_FONT_SIZE))
                 .text_color(theme::current(cx).text_subtle),
         );
@@ -55,7 +55,7 @@ pub(in crate::workspace) fn render(snap: &RightDockSnapshot, cx: &gpui::App) -> 
     }
     body = body.child(crate::ui::Divider::horizontal());
     body = body.child(crate::ui::SectionHeader::new(
-        strings::right_panel_flow_live_heading(),
+        strings::flow::panel_live_heading(),
     ));
     if snap.flows.is_empty() {
         body = body.child(empty_state(cx));
@@ -65,11 +65,11 @@ pub(in crate::workspace) fn render(snap: &RightDockSnapshot, cx: &gpui::App) -> 
     if let Some(history) = snap.flow_history.as_ref() {
         body = body.child(crate::ui::Divider::horizontal());
         body = body.child(crate::ui::SectionHeader::new(
-            strings::right_panel_flow_past_heading(),
+            strings::flow::panel_past_heading(),
         ));
         if history.runs().is_empty() {
             body = body.child(
-                crate::ui::placeholder_text(strings::right_panel_flow_past_empty())
+                crate::ui::placeholder_text(strings::flow::panel_past_empty())
                     .text_size(px(theme::DOCK_PLACEHOLDER_FONT_SIZE))
                     .text_color(theme::current(cx).text_subtle),
             );

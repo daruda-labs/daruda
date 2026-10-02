@@ -58,6 +58,25 @@ impl ProjectConfig {
     }
 }
 
+/// Initial contents of a freshly-created
+/// `<data dir>/projects/<repo>-<hash>/config.toml`. The user
+/// edits this file directly; daruda re-reads it on the next config
+/// reload (via the recursive watcher under the user config dir).
+pub const PROJECT_CONFIG_TEMPLATE: &str = "\
+# daruda project-local config.
+#
+# Sections specified here override the user-global config
+# (the config.toml two folders up from this one) for this project's
+# daruda windows.
+# Sections you don't write keep their user-layer values.
+#
+# Phase 1 supports the [shell] section only.
+
+# [shell]
+# program = \"/usr/local/bin/zsh\"
+# close_pane_on_exit = true
+";
+
 /// Stable 16-character identifier for `repo_root`. Two opens of the
 /// same path produce the same id (modulo canonicalisation); two
 /// different paths produce different ids with overwhelming probability

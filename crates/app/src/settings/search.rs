@@ -61,47 +61,47 @@ const fn hand(
 const HANDWRITTEN: &[Handwritten] = &[
     hand(
         Anchor::Row(R::CustomColors),
-        s::settings_label_custom_colors,
+        s::settings::label_custom_colors,
         &["colors", "palette", "ansi", "custom"],
     ),
     hand(
         Anchor::Card(C::AgentCatalog),
-        s::settings_section_agent_catalog,
+        s::settings::section_agent_catalog,
         &["agent", "preset", "command", "model", "mode", "acp"],
     ),
     hand(
         Anchor::Card(C::RemoteIntegrations),
-        s::remote_slack,
+        s::remote_channel::slack,
         &["slack", "token", "pair", "phone", "away"],
     ),
     hand(
         Anchor::Card(C::RemoteIntegrations),
-        s::remote_discord,
+        s::remote_channel::discord,
         &["discord", "token", "pair", "phone", "away"],
     ),
     hand(
         Anchor::Row(R::TelegramBody),
-        s::settings_telegram_token_label,
+        s::settings::telegram_token_label,
         &["telegram", "bot", "token"],
     ),
     hand(
         Anchor::Row(R::TelegramBody),
-        s::settings_telegram_generate_code,
+        s::settings::telegram_generate_code,
         &["telegram", "pair", "phone"],
     ),
     hand(
         Anchor::Page(Section::SessionHosts),
-        s::settings_session_host_add,
+        s::settings::session_host_add,
         &["ssh", "docker", "host", "remote"],
     ),
     hand(
         Anchor::Page(Section::Plugin),
-        s::settings_plugin_installed_header,
+        s::settings::plugin_installed_header,
         &["plugin", "skill", "install"],
     ),
     hand(
         Anchor::Page(Section::Keymap),
-        s::settings_section_keymap,
+        s::settings::section_keymap,
         &["shortcut", "keybinding", "key", "keymap"],
     ),
 ];

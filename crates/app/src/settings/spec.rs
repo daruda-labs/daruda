@@ -70,40 +70,45 @@ pub(super) struct TextSpec {
 pub(super) const TEXT_SETTINGS: &[TextSpec] = &[
     TextSpec {
         setting: TextSetting::TerminalFontSize,
-        placeholder: || s::settings_placeholder_example("13"),
+        placeholder: || s::settings::placeholder_example("13"),
         field: |w| &w.terminal_font_size_input,
         show: |c| c.font.terminal.size.to_string(),
         current: |c| SettingsPatch::TerminalFontSize(c.font.terminal.size),
         parse: |input, cx| {
-            bounded(input, 6.0..=72.0, || s::settings_err_font_size().into(), cx)
-                .map(SettingsPatch::TerminalFontSize)
+            bounded(
+                input,
+                6.0..=72.0,
+                || s::settings::err_font_size().into(),
+                cx,
+            )
+            .map(SettingsPatch::TerminalFontSize)
         },
     },
     TextSpec {
         setting: TextSetting::TerminalLineHeight,
-        placeholder: || s::settings_placeholder_example("1.0"),
+        placeholder: || s::settings::placeholder_example("1.0"),
         field: |w| &w.terminal_line_height_input,
         show: |c| c.font.terminal.line_height.to_string(),
         current: |c| SettingsPatch::TerminalLineHeight(c.font.terminal.line_height),
         parse: |input, cx| {
-            bounded(input, 0.5..=2.0, || s::settings_err_spacing().into(), cx)
+            bounded(input, 0.5..=2.0, || s::settings::err_spacing().into(), cx)
                 .map(SettingsPatch::TerminalLineHeight)
         },
     },
     TextSpec {
         setting: TextSetting::TerminalCellWidth,
-        placeholder: || s::settings_placeholder_example("1.0"),
+        placeholder: || s::settings::placeholder_example("1.0"),
         field: |w| &w.terminal_cell_width_input,
         show: |c| c.font.terminal.cell_width.to_string(),
         current: |c| SettingsPatch::TerminalCellWidth(c.font.terminal.cell_width),
         parse: |input, cx| {
-            bounded(input, 0.5..=2.0, || s::settings_err_spacing().into(), cx)
+            bounded(input, 0.5..=2.0, || s::settings::err_spacing().into(), cx)
                 .map(SettingsPatch::TerminalCellWidth)
         },
     },
     TextSpec {
         setting: TextSetting::EditorFontSize,
-        placeholder: || s::settings_placeholder_example("13"),
+        placeholder: || s::settings::placeholder_example("13"),
         field: |w| &w.editor_font_size_input,
         show: |c| c.font.editor.size.to_string(),
         current: |c| SettingsPatch::EditorFontSize(c.font.editor.size),
@@ -111,7 +116,7 @@ pub(super) const TEXT_SETTINGS: &[TextSpec] = &[
             bounded(
                 input,
                 6.0..=72.0,
-                || s::settings_err_editor_font_size().into(),
+                || s::settings::err_editor_font_size().into(),
                 cx,
             )
             .map(SettingsPatch::EditorFontSize)
@@ -119,18 +124,18 @@ pub(super) const TEXT_SETTINGS: &[TextSpec] = &[
     },
     TextSpec {
         setting: TextSetting::EditorLineHeight,
-        placeholder: || s::settings_placeholder_example("1.7"),
+        placeholder: || s::settings::placeholder_example("1.7"),
         field: |w| &w.editor_line_height_input,
         show: |c| c.font.editor.line_height.to_string(),
         current: |c| SettingsPatch::EditorLineHeight(c.font.editor.line_height),
         parse: |input, cx| {
-            bounded(input, 0.5..=2.0, || s::settings_err_spacing().into(), cx)
+            bounded(input, 0.5..=2.0, || s::settings::err_spacing().into(), cx)
                 .map(SettingsPatch::EditorLineHeight)
         },
     },
     TextSpec {
         setting: TextSetting::AgentChatFontSize,
-        placeholder: || s::settings_placeholder_example("13"),
+        placeholder: || s::settings::placeholder_example("13"),
         field: |w| &w.agent_chat_font_size_input,
         show: |c| c.font.agent_chat.size.to_string(),
         current: |c| SettingsPatch::AgentChatFontSize(c.font.agent_chat.size),
@@ -138,7 +143,7 @@ pub(super) const TEXT_SETTINGS: &[TextSpec] = &[
             bounded(
                 input,
                 6.0..=72.0,
-                || s::settings_err_agent_chat_font_size().into(),
+                || s::settings::err_agent_chat_font_size().into(),
                 cx,
             )
             .map(SettingsPatch::AgentChatFontSize)
@@ -146,29 +151,29 @@ pub(super) const TEXT_SETTINGS: &[TextSpec] = &[
     },
     TextSpec {
         setting: TextSetting::AgentChatLineHeight,
-        placeholder: || s::settings_placeholder_example("1.6"),
+        placeholder: || s::settings::placeholder_example("1.6"),
         field: |w| &w.agent_chat_line_height_input,
         show: |c| c.font.agent_chat.line_height.to_string(),
         current: |c| SettingsPatch::AgentChatLineHeight(c.font.agent_chat.line_height),
         parse: |input, cx| {
-            bounded(input, 0.5..=2.0, || s::settings_err_spacing().into(), cx)
+            bounded(input, 0.5..=2.0, || s::settings::err_spacing().into(), cx)
                 .map(SettingsPatch::AgentChatLineHeight)
         },
     },
     TextSpec {
         setting: TextSetting::WindowOpacity,
-        placeholder: || s::settings_placeholder_range("0.1", "1.0"),
+        placeholder: || s::settings::placeholder_range("0.1", "1.0"),
         field: |w| &w.opacity_input,
         show: |c| c.window.opacity.to_string(),
         current: |c| SettingsPatch::WindowOpacity(c.window.opacity),
         parse: |input, cx| {
-            bounded(input, 0.1..=1.0, || s::settings_err_opacity().into(), cx)
+            bounded(input, 0.1..=1.0, || s::settings::err_opacity().into(), cx)
                 .map(SettingsPatch::WindowOpacity)
         },
     },
     TextSpec {
         setting: TextSetting::ScrollbackMaxRows,
-        placeholder: || s::settings_placeholder_example("10000"),
+        placeholder: || s::settings::placeholder_example("10000"),
         field: |w| &w.scrollback_input,
         show: |c| c.scrollback.max_rows.to_string(),
         current: |c| SettingsPatch::ScrollbackMaxRows(c.scrollback.max_rows),
@@ -176,7 +181,7 @@ pub(super) const TEXT_SETTINGS: &[TextSpec] = &[
             bounded(
                 input,
                 1_000..=500_000,
-                || s::settings_err_scrollback().into(),
+                || s::settings::err_scrollback().into(),
                 cx,
             )
             .map(SettingsPatch::ScrollbackMaxRows)
@@ -184,29 +189,29 @@ pub(super) const TEXT_SETTINGS: &[TextSpec] = &[
     },
     TextSpec {
         setting: TextSetting::TerminalInsetX,
-        placeholder: || s::settings_placeholder_example("4"),
+        placeholder: || s::settings::placeholder_example("4"),
         field: |w| &w.inset_x_input,
         show: |c| c.font.terminal.inset_x.to_string(),
         current: |c| SettingsPatch::TerminalInsetX(c.font.terminal.inset_x),
         parse: |input, cx| {
-            bounded(input, 0.0..=32.0, || s::settings_err_inset().into(), cx)
+            bounded(input, 0.0..=32.0, || s::settings::err_inset().into(), cx)
                 .map(SettingsPatch::TerminalInsetX)
         },
     },
     TextSpec {
         setting: TextSetting::TerminalInsetY,
-        placeholder: || s::settings_placeholder_example("2"),
+        placeholder: || s::settings::placeholder_example("2"),
         field: |w| &w.inset_y_input,
         show: |c| c.font.terminal.inset_y.to_string(),
         current: |c| SettingsPatch::TerminalInsetY(c.font.terminal.inset_y),
         parse: |input, cx| {
-            bounded(input, 0.0..=32.0, || s::settings_err_inset().into(), cx)
+            bounded(input, 0.0..=32.0, || s::settings::err_inset().into(), cx)
                 .map(SettingsPatch::TerminalInsetY)
         },
     },
     TextSpec {
         setting: TextSetting::ClipboardStreamingMaxBytes,
-        placeholder: || s::settings_placeholder_example("10485760"),
+        placeholder: || s::settings::placeholder_example("10485760"),
         field: |w| &w.clipboard_streaming_input,
         show: |c| c.clipboard.streaming_max_bytes.to_string(),
         current: |c| SettingsPatch::ClipboardStreamingMaxBytes(c.clipboard.streaming_max_bytes),
@@ -214,7 +219,7 @@ pub(super) const TEXT_SETTINGS: &[TextSpec] = &[
             bounded(
                 input,
                 4_096..=67_108_864,
-                || s::settings_err_clipboard().into(),
+                || s::settings::err_clipboard().into(),
                 cx,
             )
             .map(SettingsPatch::ClipboardStreamingMaxBytes)
@@ -222,18 +227,18 @@ pub(super) const TEXT_SETTINGS: &[TextSpec] = &[
     },
     TextSpec {
         setting: TextSetting::PanelsGridColumns,
-        placeholder: || s::settings_placeholder_range("1", "16"),
+        placeholder: || s::settings::placeholder_range("1", "16"),
         field: |w| &w.panels_grid_columns_input,
         show: |c| c.panels.grid_columns.to_string(),
         current: |c| SettingsPatch::PanelsGridColumns(c.panels.grid_columns),
         parse: |input, cx| {
-            bounded(input, 1..=16, || s::settings_err_grid_columns().into(), cx)
+            bounded(input, 1..=16, || s::settings::err_grid_columns().into(), cx)
                 .map(SettingsPatch::PanelsGridColumns)
         },
     },
     TextSpec {
         setting: TextSetting::ClaudeStatusStaleSecs,
-        placeholder: || s::settings_placeholder_example("300"),
+        placeholder: || s::settings::placeholder_example("300"),
         field: |w| &w.claude_status_stale_input,
         show: |c| c.claude_status.stale_threshold_secs.to_string(),
         current: |c| SettingsPatch::ClaudeStatusStaleSecs(c.claude_status.stale_threshold_secs),
@@ -241,7 +246,7 @@ pub(super) const TEXT_SETTINGS: &[TextSpec] = &[
             bounded(
                 input,
                 30..=86_400,
-                || s::settings_err_stale_threshold().into(),
+                || s::settings::err_stale_threshold().into(),
                 cx,
             )
             .map(SettingsPatch::ClaudeStatusStaleSecs)
@@ -249,18 +254,18 @@ pub(super) const TEXT_SETTINGS: &[TextSpec] = &[
     },
     TextSpec {
         setting: TextSetting::ClaudeStatusFileTtlDays,
-        placeholder: || s::settings_placeholder_example("7"),
+        placeholder: || s::settings::placeholder_example("7"),
         field: |w| &w.claude_status_ttl_input,
         show: |c| c.claude_status.file_ttl_days.to_string(),
         current: |c| SettingsPatch::ClaudeStatusFileTtlDays(c.claude_status.file_ttl_days),
         parse: |input, cx| {
-            bounded(input, 1..=365, || s::settings_err_file_ttl().into(), cx)
+            bounded(input, 1..=365, || s::settings::err_file_ttl().into(), cx)
                 .map(SettingsPatch::ClaudeStatusFileTtlDays)
         },
     },
     TextSpec {
         setting: TextSetting::UsageLimitsPollSecs,
-        placeholder: || s::settings_placeholder_example("300"),
+        placeholder: || s::settings::placeholder_example("300"),
         field: |w| &w.usage_limits_poll_input,
         show: |c| c.usage.poll.limits_secs.to_string(),
         current: |c| SettingsPatch::UsageLimitsPollSecs(c.usage.poll.limits_secs),
@@ -268,7 +273,7 @@ pub(super) const TEXT_SETTINGS: &[TextSpec] = &[
             bounded(
                 input,
                 0..=MAX_TOML_INT,
-                || s::settings_err_whole_number().into(),
+                || s::settings::err_whole_number().into(),
                 cx,
             )
             .map(SettingsPatch::UsageLimitsPollSecs)
@@ -276,7 +281,7 @@ pub(super) const TEXT_SETTINGS: &[TextSpec] = &[
     },
     TextSpec {
         setting: TextSetting::UsageStatusPollSecs,
-        placeholder: || s::settings_placeholder_example("300"),
+        placeholder: || s::settings::placeholder_example("300"),
         field: |w| &w.usage_status_poll_input,
         show: |c| c.usage.poll.status_secs.to_string(),
         current: |c| SettingsPatch::UsageStatusPollSecs(c.usage.poll.status_secs),
@@ -284,7 +289,7 @@ pub(super) const TEXT_SETTINGS: &[TextSpec] = &[
             bounded(
                 input,
                 0..=MAX_TOML_INT,
-                || s::settings_err_whole_number().into(),
+                || s::settings::err_whole_number().into(),
                 cx,
             )
             .map(SettingsPatch::UsageStatusPollSecs)
@@ -292,7 +297,7 @@ pub(super) const TEXT_SETTINGS: &[TextSpec] = &[
     },
     TextSpec {
         setting: TextSetting::PortsPollSecs,
-        placeholder: || s::settings_placeholder_example("5"),
+        placeholder: || s::settings::placeholder_example("5"),
         field: |w| &w.ports_poll_input,
         show: |c| c.ports.poll_secs.to_string(),
         current: |c| SettingsPatch::PortsPollSecs(c.ports.poll_secs),
@@ -300,7 +305,7 @@ pub(super) const TEXT_SETTINGS: &[TextSpec] = &[
             bounded(
                 input,
                 2..=MAX_TOML_INT,
-                || s::settings_err_ports_poll().into(),
+                || s::settings::err_ports_poll().into(),
                 cx,
             )
             .map(SettingsPatch::PortsPollSecs)
@@ -308,29 +313,29 @@ pub(super) const TEXT_SETTINGS: &[TextSpec] = &[
     },
     TextSpec {
         setting: TextSetting::LogsRetentionDays,
-        placeholder: || s::settings_placeholder_example("30"),
+        placeholder: || s::settings::placeholder_example("30"),
         field: |w| &w.logs_retention_input,
         show: |c| c.logs.retention_days.to_string(),
         current: |c| SettingsPatch::LogsRetentionDays(c.logs.retention_days),
         parse: |input, cx| {
-            bounded(input, 0.., || s::settings_err_whole_number().into(), cx)
+            bounded(input, 0.., || s::settings::err_whole_number().into(), cx)
                 .map(SettingsPatch::LogsRetentionDays)
         },
     },
     TextSpec {
         setting: TextSetting::LogsMaxFileSizeMb,
-        placeholder: || s::settings_placeholder_example("10"),
+        placeholder: || s::settings::placeholder_example("10"),
         field: |w| &w.logs_max_size_input,
         show: |c| c.logs.max_file_size_mb.to_string(),
         current: |c| SettingsPatch::LogsMaxFileSizeMb(c.logs.max_file_size_mb),
         parse: |input, cx| {
-            bounded(input, 0.., || s::settings_err_whole_number().into(), cx)
+            bounded(input, 0.., || s::settings::err_whole_number().into(), cx)
                 .map(SettingsPatch::LogsMaxFileSizeMb)
         },
     },
     TextSpec {
         setting: TextSetting::PresenceGraceSecs,
-        placeholder: || s::settings_placeholder_example("10"),
+        placeholder: || s::settings::placeholder_example("10"),
         field: |w| &w.presence_grace_input,
         show: |c| c.presence.away_grace_secs.to_string(),
         current: |c| SettingsPatch::PresenceGraceSecs(c.presence.away_grace_secs),
@@ -338,7 +343,7 @@ pub(super) const TEXT_SETTINGS: &[TextSpec] = &[
             bounded(
                 input,
                 0..=MAX_TOML_INT,
-                || s::settings_err_whole_number().into(),
+                || s::settings::err_whole_number().into(),
                 cx,
             )
             .map(SettingsPatch::PresenceGraceSecs)
@@ -346,7 +351,7 @@ pub(super) const TEXT_SETTINGS: &[TextSpec] = &[
     },
     TextSpec {
         setting: TextSetting::PresenceIdleSecs,
-        placeholder: || s::settings_placeholder_example("30"),
+        placeholder: || s::settings::placeholder_example("30"),
         field: |w| &w.presence_idle_input,
         show: |c| c.presence.away_idle_secs.to_string(),
         current: |c| SettingsPatch::PresenceIdleSecs(c.presence.away_idle_secs),
@@ -354,7 +359,7 @@ pub(super) const TEXT_SETTINGS: &[TextSpec] = &[
             bounded(
                 input,
                 0..=MAX_TOML_INT,
-                || s::settings_err_whole_number().into(),
+                || s::settings::err_whole_number().into(),
                 cx,
             )
             .map(SettingsPatch::PresenceIdleSecs)
@@ -362,7 +367,7 @@ pub(super) const TEXT_SETTINGS: &[TextSpec] = &[
     },
     TextSpec {
         setting: TextSetting::PresenceIdleForegroundSecs,
-        placeholder: || s::settings_placeholder_example("180"),
+        placeholder: || s::settings::placeholder_example("180"),
         field: |w| &w.presence_idle_foreground_input,
         show: |c| c.presence.away_idle_foreground_secs.to_string(),
         current: |c| {
@@ -372,7 +377,7 @@ pub(super) const TEXT_SETTINGS: &[TextSpec] = &[
             bounded(
                 input,
                 0..=MAX_TOML_INT,
-                || s::settings_err_whole_number().into(),
+                || s::settings::err_whole_number().into(),
                 cx,
             )
             .map(SettingsPatch::PresenceIdleForegroundSecs)
@@ -380,7 +385,7 @@ pub(super) const TEXT_SETTINGS: &[TextSpec] = &[
     },
     TextSpec {
         setting: TextSetting::AgentInputMaxRows,
-        placeholder: || s::settings_placeholder_example("8"),
+        placeholder: || s::settings::placeholder_example("8"),
         field: |w| &w.agent_input_max_rows_input,
         show: |c| c.agent.input_max_rows.to_string(),
         current: |c| SettingsPatch::AgentInputMaxRows(c.agent.input_max_rows),
@@ -388,7 +393,7 @@ pub(super) const TEXT_SETTINGS: &[TextSpec] = &[
             bounded(
                 input,
                 2..=20,
-                || s::settings_err_input_max_rows().into(),
+                || s::settings::err_input_max_rows().into(),
                 cx,
             )
             .map(SettingsPatch::AgentInputMaxRows)
@@ -396,7 +401,7 @@ pub(super) const TEXT_SETTINGS: &[TextSpec] = &[
     },
     TextSpec {
         setting: TextSetting::AgentReadingWidth,
-        placeholder: || s::settings_placeholder_example("700"),
+        placeholder: || s::settings::placeholder_example("700"),
         field: |w| &w.agent_reading_width_input,
         show: |c| c.agent.reading_width.to_string(),
         current: |c| SettingsPatch::AgentReadingWidth(c.agent.reading_width),
@@ -404,7 +409,7 @@ pub(super) const TEXT_SETTINGS: &[TextSpec] = &[
             bounded(
                 input,
                 360.0..=2400.0,
-                || s::settings_err_reading_width().into(),
+                || s::settings::err_reading_width().into(),
                 cx,
             )
             .map(SettingsPatch::AgentReadingWidth)
@@ -412,40 +417,40 @@ pub(super) const TEXT_SETTINGS: &[TextSpec] = &[
     },
     TextSpec {
         setting: TextSetting::FlowTimeoutMinutes,
-        placeholder: || s::settings_placeholder_example("90"),
+        placeholder: || s::settings::placeholder_example("90"),
         field: |w| &w.flow_timeout_minutes_input,
         show: |c| c.flow.timeout_minutes.to_string(),
         current: |c| SettingsPatch::FlowTimeoutMinutes(c.flow.timeout_minutes),
         parse: |input, cx| {
-            bounded(input, 0.., || s::settings_err_whole_number().into(), cx)
+            bounded(input, 0.., || s::settings::err_whole_number().into(), cx)
                 .map(SettingsPatch::FlowTimeoutMinutes)
         },
     },
     TextSpec {
         setting: TextSetting::FlowMaxNodeRuns,
-        placeholder: || s::settings_placeholder_example("100"),
+        placeholder: || s::settings::placeholder_example("100"),
         field: |w| &w.flow_max_node_runs_input,
         show: |c| c.flow.max_node_runs.to_string(),
         current: |c| SettingsPatch::FlowMaxNodeRuns(c.flow.max_node_runs),
         parse: |input, cx| {
-            bounded(input, 0.., || s::settings_err_whole_number().into(), cx)
+            bounded(input, 0.., || s::settings::err_whole_number().into(), cx)
                 .map(SettingsPatch::FlowMaxNodeRuns)
         },
     },
     TextSpec {
         setting: TextSetting::FlowMaxCost,
-        placeholder: || s::settings_placeholder_example("5.0"),
+        placeholder: || s::settings::placeholder_example("5.0"),
         field: |w| &w.flow_max_cost_input,
         show: |c| c.flow.max_cost.to_string(),
         current: |c| SettingsPatch::FlowMaxCost(c.flow.max_cost),
         parse: |input, cx| {
-            bounded(input, 0.0.., || s::settings_err_non_negative().into(), cx)
+            bounded(input, 0.0.., || s::settings::err_non_negative().into(), cx)
                 .map(SettingsPatch::FlowMaxCost)
         },
     },
     TextSpec {
         setting: TextSetting::FlowCostCurrency,
-        placeholder: || s::settings_placeholder_example("USD"),
+        placeholder: || s::settings::placeholder_example("USD"),
         field: |w| &w.flow_cost_currency_input,
         show: |c| c.flow.cost_currency.clone(),
         current: |c| SettingsPatch::FlowCostCurrency(c.flow.cost_currency.clone()),
@@ -453,7 +458,7 @@ pub(super) const TEXT_SETTINGS: &[TextSpec] = &[
         parse: |input, cx| {
             let value = input.read(cx).value().trim().to_string();
             if value.is_empty() {
-                Err(s::settings_err_currency().into())
+                Err(s::settings::err_currency().into())
             } else {
                 Ok(SettingsPatch::FlowCostCurrency(value))
             }
@@ -461,7 +466,7 @@ pub(super) const TEXT_SETTINGS: &[TextSpec] = &[
     },
     TextSpec {
         setting: TextSetting::LeftDefaultWidth,
-        placeholder: || s::settings_placeholder_example("220"),
+        placeholder: || s::settings::placeholder_example("220"),
         field: |w| &w.left_default_width_input,
         show: |c| c.left_dock.left_default_width.to_string(),
         current: |c| SettingsPatch::LeftDefaultWidth(c.left_dock.left_default_width),
@@ -469,7 +474,7 @@ pub(super) const TEXT_SETTINGS: &[TextSpec] = &[
             bounded(
                 input,
                 150.0..=400.0,
-                || s::settings_err_left_default_width().into(),
+                || s::settings::err_left_default_width().into(),
                 cx,
             )
             .map(SettingsPatch::LeftDefaultWidth)
@@ -477,7 +482,7 @@ pub(super) const TEXT_SETTINGS: &[TextSpec] = &[
     },
     TextSpec {
         setting: TextSetting::ShellProgram,
-        placeholder: s::settings_placeholder_shell_program,
+        placeholder: s::settings::placeholder_shell_program,
         field: |w| &w.shell_program_input,
         show: |c| c.shell.program.clone().unwrap_or_default(),
         current: |c| SettingsPatch::ShellProgram(c.shell.program.clone()),
@@ -491,7 +496,7 @@ pub(super) const TEXT_SETTINGS: &[TextSpec] = &[
     },
     TextSpec {
         setting: TextSetting::NotifyLongRunningThresholdSecs,
-        placeholder: || s::settings_placeholder_example("30"),
+        placeholder: || s::settings::placeholder_example("30"),
         field: |w| &w.notify_long_running_threshold_input,
         show: |c| c.notifications.long_running_threshold_secs.to_string(),
         current: |c| {
@@ -503,7 +508,7 @@ pub(super) const TEXT_SETTINGS: &[TextSpec] = &[
             bounded(
                 input,
                 1..=86_400,
-                || s::settings_err_long_running_threshold().into(),
+                || s::settings::err_long_running_threshold().into(),
                 cx,
             )
             .map(SettingsPatch::NotifyLongRunningThresholdSecs)

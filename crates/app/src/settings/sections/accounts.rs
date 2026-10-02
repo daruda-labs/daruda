@@ -61,17 +61,17 @@ fn now_unix() -> u64 {
 /// diverge in wording later.
 fn last_authenticated_label(now: u64, last_authenticated_at: u64) -> String {
     if last_authenticated_at == 0 {
-        return s::settings_accounts_last_auth_never();
+        return s::settings::accounts_last_auth_never();
     }
     let age = now.saturating_sub(last_authenticated_at);
     if age < 60 {
-        s::settings_accounts_last_auth_just_now()
+        s::settings::accounts_last_auth_just_now()
     } else if age < 3_600 {
-        s::settings_accounts_last_auth_minutes(age / 60)
+        s::settings::accounts_last_auth_minutes(age / 60)
     } else if age < 86_400 {
-        s::settings_accounts_last_auth_hours(age / 3_600)
+        s::settings::accounts_last_auth_hours(age / 3_600)
     } else {
-        s::settings_accounts_last_auth_days(age / 86_400)
+        s::settings::accounts_last_auth_days(age / 86_400)
     }
 }
 
@@ -81,7 +81,7 @@ fn last_authenticated_label(now: u64, last_authenticated_at: u64) -> String {
 /// those panes revert to is the deleted account's own auth domain's
 /// ambient home, not a fixed one.
 fn remove_confirm_body(count: usize, recipe: AccountRecipeId) -> String {
-    s::settings_accounts_remove_confirm_body(
+    s::settings::accounts_remove_confirm_body(
         count,
         daruda_agent::accounts::recipe_for(recipe).system_home_hint(),
     )
@@ -156,7 +156,7 @@ fn row_header(
                 div()
                     .text_size(px(theme::SKILL_BADGE_FONT_SIZE))
                     .text_color(t.text_muted)
-                    .child(s::settings_accounts_default_badge()),
+                    .child(s::settings::accounts_default_badge()),
             )
         })
 }
@@ -182,7 +182,7 @@ impl SettingsView {
                     div()
                         .text_size(px(theme::MODAL_BODY_FONT_SIZE))
                         .text_color(theme::current(cx).text_primary)
-                        .child(s::account_recipe_label(recipe)),
+                        .child(s::settings::account_recipe_label(recipe)),
                 )
                 .child(self.render_system_row(recipe, default_id.is_none(), cx));
             for account in self.accounts.accounts.iter().filter(|a| a.recipe == recipe) {
@@ -221,7 +221,7 @@ impl SettingsView {
             .child(
                 button(
                     SharedString::from(format!("settings-accounts-system-default-{slug}")),
-                    s::settings_accounts_set_default(),
+                    s::settings::accounts_set_default(),
                 )
                 .disabled(is_default)
                 .on_click(cx.listener(move |this, _: &ClickEvent, _window, cx| {
@@ -235,9 +235,9 @@ impl SettingsView {
                 button(
                     SharedString::from(format!("settings-accounts-system-reauth-{slug}")),
                     if self.account_login_busy {
-                        s::settings_accounts_authentication_in_progress()
+                        s::settings::accounts_authentication_in_progress()
                     } else {
-                        s::settings_accounts_system_reauthenticate()
+                        s::settings::accounts_system_reauthenticate()
                     },
                 )
                 .disabled(self.account_login_busy)
@@ -248,7 +248,7 @@ impl SettingsView {
 
         row_card(cx)
             .child(row_header(
-                s::settings_accounts_system_title(),
+                s::settings::accounts_system_title(),
                 home,
                 is_default,
                 cx,
@@ -268,7 +268,7 @@ impl SettingsView {
     ) -> Option<String> {
         let status = self.auth_statuses.get(&target)?;
         let method = status.auth_method.as_deref()?;
-        Some(s::settings_accounts_signed_in_with(method))
+        Some(s::settings::accounts_signed_in_with(method))
     }
 
     fn render_account_row(
@@ -285,7 +285,7 @@ impl SettingsView {
         let email = account
             .email
             .clone()
-            .unwrap_or_else(s::settings_accounts_unknown_email);
+            .unwrap_or_else(s::settings::accounts_unknown_email);
         let last_auth = last_authenticated_label(now_unix(), account.last_authenticated_at);
         let mut subtitle = match account.organization.as_deref() {
             Some(org) => format!("{org} · {last_auth}"),
@@ -310,7 +310,7 @@ impl SettingsView {
             .child(
                 button(
                     SharedString::from(format!("settings-accounts-default-{row_key}")),
-                    s::settings_accounts_set_default(),
+                    s::settings::accounts_set_default(),
                 )
                 .disabled(is_default)
                 .on_click(cx.listener(move |this, _: &ClickEvent, _window, cx| {
@@ -321,9 +321,9 @@ impl SettingsView {
                 button(
                     SharedString::from(format!("settings-accounts-reauth-{row_key}")),
                     if self.account_login_busy {
-                        s::settings_accounts_authentication_in_progress()
+                        s::settings::accounts_authentication_in_progress()
                     } else {
-                        s::settings_accounts_reauthenticate()
+                        s::settings::accounts_reauthenticate()
                     },
                 )
                 .disabled(self.account_login_busy)
@@ -334,7 +334,7 @@ impl SettingsView {
             .child(
                 button_danger(
                     SharedString::from(format!("settings-accounts-delete-{row_key}")),
-                    s::settings_accounts_delete(),
+                    s::settings::accounts_delete(),
                 )
                 .on_click(cx.listener(move |this, _: &ClickEvent, window, cx| {
                     this.open_remove_confirm(account_id, window, cx);
@@ -359,9 +359,9 @@ impl SettingsView {
             button(
                 SharedString::from(format!("settings-accounts-add-{}", recipe_slug(recipe))),
                 if self.account_login_busy {
-                    s::settings_accounts_authentication_in_progress()
+                    s::settings::accounts_authentication_in_progress()
                 } else {
-                    s::settings_accounts_add(&s::account_recipe_label(recipe))
+                    s::settings::accounts_add(s::settings::account_recipe_label(recipe))
                 },
             )
             .disabled(self.account_login_busy)
@@ -428,7 +428,7 @@ impl SettingsView {
             Ok(state) => state,
             Err(e) => {
                 self.report_account_io_error(
-                    s::settings_err_accounts_save_default(&e.to_string()),
+                    s::settings::err_accounts_save_default(e.to_string()),
                     "Failed to save accounts.json after set-default",
                     "settings.accounts.save_default_failed",
                     &e,
@@ -491,9 +491,9 @@ impl SettingsView {
         });
         let weak = cx.weak_entity();
         open_confirm_dialog(
-            s::settings_accounts_remove_confirm_title(),
+            s::settings::accounts_remove_confirm_title(),
             remove_confirm_body(referencing, recipe),
-            s::settings_accounts_remove_confirm_ok(),
+            s::settings::accounts_remove_confirm_ok(),
             ButtonVariant::Danger,
             move |_, _window, app_cx| {
                 if let Some(this) = weak.upgrade() {
@@ -534,7 +534,7 @@ impl SettingsView {
                 // disk still names this account — which is why the cleanup
                 // below has not happened yet and must not.
                 self.report_account_io_error(
-                    s::settings_err_accounts_remove(&e.to_string()),
+                    s::settings::err_accounts_remove(e.to_string()),
                     "Failed to save accounts.json after delete",
                     "settings.accounts.save_delete_failed",
                     &e,
@@ -614,7 +614,7 @@ mod tests {
     #[test]
     fn every_recipe_has_a_label_and_a_system_home_hint() {
         for recipe in AccountRecipeId::all() {
-            assert!(!s::account_recipe_label(recipe).is_empty());
+            assert!(!s::settings::account_recipe_label(recipe).is_empty());
             assert!(
                 daruda_agent::accounts::recipe_for(recipe)
                     .system_home_hint()

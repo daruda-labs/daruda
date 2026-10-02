@@ -1672,7 +1672,7 @@ fn a_malformed_environment_line_blocks_the_save(cx: &mut TestAppContext) {
         // Pinned whole: `contains("CODEX_CONFIG")` alone would also pass on
         // the wrong row ordinal, or on a message that named the *well-formed*
         // line instead.
-        assert_eq!(err, s::settings_err_agent_catalog_env(1, "CODEX_CONFIG"));
+        assert_eq!(err, s::settings::err_agent_catalog_env(1, "CODEX_CONFIG"));
         assert!(!err.contains("RUST_LOG"), "{err}");
     });
     // An empty key is the other malformation the field has to catch, and the
@@ -1681,7 +1681,7 @@ fn a_malformed_environment_line_blocks_the_save(cx: &mut TestAppContext) {
     win.read_with(cx, |w, cx| {
         assert_eq!(
             w.validate(cx).unwrap_err(),
-            s::settings_err_agent_catalog_env(1, "=oops")
+            s::settings::err_agent_catalog_env(1, "=oops")
         );
     });
 }
@@ -2364,7 +2364,7 @@ async fn copy_botfather_commands_writes_the_registration_block(cx: &mut TestAppC
     // `control::spec::tests::the_botfather_registration_lists_every_command_name`'s
     // invariant. This test owns the copy itself — asserted exactly, so a
     // truncated or doubled paste fails rather than passing a shape check.
-    assert_eq!(text, s::control_botfather_commands());
+    assert_eq!(text, s::control::botfather_commands());
     for line in text.lines() {
         assert!(line.contains(" - "), "not a BotFather row: {line}");
     }

@@ -80,7 +80,9 @@ pub(super) fn diff_block(
         .hover(|s| s.underline())
         .font_family(theme::FONT_FAMILY_MONOSPACE)
         .text_size(px(theme::agent_chat_font_size(cx)))
-        .tooltip(crate::ui::tooltip::text(s::diff_open_in_file_view()))
+        .tooltip(crate::ui::tooltip::text(
+            s::agent_chat::diff_open_in_file_view(),
+        ))
         .child(SharedString::from(path_string.clone()))
         .on_click(move |_, window, cx| {
             // Keep the click from bubbling to an ancestor click handler —
@@ -115,8 +117,8 @@ pub(super) fn diff_block(
         .as_deref()
         .and_then(daruda_config::external_editor_preset)
     {
-        Some(preset) => s::diff_open_in_editor(preset.display_name),
-        None => s::diff_open_externally(),
+        Some(preset) => s::agent_chat::diff_open_in_editor(preset.display_name),
+        None => s::agent_chat::diff_open_externally(),
     };
     header = header.trailing(
         button_bare(SharedString::from(format!(
@@ -149,9 +151,9 @@ pub(super) fn diff_block(
             SharedString::from(format!("agent-chat-diff-copy-path-{diff_key}")),
             SharedString::from(path_string),
             Icon::empty().path(ICON_CONTENT_COPY),
-            SharedString::from(s::diff_copy_path()),
+            SharedString::from(s::agent_chat::diff_copy_path()),
             Icon::empty().path(ICON_CHECK),
-            SharedString::from(s::diff_path_copied()),
+            SharedString::from(s::agent_chat::diff_path_copied()),
             window,
             cx,
         )
@@ -256,7 +258,7 @@ fn diff_body(
                 .bg(theme::dim_toward_gray(theme::agent_chat_bg(cx), dim))
                 .text_color(theme::dim_toward_gray(theme::agent_chat_fg_muted(cx), dim))
                 .text_size(px(theme::agent_chat_font_size(cx)))
-                .child(SharedString::from(s::file_viewer_empty_diff())),
+                .child(SharedString::from(s::file_viewer::empty_diff())),
         );
     }
 
@@ -292,7 +294,7 @@ fn diff_body(
                 .bg(theme::dim_toward_gray(theme::agent_chat_bg(cx), dim))
                 .text_color(theme::dim_toward_gray(theme::agent_chat_fg_muted(cx), dim))
                 .text_size(px(theme::agent_chat_font_size(cx)))
-                .child(SharedString::from(s::agent_chat_diff_fallback_truncated(
+                .child(SharedString::from(s::agent_chat::diff_fallback_truncated(
                     split.hidden,
                 ))),
         );

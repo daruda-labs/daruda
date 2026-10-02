@@ -172,7 +172,7 @@ Runtime `Lane` model (id / path / status / `base_ref` / description) plus a GPUI
 | Menu bar | `menus.rs` |
 | Key-binding string | `surface/keybindings.rs` |
 | Keybinding-override arm | `surface/action_map.rs` |
-| User-visible label | `surface/strings.rs` or `daruda_terminal::ux::strings` |
+| User-visible label | a `locales/en.yml` key (→ `surface::strings::<section>`) or `daruda_terminal::ux::strings` |
 | User-tunable value | `daruda_config` |
 | Pixel/color constant | `daruda_terminal::ux::theme` |
 | Blocking subprocess | `lane/git.rs` style — GPUI-free, callers wrap with `background_executor` |
@@ -208,7 +208,7 @@ A file is split when its single responsibility breaks down, not when it crosses 
 Every user-facing affordance must update all four:
 1. Type — `actions!()`
 2. Handler — `register_action` or `cx.bind_keys`
-3. Constant — `surface/keybindings.rs::SHORTCUT_*` or `surface/strings.rs`
+3. Constant — `surface/keybindings.rs::SHORTCUT_*` or a `locales/en.yml` key
 4. Discoverability — `command::palette::PALETTE_ENTRIES` + `surface/action_map.rs` arm
 
 ### G4 — Inline-literal ban

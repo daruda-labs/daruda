@@ -21,7 +21,7 @@ const UNSET: &str = "";
 pub(in crate::settings) fn agent_options(config: &Config) -> Vec<select::SelectOption> {
     let mut opts = vec![select::SelectOption::new(
         UNSET,
-        s::settings_orchestrator_agent_default(),
+        s::settings::orchestrator_agent_default(),
     )];
     opts.extend(
         config
@@ -38,7 +38,7 @@ pub(in crate::settings) fn account_options(
 ) -> Vec<select::SelectOption> {
     let mut opts = vec![select::SelectOption::new(
         UNSET,
-        s::settings_orchestrator_account_system(),
+        s::settings::orchestrator_account_system(),
     )];
     opts.extend(
         accounts
@@ -54,8 +54,11 @@ fn account_label(account: &ManagedAccount) -> String {
     let identity = account
         .email
         .clone()
-        .unwrap_or_else(s::settings_accounts_unknown_email);
-    s::settings_orchestrator_account_option(&s::account_recipe_label(account.recipe), &identity)
+        .unwrap_or_else(s::settings::accounts_unknown_email);
+    s::settings::orchestrator_account_option(
+        s::settings::account_recipe_label(account.recipe),
+        &identity,
+    )
 }
 
 /// The select value the live config implies.

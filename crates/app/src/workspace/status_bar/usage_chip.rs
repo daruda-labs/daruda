@@ -57,7 +57,7 @@ pub(super) fn render(
         px(theme::STATUS_BAR_AGENT_ICON_SIZE),
         t.text_muted,
     );
-    let label = crate::surface::strings::account_recipe_label(recipe);
+    let label = crate::surface::strings::settings::account_recipe_label(recipe);
     Some(
         button_status_pill_bare(SharedString::from(format!("status-usage-{label}")), cx)
             .text_size(px(theme::STATUS_BAR_FONT_SIZE))
@@ -96,7 +96,7 @@ pub(super) fn render(
                         row.child(
                             div()
                                 .text_color(t.text_subtle)
-                                .child(SharedString::from(strings::usage_stale_marker())),
+                                .child(SharedString::from(strings::usage::stale_marker())),
                         )
                     }),
             )
@@ -155,7 +155,7 @@ struct ChipParts {
 /// `Compact`/`IconOnly` — as with the Ports chip, the number is the one
 /// reading that survives every tier.
 fn chip_parts(row: &WindowRow, density: StatusBarDensity) -> ChipParts {
-    let percent = strings::status_bar_usage_chip_percent(percent(row.utilization));
+    let percent = strings::settings::status_bar_usage_chip_percent(percent(row.utilization));
     if density.is_reduced() {
         return ChipParts {
             window: None,
@@ -167,7 +167,9 @@ fn chip_parts(row: &WindowRow, density: StatusBarDensity) -> ChipParts {
         window: Some(row.label.clone()),
         percent,
         reset: row.resets_in.map(|resets_in| {
-            strings::status_bar_usage_chip_reset(&strings::format_reset_short(resets_in))
+            strings::settings::status_bar_usage_chip_reset(strings::usage::format_reset_short(
+                resets_in,
+            ))
         }),
     }
 }
@@ -183,7 +185,9 @@ fn build_menu(
 ) -> PopupMenu {
     // Named after the domain, not "PLAN USAGE": with a pill per provider the
     // dropdown has to say whose limits these are.
-    let menu = menu.label(SharedString::from(strings::account_recipe_label(recipe)));
+    let menu = menu.label(SharedString::from(strings::settings::account_recipe_label(
+        recipe,
+    )));
     let menu = rows.iter().fold(menu, |menu, row| {
         let row = row.clone();
         menu.item(PopupMenuItem::element(move |_window, cx| {
@@ -194,15 +198,16 @@ fn build_menu(
     // than dispatching the tab-switch action, which does nothing when
     // the dock is closed or Usage is already the selected view.
     menu.separator().item(
-        PopupMenuItem::new(SharedString::from(strings::status_bar_usage_open_panel())).on_click(
-            move |_, _window, app| {
-                if let Some(ws) = workspace.upgrade() {
-                    ws.update(app, |ws, cx| {
-                        ws.reveal_right_dock_view(daruda_store::project::RightDockView::Usage, cx)
-                    });
-                }
-            },
-        ),
+        PopupMenuItem::new(SharedString::from(
+            strings::settings::status_bar_usage_open_panel(),
+        ))
+        .on_click(move |_, _window, app| {
+            if let Some(ws) = workspace.upgrade() {
+                ws.update(app, |ws, cx| {
+                    ws.reveal_right_dock_view(daruda_store::project::RightDockView::Usage, cx)
+                });
+            }
+        }),
     )
 }
 
@@ -214,7 +219,7 @@ fn build_menu(
 fn gauge_row(row: &WindowRow, cx: &App) -> AnyElement {
     let t = theme::current(cx);
     let color = row_color(row);
-    let caption = row.resets_in.map(strings::format_reset_countdown);
+    let caption = row.resets_in.map(strings::usage::format_reset_countdown);
     div()
         .flex()
         .flex_col()
@@ -228,7 +233,7 @@ fn gauge_row(row: &WindowRow, cx: &App) -> AnyElement {
                 .justify_between()
                 .child(div().child(SharedString::from(row.label.clone())))
                 .child(div().text_color(color).child(SharedString::from(
-                    strings::status_bar_usage_chip_percent(percent(row.utilization)),
+                    strings::settings::status_bar_usage_chip_percent(percent(row.utilization)),
                 ))),
         )
         .child(

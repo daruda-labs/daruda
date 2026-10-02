@@ -136,9 +136,9 @@ impl Render for ErrorReportModal {
             .child(self.body_text.clone());
 
         let copy_label = if self.copied {
-            s::error_modal_button_copied()
+            s::common::btn_copied()
         } else {
-            s::error_modal_button_copy()
+            s::common::btn_copy()
         };
 
         let footer = div()
@@ -148,7 +148,7 @@ impl Render for ErrorReportModal {
             .gap(px(theme::MODAL_FOOTER_GAP))
             .mt(px(theme::MODAL_FOOTER_MARGIN_TOP))
             .child(
-                button("error-modal-open-log", s::error_modal_button_open_log())
+                button("error-modal-open-log", s::error_modal::button_open_log())
                     .disabled(log_writer::today_log_path().is_none())
                     .on_click(cx.listener(|this, _: &ClickEvent, window, cx| {
                         this.open_log_file(window, cx);
@@ -160,7 +160,7 @@ impl Render for ErrorReportModal {
                 },
             )))
             .child(
-                button("error-modal-close", s::error_modal_button_close()).on_click(cx.listener(
+                button("error-modal-close", s::common::btn_close()).on_click(cx.listener(
                     |this, _: &ClickEvent, window, cx| {
                         this.dismiss(window, cx);
                     },

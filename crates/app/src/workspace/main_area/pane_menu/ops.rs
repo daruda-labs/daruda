@@ -310,7 +310,7 @@ impl Workspace {
             .iter()
             .find(|pane| pane.id == pane_id)
             .map(|pane| pane.title(cx))
-            .unwrap_or_else(|| SharedString::from(s::ctx_send_target_pane_fallback(pane_id)));
+            .unwrap_or_else(|| SharedString::from(s::ctx::send_target_pane_fallback(pane_id)));
         if tab_index == active_tab {
             return pane_label;
         }
@@ -326,7 +326,7 @@ impl Workspace {
             .tabs
             .get(tab_index)
             .and_then(|tab| self.tab_label(tab, cx))
-            .unwrap_or_else(|| SharedString::from(s::ctx_send_target_tab_fallback(tab_index + 1)))
+            .unwrap_or_else(|| SharedString::from(s::ctx::send_target_tab_fallback(tab_index + 1)))
     }
 
     pub(super) fn scroll_agent_chat_to_bottom(&mut self, pane_id: PaneId, cx: &mut Context<Self>) {
@@ -338,9 +338,9 @@ impl Workspace {
 
     pub(super) fn open_pane_menu_link(&mut self, url: String, cx: &mut Context<Self>) {
         if let Err(err) = open::that_detached(&url) {
-            let report = ErrorReport::new(s::ctx_open_link_failed_title())
+            let report = ErrorReport::new(s::ctx::open_link_failed_title())
                 .severity(ErrorSeverity::Warning)
-                .message(s::ctx_open_link_failed_message())
+                .message(s::ctx::open_link_failed_message())
                 .with_context("url", url)
                 .with_context("error", format!("{err}"))
                 .dedup("pane_menu.open_link_failed")
@@ -351,9 +351,9 @@ impl Workspace {
     }
 
     pub(super) fn report_pane_menu_send_failed(&mut self, cx: &mut Context<Self>) {
-        let report = ErrorReport::new(s::ctx_send_selection_failed_title())
+        let report = ErrorReport::new(s::ctx::send_selection_failed_title())
             .severity(ErrorSeverity::Info)
-            .message(s::ctx_send_selection_failed_message())
+            .message(s::ctx::send_selection_failed_message())
             .dedup("pane_menu.send_selection_failed")
             .at(file!(), line!())
             .build();

@@ -148,14 +148,14 @@ impl Workspace {
 
         let detail = dirty
             .iter()
-            .map(|(_, t, draft)| crate::surface::strings::task_close_dirty_line(t, *draft))
+            .map(|(_, t, draft)| crate::surface::strings::task::close_dirty_line(t, *draft))
             .collect::<Vec<_>>()
             .join("\n");
 
-        let prompt_heading = crate::surface::strings::tab_close_batch_heading();
-        let prompt_save = crate::surface::strings::tab_close_batch_save_all();
-        let prompt_discard = crate::surface::strings::tab_close_batch_discard_all();
-        let prompt_cancel = crate::surface::strings::task_edit_cancel();
+        let prompt_heading = crate::surface::strings::task::batch_close_heading();
+        let prompt_save = crate::surface::strings::task::batch_save_all();
+        let prompt_discard = crate::surface::strings::task::batch_discard_all();
+        let prompt_cancel = crate::surface::strings::common::btn_cancel();
         let receiver = window.prompt(
             gpui::PromptLevel::Warning,
             &prompt_heading,
@@ -214,9 +214,9 @@ impl Workspace {
             .map(|t| t.as_ref())
             .collect::<Vec<_>>()
             .join(", ");
-        let report = ErrorReport::new(crate::surface::strings::task_batch_save_failed_title())
+        let report = ErrorReport::new(crate::surface::strings::task::batch_save_failed_title())
             .severity(ErrorSeverity::Warning)
-            .message(crate::surface::strings::task_batch_save_failed_detail(
+            .message(crate::surface::strings::task::batch_save_failed_detail(
                 failed.len(),
                 &listing,
             ))

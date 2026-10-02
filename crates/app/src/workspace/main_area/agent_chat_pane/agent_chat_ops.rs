@@ -269,7 +269,7 @@ impl Workspace {
     pub(super) fn pane_title(&self, pane_id: PaneId, cx: &Context<Self>) -> String {
         self.agent_chat_view(pane_id)
             .and_then(|v| v.read(cx).session_title.clone())
-            .unwrap_or_else(s::agent_chat_tab_title)
+            .unwrap_or_else(s::agent_chat::tab_title)
     }
 
     /// Fire the "waiting for input" notification on a permission request.
@@ -287,7 +287,7 @@ impl Workspace {
         self.notify_agent_pane(
             pane_id,
             self.notifications.agent_waiting_enabled,
-            s::agent_notification_waiting(),
+            s::notification::agent_waiting(),
             cx,
         );
         // Reuse `apply_event`'s protocol→view-model conversion so this relay
@@ -400,7 +400,7 @@ impl Workspace {
         self.notify_agent_pane(
             pane_id,
             self.notifications.agent_completion_enabled,
-            s::agent_notification_completed(),
+            s::notification::agent_completed(),
             cx,
         );
     }
@@ -556,7 +556,7 @@ impl Workspace {
             PaneCwdOutcome::Ready(None) => (
                 None,
                 AgentSessionStatus::Error {
-                    message: s::agent_chat_no_lane_cwd(),
+                    message: s::agent_chat::no_lane_cwd(),
                     remedy: daruda_acp::Remedy::NoneAvailable,
                 },
             ),
@@ -672,10 +672,10 @@ impl Workspace {
         ) {
             Ok(cwd) => PaneCwdOutcome::Ready(cwd),
             Err(PaneCwdBlocked::NoRemotePath) => {
-                PaneCwdOutcome::Blocked(s::agent_chat_no_remote_cwd())
+                PaneCwdOutcome::Blocked(s::agent_chat::no_remote_cwd())
             }
             Err(PaneCwdBlocked::UnusableSessionHost(reason)) => {
-                PaneCwdOutcome::Blocked(s::agent_chat_session_host_unusable(&reason.localized()))
+                PaneCwdOutcome::Blocked(s::agent_chat::session_host_unusable(reason.localized()))
             }
         };
         self.build_agent_chat_pane(outcome, None, agent_id, None, window, cx)
@@ -1591,7 +1591,7 @@ impl Workspace {
             return;
         };
         if self.diff_pane_is_remote(pane_id, cx) {
-            let report = ErrorReport::new(s::diff_remote_path_unsupported())
+            let report = ErrorReport::new(s::agent_chat::diff_remote_path_unsupported())
                 .severity(ErrorSeverity::Warning)
                 .at(file!(), line!())
                 .dedup("agent_chat.diff.remote_path_unsupported")
@@ -1709,7 +1709,7 @@ impl Workspace {
         };
         match kind {
             LocalKind::Missing => {
-                let report = ErrorReport::new(s::agent_chat_link_file_missing())
+                let report = ErrorReport::new(s::agent_chat::link_file_missing())
                     .severity(ErrorSeverity::Warning)
                     .at(file!(), line!())
                     .with_context(
@@ -1751,7 +1751,7 @@ impl Workspace {
     }
 
     fn report_remote_path_unsupported(&mut self, dedup: &'static str, cx: &mut Context<Self>) {
-        let report = ErrorReport::new(s::diff_remote_path_unsupported())
+        let report = ErrorReport::new(s::agent_chat::diff_remote_path_unsupported())
             .severity(ErrorSeverity::Warning)
             .at(file!(), line!())
             .dedup(dedup)

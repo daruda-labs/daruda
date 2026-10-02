@@ -28,15 +28,15 @@ pub(super) fn build_group_menu_items(
     let initial = current_name.to_string();
     items.push(ws_popup_menu_item(
         ws.clone(),
-        s::group_menu_rename(),
+        s::group::menu_rename(),
         false,
         move |_, window, cx| {
             let weak = cx.entity().downgrade();
             let initial = initial.clone();
             open_single_field_dialog(
                 weak,
-                s::group_rename_dialog_title(),
-                s::group_rename_dialog_placeholder(),
+                s::modal::group_rename_title(),
+                s::modal::group_rename_placeholder(),
                 Some(&initial),
                 move |ws, value, _window, cx| {
                     let Some(name) = value else {
@@ -66,7 +66,7 @@ pub(super) fn build_group_menu_items(
 
     items.push(ws_popup_menu_item(
         ws.clone(),
-        s::group_menu_color_clear(),
+        s::group::menu_color_clear(),
         false,
         move |ws, _window, cx| {
             ws.recolor_group(group_id, None, cx);
@@ -77,9 +77,9 @@ pub(super) fn build_group_menu_items(
 
     // -- Collapse / Expand --
     let collapse_label = if is_collapsed {
-        s::group_menu_expand()
+        s::group::menu_expand()
     } else {
-        s::group_menu_collapse()
+        s::group::menu_collapse()
     };
     items.push(ws_popup_menu_item(
         ws.clone(),
@@ -97,7 +97,7 @@ pub(super) fn build_group_menu_items(
     // ungrouped (no data loss) — only the visual grouping disappears.
     items.push(ws_popup_menu_item(
         ws.clone(),
-        s::group_menu_delete(),
+        s::group::menu_delete(),
         false,
         move |ws, _window, cx| {
             ws.delete_group(group_id, cx);

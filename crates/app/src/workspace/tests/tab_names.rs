@@ -83,7 +83,7 @@ async fn the_remote_header_names_the_tab_beside_the_agent(cx: &mut TestAppContex
         after,
         before.replace(
             &agent,
-            &crate::surface::strings::remote_agent_with_tab(&agent, "review")
+            &crate::surface::strings::control::agent_with_tab(&agent, "review")
         ),
         "only the agent line gains the tab name"
     );

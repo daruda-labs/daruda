@@ -92,7 +92,7 @@ impl SkillPickerModal {
         cx: &mut Context<Self>,
     ) -> Self {
         let empty_hint = if items.is_empty() {
-            Some(SharedString::from(strings::skills_empty_plugin_picker()))
+            Some(SharedString::from(strings::skills::empty_plugin_picker()))
         } else {
             None
         };

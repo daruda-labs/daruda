@@ -24,6 +24,7 @@ use gpui::{
     prelude::*, px,
 };
 
+use crate::surface::glyphs;
 use crate::surface::strings as s;
 use crate::ui::button;
 use crate::workspace::Workspace;
@@ -159,7 +160,7 @@ fn toast_pill(
                 }),
         )
         .when(snap.repeat_count >= 2, |el| {
-            let label = format!("{}{}", s::TOAST_REPEAT_PREFIX, snap.repeat_count);
+            let label = format!("{}{}", glyphs::TOAST_REPEAT_PREFIX, snap.repeat_count);
             el.child(
                 div()
                     .px(px(theme::TOAST_REPEAT_PAD_X))
@@ -178,7 +179,7 @@ fn toast_pill(
 
 fn copy_button(toast_id: ToastId, plain_text: SharedString) -> impl IntoElement {
     let element_id = format!("error-toast-{toast_id}-copy");
-    button(SharedString::from(element_id), s::toast_button_copy()).on_click(
+    button(SharedString::from(element_id), s::common::btn_copy()).on_click(
         move |_: &ClickEvent, _window, cx| {
             cx.write_to_clipboard(ClipboardItem::new_string(plain_text.to_string()));
         },
@@ -192,7 +193,7 @@ fn details_button(toast_id: ToastId, report: ErrorReport) -> impl IntoElement {
     // the user rapidly re-opens / closes the dialog without touching
     // a different toast. ErrorReport's clone is cheap (small heap
     // strings + a BTreeMap of context entries).
-    button(SharedString::from(element_id), s::toast_button_details()).on_click(
+    button(SharedString::from(element_id), s::toast::button_details()).on_click(
         move |_: &ClickEvent, window, cx| {
             dialog_helpers::open_error_report_dialog(report.clone(), window, cx);
         },
@@ -226,8 +227,8 @@ fn severity_tint(severity: ErrorSeverity) -> gpui::Hsla {
 
 const fn severity_glyph(severity: ErrorSeverity) -> &'static str {
     match severity {
-        ErrorSeverity::Info => s::TOAST_ICON_INFO,
-        ErrorSeverity::Warning => s::TOAST_ICON_WARNING,
-        ErrorSeverity::Error => s::TOAST_ICON_ERROR,
+        ErrorSeverity::Info => glyphs::TOAST_ICON_INFO,
+        ErrorSeverity::Warning => glyphs::TOAST_ICON_WARNING,
+        ErrorSeverity::Error => glyphs::TOAST_ICON_ERROR,
     }
 }

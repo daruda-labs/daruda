@@ -336,14 +336,18 @@ async fn opting_out_of_the_presence_gate_sends_while_the_user_is_present(
 fn permission_wait_text_formats_title_summary_fallback_and_empty_values() {
     assert_eq!(
         permission_wait_text(Some("Write /tmp/x.rs"), None),
-        format!("{}\n{}", s::agent_notification_waiting(), "Write /tmp/x.rs")
+        format!(
+            "{}\n{}",
+            s::notification::agent_waiting(),
+            "Write /tmp/x.rs"
+        )
     );
 
     assert_eq!(
         permission_wait_text(Some("Run npm install"), Some("command: npm install")),
         format!(
             "{}\n{}\n{}",
-            s::agent_notification_waiting(),
+            s::notification::agent_waiting(),
             "Run npm install",
             "command: npm install"
         )
@@ -351,17 +355,21 @@ fn permission_wait_text_formats_title_summary_fallback_and_empty_values() {
 
     assert_eq!(
         permission_wait_text(None, Some("file: /tmp/x.rs")),
-        format!("{}\n{}", s::agent_notification_waiting(), "file: /tmp/x.rs")
+        format!(
+            "{}\n{}",
+            s::notification::agent_waiting(),
+            "file: /tmp/x.rs"
+        )
     );
 
     assert_eq!(
         permission_wait_text(None, None),
-        s::agent_notification_waiting()
+        s::notification::agent_waiting()
     );
 
     assert_eq!(
         permission_wait_text(Some(""), Some("")),
-        s::agent_notification_waiting()
+        s::notification::agent_waiting()
     );
 }
 
@@ -371,19 +379,19 @@ fn first_tool_ack_tail_formats_title_empty_and_absent_cases() {
         super::first_tool_ack_tail(Some("Write /tmp/x.rs")),
         format!(
             "{}\n{}",
-            s::agent_notification_telegram_first_tool_ack(),
+            s::notification::telegram_first_tool_ack(),
             "Write /tmp/x.rs"
         )
     );
 
     assert_eq!(
         super::first_tool_ack_tail(Some("")),
-        s::agent_notification_telegram_first_tool_ack()
+        s::notification::telegram_first_tool_ack()
     );
 
     assert_eq!(
         super::first_tool_ack_tail(None),
-        s::agent_notification_telegram_first_tool_ack()
+        s::notification::telegram_first_tool_ack()
     );
 }
 
@@ -725,7 +733,7 @@ async fn telegram_reply_ack_paths_cover_queue_overdue_and_empty_permission(
     );
     assert_eq!(
         sent.tail,
-        super::TelegramTail::Plain(s::agent_notification_telegram_reply_queued())
+        super::TelegramTail::Plain(s::notification::telegram_reply_queued())
     );
 
     let started = std::time::Instant::now()
@@ -753,7 +761,7 @@ async fn telegram_reply_ack_paths_cover_queue_overdue_and_empty_permission(
     assert_eq!(sent.pane.pane, pane_id);
     assert_eq!(
         sent.tail,
-        super::TelegramTail::Plain(s::agent_notification_telegram_reply_ack())
+        super::TelegramTail::Plain(s::notification::telegram_reply_ack())
     );
 
     workspace.update(cx, |ws, cx| {
@@ -784,7 +792,7 @@ async fn telegram_reply_ack_paths_cover_queue_overdue_and_empty_permission(
     assert_eq!(sent.pane.pane, pane_id);
     assert_eq!(
         sent.tail,
-        super::TelegramTail::Plain(s::agent_notification_telegram_reply_ack())
+        super::TelegramTail::Plain(s::notification::telegram_reply_ack())
     );
 }
 

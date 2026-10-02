@@ -150,7 +150,7 @@ fn a_command_survives_a_bot_suffix_and_a_capital() {
 /// a menu entry sends a command daruda answers with "unknown".
 #[test]
 fn the_botfather_registration_lists_every_command_name() {
-    let registered: Vec<&str> = crate::surface::strings::control_botfather_commands()
+    let registered: Vec<&str> = crate::surface::strings::control::botfather_commands()
         .lines()
         .filter_map(|line| line.split(" - ").next())
         .map(str::trim)

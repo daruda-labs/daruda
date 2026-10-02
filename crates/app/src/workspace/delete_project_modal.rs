@@ -86,12 +86,12 @@ impl ModalView for DeleteProjectModal {}
 impl Render for DeleteProjectModal {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let body_color = cx.theme().muted_foreground;
-        let prompt = s::close_project_modal_body(&self.project_name);
+        let prompt = s::modal::close_project_body(&self.project_name);
         let keep_checked = self.choice == DeleteProjectChoice::KeepOnDisk;
         let delete_checked = self.choice == DeleteProjectChoice::DeleteOnDisk;
         let delete_label = match self.choice {
-            DeleteProjectChoice::KeepOnDisk => s::common_button_close(),
-            DeleteProjectChoice::DeleteOnDisk => s::common_button_delete(),
+            DeleteProjectChoice::KeepOnDisk => s::common::btn_close(),
+            DeleteProjectChoice::DeleteOnDisk => s::common::btn_delete(),
         };
 
         let radio_group = div()
@@ -101,7 +101,7 @@ impl Render for DeleteProjectModal {
             .child(
                 radio(
                     "delete-project-keep",
-                    s::delete_project_keep_choice(),
+                    s::modal::delete_project_keep_choice(),
                     0_isize,
                 )
                 .checked(keep_checked)
@@ -113,7 +113,7 @@ impl Render for DeleteProjectModal {
             .child(
                 radio(
                     "delete-project-disk",
-                    s::delete_project_delete_choice(),
+                    s::modal::delete_project_delete_choice(),
                     1_isize,
                 )
                 .checked(delete_checked)
@@ -137,7 +137,7 @@ impl Render for DeleteProjectModal {
             .gap(px(theme::MODAL_FOOTER_GAP))
             .mt(px(theme::MODAL_FOOTER_MARGIN_TOP))
             .child(
-                button("delete-project-cancel", s::common_button_cancel()).on_click(cx.listener(
+                button("delete-project-cancel", s::common::btn_cancel()).on_click(cx.listener(
                     |this, _: &ClickEvent, window, cx| {
                         this.dismiss(window, cx);
                     },
@@ -179,7 +179,7 @@ pub(crate) fn open_delete_project_modal<F>(
 {
     let on_submit: DeleteProjectSubmit = Rc::new(on_submit);
     open_form_modal(
-        s::close_project_modal_title(),
+        s::modal::close_project_title(),
         None,
         move |_window, modal_cx| DeleteProjectModal::new(project_name, on_submit, modal_cx),
         window,

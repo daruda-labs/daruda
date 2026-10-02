@@ -72,7 +72,7 @@ impl SettingsView {
                 self.report_save_failure(
                     default.field(),
                     &message,
-                    s::settings_err_save_settings,
+                    |e| s::settings::err_save_settings(e),
                     cx,
                 );
             }

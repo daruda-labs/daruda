@@ -64,7 +64,7 @@ pub(super) fn build_context_menu_items(args: CtxMenuArgs) -> Vec<PopupMenuItem> 
     let path_for_reveal = path_str.clone();
     let reveal_item = ws_popup_menu_item(
         workspace.clone(),
-        surface_strings::ctx_reveal_in_file_manager(),
+        surface_strings::ctx::reveal_in_file_manager(),
         false,
         move |ws, _window, cx| {
             ws.reveal_in_file_manager(std::path::Path::new(&path_for_reveal), cx)
@@ -72,21 +72,21 @@ pub(super) fn build_context_menu_items(args: CtxMenuArgs) -> Vec<PopupMenuItem> 
     );
 
     let copy_item = crate::workspace::render::ws_popup_clipboard_item(
-        surface_strings::ctx_copy_path(),
+        surface_strings::ctx::copy_path(),
         path_str.clone(),
     );
 
     let edit_description_item = ws_popup_menu_item(
         workspace.clone(),
-        surface_strings::ctx_edit_description(),
+        surface_strings::ctx::edit_description(),
         false,
         move |_ws, window, cx| {
             let current = current_description.clone();
             let callback_ws = cx.entity().downgrade();
             crate::workspace::dialog_helpers::open_single_field_dialog(
                 callback_ws,
-                surface_strings::edit_description_modal_title(),
-                surface_strings::edit_description_placeholder(),
+                surface_strings::modal::edit_description_title(),
+                surface_strings::modal::edit_description_placeholder(),
                 current.as_deref(),
                 move |workspace, value, _window, cx| {
                     workspace.set_lane_description(
@@ -106,7 +106,7 @@ pub(super) fn build_context_menu_items(args: CtxMenuArgs) -> Vec<PopupMenuItem> 
 
     let session_host_item = ws_popup_menu_item(
         workspace.clone(),
-        surface_strings::ctx_session_host(),
+        surface_strings::ctx::session_host(),
         false,
         move |ws, window, cx| {
             super::session_host_modal::open_session_host_modal(
@@ -123,15 +123,15 @@ pub(super) fn build_context_menu_items(args: CtxMenuArgs) -> Vec<PopupMenuItem> 
 
     let rename_item = ws_popup_menu_item(
         workspace.clone(),
-        surface_strings::ctx_rename(),
+        surface_strings::common::btn_rename(),
         false,
         move |_ws, window, cx| {
             let current = current_name.clone();
             let callback_ws = cx.entity().downgrade();
             crate::workspace::dialog_helpers::open_single_field_dialog(
                 callback_ws,
-                surface_strings::rename_modal_title(),
-                surface_strings::rename_placeholder(),
+                surface_strings::modal::rename_worktree_title(),
+                surface_strings::modal::rename_placeholder(),
                 current.as_deref(),
                 move |workspace, value, _window, cx| {
                     workspace.set_lane_name(
@@ -172,12 +172,12 @@ pub(super) fn build_context_menu_items(args: CtxMenuArgs) -> Vec<PopupMenuItem> 
         if availability == LaneAvailability::AccessDenied {
             // Disabled, informational only — no handler.
             items.push(
-                PopupMenuItem::new(surface_strings::ctx_grant_full_disk_access()).disabled(true),
+                PopupMenuItem::new(surface_strings::ctx::grant_full_disk_access()).disabled(true),
             );
         }
         items.push(ws_popup_menu_item(
             workspace.clone(),
-            surface_strings::ctx_remove(),
+            surface_strings::ctx::remove(),
             false,
             move |ws, window, cx| {
                 if removable {
@@ -200,19 +200,19 @@ pub(super) fn build_context_menu_items(args: CtxMenuArgs) -> Vec<PopupMenuItem> 
     // "Merge into…" — only for git-backed lanes.
     if is_git {
         let merge_item = if is_detached {
-            PopupMenuItem::new(surface_strings::ctx_merge_into())
+            PopupMenuItem::new(surface_strings::ctx::merge_into())
                 .disabled(true)
-                .tooltip(surface_strings::ctx_merge_disabled_detached())
+                .tooltip(surface_strings::ctx::merge_disabled_detached())
         } else if is_dirty {
-            PopupMenuItem::new(surface_strings::ctx_merge_into())
+            PopupMenuItem::new(surface_strings::ctx::merge_into())
                 .disabled(true)
-                .tooltip(surface_strings::ctx_merge_disabled_dirty())
+                .tooltip(surface_strings::ctx::merge_disabled_dirty())
         } else {
             // source_branch is guaranteed Some when is_git && !is_detached.
             let branch = source_branch.unwrap_or_default();
             ws_popup_menu_item(
                 workspace.clone(),
-                surface_strings::ctx_merge_into(),
+                surface_strings::ctx::merge_into(),
                 false,
                 move |ws, window, cx| {
                     let branch = branch.clone();
@@ -243,7 +243,7 @@ pub(super) fn build_context_menu_items(args: CtxMenuArgs) -> Vec<PopupMenuItem> 
                         .collect();
 
                     if target_options.is_empty() {
-                        let report = ErrorReport::new(surface_strings::merge_modal_no_targets())
+                        let report = ErrorReport::new(surface_strings::modal::merge_no_targets())
                             .severity(ErrorSeverity::Info)
                             .at(file!(), line!())
                             .dedup("lane.merge.no_targets")
@@ -253,7 +253,7 @@ pub(super) fn build_context_menu_items(args: CtxMenuArgs) -> Vec<PopupMenuItem> 
                     }
 
                     crate::workspace::dialog_helpers::open_form_modal(
-                        surface_strings::merge_modal_title(&branch),
+                        surface_strings::modal::merge_title(&branch),
                         None,
                         move |window, cx| {
                             super::merge_modal::MergeModal::new(
@@ -336,8 +336,8 @@ mod tests {
     fn present_git_lane_shows_merge_and_no_remove() {
         let items = build(LaneAvailability::Present, true, true);
         let labels = labels(&items);
-        assert!(labels.contains(&surface_strings::ctx_merge_into()));
-        assert!(!labels.contains(&surface_strings::ctx_remove()));
+        assert!(labels.contains(&surface_strings::ctx::merge_into()));
+        assert!(!labels.contains(&surface_strings::ctx::remove()));
     }
 
     #[test]
@@ -345,22 +345,22 @@ mod tests {
         let items = build(LaneAvailability::Missing, true, true);
         let labels = labels(&items);
         assert!(
-            !labels.contains(&surface_strings::ctx_merge_into()),
+            !labels.contains(&surface_strings::ctx::merge_into()),
             "git-only Merge must be hidden for a missing lane"
         );
-        assert!(labels.contains(&surface_strings::ctx_remove()));
+        assert!(labels.contains(&surface_strings::ctx::remove()));
         // Missing offers no permission hint (only AccessDenied does).
-        assert!(!labels.contains(&surface_strings::ctx_grant_full_disk_access()));
+        assert!(!labels.contains(&surface_strings::ctx::grant_full_disk_access()));
     }
 
     #[test]
     fn access_denied_lane_adds_disabled_permission_hint() {
         let items = build(LaneAvailability::AccessDenied, true, true);
         let labels = labels(&items);
-        assert!(!labels.contains(&surface_strings::ctx_merge_into()));
-        assert!(labels.contains(&surface_strings::ctx_remove()));
+        assert!(!labels.contains(&surface_strings::ctx::merge_into()));
+        assert!(labels.contains(&surface_strings::ctx::remove()));
         assert!(
-            disabled_labels(&items).contains(&surface_strings::ctx_grant_full_disk_access()),
+            disabled_labels(&items).contains(&surface_strings::ctx::grant_full_disk_access()),
             "AccessDenied must surface a disabled Full-Disk-Access hint"
         );
     }

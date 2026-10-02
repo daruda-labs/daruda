@@ -101,7 +101,7 @@ fn build_new_tab_menu(
     let menu = {
         let ws = ws.clone();
         menu.item(
-            PopupMenuItem::new(crate::surface::strings::ctx_new_terminal()).on_click(
+            PopupMenuItem::new(crate::surface::strings::common::new_terminal()).on_click(
                 move |_, window, app| {
                     if let Some(w) = ws.upgrade() {
                         w.update(app, |this, cx| {
@@ -119,7 +119,7 @@ fn build_new_tab_menu(
         agents.iter().fold(menu, |m, (id, name)| {
             let ws = ws.clone();
             let agent_id = id.clone();
-            let label = crate::surface::strings::new_agent_chat_named(name);
+            let label = crate::surface::strings::common::new_agent_chat_named(name);
             m.item(
                 PopupMenuItem::new(label)
                     .icon(crate::ui::agent_menu_icon(
@@ -142,7 +142,7 @@ fn build_new_tab_menu(
         let agents: Vec<(String, String)> = agents.to_vec();
         let ws = ws.clone();
         menu.submenu(
-            crate::surface::strings::ctx_new_agent_chat(),
+            crate::surface::strings::common::new_agent_chat(),
             window,
             cx,
             move |sub, _w, _c| {
@@ -508,9 +508,9 @@ impl Workspace {
             .child(flow_picker::FlowPickerOverlay::new(
                 self.flow_picker.clone(),
                 self.flow_picker.prompt(),
-                crate::surface::strings::flow_picker_empty(),
-                crate::surface::strings::flow_stop_prompt(),
-                crate::surface::strings::flow_stop_action(),
+                crate::surface::strings::flow::picker_empty(),
+                crate::surface::strings::flow::stop_prompt(),
+                crate::surface::strings::flow::stop_action(),
                 cx.listener(|this, _, _, cx| this.close_flow_picker(cx)),
                 cx.listener(|this, index: &usize, window, cx| {
                     this.pick_flow_row(*index, window, cx)
@@ -601,7 +601,7 @@ impl Workspace {
             .text_size(px(theme::MODAL_BODY_FONT_SIZE))
             .font_weight(gpui::FontWeight::MEDIUM)
             .text_color(title_bar_text)
-            .child(crate::surface::strings::settings_title());
+            .child(crate::surface::strings::settings::title());
         let title_bar = crate::title_bar::render(
             crate::title_bar::chrome_for_window(window),
             title_bar_bg,
@@ -871,7 +871,7 @@ impl Workspace {
                             if !is_orchestrator {
                                 items.push(ws_popup_menu_item(
                                     ws.clone(),
-                                    s::ctx_rename_tab(),
+                                    s::ctx::rename_tab(),
                                     false,
                                     move |this, win, cx| {
                                         this.open_rename_tab_dialog(tab_id, win, cx)
@@ -882,7 +882,7 @@ impl Workspace {
                             items.extend([
                                 ws_popup_menu_item(
                                     ws.clone(),
-                                    s::ctx_close_tab(),
+                                    s::common::close_tab(),
                                     false,
                                     move |this, win, cx| {
                                         this.mutate_durable_in(win, cx, |ws, win, cx| {
@@ -892,7 +892,7 @@ impl Workspace {
                                 ),
                                 ws_popup_menu_item(
                                     ws.clone(),
-                                    s::ctx_close_other_tabs(),
+                                    s::ctx::close_other_tabs(),
                                     tab_count <= 1,
                                     move |this, win, cx| {
                                         this.mutate_durable_in(win, cx, |ws, win, cx| {
@@ -902,7 +902,7 @@ impl Workspace {
                                 ),
                                 ws_popup_menu_item(
                                     ws.clone(),
-                                    s::ctx_close_tabs_to_right(),
+                                    s::ctx::close_tabs_to_right(),
                                     is_last,
                                     move |this, win, cx| {
                                         this.mutate_durable_in(win, cx, |ws, win, cx| {
@@ -913,7 +913,7 @@ impl Workspace {
                                 PopupMenuItem::separator(),
                                 ws_popup_menu_item(
                                     ws.clone(),
-                                    s::ctx_move_tab_left(),
+                                    s::common::move_tab_left(),
                                     i == 0,
                                     move |this, _win, cx| {
                                         this.mutate_durable(cx, |ws, cx| ws.move_tab_left(i, cx));
@@ -921,7 +921,7 @@ impl Workspace {
                                 ),
                                 ws_popup_menu_item(
                                     ws.clone(),
-                                    s::ctx_move_tab_right(),
+                                    s::common::move_tab_right(),
                                     is_last,
                                     move |this, _win, cx| {
                                         this.mutate_durable(cx, |ws, cx| ws.move_tab_right(i, cx));
@@ -935,7 +935,7 @@ impl Workspace {
                                     PopupMenuItem::separator(),
                                     ws_popup_menu_item(
                                         ws.clone(),
-                                        s::ctx_split_terminal_horizontal(),
+                                        s::common::split_terminal_horizontal(),
                                         false,
                                         move |this, win, cx| {
                                             this.mutate_durable_in(win, cx, |ws, win, cx| {
@@ -951,7 +951,7 @@ impl Workspace {
                                     ),
                                     ws_popup_menu_item(
                                         ws.clone(),
-                                        s::ctx_split_terminal_vertical(),
+                                        s::common::split_terminal_vertical(),
                                         false,
                                         move |this, win, cx| {
                                             this.mutate_durable_in(win, cx, |ws, win, cx| {
@@ -968,7 +968,7 @@ impl Workspace {
                                     PopupMenuItem::separator(),
                                     ws_popup_menu_item(
                                         ws.clone(),
-                                        s::ctx_split_agent_chat_horizontal(),
+                                        s::common::split_agent_chat_horizontal(),
                                         false,
                                         move |this, win, cx| {
                                             this.mutate_durable_in(win, cx, |ws, win, cx| {
@@ -984,7 +984,7 @@ impl Workspace {
                                     ),
                                     ws_popup_menu_item(
                                         ws.clone(),
-                                        s::ctx_split_agent_chat_vertical(),
+                                        s::common::split_agent_chat_vertical(),
                                         false,
                                         move |this, win, cx| {
                                             this.mutate_durable_in(win, cx, |ws, win, cx| {
@@ -1001,7 +1001,7 @@ impl Workspace {
                                     PopupMenuItem::separator(),
                                     ws_popup_menu_item(
                                         ws.clone(),
-                                        crate::surface::strings::ctx_new_tab(),
+                                        crate::surface::strings::common::new_tab(),
                                         false,
                                         |this, win, cx| {
                                             this.mutate_durable_in(win, cx, |ws, win, cx| {
@@ -1017,19 +1017,19 @@ impl Workspace {
                                 items.push(PopupMenuItem::separator());
                                 if let Some(abs) = abs_str.clone() {
                                     items.push(ws_popup_clipboard_item(
-                                        s::ctx_copy_file_path(),
+                                        s::ctx::copy_file_path(),
                                         abs,
                                     ));
                                 }
                                 if let Some(rel) = rel_path.clone() {
                                     items.push(ws_popup_clipboard_item(
-                                        s::ctx_copy_relative_path(),
+                                        s::ctx::copy_relative_path(),
                                         rel,
                                     ));
                                 }
                                 items.push(ws_popup_menu_item(
                                     ws.clone(),
-                                    s::ctx_close_file_viewer(),
+                                    s::ctx::close_file_viewer(),
                                     false,
                                     move |this, win, cx| {
                                         this.mutate_durable_in(win, cx, |ws, win, cx| {
@@ -1083,7 +1083,7 @@ impl Workspace {
                     .map(|a| (a.id.clone(), a.name.clone()))
                     .collect();
                 crate::ui::button_icon("new-tab-btn", crate::ui::icons::ADD, cx)
-                    .tooltip(crate::surface::strings::menu_new_tab())
+                    .tooltip(crate::surface::strings::common::new_tab())
                     .mx(px(theme::NEW_TAB_MARGIN_X))
                     .rounded(px(theme::NEW_TAB_RADIUS))
                     .text_size(px(theme::NEW_TAB_FONT_SIZE))

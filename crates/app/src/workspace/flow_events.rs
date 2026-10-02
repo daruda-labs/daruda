@@ -246,7 +246,7 @@ impl Workspace {
                     .lane_for(lane_ref)
                     .map(|lane| lane.path.clone())
                     .and_then(|cwd| super::flow_paths::lane_lock_dir(&self.lock_root, &cwd))
-                    .map(|dir| s::flow_lock_held_detail(&dir.join(".lock").display().to_string())),
+                    .map(|dir| s::flow::lock_held_detail(dir.join(".lock").display().to_string())),
                 _ => None,
             };
             self.report_error(
@@ -338,15 +338,15 @@ fn report_to_open(end: &RunEnd, run_dir: &Path) -> Option<PathBuf> {
 /// report for, so those get a one-line verdict and a pointer to it.
 fn flow_outcome_notice(end: &RunEnd, refusal: Option<String>) -> String {
     if let Some(message) = refusal {
-        return s::control_flow_refused_notice(&clamp_notice_reason(&message));
+        return s::control::flow_refused_notice(clamp_notice_reason(&message));
     }
     // Spelled out rather than defaulted: which ends `end_refusal` answers for
     // is its business, not this function's, so a variant added there without a
     // wording here must be a compile error and not a confident "failed".
     match end {
-        RunEnd::Done => s::control_flow_finished_notice(),
-        RunEnd::Canceled { .. } => s::control_flow_canceled_notice(),
-        RunEnd::Failed { .. } => s::control_flow_failed_notice(),
+        RunEnd::Done => s::control::flow_finished_notice(),
+        RunEnd::Canceled { .. } => s::control::flow_canceled_notice(),
+        RunEnd::Failed { .. } => s::control::flow_failed_notice(),
         // Every one of these produced a refusal above, so they are unreachable
         // here — named anyway so the compiler, not a reader, checks that.
         RunEnd::BudgetExhausted { .. }
@@ -354,7 +354,7 @@ fn flow_outcome_notice(end: &RunEnd, refusal: Option<String>) -> String {
         | RunEnd::LockHeld { .. }
         | RunEnd::Invalid { .. }
         | RunEnd::Unprovisioned { .. }
-        | RunEnd::Stalled { .. } => s::control_flow_failed_notice(),
+        | RunEnd::Stalled { .. } => s::control::flow_failed_notice(),
     }
 }
 
@@ -376,12 +376,12 @@ fn clamp_notice_reason(reason: &str) -> String {
 fn end_refusal(end: &RunEnd) -> Option<String> {
     match end {
         RunEnd::Done | RunEnd::Failed { .. } | RunEnd::Canceled { .. } => None,
-        RunEnd::BudgetExhausted { limit } => Some(s::flow_budget_exhausted(*limit)),
+        RunEnd::BudgetExhausted { limit } => Some(s::flow::budget_exhausted(*limit)),
         RunEnd::Io { message, .. } => Some(message.clone()),
-        RunEnd::LockHeld { holder } => Some(s::flow_lock_held(holder.pid)),
+        RunEnd::LockHeld { holder } => Some(s::flow::lock_held(holder.pid)),
         RunEnd::Invalid { issues } => Some(issue_report(issues)),
-        RunEnd::Unprovisioned { agent, message } => Some(s::flow_unprovisioned(agent, message)),
-        RunEnd::Stalled { nodes } => Some(s::flow_stalled(&node_list(nodes))),
+        RunEnd::Unprovisioned { agent, message } => Some(s::flow::unprovisioned(agent, message)),
+        RunEnd::Stalled { nodes } => Some(s::flow::stalled(node_list(nodes))),
     }
 }
 
@@ -406,8 +406,8 @@ mod tests {
     fn every_outcome_has_its_own_notice() {
         let done = flow_outcome_notice(&RunEnd::Done, None);
         let canceled = flow_outcome_notice(&RunEnd::Canceled { node: None }, None);
-        assert_eq!(done, s::control_flow_finished_notice());
-        assert_eq!(canceled, s::control_flow_canceled_notice());
+        assert_eq!(done, s::control::flow_finished_notice());
+        assert_eq!(canceled, s::control::flow_canceled_notice());
         assert_ne!(done, canceled, "finished must not read as stopped");
 
         let holder = daruda_flow::lock::LockHolder {

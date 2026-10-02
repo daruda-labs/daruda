@@ -122,7 +122,7 @@ impl Workspace {
                         // go stale, so this stops short of the Error bar the
                         // worktree axis meets.
                         let report =
-                            ErrorReport::new(crate::surface::strings::error_git_tracking_failed())
+                            ErrorReport::new(crate::surface::strings::error::git_tracking_failed())
                                 .severity(ErrorSeverity::Warning)
                                 .from_error(&e)
                                 .at(file!(), line!())
@@ -205,7 +205,7 @@ impl Workspace {
                         // Changes panel, meeting the CLAUDE.md "core function
                         // broke" bar for Error severity.
                         let report =
-                            ErrorReport::new(crate::surface::strings::error_git_status_failed())
+                            ErrorReport::new(crate::surface::strings::error::git_status_failed())
                                 .severity(ErrorSeverity::Error)
                                 .from_error(&e)
                                 .at(file!(), line!())

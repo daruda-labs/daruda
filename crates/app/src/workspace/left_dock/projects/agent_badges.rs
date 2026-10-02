@@ -49,7 +49,10 @@ pub(super) fn agent_badges_row(
     cx: &gpui::App,
 ) -> impl IntoElement + use<> {
     let count = sessions.len();
-    let label = format!("{count}{}", surface_strings::agent_sessions_label_suffix());
+    let label = format!(
+        "{count}{}",
+        surface_strings::claude::sessions_label_suffix()
+    );
     let faint_text = theme::current(cx).text_subtle;
     div()
         .flex()
@@ -78,11 +81,14 @@ pub(super) fn agent_badges_row(
                     let tooltip_text = if is_active {
                         format!(
                             "{prefix}{}{}",
-                            surface_strings::AGENT_BADGE_TOOLTIP_ELLIPSIS,
-                            surface_strings::agent_badge_tooltip_active_suffix()
+                            crate::surface::glyphs::AGENT_BADGE_TOOLTIP_ELLIPSIS,
+                            surface_strings::claude::badge_active_suffix()
                         )
                     } else {
-                        format!("{prefix}{}", surface_strings::AGENT_BADGE_TOOLTIP_ELLIPSIS)
+                        format!(
+                            "{prefix}{}",
+                            crate::surface::glyphs::AGENT_BADGE_TOOLTIP_ELLIPSIS
+                        )
                     };
                     let mut indicator =
                         AgentStatusBadge::for_status(*state, IndicatorSize::Badge, cx);

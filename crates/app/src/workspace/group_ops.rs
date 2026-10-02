@@ -22,6 +22,7 @@ use daruda_store::project::{GroupId, ProjectId, SerializedGroup};
 use gpui::Context;
 
 use crate::surface::strings as s;
+use crate::ui::theme;
 
 use super::Workspace;
 
@@ -31,17 +32,17 @@ use super::Workspace;
 /// what lands in `SerializedGroup::color` and the left-dock chip.
 pub(in crate::workspace) fn group_color_presets() -> Vec<(String, &'static str)> {
     vec![
-        (s::group_menu_color_red(), s::GROUP_PRESET_RED),
-        (s::group_menu_color_orange(), s::GROUP_PRESET_ORANGE),
-        (s::group_menu_color_yellow(), s::GROUP_PRESET_YELLOW),
-        (s::group_menu_color_lime(), s::GROUP_PRESET_LIME),
-        (s::group_menu_color_green(), s::GROUP_PRESET_GREEN),
-        (s::group_menu_color_teal(), s::GROUP_PRESET_TEAL),
-        (s::group_menu_color_cyan(), s::GROUP_PRESET_CYAN),
-        (s::group_menu_color_blue(), s::GROUP_PRESET_BLUE),
-        (s::group_menu_color_indigo(), s::GROUP_PRESET_INDIGO),
-        (s::group_menu_color_purple(), s::GROUP_PRESET_PURPLE),
-        (s::group_menu_color_pink(), s::GROUP_PRESET_PINK),
+        (s::group::menu_color_red(), theme::GROUP_PRESET_RED),
+        (s::group::menu_color_orange(), theme::GROUP_PRESET_ORANGE),
+        (s::group::menu_color_yellow(), theme::GROUP_PRESET_YELLOW),
+        (s::group::menu_color_lime(), theme::GROUP_PRESET_LIME),
+        (s::group::menu_color_green(), theme::GROUP_PRESET_GREEN),
+        (s::group::menu_color_teal(), theme::GROUP_PRESET_TEAL),
+        (s::group::menu_color_cyan(), theme::GROUP_PRESET_CYAN),
+        (s::group::menu_color_blue(), theme::GROUP_PRESET_BLUE),
+        (s::group::menu_color_indigo(), theme::GROUP_PRESET_INDIGO),
+        (s::group::menu_color_purple(), theme::GROUP_PRESET_PURPLE),
+        (s::group::menu_color_pink(), theme::GROUP_PRESET_PINK),
     ]
 }
 

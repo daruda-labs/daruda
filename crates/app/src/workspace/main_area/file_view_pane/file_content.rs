@@ -120,7 +120,7 @@ fn load_raw(
     let bytes: Result<Vec<u8>, String> = if let Some(blob) = blob {
         if repo_root.is_none() {
             return LoadOutcome::plain(PaneFileContent::Error(
-                crate::surface::strings::file_viewer_err_no_git_repo(),
+                crate::surface::strings::file_viewer::err_no_git_repo(),
             ));
         }
         // git show :path requires a repo-root-relative path.
@@ -134,9 +134,9 @@ fn load_raw(
                 Some(rel) => rel,
                 None => {
                     return LoadOutcome::plain(PaneFileContent::Error(
-                        crate::surface::strings::file_viewer_err_staged_outside_repo(
-                            &path.display().to_string(),
-                            &r.display().to_string(),
+                        crate::surface::strings::file_viewer::err_staged_outside_repo(
+                            path.display().to_string(),
+                            r.display().to_string(),
                         ),
                     ));
                 }
@@ -247,7 +247,7 @@ fn load_diff(
     diagram_dark: bool,
 ) -> PaneFileContent {
     if repo_root.is_none() {
-        return PaneFileContent::Error(crate::surface::strings::file_viewer_err_no_git_repo());
+        return PaneFileContent::Error(crate::surface::strings::file_viewer::err_no_git_repo());
     }
 
     // Untracked files produce no output from `git diff`; use --no-index to

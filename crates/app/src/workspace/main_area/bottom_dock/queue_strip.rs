@@ -43,7 +43,7 @@ pub(super) fn render(snap: &BottomDockSnapshot, cx: &mut Context<Dock>) -> Optio
     // Header: "N queued" + Resume (only when a Stop parked prompts) + clear-all.
     let clear_all = {
         let workspace = snap.workspace.clone();
-        crate::ui::button("agent-queue-clear-all", s::bottom_input_queue_clear_all())
+        crate::ui::button("agent-queue-clear-all", s::bottom_dock::queue_clear_all())
             .ghost()
             .xsmall()
             .on_click(cx.listener(move |_dock, _: &ClickEvent, window, cx| {
@@ -60,7 +60,7 @@ pub(super) fn render(snap: &BottomDockSnapshot, cx: &mut Context<Dock>) -> Optio
     let armed = queue.resume_armed;
     let resume = has_paused.then(|| {
         let workspace = snap.workspace.clone();
-        let button = crate::ui::button("agent-queue-resume", s::bottom_input_queue_resume())
+        let button = crate::ui::button("agent-queue-resume", s::bottom_dock::queue_resume())
             .xsmall()
             .on_click(cx.listener(move |_dock, _: &ClickEvent, _window, cx| {
                 if let Some(ws) = workspace.upgrade() {
@@ -78,11 +78,11 @@ pub(super) fn render(snap: &BottomDockSnapshot, cx: &mut Context<Dock>) -> Optio
     // the key hint here rather than beside Resume is what makes it unambiguous —
     // floated between the two buttons it annotates neither.
     let header_text = if armed {
-        s::bottom_input_queue_resume_armed(prompts.len())
+        s::bottom_dock::queue_resume_armed(prompts.len())
     } else if has_paused {
-        s::bottom_input_queue_resume_hint(prompts.len())
+        s::bottom_dock::queue_resume_hint(prompts.len())
     } else {
-        s::bottom_input_queued_count(prompts.len())
+        s::bottom_dock::queued_count(prompts.len())
     };
     let header = div()
         .flex()
@@ -127,9 +127,9 @@ pub(super) fn render(snap: &BottomDockSnapshot, cx: &mut Context<Dock>) -> Optio
             item_color
         };
         let marker = if qp.editing {
-            Some(s::bottom_input_queue_editing())
+            Some(s::bottom_dock::queue_editing())
         } else if qp.paused {
-            Some(s::bottom_input_queue_paused())
+            Some(s::bottom_dock::queue_paused())
         } else {
             None
         };
@@ -166,7 +166,7 @@ pub(super) fn render(snap: &BottomDockSnapshot, cx: &mut Context<Dock>) -> Optio
                 SharedString::from(format!("agent-queue-edit-cancel-{}", qp.id)),
                 cx,
             )
-            .tooltip(s::bottom_input_queue_edit_cancel())
+            .tooltip(s::bottom_dock::queue_edit_cancel())
             .on_click(cx.listener(move |_dock, _: &ClickEvent, window, cx| {
                 if let Some(ws) = workspace.upgrade() {
                     ws.update(cx, |ws, cx| {
@@ -181,7 +181,7 @@ pub(super) fn render(snap: &BottomDockSnapshot, cx: &mut Context<Dock>) -> Optio
                 SharedString::from(format!("agent-queue-edit-{}", qp.id)),
                 cx,
             )
-            .tooltip(s::bottom_input_queue_edit())
+            .tooltip(s::bottom_dock::queue_edit())
             .on_click(cx.listener(move |_dock, _: &ClickEvent, window, cx| {
                 if let Some(ws) = edit_ws.upgrade() {
                     ws.update(cx, |ws, cx| {
@@ -194,7 +194,7 @@ pub(super) fn render(snap: &BottomDockSnapshot, cx: &mut Context<Dock>) -> Optio
                 SharedString::from(format!("agent-queue-remove-{}", qp.id)),
                 cx,
             )
-            .tooltip(s::bottom_input_queue_remove())
+            .tooltip(s::bottom_dock::queue_remove())
             .on_click(cx.listener(move |_dock, _: &ClickEvent, _window, cx| {
                 if let Some(ws) = remove_ws.upgrade() {
                     ws.update(cx, |ws, cx| ws.remove_queued_prompt(pane_id, id, cx));

@@ -28,7 +28,7 @@ impl PaneMenuSource for TerminalMenu {
         if let PaneMenuKind::Terminal { exited: true, .. } = ctx.kind {
             let pane_id = ctx.pane_id;
             entries.push(item(
-                s::ctx_restart_shell(),
+                s::ctx::restart_shell(),
                 ItemState::Enabled,
                 Activate::Op(Box::new(move |ws, window, cx| {
                     ws.restart_terminal_pane(pane_id, window, cx);
@@ -40,40 +40,40 @@ impl PaneMenuSource for TerminalMenu {
         entries.extend(link_entries(ctx));
 
         entries.push(item(
-            s::menu_copy(),
+            s::menu::copy(),
             state_if(ctx.selection.is_some(), None),
             Activate::Action(Box::new(daruda_terminal::view::Copy)),
         ));
         entries.push(item(
-            s::menu_paste(),
+            s::menu::paste(),
             ItemState::Enabled,
             Activate::Action(Box::new(daruda_terminal::view::Paste)),
         ));
         entries.push(item(
-            s::menu_select_all(),
+            s::menu::select_all(),
             ItemState::Enabled,
             Activate::Action(Box::new(daruda_terminal::view::SelectAll)),
         ));
         entries.push(MenuEntry::Separator);
         entries.push(item(
-            s::menu_clear_buffer(),
+            s::menu::clear_buffer(),
             ItemState::Enabled,
             Activate::Action(Box::new(daruda_terminal::view::ClearBuffer)),
         ));
         entries.push(item(
-            s::menu_copy_last_command_output(),
+            s::menu::copy_last_command_output(),
             ItemState::Enabled,
             Activate::Action(Box::new(daruda_terminal::view::CopyLastCommandOutput)),
         ));
         entries.push(item(
-            s::menu_scroll_to_bottom(),
+            s::menu::scroll_to_bottom(),
             ItemState::Enabled,
             Activate::Action(Box::new(daruda_terminal::view::ScrollToBottom)),
         ));
 
         entries.extend(send_selection_entries(
             ctx,
-            s::ctx_send_selection_to_agent_chat(),
+            s::ctx::send_selection_to_agent_chat(),
         ));
 
         entries.push(MenuEntry::Separator);
@@ -84,7 +84,7 @@ impl PaneMenuSource for TerminalMenu {
                 let pane_id = ctx.pane_id;
                 if let Some(range) = *annotation_range {
                     entries.push(item(
-                        s::terminal_annotation_action_add(),
+                        s::terminal::annotation_action_add(),
                         ItemState::Enabled,
                         Activate::Op(Box::new(move |ws, window, cx| {
                             ws.open_annotation_dialog_for_create(pane_id, range, window, cx);
@@ -92,8 +92,8 @@ impl PaneMenuSource for TerminalMenu {
                     ));
                 } else {
                     entries.push(disabled_item(
-                        s::terminal_annotation_action_add(),
-                        Some(s::terminal_annotation_action_add_disabled_tooltip().into()),
+                        s::terminal::annotation_action_add(),
+                        Some(s::terminal::annotation_action_add_disabled_tooltip().into()),
                     ));
                 }
             }
@@ -104,7 +104,7 @@ impl PaneMenuSource for TerminalMenu {
         if let Some(mark_id) = ctx.click.as_ref().and_then(|click| click.annotation) {
             let pane_id = ctx.pane_id;
             entries.push(item(
-                s::terminal_annotation_action_delete(),
+                s::terminal::annotation_action_delete(),
                 ItemState::Enabled,
                 Activate::Op(Box::new(move |ws, _window, cx| {
                     ws.remove_annotation(pane_id, mark_id, cx);
@@ -125,23 +125,23 @@ impl PaneMenuSource for AgentChatMenu {
         // from the snapshot.
         entries.push(match ctx.selection.as_ref() {
             Some(text) => item(
-                s::menu_copy(),
+                s::menu::copy(),
                 ItemState::Enabled,
                 Activate::Clipboard(text.to_string()),
             ),
-            None => disabled_item(s::menu_copy(), None),
+            None => disabled_item(s::menu::copy(), None),
         });
 
         entries.extend(send_selection_entries(
             ctx,
-            s::ctx_send_selection_to_terminal(),
+            s::ctx::send_selection_to_terminal(),
         ));
 
         entries.push(MenuEntry::Separator);
         if matches!(&ctx.kind, PaneMenuKind::AgentChat { busy: true }) {
             let pane_id = ctx.pane_id;
             entries.push(item(
-                s::ctx_stop(),
+                s::common::btn_stop(),
                 ItemState::Enabled,
                 Activate::Op(Box::new(move |ws, _window, cx| {
                     ws.cancel_agent_turn_if_active(pane_id, cx);
@@ -150,7 +150,7 @@ impl PaneMenuSource for AgentChatMenu {
         }
         let pane_id = ctx.pane_id;
         entries.push(item(
-            s::menu_scroll_to_bottom(),
+            s::menu::scroll_to_bottom(),
             ItemState::Enabled,
             Activate::Op(Box::new(move |ws, _window, cx| {
                 ws.scroll_agent_chat_to_bottom(pane_id, cx);
@@ -168,7 +168,7 @@ impl PaneMenuSource for FlowGraphMenu {
         // graph would be silent and wrong.
         let pane_id = ctx.pane_id;
         let mut entries = vec![item(
-            s::flow_add_node(),
+            s::flow::add_node(),
             ItemState::Enabled,
             Activate::Op(Box::new(move |ws, window, cx| {
                 ws.add_node_to_pane(pane_id, window, cx);
@@ -179,13 +179,13 @@ impl PaneMenuSource for FlowGraphMenu {
         // and disappear under the pointer.
         entries.push(match &ctx.kind {
             PaneMenuKind::FlowGraph { selected: true, .. } => item(
-                s::flow_delete_node(),
+                s::flow::delete_node(),
                 ItemState::Enabled,
                 Activate::Op(Box::new(move |ws, window, cx| {
                     ws.delete_node_in_pane(pane_id, window, cx);
                 })),
             ),
-            _ => disabled_item(s::flow_delete_node(), None),
+            _ => disabled_item(s::flow::delete_node(), None),
         });
         // Acts on the selected line, like its neighbour acts on the selected
         // node — not on whatever the right-click was over. Asks nothing: a line
@@ -194,17 +194,17 @@ impl PaneMenuSource for FlowGraphMenu {
             PaneMenuKind::FlowGraph {
                 dep_selected: true, ..
             } => item(
-                s::flow_remove_connection(),
+                s::flow::remove_connection(),
                 ItemState::Enabled,
                 Activate::Op(Box::new(move |ws, _window, cx| {
                     ws.disconnect_selected_edge_in_pane(pane_id, cx);
                 })),
             ),
-            _ => disabled_item(s::flow_remove_connection(), None),
+            _ => disabled_item(s::flow::remove_connection(), None),
         });
         entries.push(MenuEntry::Separator);
         entries.push(item(
-            s::ctx_reload_flow_graph(),
+            s::ctx::reload_flow_graph(),
             ItemState::Enabled,
             Activate::Op(Box::new(move |ws, window, cx| {
                 ws.reload_flow_graph_pane(pane_id, window, cx);
@@ -237,30 +237,30 @@ pub(super) fn compose(ctx: &PaneMenuContext) -> Vec<MenuEntry> {
 fn common_tail(ctx: &PaneMenuContext) -> Vec<MenuEntry> {
     let split_state = match ctx.lane {
         LaneAccess::Accessible => ItemState::Enabled,
-        LaneAccess::Inaccessible => ItemState::Disabled(Some(s::ctx_lane_inaccessible().into())),
+        LaneAccess::Inaccessible => ItemState::Disabled(Some(s::ctx::lane_inaccessible().into())),
     };
 
     let mut entries = vec![
         split_item(
-            s::ctx_split_terminal_horizontal(),
+            s::common::split_terminal_horizontal(),
             split_state.clone(),
             NewPaneKind::Terminal,
             SplitDirection::Horizontal,
         ),
         split_item(
-            s::ctx_split_terminal_vertical(),
+            s::common::split_terminal_vertical(),
             split_state.clone(),
             NewPaneKind::Terminal,
             SplitDirection::Vertical,
         ),
         split_item(
-            s::ctx_split_agent_chat_horizontal(),
+            s::common::split_agent_chat_horizontal(),
             split_state.clone(),
             NewPaneKind::AgentChat,
             SplitDirection::Horizontal,
         ),
         split_item(
-            s::ctx_split_agent_chat_vertical(),
+            s::common::split_agent_chat_vertical(),
             split_state,
             NewPaneKind::AgentChat,
             SplitDirection::Vertical,
@@ -270,9 +270,9 @@ fn common_tail(ctx: &PaneMenuContext) -> Vec<MenuEntry> {
     if let PaneRole::InSplit { zoomed } = &ctx.role {
         let pane_id = ctx.pane_id;
         let label = if *zoomed {
-            s::ctx_unzoom_pane()
+            s::ctx::unzoom_pane()
         } else {
-            s::ctx_zoom_pane()
+            s::ctx::zoom_pane()
         };
         entries.push(MenuEntry::Separator);
         entries.push(item(
@@ -286,8 +286,8 @@ fn common_tail(ctx: &PaneMenuContext) -> Vec<MenuEntry> {
 
     let pane_id = ctx.pane_id;
     let close_label = match &ctx.role {
-        PaneRole::Solo => s::ctx_close_tab(),
-        PaneRole::InSplit { .. } => s::ctx_close_pane(),
+        PaneRole::Solo => s::common::close_tab(),
+        PaneRole::InSplit { .. } => s::common::close_pane(),
     };
     entries.push(MenuEntry::Separator);
     entries.push(item(
@@ -338,14 +338,14 @@ fn link_entries(ctx: &PaneMenuContext) -> Vec<MenuEntry> {
                 LocalKind::Text => {
                     let url = url.clone();
                     entries.push(item(
-                        s::ctx_open_link_in_file_view(),
+                        s::ctx::open_link_in_file_view(),
                         ItemState::Enabled,
                         Activate::Op(Box::new(move |ws, window, cx| {
                             ws.open_pane_link(pane_id, &url, window, cx);
                         })),
                     ));
                     entries.push(item(
-                        s::ctx_open_link_externally(),
+                        s::ctx::open_link_externally(),
                         ItemState::Enabled,
                         Activate::Op(Box::new(move |ws, _window, cx| {
                             ws.open_pane_file_externally(pane_id, path.clone(), cx);
@@ -356,7 +356,7 @@ fn link_entries(ctx: &PaneMenuContext) -> Vec<MenuEntry> {
                 // tool, so only the OS default handler is offered.
                 LocalKind::Image | LocalKind::Binary | LocalKind::Directory => {
                     entries.push(item(
-                        s::ctx_open_link_externally(),
+                        s::ctx::open_link_externally(),
                         ItemState::Enabled,
                         Activate::Op(Box::new(move |ws, _window, cx| {
                             ws.open_path_with_system_default(path.clone(), cx);
@@ -370,7 +370,7 @@ fn link_entries(ctx: &PaneMenuContext) -> Vec<MenuEntry> {
         ClickLink::Web { url } => {
             let url = url.clone();
             entries.push(item(
-                s::ctx_open_link(),
+                s::ctx::open_link(),
                 ItemState::Enabled,
                 Activate::Op(Box::new(move |ws, _window, cx| {
                     ws.open_pane_menu_link(url.clone(), cx);
@@ -382,7 +382,7 @@ fn link_entries(ctx: &PaneMenuContext) -> Vec<MenuEntry> {
     }
 
     entries.push(item(
-        s::ctx_copy_link_address(),
+        s::ctx::copy_link_address(),
         ItemState::Enabled,
         Activate::Clipboard(link.url().to_owned()),
     ));
@@ -399,7 +399,7 @@ fn send_selection_entries(ctx: &PaneMenuContext, label: String) -> Vec<MenuEntry
     }
 
     let state = if text.len() > SEND_SELECTION_LIMIT {
-        ItemState::Disabled(Some(s::ctx_selection_too_large().into()))
+        ItemState::Disabled(Some(s::ctx::selection_too_large().into()))
     } else {
         ItemState::Enabled
     };
@@ -539,24 +539,24 @@ mod tests {
     fn solo_close_label_is_close_tab_and_zoom_is_absent() {
         let entries = compose(&terminal_context(PaneRole::Solo));
         let labels = labels(&entries);
-        assert!(labels.contains(&s::ctx_close_tab()));
-        assert!(!labels.contains(&s::ctx_zoom_pane()));
-        assert!(!labels.contains(&s::ctx_unzoom_pane()));
+        assert!(labels.contains(&s::common::close_tab()));
+        assert!(!labels.contains(&s::ctx::zoom_pane()));
+        assert!(!labels.contains(&s::ctx::unzoom_pane()));
     }
 
     #[test]
     fn split_role_adds_zoom_and_close_pane() {
         let entries = compose(&terminal_context(PaneRole::InSplit { zoomed: false }));
         let labels = labels(&entries);
-        assert!(labels.contains(&s::ctx_zoom_pane()));
-        assert!(labels.contains(&s::ctx_close_pane()));
+        assert!(labels.contains(&s::ctx::zoom_pane()));
+        assert!(labels.contains(&s::common::close_pane()));
     }
 
     #[test]
     fn zoomed_split_uses_unzoom_label() {
         let entries = compose(&terminal_context(PaneRole::InSplit { zoomed: true }));
         let labels = labels(&entries);
-        assert!(labels.contains(&s::ctx_unzoom_pane()));
+        assert!(labels.contains(&s::ctx::unzoom_pane()));
     }
 
     #[test]
@@ -567,17 +567,17 @@ mod tests {
         };
         let entries = compose(&ctx);
         for label in [
-            s::ctx_split_terminal_horizontal(),
-            s::ctx_split_terminal_vertical(),
-            s::ctx_split_agent_chat_horizontal(),
-            s::ctx_split_agent_chat_vertical(),
+            s::common::split_terminal_horizontal(),
+            s::common::split_terminal_vertical(),
+            s::common::split_agent_chat_horizontal(),
+            s::common::split_agent_chat_vertical(),
         ] {
             let spec = find(&entries, &label).expect("split entry present");
             assert!(spec.is_disabled(), "{label} should be disabled");
         }
         // Closing is still reachable — only splitting needs the lane.
         assert!(
-            !find(&entries, &s::ctx_close_tab())
+            !find(&entries, &s::common::close_tab())
                 .expect("close entry present")
                 .is_disabled()
         );
@@ -592,17 +592,21 @@ mod tests {
             dep_selected: false,
         })));
         assert!(
-            graph.contains(&s::ctx_reload_flow_graph()),
+            graph.contains(&s::ctx::reload_flow_graph()),
             "reload is offered: {graph:?}"
         );
-        for forbidden in [s::menu_copy(), s::ctx_stop(), s::menu_scroll_to_bottom()] {
+        for forbidden in [
+            s::menu::copy(),
+            s::common::btn_stop(),
+            s::menu::scroll_to_bottom(),
+        ] {
             assert!(
                 !graph.contains(&forbidden),
                 "{forbidden} belongs to another kind of pane"
             );
         }
         assert!(
-            !labels(&compose(&base(PaneMenuKind::Other))).contains(&s::ctx_reload_flow_graph()),
+            !labels(&compose(&base(PaneMenuKind::Other))).contains(&s::ctx::reload_flow_graph()),
             "and a pane that is not a graph is not offered it"
         );
     }
@@ -621,12 +625,12 @@ mod tests {
             dep_selected: true,
         }));
         assert!(
-            find(&without, &s::flow_remove_connection())
+            find(&without, &s::flow::remove_connection())
                 .expect("the row is present with nothing selected")
                 .is_disabled()
         );
         assert!(
-            !find(&with, &s::flow_remove_connection())
+            !find(&with, &s::flow::remove_connection())
                 .expect("and with a line selected")
                 .is_disabled()
         );
@@ -641,7 +645,7 @@ mod tests {
             dep_selected: true,
         }));
         assert!(
-            find(&line_only, &s::flow_delete_node())
+            find(&line_only, &s::flow::delete_node())
                 .expect("present")
                 .is_disabled(),
             "a line is not a node"
@@ -651,7 +655,7 @@ mod tests {
             dep_selected: false,
         }));
         assert!(
-            find(&node_only, &s::flow_remove_connection())
+            find(&node_only, &s::flow::remove_connection())
                 .expect("present")
                 .is_disabled(),
             "and a node is not a line"
@@ -670,11 +674,11 @@ mod tests {
         ] {
             let labels = labels(&compose(&ctx));
             for forbidden in [
-                s::ctx_new_tab(),
-                s::ctx_close_other_tabs(),
-                s::ctx_close_tabs_to_right(),
-                s::ctx_move_tab_left(),
-                s::ctx_move_tab_right(),
+                s::common::new_tab(),
+                s::ctx::close_other_tabs(),
+                s::ctx::close_tabs_to_right(),
+                s::common::move_tab_left(),
+                s::common::move_tab_right(),
             ] {
                 assert!(
                     !labels.contains(&forbidden),
@@ -691,11 +695,11 @@ mod tests {
         assert_eq!(
             labels,
             vec![
-                s::ctx_split_terminal_horizontal(),
-                s::ctx_split_terminal_vertical(),
-                s::ctx_split_agent_chat_horizontal(),
-                s::ctx_split_agent_chat_vertical(),
-                s::ctx_close_tab(),
+                s::common::split_terminal_horizontal(),
+                s::common::split_terminal_vertical(),
+                s::common::split_agent_chat_horizontal(),
+                s::common::split_agent_chat_vertical(),
+                s::common::close_tab(),
             ]
         );
     }
@@ -710,11 +714,11 @@ mod tests {
         };
         let entries = compose(&ctx);
         assert!(
-            find(&entries, &s::menu_copy())
+            find(&entries, &s::menu::copy())
                 .expect("copy present")
                 .is_disabled()
         );
-        assert!(!labels(&entries).contains(&s::ctx_send_selection_to_agent_chat()));
+        assert!(!labels(&entries).contains(&s::ctx::send_selection_to_agent_chat()));
     }
 
     #[test]
@@ -725,8 +729,8 @@ mod tests {
             ..terminal_context(PaneRole::Solo)
         };
         let entries = compose(&one);
-        assert!(find(&entries, &s::ctx_send_selection_to_agent_chat()).is_some());
-        assert!(submenu(&entries, &s::ctx_send_selection_to_agent_chat()).is_none());
+        assert!(find(&entries, &s::ctx::send_selection_to_agent_chat()).is_some());
+        assert!(submenu(&entries, &s::ctx::send_selection_to_agent_chat()).is_none());
 
         let many = PaneMenuContext {
             send_targets: targets(2),
@@ -734,7 +738,7 @@ mod tests {
         };
         let entries = compose(&many);
         let nested =
-            submenu(&entries, &s::ctx_send_selection_to_agent_chat()).expect("submenu present");
+            submenu(&entries, &s::ctx::send_selection_to_agent_chat()).expect("submenu present");
         assert_eq!(labels(nested), vec!["target-0", "target-1"]);
     }
 
@@ -747,7 +751,7 @@ mod tests {
         };
         let entries = compose(&ctx);
         assert!(
-            find(&entries, &s::ctx_send_selection_to_agent_chat())
+            find(&entries, &s::ctx::send_selection_to_agent_chat())
                 .expect("send entry present")
                 .is_disabled()
         );
@@ -757,13 +761,13 @@ mod tests {
     fn no_click_drops_link_and_delete_annotation() {
         let entries = compose(&terminal_context(PaneRole::Solo));
         let labels = labels(&entries);
-        assert!(!labels.contains(&s::ctx_open_link()));
-        assert!(!labels.contains(&s::ctx_copy_link_address()));
-        assert!(!labels.contains(&s::terminal_annotation_action_delete()));
+        assert!(!labels.contains(&s::ctx::open_link()));
+        assert!(!labels.contains(&s::ctx::copy_link_address()));
+        assert!(!labels.contains(&s::terminal::annotation_action_delete()));
         // Add annotation is always listed; without a single-line selection it
         // is disabled and says why.
         assert!(
-            find(&entries, &s::terminal_annotation_action_add())
+            find(&entries, &s::terminal::annotation_action_add())
                 .expect("add annotation present")
                 .is_disabled()
         );
@@ -784,8 +788,8 @@ mod tests {
             ..terminal_context(PaneRole::Solo)
         };
         let labels = labels(&compose(&ctx));
-        assert!(labels.contains(&s::ctx_open_link()));
-        assert!(labels.contains(&s::terminal_annotation_action_delete()));
+        assert!(labels.contains(&s::ctx::open_link()));
+        assert!(labels.contains(&s::terminal::annotation_action_delete()));
     }
 
     #[test]
@@ -800,8 +804,8 @@ mod tests {
             ..terminal_context(PaneRole::Solo)
         };
         let labels = labels(&compose(&ctx));
-        assert!(!labels.contains(&s::ctx_open_link()));
-        assert!(labels.contains(&s::ctx_copy_link_address()));
+        assert!(!labels.contains(&s::ctx::open_link()));
+        assert!(labels.contains(&s::ctx::copy_link_address()));
     }
 
     /// A chat link that resolves to a file is the one case with two ways to
@@ -820,11 +824,11 @@ mod tests {
             ..base(PaneMenuKind::AgentChat { busy: false })
         };
         let labels = labels(&compose(&ctx));
-        assert!(labels.contains(&s::ctx_open_link_in_file_view()));
-        assert!(labels.contains(&s::ctx_open_link_externally()));
-        assert!(labels.contains(&s::ctx_copy_link_address()));
+        assert!(labels.contains(&s::ctx::open_link_in_file_view()));
+        assert!(labels.contains(&s::ctx::open_link_externally()));
+        assert!(labels.contains(&s::ctx::copy_link_address()));
         // The browser has nothing to do with a path.
-        assert!(!labels.contains(&s::ctx_open_link()));
+        assert!(!labels.contains(&s::ctx::open_link()));
     }
 
     /// An image is not something the code viewer can show, so the viewer
@@ -843,9 +847,9 @@ mod tests {
             ..base(PaneMenuKind::AgentChat { busy: false })
         };
         let labels = labels(&compose(&ctx));
-        assert!(!labels.contains(&s::ctx_open_link_in_file_view()));
-        assert!(labels.contains(&s::ctx_open_link_externally()));
-        assert!(labels.contains(&s::ctx_copy_link_address()));
+        assert!(!labels.contains(&s::ctx::open_link_in_file_view()));
+        assert!(labels.contains(&s::ctx::open_link_externally()));
+        assert!(labels.contains(&s::ctx::copy_link_address()));
     }
 
     /// A file that is gone can still have its address copied, and nothing else.
@@ -863,9 +867,9 @@ mod tests {
             ..base(PaneMenuKind::AgentChat { busy: false })
         };
         let labels = labels(&compose(&ctx));
-        assert!(!labels.contains(&s::ctx_open_link_in_file_view()));
-        assert!(!labels.contains(&s::ctx_open_link_externally()));
-        assert!(labels.contains(&s::ctx_copy_link_address()));
+        assert!(!labels.contains(&s::ctx::open_link_in_file_view()));
+        assert!(!labels.contains(&s::ctx::open_link_externally()));
+        assert!(labels.contains(&s::ctx::copy_link_address()));
     }
 
     /// The mirror: a web link in the chat reads exactly like one in the
@@ -882,9 +886,9 @@ mod tests {
             ..base(PaneMenuKind::AgentChat { busy: false })
         };
         let labels = labels(&compose(&ctx));
-        assert!(labels.contains(&s::ctx_open_link()));
-        assert!(labels.contains(&s::ctx_copy_link_address()));
-        assert!(!labels.contains(&s::ctx_open_link_in_file_view()));
+        assert!(labels.contains(&s::ctx::open_link()));
+        assert!(labels.contains(&s::ctx::copy_link_address()));
+        assert!(!labels.contains(&s::ctx::open_link_in_file_view()));
     }
 
     /// Only a terminal whose shell exited offers a restart.
@@ -896,8 +900,8 @@ mod tests {
                 exited,
             })))
         };
-        assert!(terminal(true).contains(&s::ctx_restart_shell()));
-        assert!(!terminal(false).contains(&s::ctx_restart_shell()));
+        assert!(terminal(true).contains(&s::ctx::restart_shell()));
+        assert!(!terminal(false).contains(&s::ctx::restart_shell()));
     }
 
     /// No right-click on a link means no link section at all — the chat menu
@@ -905,10 +909,10 @@ mod tests {
     #[test]
     fn a_chat_menu_without_a_link_offers_none_of_it() {
         let labels = labels(&compose(&base(PaneMenuKind::AgentChat { busy: false })));
-        assert!(!labels.contains(&s::ctx_copy_link_address()));
-        assert!(!labels.contains(&s::ctx_open_link()));
-        assert!(!labels.contains(&s::ctx_open_link_in_file_view()));
-        assert!(!labels.contains(&s::ctx_open_link_externally()));
+        assert!(!labels.contains(&s::ctx::copy_link_address()));
+        assert!(!labels.contains(&s::ctx::open_link()));
+        assert!(!labels.contains(&s::ctx::open_link_in_file_view()));
+        assert!(!labels.contains(&s::ctx::open_link_externally()));
     }
 
     #[test]
@@ -922,7 +926,7 @@ mod tests {
         };
         let entries = compose(&ctx);
         assert!(
-            !find(&entries, &s::terminal_annotation_action_add())
+            !find(&entries, &s::terminal::annotation_action_add())
                 .expect("add annotation present")
                 .is_disabled()
         );
@@ -933,18 +937,18 @@ mod tests {
     #[test]
     fn stop_appears_only_while_a_turn_is_running() {
         let idle = labels(&compose(&base(PaneMenuKind::AgentChat { busy: false })));
-        assert!(!idle.contains(&s::ctx_stop()));
+        assert!(!idle.contains(&s::common::btn_stop()));
 
         let busy = labels(&compose(&base(PaneMenuKind::AgentChat { busy: true })));
-        assert!(busy.contains(&s::ctx_stop()));
+        assert!(busy.contains(&s::common::btn_stop()));
     }
 
     #[test]
     fn agent_chat_omits_terminal_only_editing_entries() {
         let labels = labels(&compose(&base(PaneMenuKind::AgentChat { busy: false })));
-        assert!(!labels.contains(&s::menu_paste()));
-        assert!(!labels.contains(&s::menu_select_all()));
-        assert!(!labels.contains(&s::menu_clear_buffer()));
+        assert!(!labels.contains(&s::menu::paste()));
+        assert!(!labels.contains(&s::menu::select_all()));
+        assert!(!labels.contains(&s::menu::clear_buffer()));
     }
 
     // -- separators -------------------------------------------------------

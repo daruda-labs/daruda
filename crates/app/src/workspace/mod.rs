@@ -798,7 +798,7 @@ impl Workspace {
         let git_commit_input = cx.new(|cx| {
             crate::ui::InputPanel::new(crate::ui::InputPanelLayout::ActionsFloating, window, cx)
                 .with_placeholder(
-                    crate::surface::strings::git_commit_placeholder(),
+                    crate::surface::strings::git::commit_placeholder(),
                     window,
                     cx,
                 )
@@ -807,7 +807,7 @@ impl Workspace {
                 .with_action(
                     crate::ui::PanelAction::new(
                         "commit",
-                        crate::surface::strings::git_commit_btn(),
+                        crate::surface::strings::git::commit_btn(),
                         crate::ui::PanelActionVariant::Primary,
                         move |_, window, cx| {
                             let _ = ws_commit.upgrade().map(|w| {
@@ -818,7 +818,7 @@ impl Workspace {
                         },
                     )
                     .with_dropdown_item(
-                        crate::surface::strings::ctx_git_commit_amend(),
+                        crate::surface::strings::ctx::git_commit_amend(),
                         move |window, app_cx| {
                             if let Some(ws) = ws_amend.upgrade() {
                                 ws.update(app_cx, |ws, cx| ws.on_commit_amend(window, cx));
@@ -926,7 +926,7 @@ impl Workspace {
                     });
                 });
             state.set_placeholder(
-                crate::surface::strings::bottom_input_placeholder(),
+                crate::surface::strings::bottom_dock::input_placeholder(),
                 window,
                 cx_state,
             );
@@ -1180,11 +1180,11 @@ impl Workspace {
             terminal_input_visible: false,
             skill_search_input: cx.new(|cx_state| {
                 crate::ui::InputState::new(window, cx_state)
-                    .placeholder(crate::surface::strings::skills_search_placeholder())
+                    .placeholder(crate::surface::strings::skills::search_placeholder())
             }),
             task_search_input: cx.new(|cx_state| {
                 crate::ui::InputState::new(window, cx_state)
-                    .placeholder(crate::surface::strings::task_search_placeholder())
+                    .placeholder(crate::surface::strings::task::search_placeholder())
             }),
             skill_plugin_expanded: std::collections::HashSet::new(),
             right_dock_sections: Default::default(),
@@ -1451,7 +1451,7 @@ impl Workspace {
             // workspace, not a folder, and reopening the folder is the job
             // of Open Folder. Keeping the name would make the row advertise
             // something it cannot deliver.
-            None => crate::surface::strings::menu_recent_empty_workspace(),
+            None => crate::surface::strings::menu::recent_empty_workspace(),
         };
 
         let rest = self.projects.len().saturating_sub(1);

@@ -578,7 +578,7 @@ pub(super) fn interrupted_row(dim: f32, cx: &mut Context<AgentChatView>) -> AnyE
                 .flex_none()
                 .text_color(theme::dim_toward_gray(theme::agent_chat_fg_muted(cx), dim))
                 .text_size(px(theme::agent_chat_font_size(cx)))
-                .child(SharedString::from(s::agent_chat_interrupted())),
+                .child(SharedString::from(s::agent_chat::interrupted())),
         )
         .child(rule())
         .into_any_element()

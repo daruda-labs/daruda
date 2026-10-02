@@ -16,11 +16,11 @@ pub(crate) fn permission_feedback(
 ) -> String {
     match outcome {
         BotPermissionOutcome::Applied => match decision {
-            PermissionDecision::Allow(_) => s::telegram_permission_allowed(),
-            PermissionDecision::Reject(_) => s::telegram_permission_rejected(),
+            PermissionDecision::Allow(_) => s::notification::telegram_permission_allowed(),
+            PermissionDecision::Reject(_) => s::notification::telegram_permission_rejected(),
         },
-        BotPermissionOutcome::Stale => s::telegram_permission_stale(),
-        BotPermissionOutcome::Gone => s::telegram_permission_gone(),
+        BotPermissionOutcome::Stale => s::notification::telegram_permission_stale(),
+        BotPermissionOutcome::Gone => s::notification::telegram_permission_gone(),
     }
 }
 
@@ -112,7 +112,7 @@ pub(crate) fn lent_target_reply(
         format!("pane={} agent={}", trace::pane(pane), label.agent)
     });
     Some(crate::remote_channel::command::RenderedReply {
-        text: s::control_target_lent(&label.path, &label.agent_name),
+        text: s::control::target_lent(&label.path, &label.agent_name),
         keyboard: None,
     })
 }

@@ -17,7 +17,7 @@ pub(super) fn retention_note(cx: &gpui::App) -> impl IntoElement {
     div()
         .text_size(px(theme::DOCK_PLACEHOLDER_FONT_SIZE))
         .text_color(theme::current(cx).text_subtle)
-        .child(strings::right_panel_flow_retention(
+        .child(strings::flow::panel_retention(
             daruda_flow::marker::DEFAULT_KEEP_RUNS,
         ))
 }
@@ -82,7 +82,7 @@ pub(super) fn past_row(
                 .truncate()
                 .text_size(px(theme::RIGHT_PANEL_LABEL_FONT_SIZE))
                 .text_color(status_color(run.status))
-                .child(strings::flow_run_status(run.status)),
+                .child(strings::flow::run_status(run.status)),
         )
         .children(resume_button(run, snap))
         .when_some(run.report.clone(), |row, report| {
@@ -130,7 +130,7 @@ fn resume_button(
         div().flex_none().child(
             crate::ui::button(
                 SharedString::from(format!("flow-resume-{}", run.dir.display())),
-                strings::flow_resume_action(),
+                strings::flow::resume_action(),
             )
             .on_click(move |_, window, cx| {
                 // Asked first: the interrupted node starts over, so whatever
@@ -139,9 +139,9 @@ fn resume_button(
                 let workspace = workspace.clone();
                 let run_dir = run_dir.clone();
                 crate::workspace::dialog_helpers::open_confirm_dialog(
-                    strings::flow_resume_confirm_title(),
-                    strings::flow_resume_confirm_body(),
-                    strings::flow_resume_action(),
+                    strings::flow::resume_confirm_title(),
+                    strings::flow::resume_confirm_body(),
+                    strings::flow::resume_action(),
                     crate::ui::ButtonVariant::Primary,
                     move |_, _window, cx| {
                         let run_dir = run_dir.clone();

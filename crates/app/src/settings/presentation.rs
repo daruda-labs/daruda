@@ -109,9 +109,9 @@ pub(super) fn row_with_reset(
 /// A switch with its On/Off word beside it, the control every switch row uses.
 pub(super) fn switch_with_state(switch: crate::ui::Button, checked: bool, cx: &App) -> Div {
     let state = if checked {
-        s::settings_toggle_on()
+        s::settings::toggle_on()
     } else {
-        s::settings_toggle_off()
+        s::settings::toggle_off()
     };
     div()
         .flex()
@@ -153,7 +153,7 @@ pub(super) fn config_only_row(
             .child(
                 super::settings_button(
                     gpui::ElementId::Name(format!("settings-config-only-{path}").into()),
-                    s::settings_open_config_file(),
+                    s::settings::open_config_file(),
                 )
                 .tab_stop(true)
                 .on_click(cx.listener(|this, _, _, cx| this.open_config_file(cx))),
@@ -182,7 +182,7 @@ impl SettingsView {
                 crate::ui::icons::UNDO,
                 cx,
             )
-            .tooltip(s::settings_reset_to_default())
+            .tooltip(s::settings::reset_to_default())
             .tab_stop(true)
             .on_click(
                 cx.listener(move |this, _, window, cx| this.reset_to_default(target, window, cx)),
@@ -298,7 +298,7 @@ impl SettingsView {
                         .pt(px(theme::PAD_SM))
                         .text_size(px(theme::TAB_FONT_SIZE))
                         .text_color(theme::current(cx).text_muted)
-                        .child(s::settings_dependent_off(&(super::copy::bool(parent)
+                        .child(s::settings::dependent_off((super::copy::bool(parent)
                             .label)(
                         ))),
                 )
@@ -364,14 +364,14 @@ impl SettingsView {
             .font_weight(gpui::FontWeight::MEDIUM)
             .text_color(t.text_primary)
             .child(crate::ui::icons::icon(chevron))
-            .child(s::settings_card_advanced())
+            .child(s::settings::card_advanced())
             .child(
                 div()
                     .ml_auto()
                     .text_size(px(theme::TAB_FONT_SIZE))
                     .font_weight(gpui::FontWeight::NORMAL)
                     .text_color(t.text_muted)
-                    .child(s::settings_advanced_count(count)),
+                    .child(s::settings::advanced_count(count)),
             )
             // A focused div turns Enter / Space into this click on key-up.
             .on_click(cx.listener(move |this, _, _, cx| this.toggle_advanced(section, cx)));

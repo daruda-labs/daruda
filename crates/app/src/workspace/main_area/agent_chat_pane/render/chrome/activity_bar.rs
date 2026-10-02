@@ -94,7 +94,7 @@ pub(in crate::workspace::main_area::agent_chat_pane::render) fn activity_bar(
     )
     .xsmall()
     .icon(Icon::empty().path(ICON_EXPAND))
-    .tooltip(SharedString::from(s::agent_chat_expand_all()))
+    .tooltip(SharedString::from(s::agent_chat::expand_all()))
     .disabled(!props.has_items)
     .debug_selector(|| "agent-chat-expand-all".into())
     .on_click(cx.listener(move |this, _ev, window, cx| this.set_all_folds(true, window, cx)));
@@ -105,7 +105,7 @@ pub(in crate::workspace::main_area::agent_chat_pane::render) fn activity_bar(
     )
     .xsmall()
     .icon(Icon::empty().path(ICON_COMPRESS))
-    .tooltip(SharedString::from(s::agent_chat_collapse_all()))
+    .tooltip(SharedString::from(s::agent_chat::collapse_all()))
     .disabled(!props.has_items)
     .on_click(cx.listener(move |this, _ev, window, cx| this.set_all_folds(false, window, cx)));
     let transcript_controls: Vec<AnyElement> = if props.compact_options {
@@ -135,9 +135,9 @@ pub(in crate::workspace::main_area::agent_chat_pane::render) fn activity_bar(
     };
     let reading_selected = props.content_width.is_reading();
     let reading_tooltip = if reading_selected {
-        s::agent_chat_reading_width_off()
+        s::agent_chat::reading_width_off()
     } else {
-        s::agent_chat_reading_width_on()
+        s::agent_chat::reading_width_on()
     };
     let reading_width = button_bare_on_surface(
         ("agent-chat-reading-width", props.pane_id as usize),
@@ -252,10 +252,10 @@ fn options_tooltip(
     filter: PaneChoice<DisplayFilter>,
     tail: TailChoices,
 ) -> String {
-    s::agent_chat_view_options_tooltip(
-        &fold_mode_chip_label(fold),
-        &display_filter_chip_label(filter),
-        &tail_window_chip_label(tail),
+    s::agent_chat::view_options_tooltip(
+        fold_mode_chip_label(fold),
+        display_filter_chip_label(filter),
+        tail_window_chip_label(tail),
     )
 }
 
@@ -359,9 +359,9 @@ fn activity_options_tabs(
 
 fn activity_options_label(tab: ActivityOptionsTab) -> String {
     match tab {
-        ActivityOptionsTab::Fold => s::agent_chat_view_options_fold(),
-        ActivityOptionsTab::Filter => s::agent_chat_view_options_filter(),
-        ActivityOptionsTab::RecentSteps => s::agent_chat_recent_steps_label(),
+        ActivityOptionsTab::Fold => s::agent_chat::view_options_fold(),
+        ActivityOptionsTab::Filter => s::agent_chat::view_options_filter(),
+        ActivityOptionsTab::RecentSteps => s::agent_chat::recent_steps_label(),
     }
 }
 
@@ -394,8 +394,8 @@ fn context_meter(u: &UsageView) -> ContextMeter {
         Some(c) => {
             let amount = format!("{:.2}", c.amount);
             ContextMeter {
-                label: s::agent_chat_context_meter_with_cost(&used, &size, &amount, &c.currency),
-                tooltip: s::agent_chat_context_tooltip_with_cost(
+                label: s::agent_chat::context_meter_with_cost(&used, &size, &amount, &c.currency),
+                tooltip: s::agent_chat::context_tooltip_with_cost(
                     &used,
                     &size,
                     percent,
@@ -405,8 +405,8 @@ fn context_meter(u: &UsageView) -> ContextMeter {
             }
         }
         None => ContextMeter {
-            label: s::agent_chat_context_meter(&used, &size),
-            tooltip: s::agent_chat_context_tooltip(&used, &size, percent),
+            label: s::agent_chat::context_meter(&used, &size),
+            tooltip: s::agent_chat::context_tooltip(&used, &size, percent),
         },
     }
 }
@@ -417,7 +417,7 @@ fn context_meter(u: &UsageView) -> ContextMeter {
 /// agent's own wording beats an empty tooltip.
 fn last_active_tooltip(iso: &str) -> SharedString {
     let when = timestamp::local_datetime(iso).unwrap_or_else(|| iso.to_owned());
-    SharedString::from(s::agent_chat_last_active_tooltip(&when))
+    SharedString::from(s::agent_chat::last_active_tooltip(&when))
 }
 
 /// Compact token count for the context meter: exact below 1000, whole

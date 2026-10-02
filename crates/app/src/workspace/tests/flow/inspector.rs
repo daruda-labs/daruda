@@ -724,10 +724,10 @@ nodes:
         .expect("the form says why");
     assert_eq!(
         banner,
-        crate::surface::strings::flow_edit_would_not_load(
-            &crate::surface::strings::flow_issue_line(
+        crate::surface::strings::flow::edit_would_not_load(
+            crate::surface::strings::flow::issue_line(
                 Some("design"),
-                &crate::surface::strings::flow_issue(
+                &crate::surface::strings::flow::issue(
                     &daruda_flow::error::ValidationKind::AgentIdWithoutMode
                 )
             )
@@ -894,7 +894,7 @@ nodes:
         })
         .expect("the form says why");
     assert!(
-        banner.contains(&crate::surface::strings::flow_issue(
+        banner.contains(&crate::surface::strings::flow::issue(
             &daruda_flow::error::ValidationKind::RepairWithoutFailureContext
         )),
         "the engine's rule reached the inspector: {banner}"
@@ -1287,7 +1287,7 @@ async fn a_refusal_points_at_the_field_it_is_about(cx: &mut TestAppContext) {
     assert_eq!(
         deps_note.as_deref(),
         Some(
-            crate::surface::strings::flow_issue(&daruda_flow::error::ValidationKind::UnknownDep {
+            crate::surface::strings::flow::issue(&daruda_flow::error::ValidationKind::UnknownDep {
                 dep: "nobody".into()
             })
             .as_str()
@@ -1658,7 +1658,7 @@ nodes:
     assert_eq!(
         note.as_deref(),
         Some(
-            crate::surface::strings::flow_issue(
+            crate::surface::strings::flow::issue(
                 &daruda_flow::error::ValidationKind::DuplicateOutput
             )
             .as_str()

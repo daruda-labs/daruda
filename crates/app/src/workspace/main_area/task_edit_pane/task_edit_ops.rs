@@ -29,7 +29,7 @@ pub(super) fn validate_branch(text: &str) -> BranchValidation {
         Ok(_) => BranchValidation::Valid,
         Err(daruda_core::git::BranchNameRule::Empty) => BranchValidation::Empty,
         Err(rule) => BranchValidation::Invalid {
-            reason: SharedString::from(crate::surface::strings::branch_rule_reason(rule)),
+            reason: SharedString::from(crate::surface::strings::branch_rule::reason(rule)),
         },
     }
 }
@@ -129,7 +129,7 @@ impl Workspace {
         let title_for_default = title.clone();
         let title_input = cx.new(|cx_state| {
             let mut s = InputState::new(window, cx_state)
-                .placeholder(crate::surface::strings::task_edit_title_placeholder());
+                .placeholder(crate::surface::strings::task::edit_title_placeholder());
             if !title_for_default.is_empty() {
                 s = s.default_value(title_for_default);
             }
@@ -139,7 +139,7 @@ impl Workspace {
         let branch_for_default = branch_name.clone();
         let branch_input = cx.new(|cx_state| {
             let mut s = InputState::new(window, cx_state)
-                .placeholder(crate::surface::strings::task_edit_branch_placeholder());
+                .placeholder(crate::surface::strings::task::edit_branch_placeholder());
             if !branch_for_default.is_empty() {
                 s = s.default_value(branch_for_default);
             }
@@ -153,14 +153,14 @@ impl Workspace {
         // numbers on).
         let prompt_state = make_markdown_prose_state(
             &prompt,
-            crate::surface::strings::task_edit_prompt_placeholder(),
+            crate::surface::strings::task::edit_prompt_placeholder(),
             crate::ui::theme::TASK_EDIT_PROMPT_ROWS,
             window,
             cx,
         );
         let notes_state = make_markdown_prose_state(
             &notes,
-            crate::surface::strings::task_edit_notes_placeholder(),
+            crate::surface::strings::task::edit_notes_placeholder(),
             crate::ui::theme::TASK_EDIT_NOTES_ROWS,
             window,
             cx,
@@ -197,7 +197,7 @@ impl Workspace {
         // through `gpui_component::Input` (IME-verified).
         let new_subtask_input = cx.new(|cx_state| {
             InputState::new(window, cx_state)
-                .placeholder(crate::surface::strings::task_subtask_add_placeholder())
+                .placeholder(crate::surface::strings::task::subtask_add_placeholder())
         });
         let editing_subtask_input = cx.new(|cx_state| InputState::new(window, cx_state));
         let new_subtask_sub = cx.subscribe_in(
@@ -252,7 +252,7 @@ impl Workspace {
         let focus_handle = cx.focus_handle();
 
         let cached_title: SharedString = if title.is_empty() {
-            crate::surface::strings::command_new_task().into()
+            crate::surface::strings::command::new_task().into()
         } else {
             SharedString::from(title.clone())
         };
@@ -338,7 +338,7 @@ impl Workspace {
         let title = te.title_input.read(cx).value().to_string();
         if let Some(te) = self.task_edit_content_mut_for(pane_id) {
             te.cached_title = if title.is_empty() {
-                crate::surface::strings::command_new_task().into()
+                crate::surface::strings::command::new_task().into()
             } else {
                 SharedString::from(title)
             };
@@ -433,7 +433,7 @@ fn base_lane_options(ws: &Workspace) -> Vec<SelectOption> {
     let mut options = Vec::with_capacity(lanes.len() + 1);
     options.push(SelectOption::new(
         "",
-        crate::surface::strings::task_edit_base_active_label(),
+        crate::surface::strings::task::edit_base_active_label(),
     ));
     for w in lanes {
         let Some(path_str) = w.path.to_str() else {

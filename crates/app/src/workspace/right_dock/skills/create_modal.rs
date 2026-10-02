@@ -85,30 +85,32 @@ impl CreateSkillModal {
         cx: &mut Context<Self>,
     ) -> Self {
         let name_input = cx.new(|cx_state| {
-            InputState::new(window, cx_state).placeholder(strings::skills_placeholder_name())
+            InputState::new(window, cx_state).placeholder(strings::skills::placeholder_name())
         });
         let description_input = cx.new(|cx_state| {
-            InputState::new(window, cx_state).placeholder(strings::skills_placeholder_description())
+            InputState::new(window, cx_state)
+                .placeholder(strings::skills::placeholder_description())
         });
         let when_to_use_input = cx.new(|cx_state| {
-            InputState::new(window, cx_state).placeholder(strings::skills_placeholder_when_to_use())
+            InputState::new(window, cx_state)
+                .placeholder(strings::skills::placeholder_when_to_use())
         });
         let argument_hint_input = cx.new(|cx_state| {
-            InputState::new(window, cx_state).placeholder(strings::skills_placeholder_optional())
+            InputState::new(window, cx_state).placeholder(strings::skills::placeholder_optional())
         });
         let allowed_tools_input = cx.new(|cx_state| {
-            InputState::new(window, cx_state).placeholder(strings::skills_placeholder_optional())
+            InputState::new(window, cx_state).placeholder(strings::skills::placeholder_optional())
         });
         let paths_input = cx.new(|cx_state| {
-            InputState::new(window, cx_state).placeholder(strings::skills_placeholder_optional())
+            InputState::new(window, cx_state).placeholder(strings::skills::placeholder_optional())
         });
         let model_input = cx.new(|cx_state| {
-            InputState::new(window, cx_state).placeholder(strings::skills_placeholder_optional())
+            InputState::new(window, cx_state).placeholder(strings::skills::placeholder_optional())
         });
         let body_editor = cx.new(|cx_state| {
             InputState::new(window, cx_state)
                 .multi_line(true)
-                .placeholder(strings::skills_placeholder_body())
+                .placeholder(strings::skills::placeholder_body())
         });
 
         let scope_options: Vec<SkillScope> = if project_root.is_some() {
@@ -165,16 +167,18 @@ impl CreateSkillModal {
         let raw_name = raw_name.trim().to_string();
         match validate_name(&raw_name) {
             Ok(()) => {}
-            Err(NameError::Empty) => return Err(strings::skills_name_empty().into()),
-            Err(NameError::TooLong { .. }) => return Err(strings::skills_name_too_long().into()),
-            Err(NameError::InvalidChar { .. }) => return Err(strings::skills_name_invalid().into()),
+            Err(NameError::Empty) => return Err(strings::common::name_required().into()),
+            Err(NameError::TooLong { .. }) => return Err(strings::skills::name_too_long().into()),
+            Err(NameError::InvalidChar { .. }) => {
+                return Err(strings::skills::name_invalid().into());
+            }
             Err(NameError::InvalidLeading { .. }) => {
-                return Err(strings::skills_name_leading().into());
+                return Err(strings::skills::name_leading().into());
             }
             Err(NameError::DuplicateInScope { .. }) => unreachable!("validate_name is syntactic"),
         }
         if self.state_snapshot.name_exists(self.scope, &raw_name) {
-            return Err(strings::skills_name_duplicate().into());
+            return Err(strings::skills::name_duplicate().into());
         }
 
         let mut fm = SkillFrontmatter::empty();
@@ -322,8 +326,8 @@ impl Render for CreateSkillModal {
             .scope_options
             .iter()
             .filter_map(|scope| match scope {
-                SkillScope::Project => Some((*scope, strings::skills_project().into())),
-                SkillScope::Personal => Some((*scope, strings::skills_personal().into())),
+                SkillScope::Project => Some((*scope, strings::common::section_project().into())),
+                SkillScope::Personal => Some((*scope, strings::common::section_personal().into())),
                 SkillScope::Plugin => None,
             })
             .collect();
@@ -345,26 +349,26 @@ impl Render for CreateSkillModal {
             .flex_col()
             .flex_1()
             .gap(px(theme::FORM_MODAL_SECTION_GAP))
-            .child(field_label(strings::skills_field_name(), &t))
+            .child(field_label(strings::common::field_name(), &t))
             .child(input(&self.name_input, cx, 0))
-            .child(field_label(strings::skills_field_scope(), &t))
+            .child(field_label(strings::common::field_scope(), &t))
             .child(scope_chip)
-            .child(field_label(strings::skills_field_description(), &t))
+            .child(field_label(strings::skills::field_description(), &t))
             .child(input(&self.description_input, cx, 1))
-            .child(field_label(strings::skills_field_when_to_use(), &t))
+            .child(field_label(strings::skills::field_when_to_use(), &t))
             .child(input(&self.when_to_use_input, cx, 2))
-            .child(field_label(strings::skills_field_allowed_tools(), &t))
+            .child(field_label(strings::skills::field_allowed_tools(), &t))
             .child(input(&self.allowed_tools_input, cx, 3))
-            .child(field_label(strings::skills_field_arg_hint(), &t))
+            .child(field_label(strings::skills::field_arg_hint(), &t))
             .child(input(&self.argument_hint_input, cx, 4))
-            .child(field_label(strings::skills_field_paths(), &t))
+            .child(field_label(strings::skills::field_paths(), &t))
             .child(input(&self.paths_input, cx, 5))
-            .child(field_label(strings::skills_field_model(), &t))
+            .child(field_label(strings::skills::field_model(), &t))
             .child(input(&self.model_input, cx, 6))
             .child(
                 checkbox(
                     "skill-user-invocable",
-                    strings::skills_toggle_user_invocable(),
+                    strings::skills::toggle_user_invocable(),
                     8,
                 )
                 .checked(user_invocable)
@@ -376,7 +380,7 @@ impl Render for CreateSkillModal {
             .child(
                 checkbox(
                     "skill-disable-model",
-                    strings::skills_toggle_disable_model(),
+                    strings::skills::toggle_disable_model(),
                     9,
                 )
                 .checked(disable_model)
@@ -391,7 +395,7 @@ impl Render for CreateSkillModal {
             .flex_col()
             .flex_1()
             .gap(px(theme::FORM_MODAL_SECTION_GAP))
-            .child(field_label(strings::skills_field_body(), &t))
+            .child(field_label(strings::skills::field_body(), &t))
             // body_editor sits between the left-column inputs and the
             // toggles so Tab flows from the last metadata field into
             // the markdown body before reaching the tail-of-form
@@ -406,9 +410,9 @@ impl Render for CreateSkillModal {
             .child(right);
 
         let save_label = if submitting {
-            strings::skills_saving_label()
+            strings::skills::saving_label()
         } else {
-            strings::skills_button_save()
+            strings::common::btn_save()
         };
         let footer = div()
             .flex()
@@ -417,7 +421,7 @@ impl Render for CreateSkillModal {
             .gap(px(theme::MODAL_FOOTER_GAP))
             .mt(px(theme::MODAL_FOOTER_MARGIN_TOP))
             .child(
-                button("create-skill-cancel", strings::skills_button_cancel())
+                button("create-skill-cancel", strings::common::btn_cancel())
                     .on_click(cx.listener(|this, _: &ClickEvent, w, cx| this.dismiss(w, cx))),
             )
             .child(
@@ -453,7 +457,7 @@ pub fn open_create_skill_modal(
         .global::<crate::agent::skills::SkillsState>()
         .snapshot_for(project_root.as_deref());
     crate::workspace::dialog_helpers::open_form_modal(
-        strings::skills_new_title(),
+        strings::skills::new_title(),
         Some(px(crate::ui::theme::FORM_MODAL_WIDE)),
         move |window, cx| {
             CreateSkillModal::new(workspace, prefill_scope, project_root, state, window, cx)

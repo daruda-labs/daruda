@@ -185,7 +185,7 @@ pub(super) fn spawn_poll_task(cx: &mut App) {
                         // edited: leaving the buttons on invites the user to keep
                         // tapping a decision that can no longer land.
                         (Some(callback_id), _) => {
-                            let label = s::telegram_permission_stale();
+                            let label = s::notification::telegram_permission_stale();
                             answer_and_edit(cx, &token, callback_id, callback_edit, &label).await;
                         }
                         (None, dispatch::Effect::Reply(reply)) => {

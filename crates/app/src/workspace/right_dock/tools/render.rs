@@ -23,7 +23,7 @@ use crate::ui::theme;
 use crate::ui::theme::DarudaTheme;
 use gpui::{AnyElement, Context, IntoElement, SharedString, div, prelude::*, px};
 
-use crate::agent::mcp::{McpScope, McpServer, McpSnapshot, McpTransport};
+use crate::agent::mcp::{McpScope, McpServer, McpSnapshot};
 use crate::surface::strings;
 use crate::ui::SectionHeader;
 use crate::workspace::Workspace;
@@ -42,19 +42,19 @@ pub(in crate::workspace) fn render(snap: &RightDockSnapshot, cx: &mut Context<Do
     let scopes = [
         (
             DockSection::ToolsProject,
-            strings::mcp_project(),
+            strings::common::section_project(),
             McpScope::Project,
             has_lane,
         ),
         (
             DockSection::ToolsLocal,
-            strings::mcp_local(),
+            strings::common::section_local(),
             McpScope::Local,
             has_lane,
         ),
         (
             DockSection::ToolsUser,
-            strings::mcp_user(),
+            strings::common::section_user(),
             McpScope::User,
             true,
         ),
@@ -86,13 +86,13 @@ pub(in crate::workspace) fn footer(snap: &RightDockSnapshot, cx: &gpui::App) -> 
         .sum();
     panel_footer(
         crate::ui::icons::SERVER,
-        strings::mcp_footer_servers(total),
+        strings::mcp::footer_servers(total),
         cx,
     )
 }
 
 fn header_row(workspace: gpui::WeakEntity<Workspace>, cx: &gpui::App) -> impl IntoElement {
-    SectionHeader::new(strings::right_panel_tab_tools())
+    SectionHeader::new(strings::dock::right_tab_tools())
         .prominent()
         .truncate_label(true)
         .actions(new_server_button(workspace, cx))
@@ -100,7 +100,7 @@ fn header_row(workspace: gpui::WeakEntity<Workspace>, cx: &gpui::App) -> impl In
 
 fn new_server_button(workspace: gpui::WeakEntity<Workspace>, cx: &gpui::App) -> impl IntoElement {
     crate::ui::button_icon("mcp-new", crate::ui::icons::ADD, cx)
-        .tooltip(strings::mcp_new_button())
+        .tooltip(strings::mcp::new_button())
         .on_click(move |_, window, cx| {
             if let Some(ws) = workspace.upgrade() {
                 ws.update(cx, |ws, cx| ws.open_add_mcp_server(window, cx));
@@ -117,14 +117,14 @@ fn scope_body(
 ) -> AnyElement {
     let t = theme::current(cx);
     if !enabled {
-        return empty_hint(strings::mcp_no_project_hint(), t);
+        return empty_hint(strings::mcp::no_project_hint(), t);
     }
     let servers = state.servers(scope);
     if servers.is_empty() {
         let msg = match scope {
-            McpScope::Project => strings::mcp_empty_project(),
-            McpScope::Local => strings::mcp_empty_local(),
-            McpScope::User => strings::mcp_empty_user(),
+            McpScope::Project => strings::mcp::empty_project(),
+            McpScope::Local => strings::mcp::empty_local(),
+            McpScope::User => strings::mcp::empty_user(),
         };
         return empty_hint(msg, t);
     }
@@ -171,20 +171,16 @@ fn server_row(
     // The switch mirrors the config's `disabled` flag; there is no live
     // connection state to show, so the summary line reports config only.
     let (status, status_color) = if s.is_malformed() {
-        (strings::mcp_status_malformed(), t.mcp_malformed_badge_text)
+        (strings::mcp::status_malformed(), t.mcp_malformed_badge_text)
     } else if s.disabled {
-        (strings::mcp_status_disabled(), t.text_subtle)
+        (strings::mcp::status_disabled(), t.text_subtle)
     } else {
-        (strings::mcp_status_enabled(), t.text_muted)
+        (strings::mcp::status_enabled(), t.text_muted)
     };
-    let transport_label = match s.transport {
-        McpTransport::Stdio => strings::MCP_TRANSPORT_STDIO,
-        McpTransport::Sse => strings::MCP_TRANSPORT_SSE,
-        McpTransport::Http => strings::MCP_TRANSPORT_HTTP,
-    };
+    let transport_label = s.transport.slug();
     let summary = div()
         .text_color(status_color)
-        .child(strings::mcp_row_summary(&status, transport_label));
+        .child(strings::mcp::row_summary(&status, transport_label));
     let name = div()
         .when(s.disabled, |d| d.text_color(t.text_subtle))
         .child(SharedString::from(s.name.clone()));
@@ -208,7 +204,7 @@ fn server_row(
                 !s.disabled,
                 cx,
             )
-            .tooltip(strings::mcp_toggle_tooltip())
+            .tooltip(strings::mcp::toggle_tooltip())
             .debug_selector(|| "mcp-toggle".into())
             .on_click(move |_, _window, cx| {
                 if let Some(ws) = workspace_toggle.upgrade() {
@@ -247,7 +243,7 @@ fn row_actions(
         .gap(px(theme::GAP_SM))
         .child(
             crate::ui::button_icon("edit", crate::ui::icons::EDIT, cx)
-                .tooltip(strings::mcp_button_edit())
+                .tooltip(strings::common::btn_edit())
                 .debug_selector(|| "mcp-edit".into())
                 .on_click(move |_, window, cx| {
                     if let Some(ws) = workspace_edit.upgrade() {
@@ -258,7 +254,7 @@ fn row_actions(
         )
         .child(
             crate::ui::button_delete_glyph("del", cx)
-                .tooltip(strings::mcp_button_delete())
+                .tooltip(strings::common::btn_delete())
                 .debug_selector(|| "mcp-delete".into())
                 .on_click(move |_, window, cx| {
                     if let Some(ws) = workspace_delete.upgrade() {
@@ -280,7 +276,7 @@ mod tests {
         let server = McpServer {
             name: "filesystem".into(),
             scope: McpScope::User,
-            transport: McpTransport::Stdio,
+            transport: crate::agent::mcp::McpTransport::Stdio,
             command: Some("test-server".into()),
             args: Vec::new(),
             url: None,

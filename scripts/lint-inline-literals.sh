@@ -33,7 +33,6 @@ WHITELIST=(
     "crates/daruda_terminal/src/ux/strings.rs"
     "crates/app/src/surface/constants.rs"
     "crates/app/src/surface/keybindings.rs"
-    "crates/app/src/surface/strings.rs"
     # ui/theme/ is the daruda → gpui_component palette bridge plus the
     # app-side UI palette (workspace chrome, sidebar, status bar, etc.).
     # `mod.rs` carries variant-derived hsla values (danger_hover at
@@ -49,6 +48,8 @@ is_whitelisted() {
     for w in "${WHITELIST[@]}"; do
         [[ "$file" == "$w" ]] && return 0
     done
+    # The hand-written string functions (the rest is generated from en.yml).
+    [[ "$file" == crates/app/src/surface/strings/* ]] && return 0
     # Tests are exempt — they often need synthetic concrete values.
     [[ "$file" == *"/tests/"* ]] && return 0
     [[ "$file" == *"tests.rs" ]] && return 0

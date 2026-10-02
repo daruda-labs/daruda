@@ -89,10 +89,10 @@ pub(super) fn model_from(text: &str) -> Result<FlowGraphModel, FlowGraphError> {
         )),
         Err(daruda_flow::FlowError::Parse(detail)) => Err(FlowGraphError::Parse { detail }),
         // Worded here, not carried: `ValidationIssue.message` is the engine's
-        // developer detail and says so, and `s::flow_issue` exists to be the
+        // developer detail and says so, and `s::flow::issue` exists to be the
         // one place a `ValidationKind` becomes something a person reads.
         Err(daruda_flow::FlowError::Validate(issues)) => Err(FlowGraphError::Validate {
-            issues: crate::surface::strings::flow_issue_lines(&issues),
+            issues: crate::surface::strings::flow::issue_lines(&issues),
         }),
     }
 }

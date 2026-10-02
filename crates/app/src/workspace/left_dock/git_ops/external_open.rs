@@ -89,7 +89,7 @@ impl Workspace {
             |ws, (full_path, result), cx| {
                 if let Err(e) = result {
                     let report = ErrorReport::new(
-                        crate::surface::strings::error_open_file_external_failed(),
+                        crate::surface::strings::error::open_file_external_failed(),
                     )
                     .severity(ErrorSeverity::Warning)
                     .from_error(&e)

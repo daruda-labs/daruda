@@ -17,18 +17,17 @@ pub(super) fn join_args(args: &[String]) -> String {
 }
 
 pub(super) fn transport_options() -> Vec<(McpTransport, &'static str)> {
-    vec![
-        (McpTransport::Stdio, strings::MCP_TRANSPORT_STDIO),
-        (McpTransport::Sse, strings::MCP_TRANSPORT_SSE),
-        (McpTransport::Http, strings::MCP_TRANSPORT_HTTP),
-    ]
+    [McpTransport::Stdio, McpTransport::Sse, McpTransport::Http]
+        .into_iter()
+        .map(|t| (t, t.slug()))
+        .collect()
 }
 
 pub(super) fn scope_options() -> Vec<(McpScope, String)> {
     vec![
-        (McpScope::Project, strings::mcp_scope_project()),
-        (McpScope::Local, strings::mcp_scope_local()),
-        (McpScope::User, strings::mcp_scope_user()),
+        (McpScope::Project, strings::mcp::scope_project()),
+        (McpScope::Local, strings::mcp::scope_local()),
+        (McpScope::User, strings::mcp::scope_user()),
     ]
 }
 
@@ -47,10 +46,10 @@ pub(super) fn field_label(
 /// Map a typed [`FieldError`] back to its localised banner string.
 pub(super) fn field_error_to_msg(e: FieldError) -> SharedString {
     match e {
-        FieldError::CommandRequired => strings::mcp_command_required().into(),
-        FieldError::UrlRequired => strings::mcp_url_required().into(),
-        FieldError::UrlInvalidScheme => strings::mcp_url_invalid().into(),
-        FieldError::EnvInvalidLine { line } => strings::mcp_env_invalid(&line).into(),
+        FieldError::CommandRequired => strings::mcp::command_required().into(),
+        FieldError::UrlRequired => strings::mcp::url_required().into(),
+        FieldError::UrlInvalidScheme => strings::mcp::url_invalid().into(),
+        FieldError::EnvInvalidLine { line } => strings::mcp::env_invalid(&line).into(),
     }
 }
 

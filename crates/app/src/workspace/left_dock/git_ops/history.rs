@@ -60,9 +60,9 @@ impl Workspace {
             typed
         } else if self.git_config.default_commit_message && !staged.is_empty() {
             let names: Vec<&str> = staged.iter().map(String::as_str).collect();
-            app_strings::git_default_commit_message(&names)
+            app_strings::git::default_commit_message(&names)
         } else {
-            let report = ErrorReport::new(app_strings::error_commit_message_empty())
+            let report = ErrorReport::new(app_strings::error::commit_message_empty())
                 .severity(ErrorSeverity::Warning)
                 .at(file!(), line!())
                 .dedup("git.commit.empty_message")
@@ -79,13 +79,13 @@ impl Workspace {
 
         let staged_count = staged.len();
         let first_line = message.lines().next().unwrap_or("").to_string();
-        let body = app_strings::git_confirm_commit_body(staged_count, &first_line);
+        let body = app_strings::git::confirm_commit_body(staged_count, &first_line);
 
         let weak = cx.weak_entity();
         open_confirm_dialog(
-            app_strings::git_confirm_commit_title(),
+            app_strings::git::confirm_commit_title(),
             body,
-            app_strings::git_confirm_commit_ok(),
+            app_strings::git::confirm_commit_ok(),
             ButtonVariant::Primary,
             move |_, window, app_cx| {
                 if let Some(ws) = weak.upgrade() {
@@ -138,7 +138,7 @@ impl Workspace {
                         }
                     }
                     Err(e) => {
-                        let report = ErrorReport::new(app_strings::error_git_commit_failed())
+                        let report = ErrorReport::new(app_strings::error::git_commit_failed())
                             .severity(ErrorSeverity::Error)
                             .from_error(&e)
                             .at(file!(), line!())
@@ -230,7 +230,7 @@ impl Workspace {
                 Ok(_) => {
                     // Tip commit has an empty message (--allow-empty-message) —
                     // nothing useful to prefill, so don't enter amend mode.
-                    let report = ErrorReport::new(app_strings::git_amend_load_failed())
+                    let report = ErrorReport::new(app_strings::git::amend_load_failed())
                         .severity(ErrorSeverity::Warning)
                         .at(file!(), line!())
                         .dedup("git.amend.load_failed")
@@ -240,7 +240,7 @@ impl Workspace {
                 Err(e) => {
                     // Most commonly: the repo has no commits yet, so there is
                     // nothing to amend. Surface the real git error in details.
-                    let report = ErrorReport::new(app_strings::git_amend_load_failed())
+                    let report = ErrorReport::new(app_strings::git::amend_load_failed())
                         .severity(ErrorSeverity::Error)
                         .from_error(&e)
                         .at(file!(), line!())
@@ -282,13 +282,13 @@ impl Workspace {
         self.commit_mode = mode;
         let (primary, dropdown) = if amend {
             (
-                app_strings::git_amend_btn(),
-                app_strings::git_cancel_amend(),
+                app_strings::git::amend_btn(),
+                app_strings::git::cancel_amend(),
             )
         } else {
             (
-                app_strings::git_commit_btn(),
-                app_strings::ctx_git_commit_amend(),
+                app_strings::git::commit_btn(),
+                app_strings::ctx::git_commit_amend(),
             )
         };
         self.git_commit_input.update(cx, |panel, cx_state| {
@@ -304,7 +304,7 @@ impl Workspace {
         let message = self.git_commit_input.read(cx).text(cx).to_string();
         if message.trim().is_empty() {
             // User cleared the prefilled message; amend still needs one.
-            let report = ErrorReport::new(app_strings::git_amend_needs_message())
+            let report = ErrorReport::new(app_strings::git::amend_needs_message())
                 .severity(ErrorSeverity::Warning)
                 .at(file!(), line!())
                 .dedup("git.amend.needs_message")
@@ -318,9 +318,9 @@ impl Workspace {
 
         let weak = cx.weak_entity();
         open_confirm_dialog(
-            app_strings::git_confirm_amend_title(),
-            app_strings::git_confirm_amend_body(),
-            app_strings::git_confirm_amend_ok(),
+            app_strings::git::confirm_amend_title(),
+            app_strings::git::confirm_amend_body(),
+            app_strings::git::confirm_amend_ok(),
             ButtonVariant::Danger,
             move |_, window, app_cx| {
                 if let Some(ws) = weak.upgrade() {
@@ -374,13 +374,14 @@ impl Workspace {
                         ws.set_commit_mode(CommitMode::Normal, cx);
                     }
                     Err(e) => {
-                        let report = ErrorReport::new(app_strings::error_git_commit_amend_failed())
-                            .severity(ErrorSeverity::Error)
-                            .from_error(&e)
-                            .at(file!(), line!())
-                            .with_context("repo", redact_home(&repo_for_report))
-                            .dedup("git.amend")
-                            .build();
+                        let report =
+                            ErrorReport::new(app_strings::error::git_commit_amend_failed())
+                                .severity(ErrorSeverity::Error)
+                                .from_error(&e)
+                                .at(file!(), line!())
+                                .with_context("repo", redact_home(&repo_for_report))
+                                .dedup("git.amend")
+                                .build();
                         ws.report_error(report, cx);
                     }
                 }
@@ -421,9 +422,9 @@ impl Workspace {
 
         let weak = cx.weak_entity();
         open_confirm_dialog(
-            app_strings::git_confirm_push_title(),
-            app_strings::git_confirm_push_body(),
-            app_strings::git_confirm_push_ok(),
+            app_strings::git::confirm_push_title(),
+            app_strings::git::confirm_push_body(),
+            app_strings::git::confirm_push_ok(),
             ButtonVariant::Primary,
             move |_, _window, app_cx| {
                 if let Some(ws) = weak.upgrade() {
@@ -452,7 +453,7 @@ impl Workspace {
             move |ws, result, cx| {
                 cx.notify();
                 if let Err(e) = result {
-                    let report = ErrorReport::new(app_strings::error_git_push_failed())
+                    let report = ErrorReport::new(app_strings::error::git_push_failed())
                         .severity(ErrorSeverity::Error)
                         .from_error(&e)
                         .at(file!(), line!())
@@ -482,7 +483,7 @@ impl Workspace {
             move || crate::lane::git::git_fetch(&repo_root),
             move |ws, result, cx| {
                 if let Err(e) = result {
-                    let report = ErrorReport::new(app_strings::error_git_fetch_failed())
+                    let report = ErrorReport::new(app_strings::error::git_fetch_failed())
                         .severity(ErrorSeverity::Error)
                         .from_error(&e)
                         .at(file!(), line!())
@@ -510,7 +511,7 @@ impl Workspace {
             move || crate::lane::git::git_pull(&repo_root),
             move |ws, result, cx| {
                 if let Err(e) = result {
-                    let report = ErrorReport::new(app_strings::error_git_pull_failed())
+                    let report = ErrorReport::new(app_strings::error::git_pull_failed())
                         .severity(ErrorSeverity::Error)
                         .from_error(&e)
                         .at(file!(), line!())

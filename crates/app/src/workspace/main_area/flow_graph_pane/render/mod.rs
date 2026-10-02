@@ -90,12 +90,12 @@ impl Render for FlowGraphView {
 fn error_lines(err: &FlowGraphError) -> Vec<String> {
     match err {
         FlowGraphError::Read { path, message } => {
-            vec![s::flow_graph_read_failed(
-                &path.display().to_string(),
+            vec![s::flow::graph_read_failed(
+                path.display().to_string(),
                 message,
             )]
         }
-        FlowGraphError::Parse { detail } => vec![s::flow_graph_parse_failed(detail)],
+        FlowGraphError::Parse { detail } => vec![s::flow::graph_parse_failed(detail)],
         FlowGraphError::Validate { issues } => issues.clone(),
     }
 }

@@ -27,7 +27,7 @@ pub(in crate::workspace) fn window_label(window: &UsageWindow) -> String {
     let base = duration_label(window.window);
     match window.scope {
         WindowScope::Overall => base,
-        WindowScope::Opus => format!("{base}{}", strings::usage_limit_opus_suffix()),
+        WindowScope::Opus => format!("{base}{}", strings::usage::limit_opus_suffix()),
     }
 }
 
@@ -37,15 +37,15 @@ pub(in crate::workspace) fn window_label(window: &UsageWindow) -> String {
 fn duration_label(window: Duration) -> String {
     let secs = window.as_secs();
     if secs < HOUR {
-        return strings::usage_limit_window_minutes(div_round(secs, MINUTE));
+        return strings::usage::limit_window_minutes(div_round(secs, MINUTE));
     }
     if secs < DAY {
-        return strings::usage_limit_window_hours(div_round(secs, HOUR));
+        return strings::usage::limit_window_hours(div_round(secs, HOUR));
     }
     if secs <= MAX_DAYS {
-        return strings::usage_limit_window_days(div_round(secs, DAY));
+        return strings::usage::limit_window_days(div_round(secs, DAY));
     }
-    strings::usage_limit_window_months(div_round(secs, MONTH))
+    strings::usage::limit_window_months(div_round(secs, MONTH))
 }
 
 /// Nearest whole multiple, floored at 1 so a sub-unit window never labels as

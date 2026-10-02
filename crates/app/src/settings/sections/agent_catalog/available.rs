@@ -23,14 +23,17 @@ impl SettingsView {
             .flex()
             .flex_col()
             .gap(px(theme::MODAL_PANEL_GAP))
-            .child(Self::section_label(s::settings_agent_group_available(), cx))
+            .child(Self::section_label(
+                s::settings::agent_group_available(),
+                cx,
+            ))
             .child(crate::ui::input(&self.agent_catalog_search, cx, 0));
         if no_match {
             body = body.child(
                 div()
                     .text_size(px(theme::MODAL_BODY_FONT_SIZE))
                     .text_color(theme::current(cx).text_muted)
-                    .child(s::settings_agent_catalog_no_match()),
+                    .child(s::settings::agent_catalog_no_match()),
             );
         }
         for preset in presets.available {
@@ -38,7 +41,7 @@ impl SettingsView {
         }
         if !presets.needs_install.is_empty() {
             body = body.child(Self::section_label(
-                s::settings_agent_group_needs_install(),
+                s::settings::agent_group_needs_install(),
                 cx,
             ));
         }
@@ -72,7 +75,7 @@ impl SettingsView {
         };
         let install = button(
             SharedString::from(format!("settings-agent-install-{}", preset.id)),
-            s::settings_agent_preset_install_page(),
+            s::settings::agent_preset_install_page(),
         )
         .on_click(cx.listener(move |_this, _: &ClickEvent, _window, cx| {
             cx.open_url(install_url);

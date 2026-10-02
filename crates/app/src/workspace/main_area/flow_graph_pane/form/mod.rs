@@ -401,10 +401,10 @@ fn kind_select<T: 'static>(
 ) -> Entity<crate::ui::select::SelectState> {
     use crate::ui::select::{SelectOption, state_with_options};
     let options = vec![
-        SelectOption::new(KIND_AGENT, crate::surface::strings::flow_form_kind_agent()),
+        SelectOption::new(KIND_AGENT, crate::surface::strings::flow::form_kind_agent()),
         SelectOption::new(
             KIND_COMMAND,
-            crate::surface::strings::flow_form_kind_command(),
+            crate::surface::strings::flow::form_kind_command(),
         ),
     ];
     let selected = gpui::SharedString::from(match kind {
@@ -436,11 +436,11 @@ fn source_states<T: 'static>(
     let options = vec![
         SelectOption::new(
             SOURCE_INLINE,
-            crate::surface::strings::flow_form_source_inline(),
+            crate::surface::strings::flow::form_source_inline(),
         ),
         SelectOption::new(
             SOURCE_FILE,
-            crate::surface::strings::flow_form_source_file(),
+            crate::surface::strings::flow::form_source_file(),
         ),
     ];
     let selected = gpui::SharedString::from(selected);
@@ -516,12 +516,12 @@ fn fail_states<T: 'static>(
         ),
     };
     let options = vec![
-        SelectOption::new(FAIL_HALT, crate::surface::strings::flow_form_fail_halt()),
+        SelectOption::new(FAIL_HALT, crate::surface::strings::flow::form_fail_halt()),
         SelectOption::new(
             FAIL_ACT,
             match kind {
-                FailKind::Retry => crate::surface::strings::flow_form_fail_retry(),
-                FailKind::Repair => crate::surface::strings::flow_form_fail_repair(),
+                FailKind::Retry => crate::surface::strings::flow::form_fail_retry(),
+                FailKind::Repair => crate::surface::strings::flow::form_fail_repair(),
             },
         ),
     ];
@@ -579,14 +579,17 @@ fn permission_select<T: 'static>(
     let options = vec![
         SelectOption::new(
             PERMISSION_ABSENT,
-            crate::surface::strings::flow_form_absent(),
+            crate::surface::strings::flow::form_absent(),
         ),
-        SelectOption::new("deny", crate::surface::strings::flow_form_permission_deny()),
+        SelectOption::new(
+            "deny",
+            crate::surface::strings::flow::form_permission_deny(),
+        ),
         SelectOption::new(
             "allow_once",
-            crate::surface::strings::flow_form_permission_allow_once(),
+            crate::surface::strings::flow::form_permission_allow_once(),
         ),
-        SelectOption::new("ask", crate::surface::strings::flow_form_permission_ask()),
+        SelectOption::new("ask", crate::surface::strings::flow::form_permission_ask()),
     ];
     let initial = gpui::SharedString::from(permission_value(initial));
     cx.new(|cx| state_with_options(options, Some(&initial), window, cx))
@@ -650,7 +653,7 @@ fn single_line_inheriting<T: 'static>(
     cx: &mut Context<T>,
 ) -> Entity<InputState> {
     let value = value.to_string();
-    let hint = inherited.map(crate::surface::strings::flow_form_inherited);
+    let hint = inherited.map(crate::surface::strings::flow::form_inherited);
     cx.new(|cx| {
         let state = InputState::new(window, cx).default_value(value);
         match hint {

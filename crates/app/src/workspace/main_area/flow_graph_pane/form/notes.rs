@@ -50,7 +50,7 @@ pub(in crate::workspace) fn notes_for(issues: &[ValidationIssue], node: &NodeId)
         .filter_map(|issue| {
             field_for(&issue.kind).map(|field| FieldNote {
                 field,
-                message: crate::surface::strings::flow_issue(&issue.kind),
+                message: crate::surface::strings::flow::issue(&issue.kind),
             })
         })
         .collect()
@@ -128,7 +128,7 @@ mod tests {
         assert_eq!(notes[0].field, FormField::Agent);
         assert_eq!(
             notes[0].message,
-            crate::surface::strings::flow_issue(&ValidationKind::AgentIdWithoutMode),
+            crate::surface::strings::flow::issue(&ValidationKind::AgentIdWithoutMode),
             "the wording is the one wording site's, not a second copy"
         );
     }

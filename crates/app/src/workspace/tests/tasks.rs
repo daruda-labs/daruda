@@ -73,7 +73,7 @@ fn bump_tool_use_failure_thresholds_and_orphans(cx: &mut TestAppContext) {
             TaskState::Error { message, .. } => {
                 assert_eq!(
                     message,
-                    &crate::surface::strings::task_error_tool_use_failure(
+                    &crate::surface::strings::task::error_tool_use_failure(
                         daruda_store::tasks::TASK_TOOL_USE_FAILURE_THRESHOLD
                     ),
                     "expected escalation message, got {message}"
@@ -224,7 +224,7 @@ fn apply_task_session_changed_attaches_idempotently_then_error_ends(cx: &mut Tes
             TaskState::Error { message, .. } => {
                 assert_eq!(
                     message,
-                    &crate::surface::strings::task_error_session_failed()
+                    &crate::surface::strings::task::error_session_failed()
                 );
             }
             other => panic!("expected Error, got {other:?}"),

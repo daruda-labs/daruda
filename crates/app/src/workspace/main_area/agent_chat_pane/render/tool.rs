@@ -170,7 +170,7 @@ pub(super) fn tool_card(
     // indistinguishable from a normal one-shot command.
     if tc.is_background() {
         header = header.trailing(
-            crate::ui::Badge::new(SharedString::from(s::agent_chat_tool_background()))
+            crate::ui::Badge::new(SharedString::from(s::agent_chat::tool_background()))
                 .bg_color(theme::dim_toward_gray(theme::agent_chat_tint(cx), dim))
                 .border_color(theme::dim_toward_gray(
                     theme::agent_chat_border_tint(cx),
@@ -246,7 +246,7 @@ pub(super) fn tool_card(
                     .flex_none()
                     .text_color(theme::dim_toward_gray(theme::agent_chat_fg_muted(cx), dim))
                     .text_size(font_size)
-                    .child(SharedString::from(s::agent_chat_raw_input_label()))
+                    .child(SharedString::from(s::agent_chat::raw_input_label()))
                     .into_any_element(),
             );
             body = body.child(
@@ -304,7 +304,7 @@ pub(super) fn tool_card(
             if let Some(kind) = tc.subagent_type() {
                 has_meta = true;
                 meta = meta.child(
-                    crate::ui::Badge::new(SharedString::from(s::agent_chat_subagent_type_chip(
+                    crate::ui::Badge::new(SharedString::from(s::agent_chat::subagent_type_chip(
                         kind,
                     )))
                     .bg_color(chip_bg)
@@ -316,7 +316,7 @@ pub(super) fn tool_card(
             if tc.subagent_run_in_background() == Some(true) {
                 has_meta = true;
                 meta = meta.child(
-                    crate::ui::Badge::new(SharedString::from(s::agent_chat_tool_background()))
+                    crate::ui::Badge::new(SharedString::from(s::agent_chat::tool_background()))
                         .bg_color(chip_bg)
                         .border_color(chip_border)
                         .text_color(chip_fg)
@@ -371,7 +371,7 @@ pub(super) fn tool_card(
                 div()
                     .text_color(theme::dim_toward_gray(theme::agent_chat_fg_muted(cx), dim))
                     .text_size(px(theme::agent_chat_font_size(cx)))
-                    .child(SharedString::from(s::agent_chat_tool_output_label())),
+                    .child(SharedString::from(s::agent_chat::tool_output_label())),
             );
             let output_context = OutputBlockContext {
                 assets,
@@ -414,8 +414,8 @@ pub(super) fn tool_card(
             // Name the spawned subagent when the Task input carries its type
             // (`subagent_type`); fall back to the generic label otherwise.
             let subagent_label = match tc.subagent_type() {
-                Some(kind) => s::agent_chat_subagent_label_typed(kind),
-                None => s::agent_chat_subagent_label(),
+                Some(kind) => s::agent_chat::subagent_label_typed(kind),
+                None => s::agent_chat::subagent_label(),
             };
             body = body.child(
                 div()
@@ -529,7 +529,7 @@ fn with_truncation_note(
             div()
                 .text_color(theme::dim_toward_gray(theme::agent_chat_fg(cx), dim))
                 .text_size(px(theme::agent_chat_font_size(cx)))
-                .child(s::agent_chat_tool_output_truncated(original_len)),
+                .child(s::agent_chat::tool_output_truncated(original_len)),
         )
         .into_any_element()
 }
@@ -667,7 +667,7 @@ fn output_block_view(
                 Some(None) => div()
                     .text_color(theme::dim_toward_gray(theme::agent_chat_fg(cx), dim))
                     .text_size(px(theme::agent_chat_font_size(cx)))
-                    .child(SharedString::from(s::agent_chat_tool_media_label(
+                    .child(SharedString::from(s::agent_chat::tool_media_label(
                         mime,
                         data.len() / 4 * 3,
                     )))
@@ -679,14 +679,14 @@ fn output_block_view(
                 None => div()
                     .text_color(theme::dim_toward_gray(theme::agent_chat_fg(cx), dim))
                     .text_size(px(theme::agent_chat_font_size(cx)))
-                    .child(SharedString::from(s::agent_chat_tool_image_placeholder()))
+                    .child(SharedString::from(s::agent_chat::tool_image_placeholder()))
                     .into_any_element(),
             }
         }
         ToolOutputBlock::Media { mime, byte_len } => div()
             .text_color(theme::dim_toward_gray(theme::agent_chat_fg(cx), dim))
             .text_size(px(theme::agent_chat_font_size(cx)))
-            .child(SharedString::from(s::agent_chat_tool_media_label(
+            .child(SharedString::from(s::agent_chat::tool_media_label(
                 mime, *byte_len,
             )))
             .into_any_element(),
@@ -806,7 +806,7 @@ fn command_tags(
         tags.push(
             div()
                 .id(SharedString::from(format!("command-programs-{tool_id}")))
-                .child(badge(s::agent_chat_command_more(
+                .child(badge(s::agent_chat::command_more(
                     analysis.programs.len() - 1,
                 )))
                 .tooltip(crate::ui::tooltip::text(analysis.programs.join(", ")))
@@ -816,20 +816,10 @@ fn command_tags(
     if let Some(effect) = analysis.effect {
         let light = theme::agent_chat_syntax_is_light(cx);
         let (label, color) = match (effect, light) {
-            (CommandEffect::Read, false) => {
-                (s::agent_chat_command_effect_read(), theme::AGENT_READING)
-            }
-            (CommandEffect::Read, true) => (
-                s::agent_chat_command_effect_read(),
-                theme::AGENT_READING_LIGHT,
-            ),
-            (CommandEffect::Edit, false) => {
-                (s::agent_chat_command_effect_edit(), theme::AGENT_EDITING)
-            }
-            (CommandEffect::Edit, true) => (
-                s::agent_chat_command_effect_edit(),
-                theme::AGENT_EDITING_LIGHT,
-            ),
+            (CommandEffect::Read, false) => (s::common::read(), theme::AGENT_READING),
+            (CommandEffect::Read, true) => (s::common::read(), theme::AGENT_READING_LIGHT),
+            (CommandEffect::Edit, false) => (s::common::btn_edit(), theme::AGENT_EDITING),
+            (CommandEffect::Edit, true) => (s::common::btn_edit(), theme::AGENT_EDITING_LIGHT),
         };
         let color = theme::dim_toward_gray(color, dim);
         tags.push(
@@ -850,7 +840,7 @@ fn command_tags(
 fn tool_header_label(tc: &ToolCallItem) -> String {
     tc.tool_name.clone().unwrap_or_else(|| {
         if tc.is_subagent_launch() {
-            s::agent_chat_tool_kind_subagent()
+            s::agent_chat::tool_kind_subagent()
         } else {
             tool_kind_label(tc.kind)
         }
@@ -861,16 +851,16 @@ fn tool_header_label(tc: &ToolCallItem) -> String {
 /// Search/…), independent of the (possibly long) per-call title.
 fn tool_kind_label(kind: ToolKindView) -> String {
     match kind {
-        ToolKindView::Read => s::agent_chat_tool_kind_read(),
-        ToolKindView::Edit => s::agent_chat_tool_kind_edit(),
-        ToolKindView::Delete => s::agent_chat_tool_kind_delete(),
-        ToolKindView::Move => s::agent_chat_tool_kind_move(),
-        ToolKindView::Search => s::agent_chat_tool_kind_search(),
-        ToolKindView::Execute => s::agent_chat_tool_kind_execute(),
-        ToolKindView::Think => s::agent_chat_tool_kind_think(),
-        ToolKindView::Fetch => s::agent_chat_tool_kind_fetch(),
-        ToolKindView::SwitchMode => s::agent_chat_tool_kind_switch_mode(),
-        ToolKindView::Other => s::agent_chat_tool_kind_other(),
+        ToolKindView::Read => s::common::read(),
+        ToolKindView::Edit => s::common::btn_edit(),
+        ToolKindView::Delete => s::agent_chat::tool_kind_delete(),
+        ToolKindView::Move => s::agent_chat::tool_kind_move(),
+        ToolKindView::Search => s::agent_chat::tool_kind_search(),
+        ToolKindView::Execute => s::agent_chat::tool_kind_execute(),
+        ToolKindView::Think => s::agent_chat::tool_kind_think(),
+        ToolKindView::Fetch => s::agent_chat::tool_kind_fetch(),
+        ToolKindView::SwitchMode => s::agent_chat::tool_kind_switch_mode(),
+        ToolKindView::Other => s::agent_chat::tool_kind_other(),
     }
 }
 
@@ -938,10 +928,10 @@ pub(super) fn tool_kind_icon(kind: ToolKindView) -> SharedString {
 fn exit_badge_label(exit: &Option<CommandExit>) -> Option<String> {
     let exit = exit.as_ref()?;
     if let Some(signal) = exit.signal.as_deref() {
-        return Some(s::agent_chat_tool_exit_signal(signal));
+        return Some(s::agent_chat::tool_exit_signal(signal));
     }
     match exit.code {
-        Some(code) if code != 0 => Some(s::agent_chat_tool_exit_code(code)),
+        Some(code) if code != 0 => Some(s::agent_chat::tool_exit_code(code)),
         _ => None,
     }
 }
@@ -956,11 +946,11 @@ fn tool_status_badge(status: ToolStatusView) -> SharedString {
         // never get), and a live `Pending` always means an in-flight call in the
         // active turn (see `ToolStatusView::is_live`).
         ToolStatusView::Pending | ToolStatusView::InProgress => {
-            s::agent_chat_tool_status_running().into()
+            s::agent_chat::tool_status_running().into()
         }
-        ToolStatusView::Completed => s::agent_chat_tool_status_done().into(),
-        ToolStatusView::Failed => s::agent_chat_tool_status_failed().into(),
-        ToolStatusView::Cancelled => s::agent_chat_tool_status_cancelled().into(),
+        ToolStatusView::Completed => s::agent_chat::tool_status_done().into(),
+        ToolStatusView::Failed => s::agent_chat::tool_status_failed().into(),
+        ToolStatusView::Cancelled => s::agent_chat::tool_status_cancelled().into(),
     }
 }
 
@@ -976,7 +966,7 @@ pub(super) fn permission_card(
     let title: SharedString = card
         .tool_title
         .clone()
-        .unwrap_or_else(s::agent_chat_permission_title)
+        .unwrap_or_else(s::agent_chat::permission_title)
         .into();
 
     let mut root = div()
@@ -992,7 +982,7 @@ pub(super) fn permission_card(
             div()
                 .text_color(t.banner_warning_text)
                 .text_size(px(theme::agent_chat_font_size(cx)))
-                .child(SharedString::from(s::agent_chat_permission_title())),
+                .child(SharedString::from(s::agent_chat::permission_title())),
         )
         .child(
             div()
@@ -1021,7 +1011,7 @@ pub(super) fn permission_card(
                     .text_size(px(theme::agent_chat_font_size(cx)))
                     .child(SharedString::from(format!(
                         "{} {}",
-                        s::agent_chat_permission_resolved_prefix(),
+                        s::agent_chat::permission_resolved_prefix(),
                         chosen
                     ))),
             );
@@ -1033,7 +1023,7 @@ pub(super) fn permission_card(
                 div()
                     .text_color(theme::dim_toward_gray(theme::agent_chat_fg_muted(cx), dim))
                     .text_size(px(theme::agent_chat_font_size(cx)))
-                    .child(SharedString::from(s::agent_chat_permission_cancelled())),
+                    .child(SharedString::from(s::agent_chat::permission_cancelled())),
             );
         }
         None => {
@@ -1156,7 +1146,7 @@ mod tests {
         assert!(launch.is_subagent_launch(), "the fixture must be a launch");
         assert_eq!(
             tool_header_label(&launch),
-            s::agent_chat_tool_kind_subagent()
+            s::agent_chat::tool_kind_subagent()
         );
         assert_ne!(
             tool_header_label(&launch),
@@ -1235,7 +1225,7 @@ mod tests {
         });
         assert_eq!(
             exit_badge_label(&exit),
-            Some(s::agent_chat_tool_exit_code(1))
+            Some(s::agent_chat::tool_exit_code(1))
         );
     }
 
@@ -1247,7 +1237,7 @@ mod tests {
         });
         assert_eq!(
             exit_badge_label(&exit),
-            Some(s::agent_chat_tool_exit_signal("SIGKILL"))
+            Some(s::agent_chat::tool_exit_signal("SIGKILL"))
         );
     }
 

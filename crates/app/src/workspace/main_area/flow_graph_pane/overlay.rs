@@ -109,7 +109,7 @@ impl Plugin for RerunOverlay {
             },
         );
 
-        let label = s::flow_graph_rerun_edge();
+        let label = s::flow::graph_rerun_edge();
         let mut root = div()
             .absolute()
             .size_full()

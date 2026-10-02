@@ -22,7 +22,7 @@ const ICON_PLAY: &str = "icons/ui/play-arrow.svg";
 pub(super) fn new_flow_button(snap: &RightDockSnapshot, cx: &gpui::App) -> impl IntoElement {
     let workspace = snap.workspace.clone();
     crate::ui::button_icon("flow-new", crate::ui::icons::ADD, cx)
-        .tooltip(strings::flow_new_tooltip())
+        .tooltip(strings::flow::new_tooltip())
         .on_click(move |_, window, cx| {
             let Some(ws) = workspace.upgrade() else {
                 return;
@@ -30,8 +30,8 @@ pub(super) fn new_flow_button(snap: &RightDockSnapshot, cx: &gpui::App) -> impl 
             let weak = ws.downgrade();
             crate::workspace::dialog_helpers::open_single_field_dialog(
                 weak,
-                strings::flow_new_title(),
-                strings::flow_new_placeholder(),
+                strings::flow::new_title(),
+                strings::flow::new_placeholder(),
                 None,
                 move |ws, value, window, cx| {
                     let Some(name) = value else {
@@ -65,7 +65,7 @@ fn flow_row_menu(
     let rename_from = name.clone();
     let rename = ws_popup_menu_item(
         ws.clone(),
-        strings::flow_row_menu_rename(),
+        strings::flow::row_menu_rename(),
         false,
         move |_, window, cx| {
             let weak = cx.entity().downgrade();
@@ -73,8 +73,8 @@ fn flow_row_menu(
             let initial = rename_from.clone();
             crate::workspace::dialog_helpers::open_single_field_dialog(
                 weak,
-                strings::flow_rename_title(),
-                strings::flow_new_placeholder(),
+                strings::flow::rename_title(),
+                strings::flow::new_placeholder(),
                 Some(&initial),
                 move |ws, value, _window, cx| {
                     let Some(to) = value else {
@@ -92,7 +92,7 @@ fn flow_row_menu(
     let delete_name = name;
     let delete = ws_popup_menu_item(
         ws,
-        strings::flow_row_menu_delete(),
+        strings::flow::row_menu_delete(),
         false,
         move |_, window, cx| {
             let weak = cx.entity().downgrade();
@@ -143,9 +143,9 @@ fn run_button(
         .child(
             crate::ui::button_icon(id, ICON_PLAY, cx)
                 .tooltip(if unsaved {
-                    strings::flow_needs_save()
+                    strings::flow::needs_save()
                 } else {
-                    strings::flow_run_tooltip()
+                    strings::flow::run_tooltip()
                 })
                 .disabled(unsaved)
                 .on_click(move |_, window, cx| {

@@ -84,7 +84,7 @@ impl Workspace {
             }
             Err(e) => {
                 let report =
-                    ErrorReport::new(strings::error_save_file_failed(&path.display().to_string()))
+                    ErrorReport::new(strings::error::save_file_failed(path.display().to_string()))
                         .severity(ErrorSeverity::Error)
                         .from_error(&e)
                         .build();
@@ -119,11 +119,11 @@ impl Workspace {
             .file_name()
             .map(|n| n.to_string_lossy().into_owned())
             .unwrap_or_else(|| fc.view.path.display().to_string());
-        let heading = strings::file_save_conflict_heading(&name);
-        let detail = strings::file_save_conflict_detail();
-        let overwrite = strings::file_save_conflict_overwrite();
-        let reload = strings::file_save_conflict_reload();
-        let cancel = strings::task_edit_cancel();
+        let heading = strings::file_viewer::save_conflict_heading(&name);
+        let detail = strings::file_viewer::save_conflict_detail();
+        let overwrite = strings::file_viewer::save_conflict_overwrite();
+        let reload = strings::file_viewer::save_conflict_reload();
+        let cancel = strings::common::btn_cancel();
         let receiver = window.prompt(
             gpui::PromptLevel::Warning,
             &heading,

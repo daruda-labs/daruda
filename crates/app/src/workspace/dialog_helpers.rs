@@ -58,7 +58,7 @@ pub(in crate::workspace) fn open_single_field_dialog<Cb>(
             .title(title.clone())
             .child(input(&state_for_body, cx, 0))
             .confirm()
-            .button_props(DialogButtonProps::default().ok_text(s::common_button_ok()))
+            .button_props(DialogButtonProps::default().ok_text(s::common::btn_ok()))
             .on_ok(move |_, window, app_cx| {
                 let text = state_for_ok.read(app_cx).value().to_string();
                 let trimmed = text.trim();
@@ -250,7 +250,7 @@ pub(in crate::workspace) fn open_error_report_dialog(
     window: &mut Window,
     cx: &mut App,
 ) {
-    let title: SharedString = format!("{}{}", s::error_modal_title_prefix(), report.title).into();
+    let title: SharedString = format!("{}{}", s::error_modal::title_prefix(), report.title).into();
     open_form_modal(
         title,
         Some(px(theme::ERROR_MODAL_WIDTH)),

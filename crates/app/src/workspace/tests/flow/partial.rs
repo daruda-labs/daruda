@@ -434,7 +434,7 @@ async fn a_dropped_pin_names_the_upstream_node_that_did_it(cx: &mut TestAppConte
         .expect("build has a card");
     assert_eq!(
         badge,
-        crate::surface::strings::flow_graph_unpinned_upstream("design"),
+        crate::surface::strings::flow::graph_unpinned_upstream("design"),
         "and the card says which node took it away"
     );
 }
@@ -498,7 +498,7 @@ async fn a_previous_runs_colours_do_not_erase_why_a_pin_went(cx: &mut TestAppCon
     };
     assert_eq!(
         badge(&vcx),
-        crate::surface::strings::flow_graph_unpinned_upstream("design"),
+        crate::surface::strings::flow::graph_unpinned_upstream("design"),
         "the colours came back and the reason survived them"
     );
 
@@ -507,7 +507,7 @@ async fn a_previous_runs_colours_do_not_erase_why_a_pin_went(cx: &mut TestAppCon
     vcx.run_until_parked();
     assert_ne!(
         badge(&vcx),
-        crate::surface::strings::flow_graph_unpinned_upstream("design"),
+        crate::surface::strings::flow::graph_unpinned_upstream("design"),
         "a run clears it"
     );
 }

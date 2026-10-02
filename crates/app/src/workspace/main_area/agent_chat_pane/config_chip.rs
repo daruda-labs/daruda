@@ -50,7 +50,7 @@ pub(in crate::workspace) fn config_chip(
     let tooltip = if option.name.is_empty() {
         display_name.clone()
     } else {
-        strings::agent_chat_config_chip(&option.name, &display_name)
+        strings::agent_chat::config_chip(&option.name, &display_name)
     };
     let label = SharedString::from(visible_config_label(&display_name));
 
@@ -113,11 +113,11 @@ fn choices_of(option: &ConfigOptionView) -> (Vec<(ConfigValueView, String)>, Con
             vec![
                 (
                     ConfigValueView::Bool(true),
-                    strings::agent_chat_config_boolean_on(),
+                    strings::agent_chat::config_boolean_on(),
                 ),
                 (
                     ConfigValueView::Bool(false),
-                    strings::agent_chat_config_boolean_off(),
+                    strings::agent_chat::config_boolean_off(),
                 ),
             ],
             ConfigValueView::Bool(*current_value),
@@ -129,7 +129,7 @@ fn choices_of(option: &ConfigOptionView) -> (Vec<(ConfigValueView, String)>, Con
 /// so the chip and Settings name the default model alike.
 fn choice_label(category: ConfigOptionCategoryView, choice: &ConfigChoiceView) -> String {
     if category == ConfigOptionCategoryView::Model {
-        strings::agent_model_choice_label(
+        strings::agent_chat::agent_model_choice_label(
             &choice.value,
             &choice.name,
             choice.description.as_deref(),
@@ -146,8 +146,8 @@ fn choice_label(category: ConfigOptionCategoryView, choice: &ConfigChoiceView) -
 fn current_fallback_label(current: &ConfigValueView) -> String {
     match current {
         ConfigValueView::Id(id) => id.clone(),
-        ConfigValueView::Bool(true) => strings::agent_chat_config_boolean_on(),
-        ConfigValueView::Bool(false) => strings::agent_chat_config_boolean_off(),
+        ConfigValueView::Bool(true) => strings::agent_chat::config_boolean_on(),
+        ConfigValueView::Bool(false) => strings::agent_chat::config_boolean_off(),
     }
 }
 

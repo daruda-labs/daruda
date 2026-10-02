@@ -352,24 +352,24 @@ impl Render for EditMcpServerModal {
             .flex()
             .flex_col()
             .gap(px(theme::FORM_MODAL_SECTION_GAP))
-            .child(field_label(strings::mcp_field_name(), &t))
+            .child(field_label(strings::common::field_name(), &t))
             .child(summary)
-            .child(field_label(strings::mcp_field_transport(), &t))
+            .child(field_label(strings::mcp::field_transport(), &t))
             .child(transport_chip);
 
         match self.transport {
             McpTransport::Stdio => {
                 body = body
-                    .child(field_label(strings::mcp_field_command(), &t))
+                    .child(field_label(strings::mcp::field_command(), &t))
                     .child(input(&self.command_input, cx, 0))
-                    .child(field_label(strings::mcp_field_args(), &t))
+                    .child(field_label(strings::mcp::field_args(), &t))
                     .child(input(&self.args_input, cx, 1));
             }
             McpTransport::Sse | McpTransport::Http => {
                 body = body
-                    .child(field_label(strings::mcp_field_url(), &t))
+                    .child(field_label(strings::mcp::field_url(), &t))
                     .child(input(&self.url_input, cx, 0))
-                    .child(field_label(strings::mcp_field_headers(), &t))
+                    .child(field_label(strings::mcp::field_headers(), &t))
                     .child(input(&self.headers_input, cx, 1));
             }
         }
@@ -379,10 +379,10 @@ impl Render for EditMcpServerModal {
         // checkbox regardless of transport. Name is read-only here, so
         // indices start at 0 (both branches use 0,1 for their inputs).
         body = body
-            .child(field_label(strings::mcp_field_env(), &t))
+            .child(field_label(strings::mcp::field_env(), &t))
             .child(input(&self.env_input, cx, 2))
             .child(
-                checkbox("mcp-edit-disabled", strings::mcp_field_disabled(), 3)
+                checkbox("mcp-edit-disabled", strings::mcp::field_disabled(), 3)
                     .checked(self.disabled)
                     .on_click(cx.listener(|this, checked: &bool, _w, cx| {
                         this.disabled = *checked;
@@ -391,9 +391,9 @@ impl Render for EditMcpServerModal {
             );
 
         let save_label = if submitting {
-            strings::mcp_saving_label()
+            strings::mcp::saving_label()
         } else {
-            strings::mcp_button_save()
+            strings::common::btn_save()
         };
         let footer = div()
             .flex()
@@ -402,7 +402,7 @@ impl Render for EditMcpServerModal {
             .gap(px(theme::MODAL_FOOTER_GAP))
             .mt(px(theme::MODAL_FOOTER_MARGIN_TOP))
             .child(
-                button("edit-mcp-cancel", strings::mcp_button_cancel())
+                button("edit-mcp-cancel", strings::common::btn_cancel())
                     .on_click(cx.listener(|this, _: &ClickEvent, w, cx| this.dismiss(w, cx))),
             )
             .child(
@@ -428,9 +428,9 @@ impl Render for EditMcpServerModal {
 
 fn scope_label(scope: McpScope) -> String {
     match scope {
-        McpScope::Project => strings::mcp_scope_project(),
-        McpScope::Local => strings::mcp_scope_local(),
-        McpScope::User => strings::mcp_scope_user(),
+        McpScope::Project => strings::mcp::scope_project(),
+        McpScope::Local => strings::mcp::scope_local(),
+        McpScope::User => strings::mcp::scope_user(),
     }
 }
 
@@ -450,7 +450,7 @@ pub fn open_edit_mcp_server_modal(
         return;
     };
     crate::workspace::dialog_helpers::open_form_modal(
-        strings::mcp_edit_title(),
+        strings::mcp::edit_title(),
         Some(px(crate::ui::theme::FORM_MODAL_WIDE)),
         move |window, cx| EditMcpServerModal::new(workspace, initial, window, cx),
         window,

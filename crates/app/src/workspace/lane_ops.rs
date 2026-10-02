@@ -60,7 +60,7 @@ pub(in crate::workspace) fn lane_label(project_name: &str, lane: &crate::lane::L
 }
 
 /// Synthetic label for the `lane-switcher` screenshot scenario. Not
-/// user-facing, so it does not go through `surface/strings.rs`.
+/// user-facing, so it does not go through `surface/strings/`.
 #[cfg(feature = "screenshot")]
 const LANE_SWITCHER_LONG_LABEL_SAMPLE: &str = "daruda-extremely-long-project-name-for-clipping-verification / feature/an-extremely-long-branch-name-meant-to-overflow-the-popup-width";
 
@@ -242,9 +242,9 @@ impl Workspace {
     ) -> Result<RemoveWorktreePlan, String> {
         let wt = self
             .lane_for(target)
-            .ok_or_else(crate::surface::strings::remove_lane_err_not_found)?;
+            .ok_or_else(crate::surface::strings::modal::remove_lane_err_not_found)?;
         if !Self::lane_removable(wt) {
-            return Err(crate::surface::strings::remove_lane_err_cannot_remove());
+            return Err(crate::surface::strings::modal::remove_lane_err_cannot_remove());
         }
         // A run's cancel token and its thread are only handed back when the
         // run ends on its own, so removing the lane would leave it working a
@@ -252,7 +252,7 @@ impl Workspace {
         // it. Refusing matches what the shell-out does anyway: `git worktree
         // remove` fails on a dirty checkout, and a running flow makes one.
         if self.runs.is_running(target) {
-            return Err(crate::surface::strings::remove_lane_err_flow_running());
+            return Err(crate::surface::strings::modal::remove_lane_err_flow_running());
         }
         // `runs` only knows this process. Another daruda — a debug build
         // beside a release one, which is why the lock root is deliberately
@@ -262,13 +262,11 @@ impl Workspace {
         // them, and the failure a modified file does cause is the one the
         // remove modal answers by offering `--force`.
         if let Some(holder) = self.lane_holder(&wt.path) {
-            return Err(crate::surface::strings::remove_lane_err_flow_elsewhere(
-                holder.pid,
-            ));
+            return Err(crate::surface::strings::modal::remove_lane_err_flow_elsewhere(holder.pid));
         }
         let repo_root = match &wt.kind {
             daruda_store::project::LaneKind::Git { repo_root, .. } => repo_root.clone(),
-            _ => return Err(crate::surface::strings::remove_lane_err_not_git()),
+            _ => return Err(crate::surface::strings::modal::remove_lane_err_not_git()),
         };
         Ok(RemoveWorktreePlan {
             path: wt.path.clone(),
@@ -423,7 +421,7 @@ impl Workspace {
         cx: &mut Context<Self>,
     ) -> Result<PaneId, String> {
         if self.project_for(project_id).is_none() {
-            return Err(crate::surface::strings::create_lane_err_no_active_project());
+            return Err(crate::surface::strings::create_lane::err_no_active_project());
         }
         let CreateWorktreePlan {
             branch,
@@ -934,7 +932,7 @@ impl Workspace {
             Ok(p) => p,
             Err(msg) => {
                 let report = daruda_store::observability::error_report::ErrorReport::new(
-                    crate::surface::strings::error_lane_remove_failed(),
+                    crate::surface::strings::error::lane_remove_failed(),
                 )
                 .severity(daruda_store::observability::error_report::ErrorSeverity::Warning)
                 .message(msg)
@@ -956,7 +954,7 @@ impl Workspace {
         });
         let ws_for_modal = cx.weak_entity();
         crate::workspace::dialog_helpers::open_form_modal(
-            crate::surface::strings::remove_lane_modal_title(),
+            crate::surface::strings::modal::remove_lane_title(),
             None,
             move |window, cx| {
                 super::left_dock::projects::remove_modal::RemoveWorktreeModal::new(
@@ -1074,7 +1072,7 @@ impl Workspace {
         cx: &mut Context<Self>,
     ) {
         if !path.exists() {
-            let report = ErrorReport::new(crate::surface::strings::error_reveal_path_missing())
+            let report = ErrorReport::new(crate::surface::strings::error::reveal_path_missing())
                 .severity(ErrorSeverity::Warning)
                 .at(file!(), line!())
                 .with_context(

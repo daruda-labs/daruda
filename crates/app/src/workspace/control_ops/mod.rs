@@ -178,9 +178,9 @@ impl Workspace {
         let lane = self.lane_ref_for_pane(pane)?;
         let view = self.agent_chat_view(pane)?.read(cx);
         Some(ChatLabel {
-            path: crate::surface::strings::control_lane_path(
-                &self.control_project_name(lane.project),
-                &self.control_lane_name(lane),
+            path: crate::surface::strings::control::lane_path(
+                self.control_project_name(lane.project),
+                self.control_lane_name(lane),
             ),
             agent: view.agent_id.clone(),
             agent_name: view.agent_name.clone(),

@@ -191,7 +191,7 @@ pub(super) fn thinking_block(
                     ))
                     .font_weight(gpui::FontWeight::MEDIUM)
                     .text_size(px(theme::agent_chat_font_size(cx)))
-                    .child(SharedString::from(s::agent_chat_thinking_label()))
+                    .child(SharedString::from(s::agent_chat::thinking_label()))
                     .into_any_element(),
             );
     FoldRow::block(("agent-chat-thinking", ix), key, expanded, header, |cx| {
@@ -354,7 +354,7 @@ pub(super) fn failure_block(
             // then treats them as one element, so a click on either ran both
             // of their handlers.
             ("agent-chat-failure-reauth", ix),
-            s::agent_chat_sign_in_again(),
+            s::agent_chat::sign_in_again(),
             cx,
         )
         .on_click(cx.listener(move |_this, _ev, _window, cx| {

@@ -70,15 +70,15 @@ pub(super) fn toolbar(state: ToolbarState, cx: &mut Context<FlowGraphView>) -> i
     // after that its own question is whether there is one node to stop at.
     let until_off = unsaved_form || until.is_none();
     let until_says = match (&until, unsaved_form) {
-        (_, true) => s::flow_needs_save(),
-        (Some(node), false) => s::flow_run_until_tooltip(node.as_str()),
-        (None, false) => s::flow_run_until_needs_one(),
+        (_, true) => s::flow::needs_save(),
+        (Some(node), false) => s::flow::run_until_tooltip(node.as_str()),
+        (None, false) => s::flow::run_until_needs_one(),
     };
     // The pin touches no file, so unsaved edits are none of its business.
     let (pin_says, pin_off) = match &pin {
-        PinAction::Unavailable => (s::flow_pin_needs_agent(), true),
-        PinAction::Pin(nodes) => (s::flow_pin_tooltip(nodes), false),
-        PinAction::Unpin(nodes) => (s::flow_unpin_tooltip(nodes), false),
+        PinAction::Unavailable => (s::flow::pin_needs_agent(), true),
+        PinAction::Pin(nodes) => (s::flow::pin_tooltip(nodes), false),
+        PinAction::Unpin(nodes) => (s::flow::unpin_tooltip(nodes), false),
     };
     let pin_icon = if matches!(pin, PinAction::Unpin(_)) {
         icons::PIN_FILLED
@@ -105,14 +105,14 @@ pub(super) fn toolbar(state: ToolbarState, cx: &mut Context<FlowGraphView>) -> i
         .gap(px(palette::FLOW_TOOLBAR_GAP))
         .child(
             button_icon("flow-toolbar-add", icons::ADD, cx)
-                .tooltip(s::flow_add_node())
+                .tooltip(s::flow::add_node())
                 .on_click(cx.listener(|_, _, _, cx| cx.emit(FlowGraphEvent::AddNode))),
         )
         .child(
             // Disabled rather than absent: a button that comes and goes under
             // the pointer is worse than one that says it is not available.
             button_icon_danger("flow-toolbar-delete", icons::DELETE, cx)
-                .tooltip(s::flow_delete_node())
+                .tooltip(s::flow::delete_node())
                 .disabled(!has_selection)
                 .on_click(cx.listener(|_, _, _, cx| cx.emit(FlowGraphEvent::Delete))),
         )
@@ -134,14 +134,14 @@ pub(super) fn toolbar(state: ToolbarState, cx: &mut Context<FlowGraphView>) -> i
         // answer.
         .child(
             button_icon("flow-toolbar-check", ICON_CHECK, cx)
-                .tooltip(reason_or(unsaved_form, s::flow_check_tooltip()))
+                .tooltip(reason_or(unsaved_form, s::flow::check_tooltip()))
                 .disabled(unsaved_form)
                 .debug_selector(|| TOOLBAR_CHECK_SELECTOR.into())
                 .on_click(cx.listener(|_, _, _, cx| cx.emit(FlowGraphEvent::Validate))),
         )
         .child(
             button_icon("flow-toolbar-run", ICON_PLAY, cx)
-                .tooltip(reason_or(unsaved_form, s::flow_run_tooltip()))
+                .tooltip(reason_or(unsaved_form, s::flow::run_tooltip()))
                 .disabled(unsaved_form)
                 // The press is what the disabled state has to actually stop, and
                 // that cannot be seen without a real click.
@@ -163,7 +163,7 @@ pub(super) fn toolbar(state: ToolbarState, cx: &mut Context<FlowGraphView>) -> i
 /// A button's tooltip: why it is off, or what it does.
 fn reason_or(unsaved_form: bool, does: String) -> String {
     if unsaved_form {
-        s::flow_needs_save()
+        s::flow::needs_save()
     } else {
         does
     }

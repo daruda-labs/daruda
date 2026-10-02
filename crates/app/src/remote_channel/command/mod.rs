@@ -40,7 +40,7 @@ fn flatten(listing: &Listing) -> Vec<ListingRow> {
         .flat_map(|p| {
             p.lanes.iter().flat_map(move |l| {
                 l.chats.iter().map(move |c| ListingRow {
-                    name: s::control_lane_path(&p.name, &l.name),
+                    name: s::control::lane_path(&p.name, &l.name),
                     summary: c.clone(),
                 })
             })
@@ -94,9 +94,9 @@ impl CommandState {
     /// once a newer listing has dropped it.
     fn label_for(&self, target: PaneRef) -> Option<String> {
         let row = self.rows.iter().find(|r| r.summary.target == target)?;
-        Some(s::control_target_label(
+        Some(s::control::target_label(
             &row.name,
-            &render::title_suffix(&row.summary),
+            render::title_suffix(&row.summary),
         ))
     }
 

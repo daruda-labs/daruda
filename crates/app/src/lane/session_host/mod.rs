@@ -65,13 +65,13 @@ impl SessionHostError {
     pub fn localized(self) -> String {
         use crate::surface::strings as s;
         match self {
-            Self::Empty(SessionHostField::Target) => s::session_host_err_target_empty(),
-            Self::Empty(SessionHostField::Container) => s::session_host_err_container_empty(),
-            Self::Empty(SessionHostField::SessionPath) => s::session_host_err_session_path_empty(),
-            Self::Unsafe(SessionHostField::Target) => s::session_host_err_target_unsafe(),
-            Self::Unsafe(SessionHostField::Container) => s::session_host_err_container_unsafe(),
+            Self::Empty(SessionHostField::Target) => s::session_host::err_target_empty(),
+            Self::Empty(SessionHostField::Container) => s::session_host::err_container_empty(),
+            Self::Empty(SessionHostField::SessionPath) => s::session_host::err_session_path_empty(),
+            Self::Unsafe(SessionHostField::Target) => s::session_host::err_target_unsafe(),
+            Self::Unsafe(SessionHostField::Container) => s::session_host::err_container_unsafe(),
             Self::Unsafe(SessionHostField::SessionPath) => {
-                s::session_host_err_session_path_unsafe()
+                s::session_host::err_session_path_unsafe()
             }
         }
     }

@@ -95,7 +95,7 @@ impl Workspace {
                 };
                 if let Err(BaseProblem::Git(message)) = &result {
                     let report =
-                        ErrorReport::new(crate::surface::strings::error_git_against_base_failed())
+                        ErrorReport::new(crate::surface::strings::error::git_against_base_failed())
                             .severity(ErrorSeverity::Warning)
                             .message(message.clone())
                             .at(file!(), line!())

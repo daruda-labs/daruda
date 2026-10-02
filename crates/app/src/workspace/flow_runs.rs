@@ -190,19 +190,19 @@ impl RunStage {
     /// noise that buries the row where it says "try 3".
     pub(in crate::workspace) fn describe(&self) -> String {
         match self {
-            RunStage::Starting => s::status_bar_flow_stage_starting(),
+            RunStage::Starting => s::flow::stage_starting(),
             RunStage::Node { id, attempt } if *attempt > 1 => {
-                s::status_bar_flow_stage_node_retry(id.as_str(), *attempt)
+                s::flow::stage_node_retry(id.as_str(), *attempt)
             }
-            RunStage::Node { id, .. } => s::status_bar_flow_stage_node(id.as_str()),
-            RunStage::Fixing { gate } => s::status_bar_flow_stage_fixing(gate.as_str()),
-            RunStage::Rederiving { gate } => s::status_bar_flow_stage_rederiving(gate.as_str()),
+            RunStage::Node { id, .. } => s::flow::stage_node(id.as_str()),
+            RunStage::Fixing { gate } => s::flow::stage_fixing(gate.as_str()),
+            RunStage::Rederiving { gate } => s::flow::stage_rederiving(gate.as_str()),
             // Names the node like every other stage does: dropping it while
             // asking would leave the one stage that does not say where the
             // run is. For a repair's fix session the engine sends the gate's
             // name, which is what makes that case renderable at all.
             RunStage::Asking { question, .. } => {
-                s::status_bar_flow_stage_asking(question.node.as_str(), &question.tool)
+                s::flow::stage_asking(question.node.as_str(), &question.tool)
             }
         }
     }

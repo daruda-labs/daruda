@@ -16,9 +16,18 @@ use super::super::layout::LeftDockSnapshot;
 /// All view entries shown in the strip, in visible order.
 fn entries() -> Vec<(LeftDockView, gpui::SharedString)> {
     vec![
-        (LeftDockView::Lanes, strings::sidebar_tab_worktrees().into()),
-        (LeftDockView::GitChanges, strings::sidebar_tab_git().into()),
-        (LeftDockView::Files, strings::sidebar_tab_files().into()),
+        (
+            LeftDockView::Lanes,
+            strings::dock::sidebar_tab_worktrees().into(),
+        ),
+        (
+            LeftDockView::GitChanges,
+            strings::dock::sidebar_tab_git().into(),
+        ),
+        (
+            LeftDockView::Files,
+            strings::dock::sidebar_tab_files().into(),
+        ),
     ]
 }
 

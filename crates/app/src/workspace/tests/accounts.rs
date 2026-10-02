@@ -1185,7 +1185,7 @@ async fn a_login_the_account_list_refuses_is_reported_and_cleaned_up(cx: &mut Te
         assert!(ws.accounts.find(account_id).is_none(), "nothing was filed");
         assert_eq!(
             ws.error_history.first().map(|r| r.title.as_str()),
-            Some(crate::surface::strings::settings_accounts_login_failed().as_str()),
+            Some(crate::surface::strings::settings::accounts_login_failed().as_str()),
             "the failure reaches the user"
         );
     });

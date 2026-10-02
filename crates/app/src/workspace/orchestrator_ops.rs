@@ -164,7 +164,7 @@ impl Workspace {
         } else if self.orchestrator_chat.is_some() && !self.show_orchestrator_tab(window, cx) {
             self.report_error(
                 daruda_store::observability::error_report::ErrorReport::new(
-                    crate::surface::strings::orchestrator_tab_unavailable(),
+                    crate::surface::strings::orchestrator::tab_unavailable(),
                 )
                 .severity(daruda_store::observability::error_report::ErrorSeverity::Warning)
                 .at(file!(), line!())

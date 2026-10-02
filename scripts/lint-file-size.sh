@@ -13,14 +13,12 @@
 #   - mod.rs / regular .rs       : 800 lines  (CLAUDE.md G1, app G1)
 #   - tests.rs / test files      : 2000 lines (tests dominate; G1 carve-out)
 #   - ux/theme.rs                : 2200 lines (pure const tables)
-#   - surface/strings.rs         : 1100 lines (pure const tables)
 #   - vendored / generated       : skipped
 #
 # Files explicitly waived (long const tables that will be re-evaluated
 # only when their domain becomes user-tunable):
 #   - crates/daruda_terminal/src/ux/theme.rs
 #   - crates/daruda_terminal/src/ux/strings.rs (data + constants)
-#   - crates/app/src/surface/strings.rs
 #
 # Usage:
 #   scripts/lint-file-size.sh           # warn-only (exit 0 even on hits)
@@ -53,7 +51,6 @@ TEST_BUDGET=2000
 WAIVED_PATHS=(
     "crates/daruda_terminal/src/ux/theme.rs"
     "crates/daruda_terminal/src/ux/strings.rs"
-    "crates/app/src/surface/strings.rs"
     "crates/app/src/ui/theme/palette.rs"
 )
 

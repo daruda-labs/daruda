@@ -64,9 +64,12 @@ impl Workspace {
         let (label, display_label) = match event {
             McpEvent::ClaudeJsonReloaded => (
                 "user/local",
-                crate::surface::strings::mcp_user_local_scope_display(),
+                crate::surface::strings::mcp::user_local_scope_display(),
             ),
-            McpEvent::ProjectReloaded => ("project", crate::surface::strings::mcp_project()),
+            McpEvent::ProjectReloaded => (
+                "project",
+                crate::surface::strings::common::section_project(),
+            ),
         };
         let result = cx.update_global::<McpState, _>(|state, _| match event {
             McpEvent::ClaudeJsonReloaded => state.reload_claude_json(lane.as_deref()),
@@ -85,7 +88,7 @@ impl Workspace {
             Ok(true) => cx.notify(),
             Ok(false) => {}
             Err(e) => {
-                let report = ErrorReport::new(crate::surface::strings::error_mcp_reload_failed(
+                let report = ErrorReport::new(crate::surface::strings::error::mcp_reload_failed(
                     &display_label,
                 ))
                 .severity(ErrorSeverity::Warning)
@@ -203,8 +206,8 @@ impl Workspace {
             state.reload_claude_json(lane_root.as_deref())
         });
         if let Err(e) = claude_json_result {
-            let report = ErrorReport::new(crate::surface::strings::error_mcp_reload_failed(
-                &crate::surface::strings::mcp_user_local_scope_display(),
+            let report = ErrorReport::new(crate::surface::strings::error::mcp_reload_failed(
+                crate::surface::strings::mcp::user_local_scope_display(),
             ))
             .severity(ErrorSeverity::Warning)
             .from_error(&e)
@@ -226,8 +229,8 @@ impl Workspace {
             last
         });
         if let Err(e) = project_result {
-            let report = ErrorReport::new(crate::surface::strings::error_mcp_reload_failed(
-                &crate::surface::strings::mcp_project(),
+            let report = ErrorReport::new(crate::surface::strings::error::mcp_reload_failed(
+                crate::surface::strings::common::section_project(),
             ))
             .severity(ErrorSeverity::Warning)
             .from_error(&e)

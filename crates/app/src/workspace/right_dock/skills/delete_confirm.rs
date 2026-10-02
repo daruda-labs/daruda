@@ -32,14 +32,14 @@ pub fn open_delete_skill_confirm(
     let workspace = cx.weak_entity();
     let body = format!(
         "{}\n\n{}",
-        strings::skills_delete_body_prefix(),
+        strings::skills::delete_body_prefix(),
         dir.display(),
     );
 
     open_confirm_dialog(
-        strings::skills_delete_title(),
+        strings::skills::delete_title(),
         body,
-        strings::skills_button_delete(),
+        strings::common::btn_delete(),
         ButtonVariant::Danger,
         move |_, _window, app_cx| {
             if let Some(ws) = workspace.upgrade() {
@@ -47,7 +47,7 @@ pub fn open_delete_skill_confirm(
                 ws.update(app_cx, |ws, cx| {
                     if let Err(e) = persist::delete_skill(&dir) {
                         let report =
-                            ErrorReport::new(crate::surface::strings::error_skill_delete_failed())
+                            ErrorReport::new(crate::surface::strings::error::skill_delete_failed())
                                 .severity(ErrorSeverity::Error)
                                 .from_error(&e)
                                 .at(file!(), line!())

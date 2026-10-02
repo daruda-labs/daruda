@@ -177,8 +177,8 @@ impl TelegramBridge {
         let prompt = crate::telegram::bridge::ApprovalPrompt {
             summary,
             buttons: [
-                (s::control_approval_allow(), approve),
-                (s::control_approval_refuse(), refuse),
+                (s::control::approval_allow(), approve),
+                (s::control::approval_refuse(), refuse),
             ],
         };
         trace::state("approval.tokens", || format!("id={id:?} minted=2"));

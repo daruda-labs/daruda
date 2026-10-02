@@ -75,12 +75,12 @@ async fn closing_a_tab_whose_agent_is_working_asks_first(cx: &mut TestAppContext
         "nothing closes before the answer"
     );
 
-    cx.simulate_prompt_answer(&strings::task_edit_cancel());
+    cx.simulate_prompt_answer(&strings::common::btn_cancel());
     cx.run_until_parked();
     assert!(has_pane(&ws, pane_id, cx), "Cancel keeps it");
 
     close_active_tab(wh, &ws, cx);
-    cx.simulate_prompt_answer(&strings::close_running_confirm());
+    cx.simulate_prompt_answer(&strings::modal::close_running_confirm());
     cx.run_until_parked();
     assert!(!has_pane(&ws, pane_id, cx), "confirming closes it");
 }
@@ -95,7 +95,7 @@ async fn closing_a_pane_whose_agent_is_working_asks_first(cx: &mut TestAppContex
     .unwrap();
     cx.run_until_parked();
     assert!(cx.has_pending_prompt());
-    cx.simulate_prompt_answer(&strings::close_running_confirm());
+    cx.simulate_prompt_answer(&strings::modal::close_running_confirm());
     cx.run_until_parked();
     assert!(!has_pane(&ws, pane_id, cx));
 }
@@ -113,7 +113,7 @@ async fn closing_the_window_while_an_agent_works_asks_first(cx: &mut TestAppCont
     cx.run_until_parked();
     assert!(!may_close, "the window is held while the prompt is up");
     assert!(cx.has_pending_prompt());
-    cx.simulate_prompt_answer(&strings::task_edit_cancel());
+    cx.simulate_prompt_answer(&strings::common::btn_cancel());
     cx.run_until_parked();
     assert!(
         cx.update_window(wh.into(), |_, _, _| ()).is_ok(),
@@ -140,7 +140,7 @@ async fn quitting_from_inside_the_window_still_asks_it(cx: &mut TestAppContext) 
         "held open"
     );
 
-    cx.simulate_prompt_answer(&strings::close_running_confirm());
+    cx.simulate_prompt_answer(&strings::modal::close_running_confirm());
     cx.run_until_parked();
     assert!(
         cx.update_window(wh.into(), |_, _, _| ()).is_err(),
@@ -189,7 +189,7 @@ async fn a_tab_that_moved_under_the_prompt_is_still_the_one_closed(cx: &mut Test
     })
     .unwrap();
     cx.run_until_parked();
-    cx.simulate_prompt_answer(&strings::close_running_confirm());
+    cx.simulate_prompt_answer(&strings::modal::close_running_confirm());
     cx.run_until_parked();
     assert!(!has_pane(&ws, pane_id, cx), "the asked-about tab closed");
     let tabs_after = ws.read_with(cx, |ws, _| ws.active_runtime().tabs.len());

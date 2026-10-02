@@ -46,7 +46,7 @@ impl Workspace {
             move || crate::lane::git::git_add(&wt_top, &path),
             move |ws, result, cx| {
                 if let Err(e) = result {
-                    let report = ErrorReport::new(app_strings::error_git_add_failed())
+                    let report = ErrorReport::new(app_strings::error::git_add_failed())
                         .severity(ErrorSeverity::Error)
                         .from_error(&e)
                         .at(file!(), line!())
@@ -90,7 +90,7 @@ impl Workspace {
             move || crate::lane::git::git_restore_staged(&wt_top, &path),
             move |ws, result, cx| {
                 if let Err(e) = result {
-                    let report = ErrorReport::new(app_strings::error_git_restore_staged_failed())
+                    let report = ErrorReport::new(app_strings::error::git_restore_staged_failed())
                         .severity(ErrorSeverity::Error)
                         .from_error(&e)
                         .at(file!(), line!())
@@ -135,7 +135,7 @@ impl Workspace {
             move || crate::lane::git::git_add_paths(&wt_top, &paths),
             move |ws, result, cx| {
                 if let Err(e) = result {
-                    let report = ErrorReport::new(app_strings::error_git_add_paths_failed())
+                    let report = ErrorReport::new(app_strings::error::git_add_paths_failed())
                         .severity(ErrorSeverity::Error)
                         .from_error(&e)
                         .at(file!(), line!())
@@ -181,7 +181,7 @@ impl Workspace {
             move |ws, result, cx| {
                 if let Err(e) = result {
                     let report =
-                        ErrorReport::new(app_strings::error_git_restore_staged_paths_failed())
+                        ErrorReport::new(app_strings::error::git_restore_staged_paths_failed())
                             .severity(ErrorSeverity::Error)
                             .from_error(&e)
                             .at(file!(), line!())
@@ -216,7 +216,7 @@ impl Workspace {
             move || crate::lane::git::git_add_all(&wt_top),
             move |ws, result, cx| {
                 if let Err(e) = result {
-                    let report = ErrorReport::new(app_strings::error_git_add_all_failed())
+                    let report = ErrorReport::new(app_strings::error::git_add_all_failed())
                         .severity(ErrorSeverity::Error)
                         .from_error(&e)
                         .at(file!(), line!())
@@ -251,7 +251,7 @@ impl Workspace {
             move |ws, result, cx| {
                 if let Err(e) = result {
                     let report =
-                        ErrorReport::new(app_strings::error_git_restore_staged_all_failed())
+                        ErrorReport::new(app_strings::error::git_restore_staged_all_failed())
                             .severity(ErrorSeverity::Error)
                             .from_error(&e)
                             .at(file!(), line!())
@@ -291,16 +291,16 @@ impl Workspace {
         };
         let filename = path.file_name_lossy();
         let body = match self.discard_kind(target, &path) {
-            DiscardKind::Untracked => app_strings::git_confirm_discard_untracked_body(&filename),
-            DiscardKind::Added => app_strings::git_confirm_discard_added_body(&filename),
-            DiscardKind::Tracked => app_strings::git_confirm_discard_tracked_body(&filename),
+            DiscardKind::Untracked => app_strings::git::confirm_discard_untracked_body(&filename),
+            DiscardKind::Added => app_strings::git::confirm_discard_added_body(&filename),
+            DiscardKind::Tracked => app_strings::git::confirm_discard_tracked_body(&filename),
         };
 
         let weak = cx.weak_entity();
         open_confirm_dialog(
-            app_strings::git_confirm_discard_title(),
+            app_strings::git::confirm_discard_title(),
             body,
-            app_strings::git_confirm_discard_ok(),
+            app_strings::git::confirm_discard_ok(),
             ButtonVariant::Danger,
             move |_, _window, app_cx| {
                 if let Some(ws) = weak.upgrade() {
@@ -350,9 +350,9 @@ impl Workspace {
         let tracked = pinned.len() - untracked;
         let weak = cx.weak_entity();
         open_confirm_dialog(
-            app_strings::git_confirm_discard_all_title(),
-            app_strings::git_confirm_discard_all_body(tracked, untracked),
-            app_strings::git_confirm_discard_ok(),
+            app_strings::git::confirm_discard_all_title(),
+            app_strings::git::confirm_discard_all_body(tracked, untracked),
+            app_strings::git::confirm_discard_ok(),
             ButtonVariant::Danger,
             move |_, _window, app_cx| {
                 if let Some(ws) = weak.upgrade() {
@@ -396,7 +396,7 @@ impl Workspace {
             move || crate::lane::git::discard::discard(&wt_top, &pinned),
             move |ws, result, cx| {
                 if let Err(e) = result {
-                    let report = ErrorReport::new(app_strings::error_git_restore_failed())
+                    let report = ErrorReport::new(app_strings::error::git_restore_failed())
                         .severity(ErrorSeverity::Error)
                         .from_error(&e)
                         .at(file!(), line!())

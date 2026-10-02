@@ -149,7 +149,7 @@ fn emptying_a_workspace_refreshes_its_recent_row_without_adding_one(cx: &mut Tes
     );
     assert_eq!(
         after[1].display_name,
-        crate::surface::strings::menu_recent_empty_workspace(),
+        crate::surface::strings::menu::recent_empty_workspace(),
         "the row must stop naming a project the workspace no longer holds"
     );
 }

@@ -129,7 +129,7 @@ impl Workspace {
             return;
         }
         let Some(repo_root) = self.git_repo_root() else {
-            let report = ErrorReport::new(crate::surface::strings::error_tasks_require_git_repo())
+            let report = ErrorReport::new(crate::surface::strings::error::tasks_require_git_repo())
                 .severity(ErrorSeverity::Info)
                 .at(file!(), line!())
                 .dedup("tasks.no_git_repo")
@@ -138,7 +138,7 @@ impl Workspace {
             return;
         };
         if !self.acquire_repo_lock(&repo_root) {
-            let report = ErrorReport::new(crate::surface::strings::error_lane_create_busy())
+            let report = ErrorReport::new(crate::surface::strings::error::lane_create_busy())
                 .severity(ErrorSeverity::Info)
                 .at(file!(), line!())
                 .dedup("lane.create.busy")
@@ -164,7 +164,7 @@ impl Workspace {
             new_path: new_path.clone(),
             repo_root: repo_root.clone(),
             base_ref: self.resolve_lane_base_ref(base_ref),
-            description: Some(crate::surface::strings::task_lane_description(&task.title)),
+            description: Some(crate::surface::strings::task::lane_description(&task.title)),
             // Task-driven lanes have no create-form host picker — they stay
             // at `Lane::git`'s default (unanswered/Local), same as before
             // this task added the field.
@@ -210,7 +210,7 @@ impl Workspace {
                         match result {
                             Err(msg) => {
                                 let report = ErrorReport::new(
-                                    crate::surface::strings::error_lane_create_failed(),
+                                    crate::surface::strings::error::lane_create_failed(),
                                 )
                                 .severity(ErrorSeverity::Error)
                                 .at(file!(), line!())
@@ -230,7 +230,7 @@ impl Workspace {
                                 ) {
                                     Err(msg) => {
                                         let report = ErrorReport::new(
-                                            crate::surface::strings::error_lane_finalize_failed(),
+                                            crate::surface::strings::error::lane_finalize_failed(),
                                         )
                                         .severity(ErrorSeverity::Error)
                                         .at(file!(), line!())
@@ -307,7 +307,7 @@ impl Workspace {
                     self.fail_task_dispatch(
                         task_id,
                         worktree_path,
-                        crate::surface::strings::task_error_write_prompt(&e.to_string()),
+                        crate::surface::strings::task::error_write_prompt(e.to_string()),
                         cx,
                     );
                     return;
@@ -328,7 +328,7 @@ impl Workspace {
                     self.fail_task_dispatch(
                         task_id,
                         worktree_path,
-                        crate::surface::strings::task_error_prompt_undelivered(),
+                        crate::surface::strings::task::error_prompt_undelivered(),
                         cx,
                     );
                     return;
@@ -363,7 +363,7 @@ impl Workspace {
             self.fail_task_dispatch(
                 task_id,
                 worktree_path,
-                crate::surface::strings::task_error_prompt_undelivered(),
+                crate::surface::strings::task::error_prompt_undelivered(),
                 cx,
             );
             return;
@@ -465,7 +465,7 @@ impl Workspace {
                     let ids = std::mem::take(&mut t.session_ids);
                     t.state = daruda_store::tasks::TaskState::Error {
                         worktree_path: path_for_state,
-                        message: crate::surface::strings::task_error_lane_gone(),
+                        message: crate::surface::strings::task::error_lane_gone(),
                     };
                     t.updated_at = Utc::now();
                     ids
@@ -613,7 +613,7 @@ impl Workspace {
                         daruda_store::tasks::SessionEndReason::Error => {
                             daruda_store::tasks::TaskState::Error {
                                 worktree_path,
-                                message: crate::surface::strings::task_error_session_failed(),
+                                message: crate::surface::strings::task::error_session_failed(),
                             }
                         }
                         other => daruda_store::tasks::TaskState::Done {
@@ -665,7 +665,7 @@ impl Workspace {
                     daruda_store::tasks::SessionEndReason::Error => {
                         daruda_store::tasks::TaskState::Error {
                             worktree_path,
-                            message: crate::surface::strings::task_error_session_failed(),
+                            message: crate::surface::strings::task::error_session_failed(),
                         }
                     }
                     other => daruda_store::tasks::TaskState::Done {
@@ -728,7 +728,7 @@ impl Workspace {
         let count = *count;
         if count >= daruda_store::tasks::TASK_TOOL_USE_FAILURE_THRESHOLD {
             self.claude.tool_use_failure_counts.remove(session_id);
-            let message = crate::surface::strings::task_error_tool_use_failure(count);
+            let message = crate::surface::strings::task::error_tool_use_failure(count);
             self.escalate_task_session_to_error(session_id, message, cx);
         }
     }
@@ -788,10 +788,10 @@ impl Workspace {
             // observable. The session counter has already been
             // cleared by the caller, so we don't escalate again
             // when the next failure arrives.
-            let report = ErrorReport::new(crate::surface::strings::error_task_escalation_orphan())
+            let report = ErrorReport::new(crate::surface::strings::error::task_escalation_orphan())
                 .severity(ErrorSeverity::Warning)
                 .message(
-                    crate::surface::strings::error_task_escalation_orphan_detail(
+                    crate::surface::strings::error::task_escalation_orphan_detail(
                         session_id, &message,
                     ),
                 )

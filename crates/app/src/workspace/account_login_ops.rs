@@ -145,16 +145,16 @@ impl LoginFinish {
     /// finish methods report).
     fn spawn_error_title(self) -> String {
         match self {
-            LoginFinish::Add => s::settings_accounts_login_failed(),
-            LoginFinish::Reauth | LoginFinish::System => s::settings_accounts_reauth_failed(),
+            LoginFinish::Add => s::settings::accounts_login_failed(),
+            LoginFinish::Reauth | LoginFinish::System => s::settings::accounts_reauth_failed(),
         }
     }
 }
 
 // The [`LoginOutcome::Denied`] / [`LoginOutcome::TimedOut`] toast-body
 // detail folded into the failure toast's `.message()` is authored,
-// user-visible copy — it goes through `s::settings_accounts_login_denied_detail()`
-// / `s::settings_accounts_login_timed_out_detail()` (i18n), not a fixed
+// user-visible copy — it goes through `s::settings::accounts_login_denied_detail()`
+// / `s::settings::accounts_login_timed_out_detail()` (i18n), not a fixed
 // English constant here. [`LoginOutcome::Failed`]'s captured-output
 // string stays as-is: it's a diagnostic dump, not an authored sentence.
 
@@ -296,7 +296,7 @@ impl Workspace {
     ) {
         if !can_start_login(&self.login.pending) || accounts_global::login_busy(cx) {
             self.report_error(
-                ErrorReport::new(s::settings_accounts_login_busy())
+                ErrorReport::new(s::settings::accounts_login_busy())
                     .severity(ErrorSeverity::Warning)
                     .dedup("account.add.login_busy")
                     .build(),
@@ -311,7 +311,7 @@ impl Workspace {
         let config_dir = account_config_dir(&self.data_dir, account_id);
         if let Err(e) = std::fs::create_dir_all(&config_dir) {
             self.report_error(
-                ErrorReport::new(s::settings_accounts_login_failed())
+                ErrorReport::new(s::settings::accounts_login_failed())
                     .message(format!(
                         "could not create the account config directory: {e}"
                     ))
@@ -396,7 +396,7 @@ impl Workspace {
                 cleanup_account_dir(recipe_id, &home_dir);
             }
             self.report_error(
-                ErrorReport::new(s::settings_accounts_login_busy())
+                ErrorReport::new(s::settings::accounts_login_busy())
                     .severity(ErrorSeverity::Warning)
                     .dedup("account.login.global_busy")
                     .build(),
@@ -575,13 +575,13 @@ impl Workspace {
             LoginOutcome::Denied => self.finish_login_failed(
                 recipe_id,
                 config_dir,
-                s::settings_accounts_login_denied_detail(),
+                s::settings::accounts_login_denied_detail(),
                 cx,
             ),
             LoginOutcome::TimedOut => self.finish_login_failed(
                 recipe_id,
                 config_dir,
-                s::settings_accounts_login_timed_out_detail(),
+                s::settings::accounts_login_timed_out_detail(),
                 cx,
             ),
             LoginOutcome::Failed(detail) => {
@@ -611,7 +611,7 @@ impl Workspace {
             self.finish_login_failed(
                 recipe_id,
                 config_dir,
-                s::settings_accounts_login_no_credentials_detail(),
+                s::settings::accounts_login_no_credentials_detail(),
                 cx,
             );
             return;
@@ -669,9 +669,9 @@ impl Workspace {
         accounts_global::replace(cx, state);
 
         let toast = if is_duplicate {
-            s::settings_accounts_login_already_exists()
+            s::settings::accounts_login_already_exists()
         } else {
-            s::settings_accounts_login_added()
+            s::settings::accounts_login_added()
         };
         self.report_error(
             ErrorReport::new(toast)
@@ -702,7 +702,7 @@ impl Workspace {
     ) {
         cleanup_account_dir(recipe, &config_dir);
         self.report_error(
-            ErrorReport::new(s::settings_accounts_login_failed())
+            ErrorReport::new(s::settings::accounts_login_failed())
                 .message(detail)
                 .severity(ErrorSeverity::Warning)
                 .build(),
@@ -907,8 +907,8 @@ impl Workspace {
             return;
         }
         self.report_error(
-            ErrorReport::new(s::account_ambient_login_replaced())
-                .message(s::account_ambient_login_replaced_detail())
+            ErrorReport::new(s::settings::accounts_ambient_login_replaced())
+                .message(s::settings::accounts_ambient_login_replaced_detail())
                 .severity(ErrorSeverity::Warning)
                 .at(file!(), line!())
                 .dedup("account.login.ambient_clobbered")
@@ -942,8 +942,8 @@ impl Workspace {
     ) {
         let Some(account) = self.accounts.find(account_id) else {
             self.report_error(
-                ErrorReport::new(s::settings_accounts_reauth_failed())
-                    .message(s::account_reauth_missing())
+                ErrorReport::new(s::settings::accounts_reauth_failed())
+                    .message(s::settings::accounts_reauth_missing())
                     .severity(ErrorSeverity::Warning)
                     .dedup("account.reauth.account_missing")
                     .build(),
@@ -963,7 +963,7 @@ impl Workspace {
         );
         if !can_start_login(&self.login.pending) || accounts_global::login_busy(cx) {
             self.report_error(
-                ErrorReport::new(s::settings_accounts_login_busy())
+                ErrorReport::new(s::settings::accounts_login_busy())
                     .severity(ErrorSeverity::Warning)
                     .dedup("account.reauth.login_busy")
                     .build(),
@@ -982,7 +982,7 @@ impl Workspace {
         // something removed it out from under the account row.
         if let Err(e) = std::fs::create_dir_all(&config_dir) {
             self.report_error(
-                ErrorReport::new(s::settings_accounts_reauth_failed())
+                ErrorReport::new(s::settings::accounts_reauth_failed())
                     .message(format!(
                         "could not access the account config directory: {e}"
                     ))
@@ -1029,7 +1029,7 @@ impl Workspace {
         self.restart_stale_login(LoginTarget::System { recipe }, cx);
         if !can_start_login(&self.login.pending) || accounts_global::login_busy(cx) {
             self.report_error(
-                ErrorReport::new(s::settings_accounts_login_busy())
+                ErrorReport::new(s::settings::accounts_login_busy())
                     .severity(ErrorSeverity::Warning)
                     .dedup("account.system_reauth.login_busy")
                     .build(),
@@ -1044,8 +1044,8 @@ impl Workspace {
         // than run the command against an invented path.
         let Some(home_dir) = recipe_for(recipe).system_home_dir() else {
             self.report_error(
-                ErrorReport::new(s::settings_accounts_reauth_failed())
-                    .message(s::account_system_home_unknown())
+                ErrorReport::new(s::settings::accounts_reauth_failed())
+                    .message(s::settings::accounts_system_home_unknown())
                     .severity(ErrorSeverity::Warning)
                     .dedup("account.system_reauth.no_home")
                     .build(),
@@ -1095,8 +1095,8 @@ impl Workspace {
             // spawn here — and a button that silently does nothing is worse
             // than the dead end it was meant to replace.
             None => self.report_error(
-                ErrorReport::new(s::account_reauth_elsewhere())
-                    .message(s::account_reauth_elsewhere_detail())
+                ErrorReport::new(s::settings::accounts_reauth_elsewhere())
+                    .message(s::settings::accounts_reauth_elsewhere_detail())
                     .severity(ErrorSeverity::Warning)
                     .dedup("account.reauth.not_runnable_here")
                     .build(),
@@ -1129,7 +1129,7 @@ impl Workspace {
         match outcome {
             LoginOutcome::Success => {
                 self.report_error(
-                    ErrorReport::new(s::settings_accounts_reauth_added())
+                    ErrorReport::new(s::settings::accounts_reauth_added())
                         .severity(ErrorSeverity::Info)
                         .build(),
                     cx,
@@ -1139,10 +1139,10 @@ impl Workspace {
                 cx.notify();
             }
             LoginOutcome::Denied => {
-                self.finish_reauth_failed(s::settings_accounts_login_denied_detail(), cx)
+                self.finish_reauth_failed(s::settings::accounts_login_denied_detail(), cx)
             }
             LoginOutcome::TimedOut => {
-                self.finish_reauth_failed(s::settings_accounts_login_timed_out_detail(), cx)
+                self.finish_reauth_failed(s::settings::accounts_login_timed_out_detail(), cx)
             }
             LoginOutcome::Failed(detail) => self.finish_reauth_failed(detail, cx),
         }
@@ -1173,10 +1173,10 @@ impl Workspace {
         match outcome {
             LoginOutcome::Success => self.finish_reauth_success(account_id, config_dir, recipe, cx),
             LoginOutcome::Denied => {
-                self.finish_reauth_failed(s::settings_accounts_login_denied_detail(), cx)
+                self.finish_reauth_failed(s::settings::accounts_login_denied_detail(), cx)
             }
             LoginOutcome::TimedOut => {
-                self.finish_reauth_failed(s::settings_accounts_login_timed_out_detail(), cx)
+                self.finish_reauth_failed(s::settings::accounts_login_timed_out_detail(), cx)
             }
             LoginOutcome::Failed(detail) => self.finish_reauth_failed(detail, cx),
         }
@@ -1206,7 +1206,7 @@ impl Workspace {
     ) {
         let recipe = recipe_for(recipe_id);
         if !recipe.has_credentials(&config_dir) {
-            self.finish_reauth_failed(s::settings_accounts_reauth_no_credentials_detail(), cx);
+            self.finish_reauth_failed(s::settings::accounts_reauth_no_credentials_detail(), cx);
             return;
         }
 
@@ -1254,7 +1254,7 @@ impl Workspace {
         accounts_global::replace(cx, state);
 
         self.report_error(
-            ErrorReport::new(s::settings_accounts_reauth_added())
+            ErrorReport::new(s::settings::accounts_reauth_added())
                 .severity(ErrorSeverity::Info)
                 .build(),
             cx,
@@ -1290,7 +1290,7 @@ impl Workspace {
     /// before the attempt.
     fn finish_reauth_failed(&mut self, detail: String, cx: &mut Context<Self>) {
         self.report_error(
-            ErrorReport::new(s::settings_accounts_reauth_failed())
+            ErrorReport::new(s::settings::accounts_reauth_failed())
                 .message(detail)
                 .severity(ErrorSeverity::Warning)
                 .build(),

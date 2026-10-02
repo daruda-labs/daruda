@@ -57,7 +57,7 @@ pub(super) fn tail_window_chip(
         cx,
     )
     .selected(!tail.is_following())
-    .tooltip(SharedString::from(s::agent_chat_tail_window_tooltip()))
+    .tooltip(SharedString::from(s::agent_chat::tail_window_tooltip()))
     .dropdown_menu(move |menu, _window, _cx| build_tail_window_menu(&view, tail, menu))
 }
 
@@ -73,11 +73,11 @@ pub(super) fn tail_window_chip_label(tail: TailChoices) -> String {
     let value = if calls == TailWindow::All || calls == steps {
         tail_window_value(steps)
     } else {
-        s::agent_chat_tail_window_pair(&tail_window_value(steps), &tail_window_value(calls))
+        s::agent_chat::tail_window_pair(tail_window_value(steps), tail_window_value(calls))
     };
     // The mark is about following config, and an axis is following only when
     // both of its levels are.
-    axis_chip_label(s::agent_chat_tail_window_chip(&value), tail.is_following())
+    axis_chip_label(s::agent_chat::tail_window_chip(&value), tail.is_following())
 }
 
 pub(super) fn tail_window_panel(
@@ -129,8 +129,8 @@ fn tail_window_choices() -> impl Iterator<Item = TailWindow> {
 
 fn tail_level_heading(level: TailLevel) -> String {
     match level {
-        TailLevel::Steps => s::agent_chat_tail_level_steps(),
-        TailLevel::Calls => s::agent_chat_tail_level_calls(),
+        TailLevel::Steps => s::agent_chat::tail_level_steps(),
+        TailLevel::Calls => s::agent_chat::tail_level_calls(),
     }
 }
 
@@ -139,8 +139,8 @@ fn tail_level_heading(level: TailLevel) -> String {
 /// "N earlier steps" row it sits above.
 fn tail_window_value(tail: TailWindow) -> String {
     match tail {
-        TailWindow::All => s::agent_chat_tail_window_all(),
-        TailWindow::Last(n) => s::agent_chat_tail_window_last(n),
+        TailWindow::All => s::agent_chat::tail_window_all(),
+        TailWindow::Last(n) => s::agent_chat::tail_window_last(n),
     }
 }
 
@@ -192,7 +192,7 @@ mod tests {
     fn the_chip_names_the_current_window() {
         assert!(
             tail_window_chip_label(following(TailWindow::All))
-                .contains(&s::agent_chat_tail_window_all())
+                .contains(&s::agent_chat::tail_window_all())
         );
         let last = TailWindow::last(TAIL_WINDOW_CHOICES[0]);
         assert_ne!(
@@ -211,7 +211,7 @@ mod tests {
                 PaneChoice::Seeded(calls),
             ))
         };
-        let all = s::agent_chat_tail_window_all();
+        let all = s::agent_chat::tail_window_all();
 
         // Nothing of its own to say: same window as the steps, or no window.
         assert_eq!(
@@ -220,12 +220,12 @@ mod tests {
         );
         assert_eq!(
             seeded(TailWindow::Last(3), TailWindow::All),
-            seeded_one(s::agent_chat_tail_window_last(3)),
+            seeded_one(s::agent_chat::tail_window_last(3)),
             "a call level that withholds nothing must not restate the steps"
         );
         assert_eq!(
             seeded(TailWindow::Last(2), TailWindow::Last(2)),
-            seeded_one(s::agent_chat_tail_window_last(2))
+            seeded_one(s::agent_chat::tail_window_last(2))
         );
 
         // Its own window: both slots, both values named.
@@ -244,7 +244,7 @@ mod tests {
 
     /// The single-slot chip, as the collapsed cases above must all render.
     fn seeded_one(value: String) -> String {
-        s::agent_chat_tail_window_chip(&value)
+        s::agent_chat::tail_window_chip(&value)
     }
 
     /// The mark is about following config, not about the value — and one level

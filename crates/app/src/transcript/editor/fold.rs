@@ -34,7 +34,7 @@ pub(crate) struct FoldEditorActions {
 pub(crate) fn mode_value(mode: FoldMode) -> String {
     match mode.preset() {
         Some(preset) => preset_label(preset),
-        None => s::agent_chat_fold_mode_custom(),
+        None => s::agent_chat::fold_mode_custom(),
     }
 }
 
@@ -71,7 +71,7 @@ pub(crate) fn fold_editor(
         .child(
             fixed_region()
                 .gap(px(theme::GAP_LG))
-                .child(panel_heading(s::agent_chat_fold_editor_presets(), cx))
+                .child(panel_heading(s::agent_chat::fold_editor_presets(), cx))
                 .child(preset_group(mode, state, id_prefix, &actions, cx))
                 // Separates "set a value" from "switch what is being edited":
                 // the strip above is a choice, the tabs below are a view swap.
@@ -84,7 +84,7 @@ pub(crate) fn fold_editor(
         )
         .child(reset_footer(
             SharedString::from(format!("{id_prefix}-fold-reset")),
-            s::agent_chat_fold_editor_reset_default(),
+            s::agent_chat::fold_editor_reset_default(),
             actions.reset,
         ))
         .into_any_element()
@@ -126,7 +126,7 @@ impl PresetSegment {
     fn label(self) -> String {
         match self {
             Self::Preset(preset) => preset_label(preset),
-            Self::Custom => s::agent_chat_fold_mode_custom(),
+            Self::Custom => s::agent_chat::fold_mode_custom(),
         }
     }
 
@@ -300,52 +300,52 @@ fn preset_token(preset: FoldPreset) -> &'static str {
 
 fn preset_label(preset: FoldPreset) -> String {
     match preset {
-        FoldPreset::Auto => s::agent_chat_fold_mode_auto(),
-        FoldPreset::Summary => s::agent_chat_fold_mode_summary(),
-        FoldPreset::Expanded => s::agent_chat_fold_mode_expanded(),
+        FoldPreset::Auto => s::agent_chat::fold_mode_auto(),
+        FoldPreset::Summary => s::agent_chat::fold_mode_summary(),
+        FoldPreset::Expanded => s::agent_chat::fold_mode_expanded(),
     }
 }
 
 fn turn_label(turn: TurnPosition) -> String {
     match turn {
-        TurnPosition::Past => s::agent_chat_fold_editor_earlier_turns(),
-        TurnPosition::Last => s::agent_chat_fold_editor_recent_turn(),
+        TurnPosition::Past => s::agent_chat::fold_editor_earlier_turns(),
+        TurnPosition::Last => s::agent_chat::fold_editor_recent_turn(),
     }
 }
 
 fn rule_label(rule: BlockRule) -> String {
     match rule {
-        BlockRule::Expanded => s::agent_chat_fold_editor_rule_expanded(),
-        BlockRule::Collapsed => s::agent_chat_fold_editor_rule_collapsed(),
-        BlockRule::WhileRunning => s::agent_chat_fold_editor_rule_running(),
+        BlockRule::Expanded => s::agent_chat::fold_editor_rule_expanded(),
+        BlockRule::Collapsed => s::agent_chat::fold_editor_rule_collapsed(),
+        BlockRule::WhileRunning => s::agent_chat::fold_editor_rule_running(),
     }
 }
 
 fn block_label(block: FoldBlock) -> String {
     match block {
-        FoldBlock::Response => s::agent_chat_fold_block_response(),
-        FoldBlock::ToolGroup => s::agent_chat_fold_block_tool_group(),
-        FoldBlock::Tool => s::agent_chat_fold_block_tool(),
-        FoldBlock::Subagent => s::agent_chat_fold_block_subagent(),
-        FoldBlock::Thinking => s::agent_chat_fold_block_thinking(),
-        FoldBlock::ThinkingGroup => s::agent_chat_fold_block_thinking_group(),
-        FoldBlock::Assistant => s::agent_chat_fold_block_assistant(),
-        FoldBlock::Diff => s::agent_chat_fold_block_diff(),
-        FoldBlock::RawInput => s::agent_chat_fold_block_raw_input(),
+        FoldBlock::Response => s::agent_chat::fold_block_response(),
+        FoldBlock::ToolGroup => s::agent_chat::fold_block_tool_group(),
+        FoldBlock::Tool => s::agent_chat::fold_block_tool(),
+        FoldBlock::Subagent => s::agent_chat::fold_block_subagent(),
+        FoldBlock::Thinking => s::agent_chat::fold_block_thinking(),
+        FoldBlock::ThinkingGroup => s::agent_chat::fold_block_thinking_group(),
+        FoldBlock::Assistant => s::agent_chat::fold_block_assistant(),
+        FoldBlock::Diff => s::agent_chat::fold_block_diff(),
+        FoldBlock::RawInput => s::agent_chat::fold_block_raw_input(),
     }
 }
 
 fn tool_category_label(category: ToolCategory) -> String {
     match category {
-        ToolCategory::Read => s::agent_chat_filter_tool_read(),
-        ToolCategory::Edit => s::agent_chat_filter_tool_edit(),
-        ToolCategory::Delete => s::agent_chat_filter_tool_delete(),
-        ToolCategory::Search => s::agent_chat_filter_tool_search(),
-        ToolCategory::Run => s::agent_chat_filter_tool_run(),
-        ToolCategory::Fetch => s::agent_chat_filter_tool_fetch(),
-        ToolCategory::Mcp => s::agent_chat_filter_tool_mcp(),
-        ToolCategory::Agent => s::agent_chat_filter_tool_agent(),
-        ToolCategory::Other => s::agent_chat_filter_tool_other(),
+        ToolCategory::Read => s::agent_chat::filter_tool_read(),
+        ToolCategory::Edit => s::agent_chat::filter_tool_edit(),
+        ToolCategory::Delete => s::agent_chat::filter_tool_delete(),
+        ToolCategory::Search => s::agent_chat::filter_tool_search(),
+        ToolCategory::Run => s::agent_chat::filter_tool_run(),
+        ToolCategory::Fetch => s::agent_chat::filter_tool_fetch(),
+        ToolCategory::Mcp => s::agent_chat::filter_tool_mcp(),
+        ToolCategory::Agent => s::agent_chat::filter_tool_agent(),
+        ToolCategory::Other => s::agent_chat::filter_tool_other(),
     }
 }
 
@@ -425,13 +425,13 @@ mod tests {
     fn the_value_text_names_the_preset_or_says_custom() {
         assert_eq!(
             mode_value(FoldPreset::Auto.mode()),
-            s::agent_chat_fold_mode_auto()
+            s::agent_chat::fold_mode_auto()
         );
         let matrix = FoldPreset::Summary.mode().with_rule(
             TurnPosition::Past,
             FoldBlock::Thinking,
             BlockRule::Collapsed,
         );
-        assert_eq!(mode_value(matrix), s::agent_chat_fold_mode_custom());
+        assert_eq!(mode_value(matrix), s::agent_chat::fold_mode_custom());
     }
 }

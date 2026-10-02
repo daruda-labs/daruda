@@ -134,12 +134,12 @@ impl Workspace {
                 // Git Changes commit input — placeholder + button + dropdown.
                 git_commit_input.update(cx, |panel, cx| {
                     panel.area.update(cx, |input, cx| {
-                        input.set_placeholder(s::git_commit_placeholder(), window, cx);
+                        input.set_placeholder(s::git::commit_placeholder(), window, cx);
                     });
                     let (primary, dropdown) = if amend_mode {
-                        (s::git_amend_btn(), s::git_cancel_amend())
+                        (s::git::amend_btn(), s::git::cancel_amend())
                     } else {
-                        (s::git_commit_btn(), s::ctx_git_commit_amend())
+                        (s::git::commit_btn(), s::ctx::git_commit_amend())
                     };
                     panel.set_action_label("commit", primary, cx);
                     panel.set_action_dropdown_label("commit", 0, dropdown, cx);
@@ -147,28 +147,28 @@ impl Workspace {
 
                 // Skills search input — placeholder.
                 skill_search_input.update(cx, |input, cx| {
-                    input.set_placeholder(s::skills_search_placeholder(), window, cx);
+                    input.set_placeholder(s::skills::search_placeholder(), window, cx);
                 });
 
                 // Task search input — placeholder.
                 task_search_input.update(cx, |input, cx| {
-                    input.set_placeholder(s::task_search_placeholder(), window, cx);
+                    input.set_placeholder(s::task::search_placeholder(), window, cx);
                 });
 
                 // Every open Task Edit pane, including panes parked in
                 // inactive lanes, owns four locale-dependent placeholders.
                 for (title, branch, prompt, notes) in task_edit_inputs {
                     title.update(cx, |input, cx| {
-                        input.set_placeholder(s::task_edit_title_placeholder(), window, cx);
+                        input.set_placeholder(s::task::edit_title_placeholder(), window, cx);
                     });
                     branch.update(cx, |input, cx| {
-                        input.set_placeholder(s::task_edit_branch_placeholder(), window, cx);
+                        input.set_placeholder(s::task::edit_branch_placeholder(), window, cx);
                     });
                     prompt.update(cx, |input, cx| {
-                        input.set_placeholder(s::task_edit_prompt_placeholder(), window, cx);
+                        input.set_placeholder(s::task::edit_prompt_placeholder(), window, cx);
                     });
                     notes.update(cx, |input, cx| {
-                        input.set_placeholder(s::task_edit_notes_placeholder(), window, cx);
+                        input.set_placeholder(s::task::edit_notes_placeholder(), window, cx);
                     });
                 }
             },
@@ -245,7 +245,7 @@ impl Workspace {
         } else {
             None
         };
-        s::bottom_input_placeholder_for_context(
+        s::bottom_dock::bottom_input_placeholder_for_context(
             is_agent,
             mode_name.as_deref(),
             self.agent.use_modifier_to_send,

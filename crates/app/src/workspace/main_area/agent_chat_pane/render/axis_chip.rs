@@ -10,7 +10,7 @@ pub(super) fn axis_chip_label(value_label: String, following: bool) -> String {
     if following {
         value_label
     } else {
-        s::agent_chat_chip_overridden(&value_label)
+        s::agent_chat::chip_overridden(&value_label)
     }
 }
 

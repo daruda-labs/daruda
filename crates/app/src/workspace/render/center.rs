@@ -139,7 +139,7 @@ fn present_empty_state(cx: &mut Context<Workspace>) -> AnyElement {
             div()
                 .text_size(px(theme::MAIN_EMPTY_STATE_TITLE_FONT_SIZE))
                 .text_color(t.text_primary)
-                .child(SharedString::from(s::projects_empty_no_tabs_title())),
+                .child(SharedString::from(s::projects::empty_no_tabs_title())),
         )
         .child(
             div()
@@ -147,7 +147,7 @@ fn present_empty_state(cx: &mut Context<Workspace>) -> AnyElement {
                 .text_size(px(theme::MAIN_EMPTY_STATE_BODY_FONT_SIZE))
                 .text_color(t.text_muted)
                 .text_center()
-                .child(SharedString::from(s::projects_empty_no_tabs_body())),
+                .child(SharedString::from(s::projects::empty_no_tabs_body())),
         )
         .child(
             div()
@@ -155,14 +155,14 @@ fn present_empty_state(cx: &mut Context<Workspace>) -> AnyElement {
                 .flex_row()
                 .gap(px(theme::MAIN_EMPTY_STATE_GAP))
                 .child(
-                    button("no-tabs-new-terminal", s::ctx_new_terminal()).on_click(cx.listener(
-                        |this, _, window, cx| {
+                    button("no-tabs-new-terminal", s::common::new_terminal()).on_click(
+                        cx.listener(|this, _, window, cx| {
                             this.mutate_durable_in(window, cx, |ws, w, cx| ws.add_tab(w, cx));
-                        },
-                    )),
+                        }),
+                    ),
                 )
                 .child(
-                    button_primary("no-tabs-new-chat", s::ctx_new_agent_chat()).on_click(
+                    button_primary("no-tabs-new-chat", s::common::new_agent_chat()).on_click(
                         cx.listener(|this, _, window, cx| {
                             this.mutate_durable_in(window, cx, |ws, w, cx| {
                                 ws.open_agent_chat_pane(w, cx)
@@ -195,13 +195,13 @@ fn inaccessible_empty_state(
         LaneAvailability::Present => return div().into_any_element(),
         LaneAvailability::Missing => (
             IconName::TriangleAlert,
-            s::projects_empty_missing_title(),
-            s::projects_empty_missing_body(),
+            s::projects::empty_missing_title(),
+            s::projects::empty_missing_body(),
         ),
         LaneAvailability::AccessDenied => (
             IconName::EyeOff,
-            s::projects_empty_denied_title(),
-            s::projects_empty_denied_body(),
+            s::projects::empty_denied_title(),
+            s::projects::empty_denied_body(),
         ),
     };
 
@@ -234,7 +234,7 @@ fn inaccessible_empty_state(
                 .child(SharedString::from(body)),
         )
         .child(
-            button_danger("inaccessible-remove", s::ctx_remove()).on_click(cx.listener(
+            button_danger("inaccessible-remove", s::ctx::remove()).on_click(cx.listener(
                 |this, _, window, cx| {
                     this.request_remove_inaccessible_active(window, cx);
                 },

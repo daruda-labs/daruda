@@ -33,7 +33,7 @@ impl Workspace {
             return;
         }
         terminal.exited = true;
-        let notice = format!("\r\n{}\r\n", strings::terminal_process_exited());
+        let notice = format!("\r\n{}\r\n", strings::terminal::process_exited());
         terminal.view.update(cx, |view, cx| {
             view.queue_output_bytes(notice.as_bytes(), cx);
             view.flush_pending_output(cx);
@@ -70,7 +70,7 @@ impl Workspace {
             match self.spawn_terminal_pane(pane_id, cwd, account, prepared.as_ref(), window, cx) {
                 Ok(fresh) => fresh,
                 Err(err) => {
-                    self.report_pane_error(&strings::ctx_restart_shell(), err, cx);
+                    self.report_pane_error(&strings::ctx::restart_shell(), err, cx);
                     return;
                 }
             };

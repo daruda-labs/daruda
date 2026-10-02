@@ -70,9 +70,9 @@ impl EditRefusal {
     /// chooses which line.
     pub(in crate::workspace) fn message(&self) -> String {
         match self {
-            EditRefusal::Stale => s::flow_edit_stale(),
-            EditRefusal::WouldNotLoad { detail, .. } => s::flow_edit_would_not_load(detail),
-            EditRefusal::Unsupported(detail) => s::flow_edit_unsupported(detail),
+            EditRefusal::Stale => s::flow::edit_stale(),
+            EditRefusal::WouldNotLoad { detail, .. } => s::flow::edit_would_not_load(detail),
+            EditRefusal::Unsupported(detail) => s::flow::edit_unsupported(detail),
             EditRefusal::NothingToDo => String::new(),
             // Built by `io` below, which is the only way this variant is
             // made — a whole sentence already, with the path in it.
@@ -83,9 +83,9 @@ impl EditRefusal {
     /// An I/O failure, worded where the path is known. The file system's own
     /// message is not translatable; the sentence around it is.
     fn io(path: &Path, error: &std::io::Error) -> Self {
-        EditRefusal::Io(s::flow_file_op_failed(
-            &path.display().to_string(),
-            &error.to_string(),
+        EditRefusal::Io(s::flow::file_op_failed(
+            path.display().to_string(),
+            error.to_string(),
         ))
     }
 
@@ -119,7 +119,7 @@ impl Workspace {
         };
         let dir = super::flow_paths::project_flows_dir(&self.data_dir, &root);
         if let Err(e) = std::fs::create_dir_all(&dir) {
-            self.report_flow_file_error(s::flow_create_failed_title(), &dir, &e, cx);
+            self.report_flow_file_error(s::flow::create_failed_title(), &dir, &e, cx);
             return;
         }
         let path = match super::flow_paths::flow_file_name_in(&dir, typed_name) {
@@ -134,7 +134,7 @@ impl Workspace {
             return;
         };
         if let Err(e) = write_new_file(&path, &starter) {
-            self.report_flow_file_error(s::flow_create_failed_title(), &path, &e, cx);
+            self.report_flow_file_error(s::flow::create_failed_title(), &path, &e, cx);
             return;
         }
         self.invalidate_flow_list();
@@ -158,7 +158,7 @@ impl Workspace {
         Some(
             STARTER_FLOW
                 .replace("{agent}", agent)
-                .replace("{prompt}", &s::flow_starter_prompt()),
+                .replace("{prompt}", &s::flow::starter_prompt()),
         )
     }
 
@@ -189,7 +189,7 @@ impl Workspace {
         // it needs `renamex_np` / `renameat2`, an unsafe FFI pair for two
         // platforms; deferred until something makes that worth carrying.
         if let Err(e) = std::fs::rename(from, &to) {
-            self.report_flow_file_error(s::flow_rename_failed_title(), from, &e, cx);
+            self.report_flow_file_error(s::flow::rename_failed_title(), from, &e, cx);
             return;
         }
         self.repoint_flow_graph_panes(from, &to, cx);
@@ -200,7 +200,7 @@ impl Workspace {
     /// Delete a flow file. The caller is responsible for having asked first.
     pub(in crate::workspace) fn delete_flow(&mut self, path: &Path, cx: &mut Context<Self>) {
         if let Err(e) = std::fs::remove_file(path) {
-            self.report_flow_file_error(s::flow_delete_failed_title(), path, &e, cx);
+            self.report_flow_file_error(s::flow::delete_failed_title(), path, &e, cx);
             return;
         }
         // Tell the panes drawing it directly rather than leaving it to the
@@ -230,9 +230,9 @@ impl Workspace {
 
     fn report_flow_no_agent(&mut self, cx: &mut Context<Self>) {
         self.report_error(
-            ErrorReport::new(s::flow_create_failed_title())
+            ErrorReport::new(s::flow::create_failed_title())
                 .severity(ErrorSeverity::Warning)
-                .message(s::flow_no_agent())
+                .message(s::flow::no_agent())
                 .dedup("flow.no_agent")
                 .at(file!(), line!())
                 .build(),
@@ -333,7 +333,7 @@ impl Workspace {
         cx: &mut Context<Self>,
     ) {
         self.report_error(
-            ErrorReport::new(s::flow_edit_refused_title())
+            ErrorReport::new(s::flow::edit_refused_title())
                 .severity(ErrorSeverity::Warning)
                 .message(message)
                 .dedup(dedup)
@@ -350,13 +350,13 @@ impl Workspace {
     ) {
         use super::flow_paths::FlowNameError;
         let message = match reason {
-            FlowNameError::Empty => s::flow_name_empty(),
-            FlowNameError::HasSeparator => s::flow_name_has_separator(),
-            FlowNameError::Unportable => s::flow_name_unportable(),
-            FlowNameError::Taken => s::flow_name_taken(),
+            FlowNameError::Empty => s::flow::name_empty(),
+            FlowNameError::HasSeparator => s::flow::name_has_separator(),
+            FlowNameError::Unportable => s::flow::name_unportable(),
+            FlowNameError::Taken => s::flow::name_taken(),
         };
         self.report_error(
-            ErrorReport::new(s::flow_name_refused_title())
+            ErrorReport::new(s::flow::name_refused_title())
                 .severity(ErrorSeverity::Warning)
                 .message(message)
                 .dedup("flow.name_refused")
@@ -376,9 +376,9 @@ impl Workspace {
         self.report_error(
             ErrorReport::new(title)
                 .severity(ErrorSeverity::Error)
-                .message(s::flow_file_op_failed(
-                    &path.display().to_string(),
-                    &error.to_string(),
+                .message(s::flow::file_op_failed(
+                    path.display().to_string(),
+                    error.to_string(),
                 ))
                 .dedup("flow.file_op")
                 .at(file!(), line!())
@@ -475,9 +475,9 @@ pub(in crate::workspace) fn ask_before_deleting(
     cx: &mut App,
 ) {
     crate::workspace::dialog_helpers::open_confirm_dialog(
-        s::flow_delete_confirm_title(),
+        s::flow::delete_confirm_title(),
         super::flow_paths::delete_confirm_body(name, origin),
-        s::flow_delete_confirm_ok(),
+        s::flow::delete_confirm_ok(),
         crate::ui::dialog::ButtonVariant::Danger,
         move |_, _window, app| {
             let path = path.clone();
@@ -497,7 +497,7 @@ pub(in crate::workspace) fn ask_before_deleting(
 /// says "1 validation problem(s)" and nothing about which one.
 fn load_failure_detail(error: &daruda_flow::FlowError) -> String {
     match error {
-        daruda_flow::FlowError::Validate(issues) => s::flow_issue_lines(issues).join(" · "),
+        daruda_flow::FlowError::Validate(issues) => s::flow::issue_lines(issues).join(" · "),
         other => other.to_string(),
     }
 }

@@ -253,7 +253,7 @@ impl Workspace {
             Ok(w) => w,
             Err(e) => {
                 let report =
-                    ErrorReport::new(crate::surface::strings::error_file_watcher_init_failed())
+                    ErrorReport::new(crate::surface::strings::error::file_watcher_init_failed())
                         .severity(ErrorSeverity::Warning)
                         .from_error(&e)
                         .at(file!(), line!())
@@ -401,7 +401,7 @@ impl Workspace {
             }
             DebouncedEvent::Changed { .. } => {}
             DebouncedEvent::Error(msg) => {
-                let report = ErrorReport::new(crate::surface::strings::error_file_watcher_error())
+                let report = ErrorReport::new(crate::surface::strings::error::file_watcher_error())
                     .severity(ErrorSeverity::Warning)
                     .at(file!(), line!())
                     .with_context("detail", msg)
@@ -659,8 +659,8 @@ impl Workspace {
                         // root — keep the lane and report like any
                         // dir-read error.
                         Some((
-                            crate::surface::strings::error_cannot_read_directory_detail(
-                                &e.to_string(),
+                            crate::surface::strings::error::cannot_read_directory_detail(
+                                e.to_string(),
                             ),
                             ErrorSeverity::Error,
                             "files.dir_read.root",
@@ -715,7 +715,7 @@ impl Workspace {
                     None
                 } else {
                     Some((
-                        crate::surface::strings::error_cannot_read_directory_detail(&e.to_string()),
+                        crate::surface::strings::error::cannot_read_directory_detail(e.to_string()),
                         ErrorSeverity::Warning,
                         "files.dir_read",
                     ))
@@ -723,7 +723,7 @@ impl Workspace {
             }
         };
         if let Some((msg, severity, dedup_key)) = error_msg {
-            let report = ErrorReport::new(crate::surface::strings::error_cannot_read_directory())
+            let report = ErrorReport::new(crate::surface::strings::error::cannot_read_directory())
                 .severity(severity)
                 .at(file!(), line!())
                 .with_context("detail", msg)

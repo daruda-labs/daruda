@@ -1063,7 +1063,7 @@ impl SettingsView {
                         theme::palette::SETTINGS_AGENT_ENV_ROWS_MIN,
                         theme::palette::SETTINGS_AGENT_ENV_ROWS_MAX,
                     )
-                    .placeholder(s::settings_agent_env_placeholder())
+                    .placeholder(s::settings::agent_env_placeholder())
                     .default_value(sections::agent_env::env_field_text(
                         definition.env.as_deref(),
                     ))
@@ -1079,35 +1079,35 @@ impl SettingsView {
             tail_window_calls_select: transcript.tail_window_calls_select,
             id_input: cx.new(|cx_state| {
                 InputState::new(window, cx_state)
-                    .placeholder(s::settings_agent_id_placeholder())
+                    .placeholder(s::settings::agent_id_placeholder())
                     .default_value(id)
             }),
             name_input: cx.new(|cx_state| {
                 InputState::new(window, cx_state)
-                    .placeholder(s::settings_agent_name_placeholder())
+                    .placeholder(s::settings::agent_name_placeholder())
                     .default_value(name)
             }),
             command_input: cx.new(|cx_state| {
                 InputState::new(window, cx_state)
-                    .placeholder(s::settings_agent_command_placeholder())
+                    .placeholder(s::settings::agent_command_placeholder())
                     .default_value(command)
             }),
             transport_select: cx.new(|cx| {
                 let opts = vec![
-                    SelectOption::new("raw", s::settings_agent_transport_raw()),
-                    SelectOption::new("ssh", s::settings_agent_transport_ssh()),
-                    SelectOption::new("docker", s::settings_agent_transport_docker()),
+                    SelectOption::new("raw", s::settings::agent_transport_raw()),
+                    SelectOption::new("ssh", s::settings::agent_transport_ssh()),
+                    SelectOption::new("docker", s::settings::agent_transport_docker()),
                 ];
                 select::state_with_options(opts, Some(&transport_kind), window, cx)
             }),
             host_input: cx.new(|cx_state| {
                 InputState::new(window, cx_state)
-                    .placeholder(s::settings_session_host_target_placeholder())
+                    .placeholder(s::settings::session_host_target_placeholder())
                     .default_value(host)
             }),
             container_input: cx.new(|cx_state| {
                 InputState::new(window, cx_state)
-                    .placeholder(s::settings_session_host_container_placeholder())
+                    .placeholder(s::settings::session_host_container_placeholder())
                     .default_value(container)
             }),
             default_mode_select: cx.new(|cx| {
@@ -1407,24 +1407,24 @@ impl SettingsView {
             id,
             label_input: cx.new(|cx_state| {
                 InputState::new(window, cx_state)
-                    .placeholder(s::settings_session_host_field_label())
+                    .placeholder(s::settings::session_host_field_label())
                     .default_value(label.to_string())
             }),
             kind_select: cx.new(|cx| {
                 let opts = vec![
-                    SelectOption::new("ssh", s::settings_session_host_kind_ssh()),
-                    SelectOption::new("docker", s::settings_session_host_kind_docker()),
+                    SelectOption::new("ssh", s::settings::session_host_kind_ssh()),
+                    SelectOption::new("docker", s::settings::session_host_kind_docker()),
                 ];
                 select::state_with_options(opts, Some(&SharedString::from(kind)), window, cx)
             }),
             target_input: cx.new(|cx_state| {
                 InputState::new(window, cx_state)
-                    .placeholder(s::settings_session_host_target_placeholder())
+                    .placeholder(s::settings::session_host_target_placeholder())
                     .default_value(target.to_string())
             }),
             container_input: cx.new(|cx_state| {
                 InputState::new(window, cx_state)
-                    .placeholder(s::settings_session_host_container_placeholder())
+                    .placeholder(s::settings::session_host_container_placeholder())
                     .default_value(container.to_string())
             }),
         }
@@ -1529,7 +1529,7 @@ impl SettingsView {
             .clone();
 
         let sidebar_search_input = cx.new(|cx_state| {
-            InputState::new(window, cx_state).placeholder(s::settings_search_placeholder())
+            InputState::new(window, cx_state).placeholder(s::settings::search_placeholder())
         });
         let sidebar_focus_handles = BuiltinSection::ALL
             .iter()
@@ -1550,9 +1550,9 @@ impl SettingsView {
                 .iter()
                 .map(|&slug| {
                     let label = match slug {
-                        "auto" => s::settings_language_auto(),
-                        "en" => s::settings_language_en(),
-                        "ko" => s::settings_language_ko(),
+                        "auto" => s::settings::language_auto(),
+                        "en" => s::settings::language_en(),
+                        "ko" => s::settings::language_ko(),
                         other => other.to_owned(),
                     };
                     select::SelectOption::new(slug, label)
@@ -1576,7 +1576,7 @@ impl SettingsView {
         let ui_preset_select = cx.new(|cx| {
             let system = SelectOption::new(
                 daruda_config::ui_theme_presets::SYSTEM,
-                s::settings_ui_preset_system(),
+                s::settings::ui_preset_system(),
             );
             let opts = std::iter::once(system)
                 .chain(
@@ -1718,7 +1718,7 @@ impl SettingsView {
         let editor_select = cx.new(|cx| {
             let mut opts = vec![select::SelectOption::new(
                 "",
-                s::settings_editor_system_default(),
+                s::settings::editor_system_default(),
             )];
             opts.extend(
                 daruda_config::EXTERNAL_EDITOR_PRESETS
@@ -1729,8 +1729,8 @@ impl SettingsView {
         });
         let file_icon_color_select = cx.new(|cx| {
             let opts = vec![
-                select::SelectOption::new(ICON_COLOR, s::settings_icon_color_color()),
-                select::SelectOption::new(ICON_MONOCHROME, s::settings_icon_color_monochrome()),
+                select::SelectOption::new(ICON_COLOR, s::settings::icon_color_color()),
+                select::SelectOption::new(ICON_MONOCHROME, s::settings::icon_color_monochrome()),
             ];
             let current =
                 SharedString::new_static(icon_color_value(&config.left_dock.file_icon_color_mode));
@@ -1886,7 +1886,7 @@ impl SettingsView {
         // The "Token configured" status line covers presence instead.
         let telegram_token_input = cx.new(|cx_state| {
             InputState::new(window, cx_state)
-                .placeholder(s::settings_telegram_token_placeholder())
+                .placeholder(s::settings::telegram_token_placeholder())
                 .masked(true)
         });
         input_subscriptions.push(Self::subscribe_draft_input(
@@ -1910,9 +1910,9 @@ impl SettingsView {
         let cursor_style_select = cx.new(|cx| {
             select::state_with_options(
                 vec![
-                    SelectOption::new("block", s::settings_cursor_block()),
-                    SelectOption::new("underline", s::settings_cursor_underline()),
-                    SelectOption::new("bar", s::settings_cursor_bar()),
+                    SelectOption::new("block", s::settings::cursor_block()),
+                    SelectOption::new("underline", s::settings::cursor_underline()),
+                    SelectOption::new("bar", s::settings::cursor_bar()),
                 ],
                 Some(&cursor_style_str),
                 window,
@@ -1922,7 +1922,7 @@ impl SettingsView {
 
         let agent_catalog_search = cx.new(|cx_state| {
             InputState::new(window, cx_state)
-                .placeholder(s::settings_agent_catalog_search_placeholder())
+                .placeholder(s::settings::agent_catalog_search_placeholder())
         });
 
         // Settings has no `data_dir` field of its own, but vocabulary is shared
@@ -1956,7 +1956,7 @@ impl SettingsView {
                 .map(|fps| {
                     SelectOption::new(
                         SharedString::from(fps.to_string()),
-                        s::settings_max_fps_option(*fps),
+                        s::settings::max_fps_option(*fps),
                     )
                 })
                 .collect();
@@ -2403,7 +2403,7 @@ impl SettingsView {
                 self.report_save_failure(
                     committed_patch.field(),
                     &message,
-                    s::settings_err_save_settings,
+                    |e| s::settings::err_save_settings(e),
                     cx,
                 );
                 false
@@ -2416,7 +2416,7 @@ impl SettingsView {
         patch: daruda_config::SettingsPatch,
         cx: &mut Context<Self>,
     ) -> bool {
-        self.apply_settings_patch_force_as(patch, s::settings_err_save_settings, cx)
+        self.apply_settings_patch_force_as(patch, |e| s::settings::err_save_settings(e), cx)
     }
 
     /// [`Self::apply_settings_patch_force`] with the banner sentence chosen by
@@ -2518,7 +2518,7 @@ impl SettingsView {
     /// actually attempted; a capture must not depend on a write failing.
     #[cfg(feature = "screenshot")]
     pub(crate) fn seed_error_for_shot(&mut self, cx: &mut Context<Self>) {
-        self.error = Some(SharedString::from(s::settings_err_telegram_unpair(
+        self.error = Some(SharedString::from(s::settings::err_telegram_unpair(
             "Permission denied (os error 13)",
         )));
         cx.notify();
@@ -2960,17 +2960,17 @@ impl SettingsView {
             let name = row.name_input.read(cx).value().trim().to_string();
             let command = row.command_input.read(cx).value().trim().to_string();
             if id.is_empty() || name.is_empty() || command.is_empty() {
-                return Err(SharedString::from(s::settings_err_agent_catalog_field(
+                return Err(SharedString::from(s::settings::err_agent_catalog_field(
                     ordinal,
                 )));
             }
             if !is_valid_agent_id(&id) {
-                return Err(SharedString::from(s::settings_err_agent_catalog_id(&id)));
+                return Err(SharedString::from(s::settings::err_agent_catalog_id(&id)));
             }
             if !seen_agent_ids.insert(id.clone()) {
-                return Err(SharedString::from(s::settings_err_agent_catalog_duplicate(
-                    &id,
-                )));
+                return Err(SharedString::from(
+                    s::settings::err_agent_catalog_duplicate(&id),
+                ));
             }
             let kind = row
                 .transport_select
@@ -2997,10 +2997,10 @@ impl SettingsView {
             let env = row.stated_env(cx).map_err(|err| {
                 SharedString::from(match err {
                     sections::agent_env::EnvFieldError::MalformedLine(line) => {
-                        s::settings_err_agent_catalog_env(ordinal, &line)
+                        s::settings::err_agent_catalog_env(ordinal, &line)
                     }
                     sections::agent_env::EnvFieldError::UnusableName(name) => {
-                        s::settings_err_agent_catalog_env_name(ordinal, &name)
+                        s::settings::err_agent_catalog_env_name(ordinal, &name)
                     }
                 })
             })?;
@@ -3020,7 +3020,7 @@ impl SettingsView {
             agents.push(if row.enabled { entry } else { entry.disabled() });
         }
         if agents.is_empty() {
-            return Err(SharedString::from(s::settings_err_agent_catalog_empty()));
+            return Err(SharedString::from(s::settings::err_agent_catalog_empty()));
         }
         Ok(agents)
     }
@@ -3080,12 +3080,12 @@ impl SettingsView {
             }
             if label.is_empty() {
                 return Err(SharedString::from(
-                    s::settings_err_session_host_label_empty(index + 1),
+                    s::settings::err_session_host_label_empty(index + 1),
                 ));
             }
             if !seen_labels.insert(label.to_ascii_lowercase()) {
                 return Err(SharedString::from(
-                    s::settings_err_session_host_label_duplicate(&label),
+                    s::settings::err_session_host_label_duplicate(&label),
                 ));
             }
             let kind = if row.is_docker(cx) {
@@ -3248,20 +3248,20 @@ const SYNTAX_THEMES: &[&str] = &[
 /// Localized display label for a syntax-palette config value.
 fn syntax_theme_label(value: &str) -> String {
     match value {
-        "one-dark" => s::settings_syntax_theme_one_dark(),
-        "tokyo-night" => s::settings_syntax_theme_tokyo_night(),
-        "catppuccin-mocha" => s::settings_syntax_theme_catppuccin_mocha(),
-        "dracula" => s::settings_syntax_theme_dracula(),
-        "github-dark" => s::settings_syntax_theme_github_dark(),
-        "material-palenight" => s::settings_syntax_theme_material_palenight(),
-        "monokai" => s::settings_syntax_theme_monokai(),
-        "nord" => s::settings_syntax_theme_nord(),
-        "gruvbox-dark" => s::settings_syntax_theme_gruvbox_dark(),
-        "solarized-dark" => s::settings_syntax_theme_solarized_dark(),
-        "ayu-mirage" => s::settings_syntax_theme_ayu_mirage(),
-        "night-owl" => s::settings_syntax_theme_night_owl(),
-        "darcula" => s::settings_syntax_theme_darcula(),
-        _ => s::settings_syntax_theme_daruda(),
+        "one-dark" => s::settings::syntax_theme_one_dark(),
+        "tokyo-night" => s::settings::syntax_theme_tokyo_night(),
+        "catppuccin-mocha" => s::settings::syntax_theme_catppuccin_mocha(),
+        "dracula" => s::settings::syntax_theme_dracula(),
+        "github-dark" => s::settings::syntax_theme_github_dark(),
+        "material-palenight" => s::settings::syntax_theme_material_palenight(),
+        "monokai" => s::settings::syntax_theme_monokai(),
+        "nord" => s::settings::syntax_theme_nord(),
+        "gruvbox-dark" => s::settings::syntax_theme_gruvbox_dark(),
+        "solarized-dark" => s::settings::syntax_theme_solarized_dark(),
+        "ayu-mirage" => s::settings::syntax_theme_ayu_mirage(),
+        "night-owl" => s::settings::syntax_theme_night_owl(),
+        "darcula" => s::settings::syntax_theme_darcula(),
+        _ => s::settings::syntax_theme_daruda(),
     }
 }
 
@@ -3307,20 +3307,20 @@ fn agent_row_transport_message(
     use session_host::{SessionHostError, SessionHostField};
     SharedString::from(match err {
         SessionHostError::Empty(SessionHostField::Target) => {
-            s::settings_err_agent_catalog_host(ordinal)
+            s::settings::err_agent_catalog_host(ordinal)
         }
         SessionHostError::Empty(SessionHostField::Container) => {
-            s::settings_err_agent_catalog_container(ordinal)
+            s::settings::err_agent_catalog_container(ordinal)
         }
         SessionHostError::Unsafe(SessionHostField::Target) => {
-            s::settings_err_agent_catalog_host_unsafe(ordinal)
+            s::settings::err_agent_catalog_host_unsafe(ordinal)
         }
         SessionHostError::Unsafe(SessionHostField::Container) => {
-            s::settings_err_agent_catalog_container_unsafe(ordinal)
+            s::settings::err_agent_catalog_container_unsafe(ordinal)
         }
         SessionHostError::Empty(SessionHostField::SessionPath)
         | SessionHostError::Unsafe(SessionHostField::SessionPath) => {
-            s::settings_err_agent_catalog_host(ordinal)
+            s::settings::err_agent_catalog_host(ordinal)
         }
     })
 }
@@ -3344,9 +3344,9 @@ fn session_host_validation_message(
     index: usize,
     err: session_host::SessionHostError,
 ) -> SharedString {
-    SharedString::from(s::settings_err_session_host_field(
+    SharedString::from(s::settings::err_session_host_field(
         index + 1,
-        &err.localized(),
+        err.localized(),
     ))
 }
 
@@ -3503,7 +3503,7 @@ fn all_font_names(cx: &gpui::App, current: &[&str]) -> Vec<String> {
 
 fn font_select_option(name: &str) -> SelectOption {
     let label = if name == daruda_config::SYSTEM_UI_FONT_FAMILY {
-        s::settings_font_system_ui()
+        s::settings::font_system_ui()
     } else {
         name.to_owned()
     };

@@ -125,7 +125,7 @@ fn build_state_menu(
 fn start_item(task_id: &str, workspace: &gpui::WeakEntity<Workspace>) -> PopupMenuItem {
     let ws = workspace.clone();
     let id = task_id.to_string();
-    PopupMenuItem::new(strings::task_action_start()).on_click(move |_, window, app| {
+    PopupMenuItem::new(strings::task::action_start()).on_click(move |_, window, app| {
         if let Some(w) = ws.upgrade() {
             let id = id.clone();
             w.update(app, |this, cx| this.start_task(&id, window, cx));
@@ -136,7 +136,7 @@ fn start_item(task_id: &str, workspace: &gpui::WeakEntity<Workspace>) -> PopupMe
 fn stop_item(task_id: &str, workspace: &gpui::WeakEntity<Workspace>) -> PopupMenuItem {
     let ws = workspace.clone();
     let id = task_id.to_string();
-    PopupMenuItem::new(strings::task_action_stop()).on_click(move |_, _window, app| {
+    PopupMenuItem::new(strings::task::action_stop()).on_click(move |_, _window, app| {
         if let Some(w) = ws.upgrade() {
             let id = id.clone();
             w.update(app, |this, cx| this.cancel_task(&id, cx));
@@ -147,7 +147,7 @@ fn stop_item(task_id: &str, workspace: &gpui::WeakEntity<Workspace>) -> PopupMen
 fn open_item(task_id: &str, workspace: &gpui::WeakEntity<Workspace>) -> PopupMenuItem {
     let ws = workspace.clone();
     let id = task_id.to_string();
-    PopupMenuItem::new(strings::task_action_open()).on_click(move |_, window, app| {
+    PopupMenuItem::new(strings::task::action_open()).on_click(move |_, window, app| {
         if let Some(w) = ws.upgrade() {
             let id = id.clone();
             w.update(app, |this, cx| this.focus_task_lane(&id, window, cx));
@@ -158,7 +158,7 @@ fn open_item(task_id: &str, workspace: &gpui::WeakEntity<Workspace>) -> PopupMen
 fn chat_item(task_id: &str, workspace: &gpui::WeakEntity<Workspace>) -> PopupMenuItem {
     let ws = workspace.clone();
     let id = task_id.to_string();
-    PopupMenuItem::new(strings::task_action_open_chat()).on_click(move |_, window, app| {
+    PopupMenuItem::new(strings::task::action_open_chat()).on_click(move |_, window, app| {
         if let Some(w) = ws.upgrade() {
             w.update(app, |this, cx| this.open_task_chat(&id, window, cx));
         }
@@ -168,7 +168,7 @@ fn chat_item(task_id: &str, workspace: &gpui::WeakEntity<Workspace>) -> PopupMen
 fn reopen_item(task_id: &str, workspace: &gpui::WeakEntity<Workspace>) -> PopupMenuItem {
     let ws = workspace.clone();
     let id = task_id.to_string();
-    PopupMenuItem::new(strings::task_action_reopen()).on_click(move |_, _window, app| {
+    PopupMenuItem::new(strings::task::action_reopen()).on_click(move |_, _window, app| {
         if let Some(w) = ws.upgrade() {
             let id = id.clone();
             w.update(app, |this, cx| this.reopen_task(&id, cx));
@@ -179,7 +179,7 @@ fn reopen_item(task_id: &str, workspace: &gpui::WeakEntity<Workspace>) -> PopupM
 fn retry_item(task_id: &str, workspace: &gpui::WeakEntity<Workspace>) -> PopupMenuItem {
     let ws = workspace.clone();
     let id = task_id.to_string();
-    PopupMenuItem::new(strings::task_action_retry()).on_click(move |_, window, app| {
+    PopupMenuItem::new(strings::task::action_retry()).on_click(move |_, window, app| {
         if let Some(w) = ws.upgrade() {
             let id = id.clone();
             w.update(app, |this, cx| this.retry_task(&id, window, cx));
@@ -190,7 +190,7 @@ fn retry_item(task_id: &str, workspace: &gpui::WeakEntity<Workspace>) -> PopupMe
 fn view_error_item(task_id: &str, workspace: &gpui::WeakEntity<Workspace>) -> PopupMenuItem {
     let ws = workspace.clone();
     let id = task_id.to_string();
-    PopupMenuItem::new(strings::task_action_view_error()).on_click(move |_, window, app| {
+    PopupMenuItem::new(strings::task::action_view_error()).on_click(move |_, window, app| {
         if let Some(w) = ws.upgrade() {
             let id = id.clone();
             w.update(app, |this, cx| {
@@ -203,7 +203,7 @@ fn view_error_item(task_id: &str, workspace: &gpui::WeakEntity<Workspace>) -> Po
 fn edit_item(task_id: &str, workspace: &gpui::WeakEntity<Workspace>) -> PopupMenuItem {
     let ws = workspace.clone();
     let id = task_id.to_string();
-    PopupMenuItem::new(strings::task_action_edit()).on_click(move |_, window, app| {
+    PopupMenuItem::new(strings::common::btn_edit()).on_click(move |_, window, app| {
         if let Some(w) = ws.upgrade() {
             let id = id.clone();
             w.update(app, |this, cx| {
@@ -216,7 +216,7 @@ fn edit_item(task_id: &str, workspace: &gpui::WeakEntity<Workspace>) -> PopupMen
 fn delete_item(task_id: &str, workspace: &gpui::WeakEntity<Workspace>) -> PopupMenuItem {
     let ws = workspace.clone();
     let id = task_id.to_string();
-    PopupMenuItem::new(strings::task_action_delete()).on_click(move |_, window, app| {
+    PopupMenuItem::new(strings::common::btn_delete()).on_click(move |_, window, app| {
         if let Some(w) = ws.upgrade() {
             let id = id.clone();
             w.update(app, |this, cx| {

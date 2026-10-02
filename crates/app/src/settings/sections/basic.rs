@@ -7,11 +7,11 @@ use crate::surface::strings as s;
 pub(in crate::settings) fn status_bar_item_label(item: daruda_config::StatusBarItem) -> String {
     use daruda_config::StatusBarItem as I;
     match item {
-        I::ProjectBranch => s::status_bar_toggle_project_branch(),
-        I::AccountSlot => s::status_bar_toggle_account_slot(),
-        I::Ports => s::status_bar_toggle_ports(),
-        I::ClaudeUsage => s::status_bar_toggle_claude_usage(),
-        I::Flow => s::status_bar_toggle_flow(),
+        I::ProjectBranch => s::settings::status_bar_toggle_project_branch(),
+        I::AccountSlot => s::settings::status_bar_toggle_account_slot(),
+        I::Ports => s::settings::status_bar_toggle_ports(),
+        I::ClaudeUsage => s::settings::status_bar_toggle_claude_usage(),
+        I::Flow => s::settings::status_bar_toggle_flow(),
     }
 }
 

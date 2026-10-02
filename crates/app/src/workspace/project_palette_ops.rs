@@ -27,8 +27,8 @@ impl Workspace {
         let weak = cx.entity().downgrade();
         open_single_field_dialog(
             weak,
-            s::new_group_modal_title(),
-            s::new_group_placeholder(),
+            s::modal::new_group_title(),
+            s::modal::new_group_placeholder(),
             None,
             |ws, value, _window, cx| {
                 let Some(name) = value else {
@@ -53,8 +53,8 @@ impl Workspace {
         let weak = cx.entity().downgrade();
         open_single_field_dialog(
             weak,
-            s::rename_project_modal_title(),
-            s::rename_project_placeholder(),
+            s::modal::rename_project_title(),
+            s::modal::rename_project_placeholder(),
             Some(&initial),
             |ws, value, _window, cx| {
                 let Some(name) = value else {
@@ -82,7 +82,7 @@ impl Workspace {
         let (options, initial) = GroupSelectModal::build_options(self, project_id);
         let weak = cx.entity().downgrade();
         open_form_modal(
-            s::move_project_group_modal_title(),
+            s::modal::move_project_group_title(),
             None,
             move |window, cx| GroupSelectModal::new(weak, project_id, options, initial, window, cx),
             window,

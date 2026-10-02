@@ -141,7 +141,7 @@ fn existing_lane_start_keeps_the_task_in_backlog_when_the_lane_is_gone(cx: &mut 
             assert_eq!(ws.active_runtime().tabs.len(), tabs);
             assert_eq!(
                 ws.error_history.first().map(|r| r.title.clone()),
-                Some(crate::surface::strings::error_task_lane_missing()),
+                Some(crate::surface::strings::error::task_lane_missing()),
             );
         })
     })

@@ -281,7 +281,11 @@ impl Workspace {
         let pane = match self.create_pane_at(cwd, window, cx) {
             Ok(p) => p,
             Err(e) => {
-                self.report_pane_error(&crate::surface::strings::pane_context_new_tab(), e, cx);
+                self.report_pane_error(
+                    &crate::surface::strings::error::pane_context_new_tab(),
+                    e,
+                    cx,
+                );
                 return None;
             }
         };
@@ -811,7 +815,11 @@ impl Workspace {
             NewPaneKind::Terminal => match self.create_pane(window, cx) {
                 Ok(p) => p,
                 Err(e) => {
-                    self.report_pane_error(&crate::surface::strings::pane_context_split(), e, cx);
+                    self.report_pane_error(
+                        &crate::surface::strings::error::pane_context_split(),
+                        e,
+                        cx,
+                    );
                     return;
                 }
             },
@@ -1163,14 +1171,14 @@ impl Workspace {
 
         let detail = dirty
             .iter()
-            .map(|(_, t, draft)| crate::surface::strings::task_close_dirty_line(t, *draft))
+            .map(|(_, t, draft)| crate::surface::strings::task::close_dirty_line(t, *draft))
             .collect::<Vec<_>>()
             .join("\n");
 
-        let prompt_heading = crate::surface::strings::tab_close_batch_heading();
-        let prompt_save = crate::surface::strings::tab_close_batch_save_all();
-        let prompt_discard = crate::surface::strings::tab_close_batch_discard_all();
-        let prompt_cancel = crate::surface::strings::task_edit_cancel();
+        let prompt_heading = crate::surface::strings::task::batch_close_heading();
+        let prompt_save = crate::surface::strings::task::batch_save_all();
+        let prompt_discard = crate::surface::strings::task::batch_discard_all();
+        let prompt_cancel = crate::surface::strings::common::btn_cancel();
         let receiver = window.prompt(
             gpui::PromptLevel::Warning,
             &prompt_heading,
@@ -1272,14 +1280,14 @@ impl Workspace {
 
         let detail = dirty
             .iter()
-            .map(|(_, t, draft)| crate::surface::strings::task_close_dirty_line(t, *draft))
+            .map(|(_, t, draft)| crate::surface::strings::task::close_dirty_line(t, *draft))
             .collect::<Vec<_>>()
             .join("\n");
 
-        let prompt_heading = crate::surface::strings::tab_close_batch_heading();
-        let prompt_save = crate::surface::strings::tab_close_batch_save_all();
-        let prompt_discard = crate::surface::strings::tab_close_batch_discard_all();
-        let prompt_cancel = crate::surface::strings::task_edit_cancel();
+        let prompt_heading = crate::surface::strings::task::batch_close_heading();
+        let prompt_save = crate::surface::strings::task::batch_save_all();
+        let prompt_discard = crate::surface::strings::task::batch_discard_all();
+        let prompt_cancel = crate::surface::strings::common::btn_cancel();
         let receiver = window.prompt(
             gpui::PromptLevel::Warning,
             &prompt_heading,
@@ -1348,23 +1356,18 @@ impl Workspace {
         let is_file = pane.file_content().is_some();
 
         let heading: String = if is_draft {
-            crate::surface::strings::task_edit_discard_draft_prompt().to_string()
+            crate::surface::strings::task::edit_discard_draft_prompt().to_string()
         } else {
-            format!(
-                "{}{}{}",
-                crate::surface::strings::task_edit_save_prompt_prefix(),
-                title,
-                crate::surface::strings::task_edit_save_prompt_suffix(),
-            )
+            crate::surface::strings::task::edit_save_prompt(&title)
         };
 
         let save_label = if is_draft {
-            crate::surface::strings::task_edit_save_draft()
+            crate::surface::strings::task::edit_save_draft()
         } else {
-            crate::surface::strings::task_edit_save()
+            crate::surface::strings::common::btn_save()
         };
-        let btn_discard = crate::surface::strings::task_edit_discard();
-        let btn_cancel = crate::surface::strings::task_edit_cancel();
+        let btn_discard = crate::surface::strings::task::edit_discard();
+        let btn_cancel = crate::surface::strings::common::btn_cancel();
         let buttons = [
             save_label.as_str(),
             btn_discard.as_str(),

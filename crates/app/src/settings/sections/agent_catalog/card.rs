@@ -61,7 +61,7 @@ impl SettingsView {
         let id = row.id_input.read(cx).value().trim().to_string();
         let name = row.name_input.read(cx).value().trim().to_string();
         let title = if name.is_empty() {
-            s::settings_agent_catalog_row_label(ordinal + 1)
+            s::settings::agent_catalog_row_label(ordinal + 1)
         } else {
             name
         };
@@ -92,12 +92,12 @@ impl SettingsView {
             );
         if self.agent_default_index() == Some(catalog_index) {
             title_row = title_row.child(crate::ui::badge::Badge::new(
-                s::settings_agent_card_default(),
+                s::settings::agent_card_default(),
             ));
         }
         if row.advanced_overridden(cx) {
             title_row = title_row.child(crate::ui::badge::Badge::new(
-                s::settings_agent_card_modified(),
+                s::settings::agent_card_modified(),
             ));
         }
 
@@ -113,7 +113,7 @@ impl SettingsView {
         }));
         if locked {
             switch = crate::ui::Disableable::disabled(switch, true)
-                .tooltip(s::settings_agent_card_last_enabled());
+                .tooltip(s::settings::agent_card_last_enabled());
         }
 
         div()
@@ -155,7 +155,7 @@ impl SettingsView {
                                     .text_size(px(theme::MODAL_BODY_FONT_SIZE))
                                     .text_color(t.text_muted)
                                     .truncate()
-                                    .child(s::settings_agent_card_summary(&model, &mode)),
+                                    .child(s::settings::agent_card_summary(&model, &mode)),
                             ),
                     ),
             )
@@ -205,38 +205,41 @@ impl SettingsView {
             .flex_col()
             .gap(px(theme::MODAL_PANEL_GAP))
             .child(field_row(
-                s::settings_agent_field_name(),
+                s::settings::agent_field_name(),
                 crate::ui::input(&row.name_input, cx, 0),
             ))
             .child(field_row(
-                s::settings_agent_field_default_mode(),
+                s::settings::agent_field_default_mode(),
                 crate::ui::select::select(&row.default_mode_select, cx, 0),
             ))
             .child(field_row(
-                s::settings_agent_field_default_model(),
+                s::settings::agent_field_default_model(),
                 crate::ui::select::select(&row.default_model_select, cx, 0),
             ))
             .child(Self::section_label(
-                s::settings_agent_section_transcript(),
+                s::settings::agent_section_transcript(),
                 cx,
             ))
             .child(
                 div()
                     .text_size(px(theme::MODAL_BODY_FONT_SIZE))
                     .text_color(t.text_muted)
-                    .child(s::settings_agent_transcript_description()),
+                    .child(s::settings::agent_transcript_description()),
             )
-            .child(field_row(s::settings_agent_field_fold_mode(), fold_control))
             .child(field_row(
-                s::settings_agent_field_tail_window(),
+                s::settings::agent_field_fold_mode(),
+                fold_control,
+            ))
+            .child(field_row(
+                s::settings::agent_field_tail_window(),
                 crate::ui::select::select(&row.tail_window_select, cx, 0),
             ))
             .child(field_row(
-                s::settings_agent_field_tail_window_calls(),
+                s::settings::agent_field_tail_window_calls(),
                 crate::ui::select::select(&row.tail_window_calls_select, cx, 0),
             ))
             .child(field_row(
-                s::settings_agent_field_display_filter(),
+                s::settings::agent_field_display_filter(),
                 filter_control,
             ))
             .when(
@@ -248,7 +251,7 @@ impl SettingsView {
                                 SharedString::from(format!(
                                     "settings-agent-card-make-default-{catalog_index}"
                                 )),
-                                s::settings_agent_card_make_default(),
+                                s::settings::agent_card_make_default(),
                             )
                             .on_click(cx.listener(
                                 move |this, _: &ClickEvent, _window, cx| {
@@ -274,7 +277,7 @@ impl SettingsView {
                     .on_click(cx.listener(move |this, _: &ClickEvent, _window, cx| {
                         this.toggle_agent_card_advanced(catalog_index, cx);
                     }))
-                    .child(s::settings_agent_card_advanced())
+                    .child(s::settings::agent_card_advanced())
                     .child(
                         div()
                             .debug_selector(move || {
@@ -323,11 +326,11 @@ impl SettingsView {
             .border_l_1()
             .border_color(t.border)
             .child(field_row(
-                s::settings_agent_field_id(),
+                s::settings::agent_field_id(),
                 crate::ui::input(&row.id_input, cx, 0),
             ))
             .child(field_row(
-                s::settings_agent_field_command(),
+                s::settings::agent_field_command(),
                 crate::ui::input(&row.command_input, cx, 0),
             ))
             // ssh/docker rows run on a remote host or inside a container, so
@@ -338,12 +341,12 @@ impl SettingsView {
                 body.when_some(row.path_warning.as_deref(), |body, command| {
                     body.child(crate::ui::alert::warning(
                         SharedString::from(format!("settings-agent-path-warning-{catalog_index}")),
-                        s::settings_agent_row_command_not_on_path(command),
+                        s::settings::agent_row_command_not_on_path(command),
                     ))
                 })
             })
             .child(field_row(
-                s::settings_agent_field_transport(),
+                s::settings::agent_field_transport(),
                 crate::ui::select::select(&row.transport_select, cx, 0),
             ))
             .when(
@@ -353,7 +356,7 @@ impl SettingsView {
                         div()
                             .text_size(px(theme::MODAL_BODY_FONT_SIZE))
                             .text_color(t.text_muted)
-                            .child(s::settings_agent_transport_deprecated_hint()),
+                            .child(s::settings::agent_transport_deprecated_hint()),
                     )
                 },
             );
@@ -366,7 +369,7 @@ impl SettingsView {
                 div()
                     .text_size(px(theme::MODAL_BODY_FONT_SIZE))
                     .text_color(t.banner_warning_text)
-                    .child(s::settings_agent_row_detach_hint()),
+                    .child(s::settings::agent_row_detach_hint()),
             );
         }
 
@@ -378,38 +381,38 @@ impl SettingsView {
         if transport_kind == "ssh" {
             body = body
                 .child(field_row(
-                    s::settings_agent_field_host(),
+                    s::settings::agent_field_host(),
                     crate::ui::input(&row.host_input, cx, 0),
                 ))
                 .child(
                     div()
                         .text_size(px(theme::MODAL_BODY_FONT_SIZE))
                         .text_color(t.text_muted)
-                        .child(s::settings_agent_remote_path_hint()),
+                        .child(s::settings::agent_remote_path_hint()),
                 );
         } else if transport_kind == "docker" {
             body = body
                 .child(field_row(
-                    s::settings_agent_field_container(),
+                    s::settings::agent_field_container(),
                     crate::ui::input(&row.container_input, cx, 0),
                 ))
                 .child(
                     div()
                         .text_size(px(theme::MODAL_BODY_FONT_SIZE))
                         .text_color(t.text_muted)
-                        .child(s::settings_agent_remote_path_hint()),
+                        .child(s::settings::agent_remote_path_hint()),
                 );
         }
 
         body.child(field_row(
-            s::settings_agent_field_env(),
+            s::settings::agent_field_env(),
             crate::ui::input(&row.env_input, cx, 0),
         ))
         .child(
             div()
                 .text_size(px(theme::MODAL_BODY_FONT_SIZE))
                 .text_color(t.text_muted)
-                .child(s::settings_agent_env_description()),
+                .child(s::settings::agent_env_description()),
         )
         // What the overlay does, and what it does not do. Its own banner
         // rather than a trailing clause of the muted paragraph above: the
@@ -422,15 +425,15 @@ impl SettingsView {
                 div()
                     .text_size(px(theme::MODAL_BODY_FONT_SIZE))
                     .text_color(t.text_muted)
-                    .child(s::settings_agent_env_codex_note()),
+                    .child(s::settings::agent_env_codex_note()),
             )
             .child(crate::ui::alert::info(
                 SharedString::from(format!("settings-agent-env-codex-{catalog_index}")),
-                s::settings_agent_env_codex_caveat(),
+                s::settings::agent_env_codex_caveat(),
             ))
         })
         .child(div().flex().flex_row().child(
-            button_danger(remove_id, s::settings_agent_remove()).on_click(cx.listener(
+            button_danger(remove_id, s::settings::agent_remove()).on_click(cx.listener(
                 move |this, _: &ClickEvent, window, cx| {
                     this.request_remove_agent_catalog_item(catalog_index, window, cx);
                 },

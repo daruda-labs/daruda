@@ -55,7 +55,7 @@ pub(crate) fn render(
     };
     if absorbed == Absorbed::SelectionDropped {
         reply.text.push('\n');
-        reply.text.push_str(&s::control_selection_dropped());
+        reply.text.push_str(&s::control::selection_dropped());
     }
     reply
 }
@@ -67,19 +67,19 @@ pub(crate) fn render_parse_error(error: &ParseError) -> RenderedReply {
     let text = match error {
         // The adapter routes this to plain text and never renders it; a
         // sentence is still better than an empty message if it ever arrives.
-        ParseError::NotACommand => s::control_error_no_target(),
+        ParseError::NotACommand => s::control::error_no_target(),
         ParseError::Unknown {
             input,
             suggestion: Some(suggestion),
-        } => s::control_error_unknown_command_did_you_mean(input, suggestion),
+        } => s::control::error_unknown_command_did_you_mean(input, suggestion),
         ParseError::Unknown {
             input,
             suggestion: None,
-        } => s::control_error_unknown_command(input),
+        } => s::control::error_unknown_command(input),
         ParseError::MissingArgument { command } => {
-            s::control_error_missing_argument(&usage_for(command))
+            s::control::error_missing_argument(usage_for(command))
         }
-        ParseError::BadOrdinal { input } => s::control_error_bad_ordinal(input),
+        ParseError::BadOrdinal { input } => s::control::error_bad_ordinal(input),
     };
     RenderedReply {
         text,
@@ -90,30 +90,30 @@ pub(crate) fn render_parse_error(error: &ParseError) -> RenderedReply {
 fn render_result(result: &ControlResult, state: &CommandState) -> RenderedReply {
     match result {
         ControlResult::Listing(listing) => render_listing(listing, state),
-        ControlResult::Selected { target: None } => plain(s::control_selection_cleared()),
+        ControlResult::Selected { target: None } => plain(s::control::selection_cleared()),
         ControlResult::Selected {
             target: Some(summary),
-        } => plain(s::control_selected(
-            &state
+        } => plain(s::control::selected(
+            state
                 .label_for(summary.target)
                 .unwrap_or_else(|| bare_label(summary)),
         )),
         ControlResult::Sent { disposition, .. } => plain(match disposition {
-            SendDisposition::Delivered => s::control_sent_delivered(),
-            SendDisposition::Queued => s::control_sent_queued(),
-            SendDisposition::HandledLocally => s::control_sent_handled_locally(),
+            SendDisposition::Delivered => s::control::sent_delivered(),
+            SendDisposition::Queued => s::control::sent_queued(),
+            SendDisposition::HandledLocally => s::control::sent_handled_locally(),
         }),
         ControlResult::Stopped { disposition, .. } => plain(match disposition {
-            StopDisposition::Stopped => s::control_stopped(),
-            StopDisposition::AlreadyIdle => s::control_stop_already_idle(),
+            StopDisposition::Stopped => s::control::stopped(),
+            StopDisposition::AlreadyIdle => s::control::stop_already_idle(),
         }),
         ControlResult::FlowList { flows } if flows.is_empty() => {
-            plain(s::control_flow_list_empty())
+            plain(s::control::flow_list_empty())
         }
         ControlResult::FlowList { flows } => {
             let mut rows: Vec<String> = flows
                 .iter()
-                .map(|e| s::control_flow_list_row(&e.name, &origin_label(e.origin)))
+                .map(|e| s::control::flow_list_row(&e.name, origin_label(e.origin)))
                 .collect();
             // One row per name, not per worktree: the phone runs a flow in
             // whichever window's active worktree has it, so two windows
@@ -123,31 +123,34 @@ fn render_result(result: &ControlResult, state: &CommandState) -> RenderedReply 
             rows.dedup();
             plain(rows.join("\n"))
         }
-        ControlResult::FlowStarting { name, .. } => plain(s::control_flow_starting(name)),
+        ControlResult::FlowStarting { name, .. } => plain(s::control::flow_starting(name)),
         ControlResult::FlowStopped { disposition, .. } => plain(match disposition {
-            StopDisposition::Stopped => s::control_flow_stopped(),
-            StopDisposition::AlreadyIdle => s::control_flow_stop_already_idle(),
+            StopDisposition::Stopped => s::control::flow_stopped(),
+            StopDisposition::AlreadyIdle => s::control::flow_stop_already_idle(),
         }),
-        ControlResult::Brief(brief) => plain(s::control_brief(
+        ControlResult::Brief(brief) => plain(s::control::brief(
             brief.working,
             brief.awaiting_permission,
             brief.error,
             brief.total,
         )),
         ControlResult::LaneListing { lanes } if lanes.is_empty() => {
-            plain(s::control_lane_listing_empty())
+            plain(s::control::lane_listing_empty())
         }
         ControlResult::LaneListing { lanes } => plain(
             lanes
                 .iter()
                 .map(|l| {
-                    s::control_lane_listing_row(&s::control_lane_path(&l.project, &l.name), l.chats)
+                    s::control::lane_listing_row(
+                        s::control::lane_path(&l.project, &l.name),
+                        l.chats,
+                    )
                 })
                 .collect::<Vec<_>>()
                 .join("\n"),
         ),
-        ControlResult::LaneCreated { .. } => plain(s::control_lane_created()),
-        ControlResult::ChatCreated { .. } => plain(s::control_chat_created()),
+        ControlResult::LaneCreated { .. } => plain(s::control::lane_created()),
+        ControlResult::ChatCreated { .. } => plain(s::control::chat_created()),
         // The body is the agent's own markdown, already bounded at the source.
         // Rendered as-is rather than wrapped in copy: a person who asked what
         // an agent said wants its words, not a sentence about them.
@@ -158,57 +161,57 @@ fn render_result(result: &ControlResult, state: &CommandState) -> RenderedReply 
         // because the match is exhaustive.
         ControlResult::Transcript { text, .. } => match text {
             Some(text) => plain(text.clone()),
-            None => plain(s::control_transcript_empty()),
+            None => plain(s::control::transcript_empty()),
         },
         // The agent's own words when there are any, bounded at the source —
         // a person who asked wants the reply, not a sentence about it.
         ControlResult::Answer { answer, .. } => plain(match answer {
             PaneAnswer::Text { text } => text.clone(),
-            PaneAnswer::NoAnswer => s::control_answer_none(),
-            PaneAnswer::Failed => s::control_answer_failed(),
-            PaneAnswer::Interrupted => s::control_answer_interrupted(),
-            PaneAnswer::Queued => s::control_sent_queued(),
-            PaneAnswer::StillWorking => s::control_answer_still_working(),
+            PaneAnswer::NoAnswer => s::control::answer_none(),
+            PaneAnswer::Failed => s::control::answer_failed(),
+            PaneAnswer::Interrupted => s::control::answer_interrupted(),
+            PaneAnswer::Queued => s::control::sent_queued(),
+            PaneAnswer::StillWorking => s::control::answer_still_working(),
         }),
         ControlResult::Accepted { disposition } => plain(match disposition {
-            AskDisposition::Connecting => s::control_ask_accepted_connecting(),
-            AskDisposition::Sent => s::control_ask_accepted(),
-            AskDisposition::Queued => s::control_sent_queued(),
-            AskDisposition::HandledLocally => s::control_sent_handled_locally(),
+            AskDisposition::Connecting => s::control::ask_accepted_connecting(),
+            AskDisposition::Sent => s::control::ask_accepted(),
+            AskDisposition::Queued => s::control::sent_queued(),
+            AskDisposition::HandledLocally => s::control::sent_handled_locally(),
         }),
     }
 }
 
 fn render_error(error: &ControlError) -> String {
     match error {
-        ControlError::OrdinalNotFound { ordinal } => s::control_error_ordinal_not_found(*ordinal),
-        ControlError::NoTargetSelected => s::control_error_no_target(),
-        ControlError::TargetGone => s::control_error_target_gone(),
-        ControlError::FlowNotFound { name } => s::control_error_flow_not_found(name),
-        ControlError::FlowLocked { .. } => s::control_error_flow_locked(),
-        ControlError::FlowRefused { name } => s::control_error_flow_refused(name),
-        ControlError::FlowNotStarted { name } => s::control_error_flow_not_started(name),
+        ControlError::OrdinalNotFound { ordinal } => s::control::error_ordinal_not_found(*ordinal),
+        ControlError::NoTargetSelected => s::control::error_no_target(),
+        ControlError::TargetGone => s::control::error_target_gone(),
+        ControlError::FlowNotFound { name } => s::control::error_flow_not_found(name),
+        ControlError::FlowLocked { .. } => s::control::error_flow_locked(),
+        ControlError::FlowRefused { name } => s::control::error_flow_refused(name),
+        ControlError::FlowNotStarted { name } => s::control::error_flow_not_started(name),
         ControlError::FlowNeedsInteraction { name } => {
-            s::control_error_flow_needs_interaction(name)
+            s::control::error_flow_needs_interaction(name)
         }
-        ControlError::NoActiveLane => s::control_error_no_active_lane(),
-        ControlError::OrchestratorDisabled => s::control_error_orchestrator_disabled(),
-        ControlError::OrchestratorUnresolvable => s::control_error_orchestrator_unresolvable(),
-        ControlError::OrchestratorUnavailable => s::control_error_orchestrator_unavailable(),
-        ControlError::ApprovalRefused => s::control_error_approval_refused(),
-        ControlError::ApprovalTimedOut => s::control_error_approval_timed_out(),
-        ControlError::AgentLimitReached => s::control_error_agent_limit_reached(),
-        ControlError::QueueFull => s::control_error_queue_full(),
-        ControlError::TargetReadOnly => s::task_cli_read_only(),
-        ControlError::SelfTargetRefused => s::control_error_self_target_refused(),
-        ControlError::LaneCreateBusy => s::control_error_lane_create_busy(),
+        ControlError::NoActiveLane => s::control::error_no_active_lane(),
+        ControlError::OrchestratorDisabled => s::control::error_orchestrator_disabled(),
+        ControlError::OrchestratorUnresolvable => s::control::error_orchestrator_unresolvable(),
+        ControlError::OrchestratorUnavailable => s::control::error_orchestrator_unavailable(),
+        ControlError::ApprovalRefused => s::control::error_approval_refused(),
+        ControlError::ApprovalTimedOut => s::control::error_approval_timed_out(),
+        ControlError::AgentLimitReached => s::control::error_agent_limit_reached(),
+        ControlError::QueueFull => s::control::error_queue_full(),
+        ControlError::TargetReadOnly => s::task::cli_read_only(),
+        ControlError::SelfTargetRefused => s::control::error_self_target_refused(),
+        ControlError::LaneCreateBusy => s::control::error_lane_create_busy(),
         // The phone gets the localized sentence, not git's words: a person
         // reading a notification is not the caller that has to fix an
         // argument. The detail is in the log and in the MCP result.
-        ControlError::LaneCreateFailed { .. } => s::control_error_lane_create_failed(),
-        ControlError::LaneNameInvalid => s::control_error_lane_name_invalid(),
-        ControlError::ApprovalUnavailable => s::control_error_approval_unavailable(),
-        ControlError::ApprovalsPending => s::control_error_approvals_pending(),
+        ControlError::LaneCreateFailed { .. } => s::control::error_lane_create_failed(),
+        ControlError::LaneNameInvalid => s::control::error_lane_name_invalid(),
+        ControlError::ApprovalUnavailable => s::control::error_approval_unavailable(),
+        ControlError::ApprovalsPending => s::control::error_approvals_pending(),
     }
 }
 
@@ -226,10 +229,10 @@ fn render_listing(listing: &Listing, state: &CommandState) -> RenderedReply {
         .map(|(i, row)| (i as u32 + 1, row))
         .collect();
     if rows.is_empty() {
-        return plain(s::control_listing_empty());
+        return plain(s::control::listing_empty());
     }
 
-    let mut text = s::control_listing_header();
+    let mut text = s::control::listing_header();
     let budget = REPLY_MAX_BYTES - OVERFLOW_RESERVE_BYTES;
     let mut shown = 0usize;
     for (ordinal, row) in &rows {
@@ -244,7 +247,7 @@ fn render_listing(listing: &Listing, state: &CommandState) -> RenderedReply {
     let omitted = rows.len() - shown + listing.omitted as usize;
     if omitted > 0 {
         text.push('\n');
-        text.push_str(&s::control_listing_omitted(omitted as u32));
+        text.push_str(&s::control::listing_omitted(omitted as u32));
     }
 
     let buttons: Vec<(String, String)> = rows
@@ -252,7 +255,7 @@ fn render_listing(listing: &Listing, state: &CommandState) -> RenderedReply {
         .take(shown.min(LISTING_BUTTON_MAX))
         .filter_map(|(ordinal, _)| {
             let token = state.listing_token(Ordinal(*ordinal))?;
-            Some((s::control_button_label(*ordinal), token))
+            Some((s::control::button_label(*ordinal), token))
         })
         .collect();
     let keyboard = (!buttons.is_empty()).then(|| InlineKeyboard {
@@ -266,12 +269,12 @@ fn render_listing(listing: &Listing, state: &CommandState) -> RenderedReply {
 }
 
 fn row_text(ordinal: u32, row: &ListingRow) -> String {
-    s::control_listing_row(
+    s::control::listing_row(
         ordinal,
         &row.name,
-        &agent_label(&row.summary),
-        &detail_of(&row.summary),
-        &ago_of(&row.summary),
+        agent_label(&row.summary),
+        detail_of(&row.summary),
+        ago_of(&row.summary),
     )
 }
 
@@ -288,7 +291,7 @@ fn detail_of(summary: &ChatSummary) -> String {
     if parts.is_empty() {
         return String::new();
     }
-    s::control_listing_detail(&parts.join(" "))
+    s::control::listing_detail(parts.join(" "))
 }
 
 /// The pane's condition, bracketed. Health wins over activity: a pane that
@@ -301,15 +304,15 @@ fn detail_of(summary: &ChatSummary) -> String {
 /// earns its place by naming the panes that do have one.
 fn state_badge(summary: &ChatSummary) -> String {
     let glyph = match summary.health {
-        Health::Error => s::control_state_error(),
+        Health::Error => s::control::state_error(),
         Health::Unavailable => return String::new(),
         Health::Ok => match summary.activity {
-            Activity::Idle => s::control_state_idle(),
-            Activity::Working => s::control_state_working(),
-            Activity::AwaitingPermission => s::control_state_awaiting_permission(),
+            Activity::Idle => s::control::state_idle(),
+            Activity::Working => s::control::state_working(),
+            Activity::AwaitingPermission => s::control::state_awaiting_permission(),
         },
     };
-    s::control_listing_state(&glyph)
+    s::control::listing_state(&glyph)
 }
 
 /// The title's own segment of a row, its separator included. Empty for a
@@ -322,7 +325,7 @@ pub(crate) fn title_suffix(summary: &ChatSummary) -> String {
     summary
         .title
         .as_deref()
-        .map_or_else(String::new, s::control_listing_detail)
+        .map_or_else(String::new, s::control::listing_detail)
 }
 
 /// What to call a pane the current listing no longer holds a row for: its
@@ -340,7 +343,7 @@ fn bare_label(summary: &ChatSummary) -> String {
 /// one — two chats in one worktree otherwise read alike.
 fn agent_label(summary: &ChatSummary) -> String {
     match &summary.tab_name {
-        Some(tab) => s::remote_agent_with_tab(&summary.agent_name, tab),
+        Some(tab) => s::control::agent_with_tab(&summary.agent_name, tab),
         None => summary.agent_name.clone(),
     }
 }
@@ -358,16 +361,16 @@ fn ago_of(summary: &ChatSummary) -> String {
     let Some(elapsed) = now.checked_sub(then) else {
         return String::new();
     };
-    s::control_listing_ago(&s::format_duration_compact(std::time::Duration::from_secs(
-        elapsed,
-    )))
+    s::control::listing_ago(s::notification::format_duration_compact(
+        std::time::Duration::from_secs(elapsed),
+    ))
 }
 
 fn origin_label(origin: FlowOriginKind) -> String {
     match origin {
-        FlowOriginKind::Repo => s::control_flow_origin_repo(),
-        FlowOriginKind::Project => s::control_flow_origin_project(),
-        FlowOriginKind::Global => s::control_flow_origin_global(),
+        FlowOriginKind::Repo => s::control::flow_origin_repo(),
+        FlowOriginKind::Project => s::control::flow_origin_project(),
+        FlowOriginKind::Global => s::control::flow_origin_global(),
     }
 }
 
@@ -375,9 +378,9 @@ fn origin_label(origin: FlowOriginKind) -> String {
 /// `/stop` and `/flow` both work bare, so they never reach here.
 fn usage_for(command: &str) -> String {
     match command {
-        "say" => s::control_usage_say(),
-        "daruda" => s::control_usage_daruda(),
-        _ => s::control_usage_use(),
+        "say" => s::control::usage_say(),
+        "daruda" => s::control::usage_daruda(),
+        _ => s::control::usage_use(),
     }
 }
 
@@ -414,7 +417,7 @@ mod tests {
         assert!(
             rendered
                 .text
-                .contains(&s::control_listing_omitted((400 - shown) as u32)),
+                .contains(&s::control::listing_omitted((400 - shown) as u32)),
             "the omitted count must be visible: {}",
             rendered.text
         );
@@ -548,14 +551,14 @@ mod tests {
             rows[1],
             format!(
                 "2. daruda/main (Claude Code) — [{}]",
-                s::control_state_working()
+                s::control::state_working()
             )
         );
         assert_eq!(
             rows[2],
             format!(
                 "3. daruda/main (Claude Code) — [{}] notihub routing",
-                s::control_state_idle()
+                s::control::state_idle()
             )
         );
     }
@@ -568,7 +571,7 @@ mod tests {
             Absorbed::Nothing,
             &state,
         );
-        assert_eq!(rendered.text, s::control_listing_empty());
+        assert_eq!(rendered.text, s::control::listing_empty());
         assert!(rendered.keyboard.is_none());
     }
     #[test]
@@ -626,7 +629,7 @@ mod tests {
         let rendered = render_parse_error(&ParseError::MissingArgument { command: "daruda" });
         assert_eq!(
             rendered.text,
-            s::control_error_missing_argument(&s::control_usage_daruda())
+            s::control::error_missing_argument(s::control::usage_daruda())
         );
     }
 
@@ -638,7 +641,7 @@ mod tests {
         });
         assert_eq!(
             rendered.text,
-            s::control_error_unknown_command_did_you_mean("lst", "list")
+            s::control::error_unknown_command_did_you_mean("lst", "list")
         );
     }
 }

@@ -35,7 +35,7 @@ impl Workspace {
             self.send_agent_prompt_text_with_origin(pane_id, text, PromptOrigin::InApp, cx)
         {
             self.report_error(
-                ErrorReport::new(s::agent_chat_queue_full())
+                ErrorReport::new(s::agent_chat::queue_full())
                     .severity(ErrorSeverity::Warning)
                     .at(file!(), line!())
                     .dedup(format!("agent_chat.queue_full.{pane_id}"))
@@ -84,7 +84,7 @@ impl Workspace {
     ) -> Option<PromptDispatch> {
         if self.agent_chat_view(pane_id)?.read(cx).is_read_only() {
             self.report_error(
-                ErrorReport::new(s::task_cli_read_only())
+                ErrorReport::new(s::task::cli_read_only())
                     .severity(ErrorSeverity::Info)
                     .at(file!(), line!())
                     .dedup("task.cli.read_only")

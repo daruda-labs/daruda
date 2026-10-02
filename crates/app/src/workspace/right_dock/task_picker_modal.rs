@@ -49,12 +49,12 @@ impl TaskPickAction {
     /// are about to commit to.
     pub(super) fn modal_title(self) -> String {
         match self {
-            Self::Start => strings::task_picker_title_start(),
-            Self::Cancel => strings::task_picker_title_cancel(),
-            Self::Reopen => strings::task_picker_title_reopen(),
-            Self::Retry => strings::task_picker_title_retry(),
-            Self::Delete => strings::task_picker_title_delete(),
-            Self::Edit => strings::task_picker_title_edit(),
+            Self::Start => strings::task::picker_title_start(),
+            Self::Cancel => strings::task::picker_title_cancel(),
+            Self::Reopen => strings::task::picker_title_reopen(),
+            Self::Retry => strings::task::picker_title_retry(),
+            Self::Delete => strings::task::picker_title_delete(),
+            Self::Edit => strings::task::picker_title_edit(),
         }
     }
 
@@ -205,22 +205,22 @@ impl TaskPickerModal {
 /// the panel's usage, not this one.
 fn state_label(state: &daruda_store::tasks::TaskState) -> String {
     match state {
-        daruda_store::tasks::TaskState::Backlog => strings::right_panel_task_backlog(),
-        daruda_store::tasks::TaskState::Running { .. } => strings::right_panel_task_running(),
-        daruda_store::tasks::TaskState::Done { .. } => strings::right_panel_task_done_prefix(),
-        daruda_store::tasks::TaskState::Error { .. } => strings::right_panel_task_error_prefix(),
-        daruda_store::tasks::TaskState::Cancelled { .. } => strings::right_panel_task_cancelled(),
+        daruda_store::tasks::TaskState::Backlog => strings::terminal::task_backlog(),
+        daruda_store::tasks::TaskState::Running { .. } => strings::terminal::task_running(),
+        daruda_store::tasks::TaskState::Done { .. } => strings::terminal::task_done_prefix(),
+        daruda_store::tasks::TaskState::Error { .. } => strings::terminal::task_error_prefix(),
+        daruda_store::tasks::TaskState::Cancelled { .. } => strings::terminal::task_cancelled(),
     }
 }
 
 fn empty_message(action: TaskPickAction) -> String {
     match action {
-        TaskPickAction::Start => strings::task_picker_empty_start(),
-        TaskPickAction::Cancel => strings::task_picker_empty_cancel(),
-        TaskPickAction::Edit => strings::task_picker_empty_edit(),
-        TaskPickAction::Reopen => strings::task_picker_empty_reopen(),
-        TaskPickAction::Retry => strings::task_picker_empty_retry(),
-        TaskPickAction::Delete => strings::task_picker_empty_delete(),
+        TaskPickAction::Start => strings::task::picker_empty_start(),
+        TaskPickAction::Cancel => strings::task::picker_empty_cancel(),
+        TaskPickAction::Edit => strings::task::picker_empty_edit(),
+        TaskPickAction::Reopen => strings::task::picker_empty_reopen(),
+        TaskPickAction::Retry => strings::task::picker_empty_retry(),
+        TaskPickAction::Delete => strings::task::picker_empty_delete(),
     }
 }
 

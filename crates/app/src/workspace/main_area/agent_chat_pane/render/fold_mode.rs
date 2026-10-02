@@ -42,7 +42,7 @@ pub(super) fn fold_mode_chip(
             cx,
         )
         .selected(!mode.is_following())
-        .tooltip(SharedString::from(s::agent_chat_fold_mode_tooltip())),
+        .tooltip(SharedString::from(s::agent_chat::fold_mode_tooltip())),
     )
     .content(move |_, window, cx| {
         panel_root(theme::TRANSCRIPT_EDITOR_RULES_PANEL_W, window)
@@ -56,7 +56,7 @@ pub(super) fn fold_mode_chip(
 /// cannot diverge.
 pub(super) fn fold_mode_chip_label(mode: PaneChoice<FoldMode>) -> String {
     axis_chip_label(
-        s::agent_chat_fold_mode_chip(&mode_value(mode.value())),
+        s::agent_chat::fold_mode_chip(mode_value(mode.value())),
         mode.is_following(),
     )
 }

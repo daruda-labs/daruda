@@ -30,7 +30,7 @@ pub(super) fn build_project_menu_items(
     // -- Rename --
     items.push(ws_popup_menu_item(
         ws.clone(),
-        s::project_menu_rename(),
+        s::project::menu_rename(),
         false,
         move |ws, window, cx| {
             ws.activate_lane(snap_target, window, cx);
@@ -41,7 +41,7 @@ pub(super) fn build_project_menu_items(
     // -- Move to Group --
     items.push(ws_popup_menu_item(
         ws.clone(),
-        s::project_menu_move_to_group(),
+        s::project::menu_move_to_group(),
         false,
         move |ws, window, cx| {
             ws.activate_lane(snap_target, window, cx);
@@ -60,7 +60,7 @@ pub(super) fn build_project_menu_items(
     // the right-clicked project first so the op targets it.
     items.push(ws_popup_menu_item(
         ws.clone(),
-        s::project_menu_delete(),
+        s::project::menu_delete(),
         false,
         move |ws, window, cx| {
             ws.activate_lane(snap_target, window, cx);
@@ -73,7 +73,7 @@ pub(super) fn build_project_menu_items(
     // -- Open in New Window --
     items.push(ws_popup_menu_item(
         ws.clone(),
-        s::project_menu_open_in_new_window(),
+        s::project::menu_open_in_new_window(),
         false,
         move |ws, _window, cx| {
             ws.open_project_in_new_window(project_id, cx);

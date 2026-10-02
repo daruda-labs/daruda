@@ -120,7 +120,7 @@ impl ChannelSettings {
             input: cx.new(|cx| {
                 InputState::new(window, cx)
                     .masked(true)
-                    .placeholder(s::remote_token_placeholder())
+                    .placeholder(s::remote_channel::token_placeholder())
             }),
             configured: false,
             busy: false,
@@ -209,9 +209,9 @@ impl ChannelSettings {
         let id = id.to_owned();
         crate::workspace::dialog_helpers::confirm_destructive(
             cx.weak_entity(),
-            s::remote_confirm_unpair_title(),
-            s::settings_confirm_unpair_body(),
-            s::settings_confirm_ok_unpair(),
+            s::remote_channel::confirm_unpair_title(),
+            s::settings::confirm_unpair_body(),
+            s::settings::confirm_ok_unpair(),
             move |this, _window, cx| this.unpair(&id, cx),
             window,
             cx,
@@ -230,9 +230,9 @@ impl ChannelSettings {
         let id = id.to_owned();
         crate::workspace::dialog_helpers::confirm_destructive(
             cx.weak_entity(),
-            s::remote_confirm_remove_token_title(),
-            s::settings_confirm_remove_token_body(),
-            s::settings_confirm_ok_remove_token(),
+            s::remote_channel::confirm_remove_token_title(),
+            s::settings::confirm_remove_token_body(),
+            s::settings::confirm_ok_remove_token(),
             move |this, window, cx| this.store_secret(&id, secret, true, window, cx),
             window,
             cx,
@@ -333,7 +333,7 @@ impl ChannelSettings {
             &error,
             "remote.settings.failed",
         );
-        self.error = Some(s::remote_error(error));
+        self.error = Some(s::remote_channel::error(error));
         cx.notify();
     }
 }

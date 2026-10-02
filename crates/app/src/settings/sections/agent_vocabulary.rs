@@ -169,7 +169,7 @@ fn summary_label(
     }
     match adapter_default {
         Some(id) => entry_label(entries, id, label),
-        None => s::settings_agent_vocabulary_agent_default(),
+        None => s::settings::agent_vocabulary_agent_default(),
     }
 }
 
@@ -215,7 +215,7 @@ fn mode_label(entry: &VocabEntry) -> String {
 
 /// Same label the agent-chat model chip shows for this choice.
 fn model_label(entry: &VocabEntry) -> String {
-    s::agent_model_choice_label(&entry.id, &entry.name, entry.description.as_deref())
+    s::agent_chat::agent_model_choice_label(&entry.id, &entry.name, entry.description.as_deref())
 }
 
 /// The concrete model a default-model choice resolves to, when advertised.
@@ -256,9 +256,9 @@ fn agent_default_label(
     label: fn(&VocabEntry) -> String,
 ) -> String {
     let Some(id) = adapter_default else {
-        return s::settings_agent_vocabulary_agent_default();
+        return s::settings::agent_vocabulary_agent_default();
     };
-    s::settings_agent_vocabulary_agent_default_named(&entry_label(entries, id, label))
+    s::settings::agent_vocabulary_agent_default_named(entry_label(entries, id, label))
 }
 
 #[cfg(test)]
@@ -383,7 +383,7 @@ mod tests {
         assert_eq!(labels[1..], ["Default (Opus 5.5)", "Opus 5.5"]);
         assert_eq!(
             labels[0],
-            crate::surface::strings::settings_agent_vocabulary_agent_default_named("Opus 5.5"),
+            crate::surface::strings::settings::agent_vocabulary_agent_default_named("Opus 5.5"),
             "the agent-default entry names the model, not the default choice"
         );
     }

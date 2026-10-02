@@ -70,13 +70,13 @@ const fn item(v: Item) -> Row {
 }
 
 const GENERAL: &[Card] = &[Card::Rows {
-    title: s::settings_group_language,
+    title: s::settings::group_language,
     rows: &[sel(S::Language)],
 }];
 
 const APPEARANCE: &[Card] = &[
     Card::Rows {
-        title: s::settings_group_themes,
+        title: s::settings::group_themes,
         rows: &[
             sel(S::UiPreset),
             sel(S::TerminalPreset),
@@ -85,14 +85,14 @@ const APPEARANCE: &[Card] = &[
         ],
     },
     Card::Rows {
-        title: s::settings_group_window,
+        title: s::settings::group_window,
         rows: &[t(T::WindowOpacity), b(B::WindowBlur)],
     },
 ];
 
 const FONT: &[Card] = &[
     Card::Rows {
-        title: s::settings_font_domain_terminal,
+        title: s::settings::font_domain_terminal,
         rows: &[
             sel(S::TerminalFontFamily),
             t(T::TerminalFontSize),
@@ -101,7 +101,7 @@ const FONT: &[Card] = &[
         ],
     },
     Card::Rows {
-        title: s::settings_font_domain_editor,
+        title: s::settings::font_domain_editor,
         rows: &[
             sel(S::EditorFontFamily),
             t(T::EditorFontSize),
@@ -109,7 +109,7 @@ const FONT: &[Card] = &[
         ],
     },
     Card::Rows {
-        title: s::settings_font_domain_agent_chat,
+        title: s::settings::font_domain_agent_chat,
         rows: &[
             sel(S::AgentChatFontFamily),
             t(T::AgentChatFontSize),
@@ -120,7 +120,7 @@ const FONT: &[Card] = &[
 
 const TERMINAL: &[Card] = &[
     Card::Rows {
-        title: s::settings_card_shell,
+        title: s::settings::card_shell,
         rows: &[
             t(T::ShellProgram),
             b(B::ShellNaturalTextEditing),
@@ -129,19 +129,19 @@ const TERMINAL: &[Card] = &[
         ],
     },
     Card::Rows {
-        title: s::settings_group_rendering,
+        title: s::settings::group_rendering,
         rows: &[t(T::ScrollbackMaxRows), sel(S::RenderMaxFps)],
     },
     Card::Rows {
-        title: s::settings_group_insets,
+        title: s::settings::group_insets,
         rows: &[t(T::TerminalInsetX), t(T::TerminalInsetY)],
     },
     Card::Rows {
-        title: s::settings_card_cursor,
+        title: s::settings::card_cursor,
         rows: &[sel(S::CursorStyle)],
     },
     Card::Rows {
-        title: s::settings_card_clipboard,
+        title: s::settings::card_clipboard,
         rows: &[b(B::ClipboardCopyOnSelect)],
     },
     Card::Advanced(&[t(T::ClipboardStreamingMaxBytes)]),
@@ -149,11 +149,11 @@ const TERMINAL: &[Card] = &[
 
 const WORKSPACE: &[Card] = &[
     Card::Rows {
-        title: s::settings_section_sidebar,
+        title: s::settings::section_sidebar,
         rows: &[t(T::LeftDefaultWidth), b(B::LeftCollapsedByDefault)],
     },
     Card::Rows {
-        title: s::settings_card_files,
+        title: s::settings::card_files,
         rows: &[
             b(B::FilesShowHidden),
             b(B::FilesUseGitignore),
@@ -162,7 +162,7 @@ const WORKSPACE: &[Card] = &[
         ],
     },
     Card::Rows {
-        title: s::settings_card_git,
+        title: s::settings::card_git,
         rows: &[
             b(B::GitConfirmCommit),
             b(B::GitConfirmPush),
@@ -170,7 +170,7 @@ const WORKSPACE: &[Card] = &[
         ],
     },
     Card::Rows {
-        title: s::settings_card_status_bar,
+        title: s::settings::card_status_bar,
         rows: &[
             item(Item::ProjectBranch),
             item(Item::AccountSlot),
@@ -180,11 +180,11 @@ const WORKSPACE: &[Card] = &[
         ],
     },
     Card::Rows {
-        title: s::settings_section_panels,
+        title: s::settings::section_panels,
         rows: &[t(T::PanelsGridColumns)],
     },
     Card::Rows {
-        title: s::settings_card_external_editor,
+        title: s::settings::card_external_editor,
         rows: &[sel(S::PreferredEditor)],
     },
     Card::Advanced(&[
@@ -196,7 +196,7 @@ const WORKSPACE: &[Card] = &[
 
 const AGENT: &[Card] = &[
     Card::Rows {
-        title: s::settings_group_chat,
+        title: s::settings::group_chat,
         rows: &[
             b(B::AgentUseReadingWidth),
             Row::Under(
@@ -209,7 +209,7 @@ const AGENT: &[Card] = &[
         ],
     },
     Card::Rows {
-        title: s::settings_card_flows,
+        title: s::settings::card_flows,
         rows: &[
             t(T::FlowTimeoutMinutes),
             t(T::FlowMaxNodeRuns),
@@ -219,7 +219,7 @@ const AGENT: &[Card] = &[
     },
     Card::Custom(CustomCard::AgentCatalog),
     Card::Rows {
-        title: s::settings_section_claude_status,
+        title: s::settings::section_claude_status,
         rows: &[b(B::ClaudeStatusEnabled)],
     },
     Card::Advanced(&[t(T::ClaudeStatusStaleSecs), t(T::ClaudeStatusFileTtlDays)]),
@@ -227,7 +227,7 @@ const AGENT: &[Card] = &[
 
 const ORCHESTRATOR: &[Card] = &[
     Card::Rows {
-        title: s::settings_nav_orchestrator,
+        title: s::settings::nav_orchestrator,
         rows: &[
             b(B::OrchestratorEnabled),
             Row::Under(
@@ -240,14 +240,14 @@ const ORCHESTRATOR: &[Card] = &[
         ],
     },
     Card::Rows {
-        title: s::settings_card_used_by,
+        title: s::settings::card_used_by,
         rows: &[Row::Custom(CustomRow::RemoteLink)],
     },
 ];
 
 const NOTIFICATIONS: &[Card] = &[
     Card::Rows {
-        title: s::settings_card_terminal_programs,
+        title: s::settings::card_terminal_programs,
         rows: &[
             b(B::NotifyOsc9),
             b(B::NotifyOsc777),
@@ -260,27 +260,27 @@ const NOTIFICATIONS: &[Card] = &[
         ],
     },
     Card::Rows {
-        title: s::settings_card_claude_code_terminals,
+        title: s::settings::card_claude_code_terminals,
         rows: &[b(B::NotifyHook)],
     },
     Card::Rows {
-        title: s::settings_card_agent_chat_notifications,
+        title: s::settings::card_agent_chat_notifications,
         rows: &[b(B::NotifyAgentCompletion), b(B::NotifyAgentWaiting)],
     },
     Card::Rows {
-        title: s::settings_card_notify_behavior,
+        title: s::settings::card_notify_behavior,
         rows: &[b(B::NotifySkipFocusedPane)],
     },
 ];
 
 const REMOTE_CONTROL: &[Card] = &[
     Card::Rows {
-        title: s::settings_card_daruda,
+        title: s::settings::card_daruda,
         rows: &[Row::Custom(CustomRow::DarudaLink)],
     },
     Card::Custom(CustomCard::RemoteIntegrations),
     Card::Rows {
-        title: s::settings_telegram_heading,
+        title: s::settings::telegram_heading,
         rows: &[
             b(B::TelegramEnabled),
             Row::Under(B::TelegramEnabled, &[Target::Bool(B::TelegramOnlyWhenAway)]),
@@ -297,7 +297,7 @@ const REMOTE_CONTROL: &[Card] = &[
 const ABOUT: &[Card] = &[
     Card::Custom(CustomCard::AboutVersion),
     Card::Rows {
-        title: s::settings_card_updates,
+        title: s::settings::card_updates,
         rows: &[b(B::UpdateAutoCheck)],
     },
     Card::Advanced(&[t(T::LogsRetentionDays), t(T::LogsMaxFileSizeMb)]),
@@ -325,8 +325,8 @@ impl CustomCard {
     /// version block carries none: its first line says what it is.
     pub(super) fn title(self) -> String {
         match self {
-            CustomCard::AgentCatalog => s::settings_section_agent_catalog(),
-            CustomCard::RemoteIntegrations => s::settings_group_integrations(),
+            CustomCard::AgentCatalog => s::settings::section_agent_catalog(),
+            CustomCard::RemoteIntegrations => s::settings::group_integrations(),
             CustomCard::AboutVersion => String::new(),
         }
     }
@@ -337,7 +337,7 @@ impl Card {
     pub(super) fn title(&self) -> String {
         match self {
             Card::Rows { title, .. } => title(),
-            Card::Advanced(_) => s::settings_card_advanced(),
+            Card::Advanced(_) => s::settings::card_advanced(),
             Card::Custom(kind) => kind.title(),
         }
     }

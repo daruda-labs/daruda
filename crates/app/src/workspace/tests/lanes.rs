@@ -1236,7 +1236,10 @@ fn a_lane_a_flow_is_running_in_cannot_be_removed(cx: &mut TestAppContext) {
         let err = ws
             .validate_remove_lane(target)
             .expect_err("a running flow blocks removal");
-        assert_eq!(err, crate::surface::strings::remove_lane_err_flow_running());
+        assert_eq!(
+            err,
+            crate::surface::strings::modal::remove_lane_err_flow_running()
+        );
     });
 }
 
@@ -1312,7 +1315,7 @@ async fn a_flow_another_process_runs_here_blocks_removing_the_lane(cx: &mut Test
         assert_eq!(
             ws.validate_remove_lane(target)
                 .expect_err("another process's run blocks removal"),
-            crate::surface::strings::remove_lane_err_flow_elsewhere(holder_process.id()),
+            crate::surface::strings::modal::remove_lane_err_flow_elsewhere(holder_process.id()),
         );
     });
 }
@@ -1333,7 +1336,7 @@ async fn revealing_a_folder_that_is_gone_reports_it(cx: &mut TestAppContext) {
         assert_eq!(ws.error_history().len(), before + 1);
         assert_eq!(
             ws.error_history()[0].title,
-            crate::surface::strings::error_reveal_path_missing()
+            crate::surface::strings::error::reveal_path_missing()
         );
     });
 }

@@ -34,20 +34,20 @@ use crate::workspace::main_area::pane_tree::PaneId;
 pub(in crate::workspace) fn failure_message(failure: &daruda_acp::AcpFailure) -> String {
     match failure {
         daruda_acp::AcpFailure::TransportClosed { .. } => {
-            crate::surface::strings::agent_chat_transport_closed()
+            crate::surface::strings::agent_chat::transport_closed()
         }
         daruda_acp::AcpFailure::AdapterInstall { kind, .. } => {
             use crate::surface::strings as s;
             use daruda_acp::preparation::PreparationKind;
             match kind {
                 PreparationKind::Network | PreparationKind::Timeout | PreparationKind::Io => {
-                    s::agent_chat_adapter_install_failed()
+                    s::agent_chat::adapter_install_failed()
                 }
-                PreparationKind::Integrity => s::agent_chat_adapter_integrity_failed(),
-                PreparationKind::Canceled => s::agent_chat_adapter_preparation_canceled(),
+                PreparationKind::Integrity => s::agent_chat::adapter_integrity_failed(),
+                PreparationKind::Canceled => s::agent_chat::adapter_preparation_canceled(),
                 PreparationKind::Configuration
                 | PreparationKind::InvalidPackage
-                | PreparationKind::Process => s::agent_chat_adapter_setup_required(),
+                | PreparationKind::Process => s::agent_chat::adapter_setup_required(),
             }
         }
         _ => failure.message().to_owned(),

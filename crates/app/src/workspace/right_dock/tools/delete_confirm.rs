@@ -28,14 +28,14 @@ pub fn open_delete_mcp_server_confirm(
     let workspace = cx.weak_entity();
     let body = format!(
         "{}\n\n{}",
-        strings::mcp_delete_body_prefix(),
-        strings::mcp_delete_body_detail(&name, &path.display().to_string()),
+        strings::mcp::delete_body_prefix(),
+        strings::mcp::delete_body_detail(&name, path.display().to_string()),
     );
 
     open_confirm_dialog(
-        strings::mcp_delete_title(),
+        strings::mcp::delete_title(),
         body,
-        strings::mcp_button_delete(),
+        strings::common::btn_delete(),
         ButtonVariant::Danger,
         move |_, _window, app_cx| {
             if let Some(ws) = workspace.upgrade() {
@@ -43,7 +43,7 @@ pub fn open_delete_mcp_server_confirm(
                 ws.update(app_cx, |ws, cx| {
                     if let Err(e) = ws.delete_mcp_server_internal(scope, &name, cx) {
                         let report =
-                            ErrorReport::new(crate::surface::strings::error_mcp_delete_failed())
+                            ErrorReport::new(crate::surface::strings::error::mcp_delete_failed())
                                 .severity(ErrorSeverity::Error)
                                 .from_error(&e)
                                 .at(file!(), line!())

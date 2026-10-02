@@ -53,8 +53,8 @@ impl GroupSelectModal {
             .and_then(|p| p.group_id);
 
         let mut opts = Vec::with_capacity(workspace.groups.len() + 1);
-        let ungrouped = s::group_ungrouped();
-        let current_suffix = s::group_current_suffix();
+        let ungrouped = s::group::ungrouped();
+        let current_suffix = s::group::current_suffix();
         let ungrouped_label = if current.is_none() {
             format!("{ungrouped}{current_suffix}")
         } else {
@@ -152,14 +152,14 @@ impl Render for GroupSelectModal {
             .gap(px(theme::MODAL_FOOTER_GAP))
             .mt(px(theme::MODAL_FOOTER_MARGIN_TOP))
             .child(
-                button("group-select-cancel", s::common_button_cancel()).on_click(cx.listener(
+                button("group-select-cancel", s::common::btn_cancel()).on_click(cx.listener(
                     |this, _: &ClickEvent, window, cx| {
                         this.dismiss(window, cx);
                     },
                 )),
             )
             .child(
-                button_primary("group-select-move", s::common_button_move()).on_click(cx.listener(
+                button_primary("group-select-move", s::common::btn_move()).on_click(cx.listener(
                     |this, _: &ClickEvent, window, cx| {
                         this.submit(window, cx);
                     },

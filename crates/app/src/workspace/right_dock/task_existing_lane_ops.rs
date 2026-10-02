@@ -105,7 +105,7 @@ impl Workspace {
     }
 
     fn report_task_lane_missing(&mut self, path: &Path, cx: &mut Context<Self>) {
-        let report = ErrorReport::new(crate::surface::strings::error_task_lane_missing())
+        let report = ErrorReport::new(crate::surface::strings::error::task_lane_missing())
             .severity(ErrorSeverity::Error)
             .at(file!(), line!())
             .with_context(

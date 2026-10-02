@@ -56,7 +56,7 @@ fn muted_line(text: impl Into<SharedString>, cx: &gpui::App) -> impl IntoElement
 /// "Check for updates" button, wrapped in a row so it hugs its label.
 /// Disabled while a check is in flight.
 fn check_button(disabled: bool, cx: &mut gpui::Context<SettingsView>) -> impl IntoElement {
-    let btn = button("settings-update-check", s::settings_button_check_updates())
+    let btn = button("settings-update-check", s::settings::button_check_updates())
         .disabled(disabled)
         .on_click(cx.listener(|_this, _: &ClickEvent, _window, cx| {
             if let Some(e) = crate::update::Updater::get(cx) {
@@ -68,19 +68,19 @@ fn check_button(disabled: bool, cx: &mut gpui::Context<SettingsView>) -> impl In
 
 /// "Update" button — download + install the available release.
 fn update_button(cx: &mut gpui::Context<SettingsView>) -> impl IntoElement {
-    let btn = button("settings-update-install", s::settings_button_update()).on_click(cx.listener(
-        |_this, _: &ClickEvent, _window, cx| {
+    let btn = button("settings-update-install", s::settings::button_update()).on_click(
+        cx.listener(|_this, _: &ClickEvent, _window, cx| {
             if let Some(e) = crate::update::Updater::get(cx) {
                 e.update(cx, |u, cx| u.download_and_install(cx));
             }
-        },
-    ));
+        }),
+    );
     div().flex().flex_row().child(btn)
 }
 
 /// "Restart" button — relaunch into the swapped bundle.
 fn restart_button(cx: &mut gpui::Context<SettingsView>) -> impl IntoElement {
-    let btn = button("settings-update-restart", s::settings_button_restart()).on_click(
+    let btn = button("settings-update-restart", s::settings::button_restart()).on_click(
         cx.listener(|_this, _: &ClickEvent, _window, cx| {
             if let Some(e) = crate::update::Updater::get(cx) {
                 e.update(cx, |u, cx| u.restart(cx));
@@ -112,7 +112,7 @@ impl SettingsView {
             .border_color(theme::current(cx).border)
             .rounded(px(theme::RADIUS_SM))
             .child(about_row(
-                s::settings_label_current_version(),
+                s::settings::label_current_version(),
                 SharedString::from(env!("CARGO_PKG_VERSION")),
                 cx,
             ));
@@ -124,22 +124,22 @@ impl SettingsView {
             Some(AutoUpdateStatus::UpToDate) => {
                 col = col
                     .child(check_button(false, cx))
-                    .child(muted_line(s::settings_update_up_to_date(), cx));
+                    .child(muted_line(s::settings::update_up_to_date(), cx));
             }
             Some(AutoUpdateStatus::Errored(msg)) => {
                 col = col
                     .child(check_button(false, cx))
-                    .child(muted_line(s::settings_update_error(&msg), cx));
+                    .child(muted_line(s::settings::update_error(&msg), cx));
             }
             Some(AutoUpdateStatus::Checking) => {
                 col = col
                     .child(check_button(true, cx))
-                    .child(muted_line(s::settings_update_checking(), cx));
+                    .child(muted_line(s::settings::update_checking(), cx));
             }
             Some(AutoUpdateStatus::Available(info)) => {
                 col = col
                     .child(muted_line(
-                        s::settings_update_available(&info.version.to_string()),
+                        s::settings::update_available(info.version.to_string()),
                         cx,
                     ))
                     .child(muted_line(SharedString::from(info.notes.clone()), cx));
@@ -149,18 +149,18 @@ impl SettingsView {
                 if can_install {
                     col = col.child(update_button(cx));
                 } else {
-                    col = col.child(muted_line(s::settings_update_dev_build(), cx));
+                    col = col.child(muted_line(s::settings::update_dev_build(), cx));
                 }
             }
             Some(AutoUpdateStatus::Downloading) => {
-                col = col.child(muted_line(s::settings_update_downloading(), cx));
+                col = col.child(muted_line(s::settings::update_downloading(), cx));
             }
             Some(AutoUpdateStatus::Installing) => {
-                col = col.child(muted_line(s::settings_update_installing(), cx));
+                col = col.child(muted_line(s::settings::update_installing(), cx));
             }
             Some(AutoUpdateStatus::ReadyToRestart(_)) => {
                 col = col
-                    .child(muted_line(s::settings_update_ready(), cx))
+                    .child(muted_line(s::settings::update_ready(), cx))
                     .child(restart_button(cx));
             }
         }

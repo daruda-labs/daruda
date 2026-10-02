@@ -88,7 +88,7 @@ impl Workspace {
                             Err(detail) => {
                                 ws.report_error(
                                     ErrorReport::new(
-                                        crate::surface::strings::error_lane_create_failed(),
+                                        crate::surface::strings::error::lane_create_failed(),
                                     )
                                     .severity(ErrorSeverity::Error)
                                     .at(file!(), line!())

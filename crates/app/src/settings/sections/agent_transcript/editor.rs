@@ -35,7 +35,7 @@ fn row_value_label(value: String, overridden: bool) -> String {
     if overridden {
         value
     } else {
-        s::settings_agent_transcript_built_in(&value)
+        s::settings::agent_transcript_built_in(&value)
     }
 }
 

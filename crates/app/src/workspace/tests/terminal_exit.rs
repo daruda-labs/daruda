@@ -40,7 +40,7 @@ async fn an_exited_shell_is_marked_and_says_so(cx: &mut TestAppContext) {
             .unwrap()
     });
     assert!(
-        screen.contains(&strings::terminal_process_exited()),
+        screen.contains(&strings::terminal::process_exited()),
         "the pane tells the user the shell is gone: {screen:?}"
     );
 }

@@ -68,10 +68,10 @@ impl ToolbarControls {
     fn from_view(fv: &PaneFileView) -> Self {
         let filter_toggle = (fv.view_mode == FileViewMode::Changes).then(|| {
             if fv.hide_unchanged {
-                ToolbarToggle::new(strings::file_viewer_show_all(), ICON_FILTER_ALT_OFF, true)
+                ToolbarToggle::new(strings::file_viewer::show_all(), ICON_FILTER_ALT_OFF, true)
             } else {
                 ToolbarToggle::new(
-                    strings::file_viewer_hide_unchanged(),
+                    strings::file_viewer::hide_unchanged(),
                     ICON_FILTER_ALT,
                     false,
                 )
@@ -115,9 +115,9 @@ fn mode_icon(mode: FileViewMode) -> &'static str {
 
 fn mode_label(mode: FileViewMode) -> String {
     match mode {
-        FileViewMode::Raw => strings::file_viewer_tab_raw(),
-        FileViewMode::Preview => strings::file_viewer_tab_preview(),
-        FileViewMode::Changes => strings::file_viewer_tab_changes(),
+        FileViewMode::Raw => strings::file_viewer::tab_raw(),
+        FileViewMode::Preview => strings::file_viewer::tab_preview(),
+        FileViewMode::Changes => strings::file_viewer::tab_changes(),
     }
 }
 
@@ -190,14 +190,14 @@ pub(super) fn render_file_viewer_toolbar(
         .and_then(|p| p.file_name())
         .map(|n| n.to_string_lossy().into_owned());
     let staged_badge = if fv.source.is_index() {
-        strings::file_viewer_staged_badge()
+        strings::file_viewer::staged_badge()
     } else {
         String::new()
     };
     let label = match parent_name {
         Some(dir) => format!(
             "{dir}{}{file_name}{staged_badge}",
-            strings::FILE_VIEWER_PATH_SEP
+            std::path::MAIN_SEPARATOR_STR
         ),
         None => format!("{file_name}{staged_badge}"),
     };
@@ -264,11 +264,11 @@ pub(super) fn render_file_viewer_toolbar(
                         .unwrap_or_else(|| path_for_menu.to_string_lossy().to_string());
 
                     menu.item(ws_popup_clipboard_item(
-                        strings::file_viewer_copy_abs_path(),
+                        strings::file_viewer::copy_abs_path(),
                         abs_path,
                     ))
                     .item(ws_popup_clipboard_item(
-                        strings::file_viewer_copy_rel_path(),
+                        strings::file_viewer::copy_rel_path(),
                         rel_path,
                     ))
                 }),
@@ -333,7 +333,7 @@ pub(super) fn render_file_viewer_toolbar(
                         &surface,
                         cx,
                     )
-                    .tooltip(strings::common_button_close())
+                    .tooltip(strings::common::btn_close())
                     .on_mouse_down(
                         MouseButton::Left,
                         cx.listener(move |this, _: &MouseDownEvent, window, cx| {
