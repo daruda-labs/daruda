@@ -37,7 +37,7 @@ pub(super) fn render_search_panel(
         (String::new(), count_color)
     } else if total == 0 {
         (
-            strings::file_viewer_search_no_match().to_owned(),
+            strings::file_viewer::search_no_match().to_owned(),
             empty_color,
         )
     } else {
@@ -113,7 +113,7 @@ pub(super) fn render_search_panel(
                     &surface,
                     cx,
                 )
-                .tooltip(strings::common_search_clear())
+                .tooltip(strings::common::search_clear())
                 .on_mouse_down(
                     MouseButton::Left,
                     cx.listener(move |this, _: &MouseDownEvent, window, cx| {
@@ -131,7 +131,7 @@ pub(super) fn render_search_panel(
                 &surface,
                 cx,
             )
-            .tooltip(strings::common_search_previous())
+            .tooltip(strings::common::search_previous())
             .on_mouse_down(
                 MouseButton::Left,
                 cx.listener(|this, _: &MouseDownEvent, _w, cx| {
@@ -148,7 +148,7 @@ pub(super) fn render_search_panel(
                 &surface,
                 cx,
             )
-            .tooltip(strings::common_search_next())
+            .tooltip(strings::common::search_next())
             .on_mouse_down(
                 MouseButton::Left,
                 cx.listener(|this, _: &MouseDownEvent, _w, cx| {
@@ -166,7 +166,7 @@ pub(super) fn render_search_panel(
                 &surface,
                 cx,
             )
-            .tooltip(strings::common_button_close())
+            .tooltip(strings::common::btn_close())
             .ml(px(theme::FILE_VIEWER_SEARCH_BTN_ML))
             .on_mouse_down(
                 MouseButton::Left,

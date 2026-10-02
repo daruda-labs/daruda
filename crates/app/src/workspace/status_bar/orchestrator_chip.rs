@@ -45,27 +45,27 @@ impl OrchestratorChipState {
             Self::NotStarted => (
                 metrics::ORCHESTRATOR_NOT_STARTED_GLYPH,
                 t.orchestrator_not_started,
-                s::orchestrator_not_started(),
+                s::orchestrator::not_started(),
             ),
             Self::Idle => (
                 metrics::ORCHESTRATOR_IDLE_GLYPH,
                 t.text_muted,
-                s::orchestrator_idle(),
+                s::orchestrator::idle(),
             ),
             Self::Working => (
                 metrics::ORCHESTRATOR_WORKING_GLYPH,
                 t.orchestrator_working,
-                s::orchestrator_working(),
+                s::orchestrator::working(),
             ),
             Self::AwaitingPermission => (
                 metrics::ORCHESTRATOR_PERMISSION_GLYPH,
                 t.orchestrator_permission,
-                s::orchestrator_awaiting_permission(),
+                s::orchestrator::awaiting_permission(),
             ),
             Self::Failed => (
                 metrics::ORCHESTRATOR_FAILED_GLYPH,
                 t.orchestrator_failed,
-                s::orchestrator_failed(),
+                s::orchestrator::failed(),
             ),
         }
     }
@@ -87,7 +87,7 @@ pub(super) fn render(
                 .text_color(color)
                 .child(glyph),
         )
-        .child(SharedString::from(s::orchestrator_label()))
+        .child(SharedString::from(s::orchestrator::label()))
         // One dispatch; the body cannot be a `Workspace` method — see
         // `orchestrator::start_or_toggle_from_chip`.
         .on_click(move |_, window, cx| {

@@ -392,39 +392,39 @@ macro_rules! lane_slot_table {
     (@menu_items) => {
         ::std::vec![
             ::gpui::MenuItem::action(
-                $crate::surface::strings::menu_activate_lane_1(),
+                $crate::surface::strings::menu::activate_lane_1(),
                 $crate::workspace::ActivateLane1,
             ),
             ::gpui::MenuItem::action(
-                $crate::surface::strings::menu_activate_lane_2(),
+                $crate::surface::strings::menu::activate_lane_2(),
                 $crate::workspace::ActivateLane2,
             ),
             ::gpui::MenuItem::action(
-                $crate::surface::strings::menu_activate_lane_3(),
+                $crate::surface::strings::menu::activate_lane_3(),
                 $crate::workspace::ActivateLane3,
             ),
             ::gpui::MenuItem::action(
-                $crate::surface::strings::menu_activate_lane_4(),
+                $crate::surface::strings::menu::activate_lane_4(),
                 $crate::workspace::ActivateLane4,
             ),
             ::gpui::MenuItem::action(
-                $crate::surface::strings::menu_activate_lane_5(),
+                $crate::surface::strings::menu::activate_lane_5(),
                 $crate::workspace::ActivateLane5,
             ),
             ::gpui::MenuItem::action(
-                $crate::surface::strings::menu_activate_lane_6(),
+                $crate::surface::strings::menu::activate_lane_6(),
                 $crate::workspace::ActivateLane6,
             ),
             ::gpui::MenuItem::action(
-                $crate::surface::strings::menu_activate_lane_7(),
+                $crate::surface::strings::menu::activate_lane_7(),
                 $crate::workspace::ActivateLane7,
             ),
             ::gpui::MenuItem::action(
-                $crate::surface::strings::menu_activate_lane_8(),
+                $crate::surface::strings::menu::activate_lane_8(),
                 $crate::workspace::ActivateLane8,
             ),
             ::gpui::MenuItem::action(
-                $crate::surface::strings::menu_activate_lane_9(),
+                $crate::surface::strings::menu::activate_lane_9(),
                 $crate::workspace::ActivateLane9,
             ),
         ]

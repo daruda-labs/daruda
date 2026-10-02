@@ -90,11 +90,11 @@ fn availability_badge(availability: LaneAvailability) -> Option<(IconName, Strin
         // permission-denied case.
         LaneAvailability::Missing => Some((
             IconName::TriangleAlert,
-            surface_strings::projects_directory_missing(),
+            surface_strings::projects::directory_missing(),
         )),
         LaneAvailability::AccessDenied => Some((
             IconName::EyeOff,
-            surface_strings::projects_permission_denied(),
+            surface_strings::projects::permission_denied(),
         )),
     }
 }
@@ -494,7 +494,7 @@ pub(super) fn project_header_row(
                             };
                             let catalog = ws.session_hosts.clone();
                             crate::workspace::dialog_helpers::open_form_modal(
-                                surface_strings::create_lane_button_title(),
+                                surface_strings::create_lane::button_title(),
                                 None,
                                 move |window, cx| {
                                     super::create_modal::CreateWorktreeModal::new(
@@ -539,7 +539,7 @@ pub(super) fn section_header(
         .dropdown_menu(menu_builder(move |menu, _window, _cx| {
             let ws_for_group = ws_for_group.clone();
             menu.item(
-                PopupMenuItem::new(surface_strings::section_add_menu_project()).on_click(
+                PopupMenuItem::new(surface_strings::projects::add_menu_project()).on_click(
                     move |_, _window, app_cx| {
                         // No workspace handle needed — the global open-folder
                         // flow reads its config from `SettingsStore` and the
@@ -552,7 +552,7 @@ pub(super) fn section_header(
                 ),
             )
             .item(
-                PopupMenuItem::new(surface_strings::section_add_menu_group()).on_click(
+                PopupMenuItem::new(surface_strings::projects::add_menu_group()).on_click(
                     move |_, window, app_cx| {
                         if let Some(ws) = ws_for_group.upgrade() {
                             ws.update(app_cx, |ws, cx| {
@@ -564,7 +564,7 @@ pub(super) fn section_header(
             )
         }));
 
-    SectionHeader::new(surface_strings::projects_section_header())
+    SectionHeader::new(surface_strings::projects::section_header())
         .padding(theme::LANE_ROW_PAD_X, theme::LANE_SECTION_PAD_Y)
         .actions(add_button)
 }
@@ -944,12 +944,12 @@ pub(super) fn non_git_placeholder(cx: &gpui::App) -> impl IntoElement {
         .p(px(theme::LANE_PLACEHOLDER_PAD))
         .text_size(px(theme::LANE_SUB_FONT_SIZE))
         .text_color(hint_color)
-        .child(surface_strings::lane_non_git_hint())
+        .child(surface_strings::terminal::lane_non_git_hint())
         .child(
             div()
                 .mt(px(theme::LANE_PLACEHOLDER_GIT_INIT_MT))
                 .text_color(init_color)
-                .child(surface_strings::lane_git_init_label()),
+                .child(surface_strings::terminal::lane_git_init_label()),
         )
 }
 
@@ -967,7 +967,7 @@ mod tests {
         let (icon, label) =
             availability_badge(LaneAvailability::Missing).expect("missing yields a badge");
         assert!(matches!(icon, IconName::TriangleAlert));
-        assert_eq!(label, surface_strings::projects_directory_missing());
+        assert_eq!(label, surface_strings::projects::directory_missing());
     }
 
     #[test]
@@ -975,6 +975,6 @@ mod tests {
         let (icon, label) =
             availability_badge(LaneAvailability::AccessDenied).expect("denied yields a badge");
         assert!(matches!(icon, IconName::EyeOff));
-        assert_eq!(label, surface_strings::projects_permission_denied());
+        assert_eq!(label, surface_strings::projects::permission_denied());
     }
 }

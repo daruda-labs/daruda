@@ -89,10 +89,10 @@ fn header_row(snap: &RightDockSnapshot) -> impl IntoElement {
     let new_ws = snap.workspace.clone();
 
     let filter_label = match snap.task_filter {
-        TaskFilter::All => strings::task_filter_all(),
-        TaskFilter::Backlog => strings::task_filter_backlog(),
-        TaskFilter::Running => strings::task_filter_running(),
-        TaskFilter::Done => strings::task_filter_done(),
+        TaskFilter::All => strings::task::filter_all(),
+        TaskFilter::Backlog => strings::task::filter_backlog(),
+        TaskFilter::Running => strings::task::filter_running(),
+        TaskFilter::Done => strings::task::filter_done(),
     };
 
     let filter_chip = button("task-filter", filter_label).xsmall().on_click(
@@ -105,7 +105,7 @@ fn header_row(snap: &RightDockSnapshot) -> impl IntoElement {
 
     let new_btn = crate::ui::button_with_icon(
         "task-new",
-        strings::task_new_button(),
+        strings::task::new_button(),
         crate::ui::icons::ADD,
     )
     .primary()
@@ -147,7 +147,7 @@ fn search_row(snap: &RightDockSnapshot, cx: &gpui::App) -> impl IntoElement {
         .when(has_query, |row| {
             row.child(
                 crate::ui::button_icon("task-search-clear", crate::ui::icons::CLOSE, cx)
-                    .tooltip(strings::common_search_clear())
+                    .tooltip(strings::common::search_clear())
                     .absolute()
                     .right(px(theme::PAD_XS))
                     .top_0()
@@ -171,7 +171,7 @@ fn search_empty_hint(query: String, t: &crate::ui::theme::DarudaTheme) -> impl I
         .text_color(t.text_subtle)
         .child(SharedString::from(format!(
             "{}\"{}\".",
-            strings::task_search_empty_prefix(),
+            strings::task::search_empty_prefix(),
             query.trim()
         )))
 }
@@ -182,10 +182,10 @@ fn search_empty_hint(query: String, t: &crate::ui::theme::DarudaTheme) -> impl I
 
 fn empty_state(filter: TaskFilter, cx: &gpui::App) -> AnyElement {
     let msg = match filter {
-        TaskFilter::All => strings::right_panel_task_empty_all(),
-        TaskFilter::Backlog => strings::right_panel_task_empty_backlog(),
-        TaskFilter::Running => strings::right_panel_task_empty_running(),
-        TaskFilter::Done => strings::right_panel_task_empty_done(),
+        TaskFilter::All => strings::terminal::task_empty_all(),
+        TaskFilter::Backlog => strings::terminal::task_empty_backlog(),
+        TaskFilter::Running => strings::terminal::task_empty_running(),
+        TaskFilter::Done => strings::terminal::task_empty_done(),
     };
     crate::ui::placeholder_text(msg)
         .py(px(theme::RIGHT_PANEL_PAD_Y))
@@ -345,11 +345,11 @@ fn state_indicator(state: &TaskState, cx: &gpui::App) -> (&'static str, Hsla) {
 
 fn state_label(state: &TaskState) -> SharedString {
     match state {
-        TaskState::Backlog => SharedString::from(strings::right_panel_task_backlog()),
-        TaskState::Running { .. } => SharedString::from(strings::right_panel_task_running()),
+        TaskState::Backlog => SharedString::from(strings::terminal::task_backlog()),
+        TaskState::Running { .. } => SharedString::from(strings::terminal::task_running()),
         TaskState::Done { end_reason, .. } => SharedString::from(format!(
             "{} ({})",
-            strings::right_panel_task_done_prefix(),
+            strings::terminal::task_done_prefix(),
             done_flavour_label(*end_reason),
         )),
         TaskState::Error { message, .. } => {
@@ -365,23 +365,23 @@ fn state_label(state: &TaskState) -> SharedString {
             };
             SharedString::from(format!(
                 "{}: {}",
-                strings::right_panel_task_error_prefix(),
+                strings::terminal::task_error_prefix(),
                 truncated,
             ))
         }
-        TaskState::Cancelled { .. } => SharedString::from(strings::right_panel_task_cancelled()),
+        TaskState::Cancelled { .. } => SharedString::from(strings::terminal::task_cancelled()),
     }
 }
 
 fn done_flavour_label(reason: SessionEndReason) -> String {
     match reason {
-        SessionEndReason::Stop => strings::task_done_flavour_stop(),
-        SessionEndReason::PromptInputExit => strings::task_done_flavour_prompt_input_exit(),
-        SessionEndReason::Logout => strings::task_done_flavour_logout(),
-        SessionEndReason::Other => strings::task_done_flavour_other(),
+        SessionEndReason::Stop => strings::task::done_flavour_stop(),
+        SessionEndReason::PromptInputExit => strings::task::done_flavour_prompt_input_exit(),
+        SessionEndReason::Logout => strings::task::done_flavour_logout(),
+        SessionEndReason::Other => strings::task::done_flavour_other(),
         // `Error` belongs to the `Error` state, not `Done`; reaching
         // here means a migrated row — fall back to "Other".
-        SessionEndReason::Error => strings::task_done_flavour_other(),
+        SessionEndReason::Error => strings::task::done_flavour_other(),
     }
 }
 
@@ -412,7 +412,7 @@ fn duration_cell(
         // stays clean.
         return None;
     }
-    let text = crate::surface::strings::format_duration_compact(elapsed);
+    let text = crate::surface::strings::notification::format_duration_compact(elapsed);
     Some(
         div()
             .flex_none()
@@ -517,7 +517,7 @@ fn failure_indicator(task: &Task, snap: &RightDockSnapshot) -> Option<AnyElement
     }
     let text = format!(
         "{}{}/{}",
-        strings::right_panel_task_failures_prefix(),
+        strings::terminal::task_failures_prefix(),
         count,
         TASK_TOOL_USE_FAILURE_THRESHOLD,
     );

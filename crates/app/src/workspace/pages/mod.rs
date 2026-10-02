@@ -32,8 +32,8 @@ impl Page {
 
     pub fn label(self) -> String {
         match self {
-            Self::Tasks => strings::right_panel_tab_tasks(),
-            Self::Flows => strings::right_panel_tab_flows(),
+            Self::Tasks => strings::dock::right_tab_tasks(),
+            Self::Flows => strings::dock::right_tab_flows(),
         }
     }
 

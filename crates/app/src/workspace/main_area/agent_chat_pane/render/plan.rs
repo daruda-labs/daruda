@@ -78,7 +78,7 @@ pub(super) fn plan_region(
                     .font_weight(gpui::FontWeight::MEDIUM)
                     .text_color(theme::dim_toward_gray(theme::agent_chat_fg(cx), dim))
                     .text_size(px(theme::agent_chat_font_size(cx)))
-                    .child(SharedString::from(s::agent_chat_plan_label())),
+                    .child(SharedString::from(s::agent_chat::plan_label())),
             )
             .child(
                 div()
@@ -107,7 +107,7 @@ pub(super) fn plan_region(
             )))
             .ghost()
             .icon(IconName::Close)
-            .tooltip(s::agent_chat_plan_dismiss())
+            .tooltip(s::agent_chat::plan_dismiss())
             .on_click(cx.listener(|this, _ev, _window, cx| {
                 cx.stop_propagation();
                 this.dismiss_plan(cx);

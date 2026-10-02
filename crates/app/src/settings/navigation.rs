@@ -9,12 +9,12 @@ type NavigationGroup = (&'static [Section], fn() -> String);
 pub(super) const GROUPS: &[NavigationGroup] = &[
     (
         &[Section::General, Section::Appearance, Section::Font],
-        s::settings_group_application,
+        s::settings::group_application,
     ),
-    (&[Section::Terminal], s::settings_group_terminal),
+    (&[Section::Terminal], s::settings::group_terminal),
     (
         &[Section::Workspace, Section::Keymap],
-        s::settings_group_workspace,
+        s::settings::group_workspace,
     ),
     (
         &[
@@ -23,7 +23,7 @@ pub(super) const GROUPS: &[NavigationGroup] = &[
             Section::SessionHosts,
             Section::Accounts,
         ],
-        s::settings_group_agents,
+        s::settings::group_agents,
     ),
     (
         &[
@@ -32,45 +32,45 @@ pub(super) const GROUPS: &[NavigationGroup] = &[
             Section::Plugin,
             Section::About,
         ],
-        s::settings_group_system,
+        s::settings::group_system,
     ),
 ];
 
 pub(super) fn label(section: Section) -> String {
     match section {
-        Section::General => s::settings_nav_general(),
-        Section::Appearance => s::settings_nav_appearance(),
-        Section::Font => s::settings_nav_font(),
-        Section::Terminal => s::settings_nav_terminal(),
-        Section::Workspace => s::settings_nav_workspace(),
-        Section::Keymap => s::settings_nav_keymap(),
-        Section::Agent => s::settings_nav_agent(),
-        Section::Orchestrator => s::settings_nav_orchestrator(),
-        Section::SessionHosts => s::settings_nav_session_hosts(),
-        Section::Accounts => s::settings_nav_accounts(),
-        Section::Notifications => s::settings_nav_notifications(),
-        Section::RemoteControl => s::settings_nav_remote_control(),
-        Section::Plugin => s::settings_nav_plugin(),
-        Section::About => s::settings_nav_about(),
+        Section::General => s::settings::nav_general(),
+        Section::Appearance => s::settings::nav_appearance(),
+        Section::Font => s::settings::nav_font(),
+        Section::Terminal => s::settings::nav_terminal(),
+        Section::Workspace => s::settings::nav_workspace(),
+        Section::Keymap => s::settings::nav_keymap(),
+        Section::Agent => s::settings::nav_agent(),
+        Section::Orchestrator => s::settings::nav_orchestrator(),
+        Section::SessionHosts => s::settings::nav_session_hosts(),
+        Section::Accounts => s::settings::nav_accounts(),
+        Section::Notifications => s::settings::nav_notifications(),
+        Section::RemoteControl => s::settings::nav_remote_control(),
+        Section::Plugin => s::settings::nav_plugin(),
+        Section::About => s::settings::nav_about(),
     }
 }
 
 pub(super) fn description(section: Section) -> String {
     match section {
-        Section::General => s::settings_desc_general(),
-        Section::Appearance => s::settings_desc_appearance(),
-        Section::Font => s::settings_desc_font(),
-        Section::Terminal => s::settings_desc_terminal(),
-        Section::Workspace => s::settings_desc_workspace(),
-        Section::Keymap => s::settings_desc_keymap(),
-        Section::Agent => s::settings_desc_agent(),
-        Section::Orchestrator => s::settings_desc_orchestrator(),
-        Section::SessionHosts => s::settings_desc_session_hosts(),
-        Section::Accounts => s::settings_desc_accounts(),
-        Section::Notifications => s::settings_desc_notifications(),
-        Section::RemoteControl => s::settings_desc_remote_control(),
-        Section::Plugin => s::settings_desc_plugin(),
-        Section::About => s::settings_desc_about(),
+        Section::General => s::settings::desc_general(),
+        Section::Appearance => s::settings::desc_appearance(),
+        Section::Font => s::settings::desc_font(),
+        Section::Terminal => s::settings::desc_terminal(),
+        Section::Workspace => s::settings::desc_workspace(),
+        Section::Keymap => s::settings::desc_keymap(),
+        Section::Agent => s::settings::desc_agent(),
+        Section::Orchestrator => s::settings::desc_orchestrator(),
+        Section::SessionHosts => s::settings::desc_session_hosts(),
+        Section::Accounts => s::settings::desc_accounts(),
+        Section::Notifications => s::settings::desc_notifications(),
+        Section::RemoteControl => s::settings::desc_remote_control(),
+        Section::Plugin => s::settings::desc_plugin(),
+        Section::About => s::settings::desc_about(),
     }
 }
 

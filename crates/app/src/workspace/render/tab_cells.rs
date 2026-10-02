@@ -46,7 +46,7 @@ impl Workspace {
                 let label = if pane.is_some_and(|p| p.tab_dirty_dot(cx)) {
                     SharedString::from(format!(
                         "{}{}",
-                        crate::surface::strings::TAB_TITLE_DIRTY_DOT,
+                        crate::surface::glyphs::TAB_TITLE_DIRTY_DOT,
                         base_label
                     ))
                 } else {
@@ -91,7 +91,7 @@ impl Workspace {
     /// has nothing to be called by; each caller has its own fallback.
     pub(in crate::workspace) fn tab_label(&self, tab: &TabEntry, cx: &App) -> Option<SharedString> {
         if self.is_orchestrator_tab(tab) {
-            return Some(crate::surface::strings::orchestrator_label().into());
+            return Some(crate::surface::strings::orchestrator::label().into());
         }
         if let Some(label) = tab.user_label.clone() {
             return Some(label);

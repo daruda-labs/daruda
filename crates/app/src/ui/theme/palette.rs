@@ -373,6 +373,21 @@ pub const LANE_PLACEHOLDER_LINE_GAP: f32 = GAP_STANDARD;
 pub const LANE_GROUP_COLOR_DOT_SIZE: f32 = 8.0;
 /// Corner radius of the group color dot (px). Half the size to render a circle.
 pub const LANE_GROUP_COLOR_DOT_RADIUS: f32 = RADIUS_SM;
+/// Color presets exposed by the Group context menu. Hex strings are
+/// stored on `SerializedGroup::color` so the dock's group header
+/// chip can decode them via `gpui::Rgba::try_from(...)` without any
+/// daruda-specific palette lookup.
+pub const GROUP_PRESET_RED: &str = "#f87171";
+pub const GROUP_PRESET_ORANGE: &str = "#fb923c";
+pub const GROUP_PRESET_YELLOW: &str = "#facc15";
+pub const GROUP_PRESET_LIME: &str = "#a3e635";
+pub const GROUP_PRESET_GREEN: &str = "#4ade80";
+pub const GROUP_PRESET_TEAL: &str = "#2dd4bf";
+pub const GROUP_PRESET_CYAN: &str = "#22d3ee";
+pub const GROUP_PRESET_BLUE: &str = "#60a5fa";
+pub const GROUP_PRESET_INDIGO: &str = "#818cf8";
+pub const GROUP_PRESET_PURPLE: &str = "#a78bfa";
+pub const GROUP_PRESET_PINK: &str = "#f472b6";
 
 // ----------------------------------------------------------------------------
 // Project tree metrics

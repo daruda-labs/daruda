@@ -52,7 +52,7 @@ impl SettingsView {
     /// `control::spec` actually accepts.
     fn copy_botfather_commands(&mut self, cx: &mut gpui::Context<Self>) {
         self.copy_with_feedback(
-            s::control_botfather_commands(),
+            s::control::botfather_commands(),
             |this| &mut this.telegram_botfather_copy,
             cx,
         );
@@ -139,7 +139,7 @@ impl SettingsView {
             // The token stays in the field: nothing was stored, so retrying is
             // the next thing the user will want and retyping it is not.
             Err(e) => self.report_section_error(
-                s::settings_err_telegram_token_save(&e.to_string()),
+                s::settings::err_telegram_token_save(e.to_string()),
                 ErrorReport::new("Telegram token was not stored")
                     .severity(ErrorSeverity::Warning)
                     .from_error(&e)
@@ -169,7 +169,7 @@ impl SettingsView {
                 cx.notify();
             }
             Err(e) => self.report_section_error(
-                s::settings_err_telegram_token_clear(&e.to_string()),
+                s::settings::err_telegram_token_clear(e.to_string()),
                 ErrorReport::new("Telegram token was not removed")
                     .severity(ErrorSeverity::Warning)
                     .from_error(&e)
@@ -189,7 +189,7 @@ impl SettingsView {
     pub(super) fn unpair_telegram(&mut self, cx: &mut gpui::Context<Self>) {
         self.apply_settings_patch_force_as(
             daruda_config::SettingsPatch::TelegramAuthorizedChatId(None),
-            s::settings_err_telegram_unpair,
+            |e| s::settings::err_telegram_unpair(e),
             cx,
         );
     }
@@ -213,11 +213,11 @@ impl SettingsView {
             .when(held_elsewhere, |body| {
                 body.child(crate::ui::alert::warning(
                     "settings-telegram-held-elsewhere",
-                    s::settings_telegram_held_elsewhere(),
+                    s::settings::telegram_held_elsewhere(),
                 ))
             })
             .child(field_row(
-                s::settings_telegram_token_label(),
+                s::settings::telegram_token_label(),
                 crate::ui::input(&self.telegram_token_input, cx, 0),
             ))
             .child(
@@ -229,7 +229,7 @@ impl SettingsView {
                     .child(
                         button(
                             "settings-telegram-save-token",
-                            s::settings_telegram_save_token(),
+                            s::settings::telegram_save_token(),
                         )
                         .on_click(cx.listener(
                             |this, _: &ClickEvent, window, cx| {
@@ -242,12 +242,12 @@ impl SettingsView {
                             div()
                                 .text_size(px(theme::MODAL_BODY_FONT_SIZE))
                                 .text_color(body_color)
-                                .child(s::settings_telegram_token_configured()),
+                                .child(s::settings::telegram_token_configured()),
                         )
                         .child(
                             button_danger(
                                 "settings-telegram-clear-token",
-                                s::settings_telegram_clear_token(),
+                                s::settings::telegram_clear_token(),
                             )
                             .on_click(cx.listener(
                                 |this, _: &ClickEvent, window, cx| {
@@ -271,7 +271,7 @@ impl SettingsView {
                     .child(
                         button(
                             "settings-telegram-generate-code",
-                            s::settings_telegram_generate_code(),
+                            s::settings::telegram_generate_code(),
                         )
                         .on_click(cx.listener(
                             |this, _: &ClickEvent, _window, cx| {
@@ -285,9 +285,9 @@ impl SettingsView {
             )
             .when_some(pair_code, |body, code| {
                 let copy_label = if self.telegram_pair_command_copy.copied() {
-                    s::error_modal_button_copied()
+                    s::common::btn_copied()
                 } else {
-                    s::error_modal_button_copy()
+                    s::common::btn_copy()
                 };
                 body.child(
                     div()
@@ -299,7 +299,7 @@ impl SettingsView {
                             div()
                                 .text_size(px(theme::MODAL_BODY_FONT_SIZE))
                                 .text_color(body_color)
-                                .child(s::settings_telegram_pair_instructions(&code)),
+                                .child(s::settings::telegram_pair_instructions(&code)),
                         )
                         .child(
                             button("settings-telegram-copy-pair-command", copy_label).on_click(
@@ -323,15 +323,15 @@ impl SettingsView {
                             .text_size(px(theme::MODAL_BODY_FONT_SIZE))
                             .text_color(body_color)
                             .child(match authorized_chat_id {
-                                Some(chat_id) => s::settings_telegram_paired(chat_id),
-                                None => s::settings_telegram_not_paired(),
+                                Some(chat_id) => s::settings::telegram_paired(chat_id),
+                                None => s::settings::telegram_not_paired(),
                             }),
                     )
                     .when(authorized_chat_id.is_some(), |row| {
                         row.child(
                             button_danger(
                                 "settings-telegram-unpair",
-                                s::settings_telegram_unpair(),
+                                s::settings::telegram_unpair(),
                             )
                             .on_click(cx.listener(
                                 |this, _: &ClickEvent, window, cx| {
@@ -353,13 +353,13 @@ impl SettingsView {
                         div()
                             .text_size(px(theme::MODAL_BODY_FONT_SIZE))
                             .text_color(body_color)
-                            .child(s::settings_telegram_botfather_label()),
+                            .child(s::settings::telegram_botfather_label()),
                     )
                     .child(
                         div()
                             .text_size(px(theme::MODAL_BODY_FONT_SIZE))
                             .text_color(body_color)
-                            .child(s::settings_telegram_botfather_help()),
+                            .child(s::settings::telegram_botfather_help()),
                     )
                     // A verbatim paste-me payload, so it gets the same
                     // monospace card a fenced code block does
@@ -378,16 +378,16 @@ impl SettingsView {
                             .font(gpui::font("monospace"))
                             .text_size(px(theme::MODAL_BODY_FONT_SIZE))
                             .text_color(body_color)
-                            .child(s::control_botfather_commands()),
+                            .child(s::control::botfather_commands()),
                     )
                     .child(
                         div().flex().flex_row().child(
                             button(
                                 "settings-telegram-copy-botfather",
                                 if self.telegram_botfather_copy.copied() {
-                                    s::error_modal_button_copied()
+                                    s::common::btn_copied()
                                 } else {
-                                    s::error_modal_button_copy()
+                                    s::common::btn_copy()
                                 },
                             )
                             .on_click(cx.listener(
@@ -402,8 +402,8 @@ impl SettingsView {
 
     pub(super) fn render_keymap(&self, cx: &mut gpui::Context<Self>) -> AnyElement {
         Self::render_placeholder(
-            s::settings_section_keymap(),
-            s::settings_placeholder_keymap(),
+            s::settings::section_keymap(),
+            s::settings::placeholder_keymap(),
             cx,
         )
     }
@@ -440,7 +440,7 @@ impl SettingsView {
     /// GUI yet); the sidebar carries the same action for every page.
     fn render_open_config_button(cx: &mut gpui::Context<Self>) -> impl IntoElement {
         div().flex().flex_row().child(
-            button("settings-open-config", s::settings_open_config_file()).on_click(cx.listener(
+            button("settings-open-config", s::settings::open_config_file()).on_click(cx.listener(
                 |this, _: &ClickEvent, _window, cx| {
                     this.open_config_file(cx);
                 },
@@ -470,8 +470,8 @@ impl SettingsView {
             && let Err(e) = ensure_dir(parent)
         {
             self.report_section_error(
-                s::settings_err_open_config(&e.to_string()),
-                ErrorReport::new(crate::surface::strings::error_create_config_dir_failed())
+                s::settings::err_open_config(e.to_string()),
+                ErrorReport::new(crate::surface::strings::error::create_config_dir_failed())
                     .severity(ErrorSeverity::Warning)
                     .from_error(&e)
                     .at(file!(), line!())
@@ -489,7 +489,7 @@ impl SettingsView {
                     "Config path cannot be represented as a file URL",
                 );
                 self.report_section_error(
-                    s::settings_err_open_config(&error.to_string()),
+                    s::settings::err_open_config(error.to_string()),
                     ErrorReport::new("Config file URL could not be created")
                         .severity(ErrorSeverity::Warning)
                         .from_error(&error)

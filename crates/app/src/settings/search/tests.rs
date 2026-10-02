@@ -116,7 +116,7 @@ fn every_hand_drawn_block_is_indexed_once() {
 fn a_hand_drawn_block_links_to_the_page_that_draws_it() {
     let slack = docs()
         .into_iter()
-        .find(|d| d.label == s::remote_slack())
+        .find(|d| d.label == s::remote_channel::slack())
         .expect("slack entry");
     assert_eq!(slack.target, Hit::Page(Section::RemoteControl));
 }
@@ -140,7 +140,7 @@ fn hand_drawn_blocks_keep_their_page_position() {
     let found = query("away");
     let slack = found
         .iter()
-        .position(|d| d.label == s::remote_slack())
+        .position(|d| d.label == s::remote_channel::slack())
         .expect("slack link");
     let telegram = found
         .iter()
@@ -155,7 +155,7 @@ fn hand_drawn_blocks_keep_their_page_position() {
 fn a_hand_drawn_card_groups_under_its_heading() {
     let slack = query("slack")
         .into_iter()
-        .find(|d| d.label == s::remote_slack())
+        .find(|d| d.label == s::remote_channel::slack())
         .expect("slack entry");
-    assert_eq!(slack.card, s::settings_group_integrations());
+    assert_eq!(slack.card, s::settings::group_integrations());
 }

@@ -28,11 +28,8 @@ daruda uses [rust-i18n v3](https://github.com/longbridgeapp/rust-i18n).
 ### How to wire a new `common.*` key
 
 1. Add the key to `common:` in both `en.yml` and `ko.yml`.
-2. In `surface/strings.rs` **either**:
-   - Update an existing per-domain function to point at `common.*`  
-     (`pub fn settings_cancel() -> String { t!("common.btn_cancel")... }`)  
-   - Add a new `pub fn common_<key>()` only if the caller has no domain context.
-3. Do **not** remove the per-domain wrapper functions — call sites must not change.
+2. Call `s::common::<key>()`. There are no per-domain wrappers: one key is one
+   function, so a shared string is reached by its `common.*` name.
 
 ### Do NOT put in `common:`
 
@@ -77,22 +74,43 @@ Do **not** add domain-prefixed duplicates like `ui.file_viewer_loading`.
    a section is preferred but not required.
 
 2. **Add the matching key to `ko.yml`** in the same position. Missing keys fall
-   back to English at runtime (rust-i18n `fallback = "en"`), but the file must
-   be kept in sync manually — there is no automated check.
+   back to English at runtime (rust-i18n `fallback = "en"`);
+   `locale_en_ko_key_parity` and `locale_en_ko_placeholder_parity` in
+   `surface/strings/tests.rs` fail when the two drift.
 
-3. **Add a `pub fn` to `crates/app/src/surface/strings.rs`:**
+3. **There is no step 3.** `crates/app/build.rs` turns every `en.yml` key into
+   a function — `section.key` is `crate::surface::strings::section::key()`, and
+   each `%{name}` placeholder becomes a `name: impl Display` parameter, in the
+   order the English value first names them:
+
+   ```yaml
+   flow:
+     # Said under a question when more are behind it.
+     more_questions_waiting: "%{n} more waiting"
+   ```
+   ```rust
+   s::flow::more_questions_waiting(queue.len())
+   ```
+
+   The `#` lines directly above a key (no blank line between) become its doc
+   comment. A key name must be a Rust identifier — the build says which one
+   is not. A misspelt key is a compile error, and a key nothing calls is a
+   dead-code warning, so remove it from both locale files.
+
+   **A string that needs logic** — a plural picked in code, an argument
+   formatted first — goes in `crates/app/src/surface/strings/custom/<section>.rs`
+   as a `pub(crate) fn`, declared in `custom/mod.rs`. Named like a key, it
+   replaces the generated function for that key:
 
    ```rust
-   pub fn section_key_name() -> String {
-       rust_i18n::t!("section.key_name").into_owned()
+   // custom/flow.rs — replaces the generated `flow::pin_tooltip`
+   pub(crate) fn pin_tooltip(nodes: &[daruda_flow::NodeId]) -> String {
+       rust_i18n::t!("flow.pin_tooltip", nodes = node_list(nodes)).into_owned()
    }
    ```
 
-   Function name = section + key joined with `_`, mirroring the YAML path.
-   All functions return `String` (`.into_owned()` on the `Cow`).
-
-4. **Call the function at the call site.** Never embed raw string literals for
-   user-visible text — all user-facing strings go through `surface/strings.rs`.
+4. **Call the function at the call site** (`s::section::key()`). Never embed
+   raw string literals for user-visible text.
 
 ## YAML syntax rules
 
@@ -145,8 +163,8 @@ which locale is active at runtime. `"auto"` follows the macOS system locale.
 - [ ] String is **unique to this section** → add under the owning section; string is **already in `common:`** → reuse `common.*`; string is **reused across ≥ 2 sections** → add to `common:` first
 - [ ] Key added to `en.yml`
 - [ ] Matching key added to `ko.yml` with Korean translation
-- [ ] `pub fn` added to `surface/strings.rs` (or existing function redirected to `common.*`)
-- [ ] Call sites use `s::function_name()`, not a string literal
+- [ ] Logic-bearing strings only: a `pub(crate) fn` in `surface/strings/custom/<section>.rs`
+- [ ] Call sites use `s::section::key()`, not a string literal
 - [ ] YAML validates (run from repo root):
   ```bash
   python3 -c "import yaml; yaml.safe_load(open('crates/app/locales/en.yml'))"

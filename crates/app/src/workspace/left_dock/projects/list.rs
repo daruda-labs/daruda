@@ -245,7 +245,7 @@ fn grouped_project_block(
 fn empty_state(cx: &mut Context<Dock>) -> impl IntoElement {
     let cta = crate::ui::button_primary(
         "projects-empty-add",
-        surface_strings::projects_empty_state_cta(),
+        surface_strings::projects::empty_state_cta(),
     )
     .on_click(cx.listener(|_dock, _: &gpui::ClickEvent, _window, app_cx| {
         // prompt_and_open_folder_with_policy takes only &mut App — _window unused.
@@ -263,7 +263,7 @@ fn empty_state(cx: &mut Context<Dock>) -> impl IntoElement {
         .text_size(px(theme::DOCK_PLACEHOLDER_FONT_SIZE))
         .text_color(theme::current(cx).text_subtle)
         .child(crate::ui::placeholder_text(
-            surface_strings::projects_empty_state(),
+            surface_strings::projects::empty_state(),
         ))
         .child(cta)
 }

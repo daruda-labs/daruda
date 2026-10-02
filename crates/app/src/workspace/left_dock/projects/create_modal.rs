@@ -46,7 +46,7 @@ fn host_select_options(catalog: &[SessionHostEntry]) -> Vec<SelectOption> {
     let mut opts = Vec::with_capacity(catalog.len() + 1);
     opts.push(SelectOption::new(
         LOCAL_SELECT_VALUE,
-        s::session_host_option_local(),
+        s::session_host::option_local(),
     ));
     opts.extend(
         catalog
@@ -112,13 +112,13 @@ impl CreateWorktreeModal {
         cx: &mut Context<Self>,
     ) -> Self {
         let branch_input = cx.new(|cx_state| {
-            InputState::new(window, cx_state).placeholder(s::create_lane_placeholder_branch_name())
+            InputState::new(window, cx_state).placeholder(s::create_lane::placeholder_branch_name())
         });
         let base_input = cx.new(|cx_state| {
-            InputState::new(window, cx_state).placeholder(s::create_lane_placeholder_base_ref())
+            InputState::new(window, cx_state).placeholder(s::create_lane::placeholder_base_ref())
         });
         let description_input = cx.new(|cx_state| {
-            InputState::new(window, cx_state).placeholder(s::create_lane_placeholder_description())
+            InputState::new(window, cx_state).placeholder(s::create_lane::placeholder_description())
         });
         let host_select = cx.new(|cx_state| {
             select::state_with_options(
@@ -130,7 +130,7 @@ impl CreateWorktreeModal {
         });
         let session_path_input = cx.new(|cx_state| {
             InputState::new(window, cx_state)
-                .placeholder(s::session_host_placeholder_session_path())
+                .placeholder(s::session_host::placeholder_session_path())
         });
 
         // Tab order is fully driven by the `tab_index` argument to
@@ -245,9 +245,9 @@ impl CreateWorktreeModal {
         let raw = self.branch_input.read(cx).value().to_string();
         let raw = raw.trim();
         if raw.is_empty() {
-            return Err(s::create_lane_err_branch_required());
+            return Err(s::create_lane::err_branch_required());
         }
-        let branch = sanitize_branch_name(raw).ok_or_else(s::create_lane_err_branch_invalid)?;
+        let branch = sanitize_branch_name(raw).ok_or_else(s::create_lane::err_branch_invalid)?;
         let new_path = crate::workspace::lane_ops::lane_checkout_path(&self.repo_root, &branch);
 
         let base_ref = blank_to_none(&self.base_input.read(cx).value());
@@ -397,24 +397,24 @@ impl Render for CreateWorktreeModal {
                 div()
                     .text_size(px(theme::MODAL_BODY_FONT_SIZE))
                     .text_color(muted_text)
-                    .child(s::create_lane_body_branch_name()),
+                    .child(s::create_lane::body_branch_name()),
             )
             .child(input(&self.branch_input, cx, 0))
             .child(
                 div()
                     .text_size(px(theme::MODAL_BODY_FONT_SIZE))
                     .text_color(muted_text)
-                    .child(s::create_lane_body_base_ref()),
+                    .child(s::create_lane::body_base_ref()),
             )
             .child(input(&self.base_input, cx, 1))
             .child(
                 div()
                     .text_size(px(theme::MODAL_BODY_FONT_SIZE))
                     .text_color(muted_text)
-                    .child(s::create_lane_body_description()),
+                    .child(s::create_lane::body_description()),
             )
             .child(input(&self.description_input, cx, 2))
-            .child(field_label(s::session_host_field_host(), &t))
+            .child(field_label(s::session_host::field_host(), &t))
             .child(select::select(&self.host_select, cx, 3_isize));
 
         if self.catalog.is_empty() {
@@ -422,21 +422,21 @@ impl Render for CreateWorktreeModal {
                 div()
                     .text_size(px(theme::MODAL_BODY_FONT_SIZE))
                     .text_color(muted_text)
-                    .child(s::create_lane_session_host_registry_empty_hint()),
+                    .child(s::create_lane::session_host_registry_empty_hint()),
             );
         }
 
         if self.selected_entry(cx).is_some() {
             body = body
-                .child(field_label(s::session_host_field_session_path(), &t))
+                .child(field_label(s::session_host::field_session_path(), &t))
                 .child(input(&self.session_path_input, cx, 4));
         }
 
         let create_disabled = self.submitting || self.branch_input.read(cx).value().is_empty();
         let submit_label = if self.submitting {
-            s::create_lane_creating()
+            s::create_lane::creating()
         } else {
-            s::create_lane_submit()
+            s::create_lane::submit()
         };
         let footer = div()
             .flex()
@@ -445,7 +445,7 @@ impl Render for CreateWorktreeModal {
             .gap(px(theme::MODAL_FOOTER_GAP))
             .mt(px(theme::MODAL_FOOTER_MARGIN_TOP))
             .child(
-                button("create-wt-cancel", s::common_button_cancel()).on_click(cx.listener(
+                button("create-wt-cancel", s::common::btn_cancel()).on_click(cx.listener(
                     |this, _: &ClickEvent, window, cx| {
                         this.dismiss(window, cx);
                     },

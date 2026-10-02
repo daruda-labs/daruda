@@ -223,15 +223,17 @@ impl Workspace {
         cx: &mut Context<Self>,
     ) {
         let body = match cause {
-            NewPaneCause::Terminal => s::switch_account_new_pane_body_terminal(),
-            NewPaneCause::AgentChatBusy => s::switch_account_new_pane_body_busy(),
-            NewPaneCause::AgentChatConversation => s::switch_account_new_pane_body_conversation(),
+            NewPaneCause::Terminal => s::modal::switch_account_new_pane_body_terminal(),
+            NewPaneCause::AgentChatBusy => s::modal::switch_account_new_pane_body_busy(),
+            NewPaneCause::AgentChatConversation => {
+                s::modal::switch_account_new_pane_body_conversation()
+            }
         };
         let weak = cx.weak_entity();
         open_confirm_dialog(
-            s::switch_account_new_pane_title(),
+            s::modal::switch_account_new_pane_title(),
             body,
-            s::switch_account_new_pane_confirm(),
+            s::modal::switch_account_new_pane_confirm(),
             ButtonVariant::Primary,
             move |_, window, app_cx| {
                 if let Some(ws) = weak.upgrade() {
@@ -279,7 +281,7 @@ impl Workspace {
                     Ok(p) => p,
                     Err(e) => {
                         self.report_pane_error(
-                            &crate::surface::strings::pane_context_switch_account(),
+                            &crate::surface::strings::error::pane_context_switch_account(),
                             e,
                             cx,
                         );

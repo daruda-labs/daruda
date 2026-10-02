@@ -132,7 +132,7 @@ impl RenderOnce for DiagramActions {
                     &theme::PaneSurfaceTokens::agent_chat(cx),
                     cx,
                 )
-                .tooltip(s::agent_chat_diagram_zoom())
+                .tooltip(s::agent_chat::diagram_zoom())
                 .on_click(move |_, window, cx| {
                     // This row floats over the diagram, and gpui hit-tests
                     // every hitbox under the pointer — without this the
@@ -151,9 +151,9 @@ impl RenderOnce for DiagramActions {
                 ElementId::from(SharedString::from(format!("mermaid-copy-{key}"))),
                 self.source,
                 icons::icon(icons::COPY),
-                SharedString::from(s::agent_chat_diagram_copy()),
+                SharedString::from(s::agent_chat::diagram_copy()),
                 icons::icon(icons::CHECK),
-                SharedString::from(s::agent_chat_diagram_copied()),
+                SharedString::from(s::agent_chat::diagram_copied()),
                 window,
                 cx,
             ))

@@ -163,7 +163,7 @@ fn entry_for(dir: &Path, lock_dir: Option<&Path>) -> FlowRunEntry {
         .unwrap_or_default();
     FlowRunEntry {
         started: super::flow_request::run_started_at(&name)
-            .map(crate::surface::strings::flow_run_started_at)
+            .map(crate::surface::strings::flow::run_started_at)
             .unwrap_or_default()
             .into(),
         // `is_alive` is how a lock's pid is judged, and it is the same

@@ -103,7 +103,7 @@ impl Render for ImageLightbox {
                     .justify_end()
                     .child(
                         button_close("image-lightbox-close", cx)
-                            .tooltip(s::error_modal_button_close())
+                            .tooltip(s::common::btn_close())
                             .on_click(cx.listener(|this, _: &ClickEvent, window, cx| {
                                 this.dismiss(window, cx);
                             })),

@@ -39,7 +39,7 @@ pub(in super::super) fn render(
         .child(field_with_note(
             form,
             super::notes::FormField::Id,
-            s::flow_form_id_label(),
+            s::flow::form_id_label(),
             None,
             field(form.id_state(), cx, 0),
             cx,
@@ -47,7 +47,7 @@ pub(in super::super) fn render(
         .child(field_with_note(
             form,
             super::notes::FormField::Deps,
-            s::flow_form_deps_label(),
+            s::flow::form_deps_label(),
             None,
             field(form.deps_state(), cx, 1),
             cx,
@@ -58,7 +58,7 @@ pub(in super::super) fn render(
     // logical slot whichever node they picked.
     let body = form.body_states(cx);
     rows = rows.child(field_column(
-        s::flow_form_kind_label(),
+        s::flow::form_kind_label(),
         select(body.kind_select, cx, 2),
         cx,
     ));
@@ -66,23 +66,23 @@ pub(in super::super) fn render(
         KindChoice::Agent => rows
             .child(source_row(
                 body.prompt,
-                s::flow_form_prompt_label(),
-                s::flow_form_prompt_file_label(),
+                s::flow::form_prompt_label(),
+                s::flow::form_prompt_file_label(),
                 3,
                 cx,
             ))
             .child(field_with_note(
                 form,
                 super::notes::FormField::Output,
-                s::flow_form_output_label(),
-                Some(s::flow_form_output_help()),
+                s::flow::form_output_label(),
+                Some(s::flow::form_output_help()),
                 field(body.output, cx, 5),
                 cx,
             ))
             .child(fail_section(body.on_fail, FailShape::Retry, cx)),
         KindChoice::Command => rows
             .child(field_column(
-                s::flow_form_run_label(),
+                s::flow::form_run_label(),
                 field(body.run, cx, 3),
                 cx,
             ))
@@ -91,21 +91,21 @@ pub(in super::super) fn render(
 
     rows = rows
         .child(field_column(
-            s::flow_form_timeout_label(),
+            s::flow::form_timeout_label(),
             field(form.timeout_state(), cx, 4),
             cx,
         ))
         // Beside the timeout because both are ceilings on one attempt — one on
         // its clock, one on how many times it may be prompted.
         .child(field_column(
-            s::flow_form_turns_label(),
+            s::flow::form_turns_label(),
             field(form.turns_state(), cx, 4),
             cx,
         ))
         .child(field_with_note(
             form,
             super::notes::FormField::Cwd,
-            s::flow_form_cwd_label(),
+            s::flow::form_cwd_label(),
             None,
             field(form.cwd_state(), cx, 5),
             cx,
@@ -119,13 +119,13 @@ pub(in super::super) fn render(
 
     if let Some(refusal) = &refusal {
         let message = match refusal {
-            Refusal::EmptyId => s::flow_form_id_required(),
-            Refusal::InvalidId => s::flow_form_id_invalid(),
-            Refusal::Timeout(text) => s::flow_form_timeout_unreadable(text),
-            Refusal::Attempts(text) => s::flow_form_attempts_unreadable(text),
-            Refusal::Turns(text) => s::flow_form_turns_unreadable(text),
-            Refusal::OutputRequired => s::flow_form_output_required(),
-            Refusal::RunRequired => s::flow_form_run_required(),
+            Refusal::EmptyId => s::flow::form_id_required(),
+            Refusal::InvalidId => s::flow::form_id_invalid(),
+            Refusal::Timeout(text) => s::flow::form_timeout_unreadable(text),
+            Refusal::Attempts(text) => s::flow::form_attempts_unreadable(text),
+            Refusal::Turns(text) => s::flow::form_turns_unreadable(text),
+            Refusal::OutputRequired => s::flow::form_output_required(),
+            Refusal::RunRequired => s::flow::form_run_required(),
         };
         rows = rows.child(
             div()
@@ -141,14 +141,14 @@ pub(in super::super) fn render(
         .flex_row()
         .gap(px(palette::FLOW_INSPECTOR_GAP))
         .child(
-            button_primary("flow-form-save", s::flow_form_save())
+            button_primary("flow-form-save", s::flow::form_save())
                 .disabled(!can_save)
                 .on_click(cx.listener(|_, _, _window, cx| {
                     cx.emit(super::super::FlowGraphEvent::Save);
                 })),
         )
         .child(
-            button("flow-form-revert", s::flow_form_revert())
+            button("flow-form-revert", s::flow::form_revert())
                 .disabled(!dirty)
                 .on_click(cx.listener(|_, _, _window, cx| {
                     cx.emit(super::super::FlowGraphEvent::Revert);
@@ -158,7 +158,7 @@ pub(in super::super) fn render(
         // Also on the pane's menu, which is where a person who has not selected
         // anything looks.
         .child(
-            button_danger("flow-form-delete", s::flow_delete_node()).on_click(cx.listener(
+            button_danger("flow-form-delete", s::flow::delete_node()).on_click(cx.listener(
                 |_, _, _window, cx| {
                     cx.emit(super::super::FlowGraphEvent::Delete);
                 },
@@ -282,7 +282,7 @@ fn fail_section(
         .flex_col()
         .gap(px(palette::FLOW_INSPECTOR_GAP))
         .child(field_column(
-            s::flow_form_fail_label(),
+            s::flow::form_fail_label(),
             select(&states.policy, cx, 11),
             cx,
         ));
@@ -292,31 +292,31 @@ fn fail_section(
     section = match shape {
         FailShape::Retry => section.child(source_row(
             &states.hint,
-            s::flow_form_hint_label(),
-            s::flow_form_hint_file_label(),
+            s::flow::form_hint_label(),
+            s::flow::form_hint_file_label(),
             12,
             cx,
         )),
         FailShape::Repair => section
             .child(field_column(
-                s::flow_form_fix_label(),
+                s::flow::form_fix_label(),
                 field(&states.fix, cx, 12),
                 cx,
             ))
             .child(field_column(
-                s::flow_form_rerun_label(),
+                s::flow::form_rerun_label(),
                 field(&states.rerun, cx, 13),
                 cx,
             )),
     };
     section
         .child(field_column(
-            s::flow_form_attempts_label(),
+            s::flow::form_attempts_label(),
             field(&states.max_attempts, cx, 14),
             cx,
         ))
         .child(field_column(
-            s::flow_form_wait_label(),
+            s::flow::form_wait_label(),
             field(&states.wait, cx, 15),
             cx,
         ))
@@ -355,7 +355,7 @@ fn agent_section(
             div()
                 .text_size(px(palette::FLOW_GRAPH_META_FONT_SIZE))
                 .text_color(muted)
-                .child(s::flow_form_agent_section()),
+                .child(s::flow::form_agent_section()),
         );
 
     let error = current(cx).banner_error_text;
@@ -374,27 +374,27 @@ fn agent_section(
         let states = form.agent_states();
         section = section
             .child(field_column(
-                s::flow_form_agent_id_label(),
+                s::flow::form_agent_id_label(),
                 field(&states.id, cx, 6),
                 cx,
             ))
             .child(field_column(
-                s::flow_form_agent_mode_label(),
+                s::flow::form_agent_mode_label(),
                 field(&states.mode, cx, 7),
                 cx,
             ))
             .child(field_column(
-                s::flow_form_agent_model_label(),
+                s::flow::form_agent_model_label(),
                 field(&states.model, cx, 8),
                 cx,
             ))
             .child(field_column(
-                s::flow_form_agent_effort_label(),
+                s::flow::form_agent_effort_label(),
                 field(&states.effort, cx, 9),
                 cx,
             ))
             .child(field_column(
-                s::flow_form_agent_permission_label(),
+                s::flow::form_agent_permission_label(),
                 select(&states.permission, cx, 10),
                 cx,
             ));
@@ -407,14 +407,14 @@ pub(in super::super) fn render_many(
     n: usize,
     cx: &mut Context<super::super::FlowGraphView>,
 ) -> impl IntoElement {
-    note(crate::surface::strings::flow_form_many_selected(n), cx)
+    note(crate::surface::strings::flow::form_many_selected(n), cx)
 }
 
 /// What it says for a flow with no nodes at all.
 pub(in super::super) fn render_no_nodes(
     cx: &mut Context<super::super::FlowGraphView>,
 ) -> impl IntoElement {
-    note(crate::surface::strings::flow_form_no_nodes(), cx)
+    note(crate::surface::strings::flow::form_no_nodes(), cx)
 }
 
 /// What it says with nothing selected. The column is there either way — see the
@@ -422,7 +422,7 @@ pub(in super::super) fn render_no_nodes(
 pub(in super::super) fn render_empty(
     cx: &mut Context<super::super::FlowGraphView>,
 ) -> impl IntoElement {
-    note(crate::surface::strings::flow_form_no_selection(), cx)
+    note(crate::surface::strings::flow::form_no_selection(), cx)
 }
 
 /// A labelled field on the pane's own surface, not the modal one.

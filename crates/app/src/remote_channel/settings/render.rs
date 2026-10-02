@@ -9,13 +9,13 @@ use gpui::{Context, IntoElement, Render, Window, div, prelude::*, px};
 
 fn status_label(status: Status) -> String {
     match status {
-        Status::Disabled => s::remote_disabled(),
-        Status::MissingCredentials => s::remote_missing_credentials(),
-        Status::Connecting => s::remote_connecting(),
-        Status::Connected => s::remote_connected(),
-        Status::Retrying => s::remote_retrying(),
-        Status::Failed => s::remote_failed(),
-        Status::HeldElsewhere => s::remote_held_elsewhere(),
+        Status::Disabled => s::remote_channel::disabled(),
+        Status::MissingCredentials => s::remote_channel::missing_credentials(),
+        Status::Connecting => s::remote_channel::connecting(),
+        Status::Connected => s::remote_channel::connected(),
+        Status::Retrying => s::remote_channel::retrying(),
+        Status::Failed => s::remote_channel::failed(),
+        Status::HeldElsewhere => s::remote_channel::held_elsewhere(),
     }
 }
 
@@ -31,8 +31,8 @@ impl ChannelSettings {
         let save_id = id.to_owned();
         let remove_id = id.to_owned();
         let label = match secret {
-            Secret::Bot => s::remote_bot_token(),
-            Secret::App => s::remote_app_token(),
+            Secret::Bot => s::remote_channel::bot_token(),
+            Secret::App => s::remote_channel::app_token(),
         };
         div()
             .flex()
@@ -49,7 +49,7 @@ impl ChannelSettings {
                     .items_center()
                     .gap(px(theme::MODAL_FOOTER_GAP))
                     .child(
-                        ui::button(("remote-save", index), s::remote_save_token())
+                        ui::button(("remote-save", index), s::remote_channel::save_token())
                             .icon(IconName::Check)
                             .disabled(input.busy)
                             .tab_stop(true)
@@ -61,12 +61,12 @@ impl ChannelSettings {
                         row.child(
                             div()
                                 .text_color(theme::current(cx).text_muted)
-                                .child(s::remote_token_saved()),
+                                .child(s::remote_channel::token_saved()),
                         )
                         .child(
                             ui::button_icon_danger(("remote-remove", index), ui::icons::DELETE, cx)
                                 .disabled(input.busy)
-                                .tooltip(s::remote_clear_token())
+                                .tooltip(s::remote_channel::clear_token())
                                 .tab_stop(true)
                                 .on_click(cx.listener(move |this, _, window, cx| {
                                     this.request_remove_secret(&remove_id, secret, window, cx)
@@ -95,8 +95,8 @@ impl Render for ChannelSettings {
             let unpair_id = row.config.id.clone();
             let copy_id = row.config.id.clone();
             let name = match row.config.kind {
-                ChannelKind::Slack => s::remote_slack(),
-                ChannelKind::Discord => s::remote_discord(),
+                ChannelKind::Slack => s::remote_channel::slack(),
+                ChannelKind::Discord => s::remote_channel::discord(),
             };
             let ready = row.bot.configured && row.app.as_ref().is_none_or(|app| app.configured);
             let mut section = div()
@@ -124,18 +124,18 @@ impl Render for ChannelSettings {
                         .child(row.config.id.clone()),
                 )
                 .child(ui::field_row(
-                    s::remote_enabled(),
+                    s::remote_channel::enabled(),
                     ui::switch(("remote-enabled", index), row.config.enabled, cx)
-                        .tooltip(s::remote_enabled())
+                        .tooltip(s::remote_channel::enabled())
                         .on_click(cx.listener(move |this, _, _, cx| {
                             this.set_enabled(&enabled_id, next_enabled, cx)
                         })),
                 ))
                 .child(
                     ui::dependent(row.config.enabled, cx).child(ui::field_row(
-                        s::remote_only_when_away(),
+                        s::remote_channel::only_when_away(),
                         ui::switch(("remote-presence", index), row.config.only_when_away, cx)
-                            .tooltip(s::remote_only_when_away())
+                            .tooltip(s::remote_channel::only_when_away())
                             .on_click(cx.listener(move |this, _, _, cx| {
                                 this.set_presence(&presence_id, next_presence, cx)
                             })),
@@ -158,12 +158,12 @@ impl Render for ChannelSettings {
                         .flex_wrap()
                         .items_center()
                         .gap(px(theme::MODAL_FOOTER_GAP))
-                        .child(s::remote_paired(
+                        .child(s::remote_channel::paired(
                             &recipient.user_id,
                             &recipient.conversation_id,
                         ))
                         .child(
-                            ui::button(("remote-unpair", index), s::remote_unpair())
+                            ui::button(("remote-unpair", index), s::remote_channel::unpair())
                                 .child(ui::icons::icon(ui::icons::CLOSE))
                                 .tab_stop(true)
                                 .on_click(cx.listener(move |this, _, window, cx| {
@@ -173,7 +173,7 @@ impl Render for ChannelSettings {
                 );
             } else {
                 section = section.child(
-                    ui::button(("remote-pair", index), s::remote_pair())
+                    ui::button(("remote-pair", index), s::remote_channel::pair())
                         .child(ui::icons::icon(ui::icons::ADD))
                         .disabled(!row.config.enabled || !ready)
                         .tab_stop(true)
@@ -189,7 +189,7 @@ impl Render for ChannelSettings {
                         .child(format!("!pair {code}"))
                         .child(
                             ui::button_icon(("remote-copy-pair", index), ui::icons::COPY, cx)
-                                .tooltip(s::remote_copy_pair())
+                                .tooltip(s::remote_channel::copy_pair())
                                 .tab_stop(true)
                                 .on_click(
                                     cx.listener(move |this, _, _, cx| this.copy_pair(&copy_id, cx)),

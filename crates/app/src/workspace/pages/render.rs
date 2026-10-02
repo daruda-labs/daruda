@@ -65,7 +65,7 @@ pub(in crate::workspace) fn content(
                     .actions(
                         button_icon("close-workspace-page", icons::CLOSE, cx)
                             .debug_selector(|| "close-workspace-page".into())
-                            .tooltip(strings::common_button_close())
+                            .tooltip(strings::common::btn_close())
                             .on_click(move |_, window, cx| {
                                 if let Some(ws) = workspace.upgrade() {
                                     ws.update(cx, |ws, cx| ws.return_to_worktree(window, cx));
@@ -93,7 +93,7 @@ pub(in crate::workspace) fn content(
                                 .text_size(px(theme::FONT_SIZE_SM))
                                 .text_color(t.text_muted)
                                 .child(match state.page {
-                                    Page::Tasks => strings::task_scope_all(),
+                                    Page::Tasks => strings::task::scope_all(),
                                     Page::Flows => lane,
                                 }),
                         )

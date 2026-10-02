@@ -27,7 +27,7 @@ impl Workspace {
             return; // already toasted this version
         }
         let report = daruda_store::observability::error_report::ErrorReport::new(
-            crate::surface::strings::update_available_toast(&version.to_string()),
+            crate::surface::strings::settings::update_available_toast(version.to_string()),
         )
         .severity(daruda_store::observability::error_report::ErrorSeverity::Info)
         .dedup(format!("update.available.{version}"))

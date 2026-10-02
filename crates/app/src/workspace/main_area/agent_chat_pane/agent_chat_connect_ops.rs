@@ -63,7 +63,7 @@ fn fail_connect_account_prepare(
     detail: String,
     cx: &mut gpui::AsyncApp,
 ) {
-    let report = ErrorReport::new(s::agent_chat_account_prepare_failed())
+    let report = ErrorReport::new(s::agent_chat::account_prepare_failed())
         .message(detail)
         .severity(ErrorSeverity::Error)
         .at(file!(), line!())
@@ -74,7 +74,7 @@ fn fail_connect_account_prepare(
         if let Some(view) = ws.agent_chat_view(pane_id).cloned() {
             view.update(cx, |v, cx| {
                 v.set_error(
-                    s::agent_chat_account_prepare_failed(),
+                    s::agent_chat::account_prepare_failed(),
                     daruda_acp::Remedy::Retry,
                     cx,
                 )
@@ -194,11 +194,11 @@ impl Workspace {
             // The adapter's own diagnostic, not authored copy — the same
             // treatment a captured login failure gets.
             daruda_acp::AcpEvent::Notice(message) => message.clone(),
-            daruda_acp::AcpEvent::LegacyDelegation => s::agent_chat_legacy_delegation_notice(),
+            daruda_acp::AcpEvent::LegacyDelegation => s::agent_chat::legacy_delegation_notice(),
             _ => return,
         };
         self.report_error(
-            ErrorReport::new(s::agent_chat_session_notice())
+            ErrorReport::new(s::agent_chat::session_notice())
                 .message(message.clone())
                 .severity(ErrorSeverity::Warning)
                 .at(file!(), line!())
@@ -362,7 +362,7 @@ impl Workspace {
             // below: the pane says why, and nothing connects.
             Some(Err(unusable)) => {
                 if let Some(view) = self.agent_chat_view(pane_id).cloned() {
-                    let message = s::agent_chat_session_host_unusable(&unusable.reason.localized());
+                    let message = s::agent_chat::session_host_unusable(unusable.reason.localized());
                     view.update(cx, |v, cx| {
                         v.set_error(message, daruda_acp::Remedy::Configure, cx);
                     });
@@ -430,11 +430,13 @@ impl Workspace {
             Ok(spec) => spec,
             Err(err) => {
                 let message = match err {
-                    ConnectCommandError::NoRemotePath => s::agent_chat_no_remote_cwd(),
+                    ConnectCommandError::NoRemotePath => s::agent_chat::no_remote_cwd(),
                     ConnectCommandError::JsonStdioRemote => {
-                        s::agent_chat_json_stdio_remote_unsupported()
+                        s::agent_chat::json_stdio_remote_unsupported()
                     }
-                    ConnectCommandError::JsonStdioEnv => s::agent_chat_json_stdio_env_unsupported(),
+                    ConnectCommandError::JsonStdioEnv => {
+                        s::agent_chat::json_stdio_env_unsupported()
+                    }
                 };
                 if let Some(view) = self.agent_chat_view(pane_id).cloned() {
                     view.update(cx, |v, cx| {
@@ -534,7 +536,7 @@ impl Workspace {
             if let Some(view) = self.agent_chat_view(pane_id).cloned() {
                 view.update(cx, |v, cx| {
                     v.set_error(
-                        s::task_cli_read_only(),
+                        s::task::cli_read_only(),
                         daruda_acp::Remedy::NoneAvailable,
                         cx,
                     )
@@ -556,7 +558,7 @@ impl Workspace {
             if !self.task_chat_identity_available(&chat.agent_id, account) {
                 view.update(cx, |v, cx| {
                     v.set_error(
-                        s::task_chat_missing_agent(),
+                        s::task::chat_missing_agent(),
                         daruda_acp::Remedy::Configure,
                         cx,
                     )
@@ -858,7 +860,7 @@ impl Workspace {
                             );
                         }
                         let report =
-                            ErrorReport::new(crate::surface::strings::error_acp_connect_failed())
+                            ErrorReport::new(crate::surface::strings::error::acp_connect_failed())
                                 .severity(ErrorSeverity::Error)
                                 .with_context("detail", detail)
                                 .at(file!(), line!())
@@ -904,7 +906,7 @@ impl Workspace {
         let effect = view.update(cx, |v, cx| {
             v.apply_event(
                 daruda_acp::AcpEvent::Error(daruda_acp::AcpFailure::TransportClosed {
-                    message: s::agent_chat_error_stream_ended(),
+                    message: s::agent_chat::error_stream_ended(),
                 }),
                 &syntax_theme,
                 is_light,

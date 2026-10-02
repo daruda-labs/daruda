@@ -271,17 +271,19 @@ pub(super) fn unified_file_row(
             let path_diff = abs_path_for_ctx_diff.clone();
 
             let menu = if is_staged {
-                menu.item(PopupMenuItem::new(app_strings::ctx_git_unstage()).on_click(
-                    move |_, _, cx| {
-                        if let Some(w) = ws_stage.upgrade() {
-                            w.update(cx, |ws, cx| {
-                                ws.unstage_file(lane_id, path_stage.clone(), cx)
-                            });
-                        }
-                    },
-                ))
+                menu.item(
+                    PopupMenuItem::new(app_strings::ctx::git_unstage()).on_click(
+                        move |_, _, cx| {
+                            if let Some(w) = ws_stage.upgrade() {
+                                w.update(cx, |ws, cx| {
+                                    ws.unstage_file(lane_id, path_stage.clone(), cx)
+                                });
+                            }
+                        },
+                    ),
+                )
             } else {
-                menu.item(PopupMenuItem::new(app_strings::ctx_git_stage()).on_click(
+                menu.item(PopupMenuItem::new(app_strings::ctx::git_stage()).on_click(
                     move |_, _, cx| {
                         if let Some(w) = ws_stage.upgrade() {
                             w.update(cx, |ws, cx| ws.stage_file(lane_id, path_stage.clone(), cx));
@@ -291,7 +293,7 @@ pub(super) fn unified_file_row(
             };
 
             let menu = menu.separator().item(
-                PopupMenuItem::new(app_strings::ctx_git_open_diff()).on_click(
+                PopupMenuItem::new(app_strings::ctx::git_open_diff()).on_click(
                     move |_, window, cx| {
                         if let Some(w) = ws_diff.upgrade() {
                             w.update(cx, |ws, cx| {
@@ -311,8 +313,8 @@ pub(super) fn unified_file_row(
                 ),
             );
 
-            menu.separator()
-                .item(PopupMenuItem::new(app_strings::ctx_git_discard()).on_click(
+            menu.separator().item(
+                PopupMenuItem::new(app_strings::ctx::git_discard()).on_click(
                     move |_, window, cx| {
                         if let Some(w) = ws_discard.upgrade() {
                             w.update(cx, |ws, cx| {
@@ -320,7 +322,8 @@ pub(super) fn unified_file_row(
                             });
                         }
                     },
-                ))
+                ),
+            )
         })
         .into_any_element()
 }

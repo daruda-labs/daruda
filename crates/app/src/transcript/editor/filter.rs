@@ -32,14 +32,14 @@ pub(crate) struct FilterEditorActions {
 pub(crate) fn filter_value(filter: DisplayFilter) -> String {
     let hidden = filter.hidden();
     match hidden.as_slice() {
-        [] => s::agent_chat_filter_none(),
-        [one] => s::agent_chat_filter_hidden(&facet_label(*one)),
-        [first, second] => s::agent_chat_filter_hidden(&format!(
+        [] => s::agent_chat::filter_none(),
+        [one] => s::agent_chat::filter_hidden(facet_label(*one)),
+        [first, second] => s::agent_chat::filter_hidden(format!(
             "{} + {}",
             facet_label(*first),
             facet_label(*second)
         )),
-        _ => s::agent_chat_filter_hidden_count(hidden.len()),
+        _ => s::agent_chat::filter_hidden_count(hidden.len()),
     }
 }
 
@@ -137,28 +137,28 @@ fn filter_checkbox(
 
 fn axis_label(axis: FilterAxis) -> String {
     match axis {
-        FilterAxis::Kind => s::agent_chat_filter_axis_kind(),
-        FilterAxis::Reply => s::agent_chat_filter_axis_reply(),
-        FilterAxis::Tool => s::agent_chat_filter_axis_tool(),
+        FilterAxis::Kind => s::agent_chat::filter_axis_kind(),
+        FilterAxis::Reply => s::agent_chat::filter_axis_reply(),
+        FilterAxis::Tool => s::agent_chat::filter_axis_tool(),
     }
 }
 
 fn facet_label(facet: FilterFacet) -> String {
     match facet {
-        FilterFacet::Thinking => s::agent_chat_filter_thinking(),
-        FilterFacet::Prose => s::agent_chat_filter_prose(),
-        FilterFacet::ProseAnswer => s::agent_chat_filter_prose_answer(),
-        FilterFacet::ProsePreamble => s::agent_chat_filter_prose_preamble(),
-        FilterFacet::Tools => s::agent_chat_filter_tools(),
-        FilterFacet::ToolRead => s::agent_chat_filter_tool_read(),
-        FilterFacet::ToolEdit => s::agent_chat_filter_tool_edit(),
-        FilterFacet::ToolDelete => s::agent_chat_filter_tool_delete(),
-        FilterFacet::ToolSearch => s::agent_chat_filter_tool_search(),
-        FilterFacet::ToolRun => s::agent_chat_filter_tool_run(),
-        FilterFacet::ToolFetch => s::agent_chat_filter_tool_fetch(),
-        FilterFacet::ToolMcp => s::agent_chat_filter_tool_mcp(),
-        FilterFacet::ToolAgent => s::agent_chat_filter_tool_agent(),
-        FilterFacet::ToolOther => s::agent_chat_filter_tool_other(),
+        FilterFacet::Thinking => s::agent_chat::filter_thinking(),
+        FilterFacet::Prose => s::agent_chat::filter_prose(),
+        FilterFacet::ProseAnswer => s::agent_chat::filter_prose_answer(),
+        FilterFacet::ProsePreamble => s::agent_chat::filter_prose_preamble(),
+        FilterFacet::Tools => s::agent_chat::filter_tools(),
+        FilterFacet::ToolRead => s::agent_chat::filter_tool_read(),
+        FilterFacet::ToolEdit => s::agent_chat::filter_tool_edit(),
+        FilterFacet::ToolDelete => s::agent_chat::filter_tool_delete(),
+        FilterFacet::ToolSearch => s::agent_chat::filter_tool_search(),
+        FilterFacet::ToolRun => s::agent_chat::filter_tool_run(),
+        FilterFacet::ToolFetch => s::agent_chat::filter_tool_fetch(),
+        FilterFacet::ToolMcp => s::agent_chat::filter_tool_mcp(),
+        FilterFacet::ToolAgent => s::agent_chat::filter_tool_agent(),
+        FilterFacet::ToolOther => s::agent_chat::filter_tool_other(),
     }
 }
 
@@ -182,16 +182,16 @@ mod tests {
     fn the_value_text_reads_all_until_a_kind_is_hidden() {
         assert_eq!(
             filter_value(DisplayFilter::default()),
-            s::agent_chat_filter_none()
+            s::agent_chat::filter_none()
         );
         let one = DisplayFilter::default().toggled(FilterFacet::ToolEdit);
         assert_eq!(
             filter_value(one),
-            s::agent_chat_filter_hidden(&facet_label(FilterFacet::ToolEdit))
+            s::agent_chat::filter_hidden(facet_label(FilterFacet::ToolEdit))
         );
         assert_eq!(
             filter_value(one.toggled(FilterFacet::Thinking)),
-            s::agent_chat_filter_hidden(&format!(
+            s::agent_chat::filter_hidden(format!(
                 "{} + {}",
                 facet_label(FilterFacet::Thinking),
                 facet_label(FilterFacet::ToolEdit)
@@ -205,6 +205,6 @@ mod tests {
             .toggled(FilterFacet::Thinking)
             .toggled(FilterFacet::Prose)
             .toggled(FilterFacet::ToolEdit);
-        assert_eq!(filter_value(three), s::agent_chat_filter_hidden_count(3));
+        assert_eq!(filter_value(three), s::agent_chat::filter_hidden_count(3));
     }
 }

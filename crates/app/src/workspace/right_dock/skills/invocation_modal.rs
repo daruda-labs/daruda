@@ -84,7 +84,7 @@ impl SkillInvocationModal {
             .argument_hint
             .clone()
             .map(SharedString::from)
-            .unwrap_or_else(|| SharedString::from(strings::skills_invoke_placeholder_default()));
+            .unwrap_or_else(|| SharedString::from(strings::skills::invoke_placeholder_default()));
         // Multi-line `gpui_component::Input` with Cmd+Enter as
         // `PressEnter { secondary: true }` — plain Enter inserts a
         // newline so users can compose multi-line prompts. Escape is
@@ -160,9 +160,9 @@ impl SkillInvocationModal {
         if !delivered {
             ws.update(cx, |ws, cx| {
                 let report =
-                    ErrorReport::new(crate::surface::strings::error_skill_invocation_failed())
+                    ErrorReport::new(crate::surface::strings::error::skill_invocation_failed())
                         .severity(ErrorSeverity::Warning)
-                        .message(strings::skills_invoke_no_input_target())
+                        .message(strings::skills::invoke_no_input_target())
                         .at(file!(), line!())
                         .with_context("skill", &display_name)
                         .dedup("skills.invoke.no_input_target")
@@ -245,19 +245,19 @@ impl Render for SkillInvocationModal {
             .gap(px(theme::MODAL_FOOTER_GAP))
             .mt(px(theme::MODAL_FOOTER_MARGIN_TOP))
             .child(
-                button("skill-invoke-cancel", strings::skills_invoke_cancel()).on_click(
-                    cx.listener(|this, _: &ClickEvent, w, cx| {
+                button("skill-invoke-cancel", strings::common::btn_cancel()).on_click(cx.listener(
+                    |this, _: &ClickEvent, w, cx| {
                         this.dismiss(w, cx);
-                    }),
-                ),
+                    },
+                )),
             )
             .child(
                 button_primary(
                     "skill-invoke-submit",
                     if self.submitting {
-                        strings::skills_invoke_submitting()
+                        strings::skills::invoke_submitting()
                     } else {
-                        strings::skills_invoke_submit()
+                        strings::common::btn_submit()
                     },
                 )
                 .disabled(self.submitting)

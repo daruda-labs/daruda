@@ -42,7 +42,7 @@ pub(in crate::workspace) fn mode_chip(
         .to_string();
 
     let label = SharedString::from(visible_mode_label(&display_name));
-    let tooltip = strings::agent_chat_session_mode_chip(&display_name);
+    let tooltip = strings::agent_chat::session_mode_chip(&display_name);
 
     // Owned data for the `'static` dropdown closure.
     let available: Vec<(String, String)> = modes

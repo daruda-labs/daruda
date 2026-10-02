@@ -258,7 +258,7 @@ impl Workspace {
         if daruda_flow::parse::parse_flow_file(&base)
             .is_ok_and(|file| file.nodes.len() <= nodes.len())
         {
-            self.report_own_flow_refusal(s::flow_delete_node_last(), "flow.delete_node_last", cx);
+            self.report_own_flow_refusal(s::flow::delete_node_last(), "flow.delete_node_last", cx);
             return;
         }
         let targets = nodes.clone();
@@ -293,15 +293,15 @@ impl Workspace {
         };
         let dependents = self.dependents_outside(&view, &nodes, cx);
         let body = match nodes.len() {
-            1 => s::flow_delete_node_confirm_body(first.as_str(), dependents),
-            _ => s::flow_delete_nodes_confirm_body(&nodes, dependents),
+            1 => s::flow::delete_node_confirm_body(first.as_str(), dependents),
+            _ => s::flow::delete_nodes_confirm_body(&nodes, dependents),
         };
         let weak = cx.weak_entity();
         let owned_path = path.to_path_buf();
         super::dialog_helpers::open_confirm_dialog(
-            s::flow_delete_node_confirm_title(),
+            s::flow::delete_node_confirm_title(),
             body,
-            s::flow_delete_node(),
+            s::flow::delete_node(),
             gpui_component::button::ButtonVariant::Danger,
             move |_, window, app_cx| {
                 if let Some(ws) = weak.upgrade() {

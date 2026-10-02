@@ -203,16 +203,16 @@ fn the_compact_tooltip_names_every_axis() {
         tail_pinned(true),
     );
     for value in [
-        crate::surface::strings::agent_chat_fold_mode_custom(),
-        crate::surface::strings::agent_chat_filter_tool_edit(),
+        crate::surface::strings::agent_chat::fold_mode_custom(),
+        crate::surface::strings::agent_chat::filter_tool_edit(),
     ] {
         assert!(tip.contains(&value), "{value:?} missing from {tip:?}");
     }
     // And the default reading names the defaults rather than going silent.
     let (fold, filter, tail) = following();
     let quiet = options_tooltip(fold, filter, tail);
-    assert!(quiet.contains(&crate::surface::strings::agent_chat_fold_mode_auto()));
-    assert!(quiet.contains(&crate::surface::strings::agent_chat_filter_none()));
+    assert!(quiet.contains(&crate::surface::strings::agent_chat::fold_mode_auto()));
+    assert!(quiet.contains(&crate::surface::strings::agent_chat::filter_none()));
     assert_ne!(
         quiet,
         options_tooltip(PaneChoice::Chosen(FoldMode::default()), filter, tail),

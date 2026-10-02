@@ -83,21 +83,21 @@ pub(in crate::workspace) fn render(snap: &RightDockSnapshot, cx: &mut Context<Do
     let scopes = [
         (
             DockSection::SkillsProject,
-            strings::skills_project(),
+            strings::common::section_project(),
             SkillScope::Project,
             &project,
             skills.project_root.is_some(),
         ),
         (
             DockSection::SkillsPersonal,
-            strings::skills_personal(),
+            strings::common::section_personal(),
             SkillScope::Personal,
             &personal,
             true,
         ),
         (
             DockSection::SkillsPlugins,
-            strings::skills_plugin(),
+            strings::skills::section_plugin(),
             SkillScope::Plugin,
             &plugin,
             true,
@@ -136,7 +136,7 @@ pub(in crate::workspace) fn footer(snap: &RightDockSnapshot, cx: &gpui::App) -> 
     let total = skills.project.len() + skills.personal.len() + installed;
     panel_footer(
         crate::ui::icons::SKILL,
-        strings::skills_footer_available(total),
+        strings::skills::footer_available(total),
         cx,
     )
 }
@@ -189,7 +189,7 @@ fn search_row(snap: &RightDockSnapshot, cx: &gpui::App) -> impl IntoElement {
         .when(has_query, |row| {
             row.child(
                 crate::ui::button_icon("skill-search-clear", crate::ui::icons::CLOSE, cx)
-                    .tooltip(strings::common_search_clear())
+                    .tooltip(strings::common::search_clear())
                     .absolute()
                     .right(px(theme::PAD_XS))
                     .top_0()
@@ -217,13 +217,13 @@ fn search_empty_hint(query: String, t: &DarudaTheme) -> impl IntoElement {
         .text_color(t.text_subtle)
         .child(SharedString::from(format!(
             "{}{}.",
-            strings::skills_search_empty_prefix(),
+            strings::skills::search_empty_prefix(),
             display_query
         )))
 }
 
 fn header_row(workspace: gpui::WeakEntity<Workspace>, cx: &gpui::App) -> impl IntoElement {
-    crate::ui::SectionHeader::new(strings::right_panel_tab_skills())
+    crate::ui::SectionHeader::new(strings::dock::right_tab_skills())
         .prominent()
         .truncate_label(true)
         .actions(
@@ -247,7 +247,7 @@ fn manage_plugins_button(cx: &gpui::App) -> impl IntoElement {
         crate::ui::icons::SETTINGS,
         cx,
     )
-    .tooltip(strings::skills_manage_plugins_button())
+    .tooltip(strings::skills::manage_plugins_button())
     .on_click(|_, window, cx| {
         window.dispatch_action(
             Box::new(OpenSettings(daruda_config::BuiltinSection::Plugin)),
@@ -258,7 +258,7 @@ fn manage_plugins_button(cx: &gpui::App) -> impl IntoElement {
 
 fn new_skill_button(workspace: gpui::WeakEntity<Workspace>, cx: &gpui::App) -> impl IntoElement {
     crate::ui::button_icon("skills-new", crate::ui::icons::ADD, cx)
-        .tooltip(strings::skills_new_button())
+        .tooltip(strings::skills::new_button())
         .on_click(move |_, window, cx| {
             if let Some(ws) = workspace.upgrade() {
                 ws.update(cx, |ws, cx| ws.open_create_skill(window, cx));
@@ -279,7 +279,7 @@ struct ScopeCtx<'a> {
 /// carries both numbers.
 fn scope_count(scope: SkillScope, skills: &[Skill]) -> SharedString {
     if matches!(scope, SkillScope::Plugin) {
-        strings::skills_count_chip_with_plugins(skills.len(), count_unique_plugins(skills)).into()
+        strings::skills::count_chip_with_plugins(skills.len(), count_unique_plugins(skills)).into()
     } else {
         skills.len().to_string().into()
     }
@@ -295,7 +295,7 @@ fn scope_body(
 ) -> AnyElement {
     if !enabled {
         // Project scope without a project root — explain why.
-        return empty_hint(strings::skills_no_project_hint(), t);
+        return empty_hint(strings::skills::no_project_hint(), t);
     }
     if skills.is_empty() {
         // Empty at rest — show only the text hint. Inline action
@@ -304,9 +304,9 @@ fn scope_body(
         // same action again as an inline chip muddies the empty
         // state. A search never lands here: the caller drops the scope.
         let msg = match scope {
-            SkillScope::Project => strings::skills_empty_project(),
-            SkillScope::Personal => strings::skills_empty_personal(),
-            SkillScope::Plugin => strings::skills_empty_plugin(),
+            SkillScope::Project => strings::skills::empty_project(),
+            SkillScope::Personal => strings::skills::empty_personal(),
+            SkillScope::Plugin => strings::skills::empty_plugin(),
         };
         return empty_hint(msg, t);
     }
@@ -543,7 +543,7 @@ fn skill_row(
                     crate::ui::icons::EDIT,
                     cx,
                 )
-                .tooltip(strings::skills_button_edit())
+                .tooltip(strings::common::btn_edit())
                 .debug_selector(|| "skill-edit".into())
                 .on_click(move |_: &gpui::ClickEvent, window, cx| {
                     if let Some(ws) = ws_edit.upgrade() {
@@ -557,7 +557,7 @@ fn skill_row(
                     SharedString::from(format!("skill-delete-{}-{}", scope.slug(), s.name)),
                     cx,
                 )
-                .tooltip(strings::skills_button_delete())
+                .tooltip(strings::common::btn_delete())
                 .debug_selector(|| "skill-delete".into())
                 .on_click(move |_: &gpui::ClickEvent, window, cx| {
                     if let Some(ws) = ws_delete.upgrade() {
@@ -579,7 +579,7 @@ fn skill_row(
                     crate::ui::icons::VISIBILITY,
                     cx,
                 )
-                .tooltip(strings::skills_button_view())
+                .tooltip(strings::common::btn_view())
                 .debug_selector(|| "skill-view".into())
                 .on_click(move |_: &gpui::ClickEvent, window, cx| {
                     if let Some(ws) = ws_view.upgrade() {
@@ -610,7 +610,7 @@ fn skill_row(
         .gap(px(theme::SKILL_HEADER_GAP))
         .child(name_button)
         .when(overrides_personal, |c| {
-            c.child(neutral_chip(strings::skills_overrides_personal(), t))
+            c.child(neutral_chip(strings::skills::overrides_personal(), t))
         });
     library_row(
         crate::ui::icons::SKILL,

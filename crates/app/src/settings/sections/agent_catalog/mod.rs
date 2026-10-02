@@ -54,9 +54,9 @@ impl SettingsView {
                 div()
                     .text_size(px(theme::MODAL_BODY_FONT_SIZE))
                     .text_color(description_color)
-                    .child(s::settings_agent_catalog_description()),
+                    .child(s::settings::agent_catalog_description()),
             )
-            .child(Self::section_label(s::settings_agent_group_in_use(), cx));
+            .child(Self::section_label(s::settings::agent_group_in_use(), cx));
 
         // Same predicate catalog validation uses, so the placeholder cannot
         // claim an empty catalog while the same catalog is valid.
@@ -65,7 +65,7 @@ impl SettingsView {
                 div()
                     .text_size(px(theme::MODAL_BODY_FONT_SIZE))
                     .text_color(description_color)
-                    .child(s::settings_agent_catalog_empty()),
+                    .child(s::settings::agent_catalog_empty()),
             );
         }
         for (ordinal, (catalog_index, row)) in self.agent_editable_rows().enumerate() {
@@ -74,7 +74,7 @@ impl SettingsView {
 
         if self.agent_unresolved_entries().next().is_some() {
             body = body.child(Self::section_label(
-                s::settings_agent_unresolved_section(),
+                s::settings::agent_unresolved_section(),
                 cx,
             ));
             for (catalog_index, entry) in self.agent_unresolved_entries() {
@@ -86,7 +86,7 @@ impl SettingsView {
         let no_match = groups::query_matched_nothing(&used, &query);
         body.child(self.render_preset_lists(presets, no_match, cx))
             .child(div().flex().flex_row().child(
-                button("settings-agent-add-custom", s::settings_agent_add_custom()).on_click(
+                button("settings-agent-add-custom", s::settings::agent_add_custom()).on_click(
                     cx.listener(|this, _: &ClickEvent, window, cx| {
                         this.add_custom_agent_row(window, cx);
                     }),
@@ -110,11 +110,11 @@ impl SettingsView {
             .map(|preset| (preset.name, preset.launchability))
         {
             Some((name, PresetLaunchability::NeedsManualInstall { install_url })) => (
-                s::settings_agent_unresolved_needs_install(preset_id, name),
+                s::settings::agent_unresolved_needs_install(preset_id, name),
                 Some(install_url),
             ),
             // No preset carries that id; a `Runnable` one would have resolved.
-            _ => (s::settings_agent_unresolved_unknown(preset_id), None),
+            _ => (s::settings::agent_unresolved_unknown(preset_id), None),
         };
 
         div()
@@ -136,7 +136,7 @@ impl SettingsView {
                                 SharedString::from(format!(
                                     "settings-agent-unresolved-install-{index}"
                                 )),
-                                s::settings_agent_preset_install_page(),
+                                s::settings::agent_preset_install_page(),
                             )
                             .on_click(cx.listener(
                                 move |_this, _: &ClickEvent, _window, cx| {
@@ -151,7 +151,7 @@ impl SettingsView {
                     .child(
                         button_danger(
                             SharedString::from(format!("settings-agent-unresolved-remove-{index}")),
-                            s::settings_agent_remove(),
+                            s::settings::agent_remove(),
                         )
                         .on_click(cx.listener(
                             move |this, _: &ClickEvent, window, cx| {

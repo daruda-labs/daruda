@@ -326,7 +326,7 @@ impl Workspace {
             return;
         };
         if intent == LoadIntent::Continue && !self.cli_run_may_continue(run, &session, cx) {
-            self.task_chat_error(s::task_cli_not_exited(), cx);
+            self.task_chat_error(s::task::cli_not_exited(), cx);
             return;
         }
         let Some(cwd) = v.cwd.clone() else { return };

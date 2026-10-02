@@ -124,7 +124,7 @@ impl Render for OpenProjectModal {
             .to_string();
         let theme_ref = cx.theme();
         let body_color = theme_ref.muted_foreground;
-        let prompt_text = s::open_project_modal_body(&folder_name);
+        let prompt_text = s::modal::open_project_body(&folder_name);
 
         let here_checked = self.choice == OpenProjectChoice::AddHere;
         let new_checked = self.choice == OpenProjectChoice::NewWindow;
@@ -135,17 +135,21 @@ impl Render for OpenProjectModal {
             .flex_col()
             .gap(px(theme::MODAL_PANEL_GAP / 2.0))
             .child(
-                radio("open-project-add-here", s::open_project_add_here(), 0_isize)
-                    .checked(here_checked)
-                    .on_click(cx.listener(|this, _, _, cx| {
-                        this.choice = OpenProjectChoice::AddHere;
-                        cx.notify();
-                    })),
+                radio(
+                    "open-project-add-here",
+                    s::modal::open_project_add_here(),
+                    0_isize,
+                )
+                .checked(here_checked)
+                .on_click(cx.listener(|this, _, _, cx| {
+                    this.choice = OpenProjectChoice::AddHere;
+                    cx.notify();
+                })),
             )
             .child(
                 radio(
                     "open-project-new-window",
-                    s::open_project_new_window(),
+                    s::modal::open_project_new_window(),
                     1_isize,
                 )
                 .checked(new_checked)
@@ -155,12 +159,16 @@ impl Render for OpenProjectModal {
                 })),
             );
 
-        let dont_ask = checkbox("open-project-dont-ask", s::open_project_dont_ask(), 2_isize)
-            .checked(dont_ask_checked)
-            .on_click(cx.listener(|this, _, _, cx| {
-                this.dont_ask = !this.dont_ask;
-                cx.notify();
-            }));
+        let dont_ask = checkbox(
+            "open-project-dont-ask",
+            s::modal::open_project_dont_ask(),
+            2_isize,
+        )
+        .checked(dont_ask_checked)
+        .on_click(cx.listener(|this, _, _, cx| {
+            this.dont_ask = !this.dont_ask;
+            cx.notify();
+        }));
 
         let footer = div()
             .flex()
@@ -169,14 +177,14 @@ impl Render for OpenProjectModal {
             .gap(px(theme::MODAL_FOOTER_GAP))
             .mt(px(theme::MODAL_FOOTER_MARGIN_TOP))
             .child(
-                button("open-project-cancel", s::common_button_cancel()).on_click(cx.listener(
+                button("open-project-cancel", s::common::btn_cancel()).on_click(cx.listener(
                     |this, _: &ClickEvent, window, cx| {
                         this.dismiss(window, cx);
                     },
                 )),
             )
             .child(
-                button_primary("open-project-open", s::common_button_open()).on_click(cx.listener(
+                button_primary("open-project-open", s::common::btn_open()).on_click(cx.listener(
                     |this, _: &ClickEvent, window, cx| {
                         this.submit(window, cx);
                     },
@@ -216,7 +224,7 @@ pub(crate) fn open_choose_window_modal<F>(
 {
     let on_submit: OpenProjectSubmit = Rc::new(on_submit);
     open_form_modal(
-        s::open_project_modal_title(),
+        s::modal::open_project_title(),
         None,
         move |_window, modal_cx| OpenProjectModal::new(path, initial, on_submit, modal_cx),
         window,

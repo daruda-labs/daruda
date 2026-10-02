@@ -41,7 +41,7 @@ impl std::fmt::Display for PaneSpawnError {
         match self {
             PaneSpawnError::Pty(e) => e.fmt(f),
             PaneSpawnError::Vt(e) => f.write_str(
-                &crate::surface::strings::error_pane_vt_init_failed(&e.to_string()),
+                &crate::surface::strings::error::pane_vt_init_failed(e.to_string()),
             ),
         }
     }
@@ -267,7 +267,7 @@ impl Pane {
                 )
                 .map(SharedString::from)
                 .unwrap_or_else(|| {
-                    crate::surface::strings::new_agent_chat_named(&v.agent_name).into()
+                    crate::surface::strings::common::new_agent_chat_named(&v.agent_name).into()
                 })
             }
         }
@@ -284,7 +284,7 @@ impl Pane {
                 }
             }
             PaneContent::TaskEditPane(te) if te.title_input.read(cx).value().is_empty() => {
-                let title = crate::surface::strings::command_new_task();
+                let title = crate::surface::strings::command::new_task();
                 if te.cached_title.as_ref() != title {
                     te.cached_title = title.into();
                 }
@@ -805,8 +805,8 @@ fn handle_view_event(
             if suppressed_by_focus {
                 return;
             }
-            let body = s::format_duration_compact(*elapsed);
-            let title = s::notification_long_running_title();
+            let body = s::notification::format_duration_compact(*elapsed);
+            let title = s::notification::long_running_title();
             platform::notifications::show(&title, &body);
         }
         TerminalViewEvent::AnnotationDoubleClicked { id } => {
@@ -1176,7 +1176,7 @@ impl Workspace {
         {
             self.report_error(
                 daruda_store::observability::error_report::ErrorReport::new(
-                    crate::surface::strings::account_prepare_dir_failed(),
+                    crate::surface::strings::settings::accounts_prepare_dir_failed(),
                 )
                 .severity(daruda_store::observability::error_report::ErrorSeverity::Warning)
                 .at(file!(), line!())

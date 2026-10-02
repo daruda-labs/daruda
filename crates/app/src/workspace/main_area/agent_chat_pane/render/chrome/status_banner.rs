@@ -14,9 +14,9 @@ use crate::workspace::main_area::pane_tree::PaneId;
 /// Localized banner copy for a runtime-provisioning milestone.
 fn runtime_prep_text(phase: RuntimePrepPhase) -> SharedString {
     match phase {
-        RuntimePrepPhase::Downloading => s::agent_chat_runtime_downloading(),
-        RuntimePrepPhase::Verifying => s::agent_chat_runtime_verifying(),
-        RuntimePrepPhase::Extracting => s::agent_chat_runtime_extracting(),
+        RuntimePrepPhase::Downloading => s::agent_chat::runtime_downloading(),
+        RuntimePrepPhase::Verifying => s::agent_chat::runtime_verifying(),
+        RuntimePrepPhase::Extracting => s::agent_chat::runtime_extracting(),
     }
     .into()
 }
@@ -26,10 +26,10 @@ fn runtime_prep_text(phase: RuntimePrepPhase) -> SharedString {
 /// in flight.
 fn connect_phase_text(phase: ConnectPhase) -> SharedString {
     match phase {
-        ConnectPhase::Handshaking => s::agent_chat_connecting_handshake(),
-        ConnectPhase::CreatingSession => s::agent_chat_connecting_creating_session(),
-        ConnectPhase::LoadingSession => s::agent_chat_connecting_loading_session(),
-        ConnectPhase::ApplyingMode => s::agent_chat_connecting_applying_mode(),
+        ConnectPhase::Handshaking => s::agent_chat::connecting_handshake(),
+        ConnectPhase::CreatingSession => s::agent_chat::connecting_creating_session(),
+        ConnectPhase::LoadingSession => s::agent_chat::connecting_loading_session(),
+        ConnectPhase::ApplyingMode => s::agent_chat::connecting_applying_mode(),
     }
     .into()
 }
@@ -83,7 +83,7 @@ pub(in crate::workspace::main_area::agent_chat_pane::render) fn status_banner(
     let reauthable = banner_offers_reauth(status);
     let (text, bg, fg, retryable): (SharedString, Hsla, Hsla, bool) = match status {
         AgentSessionStatus::Idle => (
-            s::agent_chat_idle().into(),
+            s::agent_chat::idle().into(),
             t.banner_info_bg,
             t.banner_info_text,
             false,
@@ -95,7 +95,7 @@ pub(in crate::workspace::main_area::agent_chat_pane::render) fn status_banner(
             false,
         ),
         AgentSessionStatus::Connecting => (
-            s::agent_chat_connecting().into(),
+            s::agent_chat::connecting().into(),
             t.banner_info_bg,
             t.banner_info_text,
             false,
@@ -108,7 +108,7 @@ pub(in crate::workspace::main_area::agent_chat_pane::render) fn status_banner(
         ),
         AgentSessionStatus::Connected => return None,
         AgentSessionStatus::Error { message, .. } => (
-            format!("{} {}", s::agent_chat_error_prefix(), message).into(),
+            format!("{} {}", s::agent_chat::error_prefix(), message).into(),
             t.banner_error_bg,
             t.banner_error_text,
             banner_offers_retry(status, has_cwd),
@@ -117,7 +117,7 @@ pub(in crate::workspace::main_area::agent_chat_pane::render) fn status_banner(
     let retry_button = retryable.then(|| {
         super::super::blocks::banner_action_button(
             ("agent-chat-retry", pane_id as usize),
-            s::agent_chat_retry(),
+            s::agent_chat::retry(),
             t,
             cx,
         )
@@ -142,7 +142,7 @@ pub(in crate::workspace::main_area::agent_chat_pane::render) fn status_banner(
     let reauth_button = reauthable.then(|| {
         super::super::blocks::banner_action_button(
             ("agent-chat-reauth", pane_id as usize),
-            s::agent_chat_sign_in_again(),
+            s::agent_chat::sign_in_again(),
             t,
             cx,
         )

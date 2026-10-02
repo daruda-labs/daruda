@@ -131,12 +131,12 @@ pub fn handle(aimed: Aimed, target: &Target, cx: &mut gpui::AsyncApp) -> Effect 
         InboundAction::ResolveApproval { id, choice } => {
             let applied = cx.update(|cx| crate::control::approval::resolve(id, choice, cx));
             let label = match (applied, choice) {
-                (false, _) => s::control_approval_already_answered(),
+                (false, _) => s::control::approval_already_answered(),
                 (true, crate::control::approval::ApprovalChoice::Approved) => {
-                    s::control_approval_allowed()
+                    s::control::approval_allowed()
                 }
                 (true, crate::control::approval::ApprovalChoice::Refused) => {
-                    s::control_approval_refused()
+                    s::control::approval_refused()
                 }
             };
             Effect::Feedback {
@@ -145,7 +145,7 @@ pub fn handle(aimed: Aimed, target: &Target, cx: &mut gpui::AsyncApp) -> Effect 
             }
         }
         InboundAction::StaleListing => Effect::Feedback {
-            label: s::control_listing_stale(),
+            label: s::control::listing_stale(),
             edit: Edit::KeepButtons,
         },
         InboundAction::Ignore | InboundAction::Unsupported | InboundAction::Paired { .. } => {
@@ -210,7 +210,7 @@ mod tests {
         match effect {
             super::Effect::Reply(reply) => assert_eq!(
                 reply.text,
-                crate::surface::strings::control_target_lent(&expected.path, &expected.agent_name),
+                crate::surface::strings::control::target_lent(&expected.path, &expected.agent_name),
             ),
             _ => panic!("a lent target must be reported, not silently used"),
         }

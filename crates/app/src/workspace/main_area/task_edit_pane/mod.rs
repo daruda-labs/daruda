@@ -51,12 +51,12 @@ pub(in crate::workspace) fn render(
         .map(|task| task.subtasks.clone())
         .unwrap_or_else(|| te.draft_subtasks.clone());
     let status = match state {
-        None => strings::task_edit_new(),
-        Some(TaskState::Backlog) => strings::right_panel_task_backlog(),
-        Some(TaskState::Running { .. }) => strings::right_panel_task_running(),
-        Some(TaskState::Done { .. }) => strings::right_panel_task_done_prefix(),
-        Some(TaskState::Error { .. }) => strings::task_edit_error(),
-        Some(TaskState::Cancelled { .. }) => strings::task_edit_cancelled(),
+        None => strings::task::edit_new(),
+        Some(TaskState::Backlog) => strings::terminal::task_backlog(),
+        Some(TaskState::Running { .. }) => strings::terminal::task_running(),
+        Some(TaskState::Done { .. }) => strings::terminal::task_done_prefix(),
+        Some(TaskState::Error { .. }) => strings::task::edit_error(),
+        Some(TaskState::Cancelled { .. }) => strings::task::edit_cancelled(),
     };
     let header =
         div()
@@ -74,7 +74,7 @@ pub(in crate::workspace) fn render(
                     .gap(px(theme::GAP_LG))
                     .child(
                         ui::button_icon(("task-edit-back", pane_id as usize), ui::icons::BACK, cx)
-                            .tooltip(strings::task_edit_back())
+                            .tooltip(strings::task::edit_back())
                             .on_click(cx.listener(|this, _, window, cx| {
                                 this.open_page(crate::workspace::pages::Page::Tasks, window, cx)
                             })),
@@ -101,7 +101,7 @@ pub(in crate::workspace) fn render(
         .gap(px(theme::PAD_XL))
         .p(px(theme::PAD_XL))
         .child(field(
-            strings::task_edit_title_label(),
+            strings::common::field_title(),
             ui::input(&te.title_input, cx, 0).into_any_element(),
             cx,
         ))
@@ -136,7 +136,7 @@ pub(in crate::workspace) fn render(
                         .text_size(px(theme::FONT_SIZE_SM))
                         .text_color(muted)
                         .child(if te.is_dirty(cx) {
-                            strings::task_edit_unsaved()
+                            strings::task::edit_unsaved()
                         } else {
                             String::new()
                         }),
@@ -153,7 +153,7 @@ pub(in crate::workspace) fn render(
                                     ui::icons::AGENT,
                                     cx,
                                 )
-                                .tooltip(strings::task_action_open_chat())
+                                .tooltip(strings::task::action_open_chat())
                                 .on_click(cx.listener(
                                     move |this, _, window, cx| {
                                         this.open_editor_task_chat(pane_id, window, cx)
@@ -168,7 +168,7 @@ pub(in crate::workspace) fn render(
                                     ui::icons::FOLDER_OPEN,
                                     cx,
                                 )
-                                .tooltip(strings::task_action_open())
+                                .tooltip(strings::task::action_open())
                                 .on_click(cx.listener(
                                     move |this, _, window, cx| {
                                         this.open_editor_task_worktree(pane_id, window, cx)
@@ -179,7 +179,7 @@ pub(in crate::workspace) fn render(
                         .child(
                             ui::button_primary(
                                 ("task-edit-save", pane_id as usize),
-                                strings::task_edit_save(),
+                                strings::common::btn_save(),
                             )
                             .disabled(!te.can_save(cx))
                             .tab_stop(true)
@@ -194,7 +194,7 @@ pub(in crate::workspace) fn render(
                             row.child(
                                 button(
                                     ("task-edit-start", pane_id as usize),
-                                    strings::task_edit_save_start(),
+                                    strings::task::edit_save_start(),
                                 )
                                 .disabled(!te.can_save(cx))
                                 .tab_stop(true)
@@ -279,8 +279,8 @@ fn prompt(
         .child(
             ui::tab_bar(("task-edit-prompt-mode", pane_id as usize))
                 .selected_index(usize::from(te.preview_prompt))
-                .child(ui::tab(strings::task_edit_prompt_label()))
-                .child(ui::tab(strings::file_viewer_tab_preview()))
+                .child(ui::tab(strings::common::field_prompt()))
+                .child(ui::tab(strings::file_viewer::tab_preview()))
                 .on_click(cx.listener(move |this, index: &usize, _, cx| {
                     this.set_task_prompt_preview(pane_id, *index, cx)
                 })),
@@ -292,7 +292,7 @@ fn prompt(
                     ui::icons::FOLDER_OPEN,
                     cx,
                 )
-                .tooltip(strings::task_edit_open_file_button())
+                .tooltip(strings::task::edit_open_file_button())
                 .on_click(cx.listener(move |this, _, window, cx| {
                     this.open_editor_prompt_file(pane_id, window, cx)
                 })),
@@ -341,7 +341,7 @@ fn settings(
         .child(
             button(
                 ("task-edit-settings", pane_id as usize),
-                strings::task_edit_settings(),
+                strings::task::edit_settings(),
             )
             .ghost()
             .justify_start()
@@ -393,7 +393,7 @@ fn settings(
                             ui::icons::REFRESH,
                             cx,
                         )
-                        .tooltip(strings::task_edit_branch_regenerate())
+                        .tooltip(strings::task::edit_branch_regenerate())
                         .on_click(cx.listener(
                             move |this, _, window, cx| {
                                 this.regenerate_task_branch(pane_id, window, cx)
@@ -404,7 +404,7 @@ fn settings(
             .when(te.branch_validation.is_invalid(), |column| {
                 let message = match &te.branch_validation {
                     BranchValidation::Invalid { reason } => reason.clone(),
-                    BranchValidation::Exists => strings::task_edit_branch_exists().into(),
+                    BranchValidation::Exists => strings::task::edit_branch_exists().into(),
                     _ => SharedString::default(),
                 };
                 column.child(
@@ -417,25 +417,25 @@ fn settings(
             .into_any_element()
     };
     section = section.child(field(
-        strings::task_edit_run_in_label(),
+        strings::task::edit_run_in_label(),
         run_in(pane_id, te, editable, cx).into_any_element(),
         cx,
     ));
     section = match te.run_in {
         RunInChoice::NewWorktree => section
-            .child(field(strings::task_edit_branch_label(), branch, cx))
+            .child(field(strings::common::field_branch(), branch, cx))
             .child(field(
-                strings::task_edit_base_label(),
+                strings::task::edit_base_label(),
                 ui::select::select(&te.base_select, cx, 4)
                     .disabled(!editable)
-                    .placeholder(strings::task_edit_base_active_label())
+                    .placeholder(strings::task::edit_base_active_label())
                     .into_any_element(),
                 cx,
             )),
         RunInChoice::ExistingLane => section,
     };
     section = section.child(field(
-        strings::task_edit_surface_label(),
+        strings::task::edit_surface_label(),
         div()
             .flex()
             .flex_wrap()
@@ -443,7 +443,7 @@ fn settings(
             .child(
                 ui::radio(
                     ("task-edit-surface-terminal", pane_id as usize),
-                    strings::task_edit_surface_terminal(),
+                    strings::task::edit_surface_terminal(),
                     5,
                 )
                 .disabled(!editable)
@@ -455,7 +455,7 @@ fn settings(
             .child(
                 ui::radio(
                     ("task-edit-surface-chat", pane_id as usize),
-                    strings::task_edit_surface_agent_chat(),
+                    strings::task::edit_surface_agent_chat(),
                     6,
                 )
                 .disabled(!editable)
@@ -471,7 +471,7 @@ fn settings(
         section = section.child(
             checkbox(
                 ("task-edit-auto", pane_id as usize),
-                strings::task_edit_auto_execute_label(),
+                strings::task::edit_auto_execute_label(),
                 7,
             )
             .checked(te.auto_execute)
@@ -496,12 +496,12 @@ fn run_in(
         [
             (
                 RunInChoice::NewWorktree,
-                strings::task_edit_run_in_new(),
+                strings::task::edit_run_in_new(),
                 "task-edit-run-in-new",
             ),
             (
                 RunInChoice::ExistingLane,
-                strings::task_edit_run_in_existing(),
+                strings::task::edit_run_in_existing(),
                 "task-edit-run-in-existing",
             ),
         ]
@@ -519,7 +519,7 @@ fn run_in(
         column = column.child(
             ui::select::select(&te.lane_select, cx, 4)
                 .disabled(!editable)
-                .placeholder(strings::task_edit_run_in_lane_placeholder()),
+                .placeholder(strings::task::edit_run_in_lane_placeholder()),
         );
         let lane = te.lane_value(cx);
         let busy = (!lane.is_empty())
@@ -531,7 +531,7 @@ fn run_in(
                 )
             })
             .flatten()
-            .map(|task| strings::task_edit_run_in_lane_busy(&task.title));
+            .map(|task| strings::task::edit_run_in_lane_busy(&task.title));
         column = column.children(busy.map(|message| {
             div()
                 .text_size(px(theme::FONT_SIZE_SM))
@@ -552,7 +552,7 @@ fn notes(pane_id: PaneId, te: &TaskEditContent, cx: &mut Context<Workspace>) -> 
         .child(
             button(
                 ("task-edit-notes", pane_id as usize),
-                strings::task_edit_notes_label(),
+                strings::common::field_notes(),
             )
             .ghost()
             .justify_start()
@@ -572,7 +572,7 @@ fn notes(pane_id: PaneId, te: &TaskEditContent, cx: &mut Context<Workspace>) -> 
                     div()
                         .text_size(px(theme::FONT_SIZE_SM))
                         .text_color(theme::current(cx).text_muted)
-                        .child(strings::task_edit_notes_hint()),
+                        .child(strings::task::edit_notes_hint()),
                 )
                 .child(ui::markdown_editor(&te.notes_state, cx).tab_index(9))
         })
@@ -585,7 +585,7 @@ fn subtasks_section(
     cx: &mut Context<Workspace>,
 ) -> impl IntoElement {
     let done = subtasks.iter().filter(|subtask| subtask.completed).count();
-    let title = strings::task_edit_subtasks_progress(done, subtasks.len());
+    let title = strings::task::edit_subtasks_progress(done, subtasks.len());
     let mut list = div().flex().flex_col().gap(px(theme::GAP_LG));
     for subtask in subtasks {
         let editing = te.editing_subtask.as_deref() == Some(subtask.id.as_str());
@@ -608,7 +608,7 @@ fn subtasks_section(
                     ui::icons::ADD,
                     cx,
                 )
-                .tooltip(strings::task_subtask_add_placeholder())
+                .tooltip(strings::task::subtask_add_placeholder())
                 .on_click(cx.listener(move |this, _, window, cx| {
                     this.submit_new_subtask(pane_id, window, cx)
                 })),
@@ -670,9 +670,9 @@ fn subtask_row(
     };
 
     let auto_manual_label = if sub.source_session_id.is_some() {
-        strings::task_subtask_auto_label()
+        strings::task::subtask_auto_label()
     } else {
-        strings::task_subtask_manual_label()
+        strings::task::subtask_manual_label()
     };
 
     let sub_id_for_remove = sub.id.clone();

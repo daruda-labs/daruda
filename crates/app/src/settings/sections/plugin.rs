@@ -135,10 +135,10 @@ fn display_name_for_invocation(skill: &Skill) -> String {
 /// `user_invocable` / `disable_model_invocation` frontmatter pair.
 fn invocation_status_label(inv: SkillInvocation) -> String {
     match inv {
-        SkillInvocation::Both => s::settings_plugin_skill_invocation_both(),
-        SkillInvocation::UserOnly => s::settings_plugin_skill_invocation_user_only(),
-        SkillInvocation::ModelOnly => s::settings_plugin_skill_invocation_model_only(),
-        SkillInvocation::Disabled => s::settings_plugin_skill_invocation_disabled(),
+        SkillInvocation::Both => s::settings::plugin_skill_invocation_both(),
+        SkillInvocation::UserOnly => s::settings::plugin_skill_invocation_user_only(),
+        SkillInvocation::ModelOnly => s::settings::plugin_skill_invocation_model_only(),
+        SkillInvocation::Disabled => s::settings::plugin_skill_invocation_disabled(),
     }
 }
 
@@ -217,18 +217,24 @@ impl SettingsView {
 
         let mut col = div().flex().flex_col().gap(px(theme::MODAL_PANEL_GAP));
 
-        col = col.child(plugin_subheading(s::settings_plugin_installed_header(), cx));
+        col = col.child(plugin_subheading(
+            s::settings::plugin_installed_header(),
+            cx,
+        ));
         if installed.is_empty() {
-            col = col.child(plugin_empty_hint(s::settings_plugin_none_installed(), cx));
+            col = col.child(plugin_empty_hint(s::settings::plugin_none_installed(), cx));
         } else {
             for g in &installed {
                 col = col.child(self.plugin_master_row(g, cx));
             }
         }
 
-        col = col.child(plugin_subheading(s::settings_plugin_available_header(), cx));
+        col = col.child(plugin_subheading(
+            s::settings::plugin_available_header(),
+            cx,
+        ));
         if available.is_empty() {
-            col = col.child(plugin_empty_hint(s::settings_plugin_none_available(), cx));
+            col = col.child(plugin_empty_hint(s::settings::plugin_none_available(), cx));
         } else {
             for g in &available {
                 col = col.child(self.plugin_master_row(g, cx));
@@ -246,7 +252,7 @@ impl SettingsView {
             .plugin_selected
             .as_deref()
             .is_some_and(|sel| sel == group.plugin_id);
-        let count_text = SharedString::from(s::settings_plugin_skill_count(group.skill_count));
+        let count_text = SharedString::from(s::settings::plugin_skill_count(group.skill_count));
         let row_id = SharedString::from(format!("settings-plugin-master-{}", group.plugin_id));
         let plugin_id = group.plugin_id.clone();
 
@@ -307,11 +313,11 @@ impl SettingsView {
             return self.plugin_skill_view_pane(view, cx);
         }
         let Some(selected_id) = self.plugin_selected.clone() else {
-            return plugin_empty_hint(s::settings_plugin_detail_empty(), cx).into_any_element();
+            return plugin_empty_hint(s::settings::plugin_detail_empty(), cx).into_any_element();
         };
         let Some(group) = groups.iter().find(|g| g.plugin_id == selected_id) else {
             // Selection went stale (plugin uninstalled while open).
-            return plugin_empty_hint(s::settings_plugin_detail_empty(), cx).into_any_element();
+            return plugin_empty_hint(s::settings::plugin_detail_empty(), cx).into_any_element();
         };
 
         let install = installs.get(&group.plugin_id);
@@ -335,49 +341,49 @@ impl SettingsView {
         );
 
         let availability_text = match group.availability {
-            Some(PluginAvailability::Installed) => s::settings_plugin_detail_status_installed(),
-            Some(PluginAvailability::Available) => s::settings_plugin_detail_status_available(),
-            None => s::settings_plugin_detail_unknown(),
+            Some(PluginAvailability::Installed) => s::settings::plugin_detail_status_installed(),
+            Some(PluginAvailability::Available) => s::settings::plugin_detail_status_available(),
+            None => s::settings::plugin_detail_unknown(),
         };
 
         let version_text = install
             .map(|i| i.version.clone())
             .filter(|v| !v.is_empty())
-            .unwrap_or_else(|| s::settings_plugin_detail_unknown().to_string());
+            .unwrap_or_else(|| s::settings::plugin_detail_unknown().to_string());
         let path_text = install
             .map(|i| redact_home(&i.install_path))
-            .unwrap_or_else(|| s::settings_plugin_detail_unknown().to_string());
+            .unwrap_or_else(|| s::settings::plugin_detail_unknown().to_string());
         let scope_text = install
             .map(|i| i.scope.clone())
             .filter(|s| !s.is_empty())
-            .unwrap_or_else(|| s::settings_plugin_detail_unknown().to_string());
+            .unwrap_or_else(|| s::settings::plugin_detail_unknown().to_string());
 
         let meta = div()
             .flex()
             .flex_col()
             .gap(px(theme::LIST_ROW_GAP))
             .child(detail_row(
-                s::settings_plugin_detail_marketplace(),
+                s::settings::plugin_detail_marketplace(),
                 SharedString::from(marketplace_id),
                 cx,
             ))
             .child(detail_row(
-                s::settings_plugin_detail_availability(),
+                s::settings::plugin_detail_availability(),
                 SharedString::from(availability_text),
                 cx,
             ))
             .child(detail_row(
-                s::settings_plugin_detail_version(),
+                s::settings::plugin_detail_version(),
                 SharedString::from(version_text),
                 cx,
             ))
             .child(detail_row(
-                s::settings_plugin_detail_scope(),
+                s::settings::plugin_detail_scope(),
                 SharedString::from(scope_text),
                 cx,
             ))
             .child(detail_row(
-                s::settings_plugin_detail_path(),
+                s::settings::plugin_detail_path(),
                 SharedString::from(path_text),
                 cx,
             ));
@@ -390,12 +396,14 @@ impl SettingsView {
                 .flex_col()
                 .gap(px(theme::LIST_ROW_GAP))
                 .child(plugin_subheading(
-                    s::settings_plugin_detail_skills_header(),
+                    s::settings::plugin_detail_skills_header(),
                     cx,
                 ));
         if skills_for_plugin.is_empty() {
-            skills_col =
-                skills_col.child(plugin_empty_hint(s::settings_plugin_detail_no_skills(), cx));
+            skills_col = skills_col.child(plugin_empty_hint(
+                s::settings::plugin_detail_no_skills(),
+                cx,
+            ));
         } else {
             for sk in &skills_for_plugin {
                 skills_col = skills_col.child(self.plugin_skill_row(sk, cx));
@@ -426,16 +434,16 @@ impl SettingsView {
         let is_in_flight = in_flight.contains(&group.plugin_id);
         let (button_label, action) = match (group.availability, is_in_flight) {
             (Some(PluginAvailability::Installed), false) => (
-                s::settings_plugin_uninstall(),
+                s::settings::plugin_uninstall(),
                 Some(PluginAction::Uninstall),
             ),
             (Some(PluginAvailability::Installed), true) => {
-                (s::settings_plugin_uninstalling(), None)
+                (s::settings::plugin_uninstalling(), None)
             }
             (Some(PluginAvailability::Available), false) => {
-                (s::settings_plugin_install(), Some(PluginAction::Install))
+                (s::settings::plugin_install(), Some(PluginAction::Install))
             }
-            (Some(PluginAvailability::Available), true) => (s::settings_plugin_installing(), None),
+            (Some(PluginAvailability::Available), true) => (s::settings::plugin_installing(), None),
             (None, _) => (String::new(), None),
         };
 
@@ -534,27 +542,31 @@ impl SettingsView {
             .child(header_line);
 
         if let Some(desc) = description {
-            col = col.child(detail_row(s::settings_plugin_skill_description(), desc, cx));
+            col = col.child(detail_row(
+                s::settings::plugin_skill_description(),
+                desc,
+                cx,
+            ));
         }
         if let Some(hint) = arg_hint {
             col = col.child(detail_row(
-                s::settings_plugin_skill_argument_hint(),
+                s::settings::plugin_skill_argument_hint(),
                 hint,
                 cx,
             ));
         }
         if let Some(tools) = allowed_tools {
             col = col.child(detail_row(
-                s::settings_plugin_skill_allowed_tools(),
+                s::settings::plugin_skill_allowed_tools(),
                 tools,
                 cx,
             ));
         }
         if let Some(p) = paths {
-            col = col.child(detail_row(s::settings_plugin_skill_paths(), p, cx));
+            col = col.child(detail_row(s::settings::plugin_skill_paths(), p, cx));
         }
         if let Some(w) = when_to_use {
-            col = col.child(detail_row(s::settings_plugin_skill_when_to_use(), w, cx));
+            col = col.child(detail_row(s::settings::plugin_skill_when_to_use(), w, cx));
         }
         col
     }
@@ -577,7 +589,7 @@ impl SettingsView {
         // master-row selection. Pass `display_name` + `skill_md_path`
         // to the spawn loader so they survive the async disk read.
         let _ = plugin_id;
-        button(id, s::settings_plugin_skill_view()).on_click(cx.listener(
+        button(id, s::settings::plugin_skill_view()).on_click(cx.listener(
             move |this, _: &ClickEvent, _, cx| {
                 this.open_plugin_skill_view(display_name.clone(), skill_md_path.clone(), cx);
             },
@@ -606,7 +618,7 @@ impl SettingsView {
             .child(
                 button(
                     "settings-plugin-skill-back",
-                    s::settings_plugin_skill_back(),
+                    s::settings::plugin_skill_back(),
                 )
                 .child(crate::ui::icons::icon(crate::ui::icons::BACK))
                 .on_click(cx.listener(|this, _: &ClickEvent, _, cx| {
@@ -622,7 +634,7 @@ impl SettingsView {
             );
 
         let path_row = detail_row(
-            s::settings_plugin_detail_path(),
+            s::settings::plugin_detail_path(),
             SharedString::from(redact_home(&view.skill_md_path)),
             cx,
         );
@@ -631,7 +643,7 @@ impl SettingsView {
             PluginSkillBodyState::Loading => div()
                 .text_size(px(theme::MODAL_BODY_FONT_SIZE))
                 .text_color(secondary_color)
-                .child(s::settings_plugin_skill_body_loading())
+                .child(s::settings::plugin_skill_body_loading())
                 .into_any_element(),
             PluginSkillBodyState::Error(msg) => div()
                 .flex()
@@ -641,7 +653,7 @@ impl SettingsView {
                     div()
                         .text_size(px(theme::MODAL_BODY_FONT_SIZE))
                         .text_color(error_color)
-                        .child(s::settings_plugin_skill_body_error()),
+                        .child(s::settings::plugin_skill_body_error()),
                 )
                 .child(
                     div()
@@ -658,7 +670,7 @@ impl SettingsView {
                     div()
                         .text_size(px(theme::SKILL_BADGE_FONT_SIZE))
                         .text_color(section_header_color)
-                        .child(s::settings_plugin_skill_body()),
+                        .child(s::settings::plugin_skill_body()),
                 )
                 .child(
                     div()
@@ -789,10 +801,10 @@ impl SettingsView {
             Err(e) => {
                 let text = match action {
                     crate::agent::skills::plugin_ops::PluginAction::Install => {
-                        s::settings_plugin_install_failed(plugin_id, &e.to_string())
+                        s::settings::plugin_install_failed(plugin_id, e.to_string())
                     }
                     crate::agent::skills::plugin_ops::PluginAction::Uninstall => {
-                        s::settings_plugin_uninstall_failed(plugin_id, &e.to_string())
+                        s::settings::plugin_uninstall_failed(plugin_id, e.to_string())
                     }
                 };
                 self.report_section_error(

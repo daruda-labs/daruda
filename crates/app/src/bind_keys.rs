@@ -207,13 +207,13 @@ pub(crate) fn register_global_actions(cx: &mut App, config: std::sync::Arc<darud
 
     // Help menu — open URLs in the user's default browser.
     cx.on_action(|_: &OpenDarudaHelp, cx: &mut App| {
-        cx.open_url(surface::strings::URL_HELP);
+        cx.open_url(surface::constants::URL_HELP);
     });
     cx.on_action(|_: &OpenReportIssue, cx: &mut App| {
-        cx.open_url(surface::strings::URL_REPORT_ISSUE);
+        cx.open_url(surface::constants::URL_REPORT_ISSUE);
     });
     cx.on_action(|_: &OpenGithubRepo, cx: &mut App| {
-        cx.open_url(surface::strings::URL_GITHUB_REPO);
+        cx.open_url(surface::constants::URL_GITHUB_REPO);
     });
 
     // Global OpenFolder handler — routes through the policy-aware chooser:

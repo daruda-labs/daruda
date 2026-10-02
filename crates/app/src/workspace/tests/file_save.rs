@@ -128,7 +128,7 @@ async fn a_save_over_a_file_changed_on_disk_asks_before_writing(cx: &mut TestApp
     assert!(cx.has_pending_prompt(), "the conflict is put to the user");
     assert_eq!(disk(&temp), "agent", "nothing is written before the answer");
 
-    cx.simulate_prompt_answer(&strings::file_save_conflict_overwrite());
+    cx.simulate_prompt_answer(&strings::file_viewer::save_conflict_overwrite());
     cx.run_until_parked();
     assert_eq!(disk(&temp), "mine", "Overwrite writes the buffer");
     let dirty = ws.read_with(cx, |ws, cx| {
@@ -143,7 +143,7 @@ async fn reloading_on_a_save_conflict_takes_the_disk_copy(cx: &mut TestAppContex
     type_text(wh, &ws, cx, "mine");
     std::fs::write(temp.path().join("a.txt"), b"agent").unwrap();
     save(wh, &ws, cx);
-    cx.simulate_prompt_answer(&strings::file_save_conflict_reload());
+    cx.simulate_prompt_answer(&strings::file_viewer::save_conflict_reload());
     cx.run_until_parked();
     assert_eq!(disk(&temp), "agent", "Reload never writes");
     assert_eq!(
@@ -196,7 +196,7 @@ async fn save_all_on_tab_close_writes_a_dirty_file_pane(cx: &mut TestAppContext)
     let (wh, ws, temp) = open_temp_file(cx, b"hello");
     type_text(wh, &ws, cx, "mine");
     close_active_tab(wh, &ws, cx);
-    cx.simulate_prompt_answer(&strings::tab_close_batch_save_all());
+    cx.simulate_prompt_answer(&strings::task::batch_save_all());
     cx.run_until_parked();
     assert_eq!(disk(&temp), "mine", "Save all must write the file");
     assert!(!has_a_txt_pane(&ws, cx), "and then close the tab");
@@ -208,7 +208,7 @@ async fn save_all_keeps_the_tab_when_the_file_changed_on_disk(cx: &mut TestAppCo
     type_text(wh, &ws, cx, "mine");
     std::fs::write(temp.path().join("a.txt"), b"agent").unwrap();
     close_active_tab(wh, &ws, cx);
-    cx.simulate_prompt_answer(&strings::tab_close_batch_save_all());
+    cx.simulate_prompt_answer(&strings::task::batch_save_all());
     cx.run_until_parked();
     assert_eq!(disk(&temp), "agent", "the agent's copy is not overwritten");
     assert!(has_a_txt_pane(&ws, cx), "the unsaved buffer stays open");
@@ -244,7 +244,7 @@ async fn closing_a_dirty_file_pane_with_save_writes_it(cx: &mut TestAppContext) 
     })
     .unwrap();
     cx.run_until_parked();
-    cx.simulate_prompt_answer(&strings::task_edit_save());
+    cx.simulate_prompt_answer(&strings::common::btn_save());
     cx.run_until_parked();
     assert_eq!(disk(&temp), "mine", "Save writes the file");
     assert!(!has_a_txt_pane(&ws, cx), "then closes the pane");

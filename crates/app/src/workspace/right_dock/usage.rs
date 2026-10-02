@@ -7,7 +7,7 @@
 //! activity from `RightDockSnapshot::activity` (local session-log
 //! aggregation pump, one entry per domain). The ↻ badge dispatches
 //! `Workspace::refresh_usage_now`. Static text comes from
-//! `surface::strings::usage_*`, pixels/colors from `crate::ui::theme`.
+//! `surface::strings::usage::*`, pixels/colors from `crate::ui::theme`.
 
 use std::time::{Duration, SystemTime};
 
@@ -126,9 +126,9 @@ pub(super) fn footer(snap: &RightDockSnapshot, cx: &gpui::App) -> Option<AnyElem
 /// on a permanent placeholder.
 fn no_provider_body(cx: &gpui::App) -> AnyElement {
     crate::workspace::right_dock::right_panel_body()
-        .child(SectionHeader::new(strings::right_panel_tab_usage()).prominent())
+        .child(SectionHeader::new(strings::dock::right_tab_usage()).prominent())
         .child(
-            crate::ui::placeholder_text(strings::usage_no_provider())
+            crate::ui::placeholder_text(strings::usage::no_provider())
                 .text_size(px(theme::DOCK_PLACEHOLDER_FONT_SIZE))
                 .text_color(theme::current(cx).text_subtle),
         )
@@ -141,9 +141,9 @@ fn no_provider_body(cx: &gpui::App) -> AnyElement {
 /// nobody is signed into anything.
 fn no_provider_body_for_domain(recipe: AccountRecipeId, cx: &gpui::App) -> AnyElement {
     crate::workspace::right_dock::right_panel_body()
-        .child(SectionHeader::new(strings::right_panel_tab_usage()).prominent())
+        .child(SectionHeader::new(strings::dock::right_tab_usage()).prominent())
         .child(
-            crate::ui::placeholder_text(strings::usage_no_domain_provider(recipe))
+            crate::ui::placeholder_text(strings::usage::no_domain_provider(recipe))
                 .text_size(px(theme::DOCK_PLACEHOLDER_FONT_SIZE))
                 .text_color(theme::current(cx).text_subtle),
         )
@@ -181,7 +181,7 @@ fn domain_switcher(
         .children(
             recipes
                 .iter()
-                .map(|recipe| tab(strings::account_recipe_label(*recipe))),
+                .map(|recipe| tab(strings::settings::account_recipe_label(*recipe))),
         )
         .on_click(move |ix, _window, cx| {
             let Some(recipe) = recipes.get(*ix).copied() else {
@@ -217,7 +217,7 @@ fn recent_sessions_block(
     });
     ScopeSection {
         section: DockSection::UsageRecentSessions,
-        label: strings::usage_recent_sessions_section().into(),
+        label: strings::usage::recent_sessions_section().into(),
         count: Some(sessions.len().to_string().into()),
         fold: SectionFold::toggleable(is_open),
         divided: true,
@@ -260,7 +260,7 @@ fn recent_session_row(
     .child(
         hover_actions("usage-session-row", theme::LIST_ROW_PAD_X, cx).child(
             crate::ui::button_icon(restore_id, crate::ui::icons::HISTORY, cx)
-                .tooltip(strings::usage_session_restore())
+                .tooltip(strings::usage::session_restore())
                 .debug_selector(|| "usage-session-restore".into())
                 .on_click(move |_, window, cx| {
                     if let Some(ws) = workspace.upgrade() {
@@ -307,7 +307,7 @@ fn provider_section(
     block
         .child(chart_block(
             DockSection::UsageTurns,
-            strings::usage_section_7day(),
+            strings::usage::section_7day(),
             activity,
             |d| d.turns,
             snap,
@@ -315,7 +315,7 @@ fn provider_section(
         ))
         .child(chart_block(
             DockSection::UsageTokens,
-            strings::usage_section_tokens(),
+            strings::usage::section_tokens(),
             activity,
             |d| d.tokens,
             snap,
@@ -354,7 +354,9 @@ fn header(
                 .text_size(px(theme::USAGE_TITLE_FONT_SIZE))
                 .font_weight(gpui::FontWeight::SEMIBOLD)
                 .text_color(t.text_primary)
-                .child(SharedString::from(strings::account_recipe_label(recipe))),
+                .child(SharedString::from(strings::settings::account_recipe_label(
+                    recipe,
+                ))),
         );
 
     if let Some(label) = plan_badge_label(plan) {
@@ -411,7 +413,7 @@ fn usage_section_header(
     let label = refresh_badge_label(fetched_at, stale, in_flight);
     let workspace = workspace.clone();
 
-    SectionHeader::new(strings::right_panel_tab_usage())
+    SectionHeader::new(strings::dock::right_tab_usage())
         .prominent()
         .truncate_label(true)
         .actions(
@@ -434,18 +436,18 @@ fn usage_section_header(
 /// age bucket.
 fn refresh_badge_label(fetched_at: Option<SystemTime>, stale: bool, in_flight: bool) -> String {
     if in_flight {
-        return strings::usage_refreshing();
+        return strings::usage::refreshing();
     }
     let age = fetched_at.and_then(|t| SystemTime::now().duration_since(t).ok());
     let label = match cache_age_bucket(age) {
-        CacheAge::Never => strings::usage_refresh(),
-        CacheAge::JustNow => strings::usage_cache_just_now(),
-        CacheAge::Minutes(n) => strings::usage_cache_minutes(n),
-        CacheAge::Hours(n) => strings::usage_cache_hours(n),
-        CacheAge::Days(n) => strings::usage_cache_days(n),
+        CacheAge::Never => strings::usage::refresh(),
+        CacheAge::JustNow => strings::usage::cache_just_now(),
+        CacheAge::Minutes(n) => strings::usage::cache_minutes(n),
+        CacheAge::Hours(n) => strings::usage::cache_hours(n),
+        CacheAge::Days(n) => strings::usage::cache_days(n),
     };
     if stale {
-        format!("{label} {}", strings::usage_stale_marker())
+        format!("{label} {}", strings::usage::stale_marker())
     } else {
         label
     }
@@ -464,7 +466,7 @@ fn gauges_block(usage: Option<&ProviderUsage>, stale: bool, cx: &gpui::App) -> i
     let col = div().flex().flex_col().gap(px(theme::USAGE_CARD_GAP));
     if windows.is_empty() {
         return col.child(gauge_card(
-            strings::usage_limit_unavailable(),
+            strings::usage::limit_unavailable(),
             None,
             stale,
             cx,
@@ -513,7 +515,7 @@ fn gauge_card(
     let reset_text = win
         .resets_at
         .and_then(|at| at.duration_since(SystemTime::now()).ok())
-        .map(strings::format_reset_countdown);
+        .map(strings::usage::format_reset_countdown);
 
     let mut card = card
         .child(gauge_header_row(
@@ -567,11 +569,11 @@ fn gauge_header_row(
 
 fn gauge_value_text(pct: Option<f32>, stale: bool) -> String {
     let Some(pct) = pct else {
-        return strings::usage_limit_unavailable();
+        return strings::usage::limit_unavailable();
     };
     let value = format!("{:.0}%", pct.clamp(0.0, 100.0));
     if stale {
-        format!("{value} {}", strings::usage_stale_marker())
+        format!("{value} {}", strings::usage::stale_marker())
     } else {
         value
     }
@@ -671,7 +673,7 @@ fn chart_bar(
         theme::USAGE_CHART_BAR_OTHER
     };
     let label = parsed
-        .map(|d| strings::usage_weekday_label(d.weekday().num_days_from_sunday() as u8))
+        .map(|d| strings::usage::weekday_label(d.weekday().num_days_from_sunday() as u8))
         .unwrap_or_default();
     let label_color = theme::current(cx).text_subtle;
 
@@ -709,7 +711,7 @@ fn status_pill(status: Option<&ServiceStatus>, cx: &gpui::App) -> impl IntoEleme
     let unknown = ServiceStatus::default();
     let status = status.unwrap_or(&unknown);
     let color = indicator_color(status.indicator, cx);
-    let label = strings::service_status_label(status);
+    let label = strings::status::service_status_label(status);
     let muted_text = theme::current(cx).text_muted;
     let mut tint = color;
     tint.a = theme::RIGHT_PANEL_STATUS_PILL_BG_ALPHA;
@@ -827,10 +829,10 @@ fn session_row_meta_label(session: &RestorableSession) -> SharedString {
 fn relative_time_label(last_active: SystemTime) -> String {
     let age = SystemTime::now().duration_since(last_active).ok();
     match cache_age_bucket(age) {
-        CacheAge::Never | CacheAge::JustNow => strings::usage_session_just_now(),
-        CacheAge::Minutes(n) => strings::usage_session_minutes(n),
-        CacheAge::Hours(n) => strings::usage_session_hours(n),
-        CacheAge::Days(n) => strings::usage_session_days(n),
+        CacheAge::Never | CacheAge::JustNow => strings::usage::session_just_now(),
+        CacheAge::Minutes(n) => strings::usage::session_minutes(n),
+        CacheAge::Hours(n) => strings::usage::session_hours(n),
+        CacheAge::Days(n) => strings::usage::session_days(n),
     }
 }
 
@@ -1048,22 +1050,22 @@ mod tests {
     #[test]
     fn relative_time_label_buckets_like_the_refresh_badge_without_the_refresh_glyph() {
         let now = SystemTime::now();
-        assert_eq!(relative_time_label(now), strings::usage_session_just_now());
+        assert_eq!(relative_time_label(now), strings::usage::session_just_now());
         assert!(
             !relative_time_label(now).starts_with('\u{21bb}'),
             "recent-session timestamps must not show the refresh glyph"
         );
         assert_eq!(
             relative_time_label(now - Duration::from_secs(5 * 60)),
-            strings::usage_session_minutes(5)
+            strings::usage::session_minutes(5)
         );
         assert_eq!(
             relative_time_label(now - Duration::from_secs(3 * 3_600)),
-            strings::usage_session_hours(3)
+            strings::usage::session_hours(3)
         );
         assert_eq!(
             relative_time_label(now - Duration::from_secs(2 * 86_400)),
-            strings::usage_session_days(2)
+            strings::usage::session_days(2)
         );
     }
 
@@ -1072,11 +1074,11 @@ mod tests {
         let now = SystemTime::now();
         let fresh = refresh_badge_label(Some(now), false, false);
         let stale = refresh_badge_label(Some(now), true, false);
-        assert!(!fresh.contains(&strings::usage_stale_marker()));
-        assert!(stale.contains(&strings::usage_stale_marker()));
+        assert!(!fresh.contains(&strings::usage::stale_marker()));
+        assert!(stale.contains(&strings::usage::stale_marker()));
         assert_eq!(
             refresh_badge_label(Some(now), true, true),
-            strings::usage_refreshing()
+            strings::usage::refreshing()
         );
     }
 
@@ -1085,11 +1087,11 @@ mod tests {
         assert_eq!(gauge_value_text(Some(99.0), false), "99%");
         assert_eq!(
             gauge_value_text(Some(99.0), true),
-            format!("99% {}", strings::usage_stale_marker())
+            format!("99% {}", strings::usage::stale_marker())
         );
         assert_eq!(
             gauge_value_text(None, true),
-            strings::usage_limit_unavailable()
+            strings::usage::limit_unavailable()
         );
     }
 

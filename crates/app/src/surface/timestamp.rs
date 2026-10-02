@@ -29,9 +29,9 @@ enum Shape {
 impl Shape {
     fn pattern(self) -> String {
         match self {
-            Self::DateAndTime => super::strings::timestamp_date_and_time(),
-            Self::MonthDayAndTime => super::strings::timestamp_month_day_and_time(),
-            Self::TimeOnly => super::strings::timestamp_time_only(),
+            Self::DateAndTime => super::strings::timestamp::date_and_time(),
+            Self::MonthDayAndTime => super::strings::timestamp::month_day_and_time(),
+            Self::TimeOnly => super::strings::timestamp::time_only(),
         }
     }
 }

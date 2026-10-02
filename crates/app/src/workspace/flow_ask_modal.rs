@@ -100,7 +100,7 @@ impl FlowAskModal {
         }
         let weak = workspace;
         open_form_modal::<FlowAskModal, _>(
-            crate::surface::strings::flow_ask_modal_title(),
+            crate::surface::strings::flow::ask_modal_title(),
             None,
             move |_window, cx_modal| FlowAskModal {
                 lane,
@@ -121,7 +121,7 @@ impl FlowAskModal {
         let lane = self.lane;
         crate::ui::button(
             SharedString::from(format!("flow-ask-modal-stop-{}", self.ask.ask_id)),
-            SharedString::from(crate::surface::strings::flow_ask_modal_stop()),
+            SharedString::from(crate::surface::strings::flow::ask_modal_stop()),
         )
         .on_click(move |_, window, cx| {
             match workspace.update(cx, |ws, cx| ws.stop_flow_run_in(lane, cx)) {

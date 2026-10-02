@@ -106,7 +106,7 @@ pub(super) fn spawn(mut receiver: UnboundedReceiver<WorkerEvent>, cx: &mut App) 
                     }
                 });
                 if persisted {
-                    let message = Message::plain(s::remote_pair_success(), None);
+                    let message = Message::plain(s::remote_channel::pair_success(), None);
                     let result = cx
                         .background_executor()
                         .spawn(
@@ -277,7 +277,7 @@ fn feedback_for(effect: Effect, kind: IncomingKind) -> Feedback {
         (Effect::None, Some((message_id, original))) => Feedback::Edit {
             message_id,
             original,
-            label: s::remote_stale_callback(),
+            label: s::remote_channel::stale_callback(),
         },
         (Effect::None, None) => Feedback::Nothing,
     }

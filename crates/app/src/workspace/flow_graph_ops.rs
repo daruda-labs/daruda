@@ -225,7 +225,7 @@ impl Workspace {
                     workspace.disconnect_nodes(&for_path, view.clone(), out_of, into, window, cx)
                 }
                 FlowGraphEvent::TypingDropped => workspace.report_own_flow_refusal(
-                    s::flow_edit_dropped_typing(),
+                    s::flow::edit_dropped_typing(),
                     "flow.edit_dropped_typing",
                     cx,
                 ),

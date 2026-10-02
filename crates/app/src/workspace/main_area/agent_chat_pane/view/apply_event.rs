@@ -384,7 +384,7 @@ impl AgentChatView {
                         format!(
                             "{}\n\n{}",
                             message,
-                            s::agent_chat_remote_connect_error_hint()
+                            s::agent_chat::remote_connect_error_hint()
                         )
                     }
                     _ => message,

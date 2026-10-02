@@ -56,7 +56,7 @@ pub(super) fn render_file_viewer_body(
             .justify_center()
             .text_size(px(editor_font_size))
             .text_color(ctx_text)
-            .child(strings::file_viewer_loading())
+            .child(strings::common::loading())
             .into_any_element(),
 
         PaneFileContent::Error(msg) => frame
@@ -82,11 +82,11 @@ pub(super) fn render_file_viewer_body(
                 .gap(px(theme::GAP_STANDARD))
                 .text_size(px(editor_font_size))
                 .text_color(ctx_text)
-                .child(strings::file_viewer_binary())
+                .child(strings::file_viewer::binary())
                 .child(
                     crate::ui::button(
                         "file-viewer-open-with-default-app",
-                        strings::file_viewer_btn_open_with_default_app(),
+                        strings::file_viewer::btn_open_with_default_app(),
                     )
                     .on_click(cx.listener(move |ws, _, _window, cx| {
                         ws.open_lane_file_with_system_default(lane_id, path.clone(), cx);
@@ -102,7 +102,7 @@ pub(super) fn render_file_viewer_body(
             .justify_center()
             .text_size(px(editor_font_size))
             .text_color(del_text)
-            .child(strings::file_viewer_deleted())
+            .child(strings::file_viewer::deleted())
             .into_any_element(),
 
         PaneFileContent::LoadedRaw { truncated } => frame
@@ -121,7 +121,7 @@ pub(super) fn render_file_viewer_body(
             )
             .when(*truncated, |body| {
                 body.child(footer_row(
-                    strings::file_viewer_truncated_read_only(theme::FILE_VIEWER_MAX_BYTES),
+                    strings::file_viewer::truncated_read_only(theme::FILE_VIEWER_MAX_BYTES),
                     ctx_text,
                     editor_font_size,
                     editor_font_size * theme::editor_line_height(cx),
@@ -147,7 +147,7 @@ pub(super) fn render_file_viewer_body(
                     .justify_center()
                     .text_size(px(editor_font_size))
                     .text_color(ctx_text)
-                    .child(strings::file_viewer_empty_diff())
+                    .child(strings::file_viewer::empty_diff())
                     .into_any_element()
             } else {
                 // The diff renders through the same editor as raw — its
@@ -277,14 +277,14 @@ fn render_raw_body(
     let shown = rows.len();
     if byte_truncated {
         col = col.child(footer_row(
-            strings::file_viewer_byte_truncated(shown, theme::FILE_VIEWER_MAX_BYTES, total_count),
+            strings::file_viewer::byte_truncated(shown, theme::FILE_VIEWER_MAX_BYTES, total_count),
             line_no_text,
             editor_font,
             row_h,
         ));
     } else if total_count > shown {
         col = col.child(footer_row(
-            strings::file_viewer_more_lines(total_count - shown),
+            strings::file_viewer::more_lines(total_count - shown),
             line_no_text,
             editor_font,
             row_h,

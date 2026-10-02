@@ -443,16 +443,16 @@ fn in_project_window<T>(
 /// deliberately carries no rendered sentences.
 fn approval_summary(cmd: &GatedCommand, cx: &mut App) -> String {
     match cmd {
-        GatedCommand::LaneCreate { name, .. } => s::control_approval_lane_create(name),
+        GatedCommand::LaneCreate { name, .. } => s::control::approval_lane_create(name),
         GatedCommand::ChatNew { lane, .. } => {
             let path = in_lane_window(*lane, cx, |ws, _window, _cx| {
-                Ok(s::control_lane_path(
-                    &ws.control_project_name(lane.project),
-                    &ws.control_lane_name(lane.lane_ref()),
+                Ok(s::control::lane_path(
+                    ws.control_project_name(lane.project),
+                    ws.control_lane_name(lane.lane_ref()),
                 ))
             })
             .unwrap_or_default();
-            s::control_approval_chat_new(&path)
+            s::control::approval_chat_new(&path)
         }
     }
 }

@@ -51,8 +51,8 @@ impl AnnotationDialog {
         cx: &mut App,
     ) {
         let title = match target {
-            AnnotationDialogTarget::Create { .. } => s::terminal_annotation_dialog_title_create(),
-            AnnotationDialogTarget::Edit { .. } => s::terminal_annotation_dialog_title_edit(),
+            AnnotationDialogTarget::Create { .. } => s::terminal::annotation_dialog_title_create(),
+            AnnotationDialogTarget::Edit { .. } => s::terminal::annotation_dialog_title_edit(),
         };
         let initial = Rc::new(initial);
         open_form_modal(
@@ -74,7 +74,7 @@ impl AnnotationDialog {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Self {
-        let placeholder = s::terminal_annotation_placeholder();
+        let placeholder = s::terminal::annotation_placeholder();
         let initial_owned: gpui::SharedString = initial.into();
         let text_input = cx.new(|cx_input| {
             let mut state = InputState::new(window, cx_input)
@@ -146,14 +146,14 @@ impl Render for AnnotationDialog {
             .gap(px(theme::MODAL_FOOTER_GAP))
             .mt(px(theme::MODAL_FOOTER_MARGIN_TOP))
             .child(
-                button("annotation-dialog-cancel", s::annotation_dialog_cancel()).on_click(
-                    cx.listener(|this, _: &ClickEvent, window, cx| {
+                button("annotation-dialog-cancel", s::common::btn_cancel()).on_click(cx.listener(
+                    |this, _: &ClickEvent, window, cx| {
                         this.dismiss(window, cx);
-                    }),
-                ),
+                    },
+                )),
             )
             .child(
-                button_primary("annotation-dialog-save", s::annotation_dialog_save()).on_click(
+                button_primary("annotation-dialog-save", s::common::btn_save()).on_click(
                     cx.listener(|this, _: &ClickEvent, window, cx| {
                         this.submit(window, cx);
                     }),

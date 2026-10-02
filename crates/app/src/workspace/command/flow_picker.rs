@@ -97,7 +97,7 @@ impl FlowCandidate {
             crate::workspace::flow_paths::FlowOrigin::Repo
             | crate::workspace::flow_paths::FlowOrigin::Project => None,
             crate::workspace::flow_paths::FlowOrigin::Global => {
-                Some(SharedString::from(strings::flow_picker_global()))
+                Some(SharedString::from(strings::flow::picker_global()))
             }
         }
     }
@@ -117,7 +117,7 @@ impl ProfileCandidate {
     fn defaults() -> Self {
         Self {
             name: None,
-            label: strings::flow_picker_profile_defaults(),
+            label: strings::flow::picker_profile_defaults(),
         }
     }
 
@@ -332,15 +332,15 @@ impl FlowPicker {
     /// this type's to know.
     pub fn prompt(&self) -> String {
         let Some(c) = self.choosing() else {
-            return strings::flow_picker_prompt_run();
+            return strings::flow::picker_prompt_run();
         };
         match (&c.stage, c.purpose) {
             (Stage::Profiles { flow, .. }, _) => {
-                strings::flow_picker_prompt_profile(&crate::workspace::flow_paths::flow_label(flow))
+                strings::flow::picker_prompt_profile(crate::workspace::flow_paths::flow_label(flow))
             }
-            (Stage::Flows { .. }, FlowPurpose::Validate) => strings::flow_picker_prompt_validate(),
-            (Stage::Flows { .. }, FlowPurpose::Run) => strings::flow_picker_prompt_run(),
-            (Stage::Flows { .. }, FlowPurpose::Graph) => strings::flow_picker_prompt_graph(),
+            (Stage::Flows { .. }, FlowPurpose::Validate) => strings::flow::picker_prompt_validate(),
+            (Stage::Flows { .. }, FlowPurpose::Run) => strings::flow::picker_prompt_run(),
+            (Stage::Flows { .. }, FlowPurpose::Graph) => strings::flow::picker_prompt_graph(),
         }
     }
 

@@ -88,7 +88,7 @@ impl Workspace {
 
         let workspace = cx.weak_entity();
         crate::workspace::dialog_helpers::open_form_modal(
-            strings::skills_invoke_title(),
+            strings::skills::invoke_title(),
             Some(gpui::px(crate::ui::theme::FORM_MODAL_WIDE)),
             move |window, cx| {
                 SkillInvocationModal::new(workspace.clone(), label.clone(), window, cx)
@@ -129,7 +129,7 @@ impl Workspace {
     /// process-launch concerns (G2 / `render.rs` responsibility fence).
     pub fn open_skill_dir_in_finder(&mut self, dir: &std::path::Path, cx: &mut Context<Self>) {
         if let Err(e) = open::that_detached(dir) {
-            let report = ErrorReport::new(crate::surface::strings::error_open_finder_failed())
+            let report = ErrorReport::new(crate::surface::strings::error::open_finder_failed())
                 .severity(ErrorSeverity::Warning)
                 .from_error(&e)
                 .at(file!(), line!())

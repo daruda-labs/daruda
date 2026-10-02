@@ -108,10 +108,10 @@ async fn open_agent_chat_pane_creates_agent_chat_leaf(cx: &mut TestAppContext) {
                         view.status
                     );
                 };
-                assert_eq!(message.as_str(), s::agent_chat_no_lane_cwd());
+                assert_eq!(message.as_str(), s::agent_chat::no_lane_cwd());
                 assert_ne!(
                     message.as_str(),
-                    s::agent_chat_error_prefix(),
+                    s::agent_chat::error_prefix(),
                     "payload must be the reason, not the prefix the banner re-adds"
                 );
                 assert!(view.items.is_empty(), "items start empty");
@@ -1357,7 +1357,7 @@ async fn diff_actions_on_a_remote_pane_report_an_error_instead_of_reading_local_
             "both actions must report an error, one each"
         );
         for report in &ws.error_history()[..2] {
-            assert_eq!(report.title, s::diff_remote_path_unsupported());
+            assert_eq!(report.title, s::agent_chat::diff_remote_path_unsupported());
         }
     });
 }
@@ -1396,7 +1396,7 @@ async fn a_remote_panes_links_report_instead_of_opening_a_local_file(cx: &mut Te
     workspace.read_with(cx, |ws, _| {
         assert_eq!(ws.error_history().len(), errors_before + 3);
         for report in &ws.error_history()[..3] {
-            assert_eq!(report.title, s::diff_remote_path_unsupported());
+            assert_eq!(report.title, s::agent_chat::diff_remote_path_unsupported());
         }
     });
 }
@@ -1481,7 +1481,7 @@ async fn a_missing_resource_link_reports_instead_of_doing_nothing(cx: &mut TestA
         assert_eq!(ws.active_runtime().tabs.len(), tabs_before, "no viewer tab");
         assert_eq!(ws.error_history().len(), errors_before + 2);
         for report in &ws.error_history()[..2] {
-            assert_eq!(report.title, s::agent_chat_link_file_missing());
+            assert_eq!(report.title, s::agent_chat::link_file_missing());
         }
     });
 }

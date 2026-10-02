@@ -1675,7 +1675,7 @@ fn transport_eof_localizes_and_preserves_the_session_for_reconnect(cx: &mut gpui
             assert_eq!(*remedy, daruda_acp::Remedy::Retry);
             assert_eq!(
                 message,
-                &crate::surface::strings::agent_chat_transport_closed()
+                &crate::surface::strings::agent_chat::transport_closed()
             );
             assert_ne!(message, "Incoming transport closed");
             assert_eq!(view.session_id.as_deref(), Some("saved-session"));
@@ -1718,7 +1718,7 @@ fn preparation_failure_releases_replay_without_losing_the_resume_target(
             assert_eq!(*remedy, daruda_acp::Remedy::Retry);
             assert_eq!(
                 message,
-                &crate::surface::strings::agent_chat_adapter_install_failed()
+                &crate::surface::strings::agent_chat::adapter_install_failed()
             );
         })
         .unwrap();
@@ -1746,7 +1746,7 @@ fn invalid_package_has_localized_guidance_without_a_misleading_retry(
             assert_ne!(*remedy, daruda_acp::Remedy::Retry);
             assert_eq!(
                 message,
-                &crate::surface::strings::agent_chat_adapter_setup_required()
+                &crate::surface::strings::agent_chat::adapter_setup_required()
             );
         })
         .unwrap();

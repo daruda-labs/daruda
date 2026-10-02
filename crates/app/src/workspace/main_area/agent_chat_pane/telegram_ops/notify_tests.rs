@@ -79,7 +79,10 @@ async fn a_permission_wait_says_which_project_agent_and_tab_asks(cx: &mut gpui::
             .clone();
         assert_eq!(
             ping.header,
-            format!("{project}\n{}", s::remote_agent_with_tab(&agent, "review"))
+            format!(
+                "{project}\n{}",
+                s::control::agent_with_tab(&agent, "review")
+            )
         );
     });
 }
@@ -104,8 +107,8 @@ async fn a_failed_turn_tells_the_phone_why(cx: &mut gpui::TestAppContext) {
         let TelegramTail::Plain(tail) = ping.tail else {
             panic!("a failure is our own copy, not agent markdown");
         };
-        assert!(tail.starts_with(&s::remote_turn_failed()), "{tail}");
-        assert!(tail.contains(&s::agent_chat_transport_closed()), "{tail}");
+        assert!(tail.starts_with(&s::control::turn_failed()), "{tail}");
+        assert!(tail.contains(&s::agent_chat::transport_closed()), "{tail}");
     });
 }
 
@@ -188,17 +191,17 @@ async fn a_completed_run_is_summarised_in_one_line(cx: &mut gpui::TestAppContext
         let ping = sent(&mut outbound);
         let summary = ping.header.lines().last().expect("a header").to_string();
         assert!(ping.header.starts_with(&ws.telegram_header(pane, cx)));
-        let took = s::format_duration_compact(std::time::Duration::from_secs(125));
+        let took = s::notification::format_duration_compact(std::time::Duration::from_secs(125));
         assert!(summary.contains(&took), "{summary}");
         assert!(
-            summary.contains(&s::agent_chat_group_category("edit", 2)),
+            summary.contains(&s::agent_chat::group_category("edit", 2)),
             "{summary}"
         );
         assert!(
-            summary.contains(&s::agent_chat_group_category("run", 1)),
+            summary.contains(&s::agent_chat::group_category("run", 1)),
             "{summary}"
         );
-        assert!(!summary.contains(&s::agent_chat_group_category("run", 2)));
+        assert!(!summary.contains(&s::agent_chat::group_category("run", 2)));
     });
 }
 

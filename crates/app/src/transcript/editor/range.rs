@@ -29,8 +29,8 @@ impl RangeLevel {
 
     fn heading(self) -> String {
         match self {
-            Self::Steps => s::agent_chat_tail_level_steps(),
-            Self::Calls => s::agent_chat_tail_level_calls(),
+            Self::Steps => s::agent_chat::tail_level_steps(),
+            Self::Calls => s::agent_chat::tail_level_calls(),
         }
     }
 }
@@ -98,7 +98,7 @@ fn choices(current: u8) -> Vec<u8> {
 
 pub(crate) fn value_label(value: u8) -> String {
     if value == TAIL_WINDOW_ALL {
-        s::agent_chat_tail_window_all()
+        s::agent_chat::tail_window_all()
     } else {
         value.to_string()
     }

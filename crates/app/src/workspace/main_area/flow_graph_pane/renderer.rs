@@ -125,7 +125,7 @@ pub(super) fn card_for(node: &GraphNode, facts: CardFacts<'_>) -> CardData {
             axes.extend(agent.mode.clone());
             axes.push(timeout_label(node.timeout));
             (
-                s::flow_graph_kind_agent(),
+                s::flow::graph_kind_agent(),
                 axes.join(" · "),
                 match prompt {
                     PromptSummary::Inline(line) => line.clone(),
@@ -134,7 +134,7 @@ pub(super) fn card_for(node: &GraphNode, facts: CardFacts<'_>) -> CardData {
             )
         }
         GraphNodeKind::Gate { run: line } => (
-            s::flow_graph_kind_gate(),
+            s::flow::graph_kind_gate(),
             timeout_label(node.timeout),
             line.clone(),
         ),
@@ -174,7 +174,7 @@ fn policy_attempts(node: &GraphNode) -> String {
     match node.fail {
         FailPolicy::Halt => String::new(),
         FailPolicy::Retry { max_attempts } | FailPolicy::Repair { max_attempts, .. } => {
-            s::flow_graph_policy_attempts(max_attempts)
+            s::flow::graph_policy_attempts(max_attempts)
         }
     }
 }
@@ -184,12 +184,12 @@ fn policy_attempts(node: &GraphNode) -> String {
 fn unpinned_label(why: &super::pins::PinDropped) -> String {
     use super::pins::PinDropped as D;
     match why {
-        D::NodeChanged => s::flow_graph_unpinned_node_changed(),
-        D::NodeGone => s::flow_graph_unpinned_node_gone(),
-        D::UpstreamChanged { node } => s::flow_graph_unpinned_upstream(node.as_str()),
-        D::InheritedAxesChanged => s::flow_graph_unpinned_inherited(),
-        D::Unreadable => s::flow_graph_unpinned_unreadable(),
-        D::SourceGone => s::flow_graph_unpinned_source_gone(),
+        D::NodeChanged => s::flow::graph_unpinned_node_changed(),
+        D::NodeGone => s::flow::graph_unpinned_node_gone(),
+        D::UpstreamChanged { node } => s::flow::graph_unpinned_upstream(node.as_str()),
+        D::InheritedAxesChanged => s::flow::graph_unpinned_inherited(),
+        D::Unreadable => s::flow::graph_unpinned_unreadable(),
+        D::SourceGone => s::flow::graph_unpinned_source_gone(),
     }
 }
 
@@ -198,16 +198,16 @@ fn unpinned_label(why: &super::pins::PinDropped) -> String {
 /// about how it is configured moved to [`policy_label`].
 fn badge_for(facts: &CardFacts<'_>) -> (String, CardAccent) {
     if facts.pinned && facts.run == NodeRunState::Pending {
-        return (s::flow_graph_status_pinned(), CardAccent::Pinned);
+        return (s::flow::graph_status_pinned(), CardAccent::Pinned);
     }
     match facts.run {
         NodeRunState::Running { attempt } if attempt > 1 => {
-            (s::flow_graph_status_attempt(attempt), CardAccent::Retried)
+            (s::flow::graph_status_attempt(attempt), CardAccent::Retried)
         }
-        NodeRunState::Running { .. } => (s::flow_graph_status_running(), CardAccent::Running),
-        NodeRunState::Passed => (s::flow_graph_status_passed(), CardAccent::Passed),
-        NodeRunState::Failed => (s::flow_graph_status_failed(), CardAccent::Failed),
-        NodeRunState::Fixing => (s::flow_graph_status_fixing(), CardAccent::Retried),
+        NodeRunState::Running { .. } => (s::flow::graph_status_running(), CardAccent::Running),
+        NodeRunState::Passed => (s::flow::graph_status_passed(), CardAccent::Passed),
+        NodeRunState::Failed => (s::flow::graph_status_failed(), CardAccent::Failed),
+        NodeRunState::Fixing => (s::flow::graph_status_fixing(), CardAccent::Retried),
         // Before the failure policy and after everything a run said: a pin
         // that has just gone is news, and the policy is not — but a run in
         // progress is about this run, and the pin was about the last one.
@@ -467,7 +467,7 @@ fn issue_marker(card: &CardData, p: CardPalette) -> Option<impl IntoElement> {
             .rounded(px(palette::FLOW_GRAPH_CHIP_RADIUS))
             .text_color(rgb(p.issue))
             .text_size(px(palette::FLOW_GRAPH_CHIP_FONT_SIZE))
-            .child(s::flow_graph_issue_count(card.issues))
+            .child(s::flow::graph_issue_count(card.issues))
     })
 }
 

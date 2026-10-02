@@ -537,7 +537,7 @@ impl Workspace {
                     .unwrap_or(false);
                 if unavailable {
                     let report =
-                        ErrorReport::new(crate::surface::strings::error_lane_path_not_found())
+                        ErrorReport::new(crate::surface::strings::error::lane_path_not_found())
                             .severity(ErrorSeverity::Warning)
                             .at(file!(), line!())
                             .with_context("path", redact_home(&swt.path))
@@ -585,7 +585,7 @@ impl Workspace {
                             // Drop the whole lane's partial panes (scratch
                             // goes out of scope) — restore aborts here.
                             self.report_pane_error(
-                                &crate::surface::strings::pane_context_restore(),
+                                &crate::surface::strings::error::pane_context_restore(),
                                 e,
                                 cx,
                             );

@@ -51,13 +51,13 @@ fn single_line_title(title: &str) -> String {
 /// live tool is a (noisy) child call — the count is the signal the user wants.
 fn working_status(content: &AgentChatView) -> SharedString {
     if content.has_pending_permission() {
-        s::agent_chat_awaiting_permission().into()
+        s::agent_chat::awaiting_permission().into()
     } else if let Some(running) = content.subagent_progress() {
-        s::agent_chat_subagent_progress(running).into()
+        s::agent_chat::subagent_progress(running).into()
     } else if let Some(title) = running_tool_title(&content.items) {
-        s::agent_chat_working_tool(&single_line_title(&title)).into()
+        s::agent_chat::working_tool(single_line_title(&title)).into()
     } else {
-        s::agent_chat_working().into()
+        s::agent_chat::working().into()
     }
 }
 

@@ -18,9 +18,9 @@ impl SettingsView {
     ) {
         confirm_destructive(
             cx.weak_entity(),
-            s::settings_confirm_remove_telegram_token_title(),
-            s::settings_confirm_remove_token_body(),
-            s::settings_confirm_ok_remove_token(),
+            s::settings::confirm_remove_telegram_token_title(),
+            s::settings::confirm_remove_token_body(),
+            s::settings::confirm_ok_remove_token(),
             |this, _window, cx| this.clear_telegram_token(cx),
             window,
             cx,
@@ -30,9 +30,9 @@ impl SettingsView {
     pub(super) fn request_unpair_telegram(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         confirm_destructive(
             cx.weak_entity(),
-            s::settings_confirm_unpair_telegram_title(),
-            s::settings_confirm_unpair_body(),
-            s::settings_confirm_ok_unpair(),
+            s::settings::confirm_unpair_telegram_title(),
+            s::settings::confirm_unpair_body(),
+            s::settings::confirm_ok_unpair(),
             |this, _window, cx| this.unpair_telegram(cx),
             window,
             cx,
@@ -59,9 +59,9 @@ impl SettingsView {
         let name = row.label_input.read(cx).value().trim().to_string();
         confirm_destructive(
             cx.weak_entity(),
-            named_title(&name, s::settings_confirm_remove_session_host_title),
-            s::settings_confirm_remove_from_config_body(),
-            s::settings_confirm_ok_remove(),
+            named_title(&name, s::settings::confirm_remove_session_host_title),
+            s::settings::confirm_remove_from_config_body(),
+            s::settings::confirm_ok_remove(),
             // By id, not position: the list can be rebuilt while the dialog
             // is open, and a stale index would remove a different host.
             move |this, _window, cx| this.remove_session_host_by_id(&id, cx),
@@ -88,9 +88,9 @@ impl SettingsView {
         };
         confirm_destructive(
             cx.weak_entity(),
-            named_title(&name, s::settings_confirm_remove_agent_title),
-            s::settings_confirm_remove_from_config_body(),
-            s::settings_confirm_ok_remove(),
+            named_title(&name, s::settings::confirm_remove_agent_title),
+            s::settings::confirm_remove_from_config_body(),
+            s::settings::confirm_ok_remove(),
             move |this, _window, cx| {
                 if let Some(index) = this.agent_catalog.iter().position(|i| key.matches(i)) {
                     this.remove_agent_catalog_item(index, cx);
@@ -115,9 +115,9 @@ impl SettingsView {
             PluginAction::Install => self.run_plugin_op(plugin_id, action, cx),
             PluginAction::Uninstall => confirm_destructive(
                 cx.weak_entity(),
-                s::settings_confirm_uninstall_plugin_title(&plugin_id),
-                s::settings_confirm_uninstall_plugin_body(),
-                s::settings_plugin_uninstall(),
+                s::settings::confirm_uninstall_plugin_title(&plugin_id),
+                s::settings::confirm_uninstall_plugin_body(),
+                s::settings::plugin_uninstall(),
                 move |this, _window, cx| this.run_plugin_op(plugin_id.clone(), action, cx),
                 window,
                 cx,
@@ -167,6 +167,6 @@ fn named_title(name: &str, generic: fn() -> String) -> String {
     if name.is_empty() {
         generic()
     } else {
-        s::settings_confirm_remove_named(name)
+        s::settings::confirm_remove_named(name)
     }
 }

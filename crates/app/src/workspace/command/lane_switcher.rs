@@ -129,7 +129,7 @@ impl RenderOnce for LaneSwitcherOverlay {
                     .text_size(px(theme::PALETTE_QUERY_FONT_SIZE))
                     .text_color(query_text)
                     .child(if state.picker.query().is_empty() {
-                        SharedString::from(s::command_switch_lane_placeholder())
+                        SharedString::from(s::command::switch_lane_placeholder())
                     } else {
                         SharedString::from(state.picker.query().to_string())
                     }),
@@ -154,7 +154,7 @@ impl RenderOnce for LaneSwitcherOverlay {
 
         let no_results = visible
             .is_empty()
-            .then(|| crate::ui::picker_empty(s::command_no_matching_lanes().into(), cx));
+            .then(|| crate::ui::picker_empty(s::command::no_matching_lanes().into(), cx));
 
         let panel = div()
             .absolute()

@@ -30,15 +30,15 @@ use crate::workspace::Workspace;
 /// remap moves the sheet with it.
 fn shortcut_rows() -> [(&'static str, String); 4] {
     [
-        (k::SHORTCUT_OPEN_FOLDER, s::welcome_shortcut_open_folder()),
+        (k::SHORTCUT_OPEN_FOLDER, s::welcome::shortcut_open_folder()),
         (
             k::SHORTCUT_OPEN_FOLDER_IN_NEW_WINDOW,
-            s::welcome_shortcut_open_folder_new_window(),
+            s::welcome::shortcut_open_folder_new_window(),
         ),
-        (k::SHORTCUT_NEW_WINDOW, s::welcome_shortcut_new_window()),
+        (k::SHORTCUT_NEW_WINDOW, s::welcome::shortcut_new_window()),
         (
             k::SHORTCUT_KEYBOARD_SHORTCUTS,
-            s::welcome_shortcut_command_palette(),
+            s::welcome::shortcut_command_palette(),
         ),
     ]
 }
@@ -64,20 +64,20 @@ pub(super) fn render(cx: &mut Context<Workspace>) -> AnyElement {
             div()
                 .text_size(px(theme::WELCOME_TITLE_FONT_SIZE))
                 .text_color(primary)
-                .child(s::welcome_title()),
+                .child(s::welcome::title()),
         )
         .child(
             div()
                 .text_size(px(theme::WELCOME_VERSION_FONT_SIZE))
                 .text_color(faint)
-                .child(s::WELCOME_VERSION),
+                .child(crate::surface::constants::WELCOME_VERSION),
         );
 
-    let open_folder_btn = button_primary("landing-open-folder", s::welcome_open_folder())
+    let open_folder_btn = button_primary("landing-open-folder", s::welcome::open_folder())
         .w_full()
         .on_click(|_, window, cx| window.dispatch_action(Box::new(crate::OpenFolder), cx));
 
-    let new_empty_btn = button("landing-new-empty", s::welcome_new_empty())
+    let new_empty_btn = button("landing-new-empty", s::welcome::new_empty())
         .w_full()
         .on_click(|_, window, cx| window.dispatch_action(Box::new(crate::NewEmptyWindow), cx));
 
@@ -127,7 +127,7 @@ fn recent_section(faint: gpui::Hsla, muted: gpui::Hsla, cx: &mut Context<Workspa
                 div()
                     .text_size(px(theme::WELCOME_HEADING_FONT_SIZE))
                     .text_color(faint)
-                    .child(s::welcome_no_recent()),
+                    .child(s::welcome::no_recent()),
             )
             .into_any_element();
     }
@@ -161,7 +161,7 @@ fn recent_section(faint: gpui::Hsla, muted: gpui::Hsla, cx: &mut Context<Workspa
             div()
                 .text_size(px(theme::WELCOME_HEADING_FONT_SIZE))
                 .text_color(muted)
-                .child(s::welcome_recent()),
+                .child(s::welcome::recent()),
         )
         .children(rows)
         .into_any_element()
@@ -200,7 +200,7 @@ fn cheat_sheet(faint: gpui::Hsla, muted: gpui::Hsla) -> AnyElement {
             div()
                 .text_size(px(theme::WELCOME_HEADING_FONT_SIZE))
                 .text_color(muted)
-                .child(s::welcome_shortcuts()),
+                .child(s::welcome::shortcuts()),
         )
         .children(rows)
         .into_any_element()

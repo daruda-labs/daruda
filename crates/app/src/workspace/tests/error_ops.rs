@@ -173,7 +173,7 @@ async fn a_legacy_delegation_surfaces_its_localized_wording(cx: &mut TestAppCont
         assert_eq!(toasts.len(), 1, "the advisory reaches the user");
         assert_eq!(
             toasts[0].report.message,
-            crate::surface::strings::agent_chat_legacy_delegation_notice(),
+            crate::surface::strings::agent_chat::legacy_delegation_notice(),
             "the body is the locale entry, not an empty string or adapter text"
         );
     });

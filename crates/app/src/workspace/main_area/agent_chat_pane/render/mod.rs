@@ -223,7 +223,7 @@ pub(super) fn render(view: &AgentChatView, cx: &mut Context<AgentChatView>) -> i
             .justify_center()
             .text_size(px(theme::agent_chat_font_size(cx)))
             .text_color(theme::dim_toward_gray(theme::agent_chat_fg_muted(cx), dim))
-            .child(SharedString::from(s::agent_chat_empty()))
+            .child(SharedString::from(s::agent_chat::empty()))
             .into_any_element()
     } else {
         // Virtualized conversation: `list` renders only visible rows, so draw
@@ -549,9 +549,9 @@ fn render_row(
 fn format_elapsed(d: std::time::Duration) -> String {
     let secs = d.as_secs();
     if secs < 60 {
-        s::agent_chat_elapsed_seconds(secs)
+        s::agent_chat::elapsed_seconds(secs)
     } else {
-        s::agent_chat_elapsed_minutes(secs / 60, format!("{:02}", secs % 60))
+        s::agent_chat::elapsed_minutes(secs / 60, format!("{:02}", secs % 60))
     }
 }
 
@@ -635,7 +635,7 @@ fn response_bar(
         this.activity_elapsed(),
     ) {
         header = header.trailing(trailing_label(
-            s::agent_chat_turn_running(format_elapsed(elapsed)),
+            s::agent_chat::turn_running(format_elapsed(elapsed)),
             this,
             cx,
         ));
@@ -726,15 +726,17 @@ fn turn_stats_element(
 /// without these it is a bare chevron on an empty line. It mirrors the response
 /// bar's own trailing counts one level up.
 fn turn_stats_label(record: &TurnRecord) -> String {
-    let mut parts = vec![s::agent_chat_turn_worked(format_elapsed(record.worked_for))];
+    let mut parts = vec![s::agent_chat::turn_worked(format_elapsed(
+        record.worked_for,
+    ))];
     // Through `timestamp`, not assembled here: that module is where a wall
     // clock becomes text, and it is what keeps ko on a 24-hour clock in this
     // row as it is everywhere else.
     parts.push(crate::surface::timestamp::local_time(record.finished_at));
     if let Some(out) = record.output_tokens {
-        parts.push(s::agent_chat_turn_output(abbreviate_tokens(out)));
+        parts.push(s::agent_chat::turn_output(abbreviate_tokens(out)));
     }
-    parts.join(&s::agent_chat_turn_separator())
+    parts.join(&s::agent_chat::turn_separator())
 }
 
 /// Token counts shortened for a trailing badge: `842`, `1.5k`, `1.6M`. The row
@@ -808,13 +810,15 @@ fn category_segments(
         .map(|&(category, count)| {
             (
                 category_icon(category),
-                style.segment(count, |n| s::agent_chat_group_category(category.token(), n)),
+                style.segment(count, |n| {
+                    s::agent_chat::group_category(category.token(), n)
+                }),
             )
         })
         .chain((thoughts > 0).then(|| {
             (
                 thought_icon(),
-                style.segment(thoughts, s::agent_chat_thinking_group_count),
+                style.segment(thoughts, s::agent_chat::thinking_group_count),
             )
         }));
     for (ix, (icon, label)) in segments.enumerate() {
@@ -824,7 +828,7 @@ fn category_segments(
                     .flex_none()
                     .text_color(this.dim(theme::agent_chat_fg_subtle(cx)))
                     .text_size(font_size)
-                    .child(SharedString::from(s::agent_chat_group_separator())),
+                    .child(SharedString::from(s::agent_chat::group_separator())),
             );
         }
         row = row.child(
@@ -983,7 +987,7 @@ fn thinking_group_bar(
 ) -> AnyElement {
     // The count is the group's own identity, so it shows in both fold states —
     // and what it names is the part of the run the display filter keeps.
-    let label = s::agent_chat_thinking_group_count(kept_thoughts(this, run, filter_revealed));
+    let label = s::agent_chat::thinking_group_count(kept_thoughts(this, run, filter_revealed));
     let header = FoldHeader::with_title(group_title(label, this, cx));
     // Borderless section bar, same as the tool-group bar.
     FoldRow::section(

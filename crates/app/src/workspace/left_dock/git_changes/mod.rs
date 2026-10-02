@@ -54,7 +54,7 @@ pub(in crate::workspace) fn render(snap: &LeftDockSnapshot, cx: &mut Context<Doc
             daruda_store::project::LaneKind::Git { branch, .. } => branch.clone(),
             daruda_store::project::LaneKind::Default => None,
         })
-        .unwrap_or_else(|| app_strings::git_detached_label().to_string());
+        .unwrap_or_else(|| app_strings::git::detached_label().to_string());
 
     let status = snap.git_worktree_cache.get(&snap.active);
     let stage_in_flight = snap.git_stage_in_flight;
@@ -220,7 +220,7 @@ fn view_header(
 ) -> impl IntoElement {
     use crate::ui::Disableable as _;
 
-    let label = app_strings::git_changes_header(branch);
+    let label = app_strings::git::changes_header(branch);
     let workspace_refresh = snap.workspace.clone();
     let workspace_remote = snap.workspace.clone();
     let workspace_push = snap.workspace.clone();
@@ -234,7 +234,7 @@ fn view_header(
         .unwrap_or((0, 0));
 
     let refresh_icon = crate::ui::button_icon("git-refresh", crate::ui::icons::REFRESH, cx)
-        .tooltip(app_strings::usage_refresh())
+        .tooltip(app_strings::usage::refresh())
         .on_click(cx.listener(move |_dock, _: &ClickEvent, _window, cx| {
             if let Some(ws) = workspace_refresh.upgrade() {
                 ws.update(cx, |ws, cx| ws.refresh_git_status(active_ref, cx));
@@ -258,7 +258,7 @@ fn view_header(
     let header_actions = header_actions.child(refresh_icon);
 
     let remote_btn = match remote_primary_action(behind) {
-        RemotePrimaryAction::Fetch => button("git-fetch", app_strings::git_fetch_btn())
+        RemotePrimaryAction::Fetch => button("git-fetch", app_strings::git::fetch_btn())
             .xsmall()
             .loading(in_flight)
             .disabled(in_flight)
@@ -267,7 +267,7 @@ fn view_header(
                     ws.update(cx, |ws, cx| ws.on_fetch(cx));
                 }
             })),
-        RemotePrimaryAction::Pull => button("git-pull", app_strings::git_pull_btn())
+        RemotePrimaryAction::Pull => button("git-pull", app_strings::git::pull_btn())
             .xsmall()
             .loading(in_flight)
             .disabled(in_flight)
@@ -278,7 +278,7 @@ fn view_header(
             })),
     };
 
-    let push_btn = button("git-push", app_strings::git_push_btn())
+    let push_btn = button("git-push", app_strings::git::push_btn())
         .xsmall()
         .loading(in_flight)
         .disabled(in_flight)
@@ -346,16 +346,16 @@ fn summary_bar(
     // single-button look.)
     let all_staged = unstaged_count == 0 && staged_count > 0;
     let btn_label = if all_staged {
-        app_strings::git_unstage_all()
+        app_strings::git::unstage_all()
     } else {
-        app_strings::git_stage_all()
+        app_strings::git::stage_all()
     };
 
     let colors = (toggle_inflight, toggle_idle, toggle_hover);
     let discard_ws = workspace.clone();
     let discard_all = summary_action(
         "git-discard-all",
-        app_strings::git_discard_all(),
+        app_strings::git::discard_all(),
         in_flight,
         colors,
         cx.listener(move |_dock, _: &MouseDownEvent, window, cx| {
@@ -427,7 +427,7 @@ fn summary_action(
 
 fn conflict_banner(count: usize) -> impl IntoElement {
     let msg = if count == 1 {
-        app_strings::git_conflict_banner_single().to_string()
+        app_strings::git::conflict_banner_single().to_string()
     } else {
         format!("{count} conflicts — resolve before committing.")
     };
@@ -619,7 +619,7 @@ fn loading_placeholder(
     let text_color = theme::current(cx).text_subtle;
     let workspace = snap.workspace.clone();
     let active_ref = snap.active;
-    let refresh_btn = button("git-refresh-fallback", app_strings::git_refresh_btn()).on_click(
+    let refresh_btn = button("git-refresh-fallback", app_strings::common::refresh()).on_click(
         cx.listener(move |_dock, _: &ClickEvent, _window, cx| {
             if let Some(ws) = workspace.upgrade() {
                 ws.update(cx, |ws, cx| ws.refresh_git_status(active_ref, cx));
@@ -635,7 +635,7 @@ fn loading_placeholder(
         .text_size(px(theme::LANE_SUB_FONT_SIZE))
         .text_color(text_color)
         .child(crate::ui::placeholder_text(
-            app_strings::git_loading_changes(),
+            app_strings::git::loading_changes(),
         ))
         .child(refresh_btn)
 }
@@ -648,7 +648,7 @@ fn clean_placeholder(cx: &gpui::App) -> impl IntoElement {
         .justify_center()
         .text_size(px(theme::DOCK_PLACEHOLDER_FONT_SIZE))
         .text_color(theme::current(cx).text_subtle)
-        .child(crate::ui::placeholder_text(app_strings::git_no_changes()))
+        .child(crate::ui::placeholder_text(app_strings::git::no_changes()))
 }
 
 fn non_git_placeholder(
@@ -659,7 +659,7 @@ fn non_git_placeholder(
     let workspace = snap.workspace.clone();
     let in_flight = snap.git_op_in_flight;
 
-    let init_btn = button("git-init", app_strings::git_init_btn()).on_click(cx.listener(
+    let init_btn = button("git-init", app_strings::git::init_btn()).on_click(cx.listener(
         move |_dock, _: &ClickEvent, _window, cx| {
             if let Some(ws) = workspace.upgrade() {
                 ws.update(cx, |ws, cx| ws.init_git_repo(lane_id, cx));
@@ -680,7 +680,7 @@ fn non_git_placeholder(
         .text_size(px(theme::DOCK_PLACEHOLDER_FONT_SIZE))
         .text_color(text_color)
         .child(crate::ui::placeholder_text(
-            app_strings::git_not_a_repository(),
+            app_strings::git::not_a_repository(),
         ))
         .child(init_btn)
 }

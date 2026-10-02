@@ -96,7 +96,7 @@ impl EditSkillModal {
 
         let description_input = cx.new(|cx_state| {
             let mut s = InputState::new(window, cx_state)
-                .placeholder(strings::skills_placeholder_description());
+                .placeholder(strings::skills::placeholder_description());
             if let Some(v) = frontmatter.description.as_deref() {
                 s = s.default_value(v.to_string());
             }
@@ -104,7 +104,7 @@ impl EditSkillModal {
         });
         let when_to_use_input = cx.new(|cx_state| {
             let mut s = InputState::new(window, cx_state)
-                .placeholder(strings::skills_placeholder_when_to_use());
+                .placeholder(strings::skills::placeholder_when_to_use());
             if let Some(v) = frontmatter.when_to_use.as_deref() {
                 s = s.default_value(v.to_string());
             }
@@ -141,7 +141,7 @@ impl EditSkillModal {
         let body_editor = cx.new(|cx_state| {
             let mut s = InputState::new(window, cx_state)
                 .multi_line(true)
-                .placeholder(strings::skills_placeholder_body_loading());
+                .placeholder(strings::skills::placeholder_body_loading());
             if !body_text.is_empty() {
                 s = s.default_value(body_text);
             }
@@ -346,13 +346,13 @@ impl Render for EditSkillModal {
         let panel_focus = self.panel_focus_handle.clone();
         let name_label = self.name.clone();
         let scope_label = match self.scope {
-            SkillScope::Project => strings::skills_project(),
-            SkillScope::Personal => strings::skills_personal(),
+            SkillScope::Project => strings::common::section_project(),
+            SkillScope::Personal => strings::common::section_personal(),
             // Plugin scope is read-only — `open_edit_skill_modal` (the
             // free fn this modal opens through) refuses to open for
             // plugin skills, so this arm is unreachable in practice.
             // The value is purely defensive.
-            SkillScope::Plugin => strings::skills_plugin(),
+            SkillScope::Plugin => strings::skills::section_plugin(),
         };
         let user_invocable = self.user_invocable;
         let disable_model = self.disable_model_invocation;
@@ -362,26 +362,26 @@ impl Render for EditSkillModal {
             .flex_col()
             .flex_1()
             .gap(px(theme::FORM_MODAL_SECTION_GAP))
-            .child(field_label(strings::skills_field_name(), &t))
+            .child(field_label(strings::common::field_name(), &t))
             .child(readonly_value(name_label, cx))
-            .child(field_label(strings::skills_field_scope(), &t))
+            .child(field_label(strings::common::field_scope(), &t))
             .child(readonly_value(scope_label.to_string(), cx))
-            .child(field_label(strings::skills_field_description(), &t))
+            .child(field_label(strings::skills::field_description(), &t))
             .child(input(&self.description_input, cx, 0))
-            .child(field_label(strings::skills_field_when_to_use(), &t))
+            .child(field_label(strings::skills::field_when_to_use(), &t))
             .child(input(&self.when_to_use_input, cx, 1))
-            .child(field_label(strings::skills_field_allowed_tools(), &t))
+            .child(field_label(strings::skills::field_allowed_tools(), &t))
             .child(input(&self.allowed_tools_input, cx, 2))
-            .child(field_label(strings::skills_field_arg_hint(), &t))
+            .child(field_label(strings::skills::field_arg_hint(), &t))
             .child(input(&self.argument_hint_input, cx, 3))
-            .child(field_label(strings::skills_field_paths(), &t))
+            .child(field_label(strings::skills::field_paths(), &t))
             .child(input(&self.paths_input, cx, 4))
-            .child(field_label(strings::skills_field_model(), &t))
+            .child(field_label(strings::skills::field_model(), &t))
             .child(input(&self.model_input, cx, 5))
             .child(
                 checkbox(
                     "edit-skill-user-invocable",
-                    strings::skills_toggle_user_invocable(),
+                    strings::skills::toggle_user_invocable(),
                     7,
                 )
                 .checked(user_invocable)
@@ -393,7 +393,7 @@ impl Render for EditSkillModal {
             .child(
                 checkbox(
                     "edit-skill-disable-model",
-                    strings::skills_toggle_disable_model(),
+                    strings::skills::toggle_disable_model(),
                     8,
                 )
                 .checked(disable_model)
@@ -408,7 +408,7 @@ impl Render for EditSkillModal {
             .flex_col()
             .flex_1()
             .gap(px(theme::FORM_MODAL_SECTION_GAP))
-            .child(field_label(strings::skills_field_body(), &t))
+            .child(field_label(strings::skills::field_body(), &t))
             // body_editor sits between the left-column inputs and the
             // two toggles so Tab moves directly from the last metadata
             // field into the markdown body — toggles come last as
@@ -434,7 +434,7 @@ impl Render for EditSkillModal {
             .gap(px(theme::MODAL_FOOTER_GAP))
             .mt(px(theme::MODAL_FOOTER_MARGIN_TOP))
             .child(
-                button("edit-skill-rename", strings::skills_button_rename()).on_click(cx.listener(
+                button("edit-skill-rename", strings::common::btn_rename()).on_click(cx.listener(
                     move |this, _: &ClickEvent, w, cx| {
                         // Close the edit dialog first so the rename
                         // prompt stays the topmost dialog.
@@ -449,7 +449,7 @@ impl Render for EditSkillModal {
                 )),
             )
             .child(
-                button("edit-skill-finder", strings::skills_button_open_finder()).on_click(
+                button("edit-skill-finder", strings::skills::button_open_finder()).on_click(
                     cx.listener(move |_, _: &ClickEvent, _w, cx| {
                         if let Some(ws) = workspace_for_finder.upgrade() {
                             let dir = dir_for_finder.clone();
@@ -459,16 +459,16 @@ impl Render for EditSkillModal {
                 ),
             )
             .child(
-                button("edit-skill-cancel", strings::skills_button_cancel())
+                button("edit-skill-cancel", strings::common::btn_cancel())
                     .on_click(cx.listener(|this, _: &ClickEvent, w, cx| this.dismiss(w, cx))),
             )
             .child(
                 button_primary(
                     "edit-skill-save",
                     if self.submitting {
-                        strings::skills_saving_label()
+                        strings::skills::saving_label()
                     } else {
-                        strings::skills_button_save()
+                        strings::common::btn_save()
                     },
                 )
                 .disabled(self.submitting)
@@ -532,7 +532,7 @@ pub fn open_edit_skill_modal(
     let Some(skill) = skill else { return };
 
     crate::workspace::dialog_helpers::open_form_modal(
-        strings::skills_edit_title(),
+        strings::skills::edit_title(),
         Some(px(crate::ui::theme::FORM_MODAL_WIDE)),
         move |window, cx| EditSkillModal::new(workspace, skill, project_root, state, window, cx),
         window,

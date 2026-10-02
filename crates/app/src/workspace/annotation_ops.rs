@@ -166,9 +166,9 @@ impl Workspace {
     }
 
     fn report_pane_missing(&mut self, site: &str, pane_id: PaneId, cx: &mut Context<Self>) {
-        let report = ErrorReport::new(s::terminal_target_pane_missing_title())
+        let report = ErrorReport::new(s::terminal::target_pane_missing_title())
             .severity(ErrorSeverity::Info)
-            .message(s::terminal_target_pane_missing_message())
+            .message(s::terminal::target_pane_missing_message())
             .dedup(format!(
                 "{ANNOTATION_ERROR_DEDUP}.pane_missing.{site}.{pane_id}"
             ))
@@ -185,9 +185,9 @@ impl Workspace {
     ) {
         // `site` and `err` go in the dedup key, not the user-facing
         // message — debugging details must not leak into a localized toast.
-        let report = ErrorReport::new(s::terminal_annotation_err_operation_failed_title())
+        let report = ErrorReport::new(s::terminal::annotation_err_operation_failed_title())
             .severity(ErrorSeverity::Warning)
-            .message(s::terminal_annotation_err_operation_failed_message())
+            .message(s::terminal::annotation_err_operation_failed_message())
             .dedup(format!(
                 "{ANNOTATION_ERROR_DEDUP}.session_error.{site}.{err}"
             ))

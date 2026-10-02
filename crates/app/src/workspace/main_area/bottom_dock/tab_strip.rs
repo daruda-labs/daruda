@@ -173,7 +173,7 @@ pub(in crate::workspace) fn render(
 /// Built-in "Input" tab. No drag / right-click — click-to-activate is
 /// driven from the TabBar's `on_click(ix=0)` branch.
 fn builtin_input_tab() -> Tab {
-    tab(surface_strings::bottom_input_tab_label())
+    tab(surface_strings::bottom_dock::input_tab_label())
 }
 
 /// Row-preset chip rendered next to `[+]` in the TabBar suffix. Shows
@@ -216,9 +216,9 @@ fn row_preset_item(
     workspace: WeakEntity<Workspace>,
 ) -> PopupMenuItem {
     let body = match rows {
-        1 => surface_strings::row_preset_1_label(),
-        2 => surface_strings::row_preset_2_label(),
-        _ => surface_strings::row_preset_3_label(),
+        1 => surface_strings::bottom_dock::row_preset_1(),
+        2 => surface_strings::bottom_dock::row_preset_2(),
+        _ => surface_strings::bottom_dock::row_preset_3(),
     };
     PopupMenuItem::new(body)
         .checked(rows == current_preset)
@@ -239,7 +239,7 @@ fn row_preset_item(
 fn add_tab_button(snap: &BottomDockSnapshot, cx: &mut Context<Dock>) -> impl IntoElement {
     let workspace = snap.workspace.clone();
     crate::ui::button_icon("panel-tab-add", crate::ui::icons::ADD, cx)
-        .tooltip(surface_strings::create_panel_tab_modal_title())
+        .tooltip(surface_strings::modal::create_panel_tab_title())
         .on_click(cx.listener(move |_dock, _: &ClickEvent, window, cx| {
             if let Some(ws) = workspace.upgrade() {
                 let callback_ws = workspace.clone();
@@ -247,8 +247,8 @@ fn add_tab_button(snap: &BottomDockSnapshot, cx: &mut Context<Dock>) -> impl Int
                     let _ = ws;
                     crate::workspace::dialog_helpers::open_single_field_dialog(
                         callback_ws.clone(),
-                        surface_strings::create_panel_tab_modal_title(),
-                        surface_strings::create_panel_tab_placeholder(),
+                        surface_strings::modal::create_panel_tab_title(),
+                        surface_strings::modal::create_panel_tab_placeholder(),
                         None,
                         |ws, value, _window, cx| {
                             if let Some(name) = value {
@@ -340,7 +340,7 @@ fn rename_item(
     current_name: String,
     workspace: WeakEntity<Workspace>,
 ) -> PopupMenuItem {
-    PopupMenuItem::new(surface_strings::ctx_panel_tab_rename()).on_click(
+    PopupMenuItem::new(surface_strings::common::btn_rename()).on_click(
         move |_ev, window: &mut Window, app_cx: &mut App| {
             // Guard: don't pop a rename dialog for a lane whose workspace
             // has already been torn down.
@@ -351,8 +351,8 @@ fn rename_item(
             let initial = current_name.clone();
             crate::workspace::dialog_helpers::open_single_field_dialog(
                 workspace.clone(),
-                surface_strings::rename_panel_tab_modal_title(),
-                surface_strings::rename_panel_tab_placeholder(),
+                surface_strings::modal::rename_panel_tab_title(),
+                surface_strings::modal::rename_panel_tab_placeholder(),
                 Some(&initial),
                 {
                     let tab_id = tab_id.clone();
@@ -375,7 +375,7 @@ fn delete_item(
     widget_count: usize,
     workspace: WeakEntity<Workspace>,
 ) -> PopupMenuItem {
-    PopupMenuItem::new(surface_strings::ctx_panel_tab_delete()).on_click(
+    PopupMenuItem::new(surface_strings::ctx::panel_tab_delete()).on_click(
         move |_ev, window: &mut Window, app_cx: &mut App| {
             // Guard: don't pop a delete confirm for a lane whose workspace
             // has already been torn down.
@@ -386,9 +386,9 @@ fn delete_item(
             let body = format_delete_body(&current_name, widget_count);
             let callback_ws = workspace.clone();
             crate::workspace::dialog_helpers::open_confirm_dialog(
-                surface_strings::delete_panel_tab_modal_title(),
+                surface_strings::modal::delete_panel_tab_title(),
                 body,
-                surface_strings::delete_panel_tab_confirm_label(),
+                surface_strings::common::btn_delete(),
                 ButtonVariant::Danger,
                 move |_, _window, app_cx| {
                     if let Some(ws) = callback_ws.upgrade() {
@@ -408,7 +408,7 @@ fn delete_item(
 /// Build "Delete tab 'X'? N widgets will be removed." style body.
 /// Singular when widget_count == 1, omits the count clause when 0.
 fn format_delete_body(name: &str, widget_count: usize) -> String {
-    surface_strings::delete_panel_tab_modal_body(name, widget_count)
+    surface_strings::modal::delete_panel_tab_modal_body(name, widget_count)
 }
 
 #[cfg(test)]

@@ -219,8 +219,8 @@ impl RemoteChannels {
                 outbound: Outbound::Approval(ApprovalPrompt {
                     summary: summary.clone(),
                     buttons: [
-                        (s::control_approval_allow(), allow),
-                        (s::control_approval_refuse(), refuse),
+                        (s::control::approval_allow(), allow),
+                        (s::control::approval_refuse(), refuse),
                     ],
                 }),
             };

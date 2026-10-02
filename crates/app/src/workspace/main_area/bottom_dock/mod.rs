@@ -84,9 +84,9 @@ pub(in crate::workspace) fn render_body(
 
     let Some(active_tab_id) = active_tab_id else {
         let message = if !has_tabs {
-            s::bottom_dock_no_tabs()
+            s::terminal::panels_no_tabs()
         } else {
-            s::bottom_dock_no_active_tab()
+            s::terminal::panels_no_active_tab()
         };
         return placeholder(message, cx).into_any_element();
     };
@@ -146,7 +146,7 @@ fn add_widget_button(
                 let ws_for_modal = workspace.clone();
                 ws.update(cx, |_, cx| {
                     crate::workspace::dialog_helpers::open_form_modal(
-                        s::macro_new_title(),
+                        s::bottom_dock::macro_new_title(),
                         None,
                         move |window, cx| {
                             MacroEditModal::new(

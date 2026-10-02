@@ -2,7 +2,7 @@
 //! "System" fallback), rendered as a dropdown trigger + menu for
 //! switching between managed accounts.
 
-use crate::surface::strings::account_recipe_label;
+use crate::surface::strings::settings::account_recipe_label;
 use crate::ui::theme;
 use crate::ui::{DropdownMenu as _, PopupMenu, PopupMenuItem, button_status_pill_bare, spinner};
 use crate::workspace::main_area::pane::AccountDomain;
@@ -42,11 +42,13 @@ pub(in crate::workspace) enum AddAccountRow {
 /// no single one, so the path is left off rather than guessed.
 fn system_label(domain: AccountDomain) -> String {
     match domain {
-        AccountDomain::Exactly(recipe) => crate::surface::strings::status_bar_account_system(
-            daruda_agent::accounts::recipe_for(recipe).system_home_hint(),
-        ),
+        AccountDomain::Exactly(recipe) => {
+            crate::surface::strings::settings::status_bar_account_system(
+                daruda_agent::accounts::recipe_for(recipe).system_home_hint(),
+            )
+        }
         AccountDomain::Any | AccountDomain::Unsupported => {
-            crate::surface::strings::status_bar_account_system_plain()
+            crate::surface::strings::settings::status_bar_account_system_plain()
         }
     }
 }
@@ -88,7 +90,7 @@ fn add_rows(domain: AccountDomain) -> Vec<AddAccountRow> {
     match domain {
         AccountDomain::Exactly(recipe) => vec![add_row(
             recipe,
-            crate::surface::strings::status_bar_add_account(),
+            crate::surface::strings::settings::status_bar_add_account(),
         )],
         // A terminal may run any adapter, so each domain gets its own named
         // entry — "+ Add account" alone wouldn't say which credentials it
@@ -97,13 +99,17 @@ fn add_rows(domain: AccountDomain) -> Vec<AddAccountRow> {
             .map(|recipe| {
                 add_row(
                     recipe,
-                    crate::surface::strings::settings_accounts_add(&account_recipe_label(recipe)),
+                    crate::surface::strings::settings::accounts_add(account_recipe_label(recipe)),
                 )
             })
             .collect(),
         AccountDomain::Unsupported => vec![
-            AddAccountRow::Inert(crate::surface::strings::status_bar_add_account().into()),
-            AddAccountRow::Inert(crate::surface::strings::status_bar_account_unsupported().into()),
+            AddAccountRow::Inert(
+                crate::surface::strings::settings::status_bar_add_account().into(),
+            ),
+            AddAccountRow::Inert(
+                crate::surface::strings::settings::status_bar_account_unsupported().into(),
+            ),
         ],
     }
 }
@@ -162,7 +168,7 @@ impl AccountSlot {
         let email = account_label(resolved.and_then(|a| a.email.as_deref()), None);
         let label = email
             .clone()
-            .unwrap_or_else(crate::surface::strings::status_bar_account_system_plain);
+            .unwrap_or_else(crate::surface::strings::settings::status_bar_account_system_plain);
         let tooltip = email.unwrap_or_else(|| system_label(domain));
         Self {
             label: label.into(),
@@ -303,7 +309,7 @@ fn build_account_menu(slot: &AccountSlot, menu: PopupMenu) -> PopupMenu {
             let account_id = account.id;
             let is_current = slot.current == AccountSelection::Managed(account_id);
             let label = account_label(account.email.as_deref(), account.organization.as_deref())
-                .unwrap_or_else(crate::surface::strings::settings_accounts_unknown_email);
+                .unwrap_or_else(crate::surface::strings::settings::accounts_unknown_email);
             m.item(
                 PopupMenuItem::new(SharedString::from(label))
                     .icon(crate::ui::agent_menu_icon(Some(icon)))
@@ -334,14 +340,14 @@ fn build_account_menu(slot: &AccountSlot, menu: PopupMenu) -> PopupMenu {
                     .gap(px(theme::STATUS_BAR_GAP))
                     .child(spinner())
                     .child(SharedString::from(
-                        crate::surface::strings::settings_accounts_login_in_progress(),
+                        crate::surface::strings::settings::accounts_login_in_progress(),
                     ))
             })
             .disabled(true),
         )
         .item(
             PopupMenuItem::new(SharedString::from(
-                crate::surface::strings::settings_account_login_cancel(),
+                crate::surface::strings::common::btn_cancel(),
             ))
             .on_click(move |_, _window, app| {
                 // Whichever window owns the attempt, not necessarily this one:
@@ -375,7 +381,7 @@ fn build_account_menu(slot: &AccountSlot, menu: PopupMenu) -> PopupMenu {
     };
     menu.item(
         PopupMenuItem::new(SharedString::from(
-            crate::surface::strings::status_bar_manage_accounts(),
+            crate::surface::strings::settings::status_bar_manage_accounts(),
         ))
         .on_click(|_, window, app| {
             window.dispatch_action(

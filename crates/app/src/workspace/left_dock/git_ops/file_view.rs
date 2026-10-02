@@ -81,7 +81,7 @@ fn title_for_file_path(path: &std::path::Path) -> gpui::SharedString {
     path.file_name()
         .map(|n| gpui::SharedString::from(n.to_string_lossy().into_owned()))
         .unwrap_or_else(|| {
-            gpui::SharedString::from(crate::surface::strings::file_viewer_untitled_tab_title())
+            gpui::SharedString::from(crate::surface::strings::file_viewer::untitled_tab_title())
         })
 }
 

@@ -410,7 +410,7 @@ fn picker(
         Some(None) => {
             options.push(SelectOption::new(
                 CUSTOM,
-                s::settings_agent_tail_window_off_list(),
+                s::settings::agent_tail_window_off_list(),
             ));
             return Picker {
                 selected: SharedString::from(CUSTOM),
@@ -448,12 +448,12 @@ fn picked(state: &Entity<SelectState>, cx: &gpui::App) -> Option<String> {
 fn tail_options() -> Vec<SelectOption> {
     let mut options = vec![SelectOption::new(
         TAIL_WINDOW_ALL.to_string(),
-        s::agent_chat_tail_window_all(),
+        s::agent_chat::tail_window_all(),
     )];
     options.extend(TAIL_WINDOW_CHOICES.into_iter().map(|size| {
         SelectOption::new(
             size.to_string(),
-            s::agent_chat_tail_window_last(usize::from(size)),
+            s::agent_chat::tail_window_last(usize::from(size)),
         )
     }));
     options

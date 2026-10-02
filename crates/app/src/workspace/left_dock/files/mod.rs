@@ -155,14 +155,14 @@ fn view_header(
 ) -> impl IntoElement {
     let workspace = snap.workspace.clone();
     let refresh = crate::ui::button_icon("files-refresh", crate::ui::icons::REFRESH, cx)
-        .tooltip(strings::usage_refresh())
+        .tooltip(strings::usage::refresh())
         .on_click(cx.listener(move |_dock, _: &ClickEvent, _window, cx| {
             if let Some(ws) = workspace.upgrade() {
                 ws.update(cx, |ws, cx| ws.refresh_files_root(cx));
             }
         }));
 
-    SectionHeader::new(strings::files_header_label())
+    SectionHeader::new(strings::ui::files_header())
         .padding(theme::GIT_HEADER_PAD_X, theme::GIT_HEADER_PAD_Y)
         .truncate_label(true)
         .actions(refresh)
@@ -290,7 +290,7 @@ fn chevron_element(kind: EntryKind, is_expanded: bool, color: Hsla) -> AnyElemen
                 .into_any_element()
         }
         EntryKind::PendingDir => slot
-            .child(strings::FILES_CHEVRON_PENDING)
+            .child(crate::surface::glyphs::FILES_CHEVRON_PENDING)
             .into_any_element(),
         EntryKind::File => slot.into_any_element(),
     }
@@ -325,7 +325,7 @@ fn loading_placeholder(cx: &gpui::App) -> AnyElement {
         .justify_center()
         .text_size(px(theme::DOCK_PLACEHOLDER_FONT_SIZE))
         .text_color(theme::current(cx).text_subtle)
-        .child(crate::ui::placeholder_text(strings::files_loading()))
+        .child(crate::ui::placeholder_text(strings::common::loading()))
         .into_any_element()
 }
 
@@ -337,6 +337,6 @@ fn empty_dir_placeholder(cx: &gpui::App) -> AnyElement {
         .justify_center()
         .text_size(px(theme::DOCK_PLACEHOLDER_FONT_SIZE))
         .text_color(theme::current(cx).text_subtle)
-        .child(crate::ui::placeholder_text(strings::files_empty_dir()))
+        .child(crate::ui::placeholder_text(strings::ui::files_empty_dir()))
         .into_any_element()
 }

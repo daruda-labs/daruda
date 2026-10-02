@@ -129,8 +129,8 @@ impl Workspace {
             // mutators (add / update / delete) — earlier revisions only
             // poked `self.last_error`, which is now reserved for inline
             // form-validation banners.
-            let report = ErrorReport::new(crate::surface::strings::error_mcp_toggle_failed(
-                &crate::surface::strings::mcp_scope_display(scope),
+            let report = ErrorReport::new(crate::surface::strings::error::mcp_toggle_failed(
+                crate::surface::strings::mcp::scope_display(scope),
             ))
             .severity(ErrorSeverity::Warning)
             .from_error(&e)

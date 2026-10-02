@@ -327,7 +327,7 @@ impl Workspace {
         }
         self.open_skill_picker_modal(
             &skills,
-            crate::surface::strings::skills_invoke_title().into(),
+            crate::surface::strings::skills::invoke_title().into(),
             window,
             cx,
         );
@@ -534,8 +534,8 @@ impl Workspace {
         let workspace_handle = cx.entity().downgrade();
         super::dialog_helpers::open_single_field_dialog(
             workspace_handle,
-            s::edit_window_title_modal_title(),
-            s::edit_window_title_placeholder(),
+            s::modal::edit_window_title_title(),
+            s::modal::edit_window_title_placeholder(),
             initial.as_deref(),
             |ws, value, _window, cx| {
                 ws.set_window_label(value, cx);
@@ -559,7 +559,7 @@ impl Workspace {
         use crate::surface::strings as s;
 
         let Some(project_root) = self.active_project().map(|p| p.root.clone()) else {
-            let report = ErrorReport::new(s::project_config_no_project())
+            let report = ErrorReport::new(s::settings::project_config_no_project())
                 .severity(ErrorSeverity::Info)
                 .at(file!(), line!())
                 .dedup("config.no_project")
@@ -568,7 +568,7 @@ impl Workspace {
             return;
         };
         let Some(path) = daruda_config::project_config_path(&project_root) else {
-            let report = ErrorReport::new(s::project_config_no_dir())
+            let report = ErrorReport::new(s::settings::project_config_no_dir())
                 .severity(ErrorSeverity::Info)
                 .at(file!(), line!())
                 .dedup("config.no_dir")
@@ -580,22 +580,23 @@ impl Workspace {
         if let Some(parent) = path.parent()
             && let Err(e) = std::fs::create_dir_all(parent)
         {
-            let report =
-                ErrorReport::new(crate::surface::strings::error_project_config_create_dir_failed())
-                    .severity(ErrorSeverity::Error)
-                    .from_error(&e)
-                    .at(file!(), line!())
-                    .with_context("path", redact_home(parent))
-                    .dedup("config.mkdir")
-                    .build();
+            let report = ErrorReport::new(
+                crate::surface::strings::error::project_config_create_dir_failed(),
+            )
+            .severity(ErrorSeverity::Error)
+            .from_error(&e)
+            .at(file!(), line!())
+            .with_context("path", redact_home(parent))
+            .dedup("config.mkdir")
+            .build();
             self.report_error(report, cx);
             return;
         }
         if !path.exists()
-            && let Err(e) = std::fs::write(&path, s::PROJECT_CONFIG_TEMPLATE)
+            && let Err(e) = std::fs::write(&path, daruda_config::project::PROJECT_CONFIG_TEMPLATE)
         {
             let report = ErrorReport::new(
-                crate::surface::strings::error_project_config_create_file_failed(),
+                crate::surface::strings::error::project_config_create_file_failed(),
             )
             .severity(ErrorSeverity::Error)
             .from_error(&e)
@@ -612,7 +613,7 @@ impl Workspace {
         // without waiting for it to exit.
         if let Err(e) = open::that_detached(&path) {
             let report =
-                ErrorReport::new(crate::surface::strings::error_project_config_open_failed())
+                ErrorReport::new(crate::surface::strings::error::project_config_open_failed())
                     .severity(ErrorSeverity::Warning)
                     .from_error(&e)
                     .at(file!(), line!())
@@ -644,7 +645,7 @@ impl Workspace {
             }
             Err(e) => {
                 let report =
-                    ErrorReport::new(crate::surface::strings::error_claude_hooks_install_failed())
+                    ErrorReport::new(crate::surface::strings::error::claude_hooks_install_failed())
                         .severity(ErrorSeverity::Error)
                         .from_error(&e)
                         .at(file!(), line!())
@@ -675,7 +676,7 @@ impl Workspace {
             }
             Err(e) => {
                 let report = ErrorReport::new(
-                    crate::surface::strings::error_claude_hooks_uninstall_failed(),
+                    crate::surface::strings::error::claude_hooks_uninstall_failed(),
                 )
                 .severity(ErrorSeverity::Error)
                 .from_error(&e)

@@ -69,21 +69,21 @@ pub(super) fn base_header(
                         .flex_1()
                         .overflow_hidden()
                         .whitespace_nowrap()
-                        .child(app_strings::git_against_base_header(base)),
+                        .child(app_strings::git::against_base_header(base)),
                 )
                 .child(
                     div()
                         .flex_none()
                         .whitespace_nowrap()
-                        .child(app_strings::git_against_base_counts(*files, *commits)),
+                        .child(app_strings::git::against_base_counts(*files, *commits)),
                 )
                 .into_any_element()
         }
         BaseHeaderRow::BaseMissing(name) => row_box
-            .child(notice(app_strings::git_against_base_missing(name)))
+            .child(notice(app_strings::git::against_base_missing(name)))
             .into_any_element(),
         BaseHeaderRow::NoMergeBase => row_box
-            .child(notice(app_strings::git_against_base_no_merge_base()))
+            .child(notice(app_strings::git::against_base_no_merge_base()))
             .into_any_element(),
     }
 }

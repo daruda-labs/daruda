@@ -63,9 +63,9 @@ pub fn code_copy_button<I: Into<ElementId>>(
         id,
         code,
         icons::icon(icons::COPY),
-        crate::surface::strings::code_block_copy().into(),
+        crate::surface::strings::code_block::copy().into(),
         icons::icon(icons::CHECK),
-        crate::surface::strings::code_block_copied().into(),
+        crate::surface::strings::code_block::copied().into(),
         window,
         cx,
     )

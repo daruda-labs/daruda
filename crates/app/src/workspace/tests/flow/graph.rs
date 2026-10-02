@@ -539,7 +539,7 @@ nodes:
 /// A file that fails validation says what a person can read.
 ///
 /// `ValidationIssue.message` is the engine's developer detail and says so; the
-/// wording belongs to `s::flow_issue`, keyed off `kind`. Reaching for the
+/// wording belongs to `s::flow::issue`, keyed off `kind`. Reaching for the
 /// message is the mistake this guards.
 #[gpui::test]
 async fn a_flow_that_fails_validation_still_draws_and_says_which_card(cx: &mut TestAppContext) {

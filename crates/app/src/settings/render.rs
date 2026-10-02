@@ -53,7 +53,7 @@ impl Render for SettingsView {
                             .child(if query.is_empty() {
                                 navigation::label(self.active_section)
                             } else {
-                                s::settings_search_heading(&query)
+                                s::settings::search_heading(&query)
                             }),
                     )
                     .child(
@@ -63,7 +63,7 @@ impl Render for SettingsView {
                             .child(if query.is_empty() {
                                 navigation::description(self.active_section)
                             } else {
-                                s::settings_search_count(results.len())
+                                s::settings::search_count(results.len())
                             }),
                     ),
             );
@@ -83,7 +83,7 @@ impl Render for SettingsView {
                     .gap(px(theme::MODAL_FOOTER_GAP))
                     .child(crate::ui::alert::warning(
                         "settings-conflict",
-                        s::settings_external_change(conflict.field().path()),
+                        s::settings::external_change(conflict.field().path()),
                     ))
                     .child(
                         div()
@@ -94,7 +94,7 @@ impl Render for SettingsView {
                             .child(
                                 button(
                                     "settings-conflict-reload",
-                                    s::settings_use_external_value(),
+                                    s::settings::use_external_value(),
                                 )
                                 .tab_stop(true)
                                 .on_click(cx.listener(
@@ -106,7 +106,7 @@ impl Render for SettingsView {
                             .child(
                                 button(
                                     "settings-conflict-overwrite",
-                                    s::settings_overwrite_external_value(),
+                                    s::settings::overwrite_external_value(),
                                 )
                                 .tab_stop(true)
                                 .on_click(cx.listener(
@@ -212,7 +212,7 @@ impl SettingsView {
             return div()
                 .text_size(px(theme::MODAL_BODY_FONT_SIZE))
                 .text_color(theme::current(cx).text_muted)
-                .child(s::settings_search_none(query))
+                .child(s::settings::search_none(query))
                 .into_any_element();
         }
         let mut body = page_stack();
@@ -222,7 +222,7 @@ impl SettingsView {
             let title = if first.card.is_empty() {
                 navigation::label(first.section)
             } else {
-                s::settings_search_group(&navigation::label(first.section), &first.card)
+                s::settings::search_group(navigation::label(first.section), &first.card)
             };
             let mut group = card(title, cx);
             while index < results.len()
@@ -235,7 +235,7 @@ impl SettingsView {
                         gpui::ElementId::Name(format!("settings-search-link-{index}").into()),
                         doc.label.clone(),
                         doc.hint.clone(),
-                        s::settings_search_open(),
+                        s::settings::search_open(),
                         section,
                         cx,
                     ),
@@ -330,7 +330,7 @@ impl SettingsView {
                     .child(
                         crate::ui::button_with_icon(
                             "settings-back",
-                            s::settings_back(),
+                            s::settings::back(),
                             crate::ui::icons::BACK,
                         )
                         .tab_stop(true)
@@ -382,7 +382,7 @@ impl SettingsView {
                     .child(
                         crate::ui::button_with_icon(
                             "settings-sidebar-open-config",
-                            s::settings_open_config_file(),
+                            s::settings::open_config_file(),
                             crate::ui::icons::EDIT,
                         )
                         .tab_stop(true)

@@ -38,7 +38,7 @@ fn with_builtin_clear(mut commands: Vec<SlashCommand>) -> Vec<SlashCommand> {
         0,
         SlashCommand {
             name: CLEAR_COMMAND_NAME.to_string(),
-            description: s::agent_chat_clear_command_desc(),
+            description: s::agent_chat::clear_command_desc(),
             input: SlashCommandInput::NoInput,
         },
     );
@@ -260,7 +260,7 @@ mod tests {
         assert_eq!(clear_count, 1);
         let clear = merged.iter().find(|c| c.name == "clear").unwrap();
         assert!(matches!(clear.input, SlashCommandInput::NoInput));
-        assert_eq!(clear.description, s::agent_chat_clear_command_desc());
+        assert_eq!(clear.description, s::agent_chat::clear_command_desc());
     }
 
     #[test]

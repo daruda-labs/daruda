@@ -44,18 +44,18 @@ pub(super) fn agent_install_banner(
             div()
                 .flex_none()
                 .text_color(icon)
-                .child(surface_strings::AGENT_BANNER_ICON),
+                .child(crate::surface::glyphs::AGENT_BANNER_ICON),
         )
         .child(
             div()
                 .flex_1()
                 .flex()
                 .flex_col()
-                .child(surface_strings::agent_banner_title())
+                .child(surface_strings::claude::banner_title())
                 .child(
                     div()
                         .text_color(hint_text)
-                        .child(surface_strings::agent_banner_hint()),
+                        .child(surface_strings::claude::banner_hint()),
                 ),
         )
         .on_click(cx.listener(move |_dock, _: &ClickEvent, window, cx| {
@@ -64,9 +64,9 @@ pub(super) fn agent_install_banner(
             };
             let weak = workspace.clone();
             crate::workspace::dialog_helpers::open_confirm_dialog(
-                surface_strings::agent_consent_title(),
-                surface_strings::agent_consent_body(),
-                surface_strings::agent_consent_confirm(),
+                surface_strings::claude::consent_title(),
+                surface_strings::claude::consent_body(),
+                surface_strings::claude::consent_confirm(),
                 ButtonVariant::Primary,
                 move |_, window, app_cx| {
                     if let Some(ws) = weak.upgrade() {

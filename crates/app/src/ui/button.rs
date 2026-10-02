@@ -209,13 +209,13 @@ pub fn button_chip(id: impl Into<ElementId>, label: impl Into<SharedString>) -> 
 
 /// Neutral dismissal, distinct from deleting an item.
 pub fn button_close(id: impl Into<ElementId>, cx: &App) -> Button {
-    button_icon(id, super::icons::CLOSE, cx).tooltip(crate::surface::strings::common_button_close())
+    button_icon(id, super::icons::CLOSE, cx).tooltip(crate::surface::strings::common::btn_close())
 }
 
 /// Delete action; the caller owns any row-hover visibility gating.
 pub fn button_delete_glyph(id: impl Into<ElementId>, cx: &App) -> Button {
     button_icon_danger(id, super::icons::DELETE, cx)
-        .tooltip(crate::surface::strings::common_button_delete())
+        .tooltip(crate::surface::strings::common::btn_delete())
 }
 
 /// Edit action, sharing the delete action's metrics without its danger tone.

@@ -534,7 +534,7 @@ fn usage_account_label(
     recipe: daruda_store::accounts::AccountRecipeId,
 ) -> String {
     crate::workspace::status_bar::account_label(email, None).unwrap_or_else(|| {
-        crate::surface::strings::status_bar_account_system(
+        crate::surface::strings::settings::status_bar_account_system(
             daruda_agent::accounts::recipe_for(recipe).system_home_hint(),
         )
     })

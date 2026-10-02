@@ -14,7 +14,7 @@ use crate::workspace::layout::RightDockSnapshot;
 /// No run in this lane. Deliberately not "no runs anywhere" — a run in
 /// another lane is still going, and the chip is saying so.
 pub(super) fn empty_state(cx: &gpui::App) -> AnyElement {
-    crate::ui::placeholder_text(strings::right_panel_flow_empty())
+    crate::ui::placeholder_text(strings::flow::panel_empty())
         .py(px(theme::RIGHT_PANEL_PAD_Y))
         .text_size(px(theme::DOCK_PLACEHOLDER_FONT_SIZE))
         .text_color(theme::current(cx).text_subtle)
@@ -92,7 +92,7 @@ fn ask_block(
                 div()
                     .text_size(px(theme::DOCK_PLACEHOLDER_FONT_SIZE))
                     .text_color(t.text_subtle)
-                    .child(strings::flow_more_questions_waiting(also_waiting)),
+                    .child(strings::flow::more_questions_waiting(also_waiting)),
             )
         })
 }
@@ -202,7 +202,7 @@ fn run_summary(run: &FlowRunRow, snap: &RightDockSnapshot, cx: &gpui::App) -> im
                     // Both halves of the ref: two projects each have a lane
                     // `0`, and one id per row is what keeps their clicks apart.
                     SharedString::from(format!("flow-panel-stop-{}-{}", lane.project, lane.lane)),
-                    strings::right_panel_flow_stop(),
+                    strings::flow::panel_stop(),
                 )
                 .on_click(move |_, _window, cx| {
                     match workspace.update(cx, |ws, cx| ws.stop_flow_run_in(lane, cx)) {

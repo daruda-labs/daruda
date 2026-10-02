@@ -102,9 +102,9 @@ pub(in crate::workspace) enum FlowOrigin {
 /// What the origin word for a flow is, on a row and in a dialog about it.
 pub(in crate::workspace) fn origin_label(origin: FlowOrigin) -> String {
     match origin {
-        FlowOrigin::Repo => s::right_panel_flow_origin_repo(),
-        FlowOrigin::Project => s::right_panel_flow_origin_project(),
-        FlowOrigin::Global => s::right_panel_flow_origin_global(),
+        FlowOrigin::Repo => s::flow::panel_flow_origin_repo(),
+        FlowOrigin::Project => s::flow::panel_flow_origin_project(),
+        FlowOrigin::Global => s::flow::panel_flow_origin_global(),
     }
 }
 
@@ -119,8 +119,8 @@ pub(in crate::workspace) fn origin_label(origin: FlowOrigin) -> String {
 /// needs told is that the deletion lands in the working tree for everyone.
 pub(in crate::workspace) fn delete_confirm_body(name: &str, origin: FlowOrigin) -> String {
     match origin {
-        FlowOrigin::Repo => s::flow_delete_confirm_body_repo(name),
-        other => s::flow_delete_confirm_body(name, &origin_label(other)),
+        FlowOrigin::Repo => s::flow::delete_confirm_body_repo(name),
+        other => s::flow::delete_confirm_body(name, origin_label(other)),
     }
 }
 
@@ -172,7 +172,7 @@ pub(in crate::workspace) fn forget_lane_lock(dir: Option<PathBuf>) {
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
         Err(e) => daruda_store::observability::log_writer::LogWriter::log(
             daruda_store::observability::error_report::ErrorReport::new(
-                crate::surface::strings::error_lane_flow_lock_cleanup_failed(),
+                crate::surface::strings::error::lane_flow_lock_cleanup_failed(),
             )
             .severity(daruda_store::observability::error_report::ErrorSeverity::Warning)
             .from_error(&e)
@@ -609,7 +609,7 @@ mod tests {
         // comparing them would pass with the repository arm gone.
         assert_ne!(
             repo,
-            s::flow_delete_confirm_body("deploy.yaml", &origin_label(FlowOrigin::Repo)),
+            s::flow::delete_confirm_body("deploy.yaml", origin_label(FlowOrigin::Repo)),
             "the repository's copy fell back to the shared sentence"
         );
     }

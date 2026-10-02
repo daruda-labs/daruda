@@ -154,7 +154,7 @@ impl RenderOnce for CommandPaletteOverlay {
                     .text_size(px(theme::PALETTE_QUERY_FONT_SIZE))
                     .text_color(query_text)
                     .child(if state.picker.query().is_empty() {
-                        SharedString::from(s::command_type_command_placeholder())
+                        SharedString::from(s::command::type_command_placeholder())
                     } else {
                         SharedString::from(state.picker.query().to_string())
                     }),
@@ -186,7 +186,7 @@ impl RenderOnce for CommandPaletteOverlay {
 
         let no_results = visible
             .is_empty()
-            .then(|| crate::ui::picker_empty(s::command_no_matching_commands().into(), cx));
+            .then(|| crate::ui::picker_empty(s::command::no_matching_commands().into(), cx));
 
         let panel = div()
             .absolute()

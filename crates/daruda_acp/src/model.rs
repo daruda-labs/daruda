@@ -686,7 +686,7 @@ pub struct ConfigChoiceView {
 /// `options` fields, so "a boolean with a choice list" is unrepresentable.
 ///
 /// Boolean carries no labels: they are user-facing text, which must come from
-/// the host's i18n layer (`surface/strings.rs`) and cannot be synthesized in
+/// the host's i18n layer (`surface/strings/`) and cannot be synthesized in
 /// this GPUI-free crate.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ConfigOptionKindView {

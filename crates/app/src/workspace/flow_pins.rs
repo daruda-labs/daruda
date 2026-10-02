@@ -146,7 +146,7 @@ impl Workspace {
         let resolved = resolve_in(pinned, &text, profile, newest.as_deref());
         if !resolved.unavailable.is_empty() {
             self.report_error(
-                ErrorReport::new(s::flow_pin_unavailable(&resolved.unavailable))
+                ErrorReport::new(s::flow::pin_unavailable(&resolved.unavailable))
                     .severity(ErrorSeverity::Warning)
                     .dedup("flow.pin_unavailable")
                     .at(file!(), line!())

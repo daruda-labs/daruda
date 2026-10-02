@@ -55,16 +55,16 @@ fn preview_for(text: &str, marker: &str) -> String {
 fn run_summary_line(summary: &super::view::RunSummary) -> Option<String> {
     let segments: Vec<String> = summary
         .worked_for
-        .map(s::format_duration_compact)
+        .map(s::notification::format_duration_compact)
         .into_iter()
         .chain(
             summary
                 .tools
                 .iter()
-                .map(|&(category, count)| s::agent_chat_group_category(category.token(), count)),
+                .map(|&(category, count)| s::agent_chat::group_category(category.token(), count)),
         )
         .collect();
-    (!segments.is_empty()).then(|| s::remote_run_summary(&segments))
+    (!segments.is_empty()).then(|| s::control::remote_run_summary(&segments))
 }
 
 /// Compose the permission-wait ping's tail: the localized "waiting for input"
@@ -73,7 +73,7 @@ fn run_summary_line(summary: &super::view::RunSummary) -> Option<String> {
 /// phone message names *what* is being asked. An empty string is treated as
 /// absent (defensive; the source already filters it).
 fn permission_wait_text(tool_title: Option<&str>, raw_input_summary: Option<&str>) -> String {
-    let mut tail = s::agent_notification_waiting();
+    let mut tail = s::notification::agent_waiting();
     for line in [tool_title, raw_input_summary] {
         if let Some(line) = line.filter(|l| !l.is_empty()) {
             tail.push('\n');
@@ -94,7 +94,7 @@ fn permission_wait_tail(
         prompt.tool_title.as_deref(),
         prompt.raw_input_summary.as_deref(),
     );
-    let Some(preview) = diff_preview::diff_preview(diffs, s::agent_chat_diff_fallback_truncated)
+    let Some(preview) = diff_preview::diff_preview(diffs, s::agent_chat::diff_fallback_truncated)
     else {
         return TelegramTail::Plain(text);
     };
@@ -127,7 +127,7 @@ fn permission_diffs<'a>(
 /// fixed i18n label, plus the tool's title on its own line when the agent
 /// supplied a non-empty one.
 fn first_tool_ack_tail(tool_title: Option<&str>) -> String {
-    let mut tail = s::agent_notification_telegram_first_tool_ack();
+    let mut tail = s::notification::telegram_first_tool_ack();
     if let Some(title) = tool_title.filter(|t| !t.is_empty()) {
         tail.push('\n');
         tail.push_str(title);
@@ -204,7 +204,7 @@ impl Workspace {
             Some(view) => {
                 let agent = view.read(cx).agent_name.clone();
                 let agent = match self.pane_tab_name(pane_id) {
-                    Some(tab) => s::remote_agent_with_tab(&agent, &tab),
+                    Some(tab) => s::control::agent_with_tab(&agent, &tab),
                     None => agent,
                 };
                 match project_line {
@@ -250,7 +250,7 @@ impl Workspace {
         let Some(view) = self.agent_chat_view(pane_id) else {
             return Some((
                 self.pane_title(pane_id, cx),
-                TelegramTail::Plain(s::agent_notification_completed()),
+                TelegramTail::Plain(s::notification::agent_completed()),
             ));
         };
         let view = view.read(cx);
@@ -285,12 +285,12 @@ impl Workspace {
                 header,
                 TelegramTail::Markdown(preview_for(
                     text,
-                    &s::agent_notification_telegram_truncated_marker(),
+                    &s::notification::telegram_truncated_marker(),
                 )),
             )),
             None => Some((
                 header,
-                TelegramTail::Plain(s::agent_notification_completed()),
+                TelegramTail::Plain(s::notification::agent_completed()),
             )),
         }
     }
@@ -656,7 +656,7 @@ impl Workspace {
         pane_id: PaneId,
         cx: &Context<Self>,
     ) -> (String, TelegramTail) {
-        let mut tail = s::remote_turn_failed();
+        let mut tail = s::control::turn_failed();
         if let Some(reason) = self
             .agent_chat_view(pane_id)
             .and_then(|view| view.read(cx).failure_reason())
@@ -664,7 +664,7 @@ impl Workspace {
             tail.push('\n');
             tail.push_str(&preview_for(
                 &reason,
-                &s::agent_notification_telegram_truncated_marker(),
+                &s::notification::telegram_truncated_marker(),
             ));
         }
         (self.telegram_header(pane_id, cx), TelegramTail::Plain(tail))
@@ -681,7 +681,7 @@ impl Workspace {
         self.relay_to_telegram(
             pane_id,
             header,
-            TelegramTail::Plain(s::agent_notification_telegram_reply_queued()),
+            TelegramTail::Plain(s::notification::telegram_reply_queued()),
             None,
             cx,
         );
@@ -695,7 +695,7 @@ impl Workspace {
         self.relay_to_telegram(
             pane_id,
             header,
-            TelegramTail::Plain(s::agent_notification_telegram_queue_full()),
+            TelegramTail::Plain(s::notification::telegram_queue_full()),
             None,
             cx,
         );
@@ -717,7 +717,7 @@ impl Workspace {
         let tail = match outcome {
             FirstResponseOutcome::Text { text, .. } => TelegramTail::Markdown(preview_for(
                 &text,
-                &s::agent_notification_telegram_truncated_marker(),
+                &s::notification::telegram_truncated_marker(),
             )),
             FirstResponseOutcome::Tool { tool_title } => {
                 TelegramTail::Plain(first_tool_ack_tail(tool_title.as_deref()))
@@ -740,7 +740,7 @@ impl Workspace {
         self.relay_to_telegram(
             pane_id,
             header,
-            TelegramTail::Plain(s::agent_notification_telegram_reply_ack()),
+            TelegramTail::Plain(s::notification::telegram_reply_ack()),
             None,
             cx,
         );

@@ -40,7 +40,7 @@ pub(crate) fn announce_chat_created(
         error_report::{ErrorReport, ErrorSeverity},
         log_writer::LogWriter,
     };
-    let tail = crate::surface::strings::control_chat_announced(agent);
+    let tail = crate::surface::strings::control::chat_announced(agent);
     let telegram = crate::telegram::global::TelegramBridge::announce_chat(
         pane,
         header.clone(),

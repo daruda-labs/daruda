@@ -27,7 +27,7 @@ pub(in crate::workspace) fn render(cx: &mut Context<Dock>) -> AnyElement {
         .child(
             crate::ui::button_with_icon(
                 "left-dock-settings",
-                crate::surface::strings::dock_settings(),
+                crate::surface::strings::dock::settings(),
                 crate::ui::icons::SETTINGS,
             )
             .ghost()

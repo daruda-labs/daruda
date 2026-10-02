@@ -77,19 +77,19 @@ fn ports_panel(
     match status {
         PortScanStatus::Pending => panel
             .child(status_row(
-                crate::surface::strings::status_bar_ports_scanning(),
+                crate::surface::strings::settings::status_bar_ports_scanning(),
                 cx,
             ))
             .into_any_element(),
         PortScanStatus::Unavailable => panel
             .child(status_row(
-                crate::surface::strings::status_bar_ports_scan_unavailable(),
+                crate::surface::strings::settings::status_bar_ports_scan_unavailable(),
                 cx,
             ))
             .into_any_element(),
         PortScanStatus::Available if groups.is_empty() && external.is_empty() => panel
             .child(status_row(
-                crate::surface::strings::status_bar_ports_no_workspace(),
+                crate::surface::strings::settings::status_bar_ports_no_workspace(),
                 cx,
             ))
             .into_any_element(),
@@ -102,11 +102,14 @@ fn ports_panel(
 
 fn summary_label(status: PortScanStatus, workspace_count: usize, external_count: usize) -> String {
     match status {
-        PortScanStatus::Pending => crate::surface::strings::status_bar_ports_scanning(),
-        PortScanStatus::Unavailable => crate::surface::strings::status_bar_ports_scan_unavailable(),
-        PortScanStatus::Available => {
-            crate::surface::strings::status_bar_ports_summary(workspace_count, external_count)
+        PortScanStatus::Pending => crate::surface::strings::settings::status_bar_ports_scanning(),
+        PortScanStatus::Unavailable => {
+            crate::surface::strings::settings::status_bar_ports_scan_unavailable()
         }
+        PortScanStatus::Available => crate::surface::strings::settings::status_bar_ports_summary(
+            workspace_count,
+            external_count,
+        ),
     }
 }
 
@@ -118,7 +121,7 @@ fn trigger_label(count: usize, density: StatusBarDensity) -> String {
     if density.is_reduced() {
         count.to_string()
     } else {
-        crate::surface::strings::status_bar_ports_label(count)
+        crate::surface::strings::settings::status_bar_ports_label(count)
     }
 }
 
@@ -185,13 +188,13 @@ fn port_scroll_body(
 
     if groups.is_empty() {
         content = content.child(status_row(
-            crate::surface::strings::status_bar_ports_no_workspace(),
+            crate::surface::strings::settings::status_bar_ports_no_workspace(),
             cx,
         ));
     } else {
         let workspace_count: usize = groups.iter().map(|(_, ports)| ports.len()).sum();
         content = content.child(section_label(
-            crate::surface::strings::status_bar_ports_workspace_count(workspace_count),
+            crate::surface::strings::settings::status_bar_ports_workspace_count(workspace_count),
             cx,
         ));
         for (label, ports) in groups {
@@ -205,7 +208,7 @@ fn port_scroll_body(
 
     if !external.is_empty() {
         content = content.child(section_label(
-            crate::surface::strings::status_bar_ports_external_count(external.len()),
+            crate::surface::strings::settings::status_bar_ports_external_count(external.len()),
             cx,
         ));
         for entry in external {
@@ -250,9 +253,9 @@ fn port_click_row(row_ix: usize, entry: &PortEntry, cx: &App) -> AnyElement {
 
 fn table_header() -> AnyElement {
     port_table_row(
-        crate::surface::strings::status_bar_ports_table_port(),
-        crate::surface::strings::status_bar_ports_table_process(),
-        crate::surface::strings::status_bar_ports_table_address(),
+        crate::surface::strings::settings::status_bar_ports_table_port(),
+        crate::surface::strings::settings::status_bar_ports_table_process(),
+        crate::surface::strings::settings::status_bar_ports_table_address(),
     )
 }
 
@@ -413,10 +416,9 @@ mod tests {
 
     #[test]
     fn trigger_label_shows_full_word_at_full_density() {
-        assert!(
-            trigger_label(3, StatusBarDensity::Full)
-                .starts_with(&crate::surface::strings::status_bar_ports_label(3))
-        );
+        assert!(trigger_label(3, StatusBarDensity::Full).starts_with(
+            &crate::surface::strings::settings::status_bar_ports_label(3)
+        ));
     }
 
     #[test]
@@ -430,7 +432,7 @@ mod tests {
     /// chip sits beside it.
     #[test]
     fn trigger_label_carries_no_dropdown_chevron() {
-        let chevron = crate::surface::strings::TASK_PILL_CHEVRON.trim();
+        let chevron = crate::surface::glyphs::TASK_PILL_CHEVRON.trim();
         for density in [
             StatusBarDensity::Full,
             StatusBarDensity::Compact,
@@ -444,15 +446,15 @@ mod tests {
     fn summary_label_distinguishes_scan_states() {
         assert_eq!(
             summary_label(PortScanStatus::Pending, 0, 0),
-            crate::surface::strings::status_bar_ports_scanning()
+            crate::surface::strings::settings::status_bar_ports_scanning()
         );
         assert_eq!(
             summary_label(PortScanStatus::Unavailable, 0, 0),
-            crate::surface::strings::status_bar_ports_scan_unavailable()
+            crate::surface::strings::settings::status_bar_ports_scan_unavailable()
         );
         assert_eq!(
             summary_label(PortScanStatus::Available, 1, 2),
-            crate::surface::strings::status_bar_ports_summary(1, 2)
+            crate::surface::strings::settings::status_bar_ports_summary(1, 2)
         );
     }
 

@@ -92,7 +92,7 @@ impl Workspace {
                     // Losing a watcher costs freshness for outside writes
                     // only; daruda's own ops still refresh through the lock.
                     let report =
-                        ErrorReport::new(crate::surface::strings::error_git_watcher_init_failed())
+                        ErrorReport::new(crate::surface::strings::error::git_watcher_init_failed())
                             .severity(ErrorSeverity::Warning)
                             .from_error(&e)
                             .at(file!(), line!())
@@ -203,7 +203,7 @@ impl Workspace {
             }
         }
         for (dir, error) in errors {
-            let report = ErrorReport::new(crate::surface::strings::error_git_watcher_error())
+            let report = ErrorReport::new(crate::surface::strings::error::git_watcher_error())
                 .severity(ErrorSeverity::Warning)
                 .with_context("path", redact_home(&dir))
                 .with_context("error", error)

@@ -14,9 +14,9 @@ use crate::workspace::main_area::agent_chat_pane::view::AgentChatView;
 /// states indistinguishable.
 fn tail_more_label(hidden_steps: usize, kept_steps: usize, collapsed: bool) -> String {
     if collapsed {
-        s::agent_chat_tail_more_show(hidden_steps)
+        s::agent_chat::tail_more_show(hidden_steps)
     } else {
-        s::agent_chat_tail_more_collapse(kept_steps)
+        s::agent_chat::tail_more_collapse(kept_steps)
     }
 }
 
@@ -31,9 +31,9 @@ pub(super) fn call_boundary_label(
     collapsed: bool,
 ) -> String {
     if collapsed {
-        s::agent_chat_tail_more_show_calls(hidden_calls)
+        s::agent_chat::tail_more_show_calls(hidden_calls)
     } else {
-        s::agent_chat_tail_more_collapse_calls(kept_calls)
+        s::agent_chat::tail_more_collapse_calls(kept_calls)
     }
 }
 

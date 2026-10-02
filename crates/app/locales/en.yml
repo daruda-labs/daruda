@@ -51,8 +51,15 @@ common:
 # Wall-clock timestamp shapes (`chrono` patterns). en-US reads on a 12-hour
 # clock; see `surface::timestamp`.
 timestamp:
+  # `chrono` pattern for a full date and time. A pattern rather than plain
+  # copy: field order, clock convention and the words around the numbers all
+  # differ per locale. Consumed by [`crate::surface::timestamp`], not at call sites.
   date_and_time: "%b %-d, %Y, %-I:%M %p"
+  # `chrono` pattern for a time of day alone — a stamp whose date the
+  # surrounding UI already implies.
   time_only: "%-I:%M %p"
+  # `chrono` pattern for a month, day and time — a timestamp whose year the
+  # surrounding UI already implies.
   month_day_and_time: "%b %-d, %-I:%M %p"
 
 # Command palette and quick switchers
@@ -142,6 +149,7 @@ welcome:
   recent: "Recent Projects"
   new_empty: "New Empty Window"
   no_recent: "No recent projects"
+  # Heading over the Landing view's keyboard cheat sheet.
   shortcuts: "Shortcuts"
   shortcut_open_folder: "Open a project folder"
   shortcut_open_folder_new_window: "Open a folder in a new window"
@@ -158,12 +166,14 @@ menu:
   help: "Help"
 
   # App menu
+
   quit_app: "Quit Daruda"
   services: "Services"
   settings: "Settings…"
   open_project_config: "Open Project Config…"
 
   # File menu
+
   new_window: "New Window"
   open: "Open…"
   open_in_new_window: "Open in New Window…"
@@ -171,10 +181,13 @@ menu:
   open_recent_in_new_window: "Open Recent in New Window"
   close_project: "Close Project"
   no_recent: "No recent projects"
-  # Label for a recent row whose workspace no longer holds any project.
+  # Recent-list label for a workspace that holds no projects. Such a row is
+  # kept (so the next launch can restore the workspace) but must not keep
+  # advertising a project that is no longer in it.
   recent_empty_workspace: "Empty workspace"
 
   # Edit menu
+
   copy: "Copy"
   paste: "Paste"
   select_all: "Select All"
@@ -187,6 +200,7 @@ menu:
   scroll_to_bottom: "Scroll to Bottom"
 
   # View menu
+
   next_pane: "Next Pane"
   prev_pane: "Previous Pane"
   focus_pane_left: "Focus Pane Left"
@@ -201,6 +215,7 @@ menu:
   jump_prompt_next: "Jump to Next Prompt"
 
   # Lane menu (indexed)
+
   activate_lane_1: "Activate Worktree 1"
   activate_lane_2: "Activate Worktree 2"
   activate_lane_3: "Activate Worktree 3"
@@ -212,11 +227,13 @@ menu:
   activate_lane_9: "Activate Worktree 9"
 
   # Window menu
+
   minimize: "Minimize"
   zoom: "Zoom"
   edit_window_title: "Edit Window Title…"
 
   # Help menu
+
   daruda_help: "Daruda Help"
   keyboard_shortcuts: "Keyboard Shortcuts"
   edit_keymap: "Edit Keymap…"
@@ -241,14 +258,22 @@ dock:
 
 # Task panel
 task:
+  # Filter dropdown labels.
   scope_all: "All tasks"
   filter_all: "All"
   filter_backlog: "Backlog"
   filter_running: "Running"
   filter_done: "Done"
+  # `[+ New]` button label.
   new_button: "New"
+  # Tasks tab search bar — substring filter over title / prompt /
+  # notes / branch_name. Placement and behaviour mirror the Skills tab
+  # search (`SKILLS_SEARCH_*`). Cleared via the in-field `✕` overlay.
   search_placeholder: "Search tasks…"
   search_empty_prefix: "No tasks match "
+  # Action labels rendered inside the status-pill dropdown. The pill
+  # itself shows the task's current state; the dropdown lists the
+  # transitions and meta actions valid for that state.
   action_start: "Start"
   action_open: "Open worktree"
   action_open_chat: "Open Agent Chat"
@@ -266,16 +291,29 @@ task:
   action_stop: "Stop"
   action_reopen: "Reopen"
   action_retry: "Retry"
+  # `View error` (Error state). Opens an OK-only alert dialog
+  # showing the full `TaskState::Error.message` so users can see the
+  # truncated row text in full.
   action_view_error: "View error"
+  # Title shown on the alert dialog opened by `View error`.
   error_dialog_title: "Task error"
+  # The `TaskState::Error.message` wordings daruda itself writes. The row
+  # renders this after its `Error:` prefix, so it has to read as a sentence
+  # fragment rather than a log line.
   error_lane_gone: "worktree gone"
   error_prompt_undelivered: "prompt could not reach the pane (pane closed)"
   error_session_failed: "session error"
+  # Escalation wording — why daruda ended the task itself. Keeps the ACP stop
+  # reason verbatim so it still matches what the adapter reported.
   error_tool_use_failure: "tool_use_failure x%{count}"
   error_write_prompt: "write prompt: %{error}"
   close_dirty_line: "• %{title}"
   close_dirty_line_draft: "• %{title} (new task)"
+  # Which panes the batch save could not write, under
+  # [`task_batch_save_failed_title`].
   batch_save_failed_detail: "%{count} pane(s) were not saved and stay open: %{panes}"
+  # Sublabel daruda gives a worktree it created for a task — it shows on the
+  # sidebar row wherever the user has not written their own description.
   lane_description: "task: %{title}"
   picker_title_start: "Start Task"
   picker_title_cancel: "Cancel Task"
@@ -289,7 +327,18 @@ task:
   picker_empty_reopen: "No completed tasks to reopen."
   picker_empty_retry: "No errored tasks to retry."
   picker_empty_delete: "No tasks to delete."
+  # `[📄 Open file]` button shown next to the Prompt section header in
+  # the TaskEdit pane. Click opens
+  # the task's prompt file (`prompt_file_path`) in a fresh file viewer tab when
+  # the task has a lane (Backlog / draft tasks disable the button
+  # since no on-disk file exists yet).
   edit_open_file_button: "📄 Open file"
+  # Subtext rendered directly under the "Notes" label in the TaskEdit
+  # pane. Notes are stored on the `Task` and surface in search, but
+  # `render_task_prompt` deliberately excludes them — the hint makes
+  # that contract visible so users don't expect the agent to read
+  # their journal. Kept agent-agnostic since `AgentType` is reserved
+  # for future codex / gemini / copilot expansion.
   edit_notes_hint: "Not included in the agent prompt."
   edit_new: "New task"
   edit_back: "Back to tasks"
@@ -300,24 +349,40 @@ task:
   edit_subtasks_progress: "Subtasks (%{done}/%{total})"
   edit_error: "Error"
   edit_cancelled: "Cancelled"
+  # Where a task runs: a worktree it creates, or one already registered.
   edit_run_in_label: "Worktree"
   edit_run_in_new: "New"
   edit_run_in_existing: "Existing"
   edit_run_in_lane_placeholder: "Choose a worktree"
+  # Warning under the lane picker: another task already runs in that lane.
   edit_run_in_lane_busy: "Task “%{title}” is already running in this worktree."
+  # A new-worktree branch that a registered lane already checks out.
   edit_branch_exists: "A worktree already uses this branch — choose Existing to run there."
+  # Field label for the base-lane selector on the TaskEdit pane.
   edit_base_label: "Base"
+  # Trailing suffix on the option that maps to "no explicit base
+  # lane — fall through to the project's active lane at
+  # start_task time". Used as both the placeholder and the
+  # first-option label so empty drafts read as "Active lane"
+  # rather than blank.
   edit_base_active_label: "Active worktree"
   edit_auto_execute_label: "Auto-execute"
+  # Field label for the execution-surface selector on the TaskEdit pane.
   edit_surface_label: "Run on"
+  # Option label — run the task on a terminal CLI session.
   edit_surface_terminal: "Terminal (CLI)"
+  # Option label — run the task on an in-app Agent chat (ACP) session.
   edit_surface_agent_chat: "Agent Chat"
   edit_title_placeholder: "Task title"
   edit_branch_placeholder: "branch-name"
   edit_prompt_placeholder: "Describe the task…"
   edit_notes_placeholder: "Notes (markdown)"
-  edit_save_prompt_prefix: "Save changes to “"
-  edit_save_prompt_suffix: "” before closing?"
+  # Close prompt for a dirty task pane. The title is a parameter, not a
+  # prefix/suffix pair, so each locale puts it where its grammar wants it.
+  edit_save_prompt: "Save changes to “%{title}” before closing?"
+  # TaskEdit pane close prompt — copy mirrors Zed `pane.rs:1981-1998`.
+  # Draft branch uses a stronger "Discard new task?" heading since the
+  # work has never been persisted.
   edit_discard_draft_prompt: "Discard new task?"
   edit_save_draft: "Save Draft"
   edit_discard: "Discard"
@@ -325,31 +390,43 @@ task:
   watcher_use_disk: "Use disk version"
   watcher_keep_mine: "Keep my version"
   watcher_diff: "Diff"
-  watcher_heading_suffix: "” changed on disk"
+  # Heading of the prompt-file watcher conflict prompt.
+  watcher_heading: "“%{title}” changed on disk"
+  # Tab / window batch close prompt. Single 3-button modal
+  # summarising every dirty TaskEdit pane in the closing scope.
   batch_close_heading: "Save changes to the following before closing?"
   batch_save_all: "Save all"
   batch_discard_all: "Discard all"
+  # Title for the toast surfaced when one or more panes in a Save-all
+  # batch fail to commit because their branch input is invalid. The
+  # detail message lists the affected task titles.
   batch_save_failed_title: "Some panes couldn't be saved"
+  # Done end-reason flavour appended inline as `Done (<flavour>)`.
   done_flavour_stop: "Stop"
   done_flavour_prompt_input_exit: "Prompt Exit"
   done_flavour_logout: "Logout"
   done_flavour_other: "Other"
-  subtask_section_title: "Subtasks"
-  subtask_progress_suffix: " done"
   subtask_add_placeholder: "Add subtask…"
-  subtask_draft_hint: "Save the task to add subtasks."
   subtask_auto_label: "auto"
   subtask_manual_label: "manual"
+  # Body of the delete-task confirmation dialog. `title` is the task's
+  # display title, interpolated inside curly quotes.
   confirm_delete_body: "Delete task “%{title}”? The associated worktree (if any) is preserved."
 
 # File viewer
 file_viewer:
   binary: "Binary file"
+  # The one way out of the binary placeholder: hand the file to the OS.
   btn_open_with_default_app: "Open with Default App"
+  # Body text when a git-backed view is asked for outside a repository.
   err_no_git_repo: "No git repository root"
+  # Body text when a staged path resolves outside the repo it was staged in.
   err_staged_outside_repo: "staged path %{path} is not inside repo root %{root}"
+  # Tab title for a path with no file-name component.
   untitled_tab_title: "(file)"
   truncated_read_only: "File exceeds %{size} — showing the first %{size}, read-only so a save cannot cut the file"
+  # Heading of the prompt a save raises when the file changed on disk since
+  # the pane loaded it.
   save_conflict_heading: "%{name} changed on disk"
   save_conflict_detail: "Another program changed or removed this file after you opened it. Overwrite replaces that version with yours; Reload discards your edits."
   save_conflict_overwrite: "Overwrite"
@@ -358,6 +435,8 @@ file_viewer:
   byte_truncated_short: "File exceeds %{size} — showing first %{shown} lines"
   deleted: "File deleted"
   empty_diff: "No changes"
+  # Stand-in for a Markdown image that has no bitmap (remote, missing, or
+  # failed to decode).
   image_alt: "[%{alt}]"
   more_lines: "… (%{count} more lines)"
   staged_badge: " (staged)"
@@ -375,89 +454,227 @@ file_viewer:
 # Agent chat pane (ACP)
 agent_chat:
   queue_full: "That chat already has too many prompts waiting. Wait for it to catch up."
+  # Heading for an inline permission card.
+  # Toast title for a non-fatal session advisory (`AcpEvent::Notice`): the
+  # session is live, but something the user or their config asked for did not
+  # happen. The body is the adapter's own diagnostic and stays untranslated.
   session_notice: "The session continued, but not as configured"
+  # Body for the one notice daruda authors itself: the agent delegated through
+  # its legacy path, so the subagent's work can never be shown.
   legacy_delegation_notice: "This agent delegated to a subagent without native subagent sessions, so the subagent's own tool calls will not appear. Its adapter may not support them, or may not read the Environment in Settings → Agents & Chat."
+  # Closes a diff cut short by the inline fallback. Names the count and points
+  # at the file, since the fallback has no scroller to reach the rest with.
   diff_fallback_truncated: "%{n} more lines — open the file to see the rest"
+  # Label for the button an agent-chat pane offers when its failure is one a
+  # fresh sign-in actually fixes (`daruda_acp::Remedy::Reauthenticate`).
+  # Deliberately distinct from the Settings row's label: here the user is
+  # recovering a session, not administering accounts.
   sign_in_again: "Sign in again"
+  # Tooltip on a mermaid diagram card's zoom button, which opens the lightbox.
   diagram_zoom: "Enlarge diagram"
+  # Tooltip on a mermaid diagram card's copy button — it copies the diagram
+  # source, not the rendered image.
   diagram_copy: "Copy diagram source"
+  # Tooltip on a mermaid diagram card's copy button right after a copy.
   diagram_copied: "Copied"
+  # Enabled state of a boolean session config option (e.g. "Fast mode"), used
+  # as both the chip label and its dropdown entry. The protocol carries only a
+  # `bool`, so the two labels are the host's to supply.
   config_boolean_on: "On"
+  # Disabled state of a boolean session config option — see
+  # [`agent_chat_config_boolean_on`].
   config_boolean_off: "Off"
   config_default_model: "Default (%{model})"
   session_mode_chip: "Session: %{value}"
   config_chip: "%{name}: %{value}"
+  # Tab / pane-header title for an Agent chat pane.
   tab_title: "Agent"
+  # Banner copy for a dormant (restored, not-yet-connected) Agent chat pane.
+  # The session starts on first focus, so this shows only for a visible but
+  # unfocused pane.
   idle: "Idle — focus this pane to start the agent."
+  # Placeholder copy shown while the agent session is connecting, before any
+  # handshake milestone has been reported yet.
   connecting: "Connecting…"
+  # Status banner shown while `initialize` is in flight (awaiting the agent's
+  # capabilities reply).
   connecting_handshake: "Connecting — waiting for the agent to respond…"
+  # Status banner shown while `session/new` is in flight (fresh session).
   connecting_creating_session: "Connecting — starting a new session…"
+  # Status banner shown while `session/load` is in flight (resuming a
+  # persisted session).
   connecting_loading_session: "Connecting — resuming your conversation…"
+  # Status banner shown while `session/set_mode` is in flight, applying the
+  # configured initial mode to a freshly created session.
   connecting_applying_mode: "Connecting — applying session mode…"
+  # Status banner shown while the app is downloading the Node.js runtime the
+  # agent adapter needs (first run on a machine without a usable Node.js).
   runtime_downloading: "Setting up the agent runtime — downloading Node.js (first run only)…"
+  # Status banner shown while the downloaded Node.js runtime is being verified.
   runtime_verifying: "Setting up the agent runtime — verifying download…"
+  # Status banner shown while the downloaded Node.js runtime is being extracted.
   runtime_extracting: "Setting up the agent runtime — extracting…"
+  # Prefix for the connection-error status line.
   error_prefix: "Connection error:"
   transport_closed: "The connection to the agent was closed. Retry to reconnect."
   adapter_install_failed: "Could not prepare the agent package. Check the error details, then retry."
   adapter_setup_required: "Could not prepare the agent package. Check the error details and correct the package or runtime configuration before reconnecting."
   adapter_integrity_failed: "The agent package failed integrity verification and was not started. Check the error details and the package source."
   adapter_preparation_canceled: "Agent preparation was canceled."
+  # Error-line reason set when the connection's event stream closes while the
+  # pane is still `Connecting`/`Handshaking`/`PreparingRuntime` — no
+  # `Connected`/`Error` ever arrived, so nothing else would surface a failure.
+  # The renderer prepends the error prefix, so this is the bare reason.
   error_stream_ended: "the agent process ended before the connection was ready."
+  # Label for the "Retry" button shown in the Error status banner.
   retry: "Retry"
+  # Status-line reason shown when an Agent chat pane has no resolvable lane
+  # working directory to attach a session to. The renderer prepends the error
+  # prefix, so this is the bare reason (not itself prefixed).
   no_lane_cwd: "No working directory for this worktree."
+  # Status-line reason shown when an Agent chat pane's command carries the
+  # legacy `{{cwd}}` token (`AgentLaunch::needs_remote_cwd`) but the lane has
+  # no `remote_cwd` configured. The one launch shape the lane's
+  # `session_host` axis doesn't cover (see `session_host::adapter_command`'s
+  # doc). `remote_cwd` is a per-lane persisted-state field
+  # (`daruda_store::project::SerializedLane`, not `config.toml`) with no
+  # editor anymore (the Session Host dialog never writes it), so the only
+  # real fix is dropping the token from the command and setting the host on
+  # the lane instead — this message names that, rather than a config key
+  # that doesn't exist. Unlike `agent_chat_no_lane_cwd`, this names the fix
+  # rather than just stating the symptom.
   no_remote_cwd: "This agent's command still uses the legacy {{cwd}} placeholder, which has no editor anymore. Remove {{cwd}} from the command in Settings → Agents & Chat, then set the host on this Worktree instead (right-click it in the sidebar → \"Session Host…\")."
+  # Status-line reason shown when a lane's Session Host resolves to a remote
+  # host (`Ssh`/`Docker`) but the pane's launch is a JSON stdio config —
+  # `session_host::wrap` can only fold a shell command line into `ssh`/
+  # `docker`, and injecting raw JSON there produces something the remote
+  # shell can't execute. See `AgentLaunch::is_json_stdio`'s doc.
   json_stdio_remote_unsupported: "This agent's command is a JSON stdio config, which can't be sent to a remote host as a shell command. Switch this Worktree's Session Host to Local, or change the command to a plain shell command line."
+  # Status-line reason shown when the pane's launch is a JSON stdio config and
+  # its agent (or account) declares an environment. Every transport applies an
+  # environment as shell text, which would stop the command being JSON; the
+  # config's own `env` field is the lossless place for it, so the message
+  # names that rather than just refusing. See
+  # `agent::launch_resolve::json_stdio_refusal`.
   json_stdio_env_unsupported: "This agent runs from a JSON stdio config, so daruda cannot add an environment to it — the environment would have to be prepended as shell text, which stops the command being JSON. Move the variables into the config's own \"env\" field, or clear the Environment field in Settings → Agents & Chat."
+  # Connect refused because the worktree's session host holds a value the
+  # launch quoting cannot carry. `reason` is the session-host validator's own
+  # wording, so the pane says the same thing the form would have.
   session_host_unusable: "This Worktree's session host can't be put into a launch command — %{reason} Fix it in the Worktree's \"Session Host…\" dialog, in Settings → Session Hosts, or in the agent's host field, then connect again."
+  # Connect aborted because the pane's managed account config dir could not
+  # be prepared. The connect does not silently fall back to another account,
+  # so this names a real blocker rather than a warning.
   account_prepare_failed: "Could not prepare the selected account's configuration directory."
+  # Hint appended to a connection error when the pane's working directory is
+  # a remote (SSH/Docker) path. Guides the user to check the remote path
+  # configuration and network connectivity.
   remote_connect_error_hint: "This looks like a remote (SSH/Docker) connection failure — check this Worktree's \"Session Host…\" setting in the sidebar (or, for an agent command still using the legacy {{cwd}} placeholder, edit that command in Settings → Agents & Chat) and that the host/container is reachable."
+  # Empty-conversation hint shown before the first message.
   empty: "Ask the agent anything to get started."
+  # Toolbar button: expand every foldable block in the conversation.
   expand_all: "Expand all"
+  # Toolbar button: collapse every foldable block in the conversation.
   collapse_all: "Collapse all"
+  # Toolbar button tooltip when clicking will enable reading-width mode.
   reading_width_on: "Use reading width"
+  # Toolbar button tooltip when clicking will return to full-width mode.
   reading_width_off: "Use full width"
+  # Tooltip on a diff block's header path — clicking opens it in the file
+  # viewer.
   diff_open_in_file_view: "Open in file view"
+  # Tooltip on a diff block header's "open externally" button when no preferred
+  # external editor is configured — the click hands the path to the OS default
+  # handler, which has no name to show.
   diff_open_externally: "Open externally"
+  # Tooltip on a diff block header's "open externally" button when a preferred
+  # external editor is configured. `editor` is the preset's own display name
+  # (a proper noun — not localized).
   diff_open_in_editor: "Open in %{editor}"
+  # Tooltip on a diff block header's copy-path button.
   diff_copy_path: "Copy path"
+  # Tooltip on a diff block header's copy-path button right after a click.
   diff_path_copied: "Copied"
+  # Error toast when "open in file view" / "open externally" is clicked on a
+  # diff whose pane's session runs on a remote host — the path is on that
+  # remote filesystem, not this machine's, so opening it locally would either
+  # fail or (worse) show an unrelated local file at the same path.
   diff_remote_path_unsupported: "Can't open a remote session's file locally."
+  # Tooltip on the activity-bar title showing the session's last-activity time
+  # (`SessionInfoUpdate.updated_at`). `time` is a pre-formatted timestamp.
   last_active_tooltip: "Last active: %{time}"
+  # Inline label on the context meter. `used`/`size` are pre-formatted token
+  # counts; the separator between them is the locale's business.
   context_meter: "%{used} / %{size}"
+  # Inline label on the context meter for an agent that reports cumulative
+  # session cost. Its own pattern, so where the amount sits is the locale's.
   context_meter_with_cost: "%{used} / %{size} · %{amount} %{currency}"
+  # Tooltip on the context meter: the current context-window fill. `used`/`size`
+  # are pre-formatted token counts; `percent` is the fill ratio.
   context_tooltip: "Context: %{used} / %{size} tokens (%{percent}%)"
+  # Same tooltip for a session whose agent also reports cumulative cost. Its own
+  # pattern, so the separator and where the amount sits relative to the fill
+  # stay translator decisions.
   context_tooltip_with_cost: "Context: %{used} / %{size} tokens (%{percent}%) · %{amount} %{currency}"
+  # Section label for the bottom plan region.
   plan_label: "Plan"
+  # Tooltip on the × button that dismisses a completed plan region.
   plan_dismiss: "Dismiss plan"
+  # Working-indicator label for the number of subagents running right now.
   subagent_progress: "%{n} subagents"
+  # Label for a collapsed agent reasoning ("thinking") block.
   thinking_label: "Thinking"
   tool_kind_delete: "Delete"
   tool_kind_move: "Move"
   tool_kind_search: "Search"
   tool_kind_execute: "Execute"
   tool_kind_think: "Think"
+  # The header label for a launch the adapter gave no tool name — its `Think`
+  # kind is the one label that misreads, so the card says what it holds.
   tool_kind_subagent: "Subagent"
   tool_kind_fetch: "Fetch"
   tool_kind_switch_mode: "Switch Mode"
   tool_kind_other: "Tool"
+  # Label above a tool call's plain-text output.
   tool_output_label: "Output"
+  # Disclosure label for a tool call's raw input (JSON arguments).
   raw_input_label: "Raw Input"
+  # Tool-call status badge — executing.
   tool_status_running: "Running"
+  # Tool-call status badge — completed successfully.
   tool_status_done: "Done"
+  # Tool-call status badge — failed.
   tool_status_failed: "Failed"
+  # Tool-call status badge — cancelled (the turn was stopped before it settled).
   tool_status_cancelled: "Cancelled"
+  # Chip marking a shell command launched detached (`run_in_background: true`).
   tool_background: "Background"
   command_more: "+%{count}"
+  # Badge naming a shell tool call's nonzero exit code, e.g. "Exit 1".
   tool_exit_code: "Exit %{code}"
+  # Badge naming the signal that terminated a shell tool call, e.g. "Signal SIGKILL".
   tool_exit_signal: "Signal %{signal}"
+  # Label above a Task/Agent card's nested subagent tool calls.
   subagent_label: "Subagent"
+  # Subagent label naming the spawned agent's type (Claude Code's `Task`
+  # `subagent_type`), e.g. "Subagent: code-reviewer". Used in place of the
+  # generic [`agent_chat_subagent_label`] when the type is known.
   subagent_label_typed: "Subagent: %{kind}"
+  # Metadata chip inside a subagent's always-visible instructions block naming
+  # its type, e.g. "Type: general-purpose".
   subagent_type_chip: "Type: %{kind}"
   permission_title: "Permission required"
+  # Prefix shown on a resolved permission card before the chosen option.
   permission_resolved_prefix: "Selected:"
+  # Shown on a permission card whose turn was cancelled before the user
+  # decided, in place of the chosen-option line.
   permission_cancelled: "Cancelled."
+  # Elapsed run time under a minute, e.g. "5s". The unit is part of the
+  # translation: a bare number with a hardcoded `s` reads as English in every
+  # locale, and this label sits beside translated text.
   elapsed_seconds: "%{secs}s"
+  # Elapsed run time at or over a minute, e.g. "1m05s". `secs` arrives
+  # zero-padded: this labels a badge that ticks, so the width has to hold still
+  # as the seconds roll over.
   elapsed_minutes: "%{mins}m%{secs}s"
   group_read: "%{count} files read"
   group_edit: "%{count} files edited"
@@ -468,6 +685,7 @@ agent_chat:
   group_mcp: "%{count} MCP calls"
   group_agent: "%{count} agents"
   group_other: "%{count} other calls"
+  # Separator between a tool-group header's category segments.
   group_separator: " · "
   group_read_one: "1 file read"
   group_edit_one: "1 file edited"
@@ -478,25 +696,45 @@ agent_chat:
   group_mcp_one: "1 MCP call"
   group_agent_one: "1 agent"
   group_other_one: "1 other call"
+  # How long the live turn has been going, e.g. "Working · 9s". Present tense
+  # on purpose: this is the bar of a turn still running, while the settled
+  # phrasing belongs to the answer row below it.
   turn_running: "Working · %{span}"
+  # How long the turn worked, e.g. "Worked for 3s". `span` arrives already
+  # formatted by the shared elapsed formatter, so this only supplies the phrase
+  # around it.
   turn_worked: "Worked for %{span}"
+  # The turn's output-token count, e.g. "1.5k out". `count` is pre-abbreviated:
+  # the row is a trailing badge, so a six-digit number would push the rest of
+  # the header off the line.
   turn_output: "%{count} out"
+  # Separator between the answer row's trailing facts.
   turn_separator: " · "
   thinking_group_count_one: "1 thought"
   thinking_group_count: "%{count} thoughts"
   filtered_show_one: "Show 1 filtered item"
   filtered_show: "Show %{count} filtered items"
+  # Expanded label for the same disclosure. Takes no count, and there is one
+  # string rather than a singular / plural / partial set: the rows are on screen,
+  # so a number here restates them and reads as a description of the current
+  # state ("12 filtered items, hidden") in exactly the state where they are not.
+  # The reveal's own extent is the *collapsed* label's job — see
+  # [`agent_chat_filtered_show`], which the reader saw a click ago.
   filtered_hide_again: "Hide them again"
   filter_chip: "Filter: %{value}"
   filter_hidden: "%{value} hidden"
   filter_hidden_count: "%{count} kinds hidden"
   filter_none: "All"
   filter_axis_kind: "Kind"
+  # The `Reply` section heading — the prose kinds nest under it.
   filter_axis_reply: "Reply"
   filter_axis_tool: "Tool"
   filter_thinking: "Reasoning"
   filter_prose: "Replies"
+  # The reply itself, as opposed to a preamble.
   filter_prose_answer: "Answers"
+  # Prose the agent wrote ahead of a step's work. Only an agent that labels its
+  # message phases produces any, so hiding these is inert for the others.
   filter_prose_preamble: "Preambles"
   filter_tools: "Tool calls"
   filter_tool_read: "Reads"
@@ -508,6 +746,11 @@ agent_chat:
   filter_tool_mcp: "MCP tools"
   filter_tool_agent: "Agents"
   filter_tool_other: "Other tools"
+  # The marker row where a Stop cut a run. Deliberately not the agent's own
+  # wording: the Claude SDK writes `[Request interrupted by user]` into its
+  # transcript, which is protocol text in one language that also reads as
+  # something the user typed. Names the actor, because the alternative reading
+  # — the agent stopped on its own — is the one worth ruling out.
   interrupted: "Stopped by user"
   tail_more_show_one: "Show 1 earlier step"
   tail_more_show: "Show %{count} earlier steps"
@@ -545,37 +788,58 @@ agent_chat:
   fold_block_diff: "Diff"
   fold_block_raw_input: "Raw input"
   tail_window_chip: "Recent steps: %{value}"
+  # The chip's value slot when the axis's two levels hold different windows.
+  # A pane whose levels agree states the single value instead — see
+  # `tail_window_chip_label`.
   tail_window_pair: "Steps: %{steps} · Calls: %{calls}"
   tail_window_all: "All"
   tail_window_last: "%{count}"
+  # Heading of the recent-steps panel's step-level group.
   tail_level_steps: "Recent steps per response"
+  # Heading of the recent-steps panel's call-level group.
   tail_level_calls: "Recent calls per step"
+  # An Activity Bar chip's label with the mark that says this pane has taken
+  # the axis off the configured default. A dot, so it costs the chip no reading
+  # and no restatement of the value it already carries.
   chip_overridden: "%{label} •"
+  # The compact bar's gear tooltip: the wide bar's three chip labels verbatim,
+  # so a narrowed pane still states what the transcript is showing.
   view_options_tooltip: "View options — %{fold} · %{filter} · %{tail}"
   view_options_fold: "Fold"
   view_options_filter: "Visible items"
   recent_steps_label: "Activity range"
   tool_output_truncated: "… (truncated, %{size} total)"
+  # Placeholder shown in place of a tool's image output block while its base64
+  # payload is still being decoded (or hasn't been scanned yet) — decode runs
+  # asynchronously on the background executor via `reconcile_tool_images`, so
+  # this dimmed one-line stand-in covers the brief gap before the real image
+  # (or, on decode failure, `agent_chat_tool_media_label`) replaces it.
   tool_image_placeholder: "[image]"
+  # Toast title when a pane link resolves to a path that no longer exists.
   link_file_missing: "The linked file no longer exists"
   tool_media_label: "[%{mime} · %{size}]"
   tool_media_label_no_mime: "[%{size}]"
+  # Pinned working-footer label while the agent is generating a response.
   working: "Working"
+  # Pinned working-footer label while a named tool call is in progress.
   working_tool: "Running %{name}"
+  # Pinned working-footer label while the turn is blocked on a permission prompt.
   awaiting_permission: "Waiting for your approval"
+  # Description for the daruda-injected `/clear` slash command, shown in the
+  # completion menu's detail column when the connected agent doesn't advertise
+  # its own `clear` command.
   clear_command_desc: "Clear conversation and start a new session"
 
 # Generic UI
 ui:
-  keystroke_hint_recording: "Press keys…"
-  keystroke_hint_idle: "Click to record"
   files_header: "Files"
   files_empty_dir: "(empty)"
-  files_load_error_prefix: "Cannot read:"
 
 # Context menus and worktree modals
 ctx:
+  # Tab-strip menu item and double-click action that names a tab.
   rename_tab: "Rename Tab…"
+  # Pane-menu item that starts a fresh shell where one exited.
   restart_shell: "Restart Shell"
   reload_flow_graph: "Reload from Disk"
   reveal_in_finder: "Reveal in Finder"
@@ -583,11 +847,19 @@ ctx:
   reveal_in_file_manager: "Reveal in File Manager"
   copy_path: "Copy Path"
   edit_description: "Edit Description…"
+  # The lane owns this setting, so every pane for it — not just ones created
+  # afterward — picks it up on its next connect
+  # (`resolve_session_command` re-resolves the lane's host fresh each time);
+  # only a session already live keeps running on the path it connected with
+  # until it reconnects.
   session_host: "Session Host…"
   merge_into: "Merge into…"
   merge_disabled_dirty: "Commit your changes first"
   merge_disabled_detached: "No branch (Detached HEAD)"
+  # Context-menu "Remove…" item for an inaccessible lane or project.
   remove: "Remove…"
+  # Informational (disabled) context-menu hint shown for an
+  # access-denied lane — points the user at the macOS permission grant.
   grant_full_disk_access: "Grant Full Disk Access in System Settings"
   panel_tab_delete: "Delete…"
   macro_edit: "Edit…"
@@ -606,22 +878,32 @@ ctx:
   send_selection_to_agent_chat: "Send Selection to Agent Chat"
   send_selection_to_terminal: "Send Selection to Terminal"
   selection_too_large: "Selection is too large to send."
+  # Fallback label for a send target whose pane can no longer be resolved.
   send_target_pane_fallback: "Pane %{id}"
+  # Fallback label for a send target's tab when it has no user label and no
+  # resolvable focused pane to borrow a name from.
   send_target_tab_fallback: "Tab %{number}"
   lane_inaccessible: "This worktree is unavailable."
   open_link_failed_title: "Failed to open link"
   open_link_failed_message: "The link could not be opened."
   send_selection_failed_title: "Could not send selection"
   send_selection_failed_message: "The target pane is no longer available."
+  # Context menu — stage a single file.
   git_stage: "Stage"
+  # Context menu — unstage a single file.
   git_unstage: "Unstage"
+  # Context menu — discard working-tree changes for a file.
   git_discard: "Discard Changes"
+  # Context menu — open the diff viewer for a file.
   git_open_diff: "Open Diff"
+  # Commit dropdown — amend the last commit with the current staged changes.
   git_commit_amend: "Amend Last Commit"
 
 # Modals (rename / merge / panel / group)
 modal:
+  # Title of the dialog that names a main-area tab.
   rename_tab_title: "Rename Tab"
+  # Heading of the prompt that closing a pane still running something raises.
   close_running_heading: "Stop what's running?"
   close_running_detail: "Closing ends the process or agent turn in:"
   close_running_line: "• %{title}"
@@ -638,6 +920,8 @@ modal:
   edit_description_placeholder: "Description (e.g. PR #123 review)"
   rename_worktree_title: "Rename Worktree"
   rename_placeholder: "Display name"
+  # Title for the Remove-lane confirmation modal opened from the
+  # left-dock row `×` button and the inaccessible empty-state.
   remove_lane_title: "Remove Worktree"
   merge_branch_label: "Target branch:"
   merge_no_targets: "Add another worktree to merge into"
@@ -683,6 +967,9 @@ modal:
   edit_window_title_placeholder: "Window title (e.g. daruda — review window)"
   group_rename_title: "Rename Group"
   group_rename_placeholder: "Group name"
+  # Confirm-dialog copy shown before opening a new pane for a busy
+  # pane's account switch (`Workspace::confirm_open_pane_with_account`,
+  # account_ops.rs `SwitchKind::NewPane` path).
   switch_account_new_pane_title: "Switch Account"
   switch_account_new_pane_body_terminal: "A running shell can't move to another account. Switching leaves this terminal as it is and opens a new pane under the selected account."
   switch_account_new_pane_body_busy: "This pane is busy — switching accounts will open a new pane under the selected account instead of interrupting it."
@@ -709,40 +996,81 @@ bottom_dock:
   macro_record_idle: "Record"
   macro_record_recording: "Press shortcut…"
   input_tab_label: "Input"
+  # Placeholder shown when the focused Agent chat pane has an active mode
+  # and modifier-to-send on — "Message agent · <mode> · ⌘↵ to send".
   input_agent_mode_modifier_placeholder: "Message agent · %{mode} · ⌘↵ to send"
+  # Placeholder shown when the focused Agent chat pane has an active mode
+  # and plain-Enter submit — "Message agent · <mode> · Enter to send".
   input_agent_mode_placeholder: "Message agent · %{mode} · Enter to send"
+  # Placeholder shown when the focused pane is an Agent chat with no active
+  # mode and modifier-to-send on — "Message agent · ⌘↵ to send".
   input_agent_modifier_placeholder: "Message agent · ⌘↵ to send"
+  # Placeholder shown when the focused pane is an Agent chat with no active
+  # mode and plain-Enter submit — "Message agent · Enter to send".
   input_agent_placeholder: "Message agent · Enter to send"
   input_placeholder: "Type to send to terminal…"
   row_preset_1: "1 row"
   row_preset_2: "2 rows"
   row_preset_3: "3 rows"
-  row_preset_tooltip: "Bottom dock height"
+  # Queued-prompt strip header — count of prompts waiting behind the running turn.
   queued_count: "%{n} queued"
+  # Queued-prompt strip — "clear all" button label.
   queue_clear_all: "Clear all"
+  # Queued-prompt strip — per-item remove (×) button tooltip.
   queue_remove: "Remove from queue"
+  # Queued-prompt strip — per-item edit (✎) button tooltip.
   queue_edit: "Edit"
+  # Queued-prompt strip — cancel-edit (↩) button tooltip on the row being edited.
   queue_edit_cancel: "Cancel edit"
+  # Queued-prompt strip — inline label on the row currently pulled into the
+  # composer for editing.
   queue_editing: "Editing…"
+  # Queued-prompt strip header — Resume button label (shown when a Stop parked
+  # the queue; resumes draining it).
   queue_resume: "Resume"
+  # Queued-prompt strip — inline label on a row parked by a Stop (awaiting Resume).
   queue_paused: "Paused"
+  # Queued-prompt strip header — replaces the plain count once a Stop has parked
+  # the queue, naming the keyboard path beside it.
   queue_resume_hint: "%{n} queued · ⏎⏎ to resume"
+  # Queued-prompt strip header — replaces the count once the first empty Enter
+  # has armed the resume gesture, asking for the confirming second press.
   queue_resume_armed: "Press Enter again to resume %{n}"
 
 # Projects view
 projects:
   section_header: "PROJECTS"
   empty_state: "No project open"
+  # CTA button label shown below the empty-state placeholder.
   empty_state_cta: "Add Project"
+  # Section-header `[+]` toggle menu — entry labels. The `[+]` opens a
+  # flat context menu instead of dispatching straight to the folder
+  # picker so the user can pick between adding a Project or creating a
+  # Group (also reachable via `Cmd+Shift+N` / the Command Palette).
   add_menu_project: "Add Project…"
   add_menu_group: "New Group…"
+  # Short inline row label for a lane/project whose directory is gone.
   directory_missing: "Directory missing"
+  # Short inline row label for a lane/project whose directory is
+  # present but unreadable (permission denied).
   permission_denied: "Permission denied"
+  # Main-area empty-state heading shown when the active lane's
+  # directory is missing.
   empty_missing_title: "Directory missing"
+  # Main-area empty-state body shown when the active lane's directory
+  # is missing.
   empty_missing_body: "This worktree's directory could not be found on disk. It may have been moved or deleted."
+  # Main-area empty-state heading shown when the active lane's
+  # directory is access-denied.
   empty_denied_title: "Permission denied"
+  # Main-area empty-state body shown when the active lane's directory
+  # is access-denied.
   empty_denied_body: "This worktree's directory exists but daruda can't read it. Grant Full Disk Access in System Settings, then reopen."
+  # Main-area empty-state heading shown when the active lane is
+  # accessible but has no open tabs (the user closed them all).
   empty_no_tabs_title: "No open tabs"
+  # Main-area empty-state body shown when the active lane is accessible
+  # but has no open tabs.
   empty_no_tabs_body: "This worktree has no open tabs. Open a terminal or start an agent chat to get going."
 
 # Group context menu
@@ -780,49 +1108,95 @@ claude:
   consent_title: "Enable Claude Code integration?"
   consent_body: "daruda will register hook entries in ~/.claude/settings.json so Claude Code can report session status (Working / Needs attention / Idle) for each worktree.\n\nOther tools' hooks are preserved. You can disable this anytime via the command palette (\"Claude: Uninstall Hook Integration\")."
   consent_confirm: "Enable"
+  # Suffix appended to the active session's badge tooltip to identify
+  # the one that's bound to the focused tab. Empty for inactive
+  # siblings.
   badge_active_suffix: " (active in this tab)"
+  # Sub-row label preceding the session badges (e.g. `"3 sessions:"`).
+  # Rendered as `format!("{count}{SUFFIX}")`.
   sessions_label_suffix: " sessions:"
 
 # Git Changes view
 git:
   changes_header: "Git Changes — %{branch}"
+  # Against-base section header in the Git Changes view, naming the base.
   against_base_header: "Changes since %{base}"
+  # Against-base section counts: files changed and commits since the base.
   against_base_counts: "Files: %{files} · Commits: %{commits}"
+  # Against-base section when the lane's base names no commit.
   against_base_missing: "Base %{name} not found"
+  # Against-base section when the lane shares no history with its base.
   against_base_no_merge_base: "No history shared with the base"
+  # Placeholder text for the git commit message input.
   commit_placeholder: "Commit message… (Cmd+Enter to commit)"
+  # Button label for the commit action in the git commit footer.
   commit_btn: "Commit"
+  # Button label for the push action in the git commit footer.
   push_btn: "Push"
+  # Placeholder shown while the first `git status` for a lane is
+  # still in flight (cache miss).
   loading_changes: "Loading changes…"
+  # Empty-state shown when the active lane is a Git repo with a clean
+  # working tree.
   no_changes: "No changes"
+  # Placeholder shown when the active lane is not a Git repository.
   not_a_repository: "Not a Git repository"
+  # Title for the discard-file confirmation dialog.
   confirm_discard_title: "Discard changes?"
+  # OK button label for the discard-file confirmation dialog.
   confirm_discard_ok: "Discard"
   confirm_discard_tracked_body: "Discard every change to \"%{filename}\", staged or not? The committed version will replace them."
   confirm_discard_added_body: "Delete \"%{filename}\"? It was added after the last commit, so there is no committed version to go back to."
+  # Title of the confirm "Discard all" raises.
   confirm_discard_all_title: "Discard all changes?"
+  # Its body: how many tracked files go back to HEAD, how many untracked
+  # files are deleted.
   confirm_discard_all_body: "%{tracked} tracked file(s) go back to the committed version and %{untracked} untracked file(s) are deleted. Ignored files are left alone. This cannot be undone."
+  # The Git panel summary bar's discard-everything button.
   discard_all: "Discard all"
   confirm_discard_untracked_body: "Delete untracked file \"%{filename}\"? This file is not in git and cannot be recovered."
+  # Single-conflict banner shown at the top of the Git Changes view when
+  # `git status` reports one merge conflict. Multi-conflict variants are
+  # formatted inline with the count.
   conflict_banner_single: "1 conflict — resolve before committing."
+  # Button label in the non-git worktree placeholder. Click runs
+  # `git init` in the lane path.
   init_btn: "Initialize Git Repo"
+  # Title for the push confirmation dialog.
   confirm_push_title: "Push to remote?"
+  # Body text for the push confirmation dialog.
   confirm_push_body: "Push the current branch to its remote."
+  # OK button label for the push confirmation dialog.
   confirm_push_ok: "Push"
+  # Title for the commit confirmation dialog.
   confirm_commit_title: "Commit changes?"
   confirm_commit_body: "%{count} file(s) staged — %{message}"
+  # OK button label for the commit confirmation dialog.
   confirm_commit_ok: "Commit"
+  # Title for the amend confirmation dialog.
   confirm_amend_title: "Amend last commit?"
+  # Body text for the amend confirmation dialog.
   confirm_amend_body: "This rewrites the last commit. If it has already been pushed, you will need a force-push."
+  # OK button label for the amend confirmation dialog.
   confirm_amend_ok: "Amend"
+  # Toast shown when the previous commit message can't be loaded for amend
+  # (no commits yet, or an empty tip-commit message).
   amend_load_failed: "Couldn't load the last commit message — is there a commit to amend?"
+  # Primary commit-button label while in amend mode (replaces "Commit").
   amend_btn: "Amend"
+  # Dropdown label while in amend mode — backs out to a normal commit.
   cancel_amend: "Cancel Amend"
+  # Warning when the user clears the commit box and tries to amend with no message.
   amend_needs_message: "Enter a commit message to amend."
+  # Branch label fallback when HEAD is detached.
   detached_label: "detached"
+  # Button label to stage all unstaged files at once.
   stage_all: "Stage All"
+  # Button label shown when all files are staged — clicks unstages everything.
   unstage_all: "Unstage All"
+  # Button label for the fetch action in the git remote bar.
   fetch_btn: "Fetch"
+  # Button label for the pull action in the git remote bar.
   pull_btn: "Pull"
 
 # Settings panel
@@ -975,31 +1349,23 @@ settings:
   use_external_value: "Use External Value"
   overwrite_external_value: "Overwrite"
   search_placeholder: "Search settings"
+  # Placeholder for a numeric setting shown as one sample value. The number is
+  # data, so only the "e.g." carrier is translated.
   placeholder_example: "e.g. %{value}"
+  # Placeholder for a numeric setting whose whole accepted range fits the field.
   placeholder_range: "%{min} – %{max}"
-  group_general: "General"
-  group_appearance: "Appearance"
   group_terminal: "Terminal"
   group_workspace: "Workspace"
   group_agents: "Agents"
   group_integrations: "Integrations"
   group_system: "System"
-  section_font: "FONT"
-  section_cursor: "CURSOR"
-  section_shell: "SHELL"
-  section_window: "WINDOW"
-  section_terminal: "TERMINAL"
-  section_dock: "DOCK"
+  # Subsection header inside the Dock page's left-dock (files) block.
   section_sidebar: "SIDEBAR"
-  section_general: "GENERAL"
-  section_clipboard: "CLIPBOARD"
+  # Subsection header inside the Dock page's bottom-dock (macro grid) block.
   section_panels: "PANELS"
+  # Subsection header inside the Agent page's session-status block.
   section_claude_status: "CLAUDE STATUS"
-  section_notifications: "NOTIFICATIONS"
   section_keymap: "KEYMAP"
-  section_plugin: "PLUGINS"
-  section_agent: "AGENT"
-  section_external_editor: "EXTERNAL EDITOR"
   font_domain_terminal: "Terminal"
   font_domain_editor: "Editor & Markdown"
   font_domain_agent_chat: "Agent Chat"
@@ -1037,6 +1403,8 @@ settings:
   label_show_hidden: "Show Hidden Files"
   label_use_gitignore: "Respect .gitignore"
   label_syntax_theme: "Syntax Theme"
+  # General-page checkbox: whether a fresh agent-chat pane starts held to the
+  # `agent.reading_width` column.
   label_agent_use_reading_width: "Hold agent chat to the reading column"
   label_agent_tool_summary_labels: "Name tool kinds in summaries"
   hint_agent_tool_summary_labels: "Show \"3 commands\" instead of the icon and count alone."
@@ -1073,12 +1441,18 @@ settings:
   nav_about: "About"
   label_clipboard_streaming: "Clipboard copy limit for programs (bytes)"
   hint_clipboard_streaming: "How much a terminal program can copy to the clipboard at once. OSC 52 and OSC 1337."
+  # Field label for the preferred-external-editor dropdown.
   label_preferred_editor: "Preferred Editor"
+  # Dropdown option meaning "no preference — use the OS default handler".
   editor_system_default: "System default"
   label_grid_columns: "Macro Grid Columns"
   label_claude_status_enable: "Enable Claude Code integration"
   err_clipboard: "Streaming cap must be a number between 4 096 and 67 108 864 (4 KiB – 64 MiB)."
   err_grid_columns: "Macro grid columns must be a whole number between 1 and 16."
+  # Settings-window banner for an action that could not be carried out. Each
+  # wraps the raw diagnostic (a `daruda_config` persistence message, an OS
+  # credential-store stderr line, an `io::Error`) in a sentence aimed at the
+  # user, since those diagnostics are English-only developer text.
   err_save_settings: "Could not save your settings: %{error}"
   err_telegram_unpair: "Could not clear the Telegram pairing: %{error}"
   err_open_config: "Could not reach the config file: %{error}"
@@ -1094,6 +1468,11 @@ settings:
   telegram_token_placeholder: "Paste token from @BotFather"
   telegram_save_token: "Save Token"
   telegram_token_configured: "● Token configured"
+  # Status shown when another running daruda holds this bot's claim, so this
+  # one neither polls it nor sends through it.
+  # Shown under the Telegram heading in Settings when another running daruda
+  # holds the bot, so an otherwise "enabled and paired" relay that sends
+  # nothing has a reason on screen.
   telegram_held_elsewhere: "Another daruda is using this bot — this window sends and receives nothing until it quits"
   confirm_remove_telegram_token_title: "Remove the Telegram bot token?"
   confirm_remove_token_body: "The token is deleted from the system credential store. The bot stops until you add a token again."
@@ -1120,7 +1499,9 @@ settings:
   orchestrator_agent_default: "First agent in the catalog"
   orchestrator_account_system: "System (ambient environment)"
   orchestrator_account_option: "%{domain} — %{identity}"
+  # Label above the copyable `/setcommands` block.
   telegram_botfather_label: "Bot command list"
+  # What to do with that block.
   telegram_botfather_help: "Send /setcommands to @BotFather, pick this bot, and paste:"
   label_agent_use_modifier_to_send: "Use modifier key to send"
   agent_use_modifier_to_send_description: "When on, Enter inserts a newline and Cmd+Enter sends the message. When off (default), Enter sends and Shift+Enter inserts a newline. Applies to the input while an agent chat pane is focused."
@@ -1134,60 +1515,128 @@ settings:
   agent_name_placeholder: "Display name"
   agent_field_command: "Command"
   agent_command_placeholder: "command --acp"
+  # Label for an agent catalog row's optional session-mode override.
   agent_field_default_mode: "Session mode"
+  # Label for an agent catalog row's optional model override.
   agent_field_default_model: "Model"
+  # The "no override" entry in a row's mode/model picker, for an adapter whose
+  # own default daruda has no fact about.
   agent_vocabulary_agent_default: "Agent default"
+  # Same entry, naming the adapter's own default so the pick reads as a stated
+  # choice rather than a blank.
   agent_vocabulary_agent_default_named: "Agent default — %{name}"
+  # Label for the transport-kind select (`daruda_config::AgentLaunch`'s three
+  # variants) in an agent catalog row.
   agent_field_transport: "Transport"
+  # Transport-select option label for `AgentLaunch::Raw`.
   agent_transport_raw: "Local"
+  # Transport-select option label for `AgentLaunch::Ssh`.
   agent_transport_ssh: "SSH (Deprecated)"
+  # Transport-select option label for `AgentLaunch::Docker`.
   agent_transport_docker: "Docker (Deprecated)"
+  # Shown under the transport select whenever a row's transport is `ssh` or
+  # `docker` — the agent-side host axis these two carry is deprecated in
+  # favor of the lane's own `session_host` (any `Raw` launch works on any
+  # lane, remote or local — see `lane::session_host::effective_session_host`).
+  # Existing rows keep loading, saving, and connecting unchanged; this only
+  # steers new setups toward the lane.
   agent_transport_deprecated_hint: "Deprecated — for a new remote setup, use Local and set the host on the worktree instead (right-click one in the sidebar and choose \"Session Host…\")."
+  # Label for the SSH host field, shown only when a row's transport is `ssh`.
   agent_field_host: "Host"
+  # Label for the Docker container field, shown only when a row's transport
+  # is `docker`.
   agent_field_container: "Container"
+  # Label for an agent catalog row's launch environment field.
   agent_field_env: "Environment"
+  # Placeholder inside the empty environment field, showing its line form.
   agent_env_placeholder: "KEY=value"
+  # What the environment field sets, for any agent.
   agent_env_description: "Variables the adapter process starts with — one KEY=value per line. Clear the field to start it with none."
+  # What the `CODEX_CONFIG` overlay buys, shown only on a row that launches
+  # with it.
   agent_env_codex_note: "CODEX_CONFIG is what makes codex report its subagents' tool calls; without it they go out through legacy delegation and never reach this app."
+  # The expectation the overlay does not meet: it reports delegation, it does
+  # not cause it. Shown beside [`settings_agent_env_codex_note`].
   agent_env_codex_caveat: "This does not ask codex to delegate — it only shows the work when it does. Codex spawns a subagent when you ask, or when an AGENTS.md or skill instruction tells it to."
+  # Heading for the per-agent transcript-presentation group inside a catalog
+  # row.
   agent_section_transcript: "Transcript"
+  # One-line explanation of what the transcript group's pickers set, and of
+  # what leaving them unset does.
   agent_transcript_description: "How a new chat pane under this agent presents its transcript. A pane can override any of these and return to them."
+  # Label for an agent catalog row's optional fold-mode override.
   agent_field_fold_mode: "Fold"
+  # Label for an agent catalog row's optional display-filter override.
   agent_field_display_filter: "Visible items"
+  # The Recent steps entry standing in for a stored size the list cannot offer.
+  # Selected, and written back untouched while it stays picked.
+  #
+  # Deliberately not "Custom": the Fold field one row above says that, and there
+  # it names a hand-edited matrix the editor can state — the opposite of this.
   agent_tail_window_off_list: "Other (from config)"
+  # A transcript axis a row leaves to the built-in: the value it resolves to,
+  # marked so it does not read as a value this row states.
   agent_transcript_built_in: "%{value} (built-in)"
+  # Hint line shown under the host/container field for an `ssh`/`docker`
+  # row, pointing at the Lane's remote-path setting that
+  # `AgentLaunch::wrap` substitutes in at connect time.
   agent_remote_path_hint: "The remote working directory is set per-Worktree — right-click a Worktree in the sidebar and choose \"Session Host…\"."
   agent_add_custom: "Add Custom"
   agent_remove: "Remove…"
   agent_preset_install_page: "Install Page"
+  # Toggle that opens a catalog card's advanced block (command, transport,
+  # environment).
   agent_card_advanced: "Advanced settings"
+  # Badge on a catalog card whose advanced settings differ from its preset.
   agent_card_modified: "Modified"
+  # A collapsed catalog card's one-line summary of what it will run.
   agent_card_summary: "%{model} · %{mode}"
+  # Badge on the catalog card a new chat opens with.
   agent_card_default: "Default"
+  # Button that makes a catalog card's agent the default.
   agent_card_make_default: "Make default"
+  # Why the only agent still on cannot be switched off.
   agent_card_last_enabled: "Keep at least one agent on"
+  # Heading over the catalog entries.
   agent_group_in_use: "In use"
+  # Heading over the runnable presets no entry uses yet.
   agent_group_available: "Available"
+  # Heading over the presets that need a manual install.
   agent_group_needs_install: "Needs install"
+  # Placeholder for the search over the preset lists.
   agent_catalog_search_placeholder: "Search agents"
+  # Shown when the search matches no preset in either list.
   agent_catalog_no_match: "No agents match."
   agent_row_detach_hint: "A remote transport cannot be expressed as a preset override — saving turns this row into a custom entry and it stops following the preset."
   agent_unresolved_section: "Not available"
   agent_unresolved_unknown: "\"%{preset}\" is not a preset daruda knows, so this agent is not offered in any Agent Chat pane. The entry is kept in config.toml untouched — remove it there if you no longer need it."
   agent_unresolved_needs_install: "\"%{preset}\" (%{name}) ships prebuilt binaries instead of a command daruda can run, so this agent is not offered in any Agent Chat pane. Install it, then register the command with Add Custom."
+  # Inline, non-blocking warning under a catalog row's command field when
+  # `command`'s executable is not found on `PATH`.
   agent_row_command_not_on_path: "\"%{command}\" was not found on PATH. You can still save — connecting will fail until it is installed or added to PATH."
   err_agent_catalog_empty: "Add at least one agent before saving."
   err_agent_catalog_field: "Agent %{index} needs an ID, name, and command."
   err_agent_catalog_id: "Agent ID \"%{id}\" can only use letters, numbers, '.', '_' and '-'."
   err_agent_catalog_duplicate: "Agent ID \"%{id}\" is used more than once."
   err_agent_catalog_env: "Agent %{index}'s environment takes one KEY=value per line — \"%{line}\" is not one."
+  # A well-formed `KEY=value` line whose name daruda cannot put into a launch
+  # command. Separate from `settings_err_agent_catalog_env` because the fix is
+  # different — rename the variable, not reshape the line — and because the
+  # charset is the reason, not the syntax. See
+  # `daruda_config::is_valid_env_name`.
   err_agent_catalog_env_name: "Agent %{index}'s environment variable name \"%{name}\" can only use letters, digits and '_', and cannot start with a digit."
   err_agent_catalog_host: "Agent %{index}'s SSH transport needs a host."
   err_agent_catalog_container: "Agent %{index}'s Docker transport needs a container name."
+  # A host/container that is present but could not be a bare word in the
+  # launch command. Separate from the two "needs a value" strings above
+  # because the fix is different — retype the value, not fill the field in.
+  # See `lane::session_host::checked_bare_word`.
   err_agent_catalog_host_unsafe: "Agent %{index}'s SSH host has an unusable character — it goes into the launch command as a single word, so it cannot contain spaces or shell punctuation."
   err_agent_catalog_container_unsafe: "Agent %{index}'s Docker container has an unusable character — it goes into the launch command as a single word, so it cannot contain spaces or shell punctuation."
-  section_session_hosts: "SESSION HOSTS"
   session_hosts_description: "Register named, reusable SSH/Docker hosts a Worktree's Session Host can reference instead of repeating the same target every time."
+  # Shown instead of the row list when the registry has no entries yet — a
+  # valid, non-error state (unlike the agent catalog, which always seeds a
+  # default).
   session_hosts_empty: "No hosts registered yet. Add one below."
   session_host_row_label: "Host %{index}"
   session_host_field_label: "Label"
@@ -1195,6 +1644,8 @@ settings:
   session_host_kind_ssh: "SSH"
   session_host_kind_docker: "Docker"
   session_host_field_target: "Target"
+  # Placeholders for the target / container fields, shared by the session-host
+  # table and the agent catalog's deprecated SSH / Docker transports.
   session_host_target_placeholder: "user@host"
   session_host_field_container: "Container"
   session_host_container_placeholder: "container-name"
@@ -1202,6 +1653,9 @@ settings:
   session_host_remove: "Remove…"
   err_session_host_label_empty: "Host %{index} needs a label."
   err_session_host_label_duplicate: "Host label \"%{label}\" is used more than once."
+  # Wraps a reused `session_host.err_*` validator message (see
+  # `session_host_err_target_empty` and friends) with the row's 1-based
+  # ordinal, so a multi-row save can point at which one failed.
   err_session_host_field: "Host %{index}: %{reason}"
   plugin_installed_header: "Installed"
   plugin_available_header: "Available from marketplace"
@@ -1238,9 +1692,9 @@ settings:
   plugin_skill_body_error: "Failed to load SKILL.md:"
   plugin_skill_count_one: "1 skill"
   plugin_skill_count: "%{count} skills"
+  # Inline banner shown when a `claude plugin` run fails.
   plugin_install_failed: "plugin install %{id}: %{error}"
   plugin_uninstall_failed: "plugin uninstall %{id}: %{error}"
-  section_about: "About"
   label_current_version: "Current version"
   button_check_updates: "Check for updates"
   button_update: "Update"
@@ -1254,83 +1708,220 @@ settings:
   update_error: "Update failed: %{msg}"
   update_dev_build: "Updates are only available in a packaged build."
   update_available_toast: "New version %{version} is available — open Settings › About to update."
+  # Status-bar / error-banner copy for the project-config flow.
   project_config_no_project: "Open a project first — project config has nowhere to live."
   project_config_no_dir: "Cannot resolve project config directory."
+  # Hover text on the small status-bar dot that indicates a
+  # project-layer config file exists for the active project.
   status_bar_project_config_tooltip: "Project config active — this workspace's [shell] section is overridden."
+  # Inline chip label shown in the status bar when the active git
+  # lane is on a detached HEAD. Lowercase so it reads as a state
+  # tag, not a sentence.
   status_bar_detached_chip: "detached"
+  # Status-bar account slot / dropdown label when the focused pane has no
+  # managed account resolved — the pane runs under the ambient credentials
+  # of one auth domain, `path` being that domain's home
+  # (`AccountRecipe::system_home_hint`).
   status_bar_account_system: "System (%{path})"
+  # The same label for a pane with no single auth domain (a terminal, which
+  # may run any adapter): no one ambient home is right, so the path is
+  # dropped rather than guessed.
   status_bar_account_system_plain: "System"
+  # Inert status-bar dropdown row explaining why an agent-chat pane on a
+  # remote or unrecognized adapter can hold no managed account.
   status_bar_account_unsupported: "No local sign-in for this agent — managed accounts need a local browser login."
+  # Status-bar account dropdown entry that starts a headless add-account
+  # login (`AddManagedAccount`) for the focused pane's auth domain —
+  # disabled when no login command resolves for that domain, or while a
+  # login is already running (see `build_account_menu`).
   status_bar_add_account: "+ Add account…"
+  # Status-bar account dropdown entry that opens the Settings window
+  # directly on the Accounts section.
   status_bar_manage_accounts: "Manage accounts…"
   status_bar_account_provider_claude: "Claude"
   status_bar_account_provider_codex: "Codex"
+  # Status-bar Ports segment's dropdown trigger label — the count of
+  # workspace-owned listening TCP ports found by the last scan.
   status_bar_ports_label: "Ports: %{count}"
+  # Ports popover summary: workspace-owned ports first, non-workspace
+  # ports second.
   status_bar_ports_summary: "%{workspace} workspace · %{external} external"
   status_bar_ports_scanning: "Scanning for ports..."
   status_bar_ports_scan_unavailable: "Port scan unavailable"
+  # Ports popover placeholder when the scan found only non-workspace
+  # ports.
   status_bar_ports_no_workspace: "No workspace ports detected"
-  status_bar_ports_external_section: "External Ports"
   status_bar_ports_external_count: "External Ports: %{count}"
   status_bar_ports_workspace_count: "Workspace Ports: %{count}"
   status_bar_ports_table_port: "Port"
   status_bar_ports_table_process: "Process"
   status_bar_ports_table_address: "Address"
+  # Status bar's right-click toggle menu — one checkable entry per
+  # [`daruda_config::StatusBarItem`], in `StatusBarItem::ALL` order.
   status_bar_toggle_project_branch: "Project / branch"
   status_bar_toggle_account_slot: "Account"
   status_bar_toggle_flow: "Flows"
   status_bar_toggle_ports: "Ports"
   status_bar_toggle_claude_usage: "Claude usage"
+  # Claude-usage percentage — the one span that carries the severity
+  # colour, in both the status-bar chip and its dropdown gauge rows.
   status_bar_usage_chip_percent: "%{pct}%"
+  # Claude-usage chip's trailing reset countdown, rendered as its own
+  # muted span after the coloured percentage — e.g. `"· 2h 13m"`.
   status_bar_usage_chip_reset: "· %{reset}"
+  # Last entry in the Claude-usage dropdown — switches the right dock to
+  # the Usage tab, where the same numbers are shown as gauges.
   status_bar_usage_open_panel: "Open Usage panel"
+  # Sidebar nav label + section header for the Settings "Accounts" page
+  # list managed accounts, set the per-domain default, delete.
   nav_accounts: "Accounts"
-  section_accounts: "ACCOUNTS"
+  # Placeholder for an account with no captured email (shouldn't happen
+  # once login captures `oauthAccount`, but the field is `Option` today).
   accounts_unknown_email: "Unknown"
+  # Title of each auth domain's "System" row — the ambient credentials a
+  # pane runs under when no managed account is pinned. The domain's own
+  # home path (`~/.claude`, `~/.codex`) rides below it as the subtitle,
+  # straight from `AccountRecipe::system_home_hint`.
   accounts_system_title: "System"
+  # Badge next to the account that's currently its domain's default.
   accounts_default_badge: "Default"
+  # "Set default" row button — makes this row (an account, or the domain's
+  # System credentials) what new panes of that domain start on. Disabled on
+  # the row that's already the default.
   accounts_set_default: "Set default"
+  # "Reauthenticate" row button — re-runs a headless login for this
+  # *existing* account, reusing its `config_dir` (see
+  # `Workspace::reauthenticate_account`).
   accounts_reauthenticate: "Reauthenticate"
+  # "Delete" row button — opens the remove-confirm dialog.
   accounts_delete: "Delete…"
+  # Add-account entry, one per auth domain — `recipe` is that domain's
+  # display label, so the entry names which credentials it signs into
+  # instead of relying on the heading above it. Used by the Settings
+  # section's buttons and by the terminal-pane status-bar dropdown, which
+  # lists every domain.
   accounts_add: "+ Add %{recipe} account"
   accounts_remove_confirm_title: "Delete this account?"
+  # `count` = panes across every open Workspace window currently
+  # pointing at the account being deleted (see
+  # `Workspace::panes_referencing_account`); `path` = the ambient home of
+  # that account's auth domain, which those panes revert to.
   accounts_remove_confirm_body: "%{count} pane(s) using this account will revert to the system default (%{path})."
   accounts_remove_confirm_ok: "Delete"
+  # Relative "last authenticated" label buckets — mirrors the Usage tab's
+  # `usage.cache_*` cache-age badge shape, kept as a separate key family
+  # since the two express different concepts (credential freshness vs.
+  # fetch-cache age) that could diverge in wording later.
   accounts_last_auth_never: "Never authenticated"
   accounts_last_auth_just_now: "Authenticated just now"
   accounts_last_auth_minutes: "Authenticated %{n}m ago"
   accounts_last_auth_hours: "Authenticated %{n}h ago"
   accounts_last_auth_days: "Authenticated %{n}d ago"
+  # Success toast title after a headless add-account login finishes and
+  # the account is saved.
   accounts_login_added: "Account added."
+  # Toast shown in place of `settings_accounts_login_added()` when a
+  # headless add-account login succeeds but its email+org matches
+  # an account already tracked (`find_duplicate`'s dedup hit branch of
+  # `Workspace::finish_login_success`): the fresh throwaway dir's
+  # credentials are discarded, not adopted, so the existing account's
+  # freshness is unchanged — this distinct copy tells the user their login
+  # didn't refresh anything and points at Reauthenticate, the flow that
+  # actually does.
   accounts_login_already_exists: "This account is already added — use Reauthenticate to refresh."
+  # Failure toast title for a headless add-account login that didn't
+  # produce a usable account — denied, timed out, the process
+  # failed, or credentials weren't found after a reported success. The
+  # outcome-specific detail rides in the report's untranslated `.message()`
+  # (diagnostic text, same convention as the rest of the error pipeline).
   accounts_login_failed: "Could not add account."
+  # Toast shown when `add_managed_account` is called while a previous
+  # headless login is still in progress (`PendingLogin::InProgress`) — a
+  # second concurrent login would overwrite `pending_login`'s
+  # uncancellable process handle and leak the first attempt's process +
+  # config dir.
   accounts_login_busy: "An account login is already in progress."
+  # Authored toast-body detail for a `LoginOutcome::Denied` add-account
+  # login, folded into `settings_accounts_login_failed()`'s report
+  # `.message()`.
   accounts_login_denied_detail: "The OAuth consent screen was denied."
+  # Authored toast-body detail for a `LoginOutcome::TimedOut` add-account
+  # login, folded into `settings_accounts_login_failed()`'s report
+  # `.message()`.
   accounts_login_timed_out_detail: "The login process did not complete before timing out."
+  # Authored toast-body detail for an add-account login that reported
+  # success but left no credentials in its config dir
+  # (`AccountRecipe::has_credentials`).
   accounts_login_no_credentials_detail: "Login succeeded but no credentials were found afterward."
+  # Reauthenticate counterpart of
+  # `settings_accounts_login_no_credentials_detail()`.
   accounts_reauth_no_credentials_detail: "Reauthentication succeeded but no credentials were found afterward."
+  # Status-bar dropdown's in-progress row, shown in place of "+ Add
+  # account" while `Workspace::is_login_pending` is true.
   accounts_login_in_progress: "Adding account…"
+  # Settings label while either add-account or reauthentication is running.
   accounts_authentication_in_progress: "Authentication in progress…"
+  # Success toast title after `Workspace::reauthenticate_account` finishes
+  # and the existing account's row is refreshed.
   accounts_reauth_added: "Account reauthenticated."
+  # Failure toast title for a reauthenticate-account login that didn't
+  # land — denied, timed out, the process failed, or credentials weren't
+  # found after a reported success. Mirrors `settings_accounts_login_failed`'s
+  # convention: the outcome-specific detail rides in the report's
+  # untranslated `.message()`.
   accounts_reauth_failed: "Could not reauthenticate account."
+  # Authored toast-body detail for `Workspace::reauthenticate_account` when
+  # `account_id` no longer resolves in `self.accounts` — a concurrent
+  # Settings-window delete raced the reauth dispatch. Folded into
+  # `settings_accounts_reauth_failed()`'s report `.message()`.
   accounts_reauth_missing: "The account being reauthenticated no longer exists."
+  # How an account signed in, for a Settings row — `method` is the agent's own
+  # value, shown verbatim because the set of values is the provider's to grow
+  # and a mapped one would report a metered login as unrecognized.
   accounts_signed_in_with: "signed in with %{method}"
+  # Toast title when a managed login replaced the ambient sign-in the user had
+  # made themselves — every `SystemDefault` pane now runs as that account.
   accounts_ambient_login_replaced: "Your system sign-in was replaced"
+  # Body for [`account_ambient_login_replaced`] — what it means and the way back.
   accounts_ambient_login_replaced_detail: "Signing in to this account also replaced the sign-in you had made yourself, so panes on the System account now run as it. Sign in again from the System row to restore it."
+  # Toast title when a failed pane's re-login cannot be run by daruda: the
+  # agent signs in wherever it runs, which for a remote agent is not this
+  # machine.
   accounts_reauth_elsewhere: "This agent signs in where it runs"
+  # Body for [`account_reauth_elsewhere`] — what to do instead.
   accounts_reauth_elsewhere_detail: "It is not running on this machine, so daruda cannot sign in for it. Open a terminal on its host, run the agent's CLI, and use its /login command."
+  # Authored toast-body detail for `Workspace::reauthenticate_system` when the
+  # domain cannot name its ambient home — no home directory and no config-dir
+  # override, so there is nothing to sign into. Folded into
+  # `settings_accounts_reauth_failed()`'s report `.message()`.
   accounts_system_home_unknown: "No home directory was found for this agent, so there is nowhere to sign in to."
+  # Label for the Settings System row's re-login button, and for the
+  # re-login button a failed pane shows when it runs on the ambient
+  # credentials rather than a managed account.
   accounts_system_reauthenticate: "Sign in"
+  # Warning toast when a terminal pane's account config dir could not be
+  # prepared. A warning rather than a blocker: the account's env still gets
+  # injected, so only the mirrored extras are missing.
   accounts_prepare_dir_failed: "Could not fully set up this account's configuration directory. The pane still runs under the account, but shared resources may be missing."
 
 # Skills tab
 skills:
+  # Section heading for the plugin-scope group. Plugin skills come
+  # from marketplace installs (`~/.claude/plugins/cache/...`) and are
+  # **read-only** in daruda — Edit / Delete / Rename are disabled.
   section_plugin: "Plugin"
+  # Count chip on the Plugin scope header — plugin skills are spread across
+  # several plugins, so the chip carries both numbers.
   count_chip_with_plugins: "%{skills} skills · %{plugins} plugins"
+  # Skills tab footer: every skill the panel lists, across scopes.
   footer_available: "%{n} skills available"
+  # Header button — opens the Create modal.
   new_button: "New skill"
+  # Header button on the right-panel Skills tab — opens Settings →
+  # Plugin so the user can install / uninstall plugins.
   manage_plugins_button: "Manage…"
   invoke_submitting: "Sending…"
+  # Primary-button label while a create / edit skill save is in flight.
   saving_label: "Saving…"
   invoke_placeholder_default: "Enter input…"
   placeholder_name: "name"
@@ -1338,14 +1929,22 @@ skills:
   placeholder_when_to_use: "when to use"
   placeholder_optional: "optional"
   placeholder_body: "# Skill body in markdown"
+  # Body editor placeholder shown while the existing skill's markdown is
+  # still loading from disk in the edit modal.
   placeholder_body_loading: "Loading body…"
+  # Shown when a skill can't be delivered to the captured pane — the
+  # pane is gone, is a kind that can't receive text (file / task editor),
+  # or the user switched lanes while the modal was open.
   invoke_no_input_target: "The selected pane can't accept this input."
   search_placeholder: "Search skills…"
   search_empty_prefix: "No skills match "
+  # Body shown when both scopes are empty.
   empty_project: "No project skills — create one to teach Claude a project-specific workflow."
   empty_personal: "No personal skills yet."
   empty_plugin: "No plugin skills installed. Install a plugin via Claude Code's `/plugin` command."
+  # Tooltip / chip text when a project skill shadows a personal one.
   overrides_personal: "overrides personal"
+  # Title strings for the CRUD modals.
   new_title: "New skill"
   edit_title: "Edit skill"
   delete_title: "Delete skill?"
@@ -1365,22 +1964,38 @@ skills:
   name_too_long: "Name must be 64 characters or fewer."
   name_duplicate: "A skill with this name already exists in this scope."
   no_project_hint: "Project skills require an active worktree. Open a project to enable this scope."
+  # Title of the skill-invocation modal (`open_form_modal`).
   invoke_title: "Run skill"
+  # Empty-state hint in the skill picker when a plugin group exposes no
+  # invocable skills (the picker chains into the invocation modal).
   empty_plugin_picker: "No skills to invoke from this group."
 
 # MCP / Tools tab
 mcp:
+  # Header button — opens AddMcpServerModal.
   new_button: "Add server"
+  # Body when project scope has no servers and there is an active lane.
   empty_project: "No project MCP servers — `+ Add server` to create `.mcp.json`."
+  # Body when project scope has no active lane (an empty workspace).
   no_project_hint: "Project and Local MCP servers require an active worktree. Open a project to enable these scopes."
+  # Body when user scope is empty.
   empty_user: "No user MCP servers configured."
+  # Body when local scope is empty (active lane, no `projects[<lane>]`
+  # servers in `~/.claude.json`).
   empty_local: "No local MCP servers for this project."
+  # Row status label — server has `"disabled": true` in config.
   status_disabled: "disabled"
+  # Row status label — the config leaves the server switched on.
   status_enabled: "enabled"
+  # Tooltip on the server row's enable switch.
   toggle_tooltip: "Enable or disable this server"
+  # Server row's second line: config state beside its transport.
   row_summary: "%{status} · %{transport}"
+  # Tools tab footer: servers configured across every scope.
   footer_servers: "%{n} MCP servers"
+  # Row status label — required fields for the chosen transport are missing.
   status_malformed: "malformed"
+  # CRUD modal titles.
   new_title: "Add MCP server"
   edit_title: "Edit MCP server"
   delete_title: "Delete MCP server?"
@@ -1396,9 +2011,15 @@ mcp:
   placeholder_url: "https://localhost:8080/mcp"
   placeholder_env: "FOO=bar"
   placeholder_headers: "Authorization=Bearer …"
+  # Displayed on the primary action button while the save is in flight.
   saving_label: "Saving…"
+  # Toggle label inside the AddModal / EditModal that maps to the
+  # JSON `"disabled": true` key.
   field_disabled: "Disabled"
+  # Confirm-modal body for the Delete flow.
   delete_body_prefix: "This removes the server entry from disk. This cannot be undone."
+  # Which server, and where it lives — the second paragraph of that body. One
+  # key rather than two labels so a locale can reorder or relabel both lines.
   delete_body_detail: "Server: %{name}\nFile: %{path}"
   name_invalid: "Name must be alphanumeric, underscore, or hyphen."
   name_leading: "Name cannot start with a hyphen or underscore."
@@ -1407,7 +2028,11 @@ mcp:
   command_required: "Command is required for stdio transport."
   url_required: "URL is required for sse / http transport."
   url_invalid: "URL must start with http:// or https://."
+  # Names the offending line, the way the agent catalog's Environment field
+  # does — "one of these lines is wrong" leaves the user to find it themselves
+  # in a block they may well have pasted.
   env_invalid: "Each env line must be KEY=VALUE — \"%{line}\" is not one."
+  # Scope option labels for the dropdown.
   scope_project: "Project (.mcp.json)"
   scope_user: "User (~/.claude.json)"
   scope_local: "Local (~/.claude.json · this project)"
@@ -1421,29 +2046,55 @@ usage:
   reset_short_minutes: "%{minutes}m"
   reset_short_now: "now"
   reset_short_under_minute: "<1m"
+  # Rolling-window gauge labels, by the coarsest unit that fits the window's
+  # length. A provider names its windows however it likes, so the label is
+  # derived from the duration (`workspace::usage_labels`) rather than fixed
+  # per window.
   limit_window_minutes: "%{n}m"
   limit_window_hours: "%{n}h"
   limit_window_days: "%{n}d"
   limit_window_months: "%{n}mo"
+  # Suffix marking a window scoped to Opus-class models, which shares its
+  # length with the plan's overall window.
   limit_opus_suffix: " · Opus"
+  # Marker appended to numbers a failed refresh left on screen, so the reading
+  # doesn't pass for current.
   stale_marker: "⚠"
+  # Body shown in place of the dashboard when no provider is signed in.
   no_provider: "Sign in to Claude or Codex to see plan usage."
   no_domain_provider: "Sign in to %{domain} to see its plan usage."
+  # Heading above the recent-sessions table.
   recent_sessions_section: "RECENT SESSIONS"
+  # Button label that restores a past session into a new pane.
   session_restore: "Restore"
+  # Recent-session relative time label for activity within the last minute.
   session_just_now: "just now"
+  # Recent-session relative time label, `n` whole minutes ago.
   session_minutes: "%{n}m ago"
+  # Recent-session relative time label, `n` whole hours ago.
   session_hours: "%{n}h ago"
+  # Recent-session relative time label, `n` whole days ago.
   session_days: "%{n}d ago"
+  # Placeholder label for either gauge when the OAuth token is
+  # unavailable, the API call failed, or the window is missing from
+  # the response.
   limit_unavailable: "Unavailable"
-  limits_section_label: "PLAN USAGE"
+  # Section heading above the 7-day turn-count bar chart.
   section_7day: "LAST 7 DAYS"
+  # Section heading above the 7-day token-usage bar chart.
   section_tokens: "TOKEN USAGE"
+  # Refresh-badge label before any fetch has landed (no cache age to
+  # show yet). Carries its own `↻` glyph.
   refresh: "Refresh"
+  # Refresh-badge label while a manual refresh is in flight.
   refreshing: "Refreshing…"
+  # Cache-age badge for a refresh less than a minute ago.
   cache_just_now: "just now"
+  # Cache-age badge, `n` whole minutes since the last refresh.
   cache_minutes: "%{n}m ago"
+  # Cache-age badge, `n` whole hours since the last refresh.
   cache_hours: "%{n}h ago"
+  # Cache-age badge, `n` whole days since the last refresh.
   cache_days: "%{n}d ago"
   weekday_sun: "Sun"
   weekday_mon: "Mon"
@@ -1455,10 +2106,24 @@ usage:
 
 # Service status pill
 status:
+  # Label shown on the green pill when Anthropic Statuspage reports
+  # "operational". The Übersicht widget unconditionally hides the
+  # upstream description on the green path because Statuspage tends
+  # to leave stale "All systems normal" descriptions; daruda mirrors
+  # that behavior.
   operational: "Operational"
+  # Default label for `minor` indicator when the response carries no
+  # description (rare but possible).
   minor_default: "Minor disruption"
+  # Default label for `major` indicator when the response carries no
+  # description.
   major_default: "Partial outage"
+  # Default label for `critical` indicator when the response carries
+  # no description.
   critical_default: "Major outage"
+  # Label shown when the indicator is `Unknown` (parse miss or
+  # before-first-fetch). Distinct from operational so the renderer
+  # can dim the pill instead of pretending green.
   unknown: "Status unavailable"
 
 # Toast / error modal
@@ -1466,12 +2131,13 @@ toast:
   button_details: "Details"
 
 error_modal:
+  # Title prefix, e.g. `Error: PTY writer thread died`. The trailing
+  # title is drawn from the underlying [`ErrorReport`] verbatim.
   title_prefix: "Error: "
   button_open_log: "Open log file"
 
 error:
   acp_connect_failed: "ACP session connect failed"
-  acp_resume_failed_retrying: "ACP session resume failed; retrying fresh"
   cannot_read_directory: "Cannot read directory"
   cannot_read_directory_detail: "Cannot read directory: %{error}"
   claude_hooks_install_failed: "Claude hooks install failed"
@@ -1484,7 +2150,6 @@ error:
   git_add_all_failed: "git add --all failed"
   git_add_failed: "git add failed"
   git_add_paths_failed: "git add (paths) failed"
-  git_clean_failed: "git clean -f failed"
   git_commit_amend_failed: "git commit --amend failed"
   git_commit_failed: "git commit failed"
   git_fetch_failed: "git fetch failed"
@@ -1507,7 +2172,6 @@ error:
   lane_flow_lock_cleanup_failed: "Worktree flow-lock cleanup failed"
   lane_disk_cleanup_failed: "Worktree disk cleanup failed"
   lane_finalize_failed: "Worktree finalize failed"
-  lane_lock_cleanup_failed: "A removed worktree's flow lock directory could not be cleared."
   lane_remove_failed: "Cannot remove worktree"
   mcp_delete_failed: "MCP delete failed"
   mcp_reload_failed: "MCP reload failed (%{source})"
@@ -1538,34 +2202,65 @@ error:
   task_lane_missing: "The worktree this task runs in is not open"
   tasks_save_failed: "Tasks save failed"
   task_escalation_orphan: "Tool-use-failure escalation has no matching task"
+  # Toast body under [`error_task_escalation_orphan`]. The title alone does not
+  # say which session, and this report is the only trace of the dropped
+  # escalation.
   task_escalation_orphan_detail: "session %{session} hit the escalation threshold but no Running task owns it (%{escalation})"
 
 # Notifications
 notification:
+  # Title for "long-running command finished" desktop notifications.
   long_running_title: "Command finished"
+  # Title for a Claude permission-prompt desktop notification.
   hook_permission_title: "Permission required"
+  # Title for a Claude idle-prompt desktop notification.
   hook_idle_title: "Waiting for your input"
+  # Title for a Claude elicitation-dialog desktop notification.
   hook_elicitation_title: "Waiting for your response"
+  # Body for the "agent finished a turn" desktop notification.
   agent_completed: "Agent finished responding"
+  # Body for the "agent is waiting for input / permission" desktop notification.
   agent_waiting: "Agent is waiting for your input"
   telegram_truncated_marker: "…(truncated)…"
+  # Body for the fixed Telegram ack sent when a phone-triggered turn goes 60s
+  # without producing text or a tool call, or settles with nothing having
+  # appeared at all — the fallback behind the agent's own first-response text
+  # or tool-ack (see `Workspace::relay_first_response_fallback_to_telegram`).
   telegram_reply_ack: "Agent received — generating response / working…"
+  # Body for the Telegram notice sent when a phone-relayed reply has to wait
+  # behind an in-flight turn — it hasn't reached the agent yet, so there is
+  # nothing to watch for a first response from.
   telegram_reply_queued: "Received — queued behind the current turn…"
   telegram_queue_full: "Not sent — that chat already has too many prompts waiting."
+  # Body for the Telegram ack sent when a phone-triggered turn goes straight to
+  # a tool call with no preceding text.
   telegram_first_tool_ack: "Checking using a tool…"
+  # Feedback shown on the phone (callback toast + rewritten message line) when a
+  # phone-tapped permission button resolves to Allow.
   telegram_permission_allowed: "✅ Allowed"
+  # Feedback for a phone-tapped Reject.
   telegram_permission_rejected: "🚫 Rejected"
+  # Feedback when the tapped request was already answered in-app or cancelled.
   telegram_permission_stale: "Already handled in the app"
+  # Feedback when the target pane/session is gone (closed since the prompt sent).
   telegram_permission_gone: "This session is no longer available"
 
 # Terminal annotations (SP-1)
 terminal:
+  # Written under a shell's last output when it exits in a pane kept open.
   process_exited: "[Process exited — restart it from the pane menu]"
+  # Context-menu entry that opens the annotation create dialog.
   annotation_action_add: "Add annotation"
+  # Tooltip shown on the disabled "Add annotation" entry when the user
+  # has no single-line selection yet.
   annotation_action_add_disabled_tooltip: "Select text on a single line first"
+  # Context-menu entry that removes the annotation under the click.
   annotation_action_delete: "Delete annotation"
+  # Title of the annotation dialog when adding a new annotation.
   annotation_dialog_title_create: "Add annotation"
+  # Title of the annotation dialog when editing an existing annotation.
   annotation_dialog_title_edit: "Edit annotation"
+  # Placeholder shown inside the annotation-text input.
   annotation_placeholder: "Annotation text"
   lane_git_init_label: "[ Initialize Git Repo ]"
   lane_non_git_hint: "Open a Git repository to use multiple worktrees."
@@ -1581,14 +2276,24 @@ terminal:
   task_error_prefix: "Error"
   task_failures_prefix: "failures "
   task_running: "Running"
+  # Toast/modal title when the workspace can no longer find the pane
+  # that a terminal operation (annotation edit, Copy) targeted.
   target_pane_missing_title: "Terminal pane is gone"
+  # User-facing message body paired with
+  # [`terminal_target_pane_missing_title`].
   target_pane_missing_message: "The terminal pane is no longer available."
+  # Toast/modal title when the underlying session rejected an annotation
+  # mutation.
   annotation_err_operation_failed_title: "Annotation operation failed"
+  # User-facing message body paired with
+  # [`terminal_annotation_err_operation_failed_title`].
   annotation_err_operation_failed_message: "The annotation could not be saved."
 
 # Rendered-markdown code-block copy button
 code_block:
+  # Tooltip on the rendered-markdown code-block copy button (idle state).
   copy: "Copy code"
+  # Tooltip on the rendered-markdown code-block copy button after a copy.
   copied: "Copied"
 
 # Why a branch name was rejected — rendered under the TaskEdit branch field.
@@ -1614,6 +2319,11 @@ create_lane:
   placeholder_base_ref: "base ref — blank = current HEAD"
   placeholder_branch_name: "branch name (required)"
   placeholder_description: "description (optional)"
+  # Shown under the create-lane form's host dropdown when the workspace's
+  # registry catalog (`Workspace.session_hosts`) is empty — mirrors
+  # `session_host_registry_empty_hint`'s tone but is its own string since
+  # this modal's copy can diverge (e.g. pointing at the create flow rather
+  # than an existing lane).
   session_host_registry_empty_hint: "No hosts are registered yet — the new worktree will run locally. Add one in Settings → Session Hosts."
   submit: "Create"
 
@@ -1623,11 +2333,23 @@ session_host:
   title: "Session Host"
   field_host: "Host"
   option_local: "Local"
+  # The dropdown entry that preserves a legacy (non-registry) or orphaned
+  # host's cached `target`/`container` verbatim — selected by default so
+  # opening the modal and hitting Save can never silently downgrade a
+  # working remote lane to Local.
   option_keep_current: "Keep current (%{value})"
+  # Shown below the registry dropdown when the catalog has no entries yet.
   registry_empty_hint: "No hosts are registered yet. Add one in Settings → Session Hosts."
+  # Banner shown when the lane's `registry_id` no longer resolves in the
+  # catalog (`lane::session_host::LinkStatus::Orphaned`) — the last cached
+  # value keeps connecting, but the link itself is gone.
   orphaned_banner: "The registered host this worktree was linked to has been removed. It's still connecting with the last known value below — pick a new one to relink."
   field_session_path: "Session Path"
   placeholder_session_path: "Absolute path on the other machine, e.g. /home/user/project"
+  # Shown inside the modal when the lane has never answered `session_host`
+  # but its legacy `remote_cwd` is set — informs the user that saving here
+  # (even choosing Local) retires that legacy pair for good, per
+  # `effective_session_host`'s precedence.
   legacy_notice: "This worktree is currently using its agent's own remote setup. Saving here takes over — and retires it, even if you pick Local."
   err_target_empty: "Target is required."
   err_target_unsafe: "Target has an unusable character."
@@ -1639,74 +2361,141 @@ session_host:
 
 # Flow engine — picker, validation results, run outcomes
 flow:
+  # Prompt when the picker is choosing a flow to draw.
   picker_prompt_graph: "Show which flow?"
   picker_prompt_run: "Run which flow?"
   picker_prompt_validate: "Check which flow?"
+  # Marks a flow that is the person's own rather than the repository's.
+  # Only the global ones are tagged — tagging both would be noise on every
+  # row in the ordinary case.
+  # The row action on a run that was killed. "Continue", not "run again":
+  # what already passed is not run a second time.
   resume_action: "Continue"
+  # Asked before continuing, because the node the crash interrupted starts
+  # over — whatever it had already done to the working tree or the machine,
+  # it does again.
   resume_confirm_title: "Continue this run?"
   resume_confirm_body: "Nodes that already passed will not run again. The node the crash interrupted starts over, so anything it had already done — commands it ran, files it edited — it does again."
   resume_refused: "This run cannot be continued"
   picker_global: "global"
+  # The first row of the profile list: the flow as its file is written.
+  # Declaring a profile must not take the base run away.
   picker_profile_defaults: "defaults"
+  # The prompt over the profile list.
   picker_prompt_profile: "Run %{flow} as…"
   picker_empty: "No flows here yet — add one under .daruda/flows/"
+  # Shown when the active lane has no flow running. Says "this lane"
+  # deliberately: a run in another lane is still going, and the status bar
+  # chip is what says so.
   panel_empty: "No flow is running in this worktree"
+  # Said under a question when more are behind it. Without it a person
+  # answers, sees a different question appear, and cannot tell whether they
+  # answered the wrong one.
   more_questions_waiting: "%{n} more waiting"
+  # The modal's way out that is not an answer. Names the object because
+  # "Stop" alone, beside three answer buttons, reads as stopping the tool
+  # call rather than the run.
   ask_modal_stop: "Stop the flow"
   panel_stop: "Stop"
+  # Title of the modal that brings a parked question to the front.
   ask_modal_title: "A flow is asking permission"
+  # A file operation that failed. The detail is the file system's own words.
   file_op_failed: "%{path}: %{detail}"
+  # What a graph pane says once its file has been deleted under it.
   file_gone: "This flow file was deleted."
+  # The body a graph pane shows in place of the flow it cannot draw. The
+  # detail is the file system's or the parser's own words — not translatable,
+  # and the sentence around them is what makes them a sentence.
   graph_read_failed: "%{path} could not be read: %{detail}"
   graph_parse_failed: "This file is not a flow: %{detail}"
+  # Chip on an agent node in the flow graph.
   graph_kind_agent: "AGENT"
+  # What an empty agent box resolves to. Shown as the box's placeholder, so
+  # "blank" reads as "inherits this" rather than as "nothing".
   form_inherited: "%{value} (from defaults)"
   form_id_invalid: "letters, digits, - and _ only"
+  # A name the engine could not use. Says the rule rather than only refusing:
+  # the person is looking at the box and needs to know what to type instead.
+  # Label on the turn-cap box. Says "prompts" rather than "turns": a turn is
+  # the protocol's word and a prompt is what the person is capping.
   form_turns_label: "Prompts per attempt"
   form_turns_unreadable: "%{text} is not a count of prompts"
+  # Why a card's pin went away, one reason per function.
+  #
+  # Five plain functions rather than one taking the reason: `surface` imports
+  # nothing from `workspace`, and the enum is the pane's. The pane matches; this
+  # only words.
   graph_unpinned_node_changed: "unpinned — edited"
   graph_unpinned_node_gone: "unpinned — node gone"
   graph_unpinned_upstream: "unpinned — %{node} changed"
   graph_unpinned_inherited: "unpinned — defaults changed"
   graph_unpinned_unreadable: "unpinned — could not compare"
   graph_unpinned_source_gone: "unpinned — the run it came from is gone"
+  # How many rules a card's node breaks. The count only — which rules is the
+  # inspector's to say, and the card has no room for a sentence.
   graph_issue_count: "%{count} issue(s)"
+  # Chip on a command node — a gate whose exit code is the verdict.
   graph_kind_gate: "GATE"
   graph_status_running: "running"
+  # Second or later attempt. The first is not worth saying — every node has
+  # one, and saying it on every card buries the card that says "3".
   graph_status_attempt: "attempt %{attempt}"
   graph_status_passed: "passed"
   graph_status_failed: "failed"
   graph_status_fixing: "repairing"
+  # A node whose output this run will reuse rather than compute. On the badge
+  # line because that line answers "what happens next", and for a pinned node
+  # the answer is nothing.
   graph_status_pinned: "reused"
+  # A node that retries itself, shown when the run is not driving it.
+  # How many attempts a node's failure policy allows. Beside the retry glyph,
+  # which is what says the policy exists at all.
   graph_policy_attempts: "×%{max}"
+  # Label on the dashed edge a gate's repair sends back.
   graph_rerun_edge: "rerun"
+  # Heading over the panel's list of flow files — the ones this lane can run,
+  # as opposed to the runs below it.
   panel_flows_heading: "Flows"
   panel_flows_empty: "No flow files in this worktree or your own folder"
+  # Title of the dialog that asks what to call a new flow.
   new_title: "New flow"
   new_placeholder: "Name, e.g. ship"
   new_tooltip: "New flow"
   rename_title: "Rename flow"
   row_menu_rename: "Rename…"
   row_menu_delete: "Delete…"
+  # Confirmation before a flow file is removed. Names the file, because the
+  # menu was opened on a row and the dialog is what the person reads.
   delete_confirm_title: "Delete this flow?"
   delete_confirm_body: "%{name} (%{origin}) will be removed from disk. Runs it already made are kept."
+  # The repository's copy. Separate because the consequence is different: it is
+  # in the working tree, so the deletion is something the whole repo sees.
   delete_confirm_body_repo: "%{name} is committed with this repository, so removing it changes the working tree and everyone who opens the repo loses it once that lands. Runs it already made are kept."
+  # The button that answers the question. Not the menu's label: an ellipsis on a
+  # menu item promises a question, and this *is* the question.
   delete_confirm_ok: "Delete"
   name_refused_title: "That name will not do"
   name_empty: "A flow needs a name."
   name_has_separator: "A name cannot contain a path separator."
   name_unportable: "A name cannot contain < > : \" | ? *, end in a dot or space, or be a device name like CON."
   name_taken: "Something already answers to that name here."
+  # Why a new flow could not be written: there is no agent to name in it.
   no_agent: "No agent is configured, so a flow has nothing to run."
   create_failed_title: "Could not create the flow"
   rename_failed_title: "Could not rename the flow"
   delete_failed_title: "Could not delete the flow"
+  # Why an edit was not written. The title is the same for all three refusals —
+  # the file is untouched either way, and the reason follows as the message.
   edit_refused_title: "This change was not saved"
+  # The node inspector's field labels and its two actions.
   form_id_label: "Name"
   form_deps_label: "Runs after"
   form_prompt_label: "Prompt"
+  # Shown instead of the prompt box when the node names a file for it.
   form_prompt_file_label: "Prompt file"
   form_output_label: "Writes"
+  # The contract the engine injects into the node's prompt and judges it by —
+  # stated on the form because the prompt an author types is not where it lives.
   form_output_help: "The instruction to write the output is added automatically. The node fails if the file is missing or empty after the run."
   form_run_label: "Command"
   form_timeout_label: "Timeout"
@@ -1714,29 +2503,54 @@ flow:
   form_timeout_unreadable: "%{text} is not a length of time — try 30s or 5m."
   form_save: "Save"
   form_revert: "Revert"
+  # What the inspector says when a marquee took several cards.
   form_many_selected: "%{n} nodes selected — fields show for one at a time."
+  # What the inspector says with nothing selected.
   form_no_selection: "Click a node to edit it."
+  # What it says for a flow that has no nodes yet.
   form_no_nodes: "This flow has no nodes — add one."
+  # The select row for "this node names none" — the absent option.
   form_absent: "(none)"
+  # The either-or select: prose typed here, or the file that holds it.
   form_source_inline: "Written here"
+  # What a node is: an agent turn, or a shell command that gates the flow.
   form_kind_label: "This node"
   form_kind_agent: "Runs an agent"
   form_kind_command: "Runs a command"
   form_output_required: "An agent node has to write something."
   form_run_required: "A command node has to run something."
   form_source_file: "From a file"
+  # The fail-policy select and the fields each policy shows.
   form_fail_label: "When it fails"
+  # The graph pane's node actions, and the one refusal deleting has of its own.
   add_node: "Add Node"
   delete_node: "Delete Node…"
+  # Acting on the flow a surface already names — the graph pane's toolbar and
+  # the Flows panel's rows. Distinct from `command.run_flow` / `command.check_flow`,
+  # which end in an ellipsis because they still have to ask which flow.
   run_tooltip: "Run this flow"
   check_tooltip: "Check this flow"
+  # Why ▶ and ✓ are off. Both read the file, so the inspector's unsaved edits
+  # would not be in what they act on — and a greyed button with no reason is
+  # worse than no button. One string for the two: the button under the pointer
+  # supplies the verb, and a second key would be a second thing to keep in step.
   needs_save: "Save your changes first"
+  # Run only as far as one node — it and what it depends on, nothing after.
+  # Names the node, because "partly" is not a thing a person can act on and the
+  # selection this reads is also what the inspector is showing.
   run_until_tooltip: "Run only as far as %{node}"
+  # Why ▶| is off with nothing, or several things, selected. One node is what a
+  # stopping point is: a run cannot end at two places.
   run_until_needs_one: "Select one node to stop the run at"
   pin_tooltip: "Reuse the finished output of %{nodes}"
   unpin_tooltip: "Run %{nodes} again instead of reusing its output"
+  # Why the pin is off: a gate writes no output, so there is nothing of its to
+  # reuse — it runs every time.
   pin_needs_agent: "Select an agent node — a gate writes no output to reuse"
   pin_unavailable: "No finished run holds an output for %{nodes}, so they will run"
+  # Removing the selected line between two cards. No ellipsis: unlike deleting
+  # a node it asks nothing — a line is redrawn with one drag, and the file is
+  # the undo stack.
   remove_connection: "Remove Connection"
   delete_node_last: "A flow needs at least one node."
   delete_node_confirm_title: "Delete this node?"
@@ -1744,6 +2558,8 @@ flow:
   delete_node_confirm_body_deps: "%{node} will be removed from the flow, and from what %{n} other node(s) run after."
   delete_nodes_confirm_body: "%{n} nodes will be removed from the flow: %{nodes}."
   delete_nodes_confirm_body_deps: "%{n} nodes will be removed from the flow (%{nodes}), and from what %{deps} other node(s) run after."
+  # What each answer to a node's permission question is called. The values
+  # stay the serde spellings; only what a person reads is translated.
   form_permission_deny: "Deny"
   form_permission_allow_once: "Allow once"
   form_permission_ask: "Ask"
@@ -1764,17 +2580,28 @@ flow:
   form_agent_effort_label: "Effort"
   form_agent_mode_label: "Session mode"
   form_agent_permission_label: "Permission"
+  # The inspector had unsaved typing and the file changed elsewhere, so the
+  # node was read again and the typing went with it.
   edit_dropped_typing: "The file changed elsewhere, so this node was read again — what you had typed and not saved went with it."
   edit_stale: "The file changed on disk after it was read. Reload the graph and make the change again."
   edit_would_not_load: "The flow would no longer load: %{detail}"
   edit_unsupported: "This part of the file cannot be changed from here: %{detail}"
+  # The one line of prose inside a new flow's template. The YAML around it is
+  # a Rust `const` in `flow_ops.rs`: a machine-parsed skeleton in a locale file
+  # is one re-indent away from a file that will not load, and only the sentence
+  # is worth translating.
   starter_prompt: "Describe what this node should do, then add the ones after it."
+  # Where a listed flow came from. Shown because the repository and the
+  # person's own folder can hold the same name, and opening the other one
+  # would be silent.
   panel_flow_origin_project: "project"
   panel_flow_origin_repo: "repo"
   panel_flow_origin_global: "yours"
   panel_live_heading: "Running now"
   panel_past_heading: "Past runs"
   panel_past_empty: "No flow has run here yet"
+  # How many finished runs survive a sweep. Said once under the list so a
+  # run vanishing from it reads as retention rather than as a loss.
   panel_retention: "The newest %{keep} are kept"
   status_done: "Done"
   status_failed: "Failed"
@@ -1786,17 +2613,26 @@ flow:
   chip_one: "Flow: %{doing}"
   chip_many: "Flows: %{n}"
   chip_summary: "%{n} flow(s) running in this window"
+  # What a run is doing, in the terms `RunStage` keeps.
   stage_starting: "starting"
   stage_node: "%{node}"
   stage_node_retry: "%{node} · try %{attempt}"
   stage_rederiving: "re-deriving for %{gate}"
+  # The chip while a run is waiting on a person. A count rather than a name:
+  # the row underneath says which, and this has to fit a status bar.
   chip_asking: "Flow: %{waiting} waiting on you"
+  # Waiting on a person. Names the tool because "waiting for approval" with
+  # no object is not something a user can act on from the row alone.
   stage_asking: "%{node} is waiting on you — %{tool}"
   stage_fixing: "fixing %{gate}"
   stop_prompt: "A flow is already running here"
   stop_action: "Stop it"
   no_lane: "Open a worktree first — a flow runs in one"
+  # Title for a flow that names an agent whose launch could not be built.
+  # The reason itself is one of the connect-command strings, shown as detail.
   agent_launch_refused: "This flow names %{agent}, but its launch could not be built"
+  # Title for a flow that names an agent whose worktree host cannot be used.
+  # The reason is the session-host validator's own wording, shown as detail.
   session_host_unusable: "This flow names %{agent}, but the worktree's session host can't be used"
   remote_lane: "This worktree runs %{agent} on another machine, and a flow cannot yet split its shell steps from its agent steps"
   budget_wall_clock: "The run hit its time limit"
@@ -1804,9 +2640,16 @@ flow:
   budget_cost: "The run hit its cost limit"
   lock_held_detail: "Clear it by hand if the process is gone: %{path}"
   lock_held: "Another run (process %{pid}) already has this worktree"
+  # Told to the phone when a run it asked for finished cleanly.
+  # Stands in for the engine's own words when a run died without saying
+  # anything — the only way `LastWord`'s guard has nothing to report.
   run_panicked: "the run stopped unexpectedly"
   unprovisioned: "%{agent} has no runtime to run with: %{message}"
+  # The nodes a run stopped short of, already joined — the engine names
+  # them all, and a reader needs the list rather than a count.
   stalled: "The run stopped with work left: the folder for %{nodes} could not be read"
+  # The lane whose path would not resolve. Shows the path because the
+  # person has to look at it to see what happened to it.
   lane_unresolvable: "That worktree folder could not be read: %{path}"
   read_failed_title: "Could not read that flow"
   parse_failed_title: "That file is not a flow"
@@ -1867,29 +2710,55 @@ orchestrator:
 
 # External control surface — the command replies sent back to a phone
 control:
+  # Heading above a `/list` reply.
   listing_header: "Open agent chats"
+  # One `/list` row. `agent` names the agent the pane runs, `detail` is the
+  # pre-formatted activity-and-title segment (empty when it has neither), and
+  # `ago` the last-activity suffix (empty when unknown).
   listing_row: "%{ordinal}. %{name} (%{agent})%{detail}%{ago}"
+  # The agent line of a remote message about a chat in a tab the user named.
   agent_with_tab: "%{agent} · %{tab}"
+  # Lead line of the phone message a turn that ended in an error sends.
   turn_failed: "⚠️ The agent stopped with an error"
   run_summary: "✅ %{segments}"
+  # What a row's dash introduces, separator included. Omitted entirely when
+  # there is nothing to introduce.
   listing_detail: " — %{detail}"
+  # The activity glyph as it sits beside a session title.
   listing_state: "[%{state}]"
+  # How a chosen target is named back to the user: its lane path plus its title.
+  # A separate key from the listing row because the separator is a translator's
+  # call, not a call site's.
   target_label: "%{name}%{title}"
+  # How a lane is addressed on a listing row.
   lane_path: "%{project}/%{lane}"
+  # Last-activity suffix on a `/list` row; `span` comes from
+  # [`format_duration_compact`].
   listing_ago: " · %{span} ago"
+  # Trailing line when a listing was cut to fit Telegram's message limit.
   listing_omitted: "…and %{count} more"
   listing_empty: "No agent chats are open."
+  # Answer to a button tapped on a listing a newer one has superseded. Distinct
+  # from the permission-prompt's stale wording — the two are different objects
+  # and the phone has no other way to tell them apart.
   listing_stale: "That list is out of date. Send /list again."
   state_idle: "○"
   state_working: "▸"
   state_awaiting_permission: "❗"
   state_error: "✕"
+  # Label on a `/list` row's inline button.
   button_label: "%{ordinal}"
   selected: "Target: %{name}"
   selection_cleared: "Target cleared."
+  # Said when the target was cleared *for* the user because the pane vanished,
+  # rather than because they asked. Without it the next plain message goes
+  # somewhere unexpected with no warning.
   selection_dropped: "That chat is gone, so the target was cleared."
   sent_delivered: "Sent."
   sent_queued: "Queued behind the current turn."
+  # Said when the text was a local slash command the pane ran itself instead of
+  # sending. Named rather than folded into "sent", because today's only such
+  # command is `/clear`, which resets the session.
   sent_handled_locally: "Ran in the app — the agent was not prompted."
   stopped: "Stopped."
   stop_already_idle: "Nothing was running."
@@ -1897,12 +2766,22 @@ control:
   flow_list_row: "%{name} (%{origin})"
   flow_list_empty: "No flows are available in this worktree."
   flow_finished_notice: "Flow finished."
+  # Told to the phone when a run it asked for was stopped.
   flow_canceled_notice: "Flow stopped."
+  # Told to the phone when a run it asked for ended badly in a way whose
+  # detail lives in the run report — which only the desktop can open.
   flow_failed_notice: "Flow failed. The run report is in daruda."
+  # Told to the phone when the engine refused the run outright. `reason` is
+  # the same already-localized wording the desktop toast shows, so the two
+  # surfaces cannot drift apart about one outcome.
   flow_refused_notice: "Flow did not run: %{reason}"
   flow_origin_repo: "repo"
   flow_origin_project: "project"
   flow_origin_global: "global"
+  # Said when a flow start was accepted. Deliberately not "started": the
+  # engine takes its lock after this answer is sent, so the run can still be
+  # refused. It promises the outcome instead, which
+  # `Workspace::settle_flow_run` then delivers.
   flow_starting: "Starting %{name}. You'll get the outcome when it ends."
   error_unknown_command: "Unknown command: /%{input}"
   error_unknown_command_did_you_mean: "Unknown command: /%{input} — did you mean /%{suggestion}?"
@@ -1914,6 +2793,9 @@ control:
   error_flow_not_found: "No flow named %{name}. Send /flow to list them."
   error_flow_locked: "A flow is already running in this worktree."
   error_flow_refused: "%{name} will not run as written. Validate it in daruda."
+  # Said when the flow itself is fine but no run appeared. Points at daruda
+  # rather than at the file, because the static check already cleared the file
+  # and the actual reason is in a toast only the desktop shows.
   error_flow_not_started: "%{name} did not start. daruda has the reason."
   error_flow_needs_interaction: "%{name} asks a question only the desktop can answer."
   error_no_active_lane: "No active worktree."
@@ -1930,7 +2812,13 @@ control:
   lane_listing_row: "%{path} — %{chats} chat(s)"
   lane_created: "Worktree created."
   chat_created: "Chat opened."
+  # The ping that introduces a chat the phone approved opening; `agent` is
+  # the display name of the agent running it.
   chat_announced: "A new %{agent} tab is open. Messages you send now go to it. /use - to go back to the orchestrator."
+  # Told to a sender whose message named no chat and whose bridge remembered
+  # none, so the app's own focused lane took it: which chat that was, and how
+  # to pick another. `name` is the lane's path, `agent` the display name of
+  # the agent running it.
   target_lent: "No chat was picked, so this went to %{name} (%{agent}). Send /list to pick another."
   transcript_empty: "That chat has not said anything yet."
   flow_stopped: "Stopped it."
@@ -1957,6 +2845,8 @@ control:
   error_orchestrator_unavailable: "The orchestrator would not start. daruda has the reason."
   # Registered with Telegram, not translated: BotFather parses these as
   # `name - description`, and the names must match what control::spec accepts.
+  # The `/setcommands` block a user pastes into BotFather. Fixed English —
+  # it is registered with Telegram, not shown in daruda's own UI.
   botfather_commands: |-
     list - Open agent chats
     use - Select a target

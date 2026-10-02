@@ -21,7 +21,7 @@ use crate::workspace::main_area::pane_tree::PaneId;
 /// cannot diverge.
 pub(super) fn fold_mode_chip_label(mode: PaneChoice<FoldMode>) -> String {
     axis_chip_label(
-        s::agent_chat_fold_mode_chip(&mode_value(mode.value())),
+        s::agent_chat::fold_mode_chip(mode_value(mode.value())),
         mode.is_following(),
     )
 }
@@ -63,7 +63,7 @@ pub(super) fn fold_mode_panel(
                 }
             }),
             reset: Some(ResetSpec {
-                label: s::agent_chat_use_agent_defaults(),
+                label: s::agent_chat::use_agent_defaults(),
                 // Offered on a value that already equals the default: what the
                 // button undoes is the *override*, not the value.
                 disabled: mode_choice.is_following(),

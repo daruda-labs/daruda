@@ -615,7 +615,7 @@ impl FlowGraphView {
     pub(in crate::workspace) fn report_file_gone(&mut self, cx: &mut Context<Self>) {
         self.state = FlowGraphState::Unreadable(FlowGraphError::Read {
             path: self.path.clone(),
-            message: s::flow_file_gone(),
+            message: s::flow::file_gone(),
         });
         // The text with it, like every other fall to `Unreadable`: `reload`
         // returns early when the bytes it read are the ones it has, so a file

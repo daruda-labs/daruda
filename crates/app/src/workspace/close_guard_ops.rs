@@ -67,10 +67,10 @@ pub(in crate::workspace) fn prompt_stop_running(
     cx: &mut App,
 ) -> futures::channel::oneshot::Receiver<usize> {
     let titles: Vec<&str> = running.iter().map(|t| t.as_ref()).collect();
-    let heading = strings::close_running_heading();
-    let detail = strings::close_running_detail(&titles);
-    let confirm = strings::close_running_confirm();
-    let cancel = strings::task_edit_cancel();
+    let heading = strings::modal::close_running_heading();
+    let detail = strings::modal::close_running_detail(&titles);
+    let confirm = strings::modal::close_running_confirm();
+    let cancel = strings::common::btn_cancel();
     window.prompt(
         gpui::PromptLevel::Warning,
         &heading,

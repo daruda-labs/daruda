@@ -135,7 +135,7 @@ impl Workspace {
                     if let Err(e) = result {
                         use daruda_store::observability::system_info::redact_home;
                         let report =
-                            ErrorReport::new(crate::surface::strings::error_tasks_save_failed())
+                            ErrorReport::new(crate::surface::strings::error::tasks_save_failed())
                                 .severity(ErrorSeverity::Warning)
                                 .from_error(&e)
                                 .at(file!(), line!())
@@ -400,9 +400,9 @@ impl Workspace {
             }
         };
         crate::workspace::dialog_helpers::open_alert_dialog(
-            crate::surface::strings::task_error_dialog_title(),
+            crate::surface::strings::task::error_dialog_title(),
             message,
-            crate::surface::strings::task_error_dialog_close(),
+            crate::surface::strings::common::btn_close(),
             window,
             cx,
         );
@@ -422,14 +422,14 @@ impl Workspace {
             let Some(task) = g.get(task_id) else {
                 return;
             };
-            crate::surface::strings::task_confirm_delete_body(&task.title)
+            crate::surface::strings::task::confirm_delete_body(&task.title)
         };
         let weak = cx.weak_entity();
         let id = task_id.to_string();
         crate::workspace::dialog_helpers::open_confirm_dialog(
-            crate::surface::strings::task_picker_title_delete(),
+            crate::surface::strings::task::picker_title_delete(),
             body,
-            crate::surface::strings::task_action_delete(),
+            crate::surface::strings::common::btn_delete(),
             ButtonVariant::Danger,
             move |_, _window, app_cx| {
                 if let Some(ws) = weak.upgrade() {

@@ -247,7 +247,7 @@ fn report_chip_start_failure(
     cx: &mut App,
 ) {
     let report = daruda_store::observability::error_report::ErrorReport::new(
-        crate::surface::strings::orchestrator_start_failed(),
+        crate::surface::strings::orchestrator::start_failed(),
     )
     .severity(daruda_store::observability::error_report::ErrorSeverity::Warning)
     .with_context("reason", format!("{error:?}"))

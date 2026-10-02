@@ -319,7 +319,7 @@ impl Workspace {
     /// daruda restarted.
     pub(super) fn save_panels(&mut self, cx: &mut Context<Self>) {
         if let Err(e) = daruda_store::panels::save_panels_in(&self.data_dir, &self.panels) {
-            let report = ErrorReport::new(crate::surface::strings::error_panels_save_failed())
+            let report = ErrorReport::new(crate::surface::strings::error::panels_save_failed())
                 .severity(ErrorSeverity::Error)
                 .from_error(&e)
                 .at(file!(), line!())
@@ -748,7 +748,7 @@ impl Workspace {
         if daruda_store::panels::migrate_builtin_flags(&mut reloaded)
             && let Err(e) = daruda_store::panels::save_panels_in(&self.data_dir, &reloaded)
         {
-            let report = ErrorReport::new(crate::surface::strings::error_panels_save_failed())
+            let report = ErrorReport::new(crate::surface::strings::error::panels_save_failed())
                 .severity(ErrorSeverity::Error)
                 .from_error(&e)
                 .at(file!(), line!())

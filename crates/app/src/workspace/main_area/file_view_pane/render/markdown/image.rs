@@ -32,7 +32,7 @@ pub(super) fn render_md_image(
     let Some(image) = image else {
         return div()
             .text_color(t.subtle)
-            .child(strings::file_viewer_image_alt(alt))
+            .child(strings::file_viewer::image_alt(alt))
             .into_any_element();
     };
     match layout {

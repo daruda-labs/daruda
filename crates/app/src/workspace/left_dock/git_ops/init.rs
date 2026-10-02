@@ -70,7 +70,7 @@ impl Workspace {
                         // probe that flips `Default → Git` failed, and a
                         // re-open will pick it up. Warning, not Error.
                         let report = ErrorReport::new(
-                            crate::surface::strings::error_git_init_probe_failed(),
+                            crate::surface::strings::error::git_init_probe_failed(),
                         )
                         .severity(ErrorSeverity::Warning)
                         .at(file!(), line!())
@@ -81,7 +81,7 @@ impl Workspace {
                     }
                     Err(e) => {
                         let report =
-                            ErrorReport::new(crate::surface::strings::error_git_init_failed())
+                            ErrorReport::new(crate::surface::strings::error::git_init_failed())
                                 .severity(ErrorSeverity::Error)
                                 .from_error(&e)
                                 .at(file!(), line!())

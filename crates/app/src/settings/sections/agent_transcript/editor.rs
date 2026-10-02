@@ -38,7 +38,7 @@ fn row_value_label(value: String, overridden: bool) -> String {
     if overridden {
         value
     } else {
-        s::settings_agent_transcript_built_in(&value)
+        s::settings::agent_transcript_built_in(&value)
     }
 }
 
@@ -122,7 +122,7 @@ fn fold_panel(
                 }
             }),
             reset: Some(ResetSpec {
-                label: s::agent_chat_use_built_in(),
+                label: s::agent_chat::use_built_in(),
                 // What the button undoes is the written key, so a row that
                 // writes none has nothing to hand back.
                 disabled: !overridden,
@@ -176,7 +176,7 @@ pub(in crate::settings) fn range_control(
     .trigger(field_trigger(
         format!("settings-agent-range-trigger-{catalog_index}"),
         row_value_label(
-            s::agent_chat_tail_window_pair(&value_label(values[0]), &value_label(values[1])),
+            s::agent_chat::tail_window_pair(value_label(values[0]), value_label(values[1])),
             overridden,
         ),
     ))
@@ -196,7 +196,7 @@ pub(in crate::settings) fn range_control(
                     }
                 }),
                 Some(ResetSpec {
-                    label: s::agent_chat_use_built_in(),
+                    label: s::agent_chat::use_built_in(),
                     disabled: !overridden,
                     on_reset: Rc::new(move |window, app| {
                         if let Some(settings) = reset.upgrade() {
@@ -242,7 +242,7 @@ fn filter_panel(
                 }
             }),
             reset: Some(ResetSpec {
-                label: s::agent_chat_use_built_in(),
+                label: s::agent_chat::use_built_in(),
                 disabled: !overridden,
                 on_reset: Rc::new(move |_window, app| {
                     if let Some(w) = reset.upgrade() {

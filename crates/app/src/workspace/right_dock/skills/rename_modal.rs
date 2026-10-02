@@ -44,7 +44,7 @@ pub fn open_rename_skill_modal(
 
     open_single_field_dialog(
         workspace,
-        strings::skills_button_rename(),
+        strings::common::btn_rename(),
         "new-name",
         Some(&current_name),
         move |ws, value, _window, cx| {
@@ -53,19 +53,29 @@ pub fn open_rename_skill_modal(
                 return;
             };
             if new_name.is_empty() {
-                report_validation(ws, strings::skills_name_empty(), "skills.rename.empty", cx);
+                report_validation(
+                    ws,
+                    strings::common::name_required(),
+                    "skills.rename.empty",
+                    cx,
+                );
                 return;
             }
             match validate_name(&new_name) {
                 Ok(()) => {}
                 Err(NameError::Empty) => {
-                    report_validation(ws, strings::skills_name_empty(), "skills.rename.empty", cx);
+                    report_validation(
+                        ws,
+                        strings::common::name_required(),
+                        "skills.rename.empty",
+                        cx,
+                    );
                     return;
                 }
                 Err(NameError::TooLong { .. }) => {
                     report_validation(
                         ws,
-                        strings::skills_name_too_long(),
+                        strings::skills::name_too_long(),
                         "skills.rename.too_long",
                         cx,
                     );
@@ -74,7 +84,7 @@ pub fn open_rename_skill_modal(
                 Err(NameError::InvalidChar { .. }) => {
                     report_validation(
                         ws,
-                        strings::skills_name_invalid(),
+                        strings::skills::name_invalid(),
                         "skills.rename.invalid",
                         cx,
                     );
@@ -83,7 +93,7 @@ pub fn open_rename_skill_modal(
                 Err(NameError::InvalidLeading { .. }) => {
                     report_validation(
                         ws,
-                        strings::skills_name_leading(),
+                        strings::skills::name_leading(),
                         "skills.rename.leading",
                         cx,
                     );
@@ -98,7 +108,7 @@ pub fn open_rename_skill_modal(
             {
                 report_validation(
                     ws,
-                    strings::skills_name_duplicate(),
+                    strings::skills::name_duplicate(),
                     "skills.rename.duplicate",
                     cx,
                 );
@@ -110,7 +120,7 @@ pub fn open_rename_skill_modal(
                 }
                 Err(e) => {
                     let report =
-                        ErrorReport::new(crate::surface::strings::error_skill_rename_failed())
+                        ErrorReport::new(crate::surface::strings::error::skill_rename_failed())
                             .severity(ErrorSeverity::Error)
                             .from_error(&e)
                             .at(file!(), line!())

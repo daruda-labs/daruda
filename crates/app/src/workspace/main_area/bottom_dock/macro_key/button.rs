@@ -129,14 +129,14 @@ fn edit_item(
 ) -> PopupMenuItem {
     ws_popup_menu_item(
         workspace,
-        surface_strings::ctx_macro_edit(),
+        surface_strings::ctx::macro_edit(),
         false,
         move |_ws, window, cx| {
             let tab_id = tab_id.clone();
             let btn = btn.clone();
             let workspace_for_modal = cx.entity().downgrade();
             crate::workspace::dialog_helpers::open_form_modal(
-                surface_strings::macro_edit_title(),
+                surface_strings::bottom_dock::macro_edit_title(),
                 None,
                 move |window, cx| {
                     MacroEditModal::new(
@@ -162,17 +162,17 @@ fn delete_item(
 ) -> PopupMenuItem {
     ws_popup_menu_item(
         workspace,
-        surface_strings::ctx_macro_delete(),
+        surface_strings::ctx::macro_delete(),
         false,
         move |_ws, window, cx| {
-            let body = surface_strings::delete_macro_modal_body(&label);
+            let body = surface_strings::modal::delete_macro_body(&label);
             let workspace_for_modal = cx.entity().downgrade();
             let tab_id = tab_id.clone();
             let widget_id = widget_id.clone();
             crate::workspace::dialog_helpers::open_confirm_dialog(
-                surface_strings::delete_macro_modal_title(),
+                surface_strings::modal::delete_macro_title(),
                 body,
-                surface_strings::delete_macro_confirm_label(),
+                surface_strings::common::btn_delete(),
                 ButtonVariant::Danger,
                 move |_ev, _window, app_cx| {
                     if let Some(ws) = workspace_for_modal.upgrade() {

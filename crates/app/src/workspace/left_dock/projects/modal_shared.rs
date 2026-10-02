@@ -25,19 +25,19 @@ pub(super) fn field_label(
 /// Map a [`SessionHostError`] to its localized banner message.
 pub(super) fn session_host_error_to_msg(e: SessionHostError) -> String {
     match e {
-        SessionHostError::Empty(SessionHostField::Target) => s::session_host_err_target_empty(),
+        SessionHostError::Empty(SessionHostField::Target) => s::session_host::err_target_empty(),
         SessionHostError::Empty(SessionHostField::Container) => {
-            s::session_host_err_container_empty()
+            s::session_host::err_container_empty()
         }
         SessionHostError::Empty(SessionHostField::SessionPath) => {
-            s::session_host_err_session_path_empty()
+            s::session_host::err_session_path_empty()
         }
-        SessionHostError::Unsafe(SessionHostField::Target) => s::session_host_err_target_unsafe(),
+        SessionHostError::Unsafe(SessionHostField::Target) => s::session_host::err_target_unsafe(),
         SessionHostError::Unsafe(SessionHostField::Container) => {
-            s::session_host_err_container_unsafe()
+            s::session_host::err_container_unsafe()
         }
         SessionHostError::Unsafe(SessionHostField::SessionPath) => {
-            s::session_host_err_session_path_unsafe()
+            s::session_host::err_session_path_unsafe()
         }
     }
 }

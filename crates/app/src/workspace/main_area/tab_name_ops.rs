@@ -67,7 +67,7 @@ impl Workspace {
         let placeholder = self.tab_label(tab, cx).unwrap_or_default();
         crate::workspace::dialog_helpers::open_single_field_dialog(
             cx.weak_entity(),
-            strings::rename_tab_modal_title(),
+            strings::modal::rename_tab_title(),
             placeholder,
             current.as_deref(),
             move |ws, value, _window, cx| ws.rename_tab(tab_id, value, cx),

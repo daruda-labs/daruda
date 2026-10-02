@@ -43,7 +43,7 @@ pub(super) fn render(
     }
     let asking = runs.iter().any(|run| run.asking.is_some());
     let label = SharedString::from(trigger_label(runs, density));
-    let summary = SharedString::from(crate::surface::strings::status_bar_flow_summary(runs.len()));
+    let summary = SharedString::from(crate::surface::strings::flow::chip_summary(runs.len()));
     let rows = runs.to_vec();
     let t = theme::current(cx);
     Some(
@@ -82,13 +82,13 @@ fn trigger_label(runs: &[FlowRunRow], density: StatusBarDensity) -> String {
         .map(|run| usize::from(run.asking.is_some()) + run.also_waiting)
         .sum();
     if waiting > 0 {
-        return crate::surface::strings::status_bar_flow_chip_asking(waiting);
+        return crate::surface::strings::flow::chip_asking(waiting);
     }
     match runs {
         [only] if density == StatusBarDensity::Full => {
-            crate::surface::strings::status_bar_flow_chip_one(&only.doing)
+            crate::surface::strings::flow::chip_one(&only.doing)
         }
-        _ => crate::surface::strings::status_bar_flow_chip_many(runs.len()),
+        _ => crate::surface::strings::flow::chip_many(runs.len()),
     }
 }
 
@@ -163,7 +163,7 @@ fn flow_panel(
                             "status-flow-stop-{}-{}",
                             lane.project, lane.lane
                         )),
-                        crate::surface::strings::status_bar_flow_stop(),
+                        crate::surface::strings::flow::stop_action(),
                     )
                     .on_click(move |_, _window, cx| {
                         match workspace.update(cx, |ws, cx| ws.stop_flow_run_in(lane, cx)) {

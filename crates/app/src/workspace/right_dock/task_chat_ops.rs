@@ -209,7 +209,7 @@ impl Workspace {
             return;
         };
         let Some(execution) = task.execution else {
-            self.task_chat_error(s::task_chat_missing_session(), cx);
+            self.task_chat_error(s::task::chat_missing_session(), cx);
             return;
         };
         let existing = self.main_area.runtimes.iter().find_map(|(lane, rt)| {
@@ -224,11 +224,11 @@ impl Workspace {
             return;
         }
         let Some(session_id) = execution.session_id else {
-            self.task_chat_error(s::task_chat_missing_session(), cx);
+            self.task_chat_error(s::task::chat_missing_session(), cx);
             return;
         };
         if !self.task_chat_identity_available(&execution.agent_id, execution.account_id) {
-            self.task_chat_error(s::task_chat_missing_agent(), cx);
+            self.task_chat_error(s::task::chat_missing_agent(), cx);
             return;
         }
         let lane = self.projects.iter().find_map(|project| {
@@ -242,7 +242,7 @@ impl Workspace {
                 })
         });
         let Some(lane) = lane.filter(|_| execution.cwd.is_dir()) else {
-            self.task_chat_error(s::task_chat_missing_worktree(), cx);
+            self.task_chat_error(s::task::chat_missing_worktree(), cx);
             return;
         };
         self.activate_lane(lane, window, cx);

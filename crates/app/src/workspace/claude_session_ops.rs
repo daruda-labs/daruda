@@ -308,7 +308,7 @@ impl Workspace {
                 }
                 Err(e) => {
                     let report = ErrorReport::new(
-                        crate::surface::strings::error_claude_status_file_read_failed(),
+                        crate::surface::strings::error::claude_status_file_read_failed(),
                     )
                     .severity(ErrorSeverity::Warning)
                     .from_error(&e)
@@ -368,9 +368,9 @@ impl Workspace {
         use daruda_agent::hooks::events::NotificationType;
 
         let title = match file.notification {
-            Some(NotificationType::PermissionPrompt) => s::notification_hook_permission_title(),
-            Some(NotificationType::IdlePrompt) => s::notification_hook_idle_title(),
-            Some(NotificationType::ElicitationDialog) => s::notification_hook_elicitation_title(),
+            Some(NotificationType::PermissionPrompt) => s::notification::hook_permission_title(),
+            Some(NotificationType::IdlePrompt) => s::notification::hook_idle_title(),
+            Some(NotificationType::ElicitationDialog) => s::notification::hook_elicitation_title(),
             // Informational subtypes and non-notification events never push.
             _ => return,
         };

@@ -201,12 +201,12 @@ impl Workspace {
             .file_name()
             .map(|n| gpui::SharedString::from(n.to_string_lossy().into_owned()))
             .unwrap_or_else(|| {
-                gpui::SharedString::from(crate::surface::strings::file_viewer_untitled_tab_title())
+                gpui::SharedString::from(crate::surface::strings::file_viewer::untitled_tab_title())
             });
 
         let search_input = cx.new(|cx_state| {
             crate::ui::InputState::new(window, cx_state)
-                .placeholder(crate::surface::strings::file_viewer_search_placeholder())
+                .placeholder(crate::surface::strings::file_viewer::search_placeholder())
         });
         // The subscription is owned by `FileContent` and dropped with
         // the pane. Capture `pane_id` so the closure can locate the
@@ -332,9 +332,9 @@ impl Workspace {
         err: PaneSpawnError,
         cx: &mut Context<Self>,
     ) {
-        let msg = crate::surface::strings::error_pane_spawn_status(context, &err.to_string());
+        let msg = crate::surface::strings::error::pane_spawn_status(context, err.to_string());
         self.last_error = Some(msg.clone().into());
-        let report = ErrorReport::new(crate::surface::strings::error_pane_spawn_failed(context))
+        let report = ErrorReport::new(crate::surface::strings::error::pane_spawn_failed(context))
             .severity(ErrorSeverity::Error)
             .from_error(&err)
             .at(file!(), line!())

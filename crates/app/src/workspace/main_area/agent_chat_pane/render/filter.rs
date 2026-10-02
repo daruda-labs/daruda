@@ -23,7 +23,7 @@ use crate::workspace::main_area::pane_tree::PaneId;
 /// cannot diverge.
 pub(super) fn display_filter_chip_label(filter: PaneChoice<DisplayFilter>) -> String {
     axis_chip_label(
-        s::agent_chat_filter_chip(&filter_value(filter.value())),
+        s::agent_chat::filter_chip(filter_value(filter.value())),
         filter.is_following(),
     )
 }
@@ -56,7 +56,7 @@ pub(super) fn filter_panel(
                 }
             }),
             reset: Some(ResetSpec {
-                label: s::agent_chat_use_agent_defaults(),
+                label: s::agent_chat::use_agent_defaults(),
                 // Offered on a value that already equals the default: what the
                 // button undoes is the *override*, not the value.
                 disabled: choice.is_following(),
@@ -84,9 +84,9 @@ pub(super) fn filter_panel(
 /// the current state precisely when the state is the opposite.
 fn filtered_chip_label(filtered: FilteredAway, revealed: bool) -> String {
     if revealed {
-        return s::agent_chat_filtered_hide_again();
+        return s::agent_chat::filtered_hide_again();
     }
-    s::agent_chat_filtered_show(filtered.revealable)
+    s::agent_chat::filtered_show(filtered.revealable)
 }
 
 /// The filter's reveal control, riding the response bar's trailing slot.

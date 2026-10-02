@@ -89,12 +89,12 @@ fn registry_select_options(
     if let Some(value) = keep_current.and_then(host_display_value) {
         opts.push(SelectOption::new(
             KEEP_CURRENT_SELECT_VALUE,
-            s::session_host_option_keep_current(value),
+            s::session_host::option_keep_current(value),
         ));
     }
     opts.push(SelectOption::new(
         LOCAL_SELECT_VALUE,
-        s::session_host_option_local(),
+        s::session_host::option_local(),
     ));
     opts.extend(
         catalog
@@ -191,7 +191,7 @@ impl SessionHostModal {
         });
         let session_path_input = cx.new(|cx_state| {
             InputState::new(window, cx_state)
-                .placeholder(s::session_host_placeholder_session_path())
+                .placeholder(s::session_host::placeholder_session_path())
                 .default_value(session_path)
         });
 
@@ -345,10 +345,10 @@ impl Render for SessionHostModal {
             .as_ref()
             .map(|msg| crate::ui::alert::error("session-host-error", msg.clone()));
         let legacy_notice = self.has_legacy_remote_cwd.then(|| {
-            crate::ui::alert::info("session-host-legacy", s::session_host_legacy_notice())
+            crate::ui::alert::info("session-host-legacy", s::session_host::legacy_notice())
         });
         let orphaned_notice = self.orphaned.then(|| {
-            crate::ui::alert::warning("session-host-orphaned", s::session_host_orphaned_banner())
+            crate::ui::alert::warning("session-host-orphaned", s::session_host::orphaned_banner())
         });
 
         let showing_session_path = self.selected_entry(cx).is_some();
@@ -357,7 +357,7 @@ impl Render for SessionHostModal {
             .flex()
             .flex_col()
             .gap(px(theme::FORM_MODAL_SECTION_GAP))
-            .child(field_label(s::session_host_field_host(), &t))
+            .child(field_label(s::session_host::field_host(), &t))
             .child(select::select(&self.registry_select, cx, 1_isize));
 
         if self.catalog.is_empty() {
@@ -365,20 +365,20 @@ impl Render for SessionHostModal {
                 div()
                     .text_size(px(theme::MODAL_BODY_FONT_SIZE))
                     .text_color(t.text_muted)
-                    .child(s::session_host_registry_empty_hint()),
+                    .child(s::session_host::registry_empty_hint()),
             );
         }
 
         if showing_session_path {
             body = body
-                .child(field_label(s::session_host_field_session_path(), &t))
+                .child(field_label(s::session_host::field_session_path(), &t))
                 .child(input(&self.session_path_input, cx, 2));
         }
 
         let save_label = if submitting {
-            s::session_host_saving()
+            s::session_host::saving_label()
         } else {
-            s::session_host_save()
+            s::common::btn_save()
         };
         let footer = div()
             .flex()
@@ -387,7 +387,7 @@ impl Render for SessionHostModal {
             .gap(px(theme::MODAL_FOOTER_GAP))
             .mt(px(theme::MODAL_FOOTER_MARGIN_TOP))
             .child(
-                button("session-host-cancel", s::session_host_cancel())
+                button("session-host-cancel", s::common::btn_cancel())
                     .on_click(cx.listener(|this, _: &ClickEvent, w, cx| this.dismiss(w, cx))),
             )
             .child(
@@ -434,7 +434,7 @@ pub fn open_session_host_modal(
     };
     let workspace = cx.weak_entity();
     crate::workspace::dialog_helpers::open_form_modal(
-        s::session_host_modal_title(),
+        s::session_host::title(),
         None,
         move |window, cx| SessionHostModal::new(workspace, initial, window, cx),
         window,

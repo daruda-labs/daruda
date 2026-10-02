@@ -138,7 +138,7 @@ impl Workspace {
             Ok(s) => s,
             Err(e) => {
                 LogWriter::log(
-                    ErrorReport::new(crate::surface::strings::error_prompt_watcher_read_failed())
+                    ErrorReport::new(crate::surface::strings::error::prompt_watcher_read_failed())
                         .severity(ErrorSeverity::Info)
                         .from_error(&e)
                         .at(file!(), line!())
@@ -185,16 +185,11 @@ impl Workspace {
 
         // Dirty — surface a 3-button platform prompt and route the
         // answer back into reload / no-op / diff.
-        let heading = format!(
-            "{}{}{}",
-            crate::surface::strings::PROMPT_WATCHER_HEADING_PREFIX,
-            title,
-            crate::surface::strings::prompt_watcher_heading_suffix(),
-        );
-        let prompt_detail = crate::surface::strings::prompt_watcher_detail();
-        let prompt_use_disk = crate::surface::strings::prompt_watcher_use_disk();
-        let prompt_keep_mine = crate::surface::strings::prompt_watcher_keep_mine();
-        let prompt_diff = crate::surface::strings::prompt_watcher_diff();
+        let heading = crate::surface::strings::task::watcher_heading(&title);
+        let prompt_detail = crate::surface::strings::task::watcher_detail();
+        let prompt_use_disk = crate::surface::strings::task::watcher_use_disk();
+        let prompt_keep_mine = crate::surface::strings::task::watcher_keep_mine();
+        let prompt_diff = crate::surface::strings::task::watcher_diff();
         let receiver = window.prompt(
             gpui::PromptLevel::Warning,
             &heading,
@@ -284,7 +279,7 @@ impl Workspace {
             return;
         };
         if !path.exists() {
-            let report = ErrorReport::new(crate::surface::strings::error_prompt_file_not_found())
+            let report = ErrorReport::new(crate::surface::strings::error::prompt_file_not_found())
                 .severity(ErrorSeverity::Warning)
                 .at(file!(), line!())
                 .with_context("path", redact_home(&path))
@@ -295,7 +290,7 @@ impl Workspace {
         }
         let Some(wt_id) = self.lane_containing(&path) else {
             let report =
-                ErrorReport::new(crate::surface::strings::error_prompt_file_outside_lanes())
+                ErrorReport::new(crate::surface::strings::error::prompt_file_outside_lanes())
                     .severity(ErrorSeverity::Warning)
                     .at(file!(), line!())
                     .with_context("path", redact_home(&path))

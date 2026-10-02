@@ -109,44 +109,44 @@ impl SettingsView {
     fn render_custom_row(&self, kind: CustomRow, cx: &mut gpui::Context<Self>) -> Div {
         match kind {
             CustomRow::CustomColors => config_only_row(
-                s::settings_label_custom_colors(),
-                s::settings_hint_custom_colors(),
+                s::settings::label_custom_colors(),
+                s::settings::hint_custom_colors(),
                 "colors",
                 cx,
             ),
             CustomRow::ProjectShell => self.event_row(
                 "settings-open-project-config",
-                s::settings_label_project_shell(),
+                s::settings::label_project_shell(),
                 if self.project_open {
-                    s::settings_hint_project_shell()
+                    s::settings::hint_project_shell()
                 } else {
-                    s::project_config_no_project()
+                    s::settings::project_config_no_project()
                 },
-                s::settings_button_open_project_config(),
+                s::settings::button_open_project_config(),
                 self.project_open
                     .then_some((|| SettingsEvent::OpenProjectConfig) as fn() -> SettingsEvent),
                 cx,
             ),
             CustomRow::DarudaLink => {
                 let state = if self.orchestrator_enabled {
-                    s::settings_toggle_on()
+                    s::settings::toggle_on()
                 } else {
-                    s::settings_toggle_off()
+                    s::settings::toggle_off()
                 };
                 self.link_row(
                     "settings-daruda-orchestrator-link",
-                    s::settings_daruda_link_label(&state),
-                    s::settings_daruda_link_hint(),
-                    s::settings_daruda_link_button(),
+                    s::settings::daruda_link_label(&state),
+                    s::settings::daruda_link_hint(),
+                    s::settings::daruda_link_button(),
                     BuiltinSection::Orchestrator,
                     cx,
                 )
             }
             CustomRow::RemoteLink => self.link_row(
                 "settings-orchestrator-remote-link",
-                s::settings_nav_remote_control(),
-                s::settings_used_by_remote_hint(),
-                s::settings_used_by_remote_button(),
+                s::settings::nav_remote_control(),
+                s::settings::used_by_remote_hint(),
+                s::settings::used_by_remote_button(),
                 BuiltinSection::RemoteControl,
                 cx,
             ),

@@ -368,17 +368,17 @@ impl Workspace {
     ) {
         let name = super::flow_paths::flow_label(path);
         let (title, body) = match self.check_flow(lane, path, profile, cx) {
-            Ok(issues) if issues.is_empty() => (s::flow_valid_title(), s::flow_valid_body(&name)),
+            Ok(issues) if issues.is_empty() => (s::flow::valid_title(), s::flow::valid_body(&name)),
             Ok(issues) => (
-                s::flow_invalid_title(&name, issues.len()),
+                s::flow::invalid_title(&name, issues.len()),
                 issue_report(&issues),
             ),
             Err(FlowSubmitError::Load(daruda_flow::FlowError::Validate(issues))) => (
-                s::flow_invalid_title(&name, issues.len()),
+                s::flow::invalid_title(&name, issues.len()),
                 issue_report(&issues),
             ),
             Err(FlowSubmitError::Load(daruda_flow::FlowError::Parse(detail))) => {
-                (s::flow_parse_failed_title(), detail)
+                (s::flow::parse_failed_title(), detail)
             }
             // Not about the flow: no lane, a remote lane, an unreadable
             // file. The same refusal `Run Flow…` would give.
@@ -387,7 +387,7 @@ impl Workspace {
                 return;
             }
         };
-        super::dialog_helpers::open_alert_dialog(title, body, s::flow_close(), window, cx);
+        super::dialog_helpers::open_alert_dialog(title, body, s::common::btn_close(), window, cx);
     }
 
     // ---- Stage 2: the run ----
@@ -689,49 +689,51 @@ impl Workspace {
 
     fn report_flow_refusal(&mut self, error: FlowSubmitError, cx: &mut Context<Self>) {
         let (message, detail) = match error {
-            FlowSubmitError::NoLane => (s::flow_no_lane(), String::new()),
+            FlowSubmitError::NoLane => (s::flow::no_lane(), String::new()),
             FlowSubmitError::LaneUnresolvable { path } => (
-                s::flow_lane_unresolvable(&path.display().to_string()),
+                s::flow::lane_unresolvable(path.display().to_string()),
                 String::new(),
             ),
-            FlowSubmitError::RemoteLane { agent } => (s::flow_remote_lane(&agent), String::new()),
+            FlowSubmitError::RemoteLane { agent } => (s::flow::remote_lane(&agent), String::new()),
             FlowSubmitError::LockHeld { pid, lock_dir } => (
-                s::flow_lock_held(pid),
+                s::flow::lock_held(pid),
                 lock_dir.map_or_else(String::new, |dir| {
-                    s::flow_lock_held_detail(&dir.join(".lock").display().to_string())
+                    s::flow::lock_held_detail(dir.join(".lock").display().to_string())
                 }),
             ),
             // The reason carries its own already-localized wording — the same
             // one an agent chat pane shows for the identical refusal.
             FlowSubmitError::AgentLaunchRefused { agent, reason } => (
-                s::flow_agent_launch_refused(&agent),
+                s::flow::agent_launch_refused(&agent),
                 match reason {
-                    ConnectCommandError::NoRemotePath => s::agent_chat_no_remote_cwd(),
+                    ConnectCommandError::NoRemotePath => s::agent_chat::no_remote_cwd(),
                     ConnectCommandError::JsonStdioRemote => {
-                        s::agent_chat_json_stdio_remote_unsupported()
+                        s::agent_chat::json_stdio_remote_unsupported()
                     }
-                    ConnectCommandError::JsonStdioEnv => s::agent_chat_json_stdio_env_unsupported(),
+                    ConnectCommandError::JsonStdioEnv => {
+                        s::agent_chat::json_stdio_env_unsupported()
+                    }
                 },
             ),
             FlowSubmitError::UnusableSessionHost { agent, reason } => {
-                (s::flow_session_host_unusable(&agent), reason.localized())
+                (s::flow::session_host_unusable(&agent), reason.localized())
             }
             FlowSubmitError::Read { path, message } => (
-                s::flow_read_failed_title(),
+                s::flow::read_failed_title(),
                 format!("{}: {message}", path.display()),
             ),
             FlowSubmitError::Load(daruda_flow::FlowError::Parse(detail)) => {
-                (s::flow_parse_failed_title(), detail)
+                (s::flow::parse_failed_title(), detail)
             }
             FlowSubmitError::Load(daruda_flow::FlowError::Validate(issues))
             | FlowSubmitError::Invalid(issues) => (
-                s::flow_invalid_title("", issues.len()),
+                s::flow::invalid_title("", issues.len()),
                 issue_report(&issues),
             ),
             // The engine's own words: it is the one that decides what can be
             // continued, and a second wording here would be a second answer
             // to the same question.
-            FlowSubmitError::Resume(e) => (s::flow_resume_refused(), e.to_string()),
+            FlowSubmitError::Resume(e) => (s::flow::resume_refused(), e.to_string()),
         };
         self.report_error(
             ErrorReport::new(message)
@@ -763,7 +765,7 @@ impl Drop for LastWord {
             site: daruda_flow::error::IoSite::Run,
             doing: "running the flow",
             path: std::path::PathBuf::new(),
-            message: s::flow_run_panicked(),
+            message: s::flow::run_panicked(),
         });
         let _ = events.try_send(FlowEvent::RunEnded { end });
     }
@@ -801,9 +803,9 @@ pub(super) fn issue_report(issues: &[daruda_flow::error::ValidationIssue]) -> St
     issues
         .iter()
         .map(|issue| {
-            s::flow_issue_line(
+            s::flow::issue_line(
                 issue.node.as_ref().map(|n| n.as_str()),
-                &s::flow_issue(&issue.kind),
+                &s::flow::issue(&issue.kind),
             )
         })
         .collect::<Vec<_>>()
