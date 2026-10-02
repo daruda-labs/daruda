@@ -20,6 +20,7 @@ pub(in crate::workspace) mod task_cli_ops;
 pub(in crate::workspace) mod task_existing_lane_ops;
 pub(in crate::workspace) mod task_ops;
 pub(in crate::workspace) mod task_picker_modal;
+pub(in crate::workspace) mod task_start;
 pub(in crate::workspace) mod task_workflow_ops;
 pub(in crate::workspace) mod tasks;
 pub(in crate::workspace) mod tools;

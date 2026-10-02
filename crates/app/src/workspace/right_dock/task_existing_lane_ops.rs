@@ -7,11 +7,11 @@
 
 use std::path::Path;
 
-use daruda_store::observability::error_report::{ErrorReport, ErrorSeverity};
 use daruda_store::project::{LaneKind, LaneRef};
 use daruda_store::tasks::{Task, TaskAgentSurface};
 use gpui::{Context, Window};
 
+use super::task_start::{TaskStartError, TaskStarted};
 use crate::workspace::Workspace;
 use crate::workspace::main_area::agent_chat_pane::agent_chat_ops::resolve_open_agent_id;
 use crate::workspace::main_area::pane_tree::PaneId;
@@ -61,28 +61,30 @@ impl Workspace {
         path: &Path,
         window: &mut Window,
         cx: &mut Context<Self>,
-    ) {
+    ) -> Result<TaskStarted, TaskStartError> {
+        let missing = || TaskStartError::LaneMissing {
+            path: path.to_path_buf(),
+        };
         let found = self
             .lane_ref_at(path)
             .and_then(|lane| Some((lane, self.lane_for(lane)?)))
             .filter(|_| path.is_dir())
             .map(|(lane, found)| (lane, found.path.clone(), lane_branch_label(found)));
-        let Some((lane, root, branch)) = found else {
-            self.report_task_lane_missing(path, cx);
-            return;
-        };
+        let (lane, root, branch) = found.ok_or_else(missing)?;
         self.activate_lane(lane, window, cx);
         if self.active_lane_is_inaccessible() {
-            self.report_task_lane_missing(path, cx);
-            return;
+            return Err(missing());
         }
         // `None` past the check above is a spawn failure, already reported.
-        let Some(pane_id) =
-            self.open_task_pane_in_active_lane(task.agent_surface, root.clone(), window, cx)
-        else {
-            return;
-        };
-        self.dispatch_claude_for_task(&task.id, &root, &branch, pane_id, window, cx);
+        let pane = self
+            .open_task_pane_in_active_lane(task.agent_surface, root.clone(), window, cx)
+            .ok_or(TaskStartError::PaneUnavailable)?;
+        self.dispatch_claude_for_task(&task.id, &root, &branch, pane, window, cx)?;
+        Ok(TaskStarted {
+            worktree: root,
+            pane,
+            surface: task.agent_surface,
+        })
     }
 
     fn open_task_pane_in_active_lane(
@@ -102,19 +104,6 @@ impl Workspace {
                 Some(pane_id)
             }
         }
-    }
-
-    fn report_task_lane_missing(&mut self, path: &Path, cx: &mut Context<Self>) {
-        let report = ErrorReport::new(crate::surface::strings::error::task_lane_missing())
-            .severity(ErrorSeverity::Error)
-            .at(file!(), line!())
-            .with_context(
-                "path",
-                daruda_store::observability::system_info::redact_home(path),
-            )
-            .dedup("task.start.lane_missing")
-            .build();
-        self.report_error(report, cx);
     }
 }
 

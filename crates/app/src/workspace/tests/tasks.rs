@@ -539,7 +539,7 @@ fn a_task_starts_in_its_own_project_while_another_is_active(cx: &mut TestAppCont
     );
     ws.update(cx, |ws, cx| ws.reconcile_bootstrapped_lanes(cx));
     cx.run_until_parked();
-    let (task_id, expected) = cx
+    let (task_id, expected, rx) = cx
         .update_window(window.into(), |_, window, cx| {
             ws.update(cx, |ws, cx| {
                 let a = &ws.projects[0];
@@ -557,12 +557,18 @@ fn a_task_starts_in_its_own_project_while_another_is_active(cx: &mut TestAppCont
                 cx.update_global::<crate::agent::tasks_global::GlobalTasks, _>(|g, _| {
                     g.add(task);
                 });
-                ws.start_task(&id, window, cx);
-                (id, expected)
+                let rx = ws.begin_task_start(&id, window, cx);
+                assert!(rx.try_recv().is_err(), "git has yet to run");
+                (id, expected, rx)
             })
         })
         .unwrap();
     cx.run_until_parked();
+    let started = rx
+        .try_recv()
+        .expect("answered once git ran")
+        .expect("started");
+    assert_eq!(started.worktree, expected);
     ws.read_with(cx, |_, cx| {
         let task = cx
             .global::<crate::agent::tasks_global::GlobalTasks>()
