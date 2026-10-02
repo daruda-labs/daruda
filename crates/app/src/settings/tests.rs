@@ -13,6 +13,7 @@ mod workspace_page;
 
 use crate::test_support::init_gpui_component;
 use crate::transcript::display_filter::FilterFacet;
+use crate::transcript::editor::range::RangeLevel;
 use crate::transcript::fold_mode::{BlockRule, FoldBlock, FoldMode, FoldPreset, TurnPosition};
 
 /// Construct a Settings window wrapped in `gpui_component::Root` —
@@ -1034,6 +1035,36 @@ fn an_off_list_step_count_gets_its_own_entry(cx: &mut TestAppContext) {
     );
 }
 
+#[gpui::test]
+fn range_editor_edits_and_resets_without_losing_the_other_custom_size(cx: &mut TestAppContext) {
+    let (_, _, config) = hand_tuned_transcript_config();
+    let (wh, win) = build_window_with_config(cx, config);
+    let original = win.read_with(cx, |s, cx| {
+        s.agent_editable_row(0).unwrap().range_values(cx)
+    });
+    wh.update(cx, |_, window, cx| {
+        win.update(cx, |s, cx| {
+            s.set_agent_row_range_size(0, RangeLevel::Calls, 3, window, cx)
+        });
+    })
+    .unwrap();
+    win.read_with(cx, |s, cx| {
+        assert_eq!(
+            s.agent_editable_row(0).unwrap().range_values(cx),
+            [original[0], 3]
+        )
+    });
+    wh.update(cx, |_, window, cx| {
+        win.update(cx, |s, cx| s.reset_agent_row_range(0, window, cx));
+    })
+    .unwrap();
+    win.read_with(cx, |s, cx| {
+        let row = s.agent_editable_row(0).unwrap();
+        assert_eq!(row.tail_window(cx), None);
+        assert_eq!(row.tail_window_calls(cx), None);
+    });
+}
+
 /// Fold and Filter need no such entry: their editors state every value those
 /// keys can hold, so a hand-tuned one loads onto the editor itself.
 #[gpui::test]
@@ -1275,15 +1306,17 @@ fn editing_onto_the_built_in_drops_the_key(cx: &mut TestAppContext) {
     });
 }
 
-/// The turn column is a view switch, not a value: moving it must not make the
-/// row state a key it did not state before.
+/// The editor's disclosures are view switches, not values: opening them must
+/// not make the row state a key it did not state before.
 #[gpui::test]
-fn moving_the_fold_turn_column_writes_nothing(cx: &mut TestAppContext) {
+fn opening_fold_editor_disclosures_writes_nothing(cx: &mut TestAppContext) {
     let (_wh, win) = build_window(cx);
     win.update(cx, |w, cx| {
-        w.set_agent_row_fold_turn(0, TurnPosition::Past, cx);
+        w.toggle_agent_row_fold_history_rules(0, cx);
+        w.toggle_agent_row_fold_tools(0, TurnPosition::Past, cx);
         let row = w.agent_editable_row(0).unwrap();
-        assert_eq!(row.fold_editor.turn(), TurnPosition::Past);
+        assert!(row.fold_editor.history_rules_open());
+        assert!(row.fold_editor.tools_open(TurnPosition::Past));
         assert_eq!(row.fold_mode(), None, "a view switch is not a value");
     });
 }

@@ -2,52 +2,21 @@
 
 use std::rc::Rc;
 
-use gpui::{Anchor, AnyElement, Context, IntoElement, SharedString, prelude::*, px};
+use gpui::{AnyElement, Context, IntoElement, SharedString, prelude::*, px};
 
 use super::axis_chip::axis_chip_label;
 use crate::surface::strings as s;
 use crate::transcript::display_filter::DisplayFilter;
 use crate::transcript::editor::ResetSpec;
 use crate::transcript::editor::filter::{FilterEditorActions, filter_editor, filter_value};
-use crate::transcript::editor::panel_root;
 use crate::ui::theme;
 use crate::ui::theme::PaneSurfaceTokens;
-use crate::ui::{Popover, Selectable as _, button_chip_on_surface};
+use crate::ui::{Selectable as _, button_chip_on_surface};
 use crate::workspace::main_area::agent_chat_pane::fold::FoldKey;
 use crate::workspace::main_area::agent_chat_pane::pane_choice::PaneChoice;
 use crate::workspace::main_area::agent_chat_pane::rows::FilteredAway;
 use crate::workspace::main_area::agent_chat_pane::view::AgentChatView;
 use crate::workspace::main_area::pane_tree::PaneId;
-
-pub(super) fn display_filter_chip(
-    pane_id: PaneId,
-    filter: PaneChoice<DisplayFilter>,
-    default_open: bool,
-    surface: &PaneSurfaceTokens,
-    cx: &mut Context<AgentChatView>,
-) -> impl IntoElement + use<> {
-    let view = cx.entity().downgrade();
-    Popover::new(SharedString::from(format!(
-        "agent-chat-display-filter-popover-{pane_id}"
-    )))
-    .default_open(default_open)
-    .anchor(Anchor::TopRight)
-    .trigger(
-        button_chip_on_surface(
-            ("agent-chat-display-filter", pane_id as usize),
-            SharedString::from(display_filter_chip_label(filter)),
-            surface,
-            cx,
-        )
-        .selected(!filter.is_following())
-        .tooltip(SharedString::from(s::agent_chat_filter_tooltip())),
-    )
-    .content(move |_, window, cx| {
-        panel_root(theme::TRANSCRIPT_EDITOR_PANEL_W, window)
-            .child(filter_panel(&view, filter, pane_id, cx))
-            .into_any_element()
-    })
-}
 
 /// The chip's full text, overridden mark included. Also the filter axis's slot
 /// in the compact bar's tooltip, so the two readings of the same setting
@@ -87,6 +56,7 @@ pub(super) fn filter_panel(
                 }
             }),
             reset: Some(ResetSpec {
+                label: s::agent_chat_use_agent_defaults(),
                 // Offered on a value that already equals the default: what the
                 // button undoes is the *override*, not the value.
                 disabled: choice.is_following(),

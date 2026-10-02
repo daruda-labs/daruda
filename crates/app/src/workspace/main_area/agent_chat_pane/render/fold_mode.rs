@@ -1,55 +1,20 @@
-//! Fold-mode chip, and the popover that opens the shared rule editor on this
+//! Fold-mode summary and the shared rule editor bound to this
 //! pane's own mode.
 
 use std::rc::Rc;
 
-use gpui::{Anchor, AnyElement, Context, IntoElement, SharedString, prelude::*};
+use gpui::{AnyElement, Context};
 
 use super::axis_chip::axis_chip_label;
 use crate::surface::strings as s;
 use crate::transcript::editor::ResetSpec;
 use crate::transcript::editor::fold::{FoldEditorActions, fold_editor, mode_value};
-use crate::transcript::editor::panel_root;
 use crate::transcript::editor::state::FoldEditorState;
 use crate::transcript::fold_mode::FoldMode;
 use crate::ui::theme;
-use crate::ui::theme::PaneSurfaceTokens;
-use crate::ui::{Popover, Selectable as _, button_chip_on_surface};
 use crate::workspace::main_area::agent_chat_pane::pane_choice::PaneChoice;
 use crate::workspace::main_area::agent_chat_pane::view::AgentChatView;
 use crate::workspace::main_area::pane_tree::PaneId;
-
-/// Activity-bar chip for the pane's transcript fold rules.
-pub(super) fn fold_mode_chip(
-    pane_id: PaneId,
-    mode: PaneChoice<FoldMode>,
-    editor_state: FoldEditorState,
-    default_open: bool,
-    surface: &PaneSurfaceTokens,
-    cx: &mut Context<AgentChatView>,
-) -> impl IntoElement + use<> {
-    let view = cx.entity().downgrade();
-    Popover::new(SharedString::from(format!(
-        "agent-chat-fold-mode-popover-{pane_id}"
-    )))
-    .default_open(default_open)
-    .anchor(Anchor::TopRight)
-    .trigger(
-        button_chip_on_surface(
-            ("agent-chat-fold-mode", pane_id as usize),
-            SharedString::from(fold_mode_chip_label(mode)),
-            surface,
-            cx,
-        )
-        .selected(!mode.is_following())
-        .tooltip(SharedString::from(s::agent_chat_fold_mode_tooltip())),
-    )
-    .content(move |_, window, cx| {
-        panel_root(theme::TRANSCRIPT_EDITOR_RULES_PANEL_W, window)
-            .child(fold_mode_panel(&view, mode, editor_state, pane_id, cx))
-            .into_any_element()
-    })
-}
 
 /// The chip's full text, overridden mark included. Also the fold axis's slot
 /// in the compact bar's tooltip, so the two readings of the same setting
@@ -73,7 +38,8 @@ pub(super) fn fold_mode_panel(
 ) -> AnyElement {
     let change_view = view.clone();
     let preset_view = view.clone();
-    let turn_view = view.clone();
+    let history_rules_view = view.clone();
+    let tools_view = view.clone();
     let reset_view = view.clone();
     fold_editor(
         mode_choice.value(),
@@ -91,12 +57,13 @@ pub(super) fn fold_mode_panel(
                     view.update(app, |v, cx| v.select_fold_preset(preset, window, cx));
                 }
             }),
-            on_turn: Rc::new(move |turn, app| {
-                if let Some(view) = turn_view.upgrade() {
-                    view.update(app, |v, cx| v.set_fold_editor_turn(turn, cx));
+            on_history_rules: Rc::new(move |app| {
+                if let Some(view) = history_rules_view.upgrade() {
+                    view.update(app, |v, cx| v.toggle_fold_editor_history_rules(cx));
                 }
             }),
             reset: Some(ResetSpec {
+                label: s::agent_chat_use_agent_defaults(),
                 // Offered on a value that already equals the default: what the
                 // button undoes is the *override*, not the value.
                 disabled: mode_choice.is_following(),
@@ -105,6 +72,11 @@ pub(super) fn fold_mode_panel(
                         view.update(app, |v, cx| v.reset_fold_mode(window, cx));
                     }
                 }),
+            }),
+            on_tools: Rc::new(move |turn, app| {
+                if let Some(view) = tools_view.upgrade() {
+                    view.update(app, |v, cx| v.toggle_fold_editor_tools(turn, cx));
+                }
             }),
         },
         cx,

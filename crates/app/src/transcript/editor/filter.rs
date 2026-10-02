@@ -54,7 +54,9 @@ pub(crate) fn filter_editor(
         "{id_prefix}-filter-facets-scroll"
     )));
     for axis in FilterAxis::ALL {
-        facets = facets.child(panel_heading(axis_label(axis), cx));
+        if axis.parent().is_none() {
+            facets = facets.child(panel_heading(axis_label(axis), cx));
+        }
         let rows = axis
             .rows()
             .into_iter()
@@ -67,8 +69,8 @@ pub(crate) fn filter_editor(
                     .child(
                         div()
                             .ml(px(theme::TRANSCRIPT_EDITOR_NEST_INDENT))
-                            .flex()
-                            .flex_col()
+                            .grid()
+                            .grid_cols(2)
                             .gap(px(theme::GAP_SM))
                             .children(rows),
                     );
@@ -87,7 +89,6 @@ pub(crate) fn filter_editor(
         .child(facets)
         .child(reset_footer(
             SharedString::from(format!("{id_prefix}-filter-reset")),
-            s::agent_chat_filter_reset_default(),
             actions.reset,
         ))
         .into_any_element()
@@ -111,7 +112,7 @@ fn parent_checkbox(
     checkbox(
         SharedString::from(format!("{id_prefix}-filter-{}", parent.token())),
         facet_label(parent),
-        (),
+        0,
     )
     .checked(state == SectionState::On)
     .indeterminate(state == SectionState::Partial)
@@ -128,7 +129,7 @@ fn filter_checkbox(
     checkbox(
         SharedString::from(format!("{id_prefix}-filter-{}", facet.token())),
         facet_label(facet),
-        (),
+        0,
     )
     .checked(current.contains(facet))
     .on_click(move |_, _window, app| on_toggle(facet, app))

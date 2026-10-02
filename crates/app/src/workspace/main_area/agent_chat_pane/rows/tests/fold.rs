@@ -3,6 +3,114 @@
 use super::*;
 
 #[test]
+fn history_policy_hides_previous_answers_but_not_the_completed_latest_answer() {
+    let items = [
+        ChatItem::UserText("first".into()),
+        asst("first answer"),
+        ChatItem::UserText("next".into()),
+        asst("latest answer"),
+    ];
+    let mut fold = FoldState::with_mode(FoldPreset::Auto.mode().with_collapse_history(true));
+    fold.hold_response(Some(1));
+    let hidden = |rows: &[RenderRow], ix| {
+        rows.iter()
+            .find_map(|r| match r.kind {
+                RowKind::ConclusionItem(i) if i == ix => Some(r.hidden),
+                _ => None,
+            })
+            .expect("answer row")
+    };
+    let rows = project_under(&items, &fold);
+    assert!(hidden(&rows, 1), "history policy outranks a send-time hold");
+    assert!(
+        !hidden(&rows, 3),
+        "completion alone does not make an answer historical"
+    );
+    fold.toggle(FoldKey::Response(1), FoldContext::past(false));
+    assert!(
+        !hidden(&project_under(&items, &fold), 1),
+        "manual reveal wins"
+    );
+}
+
+/// A revealed past response answers to the ordinary rules: its answer escapes
+/// the step window the same way it would with the policy off.
+#[test]
+fn a_revealed_past_response_keeps_its_answer_through_the_step_window() {
+    use ToolStatusView::Completed;
+    let items = [
+        ChatItem::UserText("first".into()),
+        asst("first answer"),
+        tool("t1", Completed),
+        perm(true),
+        tool("t2", Completed),
+        perm(true),
+        tool("t3", Completed),
+        ChatItem::UserText("next".into()),
+        asst("latest answer"),
+    ];
+    let answer_hidden = |mode: FoldMode| {
+        let mut fold = FoldState::with_mode(mode);
+        fold.toggle(FoldKey::Response(1), FoldContext::past(false));
+        let rows = project(
+            &items,
+            &fold,
+            false,
+            &LiveSubagentUnits::of(&items),
+            StepWindow::uniform(TailWindow::Last(1)),
+            &DisplayFilter::default(),
+        );
+        rows.iter()
+            .find_map(|r| match r.kind {
+                RowKind::AgentItem(1) | RowKind::ConclusionItem(1) => Some(r.hidden),
+                _ => None,
+            })
+            .expect("answer row")
+    };
+    let ordinary = answer_hidden(FoldPreset::Auto.mode());
+    assert!(!ordinary, "the answer escapes the step window");
+    assert_eq!(
+        answer_hidden(FoldPreset::Auto.mode().with_collapse_history(true)),
+        ordinary
+    );
+}
+
+#[test]
+fn history_policy_keeps_running_work_and_pending_permissions_visible() {
+    let items = [
+        ChatItem::UserText("first".into()),
+        tool("background", ToolStatusView::InProgress),
+        asst("progress"),
+        perm(false),
+        ChatItem::UserText("next".into()),
+        asst("latest answer"),
+    ];
+    let fold = FoldState::with_mode(FoldPreset::Auto.mode().with_collapse_history(true));
+    let rows = project_under(&items, &fold);
+    assert!(rows.iter().any(|r| matches!(
+        r.kind,
+        RowKind::ResponseHeader {
+            run_start: 1,
+            collapsed: false,
+            ..
+        }
+    )));
+    assert!(
+        rows.iter()
+            .any(|r| matches!(r.kind, RowKind::AgentItem(3)) && !r.hidden)
+    );
+    let mut completed = items;
+    if let ChatItem::ToolCall(call) = &mut completed[1] {
+        call.status = ToolStatusView::Completed;
+    }
+    let rows = project_under(&completed, &fold);
+    assert!(
+        rows.iter()
+            .any(|r| matches!(r.kind, RowKind::AgentItem(3)) && !r.hidden)
+    );
+}
+
+#[test]
 fn past_turn_collapses_current_expands() {
     use ToolStatusView::Completed;
     let items = [

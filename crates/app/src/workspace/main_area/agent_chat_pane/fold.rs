@@ -179,12 +179,19 @@ impl FoldState {
         if let Some(expanded) = self.overrides.get(key) {
             return *expanded;
         }
+        if matches!(key, FoldKey::Response(_)) && self.folds_history(ctx) {
+            return false;
+        }
         if matches!(key, FoldKey::Response(run_start) if self.held_response == Some(*run_start)) {
             return true;
         }
         // Chip-owned bulk stays folded until the user reveals it.
         self.rule_for(key, ctx)
             .is_some_and(|rule| rule.is_expanded(ctx.active))
+    }
+
+    pub(super) fn folds_history(&self, ctx: FoldContext) -> bool {
+        self.mode.value().collapse_history() && ctx.position == TurnPosition::Past && !ctx.active
     }
 
     pub(super) fn toggle(&mut self, key: FoldKey, ctx: FoldContext) {

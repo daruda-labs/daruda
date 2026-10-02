@@ -1969,10 +1969,41 @@ fn other_defaults() -> TranscriptDefaults {
     }
 }
 
+#[gpui::test]
+fn range_reset_restores_both_levels_and_resumes_config_inheritance(cx: &mut gpui::TestAppContext) {
+    let window = make_test_view(cx);
+    window
+        .update(cx, |view, _, cx| {
+            view.reseed_transcript_defaults(&other_defaults(), cx);
+            view.set_tail_window(TailLevel::Steps, TailWindow::Last(1), cx);
+            view.set_tail_window(TailLevel::Calls, TailWindow::All, cx);
+            view.fold
+                .set_all([FoldKey::Tail(0), FoldKey::Tool("manual".into())], true);
+            view.reset_tail_window(cx);
+            assert_eq!(view.tail_steps, PaneChoice::Seeded(TailWindow::Last(5)));
+            assert_eq!(view.tail_calls, PaneChoice::Seeded(TailWindow::Last(3)));
+            assert!(
+                !view
+                    .fold
+                    .is_expanded(&FoldKey::Tail(0), FoldContext::past(false))
+            );
+            assert!(
+                view.fold
+                    .is_expanded(&FoldKey::Tool("manual".into()), FoldContext::last(false))
+            );
+            let mut defaults = other_defaults();
+            defaults.tail = StepWindow::default();
+            view.reseed_transcript_defaults(&defaults, cx);
+            assert_eq!(view.tail_steps, PaneChoice::Seeded(TailWindow::All));
+            assert_eq!(view.tail_calls, PaneChoice::Seeded(TailWindow::All));
+        })
+        .expect("view update");
+}
+
 /// The one check that tells `Seeded(x)` from `Chosen(x)`: two levels hold the
 /// same value, and only the one that is *following* moves when config does.
-/// The tail axis offers no return, so a pick here is one-way — which is
-/// exactly why pinning the value already shown has to register as a pick.
+/// Pinning the value already shown has to register as a pick, or the pane
+/// would quietly keep following config.
 #[gpui::test]
 fn a_following_level_takes_the_next_default_but_an_equal_choice_does_not(
     cx: &mut gpui::TestAppContext,

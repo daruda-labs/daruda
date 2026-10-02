@@ -2526,17 +2526,8 @@ pub fn agent_chat_filter_hidden_count(count: usize) -> String {
     rust_i18n::t!("agent_chat.filter_hidden_count", count = count).into_owned()
 }
 
-pub fn agent_chat_filter_tooltip() -> String {
-    rust_i18n::t!("agent_chat.filter_tooltip").into_owned()
-}
-
 pub fn agent_chat_filter_none() -> String {
     rust_i18n::t!("agent_chat.filter_none").into_owned()
-}
-
-/// The filter panel's footer: hand the axis back to the configured default.
-pub fn agent_chat_filter_reset_default() -> String {
-    rust_i18n::t!("agent_chat.filter_reset_default").into_owned()
 }
 
 pub fn agent_chat_filter_axis_kind() -> String {
@@ -2676,10 +2667,6 @@ pub fn agent_chat_fold_mode_chip(value: &str) -> String {
     rust_i18n::t!("agent_chat.fold_mode_chip", value = value).into_owned()
 }
 
-pub fn agent_chat_fold_mode_tooltip() -> String {
-    rust_i18n::t!("agent_chat.fold_mode_tooltip").into_owned()
-}
-
 pub fn agent_chat_fold_mode_auto() -> String {
     rust_i18n::t!("agent_chat.fold_mode_auto").into_owned()
 }
@@ -2696,16 +2683,38 @@ pub fn agent_chat_fold_mode_custom() -> String {
     rust_i18n::t!("agent_chat.fold_mode_custom").into_owned()
 }
 
-pub fn agent_chat_fold_editor_presets() -> String {
-    rust_i18n::t!("agent_chat.fold_editor_presets").into_owned()
+pub fn agent_chat_fold_editor_rules() -> String {
+    rust_i18n::t!("agent_chat.fold_editor_rules").into_owned()
 }
-
-pub fn agent_chat_fold_editor_recent_turn() -> String {
-    rust_i18n::t!("agent_chat.fold_editor_recent_turn").into_owned()
+pub fn agent_chat_fold_editor_during() -> String {
+    rust_i18n::t!("agent_chat.fold_editor_during").into_owned()
 }
-
-pub fn agent_chat_fold_editor_earlier_turns() -> String {
-    rust_i18n::t!("agent_chat.fold_editor_earlier_turns").into_owned()
+pub fn agent_chat_fold_editor_after() -> String {
+    rust_i18n::t!("agent_chat.fold_editor_after").into_owned()
+}
+pub fn agent_chat_fold_editor_mixed() -> String {
+    rust_i18n::t!("agent_chat.fold_editor_mixed").into_owned()
+}
+pub fn agent_chat_fold_editor_history() -> String {
+    rust_i18n::t!("agent_chat.fold_editor_history").into_owned()
+}
+pub fn agent_chat_fold_editor_history_rules() -> String {
+    rust_i18n::t!("agent_chat.fold_editor_history_rules").into_owned()
+}
+pub fn agent_chat_fold_editor_tool_categories() -> String {
+    rust_i18n::t!("agent_chat.fold_editor_tool_categories").into_owned()
+}
+pub fn agent_chat_fold_editor_collapse_history() -> String {
+    rust_i18n::t!("agent_chat.fold_editor_collapse_history").into_owned()
+}
+pub fn agent_chat_use_agent_defaults() -> String {
+    rust_i18n::t!("agent_chat.use_agent_defaults").into_owned()
+}
+pub fn agent_chat_use_built_in() -> String {
+    rust_i18n::t!("agent_chat.use_built_in").into_owned()
+}
+pub fn agent_chat_view_options_label() -> String {
+    rust_i18n::t!("agent_chat.view_options_label").into_owned()
 }
 
 pub fn agent_chat_fold_editor_rule_expanded() -> String {
@@ -2714,15 +2723,6 @@ pub fn agent_chat_fold_editor_rule_expanded() -> String {
 
 pub fn agent_chat_fold_editor_rule_collapsed() -> String {
     rust_i18n::t!("agent_chat.fold_editor_rule_collapsed").into_owned()
-}
-
-pub fn agent_chat_fold_editor_rule_running() -> String {
-    rust_i18n::t!("agent_chat.fold_editor_rule_running").into_owned()
-}
-
-/// The fold panel's footer: hand the axis back to the configured default.
-pub fn agent_chat_fold_editor_reset_default() -> String {
-    rust_i18n::t!("agent_chat.fold_editor_reset_default").into_owned()
 }
 
 pub fn agent_chat_fold_block_response() -> String {
@@ -2770,10 +2770,6 @@ pub fn agent_chat_tail_window_chip(value: &str) -> String {
 /// `tail_window_chip_label`.
 pub fn agent_chat_tail_window_pair(steps: &str, calls: &str) -> String {
     rust_i18n::t!("agent_chat.tail_window_pair", steps = steps, calls = calls).into_owned()
-}
-
-pub fn agent_chat_tail_window_tooltip() -> String {
-    rust_i18n::t!("agent_chat.tail_window_tooltip").into_owned()
 }
 
 /// Heading of the recent-steps panel's step-level group.
@@ -5552,17 +5548,6 @@ pub fn settings_agent_transcript_description() -> String {
 /// Label for an agent catalog row's optional fold-mode override.
 pub fn settings_agent_field_fold_mode() -> String {
     rust_i18n::t!("settings.agent_field_fold_mode").into_owned()
-}
-
-/// Label for an agent catalog row's optional trailing-step-window override —
-/// the step level of the recent-steps axis.
-pub fn settings_agent_field_tail_window() -> String {
-    rust_i18n::t!("settings.agent_field_tail_window").into_owned()
-}
-
-/// Label for the same override one level in: the calls inside a step.
-pub fn settings_agent_field_tail_window_calls() -> String {
-    rust_i18n::t!("settings.agent_field_tail_window_calls").into_owned()
 }
 
 /// Label for an agent catalog row's optional display-filter override.

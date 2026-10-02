@@ -635,8 +635,9 @@ pub(crate) enum ActivityOptionsTab {
 impl ActivityOptionsTab {
     pub(crate) const ALL: [Self; 3] = [Self::Fold, Self::Filter, Self::RecentSteps];
 
-    /// Stable token — element ids and the `--screenshot-scenario` suffix. One
-    /// source, so a capture cannot name a tab the panel spells differently.
+    /// Stable `--screenshot-scenario` suffix. One source, so a capture cannot
+    /// name a tab the parser spells differently.
+    #[cfg(feature = "screenshot")]
     pub(crate) fn token(self) -> &'static str {
         match self {
             Self::Fold => "fold",

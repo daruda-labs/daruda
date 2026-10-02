@@ -194,6 +194,8 @@ impl SettingsView {
             super::super::agent_transcript::editor::fold_mode_control(catalog_index, row, cx);
         let filter_control =
             super::super::agent_transcript::editor::display_filter_control(catalog_index, row, cx);
+        let range_control =
+            super::super::agent_transcript::editor::range_control(catalog_index, row, cx);
         let advanced = row
             .fold
             .advanced
@@ -228,17 +230,10 @@ impl SettingsView {
             )
             .child(field_row(s::settings_agent_field_fold_mode(), fold_control))
             .child(field_row(
-                s::settings_agent_field_tail_window(),
-                crate::ui::select::select(&row.tail_window_select, cx, 0),
-            ))
-            .child(field_row(
-                s::settings_agent_field_tail_window_calls(),
-                crate::ui::select::select(&row.tail_window_calls_select, cx, 0),
-            ))
-            .child(field_row(
                 s::settings_agent_field_display_filter(),
                 filter_control,
             ))
+            .child(field_row(s::agent_chat_recent_steps_label(), range_control))
             .when(
                 row.enabled && self.agent_default_index() != Some(catalog_index),
                 |body| {

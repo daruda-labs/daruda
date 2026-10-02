@@ -123,6 +123,35 @@ Workspace through the production constructor (23 at the time, in
 `window_registry` and `telegram_ops`). Upstream has the same
 `unimplemented!` at the pinned rev.
 
+## `gpui-nested-deferred-reuse.patch`
+
+Applied into `vendor/zed` by `tools/vendor_gpui` as above; the marker
+`The draws are processed in place` is what to look for there.
+
+A backport of upstream zed's fix to `Window::prepaint_deferred_draws`
+(`crates/gpui/src/window.rs`): **deferred draws are processed in place
+instead of being moved out of `next_frame.deferred_draws` for each round.**
+
+`prepaint_index` snapshots that vector's length. At the pinned rev each
+round `mem::take`s the vector and appends the draws back afterwards, so a
+range recorded *during* a round, for a nested deferred draw or a cached
+view inside one, indexes a transient vector. On the next frame
+`reuse_prepaint` slices the rebuilt vector with those indices, grafts the
+wrong draws onto the reused subtree, and the dispatch tree's debug
+assertion panics: `node N was not part of the reused subtree A..B`.
+
+daruda gets there with any dropdown inside a popover inside a cached
+view. The agent-chat View panel is one: its fold rules are dropdown
+menus inside the Activity Bar popover, inside the cached `AgentChatView`.
+A debug build panicked with exactly that message. A release build skips
+the assertion and grafts the wrong draws without saying so.
+
+Guarded by upstream's own `test_nested_deferred_draws_with_reused_views`
+(`crates/gpui/src/elements/deferred.rs`), ported with one change: the
+pinned rev has no `Entity::cached`, so it goes through `AnyView::from`.
+With the `window.rs` hunk reverted it fails with the same message. Drop
+this patch when the pin moves past upstream's fix.
+
 ## `gpui-component-input-state-ime-selection.patch`
 
 Targets the **vendored `crates/gpui_component/src/input/state.rs`**

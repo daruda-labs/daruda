@@ -3,39 +3,46 @@
 
 use crate::transcript::fold_mode::{FoldMode, FoldPreset, TurnPosition};
 
-/// Which turn column the rule rows edit, and the hand-edited matrix the
-/// `Custom` segment re-selects.
+/// Which disclosures are open and the hand-edited matrix `Custom` re-selects.
 ///
 /// Neither is part of the value: a host that persists the mode does not persist
 /// these, and two hosts editing the same agent each keep their own. That is why
 /// the editor reads this rather than deriving it — the matrix `Custom` points
 /// at is a history of *this* editor, not a property of the mode.
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+///
+/// Every disclosure starts closed.
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
 pub(crate) struct FoldEditorState {
-    turn: TurnPosition,
+    history_rules_open: bool,
+    recent_tools_open: bool,
+    past_tools_open: bool,
     custom: Option<FoldMode>,
 }
 
-impl Default for FoldEditorState {
-    /// Opens on the newest turn: that is the one the user is reading.
-    fn default() -> Self {
-        Self {
-            turn: TurnPosition::Last,
-            custom: None,
+impl FoldEditorState {
+    /// Whether the previous-response overrides are shown.
+    pub(crate) fn history_rules_open(self) -> bool {
+        self.history_rules_open
+    }
+
+    pub(crate) fn toggle_history_rules(&mut self) {
+        self.history_rules_open = !self.history_rules_open;
+    }
+
+    /// Whether the per-category tool rows under `turn`'s section are shown.
+    pub(crate) fn tools_open(self, turn: TurnPosition) -> bool {
+        match turn {
+            TurnPosition::Last => self.recent_tools_open,
+            TurnPosition::Past => self.past_tools_open,
         }
     }
-}
 
-impl FoldEditorState {
-    pub(crate) fn turn(self) -> TurnPosition {
-        self.turn
-    }
-
-    /// Returns whether the column actually moved, so a host can skip a repaint.
-    pub(crate) fn set_turn(&mut self, turn: TurnPosition) -> bool {
-        let changed = self.turn != turn;
-        self.turn = turn;
-        changed
+    pub(crate) fn toggle_tools(&mut self, turn: TurnPosition) {
+        let open = match turn {
+            TurnPosition::Last => &mut self.recent_tools_open,
+            TurnPosition::Past => &mut self.past_tools_open,
+        };
+        *open = !*open;
     }
 
     pub(crate) fn custom(self) -> Option<FoldMode> {
@@ -65,14 +72,20 @@ impl FoldEditorState {
         }
     }
 
-    /// The matrix a preset-strip segment applies. `None` is the `Custom`
-    /// segment, which has a target only once something has been hand-edited —
-    /// the strip disables it until then.
-    pub(crate) fn segment_target(self, preset: Option<FoldPreset>) -> Option<FoldMode> {
-        match preset {
-            Some(preset) => Some(preset.mode()),
-            None => self.custom,
-        }
+    /// The matrix a preset-strip segment applies to `current`. `None` is the
+    /// `Custom` segment, which has a target only once something has been
+    /// hand-edited — the strip disables it until then. The history flag is not
+    /// part of the matrix, so the segment keeps the one `current` has.
+    pub(crate) fn segment_target(
+        self,
+        preset: Option<FoldPreset>,
+        current: FoldMode,
+    ) -> Option<FoldMode> {
+        let matrix = match preset {
+            Some(preset) => preset.mode(),
+            None => self.custom?,
+        };
+        Some(matrix.with_collapse_history(current.collapse_history()))
     }
 }
 
@@ -90,17 +103,22 @@ mod tests {
     }
 
     #[test]
-    fn the_editor_opens_on_the_newest_turn() {
-        assert_eq!(FoldEditorState::default().turn(), TurnPosition::Last);
-        assert_eq!(FoldEditorState::default().custom(), None);
+    fn the_editor_opens_with_every_disclosure_closed() {
+        let state = FoldEditorState::default();
+        assert!(!state.history_rules_open());
+        for turn in TurnPosition::ALL {
+            assert!(!state.tools_open(turn), "{turn:?}");
+        }
+        assert_eq!(state.custom(), None);
     }
 
     #[test]
-    fn moving_the_column_reports_only_a_real_move() {
+    fn the_history_rules_disclosure_toggles() {
         let mut state = FoldEditorState::default();
-        assert!(!state.set_turn(TurnPosition::Last));
-        assert!(state.set_turn(TurnPosition::Past));
-        assert_eq!(state.turn(), TurnPosition::Past);
+        state.toggle_history_rules();
+        assert!(state.history_rules_open());
+        state.toggle_history_rules();
+        assert!(!state.history_rules_open());
     }
 
     /// Editing into a matrix, then picking a preset, leaves `Custom` pointing
@@ -159,13 +177,51 @@ mod tests {
     }
 
     #[test]
+    fn a_segment_keeps_the_history_flag_it_finds() {
+        let mut state = FoldEditorState::default();
+        state.remember(FoldPreset::Auto.mode(), matrix());
+        let current = FoldPreset::Auto.mode().with_collapse_history(true);
+        for preset in FoldPreset::ALL {
+            assert_eq!(
+                state.segment_target(Some(preset), current),
+                Some(preset.mode().with_collapse_history(true))
+            );
+        }
+        assert_eq!(
+            state.segment_target(None, current),
+            Some(matrix().with_collapse_history(true))
+        );
+    }
+
+    #[test]
+    fn each_section_opens_its_own_tool_categories() {
+        let mut state = FoldEditorState::default();
+        state.toggle_tools(TurnPosition::Past);
+        assert!(state.tools_open(TurnPosition::Past));
+        assert!(
+            !state.tools_open(TurnPosition::Last),
+            "the other section stays shut"
+        );
+        state.toggle_tools(TurnPosition::Past);
+        assert!(!state.tools_open(TurnPosition::Past));
+    }
+
+    #[test]
     fn a_preset_segment_targets_its_own_matrix_and_custom_targets_the_edit() {
         let mut state = FoldEditorState::default();
+        let current = FoldMode::default();
         for preset in FoldPreset::ALL {
-            assert_eq!(state.segment_target(Some(preset)), Some(preset.mode()));
+            assert_eq!(
+                state.segment_target(Some(preset), current),
+                Some(preset.mode())
+            );
         }
-        assert_eq!(state.segment_target(None), None, "nothing edited yet");
+        assert_eq!(
+            state.segment_target(None, current),
+            None,
+            "nothing edited yet"
+        );
         state.remember(FoldPreset::Auto.mode(), matrix());
-        assert_eq!(state.segment_target(None), Some(matrix()));
+        assert_eq!(state.segment_target(None, current), Some(matrix()));
     }
 }

@@ -1,9 +1,9 @@
-//! The Fold and Filter editors, and the chrome they share.
+//! The Fold, Filter and Range editors, and the chrome they share.
 //!
-//! Both are host-neutral: they take the value, an id namespace, a type size and
+//! All are host-neutral: they take the value, an id namespace, a type size and
 //! a set of callbacks, and know nothing about who is showing them. The chat
 //! pane opens them in its Activity Bar popover to change what one pane shows;
-//! the Settings agent catalog opens the same two to author the defaults a pane
+//! the Settings agent catalog opens the same editors to author the defaults a pane
 //! starts on. Neither can drift from the other, because there is only one.
 
 use std::rc::Rc;
@@ -14,6 +14,7 @@ use crate::ui::theme;
 
 pub(crate) mod filter;
 pub(crate) mod fold;
+pub(crate) mod range;
 pub(crate) mod state;
 
 /// What the reset button runs.
@@ -21,11 +22,12 @@ pub(crate) type ResetPress = Rc<dyn Fn(&mut Window, &mut App)>;
 
 /// The footer button that hands the axis back to what it departed from.
 ///
-/// The wording is the same in both hosts and correct in both: a pane returns to
-/// the agent's stated value, and an agent row returns to the built-in one.
+/// Each host names the source: a pane returns to the agent's stated value,
+/// and an agent row returns to the built-in one.
 /// `disabled` is the host's call — a value that merely *equals* the target can
 /// still be an override worth undoing, so the editor never derives it.
 pub(crate) struct ResetSpec {
+    pub label: String,
     pub disabled: bool,
     pub on_reset: ResetPress,
 }
@@ -36,7 +38,7 @@ pub(crate) struct ResetSpec {
 /// Bar chip, Settings behind an agent row's field.
 ///
 /// Width is capped for the same reason height is, and only that reason: the
-/// fold editor is 430px and the window can be narrower than that leaves room
+/// fold editor is 454px and the window can be narrower than that leaves room
 /// for. It does **not** keep the panel off whatever sits beside it — a popover
 /// in a narrow frame overlaps its neighbours the way a menu does.
 pub(crate) fn panel_root(design_w: f32, window: &Window) -> Div {
@@ -92,17 +94,18 @@ pub(crate) fn panel_heading(label: String, cx: &App) -> impl IntoElement {
         .child(SharedString::from(label))
 }
 
-/// The footer both editors end with, or nothing in a host that offers no
+/// The footer each editor ends with, or nothing in a host that offers no
 /// return.
-pub(crate) fn reset_footer(id: SharedString, label: String, reset: Option<ResetSpec>) -> Div {
+pub(crate) fn reset_footer(id: SharedString, reset: Option<ResetSpec>) -> Div {
     let Some(reset) = reset else {
         return div().flex_none();
     };
     use crate::ui::{ButtonVariants as _, Disableable as _, Sizable as _, button};
     fixed_region().child(
-        button(id, label)
+        button(id, reset.label)
             .ghost()
             .xsmall()
+            .tab_stop(true)
             .disabled(reset.disabled)
             .on_click(move |_, window, app| (reset.on_reset)(window, app)),
     )
@@ -114,10 +117,9 @@ mod tests {
     use crate::ui::theme;
 
     /// Every design size a host actually passes in.
-    const DESIGNS: [f32; 3] = [
+    const DESIGNS: [f32; 2] = [
         theme::TRANSCRIPT_EDITOR_RULES_PANEL_MAX_H,
         theme::TRANSCRIPT_EDITOR_RULES_PANEL_W,
-        theme::TRANSCRIPT_EDITOR_PANEL_W,
     ];
 
     #[test]
@@ -141,7 +143,7 @@ mod tests {
 
     #[test]
     fn a_window_narrower_than_the_fold_editor_shrinks_it() {
-        // The cap only bites below ~538px of window width (430 / 0.8), which is
+        // The cap only bites below ~568px of window width (454 / 0.8), which is
         // a hand-resized window rather than any capture size.
         let capped = cap_to_viewport(theme::TRANSCRIPT_EDITOR_RULES_PANEL_W, 480.0);
         assert!(

@@ -100,17 +100,25 @@ pub(crate) enum BlockRule {
     Collapsed,
     /// Open while the block is still being produced, folded once it settles.
     WhileRunning,
+    /// Closed while producing content, open once the block settles.
+    AfterRunning,
 }
 
 impl BlockRule {
     /// Rules in menu order.
-    pub(crate) const ALL: [BlockRule; 3] = [Self::Expanded, Self::Collapsed, Self::WhileRunning];
+    pub(crate) const ALL: [BlockRule; 4] = [
+        Self::Expanded,
+        Self::Collapsed,
+        Self::WhileRunning,
+        Self::AfterRunning,
+    ];
 
     pub(crate) fn token(self) -> &'static str {
         match self {
             Self::Expanded => "expanded",
             Self::Collapsed => "collapsed",
             Self::WhileRunning => "running",
+            Self::AfterRunning => "settled",
         }
     }
 
@@ -124,9 +132,34 @@ impl BlockRule {
             Self::Expanded => true,
             Self::Collapsed => false,
             Self::WhileRunning => active,
+            Self::AfterRunning => !active,
+        }
+    }
+
+    pub(crate) fn with_expanded(self, active: bool, expanded: bool) -> Self {
+        let during = if active {
+            expanded
+        } else {
+            self.is_expanded(true)
+        };
+        let after = if active {
+            self.is_expanded(false)
+        } else {
+            expanded
+        };
+        match (during, after) {
+            (true, true) => Self::Expanded,
+            (false, false) => Self::Collapsed,
+            (true, false) => Self::WhileRunning,
+            (false, true) => Self::AfterRunning,
         }
     }
 }
+
+/// The history-cleanup tokens. Independent of the preset, so either can follow
+/// the other in a token list.
+const HISTORY_COLLAPSED: &str = "history=collapsed";
+const HISTORY_PRESERVED: &str = "history=preserved";
 
 /// The rule every cell starts on — what the `summary` preset states.
 const fn base_rule(block: FoldBlock) -> BlockRule {
@@ -200,6 +233,8 @@ pub(crate) struct FoldMode {
     /// The `Tool` slot holds its base value and is never read.
     rules: [[BlockRule; FoldBlock::ALL.len()]; TurnPosition::ALL.len()],
     tool_rules: [[BlockRule; ToolCategory::ALL.len()]; TurnPosition::ALL.len()],
+    /// Not part of the matrix: a preset matches with either value.
+    collapse_history: bool,
 }
 
 impl Default for FoldMode {
@@ -214,6 +249,7 @@ impl FoldMode {
             rules: [FoldBlock::ALL.map(base_rule); TurnPosition::ALL.len()],
             tool_rules: [[base_rule(FoldBlock::Tool); ToolCategory::ALL.len()];
                 TurnPosition::ALL.len()],
+            collapse_history: false,
         }
     }
 
@@ -273,9 +309,69 @@ impl FoldMode {
         self
     }
 
-    /// The matching preset, or `None` for a custom matrix.
+    pub(crate) fn collapse_history(self) -> bool {
+        self.collapse_history
+    }
+
+    pub(crate) fn with_collapse_history(mut self, collapse: bool) -> Self {
+        self.collapse_history = collapse;
+        self
+    }
+
+    /// Edit one lifecycle column without overwriting the other, including a
+    /// mixed tool row. Main rules also update matching historical cells.
+    pub(crate) fn with_phase(
+        mut self,
+        turn: TurnPosition,
+        block: FoldBlock,
+        active: bool,
+        expanded: bool,
+    ) -> Self {
+        if block == FoldBlock::Tool {
+            for category in Self::tool_card_categories() {
+                self = self.with_tool_phase(turn, category, active, expanded);
+            }
+        } else {
+            let current = self.rules[turn.index()][block.index()];
+            let next = current.with_expanded(active, expanded);
+            if turn == TurnPosition::Last && self.rule(TurnPosition::Past, block) == Some(current) {
+                self.set(TurnPosition::Past, block, next);
+            }
+            self = self.with_rule(turn, block, next);
+        }
+        self
+    }
+
+    pub(crate) fn with_tool_phase(
+        mut self,
+        turn: TurnPosition,
+        category: ToolCategory,
+        active: bool,
+        expanded: bool,
+    ) -> Self {
+        let current = self.tool_rule(turn, category);
+        let next = current.with_expanded(active, expanded);
+        if turn == TurnPosition::Last && self.tool_rule(TurnPosition::Past, category) == current {
+            self = self.with_tool_rule(TurnPosition::Past, category, next);
+        }
+        self.with_tool_rule(turn, category, next)
+    }
+
+    pub(crate) fn phase(self, turn: TurnPosition, block: FoldBlock, active: bool) -> Option<bool> {
+        if block != FoldBlock::Tool {
+            return self.rule(turn, block).map(|r| r.is_expanded(active));
+        }
+        let mut values =
+            Self::tool_card_categories().map(|c| self.tool_rule(turn, c).is_expanded(active));
+        let first = values.next()?;
+        values.all(|value| value == first).then_some(first)
+    }
+
+    /// The preset whose matrix this is, or `None` for a custom matrix.
     pub(crate) fn preset(self) -> Option<FoldPreset> {
-        FoldPreset::ALL.into_iter().find(|p| p.mode() == self)
+        FoldPreset::ALL
+            .into_iter()
+            .find(|p| p.mode().with_collapse_history(self.collapse_history) == self)
     }
 
     /// Parse tokens left-to-right; a preset replaces the matrix and cell tokens
@@ -286,8 +382,12 @@ impl FoldMode {
         let mut categories = Vec::new();
         for token in tokens {
             if let Some(preset) = FoldPreset::from_token(token) {
-                mode = preset.mode();
+                mode = preset.mode().with_collapse_history(mode.collapse_history);
                 categories.clear();
+            } else if token == HISTORY_COLLAPSED {
+                mode.collapse_history = true;
+            } else if token == HISTORY_PRESERVED {
+                mode.collapse_history = false;
             } else if let Some(cell) = parse_tool_cell(token) {
                 categories.push(cell);
             } else if let Some((turn, block, rule)) = parse_cell(token) {
@@ -302,11 +402,15 @@ impl FoldMode {
 
     /// Serialize as a preset, or as `summary` plus the cells that differ from it.
     pub(crate) fn tokens(self) -> Vec<String> {
-        if let Some(preset) = self.preset() {
-            return vec![preset.token().to_owned()];
+        let preset = self.preset();
+        let mut out = vec![preset.unwrap_or(FoldPreset::Summary).token().to_owned()];
+        if self.collapse_history {
+            out.push(HISTORY_COLLAPSED.to_owned());
+        }
+        if preset.is_some() {
+            return out;
         }
         let base = Self::base();
-        let mut out = vec![FoldPreset::Summary.token().to_owned()];
         for turn in TurnPosition::ALL {
             for block in FoldBlock::ALL {
                 match self.rule(turn, block) {
@@ -361,6 +465,9 @@ fn parse_cell(token: &str) -> Option<(TurnPosition, FoldBlock, BlockRule)> {
         BlockRule::from_token(rule)?,
     ))
 }
+
+#[cfg(test)]
+mod lifecycle_tests;
 
 #[cfg(test)]
 mod tests {

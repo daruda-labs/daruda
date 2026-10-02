@@ -568,7 +568,7 @@ text:          agent-chat size (config `font.agent_chat.size`, default 13px = ui
 Two classes, and the split is by whether the control carries a word:
 
 ```
-chip (carries a value — Fold / Filter / Recent steps)
+chip (opens the shared View panel)
   background:    transparent
   border:        1px pane-control-edge    ← always on, at rest; ≥3:1
   border-radius: sm (4px)
@@ -577,7 +577,7 @@ chip (carries a value — Fold / Filter / Recent steps)
   text:          agent-chat size, pane-fg-muted
 
   hover:     background pane-tint
-  selected:  background pane-active-tint   (axis no longer follows the default)
+  selected:  background pane-active-tint   (popover is open)
   disabled:  no chip is ever disabled
 
 icon button (carries a glyph — expand all / collapse all / reading width / view options)
@@ -604,20 +604,14 @@ icon button (carries a glyph — expand all / collapse all / reading width / vie
   equal what config states — which it must, because a settings edit will no
   longer move it. Value comparison would call that pane untouched and quietly
   lie about it.
-- **A `Chosen` axis appends a `•` to its chip label.** The dot is the reliable
-  mark: it costs no reading, restates no value, and carries the same vocabulary
-  as StatusBar's project-config dot. It is also what the gear's tooltip inherits
-  when the bar collapses.
-- **Selected means the same thing as the dot — or "my popover is open".** The
-  two share one fill, because the vendored `Popover` forces `selected` on its
-  trigger while open (`popover.rs`, `selected || is_open`). So an untouched
-  `Fold: Auto` marks itself while its panel is up and unmarks on close.
-  Harmless in practice — the panel you are looking at states the value — but it
-  is why the dot, not the fill, is the signal that survives an open popover.
-  The Recent-steps chip is the odd one out: it opens a menu, not a popover, so
-  it never marks itself for being open.
-- Chip copy is `Label: Value`. The label is constant and the value is the state;
-  keeping both means a chip still reads on its own, out of the row.
+- **A pin marks a pane-specific choice.** It appears beside the View icon when
+  any axis is `Chosen`, independently of whether the popover is open. The
+  tooltip summarizes all three axes, with a `•` beside each overridden axis.
+- **Selected means the popover is open.** Its fill and the override pin answer
+  different questions; closing the panel clears only the fill.
+- The wide trigger is `Settings2 + View + chevron`; the narrow trigger keeps
+  the icon and override pin. Expand all, collapse all and reading width remain
+  separate commands.
 
 **Activity Bar — responsive behaviour**
 
@@ -626,37 +620,23 @@ transcript list, so an empty conversation lands in the same layout as a full
 one):
 
 Both parts are *text* widths, so the threshold scales with
-`font.agent_chat.size`; 596px is its value at the 13px default. Widths below are
+`font.agent_chat.size`; 396px is its value at the 13px default. Widths below are
 quoted at that size.
 
 | Pane width | Right zone | Where the values are |
 |------------|-----------|----------------------|
-| > 596px | three chips + three icon buttons | in the chip labels |
-| ≤ 596px | one `View options` gear + three icon buttons | in the gear's tooltip, each with its own `•` when overridden; the gear is `selected` when any axis is off its default (and, like the chips, while its popover is open) |
+| > 396px | labeled View button + three icon buttons | in the View tooltip and panel |
+| ≤ 396px | icon-only View button + three icon buttons | in the same tooltip and panel |
 
-596px is **derived, not chosen**: `title floor (180) + control cluster (400) +
-2 × md padding (16)`. The cluster budget is what the three chips measure at
-their widest realistic values; the title floor is the point below which the
-title ellipsizes to a few words and stops identifying the session, which is the
-bar's primary job. Move either part and the breakpoint moves with it — a
-hand-set number drifts away from the thing it is supposed to describe. The two
-parts are text measurements, so they are also scaled by
-`font.agent_chat.size / 13` before the comparison: a fixed pixel breakpoint
-reads as derived while silently assuming one font size, and at 20px chrome the
-spelled-out chips would outgrow the budget while the bar stayed wide.
+396px is derived from `title floor (180) + control cluster (200) +
+2 × md padding (16)`. The title and cluster budgets scale with
+`font.agent_chat.size / 13`; padding stays fixed. Narrowing only removes the
+trigger's label, never changes which controls the panel offers.
 
-Collapsing costs the chips their labels, so the gear must repay both of their
-jobs: `selected` for the at-a-glance signal, and a tooltip that spells out all
-three chip labels verbatim, dots included (not just the adjusted ones — a
-reader asking "what is this pane showing me" wants the whole answer, and the
-dots are what say which axis is no longer config's).
+**Options panel (View)**
 
-**Options panel (the Fold and Filter chips, and the gear)**
-
-Two of the three chips open a panel; the **Recent-steps chip opens a dropdown
-menu** of checked items instead, because that axis is a single choice from a
-short list and a menu is the right control for it. Its panel body exists only as
-the combined popover's third tab.
+The single panel has three tabs: Fold, Visible items and Activity range.
+Settings > Agents & Chat uses the same editors for agent defaults.
 
 The panel is app chrome, not pane surface — it floats, so it takes the level-4
 rung and its chrome comes from the shared `Popover`:
@@ -667,18 +647,13 @@ border:        1px hairline, opaque (1.06:1 — see Known Gaps)
 border-radius: sm (4px) — small attached overlays; large floating surfaces
                (dialog, palette, toast) take lg (8px)
 shadow:        yes (level-4 exception)
-width:         240px single-axis · 430px fold-rule editor and combined panel
-max-height:    520px
+width:         454px
+max-height:    640px
 section-heading: agent-chat size, subtle
 row-gap:       xs (4px); nested rows indent 20px
-footer:        Fold and Filter only — one ghost "Reset to default", which
-               hands the axis back to config rather than setting a value.
-               Disabled when the axis is *already following* config, not when
-               its value happens to match: a pane pinned to the default's own
-               value still has an override to undo. Recent steps has no footer
-               because its list can hold the same affordance as a first entry —
-               `Default`, above the window values. Picking `All` there is not
-               the reset; `All` is a value the pane would then be pinned to.
+footer:        Each axis has a reset: "Use agent defaults" in chat,
+               "Use built-in defaults" in Settings. Chat disables reset only
+               while following config, not merely when its value matches.
 ```
 
 The panel body scales with `font.agent_chat.size`, not the UI type ladder, even
@@ -688,25 +663,22 @@ user-set size can leave in either direction.
 
 - **Both dimensions cap at 80% of the window**, so the panel can never grow past
   the frame it opens in. Width is capped as well as height because the editor is
-  430px and daruda's minimum window is not much wider. Overlapping the docks
+  454px and daruda's minimum window is not much wider. Overlapping the docks
   beside the pane is *not* what the cap is for — a popover anchored in a narrow
   pane covers its neighbours the way a context menu does, and that is fine.
-- The combined panel adds a segmented tab strip (`Fold` / `Filter` /
-  `Recent steps`) above the body. The Fold and Filter tabs show exactly what
-  their chips open on a wide bar; the Recent-steps tab is the only place its
-  radio panel appears at all.
-- **The segmented strip keeps the `hairline` frame (1.19:1), not the chip's 3:1
-  control edge.** The 3:1 floor applies where the edge is the *only* thing
-  separating a control from adjacent non-interactive text — the Activity Bar
-  chip's case. Inside the strip the ≥4.5:1 label and the accent-filled selected
-  segment identify both the control and its state, so the frame is refinement.
-  The old accent outline cleared 3:1 as an edge, but only by spending accent as
-  a 3.45:1 label on every unselected segment — under the 4.5 floor — across up
-  to 36 elements at once.
-- **A filter with nothing checked is the unfiltered state**, not a selection of
-  nothing: the chip reads `All`, "Show everything" greys out, and clearing the
-  last box restores the whole transcript. A pane showing only prompts and
-  permissions is not a state worth being able to reach.
+- Fold rules use independent **In progress / After completion** columns. Each
+  cell offers Expanded or Collapsed, covering all four lifecycle combinations.
+  Tool categories and previous-response overrides sit behind disclosures.
+- **Previous response cleanup is separate from lifecycle rules.** Its checkbox
+  collapses completed historical responses, including their final answers,
+  after a new request. It defaults off; explicit per-block expansion and
+  permission prompts remain respected. Ordinary folding keeps the final answer.
+- Visible items uses hierarchical checkboxes, with two columns for nested
+  facets and a tri-state parent. All unchecked means all optional items hidden;
+  prompts and permission requests remain available.
+- Activity range offers `All / 1 / 3 / 5 / 10` for response steps and tool calls.
+  An existing custom size receives its own selected choice. Picking `All` pins
+  that value; the footer returns both levels to their default source.
 
 **Disclosure rows inside the transcript**
 

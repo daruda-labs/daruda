@@ -1,4 +1,4 @@
-//! The Fold and Filter controls on an agent catalog row: a button showing the
+//! The Fold, Filter and Range controls on an agent catalog row: a button showing the
 //! current value, opening the same editor the chat pane opens.
 //!
 //! What differs from the pane is only what the axis departs from. A pane resets
@@ -13,6 +13,7 @@ use gpui::{Anchor, AnyElement, IntoElement, SharedString, prelude::*};
 use crate::surface::strings as s;
 use crate::transcript::editor::filter::{FilterEditorActions, filter_editor, filter_value};
 use crate::transcript::editor::fold::{FoldEditorActions, fold_editor, mode_value};
+use crate::transcript::editor::range::{range_editor, value_label};
 use crate::transcript::editor::{ResetSpec, panel_root};
 use crate::ui::theme;
 use crate::ui::{Popover, button};
@@ -25,6 +26,8 @@ use super::super::super::{AgentCatalogRow, SettingsView};
 fn field_trigger(id: String, label: String) -> crate::ui::Button {
     button(SharedString::from(id), SharedString::from(label))
         .outline()
+        .tab_stop(true)
+        .dropdown_caret(true)
         .w_full()
         .justify_start()
 }
@@ -81,7 +84,8 @@ fn fold_panel(
 ) -> AnyElement {
     let change = settings.clone();
     let preset = settings.clone();
-    let turn = settings.clone();
+    let history_rules = settings.clone();
+    let tools = settings.clone();
     let reset = settings.clone();
     fold_editor(
         mode,
@@ -103,12 +107,22 @@ fn fold_panel(
                     });
                 }
             }),
-            on_turn: Rc::new(move |t, app| {
-                if let Some(w) = turn.upgrade() {
-                    w.update(app, |w, cx| w.set_agent_row_fold_turn(catalog_index, t, cx));
+            on_history_rules: Rc::new(move |app| {
+                if let Some(w) = history_rules.upgrade() {
+                    w.update(app, |w, cx| {
+                        w.toggle_agent_row_fold_history_rules(catalog_index, cx)
+                    });
+                }
+            }),
+            on_tools: Rc::new(move |turn, app| {
+                if let Some(w) = tools.upgrade() {
+                    w.update(app, |w, cx| {
+                        w.toggle_agent_row_fold_tools(catalog_index, turn, cx)
+                    });
                 }
             }),
             reset: Some(ResetSpec {
+                label: s::agent_chat_use_built_in(),
                 // What the button undoes is the written key, so a row that
                 // writes none has nothing to hand back.
                 disabled: !overridden,
@@ -141,8 +155,59 @@ pub(in crate::settings) fn display_filter_control(
     ))
     .content(move |_, window, cx| {
         let w = window_entity.clone();
-        panel_root(theme::TRANSCRIPT_EDITOR_PANEL_W, window)
+        panel_root(theme::TRANSCRIPT_EDITOR_RULES_PANEL_W, window)
             .child(filter_panel(&w, catalog_index, filter, overridden, cx))
+            .into_any_element()
+    })
+}
+
+pub(in crate::settings) fn range_control(
+    catalog_index: usize,
+    row: &AgentCatalogRow,
+    cx: &mut gpui::Context<SettingsView>,
+) -> impl IntoElement + use<> {
+    let settings = cx.entity().downgrade();
+    let values = row.range_values(cx);
+    let overridden = row.tail_window(cx).is_some() || row.tail_window_calls(cx).is_some();
+    Popover::new(SharedString::from(format!(
+        "settings-agent-range-{catalog_index}"
+    )))
+    .anchor(Anchor::TopLeft)
+    .trigger(field_trigger(
+        format!("settings-agent-range-trigger-{catalog_index}"),
+        row_value_label(
+            s::agent_chat_tail_window_pair(&value_label(values[0]), &value_label(values[1])),
+            overridden,
+        ),
+    ))
+    .content(move |_, window, cx| {
+        let change = settings.clone();
+        let reset = settings.clone();
+        panel_root(theme::TRANSCRIPT_EDITOR_RULES_PANEL_W, window)
+            .child(range_editor(
+                &format!("settings-agent-{catalog_index}"),
+                values,
+                theme::MODAL_BODY_FONT_SIZE,
+                Rc::new(move |level, size, window, app| {
+                    if let Some(settings) = change.upgrade() {
+                        settings.update(app, |s, cx| {
+                            s.set_agent_row_range_size(catalog_index, level, size, window, cx)
+                        });
+                    }
+                }),
+                Some(ResetSpec {
+                    label: s::agent_chat_use_built_in(),
+                    disabled: !overridden,
+                    on_reset: Rc::new(move |window, app| {
+                        if let Some(settings) = reset.upgrade() {
+                            settings.update(app, |s, cx| {
+                                s.reset_agent_row_range(catalog_index, window, cx)
+                            });
+                        }
+                    }),
+                }),
+                cx,
+            ))
             .into_any_element()
     })
 }
@@ -177,6 +242,7 @@ fn filter_panel(
                 }
             }),
             reset: Some(ResetSpec {
+                label: s::agent_chat_use_built_in(),
                 disabled: !overridden,
                 on_reset: Rc::new(move |_window, app| {
                     if let Some(w) = reset.upgrade() {

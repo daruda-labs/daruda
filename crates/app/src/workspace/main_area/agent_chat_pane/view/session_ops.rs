@@ -571,11 +571,7 @@ impl AgentChatView {
         }
     }
 
-    /// Pin one level's window. One-way, unlike the fold and filter axes: this
-    /// axis's list states the effective window rather than whether the level
-    /// follows config, so it has no entry to hand the level back with. A level
-    /// the user never picks still tracks config through
-    /// [`Self::reseed_transcript_defaults`].
+    /// Pin one level's window, independently of the other level.
     pub(in crate::workspace) fn set_tail_window(
         &mut self,
         level: TailLevel,
@@ -615,6 +611,25 @@ impl AgentChatView {
         self.persist_pane_prefs(cx);
     }
 
+    pub(in crate::workspace) fn reset_tail_window(&mut self, cx: &mut Context<Self>) {
+        self.tail_steps = PaneChoice::Seeded(self.defaults.tail.steps);
+        self.tail_calls = PaneChoice::Seeded(self.defaults.tail.calls);
+        for level in TailLevel::ALL {
+            self.fold.clear_tail_reveals(level);
+        }
+        self.reproject(cx);
+        self.persist_pane_prefs(cx);
+    }
+
+    pub(in crate::workspace) fn toggle_fold_editor_tools(
+        &mut self,
+        turn: TurnPosition,
+        cx: &mut Context<Self>,
+    ) {
+        self.fold_editor.toggle_tools(turn);
+        cx.notify();
+    }
+
     /// Rebuild the embeds a fold-*mode* move put on (or took off) the screen.
     ///
     /// A mode carries the derived default for every card at once, so unlike
@@ -644,7 +659,7 @@ impl AgentChatView {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let Some(mode) = self.fold_editor.segment_target(preset) else {
+        let Some(mode) = self.fold_editor.segment_target(preset, self.fold.mode()) else {
             return;
         };
         self.set_fold_mode(mode, window, cx);
@@ -693,14 +708,12 @@ impl AgentChatView {
             .is_some_and(|w| f32::from(w) <= crate::ui::theme::agent_chat_compact_options_w(cx))
     }
 
-    pub(in crate::workspace) fn set_fold_editor_turn(
+    pub(in crate::workspace) fn toggle_fold_editor_history_rules(
         &mut self,
-        turn: TurnPosition,
         cx: &mut Context<Self>,
     ) {
-        if self.fold_editor.set_turn(turn) {
-            cx.notify();
-        }
+        self.fold_editor.toggle_history_rules();
+        cx.notify();
     }
 
     pub(in crate::workspace) fn set_activity_options_tab(

@@ -618,18 +618,8 @@ pub fn agent_chat_embed_row_height(cx: &App) -> f32 {
         .max(1.0)
 }
 
-/// Pane width at or below which the Activity Bar's three transcript chips
-/// collapse into one view-options gear.
-///
-/// The two parts are text widths measured at
-/// [`AGENT_CHAT_MSG_FONT_SIZE`](p::AGENT_CHAT_MSG_FONT_SIZE), and the pane's
-/// size is user-configurable (`font.agent_chat.size`, clamped 6-72), so the
-/// threshold has to scale with it. A fixed breakpoint reads as derived while
-/// silently assuming one font: at 20px the spelled-out chips outgrow the budget,
-/// the bar stays wide, and the cluster ellipsizes them instead of collapsing —
-/// exactly the state the split exists to avoid.
-///
-/// Padding is a fixed metric and does not scale.
+/// Pane width at or below which the View button omits its label.
+/// Text-derived widths scale with the configurable pane font; padding stays fixed.
 pub fn agent_chat_compact_options_w(cx: &App) -> f32 {
     let scale = agent_chat_font_size(cx) / p::AGENT_CHAT_MSG_FONT_SIZE;
     (p::AGENT_CHAT_TITLE_MIN_W + p::AGENT_CHAT_OPTIONS_CLUSTER_W) * scale

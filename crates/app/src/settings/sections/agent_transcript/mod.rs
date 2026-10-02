@@ -1,4 +1,4 @@
-//! What a catalog row's Fold / Recent steps / Filter controls hold, and what
+//! What a catalog row's Fold / Filter / Range controls hold, and what
 //! each writes back into `[[agents]]`.
 //!
 //! This row is the default — there is no layer under it but the built-in value.
@@ -6,16 +6,11 @@
 //! writes nothing back: an unwritten key and a key stating the built-in value
 //! resolve alike, and the shorter of the two keeps the file clean.
 //!
-//! Fold and Filter carry the same editors the chat pane opens (see
+//! All three carry the same editors the chat pane opens (see
 //! [`crate::transcript::editor`]), so every value those keys can hold is one
 //! the row can state and edit — including a matrix with `"<turn>.<block>=<rule>"`
-//! cell overrides or a partial facet set. Recent steps is two dropdowns, one
-//! per level of that axis (`tail_window` for a response's steps,
-//! `tail_window_calls` for the calls inside one), and still the one axis that
-//! can load a size it cannot offer: a hand-written `tail_window = 12` gets its
-//! own selected entry and is written back verbatim while that entry stays
-//! picked. Both levels share every helper below, so neither can offer a size
-//! the other refuses.
+//! cell overrides or a partial facet set. Range retains select-backed storage
+//! for both levels, including custom sizes loaded from a hand-written config.
 
 use crate::surface::strings as s;
 use crate::transcript::display_filter::DisplayFilter;
@@ -89,6 +84,12 @@ pub(in crate::settings) fn transcript_row(
 }
 
 impl AgentCatalogRow {
+    pub(in crate::settings) fn range_values(&self, cx: &gpui::App) -> [u8; 2] {
+        [
+            self.tail_window(cx).unwrap_or(TAIL_WINDOW_DEFAULT),
+            self.tail_window_calls(cx).unwrap_or(TAIL_WINDOW_DEFAULT),
+        ]
+    }
     /// The `fold_mode` this row writes, or `None` to write no key at all —
     /// which is what "follow the built-in" means, since an absent key resolves
     /// to exactly that value.
@@ -195,7 +196,10 @@ impl SettingsView {
         let Some(row) = self.agent_editable_row_mut(catalog_index) else {
             return;
         };
-        let Some(target) = row.fold_editor.segment_target(preset) else {
+        let Some(target) = row
+            .fold_editor
+            .segment_target(preset, row.fold_mode_value())
+        else {
             return;
         };
         self.set_agent_row_fold_mode(catalog_index, Some(target), cx);
@@ -217,9 +221,21 @@ impl SettingsView {
         self.set_agent_row_fold_mode(catalog_index, None, cx);
     }
 
-    /// Move the fold editor's turn column. A view switch, not a value, so it
-    /// neither persists nor marks the catalog dirty.
-    pub(in crate::settings) fn set_agent_row_fold_turn(
+    /// Show or hide the fold editor's previous-response overrides. A view
+    /// switch, not a value, so it neither persists nor marks the catalog dirty.
+    pub(in crate::settings) fn toggle_agent_row_fold_history_rules(
+        &mut self,
+        catalog_index: usize,
+        cx: &mut gpui::Context<Self>,
+    ) {
+        let Some(row) = self.agent_editable_row_mut(catalog_index) else {
+            return;
+        };
+        row.fold_editor.toggle_history_rules();
+        cx.notify();
+    }
+
+    pub(in crate::settings) fn toggle_agent_row_fold_tools(
         &mut self,
         catalog_index: usize,
         turn: crate::transcript::fold_mode::TurnPosition,
@@ -228,9 +244,65 @@ impl SettingsView {
         let Some(row) = self.agent_editable_row_mut(catalog_index) else {
             return;
         };
-        if row.fold_editor.set_turn(turn) {
-            cx.notify();
+        row.fold_editor.toggle_tools(turn);
+        cx.notify();
+    }
+
+    pub(in crate::settings) fn set_agent_row_range_size(
+        &mut self,
+        index: usize,
+        level: crate::transcript::editor::range::RangeLevel,
+        size: u8,
+        window: &mut Window,
+        cx: &mut gpui::Context<Self>,
+    ) {
+        let Some(row) = self.agent_editable_row_mut(index) else {
+            return;
+        };
+        let mut values = row.range_values(cx);
+        values[level.index()] = size;
+        self.set_agent_row_range(index, values, window, cx);
+    }
+
+    pub(in crate::settings) fn reset_agent_row_range(
+        &mut self,
+        index: usize,
+        window: &mut Window,
+        cx: &mut gpui::Context<Self>,
+    ) {
+        self.set_agent_row_range(index, [TAIL_WINDOW_DEFAULT; 2], window, cx);
+    }
+
+    fn set_agent_row_range(
+        &mut self,
+        index: usize,
+        values: [u8; 2],
+        window: &mut Window,
+        cx: &mut gpui::Context<Self>,
+    ) {
+        let Some(row) = self.agent_editable_row_mut(index) else {
+            return;
+        };
+        let fields = [
+            row.tail_window_select.clone(),
+            row.tail_window_calls_select.clone(),
+        ];
+        let previous = fields
+            .each_ref()
+            .map(|field| field.read(cx).selected_value().cloned());
+        for (field, value) in fields.iter().zip(values) {
+            let value = SharedString::from(tail_value(value).unwrap_or_else(|| CUSTOM.to_owned()));
+            field.update(cx, |state, cx| state.set_selected_value(&value, window, cx));
         }
+        if !self.persist_agent_catalog(cx) {
+            for (field, value) in fields.iter().zip(previous) {
+                field.update(cx, |state, cx| match value {
+                    Some(value) => state.set_selected_value(&value, window, cx),
+                    None => state.set_selected_index(None, window, cx),
+                });
+            }
+        }
+        cx.notify();
     }
 
     pub(in crate::settings) fn toggle_agent_row_filter_facet(

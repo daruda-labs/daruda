@@ -980,22 +980,15 @@ pub const AGENT_CHAT_SCROLL_BTN_INSET: f32 = 12.0;
 /// Max height (px) of the bottom plan region's expanded checklist before it
 /// scrolls internally, so a long plan can't crowd out the conversation above.
 pub const AGENT_CHAT_PLAN_MAX_H: f32 = 168.0;
-/// Width (px) the Activity Bar's right-hand control cluster needs when the
-/// three transcript chips are spelled out — the widest realistic values
-/// (`Fold: Custom`, `Filter: Reasoning + Replies`, `Recent steps: 20`) plus the
-/// three icon buttons and their gaps, at [`AGENT_CHAT_MSG_FONT_SIZE`].
-///
-/// Text-derived, so it is a width *per unit font size*, not an absolute one:
-/// [`theme::agent_chat_compact_options_w`](crate::ui::theme::agent_chat_compact_options_w)
-/// scales it by the pane's configured size before comparing.
-pub const AGENT_CHAT_OPTIONS_CLUSTER_W: f32 = 400.0;
-/// Width (px) the Activity Bar keeps for the session title before the chips are
+/// Budget for the labelled View trigger, three command icons and their gaps
+/// at [`AGENT_CHAT_MSG_FONT_SIZE`]. Scaled with the pane's configured font.
+pub const AGENT_CHAT_OPTIONS_CLUSTER_W: f32 = 200.0;
+/// Width (px) the Activity Bar keeps for the session title before the label is
 /// worth showing. Below this the title ellipsizes to a few words and stops
 /// identifying the session, which is the bar's primary job. Text-derived and
 /// font-scaled on the same terms as [`AGENT_CHAT_OPTIONS_CLUSTER_W`].
 pub const AGENT_CHAT_TITLE_MIN_W: f32 = 180.0;
-/// Pane width (px) at or below which transcript controls collapse into the
-/// single view-options popover, at the default font size.
+/// Pane width (px) at or below which the View trigger omits its label.
 ///
 /// Derived rather than dialled in: the split is "does the spelled-out cluster
 /// still leave a usable title", so it moves when either part does. A hand-set
@@ -1008,17 +1001,14 @@ pub const AGENT_CHAT_TITLE_MIN_W: f32 = 180.0;
 /// [`AGENT_CHAT_MSG_FONT_SIZE`] and exists so the derivation has one home.
 pub const AGENT_CHAT_COMPACT_OPTIONS_W: f32 =
     AGENT_CHAT_TITLE_MIN_W + AGENT_CHAT_OPTIONS_CLUSTER_W + 2.0 * AGENT_CHAT_PAD_X;
-/// Width (px) of a single-column transcript-editor popover — the display
-/// filter. Read by both hosts that open the editors: the chat pane's Activity
-/// Bar and the Settings agent catalog.
-pub const TRANSCRIPT_EDITOR_PANEL_W: f32 = 240.0;
 /// Width (px) of the fold-rule editor and the combined options popover.
-pub const TRANSCRIPT_EDITOR_RULES_PANEL_W: f32 = 430.0;
+pub const TRANSCRIPT_EDITOR_RULES_PANEL_W: f32 = 454.0;
 /// Max height (px) of the fold-rule editor popover.
-pub const TRANSCRIPT_EDITOR_RULES_PANEL_MAX_H: f32 = 520.0;
+pub const TRANSCRIPT_EDITOR_RULES_PANEL_MAX_H: f32 = 640.0;
+pub const TRANSCRIPT_EDITOR_RULE_COLUMN_W: f32 = 88.0;
 /// Largest fraction of the window a transcript-editor popover may claim, on
 /// either axis. Width is capped as well as height because the fold editor is
-/// 430px and the window can be narrower than that leaves room for — not to keep
+/// 454px and the window can be narrower than that leaves room for — not to keep
 /// the panel off whatever sits beside it, which it does not do and is not meant
 /// to.
 pub const TRANSCRIPT_EDITOR_VIEWPORT_FRACTION: f32 = 0.8;

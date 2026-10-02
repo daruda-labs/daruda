@@ -820,6 +820,16 @@ impl<'items, 'rows> RunProjector<'items, 'rows> {
         if run.is_empty() {
             return;
         }
+        // Only a response the policy actually shut takes its answer with it; a
+        // revealed one answers to the ordinary escape below.
+        let history_fold = response_collapsed
+            && fold.folds_history(fold_context_at(
+                &FoldKey::Response(run.start),
+                run.start,
+                items,
+                boundary,
+                live_units,
+            ));
 
         let tail_key = FoldKey::Tail(run.start);
         let tail_revealed = fold.is_expanded(
@@ -996,7 +1006,7 @@ impl<'items, 'rows> RunProjector<'items, 'rows> {
                 let is_conclusion = last_prose == Some(LastProse::Conclusion(k));
                 let pending_permission =
                     matches!(&items[k], ChatItem::Permission(c) if c.resolved.is_none());
-                let force_visible = is_last_prose || pending_permission;
+                let force_visible = (is_last_prose && !history_fold) || pending_permission;
                 let kind = if is_conclusion && base_indent > 0 {
                     RowKind::ConclusionItem(k)
                 } else {

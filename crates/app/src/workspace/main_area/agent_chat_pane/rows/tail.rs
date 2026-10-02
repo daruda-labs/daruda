@@ -58,14 +58,6 @@ pub(in crate::workspace) enum TailLevel {
 
 impl TailLevel {
     pub(in crate::workspace) const ALL: [Self; 2] = [Self::Steps, Self::Calls];
-
-    /// Element-id and menu-section fragment.
-    pub(in crate::workspace) fn token(self) -> &'static str {
-        match self {
-            Self::Steps => "steps",
-            Self::Calls => "calls",
-        }
-    }
 }
 
 /// Both levels' resolved windows. The projection takes the pair rather than one
@@ -152,9 +144,8 @@ mod tests {
     /// distinct id fragment — the panel, the menu and the element ids are all
     /// built from that list.
     #[test]
-    fn every_level_is_listed_once_with_its_own_token() {
-        let tokens: Vec<_> = TailLevel::ALL.iter().map(|l| l.token()).collect();
-        assert_eq!(tokens, vec!["steps", "calls"]);
+    fn every_level_is_listed_once() {
+        assert_eq!(TailLevel::ALL, [TailLevel::Steps, TailLevel::Calls]);
     }
 
     #[test]

@@ -1,21 +1,15 @@
-//! Tail-window chip, its dropdown menu, and the equivalent panel body.
-//!
-//! Third of the Activity Bar's transcript axes, alongside `fold_mode` and
-//! `filter`: each owns its chip label, its return to the configured default,
-//! and the panel the popover shows for its tab. This one carries a window per
-//! [`TailLevel`], listed from `TailLevel::ALL` on every surface below.
+//! Activity-range tooltip and the shared range editor bound to this pane.
 
+#[cfg(test)]
 use daruda_config::TAIL_WINDOW_CHOICES;
-use gpui::{AnyElement, Context, IntoElement, SharedString, prelude::*, px};
+use gpui::{AnyElement, Context};
+use std::rc::Rc;
 
 use super::axis_chip::axis_chip_label;
 use crate::surface::strings as s;
-use crate::transcript::editor::{panel_heading, scroll_region};
+use crate::transcript::editor::ResetSpec;
+use crate::transcript::editor::range::{RangeLevel, range_editor};
 use crate::ui::theme;
-use crate::ui::theme::PaneSurfaceTokens;
-use crate::ui::{
-    DropdownMenu as _, PopupMenu, PopupMenuItem, Selectable as _, button_chip_on_surface, radio,
-};
 use crate::workspace::main_area::agent_chat_pane::pane_choice::PaneChoice;
 use crate::workspace::main_area::agent_chat_pane::rows::tail::{TailLevel, TailWindow};
 use crate::workspace::main_area::agent_chat_pane::view::AgentChatView;
@@ -29,36 +23,10 @@ pub(in crate::workspace::main_area::agent_chat_pane::render) struct TailChoices 
 }
 
 impl TailChoices {
-    fn get(self, level: TailLevel) -> PaneChoice<TailWindow> {
-        match level {
-            TailLevel::Steps => self.steps,
-            TailLevel::Calls => self.calls,
-        }
-    }
-
     /// Whether the whole axis still follows config — both levels do.
     pub(in crate::workspace::main_area::agent_chat_pane::render) fn is_following(self) -> bool {
         self.steps.is_following() && self.calls.is_following()
     }
-}
-
-/// Activity-bar chip for the tail window.
-pub(super) fn tail_window_chip(
-    pane_id: PaneId,
-    tail: TailChoices,
-    surface: &PaneSurfaceTokens,
-    cx: &mut Context<AgentChatView>,
-) -> impl IntoElement + use<> {
-    let view = cx.entity().downgrade();
-    button_chip_on_surface(
-        ("agent-chat-tail-window", pane_id as usize),
-        SharedString::from(tail_window_chip_label(tail)),
-        surface,
-        cx,
-    )
-    .selected(!tail.is_following())
-    .tooltip(SharedString::from(s::agent_chat_tail_window_tooltip()))
-    .dropdown_menu(move |menu, _window, _cx| build_tail_window_menu(&view, tail, menu))
 }
 
 /// The chip's full text, overridden mark included. Also the tail axis's line in
@@ -86,52 +54,34 @@ pub(super) fn tail_window_panel(
     pane_id: PaneId,
     cx: &mut Context<crate::ui::PopoverState>,
 ) -> AnyElement {
-    // A heading per level, flat in one scrolling band — the shape the filter
-    // panel gives its facet axes. Its siblings head only *sub*-sections, and a
-    // level is exactly that; scrolling matters because two levels' lists
-    // together outgrow the popover where one did not.
-    let mut band = scroll_region(SharedString::from(format!(
-        "agent-chat-tail-levels-{pane_id}"
-    )))
-    .text_size(px(theme::agent_chat_font_size(cx)));
-    for level in TailLevel::ALL {
-        band = band.child(panel_heading(tail_level_heading(level), cx));
-        let shown = current.get(level).value();
-        band = band.children(tail_window_choices().map(|window| {
-            let view = view.clone();
-            radio(
-                SharedString::from(format!(
-                    "agent-chat-tail-option-{}-{}-{pane_id}",
-                    level.token(),
-                    window.size()
-                )),
-                tail_window_value(window),
-                (),
-            )
-            .checked(window == shown)
-            .on_click(move |_, _window, app| {
-                if let Some(view) = view.upgrade() {
-                    view.update(app, |v, cx| v.set_tail_window(level, window, cx));
+    let change = view.clone();
+    let reset = view.clone();
+    range_editor(
+        &format!("agent-chat-{pane_id}"),
+        [current.steps.value().size(), current.calls.value().size()],
+        theme::agent_chat_font_size(cx),
+        Rc::new(move |level, size, _, app| {
+            if let Some(view) = change.upgrade() {
+                let level = match level {
+                    RangeLevel::Steps => TailLevel::Steps,
+                    RangeLevel::Calls => TailLevel::Calls,
+                };
+                view.update(app, |v, cx| {
+                    v.set_tail_window(level, TailWindow::last(size), cx)
+                });
+            }
+        }),
+        Some(ResetSpec {
+            label: s::agent_chat_use_agent_defaults(),
+            disabled: current.is_following(),
+            on_reset: Rc::new(move |_, app| {
+                if let Some(view) = reset.upgrade() {
+                    view.update(app, |v, cx| v.reset_tail_window(cx));
                 }
-            })
-        }));
-    }
-    band.into_any_element()
-}
-
-/// A level's entries in list order — one list behind both the dropdown and the
-/// panel's radio group. Every entry is a window, and the one checked is the
-/// level's effective value: a level that has picked nothing marks the window
-/// config gave it, so the list reads as "what this pane shows".
-fn tail_window_choices() -> impl Iterator<Item = TailWindow> {
-    std::iter::once(TailWindow::All).chain(TAIL_WINDOW_CHOICES.into_iter().map(TailWindow::last))
-}
-
-fn tail_level_heading(level: TailLevel) -> String {
-    match level {
-        TailLevel::Steps => s::agent_chat_tail_level_steps(),
-        TailLevel::Calls => s::agent_chat_tail_level_calls(),
-    }
+            }),
+        }),
+        cx,
+    )
 }
 
 /// The chip's value slot reuses the menu item's own wording, so the chip and
@@ -142,38 +92,6 @@ fn tail_window_value(tail: TailWindow) -> String {
         TailWindow::All => s::agent_chat_tail_window_all(),
         TailWindow::Last(n) => s::agent_chat_tail_window_last(n),
     }
-}
-
-fn build_tail_window_menu(
-    view: &gpui::WeakEntity<AgentChatView>,
-    current: TailChoices,
-    menu: PopupMenu,
-) -> PopupMenu {
-    TailLevel::ALL
-        .into_iter()
-        .enumerate()
-        .fold(menu, |menu, (ix, level)| {
-            // A flat menu with a heading per level rather than two submenus:
-            // every entry stays one click away, which is the whole reason the
-            // chip carries a menu next to the panel that lists the same set.
-            let menu = if ix == 0 { menu } else { menu.separator() };
-            let menu = menu.item(PopupMenuItem::label(SharedString::from(
-                tail_level_heading(level),
-            )));
-            let shown = current.get(level).value();
-            tail_window_choices().fold(menu, |m, window| {
-                let view = view.clone();
-                m.item(
-                    PopupMenuItem::new(SharedString::from(tail_window_value(window)))
-                        .checked(window == shown)
-                        .on_click(move |_, _window, app| {
-                            if let Some(view) = view.upgrade() {
-                                view.update(app, |v, cx| v.set_tail_window(level, window, cx));
-                            }
-                        }),
-                )
-            })
-        })
 }
 
 #[cfg(test)]
@@ -261,66 +179,5 @@ mod tests {
             assert!(!pinned.is_following());
         }
         assert!(following(all).is_following());
-    }
-
-    /// The list states what the pane shows, so the checked entry is the
-    /// effective window whether the level picked it or inherited it from
-    /// config. A pane that has picked nothing must still mark one entry —
-    /// keying the check off `chosen()` left an untouched level blank.
-    #[test]
-    fn the_checked_entry_is_the_effective_window_however_it_got_there() {
-        let checked = |tail: PaneChoice<TailWindow>| {
-            let shown = tail.value();
-            tail_window_choices()
-                .filter(|w| *w == shown)
-                .collect::<Vec<_>>()
-        };
-        for window in [TailWindow::All, TailWindow::last(TAIL_WINDOW_CHOICES[0])] {
-            assert_eq!(checked(PaneChoice::Seeded(window)), vec![window]);
-            assert_eq!(checked(PaneChoice::Chosen(window)), vec![window]);
-        }
-    }
-
-    /// A window config states that the list does not offer has nothing to
-    /// check — a hand-written `tail_window = 12` leaves every entry unmarked
-    /// rather than marking a neighbour.
-    #[test]
-    fn an_off_list_window_marks_nothing() {
-        let shown = TailWindow::Last(12);
-        assert!(!TAIL_WINDOW_CHOICES.contains(&12));
-        assert_eq!(tail_window_choices().filter(|w| *w == shown).count(), 0);
-    }
-
-    /// The dropdown and the panel's radio group are the same control in two
-    /// shapes; a choice reachable from one but not the other is a bug. Both
-    /// iterate every level, so the same holds level by level.
-    #[test]
-    fn the_menu_and_the_panel_offer_the_same_choices() {
-        let choices: Vec<_> = tail_window_choices().collect();
-        assert_eq!(choices.len(), TAIL_WINDOW_CHOICES.len() + 1);
-        assert_eq!(choices[0], TailWindow::All, "the widest window leads");
-        assert!(choices.iter().all(|w| !tail_window_value(*w).is_empty()));
-        // Each level heads its own copy of that list, and the two headings are
-        // distinguishable — a shared heading would leave the flat menu unable
-        // to say which level an entry belongs to.
-        let headings: Vec<_> = TailLevel::ALL
-            .iter()
-            .map(|l| tail_level_heading(*l))
-            .collect();
-        assert_eq!(headings.len(), 2);
-        assert_ne!(headings[0], headings[1]);
-        assert!(headings.iter().all(|h| !h.is_empty()));
-    }
-
-    /// Each level marks its own window, so one level's pick cannot move the
-    /// other's check.
-    #[test]
-    fn each_level_marks_its_own_window() {
-        let split = choices(
-            PaneChoice::Chosen(TailWindow::Last(3)),
-            PaneChoice::Seeded(TailWindow::All),
-        );
-        assert_eq!(split.get(TailLevel::Steps).value(), TailWindow::Last(3));
-        assert_eq!(split.get(TailLevel::Calls).value(), TailWindow::All);
     }
 }

@@ -159,14 +159,13 @@ pub(super) fn render(view: &AgentChatView, cx: &mut Context<AgentChatView>) -> i
     );
     #[cfg(not(feature = "screenshot"))]
     let (filter_popover_open, fold_popover_open, options_popover_open) = (false, false, false);
-    // Screenshot scenarios force the layout that owns the requested popover.
-    let compact_options = match (
-        options_popover_open,
-        filter_popover_open || fold_popover_open,
-    ) {
-        (true, _) => true,
-        (false, true) => false,
-        (false, false) => content.activity_bar_is_compact(cx),
+    let compact_options = content.activity_bar_is_compact(cx);
+    let active_tab = if filter_popover_open {
+        super::view::ActivityOptionsTab::Filter
+    } else if fold_popover_open {
+        super::view::ActivityOptionsTab::Fold
+    } else {
+        content.activity_options_tab
     };
 
     let status_banner = status_banner(
@@ -198,11 +197,9 @@ pub(super) fn render(view: &AgentChatView, cx: &mut Context<AgentChatView>) -> i
             display_filter: content.display_filter,
             fold_mode: content.fold.mode_choice(),
             fold_editor: content.fold_editor,
-            activity_options_tab: content.activity_options_tab,
+            activity_options_tab: active_tab,
             compact_options,
-            filter_popover_open,
-            fold_popover_open,
-            options_popover_open,
+            options_popover_open: options_popover_open || fold_popover_open || filter_popover_open,
             dim,
         },
         cx,

@@ -786,7 +786,11 @@ impl Workspace {
             return;
         };
         view.update(cx, |v, cx| {
-            v.set_fold_mode(FoldPreset::Summary.mode(), window, cx);
+            v.set_fold_mode(
+                FoldPreset::Summary.mode().with_collapse_history(true),
+                window,
+                cx,
+            );
             v.toggle_display_facet(FilterFacet::ToolEdit, cx);
             for level in TailLevel::ALL {
                 v.set_tail_window(level, TailWindow::last(TAIL_WINDOW_CHOICES[0]), cx);

@@ -7,11 +7,8 @@
 //! a glyph and stays bare, because a glyph is already unmistakably a control.
 //! Boxing the glyphs too would add three frames for no information.
 //!
-//! Below [`theme::AGENT_CHAT_COMPACT_OPTIONS_W`] the three chips collapse into
-//! one gear. That loses their labels, so the gear takes over both of their
-//! jobs: it marks itself selected when any axis has been taken off the
-//! configured default, and its tooltip spells out all three chip labels — the
-//! overridden mark included, so the narrowed bar still says *which* axis.
+//! One View trigger owns all three axes. Narrow panes omit its label; the
+//! override pin and full tooltip remain, independently of the open-state fill.
 
 use daruda_acp::UsageView;
 use gpui::{
@@ -31,7 +28,7 @@ use crate::ui::theme;
 use crate::ui::theme::PaneSurfaceTokens;
 use crate::ui::{
     Disableable as _, Icon, IconName, Popover, Selectable as _, Sizable as _,
-    button_bare_on_surface, button_group,
+    button_bare_on_surface, button_chip_on_surface, tab_bar,
 };
 use crate::workspace::main_area::agent_chat_pane::pane_choice::PaneChoice;
 use crate::workspace::main_area::agent_chat_pane::view::{
@@ -42,6 +39,7 @@ use crate::workspace::main_area::pane_tree::PaneId;
 const ICON_EXPAND: &str = "icons/ui/expand.svg";
 const ICON_COMPRESS: &str = "icons/ui/compress.svg";
 const ICON_WIDTH_WIDE: &str = "icons/ui/width-wide.svg";
+const ICON_OVERRIDE: &str = "icons/ui/keep.svg";
 
 /// Pane activity bar: resolved session title on the left, the context-window
 /// meter and the icon controls on the right, with a bottom hairline against the
@@ -64,8 +62,6 @@ pub(in crate::workspace::main_area::agent_chat_pane::render) struct ActivityBarP
     pub fold_editor: FoldEditorState,
     pub activity_options_tab: ActivityOptionsTab,
     pub compact_options: bool,
-    pub filter_popover_open: bool,
-    pub fold_popover_open: bool,
     pub options_popover_open: bool,
     pub dim: f32,
 }
@@ -108,31 +104,7 @@ pub(in crate::workspace::main_area::agent_chat_pane::render) fn activity_bar(
     .tooltip(SharedString::from(s::agent_chat_collapse_all()))
     .disabled(!props.has_items)
     .on_click(cx.listener(move |this, _ev, window, cx| this.set_all_folds(false, window, cx)));
-    let transcript_controls: Vec<AnyElement> = if props.compact_options {
-        vec![view_options_chip(&props, &surface, cx).into_any_element()]
-    } else {
-        vec![
-            super::super::fold_mode::fold_mode_chip(
-                props.pane_id,
-                props.fold_mode,
-                props.fold_editor,
-                props.fold_popover_open,
-                &surface,
-                cx,
-            )
-            .into_any_element(),
-            super::super::filter::display_filter_chip(
-                props.pane_id,
-                props.display_filter,
-                props.filter_popover_open,
-                &surface,
-                cx,
-            )
-            .into_any_element(),
-            super::super::tail_window::tail_window_chip(props.pane_id, props.tail, &surface, cx)
-                .into_any_element(),
-        ]
-    };
+    let transcript_control = view_options_chip(&props, &surface, cx).into_any_element();
     let reading_selected = props.content_width.is_reading();
     let reading_tooltip = if reading_selected {
         s::agent_chat_reading_width_off()
@@ -222,7 +194,7 @@ pub(in crate::workspace::main_area::agent_chat_pane::render) fn activity_bar(
                 .on_mouse_down(gpui::MouseButton::Left, |_, _window, cx| {
                     cx.stop_propagation();
                 })
-                .children(transcript_controls)
+                .child(transcript_control)
                 .child(expand)
                 .child(collapse)
                 .child(reading_width),
@@ -231,10 +203,7 @@ pub(in crate::workspace::main_area::agent_chat_pane::render) fn activity_bar(
 
 /// Whether every transcript axis still follows the configured default.
 ///
-/// The compact bar replaces three labelled chips — each of which carries its
-/// own overridden dot — with one glyph, which by itself cannot say that
-/// anything is set. Marking the gear selected restores that signal, and reads
-/// the same `PaneChoice` the dots do, so wide and narrow agree.
+/// The trigger's pin reads the same `PaneChoice` values as the tooltip marks.
 fn every_axis_follows_config(
     fold: PaneChoice<FoldMode>,
     filter: PaneChoice<DisplayFilter>,
@@ -243,10 +212,7 @@ fn every_axis_follows_config(
     fold.is_following() && filter.is_following() && tail.is_following()
 }
 
-/// The gear's tooltip: the wide bar's three chip labels, verbatim. Always all
-/// three, not just the adjusted ones — a reader checking "what is this pane
-/// showing me" wants the full answer, and a variable-length list would need a
-/// separator the locale has no way to control.
+/// All three axis summaries, including which ones no longer follow config.
 fn options_tooltip(
     fold: PaneChoice<FoldMode>,
     filter: PaneChoice<DisplayFilter>,
@@ -279,11 +245,24 @@ fn view_options_chip(
     .default_open(props.options_popover_open)
     .anchor(Anchor::TopRight)
     .trigger(
-        button_bare_on_surface(("agent-chat-view-options", pane_id as usize), surface, cx)
-            .xsmall()
-            .icon(Icon::new(IconName::Settings2))
-            .selected(adjusted)
-            .tooltip(SharedString::from(tooltip)),
+        (if props.compact_options {
+            button_bare_on_surface(("agent-chat-view-options", pane_id as usize), surface, cx)
+        } else {
+            button_chip_on_surface(
+                ("agent-chat-view-options", pane_id as usize),
+                s::agent_chat_view_options_label(),
+                surface,
+                cx,
+            )
+            .child(Icon::new(IconName::ChevronDown))
+        })
+        .xsmall()
+        .tab_stop(true)
+        .icon(Icon::new(IconName::Settings2))
+        .when(adjusted, |button| {
+            button.child(Icon::empty().path(ICON_OVERRIDE))
+        })
+        .tooltip(SharedString::from(tooltip)),
     )
     .content(move |_, window, cx| {
         activity_options_panel(
@@ -322,7 +301,7 @@ fn activity_options_panel(
         }
     };
     panel_root(theme::TRANSCRIPT_EDITOR_RULES_PANEL_W, window)
-        .child(fixed_region().child(activity_options_tabs(view, active_tab, pane_id, cx)))
+        .child(fixed_region().child(activity_options_tabs(view, active_tab, pane_id)))
         .child(panel)
         .into_any_element()
 }
@@ -331,27 +310,26 @@ fn activity_options_tabs(
     view: &gpui::WeakEntity<AgentChatView>,
     active: ActivityOptionsTab,
     pane_id: PaneId,
-    cx: &gpui::App,
 ) -> impl IntoElement + use<> {
     let view = view.clone();
-    button_group(
-        SharedString::from(format!("agent-chat-view-options-tabs-{pane_id}")),
-        cx,
+    tab_bar(SharedString::from(format!(
+        "agent-chat-view-options-tabs-{pane_id}"
+    )))
+    .selected_index(
+        ActivityOptionsTab::ALL
+            .iter()
+            .position(|tab| *tab == active)
+            .unwrap_or(0),
     )
-    .children(ActivityOptionsTab::ALL.into_iter().map(|tab| {
-        crate::ui::button(
-            SharedString::from(format!("agent-chat-view-options-{}-{pane_id}", tab.token())),
-            activity_options_label(tab),
-        )
-        .selected(tab == active)
-    }))
-    .on_click(move |indices, _window, app| {
-        let Some(&ix) = indices.first() else {
-            return;
-        };
+    .children(
+        ActivityOptionsTab::ALL
+            .into_iter()
+            .map(|tab| crate::ui::tab(SharedString::from(activity_options_label(tab)))),
+    )
+    .on_click(move |ix, _window, app| {
         if let Some(view) = view.upgrade() {
             view.update(app, |v, cx| {
-                v.set_activity_options_tab(ActivityOptionsTab::ALL[ix], cx)
+                v.set_activity_options_tab(ActivityOptionsTab::ALL[*ix], cx)
             });
         }
     })
