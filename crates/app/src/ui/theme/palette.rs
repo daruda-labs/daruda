@@ -2302,6 +2302,9 @@ pub const RIGHT_PANEL_ROW_GAP: f32 = GAP_LG;
 pub const RIGHT_PANEL_SECTION_GAP: f32 = GAP_LG;
 /// Vertical padding inside a single right-panel body row (px).
 pub const RIGHT_PANEL_ROW_PAD_Y: f32 = 3.0;
+/// Widest a Tasks row's project label grows before it truncates, so a long
+/// project name cannot push the title out of the row (px).
+pub const RIGHT_PANEL_TASK_PROJECT_MAX_W: f32 = 96.0;
 /// Font size for the right-panel body rows (px).
 /// Matches `AGENT_CHAT_MSG_FONT_SIZE` so the four right-panel tabs feel
 /// part of the same typographic family as the original chat panel.

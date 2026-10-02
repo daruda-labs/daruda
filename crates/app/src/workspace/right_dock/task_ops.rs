@@ -52,6 +52,11 @@ impl Workspace {
         cx.notify();
     }
 
+    pub(super) fn toggle_task_scope(&mut self, cx: &mut Context<Self>) {
+        self.task_scope = self.task_scope.toggled();
+        cx.notify();
+    }
+
     /// Clear the Tasks tab search input (the in-field `✕` overlay).
     /// Extracted so the View closure can dispatch in one line.
     pub(super) fn clear_task_search(&mut self, window: &mut Window, cx: &mut Context<Self>) {

@@ -382,6 +382,9 @@ pub(in crate::workspace) struct RightDockSnapshot {
     pub task_search_query: String,
     /// Active Tasks-tab filter (Backlog / Running / Done / All).
     pub task_filter: daruda_store::tasks::TaskFilter,
+    /// Whether the Tasks tab lists the active project's tasks or every one.
+    pub task_scope: daruda_store::tasks::TaskScope,
+    pub task_projects: TaskProjects,
     /// Per-session Claude status, keyed by `session_id`. Mirrors the
     /// `ClaudeStatusStore` slice that the Tasks tab needs to render
     /// the `⟳ / ● / ⚠` glyph trailing each row's session-id badge.
@@ -502,6 +505,25 @@ impl RightDockSnapshot {
     }
 }
 
+/// The projects the Tasks tab names: the active one, and what each project
+/// open in this window is called. Taken at snapshot time so a row labels
+/// its project without the renderer reading `Workspace`.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct TaskProjects {
+    pub active: Option<daruda_store::project::ProjectUuid>,
+    pub names: Vec<(daruda_store::project::ProjectUuid, String)>,
+}
+
+impl TaskProjects {
+    /// `None` for a project this window does not have open.
+    pub fn name(&self, uuid: daruda_store::project::ProjectUuid) -> Option<&str> {
+        self.names
+            .iter()
+            .find(|(id, _)| *id == uuid)
+            .map(|(_, name)| name.as_str())
+    }
+}
+
 // ----------------------------------------------------------------
 // Discriminated union stored on Dock
 // ----------------------------------------------------------------
@@ -613,6 +635,8 @@ mod tests {
             task_search_input: Handle(task_search_input),
             task_search_query: String::new(),
             task_filter: daruda_store::tasks::TaskFilter::default(),
+            task_scope: daruda_store::tasks::TaskScope::default(),
+            task_projects: TaskProjects::default(),
             claude_status_per_session: std::collections::HashMap::new(),
             tool_use_failure_counts: std::collections::HashMap::new(),
             now: PerFrame(chrono::Utc::now()),
@@ -703,6 +727,12 @@ mod tests {
             assert!(
                 a.content_differs(&b),
                 "a changed Tasks filter must re-stage the panel"
+            );
+            let mut c = right_fixture(window, cx);
+            c.task_scope = daruda_store::tasks::TaskScope::AllProjects;
+            assert!(
+                a.content_differs(&c),
+                "a changed Tasks scope must re-stage the panel"
             );
             gpui::Empty
         });

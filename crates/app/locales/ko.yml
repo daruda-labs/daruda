@@ -241,6 +241,9 @@ dock:
 # Task panel
 task:
   scope_all: "전체 작업"
+  scope_project: "이 프로젝트"
+  scope_every_project: "모든 프로젝트"
+  project_not_open: "열려 있지 않음"
   filter_all: "전체"
   filter_backlog: "대기"
   filter_running: "실행 중"

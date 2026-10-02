@@ -1,7 +1,9 @@
 //! Tasks tab body — renders the lane-isolated Claude Code agent
 //! task list pulled from `Workspace::tasks`.
 //!
-//! The filter chip cycles `All → Backlog → Running → Done`; `[+ New]`
+//! The scope chip switches between the active project's tasks and every
+//! project's (rows then name their project); the filter chip cycles
+//! `All → Backlog → Running → Done`; `[+ New]`
 //! opens the TaskEdit pane; every state transition + meta action lives
 //! in the per-row status-pill dropdown (see `status_pill.rs`). The
 //! search input substring-filters `title / prompt / notes / branch_name`
@@ -12,7 +14,7 @@ use crate::ui::theme;
 use chrono::{DateTime, Utc};
 use daruda_agent::SessionStatus;
 use daruda_store::tasks::{
-    SessionEndReason, TASK_TOOL_USE_FAILURE_THRESHOLD, Task, TaskFilter, TaskState,
+    SessionEndReason, TASK_TOOL_USE_FAILURE_THRESHOLD, Task, TaskFilter, TaskScope, TaskState,
 };
 use daruda_terminal::ux::strings as ux_strings;
 use gpui::{
@@ -26,13 +28,14 @@ use crate::surface::strings;
 use crate::ui::{Badge, ButtonVariants as _, button};
 
 pub(in crate::workspace) fn render(snap: &RightDockSnapshot, cx: &gpui::App) -> AnyElement {
-    // Pipeline: state filter → search filter → newest-first sort.
+    // Pipeline: scope → state filter → search filter → newest-first sort.
     // The search filter is a no-op when the query is blank, so empty
     // searches still go through `filter_by_state` unchanged.
     let query = snap.task_search_query.trim().to_ascii_lowercase();
     let mut visible: Vec<&Task> = snap
         .tasks
         .filter_by_state(snap.task_filter)
+        .filter(|t| snap.task_scope.matches(t, snap.task_projects.active))
         .filter(|t| query.is_empty() || matches_task(t, &query))
         .collect();
     visible.sort_by_key(|t| std::cmp::Reverse(t.created_at));
@@ -83,10 +86,23 @@ fn matches_task(t: &Task, query_lower: &str) -> bool {
 // Header
 // ---------------------------------------------------------------------------
 
-/// Top row: filter chip on the left, `[+ New]` button on the right.
+/// Top row: scope and filter chips on the left, `[+ New]` on the right.
 fn header_row(snap: &RightDockSnapshot) -> impl IntoElement {
     let ws = snap.workspace.clone();
+    let scope_ws = snap.workspace.clone();
     let new_ws = snap.workspace.clone();
+
+    let scope_label = match snap.task_scope {
+        TaskScope::ActiveProject => strings::task::scope_project(),
+        TaskScope::AllProjects => strings::task::scope_every_project(),
+    };
+    let scope_chip = button("task-scope", scope_label).xsmall().on_click(
+        move |_evt: &ClickEvent, _window, app| {
+            if let Some(w) = scope_ws.upgrade() {
+                w.update(app, |this: &mut Workspace, cx| this.toggle_task_scope(cx));
+            }
+        },
+    );
 
     let filter_label = match snap.task_filter {
         TaskFilter::All => strings::task::filter_all(),
@@ -125,7 +141,15 @@ fn header_row(snap: &RightDockSnapshot) -> impl IntoElement {
         .justify_between()
         .gap(px(theme::RIGHT_PANEL_ROW_GAP))
         .py(px(theme::RIGHT_PANEL_HEADER_PAD_Y))
-        .child(filter_chip)
+        .child(
+            div()
+                .flex()
+                .flex_row()
+                .items_center()
+                .gap(px(theme::RIGHT_PANEL_ROW_GAP))
+                .child(scope_chip)
+                .child(filter_chip),
+        )
         .child(new_btn)
 }
 
@@ -228,6 +252,7 @@ fn task_row(task: &Task, snap: &RightDockSnapshot, cx: &gpui::App) -> impl IntoE
         })
         .child(indicator_cell(&task.state, *snap.now, cx))
         .child(title_cell(&task.title, theme::current(cx)))
+        .children(project_cell(task, snap, cx))
         .children(duration)
         .children(session_badge)
         .children(failures)
@@ -315,6 +340,28 @@ fn pulse_alpha(now: DateTime<Utc>) -> f32 {
     } else {
         min + span * ((phase - 0.5) * 2.0)
     }
+}
+
+/// The task's project, named only when the list spans every project — in
+/// the active-project scope every row would say the same thing.
+fn project_cell(task: &Task, snap: &RightDockSnapshot, cx: &gpui::App) -> Option<AnyElement> {
+    if snap.task_scope != TaskScope::AllProjects {
+        return None;
+    }
+    let name = snap
+        .task_projects
+        .name(task.project)
+        .map(str::to_owned)
+        .unwrap_or_else(strings::task::project_not_open);
+    Some(
+        div()
+            .flex_none()
+            .max_w(px(theme::RIGHT_PANEL_TASK_PROJECT_MAX_W))
+            .truncate()
+            .text_color(theme::current(cx).text_muted)
+            .child(SharedString::from(name))
+            .into_any_element(),
+    )
 }
 
 fn title_cell(title: &str, t: &crate::ui::theme::DarudaTheme) -> impl IntoElement {

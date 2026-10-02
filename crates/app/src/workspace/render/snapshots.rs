@@ -509,6 +509,15 @@ impl Workspace {
             task_search_input: Handle(self.task_search_input.clone()),
             task_search_query: self.task_search_input.read(cx).value().to_string(),
             task_filter: self.task_filter,
+            task_scope: self.task_scope,
+            task_projects: crate::workspace::layout::TaskProjects {
+                active: self.active_project().map(|p| p.uuid),
+                names: self
+                    .projects
+                    .iter()
+                    .map(|p| (p.uuid, p.name.clone()))
+                    .collect(),
+            },
             claude_status_per_session,
             tool_use_failure_counts,
             now: PerFrame(chrono::Utc::now()),

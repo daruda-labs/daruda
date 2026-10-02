@@ -15,7 +15,7 @@ use crate::project::ProjectUuid;
 
 use super::task::{
     AgentType, SCHEMA_VERSION, SessionEndReason, SubTask, Task, TaskAgentSurface, TaskFilter,
-    TaskRunIn, TaskState, TasksState,
+    TaskRunIn, TaskScope, TaskState, TasksState,
 };
 
 fn sample_task() -> Task {
@@ -730,4 +730,16 @@ fn save_creates_data_dir_if_missing() {
     let state = TasksState::default();
     save_tasks_in(&nested, &state).expect("save creates dirs");
     assert!(tasks_path_in(&nested).exists());
+}
+
+#[test]
+fn task_scope_keeps_the_active_projects_tasks_or_every_task() {
+    let task = sample_task();
+    let other = ProjectUuid::new();
+    assert!(TaskScope::ActiveProject.matches(&task, Some(task.project)));
+    assert!(!TaskScope::ActiveProject.matches(&task, Some(other)));
+    assert!(!TaskScope::ActiveProject.matches(&task, None));
+    assert!(TaskScope::AllProjects.matches(&task, Some(other)));
+    assert!(TaskScope::AllProjects.matches(&task, None));
+    assert_eq!(TaskScope::default().toggled(), TaskScope::AllProjects);
 }

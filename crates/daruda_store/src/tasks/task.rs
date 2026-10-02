@@ -358,6 +358,32 @@ impl TasksState {
     }
 }
 
+/// Which projects' tasks the tab lists. Default is the active project's.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum TaskScope {
+    #[default]
+    ActiveProject,
+    AllProjects,
+}
+
+impl TaskScope {
+    /// `active` is `None` when the window has no project open, and then
+    /// no task is the active project's.
+    pub fn matches(self, task: &Task, active: Option<ProjectUuid>) -> bool {
+        match self {
+            Self::ActiveProject => active == Some(task.project),
+            Self::AllProjects => true,
+        }
+    }
+
+    pub fn toggled(self) -> Self {
+        match self {
+            Self::ActiveProject => Self::AllProjects,
+            Self::AllProjects => Self::ActiveProject,
+        }
+    }
+}
+
 /// Filter shown in the tab header. Default is `All` (D-11).
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum TaskFilter {

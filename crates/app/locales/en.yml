@@ -260,6 +260,11 @@ dock:
 task:
   # Filter dropdown labels.
   scope_all: "All tasks"
+  # Scope chip: the active project's tasks, or every project's.
+  scope_project: "This project"
+  scope_every_project: "All projects"
+  # A row's project label when that project is not open in this window.
+  project_not_open: "Not open"
   filter_all: "All"
   filter_backlog: "Backlog"
   filter_running: "Running"
