@@ -4,8 +4,7 @@
 use std::path::Path;
 
 use daruda_project::lane::git::{
-    add_lane, current_branch, delete_branch, has_git, init, list_worktrees, remove_lane,
-    repo_root,
+    add_lane, current_branch, delete_branch, has_git, init, list_worktrees, remove_lane, repo_root,
 };
 
 fn commit_empty(repo: &Path) {
@@ -45,7 +44,12 @@ fn a_lane_worktree_is_created_listed_and_removed() {
 
     remove_lane(&repo, &lane, false).unwrap();
     assert!(!lane.exists());
-    assert!(list_worktrees(&repo).unwrap().iter().all(|w| w.path != lane));
+    assert!(
+        list_worktrees(&repo)
+            .unwrap()
+            .iter()
+            .all(|w| w.path != lane)
+    );
     // A lane already gone is the outcome the caller asked for.
     remove_lane(&repo, &lane, false).unwrap();
     delete_branch(&repo, "feature").unwrap();
