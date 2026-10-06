@@ -39,6 +39,7 @@ daruda_agent = { path = "packages/agent" }
 daruda_config = { path = "packages/config" }
 daruda_core = { path = "packages/core" }
 daruda_flow = { path = "packages/flow" }
+daruda_project = { path = "packages/project" }
 daruda_store = { path = "packages/store" }
 daruda_terminal = { path = "packages/terminal" }
 daruda_update = { path = "packages/update" }

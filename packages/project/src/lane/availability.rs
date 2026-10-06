@@ -7,11 +7,10 @@
 //! UI render the lane as unavailable. Recomputed from the live
 //! filesystem, never serialized.
 //!
-//! GPUI-free: pure `std::fs` plus the [`FileTreeError`] mapping.
+//! GPUI-free: pure `std::fs`. The app maps its file-tree load errors onto
+//! [`LaneAvailability`] where those errors are defined.
 
 use std::path::Path;
-
-use crate::files::tree::FileTreeError;
 
 /// Read-availability of a lane or project root directory.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -28,8 +27,8 @@ pub enum LaneAvailability {
 }
 
 /// Classify a directory by attempting to read it. `read_dir` is the
-/// same probe [`crate::path_ext::PathExt::is_accessible_dir`] uses, so
-/// a `Present` result here means the file-tree scan will succeed.
+/// same probe the app's file-tree scan uses, so a `Present` result here
+/// means that scan will succeed.
 pub fn classify_dir(path: &Path) -> LaneAvailability {
     match path.read_dir() {
         Ok(_) => LaneAvailability::Present,
@@ -52,23 +51,6 @@ fn classify_dir_from_error(e: &std::io::Error) -> LaneAvailability {
         // still exists, so stay `Present` and let the caller surface it
         // as a normal error toast rather than triggering teardown.
         _ => LaneAvailability::Present,
-    }
-}
-
-/// Map a file-tree load failure onto the matching availability so the
-/// load result itself can flip a lane that started `Present`.
-impl From<&FileTreeError> for LaneAvailability {
-    fn from(e: &FileTreeError) -> Self {
-        match e {
-            // Only genuine "gone / unusable" failures flip the lane.
-            FileTreeError::NotFound => LaneAvailability::Missing,
-            FileTreeError::PermissionDenied => LaneAvailability::AccessDenied,
-            FileTreeError::NotADir => LaneAvailability::Missing,
-            // A generic I/O error is transient/unknown — the directory
-            // likely still exists, so stay `Present` and let the caller
-            // surface it as a normal error toast instead of tearing down.
-            FileTreeError::Io(_) => LaneAvailability::Present,
-        }
     }
 }
 
@@ -122,25 +104,5 @@ mod tests {
             classify_dir_from_error(&not_a_dir),
             LaneAvailability::Missing
         );
-    }
-
-    #[test]
-    fn file_tree_error_maps_to_availability() {
-        assert_eq!(
-            LaneAvailability::from(&FileTreeError::NotFound),
-            LaneAvailability::Missing
-        );
-        assert_eq!(
-            LaneAvailability::from(&FileTreeError::PermissionDenied),
-            LaneAvailability::AccessDenied
-        );
-        assert_eq!(
-            LaneAvailability::from(&FileTreeError::NotADir),
-            LaneAvailability::Missing
-        );
-        // Generic I/O is transient — stays Present so a hiccup never
-        // triggers teardown; the caller surfaces it as an error toast.
-        let io = FileTreeError::Io(std::io::Error::other("boom"));
-        assert_eq!(LaneAvailability::from(&io), LaneAvailability::Present);
     }
 }

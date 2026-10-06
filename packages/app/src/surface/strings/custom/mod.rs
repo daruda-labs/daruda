@@ -15,6 +15,7 @@ pub(super) mod mcp;
 pub(super) mod menu;
 pub(super) mod modal;
 pub(super) mod notification;
+pub(super) mod session_host;
 pub(super) mod settings;
 pub(super) mod status;
 pub(super) mod task;

@@ -365,7 +365,9 @@ impl Workspace {
             // below: the pane says why, and nothing connects.
             Some(Err(unusable)) => {
                 if let Some(view) = self.agent_chat_view(pane_id).cloned() {
-                    let message = s::agent_chat::session_host_unusable(unusable.reason.localized());
+                    let message = s::agent_chat::session_host_unusable(
+                        s::session_host::host_error(unusable.reason),
+                    );
                     view.update(cx, |v, cx| {
                         v.set_error(message, daruda_acp::Remedy::Configure, cx);
                     });

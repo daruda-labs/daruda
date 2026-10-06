@@ -10,29 +10,31 @@ config/keybinding wiring.
 app/src/
 ├── (top-level)           # App entry, window/menu lifecycle, PTY, config watcher, slot actions
 ├── agent/                # Agent-side data models — MCP, skills, tasks (GPUI-free cores + Global wrappers) — plus GPUI-free account + ACP launch resolution
-├── project/              # Runtime Project model — `Vec<Lane>` + group/color/tab_order (GPUI-free)
 ├── settings/             # Settings surface — sidebar + one BuiltinSection body; a body-level view a Workspace hosts, not a window
 ├── surface/              # App-shell constants — name, shortcuts, strings, keybinding action map
 ├── title_bar/            # Window chrome — who draws the frame (GPUI-free `policy.rs`), the drag strip, the app-drawn caption controls, the application-menu button
 ├── ui/                   # Reusable widget primitives — gpui_component wrappers + preserved daruda widgets
-├── workspace/            # Workspace entity — projects, tabs, panes, docks
-│   ├── command/          # Command palette + history picker
-│   ├── group_ops.rs      # Group CRUD (add/rename/recolor/collapse/delete + move_project_to_group)
-│   ├── project_ops.rs    # Project CRUD (add/close/delete-on-disk/rename + window_open_policy)
-│   ├── project_palette_ops.rs  # Palette handlers: New Group / Rename Project / Move Project to Group…
-│   ├── layout/           # Dock entities (left/right/bottom), drag/toggle ops, snapshots
-│   ├── left_dock/        # Left-dock views — lanes/"Worktrees" (2-level tree), git changes, files
-│   ├── main_area/        # TabBar + PaneTree runtime
-│   │   ├── bottom_dock/  # Macro grid, terminal input, tab strip
-│   │   ├── file_view_pane/  # File-viewer data + renderers
-│   │   └── task_edit_pane/  # Task-edit inline form + ops
-│   ├── render/           # GPUI render — `impl Render` for Workspace
-│   ├── right_dock/       # Right-dock views — usage, skills, tasks, tools
-│   ├── sync/             # Background pumps — PTY, JSONL, limits, MCP, skills watchers
-│   ├── toast_layer/      # Toast overlay entity rendered above workspace
-│   └── tests/            # Lifecycle + pure-op tests
-└── lane/             # Runtime Worktree model + GPUI-free git CLI wrappers
+└── workspace/            # Workspace entity — projects, tabs, panes, docks
+    ├── command/          # Command palette + history picker
+    ├── group_ops.rs      # Group CRUD (add/rename/recolor/collapse/delete + move_project_to_group)
+    ├── project_ops.rs    # Project CRUD (add/close/delete-on-disk/rename + window_open_policy)
+    ├── project_palette_ops.rs  # Palette handlers: New Group / Rename Project / Move Project to Group…
+    ├── layout/           # Dock entities (left/right/bottom), drag/toggle ops, snapshots
+    ├── left_dock/        # Left-dock views — lanes/"Worktrees" (2-level tree), git changes, files
+    ├── main_area/        # TabBar + PaneTree runtime
+    │   ├── bottom_dock/  # Macro grid, terminal input, tab strip
+    │   ├── file_view_pane/  # File-viewer data + renderers
+    │   └── task_edit_pane/  # Task-edit inline form + ops
+    ├── render/           # GPUI render — `impl Render` for Workspace
+    ├── right_dock/       # Right-dock views — usage, skills, tasks, tools
+    ├── sync/             # Background pumps — PTY, JSONL, limits, MCP, skills watchers
+    ├── toast_layer/      # Toast overlay entity rendered above workspace
+    └── tests/            # Lifecycle + pure-op tests
 ```
+
+`crate::project` and `crate::lane` are re-exports of `daruda_project`
+(`packages/project/`), which owns the runtime Project/Lane model and the
+GPUI-free git CLI wrappers.
 
 ## Top-level (`app/src/*.rs`)
 
@@ -98,14 +100,14 @@ mixed widget types without resetting; reuse the same index pool
 across chip-driven branches so the user lands on the same logical
 slot regardless of which fields are visible.
 
-## `project/`
+## `project/` (`daruda_project::project`)
 
 Runtime [`Project`] — the workspace-visible counterpart to
 `daruda_store::project::SerializedProject`. Owns the project root, its
 non-empty `Vec<Lane>`, the `last_active_lane_id` snap target,
 and visual metadata (color, `tab_order`, `group_id`). GPUI-free. The
-dependency order is `workspace/ → project/ → lane/`; `project/`
-never imports from `workspace/`.
+dependency order is `workspace/ → project/ → lane/`; the package
+cannot import from the app at all.
 
 ## `workspace/`
 
@@ -121,7 +123,7 @@ The Workspace entity and its subsystems.
 - **`sync/`** — Background event pumps: PTY drain (tick), JSONL NDJSON watcher, HTTP usage/limits poll, MCP filesystem watcher, skills filesystem watcher.
 - **`tests/`** — Async `#[gpui::test]` lifecycle tests and sync `#[test]` pure-op tests (layout, branch sanitization, etc.).
 
-## `lane/`
+## `lane/` (`daruda_project::lane`)
 
 **Concept**: "one Claude Code session per `Lane`". A `Lane` is a workspace unit — typically a git worktree (its own directory + HEAD + branch) but a plain non-git directory for repos that aren't initialized. Multiple agents run concurrently in the same window without branch-switching or `target/` cache thrashing. Lanes are permanent until the user clicks ×. Path stays as visible sibling (`<repo>-<branch>`), not hidden. The user-facing label remains "Worktree".
 

@@ -19,13 +19,13 @@ pub mod files;
 mod fuzzy;
 mod globals;
 mod hooks;
-pub mod lane;
+pub use daruda_project::lane;
 pub(crate) mod menus;
 mod orchestrator;
 mod panels_watcher;
 pub(crate) mod path_ext;
 mod platform;
-pub mod project;
+pub use daruda_project::project;
 mod remote_channel;
 #[cfg(feature = "replay")]
 mod replay;

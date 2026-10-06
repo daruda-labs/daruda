@@ -1,0 +1,22 @@
+[package]
+name = "daruda_project"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish = false
+license.workspace = true
+description = "Runtime project and lane model for daruda — worktree/git operations and session-host resolution (GPUI-free)"
+
+[lints]
+workspace = true
+
+[dependencies]
+daruda_config = { workspace = true }
+daruda_core = { workspace = true }
+daruda_store = { workspace = true }
+which = "6"
+
+[dev-dependencies]
+serde_json = "1"
+shell-words = "1"
+tempfile = "3"

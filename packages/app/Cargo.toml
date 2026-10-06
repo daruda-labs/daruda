@@ -56,6 +56,7 @@ daruda_agent = { workspace = true }
 daruda_store = { workspace = true }
 daruda_config = { workspace = true }
 daruda_flow = { workspace = true }
+daruda_project = { workspace = true }
 daruda_terminal = { workspace = true }
 daruda_update = { workspace = true }
 gpui = { workspace = true }

@@ -51,7 +51,7 @@ Run these locally and make them pass before committing:
 cargo fmt --all -- --check
 cargo clippy -p ghostty_vt -p ghostty_vt_sys -p daruda_terminal -p daruda \
   -p daruda_config -p daruda_store -p daruda_agent -p daruda_update \
-  -p daruda_acp -p daruda_core -p daruda_flow -p ferrum_flow \
+  -p daruda_acp -p daruda_core -p daruda_flow -p daruda_project -p ferrum_flow \
   --all-targets -- -D warnings
 ./scripts/lint-inline-literals.sh
 ./scripts/lint-paint-scope.sh
@@ -65,7 +65,7 @@ cargo clippy -p ghostty_vt -p ghostty_vt_sys -p daruda_terminal -p daruda \
 ./scripts/lint-platform-boundary.sh
 cargo test -p ghostty_vt -p ghostty_vt_sys -p daruda_terminal -p daruda \
   -p daruda_config -p daruda_store -p daruda_agent -p daruda_update \
-  -p daruda_acp -p daruda_core -p daruda_flow -p ferrum_flow -p gpui_component
+  -p daruda_acp -p daruda_core -p daruda_flow -p daruda_project -p ferrum_flow -p gpui_component
 ./scripts/lint-no-silent-update.sh
 ./scripts/lint-agent-activity.sh
 ./scripts/lint-daruda-path-literals.sh
@@ -81,7 +81,7 @@ cargo test -p ghostty_vt -p ghostty_vt_sys -p daruda_terminal -p daruda \
 ./scripts/lint-raw-mouse-button.sh --self-test
 ./scripts/lint-comment-length.sh
 RUSTDOCFLAGS="-D warnings" cargo doc --no-deps \
-  -p daruda_flow -p daruda_core -p daruda_update -p ghostty_vt_sys \
+  -p daruda_flow -p daruda_project -p daruda_core -p daruda_update -p ghostty_vt_sys \
   -p ghostty_vt -p daruda_agent
 cargo run -p gen_acp_presets -- --check
 cargo clippy -p daruda --all-features --all-targets -- -D warnings
@@ -167,6 +167,7 @@ daruda/
 │   ├── app/                  # daruda — main app binary (workspace, agent, ui, lane, surface)
 │   ├── acp/                  # daruda_acp — Agent Client Protocol client core (GPUI-free)
 │   ├── flow/                 # daruda_flow — declarative ACP flow engine (GPUI-free)
+│   ├── project/              # daruda_project — runtime Project/Lane model, git/worktree ops (GPUI-free)
 │   ├── core/                 # daruda_core — shared dependency-free utilities + core logic
 │   ├── config/               # daruda_config — config system (live reload)
 │   ├── store/                # daruda_store — persistence + observability (NDJSON log)
@@ -209,7 +210,7 @@ for macOS app and DMG bundles.
 cargo fmt --all -- --check
 cargo clippy -p ghostty_vt -p ghostty_vt_sys -p daruda_terminal -p daruda \
   -p daruda_config -p daruda_store -p daruda_agent -p daruda_update \
-  -p daruda_acp -p daruda_core -p daruda_flow -p ferrum_flow \
+  -p daruda_acp -p daruda_core -p daruda_flow -p daruda_project -p ferrum_flow \
   --all-targets -- -D warnings
 scripts/lint-inline-literals.sh
 scripts/lint-paint-scope.sh
@@ -223,7 +224,7 @@ scripts/lint-landing-no-disk-read.sh
 scripts/lint-platform-boundary.sh
 cargo test -p ghostty_vt -p ghostty_vt_sys -p daruda_terminal -p daruda \
   -p daruda_config -p daruda_store -p daruda_agent -p daruda_update \
-  -p daruda_acp -p daruda_core -p daruda_flow -p ferrum_flow -p gpui_component
+  -p daruda_acp -p daruda_core -p daruda_flow -p daruda_project -p ferrum_flow -p gpui_component
 scripts/lint-no-silent-update.sh
 scripts/lint-agent-activity.sh
 scripts/lint-daruda-path-literals.sh
@@ -239,7 +240,7 @@ scripts/lint-raw-mouse-button.sh
 scripts/lint-raw-mouse-button.sh --self-test
 scripts/lint-comment-length.sh
 RUSTDOCFLAGS="-D warnings" cargo doc --no-deps \
-  -p daruda_flow -p daruda_core -p daruda_update -p ghostty_vt_sys \
+  -p daruda_flow -p daruda_project -p daruda_core -p daruda_update -p ghostty_vt_sys \
   -p ghostty_vt -p daruda_agent
 cargo run -p gen_acp_presets -- --check
 cargo clippy -p daruda --all-features --all-targets -- -D warnings
@@ -258,9 +259,9 @@ What the `Linux` job carries that no lint could is the `#[cfg]` arms the macOS j
 
 Note: the `Lint` job gates fmt, the 9 lint scripts through `lint-platform-boundary.sh`, `lint-env-literals.sh` with its self-test, `lint-no-silent-update.sh`, and `lint-agent-activity.sh`. The platform jobs gate the clippy list above and the package-scoped `cargo test` list above; the `cargo doc` link check runs on macOS.
 
-The doc-link gate covers six crates rather than all of them: clippy does not
+The doc-link gate covers seven crates rather than all of them: clippy does not
 read intra-doc links, so a deleted item leaves a dangling `[`Name`]` in the
-prose that explains the module. These six are clean today; the rest carry a
+prose that explains the module. These seven are clean today; the rest carry a
 backlog and join the list a crate at a time as that is worked off. Measured
 2026-09-18: `daruda_config` 8, `daruda_store` 8, `daruda_terminal` 11,
 `daruda_acp` 16, `daruda` 85 — the app crate is most of what is left. `lint-render-purity.sh`, `lint-daruda-path-literals.sh`, `lint-file-size.sh`, `lint-mark-dirty-direct-call.sh`, `lint-fold-header.sh`, `lint-agent-list-sync.sh`, `lint-declarative-context-menu.sh`, `lint-acp-air-gate.sh`, `lint-raw-mouse-button.sh`, `lint-comment-length.sh`, and `gen_acp_presets -- --check` are local/reviewer checks not yet wired into CI.
@@ -454,6 +455,7 @@ daruda (app)  →  daruda_terminal  →  ghostty_vt  →  ghostty_vt_sys
              →  daruda_agent      →  daruda_store
              →  daruda_acp        →  daruda_core    # GPUI-free ACP client core
              →  daruda_flow       →  daruda_acp, daruda_core
+             →  daruda_project    →  daruda_config, daruda_store, daruda_core  # GPUI-free Project/Lane
              →  daruda_core                         # shared, dependency-free
              →  daruda_update
              →  ferrum_flow                         # vendored flow graph canvas
@@ -599,9 +601,9 @@ Workspace
 | `TaskEditPane` | `PaneContent::TaskEditPane` | `workspace/main_area/pane.rs` |
 | `ToastLayout` | `toast_layer: Entity<ToastLayer>` | `workspace/toast_layer/mod.rs` |
 | `SettingsView` | `settings: Option<SettingsHost>` — `Some` *is* settings mode | `app/src/settings/`, opened/closed in `workspace/settings_ops.rs` |
-| Project (runtime) | `crate::project::Project` | `packages/app/src/project/mod.rs` |
+| Project (runtime) | `crate::project::Project` (re-export of `daruda_project::project`) | `packages/project/src/project/mod.rs` |
 | Group (runtime) | `daruda_store::project::SerializedGroup` (used directly — no separate runtime newtype) | `packages/store/src/project/` + `workspace/group_ops.rs` |
-| Lane (runtime) | `crate::lane::Lane` (was `Worktree`) — UI label remains "Worktree" | `packages/app/src/lane/mod.rs` |
+| Lane (runtime) | `crate::lane::Lane` (was `Worktree`, re-export of `daruda_project::lane`) — UI label remains "Worktree" | `packages/project/src/lane/mod.rs` |
 | Lane (persisted) | `daruda_store::project::SerializedLane` + `LaneKind { Git { .. }, Default }` | `packages/store/src/project/lane.rs` |
 | Active focus ref | `daruda_store::project::LaneRef { project, lane }` — JSON keys remain `worktree` via `#[serde(rename = "worktree", alias = "lane")]` | `daruda_store/src/project/`; per-lane caches keyed by ref in `workspace/mod.rs` |
 | `ProjectsView` 2-level tree | `TopRow` enum dispatch + `group_header_row` / `project_header_row` / `worktree_row` (function name retained — UI affordance) | `workspace/left_dock/projects/rows.rs` |

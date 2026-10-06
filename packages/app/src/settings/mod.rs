@@ -3398,7 +3398,7 @@ fn session_host_validation_message(
 ) -> SharedString {
     SharedString::from(s::settings::err_session_host_field(
         index + 1,
-        err.localized(),
+        s::session_host::host_error(err),
     ))
 }
 

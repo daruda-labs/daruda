@@ -116,6 +116,7 @@ SCAN_DIRS=(
     "packages/acp/src"
     "packages/agent/src"
     "packages/config/src"
+    "packages/project/src"
     "packages/flow/src"
     "packages/store/src"
     "packages/terminal/src"

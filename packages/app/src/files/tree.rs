@@ -9,6 +9,8 @@
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
+use crate::lane::availability::LaneAvailability;
+
 /// Per-lane entry id. Monotonically allocated; never reused after
 /// removal so stale references in `expanded` or external caches can be
 /// dropped without dangling.
@@ -73,6 +75,23 @@ impl std::fmt::Display for FileTreeError {
 }
 
 impl std::error::Error for FileTreeError {}
+
+/// Map a file-tree load failure onto the matching availability so the
+/// load result itself can flip a lane that started `Present`.
+impl From<&FileTreeError> for LaneAvailability {
+    fn from(e: &FileTreeError) -> Self {
+        match e {
+            // Only genuine "gone / unusable" failures flip the lane.
+            FileTreeError::NotFound => LaneAvailability::Missing,
+            FileTreeError::PermissionDenied => LaneAvailability::AccessDenied,
+            FileTreeError::NotADir => LaneAvailability::Missing,
+            // A generic I/O error is transient/unknown — the directory
+            // likely still exists, so stay `Present` and let the caller
+            // surface it as a normal error toast instead of tearing down.
+            FileTreeError::Io(_) => LaneAvailability::Present,
+        }
+    }
+}
 
 /// One entry per direct child returned by a directory read. The tree
 /// converts these into `Entry` values with fresh ids inside
@@ -371,6 +390,26 @@ mod tests {
 
     fn fresh_tree() -> FileTree {
         FileTree::new(PathBuf::from("/tmp/wt"))
+    }
+
+    #[test]
+    fn file_tree_error_maps_to_availability() {
+        assert_eq!(
+            LaneAvailability::from(&FileTreeError::NotFound),
+            LaneAvailability::Missing
+        );
+        assert_eq!(
+            LaneAvailability::from(&FileTreeError::PermissionDenied),
+            LaneAvailability::AccessDenied
+        );
+        assert_eq!(
+            LaneAvailability::from(&FileTreeError::NotADir),
+            LaneAvailability::Missing
+        );
+        // Generic I/O is transient — stays Present so a hiccup never
+        // triggers teardown; the caller surfaces it as an error toast.
+        let io = FileTreeError::Io(std::io::Error::other("boom"));
+        assert_eq!(LaneAvailability::from(&io), LaneAvailability::Present);
     }
 
     #[test]

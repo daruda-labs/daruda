@@ -59,22 +59,6 @@ impl SessionHostError {
             SessionHostError::Empty(field) | SessionHostError::Unsafe(field) => field,
         }
     }
-
-    /// The user-facing reason, so every surface that refuses a host — a form,
-    /// a connect, a flow — says the same thing about the same value.
-    pub fn localized(self) -> String {
-        use crate::surface::strings as s;
-        match self {
-            Self::Empty(SessionHostField::Target) => s::session_host::err_target_empty(),
-            Self::Empty(SessionHostField::Container) => s::session_host::err_container_empty(),
-            Self::Empty(SessionHostField::SessionPath) => s::session_host::err_session_path_empty(),
-            Self::Unsafe(SessionHostField::Target) => s::session_host::err_target_unsafe(),
-            Self::Unsafe(SessionHostField::Container) => s::session_host::err_container_unsafe(),
-            Self::Unsafe(SessionHostField::SessionPath) => {
-                s::session_host::err_session_path_unsafe()
-            }
-        }
-    }
 }
 
 /// A resolved host [`wrap`] must not be handed: the value, and which part of
@@ -105,15 +89,11 @@ fn breaks_quoting(c: char) -> bool {
     matches!(c, '\'' | '"' | '`' | '$' | '\\' | '\n' | '\r')
 }
 
-/// `pub(crate)` so the Settings session-host registry editor
-/// (`settings::sections::session_hosts`) can validate a
+/// Public so the app's Settings session-host registry editor can validate a
 /// `target`/`container` field the same way [`sanitized_ssh`]/[`sanitized_docker`]
 /// do, without going through a full `LaneSessionHost` (which also needs a
 /// `session_path` the registry editor has no field for).
-pub(crate) fn checked_bare_word(
-    value: &str,
-    field: SessionHostField,
-) -> Result<String, SessionHostError> {
+pub fn checked_bare_word(value: &str, field: SessionHostField) -> Result<String, SessionHostError> {
     let trimmed = value.trim();
     if trimmed.is_empty() {
         return Err(SessionHostError::Empty(field));
@@ -382,7 +362,7 @@ pub fn registry_link_status(host: &LaneSessionHost, catalog: &[SessionHostEntry]
 ///
 /// When the resolved host carries a `registry_id`, it is re-resolved against
 /// `catalog` (falling back to a tombstone `redirected_to` chase — see
-/// [`resolve_catalog_id`] — when the id isn't directly in the catalog
+/// `resolve_catalog_id` — when the id isn't directly in the catalog
 /// anymore) so `target`/`container` always reflect the latest registered
 /// value rather than a stale cached copy; a `registry_id` that resolves
 /// nowhere leaves the cached value untouched (Orphaned, not broken). A
@@ -391,10 +371,10 @@ pub fn registry_link_status(host: &LaneSessionHost, catalog: &[SessionHostEntry]
 /// produced, byte-for-byte.
 ///
 /// Whatever the precedence lands on is finally passed through
-/// [`checked_host`], so a host a form never checked — the legacy pair's two
+/// `checked_host`, so a host a form never checked — the legacy pair's two
 /// halves, a hand-edited catalog entry — can never reach [`wrap`] carrying a
 /// character its quoting cannot survive. Such a host is returned as the
-/// error, not replaced: see [`checked_host`] for why it is not `Local`.
+/// error, not replaced: see `checked_host` for why it is not `Local`.
 ///
 /// Pure over its five inputs rather than taking a `Lane`, so the precedence
 /// can be tested without building one.
@@ -438,7 +418,7 @@ pub fn effective_session_host(
 /// The registry id `host`'s catalog link currently resolves to — `host`'s
 /// own `registry_id` when it matches the catalog directly, or the
 /// tombstone-redirected id when the original entry was deleted and merged
-/// into another (see [`resolve_catalog_id`]). `None` when `host` carries no
+/// into another (see `resolve_catalog_id`). `None` when `host` carries no
 /// registry link at all, or the link is unresolvable (deleted with no
 /// redirect, kind mismatch, or a chain that never lands in the catalog).
 ///
@@ -521,7 +501,7 @@ pub fn wrap(host: &LaneSessionHost, adapter_command: &str) -> String {
 /// preconditions it does *not* check (env names, `session_path`, the
 /// transport's bare word). Two of those three are this module's to hold:
 /// [`sanitized_ssh`] / [`sanitized_docker`] at every form, and
-/// [`checked_host`] on every host [`effective_session_host`] resolves, which
+/// `checked_host` on every host [`effective_session_host`] resolves, which
 /// covers the entrances no form guards. Env names are validated where
 /// they enter the config model.
 pub fn wrap_with_env(host: &LaneSessionHost, adapter_command: &str, env: &AccountEnv) -> String {

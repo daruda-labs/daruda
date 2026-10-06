@@ -306,7 +306,7 @@ impl Lane {
     /// Replace this lane's kind and recompute the derived `is_main`
     /// flag. The one update site for in-place kind changes, so the
     /// `is_main` mirror can never drift from `worktree_root == repo_root`.
-    pub(crate) fn set_kind(&mut self, kind: LaneKind) {
+    pub fn set_kind(&mut self, kind: LaneKind) {
         self.is_main = Self::is_main_kind(&kind);
         self.kind = kind;
     }

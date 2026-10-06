@@ -1,4 +1,4 @@
-//! Pure attribution of a scanned listening TCP port to the [`Lane`] whose
+//! Pure attribution of a scanned listening TCP port to the [`Lane`](crate::lane::Lane) whose
 //! working directory the port's owning process is running under.
 //!
 //! Ported from Orca's `local-workspace-port-scanner.ts` /

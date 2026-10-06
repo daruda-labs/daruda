@@ -11,7 +11,7 @@
 //! status bar.
 //!
 //! The status / diff / staging / commit / push family lives in
-//! [`status`]; this module retains the run-git plumbing, the repo
+//! `status`; this module retains the run-git plumbing, the repo
 //! probe, lane lifecycle, and the merge sub-module. [`base`] answers what a
 //! lane committed since the branch it left.
 
@@ -20,7 +20,7 @@ mod command;
 pub mod discard;
 mod status;
 
-pub(crate) use command::git_command;
+pub use command::git_command;
 pub use status::*;
 
 use std::ffi::OsStr;
@@ -234,9 +234,8 @@ pub fn current_branch(path: &Path) -> Result<Option<String>, GitError> {
 ///
 /// Tries `origin/HEAD` first (the remote's published default), then
 /// the conventional local `main` / `master`, and finally falls back
-/// to whatever branch is checked out. Detection lives here in the
-/// app crate because `daruda_store` is git-free and only holds the
-/// persisted value.
+/// to whatever branch is checked out. Detection lives here because
+/// `daruda_store` is git-free and only holds the persisted value.
 pub fn default_branch(repo_root: &Path) -> Option<String> {
     if let Ok(s) = run_git(
         repo_root,
@@ -321,10 +320,10 @@ pub fn add_lane(
 /// A prior manual deletion (another terminal, a different git client, a
 /// previously interrupted removal) leaves nothing at `path` for git to
 /// remove — it fails with its generic "fatal" exit code (128) whose
-/// message text depends on the git process' locale (see [`run_git`]'s
+/// message text depends on the git process' locale (see `run_git`'s
 /// `LC_ALL=C` — belt-and-suspenders, not a substitute for this check).
 /// The outcome the caller wants (no worktree at `path`) is already true
-/// in that case, so [`already_removed`] recognizes it directly against
+/// in that case, so `already_removed` recognizes it directly against
 /// the filesystem rather than matching git's stderr wording.
 pub fn remove_lane(repo_root: &Path, path: &Path, force: bool) -> Result<(), GitError> {
     let mut args: Vec<String> = vec!["worktree".into(), "remove".into()];

@@ -288,7 +288,7 @@ pub(super) const SUBAGENT_PARENT_ID: &str = "shot-subagent";
 const SUBAGENT_CHILDREN: [(&str, ToolKindView); 7] = [
     ("Read packages/app/src/workspace/mod.rs", ToolKindView::Read),
     ("rg -n \"LaneRef\" packages/app/src", ToolKindView::Search),
-    ("Read packages/app/src/lane/mod.rs", ToolKindView::Read),
+    ("Read packages/project/src/lane/mod.rs", ToolKindView::Read),
     ("rg -n \"last_active_lane_id\" crates", ToolKindView::Search),
     (
         "Read packages/store/src/project/lane.rs",

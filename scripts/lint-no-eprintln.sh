@@ -37,6 +37,7 @@ SCAN_DIRS=(
     "packages/store/src"
     "packages/terminal/src"
     "packages/config/src"
+    "packages/project/src"
     "packages/agent/src"
     "packages/ghostty-vt/src"
     "packages/ghostty-vt-sys/src"

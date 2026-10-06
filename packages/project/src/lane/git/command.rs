@@ -18,7 +18,7 @@ use std::path::Path;
 use std::process::Command;
 
 /// A `git` command rooted at `cwd`, configured for machine reading.
-pub(crate) fn git_command(cwd: &Path) -> Command {
+pub fn git_command(cwd: &Path) -> Command {
     let mut command = daruda_core::process::command("git");
     command
         .current_dir(cwd)

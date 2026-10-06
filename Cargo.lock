@@ -1667,6 +1667,7 @@ dependencies = [
  "daruda_config",
  "daruda_core",
  "daruda_flow",
+ "daruda_project",
  "daruda_store",
  "daruda_terminal",
  "daruda_update",
@@ -1815,6 +1816,19 @@ dependencies = [
  "thiserror 2.0.18",
  "unicode-normalization",
  "yaml_serde",
+]
+
+[[package]]
+name = "daruda_project"
+version = "0.2.16"
+dependencies = [
+ "daruda_config",
+ "daruda_core",
+ "daruda_store",
+ "serde_json",
+ "shell-words",
+ "tempfile",
+ "which",
 ]
 
 [[package]]

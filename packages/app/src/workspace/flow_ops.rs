@@ -720,9 +720,10 @@ impl Workspace {
                     }
                 },
             ),
-            FlowSubmitError::UnusableSessionHost { agent, reason } => {
-                (s::flow::session_host_unusable(&agent), reason.localized())
-            }
+            FlowSubmitError::UnusableSessionHost { agent, reason } => (
+                s::flow::session_host_unusable(&agent),
+                s::session_host::host_error(reason),
+            ),
             FlowSubmitError::Read { path, message } => (
                 s::flow::read_failed_title(),
                 format!("{}: {message}", path.display()),

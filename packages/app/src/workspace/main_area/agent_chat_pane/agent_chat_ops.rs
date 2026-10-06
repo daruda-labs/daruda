@@ -653,9 +653,9 @@ impl Workspace {
             Err(PaneCwdBlocked::NoRemotePath) => {
                 PaneCwdOutcome::Blocked(s::agent_chat::no_remote_cwd())
             }
-            Err(PaneCwdBlocked::UnusableSessionHost(reason)) => {
-                PaneCwdOutcome::Blocked(s::agent_chat::session_host_unusable(reason.localized()))
-            }
+            Err(PaneCwdBlocked::UnusableSessionHost(reason)) => PaneCwdOutcome::Blocked(
+                s::agent_chat::session_host_unusable(s::session_host::host_error(reason)),
+            ),
         };
         self.build_agent_chat_pane(outcome, None, agent_id, None, window, cx)
     }

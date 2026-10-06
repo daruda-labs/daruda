@@ -7,10 +7,9 @@
 //! the left dock, and visual metadata (color, tab order, group).
 //!
 //! GPUI-free: lives alongside [`crate::lane`] in dependency order
-//! `workspace/ → project/ → lane/`. Workspace assembles a
-//! `Vec<Project>` at construction time; persistence reads/writes via
-//! [`crate::workspace::Workspace::snapshot_for_disk`] and
-//! [`crate::workspace::Workspace::restore_from_disk`].
+//! `project → lane`. The app's `Workspace` assembles a `Vec<Project>` at
+//! construction time and owns its persistence (`snapshot_for_disk` /
+//! `restore_from_disk`).
 
 use std::path::PathBuf;
 
@@ -138,7 +137,7 @@ impl Project {
     /// Hydrate a runtime project from the UUID-keyed on-disk shape —
     /// a [`ProjectState`] (intrinsic per-project fields) plus the
     /// per-workspace [`ProjectOverride`] (cosmetic decoration). Used
-    /// by [`crate::workspace::Workspace::restore_from_disk`].
+    /// by the app's `Workspace::restore_from_disk`.
     ///
     /// A project must always carry at least one lane. When the persisted
     /// list is empty — a corrupt or interrupted save — the lanes are
