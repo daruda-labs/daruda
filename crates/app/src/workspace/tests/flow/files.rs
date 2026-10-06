@@ -101,7 +101,7 @@ async fn a_created_flow_is_listed_and_loads(cx: &mut TestAppContext) {
     );
 
     ws.update_in(&mut vcx, |ws, window, cx| {
-        ws.create_flow("ship it", window, cx)
+        ws.create_flow_in(ws.active, "ship it", window, cx)
     });
     vcx.run_until_parked();
 
@@ -151,7 +151,7 @@ async fn renaming_a_flow_is_followed_by_the_graph_of_it(cx: &mut TestAppContext)
     let mut vcx = gpui::VisualTestContext::from_window(wh.into(), cx);
 
     ws.update_in(&mut vcx, |ws, window, cx| {
-        ws.create_flow("before", window, cx)
+        ws.create_flow_in(ws.active, "before", window, cx)
     });
     vcx.run_until_parked();
     let before = ws
@@ -209,7 +209,7 @@ async fn deleting_a_flow_tells_the_graph_of_it(cx: &mut TestAppContext) {
     let mut vcx = gpui::VisualTestContext::from_window(wh.into(), cx);
 
     ws.update_in(&mut vcx, |ws, window, cx| {
-        ws.create_flow("doomed", window, cx)
+        ws.create_flow_in(ws.active, "doomed", window, cx)
     });
     vcx.run_until_parked();
     let (path, view) = ws

@@ -72,10 +72,8 @@ impl Workspace {
         }
     }
 
-    /// (Re)spawn the flow watcher over the active lane's source directories.
-    /// Call it wherever the active lane changes, and after the app itself
-    /// creates or deletes a flow — creating the first one also creates the
-    /// directory the watcher has to be anchored on.
+    /// Watch active and browsed flow sources. Re-anchor after scope changes
+    /// or file creation, which may create a previously absent directory.
     pub(in crate::workspace) fn respawn_flow_watcher(&mut self, cx: &mut Context<Self>) {
         self.pumps.flow = None;
 
@@ -83,7 +81,14 @@ impl Workspace {
             return;
         };
         // The origin is what a *listing* needs; anchoring only needs the paths.
-        let dirs = sources.dirs().into_iter().map(|(dir, _)| dir).collect();
+        let mut dirs: Vec<_> = sources.dirs().into_iter().map(|(dir, _)| dir).collect();
+        if self.active_page() == Some(crate::workspace::pages::Page::Flows)
+            && let Some(browsed) = self.flow_sources_for(self.flow_browser_lane())
+        {
+            dirs.extend(browsed.dirs().into_iter().map(|(dir, _)| dir));
+        }
+        dirs.sort();
+        dirs.dedup();
         let (events, handle) = flow_watcher::spawn(dirs, flow_paths::FLOW_EXTENSIONS.to_vec());
         self.pumps.flow = Some(Watch::new(handle, spawn(events, cx)));
     }

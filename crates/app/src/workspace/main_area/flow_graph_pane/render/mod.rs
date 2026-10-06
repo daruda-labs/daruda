@@ -21,7 +21,26 @@ use self::toolbar::{ToolbarState, toolbar};
 
 impl Render for FlowGraphView {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let body = div().size_full().track_focus(&self.focus_handle);
+        let body = div()
+            .size_full()
+            .flex()
+            .flex_col()
+            .track_focus(&self.focus_handle)
+            .child(
+                div()
+                    .flex()
+                    .flex_none()
+                    .px(px(palette::PAD_STANDARD))
+                    .py(px(palette::PAD_XS))
+                    .child(
+                        crate::ui::button("flow-back-to-list", s::flow::back_to_list())
+                            .debug_selector(|| "flow-back-to-list".into())
+                            .tab_stop(true)
+                            .on_click(cx.listener(|_, _, _, cx| {
+                                cx.emit(super::FlowGraphEvent::BackToList)
+                            })),
+                    ),
+            );
         match &self.state {
             FlowGraphState::Graph { canvas, .. } => {
                 // A row rather than an overlay: floating the inspector over the
@@ -53,7 +72,9 @@ impl Render for FlowGraphView {
                 };
                 body.child(
                     div()
-                        .size_full()
+                        .flex_1()
+                        .min_h_0()
+                        .w_full()
                         .flex()
                         .flex_row()
                         .child(

@@ -150,7 +150,7 @@ pub(super) fn status_tabs(snap: &RightDockSnapshot, list: &TaskList<'_>) -> impl
         )
         .children(FILTERS.into_iter().zip(list.counts).enumerate().map(
             |(index, (filter, count))| {
-                tab(strings::task::filter_count(filter_label(filter), count))
+                tab(strings::common::filter_count(filter_label(filter), count))
                     .debug_selector(move || format!("task-status-{index}"))
             },
         ))
@@ -221,8 +221,8 @@ pub(super) fn results(snap: &RightDockSnapshot, list: &TaskList<'_>, cx: &App) -
 
 fn grouping_label(mode: TaskGrouping) -> String {
     match mode {
-        TaskGrouping::None => strings::task::group_none(),
-        TaskGrouping::Status => strings::task::column_status(),
+        TaskGrouping::None => strings::common::group_none(),
+        TaskGrouping::Status => strings::common::column_status(),
         TaskGrouping::Project => strings::task::column_project(),
     }
 }
@@ -232,7 +232,7 @@ pub(super) fn grouping_picker(snap: &RightDockSnapshot) -> impl IntoElement {
     let workspace = snap.workspace.clone();
     button(
         "task-grouping",
-        strings::task::group_by(grouping_label(selected)),
+        strings::common::group_by(grouping_label(selected)),
     )
     .debug_selector(|| "task-grouping".into())
     .flex_none()
@@ -287,7 +287,7 @@ pub(super) fn group_header(
             ("task-group-chevron", index),
             snap.task_groups.is_open(key),
         ))
-        .child(strings::task::filter_count(label, group.tasks.len()))
+        .child(strings::common::filter_count(label, group.tasks.len()))
         .on_click(move |_, _, cx| {
             if let Some(ws) = workspace.upgrade() {
                 ws.update(cx, |ws, cx| ws.toggle_task_group(key, cx));

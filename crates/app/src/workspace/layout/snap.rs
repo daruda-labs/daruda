@@ -413,23 +413,19 @@ pub(in crate::workspace) struct RightDockSnapshot {
     /// Carried by-value so the panel renderer never re-enters the
     /// workspace entity.
     pub mcp: crate::agent::mcp::McpSnapshot,
-    /// Flow runs in the active lane, for the Flows tab. Only this lane's:
-    /// the panel sits beside a per-lane run history, and the status bar
-    /// chip is what spans lanes.
+    /// Live runs in the browsed worktree. The status bar spans all worktrees.
     pub flows: Vec<crate::workspace::flow_rows::FlowRunRow>,
-    /// The lane every flow field here belongs to, which is the active one.
-    /// Carried rather than re-asked at click time: a past run's directory
-    /// and the lane it lives in have to agree, and a resume that read the
-    /// lane when the button was pressed could pair one lane's directory
-    /// with another lane's ref.
+    /// The worktree these flow fields belong to, captured with their paths
+    /// so an action cannot accidentally target a different active worktree.
     pub flow_lane: daruda_store::project::LaneRef,
-    /// The active lane's past runs. `None` when the Flows tab is not
+    /// The browsed worktree's past runs. `None` when the Flows tab is not
     /// showing — the read is skipped rather than cached for a tab nobody
     /// is looking at.
     pub flow_history: Option<crate::workspace::flow_history::FlowHistory>,
-    /// The flow files this lane can run, for the panel's read-only list.
+    /// The flow files this worktree can run and edit.
     /// Empty when the Flows tab is not showing, same as the history above.
     pub flow_files: Vec<crate::workspace::flow_paths::FoundFlow>,
+    pub flow_browser: crate::workspace::flow_browser::FlowBrowserSnapshot,
     /// Which of those have an open graph pane holding unsaved edits — the
     /// panel's ▶ is off for them. Usually empty. It has to be *in* the snapshot
     /// rather than read at render time: the panel renders cached, and a field
@@ -619,6 +615,7 @@ mod tests {
     fn right_fixture(window: &mut Window, cx: &mut gpui::App) -> RightDockSnapshot {
         let skill_search_input = cx.new(|cx| crate::ui::InputState::new(window, cx));
         let task_search_input = cx.new(|cx| crate::ui::InputState::new(window, cx));
+        let flow_search_input = cx.new(|cx| crate::ui::InputState::new(window, cx));
         RightDockSnapshot {
             right_dock_view: daruda_store::project::RightDockView::default(),
             workspace: Handle(WeakEntity::new_invalid()),
@@ -650,6 +647,13 @@ mod tests {
             flow_lane: daruda_store::project::LaneRef::default(),
             flow_history: None,
             flow_files: Vec::new(),
+            flow_browser: crate::workspace::flow_browser::FlowBrowserSnapshot {
+                state: Default::default(),
+                targets: Vec::new(),
+                search: Handle(flow_search_input),
+                query: String::new(),
+                modified: Vec::new(),
+            },
             flows_with_unsaved_edits: Vec::new(),
         }
     }

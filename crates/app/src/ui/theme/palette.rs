@@ -2312,6 +2312,26 @@ pub const TASK_TABLE_AGENT_W: f32 = 84.0;
 pub const TASK_TABLE_UPDATED_W: f32 = 72.0;
 pub const TASK_TABLE_MIN_W: f32 = 530.0;
 pub const TASK_TABLE_ALL_MIN_W: f32 = 634.0;
+pub const FLOW_SCOPE_MAX_W: f32 = 300.0;
+pub const FLOW_TABLE_TITLE_MIN_W: f32 = TASK_TABLE_TITLE_MIN_W;
+pub const FLOW_TABLE_ORIGIN_W: f32 = 128.0;
+pub const FLOW_TABLE_TIME_W: f32 = 112.0;
+pub const FLOW_TABLE_STATUS_W: f32 = TASK_TABLE_STATUS_W;
+pub const FLOW_TABLE_STAGE_W: f32 = 120.0;
+pub const FLOW_TABLE_ACTIONS_W: f32 = 96.0;
+pub const FLOW_TABLE_FILES_MIN_W: f32 = FLOW_TABLE_TITLE_MIN_W
+    + FLOW_TABLE_ORIGIN_W
+    + FLOW_TABLE_TIME_W
+    + FLOW_TABLE_ACTIONS_W
+    + RIGHT_PANEL_ROW_GAP * 3.0
+    + RIGHT_PANEL_PAD_X * 2.0;
+pub const FLOW_TABLE_RUNS_MIN_W: f32 = FLOW_TABLE_TITLE_MIN_W
+    + FLOW_TABLE_STATUS_W
+    + FLOW_TABLE_TIME_W
+    + FLOW_TABLE_STAGE_W
+    + FLOW_TABLE_ACTIONS_W
+    + RIGHT_PANEL_ROW_GAP * 4.0
+    + RIGHT_PANEL_PAD_X * 2.0;
 /// Font size for the right-panel body rows (px).
 /// Matches `AGENT_CHAT_MSG_FONT_SIZE` so the four right-panel tabs feel
 /// part of the same typographic family as the original chat panel.

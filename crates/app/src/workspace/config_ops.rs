@@ -106,6 +106,7 @@ impl Workspace {
         let git_commit_input = self.git_commit_input.clone();
         let skill_search_input = self.skill_search_input.clone();
         let task_search_input = self.task_search_input.clone();
+        let flow_searches = self.flow_browser.searches.clone();
         let task_edit_inputs = self
             .main_area
             .runtimes
@@ -154,6 +155,11 @@ impl Workspace {
                 task_search_input.update(cx, |input, cx| {
                     input.set_placeholder(s::task::search_placeholder(), window, cx);
                 });
+                for search in flow_searches {
+                    search.update(cx, |input, cx| {
+                        input.set_placeholder(s::flow::search_placeholder(), window, cx);
+                    });
+                }
 
                 // Every open Task Edit pane, including panes parked in
                 // inactive lanes, owns four locale-dependent placeholders.

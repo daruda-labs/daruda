@@ -4,7 +4,7 @@ use gpui::{AnyElement, App, IntoElement, div, prelude::*, px};
 
 use super::{Page, PageState};
 use crate::surface::strings;
-use crate::ui::{ButtonVariants as _, SectionHeader, button_icon, button_with_icon, icons, theme};
+use crate::ui::{ButtonVariants as _, button_icon, button_with_icon, icons, theme};
 use crate::workspace::layout::{LeftDockSnapshot, RightDockSnapshot};
 use crate::workspace::right_dock;
 
@@ -42,7 +42,7 @@ pub(in crate::workspace) fn navigation(snap: &LeftDockSnapshot, cx: &App) -> Any
 pub(in crate::workspace) fn content(
     state: &PageState,
     snap: &RightDockSnapshot,
-    lane: String,
+    _lane: String,
     cx: &App,
 ) -> AnyElement {
     let t = theme::current(cx);
@@ -61,11 +61,7 @@ pub(in crate::workspace) fn content(
         });
     let header = match state.page {
         Page::Tasks => right_dock::tasks::header(snap, close.into_any_element(), cx),
-        Page::Flows => SectionHeader::new(state.page.label())
-            .prominent()
-            .padding(theme::DOCK_PAGE_PAD, theme::PAD_STANDARD)
-            .actions(close)
-            .into_any_element(),
+        Page::Flows => right_dock::flows::header(snap, close.into_any_element(), cx),
     };
     div()
         .flex()
@@ -87,15 +83,6 @@ pub(in crate::workspace) fn content(
                         .w_full()
                         .max_w(px(theme::DOCK_PAGE_MAX_WIDTH))
                         .p(px(theme::DOCK_PAGE_PAD))
-                        .when(state.page == Page::Flows, |body| {
-                            body.child(
-                                div()
-                                    .px(px(theme::RIGHT_PANEL_PAD_X))
-                                    .text_size(px(theme::FONT_SIZE_SM))
-                                    .text_color(t.text_muted)
-                                    .child(lane),
-                            )
-                        })
                         .child(body),
                 ),
         )

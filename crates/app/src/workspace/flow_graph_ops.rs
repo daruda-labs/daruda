@@ -169,6 +169,9 @@ impl Workspace {
             &view,
             window,
             move |workspace, view, event: &FlowGraphEvent, window, cx| match event {
+                FlowGraphEvent::BackToList => {
+                    workspace.open_page(super::pages::Page::Flows, window, cx)
+                }
                 FlowGraphEvent::Save => {
                     workspace.save_node_form(&for_path, view.clone(), window, cx)
                 }

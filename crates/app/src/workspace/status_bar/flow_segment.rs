@@ -195,6 +195,8 @@ mod tests {
 
     fn row(doing: &str) -> FlowRunRow {
         FlowRunRow {
+            run_dir: std::path::PathBuf::from("run"),
+            source: crate::workspace::flow_request::FlowSource::File("flow.yaml".into()),
             lane: LaneRef {
                 project: 1,
                 lane: 0,

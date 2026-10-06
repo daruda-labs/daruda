@@ -108,13 +108,17 @@ impl Workspace {
     /// machine's answer for this project, and writing into the working tree
     /// would put it in front of a reviewer who never asked for it. Committing
     /// one is a deliberate move — copy it in — rather than the default.
-    pub(in crate::workspace) fn create_flow(
+    pub(in crate::workspace) fn create_flow_in(
         &mut self,
+        lane: daruda_store::project::LaneRef,
         typed_name: &str,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let Some(root) = self.active_project().map(|p| p.root.clone()) else {
+        if self.lane_for(lane).is_none() {
+            return;
+        }
+        let Some(root) = self.project_for(lane.project).map(|p| p.root.clone()) else {
             return;
         };
         let dir = super::flow_paths::project_flows_dir(&self.data_dir, &root);
@@ -141,7 +145,7 @@ impl Workspace {
         // The write above may have created the directory itself, which the
         // watcher can only anchor on once it exists.
         self.respawn_flow_watcher(cx);
-        self.open_flow_graph(&path, window, cx);
+        self.open_browsed_flow(lane, &path, window, cx);
     }
 
     /// A flow that loads on the first open, so the new file draws a graph
@@ -184,7 +188,7 @@ impl Workspace {
             }
         };
         // WORKAROUND: the name check above is not sealed by this write, unlike
-        // `create_flow`'s — `rename(2)` replaces its destination by definition,
+        // `create_flow_in`'s — `rename(2)` replaces its destination by definition,
         // so a file arriving at the new name in between is overwritten. Closing
         // it needs `renamex_np` / `renameat2`, an unsafe FFI pair for two
         // platforms; deferred until something makes that worth carrying.
@@ -413,40 +417,36 @@ impl Workspace {
         })
     }
 
-    /// The active lane's flow files, for the panel's list.
-    ///
-    /// Same shape as [`Self::flow_history_for_panel`] and for the same
-    /// reason: read disk only while the Flows tab is showing, and only when
-    /// the cache belongs to another lane. A file added from outside the app
-    /// shows up on the next lane switch — the panel has no way to create one
-    /// yet, so there is nothing here that could go stale by our own hand.
+    /// The browsed worktree's files, read only while Flows is visible.
+    /// Scope changes, file operations, and watcher events invalidate the cache.
     pub(in crate::workspace) fn flow_list_for_panel(
         &mut self,
     ) -> Vec<super::flow_paths::FoundFlow> {
         if self.active_page() != Some(super::pages::Page::Flows) {
             return Vec::new();
         }
-        let lane = self.active;
+        let lane = self.flow_browser_lane();
+        if self.lane_for(lane).is_none() {
+            return Vec::new();
+        }
         if self.flow_list.get(lane).is_none() {
-            let Some(sources) = self.flow_sources() else {
+            let Some(sources) = self.flow_sources_for(lane) else {
                 return Vec::new();
             };
-            self.flow_list.put(lane, sources.list_flows());
+            self.flow_list.put(
+                lane,
+                super::flow_browser::listing::FlowListing::read(&sources),
+            );
         }
-        self.flow_list.get(lane).cloned().unwrap_or_default()
+        self.flow_list
+            .get(lane)
+            .map(|listing| listing.files.clone())
+            .unwrap_or_default()
     }
 
-    /// The flows whose graph pane, in this lane, holds unsaved inspector edits.
-    ///
-    /// The panel's ▶ reads the file like the toolbar's does, so it has to be off
-    /// for the same reason — but the panel cannot see a pane's form, and a view
-    /// must not reach across entities to ask. This is that question answered
-    /// once, on the way into the snapshot.
-    ///
-    /// Gated on the tab like the list above: a panel nobody is looking at must
-    /// not cost a walk of the panes, and `is_dirty` reads several inputs per
-    /// form. Only the active lane's panes — a pane in another lane is not the
-    /// one on screen, and is not where this ▶ would run.
+    /// Disable Run for files with unsaved inspector edits in any worktree.
+    /// Project and global files can be open in multiple lanes. This scan runs
+    /// only while Flows is visible, before the view receives its snapshot.
     pub(in crate::workspace) fn flows_with_unsaved_edits(
         &self,
         cx: &gpui::App,
@@ -454,9 +454,10 @@ impl Workspace {
         if self.active_page() != Some(super::pages::Page::Flows) {
             return Vec::new();
         }
-        self.active_runtime()
-            .panes
-            .iter()
+        self.main_area
+            .runtimes
+            .values()
+            .flat_map(|runtime| runtime.panes.iter())
             .filter_map(|pane| pane.flow_graph_content())
             .filter(|fg| fg.view.read(cx).has_unsaved_form(cx))
             .map(|fg| fg.path.clone())

@@ -405,7 +405,7 @@ impl Workspace {
         self.right_dock_view = workspace.active_right_panel_view;
         self.workspace_page = workspace
             .active_page
-            .map(|page| super::pages::PageState::new(super::pages::Page::from_stored(page)));
+            .map(|page| self.page_state(super::pages::Page::from_stored(page)));
         let bottom_open = workspace.docks.bottom_open;
         let bottom_size = workspace.docks.bottom_size;
         self.bottom_dock.update(cx, |d, _| {

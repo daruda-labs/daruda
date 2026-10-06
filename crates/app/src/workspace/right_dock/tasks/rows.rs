@@ -89,7 +89,7 @@ fn header(show_project: bool, cx: &App) -> Div {
                     .child(strings::task::column_project()),
             )
         })
-        .child(cell(theme::TASK_TABLE_STATUS_W).child(strings::task::column_status()))
+        .child(cell(theme::TASK_TABLE_STATUS_W).child(strings::common::column_status()))
         .child(cell(theme::TASK_TABLE_AGENT_W).child(strings::task::column_agent()))
         .child(cell(theme::TASK_TABLE_UPDATED_W).child(strings::task::column_updated()))
 }

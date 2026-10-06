@@ -1,5 +1,9 @@
 # Common UI tokens — reused across sections
 common:
+  column_status: "Status"
+  filter_count: "%{label} %{count}"
+  group_by: "Group: %{group}"
+  group_none: "None"
   search_clear: "Clear search"
   search_previous: "Previous match"
   search_next: "Next match"
@@ -270,13 +274,9 @@ task:
   filter_done: "Done"
   filter_failed: "Failed"
   filter_cancelled: "Cancelled"
-  filter_count: "%{label} %{count}"
   result_count: "%{visible} of %{total} tasks"
-  group_by: "Group: %{group}"
-  group_none: "None"
   column_task: "Task"
   column_project: "Project"
-  column_status: "Status"
   column_agent: "Agent"
   column_updated: "Updated"
   agent_on_start: "On start"
@@ -2391,6 +2391,34 @@ session_host:
 
 # Flow engine — picker, validation results, run outcomes
 flow:
+  runs_tab: "Run history"
+  scope_current: "%{name} (Current)"
+  scope_hint: "Browse and run flows in a worktree without switching the active terminal"
+  scope_unavailable: "Worktree not open"
+  new_in_project: "Create a flow for %{project}"
+  all_sources: "All sources"
+  all_runs: "All runs"
+  search_placeholder: "Search flows or run IDs…"
+  column_flow: "Flow"
+  column_run: "Flow / run"
+  column_origin: "Source"
+  column_modified: "Modified"
+  column_started: "Started"
+  column_stage: "Current step"
+  column_actions: "Actions"
+  not_recorded: "Not recorded"
+  filter_asking: "Waiting for you"
+  filter_resumable: "Resumable"
+  result_count: "%{visible} of %{total} items"
+  clear_filters: "Clear filters and search"
+  empty_filtered: "No items match these filters. Change the filters or clear the search."
+  empty_unavailable: "This worktree is not open. Choose another worktree above."
+  pending_questions: "%{count} permission request(s) need your attention"
+  show_questions: "Review requests"
+  back_to_list: "Back to Flows"
+  source_repo: "Repository"
+  source_project: "Project-only"
+  source_global: "Personal shared"
   # Prompt when the picker is choosing a flow to draw.
   picker_prompt_graph: "Show which flow?"
   picker_prompt_run: "Run which flow?"
@@ -2414,10 +2442,6 @@ flow:
   # The prompt over the profile list.
   picker_prompt_profile: "Run %{flow} as…"
   picker_empty: "No flows here yet — add one under .daruda/flows/"
-  # Shown when the active lane has no flow running. Says "this lane"
-  # deliberately: a run in another lane is still going, and the status bar
-  # chip is what says so.
-  panel_empty: "No flow is running in this worktree"
   # Said under a question when more are behind it. Without it a person
   # answers, sees a different question appear, and cannot tell whether they
   # answered the wrong one.
@@ -2490,7 +2514,6 @@ flow:
   # Title of the dialog that asks what to call a new flow.
   new_title: "New flow"
   new_placeholder: "Name, e.g. ship"
-  new_tooltip: "New flow"
   rename_title: "Rename flow"
   row_menu_rename: "Rename…"
   row_menu_delete: "Delete…"
@@ -2627,8 +2650,6 @@ flow:
   panel_flow_origin_project: "project"
   panel_flow_origin_repo: "repo"
   panel_flow_origin_global: "yours"
-  panel_live_heading: "Running now"
-  panel_past_heading: "Past runs"
   panel_past_empty: "No flow has run here yet"
   # How many finished runs survive a sweep. Said once under the list so a
   # run vanishing from it reads as retention rather than as a loss.

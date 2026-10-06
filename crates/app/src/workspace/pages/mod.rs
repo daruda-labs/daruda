@@ -60,6 +60,14 @@ impl PageState {
 }
 
 impl Workspace {
+    pub(in crate::workspace) fn page_state(&self, page: Page) -> PageState {
+        let mut state = PageState::new(page);
+        if page == Page::Flows {
+            state.scroll = self.flow_browser.scrolls[self.flow_browser.state.tab.index()].clone();
+        }
+        state
+    }
+
     pub(in crate::workspace) fn active_page(&self) -> Option<Page> {
         self.workspace_page.as_ref().map(|state| state.page)
     }
@@ -69,9 +77,12 @@ impl Workspace {
             return;
         }
         self.mutate_durable(cx, |ws, _| {
-            ws.workspace_page = Some(PageState::new(page));
+            ws.workspace_page = Some(ws.page_state(page));
             ws.main_area.pending_resize = true;
         });
+        if page == Page::Flows {
+            self.respawn_flow_watcher(cx);
+        }
         cx.notify();
     }
 

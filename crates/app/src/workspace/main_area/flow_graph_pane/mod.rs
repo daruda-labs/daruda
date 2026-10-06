@@ -92,6 +92,7 @@ enum FlowGraphState {
 /// reference, so nothing needed changing for that.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(in crate::workspace) enum FlowGraphEvent {
+    BackToList,
     Save,
     Revert,
     /// Delete the selected node. Asks first — the workspace owns the dialog.

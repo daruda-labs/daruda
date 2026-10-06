@@ -45,6 +45,11 @@ pub(in crate::workspace) struct FlowHistory {
 }
 
 impl FlowHistory {
+    #[cfg(any(test, feature = "screenshot"))]
+    pub(in crate::workspace) fn seeded(runs: Vec<FlowRunEntry>) -> Self {
+        Self { runs }
+    }
+
     /// Read a lane's runs, newest first.
     ///
     /// Sorted by directory name, which is chronological only because the
@@ -100,35 +105,14 @@ impl FlowHistory {
 }
 
 impl Workspace {
-    /// The active lane's past runs, reading them if the cache cannot
-    /// answer. The **one** place the history is built.
-    ///
-    /// Derived here rather than pushed from each transition: the active
-    /// lane changes at five call sites (activate, project add / close /
-    /// rename, restore), and a refresh hook on each is a set the next one
-    /// forgets to join. Asking the cache whose lane it holds cannot be
-    /// forgotten.
-    ///
-    /// Reads disk only when the Flows tab is showing and the cache is
-    /// absent or built for another lane — so a tab the user is not on
-    /// costs nothing, and the tab they are on costs one listing per
-    /// change rather than one per frame.
+    /// The browsed worktree's history, read only while Flows is visible.
+    /// The lane-keyed cache avoids disk reads until its scope changes or a
+    /// run transition invalidates it.
     pub(in crate::workspace) fn flow_history_for_panel(&mut self) -> Option<FlowHistory> {
         if self.active_page() != Some(super::pages::Page::Flows) {
             return None;
         }
-        self.flow_history_of_active_lane()
-    }
-
-    /// The active lane's past runs, whatever tab is showing. The **one** place
-    /// the history is built; the panel adds its own gate above.
-    ///
-    /// Ungated because a pin resolves against a finished run's directory, and
-    /// that question is asked from the graph pane — where the Flows tab is
-    /// exactly what is *not* on screen. It costs one directory listing, and
-    /// only when the cache is absent or belongs to another lane.
-    pub(in crate::workspace) fn flow_history_of_active_lane(&mut self) -> Option<FlowHistory> {
-        self.flow_history_of(self.active)
+        self.flow_history_of(self.flow_browser_lane())
     }
 
     /// The same, for a worktree the caller named rather than the one on
@@ -139,6 +123,7 @@ impl Workspace {
         &mut self,
         lane: daruda_store::project::LaneRef,
     ) -> Option<FlowHistory> {
+        self.lane_for(lane)?;
         if self.flow_history.get(lane).is_none() {
             let cwd = self.lane_for(lane).map(|l| l.path.clone())?;
             let lock_dir = super::flow_paths::lane_lock_dir(&self.lock_root, &cwd);

@@ -20,6 +20,8 @@ use super::flow_runs::RunStage;
 #[derive(Clone, Debug, PartialEq)]
 pub(in crate::workspace) struct FlowRunRow {
     pub lane: daruda_store::project::LaneRef,
+    pub run_dir: std::path::PathBuf,
+    pub source: super::flow_request::FlowSource,
     /// [`super::lane_ops::lane_label`] — a run in another lane is the case
     /// the chip exists for, so the row has to say which lane it is.
     pub lane_label: gpui::SharedString,
@@ -53,10 +55,8 @@ impl Workspace {
         self.flow_rows_matching(|_| true)
     }
 
-    /// The runs in the lane the right dock is showing. The panel answers
-    /// questions and opens run directories, and both of those belong to one
-    /// lane — `flow-runs/` is per working directory, so a panel spanning
-    /// lanes could not show a coherent history beside them.
+    /// Active-worktree projection for lifecycle regression tests.
+    #[cfg(test)]
     pub(in crate::workspace) fn flow_rows_for_active_lane(&self) -> Vec<FlowRunRow> {
         let active = self.active;
         self.flow_rows_matching(|lane| lane == active)
@@ -74,6 +74,8 @@ impl Workspace {
             .filter(|(lane, _)| keep(*lane))
             .map(|(lane, handle)| FlowRunRow {
                 lane,
+                run_dir: handle.run_dir.clone(),
+                source: handle.source.clone(),
                 lane_label: self.lane_label_for(lane).into(),
                 doing: handle.doing.describe().into(),
                 asking: match &handle.doing {

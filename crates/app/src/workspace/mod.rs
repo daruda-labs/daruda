@@ -36,6 +36,7 @@ mod dock_badge_ops;
 mod durable;
 pub(in crate::workspace) mod error;
 pub(in crate::workspace) mod flow_ask_modal;
+mod flow_browser;
 pub(in crate::workspace) mod flow_cache;
 mod flow_edit;
 mod flow_events;
@@ -374,13 +375,14 @@ pub struct Workspace {
     /// `[flow]` — the budget every run starts with. Cached from config
     /// like the other config mirrors, refreshed in `apply_config`.
     pub(in crate::workspace) flow_config: daruda_config::flow::FlowConfig,
-    /// The active lane's past runs, read from disk when the Flows tab needs
+    /// One worktree's past runs, read from disk when the Flows tab needs
     /// them. See [`flow_cache::LaneCache`] for the rule both caches share.
     pub(in crate::workspace) flow_history: flow_cache::LaneCache<flow_history::FlowHistory>,
-    /// The active lane's flow *files*, listed from disk. Cached because the
+    /// The browsed worktree's flow files, listed from disk. Cached because the
     /// snapshot that needs it is rebuilt every frame, and a directory listing
     /// per frame is not what a panel costs.
-    pub(in crate::workspace) flow_list: flow_cache::LaneCache<Vec<flow_paths::FoundFlow>>,
+    pub(in crate::workspace) flow_list: flow_cache::LaneCache<flow_browser::listing::FlowListing>,
+    pub(in crate::workspace) flow_browser: flow_browser::FlowBrowser,
     /// Lazy per-lane state, removed together by lane and project teardown.
     pub(in crate::workspace) lane_scoped:
         HashMap<daruda_store::project::LaneRef, lane_scoped::LaneScoped>,
@@ -1118,6 +1120,7 @@ impl Workspace {
             runs: flow_runs::FlowRuns::default(),
             flow_history: flow_cache::LaneCache::default(),
             flow_list: flow_cache::LaneCache::default(),
+            flow_browser: flow_browser::FlowBrowser::new(window, cx),
             flow_config: config.flow.clone(),
             lane_scoped: HashMap::new(),
             file_tree: left_dock::file_tree_context::FileTreeContext {

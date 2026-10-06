@@ -516,6 +516,10 @@ impl Workspace {
         if self.active != lane {
             self.activate_lane(lane, window, cx);
         }
+        self.set_flow_scope(super::flow_browser::FlowScope::Worktree(lane), cx);
+        self.set_flow_tab(super::flow_browser::FlowTab::Runs, cx);
+        self.flow_browser.state.run_filter = super::flow_browser::RunFilter::All;
+        self.clear_flow_search(window, cx);
         self.open_page(super::pages::Page::Flows, window, cx);
     }
 
@@ -524,6 +528,7 @@ impl Workspace {
     /// use `open_page` to transfer keyboard focus as well.
     #[cfg(feature = "screenshot")]
     pub(in crate::workspace) fn reveal_flows_panel(&mut self, cx: &mut Context<Self>) {
+        self.set_flow_tab(super::flow_browser::FlowTab::Runs, cx);
         self.show_page(super::pages::Page::Flows, cx);
     }
 

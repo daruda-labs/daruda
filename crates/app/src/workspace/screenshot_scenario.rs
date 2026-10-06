@@ -157,6 +157,7 @@ const PANE_MENU_ANCHOR_Y: f32 = 160.;
 /// One scenario per capture — these overlays are mutually exclusive on screen.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum ScreenshotScenario {
+    FlowBrowser(super::flow_browser::screenshot::FlowBrowserShot),
     Tasks,
     TasksAll,
     TasksNoResults,
@@ -368,6 +369,21 @@ impl ScreenshotScenario {
     /// default section.
     pub(crate) fn from_cli_name(name: &str) -> Option<Self> {
         match name {
+            "flows" => Some(Self::FlowBrowser(
+                super::flow_browser::screenshot::FlowBrowserShot::Definitions,
+            )),
+            "flows-grouped" => Some(Self::FlowBrowser(
+                super::flow_browser::screenshot::FlowBrowserShot::Grouped,
+            )),
+            "flows-empty" => Some(Self::FlowBrowser(
+                super::flow_browser::screenshot::FlowBrowserShot::Empty,
+            )),
+            "flow-runs" => Some(Self::FlowBrowser(
+                super::flow_browser::screenshot::FlowBrowserShot::Runs,
+            )),
+            "flow-requests" => Some(Self::FlowBrowser(
+                super::flow_browser::screenshot::FlowBrowserShot::Asking,
+            )),
             "tasks" => Some(Self::Tasks),
             "tasks-all" => Some(Self::TasksAll),
             "tasks-no-results" => Some(Self::TasksNoResults),
@@ -544,6 +560,9 @@ pub(crate) fn drive(
                     cx,
                 );
             });
+        }
+        ScreenshotScenario::FlowBrowser(shot) => {
+            workspace.update(cx, |ws, cx| ws.seed_flow_browser_for_shot(shot, window, cx));
         }
         ScreenshotScenario::FlowResumable => {
             workspace.update(cx, |ws, cx| ws.seed_crashed_run_for_shot(cx));
