@@ -17,6 +17,7 @@ pub(super) fn search(snap: &RightDockSnapshot, cx: &App) -> impl IntoElement {
     list_page::toolbar()
         .child(div().flex_1().min_w_0().child(list_page::search(
             "flow-search-clear",
+            s::common::search_clear().into(),
             &snap.flow_browser.search,
             !snap.flow_browser.query.is_empty(),
             move |window, cx| {

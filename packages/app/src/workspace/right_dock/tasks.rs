@@ -69,6 +69,7 @@ fn search_row(snap: &RightDockSnapshot, cx: &gpui::App) -> impl IntoElement {
     let workspace = snap.workspace.clone();
     crate::ui::list_page::search(
         "task-search-clear",
+        strings::common::search_clear().into(),
         &snap.task_browser.search,
         has_query,
         move |window, cx| {

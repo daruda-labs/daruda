@@ -39,14 +39,14 @@ WHITELIST=(
     # l=0.60 etc.) next to the slot they map to. `palette.rs` carries
     # the workspace-chrome constants that used to live in
     # daruda_terminal/ux/theme.rs.
-    "packages/app/src/ui/theme/mod.rs"
-    "packages/app/src/ui/theme/palette.rs"
+    "packages/ui/src/theme/mod.rs"
+    "packages/ui/src/theme/palette.rs"
     # `syntax/` holds the editor/diff syntax palettes as hex literals.
-    "packages/app/src/ui/theme/syntax/mod.rs"
-    "packages/app/src/ui/theme/syntax/dark.rs"
-    "packages/app/src/ui/theme/syntax/light.rs"
-    "packages/app/src/ui/theme/list_metrics.rs"
-    "packages/app/src/ui/theme/metrics.rs"
+    "packages/ui/src/theme/syntax/mod.rs"
+    "packages/ui/src/theme/syntax/dark.rs"
+    "packages/ui/src/theme/syntax/light.rs"
+    "packages/ui/src/theme/list_metrics.rs"
+    "packages/ui/src/theme/metrics.rs"
 )
 
 is_whitelisted() {

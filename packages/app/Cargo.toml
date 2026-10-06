@@ -36,7 +36,6 @@ replay = ["devtools"]
 
 [dependencies]
 daruda_core = { workspace = true }
-ferrum_flow = { workspace = true }
 anyhow = "1"
 base64 = "0.22"
 chrono = { version = "0.4", features = ["serde"] }
@@ -58,6 +57,7 @@ daruda_config = { workspace = true }
 daruda_flow = { workspace = true }
 daruda_project = { workspace = true }
 daruda_terminal = { workspace = true }
+daruda_ui = { workspace = true }
 daruda_update = { workspace = true }
 gpui = { workspace = true }
 gpui_platform = { workspace = true }
@@ -75,7 +75,6 @@ merman = { version = "0.8.0-alpha.3", features = ["render"] }
 rust-i18n = { workspace = true }
 semver = "1"
 sys-locale = "0.3"
-schemars = { workspace = true }
 # Named directly, not inherited: a flow run's `FlowEvent` channel is built
 # here, and a transitive dependency has no name in Rust source.
 smol = { workspace = true }
@@ -143,6 +142,8 @@ daruda_terminal = { workspace = true, features = ["test-support"] }
 # A detached session handle lets a test watch what a pane sends, and when it
 # lets go, without an adapter process behind it.
 daruda_acp = { workspace = true, features = ["test-support"] }
+# Test-only observation hooks the workspace tests read back.
+daruda_ui = { workspace = true, features = ["test-support"] }
 gpui = { workspace = true, features = ["test-support"] }
 serde_json = "1"
 

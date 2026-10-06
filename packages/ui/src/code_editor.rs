@@ -1,0 +1,190 @@
+//! Markdown editor wrapper over `gpui_component::input::Input`. Two
+//! factories with different `InputMode`s:
+//!
+//! - `make_markdown_state` — `CodeEditor("markdown")` mode with line
+//!   numbers + indent guides + tree-sitter syntax highlight. For
+//!   structured-markdown surfaces (settings previews, READMEs).
+//! - `make_markdown_prose_state` — `AutoGrow(rows, rows)` mode. Plain
+//!   textarea feel: fixed `rows`-tall visual height that respects the
+//!   row count (CodeEditor mode collapses to a 1-line min_height — see
+//!   `input/element.rs:895-908` — so it needs an explicit `.h(...)`,
+//!   while AutoGrow naturally uses `rows × line_height` as its
+//!   minimum). The task-edit prompt + notes use this.
+
+use crate::theme;
+use gpui::{App, AppContext as _, Entity, Hsla, SharedString, Styled as _, Window, px, relative};
+use gpui_component::Sizable as _;
+use gpui_component::input::{CodeEditorSurface, Input, InputState};
+
+/// Re-export so app code (the diff viewer) can build per-row editor
+/// decorations without importing `gpui_component` directly.
+pub use gpui_component::input::LineDecoration;
+
+/// Render `state` as a bordered editor with the daruda input
+/// background. `small()` (not the wrapper default `xsmall`) is
+/// intentional — for multi-line prompt / notes surfaces a slightly
+/// larger text size is more readable. `.bg(MODAL_INPUT_BG)` overrides
+/// gpui_component's default (which pulls `theme.background` and is
+/// slightly lighter than the bespoke `TextInput`) so every input on
+/// the TaskEdit pane shares the same surface color.
+pub fn markdown_editor(state: &Entity<InputState>, cx: &App) -> Input {
+    Input::new(state)
+        .small()
+        .bordered(true)
+        .bg(theme::current(cx).modal_input_bg)
+        // Follow the config-driven editor font (`font.editor.size`) like the
+        // file-viewer editor; `.small()` still owns the padding/height, this
+        // overrides only the text size via `refine_style`.
+        .font_family(theme::editor_font_family(cx))
+        .text_size(px(theme::editor_font_size(cx)))
+        .line_height(relative(theme::editor_line_height(cx)))
+}
+
+/// Build an `Entity<InputState>` configured for markdown editing in
+/// code-editing style — line-number gutter on, syntax highlight on.
+/// Sets the initial text + `rows` baseline so the editor renders with
+/// a reasonable height even when its container does not constrain it.
+/// Use this for buffers that read as code / structured markdown
+/// (READMEs viewed in a settings pane, future MCP config previews,
+/// etc.).
+pub fn make_markdown_state(
+    initial: &str,
+    placeholder: impl Into<SharedString>,
+    rows: usize,
+    window: &mut Window,
+    cx: &mut App,
+) -> Entity<InputState> {
+    let placeholder = placeholder.into();
+    let state = cx.new(|cx| {
+        InputState::new(window, cx)
+            .code_editor("markdown")
+            .placeholder(placeholder)
+            .rows(rows)
+    });
+    apply_initial(state.clone(), initial, window, cx);
+    state
+}
+
+/// Prose-style markdown buffer — `AutoGrow(rows, rows)`. Renders as a
+/// plain bordered textarea of fixed `rows` visual height; longer
+/// content scrolls inside the input itself. No line numbers, no
+/// language-tagged syntax highlight — prose markdown is easier on the
+/// eye without `#` / `**` / etc. being tokenized.
+pub fn make_markdown_prose_state(
+    initial: &str,
+    placeholder: impl Into<SharedString>,
+    rows: usize,
+    window: &mut Window,
+    cx: &mut App,
+) -> Entity<InputState> {
+    let placeholder = placeholder.into();
+    let state = cx.new(|cx| {
+        InputState::new(window, cx)
+            .auto_grow(rows, rows)
+            .placeholder(placeholder)
+    });
+    apply_initial(state.clone(), initial, window, cx);
+    state
+}
+
+/// `set_value` requires `&mut Window` and a `Context<InputState>` so
+/// we cannot run it from inside `cx.new`'s closure (that only sees
+/// `Context<Self>`, not the workspace `App`).
+fn apply_initial(state: Entity<InputState>, initial: &str, window: &mut Window, cx: &mut App) {
+    if initial.is_empty() {
+        return;
+    }
+    let initial = initial.to_string();
+    state.update(cx, |state, cx| state.set_value(initial, window, cx));
+}
+
+/// Shared chrome for the borderless, read-only code/diff editors: no
+/// appearance ring, no size-default padding (gutter flush left), the built-in
+/// scrollbar suppressed (hosts overlay their own thin daruda thumb), the
+/// config-driven editor font size, and the state's own read-only flag
+/// forwarded back into the element.
+///
+/// The read-only forward matters because `Input::render` rewrites
+/// `state.disabled = self.disabled` every frame, so an element left at the
+/// builder default (`false`) would clobber a `set_disabled(true)` the host
+/// applied to the state on the next paint. The base text colour is pinned
+/// because `Input` never sets one, so tree-sitter-uncaptured runs (whitespace,
+/// unmapped captures) would inherit gpui's default black `text_style` and
+/// vanish on a dark theme; `fg` is the host's slot for it — each caller picks
+/// it to match whatever background it actually paints on (see
+/// [`file_viewer_editor`] vs [`embedded_code_viewer`]).
+fn code_editor_chrome(
+    state: &Entity<InputState>,
+    fg: Hsla,
+    family: SharedString,
+    size: f32,
+    line_height: f32,
+    cx: &App,
+) -> Input {
+    Input::new(state)
+        .appearance(false)
+        .input_padding(false)
+        .show_scrollbar(false)
+        .disabled(state.read(cx).is_disabled())
+        .font_family(family)
+        .text_size(px(size))
+        .line_height(relative(line_height))
+        .text_color(fg)
+}
+
+/// Render `state` as a full-size code editor for the file-viewer pane (raw +
+/// diff). Standalone in its own pane, so it scrolls both axes
+/// ([`crate::ScrollWheelBehavior::Both`], the default) and fills the body
+/// via `.flex()` at the call site. Paints on the file-viewer surface, so the
+/// fallback text colour and editor-owned gutter/ghost-line fills are matched
+/// to that surface instead of the process-wide editor background.
+pub fn file_viewer_editor(state: &Entity<InputState>, cx: &App) -> Input {
+    let bg = theme::file_viewer_pane_bg(cx);
+    let fg = theme::syntax_theme_of(
+        theme::active_syntax_palette(cx),
+        theme::file_viewer_pane_syntax_is_light(cx),
+    )
+    .default;
+    code_editor_chrome(
+        state,
+        fg,
+        theme::editor_font_family(cx),
+        theme::editor_font_size(cx),
+        theme::editor_line_height(cx),
+        cx,
+    )
+    .code_editor_surface(CodeEditorSurface::background(bg))
+}
+
+/// Render `state` as a read-only viewer **embedded, height-capped, in the
+/// agent-chat transcript** — tool output and file diffs alike. Shares
+/// [`file_viewer_editor`]'s chrome but picks its fallback colour off the
+/// terminal-preset background the embed paints on, and keeps
+/// [`crate::ScrollWheelBehavior::Both`]: a capped embed hides rows below
+/// the bound, so internal vertical scroll is the only way to reach them.
+/// `InputState::on_scroll_wheel` calls `stop_propagation` only when the offset
+/// actually changed, so a gesture at either extreme still bubbles to the
+/// transcript instead of being captured. The built-in scrollbar is suppressed —
+/// the host overlays its own thin daruda thumbs
+/// (`crate::ui::scrollbar::vertical_thumb`, paired with
+/// `InputState::last_bounds`/`scroll_size`), matching every other scrollable
+/// surface in the app instead of gpui_component's globally-themed bar.
+pub fn embedded_code_viewer(state: &Entity<InputState>, background: Hsla, cx: &App) -> Input {
+    // The light/dark pick goes through `agent_chat_syntax_is_light` — the same
+    // judgment `Workspace::agent_chat_theme_params` feeds the tree-sitter spans,
+    // so the fallback colour and the highlighted runs stay in lockstep.
+    let fg = theme::syntax_theme_of(
+        theme::active_syntax_palette(cx),
+        theme::agent_chat_syntax_is_light(cx),
+    )
+    .default;
+    code_editor_chrome(
+        state,
+        fg,
+        theme::FONT_FAMILY_MONOSPACE.into(),
+        theme::agent_chat_font_size(cx),
+        theme::agent_chat_line_height(cx),
+        cx,
+    )
+    .code_editor_surface(CodeEditorSurface::background(background))
+}

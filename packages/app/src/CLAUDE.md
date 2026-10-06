@@ -13,7 +13,7 @@ app/src/
 ├── settings/             # Settings surface — sidebar + one BuiltinSection body; a body-level view a Workspace hosts, not a window
 ├── surface/              # App-shell constants — name, shortcuts, strings, keybinding action map
 ├── title_bar/            # Window chrome — who draws the frame (GPUI-free `policy.rs`), the drag strip, the app-drawn caption controls, the application-menu button
-├── ui/                   # Reusable widget primitives — gpui_component wrappers + preserved daruda widgets
+├── ui/                   # Facade over `daruda_ui` (packages/ui/) + localized and agent-domain widgets
 └── workspace/            # Workspace entity — projects, tabs, panes, docks
     ├── command/          # Command palette + history picker
     ├── group_ops.rs      # Group CRUD (add/rename/recolor/collapse/delete + move_project_to_group)
@@ -60,12 +60,12 @@ App-shell constants and binding glue — app/process name, user-visible labels (
 
 ## `ui/`
 
-Reusable widget primitives in two layers:
+The facade over `daruda_ui` (`packages/ui/`), which holds the reusable widget primitives in two layers. The facade itself only adds localized wrappers and the agent-domain widgets:
 
 - **Wrappers** — thin factories / re-exports over `gpui_component::*` with daruda chrome (palette, `xsmall` defaults, modal tab-spec) baked in. Canonical post-migration shape.
-- **Preserved daruda widgets** — kept where `gpui_component` lacks a clean swap: bespoke hover chains, multi-purpose macro tile, absolute-positioned context menu, multi-line input panel composite, procedural status indicator, layout helpers, and `picker_row` / `picker_empty` (`ui/picker_row.rs`) — the shared row chrome of every search-and-pick overlay, which owns the focus-accent reservation, the label truncation, the trailing column's `flex_none`, and the row height `theme::PALETTE_MAX_HEIGHT` is derived from.
+- **Preserved daruda widgets** — kept where `gpui_component` lacks a clean swap: bespoke hover chains, multi-purpose macro tile, absolute-positioned context menu, multi-line input panel composite, procedural status indicator, layout helpers, and `picker_row` / `picker_empty` (`packages/ui/src/picker_row.rs`) — the shared row chrome of every search-and-pick overlay, which owns the focus-accent reservation, the label truncation, the trailing column's `flex_none`, and the row height `theme::PALETTE_MAX_HEIGHT` is derived from.
 
-Theme overlay (`apply_daruda_palette`) is the only place inline `hsla()` / `px(N)` literals are allowed (G4 exempt). See `packages/app/src/ui/CLAUDE.md` for wrapper-authoring rules and the "Adding a new primitive" recipe.
+Theme overlay (`apply_daruda_palette`) is the only place inline `hsla()` / `px(N)` literals are allowed (G4 exempt). See `packages/ui/CLAUDE.md` for wrapper-authoring rules and the "Adding a new primitive" recipe.
 
 ### Tab navigation in modals
 

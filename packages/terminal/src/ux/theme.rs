@@ -82,8 +82,8 @@ pub const SEARCH_LABEL_COUNTER: Hsla = hsla(0.0, 0.0, 0.75, 1.0);
 // Consts read only from the `app` crate (workspace chrome, modal chrome,
 // banners, settings, agent panels, file viewer, right-panel surfaces,
 // toast / error report, badges, claude-status pills, etc.) live in
-// `app/src/ui/theme/palette.rs` instead. The bridge module at
-// `app/src/ui/theme/mod.rs` re-exports both palettes so app-side call
+// `ui/src/theme/palette.rs` instead. The bridge module at
+// `ui/src/theme/mod.rs` re-exports both palettes so app-side call
 // sites continue to write `theme::FOO` against `crate::ui::theme`.
 //
 // What stays here: every constant that *terminal-side* widgets in

@@ -1,7 +1,7 @@
 # assets/themes/ — UI theme presets (light + dark **together**)
 
 Bundled `DarudaTheme` presets, compiled into the binary via `include_str!`
-(`packages/app/src/ui/theme/mod.rs::bundled_theme_json`) and loaded at runtime
+(`packages/ui/src/theme/mod.rs::bundled_theme_json`) and loaded at runtime
 by `apply_ui_theme`. Two presets ship: `daruda_dark` (default) and
 `daruda_light`.
 
@@ -124,7 +124,7 @@ cargo build -p daruda --features screenshot
 target/debug/daruda --screenshot /tmp/light.png         # then read it back — no dark patches
 ```
 
-Guard tests live in `packages/app/src/ui/theme/daruda_theme/tests.rs`:
+Guard tests live in `packages/ui/src/theme/daruda_theme/tests.rs`:
 `bundled_daruda_dark_json_matches_default` (dark stays = defaults),
 `json_schema_lists_every_theme_slot` (schema lists every field). They catch
 "file hand-edited but generator not re-run" — not light/dark *parity*, which

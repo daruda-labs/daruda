@@ -51,7 +51,7 @@ TEST_BUDGET=2000
 WAIVED_PATHS=(
     "packages/terminal/src/ux/theme.rs"
     "packages/terminal/src/ux/strings.rs"
-    "packages/app/src/ui/theme/palette.rs"
+    "packages/ui/src/theme/palette.rs"
 )
 
 # Skip directories — vendored crates and target builds aren't ours.

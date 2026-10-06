@@ -38,7 +38,7 @@ if (@ARGV && $ARGV[0] eq '--self-test') {
 die "Expected at most one base ref\n" if @ARGV > 1;
 my $base = @ARGV ? $ARGV[0] : 'HEAD';
 die "Invalid base ref\n" if $base =~ /^-/;
-my $pathspec = ':(glob)packages/app/src/ui/**/*.rs';
+my $pathspec = ':(glob)packages/ui/src/**/*.rs';
 open my $diff, '-|', 'git', 'diff', '--no-ext-diff', '--no-textconv',
     '--no-color', '--src-prefix=a/', '--dst-prefix=b/',
     '--unified=0', $base, '--', $pathspec or die "git diff: $!\n";

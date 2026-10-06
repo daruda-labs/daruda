@@ -66,7 +66,7 @@ cd "$ROOT"
 
 PANE_DIR="packages/app/src/workspace/main_area/agent_chat_pane"
 OWNER="$PANE_DIR/render/fold_header.rs"
-SCAN_DIR="packages/app/src"
+SCAN_DIRS=(packages/app/src packages/ui/src)
 
 if [[ ! -f "$OWNER" ]]; then
     echo "lint-fold-header: $OWNER not found — run from the repo root, or update" >&2
@@ -82,9 +82,9 @@ strip_comments() { sed -E 's#//.*##'; }
 
 # ── (a) the label→summary gap has one application site ──────────────────────
 HITS_A=$(
-    grep -rn 'AGENT_CHAT_SUMMARY_GAP' "$SCAN_DIR" \
+    grep -rn 'AGENT_CHAT_SUMMARY_GAP' "${SCAN_DIRS[@]}" \
         | grep -v "^$OWNER:" \
-        | grep -v '^packages/app/src/ui/theme/palette.rs:' \
+        | grep -v '^packages/ui/src/theme/palette.rs:' \
         | strip_comments \
         | grep 'AGENT_CHAT_SUMMARY_GAP' \
         || true
@@ -105,7 +105,7 @@ fi
 
 # ── (b) markdown previews go through SummaryLine::from_markdown ─────────────
 HITS_B=$(
-    grep -rn 'summary_preview_line' "$SCAN_DIR" \
+    grep -rn 'summary_preview_line' "${SCAN_DIRS[@]}" \
         | grep -v "^$OWNER:" \
         | grep -v "^$PANE_DIR/agent_chat_helpers.rs:" \
         | grep -v "^$PANE_DIR/agent_chat_helpers/tests.rs:" \

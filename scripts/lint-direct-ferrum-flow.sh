@@ -14,10 +14,10 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 
 # The wrapper module itself, and nothing else.
-ALLOW='\bpackages/app/src/ui/flow_canvas\.rs'
+ALLOW='\bpackages/ui/src/flow_canvas\.rs'
 
 violations=$(
-    grep -rnE --include="*.rs" '(^[[:space:]]*use[[:space:]]+ferrum_flow\b|\bferrum_flow::)' packages/app/src \
+    grep -rnE --include="*.rs" '(^[[:space:]]*use[[:space:]]+ferrum_flow\b|\bferrum_flow::)' packages/app/src packages/ui/src \
         | grep -Ev "$ALLOW" \
         || true
 )

@@ -142,7 +142,7 @@ Run these before committing:
 cargo fmt --all -- --check
 cargo clippy -p ghostty_vt -p ghostty_vt_sys -p daruda_terminal -p daruda \
   -p daruda_config -p daruda_store -p daruda_agent -p daruda_update \
-  -p daruda_acp -p daruda_core -p daruda_flow -p daruda_project -p ferrum_flow \
+  -p daruda_acp -p daruda_core -p daruda_flow -p daruda_project -p daruda_ui -p ferrum_flow \
   --all-targets -- -D warnings
 ./scripts/lint-inline-literals.sh
 ./scripts/lint-paint-scope.sh
@@ -153,7 +153,7 @@ cargo clippy -p ghostty_vt -p ghostty_vt_sys -p daruda_terminal -p daruda \
 ./scripts/lint-viewport-row-scroll.sh
 cargo test -p ghostty_vt -p ghostty_vt_sys -p daruda_terminal -p daruda \
   -p daruda_config -p daruda_store -p daruda_agent -p daruda_update \
-  -p daruda_acp -p daruda_core -p daruda_flow -p daruda_project -p ferrum_flow
+  -p daruda_acp -p daruda_core -p daruda_flow -p daruda_project -p daruda_ui -p ferrum_flow
 ./scripts/lint-no-silent-update.sh
 ./scripts/lint-agent-activity.sh
 ./scripts/lint-daruda-path-literals.sh
@@ -231,6 +231,7 @@ daruda/
 │   ├── project/                # daruda_project: runtime Project/Lane model, git ops
 │   ├── store/                  # daruda_store: persistence and observability
 │   ├── terminal/               # daruda_terminal: terminal emulation, GPUI rendering
+│   ├── ui/                     # daruda_ui: domain-free widgets and theme bridge
 │   ├── update/                 # daruda_update: app update checking
 │   ├── ghostty-vt/             # ghostty_vt: safe Rust wrapper over libghostty-vt
 │   ├── ghostty-vt-sys/         # ghostty_vt_sys: Zig C FFI bindings
@@ -268,8 +269,8 @@ A few rules that often come up in review:
 
 - No inline magic numbers or colors outside the theme/surface layers.
 - No re-entrant entity reads inside GPUI render/update paths.
-- App code routes through `crate::ui::*`; do not import `gpui_component::*`
-  directly outside `packages/app/src/ui/`.
+- App code routes through `crate::ui::*`; do not import `gpui_component` or
+  `daruda_ui` directly outside the facade at `packages/app/src/ui/`.
 - Blocking subprocess calls must run on the background executor.
 - User-facing actions need the action type, registered handler, shortcut
   constant, and command palette entry.

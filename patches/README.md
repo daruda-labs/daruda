@@ -447,7 +447,7 @@ read it.
 
 Copy upstream `popover.rs` in and re-add the `stop_propagation` and the
 `trigger_bounds` accessor. Paired tests in
-`packages/app/src/ui/popover.rs`
+`packages/ui/src/popover.rs`
 (`pressing_a_panel_trigger_does_not_activate_the_surface_under_it`,
 `pressing_a_dropdown_trigger_does_not_activate_the_surface_under_it`) fail loudly if
 you forget — the second is what pins the dropdown's inheritance.
@@ -493,7 +493,7 @@ handler had one in scope and did not use it.
 ### Re-vendor procedure
 
 Copy the fresh upstream `text_view.rs` / `inline.rs` in, then re-apply the table
-above by hand. Five paired tests in `packages/app/src/ui/markdown/tests.rs`
+above by hand. Five paired tests in `packages/ui/src/markdown/tests.rs`
 (`a_press_on_selectable_prose_grabs_it` /
 `a_press_inside_an_occluding_panel_does_not_grab_the_prose_under_it`,
 `a_click_on_a_link_opens_it` /
@@ -608,7 +608,7 @@ module is full of hand-rolled elements, and three of them had forgotten:
 | Delta | Detail |
 |---|---|
 | Link press/release gate on `Left` | `text/inline.rs`. Detailed in the overlay section above. |
-| Right press records the link | `text/inline.rs` + `global_state.rs` + `text/text_view.rs`. The other half of the gate above: a right press has to *do* something, and what it does is hand the URL to the host so its context menu can offer it. Capture phase, so it lands before the host's bubble-phase menu opener regardless of registration order. The record carries the press position and `take_right_clicked_link` only returns it to a caller asking with that same position, so a record no menu consumed cannot be adopted by a later, unrelated one. Full reasoning in `packages/app/src/ui/CLAUDE.md`'s divergence table. `record_right_clicked_link` is the same slot written from outside, for a host element that is not inline text; daruda's one such element, the resource-link card, now records through the workspace instead (its menu needs the declared MIME, which a bare URL cannot carry), so the function has no caller but is kept as part of the patch's API. |
+| Right press records the link | `text/inline.rs` + `global_state.rs` + `text/text_view.rs`. The other half of the gate above: a right press has to *do* something, and what it does is hand the URL to the host so its context menu can offer it. Capture phase, so it lands before the host's bubble-phase menu opener regardless of registration order. The record carries the press position and `take_right_clicked_link` only returns it to a caller asking with that same position, so a record no menu consumed cannot be adopted by a later, unrelated one. Full reasoning in `packages/ui/CLAUDE.md`'s divergence table. `record_right_clicked_link` is the same slot written from outside, for a host element that is not inline text; daruda's one such element, the resource-link card, now records through the workspace instead (its menu needs the declared MIME, which a bare URL cannot carry), so the function has no caller but is kept as part of the patch's API. |
 | Track click gates on `Left` | `scroll/scrollbar.rs`. Same shape and same reasoning as zed's. The gate also restores the context menu, because the `stop_propagation()` now only fires for a press the scrollbar actually answered. |
 | Handle press gates on `Left` | `resizable/resize_handle.rs`. Cosmetic state only, but a button that cannot resize should not look like it is. |
 | `// ANY-BUTTON: <reason>` markers | `dock/dock.rs`, `resizable/panel.rs`, `resizable/resize_handle.rs` (release), `scroll/scrollbar.rs` (release), `text/text_view.rs` (release), `input/popovers/hover_popover.rs`, `webview.rs`. Seven listeners that answer every button on purpose — every one of them either *ends* a drag (leaving one installed is the worse failure, and only a left press can have started it) or dismisses/blurs on an outside press. The marker is what separates an intent from an omission. |
@@ -618,7 +618,7 @@ module is full of hand-rolled elements, and three of them had forgotten:
 `scripts/lint-raw-mouse-button.sh` is the checklist. A fresh upstream copy drops
 both the gates and the markers, so the lint re-fires on all ten sites and walks
 you back through the table above. Two paired tests
-(`packages/app/src/ui/scrollbar.rs`'s `a_left_press_on_the_track_jumps_the_view` /
+(`packages/ui/src/scrollbar.rs`'s `a_left_press_on_the_track_jumps_the_view` /
 `a_right_press_on_the_track_does_not_jump_the_view`) cover the scrollbar gate
 from both directions; the link gates have their own pair, listed in the overlay
 section.

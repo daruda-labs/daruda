@@ -22,7 +22,7 @@ subsystem's real constraints are written down.
 | **Anything at all, before committing** | [Pre-commit checks](#pre-commit-checks) · [Verification](#verification) |
 | **Terminal, VT parsing, PTY, scrollback** | `packages/terminal/src/view/CLAUDE.md` · [Pitfalls](#pitfall-prevention-rules) 1 (coordinates), 3 (Zig FFI), 7 (text↔pixel), 8 (paint scope), 9 (palette) |
 | **Agent chat, ACP, adapters, wire log** | `packages/acp/CLAUDE.md` · [Pitfall](#pitfall-prevention-rules) 11 (single activity source) |
-| **A widget, a modal, anything visual** | `packages/app/src/ui/CLAUDE.md` · [`DESIGN.md`](./DESIGN.md) · [Pitfalls](#pitfall-prevention-rules) 10 (render cost), 12 (mouse buttons) |
+| **A widget, a modal, anything visual** | `packages/ui/CLAUDE.md` · [`DESIGN.md`](./DESIGN.md) · [Pitfalls](#pitfall-prevention-rules) 10 (render cost), 12 (mouse buttons) |
 | **Workspace layout — tabs, panes, docks** | `packages/app/src/CLAUDE.md` · [UI component hierarchy](#ui-component-hierarchy) · [MVU rules](#mvu-flavored-guiding-rules) |
 | **Any string a user will see** | `packages/app/locales/CLAUDE.md` |
 | **Where a new file or crate goes** | [Crate dependency graph](#crate-dependency-graph) · [File-structure rules](#file-structure-rules) · [Change-impact discipline](#change-impact-discipline) |
@@ -51,7 +51,7 @@ Run these locally and make them pass before committing:
 cargo fmt --all -- --check
 cargo clippy -p ghostty_vt -p ghostty_vt_sys -p daruda_terminal -p daruda \
   -p daruda_config -p daruda_store -p daruda_agent -p daruda_update \
-  -p daruda_acp -p daruda_core -p daruda_flow -p daruda_project -p ferrum_flow \
+  -p daruda_acp -p daruda_core -p daruda_flow -p daruda_project -p daruda_ui -p ferrum_flow \
   --all-targets -- -D warnings
 ./scripts/lint-inline-literals.sh
 ./scripts/lint-paint-scope.sh
@@ -65,7 +65,7 @@ cargo clippy -p ghostty_vt -p ghostty_vt_sys -p daruda_terminal -p daruda \
 ./scripts/lint-platform-boundary.sh
 cargo test -p ghostty_vt -p ghostty_vt_sys -p daruda_terminal -p daruda \
   -p daruda_config -p daruda_store -p daruda_agent -p daruda_update \
-  -p daruda_acp -p daruda_core -p daruda_flow -p daruda_project -p ferrum_flow -p gpui_component
+  -p daruda_acp -p daruda_core -p daruda_flow -p daruda_project -p daruda_ui -p ferrum_flow -p gpui_component
 ./scripts/lint-no-silent-update.sh
 ./scripts/lint-agent-activity.sh
 ./scripts/lint-daruda-path-literals.sh
@@ -81,7 +81,7 @@ cargo test -p ghostty_vt -p ghostty_vt_sys -p daruda_terminal -p daruda \
 ./scripts/lint-raw-mouse-button.sh --self-test
 ./scripts/lint-comment-length.sh
 RUSTDOCFLAGS="-D warnings" cargo doc --no-deps \
-  -p daruda_flow -p daruda_project -p daruda_core -p daruda_update -p ghostty_vt_sys \
+  -p daruda_flow -p daruda_project -p daruda_ui -p daruda_core -p daruda_update -p ghostty_vt_sys \
   -p ghostty_vt -p daruda_agent
 cargo run -p gen_acp_presets -- --check
 cargo clippy -p daruda --all-features --all-targets -- -D warnings
@@ -173,6 +173,7 @@ daruda/
 │   ├── store/                # daruda_store — persistence + observability (NDJSON log)
 │   ├── agent/                # daruda_agent — agent provider integrations
 │   ├── terminal/             # daruda_terminal — terminal emulation + GPUI rendering
+│   ├── ui/                   # daruda_ui — domain-free widgets + theme bridge (app reaches it via crate::ui)
 │   ├── update/               # daruda_update — app update checking
 │   ├── ghostty-vt/           # ghostty_vt — safe Rust wrapper over libghostty-vt
 │   ├── ghostty-vt-sys/       # ghostty_vt_sys — Zig C FFI bindings
@@ -210,7 +211,7 @@ for macOS app and DMG bundles.
 cargo fmt --all -- --check
 cargo clippy -p ghostty_vt -p ghostty_vt_sys -p daruda_terminal -p daruda \
   -p daruda_config -p daruda_store -p daruda_agent -p daruda_update \
-  -p daruda_acp -p daruda_core -p daruda_flow -p daruda_project -p ferrum_flow \
+  -p daruda_acp -p daruda_core -p daruda_flow -p daruda_project -p daruda_ui -p ferrum_flow \
   --all-targets -- -D warnings
 scripts/lint-inline-literals.sh
 scripts/lint-paint-scope.sh
@@ -224,7 +225,7 @@ scripts/lint-landing-no-disk-read.sh
 scripts/lint-platform-boundary.sh
 cargo test -p ghostty_vt -p ghostty_vt_sys -p daruda_terminal -p daruda \
   -p daruda_config -p daruda_store -p daruda_agent -p daruda_update \
-  -p daruda_acp -p daruda_core -p daruda_flow -p daruda_project -p ferrum_flow -p gpui_component
+  -p daruda_acp -p daruda_core -p daruda_flow -p daruda_project -p daruda_ui -p ferrum_flow -p gpui_component
 scripts/lint-no-silent-update.sh
 scripts/lint-agent-activity.sh
 scripts/lint-daruda-path-literals.sh
@@ -240,7 +241,7 @@ scripts/lint-raw-mouse-button.sh
 scripts/lint-raw-mouse-button.sh --self-test
 scripts/lint-comment-length.sh
 RUSTDOCFLAGS="-D warnings" cargo doc --no-deps \
-  -p daruda_flow -p daruda_project -p daruda_core -p daruda_update -p ghostty_vt_sys \
+  -p daruda_flow -p daruda_project -p daruda_ui -p daruda_core -p daruda_update -p ghostty_vt_sys \
   -p ghostty_vt -p daruda_agent
 cargo run -p gen_acp_presets -- --check
 cargo clippy -p daruda --all-features --all-targets -- -D warnings
@@ -259,9 +260,9 @@ What the `Linux` job carries that no lint could is the `#[cfg]` arms the macOS j
 
 Note: the `Lint` job gates fmt, the 9 lint scripts through `lint-platform-boundary.sh`, `lint-env-literals.sh` with its self-test, `lint-no-silent-update.sh`, and `lint-agent-activity.sh`. The platform jobs gate the clippy list above and the package-scoped `cargo test` list above; the `cargo doc` link check runs on macOS.
 
-The doc-link gate covers seven crates rather than all of them: clippy does not
+The doc-link gate covers eight crates rather than all of them: clippy does not
 read intra-doc links, so a deleted item leaves a dangling `[`Name`]` in the
-prose that explains the module. These seven are clean today; the rest carry a
+prose that explains the module. These eight are clean today; the rest carry a
 backlog and join the list a crate at a time as that is worked off. Measured
 2026-09-18: `daruda_config` 8, `daruda_store` 8, `daruda_terminal` 11,
 `daruda_acp` 16, `daruda` 85 — the app crate is most of what is left. `lint-render-purity.sh`, `lint-daruda-path-literals.sh`, `lint-file-size.sh`, `lint-mark-dirty-direct-call.sh`, `lint-fold-header.sh`, `lint-agent-list-sync.sh`, `lint-declarative-context-menu.sh`, `lint-acp-air-gate.sh`, `lint-raw-mouse-button.sh`, `lint-comment-length.sh`, and `gen_acp_presets -- --check` are local/reviewer checks not yet wired into CI.
@@ -381,7 +382,7 @@ Daruda is not strict MVU, but the architecture leans on three rules. Treat them 
 - **Error handling**: custom error types + `Display`. `unsafe` requires `// SAFETY:` comment.
 - **GPUI dependency**: only view/UI code may import GPUI. PTY, config, git stay GPUI-free.
 - **Workspace per-lane state**: data discarded on lane/project teardown belongs in `workspace/lane_scoped.rs::LaneScoped`; keep `LaneRuntime` and `FlowRuns` in their separate lifecycle containers.
-- **`gpui_component` access**: app code must go through `crate::ui::*`; direct imports forbidden. See `packages/app/src/ui/CLAUDE.md`.
+- **`gpui_component` access**: app code must go through `crate::ui::*` (the app facade over `daruda_ui`); direct `gpui_component` / `daruda_ui` imports forbidden. See `packages/ui/CLAUDE.md`.
 - **Commit only when explicitly asked** — never `git add`/`git commit` without direct instruction.
 - **Commit messages**: `<type>: <subject>` (imperative, ≤72 chars). Types: `feat` `fix` `refactor` `perf` `test` `chore` `ci` `docs`. Body only when WHY is non-obvious. Prohibitions: no Phase/Step/ticket numbers, no "what I did" lists (diff shows that), no future-work notes.
 - **User-facing values go through config** (`daruda_config`). Pixel/color constants → `ux/theme.rs`.
@@ -398,14 +399,14 @@ Daruda is not strict MVU, but the architecture leans on three rules. Treat them 
 ### Pitfall-prevention rules
 
 1. **Coordinates**: never mix byte offsets with grid coordinates. Always convert window coordinates via `mouse_position_to_local()`.
-2. **Magic numbers**: escape bytes, codes, buffer capacities, colors, pixels, and strings belong only in their designated files (`ansi.rs`, `vt_codes.rs`, `vt_limits.rs`, `theme.rs`, `strings/`, `constants.rs`, `keybindings.rs`). App UI scales and component-owned metric definition sites are documented in `packages/app/src/ui/CLAUDE.md`; ordinary call sites reuse those definitions, not inline pixel literals.
+2. **Magic numbers**: escape bytes, codes, buffer capacities, colors, pixels, and strings belong only in their designated files (`ansi.rs`, `vt_codes.rs`, `vt_limits.rs`, `theme.rs`, `strings/`, `constants.rs`, `keybindings.rs`). App UI scales and component-owned metric definition sites are documented in `packages/ui/CLAUDE.md`; ordinary call sites reuse those definitions, not inline pixel literals.
 3. **Zig FFI**: Ghostty enums are `u16`. Always range-check before casting.
 4. **IME**: printable characters must go through `replace_text_in_range` → `commit_text` → PTY. Never send directly from `on_key_down`.
 5. **GPUI Entity reentrancy**: calling `.read(cx)` on the same entity during `render()` or `entity.update()` panics. `persist_state` must only be called via `mark_dirty_and_save` (`cx.defer`).
 6. **Reference comparison**: before adding a feature or fixing a bug, check how Alacritty, iTerm2, **zed** (`gpui` itself is `vendor/zed/crates/gpui/` — the pinned rev with daruda's patches applied, which is what actually compiles; the rest of zed at that rev, `workspace`, `gpui_macos`, `gpui_platform`, is the cargo checkout `~/.cargo/git/checkouts/zed-a70e2ad075855582/193b55a/crates/`), and gpui-ghostty implement the same concept. For GPUI-specific patterns (entity lifecycles, window contexts, async re-entry) zed is the closest reference; always read the version-matched source above rather than a standalone clone of a different version.
 7. **Text pixel mapping**: never use `index = offset_px / glyph_advance`. Always use the shaper's reverse-mapping API.
 8. **Paint-scope state**: `window.text_style()` / `window.rem_size()` are invalid outside the paint walk. Share metrics via `cell_dimensions()`.
-9. **Color palette**: `daruda_terminal/src/ux/theme.rs` uses a local `hsla()` with hue in degrees (0–360). `app/src/ui/theme.rs` is the gpui_component bridge using fractions (0–1). Never call `gpui::hsla` from the terminal theme file.
+9. **Color palette**: `daruda_terminal/src/ux/theme.rs` uses a local `hsla()` with hue in degrees (0–360). `ui/src/theme/` (`daruda_ui::theme`) is the gpui_component bridge using fractions (0–1). Never call `gpui::hsla` from the terminal theme file.
 10. **Render-cost containment** (`window.refresh()` ban + cache rules): GPUI has **no partial redraw** — any dirty view repaints the whole window tree, and cost scales with node count. Two rules keep that cost contained:
     - **Never call `window.refresh()` / `cx.refresh_windows()` on a hot path.** Refresh sets `window.refreshing`, which **bypasses every `AnyView::cached`** for that frame (see gpui `view.rs` prepaint `!window.refreshing` guard). It is reserved for genuinely global invalidation (theme swap in `ui/theme.rs`). For everything else use **targeted `cx.notify(entity)`** so only that view subtree (and its ancestors) goes dirty and sibling `.cached()` views stay cached. Reference: zed PR #25009.
     - **Caching a child view requires notify-on-change.** A view that renders from a parent-staged snapshot (e.g. `Dock::snap`) must be marked dirty (`cx.notify(child)`) when that snapshot's content changes, or `.cached()` will show stale data. Self-notifying views (TerminalView, ToastLayer) are already safe. Bare `entity.update(cx, |e, _| e.field = …)` without notify is incompatible with caching that entity.
@@ -456,9 +457,9 @@ daruda (app)  →  daruda_terminal  →  ghostty_vt  →  ghostty_vt_sys
              →  daruda_acp        →  daruda_core    # GPUI-free ACP client core
              →  daruda_flow       →  daruda_acp, daruda_core
              →  daruda_project    →  daruda_config, daruda_store, daruda_core  # GPUI-free Project/Lane
+             →  daruda_ui         →  daruda_terminal, daruda_config, gpui_component, ferrum_flow  # widgets
              →  daruda_core                         # shared, dependency-free
              →  daruda_update
-             →  ferrum_flow                         # vendored flow graph canvas
              →  gpui, gpui_component, merman, portable-pty
 
 gpui_component  →  daruda_core                         # vendored; shares the text primitives

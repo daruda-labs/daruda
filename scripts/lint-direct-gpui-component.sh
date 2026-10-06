@@ -1,16 +1,18 @@
 #!/usr/bin/env bash
-# Lint: direct `use gpui_component::*` imports outside `crate::ui::*`.
+# Lint: direct `gpui_component` / `daruda_ui` access outside `crate::ui::*`.
 #
-# Background: `packages/app/src/ui/` is the wrapper home for the
-# vendored `gpui_component` crate. App code must always go through
-# `crate::ui::*` so that:
+# Background: `packages/ui/` (`daruda_ui`) is the wrapper home for the
+# vendored `gpui_component` crate, and `packages/app/src/ui/` is the app's
+# facade over it. App code must always go through `crate::ui::*` so that:
 #   - `xsmall()` is auto-applied at one place (CLAUDE.md §10),
 #   - widget defaults / variants stay consistent across the app,
-#   - future re-styling lives in one module instead of N call sites.
+#   - future re-styling lives in one module instead of N call sites,
+#   - localized wrappers in the facade are not bypassed for their
+#     label-taking `daruda_ui` originals.
 #
 # A small allow-list covers infrastructure files that legitimately
 # touch `gpui_component` directly (init / Root wrapping / Theme):
-#   - src/ui/                     — wrapper home (the entire point)
+#   - src/ui/                     — the facade (the entire point)
 #   - src/main.rs                 — `gpui_component::init(cx)` at startup
 #   - src/test_support.rs         — `init(cx)` for unit tests
 #   - src/windows.rs              — `gpui_component::Root::new(...)`
@@ -31,13 +33,13 @@ cd "$ROOT"
 ALLOW='\bpackages/app/src/ui/|\bpackages/app/src/(main|test_support|windows)\.rs|\bpackages/app/src/workspace/render/mod\.rs'
 
 violations=$(
-    grep -rn --include="*.rs" '^[[:space:]]*use[[:space:]]\+gpui_component\b' packages/app/src \
+    grep -rnE --include="*.rs" '(^[[:space:]]*use[[:space:]]+(gpui_component|daruda_ui)\b|\bdaruda_ui::)' packages/app/src \
         | grep -Ev "$ALLOW" \
         || true
 )
 
 if [ -n "$violations" ]; then
-    echo "Direct gpui_component import outside crate::ui::*:"
+    echo "Direct gpui_component / daruda_ui access outside crate::ui::*:"
     echo "$violations"
     echo
     echo "Route through crate::ui::*. See packages/app/src/ui/mod.rs."

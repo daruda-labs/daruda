@@ -155,7 +155,7 @@ impl Render for Probe {
                         .w_full()
                         .text_size(px(theme::FILE_VIEWER_FONT_SIZE))
                         .child(
-                            crate::ui::markdown::markdown("conformance", self.md.clone())
+                            crate::ui::markdown("conformance", self.md.clone())
                                 .debug_inline_bounds(move |bounds| {
                                     let mut first = first_inline_bounds.lock().unwrap();
                                     if first.is_none() {

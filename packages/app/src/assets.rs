@@ -325,4 +325,71 @@ mod tests {
             );
         }
     }
+
+    #[test]
+    fn every_control_symbol_is_embedded() {
+        use crate::ui::icons::*;
+
+        for path in [
+            BUILD,
+            SETTINGS,
+            CLOSE,
+            DELETE,
+            EDIT,
+            UNDO,
+            SAVE,
+            ADD,
+            MINIMIZE,
+            MAXIMIZE,
+            RESTORE,
+            PREVIOUS,
+            NEXT,
+            EXPAND_MORE,
+            CHEVRON_RIGHT,
+            BACK,
+            FORWARD,
+            PIN,
+            PIN_FILLED,
+            RECORD,
+            CHECKBOX_OFF,
+            CHECKBOX_ON,
+            CHECKBOX_MIXED,
+            RADIO_OFF,
+            RADIO_ON,
+            REFRESH,
+            COPY,
+            CHECK,
+            EXPAND,
+            HISTORY,
+            VISIBILITY,
+            DIFFERENCE,
+            UNFOLD_LESS,
+            CHECK_CIRCLE,
+            TASKS,
+            FLOWS,
+            FOLDER,
+            FOLDER_OPEN,
+            SESSION,
+            SKILL,
+            SERVER,
+        ] {
+            let bytes = DarudaAssets.load(path).unwrap().unwrap();
+            assert!(bytes.windows(4).any(|w| w == b"<svg"), "{path}");
+        }
+    }
+
+    /// A Lucide glyph pasted in at upstream's stroke 2 would read bold
+    /// beside the rest of the row.
+    #[test]
+    fn lucide_glyphs_share_one_stroke() {
+        use crate::ui::icons::{FLOWS, FOLDER, FOLDER_OPEN, SERVER, SESSION, SKILL, TASKS};
+        // Lucide ships at stroke 2; dock rows read at this lighter weight.
+        const LUCIDE_STROKE: &str = r#"stroke-width="1.65""#;
+
+        for path in [TASKS, FLOWS, FOLDER, FOLDER_OPEN, SESSION, SKILL, SERVER] {
+            let bytes = DarudaAssets.load(path).unwrap().unwrap();
+            let svg = std::str::from_utf8(&bytes).unwrap();
+            assert!(svg.contains(LUCIDE_STROKE), "{path}");
+        }
+    }
 }

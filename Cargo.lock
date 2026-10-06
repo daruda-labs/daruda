@@ -1670,9 +1670,9 @@ dependencies = [
  "daruda_project",
  "daruda_store",
  "daruda_terminal",
+ "daruda_ui",
  "daruda_update",
  "dirs",
- "ferrum_flow",
  "fs4",
  "futures",
  "ghostty_vt",
@@ -1697,7 +1697,6 @@ dependencies = [
  "raw-window-handle",
  "resvg",
  "rust-i18n",
- "schemars 1.2.1",
  "semver",
  "serde",
  "serde_json",
@@ -1869,6 +1868,25 @@ dependencies = [
  "tempfile",
  "tracing",
  "unicode-width",
+]
+
+[[package]]
+name = "daruda_ui"
+version = "0.2.16"
+dependencies = [
+ "daruda_config",
+ "daruda_core",
+ "daruda_terminal",
+ "ferrum_flow",
+ "gpui",
+ "gpui_component",
+ "schemars 1.2.1",
+ "serde",
+ "serde_json",
+ "tree-sitter",
+ "tree-sitter-bash",
+ "tree-sitter-highlight",
+ "tree-sitter-python",
 ]
 
 [[package]]

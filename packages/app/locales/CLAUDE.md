@@ -152,7 +152,7 @@ which locale is active at runtime. `"auto"` follows the macOS system locale.
 ## What NOT to put here
 
 - Pixel sizes, color values → `packages/terminal/src/ux/theme.rs` or
-  `packages/app/src/ui/theme.rs`
+  `packages/ui/src/theme/`
 - Internal identifiers (action slugs, element ids, TOML keys) → inline `&str`
   literals are fine
 - Strings that are never shown to users (log messages, debug output) → inline

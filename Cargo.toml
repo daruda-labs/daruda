@@ -42,6 +42,7 @@ daruda_flow = { path = "packages/flow" }
 daruda_project = { path = "packages/project" }
 daruda_store = { path = "packages/store" }
 daruda_terminal = { path = "packages/terminal" }
+daruda_ui = { path = "packages/ui" }
 daruda_update = { path = "packages/update" }
 ghostty_vt = { path = "packages/ghostty-vt" }
 ghostty_vt_sys = { path = "packages/ghostty-vt-sys" }
