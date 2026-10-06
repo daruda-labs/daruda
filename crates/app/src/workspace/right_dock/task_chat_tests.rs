@@ -343,7 +343,7 @@ fn task_chat_closed_pane_reopens_exact_session_without_execution_ownership(
     );
     cx.update_window(window.into(), |_, window, cx| {
         workspace.update(cx, |ws, cx| {
-            ws.agents[0].launch =
+            std::sync::Arc::make_mut(&mut ws.agents)[0].launch =
                 daruda_config::AgentLaunch::Raw("daruda-missing-test-adapter".into());
             let pane = pane(ws, window, cx);
             let id = task(cx);

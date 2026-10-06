@@ -1384,7 +1384,7 @@ impl Workspace {
             let _ = this.update_in(cx, |this, window, cx| match answer {
                 // can_save=false means the form is invalid. Leave the pane open.
                 0 if can_save && is_file => this.save_file_pane_or_ask(pane_id, true, window, cx),
-                0 if can_save => this.save_task_edit_pane(pane_id, false, window, cx),
+                0 if can_save => this.save_and_close_task_edit_pane(pane_id, window, cx),
                 0 => {}
                 1 => this.close_pane_by_id(pane_id, window, cx),
                 _ => {} // Cancel

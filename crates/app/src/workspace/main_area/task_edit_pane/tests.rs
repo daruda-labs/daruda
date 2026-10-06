@@ -20,13 +20,14 @@ fn task_list_scope_preserves_worktree_and_seeds_new_task_project(cx: &mut TestAp
             ws.open_page(crate::workspace::pages::Page::Tasks, window, cx);
             ws.set_task_scope(TaskScope::Project(a), cx);
             ws.set_task_filter(TaskFilter::Failed, cx);
-            ws.task_search_input
+            ws.task_browser
+                .search
                 .clone()
                 .update(cx, |input, cx| input.set_value("login", window, cx));
             ws.clear_task_filters(window, cx);
-            assert_eq!(ws.task_scope, TaskScope::Project(a));
-            assert_eq!(ws.task_filter, TaskFilter::All);
-            assert_eq!(ws.task_search_input.read(cx).value(), "");
+            assert_eq!(ws.task_browser.state.scope, TaskScope::Project(a));
+            assert_eq!(ws.task_browser.state.filter, TaskFilter::All);
+            assert_eq!(ws.task_browser.search.read(cx).value(), "");
             assert_eq!(ws.active, active);
             ws.new_task_in_scope(window, cx);
             let pane = ws.active_runtime().focused_pane_id;
@@ -90,13 +91,7 @@ fn task_editor_watches_prompt_after_start_parks_its_lane(cx: &mut TestAppContext
                 .title_input
                 .clone();
             title.update(cx, |s, cx| s.set_value("Keep watching", window, cx));
-            ws.save_task_editor(pane, false, window, cx);
-            let id = ws
-                .task_edit_content_for_pane(pane)
-                .unwrap()
-                .task_id
-                .clone()
-                .unwrap();
+            let id = ws.commit_task_edit_pane(pane, cx).unwrap();
             let project = ws.active.project;
             let lane = ws.alloc_id();
             ws.project_for_mut(project).unwrap().lanes.push(
@@ -162,15 +157,13 @@ fn task_editor_save_shortcut_and_tab_order(cx: &mut TestAppContext) {
     });
     vcx.run_until_parked();
     ws.read_with(&vcx, |ws, cx| {
-        let te = ws
-            .task_edit_content_for_pane(ws.active_runtime().focused_pane_id)
-            .unwrap();
-        let task = cx
-            .global::<GlobalTasks>()
-            .get(te.task_id.as_ref().expect("shortcut saved the draft"))
-            .unwrap();
-        assert_eq!(task.title, "Keyboard save");
-        assert!(!te.is_dirty(cx));
+        let tasks = &cx.global::<GlobalTasks>().0.tasks;
+        assert_eq!(tasks.len(), 1, "shortcut saved the draft");
+        assert_eq!(tasks[0].title, "Keyboard save");
+        assert!(
+            ws.task_edit_content_for_pane(ws.active_runtime().focused_pane_id)
+                .is_none()
+        );
         assert_eq!(ws.active_page(), Some(crate::workspace::pages::Page::Tasks));
     });
 }
@@ -224,21 +217,77 @@ fn task_editor_save_returns_to_list_and_keeps_saved_subtasks(cx: &mut TestAppCon
                 .clone();
             ws.toggle_editor_subtask(pane, &sub, cx);
             ws.save_task_editor(pane, false, window, cx);
-            let te = ws
-                .task_edit_content_for_pane(pane)
-                .expect("saved editor remains available to reopen");
-            assert!(!te.is_dirty(cx));
-            let id = te.task_id.clone().unwrap();
+            assert!(
+                ws.task_edit_content_for_pane(pane).is_none(),
+                "a saved editor leaves no tab behind"
+            );
+            let id = cx.global::<GlobalTasks>().0.tasks[0].id.clone();
             let task = cx.global::<GlobalTasks>().get(&id).unwrap();
             assert_eq!(task.subtasks[0].title, "Verify keyboard");
             assert!(task.subtasks[0].completed);
             assert_eq!(ws.active_page(), Some(crate::workspace::pages::Page::Tasks));
+            ws.open_task_edit_pane(Some(id.clone()), window, cx);
+            let pane = ws.active_runtime().focused_pane_id;
+            assert!(!ws.task_edit_content_for_pane(pane).unwrap().is_dirty(cx));
             ws.save_task_editor(pane, false, window, cx);
             assert_eq!(cx.global::<GlobalTasks>().0.tasks.len(), 1);
             assert_eq!(
                 cx.global::<GlobalTasks>().get(&id).unwrap().subtasks.len(),
                 1
             );
+        });
+    })
+    .unwrap();
+}
+
+/// Saving from the window's only tab returns to the list: closing that tab
+/// any other way closes the window.
+#[gpui::test]
+fn task_editor_save_from_the_last_tab_keeps_the_window(cx: &mut TestAppContext) {
+    let (_project, window, ws) = build_workspace_with_project(cx);
+    cx.update_window(window.into(), |_, window, cx| {
+        ws.update(cx, |ws, cx| {
+            ws.open_task_edit_pane(None, window, cx);
+            let pane = ws.active_runtime().focused_pane_id;
+            ws.close_tab_at(0, window, cx);
+            assert_eq!(ws.total_open_tabs(), 1, "the editor is the last tab");
+            let title = ws
+                .task_edit_content_for_pane(pane)
+                .unwrap()
+                .title_input
+                .clone();
+            title.update(cx, |s, cx| s.set_value("Last tab", window, cx));
+            ws.save_task_editor(pane, false, window, cx);
+            assert_eq!(ws.total_open_tabs(), 0);
+            assert_eq!(ws.active_page(), Some(crate::workspace::pages::Page::Tasks));
+            assert_eq!(cx.global::<GlobalTasks>().0.tasks[0].title, "Last tab");
+        });
+    })
+    .unwrap();
+    cx.update_window(window.into(), |_, _, _| ())
+        .expect("the window outlives the save");
+}
+
+/// The tab-close prompt's Save keeps what the editor's own Save keeps,
+/// including a subtask typed but not yet submitted.
+#[gpui::test]
+fn tab_close_save_keeps_an_unsubmitted_subtask(cx: &mut TestAppContext) {
+    let (_project, window, ws) = build_workspace_with_project(cx);
+    cx.update_window(window.into(), |_, window, cx| {
+        ws.update(cx, |ws, cx| {
+            ws.open_task_edit_pane(None, window, cx);
+            let pane = ws.active_runtime().focused_pane_id;
+            let te = ws.task_edit_content_for_pane(pane).unwrap();
+            let title = te.title_input.clone();
+            let subtask = te.new_subtask_input.clone();
+            title.update(cx, |s, cx| s.set_value("Closing", window, cx));
+            subtask.update(cx, |s, cx| s.set_value("Typed only", window, cx));
+            ws.save_and_close_task_edit_pane(pane, window, cx);
+            assert!(ws.task_edit_content_for_pane(pane).is_none());
+            let task = &cx.global::<GlobalTasks>().0.tasks[0];
+            assert_eq!(task.title, "Closing");
+            assert_eq!(task.subtasks.len(), 1);
+            assert_eq!(task.subtasks[0].title, "Typed only");
         });
     })
     .unwrap();
@@ -265,7 +314,8 @@ fn task_editor_save_reveals_task_without_switching_worktree(cx: &mut TestAppCont
             title.update(cx, |s, cx| s.set_value("Saved task", window, cx));
             ws.set_task_scope(TaskScope::ActiveProject, cx);
             ws.set_task_filter(TaskFilter::Failed, cx);
-            ws.task_search_input
+            ws.task_browser
+                .search
                 .clone()
                 .update(cx, |s, cx| s.set_value("hidden", window, cx));
             ws.set_task_grouping(TaskGrouping::Project, cx);
@@ -273,22 +323,27 @@ fn task_editor_save_reveals_task_without_switching_worktree(cx: &mut TestAppCont
             ws.toggle_task_group(key, cx);
             ws.save_task_editor(pane, false, window, cx);
             assert_eq!(ws.active_page(), Some(crate::workspace::pages::Page::Tasks));
-            assert_eq!(ws.task_scope, TaskScope::Project(project));
-            assert_eq!(ws.task_filter, TaskFilter::All);
-            assert_eq!(ws.task_search_input.read(cx).value(), "");
-            assert!(ws.task_groups.is_open(key));
+            assert_eq!(ws.task_browser.state.scope, TaskScope::Project(project));
+            assert_eq!(ws.task_browser.state.filter, TaskFilter::All);
+            assert_eq!(ws.task_browser.search.read(cx).value(), "");
+            assert!(ws.task_browser.state.groups.is_open(key));
             assert_eq!(ws.active, active);
+            assert!(ws.task_edit_content_for_pane(pane).is_none());
 
             ws.close_page(cx);
+            let id = cx.global::<GlobalTasks>().0.tasks[0].id.clone();
+            ws.open_task_edit_pane(Some(id), window, cx);
+            let pane = ws.active_runtime().focused_pane_id;
             ws.set_task_scope(TaskScope::AllProjects, cx);
             ws.set_task_filter(TaskFilter::Backlog, cx);
-            ws.task_search_input
+            ws.task_browser
+                .search
                 .clone()
                 .update(cx, |s, cx| s.set_value("saved", window, cx));
             ws.save_task_editor(pane, false, window, cx);
-            assert_eq!(ws.task_scope, TaskScope::AllProjects);
-            assert_eq!(ws.task_filter, TaskFilter::Backlog);
-            assert_eq!(ws.task_search_input.read(cx).value(), "saved");
+            assert_eq!(ws.task_browser.state.scope, TaskScope::AllProjects);
+            assert_eq!(ws.task_browser.state.filter, TaskFilter::Backlog);
+            assert_eq!(ws.task_browser.search.read(cx).value(), "saved");
             assert_eq!(ws.active_page(), Some(crate::workspace::pages::Page::Tasks));
         });
     })
@@ -326,13 +381,7 @@ fn task_editor_saving_a_rename_keeps_the_stored_branch(cx: &mut TestAppContext) 
             let task = cx.global::<GlobalTasks>().get(&id).unwrap();
             assert_eq!(task.title, "Renamed");
             assert_eq!(task.branch_name, branch);
-            assert_eq!(
-                ws.task_edit_content_for_pane(pane)
-                    .unwrap()
-                    .cached_title
-                    .as_ref(),
-                "Renamed"
-            );
+            assert!(ws.task_edit_content_for_pane(pane).is_none());
         });
     })
     .unwrap();
@@ -423,12 +472,14 @@ fn task_editor_distinct_drafts_and_empty_branch_save(cx: &mut TestAppContext) {
                 .clone();
             branch.update(cx, |s, cx| s.set_value("", window, cx));
             ws.on_task_edit_branch_typed(pane, cx);
-            ws.save_task_editor(pane, false, window, cx);
+            // Save & Start keeps the editor, so it must show the stored branch.
+            ws.save_task_editor(pane, true, window, cx);
             let te = ws.task_edit_content_for_pane(pane).unwrap();
             let task = cx
                 .global::<GlobalTasks>()
                 .get(te.task_id.as_ref().unwrap())
                 .unwrap();
+            assert!(!task.branch_name.is_empty(), "an empty branch is generated");
             assert_eq!(branch.read(cx).value().as_ref(), task.branch_name);
             assert!(!te.is_dirty(cx));
         });

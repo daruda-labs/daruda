@@ -486,7 +486,7 @@ pub struct Workspace {
     /// resolve to nothing dropped. A newly opened pane runs under `agents[0]`;
     /// each pane resolves its `agent_id` to a launch command here at connect
     /// time. Guaranteed non-empty by the config layer.
-    pub(in crate::workspace) agents: Vec<daruda_config::AgentDefinition>,
+    pub(in crate::workspace) agents: std::sync::Arc<[daruda_config::AgentDefinition]>,
     /// The registered SSH/Docker host catalog mirrored from config
     /// `[[session_hosts]]` — a lane's `session_host.registry_id` resolves
     /// against this via `lane::session_host::effective_session_host`.
@@ -566,11 +566,11 @@ pub struct Workspace {
     /// The login this window has in flight — see
     /// [`account_login_ops::LoginState`].
     pub(in crate::workspace) login: account_login_ops::LoginState,
-    /// Active filter shown in the Tasks tab header. Default = `All`.
-    pub(in crate::workspace) task_filter: daruda_store::tasks::TaskFilter,
-    /// Whether the Tasks tab lists the active project's tasks or every one.
-    pub(in crate::workspace) task_scope: daruda_store::tasks::TaskScope,
-    pub(in crate::workspace) task_groups: right_dock::tasks::TaskGroups,
+    /// The Tasks list's scope, status, folds and search.
+    pub(in crate::workspace) task_browser: right_dock::tasks::TaskBrowser,
+    /// Set by a screenshot scenario: the fixtures it seeds into this live
+    /// workspace must never reach the profile the window was restored from.
+    pub(in crate::workspace) persistence_suspended: bool,
     /// Per-repo lock that prevents two concurrent `start_task`
     /// invocations from racing on `git worktree add` against the same
     /// repository. Cleared after `finalize_create_lane` returns.
@@ -605,12 +605,6 @@ pub struct Workspace {
     /// `RightDockSnapshot::skill_search_query` (captured per frame) so the
     /// panel render closure never re-enters the workspace.
     pub(in crate::workspace) skill_search_input: gpui::Entity<crate::ui::InputState>,
-    /// Search query input rendered atop the right-bar Tasks tab. Same
-    /// pattern as `skill_search_input` — substring-filters task rows
-    /// over `title / prompt / notes / branch_name`. The renderer reads
-    /// the current text via `RightDockSnapshot::task_search_query`
-    /// (captured per frame).
-    pub(in crate::workspace) task_search_input: gpui::Entity<crate::ui::InputState>,
     /// Plugin ids (`<plugin>@<marketplace>`) whose accordion section
     /// in the right-bar Skills tab is currently expanded. Default
     /// (empty set) means every plugin group renders collapsed; the
@@ -1157,7 +1151,7 @@ impl Workspace {
             telegram: config.telegram.clone(),
             clipboard: config.clipboard.clone(),
             agent: config.agent.clone(),
-            agents: config.resolved_agents(),
+            agents: config.resolved_agents().into(),
             session_hosts: config.session_hosts.clone(),
             session_host_tombstones: config.session_host_tombstones.clone(),
             last_agent_id: None,
@@ -1179,9 +1173,8 @@ impl Workspace {
             // subscription rebroadcasts mutations into this
             // workspace's render path and re-evaluates whether the
             // live tick (pulse + duration) needs to be running.
-            task_filter: daruda_store::tasks::TaskFilter::default(),
-            task_scope: daruda_store::tasks::TaskScope::default(),
-            task_groups: right_dock::tasks::TaskGroups::default(),
+            task_browser: right_dock::tasks::TaskBrowser::new(window, cx),
+            persistence_suspended: false,
             pending_lane_creates: HashSet::new(),
             window_close_in_flight: false,
             terminal_input,
@@ -1191,10 +1184,6 @@ impl Workspace {
             skill_search_input: cx.new(|cx_state| {
                 crate::ui::InputState::new(window, cx_state)
                     .placeholder(crate::surface::strings::skills::search_placeholder())
-            }),
-            task_search_input: cx.new(|cx_state| {
-                crate::ui::InputState::new(window, cx_state)
-                    .placeholder(crate::surface::strings::task::search_placeholder())
             }),
             skill_plugin_expanded: std::collections::HashSet::new(),
             right_dock_sections: Default::default(),

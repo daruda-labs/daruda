@@ -1,7 +1,7 @@
 //! Task-page scope, status tabs, and recoverable empty states.
 
 use daruda_store::tasks::{TaskFilter, TaskScope};
-use gpui::{AnyElement, App, FontWeight, IntoElement, div, prelude::*, px};
+use gpui::{AnyElement, App, FontWeight, IntoElement, SharedString, div, prelude::*, px};
 
 use super::list::{FILTERS, TaskList};
 use super::{TaskGroupKey, TaskGrouping, grouping::TaskGroup};
@@ -54,7 +54,7 @@ fn project_label(scope: TaskScope, projects: &TaskProjects) -> String {
 
 fn scope_picker(snap: &RightDockSnapshot, cx: &App) -> impl IntoElement {
     let projects = snap.task_projects.clone();
-    let selected = snap.task_scope;
+    let selected = snap.task_browser.state.scope;
     let workspace = snap.workspace.clone();
     let label = project_label(selected, &projects);
     button_bare("task-scope")
@@ -104,7 +104,9 @@ fn scope_picker(snap: &RightDockSnapshot, cx: &App) -> impl IntoElement {
 fn new_button(snap: &RightDockSnapshot) -> impl IntoElement {
     let workspace = snap.workspace.clone();
     let project = snap
-        .task_scope
+        .task_browser
+        .state
+        .scope
         .project(snap.task_projects.active)
         .or(snap.task_projects.active);
     let target = project.and_then(|id| snap.task_projects.name(id));
@@ -145,7 +147,7 @@ pub(super) fn status_tabs(snap: &RightDockSnapshot, list: &TaskList<'_>) -> impl
         .selected_index(
             FILTERS
                 .iter()
-                .position(|filter| *filter == snap.task_filter)
+                .position(|filter| *filter == snap.task_browser.state.filter)
                 .unwrap_or(0),
         )
         .children(FILTERS.into_iter().zip(list.counts).enumerate().map(
@@ -164,16 +166,21 @@ pub(super) fn status_tabs(snap: &RightDockSnapshot, list: &TaskList<'_>) -> impl
 }
 
 pub(super) fn empty_state(snap: &RightDockSnapshot, scoped_count: usize, cx: &App) -> AnyElement {
-    let project_available = snap.task_scope == TaskScope::AllProjects
+    let project_available = snap.task_browser.state.scope == TaskScope::AllProjects
         || snap
-            .task_scope
+            .task_browser
+            .state
+            .scope
             .project(snap.task_projects.active)
             .and_then(|id| snap.task_projects.name(id))
             .is_some();
     let message = if !project_available {
         strings::task::empty_project_unavailable()
     } else if scoped_count == 0 {
-        strings::task::empty_scope(project_label(snap.task_scope, &snap.task_projects))
+        strings::task::empty_scope(project_label(
+            snap.task_browser.state.scope,
+            &snap.task_projects,
+        ))
     } else {
         strings::task::empty_filtered()
     };
@@ -190,7 +197,8 @@ pub(super) fn empty_state(snap: &RightDockSnapshot, scoped_count: usize, cx: &Ap
 }
 
 pub(super) fn results(snap: &RightDockSnapshot, list: &TaskList<'_>, cx: &App) -> impl IntoElement {
-    let filtered = snap.task_filter != TaskFilter::All || !snap.task_search_query.trim().is_empty();
+    let filtered = snap.task_browser.state.filter != TaskFilter::All
+        || !snap.task_browser.query.trim().is_empty();
     let workspace = snap.workspace.clone();
     div()
         .flex()
@@ -228,7 +236,7 @@ fn grouping_label(mode: TaskGrouping) -> String {
 }
 
 pub(super) fn grouping_picker(snap: &RightDockSnapshot) -> impl IntoElement {
-    let selected = snap.task_groups.mode;
+    let selected = snap.task_browser.state.groups.mode;
     let workspace = snap.workspace.clone();
     button(
         "task-grouping",
@@ -260,9 +268,18 @@ pub(super) fn grouping_picker(snap: &RightDockSnapshot) -> impl IntoElement {
     }))
 }
 
+/// Named by the group rather than its position, so a group appearing or
+/// vanishing leaves every other header's element state where it was.
+fn group_id(part: &str, key: TaskGroupKey) -> SharedString {
+    match key {
+        TaskGroupKey::Status(filter) => format!("task-{part}-{filter:?}"),
+        TaskGroupKey::Project(project) => format!("task-{part}-{}", project.as_inner()),
+    }
+    .into()
+}
+
 pub(super) fn group_header(
     group: &TaskGroup<'_>,
-    index: usize,
     snap: &RightDockSnapshot,
     cx: &App,
 ) -> impl IntoElement {
@@ -276,16 +293,17 @@ pub(super) fn group_header(
     };
     let key = group.key;
     let workspace = snap.workspace.clone();
-    button_bare(("task-group", index))
-        .debug_selector(move || format!("task-group-{index}"))
+    let id = group_id("group", key);
+    button_bare(id.clone())
+        .debug_selector(move || id.to_string())
         .ghost()
         .tab_stop(true)
         .w_full()
         .justify_start()
         .text_color(theme::current(cx).text_muted)
         .child(crate::ui::disclosure(
-            ("task-group-chevron", index),
-            snap.task_groups.is_open(key),
+            group_id("group-chevron", key),
+            snap.task_browser.state.groups.is_open(key),
         ))
         .child(strings::common::filter_count(label, group.tasks.len()))
         .on_click(move |_, _, cx| {

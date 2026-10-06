@@ -374,19 +374,9 @@ pub(in crate::workspace) struct RightDockSnapshot {
     /// Snapshot of the Tasks tab's task list. Plain-data clone — the
     /// renderer never touches `Workspace::tasks` directly.
     pub tasks: daruda_store::tasks::TasksState,
-    /// Search query input rendered atop the Tasks tab. Entity is
-    /// shared with the Workspace; the renderer just embeds it inline.
-    pub task_search_input: Handle<gpui::Entity<crate::ui::InputState>>,
-    /// Captured search text at snap build time. Lowercase substring
-    /// match against `title / prompt / notes / branch_name`.
-    pub task_search_query: String,
-    /// Active Tasks-tab filter (Backlog / Running / Done / All).
-    pub task_filter: daruda_store::tasks::TaskFilter,
-    /// Whether the Tasks tab lists the active project's tasks or every one.
-    pub task_scope: daruda_store::tasks::TaskScope,
+    pub task_browser: crate::workspace::right_dock::tasks::TaskBrowserSnapshot,
     pub task_projects: TaskProjects,
-    pub task_groups: crate::workspace::right_dock::tasks::TaskGroups,
-    pub task_agents: Vec<(String, String)>,
+    pub task_agents: std::sync::Arc<[daruda_config::AgentDefinition]>,
     /// Per-session Claude status, keyed by `session_id`. Mirrors the
     /// `ClaudeStatusStore` slice that the Tasks tab needs to render
     /// the `⟳ / ● / ⚠` glyph trailing each row's session-id badge.
@@ -631,13 +621,13 @@ mod tests {
             skill_plugin_expanded: std::collections::HashSet::new(),
             sections: Default::default(),
             tasks: daruda_store::tasks::TasksState::default(),
-            task_search_input: Handle(task_search_input),
-            task_search_query: String::new(),
-            task_filter: daruda_store::tasks::TaskFilter::default(),
-            task_scope: daruda_store::tasks::TaskScope::default(),
+            task_browser: crate::workspace::right_dock::tasks::TaskBrowserSnapshot {
+                state: Default::default(),
+                search: Handle(task_search_input),
+                query: String::new(),
+            },
             task_projects: TaskProjects::default(),
-            task_groups: Default::default(),
-            task_agents: Vec::new(),
+            task_agents: std::sync::Arc::from([]),
             claude_status_per_session: std::collections::HashMap::new(),
             tool_use_failure_counts: std::collections::HashMap::new(),
             now: PerFrame(chrono::Utc::now()),
@@ -731,16 +721,31 @@ mod tests {
         cx.add_window(|window, cx| {
             let a = right_fixture(window, cx);
             let mut b = right_fixture(window, cx);
-            b.task_filter = daruda_store::tasks::TaskFilter::Running;
+            b.task_browser.state.filter = daruda_store::tasks::TaskFilter::Running;
             assert!(
                 a.content_differs(&b),
                 "a changed Tasks filter must re-stage the panel"
             );
             let mut c = right_fixture(window, cx);
-            c.task_scope = daruda_store::tasks::TaskScope::AllProjects;
+            c.task_browser.state.scope = daruda_store::tasks::TaskScope::AllProjects;
             assert!(
                 a.content_differs(&c),
                 "a changed Tasks scope must re-stage the panel"
+            );
+            let mut d = right_fixture(window, cx);
+            d.task_browser
+                .state
+                .groups
+                .set_mode(crate::workspace::right_dock::tasks::TaskGrouping::Status);
+            assert!(
+                a.content_differs(&d),
+                "a changed Tasks grouping must re-stage the panel"
+            );
+            let mut e = right_fixture(window, cx);
+            e.task_browser.query = "login".into();
+            assert!(
+                a.content_differs(&e),
+                "a changed Tasks query must re-stage the panel"
             );
             gpui::Empty
         });

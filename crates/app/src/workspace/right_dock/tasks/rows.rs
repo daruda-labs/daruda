@@ -9,8 +9,8 @@ use crate::ui::{theme, tooltip};
 use crate::workspace::layout::RightDockSnapshot;
 
 pub(super) fn table(snap: &RightDockSnapshot, list: &TaskList<'_>, cx: &App) -> AnyElement {
-    let show_project =
-        snap.task_scope == TaskScope::AllProjects && snap.task_groups.mode != TaskGrouping::Project;
+    let show_project = snap.task_browser.state.scope == TaskScope::AllProjects
+        && snap.task_browser.state.groups.mode != TaskGrouping::Project;
     let mut table = div()
         .flex()
         .flex_col()
@@ -20,23 +20,20 @@ pub(super) fn table(snap: &RightDockSnapshot, list: &TaskList<'_>, cx: &App) -> 
             theme::TASK_TABLE_MIN_W
         }))
         .child(header(show_project, cx));
-    if snap.task_groups.mode == TaskGrouping::None {
+    if snap.task_browser.state.groups.mode == TaskGrouping::None {
         table = table.children(
             list.visible
                 .iter()
                 .map(|task| row(task, snap, show_project, cx)),
         );
     } else {
-        for (index, group) in super::grouping::project(
+        for group in super::grouping::project(
             &list.visible,
-            snap.task_groups.mode,
+            snap.task_browser.state.groups.mode,
             &snap.task_projects.names,
-        )
-        .into_iter()
-        .enumerate()
-        {
-            table = table.child(super::controls::group_header(&group, index, snap, cx));
-            if snap.task_groups.is_open(group.key) {
+        ) {
+            table = table.child(super::controls::group_header(&group, snap, cx));
+            if snap.task_browser.state.groups.is_open(group.key) {
                 table = table.children(
                     group
                         .tasks
@@ -246,12 +243,12 @@ fn updated_label(seconds: u64) -> String {
     }
 }
 
-fn agent_label(task: &Task, agents: &[(String, String)]) -> String {
+fn agent_label(task: &Task, agents: &[daruda_config::AgentDefinition]) -> String {
     if let Some(run) = &task.execution {
         return agents
             .iter()
-            .find(|(id, _)| *id == run.agent_id)
-            .map(|(_, name)| name.trim())
+            .find(|agent| agent.id == run.agent_id)
+            .map(|agent| agent.name.trim())
             .filter(|name| !name.is_empty())
             .unwrap_or(&run.agent_id)
             .to_owned();
@@ -290,12 +287,15 @@ mod tests {
             None,
             "/tmp".into(),
         ));
-        assert_eq!(
-            agent_label(&task, &[("codex".into(), "Codex".into())]),
-            "Codex"
-        );
+        let named = |name: &str| {
+            let mut agent = daruda_config::AgentDefinition::claude_default();
+            agent.id = "codex".into();
+            agent.name = name.into();
+            [agent]
+        };
+        assert_eq!(agent_label(&task, &named("Codex")), "Codex");
         assert_eq!(agent_label(&task, &[]), "codex");
-        assert_eq!(agent_label(&task, &[("codex".into(), " ".into())]), "codex");
+        assert_eq!(agent_label(&task, &named(" ")), "codex");
     }
 
     #[test]

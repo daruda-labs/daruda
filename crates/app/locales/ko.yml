@@ -253,7 +253,7 @@ task:
   filter_running: "실행 중"
   filter_done: "완료"
   filter_failed: "실패"
-  filter_cancelled: "취소"
+  filter_cancelled: "취소됨"
   result_count: "전체 %{total}개 중 %{visible}개 작업"
   column_task: "작업"
   column_project: "프로젝트"

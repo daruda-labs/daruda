@@ -46,7 +46,7 @@ impl Workspace {
         mode: super::tasks::TaskGrouping,
         cx: &mut Context<Self>,
     ) {
-        self.task_groups.set_mode(mode);
+        self.task_browser.state.groups.set_mode(mode);
         cx.notify();
     }
 
@@ -55,7 +55,7 @@ impl Workspace {
         key: super::tasks::TaskGroupKey,
         cx: &mut Context<Self>,
     ) {
-        self.task_groups.toggle(key);
+        self.task_browser.state.groups.toggle(key);
         cx.notify();
     }
 
@@ -70,15 +70,10 @@ impl Workspace {
             return;
         };
         let active = self.active_project().map(|project| project.uuid);
-        if !self.task_scope.matches(task, active) {
-            self.task_scope = daruda_store::tasks::TaskScope::Project(task.project);
-        }
-        if !self.task_filter.matches(&task.state) {
-            self.task_filter = daruda_store::tasks::TaskFilter::All;
-        }
-        self.task_groups.reveal(task);
+        self.task_browser.state.reveal(task, active);
         let query = self
-            .task_search_input
+            .task_browser
+            .search
             .read(cx)
             .value()
             .trim()
@@ -94,7 +89,7 @@ impl Workspace {
         scope: daruda_store::tasks::TaskScope,
         cx: &mut Context<Self>,
     ) {
-        self.task_scope = scope;
+        self.task_browser.state.scope = scope;
         cx.notify();
     }
 
@@ -104,7 +99,7 @@ impl Workspace {
         cx: &mut Context<Self>,
     ) {
         let active = self.active_project().map(|p| p.uuid);
-        let project = self.task_scope.project(active).or(active);
+        let project = self.task_browser.state.scope.project(active).or(active);
         if let Some(project) = project.filter(|id| self.project_by_uuid(*id).is_some()) {
             self.open_task_draft_for_project(project, window, cx);
         }
@@ -115,14 +110,14 @@ impl Workspace {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        self.task_filter = daruda_store::tasks::TaskFilter::All;
+        self.task_browser.state.filter = daruda_store::tasks::TaskFilter::All;
         self.clear_task_search(window, cx);
     }
 
     /// Clear the Tasks tab search input (the in-field `✕` overlay).
     /// Extracted so the View closure can dispatch in one line.
     pub(super) fn clear_task_search(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let input = self.task_search_input.clone();
+        let input = self.task_browser.search.clone();
         input.update(cx, |inp, cx_state| {
             inp.set_value("".to_string(), window, cx_state);
         });
@@ -135,8 +130,8 @@ impl Workspace {
         filter: daruda_store::tasks::TaskFilter,
         cx: &mut Context<Self>,
     ) {
-        if self.task_filter != filter {
-            self.task_filter = filter;
+        if self.task_browser.state.filter != filter {
+            self.task_browser.state.filter = filter;
             cx.notify();
         }
     }
@@ -180,6 +175,9 @@ impl Workspace {
     /// real `~/Library/Application Support/daruda/` — same pattern
     /// as `main_area::bottom_dock::macro_ops::save_panels`.
     pub(in crate::workspace) fn save_tasks_dirty(&self, cx: &mut Context<Self>) {
+        if self.persistence_suspended {
+            return;
+        }
         let weak = cx.weak_entity();
         cx.defer(move |cx| {
             let weak_for_spawn = weak.clone();

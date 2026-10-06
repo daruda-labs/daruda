@@ -1,13 +1,16 @@
 //! Project-scoped task list. Header controls own scope and status;
 //! per-row status menus retain task lifecycle actions.
 
+mod browser;
 mod controls;
 mod grouping;
 mod list;
 mod rows;
 #[cfg(feature = "screenshot")]
 mod screenshot;
+mod state;
 
+pub(in crate::workspace) use browser::{TaskBrowser, TaskBrowserSnapshot};
 pub(in crate::workspace) use controls::header;
 pub(in crate::workspace) use grouping::{TaskGroupKey, TaskGrouping, TaskGroups};
 
@@ -26,10 +29,10 @@ use crate::ui::Badge;
 pub(in crate::workspace) fn render(snap: &RightDockSnapshot, cx: &gpui::App) -> AnyElement {
     let list = list::TaskList::project(
         &snap.tasks,
-        snap.task_scope,
+        snap.task_browser.state.scope,
         snap.task_projects.active,
-        snap.task_filter,
-        &snap.task_search_query,
+        snap.task_browser.state.filter,
+        &snap.task_browser.query,
     );
     let mut body = crate::workspace::right_dock::right_panel_body()
         .child(controls::status_tabs(snap, &list))
@@ -68,17 +71,17 @@ pub(super) fn matches_task(t: &Task, query_lower: &str) -> bool {
 // Search bar
 // ---------------------------------------------------------------------------
 
-/// Search input row: wraps `task_search_input` in a relative container
+/// Search input row: wraps the task search input in a relative container
 /// so the in-field `✕` button sits absolutely on the trailing edge. The
 /// icon renders only while the query is non-empty.
 fn search_row(snap: &RightDockSnapshot, cx: &gpui::App) -> impl IntoElement {
-    let has_query = !snap.task_search_query.trim().is_empty();
+    let has_query = !snap.task_browser.query.trim().is_empty();
     let workspace = snap.workspace.clone();
     div()
         .relative()
         .flex()
         .w_full()
-        .child(crate::ui::input(&snap.task_search_input, cx, ()))
+        .child(crate::ui::input(&snap.task_browser.search, cx, ()))
         .when(has_query, |row| {
             row.child(
                 crate::ui::button_icon("task-search-clear", crate::ui::icons::CLOSE, cx)

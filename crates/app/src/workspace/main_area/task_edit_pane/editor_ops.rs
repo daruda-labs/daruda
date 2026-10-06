@@ -221,11 +221,16 @@ impl Workspace {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        self.submit_new_subtask(pane_id, window, cx);
-        self.commit_rename_subtask(pane_id, cx);
-        let Some(id) = self.commit_task_edit_pane(pane_id, cx) else {
+        let Some(id) = self.commit_task_editor(pane_id, window, cx) else {
             return;
         };
+        // The list is where a saved task is found again, so a plain save
+        // closes its editor rather than leaving a tab behind per task.
+        if !start {
+            self.close_saved_editor(pane_id, window, cx);
+            self.show_saved_task(&id, window, cx);
+            return;
+        }
         let branch = cx
             .global::<crate::agent::tasks_global::GlobalTasks>()
             .get(&id)
@@ -243,12 +248,24 @@ impl Workspace {
                     super::task_edit_ops::validate_branch(&te.saved_snapshot.branch);
             }
         }
-        if start {
-            self.start_task(&id, window, cx);
-        } else {
-            self.show_saved_task(&id, window, cx);
-        }
+        self.start_task(&id, window, cx);
         cx.notify();
+    }
+
+    /// Closing the window's last tab closes the window; a save asked for the
+    /// list instead, so that case empties the lane and keeps the window.
+    fn close_saved_editor(&mut self, pane_id: PaneId, window: &mut Window, cx: &mut Context<Self>) {
+        let sole_leaf = self
+            .active_runtime()
+            .tabs
+            .iter()
+            .find(|tab| tab.layout.pane_ids().contains(&pane_id))
+            .is_some_and(|tab| tab.layout.leaf_count() <= 1);
+        if sole_leaf && self.total_open_tabs() <= 1 {
+            self.empty_active_lane_runtime(window, cx);
+        } else {
+            self.close_pane_by_id(pane_id, window, cx);
+        }
     }
 
     pub(super) fn toggle_task_settings(&mut self, pane_id: PaneId, cx: &mut Context<Self>) {

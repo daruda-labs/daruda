@@ -378,13 +378,6 @@ impl TaskScope {
         }
     }
 
-    pub fn toggled(self) -> Self {
-        match self {
-            Self::ActiveProject | Self::Project(_) => Self::AllProjects,
-            Self::AllProjects => Self::ActiveProject,
-        }
-    }
-
     /// Resolve the list's project without changing the active workspace.
     pub fn project(self, active: Option<ProjectUuid>) -> Option<ProjectUuid> {
         match self {

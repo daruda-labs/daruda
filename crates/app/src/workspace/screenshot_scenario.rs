@@ -489,6 +489,7 @@ pub(crate) fn drive(
     window: &mut Window,
     cx: &mut App,
 ) {
+    workspace.update(cx, |ws, _| ws.suspend_persistence_for_shot());
     match scenario {
         ScreenshotScenario::Tasks
         | ScreenshotScenario::TasksAll

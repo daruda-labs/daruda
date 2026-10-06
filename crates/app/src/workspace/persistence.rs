@@ -272,6 +272,11 @@ impl Workspace {
         self.cached_window_bounds = Some(new);
     }
 
+    #[cfg(feature = "screenshot")]
+    pub(in crate::workspace) fn suspend_persistence_for_shot(&mut self) {
+        self.persistence_suspended = true;
+    }
+
     /// Persist state to disk: one workspace file
     /// (`workspaces/<uuid>.json`) referencing each project, plus one
     /// project file (`projects/<uuid>.json`) per owned project. Each
@@ -279,6 +284,9 @@ impl Workspace {
     /// sharing a project see updates via it (last-writer-wins on the lane
     /// list). Also touches `recent-workspaces.json` with the display name.
     pub fn persist_state(&self, cx: &App) {
+        if self.persistence_suspended {
+            return;
+        }
         let (workspace, projects) = self.snapshot_for_disk(cx);
 
         // Settle the recent list first, because for an empty workspace its

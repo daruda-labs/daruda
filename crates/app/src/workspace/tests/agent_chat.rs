@@ -749,7 +749,8 @@ async fn agent_chat_agent_id_restore_handles_present_and_removed_owner(cx: &mut 
         ws.agents = vec![
             daruda_config::AgentDefinition::claude_default(),
             codex_agent(),
-        ];
+        ]
+        .into();
         ws.restore_from_disk(&workspace_state, &project_states, window, cx);
         ws
     });
@@ -924,7 +925,7 @@ async fn switch_agent_preserves_source_and_split_inherits_agent(cx: &mut TestApp
     cx.update_window(window_handle.into(), |_, window, cx| {
         workspace.update(cx, |ws, cx| {
             // Two-entry catalog: claude (default) + codex (switch target).
-            ws.agents = vec![daruda_config::AgentDefinition::claude_default(), codex()];
+            ws.agents = vec![daruda_config::AgentDefinition::claude_default(), codex()].into();
             let claude_id = daruda_config::AgentDefinition::claude_default().id;
 
             // The original agent-chat pane, chatting under the default agent.

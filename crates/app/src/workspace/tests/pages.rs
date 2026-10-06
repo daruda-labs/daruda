@@ -40,8 +40,8 @@ async fn task_status_controls_preserve_scope_and_clear_without_switching_worktre
     vcx.simulate_click(running.center(), Modifiers::default());
     vcx.run_until_parked();
     workspace.read_with(&vcx, |ws, _| {
-        assert_eq!(ws.task_filter, TaskFilter::Running);
-        assert_eq!(ws.task_scope, TaskScope::AllProjects);
+        assert_eq!(ws.task_browser.state.filter, TaskFilter::Running);
+        assert_eq!(ws.task_browser.state.scope, TaskScope::AllProjects);
         assert_eq!(ws.active, active);
     });
     let clear = vcx
@@ -50,8 +50,8 @@ async fn task_status_controls_preserve_scope_and_clear_without_switching_worktre
     vcx.simulate_click(clear.center(), Modifiers::default());
     vcx.run_until_parked();
     workspace.read_with(&vcx, |ws, _| {
-        assert_eq!(ws.task_filter, TaskFilter::All);
-        assert_eq!(ws.task_scope, TaskScope::AllProjects);
+        assert_eq!(ws.task_browser.state.filter, TaskFilter::All);
+        assert_eq!(ws.task_browser.state.scope, TaskScope::AllProjects);
         assert_eq!(ws.active, active);
     });
 }
@@ -127,18 +127,20 @@ async fn task_groups_collapse_and_reopen_without_changing_filters(cx: &mut TestA
     }
     for expected_open in [false, true] {
         let header = vcx
-            .debug_bounds("task-group-0")
+            .debug_bounds("task-group-Backlog")
             .expect("Backlog group header");
         vcx.simulate_click(header.center(), Modifiers::default());
         vcx.run_until_parked();
         workspace.read_with(&vcx, |ws, _| {
             assert_eq!(
-                ws.task_groups
+                ws.task_browser
+                    .state
+                    .groups
                     .is_open(TaskGroupKey::Status(TaskFilter::Backlog)),
                 expected_open
             );
-            assert_eq!(ws.task_filter, TaskFilter::All);
-            assert_eq!(ws.task_scope, TaskScope::AllProjects);
+            assert_eq!(ws.task_browser.state.filter, TaskFilter::All);
+            assert_eq!(ws.task_browser.state.scope, TaskScope::AllProjects);
         });
         assert_eq!(
             vcx.debug_bounds("task-row-group-fixture").is_some(),

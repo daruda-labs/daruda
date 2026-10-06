@@ -4,6 +4,7 @@
 //! same project root should not pollute each other's snapshot.
 
 use super::*;
+use gpui::BorrowAppContext as _;
 
 #[gpui::test]
 fn persist_state_namespaces_workspace_and_project_files(cx: &mut TestAppContext) {
@@ -138,4 +139,63 @@ fn persist_state_namespaces_workspace_and_project_files(cx: &mut TestAppContext)
 
     let _ = std::fs::remove_dir_all(&root_a);
     let _ = std::fs::remove_dir_all(&root_b);
+}
+
+/// A screenshot scenario seeds fixtures into the live workspace; with
+/// persistence suspended neither the layout nor the task list reaches disk.
+#[gpui::test]
+fn suspended_persistence_writes_nothing(cx: &mut TestAppContext) {
+    let data_dir = fresh_test_data_dir();
+    let root = tempfile::tempdir().unwrap();
+    let window_handle = cx.add_window(|window, cx| {
+        Workspace::new_with_project_for_test_full(
+            &daruda_config::Config::default(),
+            Some(daruda_store::project::Project::from_path(root.path())),
+            data_dir.clone(),
+            window,
+            cx,
+        )
+    });
+    let ws = window_handle.root(cx).unwrap();
+    cx.run_until_parked();
+    let listing = || {
+        let mut names: Vec<_> = walkdir(&data_dir);
+        names.sort();
+        names
+    };
+    let before = listing();
+    ws.update(cx, |ws, cx| {
+        ws.persistence_suspended = true;
+        let project = ws.active_project().unwrap().uuid;
+        cx.update_global::<crate::agent::tasks_global::GlobalTasks, _>(|tasks, _| {
+            tasks.add(daruda_store::tasks::Task::new(
+                project,
+                "Fixture".into(),
+                String::new(),
+                None,
+            ));
+        });
+        ws.save_tasks_dirty(cx);
+    });
+    ws.read_with(cx, |ws, cx| ws.persist_state(cx));
+    cx.run_until_parked();
+    assert_eq!(listing(), before);
+}
+
+/// Every path under `dir` with its mtime, so a rewrite in place counts too.
+fn walkdir(dir: &std::path::Path) -> Vec<(std::path::PathBuf, std::time::SystemTime)> {
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return Vec::new();
+    };
+    entries
+        .filter_map(Result::ok)
+        .flat_map(|entry| {
+            let path = entry.path();
+            let mut found = walkdir(&path);
+            if let Ok(modified) = entry.metadata().and_then(|meta| meta.modified()) {
+                found.push((path, modified));
+            }
+            found
+        })
+        .collect()
 }

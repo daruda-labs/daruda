@@ -760,5 +760,4 @@ fn task_scope_keeps_the_active_projects_tasks_or_every_task() {
         Some(task.project)
     );
     assert_eq!(TaskScope::AllProjects.project(Some(other)), None);
-    assert_eq!(TaskScope::default().toggled(), TaskScope::AllProjects);
 }

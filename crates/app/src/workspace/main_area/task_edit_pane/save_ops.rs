@@ -9,28 +9,30 @@ use crate::workspace::Workspace;
 use crate::workspace::main_area::pane_tree::PaneId;
 
 impl Workspace {
-    /// Persist the TaskEdit pane (`pane_id`) into `GlobalTasks`. When
-    /// `task_id = None` this creates a new task; otherwise it updates
-    /// the existing one. When `start = true` the task transitions to
-    /// `Running` immediately via `start_task`. The pane closes on
-    /// success.
-    pub(in crate::workspace) fn save_task_edit_pane(
+    /// The tab-close prompt's Save: commit the form as the editor's own
+    /// Save does, then close the pane. An invalid form leaves it open.
+    pub(in crate::workspace) fn save_and_close_task_edit_pane(
         &mut self,
         pane_id: PaneId,
-        start: bool,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let Some(task_id) = self.commit_task_edit_pane(pane_id, cx) else {
-            return;
-        };
-
-        self.close_pane_by_id(pane_id, window, cx);
-
-        if start {
-            self.start_task(&task_id, window, cx);
+        if self.commit_task_editor(pane_id, window, cx).is_some() {
+            self.close_pane_by_id(pane_id, window, cx);
         }
-        cx.notify();
+    }
+
+    /// Commit the form as shown, including a typed-but-unsubmitted subtask
+    /// and an open rename — the sequence every interactive save shares.
+    pub(super) fn commit_task_editor(
+        &mut self,
+        pane_id: PaneId,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Option<TaskId> {
+        self.submit_new_subtask(pane_id, window, cx);
+        self.commit_rename_subtask(pane_id, cx);
+        self.commit_task_edit_pane(pane_id, cx)
     }
 
     /// Persist the pane's form into `GlobalTasks` without closing the

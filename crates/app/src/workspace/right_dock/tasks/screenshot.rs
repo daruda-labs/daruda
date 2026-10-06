@@ -85,7 +85,7 @@ impl Workspace {
             return;
         };
         let active = self.active;
-        let root = self.data_dir.join("task-list-preview");
+        let root = std::env::temp_dir().join("daruda-task-list-preview");
         if let Err(error) = std::fs::create_dir_all(&root) {
             self.report_error(
                 daruda_store::observability::error_report::ErrorReport::new(error.to_string())
@@ -120,7 +120,8 @@ impl Workspace {
         });
         self.set_task_scope(scope, cx);
         self.set_task_filter(TaskFilter::All, cx);
-        self.task_search_input
+        self.task_browser
+            .search
             .clone()
             .update(cx, |input, cx| input.set_value(query, window, cx));
         self.open_page(Page::Tasks, window, cx);

@@ -718,7 +718,7 @@ fn open_chat_marks_a_cli_run_read_only_and_restore_keeps_it(cx: &mut TestAppCont
     );
     cx.update_window(window.into(), |_, window, cx| {
         workspace.update(cx, |ws, cx| {
-            ws.agents[0].launch =
+            std::sync::Arc::make_mut(&mut ws.agents)[0].launch =
                 daruda_config::AgentLaunch::Raw("daruda-missing-test-adapter".into());
             let cwd = ws.active_lane().unwrap().path.clone();
             let task = cli_task(&cwd, cx);
