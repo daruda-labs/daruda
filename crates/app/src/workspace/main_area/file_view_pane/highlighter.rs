@@ -602,7 +602,7 @@ mod tests {
     /// SyntaxColors" as the cause.
     #[test]
     fn gpui_raw_editor_highlighter_colours_rust_with_daruda_theme() {
-        use crate::ui::theme::palette;
+        use crate::ui::theme::syntax;
 
         let code = "fn main() {\n    let x = 1;\n}\n";
         let rope = gpui_component::Rope::from_str(code);
@@ -611,8 +611,7 @@ mod tests {
         highlighter.update(None, &rope);
 
         let mut theme = (*gpui_component::highlighter::HighlightTheme::default_dark()).clone();
-        theme.style.syntax =
-            palette::editor_syntax_colors_of(palette::SyntaxPalette::Daruda, false);
+        theme.style.syntax = syntax::editor_syntax_colors_of(syntax::SyntaxPalette::Daruda, false);
 
         let styles = highlighter.styles(&(0..code.len()), &theme);
         let colored = styles.iter().filter(|(_, s)| s.color.is_some()).count();

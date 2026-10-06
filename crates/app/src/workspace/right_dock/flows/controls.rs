@@ -4,21 +4,20 @@ use super::list::{DefinitionList, ORIGINS, RunList};
 use crate::surface::strings as s;
 use crate::ui::{
     ButtonVariants as _, Disableable as _, DropdownMenu as _, PopupMenuItem, button_bare,
-    button_with_icon, icons, menu_builder, tab, tab_bar, theme,
+    button_with_icon, icons, list_page, menu_builder, tab, tab_bar, theme,
 };
 use crate::workspace::{
     flow_browser::{FlowScope, FlowTab, RunFilter},
     flow_paths::FlowOrigin,
     layout::RightDockSnapshot,
 };
-use gpui::{AnyElement, App, FontWeight, IntoElement, div, prelude::*, px};
+use gpui::{AnyElement, App, IntoElement, div, prelude::*, px};
 
 pub(in crate::workspace) fn header(
     snap: &RightDockSnapshot,
     close: AnyElement,
     cx: &App,
 ) -> AnyElement {
-    let t = theme::current(cx);
     let target = snap
         .flow_browser
         .targets
@@ -26,41 +25,28 @@ pub(in crate::workspace) fn header(
         .find(|target| target.lane == snap.flow_lane);
     let workspace = snap.workspace.clone();
     let lane = snap.flow_lane;
-    div()
-        .flex()
-        .items_center()
-        .gap(px(theme::GAP_STANDARD))
-        .px(px(theme::DOCK_PAGE_PAD))
-        .py(px(theme::PAD_STANDARD))
-        .child(
-            div()
-                .flex_none()
-                .text_size(px(theme::RIGHT_PANEL_BODY_FONT_SIZE))
-                .font_weight(FontWeight::SEMIBOLD)
-                .text_color(t.text_primary)
-                .child(s::dock::right_tab_flows()),
-        )
-        .child(scope_picker(snap, cx))
-        .child(div().flex_1())
-        .child(
-            button_with_icon("flow-new", s::flow::new_title(), icons::ADD)
-                .primary()
-                .flex_none()
-                .tab_stop(true)
-                .disabled(target.is_none())
-                .tooltip(
-                    target
-                        .map(|target| s::flow::new_in_project(&target.project))
-                        .unwrap_or_else(s::flow::scope_unavailable),
-                )
-                .on_click(move |_, window, cx| {
-                    if let Some(ws) = workspace.upgrade() {
-                        ws.update(cx, |ws, cx| ws.prompt_new_flow(lane, window, cx));
-                    }
-                }),
-        )
-        .child(close)
-        .into_any_element()
+    list_page::header(
+        s::dock::right_tab_flows(),
+        scope_picker(snap, cx),
+        button_with_icon("flow-new", s::flow::new_title(), icons::ADD)
+            .primary()
+            .flex_none()
+            .tab_stop(true)
+            .disabled(target.is_none())
+            .tooltip(
+                target
+                    .map(|target| s::flow::new_in_project(&target.project))
+                    .unwrap_or_else(s::flow::scope_unavailable),
+            )
+            .on_click(move |_, window, cx| {
+                if let Some(ws) = workspace.upgrade() {
+                    ws.update(cx, |ws, cx| ws.prompt_new_flow(lane, window, cx));
+                }
+            }),
+        close,
+        cx,
+    )
+    .into_any_element()
 }
 
 fn scope_picker(snap: &RightDockSnapshot, cx: &App) -> impl IntoElement {
@@ -87,7 +73,7 @@ fn scope_picker(snap: &RightDockSnapshot, cx: &App) -> impl IntoElement {
         .child(
             div()
                 .min_w_0()
-                .max_w(px(theme::FLOW_SCOPE_MAX_W))
+                .max_w(px(theme::list_metrics::WORKTREE_SCOPE_MAX_W))
                 .truncate()
                 .child(label),
         )

@@ -396,7 +396,7 @@ Daruda is not strict MVU, but the architecture leans on three rules. Treat them 
 ### Pitfall-prevention rules
 
 1. **Coordinates**: never mix byte offsets with grid coordinates. Always convert window coordinates via `mouse_position_to_local()`.
-2. **Magic numbers**: escape bytes, codes, buffer capacities, colors, pixels, and strings belong only in their designated files (`ansi.rs`, `vt_codes.rs`, `vt_limits.rs`, `theme.rs`, `strings/`, `constants.rs`, `keybindings.rs`).
+2. **Magic numbers**: escape bytes, codes, buffer capacities, colors, pixels, and strings belong only in their designated files (`ansi.rs`, `vt_codes.rs`, `vt_limits.rs`, `theme.rs`, `strings/`, `constants.rs`, `keybindings.rs`). App UI scales and component-owned metric definition sites are documented in `crates/app/src/ui/CLAUDE.md`; ordinary call sites reuse those definitions, not inline pixel literals.
 3. **Zig FFI**: Ghostty enums are `u16`. Always range-check before casting.
 4. **IME**: printable characters must go through `replace_text_in_range` → `commit_text` → PTY. Never send directly from `on_key_down`.
 5. **GPUI Entity reentrancy**: calling `.read(cx)` on the same entity during `render()` or `entity.update()` panics. `persist_state` must only be called via `mark_dirty_and_save` (`cx.defer`).

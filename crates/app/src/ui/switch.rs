@@ -16,22 +16,25 @@ struct Metrics {
 }
 
 const SETTINGS: Metrics = Metrics {
-    w: theme::SETTINGS_SWITCH_W,
-    h: theme::SETTINGS_SWITCH_H,
-    thumb: theme::SETTINGS_SWITCH_THUMB,
-    inset: theme::SETTINGS_SWITCH_INSET,
-    target_w: theme::SETTINGS_SWITCH_TARGET_W,
-    target_h: theme::BUTTON_WIDGET_HEIGHT,
+    w: 30.0,
+    h: 18.0,
+    thumb: 10.0,
+    inset: 3.0,
+    target_w: 38.0,
+    target_h: 32.0,
 };
 
 const COMPACT: Metrics = Metrics {
-    w: theme::COMPACT_SWITCH_W,
-    h: theme::COMPACT_SWITCH_H,
-    thumb: theme::COMPACT_SWITCH_THUMB,
-    inset: theme::COMPACT_SWITCH_INSET,
-    target_w: theme::COMPACT_SWITCH_TARGET_W,
+    w: 24.0,
+    h: 14.0,
+    thumb: 10.0,
+    inset: 2.0,
+    target_w: 28.0,
     target_h: theme::CONTROL_TARGET_SIZE,
 };
+
+/// Sibling row actions reserve the same space as the compact control renders.
+pub(crate) const COMPACT_TARGET_WIDTH: f32 = COMPACT.target_w;
 
 /// Controlled switch: the caller commits the change before updating `checked`.
 pub fn switch(id: impl Into<ElementId>, checked: bool, cx: &App) -> Button {

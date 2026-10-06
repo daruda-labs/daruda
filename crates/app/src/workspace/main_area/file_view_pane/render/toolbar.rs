@@ -349,8 +349,8 @@ pub(super) fn render_file_viewer_toolbar(
 fn toolbar_toggle_spacer() -> impl IntoElement {
     div()
         .flex_none()
-        .w(px(theme::FILE_VIEWER_TOOL_BUTTON_W))
-        .h(px(theme::FILE_VIEWER_TOOL_BUTTON_H))
+        .w(px(theme::CONTROL_TARGET_SIZE))
+        .h(px(theme::CONTROL_TARGET_SIZE))
 }
 
 /// A small icon button for the diff-context toggle.
@@ -364,12 +364,12 @@ fn toolbar_toggle_button(
     div()
         .id(label.clone())
         .flex_none()
-        .w(px(theme::FILE_VIEWER_TOOL_BUTTON_W))
-        .h(px(theme::FILE_VIEWER_TOOL_BUTTON_H))
+        .w(px(theme::CONTROL_TARGET_SIZE))
+        .h(px(theme::CONTROL_TARGET_SIZE))
         .flex()
         .items_center()
         .justify_center()
-        .rounded(px(theme::FILE_VIEWER_TOOL_BUTTON_RADIUS))
+        .rounded(px(theme::RADIUS_SM))
         .text_size(px(theme::FILE_VIEWER_HEADER_FONT_SIZE))
         .cursor_pointer()
         .when(toggle.active, |d| {

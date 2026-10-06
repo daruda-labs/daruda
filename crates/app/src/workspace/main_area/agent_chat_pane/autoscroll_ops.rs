@@ -24,6 +24,9 @@ use gpui::{Context, MouseButton, MouseMoveEvent, Window, px};
 use super::view::AgentChatView;
 use crate::ui::theme;
 
+const AUTOSCROLL_POLL: Duration = Duration::from_millis(50);
+const AUTOSCROLL_MAX_STEP_PX: f32 = 48.0;
+
 /// One auto-scroll polling step, in pixels. Returns the distance to scroll the
 /// list this tick (positive = toward the end / content up, negative = toward
 /// the start / content down, `0` = no scroll). Kept a free function of plain
@@ -104,10 +107,9 @@ impl AgentChatView {
         self.selection_drag_active = true;
         let entity = cx.entity().downgrade();
         let step_granularity_px = theme::agent_chat_font_size(cx).max(1.0);
-        let poll = Duration::from_millis(theme::AGENT_CHAT_AUTOSCROLL_POLL_MS);
         self.autoscroll_task = Some(window.spawn(cx, async move |cx| {
             loop {
-                cx.background_executor().timer(poll).await;
+                cx.background_executor().timer(AUTOSCROLL_POLL).await;
                 let keep_going = cx
                     .update(|window, cx| {
                         let mouse = window.mouse_position();
@@ -198,7 +200,7 @@ impl AgentChatView {
             step_granularity_px,
             f32::from(block.top()),
             f32::from(block.bottom()),
-            theme::AGENT_CHAT_AUTOSCROLL_MAX_STEP_PX,
+            AUTOSCROLL_MAX_STEP_PX,
         );
         if step != 0 {
             self.list_state.scroll_by(px(step as f32));

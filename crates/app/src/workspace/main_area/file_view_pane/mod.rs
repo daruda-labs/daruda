@@ -39,6 +39,14 @@ use std::path::PathBuf;
 
 use daruda_store::project::LaneId;
 
+/// Maximum lines shown in the file viewer body before truncation.
+pub(in crate::workspace) const FILE_VIEWER_MAX_LINES: usize = 2000;
+/// Maximum bytes read from a file in Raw mode. Files larger than this are
+/// truncated before line-splitting so the process never loads unbounded data.
+pub(in crate::workspace) const FILE_VIEWER_MAX_BYTES: usize = 5 * 1024 * 1024;
+/// Rows rendered above and below the visible viewport.
+pub(in crate::workspace) const FILE_VIEWER_VIRTUAL_OVERSCAN: usize = 8;
+
 // ----------------------------------------------------------------
 // Visual row — pre-computed flat render unit
 // ----------------------------------------------------------------
@@ -325,10 +333,9 @@ impl PaneFileContent {
 
 /// Build the flat row list for a raw file. Capped at `FILE_VIEWER_MAX_LINES`.
 pub(in crate::workspace) fn build_raw_rows(lines: &[String]) -> Vec<VisualRow> {
-    use crate::ui::theme;
     lines
         .iter()
-        .take(theme::FILE_VIEWER_MAX_LINES)
+        .take(FILE_VIEWER_MAX_LINES)
         .enumerate()
         .map(|(i, line)| VisualRow {
             kind: VisualRowKind::Plain,

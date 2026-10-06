@@ -53,7 +53,7 @@ CLAUDE.md `ui/` table.
 ```
 ui/
 ├── mod.rs          # pub mod + factory re-exports + trait re-exports
-├── theme.rs        # apply_daruda_palette(cx) — palette mapping
+├── theme/          # apply_daruda_palette(cx), semantic colors, shared metrics, list content budgets
 ├── alert.rs        # error/warning/info/success(id, msg) factories
 ├── badge.rs        # Badge::new(label).monospace()/.bg_color()/... over Tag::custom
 ├── button.rs       # button / button_primary / button_danger / button_bare; the `*_on_surface` family for terminal-mirrored panes — button_on_surface (bare label), button_bare_on_surface (glyph), button_chip_on_surface (label + always-on hairline, so a word-bearing control is not mistaken for the static readouts beside it)
@@ -69,6 +69,8 @@ ui/
 ├── icons.rs        # Glyph paths + icon(path): explicit 16px SVG artwork. Controls use Material Symbols (`icons/ui/`); dock tree/list item glyphs use Lucide (`icons/lucide/`) at stroke 1.65, pinned by a test — list new Lucide files in `LUCIDE` and credit them in `LICENSES/lucide-LICENSE.txt`. button_icon / button_icon_danger / button_icon_on_surface add a 24px target; button_icon_glyph(id, path, size, cx) makes the artwork its own target, for a tree row's leading glyph that must not push the label; button_with_icon keeps 16px artwork before a text label, independent of the vendor button tier.
 ├── divider.rs      # Divider re-export
 ├── list.rs         # FilteredItem + FilteredDelegate + searchable_list_state + list(&state)
+├── list_page.rs    # Shared page chrome for domain-owned list screens: compact header row, toolbar, search field with clear affordance, result summary row, group heading, and empty-state body. Callers own state transitions, counts, localization, scopes, and filters; this module owns repeated spacing, typography, and disclosure/search chrome.
+├── list_table.rs   # Domain-free column schema for list headers/body rows. The same `ListTable<K>` drives header and row cells, derives horizontal-scroll minimum width from visible columns + gaps + insets, and distinguishes truncating fixed cells from unclipped control/action cells.
 ├── markdown/       # markdown(id, text) — rendered, drag-selectable/copyable markdown over gpui_component::text::TextView (RenderOnce; .selectable()/.color()/.text_size()/.full_width()). A caller-set `.text_size()` also rebases the view's vertical metrics on that size (`TextViewStyle` line height / paragraph gap / heading base), since the vendored defaults are rem-anchored and stop agreeing with the body at any other size. `tests.rs` holds the click/selection gates plus the rendered-metric regressions (probe opens a real window and reads painted heights back)
 ├── menu.rs         # DropdownMenu / PopupMenu / PopupMenuItem re-exports + menu_builder + stacked_menu_builder (a dropdown opened inside another float: lifted fill + `text_subtle` edge) + popup_menu_deferred. `ContextMenuExt` is deliberately NOT re-exported: its `.context_menu(..)` renders inside the caller's subtree, where an ancestor clip cuts the menu and its hit-testing — right-click menus go through `crate::workspace::root_menu::RootContextMenuExt` (enforced by `scripts/lint-declarative-context-menu.sh`)
 ├── popover.rs      # Popover/PopoverState re-export — trigger-anchored panel for browsing surfaces (clicks inside keep it open; outside/Escape dismiss); menus stay on .dropdown_menu + menu_builder
@@ -255,6 +257,37 @@ that trait's methods. Speculative re-exports rot.
    - `scripts/lint-direct-gpui-component.sh` (passes if no call site
      bypasses ui/)
    - `cargo fmt -p daruda -- --check`
+
+### Token ownership
+
+- Shared numeric scales live in `theme/metrics.rs`: padding, gaps, fonts,
+  radii, and standard icon/target sizes. Normal callers use `theme::*`;
+  `palette::*` re-exports the same definitions for compatibility.
+- Colors stay in the palette and live theme. Chrome reads `theme::current`;
+  terminal-mirrored panes use `PaneSurfaceTokens` and surface-aware factories.
+- A component owns its recipe. Use primitive tokens directly for ordinary
+  spacing, type, and corners, not a new screen-prefixed alias. Independent
+  component constraints live beside their owner: `switch.rs` owns its two
+  `Metrics` recipes, `form_helpers.rs` owns its label gutter, and
+  `section_header.rs` owns the existing 10.5px quiet label size. These are
+  definition sites for named metrics, not exemptions for inline `px` literals.
+- Icon buttons and dock toggles share a 24px target and 4px corners. Standard
+  artwork is 16px; dock toggles keep 14px artwork and tree glyph buttons keep
+  their explicit targets. Do not repeat the factory's geometry at call sites.
+  Passive `Badge` labels, actionable chips, and custom status pills remain
+  distinct contracts. Buttons stay outside Tab unless the caller opts in;
+  switches retain their keyboard participation and disabled behavior.
+- `theme/list_metrics.rs` holds actual shared column-content budgets.
+  `ListTable` derives geometry from the visible schema; `list_page` owns page
+  chrome. Neither acquires domain filtering, selection, or state transitions.
+- Keep independent content budgets and semantic color roles even if their
+  values happen to match. Keep runtime limits and timers with feature ops.
+- Before adding a token, check the existing scale, then the existing
+  component, then the independent constraint and its narrowest visibility.
+  `bash scripts/report-ui-token-aliases.sh` reports new direct numeric aliases
+  against HEAD, including untracked UI source. It is advisory; a meaningful
+  role can carry an inline `// token-role: <reason>` exception. Legacy aliases
+  and textual unused candidates are review inputs, not automatic deletions.
 
 ### When NOT to add to ui/
 

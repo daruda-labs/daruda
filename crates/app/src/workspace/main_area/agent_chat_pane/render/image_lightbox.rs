@@ -28,8 +28,8 @@ fn lightbox_width(image_logical_width: f32, viewport_width: f32) -> f32 {
 /// Body scroll height after reserving room for the in-modal close row.
 fn lightbox_body_max_height(viewport_height: f32) -> f32 {
     let frac = theme::MERMAID_LIGHTBOX_VIEWPORT_FRACTION;
-    let reserved = theme::PANE_HEADER_CLOSE_H + theme::GAP_STANDARD;
-    (viewport_height * frac - reserved).max(theme::PANE_HEADER_CLOSE_H)
+    let reserved = theme::CONTROL_TARGET_SIZE + theme::GAP_STANDARD;
+    (viewport_height * frac - reserved).max(theme::CONTROL_TARGET_SIZE)
 }
 
 /// Vertically center the 90%-viewport lightbox enough that its own max body
@@ -169,7 +169,7 @@ mod tests {
         assert_eq!(
             height,
             viewport_height * theme::MERMAID_LIGHTBOX_VIEWPORT_FRACTION
-                - theme::PANE_HEADER_CLOSE_H
+                - theme::CONTROL_TARGET_SIZE
                 - theme::GAP_STANDARD
         );
     }
@@ -186,7 +186,7 @@ mod tests {
     #[test]
     fn margin_and_body_height_leave_bottom_room() {
         let viewport_height = 1000.0;
-        let content_height = theme::PANE_HEADER_CLOSE_H
+        let content_height = theme::CONTROL_TARGET_SIZE
             + theme::GAP_STANDARD
             + lightbox_body_max_height(viewport_height);
         assert!(lightbox_margin_top(viewport_height) + content_height < viewport_height);

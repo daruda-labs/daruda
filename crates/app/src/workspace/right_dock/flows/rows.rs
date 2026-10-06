@@ -1,7 +1,9 @@
-//! Shared column geometry for definitions and runs; details stay in their editors.
+//! Flow tables provide content; shared list geometry owns every column.
 
 use super::list::{DefinitionList, ORIGINS, RunList, RunRow};
 use crate::surface::strings as s;
+use crate::ui::list_table::{self, Column, ListTable};
+use crate::ui::theme::list_metrics as metrics;
 use crate::ui::{Badge, theme, tooltip};
 use crate::workspace::{
     flow_browser::{FlowGrouping, RunFilter},
@@ -9,71 +11,61 @@ use crate::workspace::{
 };
 use gpui::{AnyElement, App, Div, IntoElement, MouseButton, SharedString, div, prelude::*, px};
 
-pub(super) fn frame() -> Div {
-    div()
-        .flex()
-        .items_center()
-        .gap(px(theme::RIGHT_PANEL_ROW_GAP))
-        .px(px(theme::RIGHT_PANEL_PAD_X))
-        .py(px(theme::PAD_SM))
-        .text_size(px(theme::RIGHT_PANEL_BODY_FONT_SIZE))
+#[derive(Clone, Copy)]
+pub(super) enum FileColumn {
+    Title,
+    Source,
+    Modified,
+    Actions,
 }
 
-pub(super) fn cell(width: f32) -> Div {
-    div().w(px(width)).flex_none().min_w_0().truncate()
+#[derive(Clone, Copy)]
+enum RunColumn {
+    Title,
+    Status,
+    Started,
+    Stage,
+    Actions,
 }
 
-pub(super) fn title_cell() -> Div {
-    div()
-        .w(px(theme::FLOW_TABLE_TITLE_MIN_W))
-        .flex_grow()
-        .flex_shrink_0()
-        .min_w_0()
+fn file_layout() -> ListTable<FileColumn> {
+    ListTable::new([
+        (FileColumn::Title, Column::title()),
+        (FileColumn::Source, Column::Fixed(metrics::SOURCE_W)),
+        (FileColumn::Modified, Column::Fixed(metrics::TIMESTAMP_W)),
+        (
+            FileColumn::Actions,
+            Column::FixedUnclipped(metrics::ACTIONS_W),
+        ),
+    ])
 }
 
-pub(super) fn actions() -> Div {
-    div()
-        .w(px(theme::FLOW_TABLE_ACTIONS_W))
-        .flex_none()
-        .flex()
+fn run_layout() -> ListTable<RunColumn> {
+    ListTable::new([
+        (RunColumn::Title, Column::title()),
+        (RunColumn::Status, Column::Fixed(metrics::STATUS_W)),
+        (RunColumn::Started, Column::Fixed(metrics::TIMESTAMP_W)),
+        (RunColumn::Stage, Column::Fixed(metrics::STAGE_W)),
+        (
+            RunColumn::Actions,
+            Column::FixedUnclipped(metrics::ACTIONS_W),
+        ),
+    ])
+}
+
+pub(super) fn actions(cell: Div) -> Div {
+    cell.flex()
         .items_center()
         .justify_end()
         .gap(px(theme::GAP_SM))
         .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
 }
 
-fn table_header(runs: bool, cx: &App) -> Div {
-    let t = theme::current(cx);
-    let mut row = frame()
-        .text_color(t.text_muted)
-        .border_b_1()
-        .border_color(t.border)
-        .child(title_cell().child(if runs {
-            s::flow::column_run()
-        } else {
-            s::flow::column_flow()
-        }));
-    if runs {
-        row = row
-            .child(cell(theme::FLOW_TABLE_STATUS_W).child(s::common::column_status()))
-            .child(cell(theme::FLOW_TABLE_TIME_W).child(s::flow::column_started()))
-            .child(cell(theme::FLOW_TABLE_STAGE_W).child(s::flow::column_stage()));
-    } else {
-        row = row
-            .child(
-                cell(theme::FLOW_TABLE_ORIGIN_W)
-                    .id("flow-source-column")
-                    .debug_selector(|| "flow-source-column".into())
-                    .child(s::flow::column_origin()),
-            )
-            .child(cell(theme::FLOW_TABLE_TIME_W).child(s::flow::column_modified()));
-    }
-    row.child(
-        cell(theme::FLOW_TABLE_ACTIONS_W)
-            .debug_selector(|| "flow-actions-column".into())
-            .text_right()
-            .child(s::flow::column_actions()),
-    )
+fn action_heading(cell: Div) -> AnyElement {
+    cell.debug_selector(|| "flow-actions-column".into())
+        .text_right()
+        .child(s::flow::column_actions())
+        .into_any_element()
 }
 
 pub(super) fn definitions(
@@ -81,16 +73,27 @@ pub(super) fn definitions(
     list: &DefinitionList<'_>,
     cx: &App,
 ) -> AnyElement {
-    let mut body = div()
-        .flex()
-        .flex_col()
-        .min_w(px(theme::FLOW_TABLE_FILES_MIN_W))
-        .child(table_header(false, cx));
+    let layout = file_layout();
+    let mut body = layout.body().child(layout.header(
+        |column, cell| {
+            match column {
+                FileColumn::Title => cell.child(s::flow::column_flow()).into_any_element(),
+                FileColumn::Source => cell
+                    .id("flow-source-column")
+                    .debug_selector(|| "flow-source-column".into())
+                    .child(s::flow::column_origin())
+                    .into_any_element(),
+                FileColumn::Modified => cell.child(s::flow::column_modified()).into_any_element(),
+                FileColumn::Actions => action_heading(cell),
+            }
+        },
+        cx,
+    ));
     if snap.flow_browser.state.grouping == FlowGrouping::None {
         body = body.children(
             list.visible
                 .iter()
-                .map(|file| super::files::flow_row(file, snap, cx)),
+                .map(|file| super::files::flow_row(file, snap, &layout, cx)),
         );
     } else {
         for origin in ORIGINS.into_iter().flatten() {
@@ -107,79 +110,59 @@ pub(super) fn definitions(
                 body = body.children(
                     files
                         .into_iter()
-                        .map(|file| super::files::flow_row(file, snap, cx)),
+                        .map(|file| super::files::flow_row(file, snap, &layout, cx)),
                 );
             }
         }
     }
-    div()
-        .id("flow-definitions-scroll")
+    list_table::scroll("flow-definitions-scroll", body)
         .debug_selector(|| "flow-table-scroll".into())
-        .overflow_x_scroll()
-        .child(body)
         .into_any_element()
 }
 
 pub(super) fn runs(snap: &RightDockSnapshot, list: &RunList<'_>, cx: &App) -> AnyElement {
-    div()
-        .id("flow-runs-scroll")
+    let layout = run_layout();
+    let body = layout
+        .body()
+        .child(layout.header(
+            |column, cell| match column {
+                RunColumn::Title => cell.child(s::flow::column_run()).into_any_element(),
+                RunColumn::Status => cell.child(s::common::column_status()).into_any_element(),
+                RunColumn::Started => cell.child(s::flow::column_started()).into_any_element(),
+                RunColumn::Stage => cell.child(s::flow::column_stage()).into_any_element(),
+                RunColumn::Actions => action_heading(cell),
+            },
+            cx,
+        ))
+        .children(
+            list.visible
+                .iter()
+                .map(|run| run_row(*run, snap, &layout, cx)),
+        );
+    list_table::scroll("flow-runs-scroll", body)
         .debug_selector(|| "flow-table-scroll".into())
-        .overflow_x_scroll()
-        .child(
-            div()
-                .flex()
-                .flex_col()
-                .min_w(px(theme::FLOW_TABLE_RUNS_MIN_W))
-                .child(table_header(true, cx))
-                .children(list.visible.iter().map(|run| run_row(*run, snap, cx))),
-        )
         .into_any_element()
 }
 
-fn run_row(run: RunRow<'_>, snap: &RightDockSnapshot, cx: &App) -> AnyElement {
+fn run_row(
+    run: RunRow<'_>,
+    snap: &RightDockSnapshot,
+    layout: &ListTable<RunColumn>,
+    cx: &App,
+) -> AnyElement {
     let t = theme::current(cx);
     let id = run
         .dir()
         .file_name()
         .map(|name| name.to_string_lossy().into_owned())
         .unwrap_or_default();
-    let name = run_name(run, &id);
-    let subtitle = if run.source().is_some() {
-        id.clone()
-    } else {
-        s::flow::not_recorded()
-    };
-    let started = match run {
-        RunRow::Live(_) => crate::workspace::flow_request::run_started_at(&id)
-            .map(s::flow::run_started_at)
-            .unwrap_or_default(),
-        RunRow::Past(past) => past.started.to_string(),
-    };
-    let color = match run {
-        RunRow::Live(_) if run.filter() == RunFilter::Asking => theme::WARNING,
-        RunRow::Live(_) => t.right_panel_task_running_color,
-        RunRow::Past(past) => super::past::status_color(past.status),
-    };
-    let status = super::controls::run_label(run.filter());
     let detail = match run {
         RunRow::Past(past) => s::flow::run_status(past.status).to_string(),
         RunRow::Live(live) => live.doing.to_string(),
     };
-    let fill = gpui::Hsla {
-        a: theme::RIGHT_PANEL_STATUS_PILL_BG_ALPHA,
-        ..color
-    };
-    let mut row = frame()
-        .id(SharedString::from(format!(
-            "flow-past-{}",
-            run.dir().display()
-        )))
-        .debug_selector({
-            let dir = run.dir().to_path_buf();
-            move || format!("flow-run-row-{}", dir.display())
-        })
-        .child(
-            title_cell()
+    let row = layout
+        .row(|column, cell| match column {
+            RunColumn::Title => cell
                 .id("flow-run-name")
                 .tooltip(tooltip::text(run.dir().display().to_string()))
                 .child(
@@ -187,7 +170,7 @@ fn run_row(run: RunRow<'_>, snap: &RightDockSnapshot, cx: &App) -> AnyElement {
                         .w_full()
                         .truncate()
                         .text_color(t.text_body)
-                        .child(name),
+                        .child(run_name(run, &id)),
                 )
                 .child(
                     div()
@@ -195,64 +178,97 @@ fn run_row(run: RunRow<'_>, snap: &RightDockSnapshot, cx: &App) -> AnyElement {
                         .truncate()
                         .text_size(px(theme::FONT_SIZE_XS))
                         .text_color(t.text_muted)
-                        .child(subtitle),
-                ),
-        )
-        .child(
-            cell(theme::FLOW_TABLE_STATUS_W)
-                .id("flow-run-status")
-                .tooltip(tooltip::text(detail.clone()))
-                .child(
-                    Badge::new(status)
-                        .text_color(t.text_body)
-                        .bg_color(fill)
-                        .border_color(fill)
-                        .truncate(),
-                ),
-        )
-        .child(
-            cell(theme::FLOW_TABLE_TIME_W)
-                .text_color(t.text_muted)
-                .child(started),
-        )
-        .child(
-            cell(theme::FLOW_TABLE_STAGE_W)
+                        .child(if run.source().is_some() {
+                            id.clone()
+                        } else {
+                            s::flow::not_recorded()
+                        }),
+                )
+                .into_any_element(),
+            RunColumn::Status => {
+                let color = match run {
+                    RunRow::Live(_) if run.filter() == RunFilter::Asking => theme::WARNING,
+                    RunRow::Live(_) => t.right_panel_task_running_color,
+                    RunRow::Past(past) => super::past::status_color(past.status),
+                };
+                let fill = gpui::Hsla {
+                    a: theme::RIGHT_PANEL_STATUS_PILL_BG_ALPHA,
+                    ..color
+                };
+                cell.id("flow-run-status")
+                    .tooltip(tooltip::text(detail.clone()))
+                    .child(
+                        Badge::new(super::controls::run_label(run.filter()))
+                            .text_color(t.text_body)
+                            .bg_color(fill)
+                            .border_color(fill)
+                            .truncate(),
+                    )
+                    .into_any_element()
+            }
+            RunColumn::Started => {
+                let started = match run {
+                    RunRow::Live(_) => crate::workspace::flow_request::run_started_at(&id)
+                        .map(s::flow::run_started_at)
+                        .unwrap_or_default(),
+                    RunRow::Past(past) => past.started.to_string(),
+                };
+                cell.text_color(t.text_muted)
+                    .child(started)
+                    .into_any_element()
+            }
+            RunColumn::Stage => cell
                 .id("flow-run-stage")
                 .text_color(t.text_muted)
                 .tooltip(tooltip::text(detail.clone()))
-                .when(matches!(run, RunRow::Live(_)), |cell| cell.child(detail)),
-        );
+                .when(matches!(run, RunRow::Live(_)), |cell| {
+                    cell.child(detail.clone())
+                })
+                .into_any_element(),
+            RunColumn::Actions => match run {
+                RunRow::Live(live) => actions(cell)
+                    .child(super::live::stop_button(live, snap))
+                    .into_any_element(),
+                RunRow::Past(past) => actions(cell)
+                    .children(super::past::resume_button(past, snap))
+                    .into_any_element(),
+            },
+        })
+        .id(SharedString::from(format!(
+            "flow-past-{}",
+            run.dir().display()
+        )))
+        .debug_selector({
+            let dir = run.dir().to_path_buf();
+            move || format!("flow-run-row-{}", dir.display())
+        });
     match run {
-        RunRow::Live(live) => {
-            row = row.child(actions().child(super::live::stop_button(live, snap)));
-            div()
-                .flex()
-                .flex_col()
-                .gap(px(theme::GAP_SM))
-                .child(row)
-                .children(
-                    live.asking.as_ref().map(|ask| {
-                        super::live::ask_block(live.lane, ask, live.also_waiting, snap, cx)
-                    }),
-                )
-                .into_any_element()
-        }
+        RunRow::Live(live) => div()
+            .flex()
+            .flex_col()
+            .gap(px(theme::GAP_SM))
+            .child(row)
+            .children(
+                live.asking
+                    .as_ref()
+                    .map(|ask| super::live::ask_block(live.lane, ask, live.also_waiting, snap, cx)),
+            )
+            .into_any_element(),
         RunRow::Past(past) => {
             let workspace = snap.workspace.clone();
             let lane = snap.flow_lane;
-            row.child(actions().children(super::past::resume_button(past, snap)))
-                .when_some(past.report.clone(), |row, report| {
-                    row.cursor_pointer()
-                        .hover(|style| style.bg(t.overlay_hover))
-                        .on_click(move |_, window, cx| {
-                            if let Some(ws) = workspace.upgrade() {
-                                ws.update(cx, |ws, cx| {
-                                    ws.open_browsed_report(lane, &report, window, cx)
-                                });
-                            }
-                        })
-                })
-                .into_any_element()
+            row.when_some(past.report.clone(), |row, report| {
+                row.cursor_pointer()
+                    .hover(|style| style.bg(t.overlay_hover))
+                    .on_click(move |_, window, cx| {
+                        if let Some(ws) = workspace.upgrade() {
+                            ws.update(cx, |ws, cx| {
+                                ws.open_browsed_report(lane, &report, window, cx)
+                            });
+                        }
+                    })
+            })
+            .into_any_element()
         }
     }
 }

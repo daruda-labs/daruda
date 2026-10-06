@@ -2,8 +2,8 @@
 # Lint for inline color / pixel literals in production source files.
 #
 # Background: every UI color and pixel size must live in
-# `daruda_terminal::ux::theme` (colors + pixel metrics) or
-# `crate::surface::*` (app-shell text/keybindings). Inline values like
+# `daruda_terminal::ux::theme` (terminal), `ui/theme` or documented component
+# definition sites (app), or `crate::surface::*` (text/keybindings). Inline values like
 # `gpui::white()` and `px(2.0)` drift away from theming and break the
 # moment a future theme/dpi change is wired up.
 #
@@ -41,6 +41,12 @@ WHITELIST=(
     # daruda_terminal/ux/theme.rs.
     "crates/app/src/ui/theme/mod.rs"
     "crates/app/src/ui/theme/palette.rs"
+    # `syntax/` holds the editor/diff syntax palettes as hex literals.
+    "crates/app/src/ui/theme/syntax/mod.rs"
+    "crates/app/src/ui/theme/syntax/dark.rs"
+    "crates/app/src/ui/theme/syntax/light.rs"
+    "crates/app/src/ui/theme/list_metrics.rs"
+    "crates/app/src/ui/theme/metrics.rs"
 )
 
 is_whitelisted() {
@@ -116,9 +122,8 @@ done
 if (( violations > 0 )); then
     echo
     echo "✗ Inline-literal lint failed: $violations file(s) with hits."
-    echo "  See CLAUDE.md G4. Hoist values to daruda_terminal::ux::theme"
-    echo "  (colors + pixel metrics) or crate::surface::* (app-shell"
-    echo "  strings/keybindings) and reference the named constant."
+    echo "  See AGENTS.md and ui/CLAUDE.md for definition-site ownership."
+    echo "  Reuse a shared component or token; do not add call-site literals."
     exit 1
 fi
 

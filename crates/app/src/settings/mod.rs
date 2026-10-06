@@ -3278,7 +3278,7 @@ impl SettingsView {
 }
 
 /// Curated syntax palettes. Value = config key resolved by
-/// `palette::SyntaxPalette::from_config_name`; labels are i18n'd via
+/// `syntax::SyntaxPalette::from_config_name`; labels are i18n'd via
 /// [`syntax_theme_label`]. The recommended Daruda palette is first.
 const SYNTAX_THEMES: &[&str] = &[
     "daruda",

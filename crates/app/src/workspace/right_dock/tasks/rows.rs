@@ -5,27 +5,47 @@ use gpui::{AnyElement, App, Div, IntoElement, MouseButton, SharedString, div, pr
 
 use super::{TaskGrouping, list::TaskList};
 use crate::surface::strings;
+use crate::ui::list_table::{self, Column, ListTable};
+use crate::ui::theme::list_metrics as metrics;
 use crate::ui::{theme, tooltip};
 use crate::workspace::layout::RightDockSnapshot;
+
+#[derive(Clone, Copy)]
+enum TaskColumn {
+    Indicator,
+    Title,
+    Project,
+    Status,
+    Agent,
+    Updated,
+}
+
+fn layout(show_project: bool) -> ListTable<TaskColumn> {
+    let mut columns = vec![
+        (
+            TaskColumn::Indicator,
+            Column::Fixed(theme::RIGHT_PANEL_TASK_INDICATOR_W),
+        ),
+        (TaskColumn::Title, Column::title()),
+    ];
+    if show_project {
+        columns.push((TaskColumn::Project, Column::Fixed(metrics::PROJECT_W)));
+    }
+    columns.extend([
+        (TaskColumn::Status, Column::Fixed(metrics::STATUS_W)),
+        (TaskColumn::Agent, Column::Fixed(metrics::AGENT_W)),
+        (TaskColumn::Updated, Column::Fixed(metrics::RELATIVE_TIME_W)),
+    ]);
+    ListTable::new(columns)
+}
 
 pub(super) fn table(snap: &RightDockSnapshot, list: &TaskList<'_>, cx: &App) -> AnyElement {
     let show_project = snap.task_browser.state.scope == TaskScope::AllProjects
         && snap.task_browser.state.groups.mode != TaskGrouping::Project;
-    let mut table = div()
-        .flex()
-        .flex_col()
-        .min_w(px(if show_project {
-            theme::TASK_TABLE_ALL_MIN_W
-        } else {
-            theme::TASK_TABLE_MIN_W
-        }))
-        .child(header(show_project, cx));
+    let layout = layout(show_project);
+    let mut table = layout.body().child(header(&layout, cx));
     if snap.task_browser.state.groups.mode == TaskGrouping::None {
-        table = table.children(
-            list.visible
-                .iter()
-                .map(|task| row(task, snap, show_project, cx)),
-        );
+        table = table.children(list.visible.iter().map(|task| row(task, snap, &layout, cx)));
     } else {
         for group in super::grouping::project(
             &list.visible,
@@ -34,78 +54,113 @@ pub(super) fn table(snap: &RightDockSnapshot, list: &TaskList<'_>, cx: &App) -> 
         ) {
             table = table.child(super::controls::group_header(&group, snap, cx));
             if snap.task_browser.state.groups.is_open(group.key) {
-                table = table.children(
-                    group
-                        .tasks
-                        .iter()
-                        .map(|task| row(task, snap, show_project, cx)),
-                );
+                table = table.children(group.tasks.iter().map(|task| row(task, snap, &layout, cx)));
             }
         }
     }
-    div()
-        .id("task-table-scroll")
-        .overflow_x_scroll()
-        .child(table)
-        .into_any_element()
+    list_table::scroll("task-table-scroll", table).into_any_element()
 }
 
-fn frame() -> Div {
-    div()
-        .flex()
-        .items_center()
-        .gap(px(theme::RIGHT_PANEL_ROW_GAP))
-        .px(px(theme::RIGHT_PANEL_PAD_X))
-        .py(px(theme::PAD_SM))
-        .text_size(px(theme::RIGHT_PANEL_BODY_FONT_SIZE))
+fn header(layout: &ListTable<TaskColumn>, cx: &App) -> Div {
+    layout.header(
+        |column, cell| match column {
+            TaskColumn::Indicator => cell.into_any_element(),
+            TaskColumn::Title => cell.child(strings::task::column_task()).into_any_element(),
+            TaskColumn::Project => cell
+                .id("task-project-column")
+                .debug_selector(|| "task-project-column".into())
+                .child(strings::task::column_project())
+                .into_any_element(),
+            TaskColumn::Status => cell
+                .child(strings::common::column_status())
+                .into_any_element(),
+            TaskColumn::Agent => cell.child(strings::task::column_agent()).into_any_element(),
+            TaskColumn::Updated => cell
+                .child(strings::task::column_updated())
+                .into_any_element(),
+        },
+        cx,
+    )
 }
 
-fn cell(width: f32) -> Div {
-    div().w(px(width)).flex_none().min_w_0().truncate()
-}
-
-fn title_cell() -> Div {
-    div()
-        .w(px(theme::TASK_TABLE_TITLE_MIN_W))
-        .flex_grow()
-        .flex_shrink_0()
-}
-
-fn header(show_project: bool, cx: &App) -> Div {
-    frame()
-        .text_color(theme::current(cx).text_muted)
-        .border_b_1()
-        .border_color(theme::current(cx).border)
-        .child(cell(theme::RIGHT_PANEL_TASK_INDICATOR_W))
-        .child(title_cell().child(strings::task::column_task()))
-        .when(show_project, |row| {
-            row.child(
-                cell(theme::RIGHT_PANEL_TASK_PROJECT_MAX_W)
-                    .id("task-project-column")
-                    .debug_selector(|| "task-project-column".into())
-                    .child(strings::task::column_project()),
-            )
-        })
-        .child(cell(theme::TASK_TABLE_STATUS_W).child(strings::common::column_status()))
-        .child(cell(theme::TASK_TABLE_AGENT_W).child(strings::task::column_agent()))
-        .child(cell(theme::TASK_TABLE_UPDATED_W).child(strings::task::column_updated()))
-}
-
-fn row(task: &Task, snap: &RightDockSnapshot, show_project: bool, cx: &App) -> AnyElement {
+fn row(
+    task: &Task,
+    snap: &RightDockSnapshot,
+    layout: &ListTable<TaskColumn>,
+    cx: &App,
+) -> AnyElement {
     let t = theme::current(cx);
     let workspace = snap.workspace.clone();
     let id = task.id.clone();
-    let project = snap
-        .task_projects
-        .name(task.project)
-        .map(str::to_owned)
-        .unwrap_or_else(strings::task::project_not_open);
-    let agent = agent_label(task, &snap.task_agents);
-    let elapsed = (*snap.now - task.updated_at).to_std().unwrap_or_default();
-    let updated = updated_label(elapsed.as_secs());
+    layout
+        .row(|column, cell| match column {
+            TaskColumn::Indicator => cell
+                .child(super::indicator_cell(&task.state, *snap.now, cx))
+                .into_any_element(),
+            TaskColumn::Title => title(task, snap, cell, cx),
+            TaskColumn::Project => {
+                let project = snap
+                    .task_projects
+                    .name(task.project)
+                    .map(str::to_owned)
+                    .unwrap_or_else(strings::task::project_not_open);
+                cell.id("project")
+                    .debug_selector({
+                        let id = task.id.clone();
+                        move || format!("task-project-{id}")
+                    })
+                    .tooltip(tooltip::text(project.clone()))
+                    .text_color(t.text_muted)
+                    .child(project)
+                    .into_any_element()
+            }
+            TaskColumn::Status => cell
+                .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+                .child(super::status_pill::status_pill(
+                    task,
+                    snap,
+                    compact_status(&task.state).into(),
+                    super::state_label(&task.state),
+                    cx,
+                ))
+                .into_any_element(),
+            TaskColumn::Agent => {
+                let agent = agent_label(task, &snap.task_agents);
+                cell.id("agent")
+                    .tooltip(tooltip::text(agent.clone()))
+                    .text_color(t.text_muted)
+                    .child(agent)
+                    .into_any_element()
+            }
+            TaskColumn::Updated => {
+                let elapsed = (*snap.now - task.updated_at).to_std().unwrap_or_default();
+                cell.id("updated")
+                    .tooltip(tooltip::text(task.updated_at.to_rfc3339()))
+                    .text_color(t.text_muted)
+                    .child(updated_label(elapsed.as_secs()))
+                    .into_any_element()
+            }
+        })
+        .id(SharedString::from(format!("task-row-{}", task.id)))
+        .debug_selector({
+            let id = task.id.clone();
+            move || format!("task-row-{id}")
+        })
+        .hover(|style| style.bg(t.overlay_hover))
+        .on_mouse_down(MouseButton::Left, move |_, window, cx| {
+            if let Some(ws) = workspace.upgrade() {
+                ws.update(cx, |ws, cx| {
+                    ws.open_task_edit_pane(Some(id.clone()), window, cx)
+                });
+            }
+        })
+        .into_any_element()
+}
+
+fn title(task: &Task, snap: &RightDockSnapshot, cell: Div, cx: &App) -> AnyElement {
+    let t = theme::current(cx);
     let metadata = strings::task::row_metadata(short_id(task), &task.branch_name);
-    let title = title_cell()
-        .flex()
+    cell.flex()
         .flex_col()
         .child(
             div()
@@ -142,73 +197,17 @@ fn row(task: &Task, snap: &RightDockSnapshot, show_project: bool, cx: &App) -> A
                         }),
                 )
             },
-        );
-    frame()
-        .id(SharedString::from(format!("task-row-{}", task.id)))
+        )
+        .id("open")
         .debug_selector({
             let id = task.id.clone();
-            move || format!("task-row-{id}")
+            move || format!("task-title-{id}")
         })
-        .hover(|style| style.bg(t.overlay_hover))
-        .on_mouse_down(MouseButton::Left, move |_, window, cx| {
-            if let Some(ws) = workspace.upgrade() {
-                ws.update(cx, |ws, cx| {
-                    ws.open_task_edit_pane(Some(id.clone()), window, cx)
-                });
-            }
-        })
-        .child(super::indicator_cell(&task.state, *snap.now, cx))
-        .child(
-            title
-                .id("open")
-                .debug_selector({
-                    let id = task.id.clone();
-                    move || format!("task-title-{id}")
-                })
-                .cursor_pointer()
-                .tooltip(tooltip::text(format!(
-                    "{}\n{}\n{}",
-                    task.title, task.id, task.branch_name
-                ))),
-        )
-        .when(show_project, |row| {
-            row.child(
-                cell(theme::RIGHT_PANEL_TASK_PROJECT_MAX_W)
-                    .id("project")
-                    .debug_selector({
-                        let id = task.id.clone();
-                        move || format!("task-project-{id}")
-                    })
-                    .tooltip(tooltip::text(project.clone()))
-                    .text_color(t.text_muted)
-                    .child(project),
-            )
-        })
-        .child(
-            cell(theme::TASK_TABLE_STATUS_W)
-                .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
-                .child(super::status_pill::status_pill(
-                    task,
-                    snap,
-                    compact_status(&task.state).into(),
-                    super::state_label(&task.state),
-                    cx,
-                )),
-        )
-        .child(
-            cell(theme::TASK_TABLE_AGENT_W)
-                .id("agent")
-                .tooltip(tooltip::text(agent.clone()))
-                .text_color(t.text_muted)
-                .child(agent),
-        )
-        .child(
-            cell(theme::TASK_TABLE_UPDATED_W)
-                .id("updated")
-                .tooltip(tooltip::text(task.updated_at.to_rfc3339()))
-                .text_color(t.text_muted)
-                .child(updated),
-        )
+        .cursor_pointer()
+        .tooltip(tooltip::text(format!(
+            "{}\n{}\n{}",
+            task.title, task.id, task.branch_name
+        )))
         .into_any_element()
 }
 

@@ -37,6 +37,8 @@ pub mod input;
 pub mod input_panel;
 pub mod label;
 pub mod list;
+pub mod list_page;
+pub mod list_table;
 pub mod macro_key;
 pub mod markdown;
 pub mod menu;

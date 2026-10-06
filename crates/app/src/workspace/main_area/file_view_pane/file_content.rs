@@ -105,8 +105,6 @@ fn load_raw(
     syntax_theme: &str,
     mermaid_palette: &MermaidPalette,
 ) -> LoadOutcome {
-    use crate::ui::theme;
-
     // Every source but the working tree reads a blob out of git.
     let blob = match source {
         DiffSource::WorkingTree => None,
@@ -170,8 +168,8 @@ fn load_raw(
             if b.contains(&0u8) {
                 return LoadOutcome::plain(PaneFileContent::Binary);
             }
-            let (text, byte_truncated) = if b.len() > theme::FILE_VIEWER_MAX_BYTES {
-                let s = String::from_utf8_lossy(&b[..theme::FILE_VIEWER_MAX_BYTES]).into_owned();
+            let (text, byte_truncated) = if b.len() > super::FILE_VIEWER_MAX_BYTES {
+                let s = String::from_utf8_lossy(&b[..super::FILE_VIEWER_MAX_BYTES]).into_owned();
                 (s, true)
             } else {
                 match String::from_utf8(b) {

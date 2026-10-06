@@ -29,6 +29,11 @@ impl Render for Probe {
                     .on_click(cx.listener(|this, _, _, cx| this.toggle(cx))),
             )
             .child(
+                switch_compact("switch-compact", self.checked, cx)
+                    .debug_selector(|| "switch-compact".into())
+                    .on_click(cx.listener(|this, _, _, cx| this.toggle(cx))),
+            )
+            .child(
                 switch("switch-disabled", false, cx)
                     .disabled(true)
                     .debug_selector(|| "switch-disabled".into())
@@ -47,6 +52,9 @@ fn switch_supports_click_and_keyboard_but_not_disabled_activation(cx: &mut TestA
     vcx.run_until_parked();
     let live = vcx.debug_bounds("switch-live").unwrap();
     let disabled = vcx.debug_bounds("switch-disabled").unwrap();
+    let compact = vcx.debug_bounds("switch-compact").unwrap();
+    assert_eq!(compact.size.width, px(COMPACT_TARGET_WIDTH));
+    assert_eq!(compact.size.height, px(theme::CONTROL_TARGET_SIZE));
     vcx.simulate_click(live.center(), Default::default());
     vcx.run_until_parked();
     assert_eq!(
@@ -81,6 +89,14 @@ fn switch_supports_click_and_keyboard_but_not_disabled_activation(cx: &mut TestA
             .read_with(&vcx, |p, _| (p.checked, p.changes))
             .unwrap(),
         (true, 3)
+    );
+    vcx.simulate_click(compact.center(), Default::default());
+    vcx.run_until_parked();
+    assert_eq!(
+        window
+            .read_with(&vcx, |p, _| (p.checked, p.changes))
+            .unwrap(),
+        (false, 4)
     );
 }
 

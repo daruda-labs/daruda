@@ -19,7 +19,7 @@ use chrono::{DateTime, Utc};
 use daruda_agent::SessionStatus;
 use daruda_store::tasks::{SessionEndReason, TASK_TOOL_USE_FAILURE_THRESHOLD, Task, TaskState};
 use daruda_terminal::ux::strings as ux_strings;
-use gpui::{AnyElement, Hsla, IntoElement, MouseButton, SharedString, div, prelude::*, px};
+use gpui::{AnyElement, Hsla, IntoElement, SharedString, div, prelude::*, px};
 
 use super::super::layout::RightDockSnapshot;
 use super::status_pill;
@@ -37,10 +37,7 @@ pub(in crate::workspace) fn render(snap: &RightDockSnapshot, cx: &gpui::App) -> 
     let mut body = crate::workspace::right_dock::right_panel_body()
         .child(controls::status_tabs(snap, &list))
         .child(
-            div()
-                .flex()
-                .items_center()
-                .gap(px(theme::GAP_STANDARD))
+            crate::ui::list_page::toolbar()
                 .child(div().flex_1().min_w_0().child(search_row(snap, cx)))
                 .child(controls::grouping_picker(snap)),
         )
@@ -67,38 +64,20 @@ pub(super) fn matches_task(t: &Task, query_lower: &str) -> bool {
             .any(|s| s.title.to_ascii_lowercase().contains(query_lower))
 }
 
-// ---------------------------------------------------------------------------
-// Search bar
-// ---------------------------------------------------------------------------
-
-/// Search input row: wraps the task search input in a relative container
-/// so the in-field `✕` button sits absolutely on the trailing edge. The
-/// icon renders only while the query is non-empty.
 fn search_row(snap: &RightDockSnapshot, cx: &gpui::App) -> impl IntoElement {
     let has_query = !snap.task_browser.query.trim().is_empty();
     let workspace = snap.workspace.clone();
-    div()
-        .relative()
-        .flex()
-        .w_full()
-        .child(crate::ui::input(&snap.task_browser.search, cx, ()))
-        .when(has_query, |row| {
-            row.child(
-                crate::ui::button_icon("task-search-clear", crate::ui::icons::CLOSE, cx)
-                    .tooltip(strings::common::search_clear())
-                    .absolute()
-                    .right(px(theme::PAD_XS))
-                    .top_0()
-                    .on_mouse_down(MouseButton::Left, move |_, window, cx| {
-                        // Stop propagation so the click lands on the
-                        // overlay, not the underlying Input.
-                        cx.stop_propagation();
-                        if let Some(ws) = workspace.upgrade() {
-                            ws.update(cx, |ws, cx| ws.clear_task_search(window, cx));
-                        }
-                    }),
-            )
-        })
+    crate::ui::list_page::search(
+        "task-search-clear",
+        &snap.task_browser.search,
+        has_query,
+        move |window, cx| {
+            if let Some(ws) = workspace.upgrade() {
+                ws.update(cx, |ws, cx| ws.clear_task_search(window, cx));
+            }
+        },
+        cx,
+    )
 }
 
 // ---------------------------------------------------------------------------

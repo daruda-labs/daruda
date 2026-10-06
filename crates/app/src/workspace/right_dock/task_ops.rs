@@ -138,7 +138,7 @@ impl Workspace {
 
     /// Ensure the Tasks tab's live tick is alive exactly when at least
     /// one task is in the `Running` state. The tick re-renders
-    /// the workspace at [`theme::RIGHT_PANEL_TASK_LIVE_TICK_MS`]
+    /// the workspace at [`super::task_workflow_ops::TASK_LIVE_TICK`]
     /// cadence so the pulse dot animates and the inline duration text
     /// advances. When no `Running` task remains, the tick stops by
     /// dropping its `gpui::Task<()>` handle and the workspace burns

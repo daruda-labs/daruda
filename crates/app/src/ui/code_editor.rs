@@ -140,7 +140,7 @@ fn code_editor_chrome(
 /// to that surface instead of the process-wide editor background.
 pub fn file_viewer_editor(state: &Entity<InputState>, cx: &App) -> Input {
     let bg = theme::file_viewer_pane_bg(cx);
-    let fg = theme::palette::syntax_theme_of(
+    let fg = theme::syntax_theme_of(
         theme::active_syntax_palette(cx),
         theme::file_viewer_pane_syntax_is_light(cx),
     )
@@ -173,7 +173,7 @@ pub fn embedded_code_viewer(state: &Entity<InputState>, background: Hsla, cx: &A
     // The light/dark pick goes through `agent_chat_syntax_is_light` — the same
     // judgment `Workspace::agent_chat_theme_params` feeds the tree-sitter spans,
     // so the fallback colour and the highlighted runs stay in lockstep.
-    let fg = theme::palette::syntax_theme_of(
+    let fg = theme::syntax_theme_of(
         theme::active_syntax_palette(cx),
         theme::agent_chat_syntax_is_light(cx),
     )

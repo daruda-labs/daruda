@@ -5,7 +5,10 @@
 //! constants so call sites can use one `crate::ui::theme` path.
 
 pub mod daruda_theme;
+pub mod list_metrics;
+pub mod metrics;
 pub mod palette;
+pub mod syntax;
 
 pub use daruda_theme::DarudaTheme;
 
@@ -224,6 +227,7 @@ fn reconcile_ui_theme(cx: &mut gpui::App) {
 }
 
 pub use crate::ui::theme::palette::*;
+pub use crate::ui::theme::syntax::*;
 pub use daruda_terminal::ux::theme::*;
 
 // Bridge implementation reads every constant through the unified
@@ -1077,6 +1081,31 @@ mod tests {
     /// would measure the wrong thing.
     fn contrast_over(fg: gpui::Hsla, bg: gpui::Hsla) -> f32 {
         super::contrast_ratio(fg, bg)
+    }
+
+    /// Command-effect chips paint their colour as text over their own tinted
+    /// fill, which must still clear the 4.5:1 body floor on either pane.
+    #[test]
+    fn command_effect_chips_clear_contrast_on_dark_and_light_panes() {
+        for (colors, pane) in [
+            ([AGENT_READING, AGENT_EDITING], gpui::rgb(0x1e_1e_1e)),
+            (
+                [AGENT_READING_LIGHT, AGENT_EDITING_LIGHT],
+                gpui::rgb(0xf9_fa_fb),
+            ),
+        ] {
+            for color in colors {
+                let fg = gpui::Rgba::from(color);
+                let a = AGENT_CHAT_CARD_TINT_ALPHA;
+                let fill = gpui::Rgba {
+                    r: fg.r * a + pane.r * (1.0 - a),
+                    g: fg.g * a + pane.g * (1.0 - a),
+                    b: fg.b * a + pane.b * (1.0 - a),
+                    a: 1.0,
+                };
+                assert!(contrast_over(color, fill.into()) >= 4.5);
+            }
+        }
     }
 
     /// Controls on the agent-chat bar take their colour from this surface, and

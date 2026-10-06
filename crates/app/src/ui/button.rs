@@ -111,8 +111,11 @@ pub fn button_icon_on_surface(
 fn icon_button_shell(id: impl Into<ElementId>, path: &'static str) -> Button {
     // The vendor's icon slot inherits Small (14px). A child decouples artwork
     // from the button tier while the shell still owns focus and disabled state.
+    icon_target(id).child(super::icons::icon(path))
+}
+
+fn icon_target(id: impl Into<ElementId>) -> Button {
     button_bare(id)
-        .child(super::icons::icon(path))
         .w(px(theme::CONTROL_TARGET_SIZE))
         .h(px(theme::CONTROL_TARGET_SIZE))
         .p(px(0.))
@@ -181,7 +184,7 @@ pub fn button_chip_on_surface(
     button(id, label)
         .xsmall()
         .custom(variant)
-        .rounded(px(theme::AGENT_CHAT_CHIP_RADIUS))
+        .rounded(px(theme::RADIUS_SM))
 }
 
 /// [`button_on_surface`] without a label — for the icon-only controls whose
@@ -195,7 +198,7 @@ pub fn button_bare_on_surface(
 }
 
 /// Chip-style button — outlined, compact padding, `xsmall` text,
-/// forced to a uniform `BUTTON_CHIP_SIZE` square. Use when two small
+/// forced to a uniform `CONTROL_TARGET_SIZE` square. Use when two small
 /// glyph-only buttons sit adjacent (e.g. the bottom dock tab strip's
 /// `+` and row-preset chips) and need to read as discrete equal-weight
 /// controls rather than a run-on glyph sequence.
@@ -203,8 +206,8 @@ pub fn button_chip(id: impl Into<ElementId>, label: impl Into<SharedString>) -> 
     button(id, label)
         .outline()
         .compact()
-        .w(px(theme::BUTTON_CHIP_SIZE))
-        .h(px(theme::BUTTON_CHIP_SIZE))
+        .w(px(theme::CONTROL_TARGET_SIZE))
+        .h(px(theme::CONTROL_TARGET_SIZE))
 }
 
 /// Neutral dismissal, distinct from deleting an item.
@@ -376,14 +379,7 @@ fn toggle_shell(id: impl Into<ElementId>, active: bool, cx: &App) -> Button {
         .foreground(fg)
         .hover(active_bg)
         .active(active_bg);
-    Button::new(id)
-        .small()
-        .tab_stop(false)
-        .custom(variant)
-        .w(px(theme::DOCK_ICON_BUTTON_W))
-        .h(px(theme::DOCK_ICON_BUTTON_H))
-        .p(px(0.))
-        .rounded(px(theme::DOCK_ICON_BUTTON_RADIUS))
+    icon_target(id).custom(variant)
 }
 
 #[cfg(test)]
@@ -431,6 +427,14 @@ mod tests {
                         })),
                 )
                 .child(
+                    button_toggle_icon("toggle", crate::ui::icons::ADD, true, cx)
+                        .debug_selector(|| "chrome-toggle".into())
+                        .on_click(cx.listener(|this, _, _, cx| {
+                            this.presses += 1;
+                            cx.notify();
+                        })),
+                )
+                .child(
                     crate::ui::tab_bar("tabs")
                         .child(crate::ui::tab("Tab").debug_selector(|| "chrome-tab".into())),
                 )
@@ -462,6 +466,8 @@ mod tests {
         let target = px(theme::CONTROL_TARGET_SIZE);
         assert_eq!(live.size, size(target, target));
         assert_eq!(disabled.size, size(target, target));
+        let toggle = vcx.debug_bounds("chrome-toggle").unwrap();
+        assert_eq!(toggle.size, size(target, target));
         let glyph = vcx.debug_bounds("chrome-glyph").unwrap();
         assert_eq!(glyph.size, size(px(GLYPH), px(GLYPH)));
         assert_eq!(
@@ -477,6 +483,8 @@ mod tests {
         vcx.run_until_parked();
         vcx.simulate_click(glyph.center(), Default::default());
         vcx.run_until_parked();
-        assert_eq!(window.read_with(&vcx, |view, _| view.presses).unwrap(), 2);
+        vcx.simulate_click(toggle.center(), Default::default());
+        vcx.run_until_parked();
+        assert_eq!(window.read_with(&vcx, |view, _| view.presses).unwrap(), 3);
     }
 }

@@ -216,7 +216,12 @@ fn server_row(
     )
     .child(
         // Sits left of the switch so revealing the actions never hides it.
-        hover_actions("mcp-row", theme::MCP_ACTIONS_RIGHT, cx).child(row_actions(
+        hover_actions(
+            "mcp-row",
+            theme::LIST_ROW_PAD_X + crate::ui::switch::COMPACT_TARGET_WIDTH + theme::GAP_SM,
+            cx,
+        )
+        .child(row_actions(
             scope,
             name_for_edit,
             name_for_delete,

@@ -196,7 +196,7 @@ against `surface-1`; `subtle` (`#797e86`) sits right at 4.5:1 — don't darken i
 Base unit: **4px**.
 
 ```yaml
-# daruda uses a dense 2px-step scale (palette PAD_*/GAP_* tokens),
+# daruda uses a dense 2px-step scale (theme/metrics.rs PAD_*/GAP_* tokens),
 # not a doubling scale — the chrome is compact terminal UI.
 spacing:
   px:   1px    # Hairline separators
@@ -285,8 +285,8 @@ while the window base uses `#f9fafb`. It is not a white strip.
 radius:
   none: 0px      # Pane separators, full-bleed surfaces
   xs:   2px      # Inline chips, keycap shortcut labels
-  sm:   4px      # Small non-circular indicators, MacroKey cards
-  md:   6px      # Buttons, text inputs, tab pills
+  sm:   4px      # Buttons, toolbar chips, small indicators, MacroKey cards
+  md:   6px      # Text inputs, tab pills
   lg:   8px      # Dock panels, cards, modals, toasts
   pill: 9999px   # Claude state badges (circular dots), status pills, toggle chips
 ```
@@ -1384,7 +1384,7 @@ Both badges use `ui-xs` text — not `label`, no ALL-CAPS.
 
 How to apply this doc when changing daruda's UI:
 
-1. **Colors and pixel metrics are tokens, never inline.** Every value here maps to a named constant in `daruda_terminal::ux::theme` (terminal) or `app/src/ui/theme/palette.rs` (chrome) — change the constant, not the call site. Theme-variant values (light/dark chrome) live in `assets/themes/daruda_{dark,light}.json`.
+1. **Colors and pixel metrics have one owner, never inline at call sites.** Terminal values live in `daruda_terminal::ux::theme`. App colors live in `app/src/ui/theme/palette.rs`, shared numeric scales in `ui/theme/metrics.rs`, and shared column budgets in `ui/theme/list_metrics.rs`. Existing shared components own their recipes and private constraints; see `ui/CLAUDE.md` for definition sites and exceptions. Reuse the component or scale before adding a feature alias. Theme-variant values (light/dark chrome) live in `assets/themes/daruda_{dark,light}.json`.
 2. **Reach for surface change before chrome.** When something needs emphasis, move it one step on the surface ladder or add the `2px accent` border — don't add a shadow, a second accent, or a gradient.
 3. **State colors are off-limits for decoration.** `error`/`warning`/`success`/`claude-*`/`agent-*` mean a genuine state. If you want "a nice color," you don't — use a surface step.
 4. **Syntax ≠ chrome.** Touch the syntax palette only for code legibility, through `palette::syntax_theme_of` + `bucket_for_capture`; never reuse the brand accent there or vice versa.

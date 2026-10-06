@@ -1094,7 +1094,6 @@ impl Workspace {
                 crate::ui::button_icon("new-tab-btn", crate::ui::icons::ADD, cx)
                     .tooltip(crate::surface::strings::common::new_tab())
                     .mx(px(theme::NEW_TAB_MARGIN_X))
-                    .rounded(px(theme::NEW_TAB_RADIUS))
                     .text_size(px(theme::NEW_TAB_FONT_SIZE))
                     // Reorder-insertion indicator for "drop at the very
                     // end" — the counterpart of the per-cell border above

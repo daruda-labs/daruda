@@ -99,8 +99,10 @@ fn run_button(
 pub(super) fn flow_row(
     found: &crate::workspace::flow_paths::FoundFlow,
     snap: &RightDockSnapshot,
+    layout: &crate::ui::list_table::ListTable<super::rows::FileColumn>,
     cx: &gpui::App,
 ) -> impl IntoElement {
+    use super::rows::FileColumn;
     let t = theme::current(cx);
     let workspace = snap.workspace.clone();
     let ws_for_menu = snap.workspace.clone();
@@ -110,9 +112,6 @@ pub(super) fn flow_row(
     let menu_name = name.clone();
     let origin = found.origin;
     let lane = snap.flow_lane;
-    let dropdown_path = path.clone();
-    let dropdown_name = name.clone();
-    let dropdown_workspace = ws_for_menu.clone();
     let selector = format!("flow-file-{}", path.display());
     let modified = snap
         .flow_browser
@@ -121,13 +120,9 @@ pub(super) fn flow_row(
         .find(|(held, _)| *held == path)
         .map(|(_, time)| strings::flow::run_started_at((*time).into()))
         .unwrap_or_else(strings::flow::not_recorded);
-    super::rows::frame()
-        .id(SharedString::from(selector.clone()))
-        .debug_selector(move || selector)
-        .hover(move |style| style.bg(t.overlay_hover))
-        .cursor_pointer()
-        .child(
-            super::rows::title_cell()
+    layout
+        .row(|column, cell| match column {
+            FileColumn::Title => cell
                 .id("flow-name")
                 .debug_selector({
                     let path = path.clone();
@@ -139,37 +134,37 @@ pub(super) fn flow_row(
                         .w_full()
                         .truncate()
                         .text_color(t.text_body)
-                        .child(name),
-                ),
-        )
-        .child(
-            super::rows::cell(theme::FLOW_TABLE_ORIGIN_W)
+                        .child(name.clone()),
+                )
+                .into_any_element(),
+            FileColumn::Source => cell
                 .id("flow-origin")
                 .debug_selector({
                     let path = path.clone();
                     move || format!("flow-source-{}", path.display())
                 })
                 .text_color(t.text_muted)
-                .child(super::controls::origin_label(Some(origin))),
-        )
-        .child(
-            super::rows::cell(theme::FLOW_TABLE_TIME_W)
+                .child(super::controls::origin_label(Some(origin)))
+                .into_any_element(),
+            FileColumn::Modified => cell
                 .text_color(t.text_muted)
-                .child(modified),
-        )
-        .child(
-            super::rows::actions()
-                .child(run_button(found, snap, cx))
-                .child(
-                    crate::ui::button_icon(
-                        SharedString::from(format!("flow-menu-{}", path.display())),
-                        crate::ui::icons::EXPAND_MORE,
-                        cx,
-                    )
-                    .tooltip(strings::flow::column_actions())
-                    .tab_stop(true)
-                    .dropdown_menu(crate::ui::menu_builder(
-                        move |menu, _, _| {
+                .child(modified.clone())
+                .into_any_element(),
+            FileColumn::Actions => {
+                let dropdown_path = path.clone();
+                let dropdown_name = name.clone();
+                let dropdown_workspace = ws_for_menu.clone();
+                super::rows::actions(cell)
+                    .child(run_button(found, snap, cx))
+                    .child(
+                        crate::ui::button_icon(
+                            SharedString::from(format!("flow-menu-{}", path.display())),
+                            crate::ui::icons::EXPAND_MORE,
+                            cx,
+                        )
+                        .tooltip(strings::flow::column_actions())
+                        .tab_stop(true)
+                        .dropdown_menu(crate::ui::menu_builder(move |menu, _, _| {
                             flow_row_menu(
                                 dropdown_path.clone(),
                                 dropdown_name.clone(),
@@ -178,10 +173,15 @@ pub(super) fn flow_row(
                             )
                             .into_iter()
                             .fold(menu, |menu, item| menu.item(item))
-                        },
-                    )),
-                ),
-        )
+                        })),
+                    )
+                    .into_any_element()
+            }
+        })
+        .id(SharedString::from(selector.clone()))
+        .debug_selector(move || selector)
+        .hover(move |style| style.bg(t.overlay_hover))
+        .cursor_pointer()
         .on_click(move |_, window, cx| {
             if let Some(ws) = workspace.upgrade() {
                 ws.update(cx, |ws, cx| ws.open_browsed_flow(lane, &path, window, cx));

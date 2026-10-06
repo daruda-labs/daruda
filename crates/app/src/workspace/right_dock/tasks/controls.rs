@@ -1,14 +1,14 @@
 //! Task-page scope, status tabs, and recoverable empty states.
 
 use daruda_store::tasks::{TaskFilter, TaskScope};
-use gpui::{AnyElement, App, FontWeight, IntoElement, SharedString, div, prelude::*, px};
+use gpui::{AnyElement, App, IntoElement, SharedString, div, prelude::*, px};
 
 use super::list::{FILTERS, TaskList};
 use super::{TaskGroupKey, TaskGrouping, grouping::TaskGroup};
 use crate::surface::strings;
 use crate::ui::{
     ButtonVariants as _, Disableable as _, DropdownMenu as _, PopupMenuItem, button, button_bare,
-    button_with_icon, icons, menu_builder, tab, tab_bar, theme,
+    button_with_icon, icons, list_page, menu_builder, tab, tab_bar, theme,
 };
 use crate::workspace::layout::{RightDockSnapshot, TaskProjects};
 
@@ -17,26 +17,14 @@ pub(in crate::workspace) fn header(
     close: AnyElement,
     cx: &App,
 ) -> AnyElement {
-    let t = theme::current(cx);
-    div()
-        .flex()
-        .items_center()
-        .gap(px(theme::GAP_STANDARD))
-        .px(px(theme::DOCK_PAGE_PAD))
-        .py(px(theme::PAD_STANDARD))
-        .child(
-            div()
-                .flex_none()
-                .text_size(px(theme::RIGHT_PANEL_BODY_FONT_SIZE))
-                .font_weight(FontWeight::SEMIBOLD)
-                .text_color(t.text_primary)
-                .child(strings::dock::right_tab_tasks()),
-        )
-        .child(scope_picker(snap, cx))
-        .child(div().flex_1())
-        .child(new_button(snap))
-        .child(close)
-        .into_any_element()
+    list_page::header(
+        strings::dock::right_tab_tasks(),
+        scope_picker(snap, cx),
+        new_button(snap),
+        close,
+        cx,
+    )
+    .into_any_element()
 }
 
 fn project_label(scope: TaskScope, projects: &TaskProjects) -> String {
@@ -66,7 +54,7 @@ fn scope_picker(snap: &RightDockSnapshot, cx: &App) -> impl IntoElement {
         .child(
             div()
                 .min_w_0()
-                .max_w(px(theme::RIGHT_PANEL_TASK_PROJECT_MAX_W))
+                .max_w(px(theme::list_metrics::PROJECT_W))
                 .truncate()
                 .child(label),
         )
@@ -184,47 +172,30 @@ pub(super) fn empty_state(snap: &RightDockSnapshot, scoped_count: usize, cx: &Ap
     } else {
         strings::task::empty_filtered()
     };
-    div()
-        .flex()
-        .flex_col()
-        .items_start()
-        .gap(px(theme::GAP_STANDARD))
-        .py(px(theme::DOCK_PAGE_PAD))
-        .text_size(px(theme::RIGHT_PANEL_BODY_FONT_SIZE))
-        .text_color(theme::current(cx).text_muted)
-        .child(message)
-        .into_any_element()
+    list_page::empty(message, cx).into_any_element()
 }
 
 pub(super) fn results(snap: &RightDockSnapshot, list: &TaskList<'_>, cx: &App) -> impl IntoElement {
     let filtered = snap.task_browser.state.filter != TaskFilter::All
         || !snap.task_browser.query.trim().is_empty();
     let workspace = snap.workspace.clone();
-    div()
-        .flex()
-        .items_center()
-        .justify_between()
-        .flex_wrap()
-        .gap(px(theme::GAP_SM))
-        .text_size(px(theme::RIGHT_PANEL_BODY_FONT_SIZE))
-        .text_color(theme::current(cx).text_muted)
-        .child(strings::task::result_count(
-            list.visible.len(),
-            list.scoped_count,
-        ))
-        .when(filtered, |row| {
-            row.child(
-                button("task-clear-filters", strings::task::clear_filters())
-                    .ghost()
-                    .debug_selector(|| "task-clear-filters".into())
-                    .tab_stop(true)
-                    .on_click(move |_, window, cx| {
-                        if let Some(ws) = workspace.upgrade() {
-                            ws.update(cx, |ws, cx| ws.clear_task_filters(window, cx));
-                        }
-                    }),
-            )
-        })
+    let clear = filtered.then(|| {
+        button("task-clear-filters", strings::task::clear_filters())
+            .ghost()
+            .debug_selector(|| "task-clear-filters".into())
+            .tab_stop(true)
+            .on_click(move |_, window, cx| {
+                if let Some(ws) = workspace.upgrade() {
+                    ws.update(cx, |ws, cx| ws.clear_task_filters(window, cx));
+                }
+            })
+            .into_any_element()
+    });
+    list_page::results(
+        strings::task::result_count(list.visible.len(), list.scoped_count),
+        clear,
+        cx,
+    )
 }
 
 fn grouping_label(mode: TaskGrouping) -> String {
@@ -294,23 +265,19 @@ pub(super) fn group_header(
     let key = group.key;
     let workspace = snap.workspace.clone();
     let id = group_id("group", key);
-    button_bare(id.clone())
-        .debug_selector(move || id.to_string())
-        .ghost()
-        .tab_stop(true)
-        .w_full()
-        .justify_start()
-        .text_color(theme::current(cx).text_muted)
-        .child(crate::ui::disclosure(
-            group_id("group-chevron", key),
-            snap.task_browser.state.groups.is_open(key),
-        ))
-        .child(strings::common::filter_count(label, group.tasks.len()))
-        .on_click(move |_, _, cx| {
-            if let Some(ws) = workspace.upgrade() {
-                ws.update(cx, |ws, cx| ws.toggle_task_group(key, cx));
-            }
-        })
+    list_page::group_header(
+        id.clone(),
+        group_id("group-chevron", key),
+        strings::common::filter_count(label, group.tasks.len()),
+        snap.task_browser.state.groups.is_open(key),
+        cx,
+    )
+    .debug_selector(move || id.to_string())
+    .on_click(move |_, _, cx| {
+        if let Some(ws) = workspace.upgrade() {
+            ws.update(cx, |ws, cx| ws.toggle_task_group(key, cx));
+        }
+    })
 }
 
 #[cfg(test)]

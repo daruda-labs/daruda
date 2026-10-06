@@ -14,7 +14,8 @@ use crate::surface::strings;
 use crate::workspace::Workspace;
 use crate::workspace::main_area::file_view_pane::images::MdImages;
 use crate::workspace::main_area::file_view_pane::{
-    CharSelection, FileViewMode, PaneFileContent, PaneFileView, VisualRow,
+    CharSelection, FILE_VIEWER_MAX_BYTES, FILE_VIEWER_VIRTUAL_OVERSCAN, FileViewMode,
+    PaneFileContent, PaneFileView, VisualRow,
 };
 
 /// Scrollable body area: routes to the appropriate renderer by content type and mode.
@@ -121,7 +122,7 @@ pub(super) fn render_file_viewer_body(
             )
             .when(*truncated, |body| {
                 body.child(footer_row(
-                    strings::file_viewer::truncated_read_only(theme::FILE_VIEWER_MAX_BYTES),
+                    strings::file_viewer::truncated_read_only(FILE_VIEWER_MAX_BYTES),
                     ctx_text,
                     editor_font_size,
                     editor_font_size * theme::editor_line_height(cx),
@@ -211,7 +212,7 @@ fn render_raw_body(
     let editor_font = theme::editor_font_size(cx);
     let row_h = editor_font * theme::editor_line_height(cx);
     let line_h = px(row_h);
-    let overscan = theme::FILE_VIEWER_VIRTUAL_OVERSCAN;
+    let overscan = FILE_VIEWER_VIRTUAL_OVERSCAN;
 
     // offset().y is 0 at top, negative when scrolled down; negate for a positive value.
     let scroll_y = -scroll_handle.offset().y;
@@ -277,7 +278,7 @@ fn render_raw_body(
     let shown = rows.len();
     if byte_truncated {
         col = col.child(footer_row(
-            strings::file_viewer::byte_truncated(shown, theme::FILE_VIEWER_MAX_BYTES, total_count),
+            strings::file_viewer::byte_truncated(shown, FILE_VIEWER_MAX_BYTES, total_count),
             line_no_text,
             editor_font,
             row_h,

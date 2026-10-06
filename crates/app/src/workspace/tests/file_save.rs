@@ -217,7 +217,7 @@ async fn save_all_keeps_the_tab_when_the_file_changed_on_disk(cx: &mut TestAppCo
 
 #[gpui::test]
 async fn a_file_cut_at_the_size_cap_opens_read_only(cx: &mut TestAppContext) {
-    let body = vec![b'x'; crate::ui::theme::FILE_VIEWER_MAX_BYTES + 10];
+    let body = vec![b'x'; crate::workspace::main_area::file_view_pane::FILE_VIEWER_MAX_BYTES + 10];
     let (_wh, ws, _temp) = open_temp_file(cx, &body);
     ws.read_with(cx, |ws, _| {
         let fc = ws.focused_file_content().expect("file pane");

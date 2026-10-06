@@ -13,7 +13,6 @@ use std::path::Path;
 use std::time::Duration;
 
 use crate::agent::tasks_global::GlobalTasks;
-use crate::ui::theme;
 use chrono::Utc;
 use daruda_store::observability::error_report::{ErrorReport, ErrorSeverity};
 use daruda_store::observability::log_writer::LogWriter;
@@ -22,6 +21,8 @@ use gpui::{BorrowAppContext, Context, Window};
 use serde::Deserialize;
 
 use crate::workspace::Workspace;
+
+pub(in crate::workspace) const TASK_LIVE_TICK: Duration = Duration::from_millis(250);
 
 /// Subset of the `TodoWrite` tool's `tool_input.todos[]` shape.
 /// Claude Code includes more fields (`activeForm`, sometimes free-form
@@ -601,10 +602,9 @@ impl Workspace {
 /// no `Running` row, so the workspace doesn't burn wakeups while
 /// every task is idle.
 pub(super) fn spawn_task_live_tick(cx: &mut Context<Workspace>) -> gpui::Task<()> {
-    let interval = Duration::from_millis(theme::RIGHT_PANEL_TASK_LIVE_TICK_MS);
     cx.spawn(async move |this, cx| {
         loop {
-            cx.background_executor().timer(interval).await;
+            cx.background_executor().timer(TASK_LIVE_TICK).await;
             let still_alive = this
                 .update(cx, |ws, cx| {
                     let running_exists =

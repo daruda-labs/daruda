@@ -178,7 +178,7 @@ async fn flow_browser_table_alignment_and_grouping_survive_narrow_windows(cx: &m
         let title = vcx.debug_bounds(selector("flow-title-", &path)).unwrap();
         assert_eq!(heading.left(), source.left());
         assert!(title.right() <= source.left());
-        assert!(title.size.width >= gpui::px(crate::ui::theme::FLOW_TABLE_TITLE_MIN_W));
+        assert!(title.size.width >= gpui::px(crate::ui::theme::list_metrics::TITLE_MIN_W));
     }
     for open in [false, true] {
         let group = vcx.debug_bounds("flow-group-Repo").unwrap();

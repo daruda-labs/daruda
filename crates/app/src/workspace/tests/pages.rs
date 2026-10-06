@@ -123,7 +123,7 @@ async fn task_groups_collapse_and_reopen_without_changing_filters(cx: &mut TestA
             title.right() <= project.left(),
             "title cannot overlap the project"
         );
-        assert!(title.size.width >= gpui::px(crate::ui::theme::TASK_TABLE_TITLE_MIN_W));
+        assert!(title.size.width >= gpui::px(crate::ui::theme::list_metrics::TITLE_MIN_W));
     }
     for expected_open in [false, true] {
         let header = vcx

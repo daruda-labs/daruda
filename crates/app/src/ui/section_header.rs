@@ -6,6 +6,9 @@
 use crate::ui::theme;
 use gpui::{AnyElement, App, IntoElement, RenderOnce, SharedString, Window, div, prelude::*, px};
 
+/// Existing quiet section typography, also used by foldable dock sections.
+pub(crate) const LABEL_FONT_SIZE: f32 = 10.5;
+
 /// Header row with a left label and optional right-aligned actions.
 #[derive(IntoElement)]
 pub struct SectionHeader {
@@ -95,11 +98,11 @@ impl RenderOnce for SectionHeader {
             .flex_row()
             .items_center()
             .justify_between()
-            .text_size(px(theme::LANE_SECTION_HEADER_FONT_SIZE))
+            .text_size(px(LABEL_FONT_SIZE))
             .text_color(theme::current(cx).text_muted)
             .when(prominent, |row| {
                 row.min_h(px(theme::DOCK_TREE_ROW_HEIGHT))
-                    .text_size(px(theme::RIGHT_PANEL_BODY_FONT_SIZE))
+                    .text_size(px(theme::FONT_SIZE_MD))
                     .font_weight(gpui::FontWeight::SEMIBOLD)
                     .text_color(theme::current(cx).text_primary)
             });

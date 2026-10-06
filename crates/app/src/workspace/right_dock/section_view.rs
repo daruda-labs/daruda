@@ -63,7 +63,7 @@ impl ScopeSection {
             .items_center()
             .gap(px(theme::LANE_LABEL_GAP))
             .py(px(theme::DOCK_SECTION_HEADER_PAD_Y))
-            .text_size(px(theme::LANE_SECTION_HEADER_FONT_SIZE))
+            .text_size(px(crate::ui::section_header::LABEL_FONT_SIZE))
             .font_weight(gpui::FontWeight::SEMIBOLD)
             .text_color(t.text_muted)
             .child(
