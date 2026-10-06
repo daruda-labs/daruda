@@ -403,24 +403,6 @@ pub(in crate::workspace) struct RightDockSnapshot {
     /// Carried by-value so the panel renderer never re-enters the
     /// workspace entity.
     pub mcp: crate::agent::mcp::McpSnapshot,
-    /// Live runs in the browsed worktree. The status bar spans all worktrees.
-    pub flows: Vec<crate::workspace::flow_rows::FlowRunRow>,
-    /// The worktree these flow fields belong to, captured with their paths
-    /// so an action cannot accidentally target a different active worktree.
-    pub flow_lane: daruda_store::project::LaneRef,
-    /// The browsed worktree's past runs. `None` when the Flows tab is not
-    /// showing — the read is skipped rather than cached for a tab nobody
-    /// is looking at.
-    pub flow_history: Option<crate::workspace::flow_history::FlowHistory>,
-    /// The flow files this worktree can run and edit.
-    /// Empty when the Flows tab is not showing, same as the history above.
-    pub flow_files: Vec<crate::workspace::flow_paths::FoundFlow>,
-    pub flow_browser: crate::workspace::flow_browser::FlowBrowserSnapshot,
-    /// Which of those have an open graph pane holding unsaved edits — the
-    /// panel's ▶ is off for them. Usually empty. It has to be *in* the snapshot
-    /// rather than read at render time: the panel renders cached, and a field
-    /// the comparison below cannot see would leave a stale button on screen.
-    pub flows_with_unsaved_edits: Vec<std::path::PathBuf>,
 }
 
 /// One auth domain's block in the Usage tab: whose account it is, what the last
@@ -605,7 +587,6 @@ mod tests {
     fn right_fixture(window: &mut Window, cx: &mut gpui::App) -> RightDockSnapshot {
         let skill_search_input = cx.new(|cx| crate::ui::InputState::new(window, cx));
         let task_search_input = cx.new(|cx| crate::ui::InputState::new(window, cx));
-        let flow_search_input = cx.new(|cx| crate::ui::InputState::new(window, cx));
         RightDockSnapshot {
             right_dock_view: daruda_store::project::RightDockView::default(),
             workspace: Handle(WeakEntity::new_invalid()),
@@ -633,18 +614,6 @@ mod tests {
             now: PerFrame(chrono::Utc::now()),
             right_panel_scroll_handle: Handle(ScrollHandle::new()),
             mcp: crate::agent::mcp::McpSnapshot::default(),
-            flows: Vec::new(),
-            flow_lane: daruda_store::project::LaneRef::default(),
-            flow_history: None,
-            flow_files: Vec::new(),
-            flow_browser: crate::workspace::flow_browser::FlowBrowserSnapshot {
-                state: Default::default(),
-                targets: Vec::new(),
-                search: Handle(flow_search_input),
-                query: String::new(),
-                modified: Vec::new(),
-            },
-            flows_with_unsaved_edits: Vec::new(),
         }
     }
 

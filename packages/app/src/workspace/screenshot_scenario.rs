@@ -236,6 +236,8 @@ pub(crate) enum ScreenshotScenario {
     /// only way to look at the column's width against the graph it takes width
     /// from, and at whether a prompt box that size is worth reading.
     FlowGraphForm,
+    /// The real creation entry point with the first node ready to edit.
+    FlowCreate,
     /// The same graph with its first node's output pinned. The only way to see
     /// whether a pinned card is distinguishable from a pending one beside it,
     /// and whether the pin glyph in the toolbar reads as a pin at 16px.
@@ -374,6 +376,7 @@ impl ScreenshotScenario {
     /// default section.
     pub(crate) fn from_cli_name(name: &str) -> Option<Self> {
         match name {
+            "flow-create" => Some(Self::FlowCreate),
             "flows" => Some(Self::FlowBrowser(
                 super::flow_browser::screenshot::FlowBrowserShot::Definitions,
             )),
@@ -695,6 +698,9 @@ pub(crate) fn drive(
                 ws.reveal_flows_panel(cx);
                 ws.open_first_flow_graph_for_shot(window, cx);
             });
+        }
+        ScreenshotScenario::FlowCreate => {
+            workspace.update(cx, |ws, cx| ws.prompt_new_flow(ws.active, window, cx));
         }
         ScreenshotScenario::FlowGraphRunning => {
             workspace.update(cx, |ws, cx| {

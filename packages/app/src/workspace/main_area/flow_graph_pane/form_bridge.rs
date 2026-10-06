@@ -10,20 +10,44 @@ use gpui::{App, Context, Window};
 use super::{FlowGraphEvent, FlowGraphView, form, policy};
 
 impl FlowGraphView {
+    pub(in crate::workspace) fn name(&self) -> &str {
+        &self.saved_name
+    }
+
+    pub(in crate::workspace) fn path(&self) -> &std::path::Path {
+        &self.path
+    }
+
+    pub(in crate::workspace) fn edited_name(&self, cx: &App) -> String {
+        self.name_input.read(cx).value().trim().to_owned()
+    }
+
+    pub(in crate::workspace) fn name_is_dirty(&self, cx: &App) -> bool {
+        self.edited_name(cx) != self.saved_name
+    }
+
+    pub(in crate::workspace) fn focus_name(&self, window: &mut Window, cx: &mut Context<Self>) {
+        self.name_input
+            .update(cx, |input, cx| input.focus(window, cx));
+    }
+
+    pub(in crate::workspace) fn set_save_error(
+        &mut self,
+        message: Option<String>,
+        cx: &mut Context<Self>,
+    ) {
+        self.save_error = message;
+        cx.notify();
+    }
+
     /// The form for the selected node, when there is one.
     pub(in crate::workspace) fn form(&self) -> Option<&form::NodeForm> {
         self.form.as_ref()
     }
 
-    /// Is the inspector holding something the file has not been told about?
-    ///
-    /// `Pane::is_dirty` says `false` for a graph on purpose — the pane is a view
-    /// of a file, not a buffer over it, so it never joins the close prompt. This
-    /// is the narrower question the toolbar asks: running reads the file, so
-    /// while these two disagree, ▶ would run something other than what is on
-    /// screen.
+    /// Pending title or inspector edits gate Run and the close confirmation.
     pub(in crate::workspace) fn has_unsaved_form(&self, cx: &App) -> bool {
-        self.form.as_ref().is_some_and(|form| form.is_dirty(cx))
+        self.name_is_dirty(cx) || self.form.as_ref().is_some_and(|form| form.is_dirty(cx))
     }
 
     /// Open or close the inspector's agent-override block.

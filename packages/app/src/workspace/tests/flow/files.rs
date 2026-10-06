@@ -2,6 +2,152 @@
 
 use super::*;
 
+#[gpui::test]
+async fn inline_flow_name_saves_without_moving_the_file(cx: &mut TestAppContext) {
+    let (_lane, ws, path, wh) = workspace_with_a_flow(cx, ONE_AGENT);
+    let mut vcx = gpui::VisualTestContext::from_window(wh.into(), cx);
+    let view = ws.update_in(&mut vcx, |ws, window, cx| {
+        ws.open_flow_graph(&path, window, cx);
+        ws.active_runtime()
+            .panes
+            .iter()
+            .find_map(|pane| pane.flow_graph_content().map(|graph| graph.view.clone()))
+            .unwrap()
+    });
+    let name = "Release / review: ready?";
+    view.update_in(&mut vcx, |view, window, cx| {
+        view.set_name_for_test(name, window, cx)
+    });
+    let dirty = ws.read_with(&vcx, |ws, cx| ws.collect_dirty_pane_descriptors(cx));
+    assert_eq!(
+        dirty.len(),
+        1,
+        "the title participates in close confirmation"
+    );
+    ws.update_in(&mut vcx, |ws, window, cx| {
+        assert!(ws.commit_dirty_panes_with_failure_toast(&dirty, window, cx));
+        assert!(ws.collect_dirty_pane_descriptors(cx).is_empty());
+        ws.show_page(crate::workspace::pages::Page::Flows, cx);
+        let listed = ws.flow_list_for_panel();
+        assert_eq!(
+            listed.iter().find(|file| file.path == path).unwrap().name,
+            name
+        );
+        let graph = ws
+            .active_runtime()
+            .panes
+            .iter()
+            .find_map(|pane| pane.flow_graph_content())
+            .unwrap();
+        assert_eq!(graph.path, path);
+        assert_eq!(graph.cached_title.as_ref(), name);
+    });
+    let file =
+        daruda_flow::parse::parse_flow_file(&std::fs::read_to_string(&path).unwrap()).unwrap();
+    assert_eq!(file.name.as_deref(), Some(name));
+
+    view.update_in(&mut vcx, |view, window, cx| {
+        view.set_name_for_test("My pending title", window, cx)
+    });
+    std::fs::write(
+        &path,
+        format!(
+            "# external edit\n{}",
+            std::fs::read_to_string(&path).unwrap()
+        ),
+    )
+    .unwrap();
+    ws.update_in(&mut vcx, |ws, window, cx| {
+        assert!(!ws.save_flow_editor(&path, view.clone(), window, cx));
+        assert_eq!(view.read(cx).edited_name(cx), "My pending title");
+        assert_eq!(ws.collect_dirty_pane_descriptors(cx).len(), 1);
+    });
+    assert!(
+        std::fs::read_to_string(path)
+            .unwrap()
+            .starts_with("# external edit")
+    );
+}
+
+#[gpui::test]
+async fn new_flow_opens_the_editor_with_a_selected_first_node(cx: &mut TestAppContext) {
+    let (_lane, ws, _path, wh) = workspace_with_a_flow(cx, ONE_AGENT);
+    let mut vcx = gpui::VisualTestContext::from_window(wh.into(), cx);
+    ws.update_in(&mut vcx, |ws, window, cx| {
+        ws.prompt_new_flow(ws.active, window, cx);
+        assert!(ws.active_page().is_none());
+        let graph = ws
+            .active_runtime()
+            .panes
+            .iter()
+            .find_map(|pane| pane.flow_graph_content())
+            .unwrap();
+        assert!(graph.path.is_file());
+        assert_eq!(
+            graph.cached_title.as_ref(),
+            crate::surface::strings::flow::untitled()
+        );
+        assert_eq!(
+            graph.view.read(cx).selected_node(cx),
+            Some(daruda_flow::NodeId::from("first"))
+        );
+    });
+}
+
+#[gpui::test]
+async fn external_name_change_preserves_pending_node_edits(cx: &mut TestAppContext) {
+    let (_lane, ws, path, wh) = workspace_with_a_flow(cx, ONE_AGENT);
+    let mut vcx = gpui::VisualTestContext::from_window(wh.into(), cx);
+    let view = ws.update_in(&mut vcx, |ws, window, cx| {
+        ws.open_flow_graph(&path, window, cx);
+        ws.active_runtime()
+            .panes
+            .iter()
+            .find_map(|pane| pane.flow_graph_content().map(|graph| graph.view.clone()))
+            .unwrap()
+    });
+    view.update_in(&mut vcx, |view, window, cx| {
+        view.select_node_for_test(&"design".into(), window, cx);
+    });
+    let output = view.read_with(&vcx, |view, cx| {
+        view.form().unwrap().body_states(cx).output.clone()
+    });
+    output.update_in(&mut vcx, |input, window, cx| {
+        input.set_value("pending.md", window, cx)
+    });
+    std::fs::write(&path, format!("name: External title\n{ONE_AGENT}")).unwrap();
+    ws.update_in(&mut vcx, |ws, window, cx| {
+        ws.reload_flow_graphs(Some(&path), window, cx)
+    });
+    assert_eq!(
+        view.read_with(&vcx, |view, _| view.name().to_owned()),
+        "External title"
+    );
+    assert_eq!(
+        view.read_with(&vcx, |view, cx| {
+            view.form()
+                .unwrap()
+                .body_states(cx)
+                .output
+                .read(cx)
+                .value()
+                .to_string()
+        }),
+        "pending.md"
+    );
+    ws.update_in(&mut vcx, |ws, window, cx| {
+        assert!(ws.save_flow_editor(&path, view.clone(), window, cx));
+    });
+    let file =
+        daruda_flow::parse::parse_flow_file(&std::fs::read_to_string(path).unwrap()).unwrap();
+    assert_eq!(file.name.as_deref(), Some("External title"));
+    assert!(
+        std::fs::read_to_string(view.read_with(&vcx, |view, _| view.path().to_owned()))
+            .unwrap()
+            .contains("pending.md")
+    );
+}
+
 /// The picker offers both places at once. Stated at this level and not
 /// only against `flow_paths` because what the window looks in is a field
 /// it holds — the two can drift, and the way that showed up first was a
@@ -96,7 +242,7 @@ async fn a_created_flow_is_listed_and_loads(cx: &mut TestAppContext) {
         ws.flow_list_for_panel()
     });
     assert!(
-        !before.iter().any(|f| f.path.ends_with("ship it.yaml")),
+        !before.iter().any(|f| f.name == "ship it"),
         "the warmed cache starts without it"
     );
 
@@ -112,7 +258,7 @@ async fn a_created_flow_is_listed_and_loads(cx: &mut TestAppContext) {
     });
     let made = listed
         .iter()
-        .find(|f| f.path.file_name().is_some_and(|n| n == "ship it.yaml"))
+        .find(|f| f.name == "ship it")
         .expect("the created flow is listed");
     assert_eq!(
         made.origin,
@@ -163,7 +309,9 @@ async fn renaming_a_flow_is_followed_by_the_graph_of_it(cx: &mut TestAppContext)
         })
         .expect("the created flow is open");
 
-    ws.update(&mut vcx, |ws, cx| ws.rename_flow(&before, "after", cx));
+    ws.update_in(&mut vcx, |ws, window, cx| {
+        ws.rename_flow(&before, "after", window, cx)
+    });
     vcx.run_until_parked();
 
     let (path, title) = ws
@@ -178,7 +326,11 @@ async fn renaming_a_flow_is_followed_by_the_graph_of_it(cx: &mut TestAppContext)
         path.file_name().map(|n| n.to_string_lossy().into_owned()),
         Some("after.yaml".to_string())
     );
-    assert_eq!(title.as_ref(), "after.yaml", "the tab says the new name");
+    assert_eq!(
+        title.as_ref(),
+        "before",
+        "file renaming preserves the display name"
+    );
     assert!(!before.exists(), "the old file is gone");
     assert!(path.exists(), "the new one is there");
 
@@ -197,6 +349,20 @@ async fn renaming_a_flow_is_followed_by_the_graph_of_it(cx: &mut TestAppContext)
     assert!(
         view.read_with(&vcx, |v, _| v.unreadable_for_test().is_none()),
         "and the view reads the new name, not the old one"
+    );
+    view.update_in(&mut vcx, |view, window, cx| {
+        view.set_name_for_test("After rename", window, cx)
+    });
+    view.update(&mut vcx, |_, cx| {
+        cx.emit(crate::workspace::main_area::flow_graph_pane::FlowGraphEvent::Save)
+    });
+    vcx.run_until_parked();
+    let saved =
+        daruda_flow::parse::parse_flow_file(&std::fs::read_to_string(&path).unwrap()).unwrap();
+    assert_eq!(
+        saved.name.as_deref(),
+        Some("After rename"),
+        "save follows the renamed file"
     );
 }
 

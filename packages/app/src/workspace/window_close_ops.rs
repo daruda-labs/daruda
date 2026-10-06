@@ -177,7 +177,7 @@ impl Workspace {
                     this.window_close_in_flight = false;
                     match answer {
                         0 => {
-                            if this.commit_dirty_panes_with_failure_toast(&dirty, cx) {
+                            if this.commit_dirty_panes_with_failure_toast(&dirty, window, cx) {
                                 finish_close(after, window, cx);
                             }
                         }
@@ -191,18 +191,19 @@ impl Workspace {
         false
     }
 
-    /// Save every pane in `dirty` — a file pane to its file, a TaskEdit pane
-    /// to its task. `false`, with one dedup'd warning toast naming them, when
+    /// Save every dirty file, task, and flow editor. Return `false`, with one
+    /// dedup'd warning toast naming them, when
     /// any stayed unsaved: the caller then keeps them open rather than
     /// dropping the edits. A file that changed on disk counts as unsaved.
     pub(in crate::workspace) fn commit_dirty_panes_with_failure_toast(
         &mut self,
         dirty: &[(PaneId, gpui::SharedString, bool)],
+        window: &mut Window,
         cx: &mut Context<Self>,
     ) -> bool {
         let mut failed: Vec<gpui::SharedString> = Vec::new();
         for (pane_id, title, _is_draft) in dirty {
-            if !self.save_pane_for_close(*pane_id, cx) {
+            if !self.save_pane_for_close(*pane_id, window, cx) {
                 failed.push(title.clone());
             }
         }
@@ -227,7 +228,23 @@ impl Workspace {
         false
     }
 
-    fn save_pane_for_close(&mut self, pane_id: PaneId, cx: &mut Context<Self>) -> bool {
+    fn save_pane_for_close(
+        &mut self,
+        pane_id: PaneId,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        if let Some((path, view)) = self
+            .main_area
+            .runtimes
+            .values()
+            .flat_map(|runtime| runtime.panes.iter())
+            .find(|pane| pane.id == pane_id)
+            .and_then(|pane| pane.flow_graph_content())
+            .map(|graph| (graph.path.clone(), graph.view.clone()))
+        {
+            return self.save_flow_editor(&path, view, window, cx);
+        }
         let is_file = self
             .main_area
             .runtimes

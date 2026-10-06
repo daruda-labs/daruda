@@ -6,8 +6,8 @@ use crate::ui::list_table::{self, Column, ListTable};
 use crate::ui::theme::list_metrics as metrics;
 use crate::ui::{Badge, theme, tooltip};
 use crate::workspace::{
+    flow_browser::FlowPageSnapshot,
     flow_browser::{FlowGrouping, RunFilter},
-    layout::RightDockSnapshot,
 };
 use gpui::{AnyElement, App, Div, IntoElement, MouseButton, SharedString, div, prelude::*, px};
 
@@ -69,7 +69,7 @@ fn action_heading(cell: Div) -> AnyElement {
 }
 
 pub(super) fn definitions(
-    snap: &RightDockSnapshot,
+    snap: &FlowPageSnapshot,
     list: &DefinitionList<'_>,
     cx: &App,
 ) -> AnyElement {
@@ -120,7 +120,7 @@ pub(super) fn definitions(
         .into_any_element()
 }
 
-pub(super) fn runs(snap: &RightDockSnapshot, list: &RunList<'_>, cx: &App) -> AnyElement {
+pub(super) fn runs(snap: &FlowPageSnapshot, list: &RunList<'_>, cx: &App) -> AnyElement {
     let layout = run_layout();
     let body = layout
         .body()
@@ -146,7 +146,7 @@ pub(super) fn runs(snap: &RightDockSnapshot, list: &RunList<'_>, cx: &App) -> An
 
 fn run_row(
     run: RunRow<'_>,
-    snap: &RightDockSnapshot,
+    snap: &FlowPageSnapshot,
     layout: &ListTable<RunColumn>,
     cx: &App,
 ) -> AnyElement {

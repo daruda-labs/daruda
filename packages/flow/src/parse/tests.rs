@@ -1,5 +1,20 @@
 use super::*;
 
+#[test]
+fn optional_display_name_does_not_change_execution() {
+    let legacy = parse_flow_file(MINIMAL).unwrap();
+    assert!(legacy.name.is_none());
+    let mut named = legacy.clone();
+    named.name = Some("Review / release: ready?".into());
+    let yaml = yaml_serde::to_string(&named).unwrap();
+    assert_eq!(parse_flow_file(&yaml).unwrap(), named);
+    assert!(crate::load(&yaml, None).is_ok());
+    assert_eq!(
+        crate::resolve::resolve(legacy, None).unwrap(),
+        crate::resolve::resolve(named, None).unwrap()
+    );
+}
+
 const MINIMAL: &str = "\
 version: 1
 defaults:

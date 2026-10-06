@@ -7,6 +7,7 @@ use super::Workspace;
 use crate::surface::strings;
 use crate::ui::icons;
 
+pub(super) mod flows;
 pub(super) mod render;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

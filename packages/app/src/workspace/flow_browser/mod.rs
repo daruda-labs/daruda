@@ -18,6 +18,7 @@ pub(in crate::workspace) struct FlowBrowser {
     pub state: FlowBrowserState,
     pub searches: [Entity<InputState>; 2],
     pub scrolls: [ScrollHandle; 2],
+    pub page_snapshot: Option<FlowPageSnapshot>,
 }
 
 impl FlowBrowser {
@@ -31,6 +32,7 @@ impl FlowBrowser {
                 })
             }),
             scrolls: std::array::from_fn(|_| ScrollHandle::new()),
+            page_snapshot: None,
         }
     }
 }
@@ -50,6 +52,17 @@ pub(in crate::workspace) struct FlowBrowserSnapshot {
     pub search: Handle<Entity<InputState>>,
     pub query: String,
     pub modified: Vec<(std::path::PathBuf, std::time::SystemTime)>,
+}
+
+/// Data staged for the central Flows page, independent of the utility dock.
+pub(in crate::workspace) struct FlowPageSnapshot {
+    pub workspace: gpui::WeakEntity<Workspace>,
+    pub flows: Vec<crate::workspace::flow_rows::FlowRunRow>,
+    pub flow_lane: daruda_store::project::LaneRef,
+    pub flow_history: Option<crate::workspace::flow_history::FlowHistory>,
+    pub flow_files: Vec<crate::workspace::flow_paths::FoundFlow>,
+    pub flow_browser: FlowBrowserSnapshot,
+    pub flows_with_unsaved_edits: Vec<std::path::PathBuf>,
 }
 
 #[cfg(test)]

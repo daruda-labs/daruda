@@ -42,27 +42,45 @@ pub(in crate::workspace) fn navigation(snap: &LeftDockSnapshot, cx: &App) -> Any
 pub(in crate::workspace) fn content(
     state: &PageState,
     snap: &RightDockSnapshot,
-    _lane: String,
     cx: &App,
 ) -> AnyElement {
-    let t = theme::current(cx);
-    let workspace = snap.workspace.clone();
-    let body = match state.page {
-        Page::Tasks => right_dock::tasks::render(snap, cx),
-        Page::Flows => right_dock::flows::render(snap, cx),
-    };
-    let close = button_icon("close-workspace-page", icons::CLOSE, cx)
+    let close = close_button((*snap.workspace).clone(), cx);
+    frame(
+        state,
+        right_dock::tasks::header(snap, close, cx),
+        right_dock::tasks::render(snap, cx),
+        cx,
+    )
+}
+
+pub(in crate::workspace) fn flow_content(
+    state: &PageState,
+    snap: &crate::workspace::flow_browser::FlowPageSnapshot,
+    cx: &App,
+) -> AnyElement {
+    let close = close_button(snap.workspace.clone(), cx);
+    frame(
+        state,
+        super::flows::header(snap, close, cx),
+        super::flows::render(snap, cx),
+        cx,
+    )
+}
+
+fn close_button(workspace: gpui::WeakEntity<crate::workspace::Workspace>, cx: &App) -> AnyElement {
+    button_icon("close-workspace-page", icons::CLOSE, cx)
         .debug_selector(|| "close-workspace-page".into())
         .tooltip(strings::common::btn_close())
         .on_click(move |_, window, cx| {
             if let Some(ws) = workspace.upgrade() {
                 ws.update(cx, |ws, cx| ws.return_to_worktree(window, cx));
             }
-        });
-    let header = match state.page {
-        Page::Tasks => right_dock::tasks::header(snap, close.into_any_element(), cx),
-        Page::Flows => right_dock::flows::header(snap, close.into_any_element(), cx),
-    };
+        })
+        .into_any_element()
+}
+
+fn frame(state: &PageState, header: AnyElement, body: AnyElement, cx: &App) -> AnyElement {
+    let t = theme::current(cx);
     div()
         .flex()
         .flex_col()

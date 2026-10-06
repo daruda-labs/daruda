@@ -309,6 +309,7 @@ impl Workspace {
         let left_snap = self.prepare_left_dock_snapshot(cx);
         let bottom_snap = self.prepare_bottom_dock_snapshot(cx);
         let right_snap = self.prepare_right_dock_snapshot(cx);
+        self.stage_flow_page(cx);
 
         // — Publish snapshots to docks ————————————————————————————————
         // Left dock is wrapped in `.cached()` too (see `body` below), so it

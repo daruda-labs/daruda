@@ -44,7 +44,7 @@ pub(in crate::workspace) use selection::Selection;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
-use gpui::{App, Context, Entity, EventEmitter, FocusHandle, Focusable, Window};
+use gpui::{App, AppContext, Context, Entity, EventEmitter, FocusHandle, Focusable, Window};
 
 use daruda_flow::NodeId;
 
@@ -129,6 +129,10 @@ pub(in crate::workspace) enum FlowGraphEvent {
 }
 
 pub(in crate::workspace) struct FlowGraphView {
+    name_input: Entity<crate::ui::InputState>,
+    saved_name: String,
+    save_error: Option<String>,
+    _name_watch: gpui::Subscription,
     /// The flow file this view is of.
     ///
     /// Held here rather than taken as an argument: the pane wrapper keeps the
@@ -222,6 +226,21 @@ impl FlowGraphView {
             },
             Err(err) => (None, FlowGraphState::Unreadable(err)),
         };
+        let saved_name = crate::workspace::flow_paths::display_name(path, text.as_deref());
+        let name_input = cx.new(|cx| {
+            crate::ui::InputState::new(window, cx)
+                .placeholder(s::flow::new_placeholder())
+                .default_value(saved_name.clone())
+        });
+        let name_watch =
+            cx.subscribe_in(&name_input, window, |view, _, event, _, cx| match event {
+                crate::ui::InputEvent::PressEnter { .. } => cx.emit(FlowGraphEvent::Save),
+                crate::ui::InputEvent::Change => {
+                    view.save_error = None;
+                    cx.notify();
+                }
+                _ => {}
+            });
         let this = cx.entity().downgrade();
         let theme_watch = window.observe_global::<crate::ui::theme::DarudaTheme>(cx, {
             move |window, cx| {
@@ -230,6 +249,10 @@ impl FlowGraphView {
             }
         });
         let mut view = Self {
+            name_input,
+            saved_name,
+            save_error: None,
+            _name_watch: name_watch,
             unpinned: Vec::new(),
             delete_request,
             pan_armed,
@@ -464,6 +487,7 @@ impl FlowGraphView {
     /// would on first open — the pane says why rather than keeping a graph of
     /// something that is no longer true.
     pub(in crate::workspace) fn reload(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let pending_name = self.name_is_dirty(cx);
         // What was selected has to survive the rebuild: a save writes the file,
         // the watcher reads it back, and an inspector that closed itself on
         // every save would be unusable. What was *typed* is taken for the same
@@ -478,10 +502,23 @@ impl FlowGraphView {
         match policy::decide(read_flow(&self.path), self.text.as_deref(), self.drawn()) {
             policy::Reload::Unchanged => return,
             policy::Reload::Restamp { text, model } => {
+                let metadata_only = self.text.as_deref().is_some_and(|before| {
+                    let parse = daruda_flow::parse::parse_flow_file;
+                    match (parse(before), parse(&text)) {
+                        (Ok(mut before), Ok(mut after)) => {
+                            before.name = None;
+                            after.name = None;
+                            before == after
+                        }
+                        _ => false,
+                    }
+                });
                 self.absorb_surviving(pins::surviving(&self.pins, self.text.as_deref(), &text));
                 self.restamp(&model, cx);
                 self.text = Some(text);
-                self.rebuild_form(window, cx);
+                if !metadata_only {
+                    self.rebuild_form(window, cx);
+                }
             }
             policy::Reload::Rebuild { text, model } => {
                 self.absorb_surviving(pins::surviving(&self.pins, self.text.as_deref(), &text));
@@ -509,6 +546,13 @@ impl FlowGraphView {
                 self.form = None;
                 self.watch_canvas(window, cx);
             }
+        }
+        self.saved_name =
+            crate::workspace::flow_paths::display_name(&self.path, self.text.as_deref());
+        if !pending_name || self.name_input.read(cx).value().trim() == self.saved_name {
+            self.name_input.update(cx, |input, cx| {
+                input.set_value(self.saved_name.clone(), window, cx)
+            });
         }
         self.say_if_typing_was_dropped(typed, cx);
         cx.notify();
@@ -603,8 +647,20 @@ impl FlowGraphView {
 impl FlowGraphView {
     /// Follow the file to its new name. The pane wrapper renames its tab; this
     /// is the other half, so the next reload reads the file that now exists.
-    pub(in crate::workspace) fn repoint(&mut self, to: &Path, cx: &mut Context<Self>) {
+    pub(in crate::workspace) fn repoint(
+        &mut self,
+        to: &Path,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let pending_name = self.name_is_dirty(cx);
         self.path = to.to_path_buf();
+        self.saved_name = crate::workspace::flow_paths::display_name(to, self.text.as_deref());
+        if !pending_name {
+            self.name_input.update(cx, |input, cx| {
+                input.set_value(self.saved_name.clone(), window, cx)
+            });
+        }
         cx.notify();
     }
 
@@ -636,6 +692,17 @@ impl FlowGraphView {
             FlowGraphState::Graph { canvas, .. } => Some(canvas),
             FlowGraphState::Unreadable(_) => None,
         }
+    }
+
+    #[cfg(test)]
+    pub(in crate::workspace) fn set_name_for_test(
+        &self,
+        name: &str,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.name_input
+            .update(cx, |input, cx| input.set_value(name, window, cx));
     }
 
     /// The flow's node ids in the order the file declares them — what a

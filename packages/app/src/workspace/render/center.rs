@@ -29,13 +29,16 @@ use crate::workspace::main_area::render_layout;
 /// listeners), so it stays render-pure.
 pub(super) fn render_center_content(ws: &Workspace, cx: &mut Context<Workspace>) -> AnyElement {
     if let Some(page) = &ws.workspace_page
+        && page.page == crate::workspace::pages::Page::Flows
+        && let Some(snap) = &ws.flow_browser.page_snapshot
+    {
+        return crate::workspace::pages::render::flow_content(page, snap, cx);
+    }
+    if let Some(page) = &ws.workspace_page
+        && page.page == crate::workspace::pages::Page::Tasks
         && let crate::workspace::layout::DockSnapshot::Right(snap) = &ws.right_dock.read(cx).snap
     {
-        let lane = ws
-            .active_lane()
-            .map(|lane| lane.display_name())
-            .unwrap_or_default();
-        return crate::workspace::pages::render::content(page, snap, lane, cx);
+        return crate::workspace::pages::render::content(page, snap, cx);
     }
     // Which divider is being held, so its cursor can reach past itself.
     let dragged_divider = ws.main_area.drag_state.map(|drag| drag.left_first_leaf);

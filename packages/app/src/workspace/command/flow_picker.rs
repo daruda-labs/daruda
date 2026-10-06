@@ -69,15 +69,14 @@ impl FlowPurpose {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(in crate::workspace) struct FlowCandidate {
     pub path: PathBuf,
-    /// The file name as it is on disk, extension included. A stem would
-    /// render two different files (`a.yaml`, `a.yml`) as one row.
+    /// Display name, with the storage name as the fallback for legacy files.
     pub label: String,
     pub origin: crate::workspace::flow_paths::FlowOrigin,
 }
 
 impl FlowCandidate {
     pub fn from_found(found: crate::workspace::flow_paths::FoundFlow) -> Self {
-        let label = crate::workspace::flow_paths::flow_label(&found.path);
+        let label = found.name;
         Self {
             path: found.path,
             label,
@@ -558,6 +557,7 @@ mod tests {
             names
                 .iter()
                 .map(|n| crate::workspace::flow_paths::FoundFlow {
+                    name: (*n).to_string(),
                     path: PathBuf::from("/lane/f").join(n),
                     origin: crate::workspace::flow_paths::FlowOrigin::Repo,
                 })
@@ -578,10 +578,12 @@ mod tests {
             vec![
                 crate::workspace::flow_paths::FoundFlow {
                     path: PathBuf::from("/lane/.daruda/flows/ship.yaml"),
+                    name: "ship.yaml".into(),
                     origin: crate::workspace::flow_paths::FlowOrigin::Repo,
                 },
                 crate::workspace::flow_paths::FoundFlow {
                     path: PathBuf::from("/home/flows/tidy.yaml"),
+                    name: "tidy.yaml".into(),
                     origin: crate::workspace::flow_paths::FlowOrigin::Global,
                 },
             ],
@@ -629,6 +631,7 @@ mod tests {
             FlowPurpose::Run,
             vec![crate::workspace::flow_paths::FoundFlow {
                 path: PathBuf::from("/lane/.daruda/flows/ship.yaml"),
+                name: "ship.yaml".into(),
                 origin: crate::workspace::flow_paths::FlowOrigin::Repo,
             }],
         );

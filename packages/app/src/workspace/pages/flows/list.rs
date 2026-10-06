@@ -29,7 +29,10 @@ impl<'a> DefinitionList<'a> {
         let mut counts = [0; 4];
         let visible = files
             .iter()
-            .filter(|file| file.path.to_string_lossy().to_lowercase().contains(&query))
+            .filter(|file| {
+                file.name.to_lowercase().contains(&query)
+                    || file.path.to_string_lossy().to_lowercase().contains(&query)
+            })
             .filter(|file| {
                 for (index, wanted) in ORIGINS.into_iter().enumerate() {
                     if wanted.is_none_or(|wanted| wanted == file.origin) {
@@ -205,14 +208,17 @@ mod tests {
         let files = vec![
             FoundFlow {
                 path: "repo/Ship.yaml".into(),
+                name: "Release review".into(),
                 origin: FlowOrigin::Repo,
             },
             FoundFlow {
                 path: "own/ship.yaml".into(),
+                name: "Personal review".into(),
                 origin: FlowOrigin::Global,
             },
             FoundFlow {
                 path: "repo/test.yml".into(),
+                name: "Checks".into(),
                 origin: FlowOrigin::Repo,
             },
         ];
@@ -220,6 +226,12 @@ mod tests {
         assert_eq!(list.total, 3);
         assert_eq!(list.visible.len(), 1);
         assert_eq!(list.counts, [2, 1, 0, 1]);
+        let named = DefinitionList::project(&files, None, "release review");
+        assert_eq!(named.visible.len(), 1);
+        assert_eq!(
+            named.visible[0].path,
+            std::path::PathBuf::from("repo/Ship.yaml")
+        );
     }
 
     #[test]

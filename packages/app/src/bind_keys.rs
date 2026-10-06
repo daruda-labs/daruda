@@ -90,6 +90,11 @@ pub(crate) fn register_static_bindings(cx: &mut App) {
         KeyBinding::new(
             k::SHORTCUT_SAVE_FILE_PANE,
             SaveFilePane,
+            Some("FlowGraphPane"),
+        ),
+        KeyBinding::new(
+            k::SHORTCUT_SAVE_FILE_PANE,
+            SaveFilePane,
             Some("TaskEditPane"),
         ),
         KeyBinding::new(

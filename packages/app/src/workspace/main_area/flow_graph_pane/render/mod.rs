@@ -14,6 +14,7 @@ use super::{FlowGraphError, FlowGraphState, FlowGraphView, Selection, form};
 use crate::surface::strings as s;
 use crate::ui::cursor::CursorReachExt as _;
 use crate::ui::theme::palette;
+use crate::ui::{Disableable as _, button_icon, icons, input};
 
 pub(super) mod toolbar;
 
@@ -26,20 +27,48 @@ impl Render for FlowGraphView {
             .flex()
             .flex_col()
             .track_focus(&self.focus_handle)
+            .key_context("FlowGraphPane")
+            .on_action(cx.listener(|_, _: &crate::workspace::SaveFilePane, _, cx| {
+                cx.stop_propagation();
+                cx.emit(super::FlowGraphEvent::Save);
+            }))
             .child(
                 div()
                     .flex()
+                    .items_center()
+                    .gap(px(palette::PAD_STANDARD))
                     .flex_none()
                     .px(px(palette::PAD_STANDARD))
                     .py(px(palette::PAD_XS))
                     .child(
-                        crate::ui::button("flow-back-to-list", s::flow::back_to_list())
+                        button_icon("flow-back-to-list", icons::BACK, cx)
+                            .tooltip(s::flow::back_to_list())
                             .debug_selector(|| "flow-back-to-list".into())
                             .tab_stop(true)
                             .on_click(cx.listener(|_, _, _, cx| {
                                 cx.emit(super::FlowGraphEvent::BackToList)
                             })),
+                    )
+                    .child(
+                        div()
+                            .flex_1()
+                            .min_w_0()
+                            .max_w(px(palette::FLOW_NAME_INPUT_MAX_W))
+                            .child(input(&self.name_input, cx, 0)),
+                    )
+                    .child(
+                        button_icon("flow-save", icons::SAVE, cx)
+                            .tooltip(s::common::btn_save())
+                            .disabled(!self.has_unsaved_form(cx))
+                            .on_click(
+                                cx.listener(|_, _, _, cx| cx.emit(super::FlowGraphEvent::Save)),
+                            ),
                     ),
+            )
+            .children(
+                self.save_error
+                    .as_ref()
+                    .map(|message| crate::ui::alert::error("flow-save-error", message.clone())),
             );
         match &self.state {
             FlowGraphState::Graph { canvas, .. } => {

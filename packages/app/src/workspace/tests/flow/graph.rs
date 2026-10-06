@@ -1585,9 +1585,8 @@ async fn drawing_a_line_and_taking_it_away_returns_the_file(cx: &mut TestAppCont
 /// ▶ and ✓ are off while the inspector holds unsaved edits.
 ///
 /// A run reads the file, so pressing it then would run the version on disk and
-/// say nothing about the one on screen. `Pane::is_dirty` deliberately answers
-/// `false` for a graph — it is a view of a file, not a buffer over it — so this
-/// button asks its own narrower question, and that is what is asserted here.
+/// say nothing about the one on screen. The same pending edits that protect
+/// the pane from closing must also disable these file-backed actions.
 ///
 /// The flow declares a profile so an *enabled* press is observable without
 /// starting anything: it would stop at the profile question. Nothing spawns

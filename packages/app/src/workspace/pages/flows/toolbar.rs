@@ -6,13 +6,13 @@ use crate::ui::{
     theme,
 };
 use crate::workspace::{
+    flow_browser::FlowPageSnapshot,
     flow_browser::{FlowGrouping, FlowTab, RunFilter},
     flow_paths::FlowOrigin,
-    layout::RightDockSnapshot,
 };
 use gpui::{AnyElement, App, IntoElement, div, prelude::*, px};
 
-pub(super) fn search(snap: &RightDockSnapshot, cx: &App) -> impl IntoElement {
+pub(super) fn search(snap: &FlowPageSnapshot, cx: &App) -> impl IntoElement {
     let workspace = snap.workspace.clone();
     list_page::toolbar()
         .child(div().flex_1().min_w_0().child(list_page::search(
@@ -39,7 +39,7 @@ fn grouping_label(grouping: FlowGrouping) -> String {
     }
 }
 
-fn grouping_picker(snap: &RightDockSnapshot) -> impl IntoElement {
+fn grouping_picker(snap: &FlowPageSnapshot) -> impl IntoElement {
     let workspace = snap.workspace.clone();
     let selected = snap.flow_browser.state.grouping;
     button(
@@ -70,7 +70,7 @@ fn grouping_picker(snap: &RightDockSnapshot) -> impl IntoElement {
 pub(super) fn group_header(
     origin: FlowOrigin,
     count: usize,
-    snap: &RightDockSnapshot,
+    snap: &FlowPageSnapshot,
     cx: &App,
 ) -> impl IntoElement {
     let workspace = snap.workspace.clone();
@@ -92,7 +92,7 @@ pub(super) fn group_header(
 }
 
 pub(super) fn results(
-    snap: &RightDockSnapshot,
+    snap: &FlowPageSnapshot,
     visible: usize,
     total: usize,
     cx: &App,
@@ -119,7 +119,7 @@ pub(super) fn results(
     list_page::results(s::flow::result_count(visible, total), clear, cx)
 }
 
-pub(super) fn empty(snap: &RightDockSnapshot, total: usize, cx: &App) -> AnyElement {
+pub(super) fn empty(snap: &FlowPageSnapshot, total: usize, cx: &App) -> AnyElement {
     let message = if !snap
         .flow_browser
         .targets
@@ -138,7 +138,7 @@ pub(super) fn empty(snap: &RightDockSnapshot, total: usize, cx: &App) -> AnyElem
     list_page::empty(message, cx).into_any_element()
 }
 
-pub(super) fn attention(snap: &RightDockSnapshot, count: usize, cx: &App) -> impl IntoElement {
+pub(super) fn attention(snap: &FlowPageSnapshot, count: usize, cx: &App) -> impl IntoElement {
     let workspace = snap.workspace.clone();
     div()
         .flex()

@@ -7,14 +7,14 @@ use crate::ui::{
     button_with_icon, icons, list_page, menu_builder, tab, tab_bar, theme,
 };
 use crate::workspace::{
+    flow_browser::FlowPageSnapshot,
     flow_browser::{FlowScope, FlowTab, RunFilter},
     flow_paths::FlowOrigin,
-    layout::RightDockSnapshot,
 };
 use gpui::{AnyElement, App, IntoElement, div, prelude::*, px};
 
 pub(in crate::workspace) fn header(
-    snap: &RightDockSnapshot,
+    snap: &FlowPageSnapshot,
     close: AnyElement,
     cx: &App,
 ) -> AnyElement {
@@ -49,7 +49,7 @@ pub(in crate::workspace) fn header(
     .into_any_element()
 }
 
-fn scope_picker(snap: &RightDockSnapshot, cx: &App) -> impl IntoElement {
+fn scope_picker(snap: &FlowPageSnapshot, cx: &App) -> impl IntoElement {
     let targets = snap.flow_browser.targets.clone();
     let selected = snap.flow_lane;
     let workspace = snap.workspace.clone();
@@ -104,7 +104,7 @@ fn scope_picker(snap: &RightDockSnapshot, cx: &App) -> impl IntoElement {
         }))
 }
 
-pub(super) fn section_tabs(snap: &RightDockSnapshot, run_count: usize) -> impl IntoElement {
+pub(super) fn section_tabs(snap: &FlowPageSnapshot, run_count: usize) -> impl IntoElement {
     let workspace = snap.workspace.clone();
     tab_bar("flow-section-tabs")
         .w_full()
@@ -158,7 +158,7 @@ pub(super) fn run_label(filter: RunFilter) -> String {
     }
 }
 
-pub(super) fn origin_tabs(snap: &RightDockSnapshot, list: &DefinitionList<'_>) -> impl IntoElement {
+pub(super) fn origin_tabs(snap: &FlowPageSnapshot, list: &DefinitionList<'_>) -> impl IntoElement {
     let workspace = snap.workspace.clone();
     tab_bar("flow-origin-tabs")
         .w_full()
@@ -184,7 +184,7 @@ pub(super) fn origin_tabs(snap: &RightDockSnapshot, list: &DefinitionList<'_>) -
         })
 }
 
-pub(super) fn status_tabs(snap: &RightDockSnapshot, list: &RunList<'_>) -> impl IntoElement {
+pub(super) fn status_tabs(snap: &FlowPageSnapshot, list: &RunList<'_>) -> impl IntoElement {
     let workspace = snap.workspace.clone();
     tab_bar("flow-status-tabs")
         .w_full()

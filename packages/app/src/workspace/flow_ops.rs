@@ -366,7 +366,7 @@ impl Workspace {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let name = super::flow_paths::flow_label(path);
+        let name = super::flow_paths::read_flow_name(path);
         let (title, body) = match self.check_flow(lane, path, profile, cx) {
             Ok(issues) if issues.is_empty() => (s::flow::valid_title(), s::flow::valid_body(&name)),
             Ok(issues) => (

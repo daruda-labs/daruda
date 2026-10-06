@@ -2,15 +2,15 @@
 
 use crate::surface::strings;
 use crate::ui::theme;
+use crate::workspace::flow_browser::FlowPageSnapshot;
 use crate::workspace::flow_rows::FlowRunRow;
-use crate::workspace::layout::RightDockSnapshot;
 use gpui::{IntoElement, SharedString, div, prelude::*, px};
 
 pub(super) fn ask_block(
     lane: daruda_store::project::LaneRef,
     ask: &crate::workspace::flow_rows::AskRowData,
     also_waiting: usize,
-    snap: &RightDockSnapshot,
+    snap: &FlowPageSnapshot,
     cx: &gpui::App,
 ) -> impl IntoElement {
     let t = theme::current(cx);
@@ -62,7 +62,7 @@ fn answer_button(
     ask_id: u64,
     ix: usize,
     choice: &daruda_acp::PermissionChoice,
-    snap: &RightDockSnapshot,
+    snap: &FlowPageSnapshot,
 ) -> impl IntoElement + use<> {
     let id = SharedString::from(format!("flow-answer-{ask_id}-{ix}"));
     let label = SharedString::from(choice.name.clone());
@@ -105,7 +105,7 @@ fn answer_button(
     })
 }
 
-pub(super) fn stop_button(run: &FlowRunRow, snap: &RightDockSnapshot) -> impl IntoElement + use<> {
+pub(super) fn stop_button(run: &FlowRunRow, snap: &FlowPageSnapshot) -> impl IntoElement + use<> {
     let workspace = snap.workspace.clone();
     let lane = run.lane;
     crate::ui::button(

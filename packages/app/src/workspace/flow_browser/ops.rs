@@ -12,6 +12,19 @@ use crate::workspace::{
 };
 
 impl Workspace {
+    pub(in crate::workspace) fn stage_flow_page(&mut self, cx: &Context<Self>) {
+        self.flow_browser.page_snapshot =
+            (self.active_page() == Some(Page::Flows)).then(|| super::FlowPageSnapshot {
+                workspace: cx.weak_entity(),
+                flows: self.flow_rows_matching(|lane| lane == self.flow_browser_lane()),
+                flow_lane: self.flow_browser_lane(),
+                flow_history: self.flow_history_for_panel(),
+                flow_files: self.flow_list_for_panel(),
+                flow_browser: self.flow_browser_snapshot(cx),
+                flows_with_unsaved_edits: self.flows_with_unsaved_edits(cx),
+            });
+    }
+
     pub(in crate::workspace) fn flow_browser_lane(&self) -> LaneRef {
         self.flow_browser.state.scope.resolve(self.active)
     }
@@ -162,19 +175,7 @@ impl Workspace {
         if self.lane_for(lane).is_none() {
             return;
         }
-        crate::workspace::dialog_helpers::open_single_field_dialog(
-            cx.entity().downgrade(),
-            s::flow::new_title(),
-            s::flow::new_placeholder(),
-            None,
-            move |ws, value, window, cx| {
-                if let Some(name) = value {
-                    ws.create_flow_in(lane, &name, window, cx);
-                }
-            },
-            window,
-            cx,
-        );
+        self.create_flow_in(lane, &s::flow::untitled(), window, cx);
     }
 
     /// Opening an editor explicitly enters its worktree; changing scope never does.
@@ -208,6 +209,24 @@ impl Workspace {
             self.activate_lane(lane, window, cx);
         }
         self.open_flow_report(path, window, cx);
+    }
+
+    pub(in crate::workspace) fn edit_browsed_flow_name(
+        &mut self,
+        lane: LaneRef,
+        path: &Path,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if self.lane_for(lane).is_none() {
+            return;
+        }
+        self.open_browsed_flow(lane, path, window, cx);
+        if let Some(id) = self.find_flow_graph_pane(path)
+            && let Some((_, view)) = self.flow_graph_of_pane(id)
+        {
+            view.update(cx, |view, cx| view.focus_name(window, cx));
+        }
     }
 
     pub(in crate::workspace) fn run_browsed_flow(

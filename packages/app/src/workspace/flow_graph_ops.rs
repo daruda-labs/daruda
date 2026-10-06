@@ -59,6 +59,7 @@ impl Workspace {
             return;
         };
         view.update(cx, |view, cx| view.reload(window, cx));
+        self.sync_flow_graph_titles(cx);
         if let Some(colouring) = self.runs.colouring_of(self.active, &path) {
             view.update(cx, |view, cx| view.set_run_states(&colouring, cx));
         }
@@ -157,81 +158,90 @@ impl Workspace {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> super::main_area::pane::Pane {
-        let title = super::flow_paths::flow_label(path);
         let owned = path.to_path_buf();
         let view =
             cx.new(|cx| super::main_area::flow_graph_pane::FlowGraphView::new(&owned, window, cx));
+        let title = view.read(cx).name().to_owned();
         // The inspector's buttons emit; the writing happens here. Detached
         // because the subscription's life is the view's: when the pane closes the
         // view is released and gpui drops its subscribers with it.
-        let for_path = owned.clone();
         cx.subscribe_in(
             &view,
             window,
-            move |workspace, view, event: &FlowGraphEvent, window, cx| match event {
-                FlowGraphEvent::BackToList => {
-                    workspace.open_page(super::pages::Page::Flows, window, cx)
-                }
-                FlowGraphEvent::Save => {
-                    workspace.save_node_form(&for_path, view.clone(), window, cx)
-                }
-                FlowGraphEvent::Revert => {
-                    workspace.revert_node_form(&for_path, view.clone(), window, cx)
-                }
-                FlowGraphEvent::Delete => {
-                    let nodes = view.read(cx).selected_nodes(cx);
-                    workspace.confirm_delete_nodes(&for_path, view.clone(), nodes, window, cx)
-                }
-                // A toast rather than something in the pane: what would have
-                // carried it — the node's form — is the thing that was replaced.
-                FlowGraphEvent::AddNode => workspace.add_node(&for_path, view.clone(), window, cx),
-                // Straight to the funnel the picker enters one question later:
-                // the flow is already named, and the lock — plus the profile
-                // question, when the file declares any — still is not.
-                FlowGraphEvent::Run => {
-                    workspace.run_flow_from_graph(&for_path, None, view.clone(), window, cx)
-                }
-                FlowGraphEvent::RunUntil => {
-                    let until = view.read(cx).selected_node(cx);
-                    // No node selected is no stopping point, so there is
-                    // nothing to run — the button is off for exactly this, and
-                    // falling through would run the whole flow instead.
-                    if let Some(until) = until {
-                        workspace.run_flow_from_graph(
+            move |workspace, view, event: &FlowGraphEvent, window, cx| {
+                let for_path = view.read(cx).path().to_path_buf();
+                match event {
+                    FlowGraphEvent::BackToList => {
+                        workspace.open_page(super::pages::Page::Flows, window, cx)
+                    }
+                    FlowGraphEvent::Save => {
+                        workspace.save_node_form(&for_path, view.clone(), window, cx)
+                    }
+                    FlowGraphEvent::Revert => {
+                        workspace.revert_node_form(&for_path, view.clone(), window, cx)
+                    }
+                    FlowGraphEvent::Delete => {
+                        let nodes = view.read(cx).selected_nodes(cx);
+                        workspace.confirm_delete_nodes(&for_path, view.clone(), nodes, window, cx)
+                    }
+                    // A toast rather than something in the pane: what would have
+                    // carried it — the node's form — is the thing that was replaced.
+                    FlowGraphEvent::AddNode => {
+                        workspace.add_node(&for_path, view.clone(), window, cx)
+                    }
+                    // Straight to the funnel the picker enters one question later:
+                    // the flow is already named, and the lock — plus the profile
+                    // question, when the file declares any — still is not.
+                    FlowGraphEvent::Run => {
+                        workspace.run_flow_from_graph(&for_path, None, view.clone(), window, cx)
+                    }
+                    FlowGraphEvent::RunUntil => {
+                        let until = view.read(cx).selected_node(cx);
+                        // No node selected is no stopping point, so there is
+                        // nothing to run — the button is off for exactly this, and
+                        // falling through would run the whole flow instead.
+                        if let Some(until) = until {
+                            workspace.run_flow_from_graph(
+                                &for_path,
+                                Some(until),
+                                view.clone(),
+                                window,
+                                cx,
+                            );
+                        }
+                    }
+                    FlowGraphEvent::TogglePins => {
+                        workspace.toggle_flow_pins(&for_path, view.clone(), cx)
+                    }
+                    FlowGraphEvent::Validate => {
+                        // Same as the ▶ above: a refused validate has already said
+                        // so on screen, to the person who pressed the button.
+                        let _refused_on_screen = workspace.run_flow_at(
+                            workspace.active,
                             &for_path,
-                            Some(until),
-                            view.clone(),
+                            FlowPurpose::Validate,
+                            super::flow_request::FlowSelection::default(),
                             window,
                             cx,
                         );
                     }
-                }
-                FlowGraphEvent::TogglePins => {
-                    workspace.toggle_flow_pins(&for_path, view.clone(), cx)
-                }
-                FlowGraphEvent::Validate => {
-                    // Same as the ▶ above: a refused validate has already said
-                    // so on screen, to the person who pressed the button.
-                    let _refused_on_screen = workspace.run_flow_at(
-                        workspace.active,
+                    FlowGraphEvent::Connect { out_of, into } => {
+                        workspace.connect_nodes(&for_path, view.clone(), out_of, into, window, cx)
+                    }
+                    FlowGraphEvent::Disconnect { out_of, into } => workspace.disconnect_nodes(
                         &for_path,
-                        FlowPurpose::Validate,
-                        super::flow_request::FlowSelection::default(),
+                        view.clone(),
+                        out_of,
+                        into,
                         window,
                         cx,
-                    );
+                    ),
+                    FlowGraphEvent::TypingDropped => workspace.report_own_flow_refusal(
+                        s::flow::edit_dropped_typing(),
+                        "flow.edit_dropped_typing",
+                        cx,
+                    ),
                 }
-                FlowGraphEvent::Connect { out_of, into } => {
-                    workspace.connect_nodes(&for_path, view.clone(), out_of, into, window, cx)
-                }
-                FlowGraphEvent::Disconnect { out_of, into } => {
-                    workspace.disconnect_nodes(&for_path, view.clone(), out_of, into, window, cx)
-                }
-                FlowGraphEvent::TypingDropped => workspace.report_own_flow_refusal(
-                    s::flow::edit_dropped_typing(),
-                    "flow.edit_dropped_typing",
-                    cx,
-                ),
             },
         )
         .detach();
@@ -313,6 +323,25 @@ impl Workspace {
                 view.update(cx, |view, cx| view.set_run_states(&colouring, cx));
             }
         }
+        self.sync_flow_graph_titles(cx);
+    }
+
+    fn sync_flow_graph_titles(&mut self, cx: &mut Context<Self>) {
+        let mut changed = false;
+        for runtime in self.main_area.runtimes.values_mut() {
+            for pane in &mut runtime.panes {
+                if let Some(graph) = pane.flow_graph_content_mut() {
+                    let title = graph.view.read(cx).name();
+                    if graph.cached_title.as_ref() != title {
+                        graph.cached_title = title.to_owned().into();
+                        changed = true;
+                    }
+                }
+            }
+        }
+        if changed {
+            cx.notify();
+        }
     }
 
     /// Follow a renamed file in every pane drawing it.
@@ -324,9 +353,9 @@ impl Workspace {
         &mut self,
         from: &Path,
         to: &Path,
+        window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let title: gpui::SharedString = super::flow_paths::flow_label(to).into();
         // The view holds the path too, and the two have to move together.
         let mut repointed = Vec::new();
         for runtime in self.main_area.runtimes.values_mut() {
@@ -335,14 +364,14 @@ impl Workspace {
                     && fg.path == from
                 {
                     fg.path = to.to_path_buf();
-                    fg.cached_title = title.clone();
                     repointed.push(fg.view.clone());
                 }
             }
         }
         for view in repointed {
-            view.update(cx, |view, cx| view.repoint(to, cx));
+            view.update(cx, |view, cx| view.repoint(to, window, cx));
         }
+        self.sync_flow_graph_titles(cx);
         cx.notify();
     }
 

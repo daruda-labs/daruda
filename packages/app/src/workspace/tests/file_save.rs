@@ -283,9 +283,13 @@ async fn closing_the_window_saves_a_dirty_pane_in_a_parked_lane(cx: &mut TestApp
         1,
         "the parked lane's edit is in the close prompt"
     );
-    let saved = ws.update(cx, |ws, cx| {
-        ws.commit_dirty_panes_with_failure_toast(&dirty, cx)
-    });
+    let saved = cx
+        .update_window(wh.into(), |_, window, cx| {
+            ws.update(cx, |ws, cx| {
+                ws.commit_dirty_panes_with_failure_toast(&dirty, window, cx)
+            })
+        })
+        .unwrap();
     assert!(saved);
     assert_eq!(disk(&temp), "mine", "Save all reaches the parked lane");
 }
@@ -345,9 +349,13 @@ async fn closing_the_window_saves_a_task_draft_in_a_parked_lane(cx: &mut TestApp
     cx.run_until_parked();
     let dirty = ws.read_with(cx, |ws, cx| ws.collect_dirty_pane_descriptors(cx));
     assert_eq!(dirty.len(), 1, "the parked draft is in the close prompt");
-    let saved = ws.update(cx, |ws, cx| {
-        ws.commit_dirty_panes_with_failure_toast(&dirty, cx)
-    });
+    let saved = cx
+        .update_window(wh.into(), |_, window, cx| {
+            ws.update(cx, |ws, cx| {
+                ws.commit_dirty_panes_with_failure_toast(&dirty, window, cx)
+            })
+        })
+        .unwrap();
     assert!(
         saved,
         "Save all reaches a task draft outside the active lane"

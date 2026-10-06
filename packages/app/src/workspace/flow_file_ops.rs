@@ -26,23 +26,6 @@ use gpui::{App, Context, WeakEntity, Window};
 use super::Workspace;
 use crate::surface::strings as s;
 
-/// What a new flow file contains. Indentation is load-bearing, which is why it
-/// lives here rather than in a locale file; `{agent}` and `{prompt}` are the
-/// only substitutions.
-const STARTER_FLOW: &str = "\
-version: 1
-defaults:
-  agent:
-    id: {agent}
-    mode: bypassPermissions
-nodes:
-  - id: first
-    kind: agent
-    output: first.md
-    prompt: |
-      {prompt}
-";
-
 /// Why an edit did not reach the file.
 ///
 /// Typed rather than a message, because the callers do different things with
@@ -111,7 +94,7 @@ impl Workspace {
     pub(in crate::workspace) fn create_flow_in(
         &mut self,
         lane: daruda_store::project::LaneRef,
-        typed_name: &str,
+        name: &str,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
@@ -126,16 +109,17 @@ impl Workspace {
             self.report_flow_file_error(s::flow::create_failed_title(), &dir, &e, cx);
             return;
         }
-        let path = match super::flow_paths::flow_file_name_in(&dir, typed_name) {
-            Ok(path) => path,
-            Err(reason) => {
-                self.report_flow_name_refusal(reason, cx);
-                return;
-            }
-        };
-        let Some(starter) = self.starter_flow() else {
+        let path = dir.join(format!("flow-{}.yaml", uuid::Uuid::new_v4()));
+        let Some(agent) = self.agents.first() else {
             self.report_flow_no_agent(cx);
             return;
+        };
+        let starter = match starter_flow(&agent.id, name, &s::flow::starter_prompt()) {
+            Ok(text) => text,
+            Err(error) => {
+                self.report_own_flow_refusal(error.to_string(), "flow.create_serialize", cx);
+                return;
+            }
         };
         if let Err(e) = write_new_file(&path, &starter) {
             self.report_flow_file_error(s::flow::create_failed_title(), &path, &e, cx);
@@ -146,24 +130,14 @@ impl Workspace {
         // watcher can only anchor on once it exists.
         self.respawn_flow_watcher(cx);
         self.open_browsed_flow(lane, &path, window, cx);
-    }
-
-    /// A flow that loads on the first open, so the new file draws a graph
-    /// rather than an error.
-    ///
-    /// The agent is `agents[0]` — the same catalog entry a new chat pane runs
-    /// under. Writing a literal `claude` here would put a hardcoded agent id in
-    /// a file the person keeps, and this app's whole agent story is that the
-    /// catalog decides. `None` when the catalog is somehow empty: a template
-    /// with no agent id parses as YAML and then fails to load, which is a
-    /// worse first impression than refusing.
-    fn starter_flow(&self) -> Option<String> {
-        let agent = self.agents.first().map(|a| a.id.as_str())?;
-        Some(
-            STARTER_FLOW
-                .replace("{agent}", agent)
-                .replace("{prompt}", &s::flow::starter_prompt()),
-        )
+        if let Some(pane) = self.find_flow_graph_pane(&path)
+            && let Some((_, view)) = self.flow_graph_of_pane(pane)
+        {
+            view.update(cx, |view, cx| {
+                view.select_node_after_add(&daruda_flow::NodeId::from("first"), window, cx);
+                view.focus_name(window, cx);
+            });
+        }
     }
 
     /// Rename a flow file, keeping any open graph of it pointed at it.
@@ -175,6 +149,7 @@ impl Workspace {
         &mut self,
         from: &Path,
         typed_name: &str,
+        window: &mut Window,
         cx: &mut Context<Self>,
     ) {
         let Some(dir) = from.parent().map(Path::to_path_buf) else {
@@ -196,7 +171,7 @@ impl Workspace {
             self.report_flow_file_error(s::flow::rename_failed_title(), from, &e, cx);
             return;
         }
-        self.repoint_flow_graph_panes(from, &to, cx);
+        self.repoint_flow_graph_panes(from, &to, window, cx);
         self.invalidate_flow_list();
         cx.notify();
     }
@@ -526,6 +501,40 @@ fn write_new_file(path: &Path, contents: &str) -> std::io::Result<()> {
     })
 }
 
+fn starter_flow(agent: &str, name: &str, prompt: &str) -> Result<String, yaml_serde::Error> {
+    use daruda_flow::parse::{
+        AgentOverride, Defaults, FlowFile, NodeFile, NodeKindFile, PromptSource,
+    };
+    yaml_serde::to_string(&FlowFile {
+        version: 1,
+        name: Some(name.to_owned()),
+        defaults: Defaults {
+            agent: Some(AgentOverride {
+                id: Some(agent.to_owned()),
+                mode: Some("bypassPermissions".to_owned()),
+                ..Default::default()
+            }),
+            ..Default::default()
+        },
+        profiles: Default::default(),
+        nodes: vec![NodeFile {
+            id: "first".into(),
+            deps: Vec::new(),
+            timeout: None,
+            cwd: None,
+            kind: NodeKindFile::Agent {
+                agent: None,
+                prompt: PromptSource::Prompt(prompt.to_owned()),
+                output: "first.md".into(),
+                output_schema: None,
+                continue_until: None,
+                max_turns: None,
+                on_fail: Default::default(),
+            },
+        }],
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -545,5 +554,15 @@ mod tests {
             "first",
             "and what was there is still there"
         );
+    }
+
+    #[test]
+    fn starter_preserves_names_and_multiline_prompts_as_data() {
+        let name = "Review / build: \"release\"";
+        let text = starter_flow("agent: custom", name, "first\nsecond\n").unwrap();
+        let file = daruda_flow::parse::parse_flow_file(&text).unwrap();
+        assert_eq!(file.name.as_deref(), Some(name));
+        assert!(text.contains("second"));
+        daruda_flow::load(&text, None).expect("the starter is runnable");
     }
 }

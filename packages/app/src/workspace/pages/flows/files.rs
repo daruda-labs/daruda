@@ -2,7 +2,7 @@
 
 use crate::surface::strings;
 use crate::ui::{Disableable as _, DropdownMenu as _, theme, tooltip};
-use crate::workspace::layout::RightDockSnapshot;
+use crate::workspace::flow_browser::FlowPageSnapshot;
 use crate::workspace::root_menu::RootContextMenuExt as _;
 use gpui::{IntoElement, SharedString, div, prelude::*};
 
@@ -13,14 +13,15 @@ fn flow_row_menu(
     name: String,
     origin: crate::workspace::flow_paths::FlowOrigin,
     ws: gpui::WeakEntity<crate::workspace::Workspace>,
+    lane: daruda_store::project::LaneRef,
 ) -> Vec<crate::ui::PopupMenuItem> {
     use crate::workspace::render::ws_popup_menu_item;
 
     let rename_path = path.clone();
-    let rename_from = name.clone();
+    let rename_from = crate::workspace::flow_paths::flow_label(&path);
     let rename = ws_popup_menu_item(
         ws.clone(),
-        strings::flow::row_menu_rename(),
+        strings::flow::rename_file(),
         false,
         move |_, window, cx| {
             let weak = cx.entity().downgrade();
@@ -29,13 +30,13 @@ fn flow_row_menu(
             crate::workspace::dialog_helpers::open_single_field_dialog(
                 weak,
                 strings::flow::rename_title(),
-                strings::flow::new_placeholder(),
+                strings::flow::file_name_placeholder(),
                 Some(&initial),
-                move |ws, value, _window, cx| {
+                move |ws, value, window, cx| {
                     let Some(to) = value else {
                         return;
                     };
-                    ws.rename_flow(&path, &to, cx);
+                    ws.rename_flow(&path, &to, window, cx);
                 },
                 window,
                 cx,
@@ -43,6 +44,13 @@ fn flow_row_menu(
         },
     );
 
+    let edit_path = path.clone();
+    let edit_name = ws_popup_menu_item(
+        ws.clone(),
+        strings::flow::row_menu_rename(),
+        false,
+        move |ws, window, cx| ws.edit_browsed_flow_name(lane, &edit_path, window, cx),
+    );
     let delete_path = path;
     let delete_name = name;
     let delete = ws_popup_menu_item(
@@ -61,12 +69,12 @@ fn flow_row_menu(
             );
         },
     );
-    vec![rename, delete]
+    vec![edit_name, rename, delete]
 }
 
 fn run_button(
     found: &crate::workspace::flow_paths::FoundFlow,
-    snap: &RightDockSnapshot,
+    snap: &FlowPageSnapshot,
     cx: &gpui::App,
 ) -> impl IntoElement {
     let workspace = snap.workspace.clone();
@@ -98,7 +106,7 @@ fn run_button(
 
 pub(super) fn flow_row(
     found: &crate::workspace::flow_paths::FoundFlow,
-    snap: &RightDockSnapshot,
+    snap: &FlowPageSnapshot,
     layout: &crate::ui::list_table::ListTable<super::rows::FileColumn>,
     cx: &gpui::App,
 ) -> impl IntoElement {
@@ -108,7 +116,7 @@ pub(super) fn flow_row(
     let ws_for_menu = snap.workspace.clone();
     let path = found.path.clone();
     let menu_path = path.clone();
-    let name = crate::workspace::flow_paths::flow_label(&path);
+    let name = found.name.clone();
     let menu_name = name.clone();
     let origin = found.origin;
     let lane = snap.flow_lane;
@@ -170,6 +178,7 @@ pub(super) fn flow_row(
                                 dropdown_name.clone(),
                                 origin,
                                 dropdown_workspace.clone(),
+                                lane,
                             )
                             .into_iter()
                             .fold(menu, |menu, item| menu.item(item))
@@ -193,6 +202,7 @@ pub(super) fn flow_row(
                 menu_name.clone(),
                 origin,
                 ws_for_menu.clone(),
+                lane,
             )
             .into_iter()
             .fold(menu, |menu, item| menu.item(item))

@@ -182,6 +182,7 @@ pub fn resolve(file: FlowFile, profile: Option<&str>) -> Result<Flow, Vec<Valida
 pub fn to_flow_file(flow: &Flow, flow_dir: &Path) -> FlowFile {
     FlowFile {
         version: flow.version,
+        name: None,
         defaults: Defaults {
             timeout: None,
             agent: flow.default_agent.as_ref().map(agent_override),

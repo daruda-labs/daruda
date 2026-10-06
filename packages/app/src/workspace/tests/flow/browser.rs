@@ -112,11 +112,11 @@ async fn flow_browser_creation_writes_only_to_the_selected_project(cx: &mut Test
     ws.update_in(&mut vcx, |ws, window, cx| {
         let original_root = ws.active_project().unwrap().root.clone();
         let target_root = ws.project_for(target.project).unwrap().root.clone();
-        let wrong = flow_paths::project_flows_dir(&ws.data_dir, &original_root).join("scoped.yaml");
-        let right = flow_paths::project_flows_dir(&ws.data_dir, &target_root).join("scoped.yaml");
+        let wrong = flow_paths::project_flows_dir(&ws.data_dir, &original_root);
+        let right = flow_paths::project_flows_dir(&ws.data_dir, &target_root);
         ws.set_flow_scope(FlowScope::Worktree(target), cx);
         ws.create_flow_in(target, "scoped", window, cx);
-        assert!(right.is_file());
+        assert!(right.is_dir());
         assert!(!wrong.exists());
         assert_eq!(
             ws.active, target,
@@ -124,7 +124,7 @@ async fn flow_browser_creation_writes_only_to_the_selected_project(cx: &mut Test
         );
         assert!(ws.active_runtime().panes.iter().any(|pane| {
             pane.flow_graph_content()
-                .is_some_and(|graph| graph.path == right)
+                .is_some_and(|graph| graph.path.parent() == Some(right.as_path()))
         }));
     });
 }

@@ -65,6 +65,7 @@ impl Workspace {
         ]
         .into_iter()
         .map(|(name, origin)| FoundFlow {
+            name: name.to_owned(),
             path: root.join(name),
             origin,
         })

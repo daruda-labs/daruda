@@ -8,7 +8,7 @@ use gpui::{IntoElement, SharedString, div, prelude::*, px};
 
 use crate::surface::strings;
 use crate::ui::theme;
-use crate::workspace::layout::RightDockSnapshot;
+use crate::workspace::flow_browser::FlowPageSnapshot;
 
 /// Says the list is capped so a run leaving it reads as retention rather
 /// than as something lost. The number comes from the engine's own default
@@ -47,7 +47,7 @@ pub(super) fn status_color(status: daruda_flow::marker::RunStatus) -> gpui::Hsla
 /// about what may be continued.
 pub(super) fn resume_button(
     run: &crate::workspace::flow_history::FlowRunEntry,
-    snap: &RightDockSnapshot,
+    snap: &FlowPageSnapshot,
 ) -> Option<impl IntoElement + use<>> {
     if !daruda_flow::resume::is_resumable(run.status) {
         return None;

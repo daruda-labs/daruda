@@ -44,17 +44,26 @@ pub(in crate::workspace) fn flows_dir(lane_cwd: &Path) -> PathBuf {
     lane_cwd.join(REPO_DIR).join(FLOWS_DIR)
 }
 
-/// What a flow is called on screen: the file name as it is on disk.
+/// The storage name, also used by external commands and legacy files.
 ///
-/// One function because this name is on the panel row, the tab, the delete
-/// dialog, the toast and a rename's initial value at once. The fallback is the
-/// whole path rather than nothing: a restored pane takes its path straight from
-/// persisted JSON with nothing checking it, and a tab titled "" says less than
-/// one titled with a path that looks wrong.
+/// Paths without a filename retain the full path as a nonempty fallback.
 pub(in crate::workspace) fn flow_label(path: &Path) -> String {
     path.file_name()
         .map(|n| n.to_string_lossy().into_owned())
         .unwrap_or_else(|| path.display().to_string())
+}
+
+/// Read once while discovering or opening a file, never while rendering a row.
+pub(in crate::workspace) fn read_flow_name(path: &Path) -> String {
+    display_name(path, std::fs::read_to_string(path).ok().as_deref())
+}
+
+pub(in crate::workspace) fn display_name(path: &Path, text: Option<&str>) -> String {
+    text.and_then(|text| daruda_flow::parse::parse_flow_file(text).ok())
+        .and_then(|file| file.name)
+        .map(|name| name.trim().to_owned())
+        .filter(|name| !name.is_empty())
+        .unwrap_or_else(|| flow_label(path))
 }
 
 /// Flows that belong to the person rather than to a repository, usable
@@ -129,6 +138,7 @@ pub(in crate::workspace) fn delete_confirm_body(name: &str, origin: FlowOrigin) 
 pub(in crate::workspace) struct FoundFlow {
     pub path: PathBuf,
     pub origin: FlowOrigin,
+    pub name: String,
 }
 
 pub(in crate::workspace) fn runs_dir(lane_cwd: &Path) -> PathBuf {
@@ -257,7 +267,8 @@ fn merge_flows(groups: Vec<(Vec<PathBuf>, FlowOrigin)>) -> Vec<FoundFlow> {
                 continue;
             }
             claimed.push(name);
-            found.push(FoundFlow { path, origin });
+            let name = read_flow_name(&path);
+            found.push(FoundFlow { path, origin, name });
         }
     }
     found.sort_by(|a, b| a.path.file_name().cmp(&b.path.file_name()));

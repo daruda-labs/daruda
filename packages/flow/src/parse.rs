@@ -20,6 +20,9 @@ pub struct FlowFile {
     /// Schema version. Required so a future change to the execution rules
     /// can coexist with files written against today's.
     pub version: u32,
+    /// Human-readable title, independent of the file's storage name.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
     #[serde(default)]
     pub defaults: Defaults,
     /// Named layers over `defaults`, chosen at submission. A map rather

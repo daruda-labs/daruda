@@ -27,6 +27,19 @@ use super::Workspace;
 use crate::surface::strings as s;
 
 impl Workspace {
+    pub(in crate::workspace) fn save_and_close_flow_editor(
+        &mut self,
+        pane_id: super::main_area::pane_tree::PaneId,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if let Some((path, view)) = self.flow_graph_of_pane(pane_id)
+            && self.save_flow_editor(&path, view, window, cx)
+        {
+            self.close_pane_by_id(pane_id, window, cx);
+        }
+    }
+
     /// Write the inspector's fields into the flow file.
     ///
     /// The form's values become a `FlowFile` mutation and nothing more — which
@@ -42,47 +55,89 @@ impl Workspace {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let Some((base, node, fields)) = view.read_with(cx, |view, cx| {
-            let form = view.form()?;
-            Some((view.text()?.to_string(), form.node.clone(), form.fields(cx)))
+        self.save_flow_editor(path, view, window, cx);
+    }
+
+    pub(in crate::workspace) fn save_flow_editor(
+        &mut self,
+        path: &Path,
+        view: gpui::Entity<super::main_area::flow_graph_pane::FlowGraphView>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        let Some((base, name, rename, node)) = view.read_with(cx, |view, cx| {
+            let node = view
+                .form()
+                .filter(|form| form.is_dirty(cx))
+                .map(|form| (form.node.clone(), form.fields(cx)));
+            Some((
+                view.text()?.to_string(),
+                view.edited_name(cx),
+                view.name_is_dirty(cx),
+                node,
+            ))
         }) else {
-            return;
+            return false;
         };
+        if name.is_empty() {
+            view.update(cx, |view, cx| {
+                view.set_save_error(Some(s::flow::name_empty()), cx)
+            });
+            return false;
+        }
         // The name the notes are filtered by — `node` moves into the closure.
-        let node_id = node.clone();
+        let node_id = node.as_ref().map(|(node, _)| node.clone());
         // Cleared before the attempt so what the banner shows is always about the
         // save the person just asked for.
-        view.update(cx, |view, cx| view.set_form_refusal(None, Vec::new(), cx));
+        view.update(cx, |view, cx| {
+            view.set_save_error(None, cx);
+            view.set_form_refusal(None, Vec::new(), cx);
+        });
         let outcome = self.edit_flow(
             path,
             &base,
             move |file| {
-                super::main_area::flow_graph_pane::form::apply::node_fields(file, &node, &fields)
+                if rename {
+                    file.name = Some(name);
+                }
+                if let Some((node, fields)) = node {
+                    super::main_area::flow_graph_pane::form::apply::node_fields(
+                        file, &node, &fields,
+                    );
+                }
             },
             window,
             cx,
         );
         match outcome {
-            Ok(()) | Err(super::flow_file_ops::EditRefusal::NothingToDo) => {}
+            Ok(()) | Err(super::flow_file_ops::EditRefusal::NothingToDo) => return true,
             // Not about the edit: a permission or a disk failure is the same thing
             // wherever it happens, and the toast is where the app says it.
             Err(refusal @ super::flow_file_ops::EditRefusal::Io(_)) => {
-                self.report_edit_refusal(&refusal, cx)
+                view.update(cx, |view, cx| {
+                    view.set_save_error(Some(refusal.message()), cx)
+                });
+                self.report_edit_refusal(&refusal, cx);
             }
             Err(refusal) => {
                 let message = refusal.message();
                 // The boxes the issues name, for the node this form is about.
                 let notes = match &refusal {
-                    super::flow_file_ops::EditRefusal::WouldNotLoad { issues, .. } => {
-                        super::main_area::flow_graph_pane::form::notes::notes_for(issues, &node_id)
-                    }
+                    super::flow_file_ops::EditRefusal::WouldNotLoad { issues, .. } => node_id
+                        .as_ref()
+                        .map(|node| {
+                            super::main_area::flow_graph_pane::form::notes::notes_for(issues, node)
+                        })
+                        .unwrap_or_default(),
                     _ => Vec::new(),
                 };
                 view.update(cx, |view, cx| {
+                    view.set_save_error(Some(message.clone()), cx);
                     view.set_form_refusal(Some(message), notes, cx)
                 });
             }
         }
+        false
     }
 
     /// The menu's entry points: resolve the pane to its file and view first, so

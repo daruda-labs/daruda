@@ -383,25 +383,39 @@ async fn the_panel_lists_only_the_active_lane_while_the_chip_lists_every_one(
     });
 }
 
-/// The right dock repaints only when `content_differs` says something
-/// changed, and that method is a hand-written list. A field added without
-/// a line there is invisible: the panel simply never updates, with no
-/// error and no failing test anywhere else.
+/// Flow runs refresh the central page without invalidating the utility dock.
 #[gpui::test]
-async fn a_started_run_makes_the_right_dock_snapshot_differ(cx: &mut TestAppContext) {
+async fn a_started_run_updates_the_flow_page_independently_of_the_right_dock(
+    cx: &mut TestAppContext,
+) {
     let (lane, ws, _flow_path, _wh) = workspace_with_a_flow(cx, ONE_AGENT);
 
     let (before, after) = ws.update(cx, |ws, cx| {
+        ws.show_page(crate::workspace::pages::Page::Flows, cx);
+        ws.stage_flow_page(cx);
+        assert!(
+            ws.flow_browser
+                .page_snapshot
+                .as_ref()
+                .unwrap()
+                .flows
+                .is_empty()
+        );
         let before = ws.prepare_right_dock_snapshot(cx);
         let here = ws.active;
         ws.seed_flow_run_for_test(here, lane.path().join("run-here"));
+        ws.stage_flow_page(cx);
+        assert_eq!(
+            ws.flow_browser.page_snapshot.as_ref().unwrap().flows.len(),
+            1
+        );
         let after = ws.prepare_right_dock_snapshot(cx);
         (before, after)
     });
 
     assert!(
-        after.content_differs(&before),
-        "the panel would show a stale run list"
+        !after.content_differs(&before),
+        "Flow state does not belong to the utility dock"
     );
     assert!(!after.content_differs(&after), "nothing changed");
 }

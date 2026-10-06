@@ -1,7 +1,7 @@
 //! Flow definitions and execution history, scoped independently of the terminal.
 
 use crate::ui::theme;
-use crate::workspace::{flow_browser::FlowTab, layout::RightDockSnapshot};
+use crate::workspace::flow_browser::{FlowPageSnapshot, FlowTab};
 use gpui::{AnyElement, IntoElement, prelude::*, px};
 
 mod controls;
@@ -14,7 +14,7 @@ mod toolbar;
 
 pub(in crate::workspace) use controls::header;
 
-pub(in crate::workspace) fn render(snap: &RightDockSnapshot, cx: &gpui::App) -> AnyElement {
+pub(in crate::workspace) fn render(snap: &FlowPageSnapshot, cx: &gpui::App) -> AnyElement {
     let state = &snap.flow_browser.state;
     let runs = list::RunList::project(
         &snap.flows,
@@ -22,7 +22,10 @@ pub(in crate::workspace) fn render(snap: &RightDockSnapshot, cx: &gpui::App) -> 
         state.run_filter,
         &snap.flow_browser.query,
     );
-    let mut body = super::right_panel_body()
+    let mut body = gpui::div()
+        .flex()
+        .flex_col()
+        .gap(px(theme::RIGHT_PANEL_SECTION_GAP))
         .text_size(px(theme::RIGHT_PANEL_BODY_FONT_SIZE))
         .child(controls::section_tabs(snap, runs.total));
     if runs.waiting > 0 {

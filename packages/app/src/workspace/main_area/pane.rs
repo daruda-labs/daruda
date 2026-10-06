@@ -553,16 +553,15 @@ impl Pane {
 
     /// True when the pane holds unsaved user edits. A File pane in Raw mode
     /// diffs its editor against the text it loaded, and a TaskEdit pane diffs
-    /// the form against `saved_snapshot`; Terminal, FlowGraph and AgentChat
-    /// panes have no buffer to lose, so `false` rules them out of the close
-    /// prompt entirely.
+    /// the form against `saved_snapshot`. FlowGraph includes its title and
+    /// selected node's fields; Terminal and AgentChat have no editable buffer.
     ///
     /// Also what takes a tab out of the left dock's replaceable scratch slot —
     /// see [`crate::workspace::Workspace::preview_tab_index`].
     pub(in crate::workspace) fn is_dirty(&self, cx: &App) -> bool {
         match &self.content {
-            // A graph is a view of a file, never a buffer over it.
-            PaneContent::Terminal(_) | PaneContent::FlowGraph(_) => false,
+            PaneContent::Terminal(_) => false,
+            PaneContent::FlowGraph(graph) => graph.view.read(cx).has_unsaved_form(cx),
             PaneContent::File(f) => {
                 f.view.holds_editable_buffer() && *f.editor_state.read(cx).text() != f.saved_text
             }
@@ -591,7 +590,8 @@ impl Pane {
     /// True when the pane's `save` path is meaningful for the user.
     pub(super) fn can_save(&self, cx: &App) -> bool {
         match &self.content {
-            PaneContent::Terminal(_) | PaneContent::FlowGraph(_) => false,
+            PaneContent::Terminal(_) => false,
+            PaneContent::FlowGraph(graph) => !graph.view.read(cx).edited_name(cx).is_empty(),
             PaneContent::File(f) => f.view.holds_editable_buffer() && f.view.path.is_absolute(),
             PaneContent::TaskEditPane(te) => te.can_save(cx),
             PaneContent::AgentChat(_) => false,

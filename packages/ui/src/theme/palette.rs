@@ -365,6 +365,7 @@ pub const MODAL_RADIO_W: f32 = 14.0;
 pub const FORM_MODAL_WIDE: f32 = 900.0;
 pub const FORM_MODAL_SECTION_GAP: f32 = 12.0;
 pub const FORM_MODAL_SPLIT_GAP: f32 = 16.0;
+pub const FLOW_NAME_INPUT_MAX_W: f32 = 320.0;
 pub const ERROR_MODAL_WIDTH: f32 = 640.0;
 pub const ERROR_MODAL_BODY_FONT_SIZE: f32 = FONT_SIZE_SM;
 pub const ERROR_MODAL_BODY_PAD: f32 = PAD_LG;
