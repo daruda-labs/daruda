@@ -2305,6 +2305,13 @@ pub const RIGHT_PANEL_ROW_PAD_Y: f32 = 3.0;
 /// Widest a Tasks row's project label grows before it truncates, so a long
 /// project name cannot push the title out of the row (px).
 pub const RIGHT_PANEL_TASK_PROJECT_MAX_W: f32 = 96.0;
+/// Shared task header/row column widths; narrow pages scroll horizontally.
+pub const TASK_TABLE_STATUS_W: f32 = 96.0;
+pub const TASK_TABLE_TITLE_MIN_W: f32 = 200.0;
+pub const TASK_TABLE_AGENT_W: f32 = 84.0;
+pub const TASK_TABLE_UPDATED_W: f32 = 72.0;
+pub const TASK_TABLE_MIN_W: f32 = 530.0;
+pub const TASK_TABLE_ALL_MIN_W: f32 = 634.0;
 /// Font size for the right-panel body rows (px).
 /// Matches `AGENT_CHAT_MSG_FONT_SIZE` so the four right-panel tabs feel
 /// part of the same typographic family as the original chat panel.
@@ -2317,9 +2324,6 @@ pub const RIGHT_PANEL_TASK_INDICATOR_W: f32 = 14.0;
 /// Vertical padding for a right-dock tab header row (px). Shared by the
 /// Tasks / Skills / Tools headers so they sit at a uniform height.
 pub const RIGHT_PANEL_HEADER_PAD_Y: f32 = PAD_SM;
-/// Maximum number of characters of an `Error` task message echoed
-/// inline next to the row title before it's truncated with `…`.
-pub const RIGHT_PANEL_TASK_ERROR_TRUNCATE: usize = 30;
 /// Diameter of the `Running`-row pulse dot rendered in the leading
 /// indicator column (px). Drawn as a filled circle whose alpha
 /// oscillates between [`RIGHT_PANEL_TASK_PULSE_MIN_ALPHA`] and

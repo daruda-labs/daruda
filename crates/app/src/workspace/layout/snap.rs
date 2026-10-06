@@ -385,6 +385,8 @@ pub(in crate::workspace) struct RightDockSnapshot {
     /// Whether the Tasks tab lists the active project's tasks or every one.
     pub task_scope: daruda_store::tasks::TaskScope,
     pub task_projects: TaskProjects,
+    pub task_groups: crate::workspace::right_dock::tasks::TaskGroups,
+    pub task_agents: Vec<(String, String)>,
     /// Per-session Claude status, keyed by `session_id`. Mirrors the
     /// `ClaudeStatusStore` slice that the Tasks tab needs to render
     /// the `⟳ / ● / ⚠` glyph trailing each row's session-id badge.
@@ -637,6 +639,8 @@ mod tests {
             task_filter: daruda_store::tasks::TaskFilter::default(),
             task_scope: daruda_store::tasks::TaskScope::default(),
             task_projects: TaskProjects::default(),
+            task_groups: Default::default(),
+            task_agents: Vec::new(),
             claude_status_per_session: std::collections::HashMap::new(),
             tool_use_failure_counts: std::collections::HashMap::new(),
             now: PerFrame(chrono::Utc::now()),

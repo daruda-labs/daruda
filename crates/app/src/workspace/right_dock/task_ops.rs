@@ -41,22 +41,82 @@ impl Workspace {
     // Filter / expansion / persistence
     // ------------------------------------------------------------------
 
-    /// Cycle the Tasks tab filter through `All → Backlog → Running →
-    /// Done → All`. Used by the header chip until a `Select` widget
-    /// lands.
-    pub(super) fn cycle_task_filter(&mut self, cx: &mut Context<Self>) {
-        self.task_filter = match self.task_filter {
-            daruda_store::tasks::TaskFilter::All => daruda_store::tasks::TaskFilter::Backlog,
-            daruda_store::tasks::TaskFilter::Backlog => daruda_store::tasks::TaskFilter::Running,
-            daruda_store::tasks::TaskFilter::Running => daruda_store::tasks::TaskFilter::Done,
-            daruda_store::tasks::TaskFilter::Done => daruda_store::tasks::TaskFilter::All,
-        };
+    pub(in crate::workspace) fn set_task_grouping(
+        &mut self,
+        mode: super::tasks::TaskGrouping,
+        cx: &mut Context<Self>,
+    ) {
+        self.task_groups.set_mode(mode);
         cx.notify();
     }
 
-    pub(super) fn toggle_task_scope(&mut self, cx: &mut Context<Self>) {
-        self.task_scope = self.task_scope.toggled();
+    pub(in crate::workspace) fn toggle_task_group(
+        &mut self,
+        key: super::tasks::TaskGroupKey,
+        cx: &mut Context<Self>,
+    ) {
+        self.task_groups.toggle(key);
         cx.notify();
+    }
+
+    /// Keep matching filters; relax only those hiding the saved task.
+    pub(in crate::workspace) fn show_saved_task(
+        &mut self,
+        id: &str,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(task) = cx.global::<GlobalTasks>().get(id) else {
+            return;
+        };
+        let active = self.active_project().map(|project| project.uuid);
+        if !self.task_scope.matches(task, active) {
+            self.task_scope = daruda_store::tasks::TaskScope::Project(task.project);
+        }
+        if !self.task_filter.matches(&task.state) {
+            self.task_filter = daruda_store::tasks::TaskFilter::All;
+        }
+        self.task_groups.reveal(task);
+        let query = self
+            .task_search_input
+            .read(cx)
+            .value()
+            .trim()
+            .to_ascii_lowercase();
+        if !super::tasks::matches_task(task, &query) {
+            self.clear_task_search(window, cx);
+        }
+        self.open_page(crate::workspace::pages::Page::Tasks, window, cx);
+    }
+
+    pub(in crate::workspace) fn set_task_scope(
+        &mut self,
+        scope: daruda_store::tasks::TaskScope,
+        cx: &mut Context<Self>,
+    ) {
+        self.task_scope = scope;
+        cx.notify();
+    }
+
+    pub(in crate::workspace) fn new_task_in_scope(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let active = self.active_project().map(|p| p.uuid);
+        let project = self.task_scope.project(active).or(active);
+        if let Some(project) = project.filter(|id| self.project_by_uuid(*id).is_some()) {
+            self.open_task_draft_for_project(project, window, cx);
+        }
+    }
+
+    pub(in crate::workspace) fn clear_task_filters(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.task_filter = daruda_store::tasks::TaskFilter::All;
+        self.clear_task_search(window, cx);
     }
 
     /// Clear the Tasks tab search input (the in-field `✕` overlay).
@@ -69,10 +129,8 @@ impl Workspace {
         cx.notify();
     }
 
-    /// Set the Tasks-tab filter directly. Called by future `Select`
-    /// widget subscriptions once it replaces the cycle chip.
-    #[allow(dead_code)]
-    pub(super) fn set_task_filter(
+    /// Select a status without changing the project or search query.
+    pub(in crate::workspace) fn set_task_filter(
         &mut self,
         filter: daruda_store::tasks::TaskFilter,
         cx: &mut Context<Self>,

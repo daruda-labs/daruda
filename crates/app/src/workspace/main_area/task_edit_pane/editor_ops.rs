@@ -11,6 +11,18 @@ use gpui::{Context, Focusable as _, Window};
 
 impl Workspace {
     #[cfg(feature = "screenshot")]
+    pub(in crate::workspace) fn seed_saved_task_for_shot(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.seed_task_editor_for_shot(false, false, window, cx);
+        let pane = self.active_runtime().focused_pane_id;
+        self.set_task_filter(daruda_store::tasks::TaskFilter::Failed, cx);
+        self.save_task_editor(pane, false, window, cx);
+    }
+
+    #[cfg(feature = "screenshot")]
     pub(in crate::workspace) fn seed_task_editor_for_shot(
         &mut self,
         preview: bool,
@@ -233,6 +245,8 @@ impl Workspace {
         }
         if start {
             self.start_task(&id, window, cx);
+        } else {
+            self.show_saved_task(&id, window, cx);
         }
         cx.notify();
     }

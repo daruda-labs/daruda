@@ -258,10 +258,9 @@ dock:
 
 # Task panel
 task:
-  # Filter dropdown labels.
-  scope_all: "All tasks"
-  # Scope chip: the active project's tasks, or every project's.
-  scope_project: "This project"
+  # The project picker filters tasks without switching the active worktree.
+  scope_current: "%{name} (Current)"
+  scope_hint: "Filter tasks by project without switching your worktree"
   scope_every_project: "All projects"
   # A row's project label when that project is not open in this window.
   project_not_open: "Not open"
@@ -269,13 +268,36 @@ task:
   filter_backlog: "Backlog"
   filter_running: "Running"
   filter_done: "Done"
+  filter_failed: "Failed"
+  filter_cancelled: "Cancelled"
+  filter_count: "%{label} %{count}"
+  result_count: "%{visible} of %{total} tasks"
+  group_by: "Group: %{group}"
+  group_none: "None"
+  column_task: "Task"
+  column_project: "Project"
+  column_status: "Status"
+  column_agent: "Agent"
+  column_updated: "Updated"
+  agent_on_start: "On start"
+  agent_unknown: "Not recorded"
+  agent_terminal: "Claude CLI"
+  updated_now: "Just now"
+  updated_minutes: "%{count}m ago"
+  updated_hours: "%{count}h ago"
+  updated_days: "%{count}d ago"
+  row_metadata: "%{id} · %{branch}"
+  empty_scope: "No tasks in %{project} yet. Create a task to get started."
+  empty_project_unavailable: "This project is not open. Open a project or choose another project above."
+  empty_filtered: "No tasks match these filters. Try another status or clear the filters."
+  clear_filters: "Clear status and search"
+  new_in_project: "Create a task in %{project}"
   # `[+ New]` button label.
-  new_button: "New"
+  new_button: "New task"
   # Tasks tab search bar — substring filter over title / prompt /
   # notes / branch_name. Placement and behaviour mirror the Skills tab
   # search (`SKILLS_SEARCH_*`). Cleared via the in-field `✕` overlay.
   search_placeholder: "Search tasks…"
-  search_empty_prefix: "No tasks match "
   # Action labels rendered inside the status-pill dropdown. The pill
   # itself shows the task's current state; the dropdown lists the
   # transitions and meta actions valid for that state.
@@ -296,15 +318,11 @@ task:
   action_stop: "Stop"
   action_reopen: "Reopen"
   action_retry: "Retry"
-  # `View error` (Error state). Opens an OK-only alert dialog
-  # showing the full `TaskState::Error.message` so users can see the
-  # truncated row text in full.
+  # `View error` opens an OK-only alert with the full task error message.
   action_view_error: "View error"
   # Title shown on the alert dialog opened by `View error`.
   error_dialog_title: "Task error"
-  # The `TaskState::Error.message` wordings daruda itself writes. The row
-  # renders this after its `Error:` prefix, so it has to read as a sentence
-  # fragment rather than a log line.
+  # Task error messages shown in the status tooltip and error dialog.
   error_lane_gone: "worktree gone"
   error_prompt_undelivered: "prompt could not reach the pane (pane closed)"
   error_session_failed: "session error"
@@ -2285,10 +2303,6 @@ terminal:
   task_backlog: "Backlog"
   task_cancelled: "Cancelled"
   task_done_prefix: "Done"
-  task_empty_all: "No tasks. Click [+ New] to create one."
-  task_empty_backlog: "No backlog tasks."
-  task_empty_done: "No completed tasks."
-  task_empty_running: "No running tasks."
   task_error_prefix: "Error"
   task_failures_prefix: "failures "
   task_running: "Running"

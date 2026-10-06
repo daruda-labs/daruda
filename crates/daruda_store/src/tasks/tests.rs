@@ -410,7 +410,7 @@ fn tasks_state_default_uses_current_schema_version() {
 }
 
 // ---------------------------------------------------------------------------
-// TaskFilter matrix (5 states × 4 filters)
+// TaskFilter matrix (5 states × 6 filters)
 // ---------------------------------------------------------------------------
 
 #[test]
@@ -461,8 +461,18 @@ fn task_filter_matrix_matches_each_pair() {
         (TaskFilter::Done, "backlog", false),
         (TaskFilter::Done, "running", false),
         (TaskFilter::Done, "done", true),
-        (TaskFilter::Done, "error", true),
-        (TaskFilter::Done, "cancelled", true),
+        (TaskFilter::Done, "error", false),
+        (TaskFilter::Done, "cancelled", false),
+        (TaskFilter::Failed, "backlog", false),
+        (TaskFilter::Failed, "running", false),
+        (TaskFilter::Failed, "done", false),
+        (TaskFilter::Failed, "error", true),
+        (TaskFilter::Failed, "cancelled", false),
+        (TaskFilter::Cancelled, "backlog", false),
+        (TaskFilter::Cancelled, "running", false),
+        (TaskFilter::Cancelled, "done", false),
+        (TaskFilter::Cancelled, "error", false),
+        (TaskFilter::Cancelled, "cancelled", true),
     ];
 
     for (filter, label, want) in cases {
@@ -741,5 +751,14 @@ fn task_scope_keeps_the_active_projects_tasks_or_every_task() {
     assert!(!TaskScope::ActiveProject.matches(&task, None));
     assert!(TaskScope::AllProjects.matches(&task, Some(other)));
     assert!(TaskScope::AllProjects.matches(&task, None));
+    assert!(TaskScope::Project(task.project).matches(&task, Some(other)));
+    assert!(TaskScope::Project(task.project).matches(&task, None));
+    assert!(!TaskScope::Project(other).matches(&task, Some(task.project)));
+    assert_eq!(TaskScope::ActiveProject.project(Some(other)), Some(other));
+    assert_eq!(
+        TaskScope::Project(task.project).project(Some(other)),
+        Some(task.project)
+    );
+    assert_eq!(TaskScope::AllProjects.project(Some(other)), None);
     assert_eq!(TaskScope::default().toggled(), TaskScope::AllProjects);
 }

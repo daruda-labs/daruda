@@ -510,6 +510,12 @@ impl Workspace {
             task_search_query: self.task_search_input.read(cx).value().to_string(),
             task_filter: self.task_filter,
             task_scope: self.task_scope,
+            task_groups: self.task_groups.clone(),
+            task_agents: self
+                .agents
+                .iter()
+                .map(|agent| (agent.id.clone(), agent.name.clone()))
+                .collect(),
             task_projects: crate::workspace::layout::TaskProjects {
                 active: self.active_project().map(|p| p.uuid),
                 names: self

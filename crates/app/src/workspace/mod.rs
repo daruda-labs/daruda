@@ -568,6 +568,7 @@ pub struct Workspace {
     pub(in crate::workspace) task_filter: daruda_store::tasks::TaskFilter,
     /// Whether the Tasks tab lists the active project's tasks or every one.
     pub(in crate::workspace) task_scope: daruda_store::tasks::TaskScope,
+    pub(in crate::workspace) task_groups: right_dock::tasks::TaskGroups,
     /// Per-repo lock that prevents two concurrent `start_task`
     /// invocations from racing on `git worktree add` against the same
     /// repository. Cleared after `finalize_create_lane` returns.
@@ -1177,6 +1178,7 @@ impl Workspace {
             // live tick (pulse + duration) needs to be running.
             task_filter: daruda_store::tasks::TaskFilter::default(),
             task_scope: daruda_store::tasks::TaskScope::default(),
+            task_groups: right_dock::tasks::TaskGroups::default(),
             pending_lane_creates: HashSet::new(),
             window_close_in_flight: false,
             terminal_input,

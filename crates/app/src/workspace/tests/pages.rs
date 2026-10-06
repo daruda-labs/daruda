@@ -6,6 +6,57 @@ use daruda_store::project::{LeftDockView, RightDockView, WorkspacePage};
 use gpui::{AppContext as _, Modifiers, TestAppContext, VisualTestContext};
 
 #[gpui::test]
+async fn task_status_controls_preserve_scope_and_clear_without_switching_worktree(
+    cx: &mut TestAppContext,
+) {
+    use daruda_store::tasks::{TaskFilter, TaskScope};
+    let (window, workspace) = build_workspace(cx);
+    let mut vcx = VisualTestContext::from_window(window.into(), cx);
+    vcx.update(|window, cx| {
+        workspace.update(cx, |ws, cx| {
+            use gpui::BorrowAppContext as _;
+            let mut task = daruda_store::tasks::Task::new(
+                Default::default(),
+                "Visible task".into(),
+                String::new(),
+                None,
+            );
+            task.state = daruda_store::tasks::TaskState::Running {
+                worktree_path: "/tmp".into(),
+            };
+            cx.update_global::<crate::agent::tasks_global::GlobalTasks, _>(|tasks, _| {
+                tasks.add(task);
+            });
+            ws.set_task_scope(TaskScope::AllProjects, cx);
+            ws.open_page(Page::Tasks, window, cx);
+        });
+        window.refresh();
+    });
+    vcx.run_until_parked();
+    let active = workspace.read_with(&vcx, |ws, _| ws.active);
+    let running = vcx
+        .debug_bounds("task-status-2")
+        .expect("Running tab is visible");
+    vcx.simulate_click(running.center(), Modifiers::default());
+    vcx.run_until_parked();
+    workspace.read_with(&vcx, |ws, _| {
+        assert_eq!(ws.task_filter, TaskFilter::Running);
+        assert_eq!(ws.task_scope, TaskScope::AllProjects);
+        assert_eq!(ws.active, active);
+    });
+    let clear = vcx
+        .debug_bounds("task-clear-filters")
+        .expect("a nonempty filtered list has a recovery action");
+    vcx.simulate_click(clear.center(), Modifiers::default());
+    vcx.run_until_parked();
+    workspace.read_with(&vcx, |ws, _| {
+        assert_eq!(ws.task_filter, TaskFilter::All);
+        assert_eq!(ws.task_scope, TaskScope::AllProjects);
+        assert_eq!(ws.active, active);
+    });
+}
+
+#[gpui::test]
 fn pages_preserve_the_active_lane_and_utility_selection(cx: &mut TestAppContext) {
     let (window, workspace) = build_workspace(cx);
     cx.update_window(window.into(), |_, window, cx| {
@@ -24,6 +75,99 @@ fn pages_preserve_the_active_lane_and_utility_selection(cx: &mut TestAppContext)
         });
     })
     .unwrap();
+}
+
+#[gpui::test]
+async fn task_groups_collapse_and_reopen_without_changing_filters(cx: &mut TestAppContext) {
+    use crate::agent::tasks_global::GlobalTasks;
+    use crate::workspace::right_dock::tasks::{TaskGroupKey, TaskGrouping};
+    use daruda_store::tasks::{Task, TaskFilter, TaskScope};
+    use gpui::BorrowAppContext as _;
+    let (window, workspace) = build_workspace(cx);
+    let mut vcx = VisualTestContext::from_window(window.into(), cx);
+    let mut task = Task::new(
+        Default::default(),
+        "Fold this task".into(),
+        String::new(),
+        None,
+    );
+    task.id = "group-fixture".into();
+    vcx.update(|window, cx| {
+        workspace.update(cx, |ws, cx| {
+            cx.update_global::<GlobalTasks, _>(|tasks, _| {
+                tasks.add(task);
+            });
+            ws.set_task_scope(TaskScope::AllProjects, cx);
+            ws.set_task_grouping(TaskGrouping::Status, cx);
+            ws.open_page(Page::Tasks, window, cx);
+        });
+        window.refresh();
+    });
+    vcx.run_until_parked();
+    assert!(vcx.debug_bounds("task-row-group-fixture").is_some());
+    for width in [800.0, 1280.0] {
+        vcx.update(|window, _| {
+            window.resize(gpui::size(gpui::px(width), gpui::px(800.0)));
+            window.refresh();
+        });
+        vcx.run_until_parked();
+        let heading = vcx.debug_bounds("task-project-column").unwrap();
+        let project = vcx.debug_bounds("task-project-group-fixture").unwrap();
+        let title = vcx.debug_bounds("task-title-group-fixture").unwrap();
+        assert_eq!(
+            heading.left(),
+            project.left(),
+            "project columns align at {width}px"
+        );
+        assert!(
+            title.right() <= project.left(),
+            "title cannot overlap the project"
+        );
+        assert!(title.size.width >= gpui::px(crate::ui::theme::TASK_TABLE_TITLE_MIN_W));
+    }
+    for expected_open in [false, true] {
+        let header = vcx
+            .debug_bounds("task-group-0")
+            .expect("Backlog group header");
+        vcx.simulate_click(header.center(), Modifiers::default());
+        vcx.run_until_parked();
+        workspace.read_with(&vcx, |ws, _| {
+            assert_eq!(
+                ws.task_groups
+                    .is_open(TaskGroupKey::Status(TaskFilter::Backlog)),
+                expected_open
+            );
+            assert_eq!(ws.task_filter, TaskFilter::All);
+            assert_eq!(ws.task_scope, TaskScope::AllProjects);
+        });
+        assert_eq!(
+            vcx.debug_bounds("task-row-group-fixture").is_some(),
+            expected_open
+        );
+    }
+    let row = vcx.debug_bounds("task-row-group-fixture").unwrap();
+    vcx.simulate_click(row.center(), Modifiers::default());
+    vcx.run_until_parked();
+    workspace.read_with(&vcx, |ws, _| {
+        assert_eq!(
+            ws.active_page(),
+            None,
+            "the row opens the existing editor, not a side panel"
+        );
+        let pane = ws.active_runtime().focused_pane_id;
+        assert_eq!(
+            ws.active_runtime()
+                .panes
+                .iter()
+                .find(|p| p.id == pane)
+                .unwrap()
+                .task_edit_content()
+                .unwrap()
+                .task_id
+                .as_deref(),
+            Some("group-fixture")
+        );
+    });
 }
 
 #[gpui::test]

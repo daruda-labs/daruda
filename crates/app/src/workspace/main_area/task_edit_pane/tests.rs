@@ -7,6 +7,71 @@ use gpui::{
 };
 
 #[gpui::test]
+fn task_list_scope_preserves_worktree_and_seeds_new_task_project(cx: &mut TestAppContext) {
+    use daruda_store::tasks::{TaskFilter, TaskScope};
+    let (_a, window, ws) = build_workspace_with_project(cx);
+    let b_root = tempfile::tempdir().unwrap();
+    cx.update_window(window.into(), |_, window, cx| {
+        ws.update(cx, |ws, cx| {
+            let a = ws.projects[0].uuid;
+            ws.add_project(b_root.path().to_path_buf(), window, cx);
+            let active = ws.active;
+            let b = ws.active_project().unwrap().uuid;
+            ws.open_page(crate::workspace::pages::Page::Tasks, window, cx);
+            ws.set_task_scope(TaskScope::Project(a), cx);
+            ws.set_task_filter(TaskFilter::Failed, cx);
+            ws.task_search_input
+                .clone()
+                .update(cx, |input, cx| input.set_value("login", window, cx));
+            ws.clear_task_filters(window, cx);
+            assert_eq!(ws.task_scope, TaskScope::Project(a));
+            assert_eq!(ws.task_filter, TaskFilter::All);
+            assert_eq!(ws.task_search_input.read(cx).value(), "");
+            assert_eq!(ws.active, active);
+            ws.new_task_in_scope(window, cx);
+            let pane = ws.active_runtime().focused_pane_id;
+            let te = ws.task_edit_content_for_pane(pane).unwrap();
+            assert_eq!(te.project(cx), Some(a));
+            assert_eq!(
+                te.lane_value(cx),
+                "",
+                "the active project's lane cannot leak into another project"
+            );
+            let title = te.title_input.clone();
+            title.update(cx, |input, cx| input.set_value("Scoped draft", window, cx));
+            ws.commit_task_edit_pane(pane, cx).unwrap();
+            let id = ws
+                .task_edit_content_for_pane(pane)
+                .unwrap()
+                .task_id
+                .clone()
+                .unwrap();
+            assert_eq!(cx.global::<GlobalTasks>().get(&id).unwrap().project, a);
+            assert_eq!(ws.active, active);
+            ws.set_task_scope(TaskScope::AllProjects, cx);
+            ws.new_task_in_scope(window, cx);
+            let pane = ws.active_runtime().focused_pane_id;
+            assert_eq!(
+                ws.task_edit_content_for_pane(pane).unwrap().project(cx),
+                Some(b)
+            );
+            let pane_count = ws.active_runtime().panes.len();
+            ws.set_task_scope(
+                TaskScope::Project(daruda_store::project::ProjectUuid::new()),
+                cx,
+            );
+            ws.new_task_in_scope(window, cx);
+            assert_eq!(
+                ws.active_runtime().panes.len(),
+                pane_count,
+                "a closed scope must not create a task in the active project"
+            );
+        });
+    })
+    .unwrap();
+}
+
+#[gpui::test]
 fn task_editor_watches_prompt_after_start_parks_its_lane(cx: &mut TestAppContext) {
     let source = tempfile::tempdir().unwrap();
     let (window, ws) = crate::workspace::tests::build_workspace_with(
@@ -106,6 +171,7 @@ fn task_editor_save_shortcut_and_tab_order(cx: &mut TestAppContext) {
             .unwrap();
         assert_eq!(task.title, "Keyboard save");
         assert!(!te.is_dirty(cx));
+        assert_eq!(ws.active_page(), Some(crate::workspace::pages::Page::Tasks));
     });
 }
 
@@ -128,13 +194,19 @@ fn task_editor_rejects_blank_titles_and_invalid_branches(cx: &mut TestAppContext
             assert!(!ws.task_edit_content_for_pane(id).unwrap().can_save(cx));
             assert!(ws.commit_task_edit_pane(id, cx).is_none());
             assert!(cx.global::<GlobalTasks>().0.tasks.is_empty());
+            ws.save_task_editor(id, false, window, cx);
+            assert_eq!(
+                ws.active_page(),
+                None,
+                "validation failure keeps the editor visible"
+            );
         });
     })
     .unwrap();
 }
 
 #[gpui::test]
-fn task_editor_save_keeps_pane_and_draft_subtasks(cx: &mut TestAppContext) {
+fn task_editor_save_returns_to_list_and_keeps_saved_subtasks(cx: &mut TestAppContext) {
     let (_project, window, ws) = build_workspace_with_project(cx);
     cx.update_window(window.into(), |_, window, cx| {
         ws.update(cx, |ws, cx| {
@@ -154,18 +226,70 @@ fn task_editor_save_keeps_pane_and_draft_subtasks(cx: &mut TestAppContext) {
             ws.save_task_editor(pane, false, window, cx);
             let te = ws
                 .task_edit_content_for_pane(pane)
-                .expect("save keeps editor open");
+                .expect("saved editor remains available to reopen");
             assert!(!te.is_dirty(cx));
             let id = te.task_id.clone().unwrap();
             let task = cx.global::<GlobalTasks>().get(&id).unwrap();
             assert_eq!(task.subtasks[0].title, "Verify keyboard");
             assert!(task.subtasks[0].completed);
+            assert_eq!(ws.active_page(), Some(crate::workspace::pages::Page::Tasks));
             ws.save_task_editor(pane, false, window, cx);
             assert_eq!(cx.global::<GlobalTasks>().0.tasks.len(), 1);
             assert_eq!(
                 cx.global::<GlobalTasks>().get(&id).unwrap().subtasks.len(),
                 1
             );
+        });
+    })
+    .unwrap();
+}
+
+#[gpui::test]
+fn task_editor_save_reveals_task_without_switching_worktree(cx: &mut TestAppContext) {
+    use crate::workspace::right_dock::tasks::{TaskGroupKey, TaskGrouping};
+    use daruda_store::tasks::{TaskFilter, TaskScope};
+    let (_project, window, ws) = build_workspace_with_project(cx);
+    let other = tempfile::tempdir().unwrap();
+    cx.update_window(window.into(), |_, window, cx| {
+        ws.update(cx, |ws, cx| {
+            let project = ws.active_project().unwrap().uuid;
+            ws.add_project(other.path().to_owned(), window, cx);
+            let active = ws.active;
+            ws.open_task_draft_for_project(project, window, cx);
+            let pane = ws.active_runtime().focused_pane_id;
+            let title = ws
+                .task_edit_content_for_pane(pane)
+                .unwrap()
+                .title_input
+                .clone();
+            title.update(cx, |s, cx| s.set_value("Saved task", window, cx));
+            ws.set_task_scope(TaskScope::ActiveProject, cx);
+            ws.set_task_filter(TaskFilter::Failed, cx);
+            ws.task_search_input
+                .clone()
+                .update(cx, |s, cx| s.set_value("hidden", window, cx));
+            ws.set_task_grouping(TaskGrouping::Project, cx);
+            let key = TaskGroupKey::Project(project);
+            ws.toggle_task_group(key, cx);
+            ws.save_task_editor(pane, false, window, cx);
+            assert_eq!(ws.active_page(), Some(crate::workspace::pages::Page::Tasks));
+            assert_eq!(ws.task_scope, TaskScope::Project(project));
+            assert_eq!(ws.task_filter, TaskFilter::All);
+            assert_eq!(ws.task_search_input.read(cx).value(), "");
+            assert!(ws.task_groups.is_open(key));
+            assert_eq!(ws.active, active);
+
+            ws.close_page(cx);
+            ws.set_task_scope(TaskScope::AllProjects, cx);
+            ws.set_task_filter(TaskFilter::Backlog, cx);
+            ws.task_search_input
+                .clone()
+                .update(cx, |s, cx| s.set_value("saved", window, cx));
+            ws.save_task_editor(pane, false, window, cx);
+            assert_eq!(ws.task_scope, TaskScope::AllProjects);
+            assert_eq!(ws.task_filter, TaskFilter::Backlog);
+            assert_eq!(ws.task_search_input.read(cx).value(), "saved");
+            assert_eq!(ws.active_page(), Some(crate::workspace::pages::Page::Tasks));
         });
     })
     .unwrap();

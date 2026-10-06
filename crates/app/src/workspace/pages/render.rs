@@ -51,29 +51,29 @@ pub(in crate::workspace) fn content(
         Page::Tasks => right_dock::tasks::render(snap, cx),
         Page::Flows => right_dock::flows::render(snap, cx),
     };
+    let close = button_icon("close-workspace-page", icons::CLOSE, cx)
+        .debug_selector(|| "close-workspace-page".into())
+        .tooltip(strings::common::btn_close())
+        .on_click(move |_, window, cx| {
+            if let Some(ws) = workspace.upgrade() {
+                ws.update(cx, |ws, cx| ws.return_to_worktree(window, cx));
+            }
+        });
+    let header = match state.page {
+        Page::Tasks => right_dock::tasks::header(snap, close.into_any_element(), cx),
+        Page::Flows => SectionHeader::new(state.page.label())
+            .prominent()
+            .padding(theme::DOCK_PAGE_PAD, theme::PAD_STANDARD)
+            .actions(close)
+            .into_any_element(),
+    };
     div()
         .flex()
         .flex_col()
         .size_full()
         .min_w_0()
         .bg(t.dock_bg)
-        .child(
-            div().border_b_1().border_color(t.border).child(
-                SectionHeader::new(state.page.label())
-                    .prominent()
-                    .padding(theme::DOCK_PAGE_PAD, theme::PAD_STANDARD)
-                    .actions(
-                        button_icon("close-workspace-page", icons::CLOSE, cx)
-                            .debug_selector(|| "close-workspace-page".into())
-                            .tooltip(strings::common::btn_close())
-                            .on_click(move |_, window, cx| {
-                                if let Some(ws) = workspace.upgrade() {
-                                    ws.update(cx, |ws, cx| ws.return_to_worktree(window, cx));
-                                }
-                            }),
-                    ),
-            ),
-        )
+        .child(div().border_b_1().border_color(t.border).child(header))
         .child(
             div()
                 .id("workspace-page-scroll")
@@ -87,16 +87,15 @@ pub(in crate::workspace) fn content(
                         .w_full()
                         .max_w(px(theme::DOCK_PAGE_MAX_WIDTH))
                         .p(px(theme::DOCK_PAGE_PAD))
-                        .child(
-                            div()
-                                .px(px(theme::RIGHT_PANEL_PAD_X))
-                                .text_size(px(theme::FONT_SIZE_SM))
-                                .text_color(t.text_muted)
-                                .child(match state.page {
-                                    Page::Tasks => right_dock::tasks::page_subtitle(snap),
-                                    Page::Flows => lane,
-                                }),
-                        )
+                        .when(state.page == Page::Flows, |body| {
+                            body.child(
+                                div()
+                                    .px(px(theme::RIGHT_PANEL_PAD_X))
+                                    .text_size(px(theme::FONT_SIZE_SM))
+                                    .text_color(t.text_muted)
+                                    .child(lane),
+                            )
+                        })
                         .child(body),
                 ),
         )

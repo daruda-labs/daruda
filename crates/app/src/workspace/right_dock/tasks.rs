@@ -1,169 +1,67 @@
-//! Tasks tab body — renders the lane-isolated Claude Code agent
-//! task list pulled from `Workspace::tasks`.
-//!
-//! The scope chip switches between the active project's tasks and every
-//! project's (rows then name their project); the filter chip cycles
-//! `All → Backlog → Running → Done`; `[+ New]`
-//! opens the TaskEdit pane; every state transition + meta action lives
-//! in the per-row status-pill dropdown (see `status_pill.rs`). The
-//! search input substring-filters `title / prompt / notes / branch_name`
-//! (AND with the state filter), with an in-field `✕` to clear.
+//! Project-scoped task list. Header controls own scope and status;
+//! per-row status menus retain task lifecycle actions.
 
-use crate::ui::Sizable as _;
+mod controls;
+mod grouping;
+mod list;
+mod rows;
+#[cfg(feature = "screenshot")]
+mod screenshot;
+
+pub(in crate::workspace) use controls::header;
+pub(in crate::workspace) use grouping::{TaskGroupKey, TaskGrouping, TaskGroups};
+
 use crate::ui::theme;
 use chrono::{DateTime, Utc};
 use daruda_agent::SessionStatus;
-use daruda_store::tasks::{
-    SessionEndReason, TASK_TOOL_USE_FAILURE_THRESHOLD, Task, TaskFilter, TaskScope, TaskState,
-};
+use daruda_store::tasks::{SessionEndReason, TASK_TOOL_USE_FAILURE_THRESHOLD, Task, TaskState};
 use daruda_terminal::ux::strings as ux_strings;
-use gpui::{
-    AnyElement, ClickEvent, Hsla, IntoElement, MouseButton, SharedString, div, prelude::*, px,
-};
+use gpui::{AnyElement, Hsla, IntoElement, MouseButton, SharedString, div, prelude::*, px};
 
-use super::super::Workspace;
 use super::super::layout::RightDockSnapshot;
 use super::status_pill;
 use crate::surface::strings;
-use crate::ui::{Badge, ButtonVariants as _, button};
+use crate::ui::Badge;
 
 pub(in crate::workspace) fn render(snap: &RightDockSnapshot, cx: &gpui::App) -> AnyElement {
-    // Pipeline: scope → state filter → search filter → newest-first sort.
-    // The search filter is a no-op when the query is blank, so empty
-    // searches still go through `filter_by_state` unchanged.
-    let query = snap.task_search_query.trim().to_ascii_lowercase();
-    let mut visible: Vec<&Task> = snap
-        .tasks
-        .filter_by_state(snap.task_filter)
-        .filter(|t| snap.task_scope.matches(t, snap.task_projects.active))
-        .filter(|t| query.is_empty() || matches_task(t, &query))
-        .collect();
-    visible.sort_by_key(|t| std::cmp::Reverse(t.created_at));
-
-    let header = header_row(snap);
-    let search = search_row(snap, cx);
-
+    let list = list::TaskList::project(
+        &snap.tasks,
+        snap.task_scope,
+        snap.task_projects.active,
+        snap.task_filter,
+        &snap.task_search_query,
+    );
     let mut body = crate::workspace::right_dock::right_panel_body()
-        .child(header)
-        .child(search);
+        .child(controls::status_tabs(snap, &list))
+        .child(
+            div()
+                .flex()
+                .items_center()
+                .gap(px(theme::GAP_STANDARD))
+                .child(div().flex_1().min_w_0().child(search_row(snap, cx)))
+                .child(controls::grouping_picker(snap)),
+        )
+        .child(controls::results(snap, &list, cx));
 
-    if visible.is_empty() {
-        // "No tasks match this query" (search-recoverable via the inline
-        // `✕`) vs. "no tasks in this filter bucket" (a state hint).
-        let empty = if query.is_empty() {
-            empty_state(snap.task_filter, cx)
-        } else {
-            search_empty_hint(snap.task_search_query.clone(), theme::current(cx)).into_any_element()
-        };
-        body = body.child(empty);
+    if list.visible.is_empty() {
+        body = body.child(controls::empty_state(snap, list.scoped_count, cx));
     } else {
-        let rows = div().flex().flex_col().children(
-            visible
-                .iter()
-                .map(|t| task_row(t, snap, cx).into_any_element()),
-        );
-        body = body.child(rows);
+        body = body.child(rows::table(snap, &list, cx));
     }
 
     body.into_any_element()
 }
 
-/// What the page's subtitle says the list holds: the active project's
-/// name, or every project's tasks.
-pub(in crate::workspace) fn page_subtitle(snap: &RightDockSnapshot) -> String {
-    let active = snap
-        .task_projects
-        .active
-        .and_then(|uuid| snap.task_projects.name(uuid));
-    match (snap.task_scope, active) {
-        (TaskScope::ActiveProject, Some(name)) => name.to_owned(),
-        _ => strings::task::scope_all(),
-    }
-}
-
-/// Lowercase substring match across `title`, `prompt`, `notes`, the
-/// derived `branch_name`, and every `SubTask::title` (manual and
-/// auto-injected). Session-id prefixes are excluded (UUID false
-/// positives).
-fn matches_task(t: &Task, query_lower: &str) -> bool {
+/// Search task metadata and subtasks, excluding attached session IDs.
+pub(super) fn matches_task(t: &Task, query_lower: &str) -> bool {
     t.title.to_ascii_lowercase().contains(query_lower)
+        || t.id.to_ascii_lowercase().contains(query_lower)
         || t.prompt.to_ascii_lowercase().contains(query_lower)
         || t.notes.to_ascii_lowercase().contains(query_lower)
         || t.branch_name.to_ascii_lowercase().contains(query_lower)
         || t.subtasks
             .iter()
             .any(|s| s.title.to_ascii_lowercase().contains(query_lower))
-}
-
-// ---------------------------------------------------------------------------
-// Header
-// ---------------------------------------------------------------------------
-
-/// Top row: scope and filter chips on the left, `[+ New]` on the right.
-fn header_row(snap: &RightDockSnapshot) -> impl IntoElement {
-    let ws = snap.workspace.clone();
-    let scope_ws = snap.workspace.clone();
-    let new_ws = snap.workspace.clone();
-
-    let scope_label = match snap.task_scope {
-        TaskScope::ActiveProject => strings::task::scope_project(),
-        TaskScope::AllProjects => strings::task::scope_every_project(),
-    };
-    let scope_chip = button("task-scope", scope_label).xsmall().on_click(
-        move |_evt: &ClickEvent, _window, app| {
-            if let Some(w) = scope_ws.upgrade() {
-                w.update(app, |this: &mut Workspace, cx| this.toggle_task_scope(cx));
-            }
-        },
-    );
-
-    let filter_label = match snap.task_filter {
-        TaskFilter::All => strings::task::filter_all(),
-        TaskFilter::Backlog => strings::task::filter_backlog(),
-        TaskFilter::Running => strings::task::filter_running(),
-        TaskFilter::Done => strings::task::filter_done(),
-    };
-
-    let filter_chip = button("task-filter", filter_label).xsmall().on_click(
-        move |_evt: &ClickEvent, _window, app| {
-            if let Some(w) = ws.upgrade() {
-                w.update(app, |this: &mut Workspace, cx| this.cycle_task_filter(cx));
-            }
-        },
-    );
-
-    let new_btn = crate::ui::button_with_icon(
-        "task-new",
-        strings::task::new_button(),
-        crate::ui::icons::ADD,
-    )
-    .primary()
-    .xsmall()
-    .on_click(move |_evt: &ClickEvent, window, app| {
-        if let Some(w) = new_ws.upgrade() {
-            w.update(app, |this: &mut Workspace, cx| {
-                this.open_task_edit_pane(None, window, cx);
-            });
-        }
-    });
-
-    div()
-        .flex()
-        .flex_row()
-        .items_center()
-        .justify_between()
-        .gap(px(theme::RIGHT_PANEL_ROW_GAP))
-        .py(px(theme::RIGHT_PANEL_HEADER_PAD_Y))
-        .child(
-            div()
-                .flex()
-                .flex_row()
-                .items_center()
-                .gap(px(theme::RIGHT_PANEL_ROW_GAP))
-                .child(scope_chip)
-                .child(filter_chip),
-        )
-        .child(new_btn)
 }
 
 // ---------------------------------------------------------------------------
@@ -200,91 +98,11 @@ fn search_row(snap: &RightDockSnapshot, cx: &gpui::App) -> impl IntoElement {
         })
 }
 
-/// Body shown when a non-empty search yields zero matches. Text-only;
-/// the in-field `✕` already provides one-click recovery.
-fn search_empty_hint(query: String, t: &crate::ui::theme::DarudaTheme) -> impl IntoElement {
-    div()
-        .text_size(px(theme::RIGHT_PANEL_BODY_FONT_SIZE))
-        .text_color(t.text_subtle)
-        .child(SharedString::from(format!(
-            "{}\"{}\".",
-            strings::task::search_empty_prefix(),
-            query.trim()
-        )))
-}
-
-// ---------------------------------------------------------------------------
-// Empty state
-// ---------------------------------------------------------------------------
-
-fn empty_state(filter: TaskFilter, cx: &gpui::App) -> AnyElement {
-    let msg = match filter {
-        TaskFilter::All => strings::terminal::task_empty_all(),
-        TaskFilter::Backlog => strings::terminal::task_empty_backlog(),
-        TaskFilter::Running => strings::terminal::task_empty_running(),
-        TaskFilter::Done => strings::terminal::task_empty_done(),
-    };
-    crate::ui::placeholder_text(msg)
-        .py(px(theme::RIGHT_PANEL_PAD_Y))
-        .text_size(px(theme::DOCK_PLACEHOLDER_FONT_SIZE))
-        .text_color(theme::current(cx).text_subtle)
-        .into_any_element()
-}
-
 // ---------------------------------------------------------------------------
 // Per-task row
 // ---------------------------------------------------------------------------
 
-fn task_row(task: &Task, snap: &RightDockSnapshot, cx: &gpui::App) -> impl IntoElement {
-    let pill = status_pill::status_pill(task, snap, state_label(&task.state), cx);
-    let session_badge = session_badge(task, snap, cx);
-    let duration = duration_cell(task, snap, theme::current(cx));
-    let failures = failure_indicator(task, snap);
-    let subtask_progress = subtask_progress_cell(task, cx);
-
-    let row_hover_bg = theme::current(cx).overlay_hover;
-    let ws = snap.workspace.clone();
-    let id_for_open = task.id.clone();
-
-    div()
-        .flex()
-        .flex_row()
-        .items_center()
-        .gap(px(theme::RIGHT_PANEL_ROW_GAP))
-        .py(px(theme::RIGHT_PANEL_ROW_PAD_Y))
-        .px(px(theme::RIGHT_PANEL_PAD_X))
-        .text_size(px(theme::RIGHT_PANEL_BODY_FONT_SIZE))
-        .hover(move |s| s.bg(row_hover_bg))
-        .on_mouse_down(MouseButton::Left, move |_evt, window, app| {
-            if let Some(w) = ws.upgrade() {
-                let id = id_for_open.clone();
-                w.update(app, |this: &mut Workspace, cx| {
-                    this.open_task_edit_pane(Some(id), window, cx);
-                });
-            }
-        })
-        .child(indicator_cell(&task.state, *snap.now, cx))
-        .child(title_cell(&task.title, theme::current(cx)))
-        .children(project_cell(task, snap, cx))
-        .children(duration)
-        .children(session_badge)
-        .children(failures)
-        .child(subtask_progress)
-        // Stop propagation on the trailing status pill so dismissing its
-        // dropdown doesn't also trigger the row's click handler.
-        .child(
-            div()
-                .flex_none()
-                .on_mouse_down(MouseButton::Left, |_evt, _window, cx| {
-                    cx.stop_propagation();
-                })
-                .child(pill),
-        )
-}
-
-/// Subtask progress badge — `☑done/total`. Rendered for every row,
-/// including `0/0`, so the column position stays stable. Carries no
-/// click handler; clicking the row body already opens the TaskEdit pane.
+/// Progress is metadata, omitted by the row when no subtasks exist.
 fn subtask_progress_cell(task: &Task, cx: &gpui::App) -> AnyElement {
     let (done, total) = task.subtask_progress();
     div()
@@ -355,40 +173,6 @@ fn pulse_alpha(now: DateTime<Utc>) -> f32 {
     }
 }
 
-/// The task's project, named only when the list spans every project — in
-/// the active-project scope every row would say the same thing.
-fn project_cell(task: &Task, snap: &RightDockSnapshot, cx: &gpui::App) -> Option<AnyElement> {
-    if snap.task_scope != TaskScope::AllProjects {
-        return None;
-    }
-    let name = snap
-        .task_projects
-        .name(task.project)
-        .map(str::to_owned)
-        .unwrap_or_else(strings::task::project_not_open);
-    Some(
-        div()
-            .flex_none()
-            .max_w(px(theme::RIGHT_PANEL_TASK_PROJECT_MAX_W))
-            .truncate()
-            .text_color(theme::current(cx).text_muted)
-            .child(SharedString::from(name))
-            .into_any_element(),
-    )
-}
-
-fn title_cell(title: &str, t: &crate::ui::theme::DarudaTheme) -> impl IntoElement {
-    // `min_w_0` resets the flex item's implicit `min-width: auto` floor
-    // so the cell can shrink instead of pushing the trailing fixed cells
-    // past the dock edge; `truncate` clips overflow with an ellipsis.
-    div()
-        .flex_1()
-        .min_w_0()
-        .truncate()
-        .text_color(t.text_body)
-        .child(SharedString::from(title.to_string()))
-}
-
 fn state_indicator(state: &TaskState, cx: &gpui::App) -> (&'static str, Hsla) {
     let t = theme::current(cx);
     match state {
@@ -412,23 +196,11 @@ fn state_label(state: &TaskState) -> SharedString {
             strings::terminal::task_done_prefix(),
             done_flavour_label(*end_reason),
         )),
-        TaskState::Error { message, .. } => {
-            let truncated = if message.chars().count() > theme::RIGHT_PANEL_TASK_ERROR_TRUNCATE {
-                let mut s: String = message
-                    .chars()
-                    .take(theme::RIGHT_PANEL_TASK_ERROR_TRUNCATE)
-                    .collect();
-                s.push('…');
-                s
-            } else {
-                message.clone()
-            };
-            SharedString::from(format!(
-                "{}: {}",
-                strings::terminal::task_error_prefix(),
-                truncated,
-            ))
-        }
+        TaskState::Error { message, .. } => SharedString::from(format!(
+            "{}: {}",
+            strings::terminal::task_error_prefix(),
+            message,
+        )),
         TaskState::Cancelled { .. } => SharedString::from(strings::terminal::task_cancelled()),
     }
 }

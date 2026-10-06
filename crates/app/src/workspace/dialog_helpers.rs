@@ -167,11 +167,8 @@ pub(crate) fn confirm_destructive<T: 'static>(
     );
 }
 
-/// Open an OK-only alert dialog. No cancel, no destructive action —
-/// just a title, a body, and a single dismiss button. Used by
-/// [`Workspace::open_task_error_dialog`] to surface the full
-/// `TaskState::Error.message` text, which the row truncates to
-/// `RIGHT_PANEL_TASK_ERROR_TRUNCATE` chars.
+/// Open an OK-only alert with a title, body, and dismiss button.
+/// [`Workspace::open_task_error_dialog`] uses it to show the full task error.
 pub(in crate::workspace) fn open_alert_dialog(
     title: impl Into<SharedString>,
     body: impl Into<SharedString>,

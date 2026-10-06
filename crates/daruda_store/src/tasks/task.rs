@@ -364,6 +364,7 @@ pub enum TaskScope {
     #[default]
     ActiveProject,
     AllProjects,
+    Project(ProjectUuid),
 }
 
 impl TaskScope {
@@ -373,13 +374,23 @@ impl TaskScope {
         match self {
             Self::ActiveProject => active == Some(task.project),
             Self::AllProjects => true,
+            Self::Project(project) => task.project == project,
         }
     }
 
     pub fn toggled(self) -> Self {
         match self {
-            Self::ActiveProject => Self::AllProjects,
+            Self::ActiveProject | Self::Project(_) => Self::AllProjects,
             Self::AllProjects => Self::ActiveProject,
+        }
+    }
+
+    /// Resolve the list's project without changing the active workspace.
+    pub fn project(self, active: Option<ProjectUuid>) -> Option<ProjectUuid> {
+        match self {
+            Self::ActiveProject => active,
+            Self::AllProjects => None,
+            Self::Project(project) => Some(project),
         }
     }
 }
@@ -391,8 +402,9 @@ pub enum TaskFilter {
     All,
     Backlog,
     Running,
-    /// Aggregates Done + Error + Cancelled — anything `is_terminal()`.
     Done,
+    Failed,
+    Cancelled,
 }
 
 impl TaskFilter {
@@ -401,7 +413,9 @@ impl TaskFilter {
             Self::All => true,
             Self::Backlog => matches!(state, TaskState::Backlog),
             Self::Running => matches!(state, TaskState::Running { .. }),
-            Self::Done => state.is_terminal(),
+            Self::Done => matches!(state, TaskState::Done { .. }),
+            Self::Failed => matches!(state, TaskState::Error { .. }),
+            Self::Cancelled => matches!(state, TaskState::Cancelled { .. }),
         }
     }
 }

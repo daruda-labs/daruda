@@ -157,6 +157,12 @@ const PANE_MENU_ANCHOR_Y: f32 = 160.;
 /// One scenario per capture — these overlays are mutually exclusive on screen.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum ScreenshotScenario {
+    Tasks,
+    TasksAll,
+    TasksNoResults,
+    TasksByStatus,
+    TasksByProject,
+    TaskSaved,
     TaskEditor,
     TaskEditorPreview,
     TaskEditorRunning,
@@ -362,6 +368,12 @@ impl ScreenshotScenario {
     /// default section.
     pub(crate) fn from_cli_name(name: &str) -> Option<Self> {
         match name {
+            "tasks" => Some(Self::Tasks),
+            "tasks-all" => Some(Self::TasksAll),
+            "tasks-no-results" => Some(Self::TasksNoResults),
+            "tasks-by-status" => Some(Self::TasksByStatus),
+            "tasks-by-project" => Some(Self::TasksByProject),
+            "task-saved" => Some(Self::TaskSaved),
             "task-editor" => Some(Self::TaskEditor),
             "task-editor-preview" => Some(Self::TaskEditorPreview),
             "task-editor-running" => Some(Self::TaskEditorRunning),
@@ -462,6 +474,41 @@ pub(crate) fn drive(
     cx: &mut App,
 ) {
     match scenario {
+        ScreenshotScenario::Tasks
+        | ScreenshotScenario::TasksAll
+        | ScreenshotScenario::TasksNoResults
+        | ScreenshotScenario::TasksByStatus
+        | ScreenshotScenario::TasksByProject => {
+            let scope = if matches!(
+                scenario,
+                ScreenshotScenario::TasksAll | ScreenshotScenario::TasksByProject
+            ) {
+                daruda_store::tasks::TaskScope::AllProjects
+            } else {
+                daruda_store::tasks::TaskScope::ActiveProject
+            };
+            let query = if scenario == ScreenshotScenario::TasksNoResults {
+                "No matching task"
+            } else {
+                ""
+            };
+            workspace.update(cx, |ws, cx| {
+                use super::right_dock::tasks::{TaskGroupKey, TaskGrouping};
+                ws.seed_task_list_for_shot(scope, query, window, cx);
+                if scenario == ScreenshotScenario::TasksByStatus {
+                    ws.set_task_grouping(TaskGrouping::Status, cx);
+                    ws.toggle_task_group(
+                        TaskGroupKey::Status(daruda_store::tasks::TaskFilter::Cancelled),
+                        cx,
+                    );
+                } else if scenario == ScreenshotScenario::TasksByProject {
+                    ws.set_task_grouping(TaskGrouping::Project, cx);
+                }
+            });
+        }
+        ScreenshotScenario::TaskSaved => {
+            workspace.update(cx, |ws, cx| ws.seed_saved_task_for_shot(window, cx));
+        }
         ScreenshotScenario::TaskEditor => {
             workspace.update(cx, |ws, cx| {
                 ws.seed_task_editor_for_shot(false, false, window, cx)

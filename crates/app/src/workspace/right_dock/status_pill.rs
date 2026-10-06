@@ -33,6 +33,7 @@ pub(super) fn status_pill(
     task: &Task,
     snap: &RightDockSnapshot,
     state_label: SharedString,
+    tooltip: SharedString,
     cx: &gpui::App,
 ) -> impl IntoElement {
     let task_id = task.id.clone();
@@ -49,6 +50,9 @@ pub(super) fn status_pill(
     button(pill_id, state_label)
         .child(crate::ui::icons::icon(crate::ui::icons::EXPAND_MORE))
         .xsmall()
+        .w_full()
+        .tab_stop(true)
+        .tooltip(tooltip)
         .bg(bg)
         .rounded(px(theme::RIGHT_PANEL_STATUS_PILL_RADIUS_PX))
         .dropdown_menu(move |menu, _window, _cx| {

@@ -45,6 +45,25 @@ impl Workspace {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        self.open_task_editor(task_id, None, window, cx);
+    }
+
+    pub(in crate::workspace) fn open_task_draft_for_project(
+        &mut self,
+        project: ProjectUuid,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.open_task_editor(None, Some(project), window, cx);
+    }
+
+    fn open_task_editor(
+        &mut self,
+        task_id: Option<TaskId>,
+        draft_project: Option<ProjectUuid>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         if let Some(id) = task_id.as_deref()
             && let Some(existing) = self.find_task_edit_pane(id)
         {
@@ -58,7 +77,7 @@ impl Workspace {
                 .cloned()
         });
 
-        let pane = self.create_task_edit_pane(task_id, initial, window, cx);
+        let pane = self.create_task_edit_pane(task_id, initial, draft_project, window, cx);
         let pane_id = pane.id;
         let tab_id = self.alloc_id();
         self.active_runtime_mut().panes.push(pane);
@@ -102,6 +121,7 @@ impl Workspace {
         &mut self,
         task_id: Option<TaskId>,
         initial: Option<Task>,
+        draft_project: Option<ProjectUuid>,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Pane {
@@ -232,6 +252,7 @@ impl Workspace {
         let project = initial
             .as_ref()
             .map(|t| t.project)
+            .or(draft_project)
             .filter(|uuid| self.project_by_uuid(*uuid).is_some())
             .or_else(|| self.active_project().map(|p| p.uuid));
         let project_select = cx.new(|cx| {
