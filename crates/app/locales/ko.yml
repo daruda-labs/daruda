@@ -810,6 +810,15 @@ claude:
   badge_active_suffix: " (이 탭에서 활성)"
   sessions_label_suffix: " 세션:"
 
+# Main-area tab strip
+tab_strip:
+  tooltip_with_status: "%{title} — %{status}"
+  status_attention: "응답을 기다리는 중"
+  status_failed: "세션 실패"
+  status_errored: "오류로 끝남 — 아직 확인 안 함"
+  status_working: "작업 중"
+  status_done: "완료 — 아직 확인 안 함"
+
 # Git Changes view
 git:
   changes_header: "Git 변경 사항 — %{branch}"

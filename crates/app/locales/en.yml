@@ -1152,6 +1152,16 @@ claude:
   # Rendered as `format!("{count}{SUFFIX}")`.
   sessions_label_suffix: " sessions:"
 
+# Main-area tab strip: the status dot's tooltip. The dot is told apart by
+# colour alone, so the tooltip names what it means.
+tab_strip:
+  tooltip_with_status: "%{title} — %{status}"
+  status_attention: "Waiting for your answer"
+  status_failed: "Session failed"
+  status_errored: "Ended with an error — not seen yet"
+  status_working: "Working"
+  status_done: "Finished — not seen yet"
+
 # Git Changes view
 git:
   changes_header: "Git Changes — %{branch}"

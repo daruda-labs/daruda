@@ -283,6 +283,17 @@ pub(in crate::workspace) enum TurnOutcome {
     Stopped,
 }
 
+impl TurnOutcome {
+    /// What the turn leaves for the user to look at; `None` for a Stop.
+    pub(in crate::workspace) fn agent_outcome(&self) -> Option<daruda_agent::AgentOutcome> {
+        match self {
+            Self::Completed => Some(daruda_agent::AgentOutcome::Completed),
+            Self::Errored => Some(daruda_agent::AgentOutcome::Errored),
+            Self::Stopped => None,
+        }
+    }
+}
+
 /// The pane's derived activity, the single source consumed by the working
 /// indicator, the lane badge, and the status-pulse gate.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

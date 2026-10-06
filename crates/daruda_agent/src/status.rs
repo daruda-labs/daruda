@@ -55,6 +55,14 @@ impl SessionStatus {
     }
 }
 
+/// How a turn that ran to its end finished. A turn the user stopped has no
+/// outcome: stopping is their own doing and leaves nothing to look at.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum AgentOutcome {
+    Completed,
+    Errored,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

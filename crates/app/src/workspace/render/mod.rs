@@ -762,7 +762,7 @@ impl Workspace {
                      file_path,
                      worktree_root,
                      is_scratch,
-                     status,
+                     indicator,
                  }| {
                     let is_orchestrator = self
                         .active_runtime()
@@ -835,7 +835,16 @@ impl Workspace {
                                 this.on_tab_press(i, tab_id, event.click_count, window, cx);
                             }),
                         )
-                        .tooltip(crate::ui::tooltip::text(title))
+                        .tooltip(crate::ui::tooltip::text(match indicator {
+                            Some(indicator) => {
+                                crate::surface::strings::tab_strip::tooltip_with_status(
+                                    &title,
+                                    indicator.label(),
+                                )
+                                .into()
+                            }
+                            None => title,
+                        }))
                         .on_mouse_down(
                             MouseButton::Middle,
                             cx.listener(move |this, _, window, cx| {
@@ -1042,7 +1051,7 @@ impl Workspace {
                             items.into_iter().fold(menu, |m, item| m.item(item))
                         })
                         .when_some(
-                            status.and_then(|s| crate::ui::tab_dot_color(s, cx)),
+                            indicator.map(|i| tab_cells::indicator_color(i, cx)),
                             |cell, color| {
                                 cell.child(
                                     div()

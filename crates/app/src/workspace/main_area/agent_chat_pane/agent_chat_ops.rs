@@ -414,9 +414,8 @@ impl Workspace {
         outcome: TurnOutcome,
         cx: &mut Context<Self>,
     ) {
-        // A Stop is the user's own doing; an answer or a failure is news.
-        if !matches!(outcome, TurnOutcome::Stopped) {
-            self.mark_lane_unread_for_pane(pane_id, cx);
+        if let Some(news) = outcome.agent_outcome() {
+            self.record_agent_outcome(pane_id, news, cx);
         }
         if matches!(outcome, TurnOutcome::Completed) {
             self.maybe_notify_agent_completed(pane_id, cx);
@@ -446,26 +445,6 @@ impl Workspace {
         // Last, because handing `outcome` on moves it — the matches above
         // bind nothing and so only read it.
         self.answer_waiting_ask(pane_id, outcome, cx);
-    }
-
-    /// Mark the lane holding `pane_id` unread unless it is the one on screen.
-    /// [`Self::activate_lane`] clears the mark.
-    fn mark_lane_unread_for_pane(&mut self, pane_id: PaneId, cx: &mut Context<Self>) {
-        let Some(lane_ref) = self.lane_ref_for_pane(pane_id) else {
-            return;
-        };
-        if lane_ref == self.active {
-            return;
-        }
-        let Some(lane) = self.lane_for_mut(lane_ref) else {
-            return;
-        };
-        if lane.is_unread {
-            return;
-        }
-        lane.is_unread = true;
-        self.mutate_durable(cx, |_, _| {});
-        self.notify_status_docks(cx);
     }
 
     /// Answer a `daruda_chat_ask` waiting on this pane, if one is.

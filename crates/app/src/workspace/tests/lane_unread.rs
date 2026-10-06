@@ -108,3 +108,62 @@ async fn visiting_an_unread_lane_clears_it(cx: &mut TestAppContext) {
     activate(wh, &ws, home, cx);
     assert!(!unread(&ws, home, cx));
 }
+
+/// The tab strip's mark rides the same entry: a lane switch is a visibility
+/// change like any other, so going back clears the pane's unseen outcome.
+#[gpui::test]
+async fn visiting_the_lane_clears_its_tab_outcome(cx: &mut TestAppContext) {
+    let (wh, ws, pane_id, home, other, dir) = two_lanes_with_an_agent(cx);
+    ws.update(cx, |ws, cx| ws.set_window_active(true, cx));
+    activate(wh, &ws, other, cx);
+    finish(&ws, pane_id, TurnOutcome::Completed, cx);
+    let unseen = |ws: &gpui::Entity<Workspace>, cx: &mut TestAppContext| {
+        ws.read_with(cx, |ws, _| ws.unseen_outcomes.for_panes(&[pane_id]).next())
+    };
+    assert_eq!(unseen(&ws, cx), Some(daruda_agent::AgentOutcome::Completed));
+    // The fixture's root is missing so the pane stays offline; a lane whose
+    // root is missing draws an empty state, not the pane. Give it a root so
+    // going back actually puts the pane on screen.
+    std::fs::create_dir_all(dir.path().join("gone")).unwrap();
+    activate(wh, &ws, home, cx);
+    assert_eq!(unseen(&ws, cx), None);
+}
+
+/// A terminal Claude's `Stop` reaches the lane mark through the same entry
+/// as a chat turn's settle edge.
+#[gpui::test]
+async fn a_terminal_claude_finishing_in_a_parked_lane_marks_it_unread(cx: &mut TestAppContext) {
+    use daruda_agent::SessionStatus;
+    use daruda_agent::hooks::status_file::{StatusFile, write_atomic};
+
+    let (wh, ws, pane_id, home, other, dir) = two_lanes_with_an_agent(cx);
+    ws.update(cx, |ws, _| {
+        ws.claude.pty_claude_bindings.insert(
+            pane_id,
+            crate::hooks::pty_tracker::PtyBinding {
+                claude_pid: 4242,
+                session_id: "sess-lane".into(),
+            },
+        );
+    });
+    activate(wh, &ws, other, cx);
+    let path = dir.path().join("sess-lane.json");
+    for (status, event) in [
+        (SessionStatus::Working, "UserPromptSubmit"),
+        (SessionStatus::Idle, "Stop"),
+    ] {
+        write_atomic(
+            &path,
+            &StatusFile::new_hook("sess-lane", dir.path(), status, event),
+        )
+        .unwrap();
+        ws.update(cx, |ws, cx| {
+            ws.apply_claude_status_event(
+                crate::hooks::watcher::StatusEvent::Changed(path.clone()),
+                cx,
+            )
+        });
+        cx.run_until_parked();
+    }
+    assert!(unread(&ws, home, cx));
+}

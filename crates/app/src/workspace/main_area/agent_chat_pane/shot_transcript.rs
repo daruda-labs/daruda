@@ -385,7 +385,7 @@ pub(in crate::workspace) fn subagent_transcript() -> Vec<ChatItem> {
 /// answer yet, so the run's last prose is a preamble rather than a conclusion.
 /// Derived from the settled seed rather than assembled again, so the two cannot
 /// drift apart.
-pub(super) fn working_transcript() -> Vec<ChatItem> {
+pub(in crate::workspace) fn working_transcript() -> Vec<ChatItem> {
     let mut items = sample_transcript();
     items.pop();
     items

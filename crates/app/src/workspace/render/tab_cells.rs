@@ -1,10 +1,12 @@
 //! What the tab strip draws for each tab, gathered before the element tree
 //! is built so no entity is read while it is.
 
-use gpui::{App, SharedString};
+use gpui::{App, Hsla, SharedString};
 
+use crate::ui::theme;
 use crate::workspace::Workspace;
 use crate::workspace::main_area::pane::TabEntry;
+use crate::workspace::tab_indicator::TabIndicator;
 
 /// One tab's cell in the tab strip.
 pub(in crate::workspace) struct TabCell {
@@ -23,8 +25,8 @@ pub(in crate::workspace) struct TabCell {
     pub(super) worktree_root: Option<std::path::PathBuf>,
     /// The tab the next left-dock preview replaces.
     pub(super) is_scratch: bool,
-    /// The most urgent agent session among the tab's panes.
-    pub(in crate::workspace) status: Option<daruda_agent::SessionStatus>,
+    /// The tab's status dot: its most urgent live session or unseen outcome.
+    pub(in crate::workspace) indicator: Option<TabIndicator>,
 }
 
 impl Workspace {
@@ -63,12 +65,15 @@ impl Workspace {
                     }
                     None => (None, None),
                 };
-                let status = crate::workspace::claude_status_aggregate::tab_session_status(
-                    &tab.layout.pane_ids(),
+                let pane_ids = tab.layout.pane_ids();
+                let live = crate::workspace::claude_status_aggregate::tab_session_status(
+                    &pane_ids,
                     &self.claude.pty_claude_bindings,
                     &self.claude.claude_status,
                     &acp_statuses,
                 );
+                let indicator =
+                    TabIndicator::resolve(live, self.unseen_outcomes.for_panes(&pane_ids));
                 TabCell {
                     index: i,
                     id: tab.id,
@@ -78,7 +83,7 @@ impl Workspace {
                     file_path,
                     worktree_root,
                     is_scratch: scratch_tab == Some(i),
-                    status,
+                    indicator,
                 }
             })
             .collect()
@@ -103,5 +108,18 @@ impl Workspace {
             .find(|p| p.id == tab.last_focused_pane);
         pane.and_then(|p| (!p.is_file()).then(|| p.display_cwd()).flatten())
             .or_else(|| pane.map(|p| p.title(cx)))
+    }
+}
+
+/// The colour of a tab's status dot. Working takes the working blue for a
+/// tool call too: the badge palette's tool colour is amber in the dark theme
+/// and green in the light one, which a plain dot would read as waiting or done.
+pub(super) fn indicator_color(indicator: TabIndicator, cx: &App) -> Hsla {
+    let t = theme::current(cx);
+    match indicator {
+        TabIndicator::Attention => theme::WARNING,
+        TabIndicator::Failed | TabIndicator::Errored => t.status_failed_dark,
+        TabIndicator::Working => t.status_working_dark,
+        TabIndicator::Done => theme::SUCCESS,
     }
 }

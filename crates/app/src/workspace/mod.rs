@@ -8,6 +8,7 @@ mod account_login_ops;
 mod account_ops;
 pub(crate) mod accounts_global;
 mod actions;
+mod agent_outcome_ops;
 pub(crate) mod agent_vocabulary_global;
 mod annotation_dialog;
 mod annotation_ops;
@@ -76,9 +77,11 @@ mod spawn_helpers;
 pub(crate) mod status_bar;
 mod status_bar_ops;
 pub(in crate::workspace) mod sync;
+mod tab_indicator;
 #[cfg(test)]
 mod tests;
 mod toast_layer;
+mod unseen_outcomes;
 mod update_ops;
 mod usage_labels;
 mod window_close_ops;
@@ -332,6 +335,12 @@ pub struct Workspace {
     /// 18 sub-fields don't clutter `Workspace`'s top level. See
     /// [`claude_session_ops::ClaudeContext`].
     pub(in crate::workspace) claude: claude_session_ops::ClaudeContext,
+    /// Outcomes of turns that ended while their pane was not seen — what
+    /// the tab strip's result dot reads. See `agent_outcome_ops`.
+    pub(in crate::workspace) unseen_outcomes: unseen_outcomes::UnseenOutcomes,
+    /// Whether this window is in the foreground. Written only by
+    /// `set_window_active`.
+    pub(in crate::workspace) window_active: bool,
     /// Runtime projects in this workspace. Zero entries = empty (Landing
     /// screen). Each project owns its own lanes, reached via
     /// `projects[i].lanes`. `tabs`/`panes` live on the active lane's
@@ -1038,6 +1047,8 @@ impl Workspace {
             left_dock_view: daruda_store::project::LeftDockView::default(),
             right_dock_view: daruda_store::project::RightDockView::default(),
             workspace_page: None,
+            unseen_outcomes: unseen_outcomes::UnseenOutcomes::default(),
+            window_active: window.is_window_active(),
             claude: claude_session_ops::ClaudeContext {
                 usage_poll: config.usage.poll.clone(),
                 usage_by_account: claude_session_ops::PerAccountUsage::default(),
@@ -1076,6 +1087,7 @@ impl Workspace {
                 _jsonl_event_pump: None,
                 tool_use_failure_counts: HashMap::new(),
                 last_pushed_notification: HashMap::new(),
+                open_turns: Default::default(),
                 _limits_pumps: sync::limits::spawn(cx),
             },
             // Bootstrap projects for this workspace. When the caller
@@ -1261,6 +1273,9 @@ impl Workspace {
         // shows Landing). Lanes activated later are never auto-seeded —
         // they render the empty-state until the user opens content.
         ws.main_area.runtimes.entry(ws.active).or_default();
+        // Above the test short-circuit: a subscription spawns nothing, and
+        // the unseen-outcome tests drive exactly these two triggers.
+        Self::observe_outcome_visibility(window, cx);
         // Test-only short-circuit: every line below this point spawns a
         // background thread (PTY, FS watchers) or performs sync disk I/O
         // (persist_state, tasks_global::load_from_dir). Tests that need

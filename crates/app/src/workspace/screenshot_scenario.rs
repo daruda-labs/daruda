@@ -69,6 +69,7 @@ const NAME_AGENT_CHAT_EMPTY: &str = "agent-chat-empty";
 const NAME_AGENT_CHAT: &str = "agent-chat";
 const NAME_ORCHESTRATOR_CHIP: &str = "orchestrator-chip";
 const NAME_ORCHESTRATOR_TAB: &str = "orchestrator-tab";
+const NAME_TAB_INDICATORS: &str = "tab-indicators";
 /// CLI token for the mid-turn transcript, before the agent writes its answer.
 const NAME_AGENT_CHAT_WORKING: &str = "agent-chat-working";
 /// CLI token for the same transcript with the filter and tail chips engaged.
@@ -169,6 +170,10 @@ pub(crate) enum ScreenshotScenario {
     TaskEditorRunning,
     OrchestratorChip,
     OrchestratorTab,
+    /// One tab per status dot — working, waiting, failed, and the two unseen
+    /// outcomes — behind a resting tab. Colour is all that tells them apart,
+    /// which only a capture can judge.
+    TabIndicators,
     /// Open the command palette (`CommandPaletteState::open`).
     CommandPalette,
     /// Open the Lane switcher with a real candidate whose label is
@@ -395,6 +400,7 @@ impl ScreenshotScenario {
             "task-editor-running" => Some(Self::TaskEditorRunning),
             NAME_ORCHESTRATOR_CHIP => Some(Self::OrchestratorChip),
             NAME_ORCHESTRATOR_TAB => Some(Self::OrchestratorTab),
+            NAME_TAB_INDICATORS => Some(Self::TabIndicators),
             NAME_COMMAND_PALETTE => Some(Self::CommandPalette),
             NAME_LANE_SWITCHER => Some(Self::LaneSwitcher),
             NAME_CLIENT_CHROME => Some(Self::ClientChrome),
@@ -765,6 +771,9 @@ pub(crate) fn drive(
         ScreenshotScenario::OrchestratorTab => {
             workspace.update(cx, |ws, cx| ws.seed_orchestrator_for_shot(true, window, cx));
         }
+        ScreenshotScenario::TabIndicators => {
+            workspace.update(cx, |ws, cx| ws.seed_tab_indicators_for_shot(window, cx));
+        }
         ScreenshotScenario::AgentChatWorking => {
             workspace.update(cx, |ws, cx| {
                 ws.open_agent_chat_working_transcript_for_shot(window, cx)
@@ -1119,6 +1128,14 @@ mod tests {
         assert_eq!(
             ScreenshotScenario::from_cli_name("lane-switcher"),
             Some(ScreenshotScenario::LaneSwitcher)
+        );
+    }
+
+    #[test]
+    fn tab_indicators_name_maps_to_scenario() {
+        assert_eq!(
+            ScreenshotScenario::from_cli_name("tab-indicators"),
+            Some(ScreenshotScenario::TabIndicators)
         );
     }
 

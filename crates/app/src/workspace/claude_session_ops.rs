@@ -205,6 +205,9 @@ pub(in crate::workspace) struct ClaudeContext {
     /// here. Pruned alongside the session on removal.
     pub(in crate::workspace) last_pushed_notification:
         HashMap<String, chrono::DateTime<chrono::Utc>>,
+    /// Turns the hook channel has seen open, so a `Stop` can be told from
+    /// a re-delivered one. Fed by hook updates only; see `turn_end`.
+    pub(in crate::workspace) open_turns: daruda_agent::hooks::turn_end::OpenTurns,
 
     /// Background-poll tasks driving the Usage tab: plan-rate windows and
     /// service status for each auth domain, plus the local JSONL activity
@@ -294,6 +297,11 @@ impl Workspace {
                         file.last_event.clone(),
                         file.source,
                     );
+                    let turn_end = self
+                        .claude
+                        .open_turns
+                        .observe(&file.session_id, file.status, &file.last_event)
+                        .zip(self.session_pane_id(&file.session_id));
                     if self.claude.claude_status.update(file) {
                         self.notify_status_docks(cx);
                         #[cfg(debug_assertions)]
@@ -301,6 +309,9 @@ impl Workspace {
                             let (sid, cwd, event, source) = dbg_fields;
                             self.log_lane_status_change(dbg_probe, &sid, &cwd, &event, source);
                         }
+                    }
+                    if let Some((outcome, pane_id)) = turn_end {
+                        self.record_agent_outcome(pane_id, outcome, cx);
                     }
                 }
                 Ok(None) => {
@@ -323,6 +334,7 @@ impl Workspace {
                 self.claude.pty_tracker.poke();
                 self.claude.tool_use_failure_counts.remove(&session_id);
                 self.claude.last_pushed_notification.remove(&session_id);
+                self.claude.open_turns.forget(&session_id);
                 self.apply_task_session_ended(
                     &session_id,
                     daruda_store::tasks::SessionEndReason::Other,
@@ -545,9 +557,10 @@ impl Workspace {
     /// tracker stops walking their shell PIDs (keeping its idle guard
     /// able to re-arm once nothing is registered) and their bindings
     /// leave the map immediately instead of waiting for the next
-    /// poll's vanished-pane diff. Every pane-teardown path (close
-    /// pane / close tab / remove lane / close project) goes through
-    /// this single release point.
+    /// poll's vanished-pane diff. Also drops their unseen turn outcomes,
+    /// chat panes' included, since this is the one point every
+    /// pane-teardown path (close pane / close tab / remove lane / close
+    /// project) goes through.
     pub(in crate::workspace) fn release_pane_tracking(
         &mut self,
         pane_ids: &[PaneId],
@@ -557,6 +570,7 @@ impl Workspace {
             self.claude.pty_tracker.unregister(*id);
             self.claude.pty_claude_bindings.remove(id);
         }
+        self.unseen_outcomes.forget(pane_ids);
         // Dropped bindings feed the left-dock per-lane agent badges and
         // `agent_active_session_id`; a workspace render re-stages the dock
         // snapshot and the staging diff invalidates the `.cached()` dock. The

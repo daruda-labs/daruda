@@ -38,6 +38,6 @@ pub use accounts::PlanInfo;
 pub use activity::{ActivityError, ActivityStats, DayActivity};
 pub use http::FetchError;
 pub use service_status::{ServiceStatus, StatusIndicator};
-pub use status::SessionStatus;
+pub use status::{AgentOutcome, SessionStatus};
 pub use store::ClaudeStatusStore;
 pub use usage::{LimitSeverity, ProviderUsage, UsageOutcome, UsageWindow, WindowScope, source_for};
