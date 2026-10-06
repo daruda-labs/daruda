@@ -11,6 +11,7 @@ use std::time::{Duration, Instant};
 
 use gpui::{App, Global, Window};
 
+#[cfg(not(test))]
 use crate::platform::attention::{is_app_active, system_idle_seconds};
 use crate::platform::presence::{AwayRule, AwaySignal};
 
@@ -27,7 +28,8 @@ pub(crate) fn init(cx: &mut App) {
     if cx.has_global::<AppPresence>() {
         return;
     }
-    let state = AwaySignal::HERE.observe(is_app_active(), sampled_idle(), Instant::now());
+    let (active, idle) = sample(cx);
+    let state = AwaySignal::HERE.observe(active, idle, Instant::now());
     cx.set_global(AppPresence { state });
     track_new_windows::<crate::ui::Root>(cx);
 }
@@ -76,12 +78,7 @@ pub(crate) fn observe(cx: &mut App) {
     if !cx.has_global::<AppPresence>() {
         return;
     }
-    let active = is_app_active();
-    let idle = sampled_idle();
-    #[cfg(test)]
-    let (active, idle) = cx
-        .try_global::<TestPresenceSample>()
-        .map_or((active, idle), |sample| (sample.app_active, sample.idle));
+    let (active, idle) = sample(cx);
     let now = Instant::now();
     let presence = cx.global_mut::<AppPresence>();
     presence.state = presence.state.observe(active, idle, now);
@@ -123,11 +120,22 @@ pub(crate) fn rule(cx: &App) -> AwayRule {
     }
 }
 
-/// The live idle reading, or `None` where the host cannot report one.
-/// A negative reading is treated as zero rather than as unavailable —
-/// the sensor answered, it just answered nonsense.
-fn sampled_idle() -> Option<Duration> {
-    system_idle_seconds().map(|secs| Duration::from_secs_f64(secs.max(0.0)))
+/// A negative idle reading is clamped to zero; an unavailable sensor stays `None`.
+#[cfg(not(test))]
+fn sample(_cx: &App) -> (bool, Option<Duration>) {
+    let active = is_app_active();
+    let idle = system_idle_seconds().map(|secs| Duration::from_secs_f64(secs.max(0.0)));
+    (active, idle)
+}
+
+/// Test apps never query the host: concurrent HID queries can block in macOS.
+/// An unseeded fixture starts present; overrides belong to that App alone.
+#[cfg(test)]
+fn sample(cx: &App) -> (bool, Option<Duration>) {
+    cx.try_global::<TestPresenceSample>()
+        .map_or((true, Some(Duration::ZERO)), |sample| {
+            (sample.app_active, sample.idle)
+        })
 }
 
 #[cfg(test)]
@@ -146,9 +154,9 @@ pub(crate) fn seed_for_test(
     idle: Option<Duration>,
     cx: &mut App,
 ) {
+    cx.set_global(TestPresenceSample { app_active, idle });
     init(cx);
     cx.global_mut::<AppPresence>().state = state;
-    cx.set_global(TestPresenceSample { app_active, idle });
 }
 
 #[cfg(test)]
@@ -171,11 +179,13 @@ mod tests {
         cx: &mut TestAppContext,
     ) {
         cx.update(|cx| {
-            // First install seeds from the live host; assert it landed before
-            // overwriting, so this covers the seeding path and not just the
-            // `has_global` early return.
+            cx.set_global(TestPresenceSample {
+                app_active: false,
+                idle: Some(Duration::from_secs(300)),
+            });
             init(cx);
-            assert!(cx.has_global::<AppPresence>());
+            assert!(snapshot(cx).away_secs(Instant::now()).is_some());
+            assert_eq!(snapshot(cx).idle(), Some(Duration::from_secs(300)));
 
             let started = Instant::now() - Duration::from_secs(30);
             let running = AwaySignal::HERE.observe(false, Some(Duration::from_secs(300)), started);
@@ -187,6 +197,60 @@ mod tests {
                 running,
                 "a second install must not restart an absence already in progress"
             );
+        });
+    }
+
+    #[gpui::test]
+    fn test_samples_are_isolated_and_unseeded_apps_start_present(cx: &mut TestAppContext) {
+        let other = cx.new_app();
+        cx.update(|cx| {
+            let started = Instant::now() - Duration::from_secs(120);
+            seed_for_test(
+                AwaySignal::HERE.observe(false, Some(Duration::from_secs(300)), started),
+                false,
+                Some(Duration::from_secs(300)),
+                cx,
+            );
+            assert!(is_away(cx));
+        });
+        other.update(|cx| {
+            init(cx);
+            assert_eq!(snapshot(cx), AwaySignal::HERE);
+            assert!(!is_away(cx));
+            assert_eq!(snapshot(cx), AwaySignal::HERE);
+        });
+        cx.update(|cx| assert!(is_away(cx)));
+    }
+
+    #[gpui::test]
+    fn an_unavailable_test_sensor_stays_unavailable_on_install_and_observe(
+        cx: &mut TestAppContext,
+    ) {
+        cx.update(|cx| {
+            cx.set_global(TestPresenceSample {
+                app_active: false,
+                idle: None,
+            });
+            init(cx);
+            assert!(snapshot(cx).away_secs(Instant::now()).is_some());
+            assert_eq!(snapshot(cx).idle(), None);
+
+            let started = Instant::now() - Duration::from_secs(120);
+            seed_for_test(
+                AwaySignal::HERE.observe(false, None, started),
+                false,
+                None,
+                cx,
+            );
+            assert!(is_away(cx));
+            assert_eq!(snapshot(cx).idle(), None);
+
+            cx.set_global(TestPresenceSample {
+                app_active: true,
+                idle: Some(Duration::ZERO),
+            });
+            assert!(!is_away(cx));
+            assert_eq!(snapshot(cx), AwaySignal::HERE);
         });
     }
 

@@ -28,8 +28,10 @@ use daruda_terminal::AttentionKind;
 #[cfg(windows)]
 #[path = "attention_windows.rs"]
 mod windows;
+#[cfg(all(windows, not(test)))]
+pub use windows::system_idle_seconds;
 #[cfg(windows)]
-pub use windows::{apply, is_app_active, set_badge_count, system_idle_seconds};
+pub use windows::{apply, is_app_active, set_badge_count};
 
 /// Show `count` on the Dock icon; `0` clears the badge. A no-op off the main
 /// thread, which `NSApplication` requires.
@@ -90,7 +92,7 @@ pub fn is_app_active() -> bool {
 /// `None` means the platform could not answer, which is not the same fact as
 /// `Some(0.0)` ("input this instant") — a presence gate that conflates them
 /// reads an unavailable sensor as a user sitting right there.
-#[cfg(target_os = "macos")]
+#[cfg(all(target_os = "macos", not(test)))]
 pub fn system_idle_seconds() -> Option<f64> {
     // kCGEventSourceStateHIDSystemState = 1; kCGAnyInputEventType = ~0.
     const HID_SYSTEM_STATE: u32 = 1;
@@ -102,7 +104,7 @@ pub fn system_idle_seconds() -> Option<f64> {
     Some(unsafe { CGEventSourceSecondsSinceLastEventType(HID_SYSTEM_STATE, ANY_INPUT_EVENT) })
 }
 
-#[cfg(target_os = "macos")]
+#[cfg(all(target_os = "macos", not(test)))]
 #[link(name = "CoreGraphics", kind = "framework")]
 unsafe extern "C" {
     fn CGEventSourceSecondsSinceLastEventType(state: u32, event_type: u32) -> f64;
@@ -111,7 +113,7 @@ unsafe extern "C" {
 /// Linux: `XScreenSaverQueryInfo` via the X11 `screensaver` extension.
 /// `None` when no X11 connection is reachable (pure Wayland, no XWayland) or
 /// the extension refuses — the sensor is absent, not reading zero.
-#[cfg(target_os = "linux")]
+#[cfg(all(target_os = "linux", not(test)))]
 pub fn system_idle_seconds() -> Option<f64> {
     use x11rb::protocol::screensaver::ConnectionExt as _;
 

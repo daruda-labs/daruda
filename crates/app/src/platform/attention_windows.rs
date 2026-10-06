@@ -2,7 +2,9 @@
 
 use daruda_terminal::AttentionKind;
 use windows_sys::Win32::Foundation::{HWND, LPARAM};
+#[cfg(not(test))]
 use windows_sys::Win32::System::SystemInformation::GetTickCount;
+#[cfg(not(test))]
 use windows_sys::Win32::UI::Input::KeyboardAndMouse::{GetLastInputInfo, LASTINPUTINFO};
 use windows_sys::Win32::UI::WindowsAndMessaging::{
     EnumWindows, FLASHW_STOP, FLASHW_TIMERNOFG, FLASHW_TRAY, FLASHWINFO, FlashWindowEx,
@@ -17,6 +19,7 @@ pub fn is_app_active() -> bool {
     pid == std::process::id()
 }
 
+#[cfg(not(test))]
 pub fn system_idle_seconds() -> Option<f64> {
     let mut input = LASTINPUTINFO {
         cbSize: std::mem::size_of::<LASTINPUTINFO>() as u32,
