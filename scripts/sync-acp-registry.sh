@@ -19,7 +19,7 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
 
-PRESET_FILE="crates/daruda_config/src/agent/preset.rs"
+PRESET_FILE="packages/config/src/agent/preset.rs"
 SNAPSHOT="tools/gen_acp_presets/registry-snapshot.json"
 
 # The URL lives with the presets it seeds, so there is only one copy of it.

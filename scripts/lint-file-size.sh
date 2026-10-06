@@ -17,8 +17,8 @@
 #
 # Files explicitly waived (long const tables that will be re-evaluated
 # only when their domain becomes user-tunable):
-#   - crates/daruda_terminal/src/ux/theme.rs
-#   - crates/daruda_terminal/src/ux/strings.rs (data + constants)
+#   - packages/terminal/src/ux/theme.rs
+#   - packages/terminal/src/ux/strings.rs (data + constants)
 #
 # Usage:
 #   scripts/lint-file-size.sh           # warn-only (exit 0 even on hits)
@@ -49,9 +49,9 @@ TEST_BUDGET=2000
 # `palette.rs` is the same shape as `ux/theme.rs` one crate over: 600-odd
 # colour constants plus the functions that assemble them into themes.
 WAIVED_PATHS=(
-    "crates/daruda_terminal/src/ux/theme.rs"
-    "crates/daruda_terminal/src/ux/strings.rs"
-    "crates/app/src/ui/theme/palette.rs"
+    "packages/terminal/src/ux/theme.rs"
+    "packages/terminal/src/ux/strings.rs"
+    "packages/app/src/ui/theme/palette.rs"
 )
 
 # Skip directories — vendored crates and target builds aren't ours.
@@ -60,8 +60,8 @@ SKIP_DIRS=(
     "crates/gpui_component_assets"
     "crates/gpui_component_macros"
     "crates/ferrum_flow"
-    "crates/ghostty_vt"
-    "crates/ghostty_vt_sys"
+    "packages/ghostty-vt"
+    "packages/ghostty-vt-sys"
     "vendor"
     "target"
 )
@@ -107,7 +107,7 @@ while IFS= read -r f; do
         hits+=("$f: $lines lines (budget $budget)")
         over_budget=1
     fi
-done < <(find crates -name '*.rs' -type f | sort)
+done < <(find packages crates -name '*.rs' -type f | sort)
 
 if [ ${#hits[@]} -eq 0 ]; then
     echo "[lint-file-size] OK — all .rs files within budget."

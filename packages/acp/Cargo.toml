@@ -1,0 +1,39 @@
+[package]
+name = "daruda_acp"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish = false
+license.workspace = true
+description = "ACP (Agent Client Protocol) client core — spawns an ACP agent adapter and bridges its async connection to daruda (GPUI-free)"
+
+[lints]
+workspace = true
+
+[dev-dependencies]
+test_process = { workspace = true }
+
+[features]
+# Exposes `AcpSessionHandle::detached_for_test` to host test targets.
+test-support = []
+
+[dependencies]
+daruda_core = { workspace = true }
+# `unstable_auth_methods` is what makes the agent advertise its terminal login
+# methods at `initialize`; without it `authMethods` comes back empty and the
+# host has to hardcode the login command instead of reading it. Marked UNSTABLE
+# upstream (may change with the schema), so the reader treats a missing/renamed
+# field as "no methods advertised" rather than an error.
+agent-client-protocol = { version = "2.0", features = ["unstable_auth_methods", "unstable_end_turn_token_usage"] }
+anyhow = { workspace = true }
+futures = "0.3"
+semver = "1"
+serde = { workspace = true }
+serde_json = { workspace = true }
+sha2 = "0.10"
+shell-words = "1"
+smol = { workspace = true }
+thiserror = "2"
+tempfile = "3"
+ureq = { version = "2", default-features = false, features = ["tls"] }
+which = "6"

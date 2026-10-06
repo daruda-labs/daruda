@@ -12,7 +12,7 @@
 # `text_metrics::cell_metrics_at`, the single entry point that calls
 # `window.text_style()` legitimately during paint).
 #
-# This script greps `crates/daruda_terminal/src/view/` for direct
+# This script greps `packages/terminal/src/view/` for direct
 # `window.text_style()` / `window.rem_size()` calls and exits
 # non-zero on any hit outside the whitelist:
 #
@@ -29,7 +29,7 @@
 
 set -euo pipefail
 
-VIEW_DIR="crates/daruda_terminal/src/view"
+VIEW_DIR="packages/terminal/src/view"
 
 if [[ ! -d "$VIEW_DIR" ]]; then
     echo "lint-paint-scope: $VIEW_DIR not found — run from the daruda crate root." >&2

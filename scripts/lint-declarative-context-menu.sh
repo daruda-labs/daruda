@@ -34,17 +34,17 @@ cd "$ROOT"
 
 # The wrapper home is the only place allowed to name the vendored API, on the
 # same terms every lint in this family grants it. Nothing there uses it today.
-ALLOW='\bcrates/app/src/ui/'
+ALLOW='\bpackages/app/src/ui/'
 
 # Anchored after leading whitespace so `///` doc mentions don't trip it.
 violations=$(
-    grep -rn --include="*.rs" -E '^[[:space:]]*\.context_menu\(' crates/app/src \
+    grep -rn --include="*.rs" -E '^[[:space:]]*\.context_menu\(' packages/app/src \
         | grep -Ev "$ALLOW" || true
 )
 
 if [[ -n "$violations" ]]; then
     echo "error: declarative .context_menu(...) is forbidden — it is clipped by"
-    echo "       the caller's container (see crates/app/src/workspace/root_menu.rs)."
+    echo "       the caller's container (see packages/app/src/workspace/root_menu.rs)."
     echo "       Use .root_context_menu(workspace, builder) instead."
     echo
     echo "$violations"

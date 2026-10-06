@@ -28,18 +28,18 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
 
-ALLOW='\bcrates/app/src/bootstrap\.rs|\bcrates/app/src/watcher_pumps\.rs|\bcrates/app/src/hooks/handler\.rs|\bcrates/daruda_store/src/observability/log_writer\.rs'
+ALLOW='\bpackages/app/src/bootstrap\.rs|\bpackages/app/src/watcher_pumps\.rs|\bpackages/app/src/hooks/handler\.rs|\bpackages/store/src/observability/log_writer\.rs'
 
 # Scan only first-party crates. Vendored gpui_component is excluded —
 # it is upstream code with its own logging conventions.
 SCAN_DIRS=(
-    "crates/app/src"
-    "crates/daruda_store/src"
-    "crates/daruda_terminal/src"
-    "crates/daruda_config/src"
-    "crates/daruda_agent/src"
-    "crates/ghostty_vt/src"
-    "crates/ghostty_vt_sys/src"
+    "packages/app/src"
+    "packages/store/src"
+    "packages/terminal/src"
+    "packages/config/src"
+    "packages/agent/src"
+    "packages/ghostty-vt/src"
+    "packages/ghostty-vt-sys/src"
 )
 
 # Match `eprintln!` outside test code (`#[cfg(test)] mod tests`,

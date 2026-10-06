@@ -8,7 +8,7 @@ set -euo pipefail
 # mark_dirty_and_save reference (other than the fn signature itself) is
 # a violation.
 offenders=$(rg -n --type rust --glob '!**/workspace/{mod,durable}.rs' \
-    "mark_dirty_and_save" crates/app/src \
+    "mark_dirty_and_save" packages/app/src \
     | rg -v "fn mark_dirty_and_save" \
     | rg -v "^\S+:\d+:\s*(//[!/]?|///?)") || true
 

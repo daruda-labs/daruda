@@ -39,11 +39,11 @@ cd "$ROOT"
 # Scan only first-party crates. Vendored gpui_component follows its
 # own conventions.
 SCAN_DIRS=(
-    "crates/app/src"
-    "crates/daruda_store/src"
-    "crates/daruda_terminal/src"
-    "crates/daruda_config/src"
-    "crates/daruda_agent/src"
+    "packages/app/src"
+    "packages/store/src"
+    "packages/terminal/src"
+    "packages/config/src"
+    "packages/agent/src"
 )
 
 # Match `let _ = <expr>.update*(...)` shapes. Catches:

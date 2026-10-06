@@ -58,7 +58,7 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
 
-PANE_DIR="crates/app/src/workspace/main_area/agent_chat_pane"
+PANE_DIR="packages/app/src/workspace/main_area/agent_chat_pane"
 VIEW_DIR="$PANE_DIR/view"
 APPLY_EVENT_RS="$VIEW_DIR/apply_event.rs"
 SCAN_DIR="$PANE_DIR"
@@ -96,7 +96,7 @@ if ! grep -qE '^enum Turn \{' "$VIEW_DIR/mod.rs"; then
     echo "" >&2
     echo "  Check (a) only scans $SCAN_DIR because nothing outside it can name" >&2
     echo "  \`Turn\`. A visibility wider than module-private breaks that premise —" >&2
-    echo "  either restore it, or widen SCAN_DIR back to crates/app/src." >&2
+    echo "  either restore it, or widen SCAN_DIR back to packages/app/src." >&2
     FAIL=1
 fi
 

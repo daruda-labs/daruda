@@ -1,0 +1,11 @@
+[package]
+name = "visual_tests"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish = false
+license.workspace = true
+
+[dependencies]
+daruda_terminal = { workspace = true, features = ["test-support"] }
+gpui = { workspace = true, features = ["test-support"] }

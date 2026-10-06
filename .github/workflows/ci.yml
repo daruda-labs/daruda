@@ -33,7 +33,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v6
         # No submodules: the ghostty tree is only wanted by a build script,
-        # and the scans below never leave `crates/` and `scripts/`.
+        # and the scans below never leave `packages/`, `crates/`, and `scripts/`.
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable

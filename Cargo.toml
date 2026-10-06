@@ -1,6 +1,14 @@
 [workspace]
 resolver = "2"
-members = ["crates/*", "tools/*"]
+members = [
+    "packages/*",
+    "tools/*",
+    # Vendored third-party packages keep their re-vendoring location.
+    "crates/ferrum_flow",
+    "crates/gpui_component",
+    "crates/gpui_component_assets",
+    "crates/gpui_component_macros",
+]
 exclude = ["vendor/zed"]
 
 [patch."https://github.com/zed-industries/zed"]
@@ -26,6 +34,19 @@ gpui_linux = { git = "https://github.com/zed-industries/zed", package = "gpui_li
 # `gpui::Application` without `#[cfg(target_os = ...)]` of its own.
 gpui_platform = { git = "https://github.com/zed-industries/zed", package = "gpui_platform", rev = "193b55aa3aa71accf0dcd78709ee164a8ca42d54", features = ["font-kit"] }
 
+daruda_acp = { path = "packages/acp" }
+daruda_agent = { path = "packages/agent" }
+daruda_config = { path = "packages/config" }
+daruda_core = { path = "packages/core" }
+daruda_flow = { path = "packages/flow" }
+daruda_store = { path = "packages/store" }
+daruda_terminal = { path = "packages/terminal" }
+daruda_update = { path = "packages/update" }
+ghostty_vt = { path = "packages/ghostty-vt" }
+ghostty_vt_sys = { path = "packages/ghostty-vt-sys" }
+test_process = { path = "tools/test_process" }
+
+ferrum_flow = { path = "crates/ferrum_flow" }
 gpui_component = { path = "crates/gpui_component", features = ["tree-sitter-languages"] }
 gpui_component_macros = { path = "crates/gpui_component_macros" }
 gpui_component_assets = { path = "crates/gpui_component_assets" }

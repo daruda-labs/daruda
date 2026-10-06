@@ -23,7 +23,7 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
 
-REGISTRY="crates/daruda_core/src/process_env.rs"
+REGISTRY="packages/core/src/process_env.rs"
 
 validate_registry() {
     local registry="${1-$REGISTRY}"
@@ -68,7 +68,7 @@ my $violations = 0;
 
 sub is_pty_exception {
     my ($file, $content) = @_;
-    return 0 unless $file =~ m{(?:^|/)crates/daruda_terminal/src/pty\.rs$};
+    return 0 unless $file =~ m{(?:^|/)packages/terminal/src/pty\.rs$};
     return $content eq 'DARUDA_TEST'
         || $content eq 'echo DARUDA_TEST\n'
         || $content eq 'Expected DARUDA_TEST in output, got: {output}';
@@ -86,7 +86,7 @@ sub report_literal {
 
 FILE:
 for my $file (@ARGV) {
-    next FILE if $file eq 'crates/daruda_core/src/process_env.rs';
+    next FILE if $file eq 'packages/core/src/process_env.rs';
 
     open my $fh, '<', $file or do {
         print STDERR "[lint-env-literals] cannot read $file: $!\n";
@@ -286,9 +286,9 @@ self_test() {
         $'let _ = r###"echo $DARUDA_RAW_KNOB"###;\n'
     expect_scan 1 "byte string" "bytes.rs" \
         $'let _ = b"DARUDA_BYTE_KNOB";\n'
-    expect_scan 0 "exact PTY sentinels" "crates/daruda_terminal/src/pty.rs" \
+    expect_scan 0 "exact PTY sentinels" "packages/terminal/src/pty.rs" \
         $'let _ = b"echo DARUDA_TEST\\n";\nlet _ = "DARUDA_TEST";\nlet _ = "Expected DARUDA_TEST in output, got: {output}";\n'
-    expect_scan 1 "non-sentinel in PTY file" "crates/daruda_terminal/src/pty.rs" \
+    expect_scan 1 "non-sentinel in PTY file" "packages/terminal/src/pty.rs" \
         $'let _ = "DARUDA_REAL_KNOB";\n'
     expect_scan 2 "scanner failure is not clean" "broken.rs" \
         $'let _ = "DARUDA_UNCLOSED;\n'
@@ -312,7 +312,7 @@ esac
 validate_registry
 
 file_list="$(git ls-files --cached --others --exclude-standard -- \
-    ':(glob)crates/**/*.rs' ':(glob)tools/**/*.rs')" || {
+    ':(glob)packages/**/*.rs' ':(glob)crates/**/*.rs' ':(glob)tools/**/*.rs')" || {
     echo "[lint-env-literals] source discovery failed" >&2
     exit 2
 }

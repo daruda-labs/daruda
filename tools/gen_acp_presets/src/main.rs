@@ -1,5 +1,5 @@
 //! Generates the ACP registry preset block inside
-//! `crates/daruda_config/src/agent/preset.rs` from a registry snapshot.
+//! `packages/config/src/agent/preset.rs` from a registry snapshot.
 //!
 //! Run `cargo run -p gen_acp_presets` to rewrite the block, or with `--check`
 //! to fail when the committed block and the committed snapshot have drifted.
@@ -406,7 +406,7 @@ fn default_input() -> PathBuf {
 }
 
 fn preset_file() -> PathBuf {
-    workspace_root().join("crates/daruda_config/src/agent/preset.rs")
+    workspace_root().join("packages/config/src/agent/preset.rs")
 }
 
 struct Args {

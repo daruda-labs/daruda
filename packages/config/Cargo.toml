@@ -1,0 +1,25 @@
+[package]
+name = "daruda_config"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish = false
+license.workspace = true
+description = "TOML configuration loader for daruda"
+
+[lints]
+workspace = true
+
+[dependencies]
+daruda_core = { workspace = true }
+daruda_store = { workspace = true }
+dirs = "6"
+serde = { version = "1", features = ["derive"] }
+toml = "0.8"
+toml_edit = "0.22"
+tempfile = "3"
+uuid = { version = "1.10", features = ["v4", "serde"] }
+
+[dev-dependencies]
+serde_json = "1"
+shell-words = "1"

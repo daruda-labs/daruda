@@ -27,7 +27,7 @@
 set -euo pipefail
 cd "$(dirname "${BASH_SOURCE[0]}")/.." || exit 1
 
-src=crates/daruda_acp/src/native_subagents.rs
+src=packages/acp/src/native_subagents.rs
 
 # Every extraction may legitimately find nothing, which `pipefail` would turn
 # into an abort under `-e`; emptiness is judged explicitly instead.
@@ -138,7 +138,7 @@ if [ "$fail" -ne 0 ]; then
   echo
   echo "✗ AIR gate contract drifted in $checked adapter bundle(s)."
   echo "  Native subagent sessions are silently off until"
-  echo "  crates/daruda_acp/src/native_subagents.rs matches."
+  echo "  packages/acp/src/native_subagents.rs matches."
   exit 1
 fi
 

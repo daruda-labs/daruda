@@ -167,7 +167,7 @@ cargo run -p gen_acp_presets -- --check
 ```
 
 The ACP preset drift gate is offline. It regenerates the generated block in
-`crates/daruda_config/src/agent/preset.rs` from
+`packages/config/src/agent/preset.rs` from
 `tools/gen_acp_presets/registry-snapshot.json` and fails if committed output is
 stale. Use `scripts/sync-acp-registry.sh` only when intentionally refreshing the
 registry snapshot.
@@ -221,21 +221,22 @@ files fail the workflow instead of producing an empty download.
 
 ```text
 daruda/
-├── crates/
-│   ├── app/                    # main app binary: workspace, agent UI, docks, surface
-│   ├── daruda_acp/             # Agent Client Protocol client core
-│   ├── daruda_agent/           # agent provider integrations
-│   ├── daruda_config/          # config system and agent presets
-│   ├── daruda_core/            # shared dependency-free utilities
-│   ├── daruda_flow/            # declarative ACP flow engine
-│   ├── daruda_store/           # persistence and observability
-│   ├── daruda_terminal/        # terminal emulation and GPUI rendering
-│   ├── daruda_update/          # app update checking
+├── packages/                   # first-party packages (directory ≠ Cargo name)
+│   ├── app/                    # daruda: workspace, agent UI, docks, surface
+│   ├── acp/                    # daruda_acp: Agent Client Protocol client core
+│   ├── agent/                  # daruda_agent: agent provider integrations
+│   ├── config/                 # daruda_config: config system and agent presets
+│   ├── core/                   # daruda_core: shared dependency-free utilities
+│   ├── flow/                   # daruda_flow: declarative ACP flow engine
+│   ├── store/                  # daruda_store: persistence and observability
+│   ├── terminal/               # daruda_terminal: terminal emulation, GPUI rendering
+│   ├── update/                 # daruda_update: app update checking
+│   ├── ghostty-vt/             # ghostty_vt: safe Rust wrapper over libghostty-vt
+│   ├── ghostty-vt-sys/         # ghostty_vt_sys: Zig C FFI bindings
+│   └── visual-tests/           # visual_tests: offscreen render snapshot tests
+├── crates/                     # vendored third-party packages only
 │   ├── ferrum_flow/            # vendored node-graph canvas
-│   ├── ghostty_vt/             # safe Rust wrapper over libghostty-vt
-│   ├── ghostty_vt_sys/         # Zig C FFI bindings
-│   ├── gpui_component*/        # vendored gpui-component crates
-│   └── visual_tests/           # offscreen render snapshot tests
+│   └── gpui_component*/        # vendored gpui-component crates
 ├── tools/
 │   ├── acp_replay/             # ACP wire-log replay helper
 │   ├── gen_acp_presets/        # generated agent preset drift gate
@@ -267,7 +268,7 @@ A few rules that often come up in review:
 - No inline magic numbers or colors outside the theme/surface layers.
 - No re-entrant entity reads inside GPUI render/update paths.
 - App code routes through `crate::ui::*`; do not import `gpui_component::*`
-  directly outside `crates/app/src/ui/`.
+  directly outside `packages/app/src/ui/`.
 - Blocking subprocess calls must run on the background executor.
 - User-facing actions need the action type, registered handler, shortcut
   constant, and command palette entry.

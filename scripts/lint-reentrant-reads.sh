@@ -49,7 +49,7 @@
 
 set -euo pipefail
 
-WORKSPACE_DIR="crates/app/src/workspace"
+WORKSPACE_DIR="packages/app/src/workspace"
 MOD_RS="$WORKSPACE_DIR/mod.rs"
 
 if [[ ! -f "$MOD_RS" ]]; then

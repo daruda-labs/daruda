@@ -7,7 +7,7 @@
 # (the single slot that eats the leftover width), `trailing` (fixed,
 # right-anchored). That grammar lives in exactly one place:
 #
-#   crates/app/src/workspace/main_area/agent_chat_pane/render/fold_header.rs
+#   packages/app/src/workspace/main_area/agent_chat_pane/render/fold_header.rs
 #
 # It used to be two free `AnyElement` parameters on `foldable_block`, so each of
 # the seven headers re-derived the geometry and picked its own two of the three
@@ -64,9 +64,9 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
 
-PANE_DIR="crates/app/src/workspace/main_area/agent_chat_pane"
+PANE_DIR="packages/app/src/workspace/main_area/agent_chat_pane"
 OWNER="$PANE_DIR/render/fold_header.rs"
-SCAN_DIR="crates/app/src"
+SCAN_DIR="packages/app/src"
 
 if [[ ! -f "$OWNER" ]]; then
     echo "lint-fold-header: $OWNER not found — run from the repo root, or update" >&2
@@ -84,7 +84,7 @@ strip_comments() { sed -E 's#//.*##'; }
 HITS_A=$(
     grep -rn 'AGENT_CHAT_SUMMARY_GAP' "$SCAN_DIR" \
         | grep -v "^$OWNER:" \
-        | grep -v '^crates/app/src/ui/theme/palette.rs:' \
+        | grep -v '^packages/app/src/ui/theme/palette.rs:' \
         | strip_comments \
         | grep 'AGENT_CHAT_SUMMARY_GAP' \
         || true

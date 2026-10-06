@@ -54,8 +54,8 @@ SKIP_DIRS=(
     "crates/gpui_component_assets"
     "crates/gpui_component_macros"
     "crates/ferrum_flow"
-    "crates/ghostty_vt"
-    "crates/ghostty_vt_sys"
+    "packages/ghostty-vt"
+    "packages/ghostty-vt-sys"
     "vendor"
     "target"
 )
@@ -110,7 +110,7 @@ while IFS= read -r f; do
         continue
     fi
     check_file "$f"
-done < <(find crates -name '*.rs' -type f | sort)
+done < <(find packages crates -name '*.rs' -type f | sort)
 
 if [ ${#hits[@]} -eq 0 ]; then
     echo "[lint-comment-length] OK — no over-budget comment blocks."

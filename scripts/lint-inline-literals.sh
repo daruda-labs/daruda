@@ -7,7 +7,7 @@
 # `gpui::white()` and `px(2.0)` drift away from theming and break the
 # moment a future theme/dpi change is wired up.
 #
-# This script grep-walks `crates/` and fails when any tracked file
+# This script grep-walks `packages/` and `crates/` and fails when any tracked file
 # introduces a banned literal *outside* the few definition sites that
 # are allowed to use them. See CLAUDE.md G4 for the rule + exceptions.
 #
@@ -29,24 +29,24 @@ cd "$ROOT"
 # Files allowed to contain raw color / pixel / string literals — they
 # *are* the constant definitions everyone else references.
 WHITELIST=(
-    "crates/daruda_terminal/src/ux/theme.rs"
-    "crates/daruda_terminal/src/ux/strings.rs"
-    "crates/app/src/surface/constants.rs"
-    "crates/app/src/surface/keybindings.rs"
+    "packages/terminal/src/ux/theme.rs"
+    "packages/terminal/src/ux/strings.rs"
+    "packages/app/src/surface/constants.rs"
+    "packages/app/src/surface/keybindings.rs"
     # ui/theme/ is the daruda → gpui_component palette bridge plus the
     # app-side UI palette (workspace chrome, sidebar, status bar, etc.).
     # `mod.rs` carries variant-derived hsla values (danger_hover at
     # l=0.60 etc.) next to the slot they map to. `palette.rs` carries
     # the workspace-chrome constants that used to live in
     # daruda_terminal/ux/theme.rs.
-    "crates/app/src/ui/theme/mod.rs"
-    "crates/app/src/ui/theme/palette.rs"
+    "packages/app/src/ui/theme/mod.rs"
+    "packages/app/src/ui/theme/palette.rs"
     # `syntax/` holds the editor/diff syntax palettes as hex literals.
-    "crates/app/src/ui/theme/syntax/mod.rs"
-    "crates/app/src/ui/theme/syntax/dark.rs"
-    "crates/app/src/ui/theme/syntax/light.rs"
-    "crates/app/src/ui/theme/list_metrics.rs"
-    "crates/app/src/ui/theme/metrics.rs"
+    "packages/app/src/ui/theme/syntax/mod.rs"
+    "packages/app/src/ui/theme/syntax/dark.rs"
+    "packages/app/src/ui/theme/syntax/light.rs"
+    "packages/app/src/ui/theme/list_metrics.rs"
+    "packages/app/src/ui/theme/metrics.rs"
 )
 
 is_whitelisted() {
@@ -55,14 +55,14 @@ is_whitelisted() {
         [[ "$file" == "$w" ]] && return 0
     done
     # The hand-written string functions (the rest is generated from en.yml).
-    [[ "$file" == crates/app/src/surface/strings/* ]] && return 0
+    [[ "$file" == packages/app/src/surface/strings/* ]] && return 0
     # Tests are exempt — they often need synthetic concrete values.
     [[ "$file" == *"/tests/"* ]] && return 0
     [[ "$file" == *"tests.rs" ]] && return 0
     # Dedicated test crates — every file is a fixture, pixel coordinates
     # in `simulate_click(point(px(4.0), px(6.0)))` are load-bearing test
     # input rather than styling literals.
-    [[ "$file" == crates/visual_tests/* ]] && return 0
+    [[ "$file" == packages/visual-tests/* ]] && return 0
     # Vendored upstream crates (longbridge/gpui-component, Apache-2.0).
     # Their inline px / color literals are part of the upstream design
     # and intentionally not routed through daruda's theme module.
@@ -79,7 +79,7 @@ violations=0
 FILES=()
 while IFS= read -r line; do
     FILES+=("$line")
-done < <(git ls-files 'crates/**/*.rs')
+done < <(git ls-files 'packages/**/*.rs' 'crates/**/*.rs')
 
 for file in "${FILES[@]}"; do
     if is_whitelisted "$file"; then

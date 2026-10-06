@@ -6,7 +6,7 @@
 # `rust_i18n::i18n!("locales", …)` in `src/lib.rs` globs the whole directory
 # (rust-i18n-support `load_locales`), so no vendored source needed a change.
 #
-# Wording follows `crates/app/locales/ko.yml` where the two overlap — "복사",
+# Wording follows `packages/app/locales/ko.yml` where the two overlap — "복사",
 # "붙여넣기", "모두 선택", "취소", "확인" are the app's own terms for the same
 # actions, and a user meets both in one window.
 #

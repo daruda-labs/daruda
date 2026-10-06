@@ -15,7 +15,7 @@
 # and `workspace::sync::limits::activity_paths`'s cache path. The last
 # one (Telegram's Keychain-stored bot token) additionally caused two
 # profiles to 409-conflict polling Telegram with the same token — see
-# `crates/app/src/telegram/keychain.rs`'s `service_name` doc comment.
+# `packages/app/src/telegram/keychain.rs`'s `service_name` doc comment.
 #
 # This script does not (and cannot) catch the Keychain case — a service
 # *name*, not a directory path — that risk is mitigated by routing
@@ -55,14 +55,14 @@ cd "$ROOT"
 #     Committed with the repo and shared by every profile that opens it,
 #     for the same reason as the `task-*.md` files above.
 WHITELIST=(
-    "crates/daruda_store/src/persistence.rs"
-    "crates/daruda_store/src/profile.rs"
-    "crates/daruda_store/src/observability/log_writer.rs"
-    "crates/app/src/workspace/main_area/task_edit_pane/mod.rs"
-    "crates/app/src/workspace/main_area/task_edit_pane/task_edit_ops.rs"
-    "crates/app/src/hooks/installer.rs"
-    "crates/daruda_store/src/tasks/prompt_file.rs"
-    "crates/app/src/workspace/flow_paths.rs"
+    "packages/store/src/persistence.rs"
+    "packages/store/src/profile.rs"
+    "packages/store/src/observability/log_writer.rs"
+    "packages/app/src/workspace/main_area/task_edit_pane/mod.rs"
+    "packages/app/src/workspace/main_area/task_edit_pane/task_edit_ops.rs"
+    "packages/app/src/hooks/installer.rs"
+    "packages/store/src/tasks/prompt_file.rs"
+    "packages/app/src/workspace/flow_paths.rs"
 )
 
 is_whitelisted() {
@@ -74,11 +74,11 @@ is_whitelisted() {
 }
 
 SCAN_DIRS=(
-    "crates/app/src"
-    "crates/daruda_store/src"
-    "crates/daruda_terminal/src"
-    "crates/daruda_config/src"
-    "crates/daruda_agent/src"
+    "packages/app/src"
+    "packages/store/src"
+    "packages/terminal/src"
+    "packages/config/src"
+    "packages/agent/src"
 )
 
 # Portable array population — no `mapfile` (macOS bash 3.2 doesn't ship it).

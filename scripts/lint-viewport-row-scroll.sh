@@ -13,13 +13,13 @@
 # that branch and painted live grid rows (an agent's input box) over
 # scrolled-back content — the "input box afterimage" overlay bug.
 #
-# Rule: in crates/daruda_terminal/src/session/, any function whose body
+# Rule: in packages/terminal/src/session/, any function whose body
 # calls `self.terminal.dump_viewport_row` (any suffix) must also
 # reference `scroll_offset` or `wrapped_row_count` in that same body.
 # The type system can't enforce this — the dispatch lives inside the
 # method, and the FFI takes a bare u16 — so this grep guard backstops it.
 #
-# See crates/daruda_terminal/src/view/CLAUDE.md "Coordinate spaces".
+# See packages/terminal/src/view/CLAUDE.md "Coordinate spaces".
 #
 # Usage:   scripts/lint-viewport-row-scroll.sh
 # Exit:    0 — clean   1 — a viewport-row read skips the scroll dispatch
@@ -29,7 +29,7 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
 
-SCAN_DIR="crates/daruda_terminal/src/session"
+SCAN_DIR="packages/terminal/src/session"
 
 # Walk each function body (tracked by brace depth, with string literals
 # and line comments stripped first so format!("{}") braces don't skew the
@@ -92,7 +92,7 @@ if [ -n "$violations" ]; then
     echo "A function handing a viewport row to self.terminal.dump_viewport_row* must"
     echo "branch on self.scroll_offset (or recompute the grid row from"
     echo "line_buffer.wrapped_row_count, as dump_screen_row does). See"
-    echo "crates/daruda_terminal/src/view/CLAUDE.md \"Coordinate spaces\"."
+    echo "packages/terminal/src/view/CLAUDE.md \"Coordinate spaces\"."
     exit 1
 fi
 

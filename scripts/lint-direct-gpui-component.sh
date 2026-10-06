@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Lint: direct `use gpui_component::*` imports outside `crate::ui::*`.
 #
-# Background: `crates/app/src/ui/` is the wrapper home for the
+# Background: `packages/app/src/ui/` is the wrapper home for the
 # vendored `gpui_component` crate. App code must always go through
 # `crate::ui::*` so that:
 #   - `xsmall()` is auto-applied at one place (CLAUDE.md §10),
@@ -28,10 +28,10 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
 
-ALLOW='\bcrates/app/src/ui/|\bcrates/app/src/(main|test_support|windows)\.rs|\bcrates/app/src/workspace/render/mod\.rs'
+ALLOW='\bpackages/app/src/ui/|\bpackages/app/src/(main|test_support|windows)\.rs|\bpackages/app/src/workspace/render/mod\.rs'
 
 violations=$(
-    grep -rn --include="*.rs" '^[[:space:]]*use[[:space:]]\+gpui_component\b' crates/app/src \
+    grep -rn --include="*.rs" '^[[:space:]]*use[[:space:]]\+gpui_component\b' packages/app/src \
         | grep -Ev "$ALLOW" \
         || true
 )
@@ -40,6 +40,6 @@ if [ -n "$violations" ]; then
     echo "Direct gpui_component import outside crate::ui::*:"
     echo "$violations"
     echo
-    echo "Route through crate::ui::*. See crates/app/src/ui/mod.rs."
+    echo "Route through crate::ui::*. See packages/app/src/ui/mod.rs."
     exit 1
 fi

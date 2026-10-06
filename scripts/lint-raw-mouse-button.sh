@@ -254,7 +254,7 @@ def self_test() -> int:
 if __name__ == "__main__":
     if sys.argv[1:2] == ["--self-test"]:
         sys.exit(self_test())
-    found = scan_tree(Path("crates"))
+    found = scan_tree(Path("packages")) + scan_tree(Path("crates"))
     if found:
         print("\n".join(found))
         sys.exit(1)
@@ -264,8 +264,8 @@ if [[ "${1-}" == "--self-test" ]]; then
     exec python3 "$SCANNER" --self-test
 fi
 
-if [[ ! -d crates ]]; then
-    echo "lint-raw-mouse-button: crates/ not found — run from the repo root." >&2
+if [[ ! -d packages || ! -d crates ]]; then
+    echo "lint-raw-mouse-button: packages/ or crates/ not found — run from the repo root." >&2
     exit 2
 fi
 

@@ -7,7 +7,7 @@
 # view through `menus::RecentSnapshot`, a global written at the one
 # place the menu bar is set — the same write that already loads the list.
 #
-# Rule: crates/app/src/workspace/render/landing.rs may not name
+# Rule: packages/app/src/workspace/render/landing.rs may not name
 # `load_recent_in` or any other `daruda_store::project::load_*` /
 # `std::fs` entry point. It reads `RecentSnapshot` instead.
 #
@@ -23,7 +23,7 @@ set -euo pipefail
 
 cd "$(dirname "$0")/.."
 
-TARGET="crates/app/src/workspace/render/landing.rs"
+TARGET="packages/app/src/workspace/render/landing.rs"
 
 if [[ ! -f "$TARGET" ]]; then
   echo "lint-landing-no-disk-read: $TARGET is missing" >&2

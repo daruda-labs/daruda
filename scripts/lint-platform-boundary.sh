@@ -48,7 +48,7 @@ cd "$ROOT"
 # The two places a platform call may live.
 #
 #   - `daruda_core`'s capability modules: the gates themselves.
-#   - `crates/app/src/platform/`: capabilities that need a window handle,
+#   - `packages/app/src/platform/`: capabilities that need a window handle,
 #     which a GPUI-free crate cannot hold.
 #
 # Plus the narrow cases where the call *is* the subject rather than a way
@@ -58,7 +58,7 @@ cd "$ROOT"
 #
 # And two credential readers. Both reach an OS credential store, and the
 # honest reason they are two rather than one is crate layering:
-# `daruda_agent` cannot see `crates/app`. It shows — `keychain.rs` has a
+# `daruda_agent` cannot see `packages/app`. It shows — `keychain.rs` has a
 # Linux `secret-tool` arm while `credentials.rs` falls back to a JSON
 # file — so this pair is a deferral, not a design:
 #   - `app/src/remote_channel/keychain.rs`: daruda's own secrets. Takes the
@@ -71,17 +71,17 @@ cd "$ROOT"
 # reach — a job for the stage that adds the Windows arm, since that is
 # when the divergence starts costing something.
 WHITELIST_PREFIXES=(
-    "crates/daruda_core/src/file_url.rs"
-    "crates/daruda_core/src/host.rs"
-    "crates/daruda_core/src/process.rs"
-    "crates/daruda_core/src/path.rs"
-    "crates/daruda_core/src/shell.rs"
-    "crates/daruda_core/src/shell/"
-    "crates/app/src/platform/"
-    "crates/daruda_store/src/persistence.rs"
-    "crates/daruda_store/src/profile.rs"
-    "crates/app/src/remote_channel/keychain.rs"
-    "crates/daruda_agent/src/accounts/credentials.rs"
+    "packages/core/src/file_url.rs"
+    "packages/core/src/host.rs"
+    "packages/core/src/process.rs"
+    "packages/core/src/path.rs"
+    "packages/core/src/shell.rs"
+    "packages/core/src/shell/"
+    "packages/app/src/platform/"
+    "packages/store/src/persistence.rs"
+    "packages/store/src/profile.rs"
+    "packages/app/src/remote_channel/keychain.rs"
+    "packages/agent/src/accounts/credentials.rs"
 )
 
 # Known violations, listed so they are visible rather than silently exempt.
@@ -97,7 +97,7 @@ WHITELIST_PREFIXES=(
 # A file here still fails the lint if it calls the OS *outside* what is
 # already noted — the point is to not grow the debt, not to pardon it.
 DEFERRED=(
-    "crates/app/src/workspace/sync/ports.rs — platform modules not yet moved to app/src/platform/"
+    "packages/app/src/workspace/sync/ports.rs — platform modules not yet moved to app/src/platform/"
 )
 
 is_whitelisted() {
@@ -111,17 +111,17 @@ is_whitelisted() {
 }
 
 SCAN_DIRS=(
-    "crates/app/src"
-    "crates/daruda_core/src"
-    "crates/daruda_acp/src"
-    "crates/daruda_agent/src"
-    "crates/daruda_config/src"
-    "crates/daruda_flow/src"
-    "crates/daruda_store/src"
-    "crates/daruda_terminal/src"
-    "crates/daruda_update/src"
+    "packages/app/src"
+    "packages/core/src"
+    "packages/acp/src"
+    "packages/agent/src"
+    "packages/config/src"
+    "packages/flow/src"
+    "packages/store/src"
+    "packages/terminal/src"
+    "packages/update/src"
     # Examples ship as usage documentation, so a reader copies what they do.
-    "crates/daruda_flow/examples"
+    "packages/flow/examples"
 )
 
 # Portable array population — no `mapfile` (macOS bash 3.2 doesn't ship it).

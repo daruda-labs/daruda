@@ -17,10 +17,10 @@
 # gpui counts as displaying it (AGENTS.md pitfall 10). Behind Settings that is
 # kept out by structure — `prepare_frame` picks the frame body once and the
 # settings frame builds nothing it covers — and pinned by the render-count
-# tests in `crates/app/src/workspace/tests/settings_view.rs`.
+# tests in `packages/app/src/workspace/tests/settings_view.rs`.
 set -euo pipefail
 
-FILE="crates/app/src/workspace/render/mod.rs"
+FILE="packages/app/src/workspace/render/mod.rs"
 
 if [ ! -f "$FILE" ]; then
     echo "lint-render-purity: $FILE is gone — update or delete this guard." >&2

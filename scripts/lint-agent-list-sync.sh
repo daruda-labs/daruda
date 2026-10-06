@@ -35,7 +35,7 @@
 set -uo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-PANE="crates/app/src/workspace/main_area/agent_chat_pane"
+PANE="packages/app/src/workspace/main_area/agent_chat_pane"
 ADAPTER="$PANE/view/list_sync.rs"
 
 # Files allowed to mutate `items` structurally, with what each is.
