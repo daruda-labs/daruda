@@ -649,7 +649,7 @@ fn last_assistant_text(view: &AgentChatView) -> Option<String> {
 
 /// The single conversion between the workspace-private activity state and the
 /// control surface's own enum. Keeping it here is what lets
-/// `control/result.rs` stay outside `crate::workspace`.
+/// `daruda_control_types::result` stay outside `crate::workspace`.
 fn map_activity(state: ActivityState) -> Activity {
     match state {
         ActivityState::Idle => Activity::Idle,

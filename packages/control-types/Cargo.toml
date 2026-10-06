@@ -1,0 +1,18 @@
+[package]
+name = "daruda_control_types"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish = false
+license.workspace = true
+description = "The external control contract for daruda — command vocabulary, parsing, answers, and pane identity (GPUI-free, transport-free)"
+
+[lints]
+workspace = true
+
+[dependencies]
+daruda_store = { workspace = true }
+serde = { version = "1", features = ["derive"] }
+
+[dev-dependencies]
+serde_json = "1"

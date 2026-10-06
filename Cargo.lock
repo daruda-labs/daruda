@@ -1665,6 +1665,7 @@ dependencies = [
  "daruda_acp",
  "daruda_agent",
  "daruda_config",
+ "daruda_control_types",
  "daruda_core",
  "daruda_flow",
  "daruda_project",
@@ -1781,6 +1782,15 @@ dependencies = [
  "toml 0.8.23",
  "toml_edit 0.22.27",
  "uuid",
+]
+
+[[package]]
+name = "daruda_control_types"
+version = "0.2.16"
+dependencies = [
+ "daruda_store",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]

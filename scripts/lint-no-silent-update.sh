@@ -45,6 +45,7 @@ SCAN_DIRS=(
     "packages/config/src"
     "packages/project/src"
     "packages/ui/src"
+    "packages/control-types/src"
     "packages/agent/src"
 )
 

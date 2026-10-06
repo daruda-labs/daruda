@@ -8,15 +8,15 @@
 //!
 //! GPUI-free.
 
-use crate::telegram::bridge::PaneRef;
+use crate::PaneRef;
 
 /// A pane's position in the most recent `/list` output. Only the adapter that
 /// produced that listing can resolve one.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) struct Ordinal(pub u32);
+pub struct Ordinal(pub u32);
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub(crate) enum UseTarget {
+pub enum UseTarget {
     Select(Ordinal),
     Clear,
 }
@@ -25,7 +25,7 @@ pub(crate) enum UseTarget {
 /// said where it should run, so the adapter fills that in before the executor
 /// sees the command, exactly as it turns an [`Ordinal`] into a [`PaneRef`].
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub(crate) enum FlowCommand {
+pub enum FlowCommand {
     List,
     Run { name: String },
 }
@@ -33,7 +33,7 @@ pub(crate) enum FlowCommand {
 /// `/task` and its three actions, each naming a row of the last `/task`
 /// listing. Those ordinals are the task listing's own, apart from `/list`'s.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub(crate) enum TaskCommand {
+pub enum TaskCommand {
     List,
     Start(Ordinal),
     Stop(Ordinal),
@@ -48,22 +48,22 @@ pub(crate) enum TaskCommand {
 /// `daruda_chat_list` and `daruda_worktree_list` take no arguments — a listing
 /// names nothing, only an action does.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub(crate) enum ResolvedFlowCommand {
+pub enum ResolvedFlowCommand {
     List,
     Run {
         name: String,
-        lane: crate::control::result::LaneHandle,
+        lane: crate::result::LaneHandle,
     },
     /// Stop whatever `lane` is running. Names no flow: a worktree runs one at
     /// a time, so the worktree *is* the identifier.
     Stop {
-        lane: crate::control::result::LaneHandle,
+        lane: crate::result::LaneHandle,
     },
 }
 
 /// Parsed from text. Targets are ordinals.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub(crate) enum ControlCommand {
+pub enum ControlCommand {
     List,
     Use(UseTarget),
     Say {
@@ -91,7 +91,7 @@ pub(crate) enum ControlCommand {
 
 /// What the executor runs. Every target is concrete.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub(crate) enum ResolvedCommand {
+pub enum ResolvedCommand {
     List,
     Say {
         target: PaneRef,
@@ -153,12 +153,12 @@ pub(crate) enum ResolvedCommand {
 /// outcome. Folding them in would leave `run` with two arms it could never
 /// answer, which is the unreachable state this split removes.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub(crate) enum GatedCommand {
+pub enum GatedCommand {
     /// Create a worktree and open a chat in it.
     ///
     /// Window-qualified: `ProjectId` is monotonic *per workspace*, so the id
     /// alone names a project in every open window (see
-    /// [`crate::control::result::LaneHandle`]).
+    /// [`crate::result::LaneHandle`]).
     LaneCreate {
         workspace: daruda_store::project::WorkspaceUuid,
         project: daruda_store::project::ProjectId,
@@ -169,7 +169,7 @@ pub(crate) enum GatedCommand {
     },
     /// Another agent chat in a worktree that already exists.
     ChatNew {
-        lane: crate::control::result::LaneHandle,
+        lane: crate::result::LaneHandle,
         agent: Option<String>,
     },
     /// A Backlog task in `project`. With `worktree` it runs in that existing
@@ -179,7 +179,7 @@ pub(crate) enum GatedCommand {
         project: daruda_store::project::ProjectId,
         title: String,
         prompt: String,
-        worktree: Option<crate::control::result::LaneHandle>,
+        worktree: Option<crate::result::LaneHandle>,
     },
     /// Start a Backlog task, and wait until it is running.
     TaskStart { task: String },
@@ -188,7 +188,7 @@ pub(crate) enum GatedCommand {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub(crate) enum ParseError {
+pub enum ParseError {
     /// Not addressed to us — no leading slash, or empty. The adapter falls
     /// back to its plain-text routing.
     NotACommand,
@@ -204,8 +204,9 @@ pub(crate) enum ParseError {
     },
 }
 
-/// Every command name we own. Also the suggestion pool for a typo.
-const COMMANDS: [&str; 8] = [
+/// Every command name we own. Also the suggestion pool for a typo, and the
+/// list an adapter's localized command menu is checked against.
+pub const COMMANDS: [&str; 8] = [
     "list", "use", "say", "stop", "flow", "task", "brief", "daruda",
 ];
 
@@ -215,7 +216,7 @@ const CLEAR_TOKEN: &str = "-";
 /// How far a typo may be from a real command name before we stop guessing.
 const SUGGESTION_MAX_DISTANCE: usize = 2;
 
-pub(crate) fn parse(input: &str) -> Result<ControlCommand, ParseError> {
+pub fn parse(input: &str) -> Result<ControlCommand, ParseError> {
     let trimmed = input.trim();
     let Some(body) = trimmed.strip_prefix('/') else {
         return Err(ParseError::NotACommand);

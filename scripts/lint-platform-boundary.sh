@@ -118,6 +118,7 @@ SCAN_DIRS=(
     "packages/config/src"
     "packages/project/src"
     "packages/ui/src"
+    "packages/control-types/src"
     "packages/flow/src"
     "packages/store/src"
     "packages/terminal/src"

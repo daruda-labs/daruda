@@ -37,6 +37,7 @@ gpui_platform = { git = "https://github.com/zed-industries/zed", package = "gpui
 daruda_acp = { path = "packages/acp" }
 daruda_agent = { path = "packages/agent" }
 daruda_config = { path = "packages/config" }
+daruda_control_types = { path = "packages/control-types" }
 daruda_core = { path = "packages/core" }
 daruda_flow = { path = "packages/flow" }
 daruda_project = { path = "packages/project" }

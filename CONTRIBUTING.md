@@ -142,7 +142,7 @@ Run these before committing:
 cargo fmt --all -- --check
 cargo clippy -p ghostty_vt -p ghostty_vt_sys -p daruda_terminal -p daruda \
   -p daruda_config -p daruda_store -p daruda_agent -p daruda_update \
-  -p daruda_acp -p daruda_core -p daruda_flow -p daruda_project -p daruda_ui -p ferrum_flow \
+  -p daruda_acp -p daruda_core -p daruda_flow -p daruda_project -p daruda_ui -p daruda_control_types -p ferrum_flow \
   --all-targets -- -D warnings
 ./scripts/lint-inline-literals.sh
 ./scripts/lint-paint-scope.sh
@@ -153,7 +153,7 @@ cargo clippy -p ghostty_vt -p ghostty_vt_sys -p daruda_terminal -p daruda \
 ./scripts/lint-viewport-row-scroll.sh
 cargo test -p ghostty_vt -p ghostty_vt_sys -p daruda_terminal -p daruda \
   -p daruda_config -p daruda_store -p daruda_agent -p daruda_update \
-  -p daruda_acp -p daruda_core -p daruda_flow -p daruda_project -p daruda_ui -p ferrum_flow
+  -p daruda_acp -p daruda_core -p daruda_flow -p daruda_project -p daruda_ui -p daruda_control_types -p ferrum_flow
 ./scripts/lint-no-silent-update.sh
 ./scripts/lint-agent-activity.sh
 ./scripts/lint-daruda-path-literals.sh
@@ -226,6 +226,7 @@ daruda/
 │   ├── acp/                    # daruda_acp: Agent Client Protocol client core
 │   ├── agent/                  # daruda_agent: agent provider integrations
 │   ├── config/                 # daruda_config: config system and agent presets
+│   ├── control-types/          # daruda_control_types: control command contract
 │   ├── core/                   # daruda_core: shared dependency-free utilities
 │   ├── flow/                   # daruda_flow: declarative ACP flow engine
 │   ├── project/                # daruda_project: runtime Project/Lane model, git ops

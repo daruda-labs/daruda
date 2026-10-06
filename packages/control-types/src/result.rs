@@ -1,24 +1,24 @@
 //! What a control command answers with.
 //!
 //! Carries data, never rendered sentences: an adapter for a human runs these
-//! through `crate::surface::strings`, an adapter for an agent serializes them
+//! through the app's `surface::strings`, an adapter for an agent serializes them
 //! as-is. A rendered string here would force one of those two to un-render it.
 //!
 //! GPUI-free.
 
 use serde::{Deserialize, Serialize};
 
-use crate::telegram::bridge::PaneRef;
+use crate::PaneRef;
 
 /// A pane's live agent activity.
 ///
 /// Deliberately a separate type from `AgentChatView`'s `ActivityState`, which
-/// is `pub(in crate::workspace)`. Widening that visibility would break the
-/// encapsulation `scripts/lint-agent-activity.sh` protects; the single
-/// conversion lives in `crate::workspace::control_ops`.
+/// is private to the app's `workspace` module. Widening that visibility would
+/// break the encapsulation `scripts/lint-agent-activity.sh` protects; the
+/// single conversion lives in the app's `workspace::control_ops`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
-pub(crate) enum Activity {
+pub enum Activity {
     Idle,
     Working,
     AwaitingPermission,
@@ -28,14 +28,14 @@ pub(crate) enum Activity {
 /// a pane with no session is neither working nor meaningfully idle.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
-pub(crate) enum Health {
+pub enum Health {
     Ok,
     Error,
     Unavailable,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub(crate) struct ChatSummary {
+pub struct ChatSummary {
     pub target: PaneRef,
     /// Catalog id of the agent this pane runs — the same handle
     /// `daruda_chat_new` takes, so a caller can open another chat under an
@@ -52,7 +52,7 @@ pub(crate) struct ChatSummary {
     /// Lane-scoped because that is where daruda tracks the signal.
     pub unread: bool,
     /// The agent-authored session title, flattened to one bounded line by
-    /// [`crate::control::agent_text::sanitize_title`] at construction — it is
+    /// [`crate::agent_text::sanitize_title`] at construction — it is
     /// agent-authored and otherwise unbounded, so every consumer, not just a
     /// phone screen, gets it capped.
     /// `None` = a session that has not titled itself yet.
@@ -67,13 +67,13 @@ pub(crate) struct ChatSummary {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub(crate) struct LaneGroup {
+pub struct LaneGroup {
     pub name: String,
     pub chats: Vec<ChatSummary>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub(crate) struct ProjectGroup {
+pub struct ProjectGroup {
     pub name: String,
     pub lanes: Vec<LaneGroup>,
 }
@@ -81,13 +81,13 @@ pub(crate) struct ProjectGroup {
 /// Windows are the outermost group because the same project can be open in
 /// two of them; without this axis their rows are indistinguishable by name.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub(crate) struct WindowGroup {
+pub struct WindowGroup {
     pub index: u32,
     pub projects: Vec<ProjectGroup>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub(crate) struct Listing {
+pub struct Listing {
     pub windows: Vec<WindowGroup>,
     /// Rows the *adapter* dropped to fit its own message budget. The executor
     /// never truncates, so it always reports `0`; the field exists so a
@@ -100,7 +100,7 @@ pub(crate) struct Listing {
 /// only "sent" would read as a hang on the phone.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
-pub(crate) enum SendDisposition {
+pub enum SendDisposition {
     Delivered,
     Queued,
     /// The text was a local slash command the pane handled itself (`/clear`),
@@ -112,7 +112,7 @@ pub(crate) enum SendDisposition {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
-pub(crate) enum StopDisposition {
+pub enum StopDisposition {
     Stopped,
     AlreadyIdle,
 }
@@ -125,7 +125,7 @@ pub(crate) enum StopDisposition {
 /// spell combinations none of them mean.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "state", rename_all = "snake_case")]
-pub(crate) enum PaneAnswer {
+pub enum PaneAnswer {
     /// What the turn this prompt started ended up saying.
     Text { text: String },
     /// The turn finished without producing any text — all tool calls.
@@ -150,7 +150,7 @@ pub(crate) enum PaneAnswer {
 /// orchestrator pane.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
-pub(crate) enum AskDisposition {
+pub enum AskDisposition {
     /// This request started the orchestrator, so the answer waits on its ACP
     /// handshake too.
     Connecting,
@@ -164,7 +164,7 @@ pub(crate) enum AskDisposition {
 
 /// Collapse orchestrator startup and prompt delivery into one phone-facing
 /// status.
-pub(crate) fn ask_disposition(connecting: bool, send: SendDisposition) -> AskDisposition {
+pub fn ask_disposition(connecting: bool, send: SendDisposition) -> AskDisposition {
     match (send, connecting) {
         (SendDisposition::HandledLocally, _) => AskDisposition::HandledLocally,
         (_, true) => AskDisposition::Connecting,
@@ -174,18 +174,18 @@ pub(crate) fn ask_disposition(connecting: bool, send: SendDisposition) -> AskDis
 }
 
 /// Which of the three flow directories a name resolved to. Mirrors
-/// `workspace::flow_paths::FlowOrigin`, which is `pub(in crate::workspace)`;
-/// the single conversion lives in `crate::workspace::control_ops`.
+/// the app's `workspace::flow_paths::FlowOrigin`, private to that module;
+/// the single conversion lives in the app's `workspace::control_ops`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
-pub(crate) enum FlowOriginKind {
+pub enum FlowOriginKind {
     Repo,
     Project,
     Global,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub(crate) struct FlowEntry {
+pub struct FlowEntry {
     /// The file name as it is on disk, so an answer can say which of two
     /// same-stem files (`ship.yaml` / `ship.yml`) it means.
     pub name: String,
@@ -207,7 +207,7 @@ pub(crate) struct FlowEntry {
 /// produce listing rows a caller cannot tell apart — and a command built from
 /// one of them would reach both.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
-pub(crate) struct LaneHandle {
+pub struct LaneHandle {
     pub workspace: daruda_store::project::WorkspaceUuid,
     pub project: daruda_store::project::ProjectId,
     /// Named `worktree` on the wire, matching what daruda has always
@@ -219,7 +219,7 @@ pub(crate) struct LaneHandle {
 impl LaneHandle {
     /// The window-local half, for a caller that has already resolved which
     /// workspace this names.
-    pub(crate) fn lane_ref(self) -> daruda_store::project::LaneRef {
+    pub fn lane_ref(self) -> daruda_store::project::LaneRef {
         daruda_store::project::LaneRef {
             project: self.project,
             lane: self.lane,
@@ -227,7 +227,7 @@ impl LaneHandle {
     }
 
     /// Qualify a window-local ref with the workspace that owns it.
-    pub(crate) fn new(
+    pub fn new(
         workspace: daruda_store::project::WorkspaceUuid,
         target: daruda_store::project::LaneRef,
     ) -> Self {
@@ -245,7 +245,7 @@ impl LaneHandle {
 /// second call: which project it belongs to, whether it is the one on screen,
 /// and how many chats are already in it.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub(crate) struct LaneEntry {
+pub struct LaneEntry {
     pub target: LaneHandle,
     /// Display name of the owning project.
     pub project: String,
@@ -258,7 +258,7 @@ pub(crate) struct LaneEntry {
 /// Where a task stands, in the words the Tasks UI uses.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
-pub(crate) enum TaskStatus {
+pub enum TaskStatus {
     Backlog,
     Running,
     Done,
@@ -267,7 +267,7 @@ pub(crate) enum TaskStatus {
 }
 
 impl TaskStatus {
-    pub(crate) fn of(state: &daruda_store::tasks::TaskState) -> Self {
+    pub fn of(state: &daruda_store::tasks::TaskState) -> Self {
         use daruda_store::tasks::TaskState;
         match state {
             TaskState::Backlog => Self::Backlog,
@@ -281,7 +281,7 @@ impl TaskStatus {
 
 /// The project a task belongs to, as an open window holds it.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub(crate) struct TaskProject {
+pub struct TaskProject {
     pub workspace: daruda_store::project::WorkspaceUuid,
     pub project: daruda_store::project::ProjectId,
     pub name: String,
@@ -289,7 +289,7 @@ pub(crate) struct TaskProject {
 
 /// One task. `task` is its id, the handle every task tool takes.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub(crate) struct TaskEntry {
+pub struct TaskEntry {
     pub task: String,
     pub title: String,
     pub status: TaskStatus,
@@ -300,7 +300,7 @@ pub(crate) struct TaskEntry {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub(crate) struct BriefSummary {
+pub struct BriefSummary {
     pub working: u32,
     pub awaiting_permission: u32,
     pub error: u32,
@@ -310,7 +310,7 @@ pub(crate) struct BriefSummary {
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
-pub(crate) enum ControlResult {
+pub enum ControlResult {
     Listing(Listing),
     /// `None` = the selection was cleared.
     Selected {
@@ -379,7 +379,7 @@ pub(crate) enum ControlResult {
         answer: PaneAnswer,
     },
     /// What one chat's agent last said, bounded by
-    /// [`crate::control::agent_text::bound_agent_text`].
+    /// [`crate::agent_text::bound_agent_text`].
     ///
     /// `None` is a pane whose transcript holds no assistant text — a turn that
     /// was all tool calls, or a session that has not answered yet. A distinct
@@ -428,7 +428,7 @@ pub(crate) enum ControlResult {
 /// adapter renders `spec::ParseError` directly.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "code", rename_all = "snake_case")]
-pub(crate) enum ControlError {
+pub enum ControlError {
     OrdinalNotFound {
         ordinal: u32,
     },
@@ -538,7 +538,7 @@ pub(crate) enum ControlError {
 impl std::fmt::Display for ControlError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         // Diagnostic only — the user-facing wording lives in the adapters,
-        // which run these through `crate::surface::strings`.
+        // which run these through the app's `surface::strings`.
         match self {
             Self::OrdinalNotFound { ordinal } => write!(f, "no chat at {ordinal}"),
             Self::NoTargetSelected => write!(f, "no target selected"),
@@ -577,7 +577,7 @@ impl std::fmt::Display for ControlError {
     }
 }
 
-pub(crate) type ControlOutcome = Result<ControlResult, ControlError>;
+pub type ControlOutcome = Result<ControlResult, ControlError>;
 
 #[cfg(test)]
 mod tests {

@@ -146,30 +146,6 @@ fn a_command_survives_a_bot_suffix_and_a_capital() {
     );
 }
 
-/// The names BotFather is handed have to be the names `parse` accepts, or
-/// a menu entry sends a command daruda answers with "unknown".
-#[test]
-fn the_botfather_registration_lists_every_command_name() {
-    let registered: Vec<&str> = crate::surface::strings::control::botfather_commands()
-        .lines()
-        .filter_map(|line| line.split(" - ").next())
-        .map(str::trim)
-        .map(|name| {
-            COMMANDS
-                .iter()
-                .copied()
-                .find(|c| *c == name)
-                .unwrap_or_else(|| panic!("{name} is registered but not a command"))
-        })
-        .collect();
-    for command in COMMANDS {
-        assert!(
-            registered.contains(&command),
-            "/{command} is a command but is not registered"
-        );
-    }
-}
-
 #[test]
 fn a_distant_typo_suggests_nothing() {
     assert_eq!(

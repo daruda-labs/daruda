@@ -1,21 +1,13 @@
 //! Shared remote-control messages and routing decisions.
 
-use daruda_store::project::WorkspaceUuid;
-
 pub(crate) mod core;
 mod keyboard;
 pub use core::RoutingCore;
 pub use keyboard::InlineKeyboard;
 
-/// Identifies one agent-chat pane across the whole process: a
-/// workspace (window) uuid plus that workspace's locally-scoped pane
-/// id. `PaneId` is only unique within a workspace, so routing an
-/// inbound reply needs both halves. Mirrors `LaneRef { project, lane }`.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
-pub struct PaneRef {
-    pub workspace: WorkspaceUuid,
-    pub pane: u64,
-}
+/// The pane identity every channel routes by; defined once with the control
+/// contract so the bots and the MCP surface cannot drift apart.
+pub use daruda_control_types::PaneRef;
 
 /// What a phone button press means: the option the user picked, and which
 /// way they picked it.

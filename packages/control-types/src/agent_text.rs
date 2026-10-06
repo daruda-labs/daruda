@@ -35,7 +35,7 @@ const TRUNCATION_MARKER: &str = "[...truncated by daruda...]";
 /// become spaces before the whitespace run is collapsed, so a multi-line title
 /// cannot break the row it is rendered on, and no consumer has to defend
 /// against one.
-pub(crate) fn sanitize_title(raw: &str) -> Option<String> {
+pub fn sanitize_title(raw: &str) -> Option<String> {
     let clean: String = raw
         .chars()
         .map(|c| if c.is_control() { ' ' } else { c })
@@ -60,7 +60,7 @@ pub(crate) fn sanitize_title(raw: &str) -> Option<String> {
 /// Counts `char`s, not bytes, so a multi-byte response never splits
 /// mid-character. Line breaks are preserved — a caller wanting one line wants
 /// [`sanitize_title`].
-pub(crate) fn elide_middle(text: &str, head: usize, tail: usize, marker: &str) -> String {
+pub fn elide_middle(text: &str, head: usize, tail: usize, marker: &str) -> String {
     let chars: Vec<char> = text.chars().collect();
     if chars.len() <= head + tail {
         return text.to_string();
@@ -76,7 +76,7 @@ pub(crate) fn elide_middle(text: &str, head: usize, tail: usize, marker: &str) -
 ///
 /// Deliberately does *not* flatten: this is markdown prose, and a body whose
 /// line breaks were collapsed would arrive as one unreadable paragraph.
-pub(crate) fn bound_agent_text(raw: &str) -> Option<String> {
+pub fn bound_agent_text(raw: &str) -> Option<String> {
     if raw.trim().is_empty() {
         return None;
     }
