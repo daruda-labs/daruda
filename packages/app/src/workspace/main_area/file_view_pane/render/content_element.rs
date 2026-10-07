@@ -19,6 +19,14 @@ use crate::workspace::main_area::file_view_pane::{
     CharPos, CharSelection, HighlightedSpan, VisualRow, VisualRowKind, WordChange,
 };
 
+/// What one render pass paints row text with: the colour of a token the
+/// highlighter left unbucketed, and the palette every bucket resolves under.
+#[derive(Clone, Copy)]
+pub(super) struct RowColors {
+    pub default_text: gpui::Hsla,
+    pub syntax: theme::SyntaxTheme,
+}
+
 /// Custom Element that renders one file-viewer content cell with character-level
 /// text selection. Shapes text in `prepaint` so pixel↔byte mapping is exact,
 /// then registers mouse event handlers in `paint` via `window.on_mouse_event`.
@@ -30,7 +38,7 @@ pub(super) struct FileViewerContentElement {
     word_changes: Vec<WordChange>,
     row_kind: VisualRowKind,
     char_selection: Option<CharSelection>,
-    default_text_color: gpui::Hsla,
+    colors: RowColors,
     font_size: Pixels,
     line_h: Pixels,
 }
@@ -41,7 +49,7 @@ impl FileViewerContentElement {
         row_idx: usize,
         row: &VisualRow,
         char_selection: Option<&CharSelection>,
-        default_text_color: gpui::Hsla,
+        colors: RowColors,
         font_size: Pixels,
         line_h: Pixels,
     ) -> Self {
@@ -53,7 +61,7 @@ impl FileViewerContentElement {
             word_changes: row.word_changes.clone(),
             row_kind: row.kind,
             char_selection: char_selection.cloned(),
-            default_text_color,
+            colors,
             font_size,
             line_h,
         }
@@ -135,7 +143,10 @@ impl gpui::Element for FileViewerContentElement {
                 .map(|span| TextRun {
                     len: span.text.len(),
                     font: font.clone(),
-                    color: span.color.unwrap_or(self.default_text_color),
+                    color: span
+                        .bucket
+                        .map(|b| self.colors.syntax.color(b))
+                        .unwrap_or(self.colors.default_text),
                     background_color: None,
                     underline: None,
                     strikethrough: None,
@@ -147,7 +158,7 @@ impl gpui::Element for FileViewerContentElement {
             vec![TextRun {
                 len: self.content.len(),
                 font,
-                color: self.default_text_color,
+                color: self.colors.default_text,
                 background_color: None,
                 underline: None,
                 strikethrough: None,

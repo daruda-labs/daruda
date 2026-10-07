@@ -529,17 +529,16 @@ pub(super) fn build_diff_view_model(
     // stat is from the exact same diff that builds the editor below.
     let stat = diff_stat_from_hunks(&hunks);
     let ext = diff.path.extension_str();
-    highlight_hunks(
-        &mut hunks,
-        LanguageHint::Extension(ext),
-        syntax_theme,
-        is_light,
-    );
+    highlight_hunks(&mut hunks, LanguageHint::Extension(ext));
     apply_word_diff(&mut hunks);
     let rows = build_diff_rows(&hunks, false);
     let show_line_numbers = diff.old_text.is_none();
+    let syntax = crate::ui::theme::syntax_theme_of(
+        crate::ui::theme::SyntaxPalette::from_config_name(syntax_theme),
+        is_light,
+    );
     Some((
-        build_diff_editor_model(&rows, colors, show_line_numbers),
+        build_diff_editor_model(&rows, colors, &syntax, show_line_numbers),
         stat,
     ))
 }

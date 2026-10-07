@@ -348,8 +348,8 @@ impl Workspace {
         }
     }
 
-    /// Reload open file views whose baked content — diff and markdown spans,
-    /// mermaid rasters — captured something the reload moved. At most once:
+    /// Reload open file views whose baked content — a diff pane's editor
+    /// model, mermaid rasters — captured something the reload moved. At most once:
     /// each later reason is gated on the earlier ones not having reloaded.
     pub(super) fn rebuild_file_panes_for_config(
         &mut self,
@@ -364,8 +364,8 @@ impl Workspace {
             );
         }
         // A UI-theme switch flips the syntax palette's light/dark variant; the
-        // pane palette feeds markdown raw highlighting, mermaid rasters and
-        // diff hunk rows; the editor font feeds every baked line. Pane chrome
+        // pane palette feeds mermaid rasters and the diff editor's resolved
+        // highlights; the editor font feeds every baked line. Pane chrome
         // reads the colours at render time and needs only the final notify.
         if delta.painted_ui_preset
             || delta.syntax_theme

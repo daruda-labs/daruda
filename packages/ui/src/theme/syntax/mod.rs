@@ -6,6 +6,10 @@ mod light;
 use gpui::Hsla;
 use gpui_component::highlighter::{SyntaxColors, ThemeStyle};
 
+// The theme-independent half — what a token *is* — lives with the content
+// pipeline so highlighted rows can be stored without a colour in them.
+pub use daruda_content::syntax::{SyntaxBucket, TokenStyle, bucket_for_capture};
+
 /// 24-bit hex → `Hsla`. Hex literals live here (the designated colour
 /// home, G4-exempt), never at the call site.
 fn base16(hex: u32) -> Hsla {
@@ -16,6 +20,7 @@ fn base16(hex: u32) -> Hsla {
 /// shared by the raw editor (via [`editor_syntax_colors_of`], installed
 /// into `gpui_component`'s `highlight_theme`) and the diff view (via
 /// [`syntax_color_of`]). Fields are semantic token buckets.
+#[derive(Clone, Copy)]
 pub struct SyntaxTheme {
     /// purple — keywords.
     pub keyword: Hsla,
@@ -45,31 +50,6 @@ pub struct SyntaxTheme {
     pub string_special_style: TokenStyle,
     /// Non-color channel for comments — italic to signal "noise".
     pub comment_style: TokenStyle,
-}
-
-/// A token's non-color rendering channel. `Default` = plain (no
-/// weight / style override). Lets a palette carry bold/italic alongside
-/// its colours so figure/ground survives low chroma and colour-vision
-/// deficiency.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub struct TokenStyle {
-    pub bold: bool,
-    pub italic: bool,
-}
-
-impl TokenStyle {
-    const PLAIN: Self = Self {
-        bold: false,
-        italic: false,
-    };
-    const BOLD: Self = Self {
-        bold: true,
-        italic: false,
-    };
-    const ITALIC: Self = Self {
-        bold: false,
-        italic: true,
-    };
 }
 
 /// Selectable syntax palette — chosen independently of the brand theme
@@ -140,56 +120,6 @@ impl SyntaxPalette {
             Self::NightOwl => "night-owl",
             Self::Darcula => "darcula",
         }
-    }
-}
-
-/// Semantic colour bucket — the unit a tree-sitter capture maps to.
-/// [`bucket_for_capture`] is the single place the capture grouping lives;
-/// every consumer (colour, non-color channel, editor `SyntaxColors`) reads
-/// through it so the grouping can't drift between paths.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum SyntaxBucket {
-    Keyword,
-    Function,
-    Type,
-    Constant,
-    String,
-    StringSpecial,
-    Tag,
-    TagDoctype,
-    Comment,
-    Default,
-}
-
-/// Map a tree-sitter highlight capture name onto its [`SyntaxBucket`].
-///
-/// A dotted capture that doesn't match exactly falls back to its first
-/// segment (`function.method` → `function`, `keyword.control` →
-/// `keyword`), mirroring the gpui_component editor's
-/// `SyntaxColors::style` resolution (`registry.rs`). Without this the
-/// raw editor coloured `function.method` / `type.builtin` via the base
-/// field while the diff view dropped them to `Default` — the two views
-/// disagreed on methods, qualified types, and keyword sub-kinds.
-/// Unrecognised captures (and the empty string) resolve to
-/// [`SyntaxBucket::Default`], so every token gets an explicit bucket.
-pub fn bucket_for_capture(capture: &str) -> SyntaxBucket {
-    use SyntaxBucket::*;
-    match capture {
-        "keyword" => Keyword,
-        "function" | "title" => Function,
-        "type" | "enum" | "constructor" | "label" | "preproc" | "embedded" => Type,
-        "constant" | "boolean" | "number" | "attribute" | "variant" | "link_uri" => Constant,
-        "string" | "text.literal" => String,
-        "string.escape" | "string.regex" | "string.special" | "string.special.symbol" => {
-            StringSpecial
-        }
-        "tag" | "variable.special" | "link_text" => Tag,
-        "tag.doctype" => TagDoctype,
-        "comment" | "comment.doc" | "hint" | "predictive" => Comment,
-        _ => match capture.split_once('.') {
-            Some((prefix, _)) => bucket_for_capture(prefix),
-            None => Default,
-        },
     }
 }
 

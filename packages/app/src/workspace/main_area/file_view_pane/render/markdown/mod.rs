@@ -67,6 +67,8 @@ struct MdColors {
     raised: gpui::Hsla,
     /// Code-block border, table lines, the `<hr>` rule.
     line: gpui::Hsla,
+    /// Token colours for fenced code, under the palette the raw editor uses.
+    syntax: theme::SyntaxTheme,
 }
 
 type OpenUrl = Rc<dyn Fn(&str, &mut Window, &mut App)>;
@@ -96,6 +98,10 @@ impl MdColors {
             fill: tokens.tint,
             raised: tokens.active_tint,
             line: tokens.border_tint,
+            syntax: theme::syntax_theme_of(
+                theme::active_syntax_palette(cx),
+                tokens.syntax_is_light,
+            ),
         }
     }
 }

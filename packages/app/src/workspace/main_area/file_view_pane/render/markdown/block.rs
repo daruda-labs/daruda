@@ -54,6 +54,7 @@ fn code_surface(assets: MdRenderAssets<'_>) -> gpui::Div {
 /// takes the surface's own text colour.
 pub(super) fn code_block_text(
     rows: &[VisualRow],
+    syntax: &theme::SyntaxTheme,
 ) -> (String, Vec<(std::ops::Range<usize>, HighlightStyle)>) {
     let mut text = String::new();
     let mut highlights = Vec::new();
@@ -68,7 +69,7 @@ pub(super) fn code_block_text(
         for span in row.spans.iter().filter(|s| !s.text.is_empty()) {
             let start = text.len();
             text.push_str(&span.text);
-            if let Some(color) = span.color {
+            if let Some(color) = span.bucket.map(|b| syntax.color(b)) {
                 highlights.push((
                     start..text.len(),
                     HighlightStyle {
@@ -233,7 +234,7 @@ pub(super) fn render_md_block(
         }
 
         MdBlock::CodeBlock { rows, .. } => {
-            let (text, highlights) = code_block_text(rows);
+            let (text, highlights) = code_block_text(rows, &assets.t.syntax);
             code_surface(assets)
                 .child(StyledText::new(text).with_highlights(highlights))
                 .into_any_element()

@@ -7,13 +7,13 @@ use std::collections::BTreeSet;
 
 #[test]
 fn parse_heading() {
-    let blocks = parse_markdown("# Hello\n", "base16-ocean.dark", false);
+    let blocks = parse_markdown("# Hello\n");
     assert!(matches!(blocks[0], MdBlock::Heading { level: 1, .. }));
 }
 
 #[test]
 fn parse_paragraph_with_inline() {
-    let blocks = parse_markdown("normal **bold** text\n", "base16-ocean.dark", false);
+    let blocks = parse_markdown("normal **bold** text\n");
     assert!(matches!(blocks[0], MdBlock::Paragraph(_)));
     if let MdBlock::Paragraph(spans) = &blocks[0] {
         assert!(spans.iter().any(|s| matches!(s, MdSpan::Bold(_))));
@@ -22,11 +22,7 @@ fn parse_paragraph_with_inline() {
 
 #[test]
 fn links_preserve_nested_inline_styles_and_plain_text() {
-    let blocks = parse_markdown(
-        "[**bold** and *italic*](https://example.com)\n",
-        "base16-ocean.dark",
-        false,
-    );
+    let blocks = parse_markdown("[**bold** and *italic*](https://example.com)\n");
     let MdBlock::Paragraph(spans) = &blocks[0] else {
         panic!("expected paragraph");
     };
@@ -47,7 +43,7 @@ fn links_preserve_nested_inline_styles_and_plain_text() {
 #[test]
 fn parse_fenced_code_block() {
     let md = "```rust\nfn main() {}\n```\n";
-    let blocks = parse_markdown(md, "base16-ocean.dark", false);
+    let blocks = parse_markdown(md);
     assert!(matches!(
         blocks[0],
         MdBlock::CodeBlock { lang: Some(_), .. }
@@ -73,7 +69,7 @@ fn fenced_code_blocks_are_highlighted_by_language_name() {
     ];
     for (lang, code) in cases {
         let md = format!("```{lang}\n{code}\n```\n");
-        let blocks = parse_markdown(&md, "base16-ocean.dark", false);
+        let blocks = parse_markdown(&md);
         let MdBlock::CodeBlock { rows, .. } = &blocks[0] else {
             panic!("`{lang}` fence did not parse as a code block");
         };
@@ -90,11 +86,7 @@ fn fenced_code_blocks_are_highlighted_by_language_name() {
 /// sentence, so the break is what a multi-paragraph footnote reads as.
 #[test]
 fn a_multi_paragraph_footnote_keeps_its_paragraphs_apart() {
-    let blocks = parse_markdown(
-        "[^n]: first paragraph\n\n    second paragraph\n",
-        "base16-ocean.dark",
-        false,
-    );
+    let blocks = parse_markdown("[^n]: first paragraph\n\n    second paragraph\n");
     let footnotes: Vec<_> = blocks
         .iter()
         .filter_map(|b| match b {
@@ -126,7 +118,7 @@ fn a_multi_paragraph_footnote_keeps_its_paragraphs_apart() {
 
 #[test]
 fn parse_bullet_list() {
-    let blocks = parse_markdown("- item one\n- item two\n", "base16-ocean.dark", false);
+    let blocks = parse_markdown("- item one\n- item two\n");
     assert!(matches!(blocks[0], MdBlock::BulletList { .. }));
     if let MdBlock::BulletList { items, .. } = &blocks[0] {
         assert_eq!(items.len(), 2);
@@ -136,7 +128,7 @@ fn parse_bullet_list() {
 /// A shared `loose_of` for the looseness tests: the flag the renderer
 /// reads, off the document's first block.
 fn loose_of(md: &str) -> bool {
-    match &parse_markdown(md, "base16-ocean.dark", false)[0] {
+    match &parse_markdown(md)[0] {
         MdBlock::BulletList { loose, .. } | MdBlock::OrderedList { loose, .. } => *loose,
         other => panic!("expected a list, got {}", md_block_plain_text(other)),
     }
@@ -173,7 +165,7 @@ fn a_multi_block_item_is_loose_but_a_nested_sublist_is_not() {
 /// tally.
 #[test]
 fn looseness_does_not_leak_between_nesting_levels() {
-    let outer_inner = |md: &str| match &parse_markdown(md, "base16-ocean.dark", false)[0] {
+    let outer_inner = |md: &str| match &parse_markdown(md)[0] {
         MdBlock::BulletList { items, loose } => {
             let inner = items.iter().find_map(|i| {
                 i.blocks.iter().find_map(|b| match b {
@@ -203,7 +195,7 @@ fn a_later_item_can_be_what_marks_the_list_loose() {
 /// single newlines turned it tight on the round trip.
 #[test]
 fn copied_text_keeps_a_list_as_loose_or_tight_as_it_was() {
-    let copy = |md: &str| md_block_plain_text(&parse_markdown(md, "base16-ocean.dark", false)[0]);
+    let copy = |md: &str| md_block_plain_text(&parse_markdown(md)[0]);
 
     assert_eq!(copy("- one\n- two\n"), "- one\n- two");
     assert_eq!(copy("- one\n\n- two\n"), "- one\n\n- two");
@@ -217,7 +209,7 @@ fn copied_text_keeps_a_list_as_loose_or_tight_as_it_was() {
 /// plain bullet.
 #[test]
 fn a_task_item_keeps_its_checkbox_tight_or_loose() {
-    let checks = |md: &str| match &parse_markdown(md, "base16-ocean.dark", false)[0] {
+    let checks = |md: &str| match &parse_markdown(md)[0] {
         MdBlock::BulletList { items, .. } => items.iter().map(|i| i.checked).collect::<Vec<_>>(),
         _ => panic!("expected a bullet list"),
     };
@@ -232,7 +224,7 @@ fn a_task_item_keeps_its_checkbox_tight_or_loose() {
 /// in the item's text on either shape.
 #[test]
 fn a_task_items_text_excludes_its_marker() {
-    let copy = |md: &str| md_block_plain_text(&parse_markdown(md, "base16-ocean.dark", false)[0]);
+    let copy = |md: &str| md_block_plain_text(&parse_markdown(md)[0]);
 
     assert_eq!(copy("- [ ] one\n- [x] two\n"), "- [ ] one\n- [x] two");
     assert_eq!(copy("- [ ] one\n\n- [x] two\n"), "- [ ] one\n\n- [x] two");
@@ -435,10 +427,7 @@ A-->B
 
     let mut observed = BTreeSet::new();
     for fixture in FIXTURES {
-        observe_blocks(
-            &parse_markdown(fixture, "base16-ocean.dark", false),
-            &mut observed,
-        );
+        observe_blocks(&parse_markdown(fixture), &mut observed);
     }
 
     assert_eq!(observed, EXPECTED.iter().copied().collect());
@@ -446,7 +435,7 @@ A-->B
 
 #[test]
 fn parse_horizontal_rule() {
-    let blocks = parse_markdown("---\n", "base16-ocean.dark", false);
+    let blocks = parse_markdown("---\n");
     assert!(matches!(blocks[0], MdBlock::Rule));
 }
 
@@ -607,7 +596,7 @@ fn resolve_images_recurses_into_nested_spans() {
 #[test]
 fn a_block_inside_a_list_item_stays_a_block() {
     let blocks_of = |md: &str| {
-        let blocks = parse_markdown(md, "base16-ocean.dark", false);
+        let blocks = parse_markdown(md);
         assert_eq!(
             blocks.len(),
             1,
@@ -672,7 +661,7 @@ fn a_block_inside_a_list_item_stays_a_block() {
 #[test]
 fn an_items_blocks_keep_their_document_order() {
     let md = "1. Verify:\n\n   ```sh\n   foo --version\n   ```\n\n   You should see a version.\n";
-    let blocks = parse_markdown(md, "base16-ocean.dark", false);
+    let blocks = parse_markdown(md);
     let MdBlock::OrderedList { items, .. } = &blocks[0] else {
         panic!(
             "expected an ordered list, got {}",

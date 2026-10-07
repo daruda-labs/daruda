@@ -11,7 +11,7 @@ use std::sync::{Arc, LazyLock, Mutex};
 use tree_sitter_highlight::{Highlight, HighlightConfiguration, HighlightEvent, Highlighter};
 
 use super::{DiffHunk, DiffLine, HighlightedSpan, VisualRow};
-use crate::ui::theme as dt_theme;
+use daruda_content::syntax::{SyntaxBucket, bucket_for_capture};
 
 /// Capture names recognised by bundled queries. Duplicated because
 /// `gpui_component::highlighter::HIGHLIGHT_NAMES` is not public.
@@ -81,19 +81,10 @@ pub(in crate::workspace) enum LanguageHint<'a> {
     FenceToken(&'a str),
 }
 
-pub(in crate::workspace) fn highlight_hunks(
-    hunks: &mut [DiffHunk],
-    lang: LanguageHint<'_>,
-    theme_name: &str,
-    is_light: bool,
-) {
+pub(in crate::workspace) fn highlight_hunks(hunks: &mut [DiffHunk], lang: LanguageHint<'_>) {
     let Some(config) = build_config(lang) else {
         return;
     };
-    let theme = dt_theme::syntax_theme_of(
-        dt_theme::SyntaxPalette::from_config_name(theme_name),
-        is_light,
-    );
 
     for hunk in hunks.iter_mut() {
         // Collect the display-line contents and remember their index in
@@ -111,7 +102,7 @@ pub(in crate::workspace) fn highlight_hunks(
             contents.push(content);
         }
 
-        let per_line = highlight_lines(&config, &contents, &theme);
+        let per_line = highlight_lines(&config, &contents);
         for (n, spans) in per_line.into_iter().enumerate() {
             if spans.is_empty() {
                 continue;
@@ -130,22 +121,13 @@ pub(in crate::workspace) fn highlight_hunks(
 /// All rows are parsed as a single document so multi-line tokens are
 /// coloured correctly throughout the file. Unknown extensions leave rows
 /// un-highlighted.
-pub(super) fn highlight_raw_rows(
-    rows: &mut [VisualRow],
-    lang: LanguageHint<'_>,
-    theme_name: &str,
-    is_light: bool,
-) {
+pub(super) fn highlight_raw_rows(rows: &mut [VisualRow], lang: LanguageHint<'_>) {
     let Some(config) = build_config(lang) else {
         return;
     };
-    let theme = dt_theme::syntax_theme_of(
-        dt_theme::SyntaxPalette::from_config_name(theme_name),
-        is_light,
-    );
 
     let contents: Vec<&str> = rows.iter().map(|r| r.content.as_str()).collect();
-    let per_line = highlight_lines(&config, &contents, &theme);
+    let per_line = highlight_lines(&config, &contents);
     for (i, spans) in per_line.into_iter().enumerate() {
         if !spans.is_empty() {
             rows[i].spans = spans;
@@ -212,12 +194,11 @@ fn build_config(hint: LanguageHint<'_>) -> Option<Arc<HighlightConfiguration>> {
 
 /// Highlight `contents` (one entry per line) as a single joined document
 /// and return the per-line spans. Every line is fully covered: bytes not
-/// inside a recognised capture get the default foreground, so every token
-/// carries an explicit colour.
+/// inside a recognised capture get the default bucket, so every token
+/// carries an explicit one.
 fn highlight_lines(
     config: &HighlightConfiguration,
     contents: &[&str],
-    theme: &dt_theme::SyntaxTheme,
 ) -> Vec<Vec<HighlightedSpan>> {
     let mut out = vec![Vec::new(); contents.len()];
     if contents.is_empty() {
@@ -241,14 +222,12 @@ fn highlight_lines(
         return out;
     };
 
-    let default_color = theme.color(dt_theme::SyntaxBucket::Default);
-
-    // Flatten the event stream into contiguous coloured byte ranges. The
+    // Flatten the event stream into contiguous bucketed byte ranges. The
     // active capture is the top of the start/end stack; `Source` events
     // cover the whole text, so uncaptured gaps fall through to the default
-    // bucket. Each range carries both the colour and the non-color channel.
+    // bucket.
     let mut stack: Vec<usize> = Vec::new();
-    let mut ranges: Vec<(usize, usize, gpui::Hsla, dt_theme::TokenStyle)> = Vec::new();
+    let mut ranges: Vec<(usize, usize, SyntaxBucket)> = Vec::new();
     for event in events {
         let Ok(event) = event else {
             return out;
@@ -262,15 +241,12 @@ fn highlight_lines(
                 if start >= end {
                     continue;
                 }
-                let (color, style) = stack
+                let bucket = stack
                     .last()
                     .and_then(|&idx| HIGHLIGHT_NAMES.get(idx))
-                    .map(|name| {
-                        let bucket = dt_theme::bucket_for_capture(name);
-                        (theme.color(bucket), theme.style(bucket))
-                    })
-                    .unwrap_or((default_color, dt_theme::TokenStyle::default()));
-                ranges.push((start, end, color, style));
+                    .map(|name| bucket_for_capture(name))
+                    .unwrap_or(SyntaxBucket::Default);
+                ranges.push((start, end, bucket));
             }
         }
     }
@@ -279,7 +255,7 @@ fn highlight_lines(
     // boundaries (the joining `\n` bytes sit between ranges and are dropped).
     for (li, lr) in line_ranges.iter().enumerate() {
         let mut spans: Vec<HighlightedSpan> = Vec::new();
-        for &(start, end, color, style) in &ranges {
+        for &(start, end, bucket) in &ranges {
             let clip_start = start.max(lr.start);
             let clip_end = end.min(lr.end);
             if clip_start >= clip_end {
@@ -287,13 +263,10 @@ fn highlight_lines(
             }
             let text = &src[clip_start..clip_end];
             match spans.last_mut() {
-                Some(last) if last.color == Some(color) && last.style == style => {
-                    last.text.push_str(text)
-                }
+                Some(last) if last.bucket == Some(bucket) => last.text.push_str(text),
                 _ => spans.push(HighlightedSpan {
                     text: text.to_owned(),
-                    color: Some(color),
-                    style,
+                    bucket: Some(bucket),
                 }),
             }
         }
@@ -319,12 +292,7 @@ mod tests {
         let diff = "@@ -1,2 +1,2 @@\n-old\n+new\n";
         let mut hunks = parse_diff_hunks(diff);
         // Unknown extension → no language → lines left intact, no panic.
-        highlight_hunks(
-            &mut hunks,
-            LanguageHint::Extension("unknown_ext_xyz"),
-            "base16-ocean.dark",
-            false,
-        );
+        highlight_hunks(&mut hunks, LanguageHint::Extension("unknown_ext_xyz"));
         assert_eq!(hunks[0].lines.len(), 2);
         for line in &hunks[0].lines {
             if let DiffLine::Removed { spans, .. } | DiffLine::Added { spans, .. } = line {
@@ -338,18 +306,10 @@ mod tests {
         use crate::workspace::main_area::file_view_pane::diff_parser::parse_diff_hunks;
         let diff = "@@ -1,1 +1,1 @@\n-let x = 1;\n+let y = 2;\n";
         let mut hunks = parse_diff_hunks(diff);
-        highlight_hunks(
-            &mut hunks,
-            LanguageHint::Extension("rs"),
-            "base16-ocean.dark",
-            false,
-        );
+        highlight_hunks(&mut hunks, LanguageHint::Extension("rs"));
 
         // Every display line should be fully covered by spans, and the
-        // `let` keyword should not be coloured with the default foreground.
-        let keyword_color = dt_theme::syntax_color("keyword");
-        let default = dt_theme::syntax_color("");
-        assert_ne!(keyword_color, default, "test palette sanity");
+        // `let` keyword should land in the keyword bucket, not the default.
 
         let mut saw_keyword = false;
         for line in &hunks[0].lines {
@@ -359,7 +319,7 @@ mod tests {
                 assert!(joined.contains("let"), "spans must cover full content");
                 if spans
                     .iter()
-                    .any(|s| s.text.contains("let") && s.color == Some(keyword_color))
+                    .any(|s| s.text.contains("let") && s.bucket == Some(SyntaxBucket::Keyword))
                 {
                     saw_keyword = true;
                 }
@@ -385,7 +345,7 @@ mod tests {
         // the shared alias table. Both must reach a real highlight query.
         for (ext, source) in [("java", "class A { int x = 1; }"), ("hpp", "int x = 1;")] {
             let mut rows = vec![make(source)];
-            highlight_raw_rows(&mut rows, LanguageHint::Extension(ext), "daruda", false);
+            highlight_raw_rows(&mut rows, LanguageHint::Extension(ext));
             assert!(
                 !rows[0].spans.is_empty(),
                 "{ext} should be highlighted, got no spans"
@@ -405,12 +365,7 @@ mod tests {
             spans: Vec::new(),
             word_changes: Vec::new(),
         }];
-        highlight_raw_rows(
-            &mut rows,
-            LanguageHint::Extension("unknown_ext_xyz"),
-            "base16-ocean.dark",
-            false,
-        );
+        highlight_raw_rows(&mut rows, LanguageHint::Extension("unknown_ext_xyz"));
         assert!(rows[0].spans.is_empty());
     }
 
@@ -431,21 +386,16 @@ mod tests {
         // must colour BOTH rows as `comment`; a per-line parse would miss
         // the continuation line — this is the reason the rows are joined.
         let mut rows = vec![make("/* a block comment"), make("that spans lines */")];
-        highlight_raw_rows(
-            &mut rows,
-            LanguageHint::Extension("rs"),
-            "base16-ocean.dark",
-            false,
-        );
+        highlight_raw_rows(&mut rows, LanguageHint::Extension("rs"));
 
-        let comment = dt_theme::syntax_color("comment");
-        assert_ne!(comment, dt_theme::syntax_color(""), "palette sanity");
         for (i, row) in rows.iter().enumerate() {
             assert!(!row.spans.is_empty(), "row {i} should be highlighted");
             assert!(
-                row.spans.iter().all(|s| s.color == Some(comment)),
-                "row {i} should be entirely comment-coloured, got {:?}",
-                row.spans.iter().map(|s| s.color).collect::<Vec<_>>()
+                row.spans
+                    .iter()
+                    .all(|s| s.bucket == Some(SyntaxBucket::Comment)),
+                "row {i} should be entirely comment-bucketed, got {:?}",
+                row.spans.iter().map(|s| s.bucket).collect::<Vec<_>>()
             );
         }
     }
@@ -463,15 +413,18 @@ mod tests {
             word_changes: Vec::new(),
         };
 
-        // The same source highlighted under different palettes must differ
-        // somewhere — proving the selection actually drives the colours.
+        // The same highlighted row resolved under different palettes must
+        // differ somewhere — proving the selection actually drives the
+        // colours now that the row stores buckets, not colours.
+        let mut highlighted = vec![make()];
+        highlight_raw_rows(&mut highlighted, LanguageHint::Extension("rs"));
         let profile = |theme_name: &str| {
-            let mut rows = vec![make()];
-            highlight_raw_rows(&mut rows, LanguageHint::Extension("rs"), theme_name, false);
-            rows[0]
+            use crate::ui::theme::{SyntaxPalette, syntax_theme_of};
+            let theme = syntax_theme_of(SyntaxPalette::from_config_name(theme_name), false);
+            highlighted[0]
                 .spans
                 .iter()
-                .map(|s| (s.text.clone(), s.color))
+                .map(|s| (s.text.clone(), s.bucket.map(|b| theme.color(b))))
                 .collect::<Vec<_>>()
         };
 
@@ -485,13 +438,13 @@ mod tests {
         // Unknown / legacy names resolve to the recommended Daruda palette.
         assert_eq!(daruda, profile("base16-ocean.dark"), "legacy name → daruda");
         // Daruda carries a non-color channel on keywords (bold).
-        let mut rows = vec![make()];
-        highlight_raw_rows(&mut rows, LanguageHint::Extension("rs"), "daruda", false);
+        let daruda_theme = crate::ui::theme::syntax_theme_of(Default::default(), false);
         assert!(
-            rows[0]
+            highlighted[0]
                 .spans
                 .iter()
-                .any(|s| s.text.contains("let") && s.style.bold),
+                .any(|s| s.text.contains("let")
+                    && s.bucket.is_some_and(|b| daruda_theme.style(b).bold)),
             "daruda keyword span should be bold"
         );
     }

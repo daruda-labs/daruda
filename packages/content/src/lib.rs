@@ -1,5 +1,6 @@
 //! Content processing the file viewer and the agent chat share: decoding
-//! raster images, and rendering mermaid through merman and resvg to BGRA.
+//! raster images, rendering mermaid through merman and resvg to BGRA, and
+//! the token vocabulary a highlighted row is stored in.
 //!
 //! GPUI-free and app-free. Colours arrive as a [`MermaidPalette`] of hex
 //! strings; building that palette from a theme and wrapping a
@@ -11,6 +12,7 @@ mod mermaid_label_geometry;
 mod mermaid_label_stroke;
 mod mermaid_node_contrast;
 mod mermaid_text_measurer;
+pub mod syntax;
 pub mod visual;
 
 /// Plain-data palette a diagram is themed with, resolved by the host at its

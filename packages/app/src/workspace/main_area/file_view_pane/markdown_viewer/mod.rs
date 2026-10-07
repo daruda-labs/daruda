@@ -121,8 +121,8 @@ pub(in crate::workspace) enum MdBlock {
 }
 
 /// Parse `text` into a `Vec<MdBlock>`. Code fences are syntax-highlighted
-/// using `syntax_theme` (falls back to the bundled default on unknown names).
-pub(super) fn parse_markdown(text: &str, syntax_theme: &str, is_light: bool) -> Vec<MdBlock> {
+/// into token buckets; the renderer picks their colours.
+pub(super) fn parse_markdown(text: &str) -> Vec<MdBlock> {
     let mut opts = Options::empty();
     opts.insert(Options::ENABLE_STRIKETHROUGH);
     opts.insert(Options::ENABLE_TABLES);
@@ -135,7 +135,7 @@ pub(super) fn parse_markdown(text: &str, syntax_theme: &str, is_light: bool) -> 
     let mut blocks = Vec::new();
 
     while pos < events.len() {
-        if let Some((block, consumed)) = parse_block(&events, pos, syntax_theme, is_light) {
+        if let Some((block, consumed)) = parse_block(&events, pos) {
             blocks.push(block);
             pos += consumed;
         } else {
@@ -145,12 +145,7 @@ pub(super) fn parse_markdown(text: &str, syntax_theme: &str, is_light: bool) -> 
     blocks
 }
 
-fn parse_block(
-    events: &[Event<'_>],
-    pos: usize,
-    syntax_theme: &str,
-    is_light: bool,
-) -> Option<(MdBlock, usize)> {
+fn parse_block(events: &[Event<'_>], pos: usize) -> Option<(MdBlock, usize)> {
     match &events[pos] {
         Event::Start(Tag::Heading { level, .. }) => {
             let (spans, consumed) = collect_inline_until(events, pos + 1, |e| {
@@ -194,12 +189,7 @@ fn parse_block(
             }
             let mut rows = build_code_rows(&text);
             if let Some(ref l) = lang {
-                highlight_raw_rows(
-                    &mut rows,
-                    LanguageHint::FenceToken(l),
-                    syntax_theme,
-                    is_light,
-                );
+                highlight_raw_rows(&mut rows, LanguageHint::FenceToken(l));
             }
             Some((MdBlock::CodeBlock { lang, rows }, consumed + 2))
         }
@@ -221,7 +211,7 @@ fn parse_block(
                 match &events[i] {
                     Event::Start(Tag::Item) => {
                         loose |= item_is_paragraph_wrapped(events, i + 1);
-                        let (item, consumed) = parse_item(events, i + 1, syntax_theme, is_light);
+                        let (item, consumed) = parse_item(events, i + 1);
                         items.push(item);
                         i += consumed + 2;
                     }
@@ -376,12 +366,7 @@ fn task_marker(events: &[Event<'_>], pos: usize) -> Option<bool> {
 
 /// Parse one list item starting at `pos` (just after `Start(Item)`).
 /// Returns the item and the number of events consumed (NOT including `End(Item)`).
-fn parse_item(
-    events: &[Event<'_>],
-    pos: usize,
-    syntax_theme: &str,
-    is_light: bool,
-) -> (ListItem, usize) {
+fn parse_item(events: &[Event<'_>], pos: usize) -> (ListItem, usize) {
     let mut i = pos;
     let checked = task_marker(events, pos);
 
@@ -404,7 +389,7 @@ fn parse_item(
             Event::TaskListMarker(_) => i += 1,
 
             _ => {
-                if let Some((block, consumed)) = parse_block(events, i, syntax_theme, is_light) {
+                if let Some((block, consumed)) = parse_block(events, i) {
                     close_bare(&mut bare, &mut blocks);
                     blocks.push(block);
                     i += consumed;

@@ -4,6 +4,7 @@ use super::inline::highlight_for;
 use super::prose::InlineStyle;
 use super::prose::is_openable_markdown_url;
 use crate::workspace::main_area::file_view_pane::{HighlightedSpan, VisualRow, VisualRowKind};
+use daruda_content::syntax::SyntaxBucket;
 
 fn row(content: &str, spans: Vec<HighlightedSpan>) -> VisualRow {
     VisualRow {
@@ -17,11 +18,19 @@ fn row(content: &str, spans: Vec<HighlightedSpan>) -> VisualRow {
     }
 }
 
-fn span(text: &str, color: Option<gpui::Hsla>) -> HighlightedSpan {
+fn span(text: &str, bucket: Option<SyntaxBucket>) -> HighlightedSpan {
     HighlightedSpan {
         text: text.to_string(),
-        color,
-        style: Default::default(),
+        bucket,
+    }
+}
+
+/// The theme the code-block tests resolve buckets under: a keyword comes out
+/// [`RED`], so an assertion can name the colour it expects.
+fn syntax() -> crate::ui::theme::SyntaxTheme {
+    crate::ui::theme::SyntaxTheme {
+        keyword: RED,
+        ..crate::ui::theme::syntax_theme_of(Default::default(), false)
     }
 }
 
@@ -50,6 +59,7 @@ fn colors() -> MdColors {
         fill: hue(0.4),
         raised: hue(0.5),
         line: hue(0.6),
+        syntax: syntax(),
     }
 }
 
@@ -123,7 +133,10 @@ fn markdown_links_allow_only_external_safe_schemes() {
 
 #[test]
 fn rows_join_with_newlines_so_one_element_covers_the_block() {
-    let (text, highlights) = code_block_text(&[row("fn a() {}", vec![]), row("fn b() {}", vec![])]);
+    let (text, highlights) = code_block_text(
+        &[row("fn a() {}", vec![]), row("fn b() {}", vec![])],
+        &syntax(),
+    );
     assert_eq!(text, "fn a() {}\nfn b() {}");
     assert!(
         highlights.is_empty(),
@@ -133,10 +146,16 @@ fn rows_join_with_newlines_so_one_element_covers_the_block() {
 
 #[test]
 fn a_highlight_range_addresses_the_joined_text_not_its_own_row() {
-    let (text, highlights) = code_block_text(&[
-        row("let x", vec![]),
-        row("", vec![span("let", Some(RED)), span(" y", None)]),
-    ]);
+    let (text, highlights) = code_block_text(
+        &[
+            row("let x", vec![]),
+            row(
+                "",
+                vec![span("let", Some(SyntaxBucket::Keyword)), span(" y", None)],
+            ),
+        ],
+        &syntax(),
+    );
     assert_eq!(text, "let x\nlet y");
     assert_eq!(highlights.len(), 1);
     assert_eq!(
@@ -149,8 +168,13 @@ fn a_highlight_range_addresses_the_joined_text_not_its_own_row() {
 
 #[test]
 fn an_empty_span_contributes_no_range() {
-    let (text, highlights) =
-        code_block_text(&[row("", vec![span("", Some(RED)), span("x", None)])]);
+    let (text, highlights) = code_block_text(
+        &[row(
+            "",
+            vec![span("", Some(SyntaxBucket::Keyword)), span("x", None)],
+        )],
+        &syntax(),
+    );
     assert_eq!(text, "x");
     assert!(highlights.is_empty());
 }
@@ -159,10 +183,16 @@ fn an_empty_span_contributes_no_range() {
 fn every_highlight_lands_on_a_char_boundary() {
     // `StyledText::with_highlights` debug-asserts this, and multi-byte
     // source is ordinary in a code block.
-    let (text, highlights) = code_block_text(&[row(
-        "",
-        vec![span("사과", Some(RED)), span("=1", Some(RED))],
-    )]);
+    let (text, highlights) = code_block_text(
+        &[row(
+            "",
+            vec![
+                span("사과", Some(SyntaxBucket::Keyword)),
+                span("=1", Some(SyntaxBucket::Keyword)),
+            ],
+        )],
+        &syntax(),
+    );
     for (range, _) in &highlights {
         assert!(text.is_char_boundary(range.start) && text.is_char_boundary(range.end));
     }

@@ -218,7 +218,7 @@ mod tests {
             source: crate::workspace::main_area::file_view_pane::DiffSource::WorkingTree,
             live_status: None,
             content: PaneFileContent::LoadedMarkdown {
-                blocks: parse_markdown(markdown, "default", false),
+                blocks: parse_markdown(markdown),
                 raw_rows: Vec::new(),
                 total_count: markdown.lines().count(),
                 byte_truncated: false,

@@ -46,14 +46,14 @@ pub(in crate::workspace) const FILE_VIEWER_VIRTUAL_OVERSCAN: usize = 8;
 // Visual row — pre-computed flat render unit
 // ----------------------------------------------------------------
 
-/// A single syntax-highlighted text segment within a diff line.
+/// A single syntax-highlighted text segment within a diff line. Carries what
+/// the token *is*; the host turns that into a colour with the `SyntaxTheme`
+/// it paints under, so a stored row survives a palette switch.
 #[derive(Clone)]
 pub(in crate::workspace) struct HighlightedSpan {
     pub text: String,
     /// `None` means use the default text color for the row kind.
-    pub color: Option<gpui::Hsla>,
-    /// Non-color channel (bold/italic) for this segment, from the palette.
-    pub style: crate::ui::theme::TokenStyle,
+    pub bucket: Option<daruda_content::syntax::SyntaxBucket>,
 }
 
 /// A byte range within a `VisualRow::content` string that differs at the

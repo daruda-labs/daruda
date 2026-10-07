@@ -38,7 +38,7 @@ impl Engine {
 /// stamped: the renderer resolves each image through the table those passes
 /// number, and a span left unresolved would index past its end.
 fn parse_and_resolve(md: &str) -> (Vec<MdBlock>, MdImages) {
-    let mut blocks = parse_markdown(md, "default", false);
+    let mut blocks = parse_markdown(md);
     let rasters = resolve_all(&mut blocks, &mut |_| None, &mut |_| None);
     (blocks, MdImages::from_rasters(rasters))
 }

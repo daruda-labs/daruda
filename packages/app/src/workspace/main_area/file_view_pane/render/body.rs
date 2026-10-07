@@ -7,7 +7,7 @@
 use crate::ui::theme;
 use gpui::{AnyElement, Context, IntoElement, ScrollWheelEvent, div, prelude::*, px};
 
-use super::content_element::FileViewerContentElement;
+use super::content_element::{FileViewerContentElement, RowColors};
 use super::markdown::render_md_body;
 use super::virtual_list::virtual_range;
 use crate::surface::strings;
@@ -204,7 +204,15 @@ fn render_raw_body(
 ) -> gpui::Div {
     let t = theme::current(cx);
     let line_no_text = t.text_subtle;
-    let body_text = t.text_body;
+    // Resolved once per pass: every visible row reads its token colours from
+    // this, under the palette the raw editor paints with.
+    let row_colors = RowColors {
+        default_text: t.text_body,
+        syntax: theme::syntax_theme_of(
+            theme::active_syntax_palette(cx),
+            theme::PaneSurfaceTokens::file_viewer(cx).syntax_is_light,
+        ),
+    };
     let focused_bg = t.file_viewer_search_focused_bg;
     let match_bg = t.file_viewer_search_match_bg;
     // Config-driven editor font + matching row height, so the markdown raw
@@ -265,7 +273,7 @@ fn render_raw_body(
                 i,
                 row,
                 char_selection,
-                body_text,
+                row_colors,
                 px(editor_font),
                 line_h,
             ));

@@ -564,6 +564,10 @@ impl Workspace {
                 build_diff_editor_model(
                     fc.view.active_rows(),
                     &DiffColors::from_file_viewer_surface(t, surface),
+                    &crate::ui::theme::syntax_theme_of(
+                        crate::ui::theme::active_syntax_palette(cx),
+                        surface.syntax_is_light,
+                    ),
                     true,
                 )
             })
@@ -693,8 +697,9 @@ impl Workspace {
     ///
     /// Raw panes highlight live from `cx.theme().highlight_theme` at paint
     /// time, so a `cx.notify()` on the editor recolours them while
-    /// preserving scroll position and selection. Diff and markdown panes
-    /// bake their colours into spans at load time, so they need a full
+    /// preserving scroll position and selection. Rows store token buckets
+    /// and markdown resolves them at paint, but a diff pane's editor model
+    /// and every mermaid raster carry resolved colours, so they need a full
     /// reload. Called when `config.file_viewer.syntax_theme` changes.
     pub(in crate::workspace) fn reload_file_panes(&mut self, cx: &mut Context<Self>) {
         // Collect first — `load_pane_file_content` reborrows `self`. Each
@@ -744,7 +749,6 @@ impl Workspace {
         };
         let wt_path = wt.path.clone();
         let repo_root = self.git_repo_root_for(target);
-        let syntax_theme = self.syntax_theme.clone();
         // Match rendered diagrams (mermaid) to the file-viewer surface.
         // Computed here because the loader runs GPUI-free on a background
         // thread.
@@ -763,7 +767,6 @@ impl Workspace {
                     &request_for_load.source,
                     request_for_load.mode,
                     request_for_load.live_status,
-                    &syntax_theme,
                     &mermaid_palette,
                 )
             },
@@ -801,6 +804,10 @@ impl Workspace {
                                 build_diff_editor_model(
                                     fc.view.rows_for_content(&content),
                                     &DiffColors::from_file_viewer_surface(t, surface),
+                                    &crate::ui::theme::syntax_theme_of(
+                                        crate::ui::theme::active_syntax_palette(cx),
+                                        surface.syntax_is_light,
+                                    ),
                                     true,
                                 )
                             })

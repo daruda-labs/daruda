@@ -9,7 +9,7 @@ use std::ops::Range;
 
 use gpui::{FontStyle, FontWeight, HighlightStyle, Hsla, SharedString};
 
-use crate::ui::theme::{PaneSurfaceTokens, TokenStyle};
+use crate::ui::theme::{PaneSurfaceTokens, SyntaxTheme, TokenStyle};
 
 use crate::ui::LineDecoration;
 
@@ -142,6 +142,7 @@ fn line_spans(
     line_text: &str,
     base_fg: Hsla,
     colors: &DiffColors,
+    syntax: &SyntaxTheme,
 ) -> Vec<(Range<usize>, HighlightStyle)> {
     // Hunk headers carry no code: foreground is the hunk colour, with the
     // trailing context (everything past `content`) dimmed. No word diff.
@@ -162,7 +163,11 @@ fn line_spans(
     for span in &row.spans {
         let end = (off + span.text.len()).min(line_text.len());
         if end > off {
-            fg.push((off, end, span.color.unwrap_or(base_fg), span.style));
+            let (color, style) = span
+                .bucket
+                .map(|b| (syntax.color(b), syntax.style(b)))
+                .unwrap_or((base_fg, TokenStyle::default()));
+            fg.push((off, end, color, style));
         }
         off = end;
     }
@@ -234,6 +239,7 @@ fn line_spans(
 pub(in crate::workspace) fn build_diff_editor_model(
     rows: &[VisualRow],
     colors: &DiffColors,
+    syntax: &SyntaxTheme,
     show_line_numbers: bool,
 ) -> DiffEditorModel {
     let left_w = rows
@@ -282,7 +288,7 @@ pub(in crate::workspace) fn build_diff_editor_model(
             gutter: Some(SharedString::from(gutter)),
         });
 
-        for (r, style) in line_spans(row, &line_text, base_fg, colors) {
+        for (r, style) in line_spans(row, &line_text, base_fg, colors, syntax) {
             highlights.push((line_start + r.start..line_start + r.end, style));
         }
 
@@ -329,6 +335,10 @@ mod tests {
         }
     }
 
+    fn syntax() -> SyntaxTheme {
+        crate::ui::theme::syntax_theme_of(Default::default(), false)
+    }
+
     fn row(kind: VisualRowKind, left: &str, right: &str, content: &str) -> VisualRow {
         VisualRow {
             kind,
@@ -361,7 +371,7 @@ mod tests {
             row(VisualRowKind::Removed, "2", "", "let x = 1;"),
             row(VisualRowKind::Added, "", "2", "let y = 2;"),
         ];
-        let m = build_diff_editor_model(&rows, &colors(), true);
+        let m = build_diff_editor_model(&rows, &colors(), &syntax(), true);
         // No `+`/`-` markers: lines are the bare content.
         assert_eq!(m.text, "fn a() {}\nlet x = 1;\nlet y = 2;");
         // Dual gutter, right-aligned columns ("old new").
@@ -385,7 +395,7 @@ mod tests {
             row(VisualRowKind::Removed, "2", "", "let x = 1;"),
             row(VisualRowKind::Added, "", "2", "let y = 2;"),
         ];
-        let m = build_diff_editor_model(&rows, &colors(), false);
+        let m = build_diff_editor_model(&rows, &colors(), &syntax(), false);
         // Every gutter is the empty string (present, so the editor doesn't
         // fall back to its own sequential 1,2,3 numbering).
         for d in &m.decorations {
@@ -404,23 +414,16 @@ mod tests {
         r.spans = vec![
             HighlightedSpan {
                 text: "let ".into(),
-                color: Some(Hsla {
-                    h: 0.,
-                    s: 0.,
-                    l: 0.9,
-                    a: 1.,
-                }),
-                style: TokenStyle::default(),
+                bucket: Some(daruda_content::syntax::SyntaxBucket::Keyword),
             },
             HighlightedSpan {
                 text: "y = 2;".into(),
-                color: None,
-                style: TokenStyle::default(),
+                bucket: None,
             },
         ];
         // The "y" differs at the word level (bytes 4..5).
         r.word_changes = vec![WordChange { start: 4, end: 5 }];
-        let m = build_diff_editor_model(&[r], &colors(), true);
+        let m = build_diff_editor_model(&[r], &colors(), &syntax(), true);
         assert_contiguous(&m);
         // Exactly the word-change range carries the add word background.
         let with_bg: Vec<_> = m
@@ -436,7 +439,7 @@ mod tests {
     fn hunk_header_packs_context_and_blank_gutter() {
         let mut r = row(VisualRowKind::HunkHeader, "", "", "@@ -1,3 +1,4 @@");
         r.header_context = "fn a()".into();
-        let m = build_diff_editor_model(&[r], &colors(), true);
+        let m = build_diff_editor_model(&[r], &colors(), &syntax(), true);
         assert_eq!(m.text, "@@ -1,3 +1,4 @@  fn a()");
         // Blank gutter for headers.
         assert_eq!(m.decorations[0].gutter.as_deref(), Some(" "));

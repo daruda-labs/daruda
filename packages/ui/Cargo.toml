@@ -17,6 +17,7 @@ test-support = []
 
 [dependencies]
 daruda_config = { workspace = true }
+daruda_content = { workspace = true }
 daruda_core = { workspace = true }
 daruda_terminal = { workspace = true }
 ferrum_flow = { workspace = true }
