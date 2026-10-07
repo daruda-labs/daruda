@@ -12,10 +12,12 @@ workspace = true
 
 [dependencies]
 anyhow = "1"
+imara-diff = "0.2"
 image = { version = "0.25", default-features = false, features = ["png", "jpeg", "gif", "webp", "bmp"] }
 # Mermaid → SVG renderer. Not vendored — no daruda-side patch needed.
 merman = { version = "0.8.0-alpha.3", features = ["render"] }
 resvg = "0.45"
+similar = "2"
 
 [dev-dependencies]
 serde_json = "1"

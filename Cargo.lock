@@ -1686,7 +1686,6 @@ dependencies = [
  "humantime",
  "ignore",
  "image",
- "imara-diff",
  "lsp-types",
  "notify",
  "nucleo-matcher",
@@ -1789,9 +1788,11 @@ version = "0.2.16"
 dependencies = [
  "anyhow",
  "image",
+ "imara-diff",
  "merman",
  "resvg",
  "serde_json",
+ "similar",
 ]
 
 [[package]]

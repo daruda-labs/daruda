@@ -1,32 +1,29 @@
-//! Data model and diff parser for the file viewer.
-//!
-//! The viewer replaces the terminal area in the focused pane only while
-//! a file or diff is open. PTY processes keep running; removing the view
-//! from the render tree does not affect Entity lifetime.
-//!
-//! Rendering lives in the sibling `render/` module.
+//! Data model for the file viewer; the diff rows it holds are
+//! `daruda_content::diff`'s. The viewer replaces the terminal area in the
+//! focused pane only while a file or diff is open — PTY processes keep
+//! running. Rendering lives in the sibling `render/` module.
 
 pub(in crate::workspace) mod diff_editor;
-mod diff_parser;
 pub(in crate::workspace) mod file_content;
 pub(super) mod highlighter;
 mod image_source;
 pub(in crate::workspace) mod images;
-pub(super) mod line_diff;
 pub(super) mod markdown_viewer;
 pub(in crate::workspace) mod mermaid_theme;
 pub(super) mod search_ops;
 mod search_state;
 mod selection;
 pub(in crate::workspace) use daruda_content::visual;
-pub(super) mod word_diff;
 
 pub mod render;
 
 #[cfg(test)]
 mod tests;
 
-pub(in crate::workspace) use diff_parser::{DiffHunk, DiffLine, parse_diff_hunks};
+pub(in crate::workspace) use daruda_content::diff::{
+    DiffHunk, DiffLine, HighlightedSpan, VisualRow, VisualRowKind, WordChange, count_diff_stats,
+    line_diff, parse_diff_hunks, word_diff,
+};
 pub(in crate::workspace) use search_state::FileViewerSearch;
 pub(in crate::workspace) use selection::{CharPos, CharSelection, SelectionDrag};
 
@@ -41,70 +38,6 @@ pub(in crate::workspace) const FILE_VIEWER_MAX_LINES: usize = 2000;
 pub(in crate::workspace) const FILE_VIEWER_MAX_BYTES: usize = 5 * 1024 * 1024;
 /// Rows rendered above and below the visible viewport.
 pub(in crate::workspace) const FILE_VIEWER_VIRTUAL_OVERSCAN: usize = 8;
-
-// ----------------------------------------------------------------
-// Visual row — pre-computed flat render unit
-// ----------------------------------------------------------------
-
-/// A single syntax-highlighted text segment within a diff line. Carries what
-/// the token *is*; the host turns that into a colour with the `SyntaxTheme`
-/// it paints under, so a stored row survives a palette switch.
-#[derive(Clone)]
-pub(in crate::workspace) struct HighlightedSpan {
-    pub text: String,
-    /// `None` means use the default text color for the row kind.
-    pub bucket: Option<daruda_content::syntax::SyntaxBucket>,
-}
-
-/// A byte range within a `VisualRow::content` string that differs at the
-/// word level vs. the adjacent Removed/Added line pair.
-#[derive(Clone)]
-pub(in crate::workspace) struct WordChange {
-    pub start: usize,
-    pub end: usize,
-}
-
-/// A single display row produced from either a raw file line or a diff line.
-/// Built once at load time; the renderer and copy helpers consume this directly.
-#[derive(Clone)]
-pub(in crate::workspace) struct VisualRow {
-    pub kind: VisualRowKind,
-    /// Left line-number column (empty string when absent).
-    pub line_no_left: String,
-    /// Right line-number column (diff view only; empty string when absent).
-    pub line_no_right: String,
-    /// Display content — no marker prefix; that is added by the renderer.
-    pub content: String,
-    /// Trailing context text after `@@ -N,M +N,M @@` for HunkHeader rows.
-    /// Empty for all other kinds.
-    pub header_context: String,
-    /// Syntax-highlighted spans. Empty means fall back to plain `content` text.
-    pub spans: Vec<HighlightedSpan>,
-    /// Word-level change byte ranges within `content` (Added/Removed rows only).
-    pub word_changes: Vec<WordChange>,
-}
-
-#[derive(Clone, Copy, PartialEq, Eq)]
-pub(in crate::workspace) enum VisualRowKind {
-    Plain,
-    HunkHeader,
-    Context,
-    Added,
-    Removed,
-    NoNewline,
-}
-
-impl VisualRow {
-    /// Text placed in the clipboard for this row (marker prefix included).
-    pub(in crate::workspace) fn copy_text(&self) -> String {
-        match self.kind {
-            VisualRowKind::Added => format!("+{}", self.content),
-            VisualRowKind::Removed => format!("-{}", self.content),
-            VisualRowKind::Context => format!(" {}", self.content),
-            _ => self.content.clone(),
-        }
-    }
-}
 
 // ----------------------------------------------------------------
 // Core types
@@ -322,140 +255,16 @@ impl PaneFileContent {
     }
 }
 
-// ----------------------------------------------------------------
-// Row builders (called at load time, never at render time)
-// ----------------------------------------------------------------
-
-/// Build the flat row list for a raw file. Capped at `FILE_VIEWER_MAX_LINES`.
+/// [`daruda_content::diff::build_raw_rows`] under the viewer's line cap.
 pub(in crate::workspace) fn build_raw_rows(lines: &[String]) -> Vec<VisualRow> {
-    lines
-        .iter()
-        .take(FILE_VIEWER_MAX_LINES)
-        .enumerate()
-        .map(|(i, line)| VisualRow {
-            kind: VisualRowKind::Plain,
-            line_no_left: (i + 1).to_string(),
-            line_no_right: String::new(),
-            content: line.clone(),
-            header_context: String::new(),
-            spans: Vec::new(),
-            word_changes: Vec::new(),
-        })
-        .collect()
+    daruda_content::diff::build_raw_rows(lines, FILE_VIEWER_MAX_LINES)
 }
 
-/// Build the flat row list for a unified diff.
-/// When `hide_ctx` is true, `DiffLine::Context` rows are omitted and hunks
-/// that contain only context lines are skipped entirely (no orphan headers).
+/// [`daruda_content::diff::build_diff_rows`] with the marker row in the
+/// user's language.
 pub(in crate::workspace) fn build_diff_rows(hunks: &[DiffHunk], hide_ctx: bool) -> Vec<VisualRow> {
-    use crate::surface::strings::file_viewer::no_newline;
-    let mut rows = Vec::new();
-    for hunk in hunks {
-        // When hiding context, skip hunks that have no non-context lines.
-        if hide_ctx
-            && hunk
-                .lines
-                .iter()
-                .all(|l| matches!(l, DiffLine::Context { .. }))
-        {
-            continue;
-        }
-        rows.push(VisualRow {
-            kind: VisualRowKind::HunkHeader,
-            line_no_left: String::new(),
-            line_no_right: String::new(),
-            content: hunk.header.clone(),
-            header_context: hunk.header_context.clone(),
-            spans: Vec::new(),
-            word_changes: Vec::new(),
-        });
-        for line in &hunk.lines {
-            match line {
-                DiffLine::Context { .. } if hide_ctx => {}
-                DiffLine::Context {
-                    old_no,
-                    new_no,
-                    content,
-                    spans,
-                } => {
-                    rows.push(VisualRow {
-                        kind: VisualRowKind::Context,
-                        line_no_left: old_no.to_string(),
-                        line_no_right: new_no.to_string(),
-                        content: content.clone(),
-                        header_context: String::new(),
-                        spans: spans_to_row_spans(spans),
-                        word_changes: Vec::new(),
-                    });
-                }
-                DiffLine::Added {
-                    new_no,
-                    content,
-                    spans,
-                    word_changes,
-                } => {
-                    rows.push(VisualRow {
-                        kind: VisualRowKind::Added,
-                        line_no_left: String::new(),
-                        line_no_right: new_no.to_string(),
-                        content: content.clone(),
-                        header_context: String::new(),
-                        spans: spans_to_row_spans(spans),
-                        word_changes: word_changes.clone(),
-                    });
-                }
-                DiffLine::Removed {
-                    old_no,
-                    content,
-                    spans,
-                    word_changes,
-                } => {
-                    rows.push(VisualRow {
-                        kind: VisualRowKind::Removed,
-                        line_no_left: old_no.to_string(),
-                        line_no_right: String::new(),
-                        content: content.clone(),
-                        header_context: String::new(),
-                        spans: spans_to_row_spans(spans),
-                        word_changes: word_changes.clone(),
-                    });
-                }
-                DiffLine::NoNewline => {
-                    rows.push(VisualRow {
-                        kind: VisualRowKind::NoNewline,
-                        line_no_left: String::new(),
-                        line_no_right: String::new(),
-                        content: no_newline().to_owned(),
-                        header_context: String::new(),
-                        spans: Vec::new(),
-                        word_changes: Vec::new(),
-                    });
-                }
-            }
-        }
-    }
-    rows
-}
-
-/// Convert `&[HighlightedSpan]` to an owned `Vec<HighlightedSpan>`.
-fn spans_to_row_spans(spans: &[HighlightedSpan]) -> Vec<HighlightedSpan> {
-    spans.to_vec()
-}
-
-/// Count added and removed lines across all hunks.
-pub(super) fn count_diff_stats(hunks: &[DiffHunk]) -> (usize, usize) {
-    let mut added = 0usize;
-    let mut removed = 0usize;
-    for hunk in hunks {
-        for line in &hunk.lines {
-            match line {
-                DiffLine::Added { .. } => added += 1,
-                DiffLine::Removed { .. } => removed += 1,
-                _ => {}
-            }
-        }
-    }
-    (added, removed)
+    let no_newline = crate::surface::strings::file_viewer::no_newline();
+    daruda_content::diff::build_diff_rows(hunks, hide_ctx, &no_newline)
 }
 
 // ----------------------------------------------------------------

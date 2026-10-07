@@ -15,7 +15,7 @@ use imara_diff::{Algorithm, BasicLineDiffPrinter, Diff, InternedInput, UnifiedDi
 /// algorithm, with the default 3 lines of context. The result is in the
 /// same format `git diff` emits (minus the file header), ready for
 /// [`super::parse_diff_hunks`].
-pub(in crate::workspace) fn unified_diff_text(old: &str, new: &str) -> String {
+pub fn unified_diff_text(old: &str, new: &str) -> String {
     let input = InternedInput::new(old, new);
     let mut diff = Diff::compute(Algorithm::Histogram, &input);
     // Slider postprocessing picks human-friendly hunk boundaries; always

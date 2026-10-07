@@ -6,7 +6,7 @@
 
 use super::{HighlightedSpan, WordChange};
 
-pub(in crate::workspace) struct DiffHunk {
+pub struct DiffHunk {
     /// The `@@ -old +new @@` portion of the hunk header.
     pub header: String,
     /// Trailing context text after the closing `@@` (e.g. `fn foo() {`).
@@ -19,7 +19,7 @@ pub(in crate::workspace) struct DiffHunk {
     pub lines: Vec<DiffLine>,
 }
 
-pub(in crate::workspace) enum DiffLine {
+pub enum DiffLine {
     Context {
         old_no: usize,
         new_no: usize,
@@ -42,7 +42,7 @@ pub(in crate::workspace) enum DiffLine {
 }
 
 /// Parse unified diff text (output of `git diff`) into hunks.
-pub(in crate::workspace) fn parse_diff_hunks(diff_text: &str) -> Vec<DiffHunk> {
+pub fn parse_diff_hunks(diff_text: &str) -> Vec<DiffHunk> {
     let mut hunks: Vec<DiffHunk> = Vec::new();
     let mut old_line = 0usize;
     let mut new_line = 0usize;

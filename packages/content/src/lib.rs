@@ -1,11 +1,12 @@
 //! Content processing the file viewer and the agent chat share: decoding
 //! raster images, rendering mermaid through merman and resvg to BGRA, and
-//! the token vocabulary a highlighted row is stored in.
+//! turning a diff into highlighted rows.
 //!
 //! GPUI-free and app-free. Colours arrive as a [`MermaidPalette`] of hex
 //! strings; building that palette from a theme and wrapping a
 //! [`visual::RasterImage`] for GPUI stay with the host.
 
+pub mod diff;
 mod mermaid_contrast;
 mod mermaid_host_theme;
 mod mermaid_label_geometry;

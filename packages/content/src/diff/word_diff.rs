@@ -13,7 +13,7 @@ use super::{DiffHunk, DiffLine, WordChange};
 const WORD_DIFF_LINE_LIMIT: usize = 300;
 
 /// Annotate consecutive removed/added blocks with word-level change ranges.
-pub(in crate::workspace) fn apply_word_diff(hunks: &mut [DiffHunk]) {
+pub fn apply_word_diff(hunks: &mut [DiffHunk]) {
     for hunk in hunks.iter_mut() {
         let mut i = 0;
         while i < hunk.lines.len() {
@@ -232,7 +232,7 @@ mod tests {
 
     #[test]
     fn apply_word_diff_marks_adjacent_pair() {
-        use crate::workspace::main_area::file_view_pane::diff_parser::parse_diff_hunks;
+        use crate::diff::parse_diff_hunks;
         let diff = "@@ -1,2 +1,2 @@\n-foo_old\n+foo_new\n";
         let mut hunks = parse_diff_hunks(diff);
         apply_word_diff(&mut hunks);
@@ -254,7 +254,7 @@ mod tests {
 
     #[test]
     fn apply_word_diff_skips_non_adjacent() {
-        use crate::workspace::main_area::file_view_pane::diff_parser::parse_diff_hunks;
+        use crate::diff::parse_diff_hunks;
         // Context line between Removed and Added — no pairing.
         let diff = "@@ -1,3 +1,3 @@\n-foo\n ctx\n+bar\n";
         let mut hunks = parse_diff_hunks(diff);
@@ -275,7 +275,7 @@ mod tests {
 
     #[test]
     fn apply_word_diff_pairs_multi_line_block_correctly() {
-        use crate::workspace::main_area::file_view_pane::diff_parser::parse_diff_hunks;
+        use crate::diff::parse_diff_hunks;
         // 2 removed + 2 added: removed[0]↔added[0], removed[1]↔added[1].
         // A naive scan could mis-pair removed[1]↔added[0] instead.
         let diff =
@@ -334,7 +334,7 @@ mod tests {
 
     #[test]
     fn apply_word_diff_pairs_unequal_block_by_position() {
-        use crate::workspace::main_area::file_view_pane::diff_parser::parse_diff_hunks;
+        use crate::diff::parse_diff_hunks;
         // 2 removed + 1 added — N≠M. The first min(N,M)=1 line pair is
         // word-diffed positionally; the surplus removed line is left plain.
         let diff = "@@ -1,2 +1,1 @@\n-foo\n-bar\n+baz\n";
@@ -368,7 +368,7 @@ mod tests {
 
     #[test]
     fn apply_word_diff_pairs_unequal_block_added_surplus() {
-        use crate::workspace::main_area::file_view_pane::diff_parser::parse_diff_hunks;
+        use crate::diff::parse_diff_hunks;
         // 1 removed + 2 added — surplus on the added side this time.
         let diff = "@@ -1,1 +1,2 @@\n-foo\n+baz\n+qux\n";
         let mut hunks = parse_diff_hunks(diff);
@@ -399,7 +399,7 @@ mod tests {
 
     #[test]
     fn apply_word_diff_skips_long_lines() {
-        use crate::workspace::main_area::file_view_pane::diff_parser::parse_diff_hunks;
+        use crate::diff::parse_diff_hunks;
         let long = "x".repeat(WORD_DIFF_LINE_LIMIT + 1);
         let diff = format!("@@ -1,2 +1,2 @@\n-{long}\n+{long}z\n");
         let mut hunks = parse_diff_hunks(&diff);

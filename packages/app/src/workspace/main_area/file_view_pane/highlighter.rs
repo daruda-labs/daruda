@@ -288,7 +288,7 @@ mod tests {
 
     #[test]
     fn highlight_hunks_unknown_ext_is_plain() {
-        use crate::workspace::main_area::file_view_pane::diff_parser::parse_diff_hunks;
+        use crate::workspace::main_area::file_view_pane::parse_diff_hunks;
         let diff = "@@ -1,2 +1,2 @@\n-old\n+new\n";
         let mut hunks = parse_diff_hunks(diff);
         // Unknown extension → no language → lines left intact, no panic.
@@ -303,7 +303,7 @@ mod tests {
 
     #[test]
     fn highlight_hunks_rust_colours_keyword() {
-        use crate::workspace::main_area::file_view_pane::diff_parser::parse_diff_hunks;
+        use crate::workspace::main_area::file_view_pane::parse_diff_hunks;
         let diff = "@@ -1,1 +1,1 @@\n-let x = 1;\n+let y = 2;\n";
         let mut hunks = parse_diff_hunks(diff);
         highlight_hunks(&mut hunks, LanguageHint::Extension("rs"));
