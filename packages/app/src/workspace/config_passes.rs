@@ -324,6 +324,7 @@ impl Workspace {
             return;
         }
         let syntax_theme = self.syntax_theme.clone();
+        let preferred_editor = self.preferred_editor.clone();
         let views: Vec<_> = self
             .every_agent_chat()
             .map(|(_, view)| view.clone())
@@ -339,6 +340,9 @@ impl Workspace {
                     // idle pane sees no ACP event to carry it in.
                     view.set_syntax_theme(&syntax_theme);
                     view.reconcile_embeds_after_theme_change(cx);
+                }
+                if delta.preferred_editor {
+                    view.set_preferred_editor(&preferred_editor);
                 }
                 if delta.agent_chat_reading_width && view.content_width.is_reading() {
                     view.list_state.remeasure();

@@ -673,11 +673,7 @@ pub(in crate::workspace) struct AgentChatView {
     pub(super) pane_id: PaneId,
     /// The workspace window this view renders in, captured at construction so
     /// diff-editor / `InputState` creation can re-enter the workspace window.
-    /// Also the way back to the owning `Workspace` for render-time actions
-    /// this self-owned entity dispatches into it (diff-header "open in file
-    /// view" / "open externally") — resolved on demand via
-    /// `WindowRegistry::workspace_for_window`, the same lookup this view's own
-    /// pane context-menu builder already uses (`render/mod.rs`).
+    /// Never a way back to the `Workspace`: asks go out as [`AgentChatEvent`].
     pub(super) window_handle: AnyWindowHandle,
     /// Pane-level focus handle for `Cmd+W` close routing. The view's `render`
     /// tracks it (like `TerminalView`), so `wrapper_focus_handle` returns
@@ -848,6 +844,10 @@ pub(in crate::workspace) struct AgentChatView {
     /// fold expand or a seeded transcript can ask for a diff embed without one.
     /// Single update site: [`Self::set_syntax_theme`].
     syntax_theme: String,
+    /// The configured external editor's preset name, so a diff header can say
+    /// which editor "open externally" launches. Pushed by the host, like
+    /// `syntax_theme`; single update site: [`Self::set_preferred_editor`].
+    preferred_editor: String,
     /// Activity-bar title derived from `session_title` + the first user prompt.
     /// Neither input moves per frame, but resolving it *in* `render` made it the
     /// paint path's top cost on a pane whose first message was long. Derived
@@ -1048,6 +1048,7 @@ impl AgentChatView {
             command_analysis: CommandAnalysisIndex::default(),
             turn_boundary: Default::default(),
             syntax_theme,
+            preferred_editor: String::new(),
             activity_title: None,
             session_config: SessionConfig::default(),
             session_capabilities: SessionCapabilitiesView::default(),
@@ -1102,6 +1103,16 @@ impl AgentChatView {
     /// each event, and the config-reload path writes the new palette name
     /// directly — an idle pane gets no events, so waiting for one would leave the
     /// diff embeds fingerprinted against a palette the user already left.
+    pub(in crate::workspace) fn set_preferred_editor(&mut self, editor: &str) {
+        if self.preferred_editor != editor {
+            self.preferred_editor = editor.to_owned();
+        }
+    }
+
+    pub(in crate::workspace) fn preferred_editor(&self) -> &str {
+        &self.preferred_editor
+    }
+
     pub(in crate::workspace) fn set_syntax_theme(&mut self, theme: &str) {
         if self.syntax_theme != theme {
             self.syntax_theme = theme.to_owned();

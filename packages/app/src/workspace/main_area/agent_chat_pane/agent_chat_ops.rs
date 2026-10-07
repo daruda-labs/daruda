@@ -595,6 +595,8 @@ impl Workspace {
             }
         });
         self.subscribe_agent_chat(pane_id, &view, window, cx);
+        let preferred_editor = self.preferred_editor.clone();
+        view.update(cx, |view, _| view.set_preferred_editor(&preferred_editor));
         Pane {
             id: pane_id,
             content: PaneContent::AgentChat(AgentChatContent {

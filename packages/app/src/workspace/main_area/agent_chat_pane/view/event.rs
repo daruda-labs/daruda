@@ -2,6 +2,8 @@
 //! the `Workspace`; it emits one of these and the subscription made where the
 //! view is built acts on it. Data only — wording is the host's to choose.
 
+use std::path::PathBuf;
+
 use daruda_content::link_target::LinkTarget;
 use daruda_store::observability::error_report::ErrorReport;
 use gpui::{Pixels, Point};
@@ -18,6 +20,10 @@ pub(in crate::workspace) enum AgentChatEvent {
     /// A link or tool resource was clicked, already classified against this
     /// pane's session — the host only has to open it.
     OpenLink(LinkTarget),
+    /// A diff header's path: show that file in the pane-area file viewer.
+    OpenDiffInFileView(PathBuf),
+    /// A diff header's "open externally": hand the file to the user's editor.
+    OpenFileExternally(PathBuf),
     /// A right press on a tool resource, recorded so the pane menu it opens
     /// resolves the resource as the click would.
     ResourceRightClicked {

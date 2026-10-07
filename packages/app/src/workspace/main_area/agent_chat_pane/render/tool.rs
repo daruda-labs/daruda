@@ -10,8 +10,8 @@ use daruda_acp::{
     ToolCallItem, ToolKindView, ToolOutputBlock, ToolStatusView,
 };
 use gpui::{
-    AnyElement, AnyWindowHandle, App, ElementId, Hsla, IntoElement, MouseButton, Pixels,
-    SharedString, Window, div, prelude::*, px,
+    AnyElement, App, ElementId, Hsla, IntoElement, MouseButton, Pixels, SharedString, Window, div,
+    prelude::*, px,
 };
 
 use super::RenderAssets;
@@ -44,7 +44,6 @@ use crate::workspace::main_area::agent_chat_pane::rows::{
     FilterMatchIndex, LiveSubagentUnits, effective_tool_status,
 };
 use crate::workspace::main_area::agent_chat_pane::view::AgentChatView;
-use crate::workspace::main_area::pane_tree::PaneId;
 
 #[derive(Clone)]
 struct OutputBlockContext<'a> {
@@ -86,8 +85,8 @@ pub(super) struct CardContext<'a> {
     pub(super) call_window: TailWindow,
     pub(super) t: &'a theme::DarudaTheme,
     pub(super) dim: f32,
-    pub(super) pane_id: PaneId,
-    pub(super) window_handle: AnyWindowHandle,
+    /// The host's external editor, named by the diff header's tooltip.
+    pub(super) preferred_editor: &'a str,
 }
 
 pub(super) fn tool_card(
@@ -111,8 +110,7 @@ pub(super) fn tool_card(
         call_window,
         t,
         dim,
-        pane_id,
-        window_handle,
+        preferred_editor,
     } = ctx;
     // Derived here rather than by each caller: a subagent launch takes
     // `FoldKey::Subagent` and every other call takes `FoldKey::Tool`, and a
@@ -360,8 +358,7 @@ pub(super) fn tool_card(
                 diff_context,
                 t,
                 dim,
-                pane_id,
-                window_handle,
+                preferred_editor,
                 window,
                 cx,
             ));

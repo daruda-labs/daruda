@@ -43,6 +43,12 @@ impl Workspace {
             AgentChatEvent::OpenLink(target) => {
                 self.open_link_target(pane_id, target.clone(), window, cx);
             }
+            AgentChatEvent::OpenDiffInFileView(path) => {
+                self.open_diff_in_file_view(pane_id, path.clone(), window, cx);
+            }
+            AgentChatEvent::OpenFileExternally(path) => {
+                self.open_pane_file_externally(pane_id, path.clone(), cx);
+            }
             AgentChatEvent::ResourceRightClicked {
                 position,
                 uri,

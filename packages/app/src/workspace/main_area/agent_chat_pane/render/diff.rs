@@ -3,10 +3,7 @@
 //! the collapsed `+N −M` badge, and the inline fallback lines.
 
 use daruda_acp::DiffView;
-use gpui::{
-    AnyElement, AnyWindowHandle, App, Entity, Hsla, IntoElement, SharedString, Window, div,
-    prelude::*, px,
-};
+use gpui::{AnyElement, App, Entity, Hsla, IntoElement, SharedString, Window, div, prelude::*, px};
 
 use super::DiffStats;
 use super::embed::bounded_editor_embed;
@@ -14,11 +11,9 @@ use super::fold_header::{FoldHeader, FoldRow};
 use crate::surface::strings as s;
 use crate::ui::theme;
 use crate::ui::{ButtonVariants as _, Icon, Sizable as _, button_bare, copy_button};
-use crate::window_registry::WindowRegistry;
 use crate::workspace::main_area::agent_chat_pane::agent_chat_helpers::{DiffStat, diff_editor_key};
 use crate::workspace::main_area::agent_chat_pane::fold::{FoldContext, FoldKey, FoldState};
-use crate::workspace::main_area::agent_chat_pane::view::AgentChatView;
-use crate::workspace::main_area::pane_tree::PaneId;
+use crate::workspace::main_area::agent_chat_pane::view::{AgentChatEvent, AgentChatView};
 
 const ICON_CONTENT_COPY: &str = "icons/ui/content-copy.svg";
 const ICON_CHECK: &str = "icons/ui/check.svg";
@@ -46,8 +41,7 @@ pub(super) fn diff_block(
     context: FoldContext,
     t: &theme::DarudaTheme,
     dim: f32,
-    pane_id: PaneId,
-    window_handle: AnyWindowHandle,
+    preferred_editor: &str,
     window: &mut Window,
     cx: &mut Context<AgentChatView>,
 ) -> AnyElement {
@@ -61,11 +55,7 @@ pub(super) fn diff_block(
     // a link through cursor + hover underline. The hue follows the UI link
     // token, but the lightness is resolved against the agent-chat pane so a
     // light UI over a dark terminal preset (or the inverse) stays readable.
-    // Clicking it opens the file in the pane-area file
-    // viewer — dispatched through `Workspace::open_diff_in_file_view`, reached
-    // via `WindowRegistry` since this self-owned view has no direct `Workspace`
-    // handle (the same lookup its own pane context-menu builder uses,
-    // `render/mod.rs`).
+    // Clicking it asks the host to open the file in the pane-area file viewer.
     let path_for_click = diff.path.clone();
     let path_for_external_open = diff.path.clone();
     let path_link = div()
@@ -84,39 +74,25 @@ pub(super) fn diff_block(
             s::agent_chat::diff_open_in_file_view(),
         ))
         .child(SharedString::from(path_string.clone()))
-        .on_click(move |_, window, cx| {
+        .on_click(cx.listener(move |_this, _, _window, cx| {
             // Keep the click from bubbling to an ancestor click handler —
             // same defensive stop as `code_copy_button`'s, even though
             // `.toggle_on_chevron()` below means this row carries no
             // ambient handler today.
             cx.stop_propagation();
-            let Some(ws) =
-                WindowRegistry::workspace_for_window(window_handle, cx).and_then(|ws| ws.upgrade())
-            else {
-                return;
-            };
-            let path = path_for_click.clone();
-            ws.update(cx, |ws, cx| {
-                ws.open_diff_in_file_view(pane_id, path, window, cx)
-            });
-        });
+            cx.emit(AgentChatEvent::OpenDiffInFileView(path_for_click.clone()));
+        }));
     // `with_interactive_title`, not `with_title`: the path carries a click
     // handler, so it has to shrink-wrap its glyphs instead of spanning the
     // stretch slot (`fold_header` owns that geometry and explains why).
     let mut header = FoldHeader::with_interactive_title(path_link);
     // Open-externally action — launches the user's preferred editor (Settings
-    // → External Editor) or the OS default handler. Same dispatch shape as
-    // the path click, one Workspace method over. The tooltip names the editor
-    // the click will actually launch, read from the same `Workspace` field the
-    // action itself resolves so label and behaviour cannot disagree; with no
-    // preferred editor the OS default handler runs and has no name to show.
-    let external_editor = WindowRegistry::workspace_for_window(window_handle, cx)
-        .and_then(|ws| ws.upgrade())
-        .map(|ws| ws.read(cx).preferred_editor.clone());
-    let open_externally_tooltip = match external_editor
-        .as_deref()
-        .and_then(daruda_config::external_editor_preset)
-    {
+    // → External Editor) or the OS default handler. The tooltip names the
+    // editor the click will actually launch, from the value the host pushes
+    // from the same field its action resolves, so label and behaviour cannot
+    // disagree; with no preferred editor the OS default handler runs and has
+    // no name to show.
+    let open_externally_tooltip = match daruda_config::external_editor_preset(preferred_editor) {
         Some(preset) => s::agent_chat::diff_open_in_editor(preset.display_name),
         None => s::agent_chat::diff_open_externally(),
     };
@@ -132,16 +108,12 @@ pub(super) fn diff_block(
         .xsmall()
         .icon(Icon::empty().path(ICON_OPEN_IN_NEW))
         .tooltip(open_externally_tooltip)
-        .on_click(move |_, _window, cx| {
+        .on_click(cx.listener(move |_this, _, _window, cx| {
             cx.stop_propagation();
-            let Some(ws) =
-                WindowRegistry::workspace_for_window(window_handle, cx).and_then(|ws| ws.upgrade())
-            else {
-                return;
-            };
-            let path = path_for_external_open.clone();
-            ws.update(cx, |ws, cx| ws.open_pane_file_externally(pane_id, path, cx));
-        })
+            cx.emit(AgentChatEvent::OpenFileExternally(
+                path_for_external_open.clone(),
+            ));
+        }))
         .into_any_element(),
     );
     // Copy-path action — always-visible trailing icon (this pane's diffs are

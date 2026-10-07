@@ -27,8 +27,8 @@ mod tool;
 
 use daruda_acp::ChatItem;
 use gpui::{
-    AnyElement, AnyWindowHandle, Entity, IntoElement, ListSizingBehavior, MouseButton,
-    SharedString, Window, canvas, div, list, prelude::*, px,
+    AnyElement, Entity, IntoElement, ListSizingBehavior, MouseButton, SharedString, Window, canvas,
+    div, list, prelude::*, px,
 };
 
 /// Read-only diff editor entities keyed by `"{tool_call_id}#{diff_index}"`
@@ -1029,8 +1029,7 @@ fn render_agent_item(
             this.tail_calls.value(),
             t,
             this.dim_amount,
-            this.pane_id,
-            this.window_handle,
+            this.preferred_editor(),
             window,
             cx,
         ),
@@ -1062,8 +1061,7 @@ fn render_item(
     call_window: TailWindow,
     t: &theme::DarudaTheme,
     dim: f32,
-    pane_id: PaneId,
-    window_handle: AnyWindowHandle,
+    preferred_editor: &str,
     window: &mut Window,
     cx: &mut Context<AgentChatView>,
 ) -> AnyElement {
@@ -1102,8 +1100,7 @@ fn render_item(
                 call_window,
                 t,
                 dim,
-                pane_id,
-                window_handle,
+                preferred_editor,
             },
             window,
             cx,

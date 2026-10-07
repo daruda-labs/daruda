@@ -151,3 +151,67 @@ fn a_resource_right_press_reaches_the_pane_menu(cx: &mut TestAppContext) {
     })
     .unwrap();
 }
+
+/// A diff header's "open in file viewer" reaches the host, which refuses a
+/// remote session's path — the observable answer without a filesystem.
+#[gpui::test]
+fn a_diff_open_from_a_remote_chat_reaches_the_host(cx: &mut TestAppContext) {
+    use crate::surface::strings as s;
+    use daruda_store::project::PaneCwd;
+
+    let (window, workspace) = build_workspace(cx);
+    cx.update_window(window.into(), |_, window, cx| {
+        workspace.update(cx, |ws, cx| {
+            let pane = ws.create_agent_chat_pane(
+                Some(PaneCwd::Remote("/srv/app".into())),
+                None,
+                ws.agents[0].id.clone(),
+                None,
+                window,
+                cx,
+            );
+            let id = pane.id;
+            ws.active_runtime_mut().panes.push(pane);
+            let view = ws.agent_chat_view(id).expect("a chat pane").clone();
+            view.update(cx, |_, cx| {
+                cx.emit(AgentChatEvent::OpenDiffInFileView("/srv/app/a.rs".into()));
+            });
+        })
+    })
+    .unwrap();
+    cx.run_until_parked();
+    workspace.read_with(cx, |ws, _| {
+        assert_eq!(
+            times_reported(ws, &s::agent_chat::diff_remote_path_unsupported()),
+            1
+        );
+    });
+}
+
+/// The editor a diff header names is the host's, pushed in: seeded when the
+/// view is built, and re-pushed when the setting changes.
+#[gpui::test]
+fn the_host_pushes_its_preferred_editor_into_the_chat(cx: &mut TestAppContext) {
+    let (window, workspace) = build_workspace(cx);
+    let pane = cx
+        .update_window(window.into(), |_, window, cx| {
+            workspace.update(cx, |ws, cx| {
+                ws.preferred_editor = "zed".into();
+                ws.open_agent_chat_pane(window, cx);
+                ws.active_runtime().panes.last().expect("pane").id
+            })
+        })
+        .unwrap();
+    workspace.read_with(cx, |ws, cx| {
+        let view = ws.agent_chat_view(pane).expect("a chat pane");
+        assert_eq!(view.read(cx).preferred_editor(), "zed");
+    });
+
+    let mut config = daruda_config::Config::default();
+    config.editor.preferred = "cursor".into();
+    workspace.update(cx, |ws, cx| ws.apply_config(&config, cx));
+    workspace.read_with(cx, |ws, cx| {
+        let view = ws.agent_chat_view(pane).expect("a chat pane");
+        assert_eq!(view.read(cx).preferred_editor(), "cursor");
+    });
+}
