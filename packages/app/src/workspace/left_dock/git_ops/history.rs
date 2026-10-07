@@ -58,7 +58,7 @@ impl Workspace {
             .unwrap_or_default();
         let message = if !typed.trim().is_empty() {
             typed
-        } else if self.git_config.default_commit_message && !staged.is_empty() {
+        } else if self.mirrors.git_config.default_commit_message && !staged.is_empty() {
             let names: Vec<&str> = staged.iter().map(String::as_str).collect();
             app_strings::git::default_commit_message(&names)
         } else {
@@ -71,7 +71,7 @@ impl Workspace {
             return;
         };
 
-        if !self.git_config.confirm_commit {
+        if !self.mirrors.git_config.confirm_commit {
             let wh = window.window_handle();
             self.do_commit_changes(message, wh, cx);
             return;
@@ -415,7 +415,7 @@ impl Workspace {
         if self.git_repo_root_for(self.active).is_none() {
             return;
         }
-        if !self.git_config.confirm_push {
+        if !self.mirrors.git_config.confirm_push {
             self.do_push(cx);
             return;
         }

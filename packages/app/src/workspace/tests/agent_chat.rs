@@ -63,7 +63,7 @@ async fn a_new_pane_is_born_with_the_resolved_syntax_theme(cx: &mut TestAppConte
         let view = agent_view(ws, pane_id);
         assert_eq!(
             view.read(cx).syntax_theme(),
-            ws.syntax_theme,
+            ws.mirrors.syntax_theme,
             "the pane starts on the Workspace's resolved palette, not on nothing"
         );
     });
@@ -749,7 +749,7 @@ async fn agent_chat_agent_id_restore_handles_present_and_removed_owner(cx: &mut 
             window,
             cx,
         );
-        ws.agents = vec![
+        ws.mirrors.agents = vec![
             daruda_config::AgentDefinition::claude_default(),
             codex_agent(),
         ]
@@ -928,7 +928,8 @@ async fn switch_agent_preserves_source_and_split_inherits_agent(cx: &mut TestApp
     cx.update_window(window_handle.into(), |_, window, cx| {
         workspace.update(cx, |ws, cx| {
             // Two-entry catalog: claude (default) + codex (switch target).
-            ws.agents = vec![daruda_config::AgentDefinition::claude_default(), codex()].into();
+            ws.mirrors.agents =
+                vec![daruda_config::AgentDefinition::claude_default(), codex()].into();
             let claude_id = daruda_config::AgentDefinition::claude_default().id;
 
             // The original agent-chat pane, chatting under the default agent.

@@ -14,7 +14,7 @@ fn pane(ws: &mut Workspace, window: &mut Window, cx: &mut Context<Workspace>) ->
     let pane = ws.create_agent_chat_pane(
         Some(PaneCwd::Local(std::env::temp_dir())),
         None,
-        ws.agents[0].id.clone(),
+        ws.mirrors.agents[0].id.clone(),
         None,
         window,
         cx,

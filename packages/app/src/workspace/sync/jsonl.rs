@@ -120,7 +120,7 @@ impl Workspace {
         self.claude._jsonl_watcher = None;
         self.claude._jsonl_event_pump = None;
 
-        let should_run = self.claude.claude_status_enabled;
+        let should_run = self.mirrors.claude_status_enabled;
         if !should_run {
             return;
         }

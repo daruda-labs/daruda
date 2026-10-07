@@ -108,7 +108,7 @@ fn snapshot_pane(
     let pane = ws.create_agent_chat_pane(
         Some(PaneCwd::Local(std::env::temp_dir())),
         Some("cli-session".into()),
-        ws.agents[0].id.clone(),
+        ws.mirrors.agents[0].id.clone(),
         None,
         window,
         cx,
@@ -724,7 +724,7 @@ fn open_chat_marks_a_cli_run_read_only_and_restore_keeps_it(cx: &mut TestAppCont
     );
     cx.update_window(window.into(), |_, window, cx| {
         workspace.update(cx, |ws, cx| {
-            std::sync::Arc::make_mut(&mut ws.agents)[0].launch =
+            std::sync::Arc::make_mut(&mut ws.mirrors.agents)[0].launch =
                 daruda_config::AgentLaunch::Raw("daruda-missing-test-adapter".into());
             let cwd = ws.active_lane().unwrap().path.clone();
             let task = cli_task(&cwd, cx);
@@ -737,7 +737,7 @@ fn open_chat_marks_a_cli_run_read_only_and_restore_keeps_it(cx: &mut TestAppCont
                     .execution
                     .as_mut()
                     .unwrap()
-                    .agent_id = ws.agents[0].id.clone();
+                    .agent_id = ws.mirrors.agents[0].id.clone();
             });
             bind(ws, pane, 10, "cli-session", cx);
             let execution_id = run(&task, cx).id;
@@ -763,7 +763,7 @@ fn open_chat_marks_a_cli_run_read_only_and_restore_keeps_it(cx: &mut TestAppCont
                 .find(|chat| chat.view.read(cx).session_id() == Some("cli-session"))
                 .unwrap();
             assert_eq!(chat.view.read(cx).access(), expected);
-            assert_eq!(chat.agent_id, ws.agents[0].id);
+            assert_eq!(chat.agent_id, ws.mirrors.agents[0].id);
             assert!(chat.task_run.is_none());
         });
     })

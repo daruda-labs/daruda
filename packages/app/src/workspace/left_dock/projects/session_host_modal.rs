@@ -430,7 +430,7 @@ pub fn open_session_host_modal(
         lane_ref: target,
         current: lane.session_host.clone(),
         has_legacy_remote_cwd: lane.session_host.is_none() && lane.remote_cwd.is_some(),
-        catalog: ws.session_hosts.clone(),
+        catalog: ws.mirrors.session_hosts.clone(),
     };
     let workspace = cx.weak_entity();
     crate::workspace::dialog_helpers::open_form_modal(

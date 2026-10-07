@@ -157,7 +157,7 @@ impl Workspace {
                         .find(|(pid, _)| *pid == focused)
                         .map(|(pid, _)| format!("acp:{pid}"))
                 }),
-            agent_install_banner_visible: self.claude.claude_status_enabled
+            agent_install_banner_visible: self.mirrors.claude_status_enabled
                 && !self.claude.claude_hooks_installed,
             workspace: Handle(self.left_dock.read(cx).workspace.clone()),
         }
@@ -192,6 +192,7 @@ impl Workspace {
         // to Posix, which is right for daruda's macOS target where the
         // PTY inherits `$SHELL` (zsh / bash / sh).
         let shell = self
+            .mirrors
             .shell_program
             .as_deref()
             .map(daruda_core::shell::quote::Shell::detect_from_program)
@@ -447,6 +448,7 @@ impl Workspace {
                 // no lane in scope — same `is_remote: false` reasoning as
                 // `resolve_login_command`.
                 let agent_id = self
+                    .mirrors
                     .agents
                     .iter()
                     .find(|a| a.launch.account_recipe(false) == Some(section.recipe))?
@@ -501,7 +503,7 @@ impl Workspace {
                 .0
                 .clone(),
             task_browser: self.task_browser.snapshot(cx),
-            task_agents: self.agents.clone(),
+            task_agents: self.mirrors.agents.clone(),
             task_projects: crate::workspace::layout::TaskProjects {
                 active: self.active_project().map(|p| p.uuid),
                 names: self

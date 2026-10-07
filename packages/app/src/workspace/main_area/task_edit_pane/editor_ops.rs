@@ -54,7 +54,7 @@ impl Workspace {
             task.execution = Some(daruda_store::tasks::TaskExecution {
                 source: Default::default(),
                 id: "screenshot-task-run".into(),
-                agent_id: self.agents[0].id.clone(),
+                agent_id: self.mirrors.agents[0].id.clone(),
                 account_id: None,
                 cwd: lane_path.clone(),
                 session_id: Some("screenshot-task-session".into()),

@@ -448,7 +448,7 @@ fn seed_orchestrator(fixture: &ControlFixture, cx: &mut TestAppContext) -> PaneI
     cx.update_window(fixture.window.into(), |_, window, cx| {
         fixture.workspace.update(cx, |ws, cx| {
             ws.seed_orchestrator_chat_pane_unrevealed_for_test(
-                ws.agents[0].id.clone(),
+                ws.mirrors.agents[0].id.clone(),
                 cwd,
                 daruda_store::accounts::AccountSelection::SystemDefault,
                 None,

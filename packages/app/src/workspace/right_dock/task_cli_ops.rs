@@ -42,6 +42,7 @@ impl Workspace {
                 .is_some_and(|a| a.recipe == AccountRecipeId::Claude)
         });
         let agent_id = self
+            .mirrors
             .agents
             .iter()
             .find(|agent| agent.launch.account_recipe(false) == Some(AccountRecipeId::Claude))
@@ -405,7 +406,7 @@ impl Workspace {
                 transcript_path: None,
                 process,
             },
-            self.agents[0].id.clone(),
+            self.mirrors.agents[0].id.clone(),
             None,
             cwd.clone(),
         );

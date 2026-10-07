@@ -118,7 +118,7 @@ impl Workspace {
     pub(in crate::workspace) fn preview_tab_index(&self, cx: &App) -> Option<usize> {
         // Multi-tab mode never reuses a tab, so nothing is replaceable and the
         // strip must not italicise one as though it were.
-        if !self.file_viewer_preview_tab {
+        if !self.mirrors.file_viewer_preview_tab {
             return None;
         }
         let (i, pane_id) = self.preview_tab_slot()?;

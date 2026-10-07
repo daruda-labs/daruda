@@ -8,9 +8,11 @@
 //!     button at the end of the sequence. Click handlers on widgets
 //!     call back into `Workspace::run_widget`.
 
+mod config_chip;
 pub(super) mod macro_edit_modal;
 pub(super) mod macro_key;
 pub(in crate::workspace) mod macro_ops;
+mod mode_chip;
 pub(super) mod queue_strip;
 pub(in crate::workspace) mod slash_command;
 pub(in crate::workspace) mod tab_strip;

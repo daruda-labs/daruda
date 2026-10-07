@@ -295,7 +295,7 @@ impl Workspace {
                     .agent_chat_view(source_pane_id)
                     .map(|v| v.read(cx).agent_id().to_owned())
                     .unwrap_or_else(|| {
-                        resolve_open_agent_id(&self.agents, self.last_agent_id.as_deref())
+                        resolve_open_agent_id(&self.mirrors.agents, self.last_agent_id.as_deref())
                     });
                 let mut new_pane = self.create_new_agent_chat_pane(
                     agent_id,

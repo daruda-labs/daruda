@@ -97,7 +97,8 @@ impl Workspace {
         match surface {
             TaskAgentSurface::Terminal => self.insert_terminal_tab(Some(root), window, cx),
             TaskAgentSurface::AgentChat => {
-                let agent_id = resolve_open_agent_id(&self.agents, self.last_agent_id.as_deref());
+                let agent_id =
+                    resolve_open_agent_id(&self.mirrors.agents, self.last_agent_id.as_deref());
                 let cwds = self.active_lane_cwds();
                 let pane_id = self.insert_agent_chat_pane(agent_id, cwds, window, cx)?;
                 self.reveal_new_agent_chat_pane(pane_id, window, cx);

@@ -50,7 +50,7 @@ fn the_orchestrator_chat_reaches_its_host_once_however_often_it_is_shown(cx: &mu
         workspace.update(cx, |ws, cx| {
             let pane = ws
                 .seed_orchestrator_chat_pane_unrevealed_for_test(
-                    ws.agents[0].id.clone(),
+                    ws.mirrors.agents[0].id.clone(),
                     std::env::temp_dir(),
                     AccountSelection::SystemDefault,
                     None,
@@ -121,7 +121,7 @@ fn a_resource_right_press_reaches_the_pane_menu(cx: &mut TestAppContext) {
                         dir.path().to_path_buf(),
                     )),
                     None,
-                    ws.agents[0].id.clone(),
+                    ws.mirrors.agents[0].id.clone(),
                     None,
                     window,
                     cx,
@@ -165,7 +165,7 @@ fn a_diff_open_from_a_remote_chat_reaches_the_host(cx: &mut TestAppContext) {
             let pane = ws.create_agent_chat_pane(
                 Some(PaneCwd::Remote("/srv/app".into())),
                 None,
-                ws.agents[0].id.clone(),
+                ws.mirrors.agents[0].id.clone(),
                 None,
                 window,
                 cx,
@@ -196,7 +196,7 @@ fn the_host_pushes_its_preferred_editor_into_the_chat(cx: &mut TestAppContext) {
     let pane = cx
         .update_window(window.into(), |_, window, cx| {
             workspace.update(cx, |ws, cx| {
-                ws.preferred_editor = "zed".into();
+                ws.mirrors.preferred_editor = "zed".into();
                 ws.open_agent_chat_pane(window, cx);
                 ws.active_runtime().panes.last().expect("pane").id
             })

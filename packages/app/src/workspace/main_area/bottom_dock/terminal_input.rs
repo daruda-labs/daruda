@@ -58,23 +58,14 @@ pub(super) fn render_body(snap: &BottomDockSnapshot, cx: &mut Context<Dock>) -> 
     let mut chips: Vec<AnyElement> = Vec::new();
     if let Some((pane_id, modes)) = &snap.agent_mode {
         chips.push(
-            super::super::agent_chat_pane::mode_chip::mode_chip(
-                *pane_id,
-                modes,
-                snap.workspace.clone(),
-            )
-            .into_any_element(),
+            super::mode_chip::mode_chip(*pane_id, modes, snap.workspace.clone()).into_any_element(),
         );
     }
     if let Some((pane_id, options)) = &snap.agent_config_options {
         for opt in options {
             chips.push(
-                super::super::agent_chat_pane::config_chip::config_chip(
-                    *pane_id,
-                    opt,
-                    snap.workspace.clone(),
-                )
-                .into_any_element(),
+                super::config_chip::config_chip(*pane_id, opt, snap.workspace.clone())
+                    .into_any_element(),
             );
         }
     }

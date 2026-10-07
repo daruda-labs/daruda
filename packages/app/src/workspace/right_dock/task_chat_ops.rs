@@ -213,7 +213,12 @@ impl Workspace {
         agent_id: &str,
         account_id: Option<daruda_store::accounts::AccountId>,
     ) -> bool {
-        let Some(agent) = self.agents.iter().find(|agent| agent.id == agent_id) else {
+        let Some(agent) = self
+            .mirrors
+            .agents
+            .iter()
+            .find(|agent| agent.id == agent_id)
+        else {
             return false;
         };
         account_id.is_none_or(|id| {

@@ -231,7 +231,7 @@ impl Workspace {
     fn notify_agent_pane(&self, pane_id: PaneId, enabled: bool, body: String, cx: &Context<Self>) {
         if !should_notify_agent_event(
             enabled,
-            self.notifications.skip_focused_pane,
+            self.mirrors.notifications.skip_focused_pane,
             crate::platform::attention::is_app_active(),
             self.pane_on_screen(pane_id),
         ) {
@@ -263,7 +263,7 @@ impl Workspace {
         };
         self.notify_agent_pane(
             pane_id,
-            self.notifications.agent_waiting_enabled,
+            self.mirrors.notifications.agent_waiting_enabled,
             s::notification::agent_waiting(),
             cx,
         );
@@ -327,7 +327,8 @@ impl Workspace {
             return;
         };
         let source = frozen_source.or_else(|| {
-            self.agents
+            self.mirrors
+                .agents
                 .iter()
                 .find(|agent| agent.id == agent_id)
                 .map(|agent| {
@@ -379,7 +380,7 @@ impl Workspace {
     fn maybe_notify_agent_completed(&self, pane_id: PaneId, cx: &Context<Self>) {
         self.notify_agent_pane(
             pane_id,
-            self.notifications.agent_completion_enabled,
+            self.mirrors.notifications.agent_completion_enabled,
             s::notification::agent_completed(),
             cx,
         );
@@ -542,18 +543,18 @@ impl Workspace {
         // panes show their persisted label before the session loads);
         // `Pane::title()` reads it live, so there's no separate cache to seed
         // here.
-        let agent_name = agent_name_for(&self.agents, &agent_id);
+        let agent_name = agent_name_for(&self.mirrors.agents, &agent_id);
         // The view owns its own `cwd` (for connect / persistence); the wrapper
         // caches a copy so `Pane::cwd()` stays cx-free.
         // Seed from the resolved config; a restore overwrites it with the pane's
         // own persisted choice (see `rebuild_layout`), and a live config reload
         // re-applies these through `reseed_transcript_defaults`.
         let defaults = TranscriptDefaults::resolve(
-            self.agents.iter().find(|a| a.id == agent_id),
-            self.agent_reader_defaults,
+            self.mirrors.agents.iter().find(|a| a.id == agent_id),
+            self.mirrors.agent_reader_defaults,
         );
         // Seeded here so a pane can build diff embeds before its first event.
-        let syntax_theme = self.syntax_theme.clone();
+        let syntax_theme = self.mirrors.syntax_theme.clone();
         let view = cx.new({
             let cwd = cwd.clone();
             let agent_id = agent_id.clone();
@@ -575,7 +576,7 @@ impl Workspace {
             }
         });
         self.subscribe_agent_chat(pane_id, &view, window, cx);
-        let preferred_editor = self.preferred_editor.clone();
+        let preferred_editor = self.mirrors.preferred_editor.clone();
         view.update(cx, |view, _| view.set_preferred_editor(&preferred_editor));
         Pane {
             id: pane_id,
@@ -608,8 +609,8 @@ impl Workspace {
             local_cwd,
             remote_cwd,
             session_host,
-            &self.session_hosts,
-            &self.session_host_tombstones,
+            &self.mirrors.session_hosts,
+            &self.mirrors.session_host_tombstones,
         )
     }
 
@@ -663,7 +664,8 @@ impl Workspace {
     /// entry declares — looked up in the catalog. `None` when the id is not in
     /// the catalog (e.g. a persisted id whose agent was removed).
     pub(in crate::workspace) fn agent_launch_for(&self, agent_id: &str) -> Option<AgentLaunchSpec> {
-        self.agents
+        self.mirrors
+            .agents
             .iter()
             .find(|a| a.id == agent_id)
             .map(AgentLaunchSpec::of)
@@ -676,7 +678,7 @@ impl Workspace {
         &self,
         persisted_agent_id: Option<String>,
     ) -> (String, bool /* keep session id */) {
-        resolve_restored_agent(&self.agents, persisted_agent_id)
+        resolve_restored_agent(&self.mirrors.agents, persisted_agent_id)
     }
 
     /// Seed failure copy and its remedy before focus can start a real adapter.
@@ -1158,7 +1160,7 @@ impl Workspace {
     ) {
         // Default to the last agent opened (session-local), falling back to the
         // catalog default; a stale last id (agent removed) also falls back.
-        let agent_id = resolve_open_agent_id(&self.agents, self.last_agent_id.as_deref());
+        let agent_id = resolve_open_agent_id(&self.mirrors.agents, self.last_agent_id.as_deref());
         self.open_agent_chat_pane_with_agent(agent_id, window, cx);
     }
 
@@ -1307,8 +1309,10 @@ impl Workspace {
         // panel — so a caller replaying a capture wants the agent the capture
         // came from, not whatever was last opened. A requested id the catalog
         // does not have falls back exactly as a stale `last_agent_id` would.
-        let agent_id =
-            resolve_open_agent_id(&self.agents, agent_id.or(self.last_agent_id.as_deref()));
+        let agent_id = resolve_open_agent_id(
+            &self.mirrors.agents,
+            agent_id.or(self.last_agent_id.as_deref()),
+        );
         let cwds = self.active_lane_cwds();
         let pane_id = self.insert_agent_chat_pane(agent_id, cwds, window, cx)?;
         let view = self.agent_chat_view(pane_id).cloned()?;
@@ -1417,7 +1421,7 @@ impl Workspace {
     /// terminal preset and UI theme disagree.
     pub(super) fn agent_chat_theme_params(&self, cx: &Context<Self>) -> (String, bool) {
         let is_light = crate::ui::theme::agent_chat_syntax_is_light(cx);
-        (self.syntax_theme.clone(), is_light)
+        (self.mirrors.syntax_theme.clone(), is_light)
     }
 
     /// True when `pane_id` is an Agent chat pane — lets the bottom-dock input

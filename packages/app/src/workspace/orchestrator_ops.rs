@@ -43,7 +43,7 @@ impl Workspace {
         // From the mirror `apply_config` keeps: `Config::resolved_agents()`
         // deep-clones the catalog, and this runs on every render.
         let config = crate::settings_store::SettingsStore::global(cx).user_arc();
-        crate::orchestrator::config::resolve_from(&config.orchestrator, &self.agents)?;
+        crate::orchestrator::config::resolve_from(&config.orchestrator, &self.mirrors.agents)?;
         // By entity id, never by reading the registry's handle back: this runs
         // inside the render of the workspace it may be naming (pitfall 5).
         let hosted_elsewhere = crate::window_registry::WindowRegistry::orchestrator(cx)
@@ -59,7 +59,7 @@ impl Workspace {
         cx: &mut Context<Self>,
     ) {
         let pane = self.insert_orchestrator_chat(
-            self.agents[0].id.clone(),
+            self.mirrors.agents[0].id.clone(),
             self.data_dir.join("orchestrator"),
             AccountSelection::SystemDefault,
             None,

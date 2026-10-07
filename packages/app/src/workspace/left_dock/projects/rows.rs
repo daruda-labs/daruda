@@ -492,7 +492,7 @@ pub(super) fn project_header_row(
                             let Some(repo_root) = ws.git_repo_root() else {
                                 return;
                             };
-                            let catalog = ws.session_hosts.clone();
+                            let catalog = ws.mirrors.session_hosts.clone();
                             crate::workspace::dialog_helpers::open_form_modal(
                                 surface_strings::create_lane::button_title(),
                                 None,

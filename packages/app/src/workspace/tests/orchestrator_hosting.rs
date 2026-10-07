@@ -8,7 +8,7 @@ use gpui::{Context, Window};
 
 fn seed(ws: &mut Workspace, window: &mut Window, cx: &mut Context<Workspace>) -> PaneId {
     ws.seed_orchestrator_chat_pane_unrevealed_for_test(
-        ws.agents[0].id.clone(),
+        ws.mirrors.agents[0].id.clone(),
         std::env::temp_dir(),
         AccountSelection::SystemDefault,
         None,
@@ -175,7 +175,12 @@ fn closing_the_orchestrator_tab_does_not_connect_the_worktree_being_left(cx: &mu
             // A dormant chat in the worktree the user is about to leave. Its
             // session starts on focus, so the close must not hand it focus.
             let dormant = ws
-                .insert_agent_chat_pane(ws.agents[0].id.clone(), ws.active_lane_cwds(), window, cx)
+                .insert_agent_chat_pane(
+                    ws.mirrors.agents[0].id.clone(),
+                    ws.active_lane_cwds(),
+                    window,
+                    cx,
+                )
                 .unwrap();
             assert!(matches!(
                 ws.agent_chat_view(dormant).unwrap().read(cx).status(),
@@ -359,11 +364,11 @@ fn hidden_orchestrator_tracks_live_config_updates(cx: &mut TestAppContext) {
         .unwrap();
     workspace.update(cx, |ws, cx| {
         let agent = daruda_config::AgentDefinition {
-            id: ws.agents[0].id.clone(),
+            id: ws.mirrors.agents[0].id.clone(),
             name: "Renamed orchestrator".into(),
             tail_window: Some(3),
             tail_window_calls: None,
-            ..ws.agents[0].clone()
+            ..ws.mirrors.agents[0].clone()
         };
         let mut config = daruda_config::Config {
             agents: vec![daruda_config::AgentEntry::custom(agent.clone())],
@@ -373,7 +378,7 @@ fn hidden_orchestrator_tracks_live_config_updates(cx: &mut TestAppContext) {
         ws.apply_config(&config, cx);
         let view = ws.agent_chat_view(pane).unwrap().read(cx);
         assert_eq!(view.agent_name(), agent.name);
-        assert_eq!(*view.defaults_for_test(), crate::workspace::main_area::agent_chat_pane::transcript_defaults::TranscriptDefaults::resolve(Some(&agent), ws.agent_reader_defaults));
+        assert_eq!(*view.defaults_for_test(), crate::workspace::main_area::agent_chat_pane::transcript_defaults::TranscriptDefaults::resolve(Some(&agent), ws.mirrors.agent_reader_defaults));
         assert_eq!(view.syntax_theme(), config.file_viewer.syntax_theme);
     });
 }
@@ -387,7 +392,7 @@ fn hidden_orchestrator_account_cleanup_updates_the_canonical_slot(cx: &mut TestA
             workspace.update(cx, |ws, cx| {
                 let pane = ws
                     .seed_orchestrator_chat_pane_unrevealed_for_test(
-                        ws.agents[0].id.clone(),
+                        ws.mirrors.agents[0].id.clone(),
                         std::env::temp_dir(),
                         AccountSelection::Managed(account),
                         None,
@@ -626,7 +631,7 @@ fn hidden_orchestrator_preserves_user_tabs_and_resolves_its_account(cx: &mut Tes
             let before: Vec<_> = ws.active_runtime().panes.iter().map(|p| p.id).collect();
             assert_eq!(ws.orchestrator_chip_state(cx), None);
             let pane = ws.seed_orchestrator_chat_pane_unrevealed_for_test(
-                ws.agents[0].id.clone(),
+                ws.mirrors.agents[0].id.clone(),
                 std::env::temp_dir(),
                 account,
                 Some("Test briefing".into()),
@@ -655,12 +660,12 @@ fn hidden_orchestrator_pulse_emits_completion_and_phone_fallback(cx: &mut TestAp
     let pane = cx
         .update_window(window.into(), |_, window, cx| {
             workspace.update(cx, |ws, cx| {
-                ws.telegram.enabled = true;
-                ws.telegram.authorized_chat_id = Some(42);
-                ws.telegram.only_when_away = false;
+                ws.mirrors.telegram.enabled = true;
+                ws.mirrors.telegram.authorized_chat_id = Some(42);
+                ws.mirrors.telegram.only_when_away = false;
                 let pane = ws
                     .seed_orchestrator_chat_pane_unrevealed_for_test(
-                        ws.agents[0].id.clone(),
+                        ws.mirrors.agents[0].id.clone(),
                         std::env::temp_dir(),
                         AccountSelection::SystemDefault,
                         None,

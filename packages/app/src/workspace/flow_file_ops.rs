@@ -110,7 +110,7 @@ impl Workspace {
             return;
         }
         let path = dir.join(format!("flow-{}.yaml", uuid::Uuid::new_v4()));
-        let Some(agent) = self.agents.first() else {
+        let Some(agent) = self.mirrors.agents.first() else {
             self.report_flow_no_agent(cx);
             return;
         };

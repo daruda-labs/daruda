@@ -440,6 +440,7 @@ impl Workspace {
         let pane_cwd = PaneCwd::Local(cwd.to_path_buf());
         let lane = self.lane_for(lane_ref).cloned();
         let definitions: Vec<(String, AgentLaunchSpec)> = self
+            .mirrors
             .agents
             .iter()
             .map(|a| (a.id.clone(), AgentLaunchSpec::of(a)))
@@ -450,8 +451,8 @@ impl Workspace {
             let resolved_host = match lane.as_ref().map(|lane| {
                 lane.effective_session_host(
                     &launch,
-                    &self.session_hosts,
-                    &self.session_host_tombstones,
+                    &self.mirrors.session_hosts,
+                    &self.mirrors.session_host_tombstones,
                 )
             }) {
                 None => None,
@@ -508,8 +509,8 @@ impl Workspace {
                 prepared.as_ref(),
                 cached_host.as_ref(),
                 resolved_host.as_ref(),
-                &self.session_hosts,
-                &self.session_host_tombstones,
+                &self.mirrors.session_hosts,
+                &self.mirrors.session_host_tombstones,
             );
             // A launch shape that cannot produce a command is only fatal
             // for an agent this flow actually names — the same scope the
@@ -529,7 +530,7 @@ impl Workspace {
     }
 
     fn config_flow(&self) -> daruda_config::flow::FlowConfig {
-        self.flow_config.clone()
+        self.mirrors.flow_config.clone()
     }
 
     fn next_run_id(&mut self) -> String {

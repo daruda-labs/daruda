@@ -56,8 +56,8 @@ impl Workspace {
         // What moved is read before anything is written: every pass below
         // compares against the values this reload replaces.
         let (delta, mirrors) = self.config_delta(config, cx);
-        let previous_agents = self.agents.clone();
-        self.store_config_fields(config, mirrors);
+        let previous_agents = self.mirrors.agents.clone();
+        self.store_mirrors(mirrors);
         self.apply_config_to_agent_chat_defaults(delta.telegram_recipient, cx);
         self.apply_config_to_agent_sessions(&previous_agents, cx);
         self.apply_config_to_input_dock(config, cx);
@@ -254,7 +254,7 @@ impl Workspace {
         s::bottom_dock::bottom_input_placeholder_for_context(
             is_agent,
             mode_name.as_deref(),
-            self.agent.use_modifier_to_send,
+            self.mirrors.agent.use_modifier_to_send,
         )
     }
 }

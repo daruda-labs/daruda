@@ -690,7 +690,7 @@ async fn closing_the_scratch_tab_leaves_the_next_preview_intact(cx: &mut TestApp
 #[gpui::test]
 async fn multi_tab_mode_marks_no_scratch_tab(cx: &mut TestAppContext) {
     let (w, ws) = dock_showing_changes(cx, vec![entry("a.rs"), entry("b.rs")]);
-    ws.update(cx, |ws, _| ws.file_viewer_preview_tab = false);
+    ws.update(cx, |ws, _| ws.mirrors.file_viewer_preview_tab = false);
 
     arrow(w, &ws, cx, 1);
     arrow(w, &ws, cx, 1);

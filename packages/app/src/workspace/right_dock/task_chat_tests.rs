@@ -31,7 +31,7 @@ fn pane(ws: &mut Workspace, window: &mut Window, cx: &mut Context<Workspace>) ->
                 .unwrap_or_else(std::env::temp_dir),
         )),
         Some("task-session".into()),
-        ws.agents[0].id.clone(),
+        ws.mirrors.agents[0].id.clone(),
         None,
         window,
         cx,
@@ -344,7 +344,7 @@ fn task_chat_closed_pane_reopens_exact_session_without_execution_ownership(
     );
     cx.update_window(window.into(), |_, window, cx| {
         workspace.update(cx, |ws, cx| {
-            std::sync::Arc::make_mut(&mut ws.agents)[0].launch =
+            std::sync::Arc::make_mut(&mut ws.mirrors.agents)[0].launch =
                 daruda_config::AgentLaunch::Raw("daruda-missing-test-adapter".into());
             let pane = pane(ws, window, cx);
             let id = task(cx);

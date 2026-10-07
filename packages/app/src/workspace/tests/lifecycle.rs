@@ -232,7 +232,7 @@ fn test_reload_config_resolves_project_layer_shell_override(cx: &mut TestAppCont
     // `new_with_project` already resolves the project layer once.
     ws.read_with(cx, |ws, _| {
         assert_eq!(
-            ws.shell_program.as_deref(),
+            ws.mirrors.shell_program.as_deref(),
             Some("/bin/project-shell"),
             "project-layer shell.program must override user default at construction",
         );
@@ -249,6 +249,9 @@ fn test_reload_config_resolves_project_layer_shell_override(cx: &mut TestAppCont
     })
     .unwrap();
     ws.read_with(cx, |ws, _| {
-        assert_eq!(ws.shell_program.as_deref(), Some("/bin/project-shell"));
+        assert_eq!(
+            ws.mirrors.shell_program.as_deref(),
+            Some("/bin/project-shell")
+        );
     });
 }

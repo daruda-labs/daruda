@@ -12,7 +12,7 @@ use crate::workspace::Workspace;
 use crate::workspace::main_area::agent_chat_pane::transcript_defaults::TranscriptDefaults;
 
 use super::ConfigMirrors;
-use super::config_ops::{cursor_shape_from, terminal_config_from};
+use super::config_ops::cursor_shape_from;
 
 /// What one config reload moved, read before anything is written — from
 /// this window's own fields and mirrors, never from the app-wide globals the
@@ -62,12 +62,11 @@ impl Workspace {
         let (was_surface, now_surface) = (&was.shared_surface, &now.shared_surface);
         let delta = ConfigDelta {
             painted_ui_preset: was.painted_ui_preset != now.painted_ui_preset,
-            syntax_theme: self.syntax_theme != config.file_viewer.syntax_theme,
+            syntax_theme: was.syntax_theme != now.syntax_theme,
             // The chat diff header names this editor in its open-externally
             // tooltip, so a change has to dirty those cached views.
-            preferred_editor: self.preferred_editor != config.editor.preferred,
-            telegram_recipient: self.telegram.authorized_chat_id
-                != config.telegram.authorized_chat_id,
+            preferred_editor: was.preferred_editor != now.preferred_editor,
+            telegram_recipient: was.telegram.authorized_chat_id != now.telegram.authorized_chat_id,
             files_filter: was.files_show_hidden != now.files_show_hidden
                 || was.files_use_gitignore != now.files_use_gitignore,
             files_icon: was.files_icon_color_mode != now.files_icon_color_mode,
@@ -79,46 +78,17 @@ impl Workspace {
             window_opacity: was_surface.window_opacity != now_surface.window_opacity,
             terminal_palette: was_surface.terminal_bg != now_surface.terminal_bg
                 || was_surface.terminal_fg != now_surface.terminal_fg,
-            claude_status_enabled: self.claude.claude_status_enabled != config.claude_status.enable,
+            claude_status_enabled: was.claude_status_enabled != now.claude_status_enabled,
         };
         (delta, mirrors)
     }
 
-    /// The plain field copies, and the mirrors. No side effects: the passes
-    /// after this one read the new values.
-    pub(super) fn store_config_fields(
-        &mut self,
-        config: &daruda_config::Config,
-        mirrors: ConfigMirrors,
-    ) {
+    /// Installs the new mirrors. No side effects: the passes after this one
+    /// read the new values.
+    pub(super) fn store_mirrors(&mut self, mirrors: ConfigMirrors) {
         // A reload may create or remove the active project's config layer;
         // drop the memo so the status-bar dot re-stats on the next render.
         self.cached_project_config = None;
-        // The single config → terminal-config mapping; its resolved colours
-        // patch every live pane in `apply_config_to_terminals`.
-        self.terminal_config = terminal_config_from(config);
-        self.font_family = config.font.terminal.family.clone();
-        self.shell_program = config.shell.program.clone();
-        self.syntax_theme = config.file_viewer.syntax_theme.clone();
-        self.agent_reader_defaults =
-            crate::workspace::main_area::agent_chat_pane::transcript_defaults::ReaderDefaults::from_config(
-                &config.agent,
-            );
-        self.file_viewer_preview_tab = config.file_viewer.preview_tab;
-        self.preferred_editor = config.editor.preferred.clone();
-        self.notifications = config.notifications.clone();
-        self.git_config = config.git.clone();
-        self.telegram = config.telegram.clone();
-        self.clipboard = config.clipboard.clone();
-        self.agent = config.agent.clone();
-        self.agents = config.resolved_agents().into();
-        self.flow_config = config.flow.clone();
-        self.session_hosts = config.session_hosts.clone();
-        self.session_host_tombstones = config.session_host_tombstones.clone();
-        self.claude.usage_poll = config.usage.poll.clone();
-        // Read by the notification-push freshness gate.
-        self.claude.stale_threshold_secs = config.claude_status.stale_threshold_secs;
-        self.claude.claude_status_enabled = config.claude_status.enable;
         self.mirrors = mirrors;
     }
 
@@ -132,6 +102,7 @@ impl Workspace {
         cx: &mut Context<Self>,
     ) {
         let agent_names = self
+            .mirrors
             .agents
             .iter()
             .map(|agent| (agent.id.clone(), agent.name.clone()))
@@ -148,8 +119,8 @@ impl Workspace {
                     .unwrap_or_else(|| view.agent_id().to_owned());
                 view.set_agent_name(name, cx);
                 let defaults = TranscriptDefaults::resolve(
-                    self.agents.iter().find(|a| a.id == view.agent_id()),
-                    self.agent_reader_defaults,
+                    self.mirrors.agents.iter().find(|a| a.id == view.agent_id()),
+                    self.mirrors.agent_reader_defaults,
                 );
                 view.reseed_transcript_defaults(&defaults, cx);
             });
@@ -167,7 +138,7 @@ impl Workspace {
         let mut mode_switched = false;
         for (_, view) in self.every_agent_chat() {
             let was = view.read(cx).session_preferences(previous_agents);
-            let now = view.read(cx).session_preferences(&self.agents);
+            let now = view.read(cx).session_preferences(&self.mirrors.agents);
             if was != now {
                 mode_switched |= view.update(cx, |view, cx| {
                     view.follow_session_preferences(&was, &now, cx)
@@ -224,13 +195,14 @@ impl Workspace {
         config: &daruda_config::Config,
         cx: &mut Context<Self>,
     ) {
-        let fg = self.terminal_config.default_fg;
-        let bg = self.terminal_config.default_bg;
+        let fg = self.mirrors.terminal_config.default_fg;
+        let bg = self.mirrors.terminal_config.default_bg;
         let pal = self
+            .mirrors
             .terminal_config
             .palette
             .expect("terminal_config_from always sets palette");
-        let font = daruda_terminal::terminal_font_with_family(&self.font_family);
+        let font = daruda_terminal::terminal_font_with_family(&self.mirrors.font_family);
         for pane in self
             .main_area
             .runtimes
@@ -289,8 +261,8 @@ impl Workspace {
         cx: &mut Context<Self>,
     ) {
         use crate::ui::theme;
-        let fg = self.terminal_config.default_fg;
-        let bg = self.terminal_config.default_bg;
+        let fg = self.mirrors.terminal_config.default_fg;
+        let bg = self.mirrors.terminal_config.default_bg;
         theme::set_editor_font_family(cx, config.font.editor.family.clone());
         theme::set_editor_font_size(cx, config.font.editor.size);
         theme::set_editor_line_height(cx, config.font.editor.line_height);
@@ -320,8 +292,8 @@ impl Workspace {
         {
             return;
         }
-        let syntax_theme = self.syntax_theme.clone();
-        let preferred_editor = self.preferred_editor.clone();
+        let syntax_theme = self.mirrors.syntax_theme.clone();
+        let preferred_editor = self.mirrors.preferred_editor.clone();
         let views: Vec<_> = self
             .every_agent_chat()
             .map(|(_, view)| view.clone())
@@ -360,7 +332,7 @@ impl Workspace {
         if delta.syntax_theme {
             crate::ui::theme::set_active_syntax_palette(
                 cx,
-                crate::ui::theme::SyntaxPalette::from_config_name(&self.syntax_theme),
+                crate::ui::theme::SyntaxPalette::from_config_name(&self.mirrors.syntax_theme),
             );
         }
         // A UI-theme switch flips the syntax palette's light/dark variant; the

@@ -35,7 +35,7 @@ async fn apply_config_syncs_all_mirrors(cx: &mut TestAppContext) {
             ws.mirrors.close_pane_on_exit,
             new_config.shell.close_pane_on_exit
         );
-        assert_eq!(ws.shell_program.as_deref(), Some("/bin/test-shell"));
+        assert_eq!(ws.mirrors.shell_program.as_deref(), Some("/bin/test-shell"));
         assert_eq!(
             ws.mirrors.files_show_hidden,
             new_config.left_dock.files_show_hidden

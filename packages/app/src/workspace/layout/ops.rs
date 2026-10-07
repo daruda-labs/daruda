@@ -401,7 +401,7 @@ impl Workspace {
         // Pitfall #8). The per-row height constant lives in the palette instead.
         let new_line_count = self.terminal_input.read(cx).display_rows().max(1);
 
-        let max_rows = usize::from(self.agent.input_max_rows);
+        let max_rows = usize::from(self.mirrors.agent.input_max_rows);
         let clamped = new_line_count.min(max_rows);
 
         // Guard: only resize when line count actually changes.

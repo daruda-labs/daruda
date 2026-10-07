@@ -467,7 +467,7 @@ impl Workspace {
                 // the "no remote path set" error rather than connecting;
                 // every other launch shape resolves to `Local`.
                 let agent_id = resolve_open_agent_id(
-                    &self.agents,
+                    &self.mirrors.agents,
                     requested_agent.or(self.last_agent_id.as_deref()),
                 );
                 self.create_new_agent_chat_pane(

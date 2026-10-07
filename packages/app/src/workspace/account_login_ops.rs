@@ -261,8 +261,8 @@ impl Workspace {
         &self,
         requested: AccountRecipeId,
     ) -> String {
-        let active_id = resolve_open_agent_id(&self.agents, self.last_agent_id.as_deref());
-        resolve_login_command(&self.agents, &active_id, requested)
+        let active_id = resolve_open_agent_id(&self.mirrors.agents, self.last_agent_id.as_deref());
+        resolve_login_command(&self.mirrors.agents, &active_id, requested)
     }
 
     /// Whether a headless login is in flight **anywhere in the process** —
@@ -831,7 +831,7 @@ impl Workspace {
     /// always be started on request; it must not turn a passive refresh into a
     /// download for a domain nothing here uses.
     fn has_stake_in_domain(&self, recipe: AccountRecipeId) -> bool {
-        stake_in_domain(&self.accounts, &self.agents, recipe)
+        stake_in_domain(&self.accounts, &self.mirrors.agents, recipe)
     }
 
     /// One reading, off the UI thread.
@@ -847,8 +847,9 @@ impl Workspace {
     /// Settings costs nothing.
     fn probe_auth_status(&mut self, target: LoginTarget, supersede: bool, cx: &mut Context<Self>) {
         let recipe_id = target.recipe();
-        let active_id = resolve_open_agent_id(&self.agents, self.last_agent_id.as_deref());
-        let Some((command, format)) = resolve_status_command(&self.agents, &active_id, recipe_id)
+        let active_id = resolve_open_agent_id(&self.mirrors.agents, self.last_agent_id.as_deref());
+        let Some((command, format)) =
+            resolve_status_command(&self.mirrors.agents, &active_id, recipe_id)
         else {
             return;
         };

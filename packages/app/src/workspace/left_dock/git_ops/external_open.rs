@@ -21,7 +21,7 @@ impl Workspace {
     /// against repo_root before calling). `Path::join` returns the absolute
     /// argument unchanged, so the same code handles both cases.
     ///
-    /// Launches `self.preferred_editor` (`daruda_config::editor` preset name,
+    /// Launches `self.mirrors.preferred_editor` (`daruda_config::editor` preset name,
     /// Settings → External Editor) when set and recognized; an empty or
     /// unrecognized preference falls back to the OS default handler, same as
     /// before that setting existed.
@@ -35,7 +35,7 @@ impl Workspace {
             return;
         };
         let full_path = wt.path.join(&path);
-        let preset = daruda_config::external_editor_preset(&self.preferred_editor);
+        let preset = daruda_config::external_editor_preset(&self.mirrors.preferred_editor);
         self.spawn_external_open(full_path, preset, cx);
     }
 

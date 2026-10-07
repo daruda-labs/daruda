@@ -226,9 +226,9 @@ impl Workspace {
                 right_size: self.right_dock.read(cx).size,
             },
             window: self.cached_window_bounds.clone().unwrap_or_default(),
-            font_size: self.terminal_config.font_size,
-            vertical_spacing: self.terminal_config.vertical_spacing,
-            horizontal_spacing: self.terminal_config.horizontal_spacing,
+            font_size: self.mirrors.terminal_config.font_size,
+            vertical_spacing: self.mirrors.terminal_config.vertical_spacing,
+            horizontal_spacing: self.mirrors.terminal_config.horizontal_spacing,
             focused_pane_id,
             active_dock_view: self.left_dock_view,
             active_right_panel_view: self.right_dock_view,
@@ -432,10 +432,10 @@ impl Workspace {
         });
 
         // Restore font settings.
-        self.terminal_config.font_size = workspace.font_size;
-        self.terminal_config.vertical_spacing = workspace.vertical_spacing;
-        self.terminal_config.horizontal_spacing = workspace.horizontal_spacing;
-        self.terminal_config.clamp_font_settings();
+        self.mirrors.terminal_config.font_size = workspace.font_size;
+        self.mirrors.terminal_config.vertical_spacing = workspace.vertical_spacing;
+        self.mirrors.terminal_config.horizontal_spacing = workspace.horizontal_spacing;
+        self.mirrors.terminal_config.clamp_font_settings();
 
         // Adopt the persisted workspace UUID so subsequent saves land
         // on the same on-disk record.

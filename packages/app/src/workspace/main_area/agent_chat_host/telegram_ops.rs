@@ -429,7 +429,7 @@ impl Workspace {
         // Asked unconditionally, not short-circuited by the opt-out, so the
         // trace records what presence actually was even when it did not
         // decide — the alternative logs a sample from the last pump tick.
-        let send = away || !self.telegram.only_when_away;
+        let send = away || !self.mirrors.telegram.only_when_away;
         let state = crate::app_presence::snapshot(cx);
         let away_secs = state.away_secs(Instant::now());
         // `relay.send` belongs to `relay_to_telegram`; this line is the
@@ -442,7 +442,7 @@ impl Workspace {
                 "pane={pane_id} send={send} away={away} only_when_away={} \
                  away_secs={away_secs:?} idle_secs={} away_grace_secs={} \
                  away_idle_secs={} away_idle_foreground_secs={} {} text={}",
-                self.telegram.only_when_away,
+                self.mirrors.telegram.only_when_away,
                 trace::opt(state.idle().map(|i| i.as_secs())),
                 rule.grace.as_secs(),
                 rule.idle_bar.as_secs(),
@@ -564,7 +564,7 @@ impl Workspace {
         &self,
         cx: &'a Context<Self>,
     ) -> Option<&'a crate::telegram::global::TelegramBridge> {
-        if !(self.telegram.enabled && self.telegram.authorized_chat_id.is_some()) {
+        if !(self.mirrors.telegram.enabled && self.mirrors.telegram.authorized_chat_id.is_some()) {
             return None;
         }
         cx.try_global::<crate::telegram::global::TelegramBridge>()
@@ -613,7 +613,7 @@ impl Workspace {
             });
             return;
         };
-        if !away && self.telegram.only_when_away {
+        if !away && self.mirrors.telegram.only_when_away {
             trace::delivery("relay.gated", || {
                 format!(
                     "entry=presence_notice reason=presence text={}",

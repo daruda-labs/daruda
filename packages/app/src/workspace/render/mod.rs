@@ -1088,6 +1088,7 @@ impl Workspace {
                 // Snapshot the catalog as owned (id, name) pairs for the
                 // 'static menu closure.
                 let agents: Vec<(String, String)> = self
+                    .mirrors
                     .agents
                     .iter()
                     .map(|a| (a.id.clone(), a.name.clone()))

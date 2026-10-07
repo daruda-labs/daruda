@@ -332,7 +332,7 @@ impl Workspace {
         self.activate_lane(target, window, cx);
         let agent_id =
             crate::workspace::main_area::agent_chat_host::agent_chat_ops::resolve_open_agent_id(
-                &self.agents,
+                &self.mirrors.agents,
                 agent.as_deref().or(self.last_agent_id.as_deref()),
             );
         let cwds = self.active_lane_cwds();
@@ -699,7 +699,7 @@ impl Workspace {
     ) -> PaneId {
         let agent_id =
             crate::workspace::main_area::agent_chat_host::agent_chat_ops::resolve_open_agent_id(
-                &self.agents,
+                &self.mirrors.agents,
                 self.last_agent_id.as_deref(),
             );
         let cwds = self.active_lane_cwds();

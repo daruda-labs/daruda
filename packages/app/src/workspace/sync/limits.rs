@@ -187,9 +187,9 @@ fn spawn_loop(cx: &mut Context<Workspace>, kind: Endpoint) -> Task<()> {
             //    cue to exit the loop.
             let interval = match this.read_with(cx, |ws, _| match kind {
                 Endpoint::Limits(_) | Endpoint::Activity(_) => {
-                    ws.claude.usage_poll.limits_interval()
+                    ws.mirrors.usage_poll.limits_interval()
                 }
-                Endpoint::Status(_) => ws.claude.usage_poll.status_interval(),
+                Endpoint::Status(_) => ws.mirrors.usage_poll.status_interval(),
             }) {
                 Ok(opt) => opt,
                 Err(_) => break,

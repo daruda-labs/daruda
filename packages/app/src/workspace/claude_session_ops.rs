@@ -112,12 +112,6 @@ impl PerAccountUsage {
 }
 
 pub(in crate::workspace) struct ClaudeContext {
-    /// Background-poll cadences for the OAuth `/api/oauth/usage` and
-    /// public `status.claude.com` endpoints. Stored as a snapshot of
-    /// `[usage.poll]` so `limits_pump` can read it under
-    /// `read_with` without locking the full `Config`.
-    pub(in crate::workspace) usage_poll: daruda_config::PollConfig,
-
     /// Per-account cache of the Usage tab's two quantities (plan-rate
     /// limits + locally-aggregated activity), keyed by [`UsageKey`].
     /// Empty before the first fetch/aggregation, which reads back as
@@ -143,16 +137,6 @@ pub(in crate::workspace) struct ClaudeContext {
     /// JSONL fallback. Read by the left dock to render the per-lane
     /// Working/NeedsAttention/Idle/Connecting indicator.
     pub(in crate::workspace) claude_status: daruda_agent::ClaudeStatusStore,
-
-    /// Whether the Claude status feature is enabled in `[claude_status]`
-    /// config. False suppresses both the indicator and the install banner.
-    pub(in crate::workspace) claude_status_enabled: bool,
-
-    /// `[claude_status] stale_threshold_secs` mirror — the same age past
-    /// which cold restore resets a session also expires its blocking
-    /// notification for the local/remote push gate (see
-    /// `maybe_push_hook_notification`). Updated in `apply_config`.
-    pub(in crate::workspace) stale_threshold_secs: u64,
 
     /// Whether daruda's hook entries are present in
     /// `~/.claude/settings.json`. Cached: refreshed at startup and after
@@ -387,7 +371,7 @@ impl Workspace {
             _ => return,
         };
 
-        if !self.notifications.hook_notification_enabled {
+        if !self.mirrors.notifications.hook_notification_enabled {
             return;
         }
 
@@ -397,7 +381,7 @@ impl Workspace {
         // would tell the user to answer a prompt that is long gone.
         if file.event_expired(
             chrono::Utc::now(),
-            std::time::Duration::from_secs(self.claude.stale_threshold_secs),
+            std::time::Duration::from_secs(self.mirrors.stale_threshold_secs),
         ) {
             return;
         }
@@ -421,7 +405,7 @@ impl Workspace {
 
         // In-view gate — silence when daruda is foreground and the
         // session's own pane is on screen, mirroring `handle_view_event`.
-        if self.notifications.skip_focused_pane
+        if self.mirrors.notifications.skip_focused_pane
             && crate::platform::attention::is_app_active()
             && self.session_pane_on_screen(&file.session_id)
         {

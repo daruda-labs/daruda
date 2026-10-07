@@ -305,7 +305,7 @@ impl Workspace {
         let effective_mode = FileViewMode::effective_for_path(initial_mode, &path);
 
         // Preview-tab mode: reuse the existing file-viewer tab when available.
-        if self.file_viewer_preview_tab
+        if self.mirrors.file_viewer_preview_tab
             && let Some((tab_idx, pane_id)) = self.find_preview_file_tab(cx)
         {
             let project = self.active.project;

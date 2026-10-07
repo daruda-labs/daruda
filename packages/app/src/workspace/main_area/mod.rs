@@ -347,6 +347,7 @@ pub(in crate::workspace) fn render_layout(
                         .on_drop::<PathDrag>(cx.listener(
                             move |this, drag: &PathDrag, _window, cx| {
                                 let shell = this
+                                    .mirrors
                                     .shell_program
                                     .as_deref()
                                     .map(Shell::detect_from_program)
@@ -363,6 +364,7 @@ pub(in crate::workspace) fn render_layout(
                                     return;
                                 }
                                 let shell = this
+                                    .mirrors
                                     .shell_program
                                     .as_deref()
                                     .map(Shell::detect_from_program)

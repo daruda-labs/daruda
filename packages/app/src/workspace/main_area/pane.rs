@@ -762,7 +762,7 @@ fn handle_view_event(
     // A pane in view is silenced only when daruda itself is the
     // foreground app — backgrounded notifications always surface
     // because the user, by definition, is not looking at the pane.
-    let suppressed_by_focus = workspace.notifications.skip_focused_pane
+    let suppressed_by_focus = workspace.mirrors.notifications.skip_focused_pane
         && platform::attention::is_app_active()
         && workspace.pane_on_screen(pane_id);
 
@@ -772,7 +772,7 @@ fn handle_view_event(
             // foreground, so we don't apply the focused-pane rule
             // here — the kernel of attention is "tell the user
             // something happened in the background".
-            if workspace.notifications.attention_enabled {
+            if workspace.mirrors.notifications.attention_enabled {
                 platform::attention::apply(*kind);
             }
         }
@@ -782,23 +782,24 @@ fn handle_view_event(
             }
             match req {
                 NotificationRequest::Osc9 { body } => {
-                    if workspace.notifications.osc9_enabled {
+                    if workspace.mirrors.notifications.osc9_enabled {
                         platform::notifications::show(APP_NAME, body);
                     }
                 }
                 NotificationRequest::Osc777 { title, body } => {
-                    if workspace.notifications.osc777_enabled {
+                    if workspace.mirrors.notifications.osc777_enabled {
                         platform::notifications::show(title, body);
                     }
                 }
             }
         }
         TerminalViewEvent::CommandFinishedAfter { elapsed } => {
-            if !workspace.notifications.long_running_enabled {
+            if !workspace.mirrors.notifications.long_running_enabled {
                 return;
             }
-            let threshold =
-                std::time::Duration::from_secs(workspace.notifications.long_running_threshold_secs);
+            let threshold = std::time::Duration::from_secs(
+                workspace.mirrors.notifications.long_running_threshold_secs,
+            );
             if *elapsed < threshold {
                 return;
             }
@@ -1250,14 +1251,14 @@ impl Workspace {
         // Propagate the workspace's terminal config so every pane
         // starts with the same font_size / spacing. Zoom actions
         // diverge each view's runtime font_size individually.
-        let config = self.terminal_config;
+        let config = self.mirrors.terminal_config;
         // `shell_program` is the effective shell from `apply_config`; falls
         // back to `PtyConfig::default()`'s `$SHELL`/`/bin/zsh` when unset.
         let mut pty_config = PtyConfig {
             cwd,
             ..PtyConfig::default()
         };
-        if let Some(program) = self.shell_program.as_deref() {
+        if let Some(program) = self.mirrors.shell_program.as_deref() {
             pty_config.shell = program.to_string();
         }
         if let Some(prepared) = prepared {
@@ -1288,7 +1289,7 @@ impl Workspace {
         let (poke_tx, poke_rx) = futures::channel::mpsc::unbounded::<()>();
         let input_poke_tx = poke_tx.clone();
 
-        let font_family = self.font_family.clone();
+        let font_family = self.mirrors.font_family.clone();
         let view = cx.new(|cx| {
             let focus_handle = cx.focus_handle();
             let input = TerminalInput::new(move |bytes| {

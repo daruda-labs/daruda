@@ -96,8 +96,6 @@ use gpui::{AppContext, Context, FocusHandle, Window, actions};
 use command::picker::PickerKey;
 use command::picker_key::picker_keystroke;
 
-use daruda_terminal::TerminalConfig;
-
 // ----------------------------------------------------------------
 // Actions
 // ----------------------------------------------------------------
@@ -312,14 +310,6 @@ pub struct Workspace {
     /// When true, new tabs/panes spawn with the focused pane's cwd
     /// (iTerm2 "Reuse previous session's directory").
     pub(in crate::workspace) inherit_cwd: bool,
-    /// Terminal config applied to every new pane (font size + iTerm2-style
-    /// spacing multipliers). Single source of truth; `resize_all_tabs`
-    /// reads the same settings to measure cells consistently with
-    /// TerminalView.
-    pub(in crate::workspace) terminal_config: TerminalConfig,
-    /// Primary font family from config. Applied to each new pane's
-    /// TerminalView so user-specified fonts take effect.
-    pub(in crate::workspace) font_family: String,
     /// Left dock (lane list, git changes, files — the
     /// active view is picked by `left_dock_view`).
     pub(in crate::workspace) left_dock: gpui::Entity<layout::Dock>,
@@ -380,9 +370,6 @@ pub struct Workspace {
     /// The flow runs this app started. See [`flow_runs::FlowRuns`] for why the
     /// rules about them live in a type rather than here.
     pub(in crate::workspace) runs: flow_runs::FlowRuns,
-    /// `[flow]` — the budget every run starts with. Cached from config
-    /// like the other config mirrors, refreshed in `apply_config`.
-    pub(in crate::workspace) flow_config: daruda_config::flow::FlowConfig,
     /// One worktree's past runs, read from disk when the Flows tab needs
     /// them. See [`flow_cache::LaneCache`] for the rule both caches share.
     pub(in crate::workspace) flow_history: flow_cache::LaneCache<flow_history::FlowHistory>,
@@ -449,61 +436,6 @@ pub struct Workspace {
     /// string passed to `window.set_window_title`. Persisted to
     /// `ProjectState.window_user_label`.
     pub(in crate::workspace) window_user_label: Option<gpui::SharedString>,
-    /// Effective shell program for new panes — `Some` only when a
-    /// project layer (or the user `[shell]` section) sets `program`.
-    /// `None` falls back to `$SHELL` / `/bin/zsh` via `PtyConfig::default`.
-    /// Picked up by `create_pane_with_cwd` at spawn time; existing
-    /// panes keep the program they were spawned with.
-    pub(in crate::workspace) shell_program: Option<String>,
-    /// Syntect theme name for syntax highlighting in the file viewer.
-    /// Updated on every config reload; threaded into background load tasks.
-    pub(in crate::workspace) syntax_theme: String,
-    /// The app-wide agent-chat presentation a fresh pane starts on. The one
-    /// mirror of `daruda_config::AgentConfig`'s reader axes, resolved here so
-    /// the pane-creation and config-reload paths cannot read them differently.
-    pub(in crate::workspace) agent_reader_defaults:
-        crate::workspace::main_area::agent_chat_pane::transcript_defaults::ReaderDefaults,
-    /// When true, clicking a file in the left dock reuses the single
-    /// existing file-viewer tab instead of opening one per file.
-    /// Mirrors `daruda_config::FileViewerConfig::preview_tab`.
-    pub(in crate::workspace) file_viewer_preview_tab: bool,
-    /// Preferred external-editor preset name (`daruda_config::editor`), or
-    /// empty for the OS default handler. Mirrors
-    /// `daruda_config::EditorConfig::preferred`.
-    pub(in crate::workspace) preferred_editor: String,
-    /// Notification + user-attention gates. Drives whether OSC 9 / 777 /
-    /// 1337 RequestAttention surface to the OS. Read by per-pane
-    /// `TerminalViewEvent` subscriptions and by the long-running command
-    /// timer.
-    pub(in crate::workspace) notifications: daruda_config::NotificationsConfig,
-    /// `[git]` — whether the Git panel's commit and push ask first.
-    pub(in crate::workspace) git_config: daruda_config::GitConfig,
-    /// Telegram bot bridge settings — gates `relay_to_telegram` (both
-    /// `enabled` and a completed pairing are required before a ping is
-    /// queued). Mirrored from the live config the same way
-    /// `notifications` is, so a Settings-window toggle takes effect
-    /// without any extra plumbing.
-    pub(in crate::workspace) telegram: daruda_config::TelegramConfig,
-    /// Clipboard write limits — caps streaming OSC 1337 `Copy=` /
-    /// `EndCopy` payloads so a runaway shell cannot exhaust memory.
-    pub(in crate::workspace) clipboard: daruda_config::ClipboardConfig,
-    /// Agent chat configuration — permission mode applied on connect.
-    pub(in crate::workspace) agent: daruda_config::AgentConfig,
-    /// The agent catalog mirrored from config `[[agents]]`, already resolved
-    /// (`Config::resolved_agents`) — preset references expanded, entries that
-    /// resolve to nothing dropped. A newly opened pane runs under `agents[0]`;
-    /// each pane resolves its `agent_id` to a launch command here at connect
-    /// time. Guaranteed non-empty by the config layer.
-    pub(in crate::workspace) agents: std::sync::Arc<[daruda_config::AgentDefinition]>,
-    /// The registered SSH/Docker host catalog mirrored from config
-    /// `[[session_hosts]]` — a lane's `session_host.registry_id` resolves
-    /// against this via `lane::session_host::effective_session_host`.
-    pub(in crate::workspace) session_hosts: Vec<daruda_config::SessionHostEntry>,
-    /// Removed catalog rows mirrored from config `[[session_host_tombstones]]`
-    /// — chased when a `registry_id` no longer resolves in `session_hosts`,
-    /// so a merge (`redirected_to`) still re-resolves. See
-    /// `lane::session_host::effective_session_host`.
-    pub(in crate::workspace) session_host_tombstones: Vec<daruda_config::SessionHostTombstone>,
     /// The agent the user most recently opened a chat pane under (session-local,
     /// not persisted). A fresh pane defaults to this so switching agents "sticks"
     /// for the window; falls back to the catalog default when unset or stale.
@@ -865,7 +797,7 @@ impl Workspace {
                     ws_for_input.upgrade().is_some_and(|ws| {
                         let ws = ws.read(app);
                         ws.is_agent_chat_pane(ws.active_runtime().focused_pane_id)
-                            && !ws.agent.use_modifier_to_send
+                            && !ws.mirrors.agent.use_modifier_to_send
                     })
                 })
                 // Shift+Tab cycles the focused agent pane's session mode (Claude
@@ -1027,8 +959,6 @@ impl Workspace {
             focus_handle,
             dock_drag: None,
             inherit_cwd: true,
-            terminal_config: config_ops::terminal_config_from(config),
-            font_family: config.font.terminal.family.clone(),
             left_dock: {
                 let ws = ws_weak.clone();
                 cx.new(|_| {
@@ -1049,7 +979,6 @@ impl Workspace {
             unseen_outcomes: unseen_outcomes::UnseenOutcomes::default(),
             window_active: window.is_window_active(),
             claude: claude_session_ops::ClaudeContext {
-                usage_poll: config.usage.poll.clone(),
                 usage_by_account: claude_session_ops::PerAccountUsage::default(),
                 service_status: std::collections::HashMap::new(),
                 sticky_focus_by_recipe: std::collections::HashMap::new(),
@@ -1074,8 +1003,6 @@ impl Workspace {
                     }
                     store
                 },
-                claude_status_enabled: config.claude_status.enable,
-                stale_threshold_secs: config.claude_status.stale_threshold_secs,
                 claude_hooks_installed: daruda_agent::hooks::installer::InstallerPaths::from_env()
                     .map(|p| daruda_agent::hooks::installer::is_installed(&p))
                     .unwrap_or(false),
@@ -1126,7 +1053,6 @@ impl Workspace {
             flow_history: flow_cache::LaneCache::default(),
             flow_list: flow_cache::LaneCache::default(),
             flow_browser: flow_browser::FlowBrowser::new(window, cx),
-            flow_config: config.flow.clone(),
             lane_scoped: HashMap::new(),
             file_tree: left_dock::file_tree_context::FileTreeContext {
                 files_watcher_poll: None,
@@ -1149,22 +1075,6 @@ impl Workspace {
             cached_window_bounds: None,
             cached_project_config: None,
             window_user_label: None,
-            shell_program: config.shell.program.clone(),
-            syntax_theme: config.file_viewer.syntax_theme.clone(),
-            agent_reader_defaults:
-                crate::workspace::main_area::agent_chat_pane::transcript_defaults::ReaderDefaults::from_config(
-                    &config.agent,
-                ),
-            file_viewer_preview_tab: config.file_viewer.preview_tab,
-            preferred_editor: config.editor.preferred.clone(),
-            notifications: config.notifications.clone(),
-            git_config: config.git.clone(),
-            telegram: config.telegram.clone(),
-            clipboard: config.clipboard.clone(),
-            agent: config.agent.clone(),
-            agents: config.resolved_agents().into(),
-            session_hosts: config.session_hosts.clone(),
-            session_host_tombstones: config.session_host_tombstones.clone(),
             last_agent_id: None,
             agent_pulse_prev: Vec::new(),
             git_locks: left_dock::git_ops::lock::GitLocks::default(),
@@ -1591,7 +1501,7 @@ impl Workspace {
     /// repaints windows that actually show motion — idle windows stay at
     /// zero redraws.
     pub(crate) fn has_animating_claude_status(&self, cx: &gpui::App) -> bool {
-        if !self.claude.claude_status_enabled {
+        if !self.mirrors.claude_status_enabled {
             return false;
         }
         // ACP pane statuses across every lane (see `agent_chat_statuses`),

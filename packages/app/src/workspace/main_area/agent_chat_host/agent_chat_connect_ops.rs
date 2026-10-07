@@ -289,14 +289,15 @@ impl Workspace {
         // Stale id — reconcile so the chip / persisted state stop lying, then
         // launch the effective agent (a catalog entry, or the Claude id when the
         // catalog is somehow empty).
-        let effective_id = resolve_open_agent_id(&self.agents, self.last_agent_id.as_deref());
+        let effective_id =
+            resolve_open_agent_id(&self.mirrors.agents, self.last_agent_id.as_deref());
         let defaults = TranscriptDefaults::resolve(
-            self.agents.iter().find(|a| a.id == effective_id),
-            self.agent_reader_defaults,
+            self.mirrors.agents.iter().find(|a| a.id == effective_id),
+            self.mirrors.agent_reader_defaults,
         );
         if let Some(view) = self.agent_chat_view(pane_id).cloned() {
             let id = effective_id.clone();
-            let name = agent_name_for(&self.agents, &effective_id);
+            let name = agent_name_for(&self.mirrors.agents, &effective_id);
             view.update(cx, |v, cx| v.switch_agent(id, name, &defaults, cx));
             self.update_agent_chat_agent_id(pane_id, effective_id.clone());
             self.mutate_durable(cx, |_, _| {});
@@ -337,7 +338,7 @@ impl Workspace {
         let daruda_config::SessionPreferences {
             model: initial_model,
             modes: initial_modes,
-        } = view.session_preferences(&self.agents);
+        } = view.session_preferences(&self.mirrors.agents);
         let vocabulary_source = crate::lane::session_host::adapter_command(&launch)
             .trim()
             .to_string();
@@ -353,7 +354,11 @@ impl Workspace {
         let owning_lane_ref = self.lane_ref_for_pane(pane_id);
         let owning_lane = owning_lane_ref.and_then(|lane_ref| self.lane_for(lane_ref));
         let resolved_host = match owning_lane.map(|lane| {
-            lane.effective_session_host(&launch, &self.session_hosts, &self.session_host_tombstones)
+            lane.effective_session_host(
+                &launch,
+                &self.mirrors.session_hosts,
+                &self.mirrors.session_host_tombstones,
+            )
         }) {
             None => None,
             Some(Ok(host)) => Some(host),
@@ -407,8 +412,8 @@ impl Workspace {
             prepared.as_ref(),
             cached_host.as_ref(),
             resolved_host.as_ref(),
-            &self.session_hosts,
-            &self.session_host_tombstones,
+            &self.mirrors.session_hosts,
+            &self.mirrors.session_host_tombstones,
         );
         if let Some(lane_ref) = owning_lane_ref
             && let Some(corrected) = resolved.host_write_back
