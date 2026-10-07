@@ -71,8 +71,8 @@ async fn the_remote_header_names_the_tab_beside_the_agent(cx: &mut TestAppContex
             .agent_chat_view(pane)
             .unwrap()
             .read(cx)
-            .agent_name
-            .clone();
+            .agent_name()
+            .to_owned();
         (ws.telegram_header(pane, cx), agent)
     });
     ws.update(cx, |ws, cx| {

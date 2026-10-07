@@ -109,7 +109,13 @@ fn visible_rows(ws: &Workspace, cx: &gpui::App) -> usize {
         .panes
         .iter()
         .filter_map(|p| p.agent_chat_view())
-        .map(|v| v.read(cx).rows.iter().filter(|r| !r.hidden).count())
+        .map(|v| {
+            v.read(cx)
+                .rows_for_test()
+                .iter()
+                .filter(|r| !r.hidden)
+                .count()
+        })
         .sum()
 }
 

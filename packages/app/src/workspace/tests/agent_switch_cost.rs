@@ -128,7 +128,7 @@ async fn switching_back_to_a_chat_pane_recompiles_no_queries(cx: &mut TestAppCon
                 let id = ws.active_runtime().panes.last().expect("pane").id;
                 let view = super::agent_chat::agent_view(ws, id);
                 view.update(cx, |v, cx| {
-                    v.items = (0..20).flat_map(turn).collect();
+                    v.set_items_for_test((0..20).flat_map(turn).collect());
                     // Expanded: a settled transcript collapses its cards, and a
                     // collapsed card renders no body — which would make this
                     // test pass for the wrong reason.
@@ -162,7 +162,7 @@ async fn switching_back_to_a_chat_pane_recompiles_no_queries(cx: &mut TestAppCon
     let laid_out = ws.read_with(cx, |ws, cx| {
         super::agent_chat::agent_view(ws, pane_id)
             .read(cx)
-            .list_bounds
+            .list_bounds()
             .is_some()
     });
     assert!(

@@ -119,7 +119,7 @@ fn snapshot_pane(
             task_id: task_id.into(),
             execution_id,
         }));
-        v.status = AgentSessionStatus::Connected;
+        v.set_status_for_test(AgentSessionStatus::Connected);
     });
     let tab_id = ws.alloc_id();
     ws.active_runtime_mut().panes.push(pane);
@@ -498,7 +498,10 @@ fn cli_snapshot_refuses_every_input_path(cx: &mut TestAppContext) {
             let view = ws.agent_chat_view(id).unwrap().clone();
             let before = {
                 let v = view.read(cx);
-                (v.picked_mode_id.clone(), v.picked_model_id.clone())
+                (
+                    v.picked_mode_id_for_test().map(str::to_owned),
+                    v.picked_model_id_for_test().map(str::to_owned),
+                )
             };
 
             ws.send_agent_prompt_text(id, "must not send".into(), cx);
@@ -535,12 +538,15 @@ fn cli_snapshot_refuses_every_input_path(cx: &mut TestAppContext) {
             assert_eq!(probe.drain(), (0, false));
 
             let v = view.read(cx);
-            assert!(v.queue.pending_prompts.is_empty());
-            assert!(v.items.is_empty());
-            assert_eq!(v.session_id.as_deref(), Some("cli-session"));
+            assert!(v.queue().pending_prompts.is_empty());
+            assert!(v.items().is_empty());
+            assert_eq!(v.session_id(), Some("cli-session"));
             assert!(v.is_read_only());
             assert_eq!(
-                (v.picked_mode_id.clone(), v.picked_model_id.clone()),
+                (
+                    v.picked_mode_id_for_test().map(str::to_owned),
+                    v.picked_model_id_for_test().map(str::to_owned)
+                ),
                 before
             );
             assert!(ws.task_chat_owner(id, cx).is_none());
@@ -560,9 +566,9 @@ fn a_snapshot_never_starts_a_fresh_session(cx: &mut TestAppContext) {
             let cwd = PaneCwd::Local(std::env::temp_dir());
             ws.connect_agent_chat(id, cwd, None, cx);
             let v = ws.agent_chat_view(id).unwrap().read(cx);
-            assert!(matches!(v.status, AgentSessionStatus::Error { .. }));
+            assert!(matches!(v.status(), AgentSessionStatus::Error { .. }));
             assert!(v.any_handle().is_none());
-            assert_eq!(v.session_id.as_deref(), Some("cli-session"));
+            assert_eq!(v.session_id(), Some("cli-session"));
         });
     })
     .unwrap();
@@ -615,7 +621,7 @@ fn continue_waits_for_confirmed_exit_and_a_completed_load(cx: &mut TestAppContex
             ws.fold_agent_chat_event(id, failed, cx);
             let v = view.read(cx);
             assert!(v.is_read_only());
-            assert!(matches!(v.status, AgentSessionStatus::Error { .. }));
+            assert!(matches!(v.status(), AgentSessionStatus::Error { .. }));
             assert_eq!(v.load_intent(), Some(LoadIntent::Snapshot));
 
             // A continue whose load completed keeps its session and takes input.
@@ -630,7 +636,7 @@ fn continue_waits_for_confirmed_exit_and_a_completed_load(cx: &mut TestAppContex
             ws.send_agent_prompt_text(id, "carry on".into(), cx);
             assert_eq!(live.drain(), (1, false));
             let v = view.read(cx);
-            assert_eq!(v.session_id.as_deref(), Some("cli-session"));
+            assert_eq!(v.session_id(), Some("cli-session"));
             assert!(ws.task_chat_owner(id, cx).is_none());
             assert_eq!(cx.global::<GlobalTasks>().get(&task).unwrap().state, state);
         });
@@ -662,7 +668,7 @@ fn a_continue_that_loses_its_gate_mid_load_settles_as_a_snapshot(cx: &mut TestAp
             );
             let v = view.read(cx);
             assert!(v.is_read_only());
-            assert!(matches!(v.status, AgentSessionStatus::Connected));
+            assert!(matches!(v.status(), AgentSessionStatus::Connected));
             assert_eq!(probe.drain(), (0, true));
         });
     })
@@ -744,7 +750,7 @@ fn open_chat_marks_a_cli_run_read_only_and_restore_keeps_it(cx: &mut TestAppCont
             });
             let v = ws.agent_chat_view(opened).unwrap().read(cx);
             assert_eq!(v.access(), expected);
-            assert_eq!(v.session_id.as_deref(), Some("cli-session"));
+            assert_eq!(v.session_id(), Some("cli-session"));
 
             let (state, projects) = ws.snapshot_for_disk(cx);
             ws.restore_from_disk(&state, &projects, window, cx);
@@ -754,7 +760,7 @@ fn open_chat_marks_a_cli_run_read_only_and_restore_keeps_it(cx: &mut TestAppCont
                 .values()
                 .flat_map(|rt| rt.panes.iter())
                 .filter_map(Pane::agent_chat_content)
-                .find(|chat| chat.view.read(cx).session_id.as_deref() == Some("cli-session"))
+                .find(|chat| chat.view.read(cx).session_id() == Some("cli-session"))
                 .unwrap();
             assert_eq!(chat.view.read(cx).access(), expected);
             assert_eq!(chat.agent_id, ws.agents[0].id);

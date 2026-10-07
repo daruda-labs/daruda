@@ -36,8 +36,9 @@ async fn an_agent_tab_carries_its_session_status(cx: &mut TestAppContext) {
     ws.update(cx, |ws, cx| {
         let pane_id = ws.active_runtime().focused_pane_id;
         super::agent_chat::agent_view(ws, pane_id).update(cx, |v, _| {
-            v.status =
-                crate::workspace::main_area::agent_chat_pane::view::AgentSessionStatus::Connected;
+            v.set_status_for_test(
+                crate::workspace::main_area::agent_chat_pane::view::AgentSessionStatus::Connected,
+            );
             v.set_turn_in_flight();
         });
     });
@@ -392,8 +393,9 @@ async fn the_hidden_tab_shows_its_unseen_outcome(cx: &mut TestAppContext) {
 
     ws.update(cx, |ws, cx| {
         super::agent_chat::agent_view(ws, agent).update(cx, |v, _| {
-            v.status =
-                crate::workspace::main_area::agent_chat_pane::view::AgentSessionStatus::Connected;
+            v.set_status_for_test(
+                crate::workspace::main_area::agent_chat_pane::view::AgentSessionStatus::Connected,
+            );
         });
     });
     let shown = indicators(&ws, cx);

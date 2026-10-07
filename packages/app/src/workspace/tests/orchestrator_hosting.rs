@@ -178,7 +178,7 @@ fn closing_the_orchestrator_tab_does_not_connect_the_worktree_being_left(cx: &mu
                 .insert_agent_chat_pane(ws.agents[0].id.clone(), ws.active_lane_cwds(), window, cx)
                 .unwrap();
             assert!(matches!(
-                ws.agent_chat_view(dormant).unwrap().read(cx).status,
+                ws.agent_chat_view(dormant).unwrap().read(cx).status(),
                 AgentSessionStatus::Idle
             ));
 
@@ -192,7 +192,7 @@ fn closing_the_orchestrator_tab_does_not_connect_the_worktree_being_left(cx: &mu
             );
             assert!(
                 matches!(
-                    ws.agent_chat_view(dormant).unwrap().read(cx).status,
+                    ws.agent_chat_view(dormant).unwrap().read(cx).status(),
                     AgentSessionStatus::Idle
                 ),
                 "taking the tab down must not focus — and so connect — the \
@@ -372,8 +372,8 @@ fn hidden_orchestrator_tracks_live_config_updates(cx: &mut TestAppContext) {
         config.file_viewer.syntax_theme = "InspiredGitHub".into();
         ws.apply_config(&config, cx);
         let view = ws.agent_chat_view(pane).unwrap().read(cx);
-        assert_eq!(view.agent_name, agent.name);
-        assert_eq!(view.defaults, crate::workspace::main_area::agent_chat_pane::transcript_defaults::TranscriptDefaults::resolve(Some(&agent), ws.agent_reader_defaults));
+        assert_eq!(view.agent_name(), agent.name);
+        assert_eq!(*view.defaults_for_test(), crate::workspace::main_area::agent_chat_pane::transcript_defaults::TranscriptDefaults::resolve(Some(&agent), ws.agent_reader_defaults));
         assert_eq!(view.syntax_theme(), config.file_viewer.syntax_theme);
     });
 }
@@ -638,7 +638,7 @@ fn hidden_orchestrator_preserves_user_tabs_and_resolves_its_account(cx: &mut Tes
             assert_eq!(ws.orchestrator_chip_state(cx), Some(crate::workspace::status_bar::orchestrator_chip::OrchestratorChipState::Idle));
             assert_eq!(ws.agent_chat_account_selection(pane), account);
             ws.agent_chat_view(pane).cloned().unwrap().update(cx, |view, _| {
-                view.status = super::super::main_area::agent_chat_pane::view::AgentSessionStatus::Connected;
+                view.set_status_for_test(super::super::main_area::agent_chat_pane::view::AgentSessionStatus::Connected);
             });
             assert!(!ws.agent_chat_statuses(cx).iter().any(|(id, _)| *id == pane));
         });
@@ -674,10 +674,11 @@ fn hidden_orchestrator_pulse_emits_completion_and_phone_fallback(cx: &mut TestAp
                     .cloned()
                     .unwrap()
                     .update(cx, |view, _| {
-                        view.activity.span = ActivitySpan::Busy {
+                        view.activity_mut_for_test().span = ActivitySpan::Busy {
                             started_at: std::time::Instant::now(),
                         };
-                        view.activity.pending_completion = Some(TurnOutcome::Completed);
+                        view.activity_mut_for_test().pending_completion =
+                            Some(TurnOutcome::Completed);
                         view.start_phone_turn_for_test(
                             std::time::Instant::now()
                                 - std::time::Duration::from_secs(FIRST_RESPONSE_FALLBACK_SECS + 1),
@@ -691,8 +692,8 @@ fn hidden_orchestrator_pulse_emits_completion_and_phone_fallback(cx: &mut TestAp
                 ws.flush_telegram_first_response_fallbacks(cx);
                 ws.pulse_agent_chats(cx);
                 let view = ws.agent_chat_view(pane).unwrap().read(cx);
-                assert!(!view.activity.span.is_busy());
-                assert!(view.activity.pending_completion.is_none());
+                assert!(!view.activity_for_test().span.is_busy());
+                assert!(view.activity_for_test().pending_completion.is_none());
                 assert!(!view.is_phone_turn_waiting());
                 pane
             })

@@ -285,7 +285,7 @@ async fn streaming_write_diff_rebuilds_and_collapsed_header_keeps_height(cx: &mu
 
     let (rows, bounds) = view.read_with(cx, |v, cx| {
         let editor = v
-            .assets
+            .assets_for_test()
             .diff_editors
             .get("w1#0")
             .expect("diff editor built for the tool call");
@@ -453,7 +453,7 @@ async fn a_large_write_diff_renders_through_the_capped_embed(cx: &mut TestAppCon
 
     let (rows, visible, scroll_h) = view.read_with(cx, |v, cx| {
         let state = v
-            .assets
+            .assets_for_test()
             .diff_editors
             .get("w1#0")
             .expect("diff editor built for the write")
@@ -572,7 +572,7 @@ async fn long_diff_lines_wrap_to_the_embed_width(cx: &mut TestAppContext) {
 
     let (logical_rows, rows, viewport_w, content_w) = view.read_with(cx, |v, cx| {
         let state = v
-            .assets
+            .assets_for_test()
             .diff_editors
             .get("e1#0")
             .expect("diff editor built for the edit")

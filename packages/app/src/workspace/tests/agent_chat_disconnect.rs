@@ -21,7 +21,7 @@ fn pane(ws: &mut Workspace, window: &mut Window, cx: &mut Context<Workspace>) ->
     );
     let id = pane.id;
     pane.agent_chat_view().unwrap().update(cx, |view, _| {
-        view.status = AgentSessionStatus::Connected;
+        view.set_status_for_test(AgentSessionStatus::Connected);
     });
     ws.active_runtime_mut().panes.push(pane);
     id
@@ -61,7 +61,7 @@ fn idle_agent_chat_eof_leaves_another_same_cwd_task_running(cx: &mut TestAppCont
             ws.agent_chat_stream_ended(idle, cx);
 
             assert!(matches!(
-                ws.agent_chat_view(idle).unwrap().read(cx).status,
+                ws.agent_chat_view(idle).unwrap().read(cx).status(),
                 AgentSessionStatus::Error {
                     remedy: daruda_acp::Remedy::Retry,
                     ..
@@ -98,7 +98,12 @@ fn active_agent_chat_eof_completes_once_through_the_activity_edge(cx: &mut TestA
                 TaskState::Error { .. }
             ));
             assert!(!view.read(cx).is_busy());
-            assert!(view.read(cx).activity.pending_completion.is_none());
+            assert!(
+                view.read(cx)
+                    .activity_for_test()
+                    .pending_completion
+                    .is_none()
+            );
             let next_task = running_task(cx);
             ws.agent_chat_stream_ended(pane, cx);
             ws.pulse_agent_chats(cx);

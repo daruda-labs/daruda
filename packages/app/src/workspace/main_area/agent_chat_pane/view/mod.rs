@@ -678,15 +678,15 @@ pub(in crate::workspace) struct AgentChatView {
     /// Pane-level focus handle for `Cmd+W` close routing. The view's `render`
     /// tracks it (like `TerminalView`), so `wrapper_focus_handle` returns
     /// `None` for this content kind.
-    pub(in crate::workspace) focus_handle: FocusHandle,
+    pub(super) focus_handle: FocusHandle,
     /// Lane working directory the session is rooted at. `None` = no
     /// resolvable cwd; `Some(Remote)` for a different-machine session.
     /// Local-only consumers must go through `PaneCwd::as_local` / `into_local`.
-    pub(in crate::workspace) cwd: Option<PaneCwd>,
+    pub(super) cwd: Option<PaneCwd>,
     /// The agent this pane runs under (config `[[agents]]` catalog id),
     /// resolved to a launch command at connect. Persisted so restore resumes
     /// under the same agent, whose session id is then resumable.
-    pub(in crate::workspace) agent_id: String,
+    pub(super) agent_id: String,
     /// Bare adapter command used by the current connection. Vocabulary events
     /// are attributed to this frozen source rather than the live catalog,
     /// which may be edited while the old process is still connected.
@@ -699,26 +699,26 @@ pub(in crate::workspace) struct AgentChatView {
     pub(super) agent_program: Option<String>,
     /// Display name for `agent_id`, refreshed on config reload. Used as the
     /// activity-bar title fallback before the session reports its own title.
-    pub(in crate::workspace) agent_name: String,
+    pub(super) agent_name: String,
     /// Connection lifecycle state. Drives the status line + input/cancel
     /// affordance.
-    pub(in crate::workspace) status: AgentSessionStatus,
+    pub(super) status: AgentSessionStatus,
     /// Persisted ACP session id, set once `Connected` establishes a live
     /// session or seeded from restore. Present → the lazy connect resumes via
     /// `session/load` instead of starting fresh.
-    pub(in crate::workspace) session_id: Option<String>,
+    pub(super) session_id: Option<String>,
     /// Session-mode id the *user* picked for this pane — set only by the mode
     /// chip and its cycle shortcut, never mirrored from what the adapter
     /// reports, so a mode the adapter switched to on its own cannot outrank
     /// the agent's `default_mode`. Persisted, and requested on every connect.
-    pub(in crate::workspace) picked_mode_id: Option<String>,
+    pub(super) picked_mode_id: Option<String>,
     /// Model id the *user* picked for this pane — set only by the model chip,
     /// never mirrored from what the adapter reports and never written by the
     /// connect-time apply of the agent's `default_model` (that would make the
     /// setting unchangeable, since a pick outranks it). Persisted, and
     /// reapplied on every connect, so the pick outlives both the session it
     /// was made in and the app run.
-    pub(in crate::workspace) picked_model_id: Option<String>,
+    pub(super) picked_model_id: Option<String>,
     /// Whether a resume (`session/load`) is replaying its history. While
     /// `Loading`, `apply_event` accumulates items but skips the per-event
     /// rebuild + notify (O(n²) over the replay) until `Connected` clears it.
@@ -733,10 +733,10 @@ pub(in crate::workspace) struct AgentChatView {
     // selection ids are keyed by item index; valid only because `items` is
     // append-only. Removing/reordering items would require clearing
     // `FoldState` and would break markdown selection identity.
-    pub(in crate::workspace) items: Vec<ChatItem>,
+    pub(super) items: Vec<ChatItem>,
     /// The buffered/parked queue of prompts not yet on the wire, plus the
     /// in-flight-turn sequencing that gates draining it — see [`PromptQueue`].
-    pub(in crate::workspace) queue: PromptQueue,
+    pub(super) queue: PromptQueue,
     /// Text to put in front of this session's *first* prompt, without showing
     /// it in the transcript. `None` for every pane but the orchestrator's,
     /// which is briefed on what it is and which tools it has — see
@@ -753,11 +753,11 @@ pub(in crate::workspace) struct AgentChatView {
     /// unresolved cards. Updated in lockstep at every touch site
     /// (`PermissionRequested` / `respond_permission` / teardown); holds every
     /// outstanding id since permission requests can run in parallel.
-    pub(in crate::workspace) pending_permissions: HashSet<u64>,
+    pub(super) pending_permissions: HashSet<u64>,
     /// Permission ids relayed to the current phone for this connection.
     /// Cleared on recipient change or session teardown; the periodic sweep
     /// prunes resolved requests and relays outstanding ids absent here.
-    pub(in crate::workspace) permissions_told_to_phone: HashSet<u64>,
+    pub(super) permissions_told_to_phone: HashSet<u64>,
     /// The phone's side of the in-flight turn — see [`PhoneTurn`]. Armed the
     /// instant a Telegram-origin prompt dispatches, answered once a report
     /// goes out, and `None` when the turn is not the phone's, was consumed by
@@ -768,13 +768,13 @@ pub(in crate::workspace) struct AgentChatView {
     phone_turn_state: Option<PhoneTurn>,
     /// Diff editors, mermaid diagrams, and tool-output images built async
     /// from the conversation's content — see [`AssetCache`].
-    pub(in crate::workspace) assets: AssetCache,
+    pub(super) assets: AssetCache,
     /// The pane's activity bookkeeping — see [`ActivityTracker`]. Its consumer
     /// methods stay `impl AgentChatView` since they also need `queue.turn`
     /// and `items`, neither of which moved into `ActivityTracker`.
-    pub(in crate::workspace) activity: ActivityTracker,
+    pub(super) activity: ActivityTracker,
     /// Persisted pane mode plus session-only block overrides.
-    pub(in crate::workspace) fold: FoldState,
+    pub(super) fold: FoldState,
     /// The fold editor's own state — the turn column it shows and the matrix
     /// its `Custom` segment restores. Session-only: the mode itself is
     /// persisted, so only "press a preset then come back" is scoped here.
@@ -793,32 +793,32 @@ pub(in crate::workspace) struct AgentChatView {
     /// Per-pane content-column width mode, seeded from
     /// `agent.use_reading_width` and persisted only once the pane's own toggle
     /// has moved it (see `SerializedAgentChatContent::content_width`).
-    pub(in crate::workspace) content_width: ChatContentWidth,
+    pub(super) content_width: ChatContentWidth,
     /// Whether [`Self::content_width`] is still the seeded value. A pane that
     /// never touched the toggle follows config across reloads and restarts;
     /// one that did keeps its own answer.
-    pub(in crate::workspace) content_width_chosen: bool,
+    pub(super) content_width_chosen: bool,
     /// The recent-steps axis, one choice per level: how many work steps of a
     /// response stay on screen, and how many calls inside one of those steps.
     /// Two choices rather than one over a pair, so pinning the step level
     /// leaves the call level following config.
-    pub(in crate::workspace) tail_steps: PaneChoice<TailWindow>,
-    pub(in crate::workspace) tail_calls: PaneChoice<TailWindow>,
+    pub(super) tail_steps: PaneChoice<TailWindow>,
+    pub(super) tail_calls: PaneChoice<TailWindow>,
     /// Display filter and whether it still follows config.
-    pub(in crate::workspace) display_filter: PaneChoice<DisplayFilter>,
+    pub(super) display_filter: PaneChoice<DisplayFilter>,
     /// The defaults the Workspace last resolved for this pane's agent. Kept so
     /// a reset can hand an axis back to config without the view re-deriving it;
     /// written only where the seeds are applied (construction and
     /// [`Self::reseed_transcript_defaults`]).
-    pub(in crate::workspace) defaults: TranscriptDefaults,
+    pub(super) defaults: TranscriptDefaults,
     /// Virtualized conversation list state (gpui `list`). [`FollowMode::Tail`]
     /// auto-scrolls with streaming output and re-engages when the user scrolls
     /// back to the bottom. Synced with `items` via [`Self::sync_list_after`].
-    pub(in crate::workspace) list_state: ListState,
+    pub(super) list_state: ListState,
     /// Render-row projection of `items` under `fold`, recomputed by
     /// [`Self::rebuild_rows`] on every change. The virtualized list indexes
     /// over this. Derived cache — single rebuild site.
-    pub(in crate::workspace) rows: Vec<RenderRow>,
+    pub(super) rows: Vec<RenderRow>,
     /// The activity level `rows` was projected under — the key of that cache's
     /// one time-dependent input. `activity_state()` reads the clock (a trailing
     /// subagent stays busy until its quiescence window lapses), so the working
@@ -859,7 +859,7 @@ pub(in crate::workspace) struct AgentChatView {
     activity_title: Option<String>,
     /// What the connected agent advertises: modes, config options, slash
     /// commands. Established at `Connected`, cleared together on teardown.
-    pub(in crate::workspace) session_config: SessionConfig,
+    pub(super) session_config: SessionConfig,
     /// Optional session methods the agent advertised at connect (`load` /
     /// `list` / `resume` / `close`), consumed by resume gating. Re-read each
     /// connect; default = baseline agent (nothing extra).
@@ -873,10 +873,10 @@ pub(in crate::workspace) struct AgentChatView {
     pub(super) plan: Vec<PlanEntryView>,
     /// Agent-provided session title (`SessionInfoChanged`); `None` = fallback
     /// label.
-    pub(in crate::workspace) session_title: Option<String>,
+    pub(super) session_title: Option<String>,
     /// Agent-provided last-activity timestamp (ISO 8601); `None` = unknown.
     /// Shown as a tooltip on the activity-bar title.
-    pub(in crate::workspace) session_updated_at: Option<String>,
+    pub(super) session_updated_at: Option<String>,
     /// Whether the bottom plan region is collapsed to its header. Defaults to
     /// `false` (expanded); toggled via [`Self::toggle_plan_collapsed`].
     pub(super) plan_collapsed: bool,
@@ -891,7 +891,7 @@ pub(in crate::workspace) struct AgentChatView {
     /// Window-space bounds of the scrolling list viewport, captured each
     /// paint. Read by the drag-selection autoscroll poll to detect the cursor
     /// leaving the viewport. `None` until the first paint.
-    pub(in crate::workspace) list_bounds: Option<Bounds<Pixels>>,
+    pub(super) list_bounds: Option<Bounds<Pixels>>,
     /// Width of the pane root, captured each paint.
     pub(super) pane_width: Option<Pixels>,
     /// Drag-selection autoscroll poll task (mirrors
@@ -902,11 +902,11 @@ pub(in crate::workspace) struct AgentChatView {
     /// `end_selection_drag`. Independent of the selected block's paint
     /// lifetime, so the autoscroll poll still stops on mouse-release even if
     /// the block unmounts mid-drag in the virtualized list.
-    pub(in crate::workspace) selection_drag_active: bool,
+    pub(super) selection_drag_active: bool,
     /// Inactive-pane dim amount in `[0.0, 1.0]`: `0.0` = focused / full color,
     /// `> 0.0` = unfocused split leaf (see [`Self::dim`]). Single write site:
     /// `Workspace::refresh_pane_dimming` (MVU one-way flow).
-    pub(in crate::workspace) dim_amount: f32,
+    pub(super) dim_amount: f32,
     /// Observes the host theme so a light/dark toggle re-rasterizes cached
     /// mermaid diagrams (keyed by `(source, dark)`), which would otherwise
     /// stay stale until the next ACP event triggers a reconcile.
@@ -914,7 +914,7 @@ pub(in crate::workspace) struct AgentChatView {
     /// Test-only render counter, asserted by the cache-scoping regression test
     /// to confirm a `cx.notify()` on this view actually re-renders it.
     #[cfg(test)]
-    pub(in crate::workspace) render_count: std::cell::Cell<u32>,
+    pub(super) render_count: std::cell::Cell<u32>,
 }
 
 pub(in crate::workspace) use event::AgentChatEvent;
@@ -929,6 +929,8 @@ pub(super) mod list_sync;
 mod pane_choices;
 mod queue_ops;
 mod session_ops;
+#[cfg(test)]
+mod test_hooks;
 
 impl AgentChatView {
     /// Where `link` points as this pane's session sees it: against its local

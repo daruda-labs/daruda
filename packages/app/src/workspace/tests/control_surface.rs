@@ -256,7 +256,7 @@ mod ask {
                 let view = ws.agent_chat_view(target.pane).expect("pane").clone();
                 view.update(cx, |v, _| {
                     v.set_turn_in_flight();
-                    v.items = items;
+                    v.set_items_for_test(items);
                 });
                 // Busy is observed first, so the tick has an edge to detect.
                 ws.pulse_agent_chats(cx);
@@ -354,7 +354,7 @@ mod ask {
             let view = ws.agent_chat_view(target.pane).expect("pane").clone();
             view.update(cx, |v, _| {
                 v.set_turn_in_flight();
-                v.items = vec![
+                v.set_items_for_test(vec![
                     said("the previous turn's answer"),
                     ChatItem::AssistantText {
                         text: "half a sen".into(),
@@ -362,7 +362,7 @@ mod ask {
                         message_id: None,
                         phase: Default::default(),
                     },
-                ];
+                ]);
             });
             assert_eq!(
                 ws.control_read(target.pane, cx).expect("pane is there"),
@@ -407,7 +407,7 @@ mod ask {
                 let view = ws.agent_chat_view(target.pane).expect("pane").clone();
                 view.update(cx, |v, _| {
                     v.set_turn_in_flight();
-                    v.items = vec![said("nobody is listening")];
+                    v.set_items_for_test(vec![said("nobody is listening")]);
                 });
                 ws.pulse_agent_chats(cx);
                 view.update(cx, |v, _| v.set_turn_idle());

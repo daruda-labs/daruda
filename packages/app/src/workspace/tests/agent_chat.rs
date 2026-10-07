@@ -13,7 +13,7 @@ use crate::workspace::Workspace;
 use crate::workspace::main_area::agent_chat_pane::pane_choice::PaneChoice;
 use crate::workspace::main_area::agent_chat_pane::rows::tail::{TailLevel, TailWindow};
 use crate::workspace::main_area::agent_chat_pane::view::{
-    AgentChatView, AgentSessionStatus, ChatContentWidth,
+    AgentChatView, AgentSessionStatus, ChatContentWidth, ChatPaneChoices,
 };
 use crate::workspace::main_area::pane::PaneContent;
 use crate::workspace::main_area::pane_tree::PaneId;
@@ -33,7 +33,7 @@ pub(super) fn agent_view(ws: &Workspace, pane_id: PaneId) -> Entity<AgentChatVie
 /// The queued-prompt texts in FIFO order — the queue holds `QueuedPrompt`
 /// (id + text), so tests compare on the text projection.
 fn queue_texts(v: &AgentChatView) -> Vec<String> {
-    v.queue
+    v.queue()
         .pending_prompts
         .iter()
         .map(|q| q.text.clone())
@@ -102,10 +102,10 @@ async fn open_agent_chat_pane_creates_agent_chat_leaf(cx: &mut TestAppContext) {
                 let view = ac.view.read(cx);
                 // No resolvable lane cwd → the pane parks in `Error` rather
                 // than attempting a connection, keeping the suite offline.
-                let AgentSessionStatus::Error { message, .. } = &view.status else {
+                let AgentSessionStatus::Error { message, .. } = &view.status() else {
                     panic!(
                         "no lane cwd → error status, not a live connect, got {:?}",
-                        view.status
+                        view.status()
                     );
                 };
                 assert_eq!(message.as_str(), s::agent_chat::no_lane_cwd());
@@ -114,7 +114,7 @@ async fn open_agent_chat_pane_creates_agent_chat_leaf(cx: &mut TestAppContext) {
                     s::agent_chat::error_prefix(),
                     "payload must be the reason, not the prefix the banner re-adds"
                 );
-                assert!(view.items.is_empty(), "items start empty");
+                assert!(view.items().is_empty(), "items start empty");
                 assert!(view.any_handle().is_none(), "no session without a cwd");
             }
             _ => panic!("expected an AgentChat pane"),
@@ -150,7 +150,7 @@ async fn open_agent_chat_pane_creates_agent_chat_leaf(cx: &mut TestAppContext) {
                 );
                 assert_eq!(pane.cwd(), Some(tmp.as_path()));
                 match &pane.content {
-                    PaneContent::AgentChat(ac) => ac.view.read(cx).status.clone(),
+                    PaneContent::AgentChat(ac) => ac.view.read(cx).status().clone(),
                     _ => panic!("expected an AgentChat pane"),
                 }
             })
@@ -187,7 +187,7 @@ async fn notify_rerenders_cached_agent_view(cx: &mut TestAppContext) {
             .cloned()
             .expect("agent chat pane present")
     });
-    let before = view.read_with(cx, |v, _| v.render_count.get());
+    let before = view.read_with(cx, |v, _| v.render_count_for_test());
     assert!(
         before >= 1,
         "the view should have rendered at least once after open, got {before}"
@@ -197,7 +197,7 @@ async fn notify_rerenders_cached_agent_view(cx: &mut TestAppContext) {
     cx.update(|cx| view.update(cx, |_v, cx| cx.notify()));
     cx.run_until_parked();
 
-    let after = view.read_with(cx, |v, _| v.render_count.get());
+    let after = view.read_with(cx, |v, _| v.render_count_for_test());
     assert!(
         after > before,
         "cx.notify() must re-render the cached view: before={before} after={after}"
@@ -231,7 +231,7 @@ async fn cancel_turn_ends_the_turn_locally_without_an_agent_reply(cx: &mut TestA
                 // arrives, so `TurnEnded` would never clear this).
                 view.update(cx, |v, _| {
                     v.set_turn_in_flight();
-                    v.items = vec![
+                    v.set_items_for_test(vec![
                         ChatItem::AssistantText {
                             text: "working".into(),
                             streaming: true,
@@ -251,7 +251,7 @@ async fn cancel_turn_ends_the_turn_locally_without_an_agent_reply(cx: &mut TestA
                             parent_tool_id: None,
                             exit: None,
                         }),
-                    ];
+                    ]);
                 });
                 // Offline (no handle): `session/cancel` is a no-op, so only the
                 // authoritative local teardown can end the turn.
@@ -270,11 +270,11 @@ async fn cancel_turn_ends_the_turn_locally_without_an_agent_reply(cx: &mut TestA
             "Stop ends the turn without an agent reply"
         );
         assert!(view.turn_is_idle(), "the turn is settled to idle");
-        let ChatItem::AssistantText { streaming, .. } = &view.items[0] else {
+        let ChatItem::AssistantText { streaming, .. } = &view.items()[0] else {
             panic!("expected the streamed assistant text");
         };
         assert!(!streaming, "streaming text settles on Stop");
-        let ChatItem::ToolCall(tc) = &view.items[1] else {
+        let ChatItem::ToolCall(tc) = &view.items()[1] else {
             panic!("expected the tool call");
         };
         assert_eq!(
@@ -379,7 +379,7 @@ async fn parked_lane_agent_status_reaches_left_dock_aggregate(cx: &mut TestAppCo
                     user_label: None,
                 });
             agent_view(ws, id).update(cx, |v, _| {
-                v.status = AgentSessionStatus::Connected;
+                v.set_status_for_test(AgentSessionStatus::Connected);
                 v.set_turn_in_flight();
             });
 
@@ -520,7 +520,7 @@ async fn deliver_text_to_pane_routes_by_kind(cx: &mut TestAppContext) {
             {
                 let view = agent_view(ws, chat_id);
                 let view = view.read(cx);
-                assert!(view.items.is_empty(), "a queued prompt is not echoed");
+                assert!(view.items().is_empty(), "a queued prompt is not echoed");
                 assert_eq!(
                     queue_texts(view),
                     vec!["do the thing".to_string()],
@@ -549,7 +549,7 @@ async fn deliver_text_to_pane_routes_by_kind(cx: &mut TestAppContext) {
                     1,
                     "a blank submit adds no queue entry and fires no ACP turn"
                 );
-                assert!(view.items.is_empty());
+                assert!(view.items().is_empty());
                 assert!(view.turn_is_idle());
             }
 
@@ -629,16 +629,16 @@ fn restored_chats(ws: &Workspace, cx: &gpui::App) -> Vec<RestoredChat> {
         .map(|view| {
             let view = view.read(cx);
             RestoredChat {
-                agent_id: view.agent_id.clone(),
-                session_id: view.session_id.clone(),
-                title: view.session_title.clone(),
+                agent_id: view.agent_id().to_owned(),
+                session_id: view.session_id().map(str::to_owned),
+                title: view.session_title().map(str::to_owned),
                 replaying: view.is_replaying(),
                 dormant: view.any_handle().is_none(),
-                content_width: view.content_width,
-                tail_steps: view.tail_steps,
-                tail_calls: view.tail_calls,
-                display_filter: view.display_filter,
-                fold_mode: view.fold.chosen_mode(),
+                content_width: view.content_width_for_test(),
+                tail_steps: view.tail_steps_for_test(),
+                tail_calls: view.tail_calls_for_test(),
+                display_filter: view.display_filter_for_test(),
+                fold_mode: view.fold_for_test().chosen_mode(),
             }
         })
         .collect()
@@ -698,18 +698,21 @@ async fn agent_chat_agent_id_restore_handles_present_and_removed_owner(cx: &mut 
                     .cloned()
                     .expect("agent chat view present");
                 view.update(cx, |v, cx| {
-                    v.session_title = Some("Investigate flaky test".to_string());
-                    v.content_width = ChatContentWidth::Reading;
-                    // Different windows per level, so a save that collapsed the
-                    // axis back to one value would restore the wrong one.
-                    v.tail_steps = PaneChoice::Chosen(TailWindow::Last(3));
-                    v.tail_calls = PaneChoice::Chosen(TailWindow::Last(10));
-                    // Distinct token vocabularies: each preference's tokens are
-                    // unreadable to the others, so a crossed wire restores a
-                    // default rather than the wrong-but-plausible value.
-                    v.display_filter =
-                        PaneChoice::Chosen(DisplayFilter::default().toggled(FilterFacet::Prose));
-                    v.fold.set_mode(FoldPreset::Summary.mode());
+                    v.set_session_title_for_test("Investigate flaky test");
+                    v.set_content_width_for_test(ChatContentWidth::Reading);
+                    v.restore_pane_choices(ChatPaneChoices {
+                        // Different windows per level, so a save that collapsed
+                        // the axis back to one value would restore the wrong one.
+                        tail_steps: Some(TailWindow::Last(3)),
+                        tail_calls: Some(TailWindow::Last(10)),
+                        // Distinct token vocabularies: each preference's tokens
+                        // are unreadable to the others, so a crossed wire
+                        // restores a default rather than the wrong-but-plausible
+                        // value.
+                        display_filter: Some(DisplayFilter::default().toggled(FilterFacet::Prose)),
+                        fold_mode: Some(FoldPreset::Summary.mode()),
+                        ..ChatPaneChoices::default()
+                    });
                     cx.notify();
                 });
 
@@ -955,7 +958,8 @@ async fn switch_agent_preserves_source_and_split_inherits_agent(cx: &mut TestApp
             let src_view = agent_view(ws, src_id);
             let src_view = src_view.read(cx);
             assert_eq!(
-                src_view.agent_id, claude_id,
+                src_view.agent_id(),
+                claude_id,
                 "the source pane keeps chatting under its own agent"
             );
             assert!(
@@ -972,7 +976,7 @@ async fn switch_agent_preserves_source_and_split_inherits_agent(cx: &mut TestApp
                 .id;
             assert_ne!(new_id, src_id, "a distinct pane was opened");
             assert_eq!(
-                agent_view(ws, new_id).read(cx).agent_id,
+                agent_view(ws, new_id).read(cx).agent_id(),
                 "codex",
                 "the new pane runs under the switched-to agent"
             );
@@ -992,7 +996,7 @@ async fn switch_agent_preserves_source_and_split_inherits_agent(cx: &mut TestApp
                 .id;
             assert_ne!(split_id, new_id, "the split created a distinct pane");
             assert_eq!(
-                agent_view(ws, split_id).read(cx).agent_id,
+                agent_view(ws, split_id).read(cx).agent_id(),
                 "codex",
                 "the split inherits the source pane's agent, not the catalog default"
             );
@@ -1049,7 +1053,7 @@ async fn up_arrow_consumes_queue_and_edits_last_prompt(cx: &mut TestAppContext) 
                 ws.send_agent_prompt_text(pane_id, "q2".into(), cx);
                 let last = agent_view(ws, pane_id)
                     .read(cx)
-                    .queue
+                    .queue()
                     .pending_prompts
                     .last()
                     .expect("queue non-empty")
@@ -1079,7 +1083,7 @@ async fn up_arrow_consumes_queue_and_edits_last_prompt(cx: &mut TestAppContext) 
         assert!(
             agent_view(ws, pane_id)
                 .read(cx)
-                .queue
+                .queue()
                 .editing_prompt
                 .is_none(),
             "no queue edit begins when the composer is non-empty"
@@ -1120,7 +1124,7 @@ async fn up_arrow_consumes_queue_and_edits_last_prompt(cx: &mut TestAppContext) 
             "the composer receives the last queued prompt's text"
         );
         assert_eq!(
-            agent_view(ws, pane_id).read(cx).queue.editing_prompt,
+            agent_view(ws, pane_id).read(cx).queue().editing_prompt,
             Some(last_id),
             "the editing flag targets the last queued prompt"
         );
@@ -1153,7 +1157,7 @@ async fn queued_prompt_edit_exit_paths_clear_state(cx: &mut TestAppContext) {
                 ws.active_runtime_mut().panes.push(pane);
                 ws.active_runtime_mut().focused_pane_id = id;
                 ws.send_agent_prompt_text(id, "editable".into(), cx);
-                let prompt_id = agent_view(ws, id).read(cx).queue.pending_prompts[0].id;
+                let prompt_id = agent_view(ws, id).read(cx).queue().pending_prompts[0].id;
                 ws.begin_edit_queued_prompt(id, prompt_id, window, cx);
                 (id, prompt_id)
             })
@@ -1165,7 +1169,7 @@ async fn queued_prompt_edit_exit_paths_clear_state(cx: &mut TestAppContext) {
     workspace.read_with(cx, |ws, cx| {
         assert_eq!(ws.terminal_input.read(cx).value(), "editable");
         assert_eq!(
-            agent_view(ws, pane_id).read(cx).queue.editing_prompt,
+            agent_view(ws, pane_id).read(cx).queue().editing_prompt,
             Some(id)
         );
     });
@@ -1187,7 +1191,7 @@ async fn queued_prompt_edit_exit_paths_clear_state(cx: &mut TestAppContext) {
         assert!(
             agent_view(ws, pane_id)
                 .read(cx)
-                .queue
+                .queue()
                 .editing_prompt
                 .is_none(),
             "cancel clears the editing flag; the prompt stays queued"
@@ -1205,7 +1209,7 @@ async fn queued_prompt_edit_exit_paths_clear_state(cx: &mut TestAppContext) {
                 ws.send_agent_prompt_text(pane_id, "q2".into(), cx);
                 let last = agent_view(ws, pane_id)
                     .read(cx)
-                    .queue
+                    .queue()
                     .pending_prompts
                     .last()
                     .unwrap()
@@ -1220,7 +1224,7 @@ async fn queued_prompt_edit_exit_paths_clear_state(cx: &mut TestAppContext) {
     workspace.read_with(cx, |ws, cx| {
         assert_eq!(ws.terminal_input.read(cx).value(), "q2");
         assert_eq!(
-            agent_view(ws, pane_id).read(cx).queue.editing_prompt,
+            agent_view(ws, pane_id).read(cx).queue().editing_prompt,
             Some(clear_id)
         );
     });
@@ -1234,11 +1238,11 @@ async fn queued_prompt_edit_exit_paths_clear_state(cx: &mut TestAppContext) {
     workspace.read_with(cx, |ws, cx| {
         let view = agent_view(ws, pane_id);
         assert!(
-            view.read(cx).queue.pending_prompts.is_empty(),
+            view.read(cx).queue().pending_prompts.is_empty(),
             "queue cleared"
         );
         assert!(
-            view.read(cx).queue.editing_prompt.is_none(),
+            view.read(cx).queue().editing_prompt.is_none(),
             "editing flag cleared"
         );
         assert_eq!(
@@ -1251,7 +1255,7 @@ async fn queued_prompt_edit_exit_paths_clear_state(cx: &mut TestAppContext) {
     cx.update_window(window_handle.into(), |_, window, cx| {
         workspace.update(cx, |ws, cx| {
             ws.send_agent_prompt_text(pane_id, "editable".into(), cx);
-            let pid = agent_view(ws, pane_id).read(cx).queue.pending_prompts[0].id;
+            let pid = agent_view(ws, pane_id).read(cx).queue().pending_prompts[0].id;
             ws.begin_edit_queued_prompt(pane_id, pid, window, cx);
         });
     })
@@ -1278,7 +1282,7 @@ async fn queued_prompt_edit_exit_paths_clear_state(cx: &mut TestAppContext) {
     workspace.read_with(cx, |ws, cx| {
         let view = agent_view(ws, pane_id);
         assert!(
-            view.read(cx).queue.editing_prompt.is_none(),
+            view.read(cx).queue().editing_prompt.is_none(),
             "whitespace submit cancels the edit"
         );
         assert_eq!(
@@ -1591,42 +1595,46 @@ async fn a_config_reload_moves_an_untouched_panes_transcript_settings(cx: &mut T
     let untouched = workspace.read_with(cx, |ws, _| agent_view(ws, untouched_id));
     untouched.read_with(cx, |v, _| {
         assert_eq!(
-            v.tail_steps,
+            v.tail_steps_for_test(),
             PaneChoice::Seeded(TailWindow::Last(5)),
             "a reloaded tail window must reach an untouched pane"
         );
         assert_eq!(
-            v.display_filter,
+            v.display_filter_for_test(),
             PaneChoice::Seeded(DisplayFilter::default()),
             "the reload states no filter, so an untouched pane stays unfiltered"
         );
         assert_eq!(
-            v.fold.mode(),
+            v.fold_for_test().mode(),
             FoldPreset::Summary.mode(),
             "a reloaded fold mode must reach an untouched pane"
         );
-        assert_eq!(v.fold.chosen_mode(), None, "and it is still only a seed");
+        assert_eq!(
+            v.fold_for_test().chosen_mode(),
+            None,
+            "and it is still only a seed"
+        );
     });
 
     chosen.read_with(cx, |v, _| {
         assert_eq!(
-            v.tail_steps,
+            v.tail_steps_for_test(),
             PaneChoice::Chosen(TailWindow::Last(2)),
             "config must not overwrite a chosen tail window"
         );
         assert_eq!(
-            v.tail_calls,
+            v.tail_calls_for_test(),
             PaneChoice::Seeded(TailWindow::All),
             "the reload states no call level, so the level the user never picked \
              follows it to the built-in rather than inheriting the step window"
         );
         assert_eq!(
-            v.display_filter,
+            v.display_filter_for_test(),
             PaneChoice::Chosen(DisplayFilter::default().toggled(FilterFacet::Prose)),
             "config must not overwrite a chosen display filter"
         );
         assert_eq!(
-            v.fold.chosen_mode(),
+            v.fold_for_test().chosen_mode(),
             Some(FoldPreset::Expanded.mode()),
             "config must not overwrite a chosen fold mode"
         );
@@ -1703,7 +1711,13 @@ fn transcript_settings(
     view: &Entity<AgentChatView>,
     cx: &mut TestAppContext,
 ) -> (PaneChoice<TailWindow>, FoldMode, PaneChoice<DisplayFilter>) {
-    view.read_with(cx, |v, _| (v.tail_steps, v.fold.mode(), v.display_filter))
+    view.read_with(cx, |v, _| {
+        (
+            v.tail_steps_for_test(),
+            v.fold_for_test().mode(),
+            v.display_filter_for_test(),
+        )
+    })
 }
 
 /// A reload must resolve the defaults per pane, against that pane's own agent.
@@ -1878,7 +1892,7 @@ async fn stale_agent_reconnect_reseeds_to_the_fallback_agents_transcript_setting
     });
 
     let view = workspace.read_with(cx, |ws, _| agent_view(ws, pane_id));
-    let agent_id = view.read_with(cx, |v, _| v.agent_id.clone());
+    let agent_id = view.read_with(cx, |v, _| v.agent_id().to_owned());
     assert_eq!(agent_id, TRANSCRIPT_AGENT_B);
     // The status bar names the pane's auth domain from the wrapper's copy, so
     // it has to follow the view there too.
@@ -2067,22 +2081,22 @@ async fn an_untouched_pane_keeps_following_the_config_defaults(cx: &mut TestAppC
             .expect("restored agent chat pane present")
             .read(cx);
         assert_eq!(
-            view.tail_steps,
+            view.tail_steps_for_test(),
             PaneChoice::Seeded(TailWindow::Last(5)),
             "the new config tail window must reach an untouched pane"
         );
         assert_eq!(
-            view.display_filter,
+            view.display_filter_for_test(),
             PaneChoice::Seeded(DisplayFilter::default()),
             "a restored pane opens unfiltered — no config key narrows it"
         );
         assert_eq!(
-            view.fold.mode(),
+            view.fold_for_test().mode(),
             FoldPreset::Summary.mode(),
             "the new config fold mode must reach an untouched pane"
         );
         assert_eq!(
-            view.fold.chosen_mode(),
+            view.fold_for_test().chosen_mode(),
             None,
             "and it is still the seed, not a choice"
         );
@@ -2328,7 +2342,7 @@ async fn a_model_pick_is_remembered_and_survives_a_restore(cx: &mut TestAppConte
                 // clicked: the advertised option set the pick lands on.
                 let view = agent_view(ws, pane_id);
                 view.update(cx, |v, _| {
-                    v.session_config.config_options =
+                    v.session_config_mut_for_test().config_options =
                         model_options(&[("opus", "Opus"), ("sonnet", "Sonnet")]);
                 });
 
@@ -2339,7 +2353,7 @@ async fn a_model_pick_is_remembered_and_survives_a_restore(cx: &mut TestAppConte
                     daruda_acp::ConfigValueView::Id("high".to_string()),
                     cx,
                 );
-                assert_eq!(view.read(cx).picked_model_id, None);
+                assert_eq!(view.read(cx).picked_model_id_for_test(), None);
 
                 ws.set_agent_config_option(
                     pane_id,
@@ -2348,7 +2362,7 @@ async fn a_model_pick_is_remembered_and_survives_a_restore(cx: &mut TestAppConte
                     cx,
                 );
                 assert_eq!(
-                    view.read(cx).picked_model_id.as_deref(),
+                    view.read(cx).picked_model_id_for_test(),
                     Some("sonnet"),
                     "the chip pick is remembered so the next connect reapplies it"
                 );
@@ -2396,7 +2410,7 @@ async fn a_model_pick_is_remembered_and_survives_a_restore(cx: &mut TestAppConte
             .expect("restored agent chat pane present")
             .read(cx);
         assert_eq!(
-            view.picked_model_id.as_deref(),
+            view.picked_model_id_for_test(),
             Some("sonnet"),
             "a restored pane still knows its model, so its lazy connect reapplies it"
         );
@@ -2464,7 +2478,10 @@ async fn only_a_user_mode_pick_is_remembered(cx: &mut TestAppContext) {
             },
             cx,
         );
-        agent_view(ws, pane_id).read(cx).picked_mode_id.clone()
+        agent_view(ws, pane_id)
+            .read(cx)
+            .picked_mode_id_for_test()
+            .map(str::to_owned)
     });
     assert_eq!(picked, None, "a mode the adapter reported is not a pick");
 
@@ -2478,7 +2495,7 @@ async fn only_a_user_mode_pick_is_remembered(cx: &mut TestAppContext) {
             },
             cx,
         );
-        view.read(cx).picked_mode_id.clone()
+        view.read(cx).picked_mode_id_for_test().map(str::to_owned)
     });
     assert_eq!(
         picked.as_deref(),
@@ -2560,27 +2577,28 @@ async fn a_config_edit_moves_live_sessions_off_unpicked_defaults(cx: &mut TestAp
     });
     cx.run_until_parked();
 
-    let state =
-        |id: PaneId, cx: &mut TestAppContext| {
-            workspace.read_with(cx, |ws, cx| {
-                let v = agent_view(ws, id).read(cx);
-                let model = v.session_config.config_options.iter().find_map(|o| {
-                    match (&o.category, &o.kind) {
-                        (
-                            daruda_acp::ConfigOptionCategoryView::Model,
-                            daruda_acp::ConfigOptionKindView::Select { current_value, .. },
-                        ) => Some(current_value.clone()),
-                        _ => None,
-                    }
-                });
-                (
-                    model,
-                    v.session_config.mode_for_chip().map(|m| m.current.clone()),
-                    v.picked_model_id.clone(),
-                    v.picked_mode_id.clone(),
-                )
-            })
-        };
+    let state = |id: PaneId, cx: &mut TestAppContext| {
+        workspace.read_with(cx, |ws, cx| {
+            let v = agent_view(ws, id).read(cx);
+            let model = v.session_config().config_options.iter().find_map(|o| {
+                match (&o.category, &o.kind) {
+                    (
+                        daruda_acp::ConfigOptionCategoryView::Model,
+                        daruda_acp::ConfigOptionKindView::Select { current_value, .. },
+                    ) => Some(current_value.clone()),
+                    _ => None,
+                }
+            });
+            (
+                model,
+                v.session_config()
+                    .mode_for_chip()
+                    .map(|m| m.current.clone()),
+                v.picked_model_id_for_test().map(str::to_owned),
+                v.picked_mode_id_for_test().map(str::to_owned),
+            )
+        })
+    };
     assert_eq!(
         state(untouched, cx),
         (
@@ -2641,7 +2659,7 @@ async fn a_time_driven_settle_drops_the_working_indicator(cx: &mut TestAppContex
     let working = |ws: &Workspace, id: PaneId, cx: &gpui::App| {
         agent_view(ws, id)
             .read(cx)
-            .rows
+            .rows_for_test()
             .iter()
             .any(|r| matches!(r.kind, RowKind::WorkingIndicator))
     };
@@ -2661,8 +2679,8 @@ async fn a_time_driven_settle_drops_the_working_indicator(cx: &mut TestAppContex
 
             let view = agent_view(ws, id);
             view.update(cx, |v, cx| {
-                v.items = vec![tool("task-1", None), tool("child-1", Some("task-1"))];
-                v.activity
+                v.set_items_for_test(vec![tool("task-1", None), tool("child-1", Some("task-1"))]);
+                v.activity_mut_for_test()
                     .subagent_last_activity
                     .insert("task-1".into(), std::time::Instant::now());
                 // A benign event projects the rows while the subagent is live.
@@ -2680,7 +2698,7 @@ async fn a_time_driven_settle_drops_the_working_indicator(cx: &mut TestAppContex
                 let lapsed = std::time::Instant::now()
                     .checked_sub(std::time::Duration::from_secs(20))
                     .expect("the monotonic clock has 20s of history");
-                v.activity
+                v.activity_mut_for_test()
                     .subagent_last_activity
                     .insert("task-1".into(), lapsed);
             });
@@ -2833,7 +2851,7 @@ async fn empty_composer_enter_cancels_a_queued_edit_before_arming(cx: &mut TestA
             view.update(cx, |v, _| v.set_turn_in_flight());
             ws.send_agent_prompt_text(pane_id, "parked".to_string(), cx);
             view.update(cx, |v, cx| v.cancel_turn(cx));
-            let parked_id = view.read(cx).queue.paused_prompts[0].id;
+            let parked_id = view.read(cx).queue().paused_prompts[0].id;
             ws.begin_edit_queued_prompt(pane_id, parked_id, window, cx);
             // `begin_edit_queued_prompt` filled the composer; clearing it is what
             // makes the next Enter an empty submit.
@@ -2842,7 +2860,7 @@ async fn empty_composer_enter_cancels_a_queued_edit_before_arming(cx: &mut TestA
 
             ws.send_terminal_input(window, cx);
             assert!(
-                view.read(cx).queue.editing_prompt.is_none(),
+                view.read(cx).queue().editing_prompt.is_none(),
                 "the empty Enter cancelled the edit"
             );
             assert!(

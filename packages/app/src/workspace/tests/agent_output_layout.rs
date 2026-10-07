@@ -351,7 +351,7 @@ fn output_editor_wrap_facts(
 ) -> (usize, gpui::Pixels, gpui::Pixels) {
     view.read_with(cx, |v, cx| {
         let state = v
-            .assets
+            .assets_for_test()
             .output_editors
             .get("b1#0")
             .expect("output editor built for the shell output")
@@ -485,7 +485,7 @@ fn push_filler_cards(
         v.set_all_folds(true, window, cx);
         // The transcript follows its tail, so the filler would push the card
         // under test out of the virtualized window and it would never paint.
-        v.list_state.scroll_to(gpui::ListOffset {
+        v.list_state_for_test().scroll_to(gpui::ListOffset {
             item_ix: 0,
             offset_in_item: px(0.),
         });
@@ -501,7 +501,10 @@ fn transcript_scroll_range(
     view: &Entity<crate::workspace::main_area::agent_chat_pane::view::AgentChatView>,
 ) -> (usize, gpui::Pixels) {
     view.read_with(cx, |v, _| {
-        (v.items.len(), v.list_state.max_offset_for_scrollbar().y)
+        (
+            v.items().len(),
+            v.list_state_for_test().max_offset_for_scrollbar().y,
+        )
     })
 }
 
@@ -532,13 +535,15 @@ async fn capped_embed_wheel_chains_only_after_the_embed_is_exhausted(cx: &mut Te
         "the transcript has no scrollable range, so the fixture is vacuous"
     );
 
-    let before = view.read_with(cx, |v, _| v.list_state.scroll_px_offset_for_scrollbar());
+    let before = view.read_with(cx, |v, _| {
+        v.list_state_for_test().scroll_px_offset_for_scrollbar()
+    });
     let mut vcx = gpui::VisualTestContext::from_window(window_handle, cx);
     let embed = vcx
         .debug_bounds("agent-chat-out-embed-b1#0")
         .expect("the bounded embed painted");
     let (is_raw, visible) = view.read_with(&vcx, |v, cx| {
-        let raw = v.items.iter().any(|item| match item {
+        let raw = v.items().iter().any(|item| match item {
             daruda_acp::ChatItem::ToolCall(tc) => tc
                 .output
                 .first()
@@ -546,7 +551,7 @@ async fn capped_embed_wheel_chains_only_after_the_embed_is_exhausted(cx: &mut Te
             _ => false,
         });
         let visible = v
-            .assets
+            .assets_for_test()
             .output_editors
             .get("b1#0")
             .expect("output editor built for the codex shell block")
@@ -578,8 +583,8 @@ async fn capped_embed_wheel_chains_only_after_the_embed_is_exhausted(cx: &mut Te
 
     let (after, editor_offset) = view.read_with(&vcx, |v, cx| {
         (
-            v.list_state.scroll_px_offset_for_scrollbar(),
-            v.assets
+            v.list_state_for_test().scroll_px_offset_for_scrollbar(),
+            v.assets_for_test()
                 .output_editors
                 .get("b1#0")
                 .expect("output editor built")
@@ -602,7 +607,7 @@ async fn capped_embed_wheel_chains_only_after_the_embed_is_exhausted(cx: &mut Te
     for _ in 0..3 {
         wheel_down_over_embed(&mut vcx, embed);
         offsets.push(view.read_with(&vcx, |v, cx| {
-            v.assets
+            v.assets_for_test()
                 .output_editors
                 .get("b1#0")
                 .expect("output editor built")
@@ -623,7 +628,7 @@ async fn capped_embed_wheel_chains_only_after_the_embed_is_exhausted(cx: &mut Te
     }
 
     let editor = view.read_with(&vcx, |v, _| {
-        v.assets
+        v.assets_for_test()
             .output_editors
             .get("b1#0")
             .expect("output editor built")
@@ -641,13 +646,15 @@ async fn capped_embed_wheel_chains_only_after_the_embed_is_exhausted(cx: &mut Te
         "the embed should have scrolled somewhere, got {end:?}"
     );
 
-    let before = view.read_with(&vcx, |v, _| v.list_state.scroll_px_offset_for_scrollbar());
+    let before = view.read_with(&vcx, |v, _| {
+        v.list_state_for_test().scroll_px_offset_for_scrollbar()
+    });
     wheel_down_over_embed(&mut vcx, embed);
 
     let (after, still_at_end) = view.read_with(&vcx, |v, cx| {
         (
-            v.list_state.scroll_px_offset_for_scrollbar(),
-            v.assets
+            v.list_state_for_test().scroll_px_offset_for_scrollbar(),
+            v.assets_for_test()
                 .output_editors
                 .get("b1#0")
                 .expect("output editor built")
@@ -673,7 +680,7 @@ async fn capped_embed_wheel_chains_only_after_the_embed_is_exhausted(cx: &mut Te
     let (viewport_h, scroll_h) = output_editor_extents(cx, &view);
 
     let rows = view.read_with(cx, |v, cx| {
-        v.assets
+        v.assets_for_test()
             .output_editors
             .get("b1#0")
             .expect("output editor built for the codex shell block")
@@ -798,7 +805,7 @@ fn only_output_block(
 ) -> daruda_acp::ToolOutputBlock {
     view.read_with(cx, |v, _| {
         let blocks = v
-            .items
+            .items()
             .iter()
             .find_map(|item| match item {
                 daruda_acp::ChatItem::ToolCall(tc) => Some(&tc.output),
@@ -858,7 +865,7 @@ async fn read_tool_outputs_render_through_the_capped_embed(cx: &mut TestAppConte
 
     let (editor_language, value, rows, visible) = view.read_with(cx, |v, cx| {
         let state = v
-            .assets
+            .assets_for_test()
             .output_editors
             .get("t1#0")
             .expect("no output editor built — the read fell back to markdown")
@@ -909,7 +916,7 @@ fn output_editor_extents(
 ) -> (gpui::Pixels, gpui::Pixels) {
     view.read_with(cx, |v, cx| {
         let state = v
-            .assets
+            .assets_for_test()
             .output_editors
             .get("b1#0")
             .expect("output editor built for the bare-fence block")
@@ -965,7 +972,7 @@ async fn clicking_a_floating_button_still_ends_the_selection_drag(cx: &mut TestA
     vcx.simulate_mouse_down(button.center(), gpui::MouseButton::Left, Default::default());
     vcx.run_until_parked();
     assert!(
-        view.read_with(&vcx, |v, _| v.selection_drag_active),
+        view.read_with(&vcx, |v, _| v.selection_drag_active_for_test()),
         "the container's mouse-down starts the drag, so the fixture is vacuous \
          if it never does"
     );
@@ -973,7 +980,7 @@ async fn clicking_a_floating_button_still_ends_the_selection_drag(cx: &mut TestA
     vcx.simulate_mouse_up(button.center(), gpui::MouseButton::Left, Default::default());
     vcx.run_until_parked();
     assert!(
-        !view.read_with(&vcx, |v, _| v.selection_drag_active),
+        !view.read_with(&vcx, |v, _| v.selection_drag_active_for_test()),
         "the drag outlived its mouse-up, so the autoscroll poll is still running"
     );
 }

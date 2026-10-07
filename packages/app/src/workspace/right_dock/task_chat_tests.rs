@@ -37,9 +37,9 @@ fn pane(ws: &mut Workspace, window: &mut Window, cx: &mut Context<Workspace>) ->
         cx,
     );
     let id = pane.id;
-    pane.agent_chat_view()
-        .unwrap()
-        .update(cx, |view, _| view.status = AgentSessionStatus::Connected);
+    pane.agent_chat_view().unwrap().update(cx, |view, _| {
+        view.set_status_for_test(AgentSessionStatus::Connected)
+    });
     let tab_id = ws.alloc_id();
     ws.active_runtime_mut().panes.push(pane);
     ws.active_runtime_mut().tabs.push(TabEntry {
@@ -97,7 +97,7 @@ fn task_chat_open_selects_existing_tab_without_duplicate_or_reconnect(cx: &mut T
             assert_eq!(rt.focused_pane_id, pane);
             assert!(rt.tabs[rt.active_tab_index].layout.contains(pane));
             assert!(matches!(
-                ws.agent_chat_view(pane).unwrap().read(cx).status,
+                ws.agent_chat_view(pane).unwrap().read(cx).status(),
                 AgentSessionStatus::Connected
             ));
         })
@@ -116,7 +116,7 @@ fn task_chats_in_one_lane_each_reopen_their_own_pane(cx: &mut TestAppContext) {
             ws.agent_chat_view(second_pane)
                 .unwrap()
                 .update(cx, |view, _| {
-                    view.session_id = Some("second-session".into())
+                    view.set_session_id_for_test(Some("second-session".into()))
                 });
             let first = task(cx);
             let second = task(cx);
@@ -141,7 +141,7 @@ fn task_chat_changed_session_cannot_replace_identity_or_finish_task(cx: &mut Tes
             ws.bind_task_chat_execution(&id, pane, cx);
             assert!(ws.is_task_chat_restore(pane, cx));
             ws.agent_chat_view(pane).unwrap().update(cx, |view, _| {
-                view.session_id = Some("another-session".into())
+                view.set_session_id_for_test(Some("another-session".into()))
             });
             ws.record_task_chat_session(pane, cx);
             ws.apply_agent_chat_task_ended(pane, SessionEndReason::Error, cx);
@@ -206,8 +206,8 @@ fn cancelling_task_stops_its_turn_and_discards_queued_prompts(cx: &mut TestAppCo
                 TaskState::Cancelled { .. }
             ));
             assert!(!view.read(cx).is_busy());
-            assert!(view.read(cx).queue.pending_prompts.is_empty());
-            assert!(view.read(cx).queue.paused_prompts.is_empty());
+            assert!(view.read(cx).queue().pending_prompts.is_empty());
+            assert!(view.read(cx).queue().paused_prompts.is_empty());
         })
     })
     .unwrap();
@@ -237,8 +237,9 @@ fn task_chat_disk_restore_preserves_missing_agent_and_account(cx: &mut TestAppCo
                 .unwrap();
             chat.agent_id = "removed-agent".into();
             chat.account = AccountSelection::from_persisted(Some(account));
-            chat.view
-                .update(cx, |view, _| view.agent_id = "removed-agent".into());
+            chat.view.update(cx, |view, _| {
+                view.set_agent_id_for_test("removed-agent".into())
+            });
             ws.bind_task_chat_execution(&id, pane, cx);
             let (state, projects) = ws.snapshot_for_disk(cx);
             ws.restore_from_disk(&state, &projects, window, cx);
@@ -248,7 +249,7 @@ fn task_chat_disk_restore_preserves_missing_agent_and_account(cx: &mut TestAppCo
                 .values()
                 .flat_map(|rt| rt.panes.iter())
                 .filter_map(Pane::agent_chat_content)
-                .find(|chat| chat.view.read(cx).session_id.as_deref() == Some("task-session"))
+                .find(|chat| chat.view.read(cx).session_id() == Some("task-session"))
                 .unwrap();
             assert_eq!(chat.agent_id, "removed-agent");
             assert_eq!(chat.account.to_persisted(), Some(account));
@@ -300,11 +301,11 @@ fn task_chat_pending_identity_records_once_and_old_run_cannot_finish_retry(
             let id = task(cx);
             ws.agent_chat_view(pane)
                 .unwrap()
-                .update(cx, |view, _| view.session_id = None);
+                .update(cx, |view, _| view.set_session_id_for_test(None));
             ws.bind_task_chat_execution(&id, pane, cx);
-            ws.agent_chat_view(pane)
-                .unwrap()
-                .update(cx, |view, _| view.session_id = Some("first-session".into()));
+            ws.agent_chat_view(pane).unwrap().update(cx, |view, _| {
+                view.set_session_id_for_test(Some("first-session".into()))
+            });
             ws.record_task_chat_session(pane, cx);
             assert_eq!(
                 cx.global::<GlobalTasks>()
@@ -363,10 +364,7 @@ fn task_chat_closed_pane_reopens_exact_session_without_execution_ownership(
                 .unwrap()
                 .agent_chat_content()
                 .unwrap();
-            assert_eq!(
-                chat.view.read(cx).session_id.as_deref(),
-                Some("task-session")
-            );
+            assert_eq!(chat.view.read(cx).session_id(), Some("task-session"));
             assert!(chat.task_run.is_none());
             assert!(ws.is_task_chat_restore(reopened, cx));
             let count = ws.active_runtime().panes.len();

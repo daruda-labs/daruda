@@ -71,7 +71,7 @@ async fn switch_pane_account_handles_system_default_noop_and_conversation_guard(
                 let guarded =
                     seed_agent_pane(ws, AccountSelection::Managed(guarded_account), window, cx);
                 agent_view(ws, guarded).update(cx, |v, _| {
-                    v.items
+                    v.items_mut_for_test()
                         .push(ChatItem::UserText("a long investigation".into()));
                 });
                 (revert, guarded, ws.active_runtime().panes.len())
@@ -122,7 +122,7 @@ async fn switch_pane_account_handles_system_default_noop_and_conversation_guard(
         );
 
         assert_eq!(
-            agent_view(ws, guarded_pane).read(cx).items.len(),
+            agent_view(ws, guarded_pane).read(cx).items().len(),
             1,
             "re-selecting or switching a guarded pane must not reset the session"
         );

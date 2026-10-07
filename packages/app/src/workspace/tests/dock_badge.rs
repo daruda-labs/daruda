@@ -40,11 +40,12 @@ fn failed_agent_and_a_second_lane(
                 user_label: None,
             });
             super::agent_chat::agent_view(ws, pane_id).update(cx, |v, _| {
-                v.status =
+                v.set_status_for_test(
                     crate::workspace::main_area::agent_chat_pane::view::AgentSessionStatus::Error {
                         message: "adapter exited".into(),
                         remedy: daruda_acp::Remedy::NoneAvailable,
-                    };
+                    },
+                );
             });
         });
     })
