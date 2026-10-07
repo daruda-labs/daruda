@@ -22,8 +22,8 @@ impl Workspace {
         plugin_id: String,
         cx: &mut Context<Self>,
     ) {
-        if !self.skill_plugin_expanded.remove(&plugin_id) {
-            self.skill_plugin_expanded.insert(plugin_id);
+        if !self.right_views.skill_plugin_expanded.remove(&plugin_id) {
+            self.right_views.skill_plugin_expanded.insert(plugin_id);
         }
         cx.notify();
     }

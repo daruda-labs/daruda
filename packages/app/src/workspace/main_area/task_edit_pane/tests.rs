@@ -20,14 +20,15 @@ fn task_list_scope_preserves_worktree_and_seeds_new_task_project(cx: &mut TestAp
             ws.open_page(crate::workspace::pages::Page::Tasks, window, cx);
             ws.set_task_scope(TaskScope::Project(a), cx);
             ws.set_task_filter(TaskFilter::Failed, cx);
-            ws.task_browser
+            ws.right_views
+                .tasks
                 .search
                 .clone()
                 .update(cx, |input, cx| input.set_value("login", window, cx));
             ws.clear_task_filters(window, cx);
-            assert_eq!(ws.task_browser.state.scope, TaskScope::Project(a));
-            assert_eq!(ws.task_browser.state.filter, TaskFilter::All);
-            assert_eq!(ws.task_browser.search.read(cx).value(), "");
+            assert_eq!(ws.right_views.tasks.state.scope, TaskScope::Project(a));
+            assert_eq!(ws.right_views.tasks.state.filter, TaskFilter::All);
+            assert_eq!(ws.right_views.tasks.search.read(cx).value(), "");
             assert_eq!(ws.active, active);
             ws.new_task_in_scope(window, cx);
             let pane = ws.active_runtime().focused_pane_id;
@@ -314,7 +315,8 @@ fn task_editor_save_reveals_task_without_switching_worktree(cx: &mut TestAppCont
             title.update(cx, |s, cx| s.set_value("Saved task", window, cx));
             ws.set_task_scope(TaskScope::ActiveProject, cx);
             ws.set_task_filter(TaskFilter::Failed, cx);
-            ws.task_browser
+            ws.right_views
+                .tasks
                 .search
                 .clone()
                 .update(cx, |s, cx| s.set_value("hidden", window, cx));
@@ -323,10 +325,13 @@ fn task_editor_save_reveals_task_without_switching_worktree(cx: &mut TestAppCont
             ws.toggle_task_group(key, cx);
             ws.save_task_editor(pane, false, window, cx);
             assert_eq!(ws.active_page(), Some(crate::workspace::pages::Page::Tasks));
-            assert_eq!(ws.task_browser.state.scope, TaskScope::Project(project));
-            assert_eq!(ws.task_browser.state.filter, TaskFilter::All);
-            assert_eq!(ws.task_browser.search.read(cx).value(), "");
-            assert!(ws.task_browser.state.groups.is_open(key));
+            assert_eq!(
+                ws.right_views.tasks.state.scope,
+                TaskScope::Project(project)
+            );
+            assert_eq!(ws.right_views.tasks.state.filter, TaskFilter::All);
+            assert_eq!(ws.right_views.tasks.search.read(cx).value(), "");
+            assert!(ws.right_views.tasks.state.groups.is_open(key));
             assert_eq!(ws.active, active);
             assert!(ws.task_edit_content_for_pane(pane).is_none());
 
@@ -336,14 +341,15 @@ fn task_editor_save_reveals_task_without_switching_worktree(cx: &mut TestAppCont
             let pane = ws.active_runtime().focused_pane_id;
             ws.set_task_scope(TaskScope::AllProjects, cx);
             ws.set_task_filter(TaskFilter::Backlog, cx);
-            ws.task_browser
+            ws.right_views
+                .tasks
                 .search
                 .clone()
                 .update(cx, |s, cx| s.set_value("saved", window, cx));
             ws.save_task_editor(pane, false, window, cx);
-            assert_eq!(ws.task_browser.state.scope, TaskScope::AllProjects);
-            assert_eq!(ws.task_browser.state.filter, TaskFilter::Backlog);
-            assert_eq!(ws.task_browser.search.read(cx).value(), "saved");
+            assert_eq!(ws.right_views.tasks.state.scope, TaskScope::AllProjects);
+            assert_eq!(ws.right_views.tasks.state.filter, TaskFilter::Backlog);
+            assert_eq!(ws.right_views.tasks.search.read(cx).value(), "saved");
             assert_eq!(ws.active_page(), Some(crate::workspace::pages::Page::Tasks));
         });
     })

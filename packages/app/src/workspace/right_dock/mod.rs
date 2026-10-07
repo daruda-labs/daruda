@@ -7,6 +7,7 @@ use gpui::{AnyElement, App, Context, IntoElement, ScrollHandle, div, prelude::*,
 use super::layout::Dock;
 use super::layout::RightDockSnapshot;
 
+pub(in crate::workspace) mod context;
 pub(in crate::workspace) mod mcp_ops;
 pub(in crate::workspace) mod section;
 pub(in crate::workspace) mod section_ops;

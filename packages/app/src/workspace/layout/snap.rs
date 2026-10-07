@@ -397,7 +397,7 @@ pub(in crate::workspace) struct RightDockSnapshot {
     pub now: PerFrame<chrono::DateTime<chrono::Utc>>,
     /// Scroll handle shared between the right-panel body's
     /// `overflow_y_scroll` and the scrollbar thumb overlay. Cloned from
-    /// `Workspace::right_panel_scroll_handle` each frame.
+    /// `RightDockViews::scroll_handle` each frame.
     pub right_panel_scroll_handle: Handle<gpui::ScrollHandle>,
     /// Snapshot of `Workspace::mcp` for the Tools tab renderer.
     /// Carried by-value so the panel renderer never re-enters the

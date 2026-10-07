@@ -40,8 +40,8 @@ async fn task_status_controls_preserve_scope_and_clear_without_switching_worktre
     vcx.simulate_click(running.center(), Modifiers::default());
     vcx.run_until_parked();
     workspace.read_with(&vcx, |ws, _| {
-        assert_eq!(ws.task_browser.state.filter, TaskFilter::Running);
-        assert_eq!(ws.task_browser.state.scope, TaskScope::AllProjects);
+        assert_eq!(ws.right_views.tasks.state.filter, TaskFilter::Running);
+        assert_eq!(ws.right_views.tasks.state.scope, TaskScope::AllProjects);
         assert_eq!(ws.active, active);
     });
     let clear = vcx
@@ -50,8 +50,8 @@ async fn task_status_controls_preserve_scope_and_clear_without_switching_worktre
     vcx.simulate_click(clear.center(), Modifiers::default());
     vcx.run_until_parked();
     workspace.read_with(&vcx, |ws, _| {
-        assert_eq!(ws.task_browser.state.filter, TaskFilter::All);
-        assert_eq!(ws.task_browser.state.scope, TaskScope::AllProjects);
+        assert_eq!(ws.right_views.tasks.state.filter, TaskFilter::All);
+        assert_eq!(ws.right_views.tasks.state.scope, TaskScope::AllProjects);
         assert_eq!(ws.active, active);
     });
 }
@@ -133,14 +133,15 @@ async fn task_groups_collapse_and_reopen_without_changing_filters(cx: &mut TestA
         vcx.run_until_parked();
         workspace.read_with(&vcx, |ws, _| {
             assert_eq!(
-                ws.task_browser
+                ws.right_views
+                    .tasks
                     .state
                     .groups
                     .is_open(TaskGroupKey::Status(TaskFilter::Backlog)),
                 expected_open
             );
-            assert_eq!(ws.task_browser.state.filter, TaskFilter::All);
-            assert_eq!(ws.task_browser.state.scope, TaskScope::AllProjects);
+            assert_eq!(ws.right_views.tasks.state.filter, TaskFilter::All);
+            assert_eq!(ws.right_views.tasks.state.scope, TaskScope::AllProjects);
         });
         assert_eq!(
             vcx.debug_bounds("task-row-group-fixture").is_some(),

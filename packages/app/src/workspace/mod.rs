@@ -354,6 +354,9 @@ pub struct Workspace {
     pub(in crate::workspace) bottom_dock: gpui::Entity<layout::Dock>,
     /// Right dock (file explorer, git changes).
     pub(in crate::workspace) right_dock: gpui::Entity<layout::Dock>,
+    /// What the right dock's tabs remember — see
+    /// [`right_dock::context::RightDockViews`].
+    pub(in crate::workspace) right_views: right_dock::context::RightDockViews,
     /// The Settings view this window is showing, if any. `Some` *is* settings
     /// mode: it swaps the body and gates the workspace actions, so there is no
     /// separate flag to disagree with it.
@@ -381,10 +384,6 @@ pub struct Workspace {
     /// scrollbar overlay. The view header stays outside the scroll
     /// region, so only the group / project cards move.
     pub(in crate::workspace) lanes_scroll_handle: gpui::ScrollHandle,
-    /// Scroll handle for the right-dock panel body — shared with the
-    /// scrollbar overlay. Used by every right-panel tab (Usage / Skills
-    /// / Tools / Tasks) that wraps its body in `overflow_y_scroll`.
-    pub(in crate::workspace) right_panel_scroll_handle: gpui::ScrollHandle,
     /// Inline status-bar message surface for the **pane-spawn** failure
     /// path (`report_pane_error`). All git / hooks / mcp / skills / files
     /// ops route through the 3-layer error pipeline (toast → details
@@ -479,8 +478,6 @@ pub struct Workspace {
     /// The login this window has in flight — see
     /// [`account_login_ops::LoginState`].
     pub(in crate::workspace) login: account_login_ops::LoginState,
-    /// The Tasks list's scope, status, folds and search.
-    pub(in crate::workspace) task_browser: right_dock::tasks::TaskBrowser,
     /// Set by a screenshot scenario: the fixtures it seeds into this live
     /// workspace must never reach the profile the window was restored from.
     pub(in crate::workspace) persistence_suspended: bool,
@@ -512,19 +509,6 @@ pub struct Workspace {
     /// When true, the bottom dock shows the built-in "Input" panel
     /// instead of the active macro tab.
     pub(in crate::workspace) terminal_input_visible: bool,
-    /// Search query input rendered atop the right-bar Skills tab.
-    /// Cleared on `Esc`; substring-filters Project / Personal / Plugin
-    /// scopes simultaneously. The renderer reads the current text via
-    /// `RightDockSnapshot::skill_search_query` (captured per frame) so the
-    /// panel render closure never re-enters the workspace.
-    pub(in crate::workspace) skill_search_input: gpui::Entity<crate::ui::InputState>,
-    /// Plugin ids (`<plugin>@<marketplace>`) whose accordion section
-    /// in the right-bar Skills tab is currently expanded. Default
-    /// (empty set) means every plugin group renders collapsed; the
-    /// user toggles individual groups via the accordion chevron.
-    pub(in crate::workspace) skill_plugin_expanded: std::collections::HashSet<String>,
-    /// Right-dock sections the user folded or unfolded against their default.
-    pub(in crate::workspace) right_dock_sections: right_dock::section::DockSections,
     /// Background watches and their pumps — see [`lifetimes::Pumps`].
     pub(in crate::workspace) pumps: lifetimes::Pumps,
     /// Cached Project-scope `.mcp.json` directories (lane root + the
@@ -978,7 +962,6 @@ impl Workspace {
                 crate::ui::theme::painted_ui_preset(&config.theme.ui_preset, cx),
             ),
             lanes_scroll_handle: gpui::ScrollHandle::new(),
-            right_panel_scroll_handle: gpui::ScrollHandle::new(),
             last_error: None,
             #[cfg(test)]
             error_history: Vec::new(),
@@ -998,11 +981,7 @@ impl Workspace {
             // subscription refreshes the `accounts` read-cache from it and
             // repaints whenever any window mutates it (single, symmetric
             // cross-window propagation path — see `accounts_global`).
-            // Task data lives in the app-wide `GlobalTasks`; this
-            // subscription rebroadcasts mutations into this
-            // workspace's render path and re-evaluates whether the
-            // live tick (pulse + duration) needs to be running.
-            task_browser: right_dock::tasks::TaskBrowser::new(window, cx),
+            right_views: right_dock::context::RightDockViews::new(window, cx),
             persistence_suspended: false,
             pending_lane_creates: HashSet::new(),
             window_close_in_flight: false,
@@ -1010,12 +989,6 @@ impl Workspace {
             _terminal_input_subscription: terminal_input_sub,
             terminal_input_line_count: 1,
             terminal_input_visible: false,
-            skill_search_input: cx.new(|cx_state| {
-                crate::ui::InputState::new(window, cx_state)
-                    .placeholder(crate::surface::strings::skills::search_placeholder())
-            }),
-            skill_plugin_expanded: std::collections::HashSet::new(),
-            right_dock_sections: Default::default(),
             // The shared root in production; under the test's own data
             // directory otherwise, so a suite takes no lock the developer's
             // app could see and leaves nothing in their config directory.

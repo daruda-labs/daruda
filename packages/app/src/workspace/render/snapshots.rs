@@ -494,15 +494,20 @@ impl Workspace {
             skills: cx
                 .global::<crate::agent::skills::SkillsState>()
                 .snapshot_for(self.active_lane_root().as_deref()),
-            skill_search_input: Handle(self.skill_search_input.clone()),
-            skill_search_query: self.skill_search_input.read(cx).value().to_string(),
-            skill_plugin_expanded: self.skill_plugin_expanded.clone(),
-            sections: self.right_dock_sections.clone(),
+            skill_search_input: Handle(self.right_views.skill_search_input.clone()),
+            skill_search_query: self
+                .right_views
+                .skill_search_input
+                .read(cx)
+                .value()
+                .to_string(),
+            skill_plugin_expanded: self.right_views.skill_plugin_expanded.clone(),
+            sections: self.right_views.sections.clone(),
             tasks: cx
                 .global::<crate::agent::tasks_global::GlobalTasks>()
                 .0
                 .clone(),
-            task_browser: self.task_browser.snapshot(cx),
+            task_browser: self.right_views.tasks.snapshot(cx),
             task_agents: self.mirrors.agents.clone(),
             task_projects: crate::workspace::layout::TaskProjects {
                 active: self.active_project().map(|p| p.uuid),
@@ -515,7 +520,7 @@ impl Workspace {
             claude_status_per_session,
             tool_use_failure_counts,
             now: PerFrame(chrono::Utc::now()),
-            right_panel_scroll_handle: Handle(self.right_panel_scroll_handle.clone()),
+            right_panel_scroll_handle: Handle(self.right_views.scroll_handle.clone()),
             mcp: cx
                 .global::<crate::agent::mcp::McpState>()
                 .snapshot_for(self.active_lane_root().as_deref(), &self.mcp_project_dirs),

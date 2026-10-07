@@ -11,7 +11,7 @@ impl Workspace {
         section: DockSection,
         cx: &mut Context<Self>,
     ) {
-        self.right_dock_sections.toggle(section);
+        self.right_views.sections.toggle(section);
         cx.notify();
     }
 }

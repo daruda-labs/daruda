@@ -287,7 +287,11 @@ impl Workspace {
         cx: &mut Context<Self>,
     ) {
         self.reveal_right_dock_view(daruda_store::project::RightDockView::Skills, cx);
-        let handle = self.skill_search_input.read(cx).focus_handle(cx);
+        let handle = self
+            .right_views
+            .skill_search_input
+            .read(cx)
+            .focus_handle(cx);
         handle.focus(window, cx);
     }
 

@@ -120,7 +120,8 @@ impl Workspace {
         });
         self.set_task_scope(scope, cx);
         self.set_task_filter(TaskFilter::All, cx);
-        self.task_browser
+        self.right_views
+            .tasks
             .search
             .clone()
             .update(cx, |input, cx| input.set_value(query, window, cx));

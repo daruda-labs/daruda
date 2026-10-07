@@ -46,7 +46,7 @@ impl Workspace {
         mode: super::tasks::TaskGrouping,
         cx: &mut Context<Self>,
     ) {
-        self.task_browser.state.groups.set_mode(mode);
+        self.right_views.tasks.state.groups.set_mode(mode);
         cx.notify();
     }
 
@@ -55,7 +55,7 @@ impl Workspace {
         key: super::tasks::TaskGroupKey,
         cx: &mut Context<Self>,
     ) {
-        self.task_browser.state.groups.toggle(key);
+        self.right_views.tasks.state.groups.toggle(key);
         cx.notify();
     }
 
@@ -70,9 +70,10 @@ impl Workspace {
             return;
         };
         let active = self.active_project().map(|project| project.uuid);
-        self.task_browser.state.reveal(task, active);
+        self.right_views.tasks.state.reveal(task, active);
         let query = self
-            .task_browser
+            .right_views
+            .tasks
             .search
             .read(cx)
             .value()
@@ -89,7 +90,7 @@ impl Workspace {
         scope: daruda_store::tasks::TaskScope,
         cx: &mut Context<Self>,
     ) {
-        self.task_browser.state.scope = scope;
+        self.right_views.tasks.state.scope = scope;
         cx.notify();
     }
 
@@ -99,7 +100,13 @@ impl Workspace {
         cx: &mut Context<Self>,
     ) {
         let active = self.active_project().map(|p| p.uuid);
-        let project = self.task_browser.state.scope.project(active).or(active);
+        let project = self
+            .right_views
+            .tasks
+            .state
+            .scope
+            .project(active)
+            .or(active);
         if let Some(project) = project.filter(|id| self.project_by_uuid(*id).is_some()) {
             self.open_task_draft_for_project(project, window, cx);
         }
@@ -110,14 +117,14 @@ impl Workspace {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        self.task_browser.state.filter = daruda_store::tasks::TaskFilter::All;
+        self.right_views.tasks.state.filter = daruda_store::tasks::TaskFilter::All;
         self.clear_task_search(window, cx);
     }
 
     /// Clear the Tasks tab search input (the in-field `✕` overlay).
     /// Extracted so the View closure can dispatch in one line.
     pub(super) fn clear_task_search(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let input = self.task_browser.search.clone();
+        let input = self.right_views.tasks.search.clone();
         input.update(cx, |inp, cx_state| {
             inp.set_value("".to_string(), window, cx_state);
         });
@@ -130,8 +137,8 @@ impl Workspace {
         filter: daruda_store::tasks::TaskFilter,
         cx: &mut Context<Self>,
     ) {
-        if self.task_browser.state.filter != filter {
-            self.task_browser.state.filter = filter;
+        if self.right_views.tasks.state.filter != filter {
+            self.right_views.tasks.state.filter = filter;
             cx.notify();
         }
     }

@@ -35,7 +35,7 @@ impl Workspace {
     }
 
     pub(super) fn clear_skill_search(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let input = self.skill_search_input.clone();
+        let input = self.right_views.skill_search_input.clone();
         input.update(cx, |inp, cx_state| {
             inp.set_value("".to_string(), window, cx_state);
         });

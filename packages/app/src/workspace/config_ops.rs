@@ -104,8 +104,8 @@ impl Workspace {
     /// window in scope) yet `set_placeholder` requires one.
     fn refresh_locale_strings(&mut self, cx: &mut Context<Self>) {
         let git_commit_input = self.git.commit_input.clone();
-        let skill_search_input = self.skill_search_input.clone();
-        let task_search_input = self.task_browser.search.clone();
+        let skill_search_input = self.right_views.skill_search_input.clone();
+        let task_search_input = self.right_views.tasks.search.clone();
         let flow_searches = self.flows.browser.searches.clone();
         let task_edit_inputs = self
             .main_area
