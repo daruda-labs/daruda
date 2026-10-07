@@ -24,9 +24,9 @@ use std::path::Path;
 
 use fs4::fs_std::FileExt;
 
-use daruda_agent::hooks::events::HookEvent;
-use daruda_agent::hooks::fsm::{self, FsmAction};
-use daruda_agent::hooks::status_file::{
+use super::events::HookEvent;
+use super::fsm::{self, FsmAction};
+use super::status_file::{
     self, Source, StatusFile, default_dir, delete, lock_path_for, path_for, read, write_atomic,
 };
 
@@ -55,7 +55,7 @@ fn run_inner(_event_type: &str) -> Result<(), Box<dyn std::error::Error>> {
         Err(_) => {
             // Unknown / future event type, or schema drift. Silent
             // skip — daruda only subscribes to a subset of Claude Code's
-            // hook events (see `daruda_agent::hooks::installer::SUBSCRIBED_EVENTS`).
+            // hook events (see [`super::installer::SUBSCRIBED_EVENTS`]).
             return Ok(());
         }
     };
@@ -137,7 +137,7 @@ impl Drop for SessionLock {
 /// The notification subtype, present only on `Notification` events.
 /// Recorded into the status file so the app-side ingest can gate a
 /// desktop push without re-reading the hook payload.
-fn notification_type(event: &HookEvent) -> Option<daruda_agent::hooks::events::NotificationType> {
+fn notification_type(event: &HookEvent) -> Option<super::events::NotificationType> {
     match event {
         HookEvent::Notification {
             notification_type, ..

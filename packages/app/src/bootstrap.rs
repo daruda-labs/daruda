@@ -7,7 +7,6 @@
 //! an `ErrorReport` or panic so the first report carries the right
 //! version and panics survive a dead `LogWriter`.
 
-use crate::hooks;
 use crate::windows::open_empty_workspace_window;
 use daruda_core::process_env;
 use gpui::{Application, QuitMode};
@@ -15,13 +14,13 @@ use gpui::{Application, QuitMode};
 /// Returns `Some(exit_code)` when invoked as `daruda --hook
 /// <eventType>`. Callers in `main()` should exit with that code
 /// immediately — the hook handler always exits 0 (see
-/// `hooks::handler::run`) but we keep it generic in case future hook
+/// `daruda_agent::hooks::handler::run`) but we keep it generic in case future hook
 /// types want to signal failure.
 pub(crate) fn route_hook_subcommand() -> Option<i32> {
     let mut args = std::env::args().skip(1);
     if args.next().as_deref() == Some("--hook") {
         let event_type = args.next().unwrap_or_default();
-        return Some(hooks::handler::run(&event_type));
+        return Some(daruda_agent::hooks::handler::run(&event_type));
     }
     None
 }

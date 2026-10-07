@@ -28,7 +28,7 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
 
-ALLOW='\bpackages/app/src/bootstrap\.rs|\bpackages/app/src/watcher_pumps\.rs|\bpackages/app/src/hooks/handler\.rs|\bpackages/store/src/observability/log_writer\.rs'
+ALLOW='\bpackages/app/src/bootstrap\.rs|\bpackages/app/src/watcher_pumps\.rs|\bpackages/agent/src/hooks/handler\.rs|\bpackages/store/src/observability/log_writer\.rs'
 
 # Scan only first-party crates. Vendored gpui_component is excluded —
 # it is upstream code with its own logging conventions.
