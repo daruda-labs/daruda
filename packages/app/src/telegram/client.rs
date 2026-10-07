@@ -2,10 +2,11 @@
 //! `answerCallbackQuery` / `editMessageText`, plus the wire-format parsing
 //! the routing layer needs.
 //!
-//! GPUI-free and stateless: the token is an argument, nothing is kept between
-//! calls. `bridge` owns the offset; `global`'s poll loop owns the timer.
+//! GPUI-free; the token is an argument, and all that persists between calls
+//! is the one [`agent`] whose pool keeps the TLS connection open.
 
 use std::io::Read;
+use std::sync::OnceLock;
 use std::sync::atomic::{AtomicI64, Ordering};
 use std::time::Duration;
 
@@ -106,6 +107,26 @@ const LONG_POLL_MARGIN: Duration = Duration::from_secs(5);
 /// under a second on a normal connection.
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(10);
 
+/// Idle connections the pool keeps to `api.telegram.org`: one for the long
+/// poll that is almost always in flight, one for whatever is being sent
+/// meanwhile. A third would only ever be dropped.
+const IDLE_CONNECTIONS_PER_HOST: usize = 2;
+
+/// The one HTTP agent every call goes through, built on first use.
+///
+/// One agent rather than one per call because the agent owns the connection
+/// pool: a fresh agent per call meant a fresh TCP + TLS handshake per call,
+/// which measured ~0.55 s of a ~0.8 s `sendMessage` round trip. The timeout
+/// is set per request — the long poll needs a longer one than a send.
+fn agent() -> &'static ureq::Agent {
+    static AGENT: OnceLock<ureq::Agent> = OnceLock::new();
+    AGENT.get_or_init(|| {
+        ureq::AgentBuilder::new()
+            .max_idle_connections_per_host(IDLE_CONNECTIONS_PER_HOST)
+            .build()
+    })
+}
+
 /// Truncate a callback toast to Telegram's limit, counting `char`s so a
 /// multi-byte label never splits mid-character.
 fn clamp_callback_text(text: &str) -> String {
@@ -144,11 +165,11 @@ pub fn get_updates(token: &str, offset: i64, timeout_s: u64) -> Result<Vec<Updat
         "{}?offset={offset}&timeout={timeout_s}",
         base_url(token, "getUpdates")
     );
-    let agent = ureq::AgentBuilder::new()
+    let response = agent()
+        .get(&url)
         .timeout(Duration::from_secs(timeout_s) + LONG_POLL_MARGIN)
-        .build();
-
-    let response = agent.get(&url).call().map_err(|e| http_error(token, e))?;
+        .call()
+        .map_err(|e| http_error(token, e))?;
 
     let body = read_body(response)?;
     parse_updates(&body)
@@ -184,9 +205,9 @@ pub fn send_message(
         payload["reply_markup"] = inline_keyboard_json(&keyboard);
     }
 
-    let agent = ureq::AgentBuilder::new().timeout(REQUEST_TIMEOUT).build();
-    let response = agent
+    let response = agent()
         .post(&base_url(token, "sendMessage"))
+        .timeout(REQUEST_TIMEOUT)
         .send_json(payload)
         .map_err(|e| http_error(token, e))?;
 
@@ -218,9 +239,9 @@ pub fn answer_callback(
         payload["text"] = serde_json::json!(clamp_callback_text(text));
     }
 
-    let agent = ureq::AgentBuilder::new().timeout(REQUEST_TIMEOUT).build();
-    let response = agent
+    let response = agent()
         .post(&base_url(token, "answerCallbackQuery"))
+        .timeout(REQUEST_TIMEOUT)
         .send_json(payload)
         .map_err(|e| http_error(token, e))?;
 
@@ -248,9 +269,9 @@ pub fn edit_message_text(
         "text": text,
     });
 
-    let agent = ureq::AgentBuilder::new().timeout(REQUEST_TIMEOUT).build();
-    let response = agent
+    let response = agent()
         .post(&base_url(token, "editMessageText"))
+        .timeout(REQUEST_TIMEOUT)
         .send_json(payload)
         .map_err(|e| http_error(token, e))?;
 
