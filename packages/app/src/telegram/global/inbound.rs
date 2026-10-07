@@ -176,6 +176,11 @@ pub(super) fn spawn_poll_task(cx: &mut App) {
                         log_unauthorized_inbound();
                     }
                     let effect = dispatch::handle(aimed, &dispatch::Target::Telegram, cx);
+                    // The answer goes out on its own task, not awaited here:
+                    // this loop is the only thing listening for the next
+                    // message, and every HTTP round trip it waits on is a
+                    // round trip the next `getUpdates` starts late by.
+                    let reply_token = token.clone();
                     match (answer_callback_id, effect) {
                         (
                             Some(callback_id),
@@ -183,22 +188,44 @@ pub(super) fn spawn_poll_task(cx: &mut App) {
                                 label,
                                 edit: dispatch::Edit::ConsumeButtons,
                             },
-                        ) => {
-                            answer_and_edit(cx, &token, callback_id, callback_edit, &label).await;
-                        }
-                        (Some(callback_id), dispatch::Effect::Feedback { label, .. }) => {
-                            answer_only(cx, &token, callback_id, &label).await;
-                        }
+                        ) => cx
+                            .spawn(async move |cx| {
+                                answer_and_edit(
+                                    cx,
+                                    &reply_token,
+                                    callback_id,
+                                    callback_edit,
+                                    &label,
+                                )
+                                .await;
+                            })
+                            .detach(),
+                        (Some(callback_id), dispatch::Effect::Feedback { label, .. }) => cx
+                            .spawn(async move |cx| {
+                                answer_only(cx, &reply_token, callback_id, &label).await;
+                            })
+                            .detach(),
                         // An unknown or already-consumed token. Answered *and*
                         // edited: leaving the buttons on invites the user to keep
                         // tapping a decision that can no longer land.
-                        (Some(callback_id), _) => {
-                            let label = s::notification::telegram_permission_stale();
-                            answer_and_edit(cx, &token, callback_id, callback_edit, &label).await;
-                        }
-                        (None, dispatch::Effect::Reply(reply)) => {
-                            send_command_reply(cx, &token, reply).await
-                        }
+                        (Some(callback_id), _) => cx
+                            .spawn(async move |cx| {
+                                let label = s::notification::telegram_permission_stale();
+                                answer_and_edit(
+                                    cx,
+                                    &reply_token,
+                                    callback_id,
+                                    callback_edit,
+                                    &label,
+                                )
+                                .await;
+                            })
+                            .detach(),
+                        (None, dispatch::Effect::Reply(reply)) => cx
+                            .spawn(async move |cx| {
+                                send_command_reply(cx, &reply_token, reply).await;
+                            })
+                            .detach(),
                         _ => {}
                     }
                 }
@@ -206,7 +233,9 @@ pub(super) fn spawn_poll_task(cx: &mut App) {
                 // After acting, not before: a crash in between re-delivers
                 // this one update rather than losing it, and writing first
                 // would drop the command outright. Per update rather than per
-                // batch so the replay is bounded to one.
+                // batch so the replay is bounded to one. The answer above is
+                // not waited for — it is owed to the phone, but the action
+                // the offset records has already happened.
                 persist_offset(cx);
             }
 
