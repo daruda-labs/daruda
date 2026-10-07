@@ -1,16 +1,16 @@
-//! Syntax highlighting for the diff/file viewer.
+//! Syntax highlighting of diff hunks and file rows into token buckets.
 //!
 //! Parses each hunk/file text with tree-sitter in one pass so multi-line tokens
 //! survive the later split into per-line spans. Capture names map through the
 //! configured syntax palette, with unknown names falling back to Daruda tokens.
-//! Public functions are GPUI-free and background-executor safe.
+//! Background-executor safe: buckets, not colours, so no theme is read.
 
 use std::collections::HashMap;
 use std::sync::{Arc, LazyLock, Mutex};
 
 use tree_sitter_highlight::{Highlight, HighlightConfiguration, HighlightEvent, Highlighter};
 
-use super::{DiffHunk, DiffLine, HighlightedSpan, VisualRow};
+use daruda_content::diff::{DiffHunk, DiffLine, HighlightedSpan, VisualRow};
 use daruda_content::syntax::{SyntaxBucket, bucket_for_capture};
 
 /// Capture names recognised by bundled queries. Duplicated because
@@ -74,14 +74,14 @@ const HIGHLIGHT_NAMES: [&str; 40] = [
 /// `python`, `javascript`, …) un-highlighted while the handful of tokens that
 /// happen to equal their extension (`bash`, `java`, `go`) worked.
 #[derive(Clone, Copy, Debug)]
-pub(in crate::workspace) enum LanguageHint<'a> {
+pub enum LanguageHint<'a> {
     /// A file's extension, without the dot — `rs`, `md`.
     Extension(&'a str),
     /// A fenced code block's info string — `rust`, `jsx`.
     FenceToken(&'a str),
 }
 
-pub(in crate::workspace) fn highlight_hunks(hunks: &mut [DiffHunk], lang: LanguageHint<'_>) {
+pub fn highlight_hunks(hunks: &mut [DiffHunk], lang: LanguageHint<'_>) {
     let Some(config) = build_config(lang) else {
         return;
     };
@@ -121,7 +121,7 @@ pub(in crate::workspace) fn highlight_hunks(hunks: &mut [DiffHunk], lang: Langua
 /// All rows are parsed as a single document so multi-line tokens are
 /// coloured correctly throughout the file. Unknown extensions leave rows
 /// un-highlighted.
-pub(super) fn highlight_raw_rows(rows: &mut [VisualRow], lang: LanguageHint<'_>) {
+pub fn highlight_raw_rows(rows: &mut [VisualRow], lang: LanguageHint<'_>) {
     let Some(config) = build_config(lang) else {
         return;
     };
@@ -161,15 +161,15 @@ static CONFIG_CACHE: LazyLock<Mutex<HashMap<String, Arc<HighlightConfiguration>>
 fn build_config(hint: LanguageHint<'_>) -> Option<Arc<HighlightConfiguration>> {
     let lang = match hint {
         LanguageHint::Extension(ext) => daruda_core::language::from_extension(ext)
-            .and_then(crate::ui::highlighter::highlightable_config)?,
+            .and_then(crate::highlighter::highlightable_config)?,
         // A fence info string has no single vocabulary — `rust` and `rs`,
         // `bash` and `zsh` all appear in real documents. The registry answers
         // language names plus the short forms it knows; the extension table
         // covers the rest (`jsx`, `zsh`, `patch`, `hpp`).
-        LanguageHint::FenceToken(token) => crate::ui::highlighter::highlightable_config(token)
+        LanguageHint::FenceToken(token) => crate::highlighter::highlightable_config(token)
             .or_else(|| {
                 daruda_core::language::from_extension(token)
-                    .and_then(crate::ui::highlighter::highlightable_config)
+                    .and_then(crate::highlighter::highlightable_config)
             })?,
     };
     if let Some(hit) = CONFIG_CACHE.lock().unwrap().get(lang.name.as_ref()) {
@@ -288,7 +288,7 @@ mod tests {
 
     #[test]
     fn highlight_hunks_unknown_ext_is_plain() {
-        use crate::workspace::main_area::file_view_pane::parse_diff_hunks;
+        use daruda_content::diff::parse_diff_hunks;
         let diff = "@@ -1,2 +1,2 @@\n-old\n+new\n";
         let mut hunks = parse_diff_hunks(diff);
         // Unknown extension → no language → lines left intact, no panic.
@@ -303,7 +303,7 @@ mod tests {
 
     #[test]
     fn highlight_hunks_rust_colours_keyword() {
-        use crate::workspace::main_area::file_view_pane::parse_diff_hunks;
+        use daruda_content::diff::parse_diff_hunks;
         let diff = "@@ -1,1 +1,1 @@\n-let x = 1;\n+let y = 2;\n";
         let mut hunks = parse_diff_hunks(diff);
         highlight_hunks(&mut hunks, LanguageHint::Extension("rs"));
@@ -330,7 +330,7 @@ mod tests {
 
     #[test]
     fn highlight_raw_rows_colours_java_and_aliased_extensions() {
-        use super::super::{VisualRow, VisualRowKind};
+        use daruda_content::diff::{VisualRow, VisualRowKind};
         let make = |content: &str| VisualRow {
             kind: VisualRowKind::Plain,
             line_no_left: String::new(),
@@ -355,7 +355,7 @@ mod tests {
 
     #[test]
     fn highlight_raw_rows_unknown_ext_is_plain() {
-        use super::super::{VisualRow, VisualRowKind};
+        use daruda_content::diff::{VisualRow, VisualRowKind};
         let mut rows = vec![VisualRow {
             kind: VisualRowKind::Plain,
             line_no_left: String::new(),
@@ -371,7 +371,7 @@ mod tests {
 
     #[test]
     fn highlight_raw_rows_colours_multi_line_block_comment() {
-        use super::super::{VisualRow, VisualRowKind};
+        use daruda_content::diff::{VisualRow, VisualRowKind};
         let make = |content: &str| VisualRow {
             kind: VisualRowKind::Plain,
             line_no_left: String::new(),
@@ -402,7 +402,7 @@ mod tests {
 
     #[test]
     fn selected_palette_changes_the_highlight_colour() {
-        use super::super::{VisualRow, VisualRowKind};
+        use daruda_content::diff::{VisualRow, VisualRowKind};
         let make = || VisualRow {
             kind: VisualRowKind::Plain,
             line_no_left: String::new(),
@@ -419,7 +419,7 @@ mod tests {
         let mut highlighted = vec![make()];
         highlight_raw_rows(&mut highlighted, LanguageHint::Extension("rs"));
         let profile = |theme_name: &str| {
-            use crate::ui::theme::{SyntaxPalette, syntax_theme_of};
+            use crate::theme::{SyntaxPalette, syntax_theme_of};
             let theme = syntax_theme_of(SyntaxPalette::from_config_name(theme_name), false);
             highlighted[0]
                 .spans
@@ -438,7 +438,7 @@ mod tests {
         // Unknown / legacy names resolve to the recommended Daruda palette.
         assert_eq!(daruda, profile("base16-ocean.dark"), "legacy name → daruda");
         // Daruda carries a non-color channel on keywords (bold).
-        let daruda_theme = crate::ui::theme::syntax_theme_of(Default::default(), false);
+        let daruda_theme = crate::theme::syntax_theme_of(Default::default(), false);
         assert!(
             highlighted[0]
                 .spans
@@ -516,7 +516,7 @@ mod tests {
             ("rs", "fn main() {\n    let x = 1;\n}\n"),
         ];
         for (ext, code) in cases {
-            let language = crate::ui::highlighter::language_for_extension(ext);
+            let language = crate::highlighter::language_for_extension(ext);
             let mut highlighter = gpui_component::highlighter::SyntaxHighlighter::new(&language);
             highlighter.update(None, &gpui_component::Rope::from_str(code));
 
@@ -534,9 +534,8 @@ mod tests {
         // the pane opened it as `PLAIN_LANGUAGE`, whose query is empty. Pin
         // that down so the assertions above stay meaningful.
         let (_, java) = cases[0];
-        let mut plain = gpui_component::highlighter::SyntaxHighlighter::new(
-            crate::ui::highlighter::PLAIN_LANGUAGE,
-        );
+        let mut plain =
+            gpui_component::highlighter::SyntaxHighlighter::new(crate::highlighter::PLAIN_LANGUAGE);
         plain.update(None, &gpui_component::Rope::from_str(java));
         let theme = gpui_component::highlighter::HighlightTheme::default_dark();
         assert!(
@@ -555,7 +554,7 @@ mod tests {
     /// SyntaxColors" as the cause.
     #[test]
     fn gpui_raw_editor_highlighter_colours_rust_with_daruda_theme() {
-        use crate::ui::theme::syntax;
+        use crate::theme::syntax;
 
         let code = "fn main() {\n    let x = 1;\n}\n";
         let rope = gpui_component::Rope::from_str(code);

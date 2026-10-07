@@ -52,26 +52,15 @@ pub(super) type DiffStats = std::collections::HashMap<String, DiffStat>;
 
 /// Rendered mermaid diagrams keyed by source hash. Shared so the cached
 /// markdown code-block hook can see async image arrivals after parse.
-pub(super) type MermaidImages = std::sync::Arc<
-    std::sync::Mutex<
-        std::collections::HashMap<
-            u64,
-            crate::workspace::main_area::file_view_pane::render::CachedImage,
-        >,
-    >,
->;
+pub(super) type MermaidImages =
+    std::sync::Arc<std::sync::Mutex<std::collections::HashMap<u64, crate::ui::CachedImage>>>;
 
 /// Decoded tool-output images keyed by base64-content hash (`tool_image_key`).
 /// `Some` = decoded & GPU-ready; `None` = a cached decode failure. Shared so
 /// `output_block_view` sees async decode arrivals landed by
 /// `reconcile_tool_images`.
 pub(super) type ToolImages = std::sync::Arc<
-    std::sync::Mutex<
-        std::collections::HashMap<
-            u64,
-            Option<crate::workspace::main_area::file_view_pane::render::CachedImage>,
-        >,
-    >,
+    std::sync::Mutex<std::collections::HashMap<u64, Option<crate::ui::CachedImage>>>,
 >;
 
 /// Decoded local-image `ResourceLink`s keyed by tool output block identity.
@@ -79,12 +68,7 @@ pub(super) type ToolImages = std::sync::Arc<
 /// separate from `ToolImages` because the source is a mutable path rather than
 /// immutable inline base64 content.
 pub(super) type ResourceImages = std::sync::Arc<
-    std::sync::Mutex<
-        std::collections::HashMap<
-            String,
-            Option<crate::workspace::main_area::file_view_pane::render::CachedImage>,
-        >,
-    >,
+    std::sync::Mutex<std::collections::HashMap<String, Option<crate::ui::CachedImage>>>,
 >;
 
 /// The `AgentChatView::assets` caches the render pass reads, borrowed as one

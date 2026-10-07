@@ -11,8 +11,8 @@
 use gpui::{Context, Window};
 
 use super::PaneFileContent;
-use super::render::CachedImage;
 use super::visual::RasterImage;
+use crate::ui::CachedImage;
 use crate::workspace::Workspace;
 use crate::workspace::main_area::pane::{FileContent, Pane};
 use crate::workspace::main_area::pane_tree::PaneId;

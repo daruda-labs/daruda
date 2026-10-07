@@ -13,8 +13,6 @@ mod toolbar;
 mod virtual_list;
 
 /// Cacheable GPU-ready diagram image re-exported for agent-chat mermaid.
-pub(in crate::workspace) use self::markdown::CachedImage;
-
 use crate::ui::theme;
 use gpui::{Context, IntoElement, div, prelude::*, px, relative};
 

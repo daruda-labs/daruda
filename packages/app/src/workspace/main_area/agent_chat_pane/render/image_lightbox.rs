@@ -11,10 +11,10 @@ use gpui::{
 };
 
 use crate::surface::strings as s;
+use crate::ui::CachedImage;
 use crate::ui::scrollbar::Scrollbar;
 use crate::ui::theme;
 use crate::ui::{WindowExt as _, button_close};
-use crate::workspace::main_area::file_view_pane::render::CachedImage;
 use crate::workspace::modal_view::ModalView;
 
 /// Dialog width: the image's natural width plus the card padding on both

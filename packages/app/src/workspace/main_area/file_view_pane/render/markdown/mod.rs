@@ -31,7 +31,6 @@ use crate::workspace::main_area::file_view_pane::images::MdImages;
 use crate::workspace::main_area::file_view_pane::markdown_viewer::MdBlock;
 
 use self::block::render_md_block;
-pub(in crate::workspace) use self::image::CachedImage;
 use self::prose::is_openable_markdown_url;
 use self::selection::{block_with_selection, is_block_selected};
 

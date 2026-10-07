@@ -25,9 +25,7 @@ use super::view::AgentChatView;
 use super::window_access::WindowAccess;
 use crate::path_ext::PathExt as _;
 use crate::transcript::fold_mode::TurnPosition;
-use crate::workspace::main_area::file_view_pane::diff_editor::{
-    DiffColors, DiffEditorModel, build_diff_editor_model,
-};
+use crate::ui::diff_editor::{DiffColors, DiffEditorModel, build_diff_editor_model};
 use crate::workspace::main_area::pane_tree::PaneId;
 
 /// Localize host-owned failure classes while retaining raw diagnostics in logs.
@@ -513,10 +511,10 @@ pub(super) fn build_diff_view_model(
     is_light: bool,
     colors: &DiffColors,
 ) -> Option<(DiffEditorModel, DiffStat)> {
-    use crate::workspace::main_area::file_view_pane::highlighter::{LanguageHint, highlight_hunks};
-    use crate::workspace::main_area::file_view_pane::line_diff::unified_diff_text;
-    use crate::workspace::main_area::file_view_pane::word_diff::apply_word_diff;
-    use crate::workspace::main_area::file_view_pane::{build_diff_rows, parse_diff_hunks};
+    use crate::ui::row_highlight::{LanguageHint, highlight_hunks};
+    use daruda_content::diff::line_diff::unified_diff_text;
+    use daruda_content::diff::word_diff::apply_word_diff;
+    use daruda_content::diff::{build_diff_rows, parse_diff_hunks};
 
     let old = diff.old_text.as_deref().unwrap_or("");
     let text = unified_diff_text(old, &diff.new_text);
@@ -531,7 +529,8 @@ pub(super) fn build_diff_view_model(
     let ext = diff.path.extension_str();
     highlight_hunks(&mut hunks, LanguageHint::Extension(ext));
     apply_word_diff(&mut hunks);
-    let rows = build_diff_rows(&hunks, false);
+    let no_newline = crate::surface::strings::file_viewer::no_newline();
+    let rows = build_diff_rows(&hunks, false, &no_newline);
     let show_line_numbers = diff.old_text.is_none();
     let syntax = crate::ui::theme::syntax_theme_of(
         crate::ui::theme::SyntaxPalette::from_config_name(syntax_theme),
@@ -547,10 +546,8 @@ pub(super) fn build_diff_view_model(
 /// the File viewer's `count_diff_stats`, which counts `DiffLine::Added` vs
 /// `DiffLine::Removed` across the hunks — the same line classification the
 /// editor rows are built from.
-fn diff_stat_from_hunks(
-    hunks: &[crate::workspace::main_area::file_view_pane::DiffHunk],
-) -> DiffStat {
-    let (added, removed) = crate::workspace::main_area::file_view_pane::count_diff_stats(hunks);
+fn diff_stat_from_hunks(hunks: &[daruda_content::diff::DiffHunk]) -> DiffStat {
+    let (added, removed) = daruda_content::diff::count_diff_stats(hunks);
     DiffStat { added, removed }
 }
 

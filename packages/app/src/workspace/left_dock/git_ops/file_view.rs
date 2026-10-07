@@ -5,12 +5,10 @@ use std::path::PathBuf;
 use daruda_store::project::{LaneId, LaneRef};
 use gpui::{Context, Window, point, px};
 
+use crate::ui::diff_editor::{DiffColors, build_diff_editor_model};
+use crate::ui::mermaid_palette;
 use crate::workspace::Workspace;
-use crate::workspace::main_area::file_view_pane::diff_editor::{
-    DiffColors, build_diff_editor_model,
-};
 use crate::workspace::main_area::file_view_pane::file_content::LoadOutcome;
-use crate::workspace::main_area::file_view_pane::mermaid_theme;
 use crate::workspace::main_area::file_view_pane::{
     DiffSource, FileViewMode, PaneFileContent, PaneFileView,
 };
@@ -752,7 +750,7 @@ impl Workspace {
         // Match rendered diagrams (mermaid) to the file-viewer surface.
         // Computed here because the loader runs GPUI-free on a background
         // thread.
-        let mermaid_palette = mermaid_theme::file_viewer_palette(cx);
+        let mermaid_palette = mermaid_palette::file_viewer_palette(cx);
 
         let request_for_load = request.clone();
         let request_for_match = request;

@@ -1902,6 +1902,7 @@ dependencies = [
  "ferrum_flow",
  "gpui",
  "gpui_component",
+ "image",
  "schemars 1.2.1",
  "serde",
  "serde_json",

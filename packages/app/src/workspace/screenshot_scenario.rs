@@ -885,11 +885,11 @@ pub(crate) fn drive(
 /// history needed, the same render path the diagram card's zoom button uses.
 fn open_mermaid_lightbox_sample(window: &mut Window, cx: &mut App) {
     use super::main_area::agent_chat_pane::render::image_lightbox;
-    use super::main_area::file_view_pane::mermaid_theme;
-    use super::main_area::file_view_pane::render::CachedImage;
     use super::main_area::file_view_pane::visual::render_mermaid_raster;
+    use crate::ui::CachedImage;
+    use crate::ui::mermaid_palette;
 
-    let palette = mermaid_theme::default_palette();
+    let palette = mermaid_palette::default_palette();
     let Some(raster) = render_mermaid_raster(MERMAID_LIGHTBOX_SAMPLE, &palette) else {
         return;
     };

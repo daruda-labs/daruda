@@ -9,16 +9,16 @@ use std::ops::Range;
 
 use gpui::{FontStyle, FontWeight, HighlightStyle, Hsla, SharedString};
 
-use crate::ui::theme::{PaneSurfaceTokens, SyntaxTheme, TokenStyle};
+use crate::theme::{PaneSurfaceTokens, SyntaxTheme, TokenStyle};
 
-use crate::ui::LineDecoration;
+use crate::LineDecoration;
 
-use super::{VisualRow, VisualRowKind};
+use daruda_content::diff::{VisualRow, VisualRowKind};
 
 /// Theme colours the diff editor model needs, snapshotted from
-/// `DarudaTheme` by the caller so this module stays GPUI-free.
+/// `DarudaTheme` by the caller so building a model needs no `cx`.
 #[derive(Clone, Copy)]
-pub(in crate::workspace) struct DiffColors {
+pub struct DiffColors {
     pub add_bg: Hsla,
     pub del_bg: Hsla,
     pub hunk_bg: Hsla,
@@ -37,7 +37,7 @@ impl DiffColors {
     /// colours with [`Self::from_file_viewer_surface`] or
     /// [`Self::from_agent_chat_surface`] so baked `@@` rows do not keep a stale
     /// UI surface background.
-    pub(super) fn from_theme(t: &crate::ui::theme::DarudaTheme) -> Self {
+    pub(super) fn from_theme(t: &crate::theme::DarudaTheme) -> Self {
         Self {
             add_bg: t.file_diff_add_bg,
             del_bg: t.file_diff_del_bg,
@@ -52,13 +52,13 @@ impl DiffColors {
         }
     }
 
-    /// [`Self::from_theme`]'s file-viewer-pane variant. Add/remove/word-diff
+    /// `from_theme`'s file-viewer-pane variant. Add/remove/word-diff
     /// colours remain semantic git colours; the hunk-header row follows the
     /// terminal-derived file-viewer pane tint so `@@ -a,b +c,d @@` does not
     /// remain on the fixed UI raised surface after the file viewer body moves
     /// with the terminal theme.
-    pub(in crate::workspace) fn from_file_viewer_surface(
-        t: &crate::ui::theme::DarudaTheme,
+    pub fn from_file_viewer_surface(
+        t: &crate::theme::DarudaTheme,
         surface: PaneSurfaceTokens,
     ) -> Self {
         Self {
@@ -69,7 +69,7 @@ impl DiffColors {
         }
     }
 
-    /// [`Self::from_theme`]'s agent-chat variant. The add/del/word-diff
+    /// `from_theme`'s agent-chat variant. The add/del/word-diff
     /// colours stay the git-convention palette shared with the File viewer
     /// (unchanged semantics, not a surface colour) — only the hunk-header row
     /// (`@@ -a,b +c,d @@`) switches from the fixed UI `BG_RAISED` surface to
@@ -77,8 +77,8 @@ impl DiffColors {
     /// chrome uses (header row, editor background — see `render/diff.rs`),
     /// so the header row blends with its own card instead of standing out as
     /// a UI-theme island.
-    pub(in crate::workspace) fn from_agent_chat_surface(
-        t: &crate::ui::theme::DarudaTheme,
+    pub fn from_agent_chat_surface(
+        t: &crate::theme::DarudaTheme,
         surface: PaneSurfaceTokens,
     ) -> Self {
         Self {
@@ -92,7 +92,7 @@ impl DiffColors {
     /// Every colour channel this palette carries, so a caller can fingerprint the
     /// palette without restating the field list (and silently missing one a later
     /// field addition brings). Ordered; only the set of values matters to a hash.
-    pub(in crate::workspace) fn channels(&self) -> impl Iterator<Item = f32> {
+    pub fn channels(&self) -> impl Iterator<Item = f32> {
         [
             self.add_bg,
             self.del_bg,
@@ -111,7 +111,7 @@ impl DiffColors {
 }
 
 /// Editor inputs derived from a diff's `VisualRow`s.
-pub(in crate::workspace) struct DiffEditorModel {
+pub struct DiffEditorModel {
     pub text: String,
     pub decorations: Vec<LineDecoration>,
     pub highlights: Vec<(Range<usize>, HighlightStyle)>,
@@ -236,7 +236,7 @@ fn line_spans(
 /// replaced region, so "line 1" is not the file's line 1). Blank gutters keep
 /// the row backgrounds (those are decoration-driven, independent of the
 /// number) but reserve no gutter width.
-pub(in crate::workspace) fn build_diff_editor_model(
+pub fn build_diff_editor_model(
     rows: &[VisualRow],
     colors: &DiffColors,
     syntax: &SyntaxTheme,
@@ -312,7 +312,7 @@ pub(in crate::workspace) fn build_diff_editor_model(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::workspace::main_area::file_view_pane::{HighlightedSpan, WordChange};
+    use daruda_content::diff::{HighlightedSpan, WordChange};
 
     fn colors() -> DiffColors {
         let c = |l: f32| Hsla {
@@ -336,7 +336,7 @@ mod tests {
     }
 
     fn syntax() -> SyntaxTheme {
-        crate::ui::theme::syntax_theme_of(Default::default(), false)
+        crate::theme::syntax_theme_of(Default::default(), false)
     }
 
     fn row(kind: VisualRowKind, left: &str, right: &str, content: &str) -> VisualRow {

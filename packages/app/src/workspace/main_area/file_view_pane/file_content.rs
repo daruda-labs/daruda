@@ -9,8 +9,6 @@
 //! `load_raw` / `load_diff` helpers stay private and are selected
 //! via [`FileViewMode`].
 
-use super::highlighter::{LanguageHint, highlight_hunks, highlight_raw_rows};
-use super::mermaid_theme::MermaidPalette;
 use super::visual::RasterImage;
 use super::word_diff::apply_word_diff;
 use super::{
@@ -18,6 +16,8 @@ use super::{
     parse_diff_hunks,
 };
 use crate::path_ext::PathExt;
+use crate::ui::mermaid_palette::MermaidPalette;
+use crate::ui::row_highlight::{LanguageHint, highlight_hunks, highlight_raw_rows};
 
 /// Result of a background file load.
 ///

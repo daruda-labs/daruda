@@ -3,13 +3,10 @@
 //! focused pane only while a file or diff is open — PTY processes keep
 //! running. Rendering lives in the sibling `render/` module.
 
-pub(in crate::workspace) mod diff_editor;
 pub(in crate::workspace) mod file_content;
-pub(super) mod highlighter;
 mod image_source;
 pub(in crate::workspace) mod images;
 pub(super) mod markdown_viewer;
-pub(in crate::workspace) mod mermaid_theme;
 pub(super) mod search_ops;
 mod search_state;
 mod selection;
@@ -21,8 +18,8 @@ pub mod render;
 mod tests;
 
 pub(in crate::workspace) use daruda_content::diff::{
-    DiffHunk, DiffLine, HighlightedSpan, VisualRow, VisualRowKind, WordChange, count_diff_stats,
-    line_diff, parse_diff_hunks, word_diff,
+    DiffHunk, HighlightedSpan, VisualRow, VisualRowKind, WordChange, count_diff_stats, line_diff,
+    parse_diff_hunks, word_diff,
 };
 pub(in crate::workspace) use search_state::FileViewerSearch;
 pub(in crate::workspace) use selection::{CharPos, CharSelection, SelectionDrag};

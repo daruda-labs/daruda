@@ -35,11 +35,11 @@ use super::output_editor::{
 use super::view::AgentChatView;
 use super::view::list_sync::ListSync;
 use super::window_access::WindowAccess;
-use crate::workspace::main_area::file_view_pane::diff_editor::{DiffColors, DiffEditorModel};
-use crate::workspace::main_area::file_view_pane::mermaid_theme;
-use crate::workspace::main_area::file_view_pane::render::CachedImage;
-use crate::workspace::main_area::file_view_pane::visual;
+use crate::ui::CachedImage;
+use crate::ui::diff_editor::{DiffColors, DiffEditorModel};
+use crate::ui::mermaid_palette;
 use crate::workspace::main_area::link_target;
+use daruda_content::visual;
 
 /// Which tool calls a reconcile pass must revisit.
 ///
@@ -512,7 +512,7 @@ impl AgentChatView {
 
         // Resolved here (main thread) so the background rasterizer never
         // touches `Hsla` / the `DarudaTheme` global — see `daruda_content::MermaidPalette`.
-        let palette = mermaid_theme::agent_chat_palette(cx);
+        let palette = mermaid_palette::agent_chat_palette(cx);
 
         for (key, source) in pending {
             let palette = palette.clone();
@@ -809,7 +809,7 @@ mod tests {
         mermaid_key, resource_image_path,
     };
     use crate::transcript::fold_mode::{FoldMode, FoldPreset};
-    use crate::workspace::main_area::file_view_pane::diff_editor::DiffColors;
+    use crate::ui::diff_editor::DiffColors;
 
     const KEY: &str = "call_1#0";
 

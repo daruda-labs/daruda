@@ -25,6 +25,7 @@ use super::tail_row::call_boundary_label;
 use crate::surface::strings as s;
 use crate::transcript::command_analysis::{CommandAnalysis, CommandAnalysisIndex, CommandEffect};
 use crate::transcript::tool_category::{ToolCategory, is_mcp_tool_name};
+use crate::ui::CachedImage;
 use crate::ui::theme;
 use crate::ui::{Icon, IconName, IconNamed as _, Sizable as _};
 use crate::workspace::main_area::agent_chat_pane::agent_chat_helpers::{
@@ -43,7 +44,6 @@ use crate::workspace::main_area::agent_chat_pane::rows::{
     FilterMatchIndex, LiveSubagentUnits, effective_tool_status,
 };
 use crate::workspace::main_area::agent_chat_pane::view::AgentChatView;
-use crate::workspace::main_area::file_view_pane::render::CachedImage;
 use crate::workspace::main_area::pane_tree::PaneId;
 
 #[derive(Clone, Copy)]
@@ -1253,7 +1253,7 @@ mod tests {
         const CARD_W: f32 = 400.;
         // Twice as wide as the card, and short enough that the 600px height
         // cap cannot be what decides the answer.
-        let raster = crate::workspace::main_area::file_view_pane::visual::RasterImage {
+        let raster = daruda_content::visual::RasterImage {
             width: 800,
             height: 400,
             bgra: vec![0; 800 * 400 * 4],
@@ -1302,7 +1302,7 @@ mod tests {
         let cap = theme::MD_IMAGE_MAX_HEIGHT;
         // Ten times taller than wide, and narrow enough that the card's width
         // cannot be what decides the answer.
-        let raster = crate::workspace::main_area::file_view_pane::visual::RasterImage {
+        let raster = daruda_content::visual::RasterImage {
             width: 100,
             height: 1000,
             bgra: vec![0; 100 * 1000 * 4],

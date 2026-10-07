@@ -10,10 +10,10 @@ use gpui::{AnyElement, App, ElementId, IntoElement, SharedString, Window, div, p
 
 use super::MermaidImages;
 use crate::surface::strings as s;
+use crate::ui::CachedImage;
 use crate::ui::theme;
 use crate::ui::{copy_button, icons};
 use crate::workspace::main_area::agent_chat_pane::agent_chat_helpers::mermaid_key;
-use crate::workspace::main_area::file_view_pane::render::CachedImage;
 
 /// The `code_block_render` hook for a chat markdown body: replace a
 /// ```mermaid fence with its cached diagram card, leaving every other code
@@ -167,7 +167,7 @@ mod tests {
     use super::*;
     use crate::test_support::init_gpui_component;
     use crate::ui::WindowExt as _;
-    use crate::workspace::main_area::file_view_pane::visual::RasterImage;
+    use daruda_content::visual::RasterImage;
 
     const KEY: u64 = 7;
     const SOURCE: &str = "flowchart TD\n  A[hello]\n";

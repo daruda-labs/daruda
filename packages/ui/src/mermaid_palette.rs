@@ -4,14 +4,13 @@
 
 use gpui::Hsla;
 
-use crate::ui::theme::{self, DarudaTheme};
+use crate::theme::{self, DarudaTheme};
 
-pub(in crate::workspace) use daruda_content::MermaidPalette;
+pub use daruda_content::MermaidPalette;
 
-/// The palette a UI theme resolves to, over the file viewer's canvas. Only a
-/// capture or a test builds one without a live surface to read.
-#[cfg(any(test, feature = "screenshot"))]
-pub(in crate::workspace) fn palette_from_theme(theme: &DarudaTheme) -> MermaidPalette {
+/// The palette a UI theme resolves to, over the file viewer's canvas — for a
+/// caller with no live surface to read (a capture, a test).
+pub fn palette_from_theme(theme: &DarudaTheme) -> MermaidPalette {
     let canvas = theme.file_viewer_bg;
     MermaidPalette {
         dark: theme.is_dark(),
@@ -52,7 +51,7 @@ pub(in crate::workspace) fn palette_from_theme(theme: &DarudaTheme) -> MermaidPa
 }
 
 /// The palette for a diagram on the file viewer's surface.
-pub(in crate::workspace) fn file_viewer_palette(cx: &gpui::App) -> MermaidPalette {
+pub fn file_viewer_palette(cx: &gpui::App) -> MermaidPalette {
     let ui_theme = cx.try_global::<DarudaTheme>().cloned().unwrap_or_default();
     let surface = theme::PaneSurfaceTokens::file_viewer(cx);
     let canvas = surface.background;
@@ -85,7 +84,7 @@ pub(in crate::workspace) fn file_viewer_palette(cx: &gpui::App) -> MermaidPalett
 /// disagree with the UI theme's light/dark bit. Build this palette from
 /// that actual surface/foreground pair so light UI chrome cannot leak
 /// black Mermaid text onto a dark chat transcript.
-pub(in crate::workspace) fn agent_chat_palette(cx: &gpui::App) -> MermaidPalette {
+pub fn agent_chat_palette(cx: &gpui::App) -> MermaidPalette {
     let ui_theme = cx.try_global::<DarudaTheme>().cloned().unwrap_or_default();
     let surface = theme::PaneSurfaceTokens::agent_chat(cx);
     let canvas = surface.background;
@@ -116,8 +115,7 @@ pub(in crate::workspace) fn agent_chat_palette(cx: &gpui::App) -> MermaidPalette
 
 /// The compile-time (dark) palette, for a capture that renders a diagram
 /// before any `DarudaTheme` global is read.
-#[cfg(feature = "screenshot")]
-pub(in crate::workspace) fn default_palette() -> MermaidPalette {
+pub fn default_palette() -> MermaidPalette {
     palette_from_theme(&DarudaTheme::default())
 }
 
@@ -135,7 +133,6 @@ const DIAGRAM_SURFACE_ALT_ALPHA: f32 = 0.14;
 /// *direction* per theme — white in dark, black in light) but its alpha
 /// replaced, so a diagram surface can be stronger than any step on daruda's
 /// actual UI-chrome overlay ladder while staying theme-coherent.
-#[cfg(any(test, feature = "screenshot"))]
 fn diagram_surface(theme: &DarudaTheme, alpha: f32) -> Hsla {
     Hsla {
         a: alpha,

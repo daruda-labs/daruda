@@ -17,8 +17,8 @@ mod tests;
 
 use pulldown_cmark::{CodeBlockKind, Event, HeadingLevel, Options, Parser, Tag, TagEnd};
 
-use super::highlighter::{LanguageHint, highlight_raw_rows};
 use super::{VisualRow, VisualRowKind};
+use crate::ui::row_highlight::{LanguageHint, highlight_raw_rows};
 
 pub(in crate::workspace) use self::plain_text::md_block_plain_text;
 pub(in crate::workspace) use self::resolve::{lone_image, resolve_all};
