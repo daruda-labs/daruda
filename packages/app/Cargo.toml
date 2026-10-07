@@ -57,6 +57,7 @@ daruda_config = { workspace = true }
 daruda_content = { workspace = true }
 daruda_control_types = { workspace = true }
 daruda_flow = { workspace = true }
+daruda_flow_edit = { workspace = true }
 daruda_project = { workspace = true }
 daruda_terminal = { workspace = true }
 daruda_ui = { workspace = true }
@@ -84,10 +85,6 @@ tree-sitter = "0.25"
 tree-sitter-bash = "0.25.1"
 tree-sitter-highlight = "0.25"
 tree-sitter-python = "0.25.0"
-# The flow-file editor's parser. Already in the lock through
-# `gpui_component`'s `tree-sitter-languages` feature — this is the direct
-# dependency the editor needs to name it.
-tree-sitter-yaml = "0.7"
 unicode-segmentation = "1"
 url = "2"
 ureq = { version = "2", default-features = false, features = ["tls", "json"] }

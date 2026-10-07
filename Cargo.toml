@@ -41,6 +41,7 @@ daruda_content = { path = "packages/content" }
 daruda_control_types = { path = "packages/control-types" }
 daruda_core = { path = "packages/core" }
 daruda_flow = { path = "packages/flow" }
+daruda_flow_edit = { path = "packages/flow-edit" }
 daruda_project = { path = "packages/project" }
 daruda_store = { path = "packages/store" }
 daruda_terminal = { path = "packages/terminal" }

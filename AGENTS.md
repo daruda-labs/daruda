@@ -51,7 +51,7 @@ Run these locally and make them pass before committing:
 cargo fmt --all -- --check
 cargo clippy -p ghostty_vt -p ghostty_vt_sys -p daruda_terminal -p daruda \
   -p daruda_config -p daruda_store -p daruda_agent -p daruda_update \
-  -p daruda_acp -p daruda_core -p daruda_flow -p daruda_project -p daruda_ui -p daruda_control_types -p daruda_content -p ferrum_flow -p strings_gen \
+  -p daruda_acp -p daruda_core -p daruda_flow -p daruda_project -p daruda_ui -p daruda_control_types -p daruda_content -p daruda_flow_edit -p ferrum_flow -p strings_gen \
   --all-targets -- -D warnings
 ./scripts/lint-inline-literals.sh
 ./scripts/lint-paint-scope.sh
@@ -65,7 +65,7 @@ cargo clippy -p ghostty_vt -p ghostty_vt_sys -p daruda_terminal -p daruda \
 ./scripts/lint-platform-boundary.sh
 cargo test -p ghostty_vt -p ghostty_vt_sys -p daruda_terminal -p daruda \
   -p daruda_config -p daruda_store -p daruda_agent -p daruda_update \
-  -p daruda_acp -p daruda_core -p daruda_flow -p daruda_project -p daruda_ui -p daruda_control_types -p daruda_content -p ferrum_flow -p gpui_component -p strings_gen
+  -p daruda_acp -p daruda_core -p daruda_flow -p daruda_project -p daruda_ui -p daruda_control_types -p daruda_content -p daruda_flow_edit -p ferrum_flow -p gpui_component -p strings_gen
 ./scripts/lint-no-silent-update.sh
 ./scripts/lint-agent-activity.sh
 ./scripts/lint-daruda-path-literals.sh
@@ -81,7 +81,7 @@ cargo test -p ghostty_vt -p ghostty_vt_sys -p daruda_terminal -p daruda \
 ./scripts/lint-raw-mouse-button.sh --self-test
 ./scripts/lint-comment-length.sh
 RUSTDOCFLAGS="-D warnings" cargo doc --no-deps \
-  -p daruda_flow -p daruda_project -p daruda_ui -p daruda_control_types -p daruda_content -p daruda_core -p daruda_update -p ghostty_vt_sys \
+  -p daruda_flow -p daruda_project -p daruda_ui -p daruda_control_types -p daruda_content -p daruda_flow_edit -p daruda_core -p daruda_update -p ghostty_vt_sys \
   -p ghostty_vt -p daruda_agent
 cargo run -p gen_acp_presets -- --check
 cargo clippy -p daruda --all-features --all-targets -- -D warnings
@@ -167,6 +167,7 @@ daruda/
 │   ├── app/                  # daruda — main app binary (workspace, agent, ui, lane, surface)
 │   ├── acp/                  # daruda_acp — Agent Client Protocol client core (GPUI-free)
 │   ├── flow/                 # daruda_flow — declarative ACP flow engine (GPUI-free)
+│   ├── flow-edit/            # daruda_flow_edit — source-preserving flow-file edits (GPUI-free)
 │   ├── project/              # daruda_project — runtime Project/Lane model, git/worktree ops (GPUI-free)
 │   ├── core/                 # daruda_core — shared dependency-free utilities + core logic
 │   ├── config/               # daruda_config — config system (live reload)
@@ -213,7 +214,7 @@ for macOS app and DMG bundles.
 cargo fmt --all -- --check
 cargo clippy -p ghostty_vt -p ghostty_vt_sys -p daruda_terminal -p daruda \
   -p daruda_config -p daruda_store -p daruda_agent -p daruda_update \
-  -p daruda_acp -p daruda_core -p daruda_flow -p daruda_project -p daruda_ui -p daruda_control_types -p daruda_content -p ferrum_flow -p strings_gen \
+  -p daruda_acp -p daruda_core -p daruda_flow -p daruda_project -p daruda_ui -p daruda_control_types -p daruda_content -p daruda_flow_edit -p ferrum_flow -p strings_gen \
   --all-targets -- -D warnings
 scripts/lint-inline-literals.sh
 scripts/lint-paint-scope.sh
@@ -227,7 +228,7 @@ scripts/lint-landing-no-disk-read.sh
 scripts/lint-platform-boundary.sh
 cargo test -p ghostty_vt -p ghostty_vt_sys -p daruda_terminal -p daruda \
   -p daruda_config -p daruda_store -p daruda_agent -p daruda_update \
-  -p daruda_acp -p daruda_core -p daruda_flow -p daruda_project -p daruda_ui -p daruda_control_types -p daruda_content -p ferrum_flow -p gpui_component -p strings_gen
+  -p daruda_acp -p daruda_core -p daruda_flow -p daruda_project -p daruda_ui -p daruda_control_types -p daruda_content -p daruda_flow_edit -p ferrum_flow -p gpui_component -p strings_gen
 scripts/lint-no-silent-update.sh
 scripts/lint-agent-activity.sh
 scripts/lint-daruda-path-literals.sh
@@ -243,7 +244,7 @@ scripts/lint-raw-mouse-button.sh
 scripts/lint-raw-mouse-button.sh --self-test
 scripts/lint-comment-length.sh
 RUSTDOCFLAGS="-D warnings" cargo doc --no-deps \
-  -p daruda_flow -p daruda_project -p daruda_ui -p daruda_control_types -p daruda_content -p daruda_core -p daruda_update -p ghostty_vt_sys \
+  -p daruda_flow -p daruda_project -p daruda_ui -p daruda_control_types -p daruda_content -p daruda_flow_edit -p daruda_core -p daruda_update -p ghostty_vt_sys \
   -p ghostty_vt -p daruda_agent
 cargo run -p gen_acp_presets -- --check
 cargo clippy -p daruda --all-features --all-targets -- -D warnings
@@ -262,9 +263,9 @@ What the `Linux` job carries that no lint could is the `#[cfg]` arms the macOS j
 
 Note: the `Lint` job gates fmt, the 9 lint scripts through `lint-platform-boundary.sh`, `lint-env-literals.sh` with its self-test, `lint-no-silent-update.sh`, and `lint-agent-activity.sh`. The platform jobs gate the clippy list above and the package-scoped `cargo test` list above; the `cargo doc` link check runs on macOS.
 
-The doc-link gate covers ten crates rather than all of them: clippy does not
+The doc-link gate covers eleven crates rather than all of them: clippy does not
 read intra-doc links, so a deleted item leaves a dangling `[`Name`]` in the
-prose that explains the module. These ten are clean today; the rest carry a
+prose that explains the module. These eleven are clean today; the rest carry a
 backlog and join the list a crate at a time as that is worked off. Measured
 2026-09-18: `daruda_config` 8, `daruda_store` 8, `daruda_terminal` 11,
 `daruda_acp` 16, `daruda` 85 — the app crate is most of what is left. `lint-render-purity.sh`, `lint-daruda-path-literals.sh`, `lint-file-size.sh`, `lint-mark-dirty-direct-call.sh`, `lint-fold-header.sh`, `lint-agent-list-sync.sh`, `lint-declarative-context-menu.sh`, `lint-acp-air-gate.sh`, `lint-raw-mouse-button.sh`, `lint-comment-length.sh`, and `gen_acp_presets -- --check` are local/reviewer checks not yet wired into CI.
@@ -458,6 +459,7 @@ daruda (app)  →  daruda_terminal  →  ghostty_vt  →  ghostty_vt_sys
              →  daruda_agent      →  daruda_store
              →  daruda_acp        →  daruda_core    # GPUI-free ACP client core
              →  daruda_flow       →  daruda_acp, daruda_core
+             →  daruda_flow_edit  →  daruda_flow   # YAML edits that keep comments and order
              →  daruda_project    →  daruda_config, daruda_store, daruda_core  # GPUI-free Project/Lane
              →  daruda_content    →  merman, resvg, image   # GPUI-free image + mermaid pipeline
              →  daruda_control_types  →  daruda_store   # GPUI-free control contract, PaneRef

@@ -13,11 +13,9 @@
 //! is a line removal, and a value may be a block scalar or written in flow style.
 //! Flow style is refused rather than rewritten.
 //!
-//! Edits are returned rather than applied ([D7]): a caller today splices them
-//! into a file, and a caller later can hand them to an editor buffer as one
-//! transaction.
-//!
-//! [D7]: the S4 design note
+//! Edits are returned rather than applied (D7 in the S4 design note): a caller
+//! today splices them into a file, and a caller later can hand them to an
+//! editor buffer as one transaction.
 
 mod locate;
 mod render;
@@ -31,10 +29,10 @@ use locate::{Container, Site, Step, ValueKind};
 
 /// A replacement of `range` with this text. Ascending by `range.start`; a caller
 /// applying them to a string does so in reverse so earlier offsets stay valid.
-pub(in crate::workspace) type Edit = (Range<usize>, String);
+pub type Edit = (Range<usize>, String);
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub(in crate::workspace) enum FlowEditError {
+pub enum FlowEditError {
     /// The text is not a flow file to begin with. Nothing can be edited safely
     /// in a file whose shape we cannot read.
     Unparsable(String),
@@ -72,7 +70,7 @@ impl std::error::Error for FlowEditError {}
 ///
 /// An update that changes nothing returns no edits — the same rule the graph
 /// pane's reload stands on, arrived at from the other side.
-pub(in crate::workspace) fn edits_for_update(
+pub fn edits_for_update(
     text: &str,
     update: impl FnOnce(&mut FlowFile),
 ) -> Result<Vec<Edit>, FlowEditError> {
@@ -555,7 +553,7 @@ fn element_column(
 
 /// Apply `edits` to `text`. The one place that knows they come back ascending
 /// and have to be applied the other way round.
-pub(in crate::workspace) fn apply(text: &str, edits: &[Edit]) -> String {
+pub fn apply(text: &str, edits: &[Edit]) -> String {
     let mut out = text.to_string();
     for (range, replacement) in edits.iter().rev() {
         out.replace_range(range.clone(), replacement);

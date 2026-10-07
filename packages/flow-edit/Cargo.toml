@@ -1,0 +1,18 @@
+[package]
+name = "daruda_flow_edit"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish = false
+license.workspace = true
+description = "Source-preserving edits to daruda flow files — change a typed FlowFile, get back text edits (GPUI-free)"
+
+[lints]
+workspace = true
+
+[dependencies]
+daruda_flow = { workspace = true }
+tree-sitter = "0.25"
+# Node kinds in `locate` are measured against this grammar version.
+tree-sitter-yaml = "0.7"
+yaml_serde = "0.10"

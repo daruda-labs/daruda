@@ -82,6 +82,7 @@ SCAN_DIRS=(
     "packages/ui/src"
     "packages/control-types/src"
     "packages/content/src"
+    "packages/flow-edit/src"
     "packages/agent/src"
 )
 

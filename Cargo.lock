@@ -1669,6 +1669,7 @@ dependencies = [
  "daruda_control_types",
  "daruda_core",
  "daruda_flow",
+ "daruda_flow_edit",
  "daruda_project",
  "daruda_store",
  "daruda_terminal",
@@ -1713,7 +1714,6 @@ dependencies = [
  "tree-sitter-bash",
  "tree-sitter-highlight",
  "tree-sitter-python",
- "tree-sitter-yaml",
  "tungstenite",
  "uds_windows",
  "unicode-segmentation",
@@ -1836,6 +1836,16 @@ dependencies = [
  "tempfile",
  "thiserror 2.0.18",
  "unicode-normalization",
+ "yaml_serde",
+]
+
+[[package]]
+name = "daruda_flow_edit"
+version = "0.2.16"
+dependencies = [
+ "daruda_flow",
+ "tree-sitter",
+ "tree-sitter-yaml",
  "yaml_serde",
 ]
 

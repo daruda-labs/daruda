@@ -2,7 +2,7 @@
 //! a lane can run.
 //!
 //! Split from `flow_ops.rs`: these touch the filesystem and never the engine.
-//! The contents of a flow are S4's business (`flow_edit.rs`); this module only
+//! The contents of a flow are S4's business (`daruda_flow_edit`); this module only
 //! ever writes a whole file or removes one.
 //!
 //! Every operation here takes a path and nothing else — deliberately. A flow's
@@ -257,12 +257,12 @@ impl Workspace {
             Err(e) => return Err(EditRefusal::io(path, &e)),
         }
 
-        let edits = super::flow_edit::edits_for_update(base, update)
+        let edits = daruda_flow_edit::edits_for_update(base, update)
             .map_err(|err| EditRefusal::Unsupported(err.to_string()))?;
         if edits.is_empty() {
             return Err(EditRefusal::NothingToDo);
         }
-        let candidate = super::flow_edit::apply(base, &edits);
+        let candidate = daruda_flow_edit::apply(base, &edits);
         if let Err(e) = daruda_flow::load(&candidate, None) {
             return Err(EditRefusal::WouldNotLoad {
                 detail: load_failure_detail(&e),

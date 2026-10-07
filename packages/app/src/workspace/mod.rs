@@ -39,7 +39,6 @@ pub(in crate::workspace) mod error;
 pub(in crate::workspace) mod flow_ask_modal;
 mod flow_browser;
 pub(in crate::workspace) mod flow_cache;
-mod flow_edit;
 mod flow_events;
 mod flow_file_ops;
 mod flow_graph_ops;
