@@ -6,147 +6,119 @@ use gpui::Hsla;
 
 use crate::ui::theme::{self, DarudaTheme};
 
-/// Plain-data palette snapshot threaded down to the GPUI-free mermaid
-/// renderer (`mermaid_host_theme::mermaid_host_theme_profile`). Resolved once
-/// here, at the GPUI boundary, so background-thread code never touches
-/// `Hsla`. Field set mirrors merman's `HostThemeRoles` — a diagram-type-
-/// agnostic role palette, not per-diagram-type `themeVariables` — so every
-/// diagram kind (flowchart, sequence, pie, ...) picks up daruda's actual
-/// surface/text/border colors instead of leaving diagram-specific elements
-/// (sequence notes/actors, pie background, ...) on mermaid's own light
-/// defaults.
-#[derive(Clone)]
-pub(in crate::workspace) struct MermaidPalette {
-    pub dark: bool,
-    pub background: String,
-    pub primary_color: String,
-    pub primary_text_color: String,
-    pub primary_border_color: String,
-    pub line_color: String,
-    pub secondary_color: String,
-    pub surface_muted: String,
-    pub cluster_background: String,
-    pub note_background: String,
-    pub note_text: String,
-    pub activation_background: String,
-    pub error: String,
-    pub warning: String,
-    pub success: String,
-}
+pub(in crate::workspace) use daruda_content::MermaidPalette;
 
-impl MermaidPalette {
-    pub fn from_theme(theme: &DarudaTheme) -> Self {
-        let canvas = theme.file_viewer_bg;
-        Self {
-            dark: theme.is_dark(),
-            background: to_hex(canvas),
-            // `md_code_block_bg`/`md_code_inline_bg`/`dock_bg` sit on daruda's
-            // panel-elevation ladder, which is deliberately subtle
-            // (a few % lightness apart) for panel-on-panel chrome — too close to
-            // `canvas` to read as a filled node/section on open diagram canvas
-            // (mindmap topics, timeline sections have no border to compensate, so
-            // they rendered as near-invisible black-on-black boxes). `overlay_*`
-            // already encodes the right *direction* per theme (white-alpha in
-            // dark, black-alpha in light; see `daruda_light.json`), but even its
-            // strongest step (`overlay_prominent`, 10% alpha) is tuned for barely-
-            // perceptible chrome (hover/selected rows), not a standalone content
-            // box — so `diagram_surface` reuses that hue at a level actually
-            // meant to read as a filled card.
-            primary_color: to_hex_over(diagram_surface(theme, DIAGRAM_SURFACE_ALPHA), canvas),
-            primary_text_color: to_hex(theme.text_body),
-            primary_border_color: to_hex(theme.border),
-            line_color: to_hex(theme.text_muted),
-            secondary_color: to_hex_over(diagram_surface(theme, DIAGRAM_SURFACE_ALT_ALPHA), canvas),
-            surface_muted: to_hex_over(diagram_surface(theme, DIAGRAM_SURFACE_ALT_ALPHA), canvas),
-            cluster_background: to_hex_over(
-                diagram_surface(theme, DIAGRAM_SURFACE_ALT_ALPHA),
-                canvas,
-            ),
-            // `banner_warning_bg` is a translucent tint (`with_alpha(WARNING, 0.10)`)
-            // meant to composite over a panel, not stand alone — flattening it to
-            // opaque RGB without compositing would emit a full-intensity warning
-            // color instead of the intended subtle tint.
-            note_background: to_hex_over(theme.banner_warning_bg, canvas),
-            note_text: to_hex(theme.banner_warning_text),
-            activation_background: to_hex_over(
-                diagram_surface(theme, DIAGRAM_SURFACE_ALT_ALPHA),
-                canvas,
-            ),
-            error: to_hex(theme.banner_error_text),
-            warning: to_hex(theme.banner_warning_text),
-            success: to_hex(theme.banner_success_text),
-        }
-    }
-
-    pub fn from_file_viewer(cx: &gpui::App) -> Self {
-        let ui_theme = cx.try_global::<DarudaTheme>().cloned().unwrap_or_default();
-        let surface = theme::PaneSurfaceTokens::file_viewer(cx);
-        let canvas = surface.background;
-        let line = to_hex_over(surface.foreground_muted, canvas);
-        let primary_surface = diagram_surface_for_base(canvas, DIAGRAM_SURFACE_ALPHA);
-        let secondary_surface = diagram_surface_for_base(canvas, DIAGRAM_SURFACE_ALT_ALPHA);
-        let primary_surface_hex = to_hex_over(primary_surface, canvas);
-        let secondary_surface_hex = to_hex_over(secondary_surface, canvas);
-
-        Self {
-            dark: !surface.syntax_is_light,
-            background: to_hex(canvas),
-            primary_color: primary_surface_hex.clone(),
-            primary_text_color: to_hex(surface.foreground),
-            primary_border_color: to_hex_over(surface.border_tint, canvas),
-            line_color: line,
-            secondary_color: secondary_surface_hex.clone(),
-            surface_muted: secondary_surface_hex.clone(),
-            cluster_background: secondary_surface_hex.clone(),
-            note_background: to_hex_over(ui_theme.banner_warning_bg, canvas),
-            note_text: to_hex(ui_theme.banner_warning_text),
-            activation_background: secondary_surface_hex,
-            error: to_hex(ui_theme.banner_error_text),
-            warning: to_hex(ui_theme.banner_warning_text),
-            success: to_hex(ui_theme.banner_success_text),
-        }
-    }
-
-    /// Agent-chat diagrams sit on the terminal-mirrored chat surface, which can
-    /// disagree with the UI theme's light/dark bit. Build this palette from
-    /// that actual surface/foreground pair so light UI chrome cannot leak
-    /// black Mermaid text onto a dark chat transcript.
-    pub fn from_agent_chat(cx: &gpui::App) -> Self {
-        let ui_theme = cx.try_global::<DarudaTheme>().cloned().unwrap_or_default();
-        let surface = theme::PaneSurfaceTokens::agent_chat(cx);
-        let canvas = surface.background;
-        let line = to_hex_over(surface.foreground_muted, canvas);
-        let primary_surface = diagram_surface_for_base(canvas, DIAGRAM_SURFACE_ALPHA);
-        let secondary_surface = diagram_surface_for_base(canvas, DIAGRAM_SURFACE_ALT_ALPHA);
-        let primary_surface_hex = to_hex_over(primary_surface, canvas);
-        let secondary_surface_hex = to_hex_over(secondary_surface, canvas);
-
-        Self {
-            dark: !surface.syntax_is_light,
-            background: to_hex(canvas),
-            primary_color: primary_surface_hex.clone(),
-            primary_text_color: to_hex(surface.foreground),
-            primary_border_color: to_hex_over(surface.border_tint, canvas),
-            line_color: line,
-            secondary_color: secondary_surface_hex.clone(),
-            surface_muted: secondary_surface_hex.clone(),
-            cluster_background: secondary_surface_hex.clone(),
-            note_background: to_hex_over(ui_theme.banner_warning_bg, canvas),
-            note_text: to_hex(ui_theme.banner_warning_text),
-            activation_background: secondary_surface_hex,
-            error: to_hex(ui_theme.banner_error_text),
-            warning: to_hex(ui_theme.banner_warning_text),
-            success: to_hex(ui_theme.banner_success_text),
-        }
+/// The palette a UI theme resolves to, over the file viewer's canvas. Only a
+/// capture or a test builds one without a live surface to read.
+#[cfg(any(test, feature = "screenshot"))]
+pub(in crate::workspace) fn palette_from_theme(theme: &DarudaTheme) -> MermaidPalette {
+    let canvas = theme.file_viewer_bg;
+    MermaidPalette {
+        dark: theme.is_dark(),
+        background: to_hex(canvas),
+        // `md_code_block_bg`/`md_code_inline_bg`/`dock_bg` sit on daruda's
+        // panel-elevation ladder, which is deliberately subtle
+        // (a few % lightness apart) for panel-on-panel chrome — too close to
+        // `canvas` to read as a filled node/section on open diagram canvas
+        // (mindmap topics, timeline sections have no border to compensate, so
+        // they rendered as near-invisible black-on-black boxes). `overlay_*`
+        // already encodes the right *direction* per theme (white-alpha in
+        // dark, black-alpha in light; see `daruda_light.json`), but even its
+        // strongest step (`overlay_prominent`, 10% alpha) is tuned for barely-
+        // perceptible chrome (hover/selected rows), not a standalone content
+        // box — so `diagram_surface` reuses that hue at a level actually
+        // meant to read as a filled card.
+        primary_color: to_hex_over(diagram_surface(theme, DIAGRAM_SURFACE_ALPHA), canvas),
+        primary_text_color: to_hex(theme.text_body),
+        primary_border_color: to_hex(theme.border),
+        line_color: to_hex(theme.text_muted),
+        secondary_color: to_hex_over(diagram_surface(theme, DIAGRAM_SURFACE_ALT_ALPHA), canvas),
+        surface_muted: to_hex_over(diagram_surface(theme, DIAGRAM_SURFACE_ALT_ALPHA), canvas),
+        cluster_background: to_hex_over(diagram_surface(theme, DIAGRAM_SURFACE_ALT_ALPHA), canvas),
+        // `banner_warning_bg` is a translucent tint (`with_alpha(WARNING, 0.10)`)
+        // meant to composite over a panel, not stand alone — flattening it to
+        // opaque RGB without compositing would emit a full-intensity warning
+        // color instead of the intended subtle tint.
+        note_background: to_hex_over(theme.banner_warning_bg, canvas),
+        note_text: to_hex(theme.banner_warning_text),
+        activation_background: to_hex_over(
+            diagram_surface(theme, DIAGRAM_SURFACE_ALT_ALPHA),
+            canvas,
+        ),
+        error: to_hex(theme.banner_error_text),
+        warning: to_hex(theme.banner_warning_text),
+        success: to_hex(theme.banner_success_text),
     }
 }
 
-impl Default for MermaidPalette {
-    /// Falls back to the compile-time (dark) palette when no `DarudaTheme`
-    /// global is installed yet.
-    fn default() -> Self {
-        Self::from_theme(&DarudaTheme::default())
+/// The palette for a diagram on the file viewer's surface.
+pub(in crate::workspace) fn file_viewer_palette(cx: &gpui::App) -> MermaidPalette {
+    let ui_theme = cx.try_global::<DarudaTheme>().cloned().unwrap_or_default();
+    let surface = theme::PaneSurfaceTokens::file_viewer(cx);
+    let canvas = surface.background;
+    let line = to_hex_over(surface.foreground_muted, canvas);
+    let primary_surface = diagram_surface_for_base(canvas, DIAGRAM_SURFACE_ALPHA);
+    let secondary_surface = diagram_surface_for_base(canvas, DIAGRAM_SURFACE_ALT_ALPHA);
+    let primary_surface_hex = to_hex_over(primary_surface, canvas);
+    let secondary_surface_hex = to_hex_over(secondary_surface, canvas);
+
+    MermaidPalette {
+        dark: !surface.syntax_is_light,
+        background: to_hex(canvas),
+        primary_color: primary_surface_hex.clone(),
+        primary_text_color: to_hex(surface.foreground),
+        primary_border_color: to_hex_over(surface.border_tint, canvas),
+        line_color: line,
+        secondary_color: secondary_surface_hex.clone(),
+        surface_muted: secondary_surface_hex.clone(),
+        cluster_background: secondary_surface_hex.clone(),
+        note_background: to_hex_over(ui_theme.banner_warning_bg, canvas),
+        note_text: to_hex(ui_theme.banner_warning_text),
+        activation_background: secondary_surface_hex,
+        error: to_hex(ui_theme.banner_error_text),
+        warning: to_hex(ui_theme.banner_warning_text),
+        success: to_hex(ui_theme.banner_success_text),
     }
+}
+
+/// Agent-chat diagrams sit on the terminal-mirrored chat surface, which can
+/// disagree with the UI theme's light/dark bit. Build this palette from
+/// that actual surface/foreground pair so light UI chrome cannot leak
+/// black Mermaid text onto a dark chat transcript.
+pub(in crate::workspace) fn agent_chat_palette(cx: &gpui::App) -> MermaidPalette {
+    let ui_theme = cx.try_global::<DarudaTheme>().cloned().unwrap_or_default();
+    let surface = theme::PaneSurfaceTokens::agent_chat(cx);
+    let canvas = surface.background;
+    let line = to_hex_over(surface.foreground_muted, canvas);
+    let primary_surface = diagram_surface_for_base(canvas, DIAGRAM_SURFACE_ALPHA);
+    let secondary_surface = diagram_surface_for_base(canvas, DIAGRAM_SURFACE_ALT_ALPHA);
+    let primary_surface_hex = to_hex_over(primary_surface, canvas);
+    let secondary_surface_hex = to_hex_over(secondary_surface, canvas);
+
+    MermaidPalette {
+        dark: !surface.syntax_is_light,
+        background: to_hex(canvas),
+        primary_color: primary_surface_hex.clone(),
+        primary_text_color: to_hex(surface.foreground),
+        primary_border_color: to_hex_over(surface.border_tint, canvas),
+        line_color: line,
+        secondary_color: secondary_surface_hex.clone(),
+        surface_muted: secondary_surface_hex.clone(),
+        cluster_background: secondary_surface_hex.clone(),
+        note_background: to_hex_over(ui_theme.banner_warning_bg, canvas),
+        note_text: to_hex(ui_theme.banner_warning_text),
+        activation_background: secondary_surface_hex,
+        error: to_hex(ui_theme.banner_error_text),
+        warning: to_hex(ui_theme.banner_warning_text),
+        success: to_hex(ui_theme.banner_success_text),
+    }
+}
+
+/// The compile-time (dark) palette, for a capture that renders a diagram
+/// before any `DarudaTheme` global is read.
+#[cfg(feature = "screenshot")]
+pub(in crate::workspace) fn default_palette() -> MermaidPalette {
+    palette_from_theme(&DarudaTheme::default())
 }
 
 /// Alpha for a primary diagram surface (node/topic/section fill) — strong
@@ -163,6 +135,7 @@ const DIAGRAM_SURFACE_ALT_ALPHA: f32 = 0.14;
 /// *direction* per theme — white in dark, black in light) but its alpha
 /// replaced, so a diagram surface can be stronger than any step on daruda's
 /// actual UI-chrome overlay ladder while staying theme-coherent.
+#[cfg(any(test, feature = "screenshot"))]
 fn diagram_surface(theme: &DarudaTheme, alpha: f32) -> Hsla {
     Hsla {
         a: alpha,
@@ -272,7 +245,7 @@ mod tests {
     #[test]
     fn from_theme_matches_is_dark() {
         let theme = DarudaTheme::default();
-        let palette = MermaidPalette::from_theme(&theme);
+        let palette = palette_from_theme(&theme);
         assert_eq!(palette.dark, theme.is_dark());
         assert!(palette.background.starts_with('#'));
     }
@@ -299,7 +272,7 @@ mod tests {
             theme::set_agent_chat_bg(cx, 0, 0, 0);
             theme::set_agent_chat_fg(cx, 255, 255, 255);
 
-            let palette = MermaidPalette::from_agent_chat(cx);
+            let palette = agent_chat_palette(cx);
 
             assert!(palette.dark);
             assert_eq!(palette.background, "#000000");

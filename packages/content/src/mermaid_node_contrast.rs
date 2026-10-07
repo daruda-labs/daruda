@@ -556,7 +556,7 @@ mod tests {
     use super::*;
 
     fn options() -> usvg::Options<'static> {
-        super::super::visual::usvg_options()
+        crate::visual::usvg_options()
     }
 
     #[test]
@@ -854,9 +854,9 @@ mod tests {
     /// second, computed rule.
     #[test]
     fn real_classdef_with_explicit_author_color_is_not_overridden() {
-        let palette = super::super::mermaid_theme::MermaidPalette::default();
+        let palette = crate::test_palette();
         let source = "flowchart TD\n  A[Start] --> B[Highlighted]:::hl\n  classDef hl fill:#d4f8d4,stroke:#2d8a2d,stroke-width:2px,color:#0d4f0d\n";
-        let svg = super::super::visual::render_mermaid_svg(source, &palette).expect("svg");
+        let svg = crate::visual::render_mermaid_svg(source, &palette).expect("svg");
         let fixed = force_node_label_contrast(&svg, &options());
         assert_eq!(
             fixed, svg,
@@ -869,7 +869,7 @@ mod tests {
     /// output, not just the synthetic fixtures above.
     #[test]
     fn real_broken_diagrams_get_a_contrast_fix() {
-        let palette = super::super::mermaid_theme::MermaidPalette::default();
+        let palette = crate::test_palette();
         let samples: &[(&str, &str, &str)] = &[
             (
                 "flowchart style",
@@ -893,7 +893,7 @@ mod tests {
             ),
         ];
         for (name, source, must_contain) in samples {
-            let svg = super::super::visual::render_mermaid_svg(source, &palette)
+            let svg = crate::visual::render_mermaid_svg(source, &palette)
                 .unwrap_or_else(|| panic!("{name}: should render"));
             let fixed = force_node_label_contrast(&svg, &options());
             assert_ne!(fixed, svg, "{name}: expected a rewrite");

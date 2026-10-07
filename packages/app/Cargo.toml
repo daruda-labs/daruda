@@ -54,6 +54,7 @@ daruda_acp = { workspace = true }
 daruda_agent = { workspace = true }
 daruda_store = { workspace = true }
 daruda_config = { workspace = true }
+daruda_content = { workspace = true }
 daruda_control_types = { workspace = true }
 daruda_flow = { workspace = true }
 daruda_project = { workspace = true }
@@ -69,10 +70,6 @@ imara-diff = "0.2"
 lsp-types = { workspace = true }
 portable-pty = "0.9"
 pulldown-cmark = { version = "0.13", default-features = false }
-resvg = "0.45"
-# Mermaid → SVG renderer for the file viewer and agent chat. Not vendored —
-# no daruda-side patch needed. See CLAUDE.md's crate dependency graph section.
-merman = { version = "0.8.0-alpha.3", features = ["render"] }
 rust-i18n = { workspace = true }
 semver = "1"
 sys-locale = "0.3"

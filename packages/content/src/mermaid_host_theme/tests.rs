@@ -420,7 +420,7 @@ fn author_themed_diagram_renders_svg_text_labels() {
         "  A -.->|Edge caption| B\n",
     );
     let palette = test_palette();
-    let svg = super::super::visual::render_mermaid_svg(source, &palette).expect("svg");
+    let svg = crate::visual::render_mermaid_svg(source, &palette).expect("svg");
 
     assert!(
         !svg.contains("<foreignObject"),

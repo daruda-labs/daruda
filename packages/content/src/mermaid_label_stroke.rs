@@ -60,7 +60,7 @@ mod tests {
     use super::*;
 
     fn options() -> resvg::usvg::Options<'static> {
-        super::super::visual::usvg_options()
+        crate::visual::usvg_options()
     }
 
     #[test]
@@ -163,8 +163,8 @@ mod tests {
     #[test]
     fn real_state_diagram_classdef_stroke_no_longer_bleeds_into_the_label() {
         let source = "stateDiagram-v2\n  [*] --> Idle\n  Idle --> Running\n  Running --> [*]\n  class Running highlighted\n  classDef highlighted fill:#d4f8d4,stroke:#2d8a2d,stroke-width:2px\n";
-        let palette = super::super::mermaid_theme::MermaidPalette::default();
-        let svg = super::super::visual::render_mermaid_svg(source, &palette).expect("svg");
+        let palette = crate::test_palette();
+        let svg = crate::visual::render_mermaid_svg(source, &palette).expect("svg");
 
         let before = resvg::usvg::Tree::from_str(&svg, &options()).expect("parses");
         assert!(

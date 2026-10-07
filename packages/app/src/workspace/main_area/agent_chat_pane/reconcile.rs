@@ -36,7 +36,7 @@ use super::view::AgentChatView;
 use super::view::list_sync::ListSync;
 use super::window_access::WindowAccess;
 use crate::workspace::main_area::file_view_pane::diff_editor::{DiffColors, DiffEditorModel};
-use crate::workspace::main_area::file_view_pane::mermaid_theme::MermaidPalette;
+use crate::workspace::main_area::file_view_pane::mermaid_theme;
 use crate::workspace::main_area::file_view_pane::render::CachedImage;
 use crate::workspace::main_area::file_view_pane::visual;
 use crate::workspace::main_area::link_target;
@@ -511,8 +511,8 @@ impl AgentChatView {
         }
 
         // Resolved here (main thread) so the background rasterizer never
-        // touches `Hsla` / the `DarudaTheme` global — see `MermaidPalette`.
-        let palette = MermaidPalette::from_agent_chat(cx);
+        // touches `Hsla` / the `DarudaTheme` global — see `daruda_content::MermaidPalette`.
+        let palette = mermaid_theme::agent_chat_palette(cx);
 
         for (key, source) in pending {
             let palette = palette.clone();

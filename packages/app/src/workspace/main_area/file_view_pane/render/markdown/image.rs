@@ -57,7 +57,7 @@ pub(in crate::workspace) struct CachedImage {
 
 impl CachedImage {
     /// Wrap a raster into a cached GPU image, moving its buffer in. The
-    /// producer (`visual.rs`) already emits GPUI's byte order, so there is
+    /// producer (`daruda_content::visual`) already emits GPUI's byte order, so there is
     /// nothing to copy or swap here.
     pub(in crate::workspace) fn from_raster(raster: RasterImage) -> Option<Self> {
         let (logical_w, logical_h) = raster.logical_size();

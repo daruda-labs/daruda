@@ -34,7 +34,7 @@
 use std::borrow::Cow;
 
 /// Alpha every capped fill lands at — matches
-/// [`crate::workspace::main_area::file_view_pane::mermaid_theme`]'s
+/// the app's `mermaid_theme`'s
 /// `DIAGRAM_SURFACE_ALT_ALPHA` sibling tier (daruda's own diff-row tint
 /// strength), so a highlighted box reads the same "subtle tint, not a
 /// competing fill" as the rest of the app's translucent surfaces.

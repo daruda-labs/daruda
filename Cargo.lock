@@ -1665,6 +1665,7 @@ dependencies = [
  "daruda_acp",
  "daruda_agent",
  "daruda_config",
+ "daruda_content",
  "daruda_control_types",
  "daruda_core",
  "daruda_flow",
@@ -1687,7 +1688,6 @@ dependencies = [
  "image",
  "imara-diff",
  "lsp-types",
- "merman",
  "notify",
  "nucleo-matcher",
  "objc2-app-kit",
@@ -1696,7 +1696,6 @@ dependencies = [
  "portable-pty",
  "pulldown-cmark",
  "raw-window-handle",
- "resvg",
  "rust-i18n",
  "semver",
  "serde",
@@ -1782,6 +1781,17 @@ dependencies = [
  "toml 0.8.23",
  "toml_edit 0.22.27",
  "uuid",
+]
+
+[[package]]
+name = "daruda_content"
+version = "0.2.16"
+dependencies = [
+ "anyhow",
+ "image",
+ "merman",
+ "resvg",
+ "serde_json",
 ]
 
 [[package]]

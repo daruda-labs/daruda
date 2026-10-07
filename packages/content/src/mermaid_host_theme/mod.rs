@@ -9,7 +9,7 @@
 //! [`mermaid_svg_render_options`] is the viewBox geometry every diagram is
 //! laid out under.
 
-use super::mermaid_theme::MermaidPalette;
+use crate::MermaidPalette;
 
 /// The merman profile a diagram renders under: daruda's colours unless the
 /// source declares its own theme, plus the rasterizer settings either way.

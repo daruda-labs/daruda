@@ -410,7 +410,7 @@ mod tests {
 
     /// The rasterizer's own options, so a test measures what the app paints.
     fn options() -> usvg::Options<'static> {
-        super::super::visual::usvg_options()
+        crate::visual::usvg_options()
     }
 
     /// Absolute band and glyph boxes of the single label in `svg`.
@@ -581,11 +581,8 @@ mod tests {
 
     /// The SVG the app actually ships for `source`, before alignment.
     fn render_real(source: &str) -> String {
-        super::super::visual::render_mermaid_svg(
-            source,
-            &super::super::mermaid_theme::MermaidPalette::default(),
-        )
-        .expect("diagram should render")
+        crate::visual::render_mermaid_svg(source, &crate::test_palette())
+            .expect("diagram should render")
     }
 
     /// Absolute band and glyph boxes of every label, paired through the module's

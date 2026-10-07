@@ -190,7 +190,7 @@ fn load_raw(
                     &mut blocks,
                     &mut |url| {
                         let base_dir = base_dir.as_ref()?;
-                        super::visual::load_image_source(url, base_dir)
+                        super::image_source::load_image_source(url, base_dir)
                             .and_then(|bytes| super::visual::decode_image(&bytes))
                             .ok()
                     },

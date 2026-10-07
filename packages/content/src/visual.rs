@@ -7,10 +7,7 @@
 
 use std::collections::HashMap;
 use std::io::Cursor;
-use std::path::Path;
 use std::sync::{Arc, OnceLock};
-
-use crate::workspace::main_area::link_target;
 
 /// Render diagrams/images at 2× their intrinsic size so they stay crisp when
 /// the GPUI render layer scales them to fit the pane on HiDPI displays.
@@ -24,7 +21,7 @@ const MAX_DIM: u32 = 8000;
 /// bytes) — already in GPUI's `RenderImage` byte order, so the render
 /// boundary moves this buffer into a `RenderImage` without copying it.
 #[derive(Clone)]
-pub(in crate::workspace) struct RasterImage {
+pub struct RasterImage {
     pub width: u32,
     pub height: u32,
     pub bgra: Vec<u8>,
@@ -382,10 +379,7 @@ fn swap_rb_in_place(bytes: &mut [u8]) {
 /// The single funnel for both mermaid surfaces (file viewer and agent chat), so
 /// they cannot drift apart on theme options, panic containment, or the label
 /// geometry correction.
-pub(in crate::workspace) fn render_mermaid_raster(
-    source: &str,
-    palette: &super::mermaid_theme::MermaidPalette,
-) -> Option<RasterImage> {
+pub fn render_mermaid_raster(source: &str, palette: &crate::MermaidPalette) -> Option<RasterImage> {
     let svg = render_mermaid_svg(source, palette)?;
     // Contain a panic across the whole post-render pipeline, not just the
     // renderer: one bad diagram must not fail a file load or take the
@@ -404,10 +398,7 @@ pub(in crate::workspace) fn render_mermaid_raster(
 /// merman's SVG for `source`, with every option the app renders diagrams under.
 /// Split out so anything inspecting the diagram (tests, the label geometry pass)
 /// sees exactly what ships.
-pub(super) fn render_mermaid_svg(
-    source: &str,
-    palette: &super::mermaid_theme::MermaidPalette,
-) -> Option<String> {
+pub(super) fn render_mermaid_svg(source: &str, palette: &crate::MermaidPalette) -> Option<String> {
     use super::mermaid_host_theme::{mermaid_render_profile, mermaid_svg_render_options};
 
     // Fix up classDef/style/rect declarations merman-render would otherwise
@@ -435,34 +426,9 @@ pub(super) fn render_mermaid_svg(
     .flatten()
 }
 
-/// Resolve a markdown image reference to its encoded bytes.
-///
-/// Policy (locked): only local files and `data:` URIs are loaded — a local
-/// path resolves as a tool's resource link does (`file://` for this machine,
-/// absolute, or relative to `base_dir`). Any other URL is refused: a local
-/// file viewer must not fetch from the network.
-pub(super) fn load_image_source(url: &str, base_dir: &Path) -> anyhow::Result<Vec<u8>> {
-    if let Some(rest) = url.strip_prefix("data:") {
-        let (meta, payload) = rest
-            .split_once(',')
-            .ok_or_else(|| anyhow::anyhow!("malformed data URI"))?;
-        if meta.contains("base64") {
-            use base64::Engine;
-            Ok(base64::engine::general_purpose::STANDARD.decode(payload)?)
-        } else {
-            Ok(payload.as_bytes().to_vec())
-        }
-    } else {
-        let Some(path) = link_target::resource_path(url, Some(base_dir)) else {
-            anyhow::bail!("remote images are not fetched: {url}")
-        };
-        Ok(std::fs::read(path)?)
-    }
-}
-
 /// Decode an encoded raster image (PNG/JPEG/GIF/WebP/BMP) into a
 /// [`RasterImage`].
-pub(in crate::workspace) fn decode_image(bytes: &[u8]) -> anyhow::Result<RasterImage> {
+pub fn decode_image(bytes: &[u8]) -> anyhow::Result<RasterImage> {
     let img = image::load_from_memory(bytes)?.to_rgba8();
     let (width, height) = img.dimensions();
     let mut bgra = img.into_raw();
@@ -478,7 +444,7 @@ pub(in crate::workspace) fn decode_image(bytes: &[u8]) -> anyhow::Result<RasterI
 /// Decode untrusted image bytes with caller-selected allocation and dimension
 /// limits. Kept separate from [`decode_image`] so a host-specific safety policy
 /// does not silently narrow existing Markdown and file-viewer behavior.
-pub(in crate::workspace) fn decode_image_bounded(
+pub fn decode_image_bounded(
     bytes: &[u8],
     max_dimension: u32,
     max_alloc: u64,
@@ -758,58 +724,5 @@ mod tests {
         let png = encode_png(3, 2, [10, 20, 30, 255]);
         assert!(decode_image_bounded(&png, 2, 1024).is_err());
         assert_eq!(decode_image(&png).unwrap().width, 3);
-    }
-
-    #[test]
-    fn refuses_remote_image_urls() {
-        let dir = std::env::temp_dir();
-        assert!(load_image_source("https://example.com/a.png", &dir).is_err());
-        assert!(load_image_source("http://example.com/a.png", &dir).is_err());
-    }
-
-    /// Refused even when joining it onto the base dir would name a real file.
-    /// Unix only: `:` cannot appear in a Windows file name.
-    #[cfg(unix)]
-    #[test]
-    fn refuses_other_url_schemes() {
-        let dir = tempfile::tempdir().expect("tempdir");
-        let decoy = dir.path().join("mcp:/server");
-        std::fs::create_dir_all(&decoy).expect("mkdir");
-        std::fs::write(decoy.join("a.png"), b"x").expect("write decoy");
-        assert!(load_image_source("mcp://server/a.png", dir.path()).is_err());
-    }
-
-    /// A `file://` reference is the same file a bare path names — the one
-    /// resolver the agent chat's resource links use.
-    #[test]
-    fn reads_local_image_from_a_file_url() {
-        let dir = tempfile::tempdir().expect("tempdir");
-        let png = encode_png(2, 2, [7, 8, 9, 255]);
-        let path = dir.path().join("with space.png");
-        std::fs::write(&path, &png).expect("write png");
-        let url = daruda_core::file_url::from_local_path(&path).expect("file url");
-        assert_eq!(
-            load_image_source(&url, Path::new("/unrelated")).expect("load"),
-            png
-        );
-    }
-
-    #[test]
-    fn reads_local_image_relative_to_base_dir() {
-        let dir = tempfile::tempdir().expect("tempdir");
-        let png = encode_png(2, 2, [1, 2, 3, 255]);
-        std::fs::write(dir.path().join("pic.png"), &png).expect("write png");
-        let bytes = load_image_source("pic.png", dir.path()).expect("load local");
-        assert_eq!(bytes, png);
-    }
-
-    #[test]
-    fn decodes_base64_data_uri() {
-        use base64::Engine;
-        let png = encode_png(2, 2, [4, 5, 6, 255]);
-        let b64 = base64::engine::general_purpose::STANDARD.encode(&png);
-        let uri = format!("data:image/png;base64,{b64}");
-        let bytes = load_image_source(&uri, &std::env::temp_dir()).expect("load data uri");
-        assert_eq!(bytes, png);
     }
 }
