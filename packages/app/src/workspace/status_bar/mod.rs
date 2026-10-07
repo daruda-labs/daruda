@@ -105,7 +105,7 @@ pub(super) struct StatusBarData {
     /// slot entirely. `Some` for Terminal / AgentChat panes, even when no
     /// account is configured (shows the "System" fallback label).
     pub account: Option<AccountSlot>,
-    /// Latest attributed port scan (`Workspace::attributed_ports`), for
+    /// Latest attributed port scan (`PortsState::entries`), for
     /// the Ports segment. Empty before the first scan tick lands or
     /// when nothing is currently listening.
     pub ports: Vec<PortEntry>,

@@ -57,28 +57,29 @@ fn set_scanned_ports_classifies_orders_and_skips_unchanged_updates(cx: &mut Test
     ws.update(cx, |ws, cx| ws.set_scanned_ports(ports.clone(), cx));
 
     ws.read_with(cx, |ws, _| {
-        assert_eq!(ws.port_scan_status, PortScanStatus::Available);
+        assert_eq!(ws.ports.status, PortScanStatus::Available);
         assert_eq!(
-            ws.attributed_ports
+            ws.ports
+                .entries
                 .iter()
                 .map(|entry| entry.port)
                 .collect::<Vec<_>>(),
             vec![3000, 5000, 4000, 7000]
         );
         assert!(matches!(
-            &ws.attributed_ports[0].kind,
+            &ws.ports.entries[0].kind,
             PortKind::Workspace {
                 lane_label,
                 confidence: AttributionConfidence::Cwd,
             } if lane_label == &expected_label
         ));
-        assert!(matches!(&ws.attributed_ports[1].kind, PortKind::Container));
-        assert!(matches!(&ws.attributed_ports[2].kind, PortKind::External));
-        assert!(matches!(&ws.attributed_ports[3].kind, PortKind::External));
+        assert!(matches!(&ws.ports.entries[1].kind, PortKind::Container));
+        assert!(matches!(&ws.ports.entries[2].kind, PortKind::External));
+        assert!(matches!(&ws.ports.entries[3].kind, PortKind::External));
     });
 
-    let first = ws.read_with(cx, |ws, _| ws.attributed_ports.clone());
+    let first = ws.read_with(cx, |ws, _| ws.ports.entries.clone());
     ws.update(cx, |ws, cx| ws.set_scanned_ports(ports, cx));
-    let second = ws.read_with(cx, |ws, _| ws.attributed_ports.clone());
+    let second = ws.read_with(cx, |ws, _| ws.ports.entries.clone());
     assert_eq!(first, second);
 }

@@ -1451,7 +1451,8 @@ impl Workspace {
     /// Keep both the owning slot and any visible wrapper's cwd cache current.
     pub(super) fn update_agent_chat_cwd(&mut self, pane_id: PaneId, cwd: PaneCwd) {
         if let Some(chat) = self
-            .orchestrator_chat
+            .orchestrator
+            .chat
             .as_mut()
             .filter(|chat| chat.pane_id == pane_id)
         {
@@ -1473,7 +1474,8 @@ impl Workspace {
     /// the one place a live pane is re-pointed at another agent.
     pub(super) fn update_agent_chat_agent_id(&mut self, pane_id: PaneId, agent_id: String) {
         if let Some(chat) = self
-            .orchestrator_chat
+            .orchestrator
+            .chat
             .as_mut()
             .filter(|chat| chat.pane_id == pane_id)
         {
@@ -1703,7 +1705,8 @@ impl Workspace {
         pane_id: PaneId,
     ) -> daruda_store::accounts::AccountSelection {
         if let Some(chat) = self
-            .orchestrator_chat
+            .orchestrator
+            .chat
             .as_ref()
             .filter(|chat| chat.pane_id == pane_id)
         {

@@ -11,6 +11,17 @@ use super::main_area::agent_chat_pane::view::AgentChatView;
 use super::main_area::pane::{PaneContent, TabEntry};
 use super::main_area::pane_tree::PaneId;
 
+/// The orchestrator session this window hosts, and what showing its tab
+/// displaced.
+#[derive(Default)]
+pub(in crate::workspace) struct OrchestratorHost {
+    pub(in crate::workspace) chat: Option<OrchestratorChat>,
+    /// The pane the user had zoomed when the orchestrator's tab stood it down.
+    /// Beside `chat`, not in it: a property of showing the tab, not of the
+    /// session, and it outlives the wrapper.
+    pub(in crate::workspace) zoom_to_restore: Option<PaneId>,
+}
+
 /// The session's owning handle. Visible panes only clone this view.
 pub(in crate::workspace) struct OrchestratorChat {
     pub pane_id: PaneId,
@@ -25,7 +36,7 @@ impl Workspace {
     /// (the feature is off, or another window hosts the session).
     ///
     /// The registry is what makes the last case possible: a second window has
-    /// no slot of its own, so reading `orchestrator_chat` alone would have it
+    /// no slot of its own, so reading `orchestrator.chat` alone would have it
     /// claim "not started" about a session that is working.
     pub(in crate::workspace) fn orchestrator_chip_state(
         &self,
@@ -33,7 +44,7 @@ impl Workspace {
     ) -> Option<super::status_bar::orchestrator_chip::OrchestratorChipState> {
         use super::status_bar::orchestrator_chip::OrchestratorChipState;
 
-        if let Some(chat) = self.orchestrator_chat.as_ref() {
+        if let Some(chat) = self.orchestrator.chat.as_ref() {
             let view = chat.view.read(cx);
             return Some(OrchestratorChipState::from_activity(
                 view.activity_state(),
@@ -105,7 +116,7 @@ impl Workspace {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> PaneId {
-        if let Some(chat) = &self.orchestrator_chat {
+        if let Some(chat) = &self.orchestrator.chat {
             return chat.pane_id;
         }
         let pane = self.create_agent_chat_pane(
@@ -124,7 +135,7 @@ impl Workspace {
                 .view
                 .update(cx, |view, _| view.set_briefing(briefing));
         }
-        self.orchestrator_chat = Some(OrchestratorChat {
+        self.orchestrator.chat = Some(OrchestratorChat {
             pane_id: pane.id,
             view: content.view,
             cwd: content.cwd,
@@ -136,13 +147,15 @@ impl Workspace {
     }
 
     pub(in crate::workspace) fn is_orchestrator_pane(&self, id: PaneId) -> bool {
-        self.orchestrator_chat
+        self.orchestrator
+            .chat
             .as_ref()
             .is_some_and(|chat| chat.pane_id == id)
     }
 
     pub(in crate::workspace) fn is_orchestrator_tab(&self, tab: &TabEntry) -> bool {
-        self.orchestrator_chat
+        self.orchestrator
+            .chat
             .as_ref()
             .is_some_and(|chat| tab.layout.contains(chat.pane_id))
     }
@@ -161,7 +174,7 @@ impl Workspace {
     pub(crate) fn toggle_orchestrator_tab(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if self.orchestrator_tab_is_visible() {
             self.hide_orchestrator_tab(window, cx);
-        } else if self.orchestrator_chat.is_some() && !self.show_orchestrator_tab(window, cx) {
+        } else if self.orchestrator.chat.is_some() && !self.show_orchestrator_tab(window, cx) {
             self.report_error(
                 daruda_store::observability::error_report::ErrorReport::new(
                     crate::surface::strings::orchestrator::tab_unavailable(),
@@ -180,7 +193,7 @@ impl Workspace {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> bool {
-        let Some(chat) = self.orchestrator_chat.as_ref() else {
+        let Some(chat) = self.orchestrator.chat.as_ref() else {
             return false;
         };
         let id = chat.pane_id;
@@ -205,7 +218,7 @@ impl Workspace {
             .expect("inserted tab");
         self.active_runtime_mut().active_tab_index = index;
         // Remembered, not dropped: hiding restores it.
-        self.orchestrator_zoom_to_restore = self.main_area.zoomed_pane_id.take();
+        self.orchestrator.zoom_to_restore = self.main_area.zoomed_pane_id.take();
         self.main_area.pane_drop_hover = None;
         self.set_focused_pane(id, window, cx);
         if !self.bottom_dock.read(cx).is_open {
@@ -254,7 +267,7 @@ impl Workspace {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let Some(id) = self.orchestrator_chat.as_ref().map(|chat| chat.pane_id) else {
+        let Some(id) = self.orchestrator.chat.as_ref().map(|chat| chat.pane_id) else {
             return;
         };
         let was_focused = self.active_runtime().focused_pane_id == id;
@@ -283,7 +296,8 @@ impl Workspace {
         }
         // Put back the zoom the tab stood down, never the tab's own pane.
         self.main_area.zoomed_pane_id = self
-            .orchestrator_zoom_to_restore
+            .orchestrator
+            .zoom_to_restore
             .take()
             .filter(|zoomed| *zoomed != id);
         self.main_area.pane_drop_hover = None;
@@ -314,7 +328,8 @@ impl Workspace {
         &self,
     ) -> impl Iterator<Item = (PaneId, &Entity<AgentChatView>)> {
         self.lane_agent_chats().chain(
-            self.orchestrator_chat
+            self.orchestrator
+                .chat
                 .iter()
                 .map(|chat| (chat.pane_id, &chat.view)),
         )
@@ -335,7 +350,8 @@ impl Workspace {
             .find_map(|pane| pane.agent_chat_content())
             .map(|content| (content.agent_id.as_str(), content.cwd.as_ref()));
         lane.or_else(|| {
-            self.orchestrator_chat
+            self.orchestrator
+                .chat
                 .as_ref()
                 .filter(|chat| chat.pane_id == pane_id)
                 .map(|chat| (chat.agent_id.as_str(), chat.cwd.as_ref()))
@@ -357,7 +373,7 @@ impl Workspace {
     pub(crate) fn orchestrator_chat_pane(&self) -> Option<crate::telegram::bridge::PaneRef> {
         Some(crate::telegram::bridge::PaneRef {
             workspace: self.uuid(),
-            pane: self.orchestrator_chat.as_ref()?.pane_id,
+            pane: self.orchestrator.chat.as_ref()?.pane_id,
         })
     }
 

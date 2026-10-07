@@ -67,7 +67,7 @@ fn closing_the_only_orchestrator_tab_keeps_the_window_and_slot(cx: &mut TestAppC
     );
     workspace.read_with(cx, |ws, _| {
         assert_eq!(
-            ws.orchestrator_chat.as_ref().unwrap().view.entity_id(),
+            ws.orchestrator.chat.as_ref().unwrap().view.entity_id(),
             view
         )
     });
@@ -560,7 +560,7 @@ fn clicking_the_chip_starts_a_session_from_inside_the_windows_dispatch(cx: &mut 
 
     workspace.update(cx, |ws, _| {
         assert!(
-            ws.orchestrator_chat.is_some(),
+            ws.orchestrator.chat.is_some(),
             "the click has to leave a session behind — the chip is the only \
              way the desktop can start one"
         );
@@ -590,7 +590,7 @@ fn a_configured_orchestrator_shows_a_chip_before_it_has_a_session(cx: &mut TestA
     });
     cx.update_window(window.into(), |_, window, cx| {
         workspace.update(cx, |ws, cx| {
-            assert!(ws.orchestrator_chat.is_none());
+            assert!(ws.orchestrator.chat.is_none());
             assert_eq!(
                 ws.orchestrator_chip_state(cx),
                 Some(OrchestratorChipState::NotStarted),

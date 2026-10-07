@@ -200,7 +200,8 @@ impl Workspace {
             content.account = selection;
         }
         if let Some(chat) = self
-            .orchestrator_chat
+            .orchestrator
+            .chat
             .as_mut()
             .filter(|chat| chat.pane_id == pane_id)
         {
@@ -362,7 +363,8 @@ impl Workspace {
             })
             .count()
             + usize::from(
-                self.orchestrator_chat
+                self.orchestrator
+                    .chat
                     .as_ref()
                     .is_some_and(|chat| chat.account == AccountSelection::Managed(account_id)),
             )
@@ -388,7 +390,8 @@ impl Workspace {
         };
         let mut pane_changed = false;
         if let Some(chat) = self
-            .orchestrator_chat
+            .orchestrator
+            .chat
             .as_mut()
             .filter(|chat| dangling(chat.account))
         {

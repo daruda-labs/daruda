@@ -80,6 +80,25 @@ pub enum PortScanStatus {
     Unavailable,
 }
 
+/// The status bar's Ports data, written only by `set_port_scan_result`.
+pub(in crate::workspace) struct PortsState {
+    /// `Pending` until the first scan lands, then whether the scanner
+    /// produced rows or was unavailable on this platform/runtime.
+    pub(in crate::workspace) status: PortScanStatus,
+    /// Latest listening ports, attributed to a lane where possible. Empty
+    /// unless `status` is `Available`.
+    pub(in crate::workspace) entries: Vec<PortEntry>,
+}
+
+impl Default for PortsState {
+    fn default() -> Self {
+        Self {
+            status: PortScanStatus::Pending,
+            entries: Vec::new(),
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct PortScanResult {
     status: PortScanStatus,
@@ -157,9 +176,9 @@ impl Workspace {
 
     fn set_port_scan_result(&mut self, scan: PortScanResult, cx: &mut Context<Self>) {
         if scan.status == PortScanStatus::Unavailable {
-            if self.port_scan_status != scan.status || !self.attributed_ports.is_empty() {
-                self.port_scan_status = scan.status;
-                self.attributed_ports.clear();
+            if self.ports.status != scan.status || !self.ports.entries.is_empty() {
+                self.ports.status = scan.status;
+                self.ports.entries.clear();
                 cx.notify();
             }
             return;
@@ -212,9 +231,9 @@ impl Workspace {
             })
             .collect();
         entries.sort_by(compare_port_entries);
-        if self.port_scan_status != scan.status || self.attributed_ports != entries {
-            self.port_scan_status = scan.status;
-            self.attributed_ports = entries;
+        if self.ports.status != scan.status || self.ports.entries != entries {
+            self.ports.status = scan.status;
+            self.ports.entries = entries;
             cx.notify();
         }
     }

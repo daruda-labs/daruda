@@ -296,11 +296,8 @@ pub struct Workspace {
     /// (tabs / panes / focus, keyed by `LaneRef`) plus the
     /// drag/context-menu overlays.
     pub(in crate::workspace) main_area: main_area::MainAreaContext,
-    orchestrator_chat: Option<orchestrator_ops::OrchestratorChat>,
-    /// The pane the user had zoomed when the orchestrator's tab stood it down.
-    /// Beside the slot, not in it: a property of showing the tab, not of the
-    /// session, and it outlives the wrapper.
-    orchestrator_zoom_to_restore: Option<main_area::pane_tree::PaneId>,
+    /// See [`orchestrator_ops::OrchestratorHost`].
+    orchestrator: orchestrator_ops::OrchestratorHost,
     next_id: u64,
     focus_handle: FocusHandle,
     /// Dock resize drag — active while the user is pulling on the
@@ -569,15 +566,8 @@ pub struct Workspace {
     /// still saves to the pane it was meant for on the next input-pane
     /// focus. `None` until the first input-capable pane is focused.
     pub(in crate::workspace) input_owner: Option<main_area::pane_tree::PaneId>,
-    /// Status of the latest listening-TCP-port scan. Starts as Pending
-    /// before the first scan tick lands, then tracks whether the scanner
-    /// produced rows or was unavailable on the current platform/runtime.
-    pub(in crate::workspace) port_scan_status: sync::ports::PortScanStatus,
-    /// Latest listening-TCP-port scan, attributed to a lane where
-    /// possible. Refreshed by `sync::ports`'s background poll loop
-    /// (`set_scanned_ports`); read by the status bar's Ports segment
-    /// snapshot builder.
-    pub(in crate::workspace) attributed_ports: Vec<sync::ports::PortEntry>,
+    /// Latest listening-TCP-port scan — see [`sync::ports::PortsState`].
+    pub(in crate::workspace) ports: sync::ports::PortsState,
 }
 
 impl Workspace {
@@ -888,8 +878,7 @@ impl Workspace {
         let mut ws = Self {
             uuid: daruda_store::project::WorkspaceUuid::new(),
             main_area: main_area::MainAreaContext::default(),
-            orchestrator_chat: None,
-            orchestrator_zoom_to_restore: None,
+            orchestrator: orchestrator_ops::OrchestratorHost::default(),
             next_id: 0,
             focus_handle,
             dock_drag: None,
@@ -1066,8 +1055,7 @@ impl Workspace {
             window_handle: window.window_handle(),
             input_drafts: std::collections::HashMap::new(),
             input_owner: None,
-            port_scan_status: sync::ports::PortScanStatus::Pending,
-            attributed_ports: Vec::new(),
+            ports: sync::ports::PortsState::default(),
             _observers: lifetimes::GlobalObservers::new(
                 cx.observe_global::<accounts_global::AccountsGlobal>(|ws, cx| {
                     ws.accounts = accounts_global::snapshot(cx);
