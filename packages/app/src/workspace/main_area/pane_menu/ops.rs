@@ -133,10 +133,7 @@ impl Workspace {
         position: Point<Pixels>,
         window: &mut Window,
         cx: &mut Context<Self>,
-    ) -> Option<(
-        std::path::PathBuf,
-        crate::workspace::main_area::link_target::LocalKind,
-    )> {
+    ) -> Option<(std::path::PathBuf, daruda_content::link_target::LocalKind)> {
         match self
             .take_pane_click_info(pane_id, position, window, cx)?
             .link?

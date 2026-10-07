@@ -1369,7 +1369,7 @@ async fn diff_actions_on_a_remote_pane_report_an_error_instead_of_reading_local_
 #[gpui::test]
 async fn a_remote_panes_links_report_instead_of_opening_a_local_file(cx: &mut TestAppContext) {
     use crate::surface::strings as s;
-    use crate::workspace::main_area::link_target::LinkTarget;
+    use daruda_content::link_target::LinkTarget;
 
     let (window_handle, workspace) = build_workspace(cx);
     cx.run_until_parked();
@@ -1407,8 +1407,8 @@ async fn a_remote_panes_links_report_instead_of_opening_a_local_file(cx: &mut Te
 /// extensionless image a text file, and a missing relative file a plain word.
 #[gpui::test]
 async fn a_resource_links_menu_resolves_it_as_its_click_does(cx: &mut TestAppContext) {
-    use crate::workspace::main_area::link_target::LocalKind;
     use crate::workspace::main_area::pane_menu::ResourceRightClick;
+    use daruda_content::link_target::LocalKind;
     use gpui::{Point, px};
 
     let dir = tempfile::tempdir().expect("temp dir");

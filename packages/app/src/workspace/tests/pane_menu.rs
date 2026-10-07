@@ -178,7 +178,7 @@ async fn send_pane_selection_activates_the_target_tab_and_pane(cx: &mut TestAppC
 /// web is one the click hands to the platform opener.
 #[gpui::test]
 async fn the_link_menu_resolves_a_file_exactly_as_the_click_does(cx: &mut TestAppContext) {
-    use crate::workspace::main_area::link_target::{LinkTarget, LocalKind};
+    use daruda_content::link_target::{LinkTarget, LocalKind};
     use daruda_store::project::PaneCwd;
 
     let dir = tempfile::tempdir().expect("temp dir");

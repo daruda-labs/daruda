@@ -7,6 +7,7 @@
 //! [`visual::RasterImage`] for GPUI stay with the host.
 
 pub mod diff;
+pub mod link_target;
 mod mermaid_contrast;
 mod mermaid_host_theme;
 mod mermaid_label_geometry;

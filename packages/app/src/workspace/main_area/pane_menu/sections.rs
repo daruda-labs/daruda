@@ -1,9 +1,9 @@
 use gpui::SharedString;
 
 use crate::surface::strings as s;
-use crate::workspace::main_area::link_target::LocalKind;
 use crate::workspace::main_area::pane_tree::{PaneId, SplitDirection};
 use crate::workspace::main_area::tab_ops::NewPaneKind;
+use daruda_content::link_target::LocalKind;
 
 use super::context::{
     ClickLink, LaneAccess, PaneMenuContext, PaneMenuKind, PaneRole, SEND_SELECTION_LIMIT,

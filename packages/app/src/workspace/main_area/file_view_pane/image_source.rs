@@ -4,7 +4,7 @@
 
 use std::path::Path;
 
-use crate::workspace::main_area::link_target;
+use daruda_content::link_target;
 
 /// Resolve a markdown image reference to its encoded bytes.
 ///

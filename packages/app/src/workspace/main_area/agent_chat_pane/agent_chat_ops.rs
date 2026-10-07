@@ -24,9 +24,9 @@ use super::view::{AgentChatView, AgentSessionStatus, TurnOutcome};
 use crate::agent::launch_resolve::{AgentLaunchSpec, account_recipe_for_connect};
 use crate::surface::strings as s;
 use crate::workspace::Workspace;
-use crate::workspace::main_area::link_target::{self, LinkTarget, LocalKind};
 use crate::workspace::main_area::pane::{AgentChatContent, Pane, PaneContent, TabEntry};
 use crate::workspace::main_area::pane_tree::{PaneId, PaneLayout};
+use daruda_content::link_target::{self, LinkTarget, LocalKind};
 
 /// Steps the narrowed screenshot scenario keeps. One of the offered choices,
 /// and small enough against the seed that the tail-more row has a real count.

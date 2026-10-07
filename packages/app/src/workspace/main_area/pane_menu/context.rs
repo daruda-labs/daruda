@@ -7,8 +7,8 @@ use std::path::PathBuf;
 use daruda_terminal::session::interval_tree::{LineRange, MarkId};
 use gpui::{Pixels, Point, SharedString};
 
-use crate::workspace::main_area::link_target::{LinkTarget, LocalKind};
 use crate::workspace::main_area::pane_tree::PaneId;
+use daruda_content::link_target::{LinkTarget, LocalKind};
 
 /// Upper bound on a selection routed to another pane. Mirrors iTerm2's
 /// `kMaxSelectedTextLengthForCustomActions` — past this the composer stalls

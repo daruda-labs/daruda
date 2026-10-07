@@ -38,7 +38,7 @@ use super::window_access::WindowAccess;
 use crate::ui::CachedImage;
 use crate::ui::diff_editor::{DiffColors, DiffEditorModel};
 use crate::ui::mermaid_palette;
-use crate::workspace::main_area::link_target;
+use daruda_content::link_target;
 use daruda_content::visual;
 
 /// Which tool calls a reconcile pass must revisit.

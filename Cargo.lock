@@ -1790,12 +1790,15 @@ name = "daruda_content"
 version = "0.2.16"
 dependencies = [
  "anyhow",
+ "daruda_core",
  "image",
  "imara-diff",
  "merman",
  "resvg",
  "serde_json",
  "similar",
+ "tempfile",
+ "url",
 ]
 
 [[package]]

@@ -11,6 +11,7 @@ description = "Content processing shared by daruda's file viewer and agent chat 
 workspace = true
 
 [dependencies]
+daruda_core = { workspace = true }
 anyhow = "1"
 imara-diff = "0.2"
 image = { version = "0.25", default-features = false, features = ["png", "jpeg", "gif", "webp", "bmp"] }
@@ -21,3 +22,5 @@ similar = "2"
 
 [dev-dependencies]
 serde_json = "1"
+tempfile = "3"
+url = "2"

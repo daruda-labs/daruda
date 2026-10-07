@@ -12,7 +12,7 @@ use daruda_core::path_style::PathStyle;
 
 /// What a link resolves to once the pane's working directory is known.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub(in crate::workspace) enum LinkTarget {
+pub enum LinkTarget {
     /// A URL for the platform opener — browser, mail client, custom scheme.
     Web { url: String },
     /// A path on this machine, its `:line[:col]` suffix already stripped.
@@ -33,7 +33,7 @@ pub(in crate::workspace) enum LinkTarget {
 /// extension, never by reading the bytes — the viewer does that itself and
 /// shows its binary placeholder when a `Text` guess turns out wrong.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(in crate::workspace) enum LocalKind {
+pub enum LocalKind {
     /// Anything not classified below: the pane file viewer shows it.
     Text,
     /// A raster the app can decode — previewed inline, zoomed in the
@@ -46,7 +46,7 @@ pub(in crate::workspace) enum LocalKind {
     Missing,
 }
 
-/// Extensions the in-app decoder handles (`visual::decode_image`); the same
+/// Extensions the in-app decoder handles ([`crate::visual::decode_image`]); the same
 /// list gates the resource-link preview.
 const IMAGE_EXTENSIONS: &[&str] = &["png", "jpg", "jpeg", "gif", "webp", "bmp"];
 
@@ -91,7 +91,7 @@ fn declared_mime(mime: Option<&str>) -> Option<&str> {
 /// Whether a resource renders as an image: by its declared MIME when the
 /// tool sent one, else by extension. The inline preview and the click both
 /// ask this, so a previewed image never opens as text.
-pub(in crate::workspace) fn is_image_resource(path: &Path, mime: Option<&str>) -> bool {
+pub fn is_image_resource(path: &Path, mime: Option<&str>) -> bool {
     declared_mime(mime).map_or_else(
         || {
             path.extension()
@@ -109,7 +109,7 @@ fn is_binary_extension(extension: &str) -> bool {
 
 /// Whether a link points outside the filesystem. Shared with the classifier
 /// so the menu and the click cannot disagree about what a link is.
-pub(in crate::workspace) fn is_external_url(link: &str) -> bool {
+pub fn is_external_url(link: &str) -> bool {
     link.contains("://")
         || link.starts_with("mailto:")
         || link.starts_with("tel:")
@@ -117,7 +117,7 @@ pub(in crate::workspace) fn is_external_url(link: &str) -> bool {
 }
 
 /// Classify `link` as the pane with working directory `cwd` sees it.
-pub(in crate::workspace) fn classify(link: &str, cwd: Option<&Path>) -> LinkTarget {
+pub fn classify(link: &str, cwd: Option<&Path>) -> LinkTarget {
     if link.starts_with('#') {
         return LinkTarget::Opaque;
     }
@@ -135,7 +135,7 @@ pub(in crate::workspace) fn classify(link: &str, cwd: Option<&Path>) -> LinkTarg
 
 /// Classify `link` for a remote session: a URL still opens here, but any
 /// path — `file://` included — names the remote machine's filesystem.
-pub(in crate::workspace) fn classify_remote(link: &str) -> LinkTarget {
+pub fn classify_remote(link: &str) -> LinkTarget {
     if link.starts_with('#') {
         LinkTarget::Opaque
     } else if file_url::is_file_url(link) || !is_external_url(link) {
@@ -150,11 +150,7 @@ pub(in crate::workspace) fn classify_remote(link: &str) -> LinkTarget {
 /// Classify a tool's resource-link URI. Unlike Markdown text, a resource is a
 /// file by definition, so a relative URI resolves against `cwd` even when
 /// absent (→ `Missing`, which reports) instead of reading as a plain word.
-pub(in crate::workspace) fn classify_resource(
-    uri: &str,
-    mime: Option<&str>,
-    cwd: Option<&Path>,
-) -> LinkTarget {
+pub fn classify_resource(uri: &str, mime: Option<&str>, cwd: Option<&Path>) -> LinkTarget {
     if uri.starts_with('#') {
         return LinkTarget::Opaque;
     }
@@ -178,7 +174,7 @@ pub(in crate::workspace) fn classify_resource(
 /// `file://` URL for this machine, an absolute path, or a relative one under
 /// `base`. `None` for any other URL. Shared by a tool's resource link (click
 /// and inline preview) and a Markdown image in the file viewer.
-pub(in crate::workspace) fn resource_path(uri: &str, base: Option<&Path>) -> Option<PathBuf> {
+pub fn resource_path(uri: &str, base: Option<&Path>) -> Option<PathBuf> {
     if file_url::is_file_url(uri) {
         return file_url::to_local_path(uri, None);
     }
