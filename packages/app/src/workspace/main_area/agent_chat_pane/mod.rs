@@ -24,6 +24,7 @@ pub(super) mod autoscroll_ops;
 pub(super) mod config_chip;
 /// Which rows a pane has folded, and the mode those defaults come from.
 pub(in crate::workspace) mod fold;
+mod host_event_ops;
 pub(super) mod mode_chip;
 pub(in crate::workspace) mod output_editor;
 /// A pane-local view preference plus whether the user or config set it.

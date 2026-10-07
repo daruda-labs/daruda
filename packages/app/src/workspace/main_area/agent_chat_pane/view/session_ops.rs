@@ -371,19 +371,10 @@ impl AgentChatView {
 
     /// Get this pane's transcript preferences onto disk as they now stand. The
     /// snapshot writes each axis from its `chosen()`, so this is equally the
-    /// way a reset *erases* a stored override. Deferred because the save
-    /// re-enters the workspace, which is still mid-update while the chip
-    /// handler that called this runs.
+    /// way a reset *erases* a stored override. The host saves on the event,
+    /// after the chip handler that called this has released the workspace.
     pub(super) fn persist_pane_prefs(&self, cx: &mut Context<Self>) {
-        let window_handle = self.window_handle;
-        cx.defer(move |cx| {
-            if let Some(workspace) =
-                crate::window_registry::WindowRegistry::workspace_for_window(window_handle, cx)
-            {
-                // SILENT-OK: the window may close before the deferred save runs.
-                let _ = workspace.update(cx, |ws, cx| ws.mutate_durable(cx, |_, _| {}));
-            }
-        });
+        cx.emit(super::AgentChatEvent::PrefsChanged);
     }
 
     /// Toggle this pane between pane-wide wrapping and the configured reading

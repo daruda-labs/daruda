@@ -101,24 +101,7 @@ impl AgentChatView {
             .at(file!(), line!())
             .dedup("agent_chat.save_agent_default")
             .build();
-        let window_handle = self.window_handle;
-        // Deferred: the toast belongs to the Workspace, which may be the one
-        // updating this view right now.
-        cx.defer(move |cx| {
-            let Some(workspace) =
-                crate::window_registry::WindowRegistry::workspace_for_window(window_handle, cx)
-            else {
-                daruda_store::observability::log_writer::LogWriter::log(report);
-                return;
-            };
-            let fallback = report.clone();
-            if workspace
-                .update(cx, |ws, cx| ws.report_error(report, cx))
-                .is_err()
-            {
-                daruda_store::observability::log_writer::LogWriter::log(fallback);
-            }
-        });
+        cx.emit(super::AgentChatEvent::ReportError(report));
     }
 }
 

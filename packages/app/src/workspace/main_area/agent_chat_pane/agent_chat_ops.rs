@@ -594,6 +594,7 @@ impl Workspace {
                 )
             }
         });
+        self.subscribe_agent_chat(pane_id, &view, window, cx);
         Pane {
             id: pane_id,
             content: PaneContent::AgentChat(AgentChatContent {

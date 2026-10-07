@@ -916,10 +916,12 @@ pub(in crate::workspace) struct AgentChatView {
     pub(in crate::workspace) render_count: std::cell::Cell<u32>,
 }
 
+pub(in crate::workspace) use event::AgentChatEvent;
 mod activity_ops;
 mod agent_default_ops;
 pub(in crate::workspace) use activity_ops::RunSummary;
 mod apply_event;
+mod event;
 pub(super) mod list_sync;
 mod queue_ops;
 mod session_ops;

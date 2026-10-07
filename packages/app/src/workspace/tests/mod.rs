@@ -3,6 +3,7 @@ mod activity_bar_press;
 mod against_base;
 mod agent_chat;
 mod agent_chat_disconnect;
+mod agent_chat_events;
 mod agent_diff_layout;
 mod agent_output_layout;
 mod agent_switch_cost;

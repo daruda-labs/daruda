@@ -2,12 +2,12 @@
 //! state, and the two gates deciding whether a failure gets a way back.
 
 use daruda_acp::ConnectPhase;
-use gpui::{AnyWindowHandle, Context, Hsla, IntoElement, SharedString, div, prelude::*, px};
+use gpui::{Context, Hsla, IntoElement, SharedString, div, prelude::*, px};
 
 use crate::surface::strings as s;
 use crate::ui::theme;
 use crate::workspace::main_area::agent_chat_pane::view::{
-    AgentChatView, AgentSessionStatus, RuntimePrepPhase,
+    AgentChatEvent, AgentChatView, AgentSessionStatus, RuntimePrepPhase,
 };
 use crate::workspace::main_area::pane_tree::PaneId;
 
@@ -69,13 +69,12 @@ fn banner_offers_reauth(status: &AgentSessionStatus) -> bool {
 
 /// The thin top banner — shown while connecting or on error; hidden once the
 /// session is live (the conversation itself signals readiness). The `Error`
-/// arm carries an inline "Retry" button (`window_handle` + `pane_id` locate
-/// the owning `Workspace` op) — otherwise a failed connect has no way back
-/// short of closing the pane; see `Workspace::retry_agent_chat_connect`.
+/// arm carries an inline "Retry" button, emitted to the host as
+/// [`AgentChatEvent::RetryConnect`] — otherwise a failed connect has no way
+/// back short of closing the pane.
 pub(in crate::workspace::main_area::agent_chat_pane::render) fn status_banner(
     status: &AgentSessionStatus,
     pane_id: PaneId,
-    window_handle: AnyWindowHandle,
     has_cwd: bool,
     t: &theme::DarudaTheme,
     cx: &mut Context<AgentChatView>,
@@ -121,22 +120,10 @@ pub(in crate::workspace::main_area::agent_chat_pane::render) fn status_banner(
             t,
             cx,
         )
-        .on_click(cx.listener(move |_this, _ev, _window, cx| {
-            // `cx.listener` has this AgentChatView leased for the duration of
-            // this callback; `retry_agent_chat_connect` reads/updates this
-            // same entity (via `Workspace::agent_chat_view`), which would
-            // double-lease-panic if called inline (CLAUDE.md Pitfall #5).
-            // `cx.defer` runs after the lease is released.
-            cx.defer(move |cx| {
-                if let Some(workspace) =
-                    crate::window_registry::WindowRegistry::workspace_for_window(window_handle, cx)
-                {
-                    // SILENT-OK: the workspace window may already be closed by the time this deferred callback runs — nothing left to retry
-                    let _ = workspace.update(cx, |ws, cx| {
-                        ws.retry_agent_chat_connect(pane_id, cx);
-                    });
-                }
-            });
+        // The host's retry updates this same view; it runs on the event, after
+        // this listener has released it (CLAUDE.md Pitfall #5).
+        .on_click(cx.listener(|_this, _ev, _window, cx| {
+            cx.emit(AgentChatEvent::RetryConnect);
         }))
     });
     let reauth_button = reauthable.then(|| {
@@ -146,20 +133,9 @@ pub(in crate::workspace::main_area::agent_chat_pane::render) fn status_banner(
             t,
             cx,
         )
-        .on_click(cx.listener(move |_this, _ev, _window, cx| {
-            // Same lease hazard as the retry button above: the login op
-            // reaches this AgentChatView through `Workspace`, which would
-            // double-lease-panic inline (CLAUDE.md Pitfall #5).
-            cx.defer(move |cx| {
-                if let Some(workspace) =
-                    crate::window_registry::WindowRegistry::workspace_for_window(window_handle, cx)
-                {
-                    // SILENT-OK: the workspace window may already be closed by the time this deferred callback runs — nothing left to sign in for
-                    let _ = workspace.update(cx, |ws, cx| {
-                        ws.reauthenticate_pane_account(pane_id, cx);
-                    });
-                }
-            });
+        // Same as retry: the login reaches this view through the host.
+        .on_click(cx.listener(|_this, _ev, _window, cx| {
+            cx.emit(AgentChatEvent::Reauthenticate);
         }))
     });
     Some(

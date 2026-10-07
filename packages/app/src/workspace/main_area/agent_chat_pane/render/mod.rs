@@ -152,14 +152,7 @@ pub(super) fn render(view: &AgentChatView, cx: &mut Context<AgentChatView>) -> i
         content.activity_options_tab
     };
 
-    let status_banner = status_banner(
-        &content.status,
-        pane_id,
-        content.window_handle,
-        content.cwd.is_some(),
-        &t,
-        cx,
-    );
+    let status_banner = status_banner(&content.status, pane_id, content.cwd.is_some(), &t, cx);
 
     // Activity bar: title left, fold buttons right. Title resolves to the
     // session title, else the first prompt, else the configured agent name.
@@ -1117,9 +1110,7 @@ fn render_item(
         )
         .into_any_element(),
         ChatItem::Permission(card) => permission_card(ix, card, t, dim, cx).into_any_element(),
-        ChatItem::Failure(failure) => {
-            failure_block(ix, failure, pane_id, window_handle, t, cx).into_any_element()
-        }
+        ChatItem::Failure(failure) => failure_block(ix, failure, t, cx).into_any_element(),
         // Owns a top-level row (`RowKind::Interrupted`), so it never reaches
         // the per-item dispatch.
         ChatItem::Interrupted => gpui::Empty.into_any_element(),

@@ -342,8 +342,6 @@ pub(super) fn banner_action_button(
 pub(super) fn failure_block(
     ix: usize,
     failure: &daruda_acp::AcpFailure,
-    pane_id: crate::workspace::main_area::pane_tree::PaneId,
-    window_handle: gpui::AnyWindowHandle,
     t: &theme::DarudaTheme,
     cx: &mut Context<AgentChatView>,
 ) -> impl IntoElement + use<> {
@@ -357,19 +355,10 @@ pub(super) fn failure_block(
             s::agent_chat::sign_in_again(),
             cx,
         )
-        .on_click(cx.listener(move |_this, _ev, _window, cx| {
-            // The login op reaches this same view through `Workspace`, which
-            // would double-lease-panic inline (CLAUDE.md Pitfall #5).
-            cx.defer(move |cx| {
-                if let Some(workspace) =
-                    crate::window_registry::WindowRegistry::workspace_for_window(window_handle, cx)
-                {
-                    // SILENT-OK: the workspace window may already be closed by the time this deferred callback runs — nothing left to sign in for
-                    let _ = workspace.update(cx, |ws, cx| {
-                        ws.reauthenticate_pane_account(pane_id, cx);
-                    });
-                }
-            });
+        // The login reaches this same view through the host; it runs on the
+        // event, after this listener has released it (CLAUDE.md Pitfall #5).
+        .on_click(cx.listener(|_this, _ev, _window, cx| {
+            cx.emit(super::super::view::AgentChatEvent::Reauthenticate);
         }))
     });
     div()
