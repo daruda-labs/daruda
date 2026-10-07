@@ -599,13 +599,7 @@ impl Workspace {
     fn focused_agent_last_queued(&self, cx: &App) -> Option<(PaneId, PromptId)> {
         let focused = self.active_runtime().focused_pane_id;
         let view = self.agent_chat_view(focused)?;
-        let v = view.read(cx);
-        let id = v
-            .queue
-            .pending_prompts
-            .last()
-            .or_else(|| v.queue.paused_prompts.last())?
-            .id;
+        let id = view.read(cx).queue().last_prompt_id()?;
         Some((focused, id))
     }
 
@@ -674,10 +668,8 @@ impl Workspace {
             .agent_chat_view(focused)
             .and_then(|v| {
                 v.read(cx)
-                    .session_config
-                    .available_commands
-                    .iter()
-                    .find(|c| c.name == name)
+                    .session_config()
+                    .slash_command(&name)
                     .map(|c| matches!(c.input, daruda_acp::SlashCommandInput::NoInput))
             })
             .unwrap_or(false);

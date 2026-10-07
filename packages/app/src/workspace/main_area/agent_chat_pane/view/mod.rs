@@ -923,6 +923,7 @@ mod agent_default_ops;
 pub(in crate::workspace) use activity_ops::RunSummary;
 mod apply_event;
 mod event;
+mod host_surface;
 pub(super) mod list_sync;
 mod queue_ops;
 mod session_ops;

@@ -32,6 +32,15 @@ pub(in crate::workspace) struct SessionConfig {
 }
 
 impl SessionConfig {
+    /// The slash command the agent advertises under `name`, if any.
+    pub(in crate::workspace) fn slash_command(&self, name: &str) -> Option<&SlashCommand> {
+        self.available_commands.iter().find(|c| c.name == name)
+    }
+
+    pub(in crate::workspace) fn available_commands(&self) -> &[SlashCommand] {
+        &self.available_commands
+    }
+
     /// The advertised options that get an input-dock chip: everything except
     /// those whose `description` exactly matches an entry of
     /// `hidden_descriptions` (the user's
@@ -147,6 +156,21 @@ mod tests {
                 options: Vec::new(),
             },
         }
+    }
+
+    #[test]
+    fn a_slash_command_is_found_only_by_its_advertised_name() {
+        let config = SessionConfig {
+            available_commands: vec![SlashCommand {
+                name: "compact".to_string(),
+                description: String::new(),
+                input: daruda_acp::SlashCommandInput::NoInput,
+            }],
+            ..SessionConfig::default()
+        };
+        assert!(config.slash_command("compact").is_some());
+        assert!(config.slash_command("review").is_none());
+        assert_eq!(config.available_commands().len(), 1);
     }
 
     /// A boolean-kind option fixture — what an agent sends once the host

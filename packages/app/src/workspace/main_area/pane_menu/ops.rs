@@ -214,7 +214,7 @@ impl Workspace {
     /// otherwise a right-click here would offer to send text from there.
     fn agent_chat_selection(view: &Entity<AgentChatView>, cx: &App) -> Option<SharedString> {
         let handle = crate::ui::active_text_selection(cx)?;
-        let pane_bounds = view.read(cx).list_bounds?;
+        let pane_bounds = view.read(cx).list_bounds()?;
         if !pane_bounds.intersects(&handle.block_bounds(cx)) {
             return None;
         }

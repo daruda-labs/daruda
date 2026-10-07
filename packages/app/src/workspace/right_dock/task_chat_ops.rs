@@ -14,7 +14,7 @@ use crate::workspace::main_area::pane_tree::{PaneId, PaneLayout};
 
 fn matches_session(chat: &AgentChatContent, execution: &TaskExecution, cx: &gpui::App) -> bool {
     execution.session_id.is_some()
-        && chat.view.read(cx).session_id == execution.session_id
+        && chat.view.read(cx).session_id() == execution.session_id.as_deref()
         && chat.agent_id == execution.agent_id
         && chat.account.to_persisted() == execution.account_id
         && chat
@@ -79,7 +79,7 @@ impl Workspace {
             chat.account.to_persisted(),
             cwd,
         );
-        execution.session_id = chat.view.read(cx).session_id.clone();
+        execution.session_id = chat.view.read(cx).session_id().map(str::to_owned);
         chat.task_run = Some(ExecutionRef {
             task_id: task_id.to_string(),
             execution_id: execution.id.clone(),
@@ -119,7 +119,7 @@ impl Workspace {
             && execution
                 .session_id
                 .as_ref()
-                .is_none_or(|id| chat.view.read(cx).session_id.as_ref() == Some(id)))
+                .is_none_or(|id| chat.view.read(cx).session_id() == Some(id.as_str())))
         .then(|| run.task_id.clone())
     }
 
@@ -155,7 +155,7 @@ impl Workspace {
         };
         let Some(session_id) = self
             .agent_chat_view(pane_id)
-            .and_then(|view| view.read(cx).session_id.clone())
+            .and_then(|view| view.read(cx).session_id().map(str::to_owned))
         else {
             return;
         };

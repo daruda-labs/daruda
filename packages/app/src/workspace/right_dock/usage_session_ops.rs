@@ -40,7 +40,7 @@ impl Workspace {
 
         let existing = self.active_runtime().panes.iter().find_map(|p| {
             let content = p.agent_chat_content()?;
-            (content.view.read(cx).session_id.as_deref() == Some(session.session_id.as_str()))
+            (content.view.read(cx).session_id() == Some(session.session_id.as_str()))
                 .then_some(p.id)
         });
         if let Some(pane_id) = existing {

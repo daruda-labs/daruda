@@ -319,17 +319,17 @@ impl Workspace {
         };
         let v = view.read(cx);
         let Some(run) = v.mirrored_run() else { return };
-        if v.status.is_connecting() {
+        if v.status().is_connecting() {
             return;
         }
-        let Some(session) = v.session_id.clone() else {
+        let Some(session) = v.session_id().map(str::to_owned) else {
             return;
         };
         if intent == LoadIntent::Continue && !self.cli_run_may_continue(run, &session, cx) {
             self.task_chat_error(s::task::cli_not_exited(), cx);
             return;
         }
-        let Some(cwd) = v.cwd.clone() else { return };
+        let Some(cwd) = v.cwd().cloned() else { return };
         // A user-asked reload is also a moment to re-check the process.
         self.claude.pty_tracker.poke();
         view.update(cx, |v, cx| {
@@ -356,8 +356,7 @@ impl Workspace {
         let v = view.read(cx);
         let Some(run) = v.mirrored_run() else { return };
         let allow = v.load_intent() == Some(LoadIntent::Continue)
-            && v.session_id
-                .as_deref()
+            && v.session_id()
                 .is_some_and(|session| self.cli_run_may_continue(run, session, cx));
         view.update(cx, |v, cx| {
             if allow {

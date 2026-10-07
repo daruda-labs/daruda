@@ -367,7 +367,7 @@ impl Workspace {
             daruda_store::tasks::TaskAgentSurface::AgentChat => {
                 self.bind_task_chat_execution(task_id, pane_id, cx);
                 let pane_in_error = self.agent_chat_view(pane_id).is_some_and(|view| {
-                    matches!(view.read(cx).status, AgentSessionStatus::Error { .. })
+                    matches!(view.read(cx).status(), AgentSessionStatus::Error { .. })
                 });
                 if pane_in_error {
                     return Err(self.fail_task_dispatch(

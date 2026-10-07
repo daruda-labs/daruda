@@ -206,7 +206,7 @@ impl Workspace {
                     });
                 }
             } else if let Some(view) = pane.agent_chat_view().cloned()
-                && (view.read(cx).dim_amount - target).abs() > f32::EPSILON
+                && (view.read(cx).dim_amount() - target).abs() > f32::EPSILON
             {
                 view.update(cx, |v, cx| {
                     v.set_dim_amount(target);
@@ -836,7 +836,7 @@ impl Workspace {
                 let focused = self.active_runtime().focused_pane_id;
                 let agent_id = self
                     .agent_chat_view(focused)
-                    .map(|v| v.read(cx).agent_id.clone())
+                    .map(|v| v.read(cx).agent_id().to_owned())
                     .unwrap_or_else(|| {
                         resolve_open_agent_id(&self.agents, self.last_agent_id.as_deref())
                     });

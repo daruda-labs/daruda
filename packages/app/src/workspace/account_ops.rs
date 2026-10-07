@@ -164,12 +164,12 @@ impl Workspace {
         let v = view.read(cx);
         let busy = v.is_busy()
             || matches!(
-                v.status,
+                v.status(),
                 AgentSessionStatus::PreparingRuntime(_)
                     | AgentSessionStatus::Connecting
                     | AgentSessionStatus::Handshaking(_)
             );
-        switch_kind(busy, v.is_read_only() || has_conversation(&v.items))
+        switch_kind(busy, v.is_read_only() || has_conversation(v.items()))
     }
 
     /// `SwitchKind::InPlace` for an Agent chat pane: set the pane's account
@@ -293,7 +293,7 @@ impl Workspace {
                 let (local_cwd, remote_cwd, session_host) = self.active_lane_cwds();
                 let agent_id = self
                     .agent_chat_view(source_pane_id)
-                    .map(|v| v.read(cx).agent_id.clone())
+                    .map(|v| v.read(cx).agent_id().to_owned())
                     .unwrap_or_else(|| {
                         resolve_open_agent_id(&self.agents, self.last_agent_id.as_deref())
                     });

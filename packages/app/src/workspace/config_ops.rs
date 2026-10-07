@@ -244,7 +244,7 @@ impl Workspace {
         let mode_name: Option<String> = if is_agent {
             self.agent_chat_view(focused_id).and_then(|v| {
                 v.read(cx)
-                    .session_config
+                    .session_config()
                     .current_mode_name()
                     .map(str::to_string)
             })

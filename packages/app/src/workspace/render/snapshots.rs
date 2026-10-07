@@ -230,7 +230,7 @@ impl Workspace {
             .iter()
             .find(|p| p.id == focused_id)
             .and_then(|p| p.agent_chat_view())
-            .and_then(|view| view.read(cx).session_config.mode_for_chip().cloned())
+            .and_then(|view| view.read(cx).session_config().mode_for_chip().cloned())
             .map(|m| (focused_id, m));
         // Config-option chips: same focused-agent-pane gate as the mode chip,
         // sourced from `config_options` (which never carries mode — `daruda_acp`
@@ -250,7 +250,7 @@ impl Workspace {
             .and_then(|p| p.agent_chat_view())
             .map(|view| {
                 view.read(cx)
-                    .session_config
+                    .session_config()
                     .config_options_for_chips(&self.mirrors.hidden_config_option_descriptions)
             })
             .filter(|opts| !opts.is_empty())
@@ -266,23 +266,17 @@ impl Workspace {
             .and_then(|p| p.agent_chat_view())
             .map(|view| {
                 let view = view.read(cx);
-                let editing = view.queue.editing_prompt;
-                // Parked prompts (kept by a Stop) sort ahead of the live queue —
-                // they were submitted before anything queued after the Stop.
-                let mut out: Vec<crate::workspace::layout::QueuedPromptView> = Vec::new();
-                for (prompts, paused) in [
-                    (&view.queue.paused_prompts, true),
-                    (&view.queue.pending_prompts, false),
-                ] {
-                    for q in prompts {
-                        out.push(crate::workspace::layout::QueuedPromptView {
-                            id: q.id,
-                            text: q.text.clone(),
-                            editing: editing == Some(q.id),
-                            paused,
-                        });
-                    }
-                }
+                let queue = view.queue();
+                let editing = queue.editing();
+                let out: Vec<_> = queue
+                    .in_strip_order()
+                    .map(|(q, paused)| crate::workspace::layout::QueuedPromptView {
+                        id: q.id,
+                        text: q.text.clone(),
+                        editing: editing == Some(q.id),
+                        paused,
+                    })
+                    .collect();
                 (out, view.resume_armed())
             })
             .filter(|(q, _)| !q.is_empty())
@@ -300,7 +294,7 @@ impl Workspace {
                 Some(crate::workspace::layout::snap::CliSnapshot {
                     pane_id: focused_id,
                     process: self.cli_run_process(run, cx),
-                    loading: v.status.is_connecting(),
+                    loading: v.status().is_connecting(),
                 })
             }),
             terminal_input_visible: self.terminal_input_visible,
@@ -424,7 +418,7 @@ impl Workspace {
         // orchestrator's tab happens to be visible.
         let open_session_ids: std::collections::HashSet<String> = self
             .every_agent_chat()
-            .filter_map(|(_, view)| view.read(cx).session_id.clone())
+            .filter_map(|(_, view)| view.read(cx).session_id().map(str::to_owned))
             .collect();
         // Up to 10 most-recent sessions per section, restricted to the active
         // Lane. A session belonging to another Lane is restorable after the

@@ -142,7 +142,7 @@ impl Workspace {
         // Cancel the edit so the row reverts; that outranks the resume gesture.
         let editing = self
             .agent_chat_view(pane_id)
-            .is_some_and(|v| v.read(cx).queue.editing_prompt.is_some());
+            .is_some_and(|v| v.read(cx).queue().editing().is_some());
         if editing {
             self.cancel_edit_queued_prompt(pane_id, window, cx);
             return;

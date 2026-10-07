@@ -136,11 +136,11 @@ impl Workspace {
                             workspace: uuid,
                             pane: pane_id,
                         },
-                        agent: v.agent_id.clone(),
-                        agent_name: v.agent_name.clone(),
+                        agent: v.agent_id().to_owned(),
+                        agent_name: v.agent_name().to_owned(),
                         is_active_lane: lane_ref == active,
                         activity: map_activity(v.activity_state()),
-                        health: map_health(&v.status),
+                        health: map_health(v.status()),
                         unread,
                         title: v.activity_title().and_then(sanitize_title),
                         last_activity: last_activity_unix(v),
@@ -182,8 +182,8 @@ impl Workspace {
                 self.control_project_name(lane.project),
                 self.control_lane_name(lane),
             ),
-            agent: view.agent_id.clone(),
-            agent_name: view.agent_name.clone(),
+            agent: view.agent_id().to_owned(),
+            agent_name: view.agent_name().to_owned(),
         })
     }
 
@@ -622,7 +622,7 @@ impl Workspace {
 /// `Disclaims`. The one predicate both slash-ownership questions aggregate —
 /// one pane's answer, and every pane's.
 fn pane_slash_claim(view: &AgentChatView, name: &str) -> SlashClaim {
-    let advertised = &view.session_config.available_commands;
+    let advertised = view.session_config().available_commands();
     if advertised.is_empty() {
         SlashClaim::Unsaid
     } else if advertised.iter().any(|c| c.name == name) {
@@ -637,7 +637,7 @@ fn pane_slash_claim(view: &AgentChatView, name: &str) -> SlashClaim {
 /// Skips an empty one for the reason every other reader does — it would put a
 /// blank body under a header — and a streaming one because it is not finished.
 fn last_assistant_text(view: &AgentChatView) -> Option<String> {
-    view.items.iter().rev().find_map(|item| match item {
+    view.items().iter().rev().find_map(|item| match item {
         daruda_acp::ChatItem::AssistantText {
             text,
             streaming: false,
@@ -676,7 +676,7 @@ fn map_health(status: &AgentSessionStatus) -> Health {
 /// RFC 3339 for display; a control result is consumed by machines as often as
 /// by people, so it carries the numeric form.
 fn last_activity_unix(view: &AgentChatView) -> Option<u64> {
-    let raw = view.session_updated_at.as_deref()?;
+    let raw = view.session_updated_at()?;
     let parsed = chrono::DateTime::parse_from_rfc3339(raw).ok()?;
     u64::try_from(parsed.timestamp()).ok()
 }

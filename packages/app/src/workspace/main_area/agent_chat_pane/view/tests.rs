@@ -397,7 +397,7 @@ fn the_next_send_releases_the_response_the_previous_one_held(cx: &mut gpui::Test
         .unwrap();
 }
 
-fn queued(id: u64, text: &str) -> super::QueuedPrompt {
+pub(super) fn queued(id: u64, text: &str) -> super::QueuedPrompt {
     super::QueuedPrompt {
         id: super::PromptId(id),
         text: text.to_string(),

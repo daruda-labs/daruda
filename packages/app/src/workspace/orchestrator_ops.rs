@@ -37,7 +37,7 @@ impl Workspace {
             let view = chat.view.read(cx);
             return Some(OrchestratorChipState::from_activity(
                 view.activity_state(),
-                &view.status,
+                view.status(),
             ));
         }
         // From the mirror `apply_config` keeps: `Config::resolved_agents()`

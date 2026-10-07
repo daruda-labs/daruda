@@ -1778,7 +1778,7 @@ impl Workspace {
             .map(|(id, view)| (id, view.clone()))
             .filter(|(_, v)| {
                 let vr = v.read(cx);
-                vr.activity.span.is_busy() || vr.maybe_active()
+                vr.last_reconciled_busy() || vr.maybe_active()
             })
             .collect();
 
@@ -1790,11 +1790,10 @@ impl Workspace {
         let mut completions = Vec::new();
         for (pane_id, view) in &candidates {
             let edge = view.update(cx, |v, cx| v.tick_activity(tick_now, cx));
-            // `tick_activity` just recomputed the busy level with `tick_now`
-            // and stored it in `activity.span`; read that instead of calling
-            // `is_busy()` again (a second O(items) `subagent_activity` scan with a
-            // fresh `Instant::now()`) so the whole tick uses one consistent `now`.
-            if view.read(cx).activity.span.is_busy() {
+            // `tick_activity` just recomputed the busy level with `tick_now`;
+            // read that instead of `is_busy()`, a second O(items) scan with a
+            // fresh `Instant::now()`, so the whole tick uses one `now`.
+            if view.read(cx).last_reconciled_busy() {
                 busy_ids.push(view.entity_id());
             }
             if let Some(outcome) = edge {

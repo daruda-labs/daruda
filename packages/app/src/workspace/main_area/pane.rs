@@ -262,12 +262,12 @@ impl Pane {
             PaneContent::AgentChat(ac) => {
                 let v = ac.view.read(cx);
                 super::agent_chat_pane::agent_chat_helpers::activity_bar_title(
-                    v.session_title.as_deref(),
-                    &v.items,
+                    v.session_title(),
+                    v.items(),
                 )
                 .map(SharedString::from)
                 .unwrap_or_else(|| {
-                    crate::surface::strings::common::new_agent_chat_named(&v.agent_name).into()
+                    crate::surface::strings::common::new_agent_chat_named(v.agent_name()).into()
                 })
             }
         }
@@ -354,7 +354,7 @@ impl Pane {
             PaneContent::Terminal(t) => t.view.read(cx).focus_handle().clone(),
             PaneContent::File(f) => f.focus_handle.clone(),
             PaneContent::TaskEditPane(te) => te.focus_handle.clone(),
-            PaneContent::AgentChat(ac) => ac.view.read(cx).focus_handle.clone(),
+            PaneContent::AgentChat(ac) => ac.view.read(cx).focus_handle(cx),
             PaneContent::FlowGraph(fg) => fg.view.read(cx).focus_handle(cx),
         }
     }
