@@ -1389,7 +1389,8 @@ async fn a_remote_panes_links_report_instead_of_opening_a_local_file(cx: &mut Te
             );
             assert!(ws.open_pane_link(pane_id, "/tmp", window, cx));
             assert!(ws.open_pane_link(pane_id, "file:///tmp", window, cx));
-            assert!(ws.open_pane_resource_link(pane_id, "/tmp/shot.png", None, window, cx));
+            let target = ws.classify_pane_resource(pane_id, "/tmp/shot.png", None, cx);
+            assert!(ws.open_link_target(pane_id, target, window, cx));
         });
     })
     .unwrap();
@@ -1471,7 +1472,8 @@ async fn a_missing_resource_link_reports_instead_of_doing_nothing(cx: &mut TestA
 
     cx.update_window(window_handle.into(), |_, window, cx| {
         workspace.update(cx, |ws, cx| {
-            assert!(ws.open_pane_resource_link(pane_id, "gone.png", None, window, cx));
+            let target = ws.classify_pane_resource(pane_id, "gone.png", None, cx);
+            assert!(ws.open_link_target(pane_id, target, window, cx));
             let absolute = dir.path().join("gone.rs");
             assert!(ws.open_pane_link(pane_id, absolute.to_str().unwrap(), window, cx));
         });

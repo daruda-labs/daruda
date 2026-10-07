@@ -407,7 +407,7 @@ fn render_row(
                 MarkdownRender::new(
                     &this.assets.mermaid_images,
                     this.dim_amount,
-                    AgentChatMarkdownLinks::new(this.pane_id, this.window_handle),
+                    AgentChatMarkdownLinks::new(cx.weak_entity()),
                 ),
                 cx,
             ),
@@ -470,7 +470,7 @@ fn render_row(
                     MarkdownRender::new(
                         &this.assets.mermaid_images,
                         this.dim_amount,
-                        AgentChatMarkdownLinks::new(this.pane_id, this.window_handle),
+                        AgentChatMarkdownLinks::new(cx.weak_entity()),
                     ),
                     cx,
                 )
@@ -1071,7 +1071,7 @@ fn render_item(
     let markdown = MarkdownRender::new(
         mermaid_images,
         dim,
-        AgentChatMarkdownLinks::new(pane_id, window_handle),
+        AgentChatMarkdownLinks::new(cx.weak_entity()),
     );
     match item {
         ChatItem::UserText(text) => user_bubble(ix, text, dim, cx).into_any_element(),

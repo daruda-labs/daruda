@@ -46,7 +46,7 @@ use crate::workspace::main_area::agent_chat_pane::rows::{
 use crate::workspace::main_area::agent_chat_pane::view::AgentChatView;
 use crate::workspace::main_area::pane_tree::PaneId;
 
-#[derive(Clone, Copy)]
+#[derive(Clone)]
 struct OutputBlockContext<'a> {
     assets: RenderAssets<'a>,
     t: &'a theme::DarudaTheme,
@@ -120,7 +120,7 @@ pub(super) fn tool_card(
     // never reads. Both call paths used to restate this.
     let key = tool_fold_key(tc);
     let expanded = fold.is_expanded(&key, fold_context_at(&key, ix, items, boundary, live_units));
-    let markdown_links = AgentChatMarkdownLinks::new(pane_id, window_handle);
+    let markdown_links = AgentChatMarkdownLinks::new(cx.weak_entity());
     // A subagent parent (Task/Agent) whose flattened children keep running past
     // its own completion must not read "done": the adapter marks the parent
     // `Completed` when its SDK call returns, but the child tool calls stream in
@@ -342,7 +342,7 @@ pub(super) fn tool_card(
                     cx,
                 )
                 .code_block_render(mermaid_code_block_render(assets.mermaid_images, dim))
-                .link_click_handler(markdown_links.handler()),
+                .link_click_handler(markdown_links.clone().handler()),
             );
         }
         for (di, diff) in tc.diffs.iter().enumerate() {
@@ -380,7 +380,13 @@ pub(super) fn tool_card(
                 links: markdown_links,
             };
             for (ix, block) in tc.output.iter().enumerate() {
-                body = body.child(output_block_view(&tc.id, ix, block, output_context, cx));
+                body = body.child(output_block_view(
+                    &tc.id,
+                    ix,
+                    block,
+                    output_context.clone(),
+                    cx,
+                ));
             }
         }
 
@@ -696,14 +702,15 @@ fn output_block_view(
             // a bare path with no scheme, which `open_url` refuses silently,
             // and only the workspace knows the pane's cwd and the file's kind.
             let links = context.links;
+            let links_for_menu = links.clone();
             let uri_for_click = uri.clone();
             let mime_for_click = mime.clone();
             let link = crate::ui::button(
                 SharedString::from(format!("agent-chat-tool-link-{tool_id}-{ix}")),
                 SharedString::from(name.clone()),
             )
-            .on_click(move |_, window, cx| {
-                links.open_resource(&uri_for_click, mime_for_click.as_deref(), window, cx)
+            .on_click(move |_, _window, cx| {
+                links.open_resource(&uri_for_click, mime_for_click.as_deref(), cx)
             });
             let uri_for_menu = uri.clone();
             let mime_for_menu = mime.clone();
@@ -715,7 +722,7 @@ fn output_block_view(
                 // so the menu resolves it as the left click does
                 // (`take_pane_click_info`).
                 .on_mouse_down(MouseButton::Right, move |event, _window, cx| {
-                    links.record_resource_right_click(
+                    links_for_menu.record_resource_right_click(
                         event.position,
                         uri_for_menu.clone(),
                         mime_for_menu.clone(),

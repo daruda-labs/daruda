@@ -74,3 +74,80 @@ fn the_orchestrator_chat_reaches_its_host_once_however_often_it_is_shown(cx: &mu
         assert_eq!(times_reported(ws, "revealed"), 1);
     });
 }
+
+/// A link the chat already classified is opened by its host as is — here a
+/// web URL, which goes to the platform opener.
+#[gpui::test]
+fn an_open_link_event_is_opened_by_the_host(cx: &mut TestAppContext) {
+    use daruda_content::link_target::LinkTarget;
+
+    let (window, workspace) = build_workspace(cx);
+    cx.update_window(window.into(), |_, window, cx| {
+        workspace.update(cx, |ws, cx| {
+            ws.open_agent_chat_pane(window, cx);
+            let pane = ws.active_runtime().panes.last().expect("pane").id;
+            let view = ws.agent_chat_view(pane).expect("a chat pane").clone();
+            view.update(cx, |_, cx| {
+                cx.emit(AgentChatEvent::OpenLink(LinkTarget::Web {
+                    url: "https://example.com/from-chat".into(),
+                }));
+            });
+        })
+    })
+    .unwrap();
+    cx.run_until_parked();
+    assert_eq!(
+        cx.opened_url().as_deref(),
+        Some("https://example.com/from-chat")
+    );
+}
+
+/// A right press on a resource reaches the host's record, so the pane menu
+/// that press opens resolves the resource — and only for that press.
+#[gpui::test]
+fn a_resource_right_press_reaches_the_pane_menu(cx: &mut TestAppContext) {
+    use daruda_content::link_target::LocalKind;
+    use gpui::{Point, px};
+
+    let dir = tempfile::tempdir().expect("temp dir");
+    std::fs::write(dir.path().join("artifact"), b"x").expect("write artifact");
+    let (window, workspace) = build_workspace(cx);
+    let at = Point::new(px(10.), px(20.));
+    let pane = cx
+        .update_window(window.into(), |_, window, cx| {
+            workspace.update(cx, |ws, cx| {
+                let pane = ws.create_agent_chat_pane(
+                    Some(daruda_store::project::PaneCwd::Local(
+                        dir.path().to_path_buf(),
+                    )),
+                    None,
+                    ws.agents[0].id.clone(),
+                    None,
+                    window,
+                    cx,
+                );
+                let id = pane.id;
+                ws.active_runtime_mut().panes.push(pane);
+                let view = ws.agent_chat_view(id).expect("a chat pane").clone();
+                view.update(cx, |_, cx| {
+                    cx.emit(AgentChatEvent::ResourceRightClicked {
+                        position: at,
+                        uri: "artifact".into(),
+                        mime: Some("image/png".into()),
+                    });
+                });
+                id
+            })
+        })
+        .unwrap();
+    cx.run_until_parked();
+    cx.update_window(window.into(), |_, window, cx| {
+        workspace.update(cx, |ws, cx| {
+            assert_eq!(
+                ws.pane_menu_file_for_test(pane, at, window, cx),
+                Some((dir.path().join("artifact"), LocalKind::Image))
+            );
+        })
+    })
+    .unwrap();
+}

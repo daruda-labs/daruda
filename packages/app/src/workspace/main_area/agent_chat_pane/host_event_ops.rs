@@ -4,6 +4,8 @@
 
 use gpui::{Context, Entity, Window};
 
+use crate::workspace::main_area::pane_menu::ResourceRightClick;
+
 use super::view::{AgentChatEvent, AgentChatView};
 use crate::workspace::Workspace;
 use crate::workspace::main_area::pane_tree::PaneId;
@@ -30,7 +32,7 @@ impl Workspace {
         &mut self,
         pane_id: PaneId,
         event: &AgentChatEvent,
-        _window: &mut Window,
+        window: &mut Window,
         cx: &mut Context<Self>,
     ) {
         match event {
@@ -38,6 +40,18 @@ impl Workspace {
             AgentChatEvent::PrefsChanged => self.mutate_durable(cx, |_, _| {}),
             AgentChatEvent::RetryConnect => self.retry_agent_chat_connect(pane_id, cx),
             AgentChatEvent::Reauthenticate => self.reauthenticate_pane_account(pane_id, cx),
+            AgentChatEvent::OpenLink(target) => {
+                self.open_link_target(pane_id, target.clone(), window, cx);
+            }
+            AgentChatEvent::ResourceRightClicked {
+                position,
+                uri,
+                mime,
+            } => self.record_resource_right_click(ResourceRightClick {
+                position: *position,
+                uri: uri.clone(),
+                mime: mime.clone(),
+            }),
         }
     }
 }

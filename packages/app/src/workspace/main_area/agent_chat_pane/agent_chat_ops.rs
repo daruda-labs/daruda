@@ -1595,38 +1595,20 @@ impl Workspace {
         );
     }
 
-    /// The pane's working directory, when it is a local one. A remote
-    /// session's paths are not this machine's, so they resolve to nothing.
-    fn agent_chat_local_cwd(&self, pane_id: PaneId, cx: &App) -> Option<PathBuf> {
-        self.agent_chat_view(pane_id).and_then(|view| {
-            let view = view.read(cx);
-            match &view.cwd {
-                Some(PaneCwd::Local(path)) => Some(path.clone()),
-                Some(PaneCwd::Remote(_)) | None => None,
-            }
-        })
-    }
-
-    /// Classify a link as `pane_id`'s session sees it — against the pane's
-    /// local working directory, or as remote for a remote session. The
-    /// context menu and [`Self::open_pane_link`] both read this, so the menu
-    /// cannot offer an opener the click would decline.
+    /// Classify a link as `pane_id`'s session sees it — the view's own answer
+    /// ([`AgentChatView::classify_link`]), which its click also acts on.
     pub(in crate::workspace) fn classify_pane_link(
         &self,
         pane_id: PaneId,
         link: &str,
         cx: &App,
     ) -> LinkTarget {
-        if self.diff_pane_is_remote(pane_id, cx) {
-            return link_target::classify_remote(link);
+        match self.agent_chat_view(pane_id) {
+            Some(view) => view.read(cx).classify_link(link),
+            None => link_target::classify(link, None),
         }
-        let cwd = self.agent_chat_local_cwd(pane_id, cx);
-        link_target::classify(link, cwd.as_deref())
     }
 
-    /// Open a link from rendered Markdown in `pane_id` — see
-    /// [`Self::open_link_target`] for where each kind goes. Returns `false`
-    /// only for a link nothing can open, so the caller may fall back.
     pub(in crate::workspace) fn open_pane_link(
         &mut self,
         pane_id: PaneId,
@@ -1638,11 +1620,7 @@ impl Workspace {
         self.open_link_target(pane_id, target, window, cx)
     }
 
-    /// Classify a tool's resource-link URI as `pane_id`'s session sees it.
-    /// A resource rather than Markdown text, so a relative URI that is gone
-    /// reports instead of doing nothing; `mime` is the tool's declared type,
-    /// which the inline preview trusts too. The click and the pane menu both
-    /// read this.
+    /// [`Self::classify_pane_link`] for a tool's resource-link URI.
     pub(in crate::workspace) fn classify_pane_resource(
         &self,
         pane_id: PaneId,
@@ -1650,30 +1628,16 @@ impl Workspace {
         mime: Option<&str>,
         cx: &App,
     ) -> LinkTarget {
-        if self.diff_pane_is_remote(pane_id, cx) {
-            return link_target::classify_remote(uri);
+        match self.agent_chat_view(pane_id) {
+            Some(view) => view.read(cx).classify_resource(uri, mime),
+            None => link_target::classify_resource(uri, mime, None),
         }
-        let cwd = self.agent_chat_local_cwd(pane_id, cx);
-        link_target::classify_resource(uri, mime, cwd.as_deref())
-    }
-
-    /// Open a tool's resource-link URI — see [`Self::classify_pane_resource`].
-    pub(in crate::workspace) fn open_pane_resource_link(
-        &mut self,
-        pane_id: PaneId,
-        uri: &str,
-        mime: Option<&str>,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) -> bool {
-        let target = self.classify_pane_resource(pane_id, uri, mime, cx);
-        self.open_link_target(pane_id, target, window, cx)
     }
 
     /// Text opens in the pane file viewer (at the `:line` the link carried);
     /// images, binaries and directories in the OS default handler; URLs in
     /// the platform opener. A missing file and a remote path each report.
-    fn open_link_target(
+    pub(in crate::workspace) fn open_link_target(
         &mut self,
         pane_id: PaneId,
         target: LinkTarget,

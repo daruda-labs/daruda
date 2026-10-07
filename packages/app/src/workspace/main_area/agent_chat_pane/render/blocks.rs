@@ -23,7 +23,7 @@ use crate::workspace::main_area::agent_chat_pane::view::AgentChatView;
 /// at the row's head, against a filled green mark at its tail.
 const ICON_ANSWER: &str = "icons/ui/task-alt.svg";
 
-#[derive(Clone, Copy)]
+#[derive(Clone)]
 pub(super) struct MarkdownRender<'a> {
     pub(super) mermaid_images: &'a MermaidImages,
     pub(super) dim: f32,
@@ -157,10 +157,11 @@ pub(super) fn conclusion_block(
     if let Some(stats) = stats {
         header = header.trailing(stats);
     }
+    let dim = markdown.dim;
     FoldRow::block(("agent-chat-conclusion", ix), key, expanded, header, |cx| {
         assistant_markdown(ix, text, markdown, cx)
     })
-    .render(markdown.dim, cx)
+    .render(dim, cx)
 }
 
 /// Agent reasoning — dimmed, foldable block under a "Thinking" label (default
@@ -194,10 +195,11 @@ pub(super) fn thinking_block(
                     .child(SharedString::from(s::agent_chat::thinking_label()))
                     .into_any_element(),
             );
+    let dim = markdown.dim;
     FoldRow::block(("agent-chat-thinking", ix), key, expanded, header, |cx| {
         thought_body(ix, text, theme::agent_chat_fg_subtle(cx), markdown, cx)
     })
-    .render(markdown.dim, cx)
+    .render(dim, cx)
 }
 
 /// A thought inside a tool group, shown whole with no fold: these run one to

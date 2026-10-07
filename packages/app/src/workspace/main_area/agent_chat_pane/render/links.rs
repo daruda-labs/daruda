@@ -1,77 +1,67 @@
 //! Link handling for rendered agent-chat Markdown.
 
-use gpui::{AnyWindowHandle, App, Pixels, Point, Window};
+use daruda_content::link_target::LinkTarget;
+use gpui::{App, Pixels, Point, WeakEntity, Window};
 
-use crate::window_registry::WindowRegistry;
-use crate::workspace::main_area::pane_menu::ResourceRightClick;
-use crate::workspace::main_area::pane_tree::PaneId;
+use crate::workspace::main_area::agent_chat_pane::view::{AgentChatEvent, AgentChatView};
 
-#[derive(Clone, Copy)]
+/// The chat a rendered link belongs to. It classifies the link itself and
+/// hands the host only what to open.
+#[derive(Clone)]
 pub(super) struct AgentChatMarkdownLinks {
-    pane_id: PaneId,
-    window_handle: AnyWindowHandle,
+    view: WeakEntity<AgentChatView>,
 }
 
 impl AgentChatMarkdownLinks {
-    pub(super) fn new(pane_id: PaneId, window_handle: AnyWindowHandle) -> Self {
-        Self {
-            pane_id,
-            window_handle,
-        }
+    pub(super) fn new(view: WeakEntity<AgentChatView>) -> Self {
+        Self { view }
     }
 
+    /// `false` for a link the pane does not handle, which leaves it to the
+    /// Markdown view's default opener — the answer is needed now, so the view
+    /// classifies before it emits.
     pub(super) fn handler(self) -> impl Fn(&str, &mut Window, &mut App) -> bool + Clone + 'static {
-        move |url, window, cx| {
-            let Some(ws) = WindowRegistry::workspace_for_window(self.window_handle, cx)
-                .and_then(|ws| ws.upgrade())
-            else {
+        move |url, _window, cx| {
+            let Some(view) = self.view.upgrade() else {
                 return false;
             };
-            ws.update(cx, |ws, cx| {
-                ws.open_pane_link(self.pane_id, url, window, cx)
-            })
+            let target = view.read(cx).classify_link(url);
+            if target == LinkTarget::Opaque {
+                return false;
+            }
+            view.update(cx, |_, cx| cx.emit(AgentChatEvent::OpenLink(target)));
+            true
         }
     }
 
     /// The opener for a tool's resource-link URI — a file by definition, so
     /// it resolves as one even where the Markdown rules would read a word.
-    pub(super) fn open_resource(
-        self,
-        uri: &str,
-        mime: Option<&str>,
-        window: &mut Window,
-        cx: &mut App,
-    ) {
-        let Some(ws) = WindowRegistry::workspace_for_window(self.window_handle, cx)
-            .and_then(|ws| ws.upgrade())
-        else {
+    pub(super) fn open_resource(&self, uri: &str, mime: Option<&str>, cx: &mut App) {
+        let Some(view) = self.view.upgrade() else {
             return;
         };
-        ws.update(cx, |ws, cx| {
-            ws.open_pane_resource_link(self.pane_id, uri, mime, window, cx);
-        });
+        let target = view.read(cx).classify_resource(uri, mime);
+        view.update(cx, |_, cx| cx.emit(AgentChatEvent::OpenLink(target)));
     }
 
     /// Record a right press on a resource link, so the pane menu that press
     /// opens classifies it as [`Self::open_resource`] would.
     pub(super) fn record_resource_right_click(
-        self,
+        &self,
         position: Point<Pixels>,
         uri: String,
         mime: Option<String>,
         cx: &mut App,
     ) {
-        let Some(ws) = WindowRegistry::workspace_for_window(self.window_handle, cx)
-            .and_then(|ws| ws.upgrade())
-        else {
+        let Some(view) = self.view.upgrade() else {
             return;
         };
-        ws.update(cx, |ws, _| {
-            ws.record_resource_right_click(ResourceRightClick {
+        view.update(cx, |_, cx| {
+            cx.emit(AgentChatEvent::ResourceRightClicked {
                 position,
                 uri,
                 mime,
-            });
+            })
         });
     }
 }

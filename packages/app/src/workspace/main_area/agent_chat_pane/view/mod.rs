@@ -20,6 +20,7 @@ use std::collections::{HashMap, HashSet, VecDeque};
 use daruda_acp::{
     AcpSessionHandle, ChatItem, ConnectPhase, PlanEntryView, SessionCapabilitiesView, UsageView,
 };
+use daruda_content::link_target::{self, LinkTarget};
 use daruda_core::process_env;
 use daruda_store::project::PaneCwd;
 use gpui::{
@@ -925,6 +926,33 @@ mod event;
 pub(super) mod list_sync;
 mod queue_ops;
 mod session_ops;
+
+impl AgentChatView {
+    /// Where `link` points as this pane's session sees it: against its local
+    /// cwd, or not at all for a session on another machine. The click and the
+    /// pane menu both read this, so the menu never offers what a click refuses.
+    pub(in crate::workspace) fn classify_link(&self, link: &str) -> LinkTarget {
+        match &self.cwd {
+            Some(PaneCwd::Remote(_)) => link_target::classify_remote(link),
+            Some(PaneCwd::Local(cwd)) => link_target::classify(link, Some(cwd)),
+            None => link_target::classify(link, None),
+        }
+    }
+
+    /// [`Self::classify_link`] for a tool's resource-link URI — a file by
+    /// definition, and `mime` is the tool's declared type.
+    pub(in crate::workspace) fn classify_resource(
+        &self,
+        uri: &str,
+        mime: Option<&str>,
+    ) -> LinkTarget {
+        match &self.cwd {
+            Some(PaneCwd::Remote(_)) => link_target::classify_remote(uri),
+            Some(PaneCwd::Local(cwd)) => link_target::classify_resource(uri, mime, Some(cwd)),
+            None => link_target::classify_resource(uri, mime, None),
+        }
+    }
+}
 
 impl AgentChatView {
     /// Build a fresh view. The session is *not* started here — the Workspace
