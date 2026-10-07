@@ -9,12 +9,12 @@ use gpui::{BorrowAppContext as _, Context};
 use std::path::Path;
 
 use crate::agent::tasks_global::GlobalTasks;
-use crate::hooks::pty_tracker::PtyBinding;
 use crate::surface::strings as s;
 use crate::workspace::Workspace;
 use crate::workspace::main_area::agent_chat_pane::view::LoadIntent;
 use crate::workspace::main_area::pane::PaneContent;
 use crate::workspace::main_area::pane_tree::PaneId;
+use daruda_agent::pty_tracker::PtyBinding;
 
 impl Workspace {
     pub(super) fn bind_task_cli_execution(

@@ -10,6 +10,19 @@ description = "Agent-provider integrations: accounts, usage, activity, service s
 [lints]
 workspace = true
 
+[features]
+# Read-back of `pty_tracker`'s internal state for the app's tests. Never a
+# shipping default.
+test-support = []
+
+# `pty_tracker` watches the session directory. Feature selection mirrors the
+# app's: `macos_fsevent` is the only opt-in backend.
+[target.'cfg(target_os = "macos")'.dependencies]
+notify = { version = "7", default-features = false, features = ["macos_fsevent"] }
+
+[target.'cfg(not(target_os = "macos"))'.dependencies]
+notify = { version = "7", default-features = false }
+
 [dev-dependencies]
 test_process = { workspace = true }
 
@@ -23,6 +36,8 @@ fs4 = "0.13"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 sha2 = "0.10"
+# Which process each pane runs, for `pty_tracker`.
+sysinfo = "0.32"
 shell-words = "1"
 tempfile = "3"
 thiserror = "2"

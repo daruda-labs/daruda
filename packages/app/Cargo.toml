@@ -140,6 +140,8 @@ daruda_terminal = { workspace = true, features = ["test-support"] }
 # A detached session handle lets a test watch what a pane sends, and when it
 # lets go, without an adapter process behind it.
 daruda_acp = { workspace = true, features = ["test-support"] }
+# `pty_tracker`'s state read-back the workspace tests assert on.
+daruda_agent = { workspace = true, features = ["test-support"] }
 # Test-only observation hooks the workspace tests read back.
 daruda_ui = { workspace = true, features = ["test-support"] }
 gpui = { workspace = true, features = ["test-support"] }

@@ -1,4 +1,4 @@
-//! PTY-tracker event pump — bridges the GPUI-free `hooks::pty_tracker`
+//! PTY-tracker event pump — bridges the GPUI-free `daruda_agent::pty_tracker`
 //! channel into the GPUI Workspace entity.
 //!
 //! The tracker emits `BindingChanged` / `SessionProcessExited` events over an
@@ -11,8 +11,8 @@ use std::time::Duration;
 
 use gpui::{Context, Task};
 
-use crate::hooks::pty_tracker::PtyTrackerEvent;
 use crate::workspace::Workspace;
+use daruda_agent::pty_tracker::PtyTrackerEvent;
 
 /// 100 ms: visible state (sub-row badges, active outline) snaps without
 /// perceptible lag, without waking the background executor gratuitously.

@@ -231,7 +231,7 @@ fn claude_terminal_behind_a_tab(
                 let pane = ws.active_runtime().focused_pane_id;
                 ws.claude.pty_claude_bindings.insert(
                     pane,
-                    crate::hooks::pty_tracker::PtyBinding {
+                    daruda_agent::pty_tracker::PtyBinding {
                         claude_pid: 4242,
                         session_id: SESSION.into(),
                     },

@@ -9,10 +9,10 @@
 
 use std::collections::HashMap;
 
-use crate::hooks::pty_tracker::PtyBinding;
 use crate::workspace::Workspace;
 use crate::workspace::main_area::pane_tree::PaneId;
 use daruda_agent::SessionStatus;
+use daruda_agent::pty_tracker::PtyBinding;
 
 // `Path` and `Source` are only named by the debug-only transition logger
 // (and `Source` also by the always-compiled test fixtures), so gate the

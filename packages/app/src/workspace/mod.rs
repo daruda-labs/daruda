@@ -977,7 +977,7 @@ impl Workspace {
         // is shared with the Workspace (for register/unregister) and
         // the receiver feeds an event-pump task that updates the
         // bindings map. See `workspace/sync/pty.rs`.
-        let (pty_tracker, pty_rx) = crate::hooks::pty_tracker::PtyTracker::spawn();
+        let (pty_tracker, pty_rx) = daruda_agent::pty_tracker::PtyTracker::spawn();
         let pty_event_pump = sync::pty::spawn(pty_rx, cx);
 
         // Install the app-wide accounts Global from disk if this is the

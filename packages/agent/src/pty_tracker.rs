@@ -12,7 +12,7 @@ use std::sync::{Arc, Mutex, mpsc};
 use std::thread;
 use std::time::{Duration, Instant};
 
-use daruda_agent::pty_link;
+use crate::pty_link;
 
 /// Pane id mirrored locally to keep this tracker independent of GPUI/workspace.
 pub type PaneId = u64;
@@ -81,7 +81,7 @@ impl Drop for ShutdownOnDrop {
 
 /// Handle to the running tracker. Cloneable so multiple Workspace
 /// entities can share it; the thread is parked on its wake channel and
-/// exits when the last clone drops (via [`ShutdownOnDrop`]) or the
+/// exits when the last clone drops (via `ShutdownOnDrop`) or the
 /// event receiver disconnects.
 #[derive(Clone)]
 pub struct PtyTracker {
@@ -221,7 +221,7 @@ impl PtyTracker {
     }
 
     /// Test-only introspection — the currently registered pane ids.
-    #[cfg(test)]
+    #[cfg(any(test, feature = "test-support"))]
     pub fn tracked_pane_ids(&self) -> Vec<PaneId> {
         self.inner
             .lock()
@@ -230,7 +230,7 @@ impl PtyTracker {
     }
 
     /// Test-only introspection — the PID awaiting OS exit for `session_id`.
-    #[cfg(test)]
+    #[cfg(any(test, feature = "test-support"))]
     pub fn known_process(&self, session_id: &str) -> Option<u32> {
         lock_inner(&self.inner)
             .known_processes
@@ -240,7 +240,7 @@ impl PtyTracker {
 
     /// Test-only introspection — whether `pane_id` is still waiting for its
     /// task CLI to bind.
-    #[cfg(test)]
+    #[cfg(any(test, feature = "test-support"))]
     pub fn awaits_binding(&self, pane_id: PaneId) -> bool {
         lock_inner(&self.inner)
             .panes
@@ -344,7 +344,7 @@ fn run(
 /// the tracker with a [`Wake::Poke`]; the diffing happens in the
 /// resolution pass, so the event payload is not inspected.
 ///
-/// Intentionally NOT built on [`crate::dir_watch::spawn_dir_watcher`]: any
+/// Intentionally NOT built on the app's `dir_watch::spawn_dir_watcher`: any
 /// event here already triggers a full re-resolution pass, so FSEvents'
 /// post-sleep `EventKind::Other` rescan is handled for free, and the wake
 /// needs to multiplex into the shared `wake_tx` alongside register /

@@ -22,8 +22,8 @@ use gpui::Task;
 
 use daruda_store::accounts::{AccountRecipeId, AccountSelection};
 
-use crate::hooks::pty_tracker::{PtyBinding, PtyTracker};
 use crate::workspace::main_area::pane_tree::PaneId;
+use daruda_agent::pty_tracker::{PtyBinding, PtyTracker};
 
 /// Which account's usage a cache entry belongs to. The auth domain is part of
 /// the key because [`AccountSelection::SystemDefault`] names a *different*

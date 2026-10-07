@@ -391,7 +391,7 @@ fn close_active_project_releases_pane_tracking(cx: &mut TestAppContext) {
                 ws.claude.pty_tracker.register(*id, 4242);
                 ws.claude.pty_claude_bindings.insert(
                     *id,
-                    crate::hooks::pty_tracker::PtyBinding {
+                    daruda_agent::pty_tracker::PtyBinding {
                         claude_pid: 4242,
                         session_id: format!("sess-{id}"),
                     },

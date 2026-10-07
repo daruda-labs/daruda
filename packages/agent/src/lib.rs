@@ -29,6 +29,7 @@ mod http;
 pub mod jsonl;
 pub mod providers;
 pub mod pty_link;
+pub mod pty_tracker;
 pub mod service_status;
 pub mod status;
 pub mod store;

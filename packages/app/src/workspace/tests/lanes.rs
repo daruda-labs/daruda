@@ -443,7 +443,7 @@ fn finalize_remove_active_lane_keeps_main_area_filled(cx: &mut TestAppContext) {
                     ws.claude.pty_tracker.register(*id, 4242);
                     ws.claude.pty_claude_bindings.insert(
                         *id,
-                        crate::hooks::pty_tracker::PtyBinding {
+                        daruda_agent::pty_tracker::PtyBinding {
                             claude_pid: 4242,
                             session_id: format!("sess-{id}"),
                         },

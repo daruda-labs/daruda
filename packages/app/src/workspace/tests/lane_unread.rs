@@ -140,7 +140,7 @@ async fn a_terminal_claude_finishing_in_a_parked_lane_marks_it_unread(cx: &mut T
     ws.update(cx, |ws, _| {
         ws.claude.pty_claude_bindings.insert(
             pane_id,
-            crate::hooks::pty_tracker::PtyBinding {
+            daruda_agent::pty_tracker::PtyBinding {
                 claude_pid: 4242,
                 session_id: "sess-lane".into(),
             },
