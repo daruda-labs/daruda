@@ -103,7 +103,7 @@ impl Workspace {
     /// live `&mut Window` since `apply_config` runs from `observe_global` (no
     /// window in scope) yet `set_placeholder` requires one.
     fn refresh_locale_strings(&mut self, cx: &mut Context<Self>) {
-        let git_commit_input = self.git_commit_input.clone();
+        let git_commit_input = self.git.commit_input.clone();
         let skill_search_input = self.skill_search_input.clone();
         let task_search_input = self.task_browser.search.clone();
         let flow_searches = self.flow_browser.searches.clone();

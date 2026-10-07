@@ -18,7 +18,7 @@ impl Workspace {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let panel = self.git_changes_panel_focus.clone();
+        let panel = self.git.panel_focus.clone();
         self.toggle_left_dock_panel_focus(
             daruda_store::project::LeftDockView::GitChanges,
             panel,
@@ -95,7 +95,7 @@ impl Workspace {
         // A click landed in this panel, so this panel takes keyboard focus —
         // stated rather than left to GPUI's `track_focus` mousedown, and the
         // same rule the Files rows follow.
-        self.git_changes_panel_focus.clone().focus(window, cx);
+        self.git.panel_focus.clone().focus(window, cx);
         // Resolved here rather than taken as a second argument: the row's
         // path is repo-root-relative, and a linked lane's root is not the
         // repo root, so only `LanePaths` can absolutise it correctly.
@@ -161,9 +161,10 @@ impl Workspace {
         });
         // Keep the cursor on screen — skimming past the viewport otherwise
         // previews a row the user cannot see.
-        self.git_changes_scroll_handle
+        self.git
+            .scroll_handle
             .scroll_to_item(row, gpui::ScrollStrategy::Nearest);
-        let panel = self.git_changes_panel_focus.clone();
+        let panel = self.git.panel_focus.clone();
         self.arm_left_dock_preview(panel, window, cx, |ws, window, cx| {
             ws.open_git_changes_cursor(OpenIntent::Preview, window, cx)
         });

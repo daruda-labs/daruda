@@ -48,16 +48,16 @@ impl Workspace {
     /// a dialog for work that will be refused is worse than no dialog.
     pub(in crate::workspace) fn git_lock_held(&self, lock: GitLock) -> bool {
         match lock {
-            GitLock::Index => self.git_locks.index,
-            GitLock::Repo => self.git_locks.repo,
+            GitLock::Index => self.git.locks.index,
+            GitLock::Repo => self.git.locks.repo,
         }
     }
 
     fn set_git_lock(&mut self, lock: GitLock, held: bool, cx: &mut Context<Self>) {
         match lock {
-            GitLock::Index => self.git_locks.index = held,
+            GitLock::Index => self.git.locks.index = held,
             GitLock::Repo => {
-                self.git_locks.repo = held;
+                self.git.locks.repo = held;
                 // The commit button's disabled state mirrors this flag. Syncing
                 // it here is what keeps the mirror to one update site — every
                 // flip of the repo lock goes through this arm.

@@ -388,8 +388,6 @@ pub struct Workspace {
     /// `apply_config` is the only update site (other than per-field
     /// toggle methods like `toggle_files_show_hidden`).
     pub(in crate::workspace) mirrors: ConfigMirrors,
-    /// Scroll handle for the Git Changes file list — shared with the scrollbar overlay.
-    pub(in crate::workspace) git_changes_scroll_handle: gpui::UniformListScrollHandle,
     /// Scroll handle for the Lanes view card list — shared with the
     /// scrollbar overlay. The view header stays outside the scroll
     /// region, so only the group / project cards move.
@@ -398,10 +396,6 @@ pub struct Workspace {
     /// scrollbar overlay. Used by every right-panel tab (Usage / Skills
     /// / Tools / Tasks) that wraps its body in `overflow_y_scroll`.
     pub(in crate::workspace) right_panel_scroll_handle: gpui::ScrollHandle,
-    /// Commit-message input panel rendered in the Git Changes footer.
-    pub(in crate::workspace) git_commit_input: gpui::Entity<crate::ui::InputPanel>,
-    /// Keeps the InputPanel subscription alive for the lifetime of Workspace.
-    _git_commit_subscription: gpui::Subscription,
     /// Inline status-bar message surface for the **pane-spawn** failure
     /// path (`report_pane_error`). All git / hooks / mcp / skills / files
     /// ops route through the 3-layer error pipeline (toast → details
@@ -446,19 +440,9 @@ pub struct Workspace {
     /// `detect_accessed_entities` lost-wakeup, see
     /// `lane_switch_scroll_dead_rootcause`). Runtime-only; never serialized.
     pub(in crate::workspace) agent_pulse_prev: Vec<gpui::EntityId>,
-    /// The two git locks this window holds — see
-    /// [`left_dock::git_ops::lock::GitLocks`].
-    pub(in crate::workspace) git_locks: left_dock::git_ops::lock::GitLocks,
-    /// Commit-button mode — see [`left_dock::git_ops::history::CommitMode`].
-    pub(in crate::workspace) commit_mode: left_dock::git_ops::history::CommitMode,
-    /// Git directories this window watches — see
-    /// [`left_dock::git_ops::watch::GitWatch`].
-    pub(in crate::workspace) git_watch: left_dock::git_ops::watch::GitWatch,
-    /// Focus handle for the Git Changes panel body. Bound to
-    /// `key_context("GitChanges")` so the four arrow / Space / Enter
-    /// keybindings only fire when the panel holds focus — otherwise
-    /// they fall through to terminal panes.
-    pub(in crate::workspace) git_changes_panel_focus: gpui::FocusHandle,
+    /// Git Changes view state and the git locks / watchers every git op
+    /// shares — see [`left_dock::git_ops::context::GitContext`].
+    pub(in crate::workspace) git: left_dock::git_ops::context::GitContext,
     /// Debounce for the left dock's arrow-key preview, shared by the Git and
     /// Files panels. Holds at most one armed timer; re-arming drops it, which
     /// cancels the row the cursor left.
@@ -729,55 +713,6 @@ impl Workspace {
         let focus_handle = cx.focus_handle();
         let ws_weak = cx.entity().downgrade();
         let toast_layer = cx.new(|_| toast_layer::ToastLayer::new(ws_weak.clone()));
-
-        // Commit-message input panel + subscription must be created before the
-        // struct literal so both can reference each other without a borrow
-        // conflict.  The subscription is stored as a struct field so it
-        // lives for the entire lifetime of the Workspace entity.
-        let ws_commit = ws_weak.clone();
-        let ws_amend = ws_weak.clone();
-        let git_commit_input = cx.new(|cx| {
-            crate::ui::InputPanel::new(crate::ui::InputPanelLayout::ActionsFloating, window, cx)
-                .with_placeholder(
-                    crate::surface::strings::git::commit_placeholder(),
-                    window,
-                    cx,
-                )
-                .with_borderless(cx)
-                .with_focus_ring(false, cx)
-                .with_action(
-                    crate::ui::PanelAction::new(
-                        "commit",
-                        crate::surface::strings::git::commit_btn(),
-                        crate::ui::PanelActionVariant::Primary,
-                        move |_, window, cx| {
-                            let _ = ws_commit.upgrade().map(|w| {
-                                w.update(cx, |ws, cx| {
-                                    ws.on_commit_changes(&CommitChanges, window, cx)
-                                })
-                            });
-                        },
-                    )
-                    .with_dropdown_item(
-                        crate::surface::strings::ctx::git_commit_amend(),
-                        move |window, app_cx| {
-                            if let Some(ws) = ws_amend.upgrade() {
-                                ws.update(app_cx, |ws, cx| ws.on_commit_amend(window, cx));
-                            }
-                        },
-                    ),
-                )
-        });
-        let git_commit_sub = cx.subscribe_in(
-            &git_commit_input,
-            window,
-            |this, _, ev: &crate::ui::InputPanelEvent, window, cx| match ev {
-                crate::ui::InputPanelEvent::Submit => {
-                    this.on_commit_changes(&CommitChanges, window, cx);
-                }
-                crate::ui::InputPanelEvent::Changed => {}
-            },
-        );
 
         let ws_for_input = ws_weak.clone();
         let ws_for_tab = ws_weak.clone();
@@ -1064,11 +999,8 @@ impl Workspace {
                 config,
                 crate::ui::theme::painted_ui_preset(&config.theme.ui_preset, cx),
             ),
-            git_changes_scroll_handle: gpui::UniformListScrollHandle::new(),
             lanes_scroll_handle: gpui::ScrollHandle::new(),
             right_panel_scroll_handle: gpui::ScrollHandle::new(),
-            git_commit_input,
-            _git_commit_subscription: git_commit_sub,
             last_error: None,
             error_history: Vec::new(),
             toast_layer,
@@ -1077,10 +1009,7 @@ impl Workspace {
             window_user_label: None,
             last_agent_id: None,
             agent_pulse_prev: Vec::new(),
-            git_locks: left_dock::git_ops::lock::GitLocks::default(),
-            commit_mode: left_dock::git_ops::history::CommitMode::default(),
-            git_watch: left_dock::git_ops::watch::GitWatch::default(),
-            git_changes_panel_focus: cx.focus_handle(),
+            git: left_dock::git_ops::context::GitContext::new(&ws_weak, window, cx),
             left_dock_preview: None,
             panels: main_area::bottom_dock::macro_ops::load_or_seed_panels(&data_dir),
             agent_vocabulary,

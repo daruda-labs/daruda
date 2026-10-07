@@ -1,7 +1,7 @@
 //! Keyboard skimming in the Git Changes dock.
 //!
 //! The panel's keybindings only fire under `key_context("GitChanges")`, which
-//! needs `git_changes_panel_focus` to hold focus. Everything a panel row opens
+//! needs `GitContext::panel_focus` to hold focus. Everything a panel row opens
 //! therefore goes through `OpenIntent::Preview` or `Commit`, neither of which
 //! enters the pane — one that did would end the keyboard session after a
 //! single file. That, and which tab a later skim is allowed to take, are the
@@ -42,7 +42,7 @@ async fn enter_opens_the_diff_and_keeps_the_panel_focused(cx: &mut TestAppContex
 
     cx.update_window(w.into(), |_, window, cx| {
         ws.update(cx, |ws, cx| {
-            ws.git_changes_panel_focus.clone().focus(window, cx);
+            ws.git.panel_focus.clone().focus(window, cx);
             let lane = ws.active.lane;
             ws.set_git_changes_cursor(lane, PathBuf::from("src/a.rs"), cx);
             ws.activate_git_changes_cursor(window, cx);
@@ -61,7 +61,7 @@ async fn enter_opens_the_diff_and_keeps_the_panel_focused(cx: &mut TestAppContex
 
     let focused = cx
         .update_window(w.into(), |_, window, cx| {
-            ws.read(cx).git_changes_panel_focus.is_focused(window)
+            ws.read(cx).git.panel_focus.is_focused(window)
         })
         .unwrap();
     assert!(
@@ -78,7 +78,7 @@ async fn arrow_navigation_previews_the_cursor_file_without_taking_focus(cx: &mut
 
     cx.update_window(w.into(), |_, window, cx| {
         ws.update(cx, |ws, cx| {
-            ws.git_changes_panel_focus.clone().focus(window, cx);
+            ws.git.panel_focus.clone().focus(window, cx);
             ws.move_git_changes_cursor(1, window, cx);
         });
     })
@@ -104,7 +104,7 @@ async fn arrow_navigation_previews_the_cursor_file_without_taking_focus(cx: &mut
 
     let focused = cx
         .update_window(w.into(), |_, window, cx| {
-            ws.read(cx).git_changes_panel_focus.is_focused(window)
+            ws.read(cx).git.panel_focus.is_focused(window)
         })
         .unwrap();
     assert!(
@@ -123,7 +123,7 @@ async fn a_row_the_cursor_only_passes_over_is_never_previewed(cx: &mut TestAppCo
 
     cx.update_window(w.into(), |_, window, cx| {
         ws.update(cx, |ws, cx| {
-            ws.git_changes_panel_focus.clone().focus(window, cx);
+            ws.git.panel_focus.clone().focus(window, cx);
             ws.move_git_changes_cursor(1, window, cx); // → src/a.rs
         });
     })
@@ -166,7 +166,7 @@ async fn a_git_changes_row_click_previews_and_leaves_the_panel_focused(cx: &mut 
 
     cx.update_window(w.into(), |_, window, cx| {
         ws.update(cx, |ws, cx| {
-            ws.git_changes_panel_focus.clone().focus(window, cx);
+            ws.git.panel_focus.clone().focus(window, cx);
             let lane = ws.active.lane;
             ws.on_git_changes_row_click(lane, PathBuf::from("src/a.rs"), false, 1, window, cx);
         });
@@ -191,7 +191,7 @@ async fn a_git_changes_row_click_previews_and_leaves_the_panel_focused(cx: &mut 
 
     let focused = cx
         .update_window(w.into(), |_, window, cx| {
-            ws.read(cx).git_changes_panel_focus.is_focused(window)
+            ws.read(cx).git.panel_focus.is_focused(window)
         })
         .unwrap();
     assert!(
@@ -240,7 +240,7 @@ async fn toggling_git_changes_focus_switches_the_view_opens_the_dock_and_round_t
             (
                 ws.left_dock.read(cx).is_open,
                 ws.left_dock_view,
-                ws.git_changes_panel_focus.is_focused(window),
+                ws.git.panel_focus.is_focused(window),
             )
         })
         .unwrap();
@@ -264,7 +264,7 @@ async fn toggling_git_changes_focus_switches_the_view_opens_the_dock_and_round_t
 
     let still_focused = cx
         .update_window(w.into(), |_, window, cx| {
-            ws.read(cx).git_changes_panel_focus.is_focused(window)
+            ws.read(cx).git.panel_focus.is_focused(window)
         })
         .unwrap();
     assert!(
@@ -284,7 +284,7 @@ async fn a_second_enter_on_the_open_row_steps_into_the_viewer(cx: &mut TestAppCo
 
     cx.update_window(w.into(), |_, window, cx| {
         ws.update(cx, |ws, cx| {
-            ws.git_changes_panel_focus.clone().focus(window, cx);
+            ws.git.panel_focus.clone().focus(window, cx);
             let lane = ws.active.lane;
             ws.set_git_changes_cursor(lane, PathBuf::from("src/a.rs"), cx);
             ws.activate_git_changes_cursor(window, cx);
@@ -295,7 +295,7 @@ async fn a_second_enter_on_the_open_row_steps_into_the_viewer(cx: &mut TestAppCo
 
     let after_first = cx
         .update_window(w.into(), |_, window, cx| {
-            ws.read(cx).git_changes_panel_focus.is_focused(window)
+            ws.read(cx).git.panel_focus.is_focused(window)
         })
         .unwrap();
     assert!(after_first, "the first Enter opens and stays in the panel");
@@ -308,7 +308,7 @@ async fn a_second_enter_on_the_open_row_steps_into_the_viewer(cx: &mut TestAppCo
 
     let after_second = cx
         .update_window(w.into(), |_, window, cx| {
-            ws.read(cx).git_changes_panel_focus.is_focused(window)
+            ws.read(cx).git.panel_focus.is_focused(window)
         })
         .unwrap();
     assert!(
@@ -337,7 +337,7 @@ async fn previewing_a_row_does_not_surface_the_bottom_input(cx: &mut TestAppCont
 
     cx.update_window(w.into(), |_, window, cx| {
         ws.update(cx, |ws, cx| {
-            ws.git_changes_panel_focus.clone().focus(window, cx);
+            ws.git.panel_focus.clone().focus(window, cx);
             ws.move_git_changes_cursor(1, window, cx);
         });
     })
@@ -391,7 +391,7 @@ async fn a_preview_replaces_only_the_tab_a_preview_opened(cx: &mut TestAppContex
     // Enter is the deliberate open: the user picked this file.
     cx.update_window(w.into(), |_, window, cx| {
         ws.update(cx, |ws, cx| {
-            ws.git_changes_panel_focus.clone().focus(window, cx);
+            ws.git.panel_focus.clone().focus(window, cx);
             let lane = ws.active.lane;
             ws.set_git_changes_cursor(lane, PathBuf::from("src/a.rs"), cx);
             ws.activate_git_changes_cursor(window, cx);
@@ -435,7 +435,7 @@ async fn a_cursor_whose_file_vanished_resumes_in_place(cx: &mut TestAppContext) 
 
     cx.update_window(w.into(), |_, window, cx| {
         ws.update(cx, |ws, cx| {
-            ws.git_changes_panel_focus.clone().focus(window, cx);
+            ws.git.panel_focus.clone().focus(window, cx);
             let lane = ws.active.lane;
             ws.set_git_changes_cursor(lane, PathBuf::from("c.rs"), cx);
         });
@@ -481,7 +481,7 @@ fn refocus_panel(
 ) {
     cx.update_window(w.into(), |_, window, cx| {
         ws.update(cx, |ws, cx| {
-            ws.git_changes_panel_focus.clone().focus(window, cx);
+            ws.git.panel_focus.clone().focus(window, cx);
         });
     })
     .unwrap();
@@ -604,7 +604,7 @@ async fn the_focus_binding_reopens_a_dock_the_user_closed(cx: &mut TestAppContex
             let r = ws.read(cx);
             (
                 r.left_dock.read(cx).is_open,
-                r.git_changes_panel_focus.is_focused(window),
+                r.git.panel_focus.is_focused(window),
             )
         })
         .unwrap();
@@ -623,7 +623,7 @@ async fn a_preview_armed_before_leaving_the_panel_does_not_fire(cx: &mut TestApp
     cx.update_window(w.into(), |_, window, cx| {
         ws.update(cx, |ws, cx| {
             ws.add_tab(window, cx);
-            ws.git_changes_panel_focus.clone().focus(window, cx);
+            ws.git.panel_focus.clone().focus(window, cx);
             ws.move_git_changes_cursor(1, window, cx);
             // The user leaves the panel before the timer elapses.
             let pane = ws.active_runtime().focused_pane_id;

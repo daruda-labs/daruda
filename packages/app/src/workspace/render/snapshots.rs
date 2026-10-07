@@ -126,13 +126,13 @@ impl Workspace {
                 .lane_scoped
                 .get(&self.active)
                 .and_then(|state| state.git.cursor.as_ref().map(|c| c.path.clone())),
-            git_changes_panel_focus: Handle(self.git_changes_panel_focus.clone()),
+            git_changes_panel_focus: Handle(self.git.panel_focus.clone()),
             focused_file_selection: self
                 .focused_file_view()
                 .map(|fv| (fv.lane_id, fv.path.clone(), fv.source.clone())),
-            git_changes_scroll_handle: Handle(self.git_changes_scroll_handle.clone()),
+            git_changes_scroll_handle: Handle(self.git.scroll_handle.clone()),
             lanes_scroll_handle: Handle(self.lanes_scroll_handle.clone()),
-            git_commit_input: Handle(self.git_commit_input.clone()),
+            git_commit_input: Handle(self.git.commit_input.clone()),
             files_panel_focus: Handle(self.file_tree.files_panel_focus.clone()),
             files_scroll_handle: Handle(self.file_tree.files_scroll_handle.clone()),
             files_icon_color_mode: self.mirrors.files_icon_color_mode.clone(),

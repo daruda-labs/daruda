@@ -1891,7 +1891,7 @@ async fn every_files_row_click_leaves_the_panel_focused(cx: &mut TestAppContext)
         // simply never having moved.
         cx.update_window(wh.into(), |_, window, cx| {
             ws.update(cx, |ws, cx| {
-                ws.git_changes_panel_focus.clone().focus(window, cx);
+                ws.git.panel_focus.clone().focus(window, cx);
                 ws.on_files_row_click(id, entry_id, abs, kind, clicks, false, window, cx);
             });
         })

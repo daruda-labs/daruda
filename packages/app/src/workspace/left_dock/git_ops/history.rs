@@ -49,7 +49,7 @@ impl Workspace {
         }
 
         let typed = {
-            let panel = self.git_commit_input.read(cx);
+            let panel = self.git.commit_input.read(cx);
             panel.text(cx).to_string()
         };
         let staged: Vec<String> = self
@@ -125,7 +125,7 @@ impl Workspace {
             move |ws, result, cx| {
                 match result {
                     Ok(()) => {
-                        let input = ws.git_commit_input.clone();
+                        let input = ws.git.commit_input.clone();
                         if cx
                             .update_window(wh, |_, window, cx| {
                                 input.update(cx, |panel, cx_state| {
@@ -154,7 +154,7 @@ impl Workspace {
 
     /// Whether the Commit split button is currently in amend mode.
     pub(in crate::workspace) fn is_amend_mode(&self) -> bool {
-        matches!(self.commit_mode, CommitMode::Amend { .. })
+        matches!(self.git.commit_mode, CommitMode::Amend { .. })
     }
 
     /// Dropdown action under the Commit split button. Normal mode → enter
@@ -185,7 +185,7 @@ impl Workspace {
             return;
         };
 
-        let current = self.git_commit_input.read(cx).text(cx).to_string();
+        let current = self.git.commit_input.read(cx).text(cx).to_string();
         if !current.trim().is_empty() {
             // Keep the user's own draft as both the box content and the saved
             // draft, so Cancel returns to exactly this normal-commit state.
@@ -208,7 +208,7 @@ impl Workspace {
             move || crate::lane::git::git_head_message(&repo_root),
             move |ws, result, cx| match result {
                 Ok(message) if !message.trim().is_empty() => {
-                    let input = ws.git_commit_input.clone();
+                    let input = ws.git.commit_input.clone();
                     if cx
                         .update_window(wh, |_, window, cx| {
                             input.update(cx, |panel, cx_state| {
@@ -263,11 +263,11 @@ impl Workspace {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let CommitMode::Amend { saved_draft } = &self.commit_mode else {
+        let CommitMode::Amend { saved_draft } = &self.git.commit_mode else {
             return;
         };
         let saved_draft = saved_draft.clone();
-        self.git_commit_input.update(cx, |panel, cx_state| {
+        self.git.commit_input.update(cx, |panel, cx_state| {
             panel.set_text(saved_draft.as_str(), window, cx_state);
         });
         self.set_commit_mode(CommitMode::Normal, cx);
@@ -279,7 +279,7 @@ impl Workspace {
     /// a message-only amend — so the disable rule differs by mode).
     fn set_commit_mode(&mut self, mode: CommitMode, cx: &mut Context<Self>) {
         let amend = matches!(mode, CommitMode::Amend { .. });
-        self.commit_mode = mode;
+        self.git.commit_mode = mode;
         let (primary, dropdown) = if amend {
             (
                 app_strings::git::amend_btn(),
@@ -291,7 +291,7 @@ impl Workspace {
                 app_strings::ctx::git_commit_amend(),
             )
         };
-        self.git_commit_input.update(cx, |panel, cx_state| {
+        self.git.commit_input.update(cx, |panel, cx_state| {
             panel.set_action_label("commit", primary, cx_state);
             panel.set_action_dropdown_label("commit", 0, dropdown, cx_state);
         });
@@ -301,7 +301,7 @@ impl Workspace {
     /// Perform the amend the user set up in amend mode: validate the (prefilled
     /// or edited) message, confirm the history rewrite, then run the amend.
     fn perform_amend(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let message = self.git_commit_input.read(cx).text(cx).to_string();
+        let message = self.git.commit_input.read(cx).text(cx).to_string();
         if message.trim().is_empty() {
             // User cleared the prefilled message; amend still needs one.
             let report = ErrorReport::new(app_strings::git::amend_needs_message())
@@ -358,7 +358,7 @@ impl Workspace {
             move |ws, result, cx| {
                 match result {
                     Ok(()) => {
-                        let input = ws.git_commit_input.clone();
+                        let input = ws.git.commit_input.clone();
                         if cx
                             .update_window(wh, |_, window, cx| {
                                 input.update(cx, |panel, cx_state| {

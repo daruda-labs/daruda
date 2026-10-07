@@ -165,7 +165,7 @@ impl Workspace {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        self.git_changes_panel_focus.clone().focus(window, cx);
+        self.git.panel_focus.clone().focus(window, cx);
         if click_count >= 2 {
             if let Some(abs) = self
                 .lane_for(target)

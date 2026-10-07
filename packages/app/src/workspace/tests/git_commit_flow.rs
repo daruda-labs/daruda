@@ -69,7 +69,8 @@ fn commit(
     let message = message.to_string();
     cx.update_window(wh.into(), |_, window, cx| {
         ws.update(cx, |ws, cx| {
-            ws.git_commit_input
+            ws.git
+                .commit_input
                 .update(cx, |panel, cx| panel.set_text(message.as_str(), window, cx));
             ws.on_commit_changes(&CommitChanges, window, cx);
         });
