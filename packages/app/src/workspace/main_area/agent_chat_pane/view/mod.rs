@@ -930,6 +930,8 @@ pub(super) mod list_sync;
 mod pane_choices;
 mod queue_ops;
 mod session_ops;
+#[cfg(feature = "screenshot")]
+mod shot_ops;
 #[cfg(test)]
 mod test_hooks;
 

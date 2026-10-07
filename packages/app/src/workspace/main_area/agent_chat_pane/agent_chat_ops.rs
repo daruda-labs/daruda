@@ -745,8 +745,7 @@ impl Workspace {
             return;
         };
         view.update(cx, |v, cx| {
-            v.set_activity_options_tab(super::view::ActivityOptionsTab::Fold, cx);
-            v.screenshot_options_open = true;
+            v.pin_options_for_shot(super::view::ActivityOptionsTab::Fold, cx)
         });
     }
 
@@ -780,9 +779,8 @@ impl Workspace {
             for level in TailLevel::ALL {
                 v.set_tail_window(level, TailWindow::last(TAIL_WINDOW_CHOICES[0]), cx);
             }
-            v.set_activity_options_tab(tab, cx);
             v.seed_usage_for_shot(cx);
-            v.screenshot_options_open = true;
+            v.pin_options_for_shot(tab, cx);
         });
     }
 
@@ -814,7 +812,6 @@ impl Workspace {
         cx: &mut Context<Self>,
     ) {
         use super::fold::FoldKey;
-        use super::rows::RowKind;
 
         self.open_agent_chat_pane_seeded(
             None,
@@ -829,13 +826,7 @@ impl Workspace {
             return;
         };
         view.update(cx, |v, cx| {
-            // The first conclusion, taken from the projection that just ran —
-            // which item it is belongs to the seed, not to a constant here.
-            let first = v.rows.iter().find_map(|r| match r.kind {
-                RowKind::ConclusionItem(ix) => Some(ix),
-                _ => None,
-            });
-            if let Some(ix) = first {
+            if let Some(ix) = v.first_conclusion_for_shot() {
                 v.set_fold_for_shot(FoldKey::Assistant(ix), false, window, cx);
             }
         });
@@ -954,10 +945,9 @@ impl Workspace {
             for level in TailLevel::ALL {
                 v.set_tail_window(level, TailWindow::All, cx);
             }
-            v.set_activity_options_tab(super::view::ActivityOptionsTab::Filter, cx);
             // The chip rides the response bar, which the filter popover would
             // cover — the popover has its own scenario (`agent-chat-options`).
-            v.screenshot_filter_open = false;
+            v.select_filter_tab_for_shot(cx);
         });
     }
 
@@ -1021,7 +1011,6 @@ impl Workspace {
         cx: &mut Context<Self>,
     ) {
         use super::fold::FoldKey;
-        use super::rows::RowKind;
         use super::rows::tail::{TailLevel, TailWindow};
 
         self.open_agent_chat_transcript_for_shot(window, cx);
@@ -1031,13 +1020,7 @@ impl Workspace {
         };
         view.update(cx, |v, cx| {
             v.set_tail_window(TailLevel::Steps, TailWindow::Last(SHOT_TAIL_WINDOW), cx);
-            // The boundary's own key, taken from the projection that just ran —
-            // the run start is a property of the seed, not a constant.
-            let run_start = v.rows.iter().find_map(|r| match r.kind {
-                RowKind::TailMore { run_start, .. } => Some(run_start),
-                _ => None,
-            });
-            if let Some(run_start) = run_start {
+            if let Some(run_start) = v.tail_boundary_for_shot() {
                 v.set_fold_for_shot(FoldKey::Tail(run_start), reveal, window, cx);
             }
         });
@@ -1054,7 +1037,6 @@ impl Workspace {
         cx: &mut Context<Self>,
     ) {
         use super::fold::FoldKey;
-        use super::rows::RowKind;
         use super::rows::tail::{TailLevel, TailWindow};
 
         self.open_agent_chat_transcript_for_shot(window, cx);
@@ -1068,15 +1050,9 @@ impl Workspace {
                 TailWindow::Last(SHOT_GROUP_TAIL_WINDOW),
                 cx,
             );
-            // The last group with a call behind its own boundary, taken from the
-            // projection that just ran — which group that is belongs to the seed.
-            let target = v.rows.iter().rev().find_map(|r| match &r.kind {
-                RowKind::ToolGroupTailMore {
-                    gid, hidden_calls, ..
-                } if *hidden_calls > 0 => Some(gid.clone()),
-                _ => None,
-            });
-            let Some(gid) = target else { return };
+            let Some(gid) = v.last_windowed_group_for_shot() else {
+                return;
+            };
             v.set_fold_for_shot(FoldKey::ToolGroup(gid.clone()), true, window, cx);
             v.set_fold_for_shot(FoldKey::ToolGroupTail(gid), reveal, window, cx);
         });
@@ -1189,8 +1165,7 @@ impl Workspace {
                 window,
                 cx,
             );
-            v.set_activity_options_tab(super::view::ActivityOptionsTab::Fold, cx);
-            v.screenshot_fold_open = true;
+            v.pin_fold_editor_for_shot(cx);
         });
     }
 
