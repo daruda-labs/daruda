@@ -19,7 +19,7 @@ use super::Workspace;
 use crate::agent::launch_resolve::account_recipe_for_connect;
 use crate::lane::availability::LaneAvailability;
 use crate::transcript::fold_mode::FoldMode;
-use crate::workspace::main_area::agent_chat_pane::pane_choice::PaneChoice;
+use crate::workspace::main_area::agent_chat_pane::view::ChatPaneChoices;
 use crate::workspace::main_area::pane::{self, PaneSpawnError, TabEntry};
 use crate::workspace::main_area::pane_tree::{self as pane_tree, PaneLayout, SplitDirection};
 
@@ -830,11 +830,6 @@ impl Workspace {
                                 .view
                                 .update(cx, |view, _| view.set_access(ac.access.clone()));
                             content.account = account;
-                            // The user's mode and model picks: the lazy connect
-                            // requests them over the agent's defaults and over
-                            // whatever the adapter picks for itself.
-                            let mode_id = ac.picked_mode_id.clone();
-                            let model_id = ac.model_id.clone();
                             let content_width =
                                 ac.content_width.map(deserialize_chat_content_width);
                             // Missing pane choices retain the constructor's config
@@ -861,26 +856,18 @@ impl Workspace {
                                     tokens.iter().map(String::as_str),
                                 )
                             });
-                            content.view.update(cx, |v, _| {
-                                v.picked_mode_id = mode_id;
-                                v.picked_model_id = model_id;
-                                if let Some(width) = content_width {
-                                    v.content_width = width;
-                                    v.content_width_chosen = true;
-                                }
-                                if let Some(tail) = tail_steps {
-                                    v.tail_steps = PaneChoice::Chosen(tail);
-                                }
-                                if let Some(tail) = tail_calls {
-                                    v.tail_calls = PaneChoice::Chosen(tail);
-                                }
-                                if let Some(filter) = display_filter {
-                                    v.display_filter = PaneChoice::Chosen(filter);
-                                }
-                                if let Some(mode) = fold_mode {
-                                    v.fold.set_mode(mode);
-                                }
-                            });
+                            let choices = ChatPaneChoices {
+                                mode_id: ac.picked_mode_id.clone(),
+                                model_id: ac.model_id.clone(),
+                                content_width,
+                                tail_steps,
+                                tail_calls,
+                                display_filter,
+                                fold_mode,
+                            };
+                            content
+                                .view
+                                .update(cx, |v, _| v.restore_pane_choices(choices));
                         }
                         restored
                     }
@@ -1183,31 +1170,28 @@ fn serialize_pane_content(
     }
     if let Some(ac) = pane.agent_chat_content() {
         let v = ac.view.read(cx);
+        // Only explicit choices are written, so an untouched pane keeps
+        // following config.
+        let choices = v.pane_choices();
         return Content::AgentChat(daruda_store::project::SerializedAgentChatContent {
             access: v.access(),
             cwd: ac.cwd.clone(),
-            session_id: v.session_id.clone(),
-            title: v.session_title.clone(),
-            agent_id: Some(v.agent_id.clone()),
+            session_id: v.session_id().map(str::to_owned),
+            title: v.session_title().map(str::to_owned),
+            agent_id: Some(v.agent_id().to_owned()),
             account_id: ac.account.to_persisted(),
-            picked_mode_id: v.picked_mode_id.clone(),
-            model_id: v.picked_model_id.clone(),
-            // Written only once the pane's own toggle has moved it, so an
-            // untouched pane keeps following `agent.use_reading_width`.
-            content_width: v
-                .content_width_chosen
-                .then(|| serialize_chat_content_width(v.content_width)),
-            // Persist only explicit choices so untouched panes keep following config.
-            tail_window: v.tail_steps.chosen().map(serialize_chat_tail_window),
-            tail_window_calls: v.tail_calls.chosen().map(serialize_chat_tail_window),
+            picked_mode_id: choices.mode_id,
+            model_id: choices.model_id,
+            content_width: choices.content_width.map(serialize_chat_content_width),
+            tail_window: choices.tail_steps.map(serialize_chat_tail_window),
+            tail_window_calls: choices.tail_calls.map(serialize_chat_tail_window),
             // Superseded field: never written, so a file carrying it sheds it
             // on the first save after the split.
             display_filter: None,
-            visible_kinds: v
+            visible_kinds: choices
                 .display_filter
-                .chosen()
                 .map(|f| f.tokens().into_iter().map(str::to_owned).collect()),
-            fold_mode: v.fold.chosen_mode().map(FoldMode::tokens),
+            fold_mode: choices.fold_mode.map(FoldMode::tokens),
         });
     }
     if let Some(fg) = pane.flow_graph_content() {

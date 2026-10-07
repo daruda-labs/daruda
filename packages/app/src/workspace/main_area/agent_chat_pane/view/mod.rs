@@ -918,6 +918,7 @@ pub(in crate::workspace) struct AgentChatView {
 }
 
 pub(in crate::workspace) use event::AgentChatEvent;
+pub(in crate::workspace) use pane_choices::ChatPaneChoices;
 mod activity_ops;
 mod agent_default_ops;
 pub(in crate::workspace) use activity_ops::RunSummary;
@@ -925,6 +926,7 @@ mod apply_event;
 mod event;
 mod host_surface;
 pub(super) mod list_sync;
+mod pane_choices;
 mod queue_ops;
 mod session_ops;
 
