@@ -82,7 +82,7 @@ impl Workspace {
         // leaves the guard inside `run_flow_at` to answer the second case by
         // opening its "stop it?" picker — a desktop dialog raised by a phone
         // command, which is the one thing this surface must never do.
-        if self.lane_holder(&cwd).is_some() || self.runs.is_running(lane) {
+        if self.lane_holder(&cwd).is_some() || self.flows.runs.is_running(lane) {
             return Err(ControlError::FlowLocked { name: label });
         }
         // Everything the run would refuse *after* dispatch surfaces on the
@@ -127,7 +127,7 @@ impl Workspace {
         // Marked after dispatch rather than threaded into the submission: the
         // run is inserted synchronously and nothing here awaits, so the event
         // pump cannot retire it in between.
-        if !self.runs.answer_telegram_on_end(lane) {
+        if !self.flows.runs.answer_telegram_on_end(lane) {
             return Err(ControlError::FlowNotStarted { name: entry.name });
         }
         Ok(entry)
@@ -147,7 +147,7 @@ impl Workspace {
         if self.lane_for(lane).is_none() {
             return Err(ControlError::TargetGone);
         }
-        if !self.runs.is_running(lane) {
+        if !self.flows.runs.is_running(lane) {
             return Ok(StopDisposition::AlreadyIdle);
         }
         self.stop_flow_run_in(lane, cx);

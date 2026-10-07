@@ -69,6 +69,7 @@ impl Workspace {
         keep: impl Fn(daruda_store::project::LaneRef) -> bool,
     ) -> Vec<FlowRunRow> {
         let mut rows: Vec<FlowRunRow> = self
+            .flows
             .runs
             .iter()
             .filter(|(lane, _)| keep(*lane))

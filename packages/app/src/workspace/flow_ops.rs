@@ -122,7 +122,7 @@ impl Workspace {
             // The map is the authority, not the lock's pid: a token for
             // another lane belongs to this process too and would not stop
             // this one.
-            Some(_) if self.runs.is_running(lane) => {
+            Some(_) if self.flows.runs.is_running(lane) => {
                 self.flow_picker = FlowPicker::Stopping { lane };
                 cx.notify();
                 false
@@ -476,7 +476,7 @@ impl Workspace {
                 last_word.end = Some(RunEnd::from(&report.outcome));
             })
         };
-        self.runs.insert(
+        self.flows.runs.insert(
             lane_ref,
             RunHandle::started(cancel, run_dir, source, nodes_at_start, thread),
         );
@@ -495,7 +495,7 @@ impl Workspace {
     ) {
         // The engine releases its own side — the interrupt arm answers the
         // adapter `Cancelled`.
-        self.runs.cancel(lane);
+        self.flows.runs.cancel(lane);
         cx.notify();
     }
 
@@ -518,7 +518,7 @@ impl Workspace {
         }
         self.set_flow_scope(super::flow_browser::FlowScope::Worktree(lane), cx);
         self.set_flow_tab(super::flow_browser::FlowTab::Runs, cx);
-        self.flow_browser.state.run_filter = super::flow_browser::RunFilter::All;
+        self.flows.browser.state.run_filter = super::flow_browser::RunFilter::All;
         self.clear_flow_search(window, cx);
         self.open_page(super::pages::Page::Flows, window, cx);
     }
@@ -563,7 +563,7 @@ impl Workspace {
         self.reveal_flows_panel(cx);
         let dir = super::flow_paths::runs_dir(&self.active_lane_root().unwrap_or_default());
         let shot = super::flow_history::FlowHistory::for_shot(dir);
-        self.flow_history.put(self.active, shot);
+        self.flows.history.put(self.active, shot);
         cx.notify();
     }
 
@@ -609,7 +609,7 @@ impl Workspace {
         use daruda_acp::{PermissionChoice, PermissionKindView};
         let lane = self.active;
         let run_dir = self.active_lane_root().unwrap_or_default();
-        self.runs.insert(
+        self.flows.runs.insert(
             lane,
             // This capture is of the panel and the chip, which read `doing`;
             // no graph pane is open for it to colour.
@@ -688,7 +688,8 @@ impl Workspace {
         run_dir: PathBuf,
         source: super::flow_request::FlowSource,
     ) {
-        self.runs
+        self.flows
+            .runs
             .insert(lane, RunHandle::seeded(run_dir, source, RunStage::Starting));
     }
 

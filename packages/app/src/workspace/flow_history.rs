@@ -10,7 +10,7 @@
 //! So the result is cached per lane and rebuilt only when something makes
 //! it wrong, never per frame. [`super::flow_cache::LaneCache::get`] is
 //! where that rule lives — it answers only for the lane it was read for —
-//! and `Workspace::flow_history` is the one field holding it.
+//! and `FlowContext::history` is the one field holding it.
 
 use std::path::{Path, PathBuf};
 
@@ -124,20 +124,20 @@ impl Workspace {
         lane: daruda_store::project::LaneRef,
     ) -> Option<FlowHistory> {
         self.lane_for(lane)?;
-        if self.flow_history.get(lane).is_none() {
+        if self.flows.history.get(lane).is_none() {
             let cwd = self.lane_for(lane).map(|l| l.path.clone())?;
             let lock_dir = super::flow_paths::lane_lock_dir(&self.lock_root, &cwd);
             let read = FlowHistory::read(&super::flow_paths::runs_dir(&cwd), lock_dir.as_deref());
-            self.flow_history.put(lane, read);
+            self.flows.history.put(lane, read);
         }
-        self.flow_history.get(lane).cloned()
+        self.flows.history.get(lane).cloned()
     }
 
     /// Drop the cached history so the next snapshot reads disk again.
     /// Scoped to the lane it happened in — another lane's run says nothing
     /// about this lane's directory.
     pub(in crate::workspace) fn invalidate_flow_history(&mut self, lane: LaneRef) {
-        self.flow_history.invalidate_for(lane);
+        self.flows.history.invalidate_for(lane);
     }
 }
 

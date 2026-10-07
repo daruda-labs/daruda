@@ -487,7 +487,7 @@ async fn a_run_ending_in_a_parked_worktree_opens_no_report_there(cx: &mut TestAp
             ws.apply_flow_event_with_window_for_test(other, &ended, window, cx);
 
             assert!(
-                !ws.runs.is_running(other),
+                !ws.flows.runs.is_running(other),
                 "settling still has to happen — only the pane is withheld"
             );
             assert_eq!(
@@ -582,6 +582,7 @@ async fn the_stop_prompt_stops_the_run_it_was_raised_for(cx: &mut TestAppContext
             ws.execute_flow_picker_selection(window, cx);
 
             let canceled: Vec<(daruda_store::project::LaneRef, bool)> = ws
+                .flows
                 .runs
                 .iter()
                 .map(|(l, handle)| (l, handle.cancel.is_canceled()))
@@ -618,6 +619,7 @@ async fn a_stop_reaches_the_named_worktree_not_the_active_one(cx: &mut TestAppCo
         // The token is the stop; the entry stays until the event pump retires
         // it, so cancellation is what to read — not `is_running`.
         let canceled: Vec<(daruda_store::project::LaneRef, bool)> = ws
+            .flows
             .runs
             .iter()
             .map(|(lane, handle)| (lane, handle.cancel.is_canceled()))
@@ -763,7 +765,7 @@ async fn a_cancelled_phone_started_run_still_reports_back(cx: &mut TestAppContex
             // `cancel` trips the token and leaves the handle in place, so the
             // engine returns and the run still gets to say how it ended.
             let lane_ref = ws.active_ref();
-            ws.runs.cancel(lane_ref);
+            ws.flows.runs.cancel(lane_ref);
         });
     })
     .expect("window is live");

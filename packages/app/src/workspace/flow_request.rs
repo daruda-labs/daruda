@@ -534,7 +534,7 @@ impl Workspace {
     }
 
     fn next_run_id(&mut self) -> String {
-        let counter = self.runs.next_run_id();
+        let counter = self.flows.runs.next_run_id();
         run_id(
             std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)

@@ -41,7 +41,7 @@ impl Workspace {
             self.main_area.runtimes.entry(self.active).or_default();
             self.projects.push(project);
         }
-        self.flow_browser.state.scope = FlowScope::Current;
+        self.flows.browser.state.scope = FlowScope::Current;
         let tab = match shot {
             FlowBrowserShot::Runs | FlowBrowserShot::Asking => FlowTab::Runs,
             _ => FlowTab::Definitions,
@@ -73,14 +73,15 @@ impl Workspace {
         let now = std::time::SystemTime::now();
         let modified = files.iter().map(|file| (file.path.clone(), now)).collect();
         let source = FlowSource::File(files[0].path.clone());
-        self.flow_list
+        self.flows
+            .list
             .put(self.active, FlowListing { files, modified });
         if shot == FlowBrowserShot::Grouped {
-            self.flow_browser.state.grouping = FlowGrouping::Origin;
-            self.flow_browser.state.toggle_group(FlowOrigin::Project);
+            self.flows.browser.state.grouping = FlowGrouping::Origin;
+            self.flows.browser.state.toggle_group(FlowOrigin::Project);
         }
         if shot == FlowBrowserShot::Empty {
-            self.flow_browser.searches[tab.index()].update(cx, |input, cx| {
+            self.flows.browser.searches[tab.index()].update(cx, |input, cx| {
                 input.set_value("no matching flow", window, cx)
             });
         }
@@ -119,7 +120,7 @@ impl Workspace {
                 attempt: 2,
             }
         };
-        self.runs.insert(
+        self.flows.runs.insert(
             self.active,
             RunHandle::seeded(live_dir.clone(), source, stage),
         );
@@ -155,7 +156,8 @@ impl Workspace {
             }
         })
         .collect();
-        self.flow_history
+        self.flows
+            .history
             .put(self.active, FlowHistory::seeded(history));
         cx.notify();
     }

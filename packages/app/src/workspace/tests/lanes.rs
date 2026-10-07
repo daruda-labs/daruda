@@ -1222,7 +1222,7 @@ fn a_lane_a_flow_is_running_in_cannot_be_removed(cx: &mut TestAppContext) {
 
     ws.update(cx, |ws, _| {
         let run_dir = checkout.join("run");
-        ws.runs.insert(
+        ws.flows.runs.insert(
             target,
             RunHandle::seeded(
                 run_dir.clone(),

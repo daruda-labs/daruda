@@ -204,7 +204,7 @@ impl Workspace {
     /// Drop the cached listing so the panel reads the directory again. One
     /// assignment, like the run history's — the snapshot rebuilds it.
     pub(in crate::workspace) fn invalidate_flow_list(&mut self) {
-        self.flow_list.invalidate();
+        self.flows.list.invalidate();
     }
 
     fn report_flow_no_agent(&mut self, cx: &mut Context<Self>) {
@@ -404,16 +404,17 @@ impl Workspace {
         if self.lane_for(lane).is_none() {
             return Vec::new();
         }
-        if self.flow_list.get(lane).is_none() {
+        if self.flows.list.get(lane).is_none() {
             let Some(sources) = self.flow_sources_for(lane) else {
                 return Vec::new();
             };
-            self.flow_list.put(
+            self.flows.list.put(
                 lane,
                 super::flow_browser::listing::FlowListing::read(&sources),
             );
         }
-        self.flow_list
+        self.flows
+            .list
             .get(lane)
             .map(|listing| listing.files.clone())
             .unwrap_or_default()

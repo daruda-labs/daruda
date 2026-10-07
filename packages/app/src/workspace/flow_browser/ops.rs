@@ -13,7 +13,7 @@ use crate::workspace::{
 
 impl Workspace {
     pub(in crate::workspace) fn stage_flow_page(&mut self, cx: &Context<Self>) {
-        self.flow_browser.page_snapshot =
+        self.flows.browser.page_snapshot =
             (self.active_page() == Some(Page::Flows)).then(|| super::FlowPageSnapshot {
                 workspace: cx.weak_entity(),
                 flows: self.flow_rows_matching(|lane| lane == self.flow_browser_lane()),
@@ -26,13 +26,13 @@ impl Workspace {
     }
 
     pub(in crate::workspace) fn flow_browser_lane(&self) -> LaneRef {
-        self.flow_browser.state.scope.resolve(self.active)
+        self.flows.browser.state.scope.resolve(self.active)
     }
 
     pub(in crate::workspace) fn flow_browser_snapshot(&self, cx: &App) -> FlowBrowserSnapshot {
-        let search = &self.flow_browser.searches[self.flow_browser.state.tab.index()];
+        let search = &self.flows.browser.searches[self.flows.browser.state.tab.index()];
         FlowBrowserSnapshot {
-            state: self.flow_browser.state.clone(),
+            state: self.flows.browser.state.clone(),
             targets: self
                 .projects
                 .iter()
@@ -54,7 +54,8 @@ impl Workspace {
             search: Handle(search.clone()),
             query: search.read(cx).value().to_string(),
             modified: self
-                .flow_list
+                .flows
+                .list
                 .get(self.flow_browser_lane())
                 .map(|listing| listing.modified.clone())
                 .unwrap_or_default(),
@@ -69,7 +70,7 @@ impl Workspace {
         if self.lane_for(scope.resolve(self.active)).is_none() {
             return;
         }
-        self.flow_browser.state.scope = scope;
+        self.flows.browser.state.scope = scope;
         self.invalidate_flow_list();
         self.invalidate_flow_history(self.flow_browser_lane());
         self.respawn_flow_watcher(cx);
@@ -78,13 +79,13 @@ impl Workspace {
     }
 
     pub(in crate::workspace) fn set_flow_tab(&mut self, tab: FlowTab, cx: &mut Context<Self>) {
-        self.flow_browser.state.tab = tab;
+        self.flows.browser.state.tab = tab;
         if let Some(page) = self
             .workspace_page
             .as_mut()
             .filter(|p| p.page == Page::Flows)
         {
-            page.scroll = self.flow_browser.scrolls[tab.index()].clone();
+            page.scroll = self.flows.browser.scrolls[tab.index()].clone();
         }
         cx.notify();
     }
@@ -94,7 +95,7 @@ impl Workspace {
         origin: Option<FlowOrigin>,
         cx: &mut Context<Self>,
     ) {
-        self.flow_browser.state.origin = origin;
+        self.flows.browser.state.origin = origin;
         self.reset_flow_scroll();
         cx.notify();
     }
@@ -104,7 +105,7 @@ impl Workspace {
         filter: RunFilter,
         cx: &mut Context<Self>,
     ) {
-        self.flow_browser.state.run_filter = filter;
+        self.flows.browser.state.run_filter = filter;
         self.reset_flow_scroll();
         cx.notify();
     }
@@ -114,7 +115,7 @@ impl Workspace {
         grouping: FlowGrouping,
         cx: &mut Context<Self>,
     ) {
-        self.flow_browser.state.grouping = grouping;
+        self.flows.browser.state.grouping = grouping;
         cx.notify();
     }
 
@@ -123,12 +124,12 @@ impl Workspace {
         origin: FlowOrigin,
         cx: &mut Context<Self>,
     ) {
-        self.flow_browser.state.toggle_group(origin);
+        self.flows.browser.state.toggle_group(origin);
         cx.notify();
     }
 
     fn reset_flow_scroll(&self) {
-        self.flow_browser.scrolls[self.flow_browser.state.tab.index()]
+        self.flows.browser.scrolls[self.flows.browser.state.tab.index()]
             .set_offset(gpui::point(gpui::Pixels::ZERO, gpui::Pixels::ZERO));
     }
 
@@ -137,9 +138,12 @@ impl Workspace {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        self.flow_browser.searches[self.flow_browser.state.tab.index()].update(cx, |input, cx| {
-            input.set_value("", window, cx);
-        });
+        self.flows.browser.searches[self.flows.browser.state.tab.index()].update(
+            cx,
+            |input, cx| {
+                input.set_value("", window, cx);
+            },
+        );
         self.reset_flow_scroll();
         cx.notify();
     }
@@ -149,9 +153,9 @@ impl Workspace {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        match self.flow_browser.state.tab {
-            FlowTab::Definitions => self.flow_browser.state.origin = None,
-            FlowTab::Runs => self.flow_browser.state.run_filter = RunFilter::All,
+        match self.flows.browser.state.tab {
+            FlowTab::Definitions => self.flows.browser.state.origin = None,
+            FlowTab::Runs => self.flows.browser.state.run_filter = RunFilter::All,
         }
         self.clear_flow_search(window, cx);
     }

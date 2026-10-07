@@ -100,6 +100,7 @@ impl Workspace {
         cx: &mut Context<Self>,
     ) {
         let parked = self
+            .flows
             .runs
             .park_ask(lane_ref, run_dir, ParkedAsk::new(pending));
         cx.notify();
@@ -144,7 +145,7 @@ impl Workspace {
         decision: daruda_acp::PermissionDecision,
         cx: &mut Context<Self>,
     ) {
-        if self.runs.answer_ask(lane, ask_id, decision) {
+        if self.flows.runs.answer_ask(lane, ask_id, decision) {
             cx.notify();
         }
     }
@@ -211,7 +212,7 @@ impl Workspace {
         // itself and before its first node. Refreshing on the announcement
         // instead would read the pre-sweep listing and leave deleted runs on
         // screen for the length of the run.
-        match self.runs.advance_stage(lane_ref, event) {
+        match self.flows.runs.advance_stage(lane_ref, event) {
             Advanced::Nothing => return,
             Advanced::Moved { left_setup } => {
                 if left_setup {
@@ -232,8 +233,8 @@ impl Workspace {
         cx: &mut Context<Self>,
     ) -> Option<PathBuf> {
         // Asked before `retire`, which drops the handle that knows.
-        let owes_remote_answer = self.runs.owes_telegram_answer(lane_ref);
-        let run_dir = self.runs.retire(lane_ref);
+        let owes_remote_answer = self.flows.runs.owes_telegram_answer(lane_ref);
+        let run_dir = self.flows.runs.retire(lane_ref);
         // The run just wrote its completion marker, so the list that reads
         // those markers is now wrong.
         self.invalidate_flow_history(lane_ref);

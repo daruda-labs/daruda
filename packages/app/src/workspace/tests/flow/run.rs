@@ -343,10 +343,10 @@ async fn a_run_ending_settles_its_own_lane_and_leaves_the_others_alone(cx: &mut 
             "opened the active lane's report instead of the one that ended"
         );
         assert!(
-            ws.runs.is_running(here),
+            ws.flows.runs.is_running(here),
             "settling one lane dropped another lane's cancel token"
         );
-        assert!(!ws.runs.is_running(elsewhere));
+        assert!(!ws.flows.runs.is_running(elsewhere));
     });
 }
 
@@ -394,7 +394,8 @@ async fn a_started_run_updates_the_flow_page_independently_of_the_right_dock(
         ws.show_page(crate::workspace::pages::Page::Flows, cx);
         ws.stage_flow_page(cx);
         assert!(
-            ws.flow_browser
+            ws.flows
+                .browser
                 .page_snapshot
                 .as_ref()
                 .unwrap()
@@ -406,7 +407,7 @@ async fn a_started_run_updates_the_flow_page_independently_of_the_right_dock(
         ws.seed_flow_run_for_test(here, lane.path().join("run-here"));
         ws.stage_flow_page(cx);
         assert_eq!(
-            ws.flow_browser.page_snapshot.as_ref().unwrap().flows.len(),
+            ws.flows.browser.page_snapshot.as_ref().unwrap().flows.len(),
             1
         );
         let after = ws.prepare_right_dock_snapshot(cx);
@@ -494,7 +495,7 @@ async fn only_a_run_leaving_setup_refreshes_the_history(cx: &mut TestAppContext)
         // Leaving `Starting`: the sweep has happened, so the list is stale.
         ws.apply_flow_event_for_test(here, &started("design"), cx);
         assert!(
-            ws.flow_history.get(here).is_none(),
+            ws.flows.history.get(here).is_none(),
             "a swept run would stay on screen for the length of the run"
         );
 
@@ -504,7 +505,7 @@ async fn only_a_run_leaving_setup_refreshes_the_history(cx: &mut TestAppContext)
         for node in ["test", "review"] {
             ws.apply_flow_event_for_test(here, &started(node), cx);
             assert!(
-                ws.flow_history.get(here).is_some(),
+                ws.flows.history.get(here).is_some(),
                 "re-read the directory at node `{node}`"
             );
         }
@@ -1044,7 +1045,8 @@ async fn the_stop_prompt_stops_the_run_on_enter_and_leaves_it_on_escape(cx: &mut
         prefer_character_input: false,
     };
     let canceled = |ws: &crate::workspace::Workspace| {
-        ws.runs
+        ws.flows
+            .runs
             .iter()
             .map(|(_, handle)| handle.cancel.is_canceled())
             .collect::<Vec<_>>()
@@ -1114,7 +1116,8 @@ async fn a_list_key_in_the_stop_prompt_changes_nothing(cx: &mut TestAppContext) 
                     "{k} closed the stop prompt"
                 );
                 assert!(
-                    ws.runs
+                    ws.flows
+                        .runs
                         .iter()
                         .all(|(_, handle)| !handle.cancel.is_canceled()),
                     "{k} stopped the run"

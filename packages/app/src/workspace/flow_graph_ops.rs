@@ -60,7 +60,7 @@ impl Workspace {
         };
         view.update(cx, |view, cx| view.reload(window, cx));
         self.sync_flow_graph_titles(cx);
-        if let Some(colouring) = self.runs.colouring_of(self.active, &path) {
+        if let Some(colouring) = self.flows.runs.colouring_of(self.active, &path) {
             view.update(cx, |view, cx| view.set_run_states(&colouring, cx));
         }
     }
@@ -102,7 +102,7 @@ impl Workspace {
         cx: &mut Context<Self>,
     ) {
         view.update(cx, |view, cx| view.toggle_pins(cx));
-        if let Some(colouring) = self.runs.colouring_of(self.active, path) {
+        if let Some(colouring) = self.flows.runs.colouring_of(self.active, path) {
             view.update(cx, |view, cx| view.set_run_states(&colouring, cx));
         }
     }
@@ -319,7 +319,7 @@ impl Workspace {
             // pending. The run's own state is here, so put it back — otherwise
             // editing a field mid-run greys out everything that already passed,
             // until the next event happens to repaint it.
-            if let Some(colouring) = self.runs.colouring_of(lane_ref, &path) {
+            if let Some(colouring) = self.flows.runs.colouring_of(lane_ref, &path) {
                 view.update(cx, |view, cx| view.set_run_states(&colouring, cx));
             }
         }
@@ -395,7 +395,7 @@ impl Workspace {
         event: &FlowEvent,
         cx: &mut Context<Self>,
     ) {
-        let Some((path, colouring)) = self.runs.colour_after(lane_ref, event) else {
+        let Some((path, colouring)) = self.flows.runs.colour_after(lane_ref, event) else {
             return;
         };
         let Some(view) = self

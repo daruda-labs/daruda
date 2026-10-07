@@ -61,7 +61,7 @@ async fn flow_browser_scope_filters_without_switching_the_active_worktree(cx: &m
     vcx.run_until_parked();
     ws.read_with(&vcx, |ws, _| {
         assert_eq!(
-            ws.flow_browser.state.origin,
+            ws.flows.browser.state.origin,
             Some(flow_paths::FlowOrigin::Repo)
         );
         assert_eq!(ws.active, active);
@@ -71,7 +71,7 @@ async fn flow_browser_scope_filters_without_switching_the_active_worktree(cx: &m
     vcx.simulate_click(clear.center(), Modifiers::default());
     vcx.run_until_parked();
     ws.read_with(&vcx, |ws, _| {
-        assert_eq!(ws.flow_browser.state.origin, None);
+        assert_eq!(ws.flows.browser.state.origin, None);
         assert_eq!(ws.flow_browser_lane(), target);
         assert_eq!(ws.active, active);
     });
@@ -135,11 +135,11 @@ async fn flow_browser_tabs_retain_separate_queries_and_scroll_offsets(cx: &mut T
     let mut vcx = VisualTestContext::from_window(wh.into(), cx);
     ws.update_in(&mut vcx, |ws, window, cx| {
         ws.open_page(Page::Flows, window, cx);
-        ws.flow_browser.searches[0].update(cx, |input, cx| input.set_value("ship", window, cx));
-        ws.flow_browser.scrolls[0].set_offset(gpui::point(gpui::px(0.0), gpui::px(-80.0)));
+        ws.flows.browser.searches[0].update(cx, |input, cx| input.set_value("ship", window, cx));
+        ws.flows.browser.scrolls[0].set_offset(gpui::point(gpui::px(0.0), gpui::px(-80.0)));
         ws.set_flow_tab(FlowTab::Runs, cx);
-        ws.flow_browser.searches[1].update(cx, |input, cx| input.set_value("other", window, cx));
-        ws.flow_browser.scrolls[1].set_offset(gpui::point(gpui::px(0.0), gpui::px(-20.0)));
+        ws.flows.browser.searches[1].update(cx, |input, cx| input.set_value("other", window, cx));
+        ws.flows.browser.scrolls[1].set_offset(gpui::point(gpui::px(0.0), gpui::px(-20.0)));
         ws.set_flow_tab(FlowTab::Definitions, cx);
         assert_eq!(ws.flow_browser_snapshot(cx).query, "ship");
         assert_eq!(
@@ -200,7 +200,7 @@ async fn flow_browser_table_alignment_and_grouping_survive_narrow_windows(cx: &m
     vcx.run_until_parked();
     ws.read_with(&vcx, |ws, _| {
         assert_eq!(ws.active_page(), Some(Page::Flows));
-        assert_eq!(ws.flow_browser.state.grouping, FlowGrouping::Origin);
+        assert_eq!(ws.flows.browser.state.grouping, FlowGrouping::Origin);
     });
 }
 
@@ -211,18 +211,18 @@ async fn flow_browser_request_recovery_does_not_clear_definition_filters(cx: &mu
     ws.update_in(&mut vcx, |ws, window, cx| {
         ws.open_page(Page::Flows, window, cx);
         ws.set_flow_origin(Some(flow_paths::FlowOrigin::Repo), cx);
-        ws.flow_browser.searches[0].update(cx, |input, cx| input.set_value("ship", window, cx));
-        ws.flow_browser.searches[1].update(cx, |input, cx| input.set_value("hidden", window, cx));
+        ws.flows.browser.searches[0].update(cx, |input, cx| input.set_value("ship", window, cx));
+        ws.flows.browser.searches[1].update(cx, |input, cx| input.set_value("hidden", window, cx));
         ws.show_flow_questions(window, cx);
-        assert_eq!(ws.flow_browser.state.tab, FlowTab::Runs);
-        assert_eq!(ws.flow_browser.state.run_filter, RunFilter::Asking);
+        assert_eq!(ws.flows.browser.state.tab, FlowTab::Runs);
+        assert_eq!(ws.flows.browser.state.run_filter, RunFilter::Asking);
         assert!(ws.flow_browser_snapshot(cx).query.is_empty());
         assert_eq!(
-            ws.flow_browser.state.origin,
+            ws.flows.browser.state.origin,
             Some(flow_paths::FlowOrigin::Repo)
         );
         assert_eq!(
-            ws.flow_browser.searches[0].read(cx).value().as_ref(),
+            ws.flows.browser.searches[0].read(cx).value().as_ref(),
             "ship"
         );
     });
@@ -238,7 +238,7 @@ async fn flow_browser_narrow_tables_scroll_to_the_action_column(cx: &mut TestApp
     vcx.simulate_resize(gpui::size(px(800.0), px(600.0)));
     ws.update_in(&mut vcx, |ws, window, cx| {
         ws.open_page(Page::Flows, window, cx);
-        ws.flow_history.put(
+        ws.flows.history.put(
             ws.active,
             FlowHistory::seeded(vec![FlowRunEntry {
                 dir: path.with_file_name("run-01"),

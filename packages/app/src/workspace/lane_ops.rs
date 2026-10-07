@@ -251,7 +251,7 @@ impl Workspace {
         // checkout `git worktree remove` just deleted with no way left to stop
         // it. Refusing matches what the shell-out does anyway: `git worktree
         // remove` fails on a dirty checkout, and a running flow makes one.
-        if self.runs.is_running(target) {
+        if self.flows.runs.is_running(target) {
             return Err(crate::surface::strings::modal::remove_lane_err_flow_running());
         }
         // `runs` only knows this process. Another daruda — a debug build

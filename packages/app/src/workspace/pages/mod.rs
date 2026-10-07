@@ -64,7 +64,7 @@ impl Workspace {
     pub(in crate::workspace) fn page_state(&self, page: Page) -> PageState {
         let mut state = PageState::new(page);
         if page == Page::Flows {
-            state.scroll = self.flow_browser.scrolls[self.flow_browser.state.tab.index()].clone();
+            state.scroll = self.flows.browser.scrolls[self.flows.browser.state.tab.index()].clone();
         }
         state
     }

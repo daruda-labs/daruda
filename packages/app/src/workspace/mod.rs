@@ -39,6 +39,7 @@ pub(in crate::workspace) mod error;
 pub(in crate::workspace) mod flow_ask_modal;
 mod flow_browser;
 pub(in crate::workspace) mod flow_cache;
+mod flow_context;
 mod flow_events;
 mod flow_file_ops;
 mod flow_graph_ops;
@@ -364,17 +365,8 @@ pub struct Workspace {
     pub(in crate::workspace) lane_switcher: command::lane_switcher::LaneSwitcherState,
     /// Flow picker state — the list opened by `Run Flow…` / `Check Flow…`.
     pub(in crate::workspace) flow_picker: command::flow_picker::FlowPicker,
-    /// The flow runs this app started. See [`flow_runs::FlowRuns`] for why the
-    /// rules about them live in a type rather than here.
-    pub(in crate::workspace) runs: flow_runs::FlowRuns,
-    /// One worktree's past runs, read from disk when the Flows tab needs
-    /// them. See [`flow_cache::LaneCache`] for the rule both caches share.
-    pub(in crate::workspace) flow_history: flow_cache::LaneCache<flow_history::FlowHistory>,
-    /// The browsed worktree's flow files, listed from disk. Cached because the
-    /// snapshot that needs it is rebuilt every frame, and a directory listing
-    /// per frame is not what a panel costs.
-    pub(in crate::workspace) flow_list: flow_cache::LaneCache<flow_browser::listing::FlowListing>,
-    pub(in crate::workspace) flow_browser: flow_browser::FlowBrowser,
+    /// Flow runs and the Flows tab — see [`flow_context::FlowContext`].
+    pub(in crate::workspace) flows: flow_context::FlowContext,
     /// Lazy per-lane state, removed together by lane and project teardown.
     pub(in crate::workspace) lane_scoped:
         HashMap<daruda_store::project::LaneRef, lane_scoped::LaneScoped>,
@@ -973,10 +965,7 @@ impl Workspace {
             command_palette: command::palette::CommandPaletteState::default(),
             lane_switcher: command::lane_switcher::LaneSwitcherState::default(),
             flow_picker: command::flow_picker::FlowPicker::default(),
-            runs: flow_runs::FlowRuns::default(),
-            flow_history: flow_cache::LaneCache::default(),
-            flow_list: flow_cache::LaneCache::default(),
-            flow_browser: flow_browser::FlowBrowser::new(window, cx),
+            flows: flow_context::FlowContext::new(window, cx),
             lane_scoped: HashMap::new(),
             file_tree: left_dock::file_tree_context::FileTreeContext {
                 files_watcher_poll: None,

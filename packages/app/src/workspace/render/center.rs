@@ -30,7 +30,7 @@ use crate::workspace::main_area::render_layout;
 pub(super) fn render_center_content(ws: &Workspace, cx: &mut Context<Workspace>) -> AnyElement {
     if let Some(page) = &ws.workspace_page
         && page.page == crate::workspace::pages::Page::Flows
-        && let Some(snap) = &ws.flow_browser.page_snapshot
+        && let Some(snap) = &ws.flows.browser.page_snapshot
     {
         return crate::workspace::pages::render::flow_content(page, snap, cx);
     }
