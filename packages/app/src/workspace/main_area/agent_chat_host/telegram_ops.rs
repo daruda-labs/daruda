@@ -17,12 +17,13 @@ use crate::telegram::trace;
 use crate::workspace::Workspace;
 use crate::workspace::main_area::pane_tree::PaneId;
 
-use super::view::PromptDispatch;
+use crate::workspace::main_area::agent_chat_pane::view::PromptDispatch;
 
 mod diff_preview;
-mod turn;
 
-pub(in crate::workspace) use turn::{FirstResponseOutcome, PhoneTurn};
+pub(in crate::workspace) use crate::workspace::main_area::agent_chat_pane::phone_turn::{
+    FirstResponseOutcome, PhoneTurn,
+};
 
 /// Leading/trailing characters kept when a response is truncated — head carries
 /// the ask, tail carries the result; the elided middle is usually tool-output
@@ -52,7 +53,9 @@ fn preview_for(text: &str, marker: &str) -> String {
 
 /// The finished run in one line — how long it worked and what its tool calls
 /// did, by category. `None` when there is nothing to say.
-fn run_summary_line(summary: &super::view::RunSummary) -> Option<String> {
+fn run_summary_line(
+    summary: &crate::workspace::main_area::agent_chat_pane::view::RunSummary,
+) -> Option<String> {
     let segments: Vec<String> = summary
         .worked_for
         .map(s::notification::format_duration_compact)
@@ -108,7 +111,7 @@ fn permission_wait_tail(
 /// Diffs on the tool call a permission card belongs to. Empty when the
 /// adapter did not send the tool card before asking, or the card is synthetic.
 fn permission_diffs<'a>(
-    view: &'a super::view::AgentChatView,
+    view: &'a crate::workspace::main_area::agent_chat_pane::view::AgentChatView,
     tool_call_id: &str,
 ) -> &'a [daruda_acp::DiffView] {
     view.items()

@@ -16,7 +16,7 @@ use super::command::lane_switcher::LaneCandidate;
 use super::command::picker::PickerKey;
 use super::command::picker_key::picker_keystroke;
 use crate::lane::availability::LaneAvailability;
-use crate::workspace::main_area::agent_chat_pane::agent_chat_ops::resolve_open_agent_id;
+use crate::workspace::main_area::agent_chat_host::agent_chat_ops::resolve_open_agent_id;
 use crate::workspace::main_area::file_view_pane::images::release_pane_images;
 use crate::workspace::main_area::pane;
 use crate::workspace::main_area::pane_tree::{PaneId, PaneLayout};

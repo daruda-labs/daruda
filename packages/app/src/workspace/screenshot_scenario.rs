@@ -10,7 +10,7 @@
 
 use gpui::{App, Entity, Point, Window, px};
 
-use super::main_area::agent_chat_pane::agent_chat_ops::ThoughtsShot;
+use super::main_area::agent_chat_host::agent_chat_ops::ThoughtsShot;
 use super::main_area::agent_chat_pane::view::ActivityOptionsTab;
 use super::main_area::tab_ops::OpenIntent;
 use super::{ToggleCommandPalette, Workspace, dialog_helpers};

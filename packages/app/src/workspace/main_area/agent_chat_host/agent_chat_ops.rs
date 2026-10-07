@@ -19,11 +19,13 @@ use daruda_store::project::{LaneSessionHost, PaneCwd};
 use gpui::{App, AppContext as _, Context, Entity, Window};
 use std::path::PathBuf;
 
-use super::transcript_defaults::TranscriptDefaults;
-use super::view::{AgentChatView, AgentSessionStatus, TurnOutcome};
 use crate::agent::launch_resolve::{AgentLaunchSpec, account_recipe_for_connect};
 use crate::surface::strings as s;
 use crate::workspace::Workspace;
+use crate::workspace::main_area::agent_chat_pane::transcript_defaults::TranscriptDefaults;
+use crate::workspace::main_area::agent_chat_pane::view::{
+    AgentChatView, AgentSessionStatus, TurnOutcome,
+};
 use crate::workspace::main_area::pane::{AgentChatContent, Pane, PaneContent, TabEntry};
 use crate::workspace::main_area::pane_tree::{PaneId, PaneLayout};
 use daruda_content::link_target::{self, LinkTarget, LocalKind};
@@ -32,16 +34,10 @@ use daruda_content::link_target::{self, LinkTarget, LocalKind};
 /// and small enough against the seed that the tail-more row has a real count.
 #[cfg(feature = "screenshot")]
 const SHOT_TAIL_WINDOW: usize = 3;
-/// The window both call-unit boundary captures run under. It has to be narrower
-/// than the sample seed's longest tool group *and* than the subagent seed's
-/// child count, so each capture has something to hold back; `shot_transcript`'s
-/// tests assert both sides.
 #[cfg(feature = "screenshot")]
-pub(super) const SHOT_GROUP_TAIL_WINDOW: usize = 2;
-/// The call window the thought-run captures run under — narrower than the seed's
-/// one group, so its boundary row has calls to hold back.
-#[cfg(feature = "screenshot")]
-pub(super) const SHOT_THOUGHT_CALL_WINDOW: usize = 5;
+use crate::workspace::main_area::agent_chat_pane::shot_transcript::{
+    SHOT_GROUP_TAIL_WINDOW, SHOT_THOUGHT_CALL_WINDOW,
+};
 
 /// Which state of the thought-run seed a capture shows.
 #[cfg(feature = "screenshot")]
@@ -101,28 +97,9 @@ fn mode_vocabulary(modes: Option<&daruda_acp::ModeStateView>) -> Vec<VocabEntry>
         .unwrap_or_default()
 }
 
-/// The model axis of an advertised option set: the `Model`-category select's
-/// option id, its current value, and its choices. `None` when the agent
-/// advertises no model select — a boolean in that category is not a model list.
-/// The one place that decides which option *is* the model.
-pub(super) fn model_select(
-    options: &[daruda_acp::ConfigOptionView],
-) -> Option<(&str, &str, &[daruda_acp::ConfigChoiceView])> {
-    options
-        .iter()
-        .filter(|o| o.category == daruda_acp::ConfigOptionCategoryView::Model)
-        .find_map(|o| match &o.kind {
-            daruda_acp::ConfigOptionKindView::Select {
-                current_value,
-                options,
-            } => Some((o.id.as_str(), current_value.as_str(), options.as_slice())),
-            daruda_acp::ConfigOptionKindView::Boolean { .. } => None,
-        })
-}
-
 /// The model axis as a vocabulary list. Empty for an agent with no model select.
 fn model_vocabulary(options: &[daruda_acp::ConfigOptionView]) -> Vec<VocabEntry> {
-    model_select(options)
+    crate::workspace::main_area::agent_chat_pane::session_config::model_select(options)
         .map(|(_, _, choices)| {
             choices
                 .iter()
@@ -722,7 +699,7 @@ impl Workspace {
                     cx,
                 );
                 v.set_error(
-                    super::agent_chat_helpers::failure_message(&failure),
+                    crate::workspace::main_area::agent_chat_pane::agent_chat_helpers::failure_message(&failure),
                     failure.remedy(),
                     cx,
                 );
@@ -745,7 +722,10 @@ impl Workspace {
             return;
         };
         view.update(cx, |v, cx| {
-            v.pin_options_for_shot(super::view::ActivityOptionsTab::Fold, cx)
+            v.pin_options_for_shot(
+                crate::workspace::main_area::agent_chat_pane::view::ActivityOptionsTab::Fold,
+                cx,
+            )
         });
     }
 
@@ -755,13 +735,13 @@ impl Workspace {
     #[cfg(feature = "screenshot")]
     pub(in crate::workspace) fn open_agent_chat_options_for_shot(
         &mut self,
-        tab: super::view::ActivityOptionsTab,
+        tab: crate::workspace::main_area::agent_chat_pane::view::ActivityOptionsTab,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        use super::rows::tail::{TailLevel, TailWindow};
         use crate::transcript::display_filter::FilterFacet;
         use crate::transcript::fold_mode::FoldPreset;
+        use crate::workspace::main_area::agent_chat_pane::rows::tail::{TailLevel, TailWindow};
         use daruda_config::TAIL_WINDOW_CHOICES;
 
         self.open_agent_chat_transcript_for_shot(window, cx);
@@ -794,7 +774,7 @@ impl Workspace {
         self.open_agent_chat_pane_seeded(
             None,
             |v, window, cx| {
-                v.seed_transcript(super::shot_transcript::sample_transcript(), window, cx)
+                v.seed_transcript(crate::workspace::main_area::agent_chat_pane::shot_transcript::sample_transcript(), window, cx)
             },
             window,
             cx,
@@ -811,12 +791,12 @@ impl Workspace {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        use super::fold::FoldKey;
+        use crate::workspace::main_area::agent_chat_pane::fold::FoldKey;
 
         self.open_agent_chat_pane_seeded(
             None,
             |v, window, cx| {
-                v.seed_transcript(super::shot_transcript::sole_reply_transcript(), window, cx)
+                v.seed_transcript(crate::workspace::main_area::agent_chat_pane::shot_transcript::sole_reply_transcript(), window, cx)
             },
             window,
             cx,
@@ -846,8 +826,8 @@ impl Workspace {
         self.open_agent_chat_pane_seeded(
             None,
             move |v, window, cx| {
-                v.seed_transcript(super::shot_transcript::sample_transcript(), window, cx);
-                v.seed_plan(super::shot_transcript::shot_plan(stopped), cx);
+                v.seed_transcript(crate::workspace::main_area::agent_chat_pane::shot_transcript::sample_transcript(), window, cx);
+                v.seed_plan(crate::workspace::main_area::agent_chat_pane::shot_transcript::shot_plan(stopped), cx);
             },
             window,
             cx,
@@ -866,7 +846,7 @@ impl Workspace {
         self.open_agent_chat_pane_seeded(
             None,
             |v, window, cx| {
-                v.seed_transcript(super::shot_transcript::interrupted_transcript(), window, cx)
+                v.seed_transcript(crate::workspace::main_area::agent_chat_pane::shot_transcript::interrupted_transcript(), window, cx)
             },
             window,
             cx,
@@ -887,7 +867,7 @@ impl Workspace {
         self.open_agent_chat_pane_seeded(
             None,
             move |v, window, cx| {
-                v.seed_transcript(super::shot_transcript::interrupted_transcript(), window, cx);
+                v.seed_transcript(crate::workspace::main_area::agent_chat_pane::shot_transcript::interrupted_transcript(), window, cx);
                 v.seed_parked_queue_for_shot(armed, cx);
             },
             window,
@@ -906,7 +886,7 @@ impl Workspace {
         self.open_agent_chat_pane_seeded(
             None,
             |v, window, cx| {
-                v.seed_working_transcript(super::shot_transcript::working_transcript(), window, cx)
+                v.seed_working_transcript(crate::workspace::main_area::agent_chat_pane::shot_transcript::working_transcript(), window, cx)
             },
             window,
             cx,
@@ -920,8 +900,8 @@ impl Workspace {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        use super::rows::tail::{TailLevel, TailWindow};
         use crate::transcript::display_filter::FilterFacet;
+        use crate::workspace::main_area::agent_chat_pane::rows::tail::{TailLevel, TailWindow};
 
         self.open_agent_chat_transcript_for_shot(window, cx);
         let pane_id = self.active_runtime().focused_pane_id;
@@ -962,10 +942,12 @@ impl Workspace {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        use super::fold::FoldKey;
-        use super::rows::tail::{TailLevel, TailWindow};
-        use super::shot_transcript::{THOUGHT_RUN_GID, thought_run_transcript};
         use crate::transcript::display_filter::{DisplayFilter, FilterFacet};
+        use crate::workspace::main_area::agent_chat_pane::fold::FoldKey;
+        use crate::workspace::main_area::agent_chat_pane::rows::tail::{TailLevel, TailWindow};
+        use crate::workspace::main_area::agent_chat_pane::shot_transcript::{
+            THOUGHT_RUN_GID, thought_run_transcript,
+        };
 
         self.open_agent_chat_pane_seeded(
             None,
@@ -1010,8 +992,8 @@ impl Workspace {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        use super::fold::FoldKey;
-        use super::rows::tail::{TailLevel, TailWindow};
+        use crate::workspace::main_area::agent_chat_pane::fold::FoldKey;
+        use crate::workspace::main_area::agent_chat_pane::rows::tail::{TailLevel, TailWindow};
 
         self.open_agent_chat_transcript_for_shot(window, cx);
         let pane_id = self.active_runtime().focused_pane_id;
@@ -1036,8 +1018,8 @@ impl Workspace {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        use super::fold::FoldKey;
-        use super::rows::tail::{TailLevel, TailWindow};
+        use crate::workspace::main_area::agent_chat_pane::fold::FoldKey;
+        use crate::workspace::main_area::agent_chat_pane::rows::tail::{TailLevel, TailWindow};
 
         self.open_agent_chat_transcript_for_shot(window, cx);
         let pane_id = self.active_runtime().focused_pane_id;
@@ -1093,14 +1075,14 @@ impl Workspace {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        use super::fold::FoldKey;
-        use super::rows::tail::{TailLevel, TailWindow};
-        use super::shot_transcript::SUBAGENT_PARENT_ID;
+        use crate::workspace::main_area::agent_chat_pane::fold::FoldKey;
+        use crate::workspace::main_area::agent_chat_pane::rows::tail::{TailLevel, TailWindow};
+        use crate::workspace::main_area::agent_chat_pane::shot_transcript::SUBAGENT_PARENT_ID;
 
         self.open_agent_chat_pane_seeded(
             None,
             |v, window, cx| {
-                v.seed_transcript(super::shot_transcript::subagent_transcript(), window, cx)
+                v.seed_transcript(crate::workspace::main_area::agent_chat_pane::shot_transcript::subagent_transcript(), window, cx)
             },
             window,
             cx,
@@ -1364,7 +1346,7 @@ impl Workspace {
     /// Switch the active session mode. Shim for the mode chip: routes the
     /// chosen id into the view, which optimistically updates and sends
     /// `session/set_mode`. No-op when `pane_id` isn't an Agent chat pane.
-    pub(super) fn set_agent_mode(
+    pub(in crate::workspace) fn set_agent_mode(
         &mut self,
         pane_id: PaneId,
         mode_id: String,

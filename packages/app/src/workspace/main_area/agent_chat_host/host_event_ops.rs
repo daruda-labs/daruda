@@ -6,8 +6,8 @@ use gpui::{Context, Entity, Window};
 
 use crate::workspace::main_area::pane_menu::ResourceRightClick;
 
-use super::view::{AgentChatEvent, AgentChatView};
 use crate::workspace::Workspace;
+use crate::workspace::main_area::agent_chat_pane::view::{AgentChatEvent, AgentChatView};
 use crate::workspace::main_area::pane_tree::PaneId;
 
 impl Workspace {

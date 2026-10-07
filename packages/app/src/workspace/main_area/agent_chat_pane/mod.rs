@@ -5,30 +5,22 @@
 //!   itself so a scroll / fold dirties only its cached subtree.
 //! - [`render`] — pure view of an `&AgentChatView` (MVU view purity); event
 //!   closures one-line dispatch into view ops.
-//! - [`agent_chat_ops`] — `Workspace` ops needing workspace state: pane/tab
-//!   construction, desktop notifications, mode/config switching, and misc
-//!   pane accessors.
-//! - [`agent_chat_connect_ops`] — the ACP connection lifecycle: lazy-connect,
-//!   manual retry, the background connect + event pump, and the `/clear` reset.
-//! - [`agent_chat_queue_ops`] — bottom-dock prompt send / queue / edit / cancel
-//!   routing.
-//! - [`telegram_ops`] — Telegram relay: outbound pings and inbound
-//!   phone-relayed replies / permission decisions routed back into a pane.
+//!
+//! The `Workspace` side — pane construction, the connection lifecycle, the
+//! queue routing and the Telegram relay — is `super::agent_chat_host`. It
+//! reaches the view only through `view::host_surface` / `host_commands`.
 
-pub(super) mod agent_chat_connect_ops;
-pub(in crate::workspace) mod agent_chat_event_ops;
 pub(in crate::workspace) mod agent_chat_helpers;
-pub(in crate::workspace) mod agent_chat_ops;
-pub(super) mod agent_chat_queue_ops;
 pub(super) mod autoscroll_ops;
 pub(super) mod config_chip;
 /// Which rows a pane has folded, and the mode those defaults come from.
 pub(in crate::workspace) mod fold;
-mod host_event_ops;
 pub(super) mod mode_chip;
 pub(in crate::workspace) mod output_editor;
 /// A pane-local view preference plus whether the user or config set it.
 pub(in crate::workspace) mod pane_choice;
+/// The phone's side of one agent turn, owned by the view.
+pub(in crate::workspace) mod phone_turn;
 pub(super) mod reconcile;
 pub(in crate::workspace) mod render;
 pub(in crate::workspace) mod rows;
@@ -37,7 +29,6 @@ pub(super) mod session_config;
 #[cfg(feature = "screenshot")]
 pub(in crate::workspace) mod shot_transcript;
 pub(super) mod slash_dispatch;
-pub(in crate::workspace) mod telegram_ops;
 /// Parent/child structure of a conversation's tool calls — the one place the
 /// nesting rules live.
 pub(super) mod tool_hierarchy;

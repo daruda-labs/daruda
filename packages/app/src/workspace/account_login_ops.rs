@@ -28,7 +28,7 @@ use daruda_store::observability::error_report::{ErrorReport, ErrorSeverity};
 use super::{AddManagedAccount, accounts_global, auth_status_global};
 use crate::surface::strings as s;
 use crate::workspace::Workspace;
-use crate::workspace::main_area::agent_chat_pane::agent_chat_ops::resolve_open_agent_id;
+use crate::workspace::main_area::agent_chat_host::agent_chat_ops::resolve_open_agent_id;
 
 /// Timeout for a headless add-account login before it's treated as hung
 /// and cancelled. Generous — the flow blocks on the user completing OAuth

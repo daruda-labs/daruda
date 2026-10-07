@@ -17,14 +17,14 @@ use gpui::Context;
 
 use super::agent_chat_event_ops::PumpStep;
 use super::agent_chat_ops::{agent_name_for, resolve_open_agent_id};
-use super::transcript_defaults::TranscriptDefaults;
-use super::view::{AgentSessionStatus, RuntimePrepPhase};
 use crate::agent::account::PreparedAccount;
 use crate::agent::launch_resolve::{
     AgentLaunchSpec, ConnectCommandError, account_recipe_for_connect, resolve_launch,
 };
 use crate::surface::strings as s;
 use crate::workspace::Workspace;
+use crate::workspace::main_area::agent_chat_pane::transcript_defaults::TranscriptDefaults;
+use crate::workspace::main_area::agent_chat_pane::view::{AgentSessionStatus, RuntimePrepPhase};
 use crate::workspace::main_area::pane_tree::PaneId;
 
 /// Why a connect fails under test, where no adapter is ever launched.
@@ -529,7 +529,8 @@ impl Workspace {
             .and_then(|view| view.read(cx).load_intent());
         let read_only = load_intent.is_some();
         let strict_restore = resume.is_some() && self.requires_exact_resume(pane_id, cx);
-        let snapshot = load_intent == Some(super::view::LoadIntent::Snapshot);
+        let snapshot = load_intent
+            == Some(crate::workspace::main_area::agent_chat_pane::view::LoadIntent::Snapshot);
 
         // A CLI snapshot mirrors one exact session; with nothing to load there
         // is nothing to show, and `session/new` would invent a conversation.

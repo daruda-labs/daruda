@@ -30,13 +30,13 @@ use gpui::{
 
 use super::fold::FoldState;
 use super::pane_choice::PaneChoice;
+use super::phone_turn::{FirstResponseOutcome, PhoneTurn};
 use super::render::{
     DiffEditors, DiffStats, MermaidImages, OutputEditors, ResourceImages, ToolImages,
 };
 use super::rows::tail::TailWindow;
 use super::rows::{FilterMatchIndex, LiveSubagentUnits, RenderRow};
 use super::session_config::SessionConfig;
-use super::telegram_ops::{FirstResponseOutcome, PhoneTurn};
 use super::transcript_defaults::TranscriptDefaults;
 use crate::transcript::command_analysis::CommandAnalysisIndex;
 use crate::transcript::display_filter::DisplayFilter;
@@ -968,7 +968,7 @@ impl AgentChatView {
     /// restore doesn't spin up an agent process per pane. `status` is decided
     /// by the caller (Idle when a cwd is present, Error otherwise).
     #[allow(clippy::too_many_arguments)] // Restore/create seed values — bundling them into a struct only wraps callers.
-    pub(super) fn new(
+    pub(in crate::workspace) fn new(
         pane_id: PaneId,
         window_handle: AnyWindowHandle,
         cwd: Option<PaneCwd>,
@@ -1136,7 +1136,7 @@ impl AgentChatView {
 
     /// Enter the `Connecting` status and repaint. Self-notifying so the event
     /// pump can't advance the connection state without dirtying the pane.
-    pub(super) fn set_connecting(&mut self, cx: &mut Context<Self>) {
+    pub(in crate::workspace) fn set_connecting(&mut self, cx: &mut Context<Self>) {
         self.status = AgentSessionStatus::Connecting;
         cx.notify();
     }
@@ -1187,7 +1187,11 @@ impl AgentChatView {
     /// Enter the `PreparingRuntime` status at `phase` and repaint.
     /// Self-notifying so the runtime-progress drain can't advance the banner
     /// without dirtying the pane.
-    pub(super) fn set_preparing(&mut self, phase: RuntimePrepPhase, cx: &mut Context<Self>) {
+    pub(in crate::workspace) fn set_preparing(
+        &mut self,
+        phase: RuntimePrepPhase,
+        cx: &mut Context<Self>,
+    ) {
         self.status = AgentSessionStatus::PreparingRuntime(phase);
         cx.notify();
     }

@@ -12,13 +12,13 @@ use gpui::{Context, Window};
 use super::super::agent_chat_helpers::{
     cancel_pending_permission, fold_context, fold_key_item_index, permission_card_mut,
 };
-use super::super::agent_chat_ops::model_select;
 use super::super::fold::FoldKey;
 use super::super::pane_choice::PaneChoice;
 use super::super::reconcile::ReconcileScope;
 use super::super::rows::tail::{StepWindow, TailLevel, TailWindow};
 use super::super::rows::{collect_foldable_keys, item_row};
 use super::super::session_config::SessionConfig;
+use super::super::session_config::model_select;
 use super::super::transcript_defaults::TranscriptDefaults;
 use super::super::window_access::WindowAccess;
 use super::list_sync::ListSync;

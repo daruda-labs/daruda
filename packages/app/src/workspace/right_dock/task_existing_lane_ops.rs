@@ -13,7 +13,7 @@ use gpui::{Context, Window};
 
 use super::task_start::{TaskStartError, TaskStarted};
 use crate::workspace::Workspace;
-use crate::workspace::main_area::agent_chat_pane::agent_chat_ops::resolve_open_agent_id;
+use crate::workspace::main_area::agent_chat_host::agent_chat_ops::resolve_open_agent_id;
 use crate::workspace::main_area::pane_tree::PaneId;
 
 /// What the prompt header names for a lane: its branch, else its label

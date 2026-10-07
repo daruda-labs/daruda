@@ -647,10 +647,8 @@ fn hidden_orchestrator_preserves_user_tabs_and_resolves_its_account(cx: &mut Tes
 
 #[gpui::test]
 fn hidden_orchestrator_pulse_emits_completion_and_phone_fallback(cx: &mut TestAppContext) {
-    use crate::workspace::main_area::agent_chat_pane::{
-        telegram_ops::FIRST_RESPONSE_FALLBACK_SECS,
-        view::{ActivitySpan, TurnOutcome},
-    };
+    use crate::workspace::main_area::agent_chat_host::telegram_ops::FIRST_RESPONSE_FALLBACK_SECS;
+    use crate::workspace::main_area::agent_chat_pane::view::{ActivitySpan, TurnOutcome};
     let (window, workspace) = build_workspace(cx);
     let mut outbound =
         cx.update(|cx| crate::telegram::global::install_for_test(true, Some(42), cx));

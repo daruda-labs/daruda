@@ -75,7 +75,7 @@ impl SessionConfig {
     }
 
     /// `id` of the mode the session is in, when the agent advertises modes.
-    pub(super) fn current_mode_id(&self) -> Option<&str> {
+    pub(in crate::workspace) fn current_mode_id(&self) -> Option<&str> {
         self.modes.as_ref().map(|m| m.current.as_str())
     }
 
@@ -93,7 +93,7 @@ impl SessionConfig {
 
     /// The mode the Shift+Tab cycle advances to, or `None` when there is
     /// nothing to cycle (fewer than two advertised modes).
-    pub(super) fn next_mode_id(&self) -> Option<String> {
+    pub(in crate::workspace) fn next_mode_id(&self) -> Option<String> {
         self.modes.as_ref().and_then(next_mode_id)
     }
 
@@ -130,6 +130,25 @@ impl SessionConfig {
             _ => {}
         }
     }
+}
+
+/// The model axis of an advertised option set: the `Model`-category select's
+/// option id, its current value, and its choices. `None` when the agent
+/// advertises no model select — a boolean in that category is not a model list.
+/// The one place that decides which option *is* the model.
+pub(in crate::workspace) fn model_select(
+    options: &[daruda_acp::ConfigOptionView],
+) -> Option<(&str, &str, &[daruda_acp::ConfigChoiceView])> {
+    options
+        .iter()
+        .filter(|o| o.category == daruda_acp::ConfigOptionCategoryView::Model)
+        .find_map(|o| match &o.kind {
+            daruda_acp::ConfigOptionKindView::Select {
+                current_value,
+                options,
+            } => Some((o.id.as_str(), current_value.as_str(), options.as_slice())),
+            daruda_acp::ConfigOptionKindView::Boolean { .. } => None,
+        })
 }
 
 #[cfg(test)]

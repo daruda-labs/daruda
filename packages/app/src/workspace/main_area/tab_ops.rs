@@ -7,7 +7,7 @@ use super::pane_tree::{
     remove_pane_from_layout,
 };
 use crate::workspace::Workspace;
-use crate::workspace::main_area::agent_chat_pane::agent_chat_ops::resolve_open_agent_id;
+use crate::workspace::main_area::agent_chat_host::agent_chat_ops::resolve_open_agent_id;
 use crate::workspace::main_area::file_view_pane::images::release_pane_images;
 
 /// What content a newly split-off pane should hold. Keeps the split entry

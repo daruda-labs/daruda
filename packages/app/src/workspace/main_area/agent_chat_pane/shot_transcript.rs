@@ -18,7 +18,7 @@ use daruda_acp::{
 /// reaches after a Stop: `settle_run_state` turns the running step into
 /// `Cancelled`, so the pair differs in exactly the one entry whose icon is the
 /// thing under review.
-pub(super) fn shot_plan(stopped: bool) -> Vec<PlanEntryView> {
+pub(in crate::workspace) fn shot_plan(stopped: bool) -> Vec<PlanEntryView> {
     let entry = |content: &str, status| PlanEntryView {
         content: content.to_string(),
         priority: PlanPriority::Medium,
@@ -42,8 +42,14 @@ pub(super) fn shot_plan(stopped: bool) -> Vec<PlanEntryView> {
     ]
 }
 
-#[cfg(test)]
-use super::agent_chat_ops::SHOT_GROUP_TAIL_WINDOW;
+/// The window both call-unit boundary captures run under. It has to be narrower
+/// than the sample seed's longest tool group *and* than the subagent seed's
+/// child count, so each capture has something to hold back; `shot_transcript`'s
+/// tests assert both sides.
+pub(in crate::workspace) const SHOT_GROUP_TAIL_WINDOW: usize = 2;
+/// The call window the thought-run captures run under — narrower than the seed's
+/// one group, so its boundary row has calls to hold back.
+pub(in crate::workspace) const SHOT_THOUGHT_CALL_WINDOW: usize = 5;
 
 /// A file modification a sample call reports.
 struct SampleDiff {
@@ -248,7 +254,7 @@ pub(in crate::workspace) fn sample_transcript() -> Vec<ChatItem> {
 /// fold: the conclusion escape keeps that block on screen through the bar. So
 /// the bare chevron is the only control the turn has, and whether it reads as
 /// one is a question only a capture answers.
-pub(super) fn sole_reply_transcript() -> Vec<ChatItem> {
+pub(in crate::workspace) fn sole_reply_transcript() -> Vec<ChatItem> {
     vec![
         ChatItem::UserText(USAGE_PROMPT.to_string()),
         assistant(USAGE_REPLY, MessagePhase::Answer),
@@ -268,7 +274,7 @@ const USAGE_REPLY: &str = "## Usage\n\n> Claude team subscription usage\n\n### L
 /// The seeded conversation cut by a Stop: the run loses its conclusion and is
 /// closed by the marker, then the user asks again. Shows the marker between two
 /// turns, which is the only place it ever appears.
-pub(super) fn interrupted_transcript() -> Vec<ChatItem> {
+pub(in crate::workspace) fn interrupted_transcript() -> Vec<ChatItem> {
     let mut items = sample_transcript();
     // Drop the conclusion — a stopped run never reached one.
     items.pop();
@@ -282,7 +288,7 @@ pub(super) fn interrupted_transcript() -> Vec<ChatItem> {
 const REPROMPT: &str = "Stop there — just show me the lane lookup, not the whole module.";
 
 /// The parent call every [`subagent_transcript`] child names.
-pub(super) const SUBAGENT_PARENT_ID: &str = "shot-subagent";
+pub(in crate::workspace) const SUBAGENT_PARENT_ID: &str = "shot-subagent";
 /// More children than the capture's window keeps, so the card's own boundary
 /// has something to hold back.
 const SUBAGENT_CHILDREN: [(&str, ToolKindView); 7] = [
@@ -393,12 +399,12 @@ pub(in crate::workspace) fn working_transcript() -> Vec<ChatItem> {
 
 /// Id of the first call in [`thought_run_transcript`] — the id its tool group
 /// is keyed by, so a scenario can open it without searching the projection.
-pub(super) const THOUGHT_RUN_GID: &str = "shot-thought-0";
+pub(in crate::workspace) const THOUGHT_RUN_GID: &str = "shot-thought-0";
 
 /// One tool group narrated with a thought before most calls: longer than the
 /// call window, mixed categories, and one failed call so the rollup turns.
 /// `working` ends on a still-streaming thought instead of the answer.
-pub(super) fn thought_run_transcript(working: bool) -> Vec<ChatItem> {
+pub(in crate::workspace) fn thought_run_transcript(working: bool) -> Vec<ChatItem> {
     let steps: [(Option<&str>, Call); 9] = [
         (
             None,
@@ -624,10 +630,10 @@ mod tests {
     /// the window, would capture a state the feature does not have.
     #[test]
     fn the_thought_run_is_one_group_longer_than_its_window() {
-        use super::super::agent_chat_ops::SHOT_THOUGHT_CALL_WINDOW;
         use super::super::fold::FoldState;
         use super::super::rows::tail::StepWindow;
         use super::super::rows::{LiveSubagentUnits, RowKind, project};
+        use super::SHOT_THOUGHT_CALL_WINDOW;
         use crate::transcript::display_filter::DisplayFilter;
 
         for working in [false, true] {

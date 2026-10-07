@@ -9,7 +9,7 @@ use gpui::Context;
 
 use super::super::agent_chat_helpers::fold_context;
 use super::super::fold::FoldKey;
-use super::super::telegram_ops::PhoneTurn;
+use super::super::phone_turn::PhoneTurn;
 use super::{
     AgentChatView, AgentSessionStatus, EmptySubmitOutcome, EscapeOutcome, FirstResponseOutcome,
     PhoneAckEffect, PromptDispatch, PromptId, PromptOrigin, QueuedPrompt,

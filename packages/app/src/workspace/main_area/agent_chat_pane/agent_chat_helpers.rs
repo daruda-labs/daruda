@@ -1,14 +1,9 @@
 //! GPUI-free (and view-context) helpers for the agent chat pane, shared by the
 //! renderer, the row projection, the reconcilers, and the `Workspace` ops.
 //!
-//! Split out of [`agent_chat_ops`](super::agent_chat_ops) — whose `impl
-//! Workspace` methods (notification, pane construction, mode/config; the
-//! connect lifecycle and prompt queue live in their own sibling files) need
-//! `Workspace` state — because these are a distinct responsibility cluster
-//! (pure model/derivation helpers + the diff-model builders) with their own
-//! test fixtures. Everything here is either GPUI-free or takes a
-//! `Context<AgentChatView>` (diff-editor creation); none of it needs
-//! `Workspace` state.
+//! Pure model/derivation helpers and the diff-model builders. Everything
+//! here is either GPUI-free or takes a `Context<AgentChatView>`
+//! (diff-editor creation); none of it needs `Workspace` state.
 
 use daruda_acp::DiffView;
 use daruda_store::observability::error_report::{ErrorReport, ErrorSeverity};

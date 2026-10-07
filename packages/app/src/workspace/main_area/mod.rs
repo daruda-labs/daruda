@@ -6,6 +6,7 @@
 //! draggable dividers between siblings of a `Split`. Lives next to
 //! `pane_header` (only called from here) so the two stay in sync.
 
+pub(in crate::workspace) mod agent_chat_host;
 pub(in crate::workspace) mod agent_chat_pane;
 pub(in crate::workspace) mod bottom_dock;
 pub(in crate::workspace) mod context;

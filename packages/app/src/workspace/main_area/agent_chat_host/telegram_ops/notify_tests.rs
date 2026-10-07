@@ -75,8 +75,8 @@ async fn a_permission_wait_says_which_project_agent_and_tab_asks(cx: &mut gpui::
             .agent_chat_view(pane)
             .unwrap()
             .read(cx)
-            .agent_name
-            .clone();
+            .agent_name()
+            .to_owned();
         assert_eq!(
             ping.header,
             format!(
@@ -95,13 +95,18 @@ async fn a_failed_turn_tells_the_phone_why(cx: &mut gpui::TestAppContext) {
     workspace.update(cx, |ws, cx| {
         let view = ws.agent_chat_view(pane).cloned().unwrap();
         view.update(cx, |v, _| {
-            v.items.push(ChatItem::UserText("go".into()));
-            v.items
-                .push(ChatItem::Failure(daruda_acp::AcpFailure::TransportClosed {
+            v.items_mut_for_test().push(ChatItem::UserText("go".into()));
+            v.items_mut_for_test().push(ChatItem::Failure(
+                daruda_acp::AcpFailure::TransportClosed {
                     message: "adapter exited".into(),
-                }));
+                },
+            ));
         });
-        ws.fire_activity_completion(pane, super::super::view::TurnOutcome::Errored, cx);
+        ws.fire_activity_completion(
+            pane,
+            crate::workspace::main_area::agent_chat_pane::view::TurnOutcome::Errored,
+            cx,
+        );
         let ping = sent(&mut outbound);
         assert_eq!(ping.header, ws.telegram_header(pane, cx));
         let TelegramTail::Plain(tail) = ping.tail else {
@@ -119,12 +124,18 @@ async fn a_dead_session_tells_the_phone_its_error(cx: &mut gpui::TestAppContext)
     workspace.update(cx, |ws, cx| {
         let view = ws.agent_chat_view(pane).cloned().unwrap();
         view.update(cx, |v, _| {
-            v.status = super::super::view::AgentSessionStatus::Error {
-                message: "adapter exited with 137".into(),
-                remedy: daruda_acp::Remedy::NoneAvailable,
-            };
+            v.set_status_for_test(
+                crate::workspace::main_area::agent_chat_pane::view::AgentSessionStatus::Error {
+                    message: "adapter exited with 137".into(),
+                    remedy: daruda_acp::Remedy::NoneAvailable,
+                },
+            );
         });
-        ws.fire_activity_completion(pane, super::super::view::TurnOutcome::Errored, cx);
+        ws.fire_activity_completion(
+            pane,
+            crate::workspace::main_area::agent_chat_pane::view::TurnOutcome::Errored,
+            cx,
+        );
         let TelegramTail::Plain(tail) = sent(&mut outbound).tail else {
             panic!("plain");
         };
@@ -137,7 +148,11 @@ async fn a_dead_session_tells_the_phone_its_error(cx: &mut gpui::TestAppContext)
 async fn a_stopped_turn_sends_nothing(cx: &mut gpui::TestAppContext) {
     let (mut outbound, workspace, pane) = bridged_pane(cx);
     workspace.update(cx, |ws, cx| {
-        ws.fire_activity_completion(pane, super::super::view::TurnOutcome::Stopped, cx);
+        ws.fire_activity_completion(
+            pane,
+            crate::workspace::main_area::agent_chat_pane::view::TurnOutcome::Stopped,
+            cx,
+        );
     });
     assert!(outbound.next().now_or_never().is_none());
 }
@@ -172,7 +187,7 @@ async fn a_completed_run_is_summarised_in_one_line(cx: &mut gpui::TestAppContext
                 unreachable!()
             };
             nested_call.parent_tool_id = Some("e1".into());
-            v.items = vec![
+            v.set_items_for_test(vec![
                 ChatItem::UserText("go".into()),
                 tool("e1", K::Edit),
                 tool("e2", K::Edit),
@@ -184,10 +199,14 @@ async fn a_completed_run_is_summarised_in_one_line(cx: &mut gpui::TestAppContext
                     message_id: None,
                     phase: Default::default(),
                 },
-            ];
+            ]);
             v.record_turn_for_test(std::time::Duration::from_secs(125));
         });
-        ws.fire_activity_completion(pane, super::super::view::TurnOutcome::Completed, cx);
+        ws.fire_activity_completion(
+            pane,
+            crate::workspace::main_area::agent_chat_pane::view::TurnOutcome::Completed,
+            cx,
+        );
         let ping = sent(&mut outbound);
         let summary = ping.header.lines().last().expect("a header").to_string();
         assert!(ping.header.starts_with(&ws.telegram_header(pane, cx)));
@@ -233,7 +252,7 @@ async fn a_permission_to_edit_a_file_shows_the_edit(cx: &mut gpui::TestAppContex
                 old_text: Some("old line\n".into()),
                 new_text: "new line\n".into(),
             }];
-            v.items.push(ChatItem::ToolCall(call));
+            v.items_mut_for_test().push(ChatItem::ToolCall(call));
         });
         ws.relay_permission_wait_to_telegram(pane, &prompt, cx);
         let TelegramTail::Markdown(tail) = sent(&mut outbound).tail else {

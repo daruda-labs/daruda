@@ -532,7 +532,8 @@ async fn a_turn_whose_only_answer_was_acked_is_not_reported_twice(cx: &mut gpui:
         let view = ws.agent_chat_view(pane_id).cloned().expect("view");
         view.update(cx, |v, _| {
             v.start_phone_turn_for_test(std::time::Instant::now());
-            v.items.push(answer("m1", "## Usage\n48% used"));
+            v.items_mut_for_test()
+                .push(answer("m1", "## Usage\n48% used"));
             assert!(
                 v.take_phone_first_response_for_test(),
                 "the ack goes out for the turn's first message"
@@ -550,9 +551,10 @@ async fn a_turn_whose_only_answer_was_acked_is_not_reported_twice(cx: &mut gpui:
         let view = ws.agent_chat_view(pane_id).cloned().expect("view");
         view.update(cx, |v, _| {
             v.start_phone_turn_for_test(std::time::Instant::now());
-            v.items.push(answer("m2", "working on it"));
+            v.items_mut_for_test().push(answer("m2", "working on it"));
             assert!(v.take_phone_first_response_for_test());
-            v.items.push(answer("m3", "here is the answer"));
+            v.items_mut_for_test()
+                .push(answer("m3", "here is the answer"));
         });
         let (_, tail) = ws
             .telegram_completion_parts(pane_id, cx)
@@ -576,12 +578,13 @@ async fn a_turns_first_response_answers_it_once(cx: &mut gpui::TestAppContext) {
         let view = ws.agent_chat_view(pane_id).cloned().expect("view");
         view.update(cx, |v, _| {
             v.start_phone_turn_for_test(std::time::Instant::now());
-            v.items.push(daruda_acp::ChatItem::AssistantText {
-                text: "on it".to_string(),
-                streaming: false,
-                message_id: Some("m1".to_string()),
-                phase: Default::default(),
-            });
+            v.items_mut_for_test()
+                .push(daruda_acp::ChatItem::AssistantText {
+                    text: "on it".to_string(),
+                    streaming: false,
+                    message_id: Some("m1".to_string()),
+                    phase: Default::default(),
+                });
             assert!(
                 v.take_phone_first_response_for_test(),
                 "the turn's first response is the one ack that goes out"
@@ -634,15 +637,20 @@ async fn a_turn_that_errored_does_not_leave_its_ledger_behind(cx: &mut gpui::Tes
         let view = ws.agent_chat_view(pane_id).cloned().expect("view");
         view.update(cx, |v, _| {
             v.start_phone_turn_for_test(std::time::Instant::now());
-            v.items.push(daruda_acp::ChatItem::AssistantText {
-                text: "partial answer".to_string(),
-                streaming: false,
-                message_id: Some("m1".to_string()),
-                phase: Default::default(),
-            });
+            v.items_mut_for_test()
+                .push(daruda_acp::ChatItem::AssistantText {
+                    text: "partial answer".to_string(),
+                    streaming: false,
+                    message_id: Some("m1".to_string()),
+                    phase: Default::default(),
+                });
             assert!(v.take_phone_first_response_for_test());
         });
-        ws.fire_activity_completion(pane_id, super::super::view::TurnOutcome::Errored, cx);
+        ws.fire_activity_completion(
+            pane_id,
+            crate::workspace::main_area::agent_chat_pane::view::TurnOutcome::Errored,
+            cx,
+        );
         assert!(
             ws.agent_chat_view(pane_id)
                 .expect("view")
@@ -711,7 +719,7 @@ async fn telegram_reply_ack_paths_cover_queue_overdue_and_empty_permission(
         let view = ws.agent_chat_view(pane_id).cloned().expect("pane present");
         assert_eq!(
             view.read(cx)
-                .queue
+                .queue()
                 .pending_prompts
                 .iter()
                 .map(|q| q.text.as_str())
@@ -880,7 +888,7 @@ async fn for_each_workspace_uuid_guard_dispatches_to_only_the_matching_pane(
         let view = ws.agent_chat_view(pane_a).cloned().expect("pane a present");
         assert_eq!(
             view.read(cx)
-                .queue
+                .queue()
                 .pending_prompts
                 .iter()
                 .map(|q| q.text.as_str())
@@ -892,7 +900,7 @@ async fn for_each_workspace_uuid_guard_dispatches_to_only_the_matching_pane(
     workspace_b.read_with(cx, |ws, cx| {
         let view = ws.agent_chat_view(pane_b).cloned().expect("pane b present");
         assert!(
-            view.read(cx).queue.pending_prompts.is_empty(),
+            view.read(cx).queue().pending_prompts.is_empty(),
             "the non-matching workspace's pane must not be touched"
         );
     });
@@ -933,15 +941,15 @@ async fn an_outstanding_permission_declined_while_present_is_offered_once_the_us
     workspace.update(cx, |ws, cx| {
         let view = ws.agent_chat_view(pane).cloned().expect("view present");
         view.update(cx, |v, _| {
-            v.items = vec![ChatItem::Permission(PermissionItem {
+            v.set_items_for_test(vec![ChatItem::Permission(PermissionItem {
                 id: 7,
                 tool_call_id: String::new(),
                 tool_title: Some("Write /tmp/x.rs".to_string()),
                 raw_input_summary: None,
                 options: options.clone(),
                 resolved: None,
-            })];
-            v.pending_permissions.insert(7);
+            })]);
+            v.pending_permissions_mut_for_test().insert(7);
         });
 
         // Fires while the user is at the desk: declined, nothing queued.
@@ -987,8 +995,8 @@ async fn an_outstanding_permission_declined_while_present_is_offered_once_the_us
     workspace.update(cx, |ws, cx| {
         let view = ws.agent_chat_view(pane).cloned().expect("view present");
         view.update(cx, |v, _| {
-            v.pending_permissions.remove(&7);
-            if let Some(ChatItem::Permission(p)) = v.items.first_mut() {
+            v.pending_permissions_mut_for_test().remove(&7);
+            if let Some(ChatItem::Permission(p)) = v.items_mut_for_test().first_mut() {
                 p.resolved = Some(PermissionResolution::Chosen("allow_once".to_string()));
             }
         });
@@ -996,7 +1004,9 @@ async fn an_outstanding_permission_declined_while_present_is_offered_once_the_us
         assert!(outbound.next().now_or_never().is_none());
         // The bookkeeping entry went with it rather than accumulating.
         assert!(
-            view.read(cx).permissions_told_to_phone.is_empty(),
+            view.read(cx)
+                .permissions_told_to_phone_for_test()
+                .is_empty(),
             "a resolved request must not leave its id behind"
         );
     });
@@ -1026,17 +1036,19 @@ async fn permission_delivery_history_tracks_recipient_and_connection(
     cx.run_until_parked();
 
     let options = vec![choice("allow_once", "Allow", PermissionKindView::AllowOnce)];
-    let add_request = |view: &mut super::super::view::AgentChatView| {
-        view.items.push(ChatItem::Permission(PermissionItem {
-            id: 0,
-            tool_call_id: String::new(),
-            tool_title: Some("Write /tmp/x.rs".into()),
-            raw_input_summary: None,
-            options: options.clone(),
-            resolved: None,
-        }));
-        view.pending_permissions.insert(0);
-    };
+    let add_request =
+        |view: &mut crate::workspace::main_area::agent_chat_pane::view::AgentChatView| {
+            view.items_mut_for_test()
+                .push(ChatItem::Permission(PermissionItem {
+                    id: 0,
+                    tool_call_id: String::new(),
+                    tool_title: Some("Write /tmp/x.rs".into()),
+                    raw_input_summary: None,
+                    options: options.clone(),
+                    resolved: None,
+                }));
+            view.pending_permissions_mut_for_test().insert(0);
+        };
 
     workspace.update(cx, |ws, cx| {
         let view = ws.agent_chat_view(pane).cloned().unwrap();
@@ -1170,9 +1182,9 @@ async fn respond_bot_permission_routes_by_id_under_concurrency(cx: &mut gpui::Te
                 ws.active_runtime_mut().panes.push(pane);
                 let view = ws.agent_chat_view(id).cloned().expect("view present");
                 view.update(cx, |v, _| {
-                    v.items = vec![card(100), card(200)];
-                    v.pending_permissions.insert(100);
-                    v.pending_permissions.insert(200);
+                    v.set_items_for_test(vec![card(100), card(200)]);
+                    v.pending_permissions_mut_for_test().insert(100);
+                    v.pending_permissions_mut_for_test().insert(200);
                 });
                 id
             })
@@ -1201,10 +1213,10 @@ async fn respond_bot_permission_routes_by_id_under_concurrency(cx: &mut gpui::Te
     workspace.read_with(cx, |ws, cx| {
         let view = ws.agent_chat_view(pane).cloned().unwrap();
         let view = view.read(cx);
-        let ChatItem::Permission(first) = &view.items[0] else {
+        let ChatItem::Permission(first) = &view.items()[0] else {
             panic!("expected first permission card");
         };
-        let ChatItem::Permission(second) = &view.items[1] else {
+        let ChatItem::Permission(second) = &view.items()[1] else {
             panic!("expected second permission card");
         };
         assert_eq!(
@@ -1231,7 +1243,7 @@ async fn respond_bot_permission_routes_by_id_under_concurrency(cx: &mut gpui::Te
     workspace.read_with(cx, |ws, cx| {
         let view = ws.agent_chat_view(pane).cloned().unwrap();
         let view = view.read(cx);
-        let ChatItem::Permission(second) = &view.items[1] else {
+        let ChatItem::Permission(second) = &view.items()[1] else {
             panic!("expected second permission card");
         };
         assert_eq!(

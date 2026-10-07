@@ -2,6 +2,8 @@
 //! internals, listed in one place so the coupling stays visible. A
 //! production caller uses `host_surface` instead.
 
+use std::collections::HashSet;
+
 use daruda_acp::ChatItem;
 use gpui::ListState;
 
@@ -31,6 +33,14 @@ impl AgentChatView {
 
     pub(in crate::workspace) fn items_mut_for_test(&mut self) -> &mut Vec<ChatItem> {
         &mut self.items
+    }
+
+    pub(in crate::workspace) fn pending_permissions_mut_for_test(&mut self) -> &mut HashSet<u64> {
+        &mut self.pending_permissions
+    }
+
+    pub(in crate::workspace) fn permissions_told_to_phone_for_test(&self) -> &HashSet<u64> {
+        &self.permissions_told_to_phone
     }
 
     pub(in crate::workspace) fn session_config_mut_for_test(&mut self) -> &mut SessionConfig {

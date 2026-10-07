@@ -9,12 +9,14 @@ use gpui::{Context, Window};
 
 use daruda_store::observability::error_report::{ErrorReport, ErrorSeverity};
 
-use super::slash_dispatch::{LocalSlashCommand, SlashDispatch, classify_slash};
-use super::view::{
-    EmptySubmitOutcome, EscapeOutcome, PhoneAckEffect, PromptDispatch, PromptId, PromptOrigin,
-};
 use crate::surface::strings as s;
 use crate::workspace::Workspace;
+use crate::workspace::main_area::agent_chat_pane::slash_dispatch::{
+    LocalSlashCommand, SlashDispatch, classify_slash,
+};
+use crate::workspace::main_area::agent_chat_pane::view::{
+    EmptySubmitOutcome, EscapeOutcome, PhoneAckEffect, PromptDispatch, PromptId, PromptOrigin,
+};
 use crate::workspace::main_area::pane_tree::PaneId;
 
 impl Workspace {

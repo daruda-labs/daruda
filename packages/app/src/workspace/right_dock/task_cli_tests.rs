@@ -3,7 +3,7 @@
 
 use super::*;
 use crate::control::result::ControlError;
-use crate::workspace::main_area::agent_chat_pane::agent_chat_event_ops::PumpStep;
+use crate::workspace::main_area::agent_chat_host::agent_chat_event_ops::PumpStep;
 use crate::workspace::main_area::agent_chat_pane::view::{
     AgentSessionStatus, LoadIntent, PromptDispatch,
 };

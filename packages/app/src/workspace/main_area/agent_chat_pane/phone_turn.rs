@@ -9,7 +9,7 @@
 //! The state is sealed. [`PhoneTurn`] is a newtype over a private [`State`],
 //! so every transition goes through a method here and no caller can put a turn
 //! into a shape the relays would misread. GPUI-free: it reads `ChatItem`s and
-//! answers questions, and the [`super`] layer renders and sends.
+//! answers questions, and the Telegram relay renders and sends.
 
 use daruda_acp::ChatItem;
 
@@ -206,7 +206,7 @@ impl PhoneTurn {
     /// The completion relay bounds its scan to it, so a turn that produced no
     /// text of its own reports exactly that instead of handing the sender an
     /// earlier turn's answer as if it were this one's.
-    pub(super) fn items_anchor(&self) -> usize {
+    pub(in crate::workspace) fn items_anchor(&self) -> usize {
         match &self.0 {
             State::Waiting {
                 items_len_at_start, ..
@@ -223,7 +223,7 @@ impl PhoneTurn {
     /// An unnamed message never matches: without identity the honest answer is
     /// "cannot tell", and repeating an answer is the lesser failure against
     /// swallowing one.
-    pub(super) fn already_sent(&self, message_id: Option<&str>) -> bool {
+    pub(in crate::workspace) fn already_sent(&self, message_id: Option<&str>) -> bool {
         match (&self.0, message_id) {
             (
                 State::Answered {
