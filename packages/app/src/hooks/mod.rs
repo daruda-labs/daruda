@@ -8,7 +8,6 @@
 //!
 pub mod flow_watcher;
 pub mod handler;
-pub mod installer;
 pub mod jsonl_watcher;
 pub mod mcp_watcher;
 pub mod pty_tracker;

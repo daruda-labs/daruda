@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # daruda Claude Code hook notifier — extracted on first install by
-# `app/src/hooks/installer.rs`. Forwards the hook event (with the
+# `packages/agent/src/hooks/installer.rs`. Forwards the hook event (with the
 # original JSON payload on stdin) to whichever `daruda` binary is
 # resolvable, then exits.
 #

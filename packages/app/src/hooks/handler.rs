@@ -55,7 +55,7 @@ fn run_inner(_event_type: &str) -> Result<(), Box<dyn std::error::Error>> {
         Err(_) => {
             // Unknown / future event type, or schema drift. Silent
             // skip — daruda only subscribes to a subset of Claude Code's
-            // hook events (see `installer::SUBSCRIBED_EVENTS`).
+            // hook events (see `daruda_agent::hooks::installer::SUBSCRIBED_EVENTS`).
             return Ok(());
         }
     };

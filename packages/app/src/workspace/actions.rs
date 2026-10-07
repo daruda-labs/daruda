@@ -632,8 +632,8 @@ impl Workspace {
         _window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let result = match crate::hooks::installer::InstallerPaths::from_env() {
-            Ok(paths) => crate::hooks::installer::install(&paths),
+        let result = match daruda_agent::hooks::installer::InstallerPaths::from_env() {
+            Ok(paths) => daruda_agent::hooks::installer::install(&paths),
             Err(e) => Err(e),
         };
         match result {
@@ -663,8 +663,8 @@ impl Workspace {
         _window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let result = match crate::hooks::installer::InstallerPaths::from_env() {
-            Ok(paths) => crate::hooks::installer::uninstall(&paths),
+        let result = match daruda_agent::hooks::installer::InstallerPaths::from_env() {
+            Ok(paths) => daruda_agent::hooks::installer::uninstall(&paths),
             Err(e) => Err(e),
         };
         match result {

@@ -1076,8 +1076,8 @@ impl Workspace {
                 },
                 claude_status_enabled: config.claude_status.enable,
                 stale_threshold_secs: config.claude_status.stale_threshold_secs,
-                claude_hooks_installed: crate::hooks::installer::InstallerPaths::from_env()
-                    .map(|p| crate::hooks::installer::is_installed(&p))
+                claude_hooks_installed: daruda_agent::hooks::installer::InstallerPaths::from_env()
+                    .map(|p| daruda_agent::hooks::installer::is_installed(&p))
                     .unwrap_or(false),
                 pty_tracker,
                 pty_claude_bindings: HashMap::new(),

@@ -7,7 +7,7 @@
 //! single-threaded process boundary.
 //!
 //! `DARUDA_BIN` is the one shell-only exception. The installed hook reads it
-//! in `packages/app/src/hooks/notify.sh`; Rust neither reads nor writes it.
+//! in `packages/agent/src/hooks/notify.sh`; Rust neither reads nor writes it.
 
 use std::env::VarError;
 use std::ffi::OsString;

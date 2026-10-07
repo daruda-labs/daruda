@@ -60,7 +60,7 @@ WHITELIST=(
     "packages/store/src/observability/log_writer.rs"
     "packages/app/src/workspace/main_area/task_edit_pane/mod.rs"
     "packages/app/src/workspace/main_area/task_edit_pane/task_edit_ops.rs"
-    "packages/app/src/hooks/installer.rs"
+    "packages/agent/src/hooks/installer.rs"
     "packages/store/src/tasks/prompt_file.rs"
     "packages/app/src/workspace/flow_paths.rs"
 )
