@@ -3,11 +3,10 @@
 //! Properties under test:
 //! - the report lands at the head of `error_history`,
 //! - the live toast queue surfaces it,
-//! - workspace wrappers can dismiss it,
-//! - history caps at its workspace-owned limit.
+//! - workspace wrappers can dismiss it.
 
 use daruda_store::observability::error_report::{ErrorReport, ErrorSeverity};
-use gpui::TestAppContext;
+use gpui::{AppContext, TestAppContext};
 
 use super::build_workspace;
 
@@ -48,22 +47,6 @@ async fn report_error_appends_to_history_and_pushes_toast(cx: &mut TestAppContex
             ws.error_toasts(cx).is_empty(),
             "dismiss wrapper clears toast"
         );
-    });
-
-    workspace.update(cx, |ws, cx| {
-        for i in 0..60 {
-            let report = ErrorReport::new(format!("Err {i}"))
-                .severity(ErrorSeverity::Warning)
-                .build();
-            ws.report_error(report, cx);
-        }
-    });
-
-    workspace.read_with(cx, |ws, _cx| {
-        let history = ws.error_history();
-        assert_eq!(history.len(), 50, "history capped at 50");
-        assert_eq!(history[0].title, "Err 59", "newest first");
-        assert_eq!(history[49].title, "Err 10", "oldest 10 dropped");
     });
 }
 
@@ -119,10 +102,38 @@ async fn report_pane_error_fills_status_bar_and_toast(cx: &mut TestAppContext) {
             "panes should be untouched"
         );
 
-        // History records it for the (future) "Show recent errors"
-        // command palette entry.
         assert_eq!(ws.error_history().len(), 1);
     });
+}
+
+/// The pinned pane-spawn message describes a failure the user can retry;
+/// once a pane spawns, the message no longer describes anything.
+#[gpui::test]
+async fn a_successful_spawn_clears_the_pane_error_pin(cx: &mut TestAppContext) {
+    use crate::workspace::main_area::pane::PaneSpawnError;
+    use daruda_terminal::pty::PtyError;
+
+    let (window, workspace) = build_workspace(cx);
+    workspace.update(cx, |ws, cx| {
+        ws.report_pane_error(
+            "Add tab",
+            PaneSpawnError::Pty(PtyError::SpawnShell("synthetic shell failure".into())),
+            cx,
+        );
+    });
+    assert!(workspace.read_with(cx, |ws, _| ws.last_error.is_some()));
+
+    cx.update_window(window.into(), |_, window, cx| {
+        workspace.update(cx, |ws, cx| {
+            ws.create_pane(window, cx).expect("retry spawns a pane");
+        });
+    })
+    .expect("window alive");
+
+    assert!(
+        workspace.read_with(cx, |ws, _| ws.last_error.is_none()),
+        "a successful spawn clears the pin",
+    );
 }
 
 /// A session advisory has to reach the user, not just the log file. Two call

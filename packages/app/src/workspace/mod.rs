@@ -398,12 +398,12 @@ pub struct Workspace {
     /// ops route through the 3-layer error pipeline (toast → details
     /// modal → NDJSON log) via `report_error`; do not reach for
     /// `last_error` for those. New IO/exec failures belong in the
-    /// pipeline.
+    /// pipeline. Cleared by the next successful spawn — the retry.
     pub(in crate::workspace) last_error: Option<gpui::SharedString>,
-    /// Recent surfaced [`ErrorReport`]s, newest-first. Capped at 50
-    /// entries — older reports drop out as new ones land. Long-tail
-    /// archive that survives toast dismissal so the "Show recent
-    /// errors" command palette entry can read it.
+    /// Every report `report_error` surfaced, newest-first. Test-only: the
+    /// toast queue caps and merges reports, so tests that count them read
+    /// this instead.
+    #[cfg(test)]
     pub(in crate::workspace) error_history:
         Vec<daruda_store::observability::error_report::ErrorReport>,
     /// Toast notification layer — owns the live queue, the 1 Hz expiry
@@ -991,6 +991,7 @@ impl Workspace {
             lanes_scroll_handle: gpui::ScrollHandle::new(),
             right_panel_scroll_handle: gpui::ScrollHandle::new(),
             last_error: None,
+            #[cfg(test)]
             error_history: Vec::new(),
             toast_layer,
             cached_window_bounds: None,

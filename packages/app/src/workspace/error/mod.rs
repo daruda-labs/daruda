@@ -1,9 +1,8 @@
 //! Workspace-side error reporting entry point.
 //!
 //! Every surfaced error flows through [`Workspace::report_error`], which
-//! routes it to three surfaces: the on-disk NDJSON log ([`LogWriter::global`]),
-//! the in-memory `error_history` ring (capped), and the live toast
-//! ([`ToastLayer`](super::toast_layer::ToastLayer)).
+//! routes it to two surfaces: the on-disk NDJSON log ([`LogWriter::global`])
+//! and the live toast ([`ToastLayer`](super::toast_layer::ToastLayer)).
 
 pub(in crate::workspace) mod modal;
 pub(in crate::workspace) mod toast;
@@ -14,9 +13,6 @@ use gpui::Context;
 
 use self::toast::ToastId;
 use crate::workspace::Workspace;
-
-/// Cap on the in-memory ring of recent reports.
-const HISTORY_CAP: usize = 50;
 
 impl Workspace {
     /// Surface an error to the user and the on-disk log. Safe to call
@@ -30,13 +26,10 @@ impl Workspace {
             writer.append(report.clone());
         }
 
-        // 2. Long-tail history (50 most recent, newest first).
+        #[cfg(test)]
         self.error_history.insert(0, report.clone());
-        if self.error_history.len() > HISTORY_CAP {
-            self.error_history.truncate(HISTORY_CAP);
-        }
 
-        // 3. Live toast — queue, expiry sweep, and render owned by
+        // 2. Live toast — queue, expiry sweep, and render owned by
         // ToastLayer. Updating the child entity is re-entrant-safe in
         // GPUI (parent may update child freely). ToastLayer calls its
         // own cx.notify(); no Workspace repaint needed here.
@@ -55,8 +48,7 @@ impl Workspace {
         self.toast_layer.update(cx, |tl, cx| tl.dismiss_id(id, cx));
     }
 
-    /// Read-only accessor for the in-memory history ring. Used by
-    /// tests and (future) command-palette surfaces.
+    /// Every report surfaced so far, newest-first.
     #[cfg(test)]
     pub(in crate::workspace) fn error_history(&self) -> &[ErrorReport] {
         &self.error_history

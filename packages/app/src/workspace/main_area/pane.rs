@@ -1281,6 +1281,9 @@ impl Workspace {
         // the session to the pane's measured cols/rows on first layout.
         let session =
             TerminalSession::new(TerminalDims::default(), config).map_err(PaneSpawnError::Vt)?;
+        // Every spawn path ends here, so a success is the retry the pinned
+        // pane-spawn message asked for.
+        self.last_error = None;
 
         // Wakes the stdout poll out of its idle backoff the instant
         // bytes head for the PTY, so the echo is drained at the fast
