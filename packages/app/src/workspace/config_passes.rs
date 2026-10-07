@@ -139,19 +139,16 @@ impl Workspace {
         for (_, view) in self.every_agent_chat() {
             view.update(cx, |view, cx| {
                 if telegram_recipient_changed {
-                    view.permissions_told_to_phone.clear();
+                    view.forget_permissions_told_to_phone();
                 }
                 let name = agent_names
                     .iter()
-                    .find(|(id, _)| id == &view.agent_id)
+                    .find(|(id, _)| id == view.agent_id())
                     .map(|(_, name)| name.clone())
-                    .unwrap_or_else(|| view.agent_id.clone());
-                if view.agent_name != name {
-                    view.agent_name = name;
-                    cx.notify();
-                }
+                    .unwrap_or_else(|| view.agent_id().to_owned());
+                view.set_agent_name(name, cx);
                 let defaults = TranscriptDefaults::resolve(
-                    self.agents.iter().find(|a| a.id == view.agent_id),
+                    self.agents.iter().find(|a| a.id == view.agent_id()),
                     self.agent_reader_defaults,
                 );
                 view.reseed_transcript_defaults(&defaults, cx);
@@ -332,8 +329,7 @@ impl Workspace {
         for view in views {
             view.update(cx, |view, cx| {
                 if delta.terminal_palette {
-                    view.assets.clear_mermaid();
-                    view.reconcile_mermaid(!crate::ui::theme::agent_chat_syntax_is_light(cx), cx);
+                    view.rerender_mermaid_after_palette_change(cx);
                 }
                 if diff_palette {
                     // Push the new palette name before the pass reads it: an
@@ -344,8 +340,8 @@ impl Workspace {
                 if delta.preferred_editor {
                     view.set_preferred_editor(&preferred_editor);
                 }
-                if delta.agent_chat_reading_width && view.content_width.is_reading() {
-                    view.list_state.remeasure();
+                if delta.agent_chat_reading_width {
+                    view.reading_width_changed();
                 }
                 cx.notify();
             });

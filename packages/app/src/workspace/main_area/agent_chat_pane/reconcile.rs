@@ -253,6 +253,16 @@ impl AgentChatView {
     ///
     /// Runs outside any window update: a global observer and the config-reload
     /// path both fire from `flush_effects`, after gpui has put the window back.
+    /// Re-raster every mermaid diagram after the terminal palette changed:
+    /// the cached images carry the old colours.
+    pub(in crate::workspace) fn rerender_mermaid_after_palette_change(
+        &mut self,
+        cx: &mut Context<Self>,
+    ) {
+        self.assets.clear_mermaid();
+        self.reconcile_mermaid(Self::host_is_dark(cx), cx);
+    }
+
     pub(in crate::workspace) fn reconcile_embeds_after_theme_change(
         &mut self,
         cx: &mut Context<Self>,

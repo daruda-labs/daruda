@@ -603,16 +603,15 @@ impl Workspace {
         cx: &mut App,
     ) {
         let view = self.agent_chat_view(pane).expect("pane").clone();
-        view.update(cx, |v, _| {
-            v.session_config.available_commands = names
-                .iter()
-                .map(|n| daruda_acp::SlashCommand {
-                    name: (*n).to_string(),
-                    description: String::new(),
-                    input: daruda_acp::SlashCommandInput::NoInput,
-                })
-                .collect();
-        });
+        let commands = names
+            .iter()
+            .map(|n| daruda_acp::SlashCommand {
+                name: (*n).to_string(),
+                description: String::new(),
+                input: daruda_acp::SlashCommandInput::NoInput,
+            })
+            .collect();
+        view.update(cx, |v, _| v.advertise_commands_for_test(commands));
     }
 }
 
@@ -756,9 +755,7 @@ impl Workspace {
         cx: &mut Context<Self>,
     ) {
         let view = self.agent_chat_view(pane).expect("pane").clone();
-        view.update(cx, |v, _| {
-            v.pending_permissions.insert(1);
-        });
+        view.update(cx, |v, _| v.hold_permission_for_shot(1));
     }
 
     pub(crate) fn set_pane_errored_for_test(&mut self, pane: PaneId, cx: &mut Context<Self>) {

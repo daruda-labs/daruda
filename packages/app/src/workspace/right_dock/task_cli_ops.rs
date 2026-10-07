@@ -428,7 +428,7 @@ impl Workspace {
                     window,
                     cx,
                 );
-                v.session_id = Some("screenshot-cli-session".into());
+                v.set_session_id_for_shot("screenshot-cli-session");
                 v.set_access(access);
             },
             window,

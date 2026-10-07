@@ -125,7 +125,7 @@ impl Workspace {
             None,
             |v, window, cx| {
                 v.seed_working_transcript(working_transcript(), window, cx);
-                v.pending_permissions.insert(0);
+                v.hold_permission_for_shot(0);
             },
             window,
             cx,
