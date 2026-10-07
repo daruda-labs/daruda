@@ -111,7 +111,7 @@ fn permission_diffs<'a>(
     view: &'a super::view::AgentChatView,
     tool_call_id: &str,
 ) -> &'a [daruda_acp::DiffView] {
-    view.items
+    view.items()
         .iter()
         .rev()
         .find_map(|item| match item {
@@ -164,25 +164,6 @@ fn permission_buttons(
         .collect()
 }
 
-/// The pane's unresolved permission cards the phone has not been shown, in
-/// card order. Cloned rather than borrowed because relaying needs `&mut
-/// Workspace` while the view read is still live.
-fn untold_permissions(view: &super::view::AgentChatView) -> Vec<daruda_acp::PermissionItem> {
-    view.items
-        .iter()
-        .filter_map(|item| match item {
-            daruda_acp::ChatItem::Permission(p)
-                if p.resolved.is_none()
-                    && view.pending_permissions.contains(&p.id)
-                    && !view.permissions_told_to_phone.contains(&p.id) =>
-            {
-                Some(p.clone())
-            }
-            _ => None,
-        })
-        .collect()
-}
-
 impl Workspace {
     /// The owning project's display name, excluding workspace-owned chats
     /// and panes whose lane or project has gone away.
@@ -202,7 +183,7 @@ impl Workspace {
         let project_line = self.project_name_for_pane(pane_id);
         match self.agent_chat_view(pane_id) {
             Some(view) => {
-                let agent = view.read(cx).agent_name.clone();
+                let agent = view.read(cx).agent_name().to_owned();
                 let agent = match self.pane_tab_name(pane_id) {
                     Some(tab) => s::control::agent_with_tab(&agent, &tab),
                     None => agent,
@@ -264,7 +245,7 @@ impl Workspace {
         let anchor = view.phone_turn().map_or(0, PhoneTurn::items_anchor);
         // Skips a message with no text for the same reason `first_response`
         // does: it would put an empty preview under the notification header.
-        let last_response = view.items[anchor.min(view.items.len())..]
+        let last_response = view.items()[anchor.min(view.items().len())..]
             .iter()
             .rev()
             .find_map(|item| match item {
@@ -364,9 +345,7 @@ impl Workspace {
         let Some(view) = self.agent_chat_view(pane_id).cloned() else {
             return;
         };
-        view.update(cx, |v, _| {
-            v.permissions_told_to_phone.insert(perm_id);
-        });
+        view.update(cx, |v, _| v.mark_permission_told_to_phone(perm_id));
     }
 
     /// Re-offer permission prompts the phone has never been shown, for every
@@ -389,13 +368,7 @@ impl Workspace {
             let Some(view) = self.agent_chat_view(pane_id).cloned() else {
                 continue;
             };
-            // Drop bookkeeping for requests that have since been answered, so
-            // the set cannot outgrow the outstanding ones.
-            let untold = view.update(cx, |v, _| {
-                v.permissions_told_to_phone
-                    .retain(|id| v.pending_permissions.contains(id));
-                untold_permissions(v)
-            });
+            let untold = view.update(cx, |v, _| v.take_permissions_untold_to_phone());
             for prompt in untold {
                 self.relay_permission_wait_to_telegram(pane_id, &prompt, cx);
             }

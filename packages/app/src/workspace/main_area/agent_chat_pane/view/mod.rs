@@ -924,6 +924,7 @@ mod agent_default_ops;
 pub(in crate::workspace) use activity_ops::RunSummary;
 mod apply_event;
 mod event;
+mod host_commands;
 mod host_surface;
 pub(super) mod list_sync;
 mod pane_choices;

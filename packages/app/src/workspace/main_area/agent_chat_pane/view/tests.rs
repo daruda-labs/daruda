@@ -34,7 +34,7 @@ fn tool_call(
     })
 }
 
-fn permission_card(id: u64) -> daruda_acp::ChatItem {
+pub(super) fn permission_card(id: u64) -> daruda_acp::ChatItem {
     daruda_acp::ChatItem::Permission(daruda_acp::PermissionItem {
         id,
         tool_call_id: String::new(),

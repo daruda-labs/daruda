@@ -268,7 +268,7 @@ impl Workspace {
     /// `pub(super)` because `telegram_ops` also reads it.
     pub(super) fn pane_title(&self, pane_id: PaneId, cx: &Context<Self>) -> String {
         self.agent_chat_view(pane_id)
-            .and_then(|v| v.read(cx).session_title.clone())
+            .and_then(|v| v.read(cx).session_title().map(str::to_owned))
             .unwrap_or_else(s::agent_chat::tab_title)
     }
 
@@ -300,7 +300,7 @@ impl Workspace {
             return;
         };
         let daruda_acp::ChatItem::Permission(card) =
-            daruda_acp::permission_item(*id, request, &view.read(cx).items)
+            daruda_acp::permission_item(*id, request, view.read(cx).items())
         else {
             return;
         };
@@ -342,7 +342,10 @@ impl Workspace {
         };
         let Some((agent_id, frozen_source)) = self.agent_chat_view(pane_id).map(|v| {
             let view = v.read(cx);
-            (view.agent_id.clone(), view.agent_vocabulary_source.clone())
+            (
+                view.agent_id().to_owned(),
+                view.agent_vocabulary_source().map(str::to_owned),
+            )
         }) else {
             return;
         };
@@ -1418,11 +1421,11 @@ impl Workspace {
         let Some(view) = self.agent_chat_view(pane_id).cloned() else {
             return;
         };
-        let model_before = view.read(cx).picked_model_id.clone();
+        let model_before = view.read(cx).picked_model_id().map(str::to_owned);
         view.update(cx, |v, cx| v.set_config_option(config_id, value, cx));
         // Only a `Model`-category pick moves `picked_model_id`; persist it
         // so the next connect starts on it (see that field's doc).
-        if view.read(cx).picked_model_id != model_before {
+        if view.read(cx).picked_model_id() != model_before.as_deref() {
             self.mutate_durable(cx, |_, _| {});
         }
     }
@@ -1438,7 +1441,7 @@ impl Workspace {
         let Some(view) = self.agent_chat_view(pane_id).cloned() else {
             return false;
         };
-        let Some(next) = view.read(cx).session_config.next_mode_id() else {
+        let Some(next) = view.read(cx).session_config().next_mode_id() else {
             return false;
         };
         view.update(cx, |v, cx| v.set_mode(next, cx));
@@ -1557,7 +1560,7 @@ impl Workspace {
     /// happens to share the same absolute path.
     fn diff_pane_is_remote(&self, pane_id: PaneId, cx: &App) -> bool {
         self.agent_chat_view(pane_id)
-            .is_some_and(|view| matches!(view.read(cx).cwd, Some(PaneCwd::Remote(_))))
+            .is_some_and(|view| matches!(view.read(cx).cwd(), Some(PaneCwd::Remote(_))))
     }
 
     /// Open a diff block's file in the pane-area file viewer. Dispatched from

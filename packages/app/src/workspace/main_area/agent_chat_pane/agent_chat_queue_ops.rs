@@ -151,7 +151,7 @@ impl Workspace {
         let Some(view) = self.agent_chat_view(pane_id).cloned() else {
             return;
         };
-        let was_editing = view.read(cx).queue.editing_prompt.is_some();
+        let was_editing = view.read(cx).queue().editing().is_some();
         view.update(cx, |v, cx| v.clear_queue(cx));
         if was_editing {
             self.terminal_input
@@ -177,14 +177,7 @@ impl Workspace {
         };
         // Reading the view entity here is safe — it is a different entity from
         // `self` (Workspace) and from `terminal_input`.
-        let v = view.read(cx);
-        let found = v
-            .queue
-            .pending_prompts
-            .iter()
-            .chain(v.queue.paused_prompts.iter())
-            .find(|q| q.id == id)
-            .map(|q| q.text.clone());
+        let found = view.read(cx).queue().find(id).map(|q| q.text.clone());
         let Some(text) = found else {
             return;
         };

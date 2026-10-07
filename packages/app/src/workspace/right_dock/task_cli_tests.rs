@@ -500,7 +500,7 @@ fn cli_snapshot_refuses_every_input_path(cx: &mut TestAppContext) {
                 let v = view.read(cx);
                 (
                     v.picked_mode_id_for_test().map(str::to_owned),
-                    v.picked_model_id_for_test().map(str::to_owned),
+                    v.picked_model_id().map(str::to_owned),
                 )
             };
 
@@ -545,7 +545,7 @@ fn cli_snapshot_refuses_every_input_path(cx: &mut TestAppContext) {
             assert_eq!(
                 (
                     v.picked_mode_id_for_test().map(str::to_owned),
-                    v.picked_model_id_for_test().map(str::to_owned)
+                    v.picked_model_id().map(str::to_owned)
                 ),
                 before
             );

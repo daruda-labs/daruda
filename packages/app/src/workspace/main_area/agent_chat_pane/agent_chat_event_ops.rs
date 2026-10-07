@@ -55,15 +55,15 @@ impl Workspace {
         // persisted (the id lets a later launch resume via
         // `session/load`; the title names the tab), so a save
         // is triggered below when either changes.
-        let session_id_before = view.read(cx).session_id.clone();
-        let title_before = view.read(cx).session_title.clone();
+        let session_id_before = view.read(cx).session_id().map(str::to_owned);
+        let title_before = view.read(cx).session_title().map(str::to_owned);
         // Capture current mode before the event so we can
         // detect `Connected` (modes arriving) and
         // `ModeChanged` (current switching) and refresh the
         // bottom-input placeholder when either fires.
         let mode_before = view
             .read(cx)
-            .session_config
+            .session_config()
             .current_mode_id()
             .map(str::to_string);
         // Desktop notification for a permission wait, gated by
@@ -108,7 +108,9 @@ impl Workspace {
         // token-streaming events.
         {
             let v = view.read(cx);
-            if v.session_id != session_id_before || v.session_title != title_before {
+            if v.session_id() != session_id_before.as_deref()
+                || v.session_title() != title_before.as_deref()
+            {
                 self.mutate_durable(cx, |_, _| {});
             }
         }
@@ -118,7 +120,7 @@ impl Workspace {
         // lane vieself.
         let mode_after = view
             .read(cx)
-            .session_config
+            .session_config()
             .current_mode_id()
             .map(str::to_string);
         let focused_id = self.active_runtime().focused_pane_id;

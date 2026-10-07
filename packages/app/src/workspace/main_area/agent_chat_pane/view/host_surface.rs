@@ -1,13 +1,12 @@
-//! What the hosting workspace may read off a chat pane, and the few
-//! things it may tell one. The fields stay the view's own; a host that
-//! needs one more fact or verb adds it here rather than reaching in.
+//! What the hosting workspace may read off a chat pane. The fields stay
+//! the view's own; a host that needs one more fact adds a reader here
+//! rather than reaching in. Verbs live in `host_commands`.
 
 use daruda_acp::ChatItem;
 use daruda_store::project::PaneCwd;
-use gpui::{Bounds, Context, Pixels};
+use gpui::{Bounds, Pixels};
 
 use super::super::session_config::SessionConfig;
-use super::list_sync::ListSync;
 use super::{AgentChatView, AgentSessionStatus, PromptId, PromptQueue, QueuedPrompt};
 
 impl AgentChatView {
@@ -62,54 +61,22 @@ impl AgentChatView {
         self.dim_amount
     }
 
+    /// The model the user picked on this pane, which the next connect asks
+    /// for over the agent's default.
+    pub(in crate::workspace) fn picked_model_id(&self) -> Option<&str> {
+        self.picked_model_id.as_deref()
+    }
+
+    /// The adapter command the pane's option vocabularies are recorded
+    /// under, once a connect has named it.
+    pub(in crate::workspace) fn agent_vocabulary_source(&self) -> Option<&str> {
+        self.agent_vocabulary_source.as_deref()
+    }
+
     /// The busy level `tick_activity` stored, without a fresh scan — so one
     /// pulse tick reads one consistent `now`.
     pub(in crate::workspace) fn last_reconciled_busy(&self) -> bool {
         self.activity.span.is_busy()
-    }
-}
-
-impl AgentChatView {
-    /// Rename the pane after the catalog renamed its agent.
-    pub(in crate::workspace) fn set_agent_name(&mut self, name: String, cx: &mut Context<Self>) {
-        if self.agent_name != name {
-            self.agent_name = name;
-            cx.notify();
-        }
-    }
-
-    /// The phone recipient changed: forget which permission requests the
-    /// old one was told about, so the next sweep tells the new one.
-    pub(in crate::workspace) fn forget_permissions_told_to_phone(&mut self) {
-        self.permissions_told_to_phone.clear();
-    }
-
-    /// The configured reading width changed. Only a pane laid out at that
-    /// width has rows whose heights are now stale.
-    pub(in crate::workspace) fn reading_width_changed(&mut self) {
-        if self.content_width.is_reading() {
-            self.apply_list_sync(ListSync::EveryRow, "reading_width_changed");
-        }
-    }
-
-    /// Hold a permission request open, as an agent asking would — for a
-    /// capture or a test that needs the awaiting state without a session.
-    #[cfg(any(test, feature = "screenshot"))]
-    pub(in crate::workspace) fn hold_permission_for_shot(&mut self, id: u64) {
-        self.pending_permissions.insert(id);
-    }
-
-    #[cfg(feature = "screenshot")]
-    pub(in crate::workspace) fn set_session_id_for_shot(&mut self, id: &str) {
-        self.session_id = Some(id.to_owned());
-    }
-
-    #[cfg(test)]
-    pub(in crate::workspace) fn advertise_commands_for_test(
-        &mut self,
-        commands: Vec<daruda_acp::SlashCommand>,
-    ) {
-        self.session_config.available_commands = commands;
     }
 }
 
@@ -121,6 +88,15 @@ impl PromptQueue {
             .last()
             .or_else(|| self.paused_prompts.last())
             .map(|q| q.id)
+    }
+
+    pub(in crate::workspace) fn has_pending(&self) -> bool {
+        !self.pending_prompts.is_empty()
+    }
+
+    /// A queued prompt by id, live or parked.
+    pub(in crate::workspace) fn find(&self, id: PromptId) -> Option<&QueuedPrompt> {
+        self.in_strip_order().map(|(q, _)| q).find(|q| q.id == id)
     }
 
     /// The queued prompt the composer is editing, if any.
@@ -159,27 +135,6 @@ mod tests {
         .unwrap();
     }
 
-    #[gpui::test]
-    fn a_rename_and_a_new_phone_reach_the_pane(cx: &mut gpui::TestAppContext) {
-        let view = make_test_view(cx);
-        view.update(cx, |v, _, cx| {
-            v.hold_permission_for_shot(7);
-            v.permissions_told_to_phone.insert(7);
-            v.set_agent_name("Claude Code".into(), cx);
-            v.forget_permissions_told_to_phone();
-        })
-        .unwrap();
-        view.read_with(cx, |v, _| {
-            assert_eq!(v.agent_name(), "Claude Code");
-            assert!(v.permissions_told_to_phone.is_empty());
-            assert!(
-                v.pending_permissions.contains(&7),
-                "only the phone's record is reset"
-            );
-        })
-        .unwrap();
-    }
-
     #[test]
     fn parked_prompts_lead_the_strip_and_the_live_queue_ends_it() {
         use super::super::tests::queued;
@@ -194,6 +149,11 @@ mod tests {
             .collect();
         assert_eq!(order, [("parked", true), ("live", false)]);
         assert_eq!(queue.last_prompt_id(), Some(queued(2, "").id));
+        assert_eq!(
+            queue.find(queued(1, "").id).map(|q| q.text.as_str()),
+            Some("parked")
+        );
+        assert!(queue.has_pending());
         queue.pending_prompts.clear();
         assert_eq!(queue.last_prompt_id(), Some(queued(1, "").id));
     }

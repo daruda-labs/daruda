@@ -2353,7 +2353,7 @@ async fn a_model_pick_is_remembered_and_survives_a_restore(cx: &mut TestAppConte
                     daruda_acp::ConfigValueView::Id("high".to_string()),
                     cx,
                 );
-                assert_eq!(view.read(cx).picked_model_id_for_test(), None);
+                assert_eq!(view.read(cx).picked_model_id(), None);
 
                 ws.set_agent_config_option(
                     pane_id,
@@ -2362,7 +2362,7 @@ async fn a_model_pick_is_remembered_and_survives_a_restore(cx: &mut TestAppConte
                     cx,
                 );
                 assert_eq!(
-                    view.read(cx).picked_model_id_for_test(),
+                    view.read(cx).picked_model_id(),
                     Some("sonnet"),
                     "the chip pick is remembered so the next connect reapplies it"
                 );
@@ -2410,7 +2410,7 @@ async fn a_model_pick_is_remembered_and_survives_a_restore(cx: &mut TestAppConte
             .expect("restored agent chat pane present")
             .read(cx);
         assert_eq!(
-            view.picked_model_id_for_test(),
+            view.picked_model_id(),
             Some("sonnet"),
             "a restored pane still knows its model, so its lazy connect reapplies it"
         );
@@ -2594,7 +2594,7 @@ async fn a_config_edit_moves_live_sessions_off_unpicked_defaults(cx: &mut TestAp
                 v.session_config()
                     .mode_for_chip()
                     .map(|m| m.current.clone()),
-                v.picked_model_id_for_test().map(str::to_owned),
+                v.picked_model_id().map(str::to_owned),
                 v.picked_mode_id_for_test().map(str::to_owned),
             )
         })

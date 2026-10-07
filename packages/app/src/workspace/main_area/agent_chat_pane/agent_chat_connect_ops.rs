@@ -106,7 +106,7 @@ impl Workspace {
     ) {
         if self.agent_chat_view(pane_id).is_some_and(|view| {
             let v = view.read(cx);
-            matches!(v.status, AgentSessionStatus::Idle) && v.is_read_only()
+            matches!(v.status(), AgentSessionStatus::Idle) && v.is_read_only()
         }) {
             self.refresh_cli_chat(pane_id, cx);
             return;
@@ -116,16 +116,16 @@ impl Workspace {
                 return;
             };
             let v = view.read(cx);
-            if !matches!(v.status, AgentSessionStatus::Idle) {
+            if !matches!(v.status(), AgentSessionStatus::Idle) {
                 return;
             }
             // Both `Local` and `Remote` panes are connectable; a cwd-less pane
             // was parked in `Error` at construction and never reaches `Idle`.
-            let Some(cwd) = v.cwd.clone() else {
+            let Some(cwd) = v.cwd().cloned() else {
                 return;
             };
             // A persisted session id resumes via `session/load`; `None` is fresh.
-            (cwd, v.session_id.clone())
+            (cwd, v.session_id().map(str::to_owned))
         };
         // Flip to `Connecting` before spawning so a second focus during the
         // handshake doesn't start a duplicate session. `begin_connect` takes the
@@ -157,13 +157,13 @@ impl Workspace {
                 return;
             };
             let v = view.read(cx);
-            if !matches!(v.status, AgentSessionStatus::Error { .. }) {
+            if !matches!(v.status(), AgentSessionStatus::Error { .. }) {
                 return;
             }
-            let Some(cwd) = v.cwd.clone() else {
+            let Some(cwd) = v.cwd().cloned() else {
                 return;
             };
-            (cwd, v.session_id.clone())
+            (cwd, v.session_id().map(str::to_owned))
         };
         if let Some(view) = self.agent_chat_view(pane_id).cloned() {
             view.update(cx, |v, cx| v.retry_for_reconnect(resume.clone(), cx));
@@ -255,7 +255,7 @@ impl Workspace {
                 });
                 let remedy =
                     self.agent_chat_view(pane_id)
-                        .and_then(|view| match &view.read(cx).status {
+                        .and_then(|view| match &view.read(cx).status() {
                             AgentSessionStatus::Error { remedy, .. } => Some(*remedy),
                             _ => None,
                         });
@@ -277,7 +277,11 @@ impl Workspace {
         pane_id: PaneId,
         cx: &mut Context<Self>,
     ) -> Option<AgentLaunchSpec> {
-        let agent_id = self.agent_chat_view(pane_id)?.read(cx).agent_id.clone();
+        let agent_id = self
+            .agent_chat_view(pane_id)?
+            .read(cx)
+            .agent_id()
+            .to_owned();
         // Happy path: the view's agent is still in the catalog.
         if let Some(spec) = self.agent_launch_for(&agent_id) {
             return Some(spec);
@@ -293,15 +297,7 @@ impl Workspace {
         if let Some(view) = self.agent_chat_view(pane_id).cloned() {
             let id = effective_id.clone();
             let name = agent_name_for(&self.agents, &effective_id);
-            view.update(cx, |v, cx| {
-                v.agent_id = id;
-                v.agent_name = name;
-                // The program belongs to the agent that reported it. Leaving it
-                // would read the incoming agent's traffic in the outgoing one's
-                // dialect until the next connect restates it.
-                v.agent_program = None;
-                v.reseed_transcript_defaults(&defaults, cx);
-            });
+            view.update(cx, |v, cx| v.switch_agent(id, name, &defaults, cx));
             self.update_agent_chat_agent_id(pane_id, effective_id.clone());
             self.mutate_durable(cx, |_, _| {});
         }
@@ -335,7 +331,7 @@ impl Workspace {
         // is picked up: the preferences below resolve against that agent, and
         // the id keys the dev-build wire-tap file name.
         let view = self.agent_chat_view(pane_id)?.read(cx);
-        let agent_id = view.agent_id.clone();
+        let agent_id = view.agent_id().to_owned();
         // Requested on every connect, a resume (`session/load`) included: a
         // value the adapter reports for itself never outranks these.
         let daruda_config::SessionPreferences {
@@ -347,7 +343,7 @@ impl Workspace {
             .to_string();
         if let Some(view) = self.agent_chat_view(pane_id).cloned() {
             view.update(cx, |view, _| {
-                view.agent_vocabulary_source = Some(vocabulary_source);
+                view.set_agent_vocabulary_source(vocabulary_source)
             });
         }
 
@@ -421,10 +417,10 @@ impl Workspace {
         }
         let cwd_changed = self
             .agent_chat_view(pane_id)
-            .is_some_and(|view| view.read(cx).cwd.as_ref() != Some(&resolved.resolved_cwd));
+            .is_some_and(|view| view.read(cx).cwd() != Some(&resolved.resolved_cwd));
         if cwd_changed {
             if let Some(view) = self.agent_chat_view(pane_id).cloned() {
-                view.update(cx, |v, _| v.cwd = Some(resolved.resolved_cwd.clone()));
+                view.update(cx, |v, _| v.set_cwd(resolved.resolved_cwd.clone()));
             }
             self.update_agent_chat_cwd(pane_id, resolved.resolved_cwd.clone());
             self.mutate_durable(cx, |_, _| {});
@@ -560,7 +556,7 @@ impl Workspace {
                 .find(|pane| pane.id == pane_id)
                 .and_then(|pane| pane.agent_chat_content())
                 .and_then(|chat| chat.account.to_persisted());
-            if !self.task_chat_identity_available(&chat.agent_id, account) {
+            if !self.task_chat_identity_available(chat.agent_id(), account) {
                 view.update(cx, |v, cx| {
                     v.set_error(
                         s::task::chat_missing_agent(),
@@ -657,7 +653,7 @@ impl Workspace {
                         // phase — never clobber a Connected/Error terminal state
                         // (the connect and drain tasks race to completion).
                         if matches!(
-                            v.status,
+                            v.status(),
                             AgentSessionStatus::Connecting
                                 | AgentSessionStatus::PreparingRuntime(_)
                         ) {
@@ -761,7 +757,7 @@ impl Workspace {
                         };
                         view.update(cx, |v, cx| {
                             v.attach_handle(handle);
-                            if matches!(v.status, AgentSessionStatus::PreparingRuntime(_)) {
+                            if matches!(v.status(), AgentSessionStatus::PreparingRuntime(_)) {
                                 v.set_connecting(cx);
                             }
                         });
@@ -887,7 +883,7 @@ impl Workspace {
         // Store the pump on the view so a pane close drops it (ending the loop)
         // on top of dropping the session handle.
         if let Some(view) = self.agent_chat_view(pane_id).cloned() {
-            view.update(cx, |v, _| v._event_pump = Some(pump));
+            view.update(cx, |v, _| v.attach_event_pump(pump));
         }
     }
 
@@ -905,11 +901,11 @@ impl Workspace {
         let failed_to_start_prompt = {
             let view = view.read(cx);
             matches!(
-                view.status,
+                view.status(),
                 AgentSessionStatus::PreparingRuntime(_)
                     | AgentSessionStatus::Connecting
                     | AgentSessionStatus::Handshaking(_)
-            ) && !view.queue.pending_prompts.is_empty()
+            ) && view.queue().has_pending()
         };
         view.update(cx, |v, cx| v.abort_restore(cx));
         if !needs_disconnect_error {
@@ -959,7 +955,7 @@ impl Workspace {
         // Same gate as `maybe_connect_agent_chat`: both `Local` and `Remote`
         // reconnect through `connect_agent_chat` here; only a genuinely
         // cwd-less pane (never had a session) no-ops.
-        let Some(cwd) = view.read(cx).cwd.clone() else {
+        let Some(cwd) = view.read(cx).cwd().cloned() else {
             return; // no cwd → never had a session
         };
         for pane in self

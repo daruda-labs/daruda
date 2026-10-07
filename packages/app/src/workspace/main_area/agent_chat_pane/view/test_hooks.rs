@@ -81,10 +81,6 @@ impl AgentChatView {
         self.picked_mode_id.as_deref()
     }
 
-    pub(in crate::workspace) fn picked_model_id_for_test(&self) -> Option<&str> {
-        self.picked_model_id.as_deref()
-    }
-
     pub(in crate::workspace) fn set_status_for_test(&mut self, status: AgentSessionStatus) {
         self.status = status;
     }
