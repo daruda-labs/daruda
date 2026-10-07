@@ -1703,6 +1703,7 @@ dependencies = [
  "shell-words",
  "similar",
  "smol",
+ "strings_gen",
  "sys-locale",
  "sysinfo 0.32.1",
  "tempfile",
@@ -7296,6 +7297,14 @@ dependencies = [
  "phf_shared 0.11.3",
  "proc-macro2",
  "quote",
+]
+
+[[package]]
+name = "strings_gen"
+version = "0.2.16"
+dependencies = [
+ "tempfile",
+ "yaml_serde",
 ]
 
 [[package]]

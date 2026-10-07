@@ -51,7 +51,7 @@ Run these locally and make them pass before committing:
 cargo fmt --all -- --check
 cargo clippy -p ghostty_vt -p ghostty_vt_sys -p daruda_terminal -p daruda \
   -p daruda_config -p daruda_store -p daruda_agent -p daruda_update \
-  -p daruda_acp -p daruda_core -p daruda_flow -p daruda_project -p daruda_ui -p daruda_control_types -p daruda_content -p ferrum_flow \
+  -p daruda_acp -p daruda_core -p daruda_flow -p daruda_project -p daruda_ui -p daruda_control_types -p daruda_content -p ferrum_flow -p strings_gen \
   --all-targets -- -D warnings
 ./scripts/lint-inline-literals.sh
 ./scripts/lint-paint-scope.sh
@@ -65,7 +65,7 @@ cargo clippy -p ghostty_vt -p ghostty_vt_sys -p daruda_terminal -p daruda \
 ./scripts/lint-platform-boundary.sh
 cargo test -p ghostty_vt -p ghostty_vt_sys -p daruda_terminal -p daruda \
   -p daruda_config -p daruda_store -p daruda_agent -p daruda_update \
-  -p daruda_acp -p daruda_core -p daruda_flow -p daruda_project -p daruda_ui -p daruda_control_types -p daruda_content -p ferrum_flow -p gpui_component
+  -p daruda_acp -p daruda_core -p daruda_flow -p daruda_project -p daruda_ui -p daruda_control_types -p daruda_content -p ferrum_flow -p gpui_component -p strings_gen
 ./scripts/lint-no-silent-update.sh
 ./scripts/lint-agent-activity.sh
 ./scripts/lint-daruda-path-literals.sh
@@ -213,7 +213,7 @@ for macOS app and DMG bundles.
 cargo fmt --all -- --check
 cargo clippy -p ghostty_vt -p ghostty_vt_sys -p daruda_terminal -p daruda \
   -p daruda_config -p daruda_store -p daruda_agent -p daruda_update \
-  -p daruda_acp -p daruda_core -p daruda_flow -p daruda_project -p daruda_ui -p daruda_control_types -p daruda_content -p ferrum_flow \
+  -p daruda_acp -p daruda_core -p daruda_flow -p daruda_project -p daruda_ui -p daruda_control_types -p daruda_content -p ferrum_flow -p strings_gen \
   --all-targets -- -D warnings
 scripts/lint-inline-literals.sh
 scripts/lint-paint-scope.sh
@@ -227,7 +227,7 @@ scripts/lint-landing-no-disk-read.sh
 scripts/lint-platform-boundary.sh
 cargo test -p ghostty_vt -p ghostty_vt_sys -p daruda_terminal -p daruda \
   -p daruda_config -p daruda_store -p daruda_agent -p daruda_update \
-  -p daruda_acp -p daruda_core -p daruda_flow -p daruda_project -p daruda_ui -p daruda_control_types -p daruda_content -p ferrum_flow -p gpui_component
+  -p daruda_acp -p daruda_core -p daruda_flow -p daruda_project -p daruda_ui -p daruda_control_types -p daruda_content -p ferrum_flow -p gpui_component -p strings_gen
 scripts/lint-no-silent-update.sh
 scripts/lint-agent-activity.sh
 scripts/lint-daruda-path-literals.sh
@@ -388,7 +388,7 @@ Daruda is not strict MVU, but the architecture leans on three rules. Treat them 
 - **Commit only when explicitly asked** — never `git add`/`git commit` without direct instruction.
 - **Commit messages**: `<type>: <subject>` (imperative, ≤72 chars). Types: `feat` `fix` `refactor` `perf` `test` `chore` `ci` `docs`. Body only when WHY is non-obvious. Prohibitions: no Phase/Step/ticket numbers, no "what I did" lists (diff shows that), no future-work notes.
 - **User-facing values go through config** (`daruda_config`). Pixel/color constants → `ux/theme.rs`.
-- **User-facing strings go through i18n** — every string visible to the user must be a key in `packages/app/locales/en.yml` (+ matching key in `ko.yml`); `build.rs` generates `surface::strings::<section>::<key>()` from it. Never embed raw string literals at call sites. See `packages/app/locales/CLAUDE.md` for the full checklist.
+- **User-facing strings go through i18n** — every string visible to the user must be a key in `packages/app/locales/en.yml` (+ matching key in `ko.yml`); `build.rs` generates `surface::strings::<section>::<key>()` from it through `tools/strings_gen`, which also holds the en/ko parity checks. Never embed raw string literals at call sites. See `packages/app/locales/CLAUDE.md` for the full checklist.
 - **Comments**: current logic only. No history, no "used to be X". Keep each to 2-3 lines — summarize, don't explain at length. Don't restate what's already verifiable by reading the code (e.g. what a well-named function/variable does); only note the non-obvious WHY.
 - **In-progress docs**: keep outside the repo in a personal document store.
 

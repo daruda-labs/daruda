@@ -48,6 +48,7 @@ daruda_ui = { path = "packages/ui" }
 daruda_update = { path = "packages/update" }
 ghostty_vt = { path = "packages/ghostty-vt" }
 ghostty_vt_sys = { path = "packages/ghostty-vt-sys" }
+strings_gen = { path = "tools/strings_gen" }
 test_process = { path = "tools/test_process" }
 
 ferrum_flow = { path = "crates/ferrum_flow" }

@@ -1,0 +1,17 @@
+[package]
+name = "strings_gen"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish = false
+description = "Generates a crate's locale string functions from locales/en.yml at build time, and checks en/ko parity"
+
+[lints]
+workspace = true
+
+[dependencies]
+yaml_serde = "0.10"
+
+[dev-dependencies]
+tempfile = "3"

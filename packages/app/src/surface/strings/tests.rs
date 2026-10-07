@@ -14,28 +14,6 @@ fn a_run_start_label_carries_no_year() {
     assert!(!label.is_empty());
 }
 
-/// Recursively collect dotted key paths for every scalar leaf in a
-/// YAML mapping tree (e.g. `common.btn_cancel`).
-fn collect_locale_keys(
-    value: &yaml_serde::Value,
-    prefix: &str,
-    out: &mut std::collections::BTreeSet<String>,
-) {
-    if let yaml_serde::Value::Mapping(map) = value {
-        for (k, v) in map {
-            let key = k.as_str().unwrap_or("<non-string-key>");
-            let path = if prefix.is_empty() {
-                key.to_string()
-            } else {
-                format!("{prefix}.{key}")
-            };
-            collect_locale_keys(v, &path, out);
-        }
-    } else {
-        out.insert(prefix.to_string());
-    }
-}
-
 /// Every category the bar can count needs phrasing of its own. A missing
 /// match arm falls through to "other" silently, and a key the locales never
 /// got renders as the key itself — neither fails anywhere else.
@@ -65,92 +43,17 @@ fn every_tool_category_has_its_own_group_label() {
     }
 }
 
-/// Every i18n key in `en.yml` must have a counterpart in `ko.yml`
-/// and vice versa. A missing translation silently renders the raw
-/// key string at runtime, so key drift must fail the build.
+const EN: &str = include_str!("../../../locales/en.yml");
+const KO: &str = include_str!("../../../locales/ko.yml");
+
 #[test]
 fn locale_en_ko_key_parity() {
-    let en: yaml_serde::Value =
-        yaml_serde::from_str(include_str!("../../../locales/en.yml")).unwrap();
-    let ko: yaml_serde::Value =
-        yaml_serde::from_str(include_str!("../../../locales/ko.yml")).unwrap();
-
-    let mut en_keys = std::collections::BTreeSet::new();
-    let mut ko_keys = std::collections::BTreeSet::new();
-    collect_locale_keys(&en, "", &mut en_keys);
-    collect_locale_keys(&ko, "", &mut ko_keys);
-
-    let missing_in_ko: Vec<_> = en_keys.difference(&ko_keys).collect();
-    let missing_in_en: Vec<_> = ko_keys.difference(&en_keys).collect();
-    assert!(
-        missing_in_ko.is_empty() && missing_in_en.is_empty(),
-        "i18n key drift between en.yml and ko.yml:\n  missing in ko.yml: {missing_in_ko:?}\n  missing in en.yml: {missing_in_en:?}"
-    );
+    strings_gen::check_key_parity(EN, KO).unwrap_or_else(|e| panic!("{e}"));
 }
 
-/// Recursively collect `dotted.key -> the set of %{placeholder} names it
-/// interpolates`, for every scalar leaf.
-fn collect_locale_placeholders(
-    value: &yaml_serde::Value,
-    prefix: &str,
-    out: &mut std::collections::BTreeMap<String, std::collections::BTreeSet<String>>,
-) {
-    match value {
-        yaml_serde::Value::Mapping(map) => {
-            for (k, v) in map {
-                let key = k.as_str().unwrap_or("<non-string-key>");
-                let path = if prefix.is_empty() {
-                    key.to_string()
-                } else {
-                    format!("{prefix}.{key}")
-                };
-                collect_locale_placeholders(v, &path, out);
-            }
-        }
-        yaml_serde::Value::String(text) => {
-            let mut names = std::collections::BTreeSet::new();
-            let mut rest = text.as_str();
-            while let Some(open) = rest.find("%{") {
-                rest = &rest[open + 2..];
-                let Some(close) = rest.find('}') else { break };
-                names.insert(rest[..close].trim().to_string());
-                rest = &rest[close + 1..];
-            }
-            out.insert(prefix.to_string(), names);
-        }
-        _ => {}
-    }
-}
-
-/// A key present in both files but interpolating different placeholders is
-/// invisible to [`locale_en_ko_key_parity`], compiles, and renders a
-/// literal `%{name}` to whoever is running that locale. `rust_i18n`
-/// substitutes by name at the call site, so a translated string that
-/// renamed or dropped one is a runtime-only defect no other check catches.
 #[test]
 fn locale_en_ko_placeholder_parity() {
-    let en: yaml_serde::Value =
-        yaml_serde::from_str(include_str!("../../../locales/en.yml")).unwrap();
-    let ko: yaml_serde::Value =
-        yaml_serde::from_str(include_str!("../../../locales/ko.yml")).unwrap();
-
-    let mut en_ph = std::collections::BTreeMap::new();
-    let mut ko_ph = std::collections::BTreeMap::new();
-    collect_locale_placeholders(&en, "", &mut en_ph);
-    collect_locale_placeholders(&ko, "", &mut ko_ph);
-
-    let mismatched: Vec<String> = en_ph
-        .iter()
-        .filter_map(|(key, en_names)| {
-            let ko_names = ko_ph.get(key)?;
-            (en_names != ko_names).then(|| format!("{key}: en {en_names:?} vs ko {ko_names:?}"))
-        })
-        .collect();
-    assert!(
-        mismatched.is_empty(),
-        "i18n placeholder drift between en.yml and ko.yml:\n  {}",
-        mismatched.join("\n  ")
-    );
+    strings_gen::check_placeholder_parity(EN, KO).unwrap_or_else(|e| panic!("{e}"));
 }
 
 #[test]
@@ -292,70 +195,4 @@ fn title_prompts_interpolate_the_title() {
         assert!(heading.contains("notes.md"), "{heading:?}");
         assert!(!heading.contains("%{"), "{heading:?}");
     }
-}
-
-/// The generator `build.rs` runs, compiled here so its rules are pinned.
-#[path = "../../../build/strings_gen.rs"]
-#[allow(dead_code)]
-mod strings_gen;
-
-/// The `#` lines directly above a key are its doc; a blank line ends them,
-/// so a group header standing on its own documents nothing.
-#[test]
-fn only_comments_touching_a_key_document_it() {
-    let en =
-        "menu:\n  # File menu\n\n  # Opens a window.\n  new_window: \"New\"\n  open: \"Open\"\n";
-    let sections = strings_gen::parse(en).expect("parses");
-    let keys = &sections[0].1;
-    assert_eq!(keys[0].name, "new_window");
-    assert_eq!(keys[0].doc, ["Opens a window."]);
-    assert!(keys[1].doc.is_empty());
-}
-
-/// Placeholders become parameters once each, in the order the English value
-/// first names them — a `|-` block value included.
-#[test]
-fn placeholders_become_parameters_in_first_use_order() {
-    let en = "flow:\n  a: \"%{node} then %{n}, %{node} again\"\n  b: |-\n    first %{x}\n    then %{y}\n";
-    let sections = strings_gen::parse(en).expect("parses");
-    assert_eq!(sections[0].1[0].params, ["node", "n"]);
-    assert_eq!(sections[0].1[1].params, ["x", "y"]);
-}
-
-/// A key that cannot be spelled as a Rust function fails the build by name
-/// rather than generating code that does not compile.
-#[test]
-fn a_key_that_is_not_an_identifier_is_refused() {
-    for en in [
-        "git:\n  type: \"x\"\n",
-        "git:\n  7day: \"x\"\n",
-        "git:\n  a: \"%{Name}\"\n",
-    ] {
-        let err = strings_gen::parse(en).err().expect("refused");
-        assert!(err.contains("Rust identifier"), "{err}");
-    }
-}
-
-/// A custom function named like a key replaces the generated one, and a
-/// custom file whose section does not exist is refused.
-#[test]
-fn a_custom_function_replaces_its_key() {
-    let dir = tempfile::tempdir().expect("tempdir");
-    std::fs::write(
-        dir.path().join("flow.rs"),
-        "pub(crate) fn pin(n: usize) -> String {\n    n.to_string()\n}\n",
-    )
-    .expect("write");
-    let out = strings_gen::generate("flow:\n  pin: \"%{n}\"\n  stop: \"Stop\"\n", dir.path())
-        .expect("generates");
-    assert!(
-        out.contains("pub(crate) use super::custom::flow::*;"),
-        "{out}"
-    );
-    assert!(!out.contains("fn pin("), "{out}");
-    assert!(out.contains("fn stop()"), "{out}");
-
-    std::fs::write(dir.path().join("nowhere.rs"), "").expect("write");
-    let err = strings_gen::generate("flow:\n  stop: \"Stop\"\n", dir.path()).expect_err("refused");
-    assert!(err.contains("names no section"), "{err}");
 }

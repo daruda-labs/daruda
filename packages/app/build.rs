@@ -5,14 +5,15 @@
 
 use std::path::Path;
 
-#[path = "build/strings_gen.rs"]
-mod strings_gen;
-
 const EN: &str = "locales/en.yml";
+/// Read by `rust_i18n::i18n!`, which tracks no file it embeds — without this
+/// a translation-only edit would leave the old strings compiled in.
+const KO: &str = "locales/ko.yml";
 const CUSTOM_DIR: &str = "src/surface/strings/custom";
 
 fn main() {
     println!("cargo:rerun-if-changed={EN}");
+    println!("cargo:rerun-if-changed={KO}");
     println!("cargo:rerun-if-changed={CUSTOM_DIR}");
     let en = std::fs::read_to_string(EN).expect("read locales/en.yml");
     let out =

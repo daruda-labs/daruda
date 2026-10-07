@@ -129,7 +129,11 @@ windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Securit
 # the app has no `notify` at all on Windows and does not compile.
 notify = { version = "7", default-features = false }
 
+[build-dependencies]
+strings_gen = { workspace = true }
+
 [dev-dependencies]
+strings_gen = { workspace = true }
 test_process = { workspace = true }
 agent-client-protocol = "2.0"
 # `test-support` swaps the PTY spawn for a stub. Declared here rather than on
