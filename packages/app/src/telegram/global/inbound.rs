@@ -22,6 +22,7 @@ use super::super::bridge::{CallbackEdit, InboundAction, RouteResult};
 use super::super::client;
 use super::super::keychain;
 use super::super::trace;
+use super::backoff::ErrorBackoff;
 use super::control::{answer_only, log_unauthorized_inbound, persist_offset, send_command_reply};
 use super::{IDLE_RECHECK, POLL_TIMEOUT_SECS, TelegramBridge};
 use crate::platform::attention::is_app_active;
@@ -36,6 +37,7 @@ use crate::surface::strings as s;
 pub(super) fn spawn_poll_task(cx: &mut App) {
     cx.spawn(async move |cx| {
         let lock_root = daruda_store::persistence::remote_lock_root();
+        let mut backoff = ErrorBackoff::new();
         loop {
             let (enabled, chat_id, token, offset) = cx.update(|cx| {
                 let cfg = SettingsStore::global(cx).user_arc();
@@ -85,7 +87,10 @@ pub(super) fn spawn_poll_task(cx: &mut App) {
                 .await;
 
             let updates = match fetched {
-                Ok(updates) => updates,
+                Ok(updates) => {
+                    backoff.reset();
+                    updates
+                }
                 Err(e) => {
                     trace::delivery("poll.failed", || format!("offset={offset} error={e}"));
                     LogWriter::log(
@@ -96,7 +101,10 @@ pub(super) fn spawn_poll_task(cx: &mut App) {
                             .dedup("telegram.get_updates")
                             .build(),
                     );
-                    cx.background_executor().timer(IDLE_RECHECK).await;
+                    // Not `IDLE_RECHECK`: that is the cadence for a bridge with
+                    // nothing to do. Every second waited here is a second a
+                    // message the phone already sent sits undelivered.
+                    cx.background_executor().timer(backoff.delay()).await;
                     continue;
                 }
             };
