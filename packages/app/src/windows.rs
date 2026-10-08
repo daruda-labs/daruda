@@ -223,7 +223,7 @@ pub(crate) fn open_settings_in_some_workspace(
         return;
     };
     try_update_workspace_window(handle, cx, "open_settings_fallback", move |window, cx| {
-        window.activate_window();
+        crate::platform::desktop::activate(window);
         let action = crate::workspace::OpenSettings(section);
         if let Err(e) = workspace.update(cx, |ws, cx| ws.on_open_settings(&action, window, cx)) {
             LogWriter::log(
@@ -276,18 +276,18 @@ pub(crate) fn open_recent_uuid(
     // window that already has it instead. Clicking a Landing row for the
     // window you are in lands here too, and correctly does nothing.
     if let Some(open) = WindowRegistry::workspace_window_for_uuid(uuid, cx) {
-        activate_existing(open, cx);
+        crate::platform::desktop::activate_handle(open, cx);
         leave_open();
         return;
     }
     let initiating_window = active_window_to_close(cx);
-    let data_dir = daruda_store::persistence::default_data_dir();
-    let Some(ws_state) = daruda_store::project::load_workspace_state_in(&data_dir, uuid) else {
+    let store = crate::workspace_storage::current(cx);
+    let Some(ws_state) = store.load_workspace(uuid) else {
         // Stale recent entry — prune and bail. The user perceives
         // this as the menu row vanishing on next refresh.
-        let mut entries = daruda_store::project::load_recent_in(&data_dir);
+        let mut entries = store.load_recent();
         entries.retain(|e| e.workspace_uuid != uuid);
-        if let Err(e) = daruda_store::project::save_recent_in(&data_dir, &entries) {
+        if let Err(e) = store.save_recent(&entries) {
             LogWriter::log(
                 ErrorReport::new("Failed to prune stale recent entry")
                     .severity(ErrorSeverity::Warning)
@@ -305,7 +305,7 @@ pub(crate) fn open_recent_uuid(
     let project_states: Vec<_> = ws_state
         .project_ids
         .iter()
-        .filter_map(|p| daruda_store::project::load_project_state_in(&data_dir, *p))
+        .filter_map(|p| store.load_project(*p))
         .collect();
     let opts = build_window_options(&config);
     open_project_with_mode(
@@ -446,7 +446,7 @@ fn handle_picked_folder(
             // folder twice. Focus the active window if its workspace
             // already owns this root; otherwise add.
             if workspace_has_root(handle, &weak, &path, cx) {
-                activate_existing(handle, cx);
+                crate::platform::desktop::activate_handle(handle, cx);
                 return;
             }
             add_path_to_workspace(handle, &weak, path, cx);
@@ -467,16 +467,6 @@ pub(crate) fn open_requested_directory(
     cx: &mut App,
 ) {
     handle_picked_folder(config, path, cx);
-}
-
-/// Activate (focus) a previously-registered workspace window. Used by
-/// the duplicate-root check so the user sees their existing project
-/// instead of getting a second copy in a new window.
-fn activate_existing(handle: gpui::AnyWindowHandle, cx: &mut App) {
-    // SILENT-OK: window or process may exit during async picker / close-loop / registry iteration
-    let _ = cx.update_window(handle, |_, window, _| {
-        window.activate_window();
-    });
 }
 
 /// Read the active workspace's [`WindowOpenPolicy`] through its
@@ -597,7 +587,7 @@ fn add_path_to_workspace(
                     .build(),
             );
         }
-        window.activate_window();
+        crate::platform::desktop::activate(window);
     });
     if let Err(e) = &update_result {
         LogWriter::log(
@@ -678,7 +668,7 @@ fn open_chooser_modal(
                             ws.update(app_cx, |ws, cx| {
                                 ws.add_project(picked_path.clone(), window, cx);
                             });
-                            window.activate_window();
+                            crate::platform::desktop::activate(window);
                         }
                         crate::menus::refresh_recent_menu(app_cx);
                     }

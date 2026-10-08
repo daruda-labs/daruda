@@ -158,10 +158,13 @@ impl SettingsView {
             Some(AutoUpdateStatus::Installing) => {
                 col = col.child(muted_line(s::settings::update_installing(), cx));
             }
-            Some(AutoUpdateStatus::ReadyToRestart(_)) => {
-                col = col
-                    .child(muted_line(s::settings::update_ready(), cx))
-                    .child(restart_button(cx));
+            Some(AutoUpdateStatus::ReadyToRestart(target)) => {
+                let message = if target.uses_installer() {
+                    s::settings::update_ready_installer()
+                } else {
+                    s::settings::update_ready()
+                };
+                col = col.child(muted_line(message, cx)).child(restart_button(cx));
             }
         }
 

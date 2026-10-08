@@ -453,8 +453,8 @@ fn set_agent_entry_default_mode(entry: &mut AgentEntry, mode: &str) {
     }
 }
 
-/// Resolve the config file path — same profile-scoped data directory as
-/// logs, workspaces, and every other persisted file
+/// Resolve the config file path — the compatibility data directory used by
+/// workspaces and other persisted files
 /// (`daruda_store::persistence::default_data_dir`): the release build
 /// keeps the un-suffixed `daruda/config.toml`, while a debug build or any
 /// `DARUDA_PROFILE`-named run (tests, staging, etc.) gets its own

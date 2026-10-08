@@ -52,15 +52,15 @@ pub(super) fn install(cx: &mut App) {
                         ..
                     }
                 ) {
-                    reveal(cx);
+                    super::reveal(None, cx);
                 }
             }
             for event in MenuEvent::receiver().try_iter() {
                 let tray = cx.global::<Tray>();
                 if event.id == tray.show {
-                    reveal(cx);
+                    super::reveal(None, cx);
                 } else if event.id == tray.settings {
-                    reveal(cx);
+                    super::reveal(None, cx);
                     cx.dispatch_action(&crate::workspace::OpenSettings(
                         daruda_config::BuiltinSection::default(),
                     ));
@@ -105,10 +105,6 @@ fn build() -> anyhow::Result<Tray> {
         update: update.id().clone(),
         quit: quit.id().clone(),
     })
-}
-
-fn reveal(cx: &mut App) {
-    super::reveal(None, cx);
 }
 
 fn native(window: &gpui::Window) -> Option<windows_sys::Win32::Foundation::HWND> {

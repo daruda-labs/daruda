@@ -88,8 +88,7 @@ pub(crate) fn set_menu_bar(recent: &[daruda_store::project::RecentEntry], cx: &m
 /// menu bar. Call after every successful `touch_recent_in` so File >
 /// Open Recent stays current without requiring a relaunch.
 pub(crate) fn refresh_recent_menu(cx: &mut App) {
-    let recent =
-        daruda_store::project::load_recent_in(&daruda_store::persistence::default_data_dir());
+    let recent = crate::workspace_storage::current(cx).load_recent();
     set_menu_bar(&recent, cx);
 }
 

@@ -6,6 +6,14 @@
 use std::io;
 use std::path::{Path, PathBuf};
 
+pub mod directories;
+
+/// Make a path absolute without requiring it to exist or following symlinks.
+/// Resolves Windows drive-relative paths using the OS drive context as well.
+pub fn absolute(path: impl AsRef<Path>) -> io::Result<PathBuf> {
+    std::path::absolute(path)
+}
+
 /// Resolve `path` to an absolute form with symlinks followed.
 ///
 /// On Windows, simplify extended paths when a regular path names the same

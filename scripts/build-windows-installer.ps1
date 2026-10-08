@@ -24,18 +24,26 @@ try {
     $output = Join-Path $outputRoot "$name-setup.exe"
     $manifest = Join-Path $stage 'uninstall-manifest.nsh'
     $lines = [Collections.Generic.List[string]]::new()
-    foreach ($file in Get-ChildItem -LiteralPath $bundle -Recurse -File) {
+    $files = @(Get-ChildItem -LiteralPath $bundle -Recurse -File | Sort-Object @{ Expression = { $_.Name -eq 'daruda.exe' } }, FullName)
+    $checks = [Collections.Generic.List[string]]::new()
+    $checks.Add('!macro CheckShippedFiles PREFIX')
+    $fileIndex = 0
+    foreach ($file in $files) {
         $relative = [IO.Path]::GetRelativePath($bundle, $file.FullName)
         if ($relative.Contains('$') -or $relative.Contains('"')) { throw 'Unsupported package filename' }
-        $lines.Add('Delete "$INSTDIR\' + $relative + '"')
+        $lines.Add('!insertmacro DeleteOwnedFile "$INSTDIR\' + $relative + '"')
+        $checks.Add('!insertmacro CheckOwnedFile "$INSTDIR\' + $relative + '" "${PREFIX}' + $fileIndex + '_"')
+        $fileIndex++
     }
+    $checks.Add('!macroend')
+    $checks | Set-Content -LiteralPath (Join-Path $stage 'file-checks.nsh') -Encoding utf8
     foreach ($directory in Get-ChildItem -LiteralPath $bundle -Recurse -Directory | Sort-Object { $_.FullName.Length } -Descending) {
         $relative = [IO.Path]::GetRelativePath($bundle, $directory.FullName)
         if ($relative.Contains('$') -or $relative.Contains('"')) { throw 'Unsupported package directory' }
         $lines.Add('RMDir "$INSTDIR\' + $relative + '"')
     }
     $lines | Set-Content -LiteralPath $manifest -Encoding utf8
-    $definitions = @("/DBUNDLE=$bundle", "/DOUTPUT=$output", "/DVERSION=$version", "/DUNINSTALL_MANIFEST=$manifest")
+    $definitions = @("/DBUNDLE=$bundle", "/DOUTPUT=$output", "/DVERSION=$version", "/DUNINSTALL_MANIFEST=$manifest", "/DFILE_CHECKS=$(Join-Path $stage 'file-checks.nsh')")
     if ($CertificateThumbprint) {
         if ($CertificateThumbprint -notmatch '^[A-Fa-f0-9]{40}$') { throw 'Invalid certificate thumbprint' }
         $signer = Join-Path $PSScriptRoot 'sign-windows.ps1'

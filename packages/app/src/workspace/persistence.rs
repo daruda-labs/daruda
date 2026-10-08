@@ -314,7 +314,7 @@ impl Workspace {
         }
 
         for project in &projects {
-            if let Err(e) = daruda_store::project::save_project_state_in(&self.data_dir, project) {
+            if let Err(e) = self.workspace_store.save_project(project) {
                 LogWriter::log(
                     ErrorReport::new("Failed to persist project state")
                         .severity(ErrorSeverity::Error)
@@ -328,7 +328,7 @@ impl Workspace {
             }
         }
 
-        if let Err(e) = daruda_store::project::save_workspace_state_in(&self.data_dir, &workspace) {
+        if let Err(e) = self.workspace_store.save_workspace(&workspace) {
             LogWriter::log(
                 ErrorReport::new("Failed to persist workspace state")
                     .severity(ErrorSeverity::Error)
@@ -348,13 +348,11 @@ impl Workspace {
     fn update_recent_entry(&self, workspace: &WorkspaceState) -> bool {
         let display_name = self.recent_display_name();
         let outcome = if self.projects.is_empty() {
-            daruda_store::project::refresh_recent_if_present_in(
-                &self.data_dir,
-                workspace.uuid,
-                display_name,
-            )
+            self.workspace_store
+                .refresh_recent_if_present(workspace.uuid, display_name)
         } else {
-            daruda_store::project::touch_recent_in(&self.data_dir, workspace.uuid, display_name)
+            self.workspace_store
+                .touch_recent(workspace.uuid, display_name)
                 .map(|()| true)
         };
         match outcome {
@@ -379,9 +377,7 @@ impl Workspace {
     /// Remove the state file of a workspace nothing can reach, so an empty
     /// window does not leave one behind on every launch.
     fn discard_unreachable_state(&self, workspace: &WorkspaceState) {
-        if let Err(e) =
-            daruda_store::project::delete_workspace_state_in(&self.data_dir, workspace.uuid)
-        {
+        if let Err(e) = self.workspace_store.delete_workspace(workspace.uuid) {
             LogWriter::log(
                 ErrorReport::new("Failed to discard unreachable workspace state")
                     .severity(ErrorSeverity::Warning)

@@ -414,10 +414,12 @@ pub struct Workspace {
     /// Files panels. Holds at most one armed timer; re-arming drops it, which
     /// cancels the row the cursor left.
     pub(in crate::workspace) left_dock_preview: Option<gpui::Task<()>>,
-    /// Directory where state files are written by `persist_state()`.
+    /// Compatibility root for configuration, accounts and other feature data.
     /// Injected at construction time: production passes `default_data_dir()`,
     /// tests pass a per-test temp directory.
     pub(in crate::workspace) data_dir: std::path::PathBuf,
+    /// Workspace state persistence, independent of configuration and account paths.
+    pub(in crate::workspace) workspace_store: daruda_store::project::WorkspaceStore,
     /// Where flow run locks live. Injected for the same reason `data_dir`
     /// is, and it has to be a second field rather than derived from it:
     /// production wants the **shared, profile-independent** root, so that a
@@ -772,6 +774,7 @@ impl Workspace {
             } else {
                 daruda_store::persistence::flow_lock_root()
             },
+            workspace_store: crate::workspace_storage::for_root(&data_dir, cx),
             data_dir,
             mcp_project_dirs: Vec::new(),
             // Re-resolve the user layer with this workspace's project

@@ -5,11 +5,13 @@
 pub mod attention;
 pub(crate) mod desktop;
 pub(crate) mod desktop_instance;
+pub(crate) mod installer_update;
 pub(crate) mod local_socket;
 pub mod notifications;
 #[cfg(windows)]
 pub(crate) mod power;
 pub mod presence;
+pub(crate) mod startup_failure;
 #[cfg(windows)]
 mod taskbar_windows;
 pub(crate) mod window_controls;

@@ -1889,6 +1889,7 @@ dependencies = [
 name = "daruda_core"
 version = "0.2.16"
 dependencies = [
+ "dirs",
  "dunce",
  "libc",
  "percent-encoding",

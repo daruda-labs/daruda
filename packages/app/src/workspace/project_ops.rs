@@ -23,11 +23,11 @@ use crate::workspace::main_area::pane_tree::PaneId;
 /// (single-digit MS for typical project counts). If profiling shows
 /// this becoming a hotspot, cache the mapping in a `Workspace` field.
 pub(in crate::workspace) fn find_existing_project_uuid_for_root(
-    data_dir: &Path,
+    store: &daruda_store::project::WorkspaceStore,
     root: &Path,
 ) -> Option<ProjectUuid> {
     let mut found = None;
-    daruda_store::project::for_each_project_state_in(data_dir, |p| {
+    store.for_each_project(|p| {
         // Two spellings of one folder share one UUID, as `has_project_root`
         // treats them within a window.
         if found.is_none() && daruda_core::path::same_path(&p.root, root) {
@@ -117,12 +117,12 @@ impl Workspace {
         // (from another workspace), reuse its UUID so the new runtime
         // project points at the canonical shared file. Lane-list
         // mutations from either workspace flow through the same
-        // `<data_dir>/projects/<uuid>.json`.
+        // the repository's shared project record.
         //
         // `ProjectUuid::default()` is the nil sentinel — we need a
         // freshly-minted v4, hence the explicit closure.
         #[allow(clippy::unwrap_or_default)]
-        let uuid = find_existing_project_uuid_for_root(&self.data_dir, &root)
+        let uuid = find_existing_project_uuid_for_root(&self.workspace_store, &root)
             .unwrap_or_else(ProjectUuid::new);
         let mut project = crate::project::Project::new_with_uuid(new_id, uuid, root);
         project.tab_order = tab_order;
@@ -230,7 +230,7 @@ impl Workspace {
         let config = crate::settings_store::SettingsStore::global(cx).user_arc();
         let store_project = daruda_store::project::Project::from_path(&root);
         // Policy B: the new workspace will reuse this project's
-        // existing UUID when it scans `<data_dir>/projects/` on first
+        // existing UUID when it scans the workspace repository on first
         // `add_project` (or recreate the file fresh if scrub'd). No
         // cross-window dedup applies here — by construction the user
         // explicitly asked for a second window pointing at the same

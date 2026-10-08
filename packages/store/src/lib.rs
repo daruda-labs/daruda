@@ -21,5 +21,6 @@ pub mod persistence;
 pub(crate) mod profile;
 pub mod project;
 pub mod remote_channels;
+mod storage;
 pub mod tasks;
 pub mod telegram;

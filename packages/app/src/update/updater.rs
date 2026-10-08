@@ -134,10 +134,11 @@ impl Updater {
         cx.notify();
 
         let current = self.current.clone();
+        let suffix = self.target.as_ref().and_then(InstallTarget::asset_suffix);
         cx.spawn(async move |this, cx| {
             let result = cx
                 .background_executor()
-                .spawn(async move { check_latest(&current) })
+                .spawn(async move { check_latest(&current, suffix) })
                 .await;
             // SILENT-OK: app shutting down mid-update; the entity update is moot
             let _ = this.update(cx, |updater, cx| updater.apply_check_result(result, cx));
@@ -161,7 +162,17 @@ impl Updater {
         cx.notify();
 
         cx.spawn(async move |this, cx| {
-            let dest = std::env::temp_dir().join(format!("daruda-update-{}.dmg", info.version));
+            let temporary = match tempfile::tempdir() {
+                Ok(directory) => directory,
+                Err(error) => {
+                    // SILENT-OK: app shutting down mid-update; the entity update is moot
+                    let _ = this.update(cx, |updater, cx| {
+                        updater.fail(&UpdateError::Io(error.to_string()), cx)
+                    });
+                    return;
+                }
+            };
+            let dest = temporary.path().join("package");
             let release = info.clone();
             let dest_for_dl = dest.clone();
 
@@ -202,7 +213,7 @@ impl Updater {
             let _ = std::fs::remove_file(&dmg);
             // SILENT-OK: app shutting down mid-update; the entity update is moot
             let _ = this.update(cx, |updater, cx| match installed {
-                Ok(()) => {
+                Ok(target) => {
                     updater.status = AutoUpdateStatus::ReadyToRestart(target);
                     cx.notify();
                 }
@@ -275,11 +286,17 @@ impl Updater {
 /// `<…>/target/{debug,release}` — where cargo puts a build, and the one
 /// place a portable install never is.
 /// Tests must never reach GitHub: under test every check answers "up to date".
-fn check_latest(current: &semver::Version) -> Result<Option<ReleaseInfo>, UpdateError> {
+fn check_latest(
+    current: &semver::Version,
+    suffix: Option<&'static str>,
+) -> Result<Option<ReleaseInfo>, UpdateError> {
     if cfg!(test) {
         return Ok(None);
     }
-    daruda_update::check_latest(current)
+    match suffix {
+        Some(suffix) => daruda_update::check::check_latest_with_suffix(current, suffix),
+        None => daruda_update::check_latest(current),
+    }
 }
 
 /// The release's package, verified against its published checksum. Under
@@ -315,6 +332,8 @@ pub enum InstallTarget {
     Bundle(PathBuf),
     /// The directory a portable archive was extracted to.
     Directory(PathBuf),
+    /// NSIS owns file manifests and Windows registration for this deployment.
+    Installer(super::InstallerTarget),
 }
 
 impl InstallTarget {
@@ -331,20 +350,38 @@ impl InstallTarget {
             // Everything but a cargo build looks like one, and that directory
             // is writable — so the swap's own check would not save a developer
             // from having a release dropped over `target\\debug`.
-            return exe
-                .parent()
-                .filter(|dir| !is_cargo_output(dir))
-                .map(|dir| Self::Directory(dir.to_path_buf()));
+            return exe.parent().filter(|dir| !is_cargo_output(dir)).map(|dir| {
+                match super::InstallerTarget::discover(dir) {
+                    Some(installer) => Self::Installer(installer),
+                    None => Self::Directory(dir.to_path_buf()),
+                }
+            });
         }
         exe.ancestors()
             .find(|path| path.extension().is_some_and(|ext| ext == "app"))
             .map(|bundle| Self::Bundle(bundle.to_path_buf()))
     }
 
-    fn install(&self, package: &Path) -> Result<(), UpdateError> {
+    fn asset_suffix(&self) -> Option<&'static str> {
         match self {
-            Self::Bundle(bundle) => daruda_update::install_dmg(package, bundle),
-            Self::Directory(root) => daruda_update::install_zip(package, root),
+            Self::Installer(_) => Some(super::installer::ASSET_SUFFIX),
+            _ => daruda_update::asset_suffix(),
+        }
+    }
+
+    pub(crate) fn uses_installer(&self) -> bool {
+        matches!(self, Self::Installer(_))
+    }
+
+    fn install(&self, package: &Path) -> Result<Self, UpdateError> {
+        match self {
+            Self::Installer(installer) => installer.prepare(package).map(Self::Installer),
+            Self::Bundle(bundle) => {
+                daruda_update::install_dmg(package, bundle).map(|()| self.clone())
+            }
+            Self::Directory(root) => {
+                daruda_update::install_zip(package, root).map(|()| self.clone())
+            }
         }
     }
 
@@ -361,6 +398,7 @@ impl InstallTarget {
         match self {
             Self::Bundle(bundle) => daruda_update::relaunch(bundle),
             Self::Directory(root) => daruda_update::relaunch_from(root),
+            Self::Installer(installer) => installer.relaunch(),
         }
     }
 }
@@ -380,7 +418,7 @@ mod tests {
     #[test]
     fn network_calls_are_stubbed_under_test() {
         let current = semver::Version::new(0, 2, 0);
-        assert!(matches!(check_latest(&current), Ok(None)));
+        assert!(matches!(check_latest(&current, None), Ok(None)));
         let release = ReleaseInfo {
             version: semver::Version::new(0, 3, 0),
             tag: "v0.3.0".to_string(),
@@ -515,5 +553,18 @@ mod tests {
             "/Applications/daruda.app",
         )));
         assert!(updater.can_install());
+    }
+
+    #[test]
+    fn managed_windows_installations_use_setup_instead_of_zip() {
+        let root = tempfile::tempdir().unwrap();
+        let exe = root.path().join("daruda.exe");
+        std::fs::write(root.path().join("uninstall.exe"), "installer owned").unwrap();
+        let target = InstallTarget::for_host(&exe, true).unwrap();
+        assert!(target.uses_installer());
+        assert_eq!(
+            target.asset_suffix(),
+            Some(super::super::installer::ASSET_SUFFIX)
+        );
     }
 }

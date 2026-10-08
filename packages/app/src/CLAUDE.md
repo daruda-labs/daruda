@@ -9,6 +9,7 @@ config/keybinding wiring.
 ```
 app/src/
 ├── (top-level)           # App entry, window/menu lifecycle, PTY, config watcher, slot actions
+├── startup/              # Desktop startup and optional replay, capture, and smoke flows
 ├── agent/                # Agent-side data models — MCP, skills, tasks (GPUI-free cores + Global wrappers) — plus GPUI-free account + ACP launch resolution
 ├── settings/             # Settings surface — sidebar + one BuiltinSection body; a body-level view a Workspace hosts, not a window
 ├── surface/              # App-shell constants — name, shortcuts, strings, keybinding action map
@@ -39,6 +40,10 @@ app/src/
 GPUI-free git CLI wrappers.
 
 ## Top-level (`app/src/*.rs`)
+
+`main()` delegates to `startup::run`: helper commands exit before environment
+hydration or GUI initialization, desktop cleanup exits before instance ownership,
+and the desktop flow initializes the first window before scheduling inspection.
 
 App-shell glue — process entry, native menu bar + Open Recent, window lifecycle (every window is a Workspace, wrapped in `gpui_component::Root`, with double-open guards), live config-reload watcher, PTY spawn + I/O threads, and tab/lane slot-action macros (`tab_slot_table!` / `lane_slot_table!` — the latter generates `ActivateLane*` actions, displayed as "Activate Worktree N" in the menu).
 

@@ -11,7 +11,8 @@ nearby when a shell is still the right tool.
 
 daruda is built on [GPUI](https://github.com/zed-industries/zed/tree/main/crates/gpui)
 and [ghostty_vt](https://ghostty.org). macOS 12+ is the primary supported
-desktop target today.
+desktop target. Native Windows x86_64 builds are also available, with
+experimental GUI support.
 
 ---
 
@@ -51,14 +52,14 @@ Use `Cmd+Ctrl+1-9` to jump between worktrees.
 
 ## Quick Start
 
-### Requirements
+### macOS Requirements
 
 - macOS 12 Monterey or later
 - Rust 1.95+
 - Xcode Command Line Tools
 - Zig 0.14.1, installed by the bootstrap script below on macOS
 
-### Run From Source
+### Run From Source on macOS
 
 ```bash
 git clone --recurse-submodules https://github.com/daruda-labs/daruda
@@ -69,8 +70,26 @@ cargo fetch && ./scripts/apply-gpui-patch.sh
 cargo run -p daruda
 ```
 
-For contributor setup, local checks, CI commands, Linux notes, and release
-packaging, see [CONTRIBUTING.md](CONTRIBUTING.md).
+### Windows Requirements
+
+- Windows x86_64
+- Git for Windows
+- Rust 1.95+ (MSVC toolchain)
+- Visual Studio 2022 Build Tools with the C++ workload and Windows SDK
+- Zig 0.14.1, installed by the bootstrap script below
+
+### Run From Source on Windows
+
+```powershell
+git clone --recurse-submodules https://github.com/daruda-labs/daruda
+cd daruda
+./scripts/bootstrap-zig.ps1
+./scripts/build-windows.ps1
+./target/debug/daruda.exe
+```
+
+For setup details, tests, platform limitations, and ZIP/installer packaging,
+see [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ---
 
@@ -80,7 +99,7 @@ packaging, see [CONTRIBUTING.md](CONTRIBUTING.md).
 |---|---|
 | macOS runtime | Primary supported target, Apple Silicon and Intel |
 | Linux | Builds and tests pass; GUI runtime still needs desktop verification |
-| Windows | x86_64 ZIP ships with in-place self-update; builds, tests, and a smoke launch pass in CI; GUI runtime still needs desktop verification |
+| Windows | Native x86_64 ZIP and installer; experimental GUI support with CI build, test, and smoke checks |
 | ACP chat sessions | Shipped for configured ACP agents |
 | Claude Code integration | Status, usage, skills, tools, and task launching shipped |
 | Other agent integrations | Ongoing as each CLI exposes stable metadata |

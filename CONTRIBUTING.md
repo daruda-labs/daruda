@@ -10,6 +10,7 @@ daruda locally. For a short product overview and first run instructions, see
 
 - [Requirements](#requirements)
 - [Setup](#setup)
+- [Storage locations](#storage-locations)
 - [Local Checks](#local-checks)
 - [Packaging](#packaging)
 - [Project Structure](#project-structure)
@@ -139,7 +140,67 @@ processes as Unix process groups do.
 
 ---
 
+## Storage locations
+
+Configuration and account data retain their existing platform
+config directory (`daruda` for release, `daruda-debug` for debug, or
+`daruda-<profile>` for a named profile). Managed Node installations and resource
+locks also retain their existing shared locations.
+
+New logs use native local storage:
+
+| Platform | Default log directory |
+|---|---|
+| Windows | `%LOCALAPPDATA%\daruda\logs\<profile>` |
+| macOS | `~/Library/Logs/daruda/<profile>` (`release`, `debug`, or a named profile) |
+| Linux | `$XDG_STATE_HOME/daruda/logs/<profile>` (default `~/.local/state`) |
+
+`DARUDA_DATA_DIR` selects an exact isolated root, with logs in `<root>/logs`
+and the existing configuration, Node and lock paths under that root. Relative
+overrides are resolved against the working directory at the first storage
+lookup. The override and profile are captured once per process.
+
+Old `~/.daruda/logs/<profile>` files remain untouched. The Help menu's diagnostic
+export reads bounded, sanitized events from both old and new default logs;
+an isolated override reads only its own logs. Explicit ACP/Telegram trace
+environment overrides still select their requested destinations.
+
+Profiles (`release`, `debug`, or a named profile) share one application log
+root on every OS. macOS follows the
+[`~/Library/Logs/<AppName>` convention](https://www.electronjs.org/docs/latest/api/app#setapplogspathpath).
+Windows uses [local app data](https://learn.microsoft.com/en-us/windows/apps/develop/windows-app-restore#machine-specific-app-data),
+and Linux uses [`XDG_STATE_HOME` for log history](https://specifications.freedesktop.org/basedir/0.8/).
+Earlier native logs under the `daruda[-profile]` application directories
+remain read-only diagnostic sources; they are not moved or deleted.
+
+Workspace UUID records and the recent list use a separate repository:
+
+| Platform | Workspace repository |
+|---|---|
+| Windows | `%LOCALAPPDATA%\daruda[-profile]\state\workspace` |
+| macOS | `~/Library/Application Support/daruda[-profile]/state/workspace` |
+| Linux | `$XDG_STATE_HOME/daruda[-profile]/workspace` |
+| Explicit override | `<DARUDA_DATA_DIR>/state/workspace` |
+
+The primary desktop instance prepares this repository before opening windows.
+On the first launch it validates and copies only UUID JSON records and
+`recent-workspaces.json`, then publishes the verified directory atomically.
+Original files, project config/Flow directories and unknown files stay untouched.
+An interrupted copy is retried from the original snapshot; abandoned staging
+directories are never read as state. An existing destination without a valid
+layout marker, malformed source records or newer schemas stop startup rather
+than overwrite data. Later launches use the published repository exclusively.
+Running an older app after migration reads the preserved, potentially stale
+original state; automatic downgrade synchronization is not supported.
+
 ## Local Checks
+
+Unit tests must not launch desktop applications against temporary fixtures.
+The workspace external-file boundary records requests per GPUI app in test
+builds; assert the requested path and editor with `take_external_open_requests`
+instead of invoking an installed editor. This applies on every OS, without
+requiring a default file association or an editor on `PATH`. Keep native launch
+verification in an explicit manual smoke check with a persistent file.
 
 Run these before committing:
 
@@ -216,9 +277,18 @@ Build a per-user installer from that ZIP with NSIS 3.11 on PATH:
 
 The installer defaults to `%LOCALAPPDATA%\Programs\daruda`, requires no
 administrator permission, and registers shortcuts and an uninstall entry.
-It refuses to replace a running executable. Uninstall removes only shipped
-files and preserves application data and user-created files. The installation
-test refuses to run if existing daruda desktop integration would be overwritten.
+It checks every shipped file for locks before replacing or removing files.
+Uninstall preserves application data and user-created files, keeps registration
+on removal failure, and removes shared integration only when its registered
+directory still belongs to that installation. The installation test refuses to
+run if existing daruda desktop integration would be overwritten.
+
+Installer deployments download the checksum-verified setup asset rather than
+the portable ZIP. Restart opens that installer, which waits for the old process
+to exit, updates its file manifest and Windows registration, and relaunches the
+app after successful installation. The verified setup remains in the user's
+temporary directory for retry or diagnosis. Portable ZIP deployments retain
+their existing file-swap update path.
 For signed builds, pass `-CertificateThumbprint <thumbprint>` to the installer
 build script. The certificate must be in `Cert:\CurrentUser\My` with an accessible
 private key. The app, uninstaller, and installer are signed and timestamped;

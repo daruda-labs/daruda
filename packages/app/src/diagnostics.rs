@@ -2,14 +2,11 @@
 
 use daruda_store::observability::{
     error_report::{ErrorReport, ErrorSeverity},
-    log_writer::{LogWriter, log_dir},
+    log_writer::LogWriter,
 };
 use gpui::App;
 
 pub(crate) fn export(cx: &mut App) {
-    let Some(logs) = log_dir() else {
-        return;
-    };
     let selected = cx.prompt_for_paths(gpui::PathPromptOptions {
         files: false,
         directories: true,
@@ -32,8 +29,11 @@ pub(crate) fn export(cx: &mut App) {
         let result = cx
             .background_executor()
             .spawn(async move {
-                daruda_store::observability::diagnostics::export(&logs, &output, chrono::Utc::now())
-                    .map(|_| output)
+                daruda_store::observability::diagnostics::export_current(
+                    &output,
+                    chrono::Utc::now(),
+                )
+                .map(|_| output)
             })
             .await;
         match result {

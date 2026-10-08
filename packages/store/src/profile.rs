@@ -9,7 +9,7 @@ use std::sync::OnceLock;
 use daruda_core::process_env;
 
 /// Profile name that keeps the legacy (un-suffixed) data path.
-/// `persistence::default_data_dir_from` pattern-matches against this
+/// The private storage layout pattern-matches against this
 /// when deciding whether to append a `-<profile>` suffix to the
 /// platform config dir.
 pub(crate) const RELEASE_PROFILE: &str = "release";

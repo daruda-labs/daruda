@@ -88,7 +88,7 @@ pub fn parse_release(
 
 /// [`parse_release`] against a named package suffix, so a platform's
 /// selection is checked without being run on it.
-fn parse_release_with_suffix(
+pub fn parse_release_with_suffix(
     json: &str,
     current: &semver::Version,
     suffix: &'static str,
@@ -132,6 +132,24 @@ fn parse_release_with_suffix(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn installer_and_portable_assets_are_selected_independently() {
+        let json = r#"{"tag_name":"v0.3.0","assets":[
+            {"name":"daruda-0.3.0-windows-x86_64.zip","browser_download_url":"https://github.com/portable"},
+            {"name":"daruda-0.3.0-windows-x86_64-setup.exe","browser_download_url":"https://github.com/installer"},
+            {"name":"SHA256SUMS.txt","browser_download_url":"https://github.com/checksums"}
+        ]}"#;
+        let current = semver::Version::new(0, 2, 0);
+        let installed = parse_release_with_suffix(json, &current, "-windows-x86_64-setup.exe")
+            .unwrap()
+            .unwrap();
+        let portable = parse_release_with_suffix(json, &current, "-windows-x86_64.zip")
+            .unwrap()
+            .unwrap();
+        assert_eq!(installed.asset_url, "https://github.com/installer");
+        assert_eq!(portable.asset_url, "https://github.com/portable");
+    }
 
     const RELEASE_JSON: &str = "{\
         \"tag_name\": \"v0.3.0\",\

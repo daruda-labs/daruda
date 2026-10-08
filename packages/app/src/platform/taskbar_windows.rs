@@ -4,35 +4,17 @@ use std::cell::Cell;
 
 mod lifecycle;
 
+mod state;
+
 #[derive(Clone, Copy, Default)]
-struct Overlay {
-    desired: usize,
-    applied: Option<usize>,
+struct Runtime {
+    overlay: state::Overlay,
     failure_reported: bool,
 }
 
-impl Overlay {
-    fn synchronize(
-        &mut self,
-        invalidated: bool,
-        available: bool,
-        apply: impl FnOnce(usize) -> anyhow::Result<()>,
-    ) -> anyhow::Result<()> {
-        if invalidated {
-            self.applied = None;
-        }
-        if available && self.applied != Some(self.desired) {
-            self.applied = None;
-            apply(self.desired)?;
-            self.applied = Some(self.desired);
-        }
-        Ok(())
-    }
-}
-
 thread_local! {
-    static OVERLAY: Cell<Overlay> = const { Cell::new(Overlay {
-        desired: 0, applied: None, failure_reported: false,
+    static OVERLAY: Cell<Runtime> = const { Cell::new(Runtime {
+        overlay: state::Overlay::new(), failure_reported: false,
     }) };
 }
 
@@ -57,10 +39,9 @@ const DIGITS: [[u8; 7]; 10] = [
 
 pub(super) fn set(count: usize) {
     OVERLAY.with(|state| {
-        state.set(Overlay {
-            desired: count,
-            ..state.get()
-        })
+        let mut runtime = state.get();
+        runtime.overlay.request(count);
+        state.set(runtime);
     });
     refresh();
 }
@@ -80,12 +61,14 @@ fn refresh() {
     let mut state = OVERLAY.with(Cell::get);
     let result = (|| -> anyhow::Result<()> {
         let (windows, invalidated) = lifecycle::windows()?;
-        state.synchronize(invalidated, !windows.is_empty(), |count| {
-            update(count, windows)
-        })
+        state
+            .overlay
+            .synchronize(invalidated, !windows.is_empty(), |count| {
+                update(count, windows)
+            })
     })();
     if let Err(error) = result {
-        state.applied = None;
+        state.overlay.invalidate();
         if !state.failure_reported {
             super::report_error(
                 "desktop.taskbar",
@@ -161,43 +144,6 @@ fn pixels(count: usize) -> [u8; 16 * 16 * 4] {
 
 #[cfg(test)]
 mod tests {
-    #[test]
-    fn unchanged_count_retries_after_failure_and_taskbar_recreation() {
-        let mut state = super::Overlay {
-            desired: 3,
-            ..Default::default()
-        };
-        assert!(
-            state
-                .synchronize(false, true, |_| anyhow::bail!("temporary failure"))
-                .is_err()
-        );
-        assert_eq!(state.applied, None);
-        let mut attempts = 0;
-        for invalidated in [false, false, true] {
-            state
-                .synchronize(invalidated, true, |count| {
-                    assert_eq!(count, 3);
-                    attempts += 1;
-                    Ok(())
-                })
-                .unwrap();
-        }
-        assert_eq!(attempts, 2);
-        state.desired = 0;
-        state
-            .synchronize(false, false, |_| panic!("no window"))
-            .unwrap();
-        assert_eq!(state.applied, Some(3));
-        state
-            .synchronize(false, true, |count| {
-                assert_eq!(count, 0);
-                Ok(())
-            })
-            .unwrap();
-        assert_eq!(state.applied, Some(0));
-    }
-
     #[test]
     fn overlay_has_transparent_corners_and_distinct_counts() {
         let one = super::pixels(1);

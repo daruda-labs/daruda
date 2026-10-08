@@ -5,7 +5,7 @@
 //! synchronous by design — the app-layer caller is responsible for running
 //! these functions off the GPUI main thread.
 
-use crate::{ReleaseInfo, UpdateError, parse_release};
+use crate::{ReleaseInfo, UpdateError};
 use std::fs::File;
 use std::io::{self, Read as _};
 use std::path::Path;
@@ -33,6 +33,17 @@ const MAX_CHECKSUMS_BYTES: u64 = 64 * 1024;
 /// GitHub's `/releases/latest` endpoint already excludes prereleases and drafts.
 /// Blocking; call off the main thread.
 pub fn check_latest(current: &semver::Version) -> Result<Option<ReleaseInfo>, UpdateError> {
+    let suffix =
+        crate::asset_suffix().ok_or(UpdateError::NoPackageForPlatform(std::env::consts::OS))?;
+    check_latest_with_suffix(current, suffix)
+}
+
+/// Check the same trusted release endpoint for a deployment-specific asset.
+/// The caller selects a fixed suffix, never an arbitrary download URL.
+pub fn check_latest_with_suffix(
+    current: &semver::Version,
+    suffix: &'static str,
+) -> Result<Option<ReleaseInfo>, UpdateError> {
     // Redirects are followed with the default agent here (unlike `download_asset`,
     // which pins hosts per hop): the target is a fixed HTTPS GitHub API URL with
     // TLS certificate validation, and the only value derived from the response —
@@ -53,7 +64,7 @@ pub fn check_latest(current: &semver::Version) -> Result<Option<ReleaseInfo>, Up
         .into_string()
         .map_err(|e| UpdateError::Http(e.to_string()))?;
 
-    parse_release(&body, current)
+    crate::release::parse_release_with_suffix(&body, current, suffix)
 }
 
 /// Download `url` to `dest`, streaming to disk. Rejects any URL whose host is

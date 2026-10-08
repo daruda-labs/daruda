@@ -1900,6 +1900,24 @@ async fn every_files_row_click_leaves_the_panel_focused(cx: &mut TestAppContext)
             ws.update(cx, |ws, cx| {
                 ws.git.panel_focus.clone().focus(window, cx);
                 ws.on_files_row_click(id, entry_id, abs, kind, clicks, false, window, cx);
+                let requests = ws.take_external_open_requests(cx);
+                if kind.is_dir() {
+                    assert!(
+                        requests.is_empty(),
+                        "directory clicks must not launch an app"
+                    );
+                } else {
+                    assert_eq!(
+                        requests.len(),
+                        1,
+                        "double click must request one external open"
+                    );
+                    assert_eq!(requests[0].path, temp.path().join("a.txt"));
+                    assert!(
+                        requests[0].preset.is_none(),
+                        "the default editor must use the OS handler"
+                    );
+                }
             });
         })
         .unwrap();
@@ -1912,6 +1930,34 @@ async fn every_files_row_click_leaves_the_panel_focused(cx: &mut TestAppContext)
             .unwrap();
         assert!(focused, "{label} left focus outside the Files panel");
     }
+}
+
+/// Every external-file entry point uses the same test boundary, including
+/// configured editors. Cleanup must be safe before background work settles.
+#[gpui::test]
+async fn external_file_requests_survive_fixture_cleanup_without_launching_apps(
+    cx: &mut TestAppContext,
+) {
+    let (_wh, ws, temp) = build_workspace_with_temp_project(cx);
+    let path = temp.path().join("a.txt");
+    ws.update(cx, |ws, cx| {
+        let lane = ws.active_ref();
+        ws.mirrors.preferred_editor = "vscode".into();
+        ws.open_file_externally(lane, "a.txt".into(), cx);
+        ws.open_lane_file_with_system_default(lane, "a.txt".into(), cx);
+        ws.open_path_with_system_default(path.clone(), cx);
+    });
+    temp.close().unwrap();
+    cx.run_until_parked();
+    ws.update(cx, |ws, cx| {
+        let requests = ws.take_external_open_requests(cx);
+        assert_eq!(requests.len(), 3);
+        assert!(requests.iter().all(|request| request.path == path));
+        assert_eq!(requests[0].preset.unwrap().name, "vscode");
+        assert!(requests[1].preset.is_none());
+        assert!(requests[2].preset.is_none());
+        assert!(ws.take_external_open_requests(cx).is_empty());
+    });
 }
 
 /// The Files panel needs the same keyboard door the Git panel does, and for

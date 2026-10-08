@@ -39,6 +39,7 @@ pub mod settings_store;
 mod shell_env;
 mod slot_actions;
 mod smoke;
+mod startup;
 pub mod surface;
 mod telegram;
 #[cfg(test)]
@@ -54,6 +55,7 @@ pub(crate) mod window_registry;
 mod window_startup;
 mod windows;
 mod workspace;
+mod workspace_storage;
 
 use gpui::{App, MenuItem, actions};
 use windows::OpenMode;
@@ -150,9 +152,7 @@ macro_rules! recent_slot_table {
                     let cfg_replace = config.clone();
                     cx.on_action(move |_: &$replace, cx: &mut App| {
                         let recent = std::sync::Arc::new(
-                            daruda_store::project::load_recent_in(
-                                &daruda_store::persistence::default_data_dir(),
-                            ),
+                            crate::workspace_storage::current(cx).load_recent(),
                         );
                         windows::open_recent_idx(
                             $idx,
@@ -168,9 +168,7 @@ macro_rules! recent_slot_table {
                     let cfg_new = config.clone();
                     cx.on_action(move |_: &$new_window, cx: &mut App| {
                         let recent = std::sync::Arc::new(
-                            daruda_store::project::load_recent_in(
-                                &daruda_store::persistence::default_data_dir(),
-                            ),
+                            crate::workspace_storage::current(cx).load_recent(),
                         );
                         windows::open_recent_idx(
                             $idx,
@@ -201,140 +199,5 @@ recent_slot_table! {
 }
 
 fn main() {
-    // `daruda --hook <eventType>` is a non-GUI subcommand invoked by
-    // Claude Code's hook system. Handle it before constructing the
-    // GPUI App so spawning a hook doesn't open a window or attach to
-    // the desktop session.
-    if let Some(code) = bootstrap::route_hook_subcommand() {
-        std::process::exit(code);
-    }
-
-    // `daruda --mcp` is the stdio↔socket relay an ACP agent spawns to reach
-    // daruda's tools. Same reasoning as the hook above: it must not open a
-    // window, and an agent may run several at once.
-    if let Some(code) = bootstrap::route_mcp_subcommand() {
-        std::process::exit(code);
-    }
-
-    // `daruda --await-exit <pid>` finishes a portable-install update: it
-    // outlives the process it replaced and starts the new one. Before the
-    // GUI for the same reason as the rest — it must open no window of its own.
-    if let Some(code) = bootstrap::route_await_exit_subcommand() {
-        std::process::exit(code);
-    }
-
-    // `daruda --env` stands in for `env(1)` on a host without one. Same
-    // reasoning as the two above, and it must precede `shell_env` below: the
-    // whole point is to hand the child a smaller environment, not a hydrated
-    // one.
-    if let Some(code) = bootstrap::route_env_subcommand() {
-        std::process::exit(code);
-    }
-
-    // A GUI launch (Finder / Dock / `open`) inherits only launchd's minimal
-    // PATH; hydrate it from the login shell so subprocesses spawned later —
-    // the ACP `npx` adapter, the `claude` CLI — are found. No-op from a
-    // terminal launch. Must precede any subprocess spawn.
-    shell_env::hydrate_path_from_login_shell();
-
-    bootstrap::init_observability();
-
-    if std::env::args_os().any(|arg| arg == "--unregister-desktop") {
-        if let Err(error) = platform::notifications::unregister_desktop() {
-            platform::report_error(
-                "desktop.shortcuts",
-                "Desktop shortcut cleanup failed",
-                error.as_ref(),
-            );
-            std::process::exit(1);
-        }
-        return;
-    }
-
-    let desktop = platform::desktop_instance::start(
-        &daruda_store::persistence::default_data_dir(),
-        std::env::args_os().skip(1),
-    );
-    let instance = match desktop {
-        Ok(platform::desktop_instance::Launch::Primary(instance)) => instance,
-        Ok(platform::desktop_instance::Launch::Forwarded) => return,
-        Err(error) => {
-            platform::report_error("desktop.startup", "Desktop startup failed", error.as_ref());
-            std::process::exit(1);
-        }
-    };
-
-    let app = bootstrap::new_application();
-    app.run(move |cx: &mut App| {
-        globals::init_all(cx);
-        platform::desktop_instance::install(instance, cx);
-        platform::notifications::install(cx);
-        platform::desktop::install(cx);
-        bind_keys::register_static_bindings(cx);
-
-        // SettingsStore is the single source of truth — read the
-        // user layer directly instead of re-reading disk.
-        let config = crate::settings_store::SettingsStore::global(cx).user_arc();
-        surface::action_map::apply_keybinding_overrides(&config.keybindings.bindings, cx);
-
-        let window_opts = windows::build_window_options(&config);
-
-        bind_keys::register_global_actions(cx, config.clone());
-        register_recent_actions(cx, config.clone());
-
-        // Canonical startup install of the app-wide managed-accounts Global
-        // (the single source of truth every window mirrors). Window
-        // constructors also install it idempotently, so this is belt-and-
-        // suspenders for the first window plus the authoritative install
-        // point for a window with no Workspace (Settings).
-        crate::workspace::accounts_global::install_if_absent(
-            cx,
-            daruda_store::accounts::load_accounts().unwrap_or_default(),
-        );
-
-        // `--replay-acp-log <path>`: fill an agent-chat pane with a captured
-        // conversation and leave the app running, for hands-on inspection. The
-        // read happens here, before any window exists — a restored pane that
-        // connects would otherwise let this build's own wire tap truncate the
-        // capture out from under us.
-        #[cfg(feature = "replay")]
-        let replay_loaded = replay::parse_replay_arg()
-            .and_then(|path| replay::load(&path, replay::parse_replay_agent_arg()));
-
-        window_startup::open_first_window(config, window_opts, cx);
-
-        #[cfg(feature = "replay")]
-        if let Some(loaded) = replay_loaded {
-            replay::schedule_seed(loaded, cx);
-        }
-
-        watchers_lifecycle::spawn_all(cx);
-        crate::telegram::global::install(cx);
-        crate::remote_channel::global::install(cx);
-
-        // `--screenshot <path>`: capture the live window to a PNG, then quit.
-        // `--screenshot-terminal-widen` swaps the restored-workspace capture
-        // for a standalone terminal driven through a narrow→wide reflow — the
-        // widen-reentry scrollback-dedup repro the workspace path can't stage.
-        #[cfg(feature = "screenshot")]
-        if let Some(path) = screenshot::parse_screenshot_arg() {
-            if screenshot::parse_terminal_widen_flag() {
-                screenshot::schedule_terminal_widen_capture(path, cx);
-            } else {
-                screenshot::schedule_capture(
-                    path,
-                    screenshot::parse_scenario_arg(),
-                    screenshot::parse_themes_arg(),
-                    screenshot::parse_size_arg(),
-                    cx,
-                );
-            }
-        }
-
-        // `--smoke`: wait for the window to come up and paint, then quit. Last,
-        // so it observes the same startup every other path just set running.
-        if smoke::requested() {
-            smoke::schedule(cx);
-        }
-    });
+    startup::run();
 }

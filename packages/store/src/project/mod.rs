@@ -14,6 +14,9 @@ pub mod lane;
 pub mod persistence;
 pub mod session_host_id;
 pub mod types;
+mod workspace_store;
+
+pub use workspace_store::WorkspaceStore;
 
 #[cfg(test)]
 mod tests;

@@ -1,3 +1,9 @@
+startup:
+  failure_heading: "daruda could not start"
+  failure_recovery: "Your existing data has been preserved. Resolve the problem below and restart daruda."
+  failure_log: "Details saved to: %{path}"
+  failure_log_unavailable: "Could not save the diagnostic log: %{error}"
+
 # Common UI tokens — reused across sections
 common:
   column_status: "Status"
@@ -1754,6 +1760,7 @@ settings:
   update_downloading: "Downloading update…"
   update_installing: "Installing update…"
   update_ready: "Update installed. Restart to apply."
+  update_ready_installer: "The verified installer is ready. Restart to open it and complete the update."
   update_error: "Update failed: %{msg}"
   update_dev_build: "Updates are only available in a packaged build."
   update_available_toast: "New version %{version} is available — open Settings › About to update."

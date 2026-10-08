@@ -20,14 +20,14 @@ pub(crate) fn open_first_window(
     window_opts: WindowOptions,
     cx: &mut App,
 ) {
-    let data_dir = daruda_store::persistence::default_data_dir();
-    let recent = daruda_store::project::load_recent_in(&data_dir);
+    let store = crate::workspace_storage::current(cx);
+    let recent = store.load_recent();
     let restored = recent.first().and_then(|entry| {
-        daruda_store::project::load_workspace_state_in(&data_dir, entry.workspace_uuid).map(|ws| {
+        store.load_workspace(entry.workspace_uuid).map(|ws| {
             let projects: Vec<_> = ws
                 .project_ids
                 .iter()
-                .filter_map(|p| daruda_store::project::load_project_state_in(&data_dir, *p))
+                .filter_map(|p| store.load_project(*p))
                 .collect();
             (ws, projects)
         })

@@ -121,7 +121,7 @@ fn register_settings_observer(cx: &mut App) {
 /// `"auto"` resolves to the primary tag of the system locale (e.g.
 /// `"ko-KR"` → `"ko"`). Unknown locale codes are clamped to `"en"` so
 /// neither `rust_i18n` nor `gpui_component` receives an unrecognised tag.
-fn apply_locale_str(lang: &str) {
+pub(crate) fn apply_locale_str(lang: &str) {
     let candidate = if lang == "auto" {
         let sys = sys_locale::get_locale().unwrap_or_else(|| "en".to_string());
         sys.split('-').next().unwrap_or("en").to_string()

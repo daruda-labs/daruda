@@ -1167,7 +1167,7 @@ fn window_open_policy_default_is_ask() {
 // ---- New UUID-keyed schema round-trip tests ----
 
 #[cfg(test)]
-mod new_schema_fixtures {
+pub(super) mod new_schema_fixtures {
     use std::collections::BTreeMap;
     use std::path::PathBuf;
 
@@ -1176,7 +1176,7 @@ mod new_schema_fixtures {
         WORKSPACE_SCHEMA_VERSION, WindowState, WorkspaceState, WorkspaceUuid,
     };
 
-    pub(super) fn sample_project() -> ProjectState {
+    pub(in crate::project) fn sample_project() -> ProjectState {
         ProjectState {
             schema_version: WORKSPACE_SCHEMA_VERSION,
             uuid: ProjectUuid::new(),
@@ -1190,7 +1190,7 @@ mod new_schema_fixtures {
         }
     }
 
-    pub(super) fn sample_workspace(project: ProjectUuid) -> WorkspaceState {
+    pub(in crate::project) fn sample_workspace(project: ProjectUuid) -> WorkspaceState {
         WorkspaceState {
             schema_version: WORKSPACE_SCHEMA_VERSION,
             uuid: WorkspaceUuid::new(),

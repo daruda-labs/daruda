@@ -11,8 +11,8 @@
 //! - [`system_info`] — cached `daruda VERSION · OS · ARCH` summary +
 //!   `redact_home()` helper. Strict allow-list — no hostname, username,
 //!   or environment-variable leakage.
-//! - [`log_writer`] — NDJSON append + 30-day rotation, gated by
-//!   `cfg!(debug_assertions)` into `~/.daruda/logs/{debug,release}/`.
+//! - [`log_writer`] — NDJSON append + 30-day rotation in the native
+//!   profile-scoped log directory (or the isolated data override).
 
 pub mod diagnostics;
 pub mod error_report;

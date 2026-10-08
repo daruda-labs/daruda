@@ -21,7 +21,7 @@
 use std::io::Write as _;
 use std::path::{Path, PathBuf};
 
-use daruda_core::process_env;
+use crate::storage::StorageLayout;
 use serde::{Serialize, de::DeserializeOwned};
 
 use crate::observability::error_report::{ErrorReport, ErrorSeverity};
@@ -129,44 +129,22 @@ pub fn save_json_atomic<T: Serialize>(dir: &Path, target: &Path, value: &T) -> s
     Ok(())
 }
 
-/// Default daruda data directory. Resolution order:
-///
-/// 1. `DARUDA_DATA_DIR` env — full override, used verbatim.
-/// 2. Platform config dir (`dirs::config_dir()`) joined with
-///    `daruda` (release profile) or `daruda-<profile>` (anything else).
-///    Profile resolved from `DARUDA_PROFILE` env or `cfg!(debug_assertions)`
-///    via `crate::profile::resolve_profile_from`.
-/// 3. Fallback to `./daruda` if the platform dir is unresolvable, with
-///    a warning written to the daruda log.
-///
-/// `release` is treated specially so existing users keep their data
-/// in `Application Support/daruda/` without any migration. All other
-/// profile names (including `debug`) get a `daruda-<profile>` suffix.
-///
-/// Reads env exactly once per call at this site; pure layout logic
-/// lives in `default_data_dir_from` so tests can exercise every branch
-/// without touching process state.
+/// Compatibility root for configuration, accounts and existing feature data.
+/// Workspace state is owned separately by `project::WorkspaceStore`.
+/// Environment and profile are captured once for all storage consumers.
 pub fn default_data_dir() -> PathBuf {
-    let override_env = process_env::DATA_DIR.read_utf8().ok();
-    let profile_env = process_env::PROFILE.read_utf8().ok();
-
-    // This is the one legitimate caller `clippy.toml`'s `disallowed-methods`
-    // entry for `dirs::config_dir` refers to — every other daruda-owned
-    // path must come from this function's return value, not a fresh call.
-    #[allow(clippy::disallowed_methods)]
-    let base = dirs::config_dir().unwrap_or_else(|| {
+    let directory = StorageLayout::current().data();
+    if directory.is_relative() {
         LogWriter::log(
             ErrorReport::new("Config directory unresolved — using ./daruda")
                 .severity(ErrorSeverity::Warning)
-                .message("dirs::config_dir() returned None; falling back to ./daruda")
+                .message("OS config directory unavailable; using the compatibility fallback")
                 .at(file!(), line!())
                 .dedup("store.config_dir.fallback")
                 .build(),
         );
-        PathBuf::from(".")
-    });
-
-    default_data_dir_from(override_env.as_deref(), profile_env.as_deref(), &base)
+    }
+    directory
 }
 
 /// The active profile's suffix for non-path resources that need the same
@@ -191,18 +169,7 @@ pub fn profile_suffix() -> Option<&'static str> {
 /// stay isolated), otherwise lands under the shared `daruda/node` regardless of
 /// the active profile.
 pub fn node_install_dir() -> PathBuf {
-    if let Some(dir) = process_env::DATA_DIR.read_utf8().ok().as_deref() {
-        let trimmed = dir.trim();
-        if !trimmed.is_empty() {
-            return PathBuf::from(trimmed).join("node");
-        }
-    }
-    // Deliberately independent of `default_data_dir` (see the doc comment
-    // above) — this is the second, allowed exception to the
-    // `disallowed-methods` `dirs::config_dir` entry.
-    #[allow(clippy::disallowed_methods)]
-    let base = dirs::config_dir().unwrap_or_else(|| PathBuf::from("."));
-    base.join("daruda").join("node")
+    StorageLayout::current().node_install()
 }
 
 /// Where flow run locks live: `<config>/daruda/flow-locks`.
@@ -219,17 +186,7 @@ pub fn node_install_dir() -> PathBuf {
 /// two suites pointed at different data directories are not sharing a
 /// working tree either.
 pub fn flow_lock_root() -> PathBuf {
-    if let Some(dir) = process_env::DATA_DIR.read_utf8().ok().as_deref() {
-        let trimmed = dir.trim();
-        if !trimmed.is_empty() {
-            return PathBuf::from(trimmed).join("flow-locks");
-        }
-    }
-    // The third allowed exception to the `disallowed-methods`
-    // `dirs::config_dir` entry, for the reason in the doc above.
-    #[allow(clippy::disallowed_methods)]
-    let base = dirs::config_dir().unwrap_or_else(|| PathBuf::from("."));
-    base.join("daruda").join("flow-locks")
+    StorageLayout::current().flow_locks()
 }
 
 /// Where the per-bot connection locks live: `<config>/daruda/remote-locks`.
@@ -247,39 +204,8 @@ pub fn flow_lock_root() -> PathBuf {
 /// two suites pointed at different data directories are not sharing a bot
 /// either.
 pub fn remote_lock_root() -> PathBuf {
-    if let Some(dir) = process_env::DATA_DIR.read_utf8().ok().as_deref() {
-        let trimmed = dir.trim();
-        if !trimmed.is_empty() {
-            return PathBuf::from(trimmed).join("remote-locks");
-        }
-    }
-    // The fourth allowed exception to the `disallowed-methods`
-    // `dirs::config_dir` entry, for the reason in the doc above.
-    #[allow(clippy::disallowed_methods)]
-    let base = dirs::config_dir().unwrap_or_else(|| PathBuf::from("."));
-    base.join("daruda").join("remote-locks")
+    StorageLayout::current().remote_locks()
 }
-
-/// Pure layout resolver — no env reads, no fs reads. Returns the
-/// path that `default_data_dir()` would produce for the given inputs.
-/// Crate-visible so unit tests drive every branch deterministically.
-pub(crate) fn default_data_dir_from(
-    override_env: Option<&str>,
-    profile_env: Option<&str>,
-    base: &std::path::Path,
-) -> PathBuf {
-    if let Some(dir) = override_env {
-        let trimmed = dir.trim();
-        if !trimmed.is_empty() {
-            return PathBuf::from(trimmed);
-        }
-    }
-    match crate::profile::resolve_profile_from(profile_env) {
-        crate::profile::RELEASE_PROFILE => base.join("daruda"),
-        other => base.join(format!("daruda-{other}")),
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -329,43 +255,5 @@ mod tests {
         assert!(c.into_option().is_none());
         let p: LoadOutcome<Sample> = LoadOutcome::Parsed(Sample { x: 7 });
         assert_eq!(p.into_option(), Some(Sample { x: 7 }));
-    }
-
-    // Pure-resolver tests — no process env mutation, parallel-safe.
-
-    #[test]
-    fn default_data_dir_release_keeps_legacy_path() {
-        let base = std::path::PathBuf::from("/base");
-        let dir = super::default_data_dir_from(None, Some("release"), &base);
-        assert_eq!(dir, base.join("daruda"));
-        assert!(
-            !dir.to_string_lossy().contains("daruda-"),
-            "release must not get a profile suffix, got {dir:?}"
-        );
-    }
-
-    #[test]
-    fn default_data_dir_debug_profile_uses_suffix() {
-        let base = std::path::PathBuf::from("/base");
-        let dir = super::default_data_dir_from(None, Some("debug"), &base);
-        assert_eq!(dir, base.join("daruda-debug"));
-    }
-
-    #[test]
-    fn default_data_dir_named_profile_uses_suffix() {
-        let base = std::path::PathBuf::from("/base");
-        let dir = super::default_data_dir_from(None, Some("staging"), &base);
-        assert_eq!(dir, base.join("daruda-staging"));
-    }
-
-    #[test]
-    fn default_data_dir_full_override_beats_profile() {
-        let base = std::path::PathBuf::from("/base");
-        let dir = super::default_data_dir_from(
-            Some("/tmp/daruda-test-abc"),
-            Some("debug"), // ignored because override wins
-            &base,
-        );
-        assert_eq!(dir, std::path::PathBuf::from("/tmp/daruda-test-abc"));
     }
 }

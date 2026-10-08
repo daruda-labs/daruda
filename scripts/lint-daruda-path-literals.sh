@@ -4,7 +4,7 @@
 # Background: every on-disk file daruda itself writes and reads back
 # across restarts (config.toml, hook status, activity cache, the
 # Telegram bridge's Keychain service name, ...) must be profile-scoped
-# via `daruda_store::persistence::default_data_dir()` — release keeps
+# via store APIs backed by the private StorageLayout — release keeps
 # the unsuffixed path, debug/named profiles get `daruda-<profile>/`.
 #
 # Four separate places independently hardcoded `.join("daruda")` /
@@ -41,8 +41,8 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
 
 # Files allowed to spell out the data-directory name literally — either
-# they *are* the canonical implementation (persistence.rs / profile.rs /
-# log_writer.rs), or the path is deliberately NOT app-instance state:
+# they are the canonical layout (storage.rs), or the path is deliberately
+# NOT app-instance state:
 #   - pages/tasks/editor/{mod,task_edit_ops}.rs: `<worktree>/.daruda/task-*.md`
 #     is a per-repo artifact tied to the branch, not app installation
 #     state — every profile touching the same repo should share it.
@@ -55,9 +55,7 @@ cd "$ROOT"
 #     Committed with the repo and shared by every profile that opens it,
 #     for the same reason as the `task-*.md` files above.
 WHITELIST=(
-    "packages/store/src/persistence.rs"
-    "packages/store/src/profile.rs"
-    "packages/store/src/observability/log_writer.rs"
+    "packages/store/src/storage.rs"
     "packages/app/src/workspace/pages/tasks/editor/mod.rs"
     "packages/app/src/workspace/pages/tasks/editor/task_edit_ops.rs"
     "packages/agent/src/hooks/installer.rs"

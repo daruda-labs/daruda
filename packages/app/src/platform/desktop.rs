@@ -17,6 +17,13 @@ pub(crate) fn activate(window: &gpui::Window) {
     window.activate_window();
 }
 
+/// Activate an existing window through the same restore path as tray and IPC.
+pub(crate) fn activate_handle(handle: gpui::AnyWindowHandle, cx: &mut gpui::App) {
+    crate::windows::try_update_workspace_window(handle, cx, "desktop.activate", |window, _| {
+        activate(window);
+    });
+}
+
 /// Reveal a notification target, or the focused workspace with a stable fallback.
 pub(crate) fn reveal(target: Option<super::notifications::Target>, cx: &mut gpui::App) {
     use crate::window_registry::WindowRegistry;
@@ -66,6 +73,9 @@ mod tests {
         })
         .unwrap();
         cx.update(|cx| {
+            activate_handle(first.window.into(), cx);
+            assert_eq!(cx.active_window(), Some(first.window.into()));
+            activate_handle(second.window.into(), cx);
             reveal(None, cx);
             assert_eq!(cx.active_window(), Some(second.window.into()));
             reveal(Some(target), cx);

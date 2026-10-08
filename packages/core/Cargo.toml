@@ -11,6 +11,7 @@ description = "Shared utilities and core logic for daruda — usable from both t
 workspace = true
 
 [dependencies]
+dirs = "6"
 percent-encoding = "2"
 url = "2"
 

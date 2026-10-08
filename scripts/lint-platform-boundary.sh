@@ -75,6 +75,7 @@ WHITELIST_PREFIXES=(
     "packages/core/src/host.rs"
     "packages/core/src/process.rs"
     "packages/core/src/path.rs"
+    "packages/core/src/path/"
     "packages/core/src/shell.rs"
     "packages/core/src/shell/"
     "packages/app/src/platform/"

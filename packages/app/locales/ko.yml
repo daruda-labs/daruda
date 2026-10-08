@@ -1,4 +1,10 @@
 # Common UI tokens — reused across sections
+startup:
+  failure_heading: "daruda를 시작할 수 없습니다"
+  failure_recovery: "기존 데이터는 보존되었습니다. 아래 문제를 해결한 후 daruda를 다시 시작하세요."
+  failure_log: "상세 정보 저장 위치: %{path}"
+  failure_log_unavailable: "진단 로그를 저장할 수 없습니다: %{error}"
+
 common:
   column_status: "상태"
   filter_count: "%{label} %{count}"
@@ -1276,6 +1282,7 @@ settings:
   update_downloading: "업데이트 다운로드 중…"
   update_installing: "업데이트 설치 중…"
   update_ready: "업데이트가 설치되었습니다. 적용하려면 재시작하세요."
+  update_ready_installer: "검증된 설치 프로그램이 준비되었습니다. 재시작하면 설치 프로그램이 열려 업데이트를 완료할 수 있습니다."
   update_error: "업데이트 실패: %{msg}"
   update_dev_build: "업데이트는 패키지 빌드에서만 사용할 수 있습니다."
   update_available_toast: "새 버전 %{version}을(를) 사용할 수 있습니다 — 설정 › 정보에서 업데이트하세요."

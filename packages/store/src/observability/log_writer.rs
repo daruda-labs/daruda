@@ -5,17 +5,13 @@
 //! onto a channel; the worker drains it and appends one NDJSON line
 //! per record to the current daily file.
 //!
-//! # Layout (D1: environment-separated)
+//! # Layout
 //!
 //! ```text
-//! ~/.daruda/logs/
-//! ├── debug/                              # cfg!(debug_assertions) builds
-//! │   ├── daruda-2026-05-09.log           # day's first file (no ordinal)
-//! │   ├── daruda-2026-05-09.001.log       # rolled when .log hit max size
-//! │   ├── daruda-2026-05-09.002.log
-//! │   └── panic-2026-05-09T14-23-11.log
-//! └── release/
-//!     └── …
+//! Windows: %LOCALAPPDATA%/daruda/logs/<profile>/
+//! macOS:   ~/Library/Logs/daruda/<profile>/
+//! Linux:   $XDG_STATE_HOME/daruda/logs/<profile>/
+//! Override: $DARUDA_DATA_DIR/logs/
 //! ```
 //!
 //! # Rolling rules
@@ -53,9 +49,6 @@ use std::time::{Duration, SystemTime};
 use chrono::{DateTime, NaiveDate, Utc};
 
 use super::error_report::ErrorReport;
-
-/// Directory name parent for all daruda observability artefacts.
-const LOG_ROOT: &str = ".daruda/logs";
 
 static GLOBAL: OnceLock<LogWriter> = OnceLock::new();
 
@@ -105,10 +98,10 @@ pub fn log_profile() -> &'static str {
     crate::profile::active_profile()
 }
 
-/// Resolve `~/.daruda/logs/<profile>/`. Returns `None` when the home
-/// directory cannot be determined.
+/// Native profile log directory, or `<DARUDA_DATA_DIR>/logs` when overridden.
+/// Returns `None` when the OS cannot resolve the native directory.
 pub fn log_dir() -> Option<PathBuf> {
-    Some(dirs::home_dir()?.join(LOG_ROOT).join(log_profile()))
+    crate::storage::StorageLayout::current().logs()
 }
 
 /// Path for a fresh `panic-<timestamp>.log`. The panic hook writes
@@ -256,6 +249,36 @@ impl LogWriter {
             w.append(report);
         }
     }
+
+    /// Persist a terminal failure before process exit, without the worker queue.
+    /// Returns the daily log path only after the report has been synced.
+    pub fn log_sync(report: &ErrorReport) -> std::io::Result<PathBuf> {
+        let dir = log_dir().ok_or_else(|| {
+            std::io::Error::new(std::io::ErrorKind::NotFound, "Cannot resolve log storage")
+        })?;
+        append_sync_in(&dir, report).map_err(|error| {
+            std::io::Error::new(
+                error.kind(),
+                format!(
+                    "Cannot persist terminal failure in {}: {error}",
+                    dir.display()
+                ),
+            )
+        })
+    }
+}
+
+fn append_sync_in(dir: &Path, report: &ErrorReport) -> std::io::Result<PathBuf> {
+    daruda_core::path::create_owner_only_dir(dir)?;
+    let date = Utc::now().date_naive();
+    let ordinal = max_existing_ordinal(dir, date).unwrap_or(0);
+    let path = daily_path(dir, date, ordinal);
+    // Terminal failures bypass rolling: one final record must survive exit.
+    let mut file =
+        daruda_core::path::open_owner_only(OpenOptions::new().create(true).append(true), &path)?;
+    file.write_all(report.to_ndjson_line().as_bytes())?;
+    file.sync_all()?;
+    Ok(path)
 }
 
 /// Public so the panic hook in `main.rs` can call it without going
@@ -475,6 +498,27 @@ mod tests {
 
     use crate::observability::error_report::{ErrorReport, ErrorSeverity};
 
+    #[test]
+    fn synchronous_terminal_report_is_readable_without_a_worker() {
+        let dir = TempDir::new().unwrap();
+        let first = synthetic("first", ErrorSeverity::Error);
+        let second = synthetic("second", ErrorSeverity::Error);
+        let path = append_sync_in(dir.path(), &first).unwrap();
+        assert_eq!(append_sync_in(dir.path(), &second).unwrap(), path);
+        let contents = fs::read_to_string(path).unwrap();
+        let reports: Vec<ErrorReport> = contents
+            .lines()
+            .map(|line| serde_json::from_str(line).unwrap())
+            .collect();
+        assert_eq!(reports.len(), 2);
+        assert_eq!(reports[0].title, "first");
+        assert_eq!(reports[1].title, "second");
+        let unavailable = dir.path().join("not-a-directory");
+        fs::write(&unavailable, "preserve").unwrap();
+        assert!(append_sync_in(&unavailable, &first).is_err());
+        assert_eq!(fs::read_to_string(unavailable).unwrap(), "preserve");
+    }
+
     fn synthetic(title: &str, severity: ErrorSeverity) -> ErrorReport {
         ErrorReport::new(title)
             .severity(severity)
@@ -484,16 +528,9 @@ mod tests {
     }
 
     #[test]
-    fn log_dir_is_under_profile_subdirectory() {
-        let Some(dir) = log_dir() else { return };
-        let last = dir.file_name().and_then(|n| n.to_str()).unwrap_or("");
-        assert_eq!(last, log_profile());
-        let parent = dir
-            .parent()
-            .and_then(|p| p.file_name())
-            .and_then(|n| n.to_str())
-            .unwrap_or("");
-        assert_eq!(parent, "logs");
+    fn log_directory_uses_the_same_storage_snapshot_as_data() {
+        assert_eq!(log_dir(), crate::storage::StorageLayout::current().logs());
+        assert_eq!(log_profile(), crate::profile::active_profile());
     }
 
     #[test]
