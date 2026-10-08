@@ -309,7 +309,7 @@ impl Task {
     }
 
     /// `(completed, total)` subtask counts — drives the row progress
-    /// badge (`☑done/total`) and the TaskEdit pane's section header.
+    /// badge (`☑done/total`) and the Task editor's section header.
     /// Returned as `usize` so the renderer can format directly.
     pub fn subtask_progress(&self) -> (usize, usize) {
         let done = self.subtasks.iter().filter(|s| s.completed).count();

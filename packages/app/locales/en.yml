@@ -414,6 +414,8 @@ task:
   watcher_use_disk: "Use disk version"
   watcher_keep_mine: "Keep my version"
   watcher_diff: "Diff"
+  prompt_disk_copy: "On disk"
+  prompt_disk_copy_close: "Close the disk version"
   # Heading of the prompt-file watcher conflict prompt.
   watcher_heading: "“%{title}” changed on disk"
   # Tab / window batch close prompt. Single 3-button modal

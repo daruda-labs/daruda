@@ -240,6 +240,7 @@ impl Workspace {
             active_dock_view: self.docks.left_view,
             active_right_panel_view: self.docks.right_view,
             active_page: self.active_page().map(super::pages::Page::stored),
+            task_detail: self.task_detail_target(cx),
             window_open_policy: self.window_open_policy,
             next_group_id: self.next_group_id,
             project_tabs,
@@ -633,6 +634,11 @@ impl Workspace {
                 }
                 self.main_area.runtimes.insert(wt_ref, runtime);
             }
+        }
+
+        // After the runtimes, so the editor's id is minted past every pane's.
+        if let Some(target) = &workspace.task_detail {
+            self.restore_task_detail(target, window, cx);
         }
 
         // Invariant: the active lane's runtime must exist before any

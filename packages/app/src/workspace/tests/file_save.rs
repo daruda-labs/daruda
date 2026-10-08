@@ -276,7 +276,7 @@ async fn closing_the_window_saves_a_dirty_pane_in_a_parked_lane(cx: &mut TestApp
     cx.run_until_parked();
     let dirty = ws.read_with(cx, |ws, cx| {
         assert_ne!(ws.active, home, "the file's lane is parked");
-        ws.collect_dirty_pane_descriptors(cx)
+        ws.collect_dirty_items(cx)
     });
     assert_eq!(
         dirty.len(),
@@ -286,7 +286,7 @@ async fn closing_the_window_saves_a_dirty_pane_in_a_parked_lane(cx: &mut TestApp
     let saved = cx
         .update_window(wh.into(), |_, window, cx| {
             ws.update(cx, |ws, cx| {
-                ws.commit_dirty_panes_with_failure_toast(&dirty, window, cx)
+                ws.commit_dirty_items_with_failure_toast(&dirty, window, cx)
             })
         })
         .unwrap();
@@ -309,22 +309,20 @@ async fn escape_on_a_dirty_file_pane_asks_before_closing(cx: &mut TestAppContext
 }
 
 #[gpui::test]
-async fn closing_the_window_saves_a_task_draft_in_a_parked_lane(cx: &mut TestAppContext) {
+async fn closing_the_window_saves_a_task_draft_left_behind_a_lane_switch(cx: &mut TestAppContext) {
     let (wh, ws, _temp) = open_temp_file(cx, b"hello");
     cx.update_window(wh.into(), |_, window, cx| {
-        ws.update(cx, |ws, cx| ws.open_task_edit_pane(None, window, cx));
+        ws.update(cx, |ws, cx| ws.open_task_editor(None, window, cx));
     })
     .unwrap();
     cx.run_until_parked();
     cx.update_window(wh.into(), |_, window, cx| {
         ws.update(cx, |ws, cx| {
             let title = ws
-                .active_runtime()
-                .panes
-                .iter()
-                .find_map(|p| p.task_edit_content())
+                .task_detail_id()
+                .and_then(|id| ws.task_editor(id))
                 .map(|te| te.title_input.clone())
-                .expect("task edit pane");
+                .expect("task editor");
             title.update(cx, |s, cx| s.set_value("parked task", window, cx));
         });
     })
@@ -347,12 +345,12 @@ async fn closing_the_window_saves_a_task_draft_in_a_parked_lane(cx: &mut TestApp
     })
     .unwrap();
     cx.run_until_parked();
-    let dirty = ws.read_with(cx, |ws, cx| ws.collect_dirty_pane_descriptors(cx));
+    let dirty = ws.read_with(cx, |ws, cx| ws.collect_dirty_items(cx));
     assert_eq!(dirty.len(), 1, "the parked draft is in the close prompt");
     let saved = cx
         .update_window(wh.into(), |_, window, cx| {
             ws.update(cx, |ws, cx| {
-                ws.commit_dirty_panes_with_failure_toast(&dirty, window, cx)
+                ws.commit_dirty_items_with_failure_toast(&dirty, window, cx)
             })
         })
         .unwrap();

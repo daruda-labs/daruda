@@ -32,6 +32,7 @@ pub(crate) use control_task_ops::ControlTaskStart;
 mod close_guard_ops;
 pub(crate) mod delete_project_modal;
 pub(crate) mod dialog_helpers;
+mod dirty_items;
 mod dnd_ops;
 mod dock_badge_ops;
 mod durable;
@@ -254,7 +255,7 @@ actions!(
         CloseOtherTabs,
         CloseTabsToRight,
         ToggleZoomPane,
-        /// Open a fresh TaskEdit pane in draft mode (no task_id). Wired
+        /// Open a fresh task draft on the Tasks page (no task_id). Wired
         /// from the Command Palette `new_task`; keybinding via
         /// `[keybindings] new_task`.
         NewTask,
@@ -308,6 +309,9 @@ pub struct Workspace {
     /// [`layout::docks::Docks`].
     pub(in crate::workspace) docks: layout::docks::Docks,
     pub(in crate::workspace) workspace_page: Option<pages::PageState>,
+    /// What each page keeps while it is not on screen — see
+    /// [`pages::tasks::PageDetails`].
+    pub(in crate::workspace) pages: pages::tasks::PageDetails,
     /// Claude Code integration state — usage / plan-limits / service-
     /// status / session-status / PTY tracker / JSONL fallback +
     /// associated background tasks. Grouped into one struct so the
@@ -661,6 +665,7 @@ impl Workspace {
             window_runtime: window_runtime::WindowRuntime::new(window, cx),
             docks: layout::docks::Docks::new(&ws_weak, config, cx),
             workspace_page: None,
+            pages: pages::tasks::PageDetails::default(),
             unseen_outcomes: unseen_outcomes::UnseenOutcomes::default(),
             claude: claude_session_ops::ClaudeContext {
                 usage_by_account: claude_session_ops::PerAccountUsage::default(),
@@ -895,8 +900,8 @@ impl Workspace {
         })
         .detach();
 
-        // Intercept `Cmd+Q` and red-cross close attempts so dirty
-        // TaskEdit panes don't silently disappear. The callback returns
+        // Intercept `Cmd+Q` and red-cross close attempts so unsaved edits
+        // (file panes, the Task editor) don't silently disappear. The callback returns
         // `false` to veto the close, spawns the async batch prompt, and
         // then re-issues `window.remove_window()` once the user picks
         // Save all / Discard all.

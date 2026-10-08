@@ -150,7 +150,7 @@ fn row(
         .on_mouse_down(MouseButton::Left, move |_, window, cx| {
             if let Some(ws) = workspace.upgrade() {
                 ws.update(cx, |ws, cx| {
-                    ws.open_task_edit_pane(Some(id.clone()), window, cx)
+                    ws.open_task_editor(Some(id.clone()), window, cx)
                 });
             }
         })

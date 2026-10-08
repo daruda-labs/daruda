@@ -280,7 +280,7 @@ impl Workspace {
     // Mutations are applied through `cx.update_global::<GlobalTasks, _>`
     // and persisted via `save_tasks_dirty` immediately — subtask
     // toggles are explicit user commits (checkbox click / Enter / X),
-    // not buffered form edits, so the TaskEdit pane's `saved_snapshot`
+    // not buffered form edits, so the Task editor's `saved_snapshot`
     // dirty comparison deliberately ignores subtasks.
 
     /// Append a manually-added subtask to `task_id`. Empty / whitespace

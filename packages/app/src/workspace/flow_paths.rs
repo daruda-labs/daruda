@@ -9,7 +9,7 @@
 //! These are per-repository artifacts, deliberately **not** profile-scoped:
 //! a flow is committed alongside the code it drives, and every profile
 //! opening the same repo should see the same flows. That is the same
-//! reasoning `task_edit_pane`'s `.daruda/task-*.md` files are whitelisted
+//! reasoning the Task editor's `.daruda/task-*.md` files are whitelisted
 //! under.
 //!
 //! [`FlowOrigin`] is defined here, and so are the words that name one: the

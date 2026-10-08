@@ -101,7 +101,7 @@ pub(super) struct StatusBarData {
     /// at a glance that some user-global keys are being shadowed.
     pub has_project_config: bool,
     /// The focused pane's resolved account slot. `None` when the focused
-    /// pane doesn't track an account (File / TaskEdit panes) — hides the
+    /// pane doesn't track an account (File / flow panes) — hides the
     /// slot entirely. `Some` for Terminal / AgentChat panes, even when no
     /// account is configured (shows the "System" fallback label).
     pub account: Option<AccountSlot>,

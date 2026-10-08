@@ -7,11 +7,11 @@ use daruda_store::project::{LaneKind, ProjectUuid};
 use daruda_store::tasks::{Task, TaskRunIn, TaskState};
 use gpui::{Context, SharedString};
 
+use super::TaskEditorId;
 use super::state::{BranchValidation, RunInChoice, TaskEditContent};
 use crate::agent::tasks_global::GlobalTasks;
 use crate::ui::select::SelectOption;
 use crate::workspace::Workspace;
-use crate::workspace::main_area::pane_tree::PaneId;
 
 use super::task_edit_ops::validate_branch;
 
@@ -109,11 +109,11 @@ impl Workspace {
 
     pub(super) fn set_task_run_in(
         &mut self,
-        pane_id: PaneId,
+        editor_id: TaskEditorId,
         choice: RunInChoice,
         cx: &mut Context<Self>,
     ) {
-        if let Some(te) = self.task_edit_content_mut_for_pane(pane_id) {
+        if let Some(te) = self.task_editor_mut(editor_id) {
             te.run_in = choice;
         }
         cx.notify();

@@ -44,7 +44,7 @@ impl Workspace {
                 let pane = runtime.panes.iter().find(|p| p.id == tab.last_focused_pane);
                 let base_label = self.tab_label(tab, cx).unwrap_or_else(|| "shell".into());
                 // The dirty dot lets unsaved edits be spotted at a glance —
-                // File panes in Raw mode and TaskEdit panes both report them.
+                // File panes in Raw mode and flow editors report them.
                 let label = if pane.is_some_and(|p| p.tab_dirty_dot(cx)) {
                     SharedString::from(format!(
                         "{}{}",

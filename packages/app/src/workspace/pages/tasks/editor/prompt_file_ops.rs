@@ -1,4 +1,4 @@
-//! The task's prompt file while a TaskEdit pane is open: watching it,
+//! The task's prompt file while its editor is open: watching it,
 //! reconciling an external edit with the form, and opening it.
 
 use daruda_store::observability::error_report::{ErrorReport, ErrorSeverity};
@@ -7,47 +7,37 @@ use daruda_store::observability::system_info::redact_home;
 use daruda_store::tasks::Task;
 use gpui::{Context, Window};
 
+use super::TaskEditorId;
 use super::state::normalize_newlines;
 use crate::workspace::Workspace;
-use crate::workspace::main_area::pane_tree::PaneId;
 
 impl Workspace {
-    /// Dynamically install the prompt-file FS watcher on a TaskEdit
-    /// pane that's still open when its task transitions Backlog →
-    /// Running. At pane-open time the lane didn't exist
-    /// yet so `install_prompt_watcher` returned `None`; `start_task`
-    /// just wrote the file, so the watcher can finally subscribe.
-    /// No-op when the pane is closed, when there's already a watcher
-    /// attached, or when the task still has no lane.
-    pub(in crate::workspace) fn attach_prompt_watcher_if_pane_open(
+    /// Watch the prompt file of a task that just started while its editor
+    /// was open — when the editor opened there was no lane and so no file.
+    /// No-op when the editor is closed, already watching, or still laneless.
+    pub(in crate::workspace) fn attach_prompt_watcher_if_editor_open(
         &mut self,
         task_id: &str,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        // Starting a task activates its new lane; the authoring tab stays
-        // in the source lane, and may be open in more than one lane.
-        let panes: Vec<_> = self
-            .main_area
-            .runtimes
-            .values()
-            .flat_map(|runtime| runtime.panes.iter())
-            .filter_map(|pane| {
-                let te = pane.task_edit_content()?;
-                (te.task_id.as_deref() == Some(task_id) && te._prompt_watcher.is_none())
-                    .then_some(pane.id)
-            })
-            .collect();
+        // Starting a task activates its new lane; the editor stays on the
+        // Tasks page, hidden until the user comes back to it.
+        let Some(editor_id) = self.pages.tasks.detail.as_ref().and_then(|detail| {
+            (detail.editor.task_id.as_deref() == Some(task_id)
+                && detail.editor._prompt_watcher.is_none())
+            .then_some(detail.id)
+        }) else {
+            return;
+        };
         let task = cx
             .global::<crate::agent::tasks_global::GlobalTasks>()
             .get(task_id)
             .cloned();
-        for pane_id in panes {
-            let (handle, pump) = install_prompt_watcher(task.as_ref(), pane_id, window, cx);
-            if let Some(te) = self.task_edit_content_mut_for(pane_id) {
-                te._prompt_watcher = handle;
-                te._prompt_pump = pump;
-            }
+        let (handle, pump) = install_prompt_watcher(task.as_ref(), editor_id, window, cx);
+        if let Some(te) = self.task_editor_mut(editor_id) {
+            te._prompt_watcher = handle;
+            te._prompt_pump = pump;
         }
     }
 }
@@ -62,11 +52,11 @@ fn prompt_file_path_for(task: &Task) -> Option<std::path::PathBuf> {
 /// Install the watcher and pump when the task has a prompt file on disk.
 pub(super) fn install_prompt_watcher(
     initial: Option<&Task>,
-    pane_id: PaneId,
+    editor_id: TaskEditorId,
     window: &mut Window,
     cx: &mut Context<Workspace>,
 ) -> (
-    Option<crate::workspace::main_area::prompt_watcher::PromptFileWatcherHandle>,
+    Option<super::prompt_watcher::PromptFileWatcherHandle>,
     Option<gpui::Task<()>>,
 ) {
     let Some(task) = initial else {
@@ -79,7 +69,7 @@ pub(super) fn install_prompt_watcher(
         return (None, None);
     }
 
-    let (events_rx, handle) = crate::workspace::main_area::prompt_watcher::spawn(path.clone());
+    let (events_rx, handle) = super::prompt_watcher::spawn(path.clone());
     let path_for_pump = path.clone();
     let pump = cx.spawn_in(window, async move |this, cx| {
         const POLL: std::time::Duration = std::time::Duration::from_millis(100);
@@ -95,7 +85,7 @@ pub(super) fn install_prompt_watcher(
                         if this
                             .update_in(cx, |ws, window, cx| {
                                 ws.handle_prompt_file_changed(
-                                    pane_id,
+                                    editor_id,
                                     path_for_dispatch,
                                     window,
                                     cx,
@@ -119,12 +109,11 @@ pub(super) fn install_prompt_watcher(
 impl Workspace {
     /// Dispatched by the prompt-file watcher when an external editor
     /// rewrites `<wt>/.daruda/task-<id>.md`. Reloads the editor
-    /// silently when the pane is clean; surfaces a conflict prompt
-    /// (Use disk version / Keep my version / Diff) when the pane is
-    /// dirty.
+    /// silently when the form is clean; surfaces a conflict prompt
+    /// (Use disk version / Keep my version / Diff) when it is dirty.
     pub(super) fn handle_prompt_file_changed(
         &mut self,
-        pane_id: PaneId,
+        editor_id: TaskEditorId,
         path: std::path::PathBuf,
         window: &mut Window,
         cx: &mut Context<Self>,
@@ -150,14 +139,11 @@ impl Workspace {
             }
         };
 
-        let Some(pane) = self.main_area.pane(pane_id) else {
-            return;
-        };
-        let Some(te) = pane.task_edit_content() else {
+        let Some(te) = self.task_editor(editor_id) else {
             return;
         };
         let prompt_entity = te.prompt_state.clone();
-        let title = pane.title(cx);
+        let title = te.cached_title.clone();
         let is_dirty = te.is_dirty(cx);
 
         // Disk content matching the editor (modulo CRLF) is the echo of
@@ -166,14 +152,14 @@ impl Workspace {
             normalize_newlines(prompt_entity.read(cx).text().to_string().as_str());
         let disk_normalized = normalize_newlines(&disk_content);
         if editor_normalized == disk_normalized {
-            if let Some(te) = self.task_edit_content_mut_for_pane(pane_id) {
+            if let Some(te) = self.task_editor_mut(editor_id) {
                 te.saved_snapshot.prompt = disk_content;
             }
             return;
         }
 
         if !is_dirty {
-            self.reload_prompt_from_disk(pane_id, prompt_entity, disk_content, window, cx);
+            self.reload_prompt_from_disk(editor_id, prompt_entity, disk_content, window, cx);
             return;
         }
 
@@ -196,7 +182,6 @@ impl Workspace {
             cx,
         );
 
-        let path_for_diff = path.clone();
         cx.spawn_in(window, async move |this, cx| {
             let Ok(answer) = receiver.await else {
                 return;
@@ -204,16 +189,12 @@ impl Workspace {
             // SILENT-OK: user may close window before save-dialog answer arrives
             let _ = this.update_in(cx, |this, window, cx| match answer {
                 0 => {
-                    let Some(pane) = this.active_runtime().panes.iter().find(|p| p.id == pane_id)
-                    else {
-                        return;
-                    };
-                    let Some(te) = pane.task_edit_content() else {
+                    let Some(te) = this.task_editor(editor_id) else {
                         return;
                     };
                     let prompt_entity = te.prompt_state.clone();
                     this.reload_prompt_from_disk(
-                        pane_id,
+                        editor_id,
                         prompt_entity,
                         disk_content.clone(),
                         window,
@@ -221,29 +202,27 @@ impl Workspace {
                     );
                 }
                 1 => {} // Keep my version — leave editor untouched
-                2 => {
-                    // Split the TaskEdit pane's tab to the right with
-                    // the disk version so the user sees both at once.
-                    this.open_disk_file_for_diff(pane_id, path_for_diff.clone(), window, cx);
-                }
+                2 => this.show_prompt_disk_copy(editor_id, &disk_content, window, cx),
                 _ => {}
             });
         })
         .detach();
     }
 
-    /// Overwrite the pane's prompt editor with `content` and rebaseline
-    /// the dirty snapshot so the pane no longer reads as dirty.
+    /// Overwrite the prompt with `content` and rebaseline the dirty
+    /// snapshot so the form no longer reads as dirty.
     fn reload_prompt_from_disk(
         &mut self,
-        pane_id: PaneId,
+        editor_id: TaskEditorId,
         prompt_entity: gpui::Entity<gpui_component::input::InputState>,
         content: String,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
         prompt_entity.update(cx, |state, cx| state.set_value(content.clone(), window, cx));
-        if let Some(te) = self.task_edit_content_mut_for_pane(pane_id) {
+        if let Some(te) = self.task_editor_mut(editor_id) {
+            // The prompt now is the disk version; a copy beside it says nothing.
+            te.disk_copy = None;
             te.saved_snapshot.prompt = content;
         }
         cx.notify();
@@ -288,19 +267,40 @@ impl Workspace {
         self.open_linked_file(path, window, cx);
     }
 
-    /// The conflict prompt's `[Diff]`: open `path` split to the right of the
-    /// TaskEdit pane, so its edits and the disk version sit side by side. A
-    /// path no lane holds opens for reference instead.
-    fn open_disk_file_for_diff(
+    /// The conflict prompt's `[Diff]`: put the disk version beside the
+    /// prompt, read-only, so the two can be compared in place.
+    pub(super) fn show_prompt_disk_copy(
         &mut self,
-        pane_id: PaneId,
-        path: std::path::PathBuf,
+        editor_id: TaskEditorId,
+        disk_content: &str,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        match self.projects.lane_owning(&path) {
-            Some(lane) => self.open_file_split_right(lane, path, pane_id, window, cx),
-            None => self.open_reference_file(path, window, cx),
+        if self.task_editor(editor_id).is_none() {
+            return;
         }
+        let copy = crate::ui::make_markdown_prose_state(
+            disk_content,
+            "",
+            crate::ui::theme::TASK_EDIT_PROMPT_ROWS,
+            window,
+            cx,
+        );
+        copy.update(cx, |state, cx| state.set_disabled(true, cx));
+        if let Some(te) = self.task_editor_mut(editor_id) {
+            te.disk_copy = Some(copy);
+        }
+        cx.notify();
+    }
+
+    pub(super) fn close_prompt_disk_copy(
+        &mut self,
+        editor_id: TaskEditorId,
+        cx: &mut Context<Self>,
+    ) {
+        if let Some(te) = self.task_editor_mut(editor_id) {
+            te.disk_copy = None;
+        }
+        cx.notify();
     }
 }

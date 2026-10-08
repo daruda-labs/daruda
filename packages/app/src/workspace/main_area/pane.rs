@@ -20,7 +20,6 @@ use portable_pty::MasterPty;
 
 use super::agent_chat_pane::view::AgentChatView;
 use super::file_view_pane::PaneFileView;
-use super::task_edit_pane::state::TaskEditContent;
 use crate::agent::account::PreparedAccount;
 use crate::path_ext::PathExt;
 use crate::workspace::Workspace;
@@ -60,7 +59,6 @@ impl std::error::Error for PaneSpawnError {}
 pub(in crate::workspace) enum PaneContent {
     Terminal(TerminalContent),
     File(FileContent),
-    TaskEditPane(TaskEditContent),
     AgentChat(AgentChatContent),
     FlowGraph(FlowGraphContent),
 }
@@ -155,7 +153,7 @@ pub(in crate::workspace) struct FileContent {
 /// self-owned [`AgentChatView`] entity (which holds the model + UI state and
 /// renders itself), mirroring how [`TerminalContent`] wraps `TerminalView`.
 ///
-/// Unlike `TerminalContent` / `FileContent` / `TaskEditContent`, there is
+/// Unlike `TerminalContent` / `FileContent`, there is
 /// no cached title here: the view's `session_title` and `items` (first-prompt
 /// fallback) can change from several independent internal paths (event pump,
 /// prompt echo, session reset), so a write-once cache drifts stale — `/clear`
@@ -238,7 +236,6 @@ impl PaneContent {
             // `Render` impl, so the wrapper div must not double-track it.
             PaneContent::FlowGraph(_) => None,
             PaneContent::File(f) => Some(&f.focus_handle),
-            PaneContent::TaskEditPane(te) => Some(&te.focus_handle),
             // The `AgentChatView` entity tracks its own focus handle in its
             // `Render` impl (like `Terminal` via `TerminalView`), so the
             // wrapper div must not double-track it.
@@ -258,7 +255,6 @@ impl Pane {
             PaneContent::Terminal(t) => t.cached_title.clone(),
             PaneContent::FlowGraph(fg) => fg.cached_title.clone(),
             PaneContent::File(f) => f.cached_title.clone(),
-            PaneContent::TaskEditPane(te) => te.cached_title.clone(),
             PaneContent::AgentChat(ac) => {
                 let v = ac.view.read(cx);
                 super::agent_chat_pane::agent_chat_helpers::activity_bar_title(
@@ -283,26 +279,14 @@ impl Pane {
                     t.cached_title = title.into();
                 }
             }
-            PaneContent::TaskEditPane(te) if te.title_input.read(cx).value().is_empty() => {
-                let title = crate::surface::strings::command::new_task();
-                if te.cached_title.as_ref() != title {
-                    te.cached_title = title.into();
-                }
-            }
             // A flow graph's title is its file's name, which no locale changes.
-            PaneContent::File(_)
-            | PaneContent::TaskEditPane(_)
-            | PaneContent::AgentChat(_)
-            | PaneContent::FlowGraph(_) => {}
+            PaneContent::File(_) | PaneContent::AgentChat(_) | PaneContent::FlowGraph(_) => {}
         }
     }
 
     /// Filesystem cwd if the content tracks one (Terminal: from OSC 7;
     /// File: the file's parent directory). The Files-view "show parent
-    /// of focused file" affordance reuses this. TaskEdit panes don't
-    /// have a meaningful cwd until the task transitions to `Running`
-    /// and a lane is materialised — return `None` so dock
-    /// affordances skip TaskEdit panes.
+    /// of focused file" affordance reuses this.
     ///
     /// **AgentChat is `None` for `PaneCwd::Remote`.** This is a local
     /// filesystem accessor — every consumer expects a real path on this
@@ -315,7 +299,7 @@ impl Pane {
             PaneContent::File(f) => f.view.path.parent(),
             // A graph draws a file; it is not rooted anywhere the way a
             // terminal or a session is.
-            PaneContent::FlowGraph(_) | PaneContent::TaskEditPane(_) => None,
+            PaneContent::FlowGraph(_) => None,
             PaneContent::AgentChat(ac) => ac.cwd.as_ref().and_then(PaneCwd::as_local),
         }
     }
@@ -350,7 +334,6 @@ impl Pane {
         match &self.content {
             PaneContent::Terminal(t) => t.view.read(cx).focus_handle().clone(),
             PaneContent::File(f) => f.focus_handle.clone(),
-            PaneContent::TaskEditPane(te) => te.focus_handle.clone(),
             PaneContent::AgentChat(ac) => ac.view.read(cx).focus_handle(cx),
             PaneContent::FlowGraph(fg) => fg.view.read(cx).focus_handle(cx),
         }
@@ -364,10 +347,7 @@ impl Pane {
     pub(in crate::workspace) fn terminal_view(&self) -> Option<&Entity<TerminalView>> {
         match &self.content {
             PaneContent::Terminal(t) => Some(&t.view),
-            PaneContent::File(_)
-            | PaneContent::TaskEditPane(_)
-            | PaneContent::AgentChat(_)
-            | PaneContent::FlowGraph(_) => None,
+            PaneContent::File(_) | PaneContent::AgentChat(_) | PaneContent::FlowGraph(_) => None,
         }
     }
 
@@ -380,10 +360,7 @@ impl Pane {
     ) -> Option<daruda_store::accounts::AccountId> {
         match &self.content {
             PaneContent::Terminal(t) => t.account.to_persisted(),
-            PaneContent::File(_)
-            | PaneContent::TaskEditPane(_)
-            | PaneContent::AgentChat(_)
-            | PaneContent::FlowGraph(_) => None,
+            PaneContent::File(_) | PaneContent::AgentChat(_) | PaneContent::FlowGraph(_) => None,
         }
     }
 
@@ -400,7 +377,7 @@ impl Pane {
         match &self.content {
             PaneContent::Terminal(t) => Some(t.account),
             PaneContent::AgentChat(ac) => Some(ac.account),
-            PaneContent::File(_) | PaneContent::TaskEditPane(_) | PaneContent::FlowGraph(_) => None,
+            PaneContent::File(_) | PaneContent::FlowGraph(_) => None,
         }
     }
 
@@ -424,10 +401,7 @@ impl Pane {
                 }
                 None => false,
             },
-            PaneContent::File(_)
-            | PaneContent::TaskEditPane(_)
-            | PaneContent::AgentChat(_)
-            | PaneContent::FlowGraph(_) => false,
+            PaneContent::File(_) | PaneContent::AgentChat(_) | PaneContent::FlowGraph(_) => false,
         }
     }
 
@@ -435,10 +409,9 @@ impl Pane {
     pub(in crate::workspace) fn file_content(&self) -> Option<&FileContent> {
         match &self.content {
             PaneContent::File(f) => Some(f),
-            PaneContent::Terminal(_)
-            | PaneContent::TaskEditPane(_)
-            | PaneContent::AgentChat(_)
-            | PaneContent::FlowGraph(_) => None,
+            PaneContent::Terminal(_) | PaneContent::AgentChat(_) | PaneContent::FlowGraph(_) => {
+                None
+            }
         }
     }
 
@@ -448,37 +421,9 @@ impl Pane {
     pub(in crate::workspace) fn file_content_mut(&mut self) -> Option<&mut FileContent> {
         match &mut self.content {
             PaneContent::File(f) => Some(f),
-            PaneContent::Terminal(_)
-            | PaneContent::TaskEditPane(_)
-            | PaneContent::AgentChat(_)
-            | PaneContent::FlowGraph(_) => None,
-        }
-    }
-
-    /// Immutable accessor for the TaskEdit pane state. Used by
-    /// `Workspace::find_task_edit_pane`, dirty-check helpers,
-    /// and the layout serializer to skip draft panes.
-    pub(in crate::workspace) fn task_edit_content(&self) -> Option<&TaskEditContent> {
-        match &self.content {
-            PaneContent::TaskEditPane(te) => Some(te),
-            PaneContent::Terminal(_)
-            | PaneContent::File(_)
-            | PaneContent::AgentChat(_)
-            | PaneContent::FlowGraph(_) => None,
-        }
-    }
-
-    /// Mutable counterpart to `task_edit_content`. Used by save /
-    /// validation / watcher callbacks that need to refresh
-    /// `saved_snapshot`, or re-render the
-    /// pane after a state mutation.
-    pub(in crate::workspace) fn task_edit_content_mut(&mut self) -> Option<&mut TaskEditContent> {
-        match &mut self.content {
-            PaneContent::TaskEditPane(te) => Some(te),
-            PaneContent::Terminal(_)
-            | PaneContent::File(_)
-            | PaneContent::AgentChat(_)
-            | PaneContent::FlowGraph(_) => None,
+            PaneContent::Terminal(_) | PaneContent::AgentChat(_) | PaneContent::FlowGraph(_) => {
+                None
+            }
         }
     }
 
@@ -487,10 +432,7 @@ impl Pane {
     pub(in crate::workspace) fn agent_chat_content(&self) -> Option<&AgentChatContent> {
         match &self.content {
             PaneContent::AgentChat(ac) => Some(ac),
-            PaneContent::Terminal(_)
-            | PaneContent::File(_)
-            | PaneContent::TaskEditPane(_)
-            | PaneContent::FlowGraph(_) => None,
+            PaneContent::Terminal(_) | PaneContent::File(_) | PaneContent::FlowGraph(_) => None,
         }
     }
 
@@ -500,10 +442,7 @@ impl Pane {
     pub(in crate::workspace) fn flow_graph_content(&self) -> Option<&FlowGraphContent> {
         match &self.content {
             PaneContent::FlowGraph(fg) => Some(fg),
-            PaneContent::Terminal(_)
-            | PaneContent::File(_)
-            | PaneContent::TaskEditPane(_)
-            | PaneContent::AgentChat(_) => None,
+            PaneContent::Terminal(_) | PaneContent::File(_) | PaneContent::AgentChat(_) => None,
         }
     }
 
@@ -513,10 +452,7 @@ impl Pane {
     pub(in crate::workspace) fn flow_graph_content_mut(&mut self) -> Option<&mut FlowGraphContent> {
         match &mut self.content {
             PaneContent::FlowGraph(fg) => Some(fg),
-            PaneContent::Terminal(_)
-            | PaneContent::File(_)
-            | PaneContent::TaskEditPane(_)
-            | PaneContent::AgentChat(_) => None,
+            PaneContent::Terminal(_) | PaneContent::File(_) | PaneContent::AgentChat(_) => None,
         }
     }
 
@@ -527,10 +463,7 @@ impl Pane {
     pub(in crate::workspace) fn agent_chat_content_mut(&mut self) -> Option<&mut AgentChatContent> {
         match &mut self.content {
             PaneContent::AgentChat(ac) => Some(ac),
-            PaneContent::Terminal(_)
-            | PaneContent::File(_)
-            | PaneContent::TaskEditPane(_)
-            | PaneContent::FlowGraph(_) => None,
+            PaneContent::Terminal(_) | PaneContent::File(_) | PaneContent::FlowGraph(_) => None,
         }
     }
 
@@ -541,16 +474,12 @@ impl Pane {
     pub(in crate::workspace) fn agent_chat_view(&self) -> Option<&Entity<AgentChatView>> {
         match &self.content {
             PaneContent::AgentChat(ac) => Some(&ac.view),
-            PaneContent::Terminal(_)
-            | PaneContent::File(_)
-            | PaneContent::TaskEditPane(_)
-            | PaneContent::FlowGraph(_) => None,
+            PaneContent::Terminal(_) | PaneContent::File(_) | PaneContent::FlowGraph(_) => None,
         }
     }
 
     /// True when the pane holds unsaved user edits. A File pane in Raw mode
-    /// diffs its editor against the text it loaded, and a TaskEdit pane diffs
-    /// the form against `saved_snapshot`. FlowGraph includes its title and
+    /// diffs its editor against the text it loaded. FlowGraph includes its title and
     /// selected node's fields; Terminal and AgentChat have no editable buffer.
     ///
     /// Also what takes a tab out of the left dock's replaceable scratch slot —
@@ -562,7 +491,6 @@ impl Pane {
             PaneContent::File(f) => {
                 f.view.holds_editable_buffer() && *f.editor_state.read(cx).text() != f.saved_text
             }
-            PaneContent::TaskEditPane(te) => te.is_dirty(cx),
             PaneContent::AgentChat(_) => false,
         }
     }
@@ -578,9 +506,7 @@ impl Pane {
                     })
             }
             PaneContent::AgentChat(ac) => ac.view.read(cx).is_busy(),
-            PaneContent::File(_) | PaneContent::FlowGraph(_) | PaneContent::TaskEditPane(_) => {
-                false
-            }
+            PaneContent::File(_) | PaneContent::FlowGraph(_) => false,
         }
     }
 
@@ -590,7 +516,6 @@ impl Pane {
             PaneContent::Terminal(_) => false,
             PaneContent::FlowGraph(graph) => !graph.view.read(cx).edited_name(cx).is_empty(),
             PaneContent::File(f) => f.view.holds_editable_buffer() && f.view.path.is_absolute(),
-            PaneContent::TaskEditPane(te) => te.can_save(cx),
             PaneContent::AgentChat(_) => false,
         }
     }
@@ -623,10 +548,7 @@ impl Pane {
     ) -> bool {
         match &mut self.content {
             PaneContent::Terminal(t) => t.update_cached(new_title, new_cwd),
-            PaneContent::File(_)
-            | PaneContent::TaskEditPane(_)
-            | PaneContent::AgentChat(_)
-            | PaneContent::FlowGraph(_) => false,
+            PaneContent::File(_) | PaneContent::AgentChat(_) | PaneContent::FlowGraph(_) => false,
         }
     }
 
@@ -647,10 +569,7 @@ impl Pane {
             PaneContent::Terminal(t) => {
                 t.resize_to_fit(avail_w, avail_h, pane_header_h, cache, window, cx)
             }
-            PaneContent::File(_)
-            | PaneContent::TaskEditPane(_)
-            | PaneContent::AgentChat(_)
-            | PaneContent::FlowGraph(_) => true,
+            PaneContent::File(_) | PaneContent::AgentChat(_) | PaneContent::FlowGraph(_) => true,
         }
     }
 }

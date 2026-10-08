@@ -1341,14 +1341,15 @@ async fn toggle_hide_unchanged_for_pane_targets_the_clicked_pane_not_the_focused
 
     let lane = ws.read_with(cx, |ws, _| ws.active_ref());
 
-    // Pane A: f.txt in Changes mode. Becomes the focused pane.
+    // Pane A: f.txt in Changes mode, committed so the next open does not
+    // reuse its tab. Becomes the focused pane.
     cx.update_window(wh.into(), |_, window, cx| {
         ws.update(cx, |ws, cx| {
             ws.open_git_file_diff(
                 lane,
                 std::path::PathBuf::from("f.txt"),
                 DiffSource::WorkingTree,
-                crate::workspace::main_area::tab_ops::OpenIntent::Preview,
+                crate::workspace::main_area::tab_ops::OpenIntent::Commit,
                 window,
                 cx,
             );
@@ -1358,14 +1359,15 @@ async fn toggle_hide_unchanged_for_pane_targets_the_clicked_pane_not_the_focused
     cx.run_until_parked();
     let pane_a_id = ws.read_with(cx, |ws, _| ws.active_runtime().focused_pane_id);
 
-    // Pane B: split g.txt to the right of pane A. `open_file_split_right`
-    // focuses the new pane, so pane A is no longer focused.
+    // Pane B: g.txt in a tab of its own, which takes focus from pane A.
     cx.update_window(wh.into(), |_, window, cx| {
         ws.update(cx, |ws, cx| {
-            ws.open_file_split_right(
+            ws.open_pane_file_view(
                 lane,
                 std::path::PathBuf::from("g.txt"),
-                pane_a_id,
+                DiffSource::WorkingTree,
+                crate::workspace::main_area::file_view_pane::FileViewMode::Raw,
+                crate::workspace::main_area::tab_ops::OpenIntent::Commit,
                 window,
                 cx,
             );
@@ -1375,7 +1377,10 @@ async fn toggle_hide_unchanged_for_pane_targets_the_clicked_pane_not_the_focused
     cx.run_until_parked();
 
     let pane_b_id = ws.read_with(cx, |ws, _| ws.active_runtime().focused_pane_id);
-    assert_ne!(pane_a_id, pane_b_id, "split must focus the new pane");
+    assert_ne!(
+        pane_a_id, pane_b_id,
+        "the second open must focus its own pane"
+    );
 
     // Click pane A's own toolbar toggle while B is focused. Routed through
     // `cx.update_window`, matching the real mouse-down dispatch, so a

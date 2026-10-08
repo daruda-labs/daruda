@@ -21,12 +21,10 @@ pub(in crate::workspace) mod pane_drag_ops;
 pub(in crate::workspace) mod pane_input_ops;
 pub(in crate::workspace) mod pane_menu;
 pub(in crate::workspace) mod pane_tree;
-pub(in crate::workspace) mod prompt_watcher;
 pub(in crate::workspace) mod resize;
 pub(in crate::workspace) mod tab_drag_ops;
 mod tab_name_ops;
 pub(in crate::workspace) mod tab_ops;
-pub(in crate::workspace) mod task_edit_pane;
 mod terminal_exit_ops;
 
 pub(in crate::workspace) use context::MainAreaContext;
@@ -294,14 +292,6 @@ pub(in crate::workspace) fn render_layout(
                         d.track_focus(fh)
                     })
                     .child(render_pane_file_viewer(id, f, cx)),
-                self::pane::PaneContent::TaskEditPane(te) => div()
-                    .flex_1()
-                    .min_h(px(0.))
-                    .overflow_hidden()
-                    .when_some(pane.content.wrapper_focus_handle(), |d, fh| {
-                        d.track_focus(fh)
-                    })
-                    .child(self::task_edit_pane::render(id, te, cx)),
                 self::pane::PaneContent::AgentChat(ac) => div()
                     .flex_1()
                     .min_h(px(0.))

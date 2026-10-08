@@ -7,6 +7,7 @@ use super::pane_tree::{
     remove_pane_from_layout,
 };
 use crate::workspace::Workspace;
+use crate::workspace::dirty_items::DirtyItem;
 use crate::workspace::main_area::file_view_pane::images::release_pane_images;
 
 /// What content a newly split-off pane should hold. Keeps the split entry
@@ -166,8 +167,8 @@ impl Workspace {
     }
 
     /// True when `id` names a pane that reads the shared bottom-dock input:
-    /// a Terminal (PTY stdin) or an AgentChat (ACP prompt). File and
-    /// TaskEdit panes return `false`, so focusing them keeps the visible
+    /// a Terminal (PTY stdin) or an AgentChat (ACP prompt). File and flow
+    /// panes return `false`, so focusing them keeps the visible
     /// draft (and its owner) untouched. Scans the active runtime's panes;
     /// unknown ids yield `false`.
     pub(in crate::workspace) fn pane_consumes_bottom_input(&self, id: PaneId) -> bool {
@@ -681,7 +682,7 @@ impl Workspace {
     //
     // Close Other Tabs / Close Tabs to Right route through
     // `request_close_tabs_bulk`, whose dirty-prompt covers every dirty
-    // TaskEdit pane in the closing set. Never loop over `close_tab_at`
+    // pane in the closing set. Never loop over `close_tab_at`
     // directly for a multi-tab close — that silently drops unsaved edits.
 
     pub(in crate::workspace) fn close_other_tabs(
@@ -1148,20 +1149,13 @@ impl Workspace {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let dirty: Vec<(PaneId, gpui::SharedString, bool)> = indices
+        let dirty: Vec<DirtyItem> = indices
             .iter()
             .filter_map(|&i| self.active_runtime().tabs.get(i))
             .flat_map(|tab| tab.layout.pane_ids().into_iter())
             .filter_map(|id| {
                 let pane = self.active_runtime().panes.iter().find(|p| p.id == id)?;
-                if !pane.is_dirty(cx) {
-                    return None;
-                }
-                let is_draft = matches!(
-                    &pane.content,
-                    PaneContent::TaskEditPane(te) if te.task_id.is_none()
-                );
-                Some((id, pane.title(cx), is_draft))
+                DirtyItem::of_pane(pane, cx)
             })
             .collect();
 
@@ -1172,11 +1166,7 @@ impl Workspace {
             return;
         }
 
-        let detail = dirty
-            .iter()
-            .map(|(_, t, draft)| crate::surface::strings::task::close_dirty_line(t, *draft))
-            .collect::<Vec<_>>()
-            .join("\n");
+        let detail = crate::workspace::dirty_items::dirty_listing(&dirty);
 
         let prompt_heading = crate::surface::strings::task::batch_close_heading();
         let prompt_save = crate::surface::strings::task::batch_save_all();
@@ -1201,7 +1191,7 @@ impl Workspace {
             // SILENT-OK: user may close window before save-dialog answer arrives
             let _ = this.update_in(cx, |this, window, cx| match answer {
                 0 => {
-                    if this.commit_dirty_panes_with_failure_toast(&dirty, window, cx) {
+                    if this.commit_dirty_items_with_failure_toast(&dirty, window, cx) {
                         for i in &indices {
                             this.close_tab_at(*i, window, cx);
                         }
@@ -1259,20 +1249,13 @@ impl Workspace {
             return;
         };
 
-        let dirty: Vec<(PaneId, gpui::SharedString, bool)> = tab
+        let dirty: Vec<DirtyItem> = tab
             .layout
             .pane_ids()
             .iter()
             .filter_map(|&id| {
                 let pane = self.active_runtime().panes.iter().find(|p| p.id == id)?;
-                if !pane.is_dirty(cx) {
-                    return None;
-                }
-                let is_draft = matches!(
-                    &pane.content,
-                    PaneContent::TaskEditPane(te) if te.task_id.is_none()
-                );
-                Some((id, pane.title(cx), is_draft))
+                DirtyItem::of_pane(pane, cx)
             })
             .collect();
 
@@ -1281,11 +1264,7 @@ impl Workspace {
             return;
         }
 
-        let detail = dirty
-            .iter()
-            .map(|(_, t, draft)| crate::surface::strings::task::close_dirty_line(t, *draft))
-            .collect::<Vec<_>>()
-            .join("\n");
+        let detail = crate::workspace::dirty_items::dirty_listing(&dirty);
 
         let prompt_heading = crate::surface::strings::task::batch_close_heading();
         let prompt_save = crate::surface::strings::task::batch_save_all();
@@ -1310,7 +1289,7 @@ impl Workspace {
             // SILENT-OK: user may close window before save-dialog answer arrives
             let _ = this.update_in(cx, |this, window, cx| match answer {
                 0 => {
-                    if this.commit_dirty_panes_with_failure_toast(&dirty, window, cx) {
+                    if this.commit_dirty_items_with_failure_toast(&dirty, window, cx) {
                         this.close_tab_at(index, window, cx);
                     }
                 }
@@ -1350,26 +1329,13 @@ impl Workspace {
             return;
         }
 
-        let is_draft = matches!(
-            &pane.content,
-            PaneContent::TaskEditPane(te) if te.task_id.is_none()
-        );
         let title = pane.title(cx);
         let can_save = pane.can_save(cx);
         let is_file = pane.file_content().is_some();
         let is_flow = pane.flow_graph_content().is_some();
 
-        let heading: String = if is_draft {
-            crate::surface::strings::task::edit_discard_draft_prompt().to_string()
-        } else {
-            crate::surface::strings::task::edit_save_prompt(&title)
-        };
-
-        let save_label = if is_draft {
-            crate::surface::strings::task::edit_save_draft()
-        } else {
-            crate::surface::strings::common::btn_save()
-        };
+        let heading = crate::surface::strings::task::edit_save_prompt(&title);
+        let save_label = crate::surface::strings::common::btn_save();
         let btn_discard = crate::surface::strings::task::edit_discard();
         let btn_cancel = crate::surface::strings::common::btn_cancel();
         let buttons = [
@@ -1389,7 +1355,6 @@ impl Workspace {
                 // can_save=false means the form is invalid. Leave the pane open.
                 0 if can_save && is_file => this.save_file_pane_or_ask(pane_id, true, window, cx),
                 0 if can_save && is_flow => this.save_and_close_flow_editor(pane_id, window, cx),
-                0 if can_save => this.save_and_close_task_edit_pane(pane_id, window, cx),
                 0 => {}
                 1 => this.close_pane_by_id(pane_id, window, cx),
                 _ => {} // Cancel

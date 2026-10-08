@@ -18,15 +18,15 @@ async fn inline_flow_name_saves_without_moving_the_file(cx: &mut TestAppContext)
     view.update_in(&mut vcx, |view, window, cx| {
         view.set_name_for_test(name, window, cx)
     });
-    let dirty = ws.read_with(&vcx, |ws, cx| ws.collect_dirty_pane_descriptors(cx));
+    let dirty = ws.read_with(&vcx, |ws, cx| ws.collect_dirty_items(cx));
     assert_eq!(
         dirty.len(),
         1,
         "the title participates in close confirmation"
     );
     ws.update_in(&mut vcx, |ws, window, cx| {
-        assert!(ws.commit_dirty_panes_with_failure_toast(&dirty, window, cx));
-        assert!(ws.collect_dirty_pane_descriptors(cx).is_empty());
+        assert!(ws.commit_dirty_items_with_failure_toast(&dirty, window, cx));
+        assert!(ws.collect_dirty_items(cx).is_empty());
         ws.show_page(crate::workspace::pages::Page::Flows, cx);
         let listed = ws.flow_list_for_panel();
         assert_eq!(
@@ -60,7 +60,7 @@ async fn inline_flow_name_saves_without_moving_the_file(cx: &mut TestAppContext)
     ws.update_in(&mut vcx, |ws, window, cx| {
         assert!(!ws.save_flow_editor(&path, view.clone(), window, cx));
         assert_eq!(view.read(cx).edited_name(cx), "My pending title");
-        assert_eq!(ws.collect_dirty_pane_descriptors(cx).len(), 1);
+        assert_eq!(ws.collect_dirty_items(cx).len(), 1);
     });
     assert!(
         std::fs::read_to_string(path)

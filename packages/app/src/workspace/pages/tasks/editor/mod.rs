@@ -2,6 +2,7 @@
 
 mod editor_ops;
 mod prompt_file_ops;
+mod prompt_watcher;
 pub(in crate::workspace) mod run_in_ops;
 mod save_ops;
 pub(in crate::workspace) mod state;
@@ -10,17 +11,36 @@ pub(super) mod task_edit_ops;
 use daruda_store::tasks::{SubTask, TaskAgentSurface, TaskExecution, TaskState};
 use gpui::{Context, IntoElement, MouseButton, SharedString, div, prelude::*, px};
 
-use super::super::Workspace;
-use super::pane_tree::PaneId;
+use crate::workspace::Workspace;
+
+pub(in crate::workspace) use super::TaskEditorId;
 use crate::agent::tasks_global::GlobalTasks;
 use crate::surface::strings;
 use crate::ui::{self, ButtonVariants as _, Disableable as _, theme};
 use crate::ui::{button, checkbox};
+#[cfg(feature = "screenshot")]
+pub(crate) use editor_ops::TaskEditorShot;
 use run_in_ops::task_running_in;
 use state::{BranchValidation, RunInChoice, TaskEditContent};
 
-pub(in crate::workspace) fn render(
-    pane_id: PaneId,
+/// The editor as the Tasks page's detail: it fills the page and takes the
+/// focus the page hands it.
+pub(in crate::workspace) fn render_detail(
+    editor_id: TaskEditorId,
+    te: &TaskEditContent,
+    cx: &mut Context<Workspace>,
+) -> gpui::AnyElement {
+    div()
+        .size_full()
+        .min_h(px(0.))
+        .overflow_hidden()
+        .track_focus(&te.focus_handle)
+        .child(render(editor_id, te, cx))
+        .into_any_element()
+}
+
+fn render(
+    editor_id: TaskEditorId,
     te: &TaskEditContent,
     cx: &mut Context<Workspace>,
 ) -> impl IntoElement {
@@ -58,39 +78,46 @@ pub(in crate::workspace) fn render(
         Some(TaskState::Error { .. }) => strings::task::edit_error(),
         Some(TaskState::Cancelled { .. }) => strings::task::edit_cancelled(),
     };
-    let header =
-        div()
-            .flex()
-            .items_center()
-            .justify_between()
-            .h(px(theme::TASK_EDIT_HEADER_H))
-            .px(px(theme::PAD_LG))
-            .border_b_1()
-            .border_color(border)
-            .child(
-                div()
-                    .flex()
-                    .items_center()
-                    .gap(px(theme::GAP_LG))
-                    .child(
-                        ui::button_icon(("task-edit-back", pane_id as usize), ui::icons::BACK, cx)
-                            .tooltip(strings::task::edit_back())
-                            .on_click(cx.listener(|this, _, window, cx| {
-                                this.open_page(crate::workspace::pages::Page::Tasks, window, cx)
-                            })),
+    let header = div()
+        .flex()
+        .items_center()
+        .justify_between()
+        .h(px(theme::TASK_EDIT_HEADER_H))
+        .px(px(theme::PAD_LG))
+        .border_b_1()
+        .border_color(border)
+        .child(
+            div()
+                .flex()
+                .items_center()
+                .gap(px(theme::GAP_LG))
+                .child(
+                    ui::button_icon(
+                        ("task-edit-back", editor_id.0 as usize),
+                        ui::icons::BACK,
+                        cx,
                     )
-                    .child(
-                        div()
-                            .text_size(px(theme::FONT_SIZE_SM))
-                            .text_color(muted)
-                            .child(status),
-                    ),
-            )
-            .child(
-                ui::button_close(("task-edit-close", pane_id as usize), cx).on_click(cx.listener(
-                    move |this, _, window, cx| this.request_close_pane(pane_id, window, cx),
-                )),
-            );
+                    .tooltip(strings::task::edit_back())
+                    .on_click(cx.listener(|this, _, window, cx| {
+                        this.leave_task_detail_then(window, cx, |_, _, _| {})
+                    })),
+                )
+                .child(
+                    div()
+                        .text_size(px(theme::FONT_SIZE_SM))
+                        .text_color(muted)
+                        .child(status),
+                ),
+        )
+        .child(
+            ui::button_close(("task-edit-close", editor_id.0 as usize), cx).on_click(cx.listener(
+                |this, _, window, cx| {
+                    this.leave_task_detail_then(window, cx, |ws, window, cx| {
+                        ws.return_to_worktree(window, cx);
+                    })
+                },
+            )),
+        );
 
     let body = div()
         .w_full()
@@ -105,10 +132,10 @@ pub(in crate::workspace) fn render(
             ui::input(&te.title_input, cx, 0).into_any_element(),
             cx,
         ))
-        .child(prompt(pane_id, te, te._prompt_watcher.is_some(), cx))
-        .child(settings(pane_id, te, can_start, cx))
-        .child(subtasks_section(pane_id, te, subtasks, cx))
-        .child(notes(pane_id, te, cx));
+        .child(prompt(editor_id, te, te._prompt_watcher.is_some(), cx))
+        .child(settings(editor_id, te, can_start, cx))
+        .child(subtasks_section(editor_id, te, subtasks, cx))
+        .child(notes(editor_id, te, cx));
 
     let footer = div()
         .absolute()
@@ -149,14 +176,14 @@ pub(in crate::workspace) fn render(
                         .when(can_open_chat, |row| {
                             row.child(
                                 ui::button_icon(
-                                    ("task-edit-chat", pane_id as usize),
+                                    ("task-edit-chat", editor_id.0 as usize),
                                     ui::icons::AGENT,
                                     cx,
                                 )
                                 .tooltip(strings::task::action_open_chat())
                                 .on_click(cx.listener(
                                     move |this, _, window, cx| {
-                                        this.open_editor_task_chat(pane_id, window, cx)
+                                        this.open_editor_task_chat(editor_id, window, cx)
                                     },
                                 )),
                             )
@@ -164,21 +191,21 @@ pub(in crate::workspace) fn render(
                         .when(has_worktree, |row| {
                             row.child(
                                 ui::button_icon(
-                                    ("task-edit-worktree", pane_id as usize),
+                                    ("task-edit-worktree", editor_id.0 as usize),
                                     ui::icons::FOLDER_OPEN,
                                     cx,
                                 )
                                 .tooltip(strings::task::action_open())
                                 .on_click(cx.listener(
                                     move |this, _, window, cx| {
-                                        this.open_editor_task_worktree(pane_id, window, cx)
+                                        this.open_editor_task_worktree(editor_id, window, cx)
                                     },
                                 )),
                             )
                         })
                         .child(
                             ui::button_primary(
-                                ("task-edit-save", pane_id as usize),
+                                ("task-edit-save", editor_id.0 as usize),
                                 strings::common::btn_save(),
                             )
                             .disabled(!te.can_save(cx))
@@ -186,14 +213,14 @@ pub(in crate::workspace) fn render(
                             .tab_index(10)
                             .on_click(cx.listener(
                                 move |this, _, window, cx| {
-                                    this.save_task_editor(pane_id, false, window, cx)
+                                    this.save_task_editor(editor_id, false, window, cx)
                                 },
                             )),
                         )
                         .when(can_start, |row| {
                             row.child(
                                 button(
-                                    ("task-edit-start", pane_id as usize),
+                                    ("task-edit-start", editor_id.0 as usize),
                                     strings::task::edit_save_start(),
                                 )
                                 .disabled(!te.can_save(cx))
@@ -201,7 +228,7 @@ pub(in crate::workspace) fn render(
                                 .tab_index(11)
                                 .on_click(cx.listener(
                                     move |this, _, window, cx| {
-                                        this.save_task_editor(pane_id, true, window, cx)
+                                        this.save_task_editor(editor_id, true, window, cx)
                                     },
                                 )),
                             )
@@ -218,17 +245,17 @@ pub(in crate::workspace) fn render(
         .bg(background)
         .text_color(foreground)
         .on_key_down(cx.listener(move |this, event, window, cx| {
-            this.handle_task_edit_key(pane_id, event, window, cx)
+            this.handle_task_edit_key(editor_id, event, window, cx)
         }))
         .on_action(cx.listener(
             move |this, _: &crate::workspace::SaveFilePane, window, cx| {
-                this.save_task_editor(pane_id, false, window, cx)
+                this.save_task_editor(editor_id, false, window, cx)
             },
         ))
         .child(header)
         .child(
             div()
-                .id(("task-edit-body", pane_id as usize))
+                .id(("task-edit-body", editor_id.0 as usize))
                 .absolute()
                 .top(px(theme::TASK_EDIT_HEADER_H))
                 .bottom(px(theme::TASK_EDIT_FOOTER_H))
@@ -240,7 +267,7 @@ pub(in crate::workspace) fn render(
         )
         .child(footer)
         .children(ui::scrollbar::vertical_thumb(
-            ("task-edit-scrollbar", pane_id as usize),
+            ("task-edit-scrollbar", editor_id.0 as usize),
             scroll.bounds().size.height,
             scroll.bounds().size.height + scroll.max_offset().y,
             scroll.offset().y,
@@ -266,7 +293,7 @@ fn field(label: String, body: gpui::AnyElement, cx: &gpui::App) -> impl IntoElem
 }
 
 fn prompt(
-    pane_id: PaneId,
+    editor_id: TaskEditorId,
     te: &TaskEditContent,
     has_file: bool,
     cx: &mut Context<Workspace>,
@@ -277,24 +304,24 @@ fn prompt(
         .justify_between()
         .flex_wrap()
         .child(
-            ui::tab_bar(("task-edit-prompt-mode", pane_id as usize))
+            ui::tab_bar(("task-edit-prompt-mode", editor_id.0 as usize))
                 .selected_index(usize::from(te.preview_prompt))
                 .child(ui::tab(strings::common::field_prompt()))
                 .child(ui::tab(strings::file_viewer::tab_preview()))
                 .on_click(cx.listener(move |this, index: &usize, _, cx| {
-                    this.set_task_prompt_preview(pane_id, *index, cx)
+                    this.set_task_prompt_preview(editor_id, *index, cx)
                 })),
         )
         .when(has_file, |row| {
             row.child(
                 ui::button_icon(
-                    ("task-edit-open-file", pane_id as usize),
+                    ("task-edit-open-file", editor_id.0 as usize),
                     ui::icons::FOLDER_OPEN,
                     cx,
                 )
                 .tooltip(strings::task::edit_open_file_button())
                 .on_click(cx.listener(move |this, _, window, cx| {
-                    this.open_editor_prompt_file(pane_id, window, cx)
+                    this.open_editor_prompt_file(editor_id, window, cx)
                 })),
             )
         });
@@ -304,7 +331,7 @@ fn prompt(
             .w_full()
             .child(
                 ui::markdown(
-                    ("task-edit-preview", pane_id as usize),
+                    ("task-edit-preview", editor_id.0 as usize),
                     te.prompt_state.read(cx).value(),
                 )
                 .text_size(px(theme::editor_font_size(cx)))
@@ -317,6 +344,15 @@ fn prompt(
             .tab_index(1)
             .into_any_element()
     };
+    // With the disk version beside it, headers and bodies each share a row
+    // so the two texts start level.
+    let (header, body) = match &te.disk_copy {
+        Some(copy) => (
+            beside(header, disk_copy_header(editor_id, cx)),
+            beside(body, ui::markdown_editor(copy, cx)),
+        ),
+        None => (header.into_any_element(), body),
+    };
     div()
         .flex()
         .flex_col()
@@ -326,8 +362,46 @@ fn prompt(
         .child(body)
 }
 
+/// Two equal columns, the prompt's part left of the disk version's. Both
+/// stretch to the row; a shorter part sits centred in its column.
+fn beside(prompt: impl IntoElement, disk: impl IntoElement) -> gpui::AnyElement {
+    let column = |part| {
+        div()
+            .flex_1()
+            .min_w_0()
+            .flex()
+            .flex_col()
+            .justify_center()
+            .child(part)
+    };
+    div()
+        .flex()
+        .gap(px(theme::GAP_LG))
+        .child(column(prompt.into_any_element()))
+        .child(column(disk.into_any_element()))
+        .into_any_element()
+}
+
+/// The label over the prompt file's read-only disk version, with its close.
+fn disk_copy_header(editor_id: TaskEditorId, cx: &mut Context<Workspace>) -> impl IntoElement {
+    div()
+        .flex()
+        .items_center()
+        .justify_between()
+        .text_size(px(theme::FONT_SIZE_SM))
+        .text_color(theme::current(cx).text_muted)
+        .child(strings::task::prompt_disk_copy())
+        .child(
+            ui::button_close(("task-edit-disk-copy-close", editor_id.0 as usize), cx)
+                .tooltip(strings::task::prompt_disk_copy_close())
+                .on_click(
+                    cx.listener(move |this, _, _, cx| this.close_prompt_disk_copy(editor_id, cx)),
+                ),
+        )
+}
+
 fn settings(
-    pane_id: PaneId,
+    editor_id: TaskEditorId,
     te: &TaskEditContent,
     editable: bool,
     cx: &mut Context<Workspace>,
@@ -340,7 +414,7 @@ fn settings(
         .border_color(theme::current(cx).border)
         .child(
             button(
-                ("task-edit-settings", pane_id as usize),
+                ("task-edit-settings", editor_id.0 as usize),
                 strings::task::edit_settings(),
             )
             .ghost()
@@ -353,7 +427,7 @@ fn settings(
             } else {
                 ui::icons::CHEVRON_RIGHT
             }))
-            .on_click(cx.listener(move |this, _, _, cx| this.toggle_task_settings(pane_id, cx))),
+            .on_click(cx.listener(move |this, _, _, cx| this.toggle_task_settings(editor_id, cx))),
         );
     if !te.settings_open {
         return section;
@@ -365,7 +439,7 @@ fn settings(
             .text_size(px(theme::FONT_SIZE_SM))
             .child(
                 ui::selectable_text(
-                    ("task-edit-branch-value", pane_id as usize),
+                    ("task-edit-branch-value", editor_id.0 as usize),
                     te.branch_input.read(cx).value(),
                 )
                 .selectable(true),
@@ -389,14 +463,14 @@ fn settings(
                     )
                     .child(
                         ui::button_icon(
-                            ("task-edit-regenerate-branch", pane_id as usize),
+                            ("task-edit-regenerate-branch", editor_id.0 as usize),
                             ui::icons::REFRESH,
                             cx,
                         )
                         .tooltip(strings::task::edit_branch_regenerate())
                         .on_click(cx.listener(
                             move |this, _, window, cx| {
-                                this.regenerate_task_branch(pane_id, window, cx)
+                                this.regenerate_task_branch(editor_id, window, cx)
                             },
                         )),
                     ),
@@ -426,7 +500,7 @@ fn settings(
     ));
     section = section.child(field(
         strings::task::edit_run_in_label(),
-        run_in(pane_id, te, editable, cx).into_any_element(),
+        run_in(editor_id, te, editable, cx).into_any_element(),
         cx,
     ));
     section = match te.run_in {
@@ -450,26 +524,26 @@ fn settings(
             .gap(px(theme::GAP_LG))
             .child(
                 ui::radio(
-                    ("task-edit-surface-terminal", pane_id as usize),
+                    ("task-edit-surface-terminal", editor_id.0 as usize),
                     strings::task::edit_surface_terminal(),
                     5,
                 )
                 .disabled(!editable)
                 .checked(te.agent_surface == TaskAgentSurface::Terminal)
                 .on_click(cx.listener(move |this, _, _, cx| {
-                    this.set_task_surface(pane_id, TaskAgentSurface::Terminal, cx)
+                    this.set_task_surface(editor_id, TaskAgentSurface::Terminal, cx)
                 })),
             )
             .child(
                 ui::radio(
-                    ("task-edit-surface-chat", pane_id as usize),
+                    ("task-edit-surface-chat", editor_id.0 as usize),
                     strings::task::edit_surface_agent_chat(),
                     6,
                 )
                 .disabled(!editable)
                 .checked(te.agent_surface == TaskAgentSurface::AgentChat)
                 .on_click(cx.listener(move |this, _, _, cx| {
-                    this.set_task_surface(pane_id, TaskAgentSurface::AgentChat, cx)
+                    this.set_task_surface(editor_id, TaskAgentSurface::AgentChat, cx)
                 })),
             )
             .into_any_element(),
@@ -478,14 +552,14 @@ fn settings(
     if te.agent_surface == TaskAgentSurface::Terminal {
         section = section.child(
             checkbox(
-                ("task-edit-auto", pane_id as usize),
+                ("task-edit-auto", editor_id.0 as usize),
                 strings::task::edit_auto_execute_label(),
                 7,
             )
             .checked(te.auto_execute)
             .disabled(!editable)
             .on_click(cx.listener(move |this, enabled: &bool, _, cx| {
-                this.set_task_auto_execute(pane_id, *enabled, cx)
+                this.set_task_auto_execute(editor_id, *enabled, cx)
             })),
         );
     }
@@ -495,7 +569,7 @@ fn settings(
 /// New / Existing worktree radios; under Existing, the lane picker and a
 /// warning when another task already runs in the picked lane.
 fn run_in(
-    pane_id: PaneId,
+    editor_id: TaskEditorId,
     te: &TaskEditContent,
     editable: bool,
     cx: &mut Context<Workspace>,
@@ -514,11 +588,11 @@ fn run_in(
             ),
         ]
         .map(|(choice, label, id)| {
-            ui::radio((id, pane_id as usize), label, 3)
+            ui::radio((id, editor_id.0 as usize), label, 3)
                 .disabled(!editable)
                 .checked(te.run_in == choice)
                 .on_click(
-                    cx.listener(move |this, _, _, cx| this.set_task_run_in(pane_id, choice, cx)),
+                    cx.listener(move |this, _, _, cx| this.set_task_run_in(editor_id, choice, cx)),
                 )
         }),
     );
@@ -550,7 +624,11 @@ fn run_in(
     column
 }
 
-fn notes(pane_id: PaneId, te: &TaskEditContent, cx: &mut Context<Workspace>) -> impl IntoElement {
+fn notes(
+    editor_id: TaskEditorId,
+    te: &TaskEditContent,
+    cx: &mut Context<Workspace>,
+) -> impl IntoElement {
     div()
         .flex()
         .flex_col()
@@ -559,7 +637,7 @@ fn notes(pane_id: PaneId, te: &TaskEditContent, cx: &mut Context<Workspace>) -> 
         .border_color(theme::current(cx).border)
         .child(
             button(
-                ("task-edit-notes", pane_id as usize),
+                ("task-edit-notes", editor_id.0 as usize),
                 strings::common::field_notes(),
             )
             .ghost()
@@ -572,7 +650,7 @@ fn notes(pane_id: PaneId, te: &TaskEditContent, cx: &mut Context<Workspace>) -> 
             } else {
                 ui::icons::CHEVRON_RIGHT
             }))
-            .on_click(cx.listener(move |this, _, _, cx| this.toggle_task_notes(pane_id, cx))),
+            .on_click(cx.listener(move |this, _, _, cx| this.toggle_task_notes(editor_id, cx))),
         )
         .when(te.notes_open, |section| {
             section
@@ -587,7 +665,7 @@ fn notes(pane_id: PaneId, te: &TaskEditContent, cx: &mut Context<Workspace>) -> 
 }
 
 fn subtasks_section(
-    pane_id: PaneId,
+    editor_id: TaskEditorId,
     te: &TaskEditContent,
     subtasks: Vec<SubTask>,
     cx: &mut Context<Workspace>,
@@ -597,7 +675,7 @@ fn subtasks_section(
     let mut list = div().flex().flex_col().gap(px(theme::GAP_LG));
     for subtask in subtasks {
         let editing = te.editing_subtask.as_deref() == Some(subtask.id.as_str());
-        list = list.child(subtask_row(pane_id, subtask, editing, te, cx));
+        list = list.child(subtask_row(editor_id, subtask, editing, te, cx));
     }
     list = list.child(
         div()
@@ -612,13 +690,13 @@ fn subtasks_section(
             )
             .child(
                 ui::button_icon(
-                    ("task-edit-add-subtask", pane_id as usize),
+                    ("task-edit-add-subtask", editor_id.0 as usize),
                     ui::icons::ADD,
                     cx,
                 )
                 .tooltip(strings::task::subtask_add_placeholder())
                 .on_click(cx.listener(move |this, _, window, cx| {
-                    this.submit_new_subtask(pane_id, window, cx)
+                    this.submit_new_subtask(editor_id, window, cx)
                 })),
             ),
     );
@@ -626,7 +704,7 @@ fn subtasks_section(
 }
 
 fn subtask_row(
-    pane_id: PaneId,
+    editor_id: TaskEditorId,
     sub: SubTask,
     is_editing: bool,
     te: &TaskEditContent,
@@ -642,7 +720,7 @@ fn subtask_row(
     )
     .checked(sub.completed)
     .on_click(cx.listener(move |this, _checked: &bool, _w, cx| {
-        this.toggle_editor_subtask(pane_id, &sub_id_for_toggle, cx);
+        this.toggle_editor_subtask(editor_id, &sub_id_for_toggle, cx);
     }));
 
     let t = theme::current(cx);
@@ -671,7 +749,13 @@ fn subtask_row(
             .on_mouse_down(
                 MouseButton::Left,
                 cx.listener(move |this, ev, window, cx| {
-                    this.handle_task_subtask_mouse_down(pane_id, &sub_id_for_rename, ev, window, cx)
+                    this.handle_task_subtask_mouse_down(
+                        editor_id,
+                        &sub_id_for_rename,
+                        ev,
+                        window,
+                        cx,
+                    )
                 }),
             )
             .into_any_element()
@@ -689,7 +773,7 @@ fn subtask_row(
         cx,
     )
     .on_click(cx.listener(move |this, _ev: &gpui::ClickEvent, _w, cx| {
-        this.delete_editor_subtask(pane_id, &sub_id_for_remove, cx);
+        this.delete_editor_subtask(editor_id, &sub_id_for_remove, cx);
     }));
 
     div()

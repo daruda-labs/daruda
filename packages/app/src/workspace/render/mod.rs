@@ -1503,7 +1503,7 @@ impl Workspace {
             None => "shell".into(),
         };
         // Same focused-pane lookup for the account slot: Terminal/AgentChat
-        // panes carry an `AccountSelection`; File/TaskEdit panes don't track
+        // panes carry an `AccountSelection`; File and flow panes don't track
         // an account at all, so the slot is hidden (`None`) rather than
         // showing a misleading "System".
         let focused_pane_id = self.active_runtime().focused_pane_id;

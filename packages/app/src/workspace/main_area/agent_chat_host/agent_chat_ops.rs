@@ -1170,9 +1170,8 @@ impl Workspace {
         self.open_agent_chat_pane_with_agent(agent_id, window, cx);
     }
 
-    /// Open a fresh pane under `agent_id` at the active lane's cwd. Mirrors
-    /// `open_task_edit_pane`'s tab-append + focus flow, and records
-    /// `agent_id` as the session's last choice.
+    /// Open a fresh pane under `agent_id` at the active lane's cwd, and
+    /// record `agent_id` as the session's last choice.
     pub(in crate::workspace) fn open_agent_chat_pane_with_agent(
         &mut self,
         agent_id: String,

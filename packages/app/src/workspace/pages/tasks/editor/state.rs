@@ -1,25 +1,22 @@
-//! The TaskEdit form's state — the entities a pane holds, the values Save
-//! reads off them, and the checks that gate Save.
+//! The Task editor's state — the entities it holds, the values Save reads
+//! off them, and the checks that gate Save.
 
 use daruda_store::project::ProjectUuid;
 use daruda_store::tasks::{TaskAgentSurface, TaskId};
 use gpui::{App, Entity, FocusHandle, ScrollHandle, SharedString, Subscription, Task};
 
-/// Markdown-form editor pane for a single Task. Lives at the same
-/// `PaneLayout::Pane` level as Terminal and File so users can split a
-/// TaskEdit alongside a running shell. `task_id = None` means this is a
-/// draft: nothing is persisted to `tasks.json` until the user presses
-/// `[Save Draft]` or `[Start]`, and the layout serializer skips drafts
-/// so they don't survive a session restart.
+/// Markdown-form editor for a single Task — the Tasks page's detail (see
+/// `pages::tasks`). `task_id = None` means a draft: nothing is persisted to
+/// `tasks.json` until the user presses `[Save Draft]` or `[Start]`.
 pub(in crate::workspace) struct TaskEditContent {
     pub(in crate::workspace) task_id: Option<TaskId>,
     pub(in crate::workspace) title_input: Entity<crate::ui::InputState>,
     pub(in crate::workspace) branch_input: Entity<crate::ui::InputState>,
-    pub(in crate::workspace::main_area) draft_subtasks: Vec<daruda_store::tasks::SubTask>,
-    pub(in crate::workspace::main_area) preview_prompt: bool,
-    pub(in crate::workspace::main_area) settings_open: bool,
-    pub(in crate::workspace::main_area) notes_open: bool,
-    pub(in crate::workspace::main_area) branch_validation: BranchValidation,
+    pub(in crate::workspace::pages::tasks) draft_subtasks: Vec<daruda_store::tasks::SubTask>,
+    pub(in crate::workspace::pages::tasks) preview_prompt: bool,
+    pub(in crate::workspace::pages::tasks) settings_open: bool,
+    pub(in crate::workspace::pages::tasks) notes_open: bool,
+    pub(in crate::workspace::pages::tasks) branch_validation: BranchValidation,
     /// The project the task belongs to, keyed by `ProjectUuid`. Its lanes
     /// are what `base_select` and `lane_select` offer, so picking another
     /// project rebuilds both.
@@ -29,7 +26,7 @@ pub(in crate::workspace) struct TaskEditContent {
     /// active lane at run time"; every other value is the absolute path of a
     /// registered lane. Sits in the focus chain between prompt and notes.
     pub(in crate::workspace) base_select: Entity<crate::ui::select::SelectState>,
-    pub(in crate::workspace::main_area) run_in: RunInChoice,
+    pub(in crate::workspace::pages::tasks) run_in: RunInChoice,
     /// Registered lanes keyed by absolute path; read under
     /// `RunInChoice::ExistingLane` only.
     pub(in crate::workspace) lane_select: Entity<crate::ui::select::SelectState>,
@@ -38,28 +35,27 @@ pub(in crate::workspace) struct TaskEditContent {
     /// `crate::ui::markdown_editor(&state)`.
     pub(in crate::workspace) prompt_state: Entity<gpui_component::input::InputState>,
     pub(in crate::workspace) notes_state: Entity<gpui_component::input::InputState>,
-    pub(in crate::workspace::main_area) auto_execute: bool,
+    pub(in crate::workspace::pages::tasks) auto_execute: bool,
     /// Execution surface the task will run on when started — mirrors
     /// `Task::agent_surface`. Terminal CLI (default) or in-app Agent
     /// chat (ACP). Flipped in-place by the form's surface selector, the
     /// same plain-data pattern as `auto_execute`.
-    pub(in crate::workspace::main_area) agent_surface: TaskAgentSurface,
-    pub(in crate::workspace::main_area) focus_handle: FocusHandle,
-    pub(in crate::workspace::main_area) cached_title: SharedString,
+    pub(in crate::workspace::pages::tasks) agent_surface: TaskAgentSurface,
+    pub(in crate::workspace::pages::tasks) focus_handle: FocusHandle,
+    pub(in crate::workspace::pages::tasks) cached_title: SharedString,
     /// Baseline snapshot for dirty comparison. Reset to
     /// `current_snapshot()` after every successful save.
-    pub(in crate::workspace::main_area) saved_snapshot: TaskEditValues,
-    pub(in crate::workspace::main_area) _subscriptions: Vec<Subscription>,
+    pub(in crate::workspace::pages::tasks) saved_snapshot: TaskEditValues,
+    pub(in crate::workspace::pages::tasks) _subscriptions: Vec<Subscription>,
     /// FS watcher on `<lane>/.daruda/task-<id>.md`. `None`
     /// when the task is still in `Backlog` (no lane yet) or the
-    /// file didn't exist at pane-open time. Dropped with the pane —
+    /// file didn't exist when the editor opened. Dropped with the editor —
     /// `PromptFileWatcherHandle` shuts down the underlying threads.
-    pub(in crate::workspace::main_area) _prompt_watcher:
-        Option<crate::workspace::main_area::prompt_watcher::PromptFileWatcherHandle>,
+    pub(super) _prompt_watcher: Option<super::prompt_watcher::PromptFileWatcherHandle>,
     /// GPUI-side pump that polls the watcher's debounced channel and
     /// dispatches `handle_prompt_file_changed`. Dropped with
-    /// the pane.
-    pub(in crate::workspace::main_area) _prompt_pump: Option<Task<()>>,
+    /// the editor.
+    pub(in crate::workspace::pages::tasks) _prompt_pump: Option<Task<()>>,
     /// Trailing `[+ Add subtask…]` row input. `Submit` (Enter)
     /// dispatches `Workspace::add_subtask` and clears the buffer for
     /// the next entry; the input stays focused so the user can chain
@@ -68,20 +64,23 @@ pub(in crate::workspace) struct TaskEditContent {
     /// `Some(subtask_id)` while that row is in inline-rename mode (Enter /
     /// blur commits, Escape cancels). One shared rename input is reused
     /// across rows to avoid IME composition-state churn when switching rows.
-    pub(in crate::workspace::main_area) editing_subtask: Option<String>,
-    pub(in crate::workspace::main_area) editing_subtask_input: Entity<crate::ui::InputState>,
+    pub(in crate::workspace::pages::tasks) editing_subtask: Option<String>,
+    pub(in crate::workspace::pages::tasks) editing_subtask_input: Entity<crate::ui::InputState>,
+    /// The prompt file as it is on disk, shown read-only beside the prompt
+    /// after the conflict prompt's `[Diff]`, so both versions are in view.
+    pub(in crate::workspace::pages::tasks) disk_copy: Option<Entity<crate::ui::InputState>>,
     /// Scroll handle for the form-body absolute scroll container.
     /// `vertical_scrollbar(&handle)` on the relative parent renders
     /// the visible thumb; `track_scroll(&handle)` on the scroll
     /// container hooks up cursor + wheel + scrollbar drag together.
-    pub(in crate::workspace::main_area) body_scroll_handle: ScrollHandle,
+    pub(in crate::workspace::pages::tasks) body_scroll_handle: ScrollHandle,
 }
 
 /// Result of running `validate_branch` over the current branch-input
 /// text. Drives the disabled state of `[Save Draft]` / `[Start]` and
 /// the inline red-border + reason label under the field.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub(in crate::workspace::main_area) enum BranchValidation {
+pub(in crate::workspace::pages::tasks) enum BranchValidation {
     /// Empty input → a draft gets its default `task-<id>` branch on Save;
     /// a saved task keeps its own.
     Empty,
@@ -117,7 +116,7 @@ impl BranchValidation {
     }
 }
 
-/// Plain-data dirty-comparison baseline for a TaskEdit pane. Lives
+/// Plain-data dirty-comparison baseline for the Task editor. Lives
 /// on `TaskEditContent::saved_snapshot` and is recomputed via
 /// `current_snapshot()` on every dirty check / save.
 ///
@@ -125,23 +124,23 @@ impl BranchValidation {
 /// snapshots are compared, so a CRLF disk reload doesn't read as an edit.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub(in crate::workspace) struct TaskEditValues {
-    pub(in crate::workspace::main_area) draft_subtasks: Vec<daruda_store::tasks::SubTask>,
-    pub(in crate::workspace::main_area) title: String,
-    pub(in crate::workspace::main_area) branch: String,
-    pub(in crate::workspace::main_area) prompt: String,
-    pub(in crate::workspace::main_area) notes: String,
-    pub(in crate::workspace::main_area) auto_execute: bool,
-    pub(in crate::workspace::main_area) agent_surface: TaskAgentSurface,
+    pub(in crate::workspace::pages::tasks) draft_subtasks: Vec<daruda_store::tasks::SubTask>,
+    pub(in crate::workspace::pages::tasks) title: String,
+    pub(in crate::workspace::pages::tasks) branch: String,
+    pub(in crate::workspace::pages::tasks) prompt: String,
+    pub(in crate::workspace::pages::tasks) notes: String,
+    pub(in crate::workspace::pages::tasks) auto_execute: bool,
+    pub(in crate::workspace::pages::tasks) agent_surface: TaskAgentSurface,
     /// Empty string ↔ `Task::base_worktree_path == None`; non-empty ↔
     /// `Some(PathBuf::from(s))`. Plain `String` (not `Option<String>`)
     /// keeps the dirty-comparison `==` path trivial — the user-facing
     /// sentinel is `""` either way.
-    pub(in crate::workspace::main_area) base_value: String,
-    pub(in crate::workspace::main_area) run_in: RunInChoice,
+    pub(in crate::workspace::pages::tasks) base_value: String,
+    pub(in crate::workspace::pages::tasks) run_in: RunInChoice,
     /// `lane_select`'s value, `""` when nothing is picked.
-    pub(in crate::workspace::main_area) lane_value: String,
+    pub(in crate::workspace::pages::tasks) lane_value: String,
     /// `project_select`'s value, `""` when nothing is picked.
-    pub(in crate::workspace::main_area) project_value: String,
+    pub(in crate::workspace::pages::tasks) project_value: String,
 }
 
 /// `project_select`'s option value for `uuid`.
@@ -208,6 +207,11 @@ impl TaskEditValues {
 }
 
 impl TaskEditContent {
+    /// What the editor is called — the task's title, or "New task".
+    pub(in crate::workspace) fn title(&self) -> SharedString {
+        self.cached_title.clone()
+    }
+
     /// The form's current values, read through the input entities — what
     /// Save persists and what the dirty check compares.
     pub(in crate::workspace) fn current_snapshot(&self, cx: &App) -> TaskEditValues {

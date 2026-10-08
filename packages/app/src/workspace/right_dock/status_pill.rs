@@ -211,7 +211,7 @@ fn edit_item(task_id: &str, workspace: &gpui::WeakEntity<Workspace>) -> PopupMen
         if let Some(w) = ws.upgrade() {
             let id = id.clone();
             w.update(app, |this, cx| {
-                this.open_task_edit_pane(Some(id), window, cx);
+                this.open_task_editor(Some(id), window, cx);
             });
         }
     })

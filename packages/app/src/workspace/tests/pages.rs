@@ -154,20 +154,12 @@ async fn task_groups_collapse_and_reopen_without_changing_filters(cx: &mut TestA
     workspace.read_with(&vcx, |ws, _| {
         assert_eq!(
             ws.active_page(),
-            None,
-            "the row opens the existing editor, not a side panel"
+            Some(Page::Tasks),
+            "the row opens the editor as the page's detail"
         );
-        let pane = ws.active_runtime().focused_pane_id;
+        let editor = ws.task_detail_id().and_then(|id| ws.task_editor(id));
         assert_eq!(
-            ws.active_runtime()
-                .panes
-                .iter()
-                .find(|p| p.id == pane)
-                .unwrap()
-                .task_edit_content()
-                .unwrap()
-                .task_id
-                .as_deref(),
+            editor.and_then(|te| te.task_id.as_deref()),
             Some("group-fixture")
         );
     });
@@ -189,14 +181,25 @@ fn selecting_projects_or_the_same_lane_returns_to_its_content(cx: &mut TestAppCo
     .unwrap();
 }
 
+/// The editor is the Tasks page's detail: opening it shows the page, and
+/// hiding the page keeps it for the next visit.
 #[gpui::test]
-fn task_editor_is_visible_after_leaving_the_task_page(cx: &mut TestAppContext) {
+fn the_task_editor_lives_on_the_task_page_across_a_lane_switch(cx: &mut TestAppContext) {
     let (window, workspace) = build_workspace(cx);
     cx.update_window(window.into(), |_, window, cx| {
         workspace.update(cx, |ws, cx| {
+            ws.open_task_editor(None, window, cx);
+            assert_eq!(ws.active_page(), Some(Page::Tasks));
+            let editor = ws.task_detail_id().expect("the page holds the editor");
+            assert!(
+                ws.active_runtime().panes.iter().all(|p| p.id != editor.0),
+                "no lane tab holds the editor",
+            );
+            ws.activate_lane(ws.active, window, cx);
+            assert_eq!(ws.active_page(), None, "the lane shows its own work");
+            assert_eq!(ws.task_detail_id(), Some(editor), "the editor waits");
             ws.open_page(Page::Tasks, window, cx);
-            ws.open_task_edit_pane(None, window, cx);
-            assert_eq!(ws.active_page(), None);
+            assert_eq!(ws.task_detail_id(), Some(editor));
         });
     })
     .unwrap();

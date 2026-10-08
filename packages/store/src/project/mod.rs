@@ -31,7 +31,7 @@ pub use persistence::{
 };
 pub use session_host_id::SessionHostId;
 pub use types::{
-    PaneId, PaneLayout, ProjectOverride, ProjectState, ProjectUuid, RecentEntry,
+    PaneId, PaneLayout, ProjectOverride, ProjectState, ProjectUuid, RecentEntry, TaskDetailTarget,
     WORKSPACE_SCHEMA_VERSION, WorkspaceState, WorkspaceUuid,
 };
 
@@ -197,8 +197,8 @@ pub enum SerializedLayout {
 /// with the others, which is a rule a reader has to keep rather than one the
 /// type keeps for them.
 ///
-/// TaskEdit panes are absent on purpose: they hold an unsaved form, and
-/// restoring one would put a half-typed task back on screen as if it had been
+/// The Task editor is absent on purpose: it lives on the Tasks page, not in a
+/// lane, and its unsaved form would come back on screen as if it had been
 /// kept.
 ///
 /// Deliberately not `Serialize`/`Deserialize`: the file's shape is

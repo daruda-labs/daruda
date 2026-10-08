@@ -1,4 +1,4 @@
-//! Filesystem watcher for the TaskEdit pane's prompt markdown file.
+//! Filesystem watcher for the Task editor's prompt markdown file.
 //!
 //! 1. **`dir_watch`** owns the `notify::Watcher` (via the returned
 //!    [`crate::dir_watch::DirWatcher`] handle) and forwards events for our
@@ -8,11 +8,11 @@
 //!    emits ≥3 events per save) into one signal per [`DEBOUNCE`]
 //!    window.
 //!
-//! Each TaskEdit pane owns its own `PromptFileWatcherHandle` — dropping the
+//! The Task editor owns its `PromptFileWatcherHandle` — dropping the
 //! handle drops the `DirWatcher` (stopping the watch), which disconnects the
 //! raw channel and ends the debounce thread. The GPUI-side pump task that
-//! consumes the debounced channel lives on the same `Pane` so its lifetime is
-//! tied to the pane.
+//! consumes the debounced channel lives on the same editor, so its lifetime is
+//! tied to the editor's.
 
 use std::path::{Path, PathBuf};
 use std::sync::mpsc::{self, RecvTimeoutError};

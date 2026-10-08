@@ -567,27 +567,6 @@ async fn deliver_text_to_pane_routes_by_kind(cx: &mut TestAppContext) {
                 ),
                 "a missing pane id cannot receive text"
             );
-
-            // TaskEdit pane → false (kind cannot receive delivered text).
-            ws.open_task_edit_pane(None, window, cx);
-            let te_id = ws
-                .active_runtime()
-                .panes
-                .last()
-                .expect("open_task_edit_pane pushed a pane")
-                .id;
-            assert!(
-                !ws.deliver_text_to_pane(
-                    te_id,
-                    PaneTextInput {
-                        body: "x".to_string(),
-                        intent: PaneTextIntent::Command { submit: false },
-                    },
-                    window,
-                    cx,
-                ),
-                "a TaskEdit pane is not a text-delivery target"
-            );
         });
     })
     .unwrap();

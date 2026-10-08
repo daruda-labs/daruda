@@ -37,7 +37,7 @@ pub enum TaskPickAction {
     Reopen,
     Retry,
     Delete,
-    /// Picks a task to open in a TaskEdit pane — wired from the
+    /// Picks a task to open in the Task editor — wired from the
     /// Command Palette `edit_task` entry. Any task state
     /// is eligible because Edit is a pure metadata mutation.
     Edit,
@@ -190,7 +190,7 @@ impl TaskPickerModal {
                 TaskPickAction::Reopen => ws.reopen_task(&id, cx),
                 TaskPickAction::Retry => ws.retry_task(&id, window, cx),
                 TaskPickAction::Delete => ws.open_delete_task_confirm(&id, window, cx),
-                TaskPickAction::Edit => ws.open_task_edit_pane(Some(id), window, cx),
+                TaskPickAction::Edit => ws.open_task_editor(Some(id), window, cx),
             });
         }
     }

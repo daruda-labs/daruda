@@ -1,59 +1,43 @@
-//! Saving the TaskEdit form: read it off the pane, check where the task
+//! Saving the Task editor's form: read it off the editor, check where the task
 //! runs, and persist it into `GlobalTasks`.
 
 use daruda_store::tasks::{TaskId, TaskRunIn};
 use gpui::{BorrowAppContext as _, Context, Window};
 
+use super::TaskEditorId;
 use super::state::{RunInChoice, TaskEditValues};
 use crate::workspace::Workspace;
-use crate::workspace::main_area::pane_tree::PaneId;
 
 impl Workspace {
-    /// The tab-close prompt's Save: commit the form as the editor's own
-    /// Save does, then close the pane. An invalid form leaves it open.
-    pub(in crate::workspace) fn save_and_close_task_edit_pane(
-        &mut self,
-        pane_id: PaneId,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
-        if self.commit_task_editor(pane_id, window, cx).is_some() {
-            self.close_pane_by_id(pane_id, window, cx);
-        }
-    }
-
     /// Commit the form as shown, including a typed-but-unsubmitted subtask
     /// and an open rename — the sequence every interactive save shares.
-    pub(super) fn commit_task_editor(
+    pub(in crate::workspace) fn commit_task_editor(
         &mut self,
-        pane_id: PaneId,
+        editor_id: TaskEditorId,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Option<TaskId> {
-        self.submit_new_subtask(pane_id, window, cx);
-        self.commit_rename_subtask(pane_id, cx);
-        self.commit_task_edit_pane(pane_id, cx)
+        self.submit_new_subtask(editor_id, window, cx);
+        self.commit_rename_subtask(editor_id, cx);
+        self.commit_task_form(editor_id, cx)
     }
 
-    /// Persist the pane's form into `GlobalTasks` without closing the
-    /// pane. Used by the close-tab and window-close batch flows
-    /// where one wrapping prompt covers multiple panes and the
-    /// caller drives the close pass separately. Returns the resolved
-    /// `task_id` on success, `None` when the form is invalid (the
-    /// caller should keep the pane open in that case).
-    pub(in crate::workspace) fn commit_task_edit_pane(
+    /// Persist the form into `GlobalTasks`, leaving the editor open.
+    /// Returns the resolved `task_id`, or `None` when the form is
+    /// invalid — the caller then keeps the editor.
+    pub(in crate::workspace) fn commit_task_form(
         &mut self,
-        pane_id: PaneId,
+        editor_id: TaskEditorId,
         cx: &mut Context<Self>,
     ) -> Option<TaskId> {
-        let form = self.read_task_edit_form(pane_id, cx)?;
+        let form = self.read_task_edit_form(editor_id, cx)?;
         let values = &form.values;
         if values.title.trim().is_empty() {
             return None;
         }
         // `None` once started: where the task runs is then fixed.
         let run_in = if form.editable {
-            Some(self.commit_task_run_in(pane_id, values, form.project)?)
+            Some(self.commit_task_run_in(editor_id, values, form.project)?)
         } else {
             None
         };
@@ -128,9 +112,9 @@ impl Workspace {
             }
         };
 
-        // Re-baseline the dirty snapshot so the pane no longer reads
+        // Re-baseline the dirty snapshot so the form no longer reads
         // as dirty after a successful save.
-        if let Some(te) = self.task_edit_content_mut_for(pane_id) {
+        if let Some(te) = self.task_editor_mut(editor_id) {
             te.task_id = Some(task_id.clone());
             te.draft_subtasks.clear();
             te.saved_snapshot = te.current_snapshot(cx);
@@ -144,7 +128,7 @@ impl Workspace {
     /// after the form opened can have taken it since the last keystroke.
     fn commit_task_run_in(
         &mut self,
-        pane_id: PaneId,
+        editor_id: TaskEditorId,
         form: &TaskEditValues,
         project: Option<daruda_store::project::ProjectUuid>,
     ) -> Option<TaskRunIn> {
@@ -152,7 +136,7 @@ impl Workspace {
             RunInChoice::NewWorktree => {
                 let validation = self.branch_validation_for(&form.branch, true, project);
                 let invalid = validation.is_invalid();
-                if let Some(te) = self.task_edit_content_mut_for(pane_id) {
+                if let Some(te) = self.task_editor_mut(editor_id) {
                     te.branch_validation = validation;
                 }
                 (!invalid).then_some(TaskRunIn::NewWorktree)
@@ -165,10 +149,14 @@ impl Workspace {
         }
     }
 
-    /// Read the current form values without holding a `&mut self`
-    /// borrow on `self.active_runtime().panes` past the snapshot.
-    fn read_task_edit_form(&self, pane_id: PaneId, cx: &Context<Self>) -> Option<TaskEditForm> {
-        let te = self.main_area.pane(pane_id)?.task_edit_content()?;
+    /// Read the current form values in one step, so no borrow of the
+    /// editor outlives the snapshot.
+    fn read_task_edit_form(
+        &self,
+        editor_id: TaskEditorId,
+        cx: &Context<Self>,
+    ) -> Option<TaskEditForm> {
+        let te = self.task_editor(editor_id)?;
         Some(TaskEditForm {
             task_id: te.task_id.clone(),
             editable: super::run_in_ops::location_editable(te, cx.global()),
@@ -178,8 +166,8 @@ impl Workspace {
     }
 }
 
-/// What Save reads off the pane in one step, so it holds no borrow of
-/// `self.active_runtime().panes` past the read.
+/// What Save reads off the editor in one step, so it holds no borrow of
+/// the editor past the read.
 struct TaskEditForm {
     task_id: Option<TaskId>,
     /// Whether the task has yet to start, so its location may still change.

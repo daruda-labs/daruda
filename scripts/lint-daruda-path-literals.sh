@@ -43,7 +43,7 @@ cd "$ROOT"
 # Files allowed to spell out the data-directory name literally — either
 # they *are* the canonical implementation (persistence.rs / profile.rs /
 # log_writer.rs), or the path is deliberately NOT app-instance state:
-#   - task_edit_pane/{mod,task_edit_ops}.rs: `<worktree>/.daruda/task-*.md`
+#   - pages/tasks/editor/{mod,task_edit_ops}.rs: `<worktree>/.daruda/task-*.md`
 #     is a per-repo artifact tied to the branch, not app installation
 #     state — every profile touching the same repo should share it.
 #   - hooks/installer.rs: `~/.daruda/hooks/notify.sh` is a single global
@@ -58,8 +58,8 @@ WHITELIST=(
     "packages/store/src/persistence.rs"
     "packages/store/src/profile.rs"
     "packages/store/src/observability/log_writer.rs"
-    "packages/app/src/workspace/main_area/task_edit_pane/mod.rs"
-    "packages/app/src/workspace/main_area/task_edit_pane/task_edit_ops.rs"
+    "packages/app/src/workspace/pages/tasks/editor/mod.rs"
+    "packages/app/src/workspace/pages/tasks/editor/task_edit_ops.rs"
     "packages/agent/src/hooks/installer.rs"
     "packages/store/src/tasks/prompt_file.rs"
     "packages/app/src/workspace/flow_paths.rs"

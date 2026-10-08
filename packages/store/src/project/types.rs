@@ -15,6 +15,8 @@ use std::path::PathBuf;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
+use crate::tasks::TaskId;
+
 use crate::project::{
     DockStates, GroupId, LaneId, LeftDockView, RightDockView, SerializedGroup, SerializedLane,
     SerializedTab, WindowOpenPolicy, WindowState, WorkspacePage,
@@ -160,6 +162,9 @@ pub struct WorkspaceState {
     /// Absent in files written before pages had their own slot.
     #[serde(default)]
     pub active_page: Option<WorkspacePage>,
+    /// Absent in files written before the Tasks page held an editor.
+    #[serde(default)]
+    pub task_detail: Option<TaskDetailTarget>,
     pub window_open_policy: WindowOpenPolicy,
 
     #[serde(default)]
@@ -177,6 +182,15 @@ pub struct WorkspaceState {
     /// per-lane default, this field will become canonical and
     /// `SerializedLane::tabs` will become its initialization seed.
     pub project_tabs: BTreeMap<ProjectUuid, Vec<PaneLayout>>,
+}
+
+/// What the Tasks page's editor showed. Restored as a fresh form — edits
+/// never saved are not kept.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum TaskDetailTarget {
+    Task { id: TaskId },
+    NewDraft { project: ProjectUuid },
 }
 
 /// Entry in `recent-workspaces.json`. Keyed by workspace UUID;

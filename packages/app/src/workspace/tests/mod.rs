@@ -72,7 +72,7 @@ pub(super) use crate::workspace::main_area::tab_ops::NewPaneKind;
 /// never share persistence state. The directory is left on disk after
 /// the test; macOS cleans up /tmp periodically. The pid keeps a *later*
 /// run from inheriting the state a previous run left at the same counter.
-fn fresh_test_data_dir() -> std::path::PathBuf {
+pub(in crate::workspace) fn fresh_test_data_dir() -> std::path::PathBuf {
     static COUNTER: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
     let id = COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
     let pid = std::process::id();

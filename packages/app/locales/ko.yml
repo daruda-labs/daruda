@@ -350,6 +350,8 @@ task:
   watcher_use_disk: "디스크 버전 사용"
   watcher_keep_mine: "내 버전 유지"
   watcher_diff: "비교"
+  prompt_disk_copy: "디스크 버전"
+  prompt_disk_copy_close: "디스크 버전 닫기"
   watcher_heading: "“%{title}”이(가) 디스크에서 변경되었습니다"
   batch_close_heading: "닫기 전에 다음 항목의 변경 사항을 저장할까요?"
   batch_save_all: "모두 저장"

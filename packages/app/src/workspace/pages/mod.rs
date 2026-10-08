@@ -9,6 +9,7 @@ use crate::ui::icons;
 
 pub(super) mod flows;
 pub(super) mod render;
+pub(in crate::workspace) mod tasks;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(in crate::workspace) enum Page {

@@ -108,7 +108,7 @@ impl Workspace {
     /// Switch `pane_id`'s account to `selection`
     /// ([`AccountSelection::SystemDefault`] = `~/.claude`). Dispatches on pane
     /// kind: an Agent chat pane consults [`switch_kind`]; a Terminal pane
-    /// always opens a new pane (see the module doc); File/TaskEdit panes don't
+    /// always opens a new pane (see the module doc); File and flow panes don't
     /// track an account and are a no-op.
     pub(in crate::workspace) fn switch_pane_account(
         &mut self,

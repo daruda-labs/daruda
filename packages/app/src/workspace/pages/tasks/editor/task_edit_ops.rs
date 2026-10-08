@@ -1,8 +1,8 @@
-//! TaskEdit pane lifecycle — builder, open / find, branch validation, and
-//! the accessors the sibling `save_ops` / `prompt_file_ops` reach panes by.
+//! The Task editor's lifecycle — builder, open, branch validation, and the
+//! accessors the sibling `save_ops` / `prompt_file_ops` reach the editor by.
 //!
-//! The pane itself is rendered by `render::task_edit_pane`; this
-//! module owns the *operations* (open, validate, find existing)
+//! The editor itself is rendered by `editor::render_detail`; this
+//! module owns the *operations* (open, restore, validate)
 //! that the renderer + status_pill + Tasks-tab row click dispatch into.
 //!
 //! Branch validation runs the shared `daruda_core::git` rule walk and
@@ -10,17 +10,17 @@
 //! silent filter behind `sanitize_branch_name` can never disagree on what
 //! git accepts.
 
-use daruda_store::project::ProjectUuid;
+use daruda_store::project::{ProjectUuid, TaskDetailTarget};
 use daruda_store::tasks::{Task, TaskAgentSurface, TaskId, random_branch_name};
 use gpui::{AppContext as _, Context, Focusable as _, SharedString, Window};
 
+use super::TaskEditorId;
 use super::prompt_file_ops::install_prompt_watcher;
 use super::state::{BranchValidation, TaskEditContent, TaskEditValues};
 use crate::ui::select::{SelectOption, state_with_options};
 use crate::ui::{InputEvent, InputState, make_markdown_prose_state};
 use crate::workspace::Workspace;
-use crate::workspace::main_area::pane::{Pane, PaneContent};
-use crate::workspace::main_area::pane_tree::{PaneId, PaneLayout};
+use crate::workspace::pages::tasks::TaskDetail;
 
 /// Validate a branch-input string, reporting which rule it broke so the
 /// form can show a precise red label. An empty field is not an error — a
@@ -36,16 +36,15 @@ pub(super) fn validate_branch(text: &str) -> BranchValidation {
 }
 
 impl Workspace {
-    /// Open (or focus) the TaskEdit pane for `task_id`. `None` opens a
-    /// fresh draft pane. Same task → second open re-focuses the
-    /// existing pane instead of creating a duplicate.
-    pub(in crate::workspace) fn open_task_edit_pane(
+    /// Open the editor for `task_id` (`None`: a fresh draft) as the Tasks
+    /// page's detail — see [`Self::open_task_editor_with`].
+    pub(in crate::workspace) fn open_task_editor(
         &mut self,
         task_id: Option<TaskId>,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        self.open_task_editor(task_id, None, window, cx);
+        self.open_task_editor_with(task_id, None, window, cx);
     }
 
     pub(in crate::workspace) fn open_task_draft_for_project(
@@ -54,79 +53,101 @@ impl Workspace {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        self.open_task_editor(None, Some(project), window, cx);
+        self.open_task_editor_with(None, Some(project), window, cx);
     }
 
-    fn open_task_editor(
+    /// Show `task_id`'s editor (`None`: a fresh draft) as the Tasks page's
+    /// detail. The same task already open is shown again as it is; anything
+    /// else replaces the current editor, asking first if it holds edits.
+    fn open_task_editor_with(
         &mut self,
         task_id: Option<TaskId>,
         draft_project: Option<ProjectUuid>,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if let Some(id) = task_id.as_deref()
-            && let Some(existing) = self.find_task_edit_pane(id)
+        if let Some(open) = self.pages.tasks.detail.as_ref()
+            && task_id.is_some()
+            && open.editor.task_id == task_id
         {
-            self.focus_pane(existing, window, cx);
+            let id = open.id;
+            self.show_task_detail(id, window, cx);
             return;
         }
-
-        let initial = task_id.as_deref().and_then(|id| {
-            cx.global::<crate::agent::tasks_global::GlobalTasks>()
-                .get(id)
-                .cloned()
-        });
-
-        let pane = self.create_task_edit_pane(task_id, initial, draft_project, window, cx);
-        let pane_id = pane.id;
-        let tab_id = self.alloc_id();
-        self.active_runtime_mut().panes.push(pane);
-        self.active_runtime_mut()
-            .tabs
-            .push(crate::workspace::main_area::pane::TabEntry {
-                id: tab_id,
-                layout: PaneLayout::Pane(pane_id),
-                last_focused_pane: pane_id,
-                user_label: None,
+        self.leave_task_detail_then(window, cx, move |ws, window, cx| {
+            let initial = task_id.as_deref().and_then(|id| {
+                cx.global::<crate::agent::tasks_global::GlobalTasks>()
+                    .get(id)
+                    .cloned()
             });
-        let cur_tab = self.active_runtime().active_tab_index;
-        self.active_runtime_mut().tab_history.push(cur_tab);
-        let last_tab = self.active_runtime().tabs.len() - 1;
-        self.active_runtime_mut().active_tab_index = last_tab;
-        self.set_focused_pane(pane_id, window, cx);
-        self.bump_activity(pane_id);
-        self.focus_pane(pane_id, window, cx);
-        if let Some(te) = self.task_edit_content_for_pane(pane_id) {
-            te.title_input.read(cx).focus_handle(cx).focus(window, cx);
-        }
-        cx.notify();
+            let id = ws.install_task_editor(task_id, initial, draft_project, window, cx);
+            ws.show_task_detail(id, window, cx);
+        });
     }
 
-    /// Return the `PaneId` of the existing TaskEdit pane tied to
-    /// `task_id`, if any. Drafts (`task_id = None`) are never
-    /// deduplicated — each `[+ New]` click is a fresh draft.
-    pub(super) fn find_task_edit_pane(&self, task_id: &str) -> Option<PaneId> {
-        self.active_runtime()
-            .panes
-            .iter()
-            .find_map(|p| match &p.content {
-                PaneContent::TaskEditPane(te) if te.task_id.as_deref() == Some(task_id) => {
-                    Some(p.id)
+    /// Reopen the editor a saved workspace showed, as a fresh form. A task
+    /// deleted since, or a draft whose project is no longer open, leaves the
+    /// page on its list.
+    pub(in crate::workspace) fn restore_task_detail(
+        &mut self,
+        target: &TaskDetailTarget,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        match target {
+            TaskDetailTarget::Task { id } => {
+                let Some(task) = cx
+                    .global::<crate::agent::tasks_global::GlobalTasks>()
+                    .get(id)
+                    .cloned()
+                else {
+                    return;
+                };
+                self.install_task_editor(Some(id.clone()), Some(task), None, window, cx);
+            }
+            TaskDetailTarget::NewDraft { project } => {
+                if self.project_by_uuid(*project).is_some() {
+                    self.install_task_editor(None, None, Some(*project), window, cx);
                 }
-                _ => None,
-            })
+            }
+        }
     }
 
-    fn create_task_edit_pane(
+    /// Make a new editor the page's detail. The caller has left the old one.
+    fn install_task_editor(
         &mut self,
         task_id: Option<TaskId>,
         initial: Option<Task>,
         draft_project: Option<ProjectUuid>,
         window: &mut Window,
         cx: &mut Context<Self>,
-    ) -> Pane {
-        let pane_id = self.alloc_id();
+    ) -> TaskEditorId {
+        let id = TaskEditorId(self.alloc_id());
+        let editor = self.build_task_editor(id, task_id, initial, draft_project, window, cx);
+        self.mutate_durable(cx, |ws, _| {
+            ws.pages.tasks.detail = Some(TaskDetail { id, editor });
+        });
+        id
+    }
 
+    /// Bring the Tasks page up on editor `id` and put the cursor in its title.
+    fn show_task_detail(&mut self, id: TaskEditorId, window: &mut Window, cx: &mut Context<Self>) {
+        self.show_page(crate::workspace::pages::Page::Tasks, cx);
+        if let Some(te) = self.task_editor(id) {
+            te.title_input.read(cx).focus_handle(cx).focus(window, cx);
+        }
+        cx.notify();
+    }
+
+    fn build_task_editor(
+        &mut self,
+        editor_id: TaskEditorId,
+        task_id: Option<TaskId>,
+        initial: Option<Task>,
+        draft_project: Option<ProjectUuid>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> TaskEditContent {
         let (title, prompt, notes, branch_name, auto_execute, agent_surface) = match &initial {
             Some(t) => (
                 t.title.clone(),
@@ -199,7 +220,7 @@ impl Workspace {
             window,
             move |this, _inp, ev: &InputEvent, _window, cx| {
                 if matches!(ev, InputEvent::Change) {
-                    this.refresh_task_edit_title(pane_id, cx);
+                    this.refresh_task_edit_title(editor_id, cx);
                 }
             },
         );
@@ -208,7 +229,7 @@ impl Workspace {
             window,
             move |this, _inp, ev: &InputEvent, _window, cx| {
                 if matches!(ev, InputEvent::Change) {
-                    this.on_task_edit_branch_typed(pane_id, cx);
+                    this.on_task_edit_branch_typed(editor_id, cx);
                 }
             },
         );
@@ -226,7 +247,7 @@ impl Workspace {
             window,
             move |this, _inp, ev: &InputEvent, window, cx| {
                 if matches!(ev, InputEvent::PressEnter { .. }) {
-                    this.submit_new_subtask(pane_id, window, cx);
+                    this.submit_new_subtask(editor_id, window, cx);
                 }
             },
         );
@@ -237,7 +258,7 @@ impl Workspace {
             window,
             move |this, _inp, ev: &InputEvent, _window, cx| {
                 if matches!(ev, InputEvent::PressEnter { .. }) {
-                    this.commit_rename_subtask(pane_id, cx);
+                    this.commit_rename_subtask(editor_id, cx);
                 }
             },
         );
@@ -268,7 +289,7 @@ impl Workspace {
             window,
             move |this, _state, ev: &crate::ui::select::ConfirmEvent, window, cx| {
                 if matches!(ev, crate::ui::select::SelectEvent::Confirm(_)) {
-                    this.on_task_edit_project_changed(pane_id, window, cx);
+                    this.on_task_edit_project_changed(editor_id, window, cx);
                 }
             },
         );
@@ -328,7 +349,7 @@ impl Workspace {
         // Running tasks watch immediately; Start attaches the watcher once
         // it has materialized the task's prompt file.
         let (_prompt_watcher, _prompt_pump) =
-            install_prompt_watcher(initial.as_ref(), pane_id, window, cx);
+            install_prompt_watcher(initial.as_ref(), editor_id, window, cx);
 
         let mut content = TaskEditContent {
             task_id,
@@ -367,24 +388,26 @@ impl Workspace {
             new_subtask_input,
             editing_subtask: None,
             editing_subtask_input,
+            disk_copy: None,
             body_scroll_handle: gpui::ScrollHandle::new(),
         };
         // The baseline is what the form shows: a base or lane no longer
         // registered is not selected, and must not read as an edit.
         content.saved_snapshot = content.current_snapshot(cx);
-        Pane {
-            id: pane_id,
-            content: PaneContent::TaskEditPane(content),
-        }
+        content
     }
 
     /// Refresh the tab title from the title input.
-    pub(super) fn refresh_task_edit_title(&mut self, pane_id: PaneId, cx: &mut Context<Self>) {
-        let Some(te) = self.task_edit_content_for_pane(pane_id) else {
+    pub(super) fn refresh_task_edit_title(
+        &mut self,
+        editor_id: TaskEditorId,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(te) = self.task_editor(editor_id) else {
             return;
         };
         let title = te.title_input.read(cx).value().to_string();
-        if let Some(te) = self.task_edit_content_mut_for(pane_id) {
+        if let Some(te) = self.task_editor_mut(editor_id) {
             te.cached_title = if title.is_empty() {
                 crate::surface::strings::command::new_task().into()
             } else {
@@ -395,21 +418,21 @@ impl Workspace {
     }
 
     /// User typed into the branch input directly — re-validate.
-    pub(super) fn on_task_edit_branch_typed(&mut self, pane_id: PaneId, cx: &mut Context<Self>) {
-        let (branch_text, editable, project) =
-            match self.active_runtime().panes.iter().find(|p| p.id == pane_id) {
-                Some(p) => match p.task_edit_content() {
-                    Some(te) => (
-                        te.branch_input.read(cx).text().to_string(),
-                        super::run_in_ops::location_editable(te, cx.global()),
-                        te.project(cx),
-                    ),
-                    None => return,
-                },
-                None => return,
-            };
+    pub(super) fn on_task_edit_branch_typed(
+        &mut self,
+        editor_id: TaskEditorId,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(te) = self.task_editor(editor_id) else {
+            return;
+        };
+        let (branch_text, editable, project) = (
+            te.branch_input.read(cx).text().to_string(),
+            super::run_in_ops::location_editable(te, cx.global()),
+            te.project(cx),
+        );
         let validation = self.branch_validation_for(&branch_text, editable, project);
-        if let Some(te) = self.task_edit_content_mut_for(pane_id) {
+        if let Some(te) = self.task_editor_mut(editor_id) {
             te.branch_validation = validation;
         }
         cx.notify();
@@ -420,11 +443,11 @@ impl Workspace {
     /// and drop the picks.
     pub(super) fn on_task_edit_project_changed(
         &mut self,
-        pane_id: PaneId,
+        editor_id: TaskEditorId,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let Some(te) = self.task_edit_content_for_pane(pane_id) else {
+        let Some(te) = self.task_editor(editor_id) else {
             return;
         };
         let project = te.project(cx);
@@ -442,51 +465,45 @@ impl Workspace {
             state.set_selected_index(None, window, cx);
         });
         let validation = self.branch_validation_for(&branch, editable, project);
-        if let Some(te) = self.task_edit_content_mut_for(pane_id) {
+        if let Some(te) = self.task_editor_mut(editor_id) {
             te.branch_validation = validation;
         }
         cx.notify();
     }
 
-    /// Searches every lane: a window-close "Save all" commits a pane parked
-    /// in a lane that is not on screen.
-    pub(super) fn task_edit_content_mut_for(
-        &mut self,
-        pane_id: PaneId,
-    ) -> Option<&mut TaskEditContent> {
-        self.main_area.pane_mut(pane_id)?.task_edit_content_mut()
+    /// The editor named `id`, wherever it is held. Every editor lookup goes
+    /// through this pair, so a window-close "Save all" reaches an editor that
+    /// is not on screen, and a late callback for an editor that is gone finds
+    /// nothing.
+    pub(in crate::workspace) fn task_editor(&self, id: TaskEditorId) -> Option<&TaskEditContent> {
+        self.pages
+            .tasks
+            .detail
+            .as_ref()
+            .filter(|detail| detail.id == id)
+            .map(|detail| &detail.editor)
     }
 
-    /// Public counterpart used by the renderer's click handlers (e.g.
-    /// the auto-execute checkbox) to flip a field on the focused pane
-    /// without going through a private helper.
-    pub(super) fn task_edit_content_mut_for_pane(
+    pub(in crate::workspace) fn task_editor_mut(
         &mut self,
-        pane_id: PaneId,
+        id: TaskEditorId,
     ) -> Option<&mut TaskEditContent> {
-        self.task_edit_content_mut_for(pane_id)
-    }
-
-    /// Immutable lookup — returns the TaskEdit content tied to
-    /// `pane_id`, if any. Used by listeners that only need to read a
-    /// field (e.g. the prompt-header "Open file" button reading
-    /// `task_id` to dispatch `open_task_prompt_file`).
-    pub(super) fn task_edit_content_for_pane(&self, pane_id: PaneId) -> Option<&TaskEditContent> {
-        let pane = self.main_area.pane(pane_id)?;
-        match &pane.content {
-            PaneContent::TaskEditPane(te) => Some(te),
-            _ => None,
-        }
+        self.pages
+            .tasks
+            .detail
+            .as_mut()
+            .filter(|detail| detail.id == id)
+            .map(|detail| &mut detail.editor)
     }
 
     pub(super) fn open_editor_task_chat(
         &mut self,
-        pane: PaneId,
+        editor_id: TaskEditorId,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
         if let Some(id) = self
-            .task_edit_content_for_pane(pane)
+            .task_editor(editor_id)
             .and_then(|te| te.task_id.clone())
         {
             self.open_task_chat(&id, window, cx);
@@ -505,7 +522,7 @@ fn project_options(ws: &Workspace) -> Vec<SelectOption> {
 /// Build the `base_select` option list from `project`'s lanes. The
 /// leading empty-string option is the "no explicit base — the project's
 /// base branch at `start_task` time" sentinel; remaining entries are keyed
-/// by absolute path so `commit_task_edit_pane` can round-trip the user's
+/// by absolute path so `commit_task_form` can round-trip the user's
 /// pick back into `Task::base_worktree_path: Option<PathBuf>`.
 fn base_lane_options(ws: &Workspace, project: Option<ProjectUuid>) -> Vec<SelectOption> {
     let lanes = ws.task_project_lanes(project);

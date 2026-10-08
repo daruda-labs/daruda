@@ -108,19 +108,18 @@ impl Workspace {
         let task_search_input = self.right_views.tasks.search.clone();
         let flow_searches = self.flows.browser.searches.clone();
         let task_edit_inputs = self
-            .main_area
-            .runtimes
-            .values()
-            .flat_map(|runtime| runtime.panes.iter())
-            .filter_map(|pane| {
-                pane.task_edit_content().map(|task_edit| {
-                    (
-                        task_edit.title_input.clone(),
-                        task_edit.branch_input.clone(),
-                        task_edit.prompt_state.clone(),
-                        task_edit.notes_state.clone(),
-                    )
-                })
+            .pages
+            .tasks
+            .detail
+            .iter()
+            .map(|detail| {
+                let task_edit = &detail.editor;
+                (
+                    task_edit.title_input.clone(),
+                    task_edit.branch_input.clone(),
+                    task_edit.prompt_state.clone(),
+                    task_edit.notes_state.clone(),
+                )
             })
             .collect::<Vec<_>>();
         let handle = self.window_runtime.handle;

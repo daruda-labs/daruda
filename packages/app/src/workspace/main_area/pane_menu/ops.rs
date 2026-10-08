@@ -199,7 +199,7 @@ impl Workspace {
                     },
                 })
             }
-            PaneContent::File(_) | PaneContent::TaskEditPane(_) => Some(PaneMenuSnapshot {
+            PaneContent::File(_) => Some(PaneMenuSnapshot {
                 selection: None,
                 kind: PaneMenuKind::Other,
             }),

@@ -3,8 +3,8 @@ use gpui::{App, Context, Window};
 use daruda_store::observability::error_report::{ErrorReport, ErrorSeverity};
 
 use crate::workspace::close_guard_ops::prompt_stop_running;
+use crate::workspace::dirty_items::{DirtyItem, DirtyTarget, dirty_listing};
 use crate::workspace::main_area::file_save_ops::FileSaveOutcome;
-use crate::workspace::main_area::pane::PaneContent;
 use crate::workspace::main_area::pane_tree::PaneId;
 use crate::workspace::{CloseWindow, Workspace};
 
@@ -140,7 +140,7 @@ impl Workspace {
             }
         }
 
-        let dirty = ws.read(app).collect_dirty_pane_descriptors(app);
+        let dirty = ws.read(app).collect_dirty_items(app);
         if dirty.is_empty() {
             return true;
         }
@@ -148,11 +148,7 @@ impl Workspace {
             this.window_runtime.close_in_flight = true;
         });
 
-        let detail = dirty
-            .iter()
-            .map(|(_, t, draft)| crate::surface::strings::task::close_dirty_line(t, *draft))
-            .collect::<Vec<_>>()
-            .join("\n");
+        let detail = dirty_listing(&dirty);
 
         let prompt_heading = crate::surface::strings::task::batch_close_heading();
         let prompt_save = crate::surface::strings::task::batch_save_all();
@@ -179,7 +175,7 @@ impl Workspace {
                     this.window_runtime.close_in_flight = false;
                     match answer {
                         0 => {
-                            if this.commit_dirty_panes_with_failure_toast(&dirty, window, cx) {
+                            if this.commit_dirty_items_with_failure_toast(&dirty, window, cx) {
                                 finish_close(after, window, cx);
                             }
                         }
@@ -197,16 +193,20 @@ impl Workspace {
     /// dedup'd warning toast naming them, when
     /// any stayed unsaved: the caller then keeps them open rather than
     /// dropping the edits. A file that changed on disk counts as unsaved.
-    pub(in crate::workspace) fn commit_dirty_panes_with_failure_toast(
+    pub(in crate::workspace) fn commit_dirty_items_with_failure_toast(
         &mut self,
-        dirty: &[(PaneId, gpui::SharedString, bool)],
+        dirty: &[DirtyItem],
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> bool {
         let mut failed: Vec<gpui::SharedString> = Vec::new();
-        for (pane_id, title, _is_draft) in dirty {
-            if !self.save_pane_for_close(*pane_id, window, cx) {
-                failed.push(title.clone());
+        for item in dirty {
+            let saved = match item.target {
+                DirtyTarget::Pane(pane_id) => self.save_pane_for_close(pane_id, window, cx),
+                DirtyTarget::TaskEditor(id) => self.commit_task_editor(id, window, cx).is_some(),
+            };
+            if !saved {
+                failed.push(item.title.clone());
             }
         }
         if failed.is_empty() {
@@ -244,42 +244,26 @@ impl Workspace {
         {
             return self.save_flow_editor(&path, view, window, cx);
         }
-        let is_file = self
+        self.write_file_pane(pane_id, false, cx) == FileSaveOutcome::Saved
+    }
+
+    /// Every piece of unsaved work in the window — closing it drops the
+    /// parked lanes' panes too. Used by the window-close batch prompt to
+    /// summarise pending edits in one modal.
+    pub(in crate::workspace) fn collect_dirty_items(&self, cx: &App) -> Vec<DirtyItem> {
+        let panes = self
             .main_area
             .runtimes
             .values()
             .flat_map(|rt| rt.panes.iter())
-            .any(|p| p.id == pane_id && p.file_content().is_some());
-        if is_file {
-            self.write_file_pane(pane_id, false, cx) == FileSaveOutcome::Saved
-        } else {
-            self.commit_task_edit_pane(pane_id, cx).is_some()
-        }
-    }
-
-    /// Snapshot of every dirty pane in every lane — closing the window drops
-    /// the parked lanes' panes too. Used by the window-close batch prompt to
-    /// summarise pending edits in one modal. Returns `(pane_id, title,
-    /// is_draft)` triples.
-    pub(in crate::workspace) fn collect_dirty_pane_descriptors(
-        &self,
-        cx: &App,
-    ) -> Vec<(PaneId, gpui::SharedString, bool)> {
-        self.main_area
-            .runtimes
-            .values()
-            .flat_map(|rt| rt.panes.iter())
-            .filter_map(|p| {
-                if !p.is_dirty(cx) {
-                    return None;
-                }
-                let is_draft = matches!(
-                    &p.content,
-                    PaneContent::TaskEditPane(te) if te.task_id.is_none()
-                );
-                Some((p.id, p.title(cx), is_draft))
-            })
-            .collect()
+            .filter_map(|p| DirtyItem::of_pane(p, cx));
+        let editor = self
+            .pages
+            .tasks
+            .detail
+            .iter()
+            .filter_map(|d| DirtyItem::of_task_editor(d.id, &d.editor, cx));
+        panes.chain(editor).collect()
     }
 }
 

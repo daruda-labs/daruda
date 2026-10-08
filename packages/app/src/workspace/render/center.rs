@@ -34,6 +34,18 @@ pub(super) fn render_center_content(ws: &Workspace, cx: &mut Context<Workspace>)
     {
         return crate::workspace::pages::render::flow_content(page, snap, cx);
     }
+    // The Tasks page shows its editor when it holds one, its list otherwise.
+    // The editor is read off the workspace, not the dock's snapshot.
+    if let Some(page) = &ws.workspace_page
+        && page.page == crate::workspace::pages::Page::Tasks
+        && let Some(detail) = &ws.pages.tasks.detail
+    {
+        return crate::workspace::pages::tasks::editor::render_detail(
+            detail.id,
+            &detail.editor,
+            cx,
+        );
+    }
     if let Some(page) = &ws.workspace_page
         && page.page == crate::workspace::pages::Page::Tasks
         && let crate::workspace::layout::DockSnapshot::Right(snap) = &ws.docks.right.read(cx).snap

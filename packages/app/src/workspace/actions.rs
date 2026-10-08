@@ -53,7 +53,7 @@ impl Workspace {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if self.return_to_worktree(window, cx) {
+        if self.close_page_detail(window, cx) || self.return_to_worktree(window, cx) {
             return;
         }
         self.mutate_durable_in(window, cx, |ws, window, cx| {
@@ -141,7 +141,7 @@ impl Workspace {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if self.return_to_worktree(window, cx) {
+        if self.close_page_detail(window, cx) || self.return_to_worktree(window, cx) {
             return;
         }
         self.mutate_durable_in(window, cx, |ws, window, cx| {
@@ -235,8 +235,8 @@ impl Workspace {
         crate::workspace::right_dock::skills::open_create_skill_modal(self, None, window, cx);
     }
 
-    /// Bound to the [`NewTask`] action — opens a fresh TaskEdit pane
-    /// in draft mode. Keyboard-equivalent of the right-panel
+    /// Bound to the [`NewTask`] action — opens a fresh task draft on the
+    /// Tasks page. Keyboard-equivalent of the right-panel
     /// `[+ New]` button.
     pub(in crate::workspace) fn on_new_task(
         &mut self,
@@ -244,7 +244,7 @@ impl Workspace {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        self.open_task_edit_pane(None, window, cx);
+        self.open_task_editor(None, window, cx);
     }
 
     /// Bound to the [`OpenAgentChat`] action — opens a fresh Agent chat
@@ -263,7 +263,7 @@ impl Workspace {
     /// Bound to the [`EditTask`] action — opens the task picker so the
     /// user can pick which existing task to edit. The picker's confirm
     /// handler routes through `TaskPickAction::Edit` →
-    /// `open_task_edit_pane(Some(id), ...)`.
+    /// `open_task_editor(Some(id), ...)`.
     pub(in crate::workspace) fn on_edit_task(
         &mut self,
         _: &EditTask,

@@ -13,6 +13,7 @@ use gpui::{App, Entity, Point, Window, px};
 use super::main_area::agent_chat_host::agent_chat_ops::ThoughtsShot;
 use super::main_area::agent_chat_pane::view::ActivityOptionsTab;
 use super::main_area::tab_ops::OpenIntent;
+use super::pages::tasks::editor::TaskEditorShot;
 use super::{ToggleCommandPalette, Workspace, dialog_helpers};
 use daruda_config::BuiltinSection;
 use daruda_store::observability::error_report::{ErrorReport, ErrorSeverity};
@@ -165,9 +166,7 @@ pub(crate) enum ScreenshotScenario {
     TasksByStatus,
     TasksByProject,
     TaskSaved,
-    TaskEditor,
-    TaskEditorPreview,
-    TaskEditorRunning,
+    TaskEditor(TaskEditorShot),
     OrchestratorChip,
     OrchestratorTab,
     /// One tab per status dot — working, waiting, failed, and the two unseen
@@ -398,9 +397,10 @@ impl ScreenshotScenario {
             "tasks-by-status" => Some(Self::TasksByStatus),
             "tasks-by-project" => Some(Self::TasksByProject),
             "task-saved" => Some(Self::TaskSaved),
-            "task-editor" => Some(Self::TaskEditor),
-            "task-editor-preview" => Some(Self::TaskEditorPreview),
-            "task-editor-running" => Some(Self::TaskEditorRunning),
+            "task-editor" => Some(Self::TaskEditor(TaskEditorShot::Form)),
+            "task-editor-preview" => Some(Self::TaskEditor(TaskEditorShot::Preview)),
+            "task-editor-running" => Some(Self::TaskEditor(TaskEditorShot::Running)),
+            "task-editor-disk-copy" => Some(Self::TaskEditor(TaskEditorShot::DiskCopy)),
             NAME_ORCHESTRATOR_CHIP => Some(Self::OrchestratorChip),
             NAME_ORCHESTRATOR_TAB => Some(Self::OrchestratorTab),
             NAME_TAB_INDICATORS => Some(Self::TabIndicators),
@@ -535,20 +535,8 @@ pub(crate) fn drive(
         ScreenshotScenario::TaskSaved => {
             workspace.update(cx, |ws, cx| ws.seed_saved_task_for_shot(window, cx));
         }
-        ScreenshotScenario::TaskEditor => {
-            workspace.update(cx, |ws, cx| {
-                ws.seed_task_editor_for_shot(false, false, window, cx)
-            });
-        }
-        ScreenshotScenario::TaskEditorPreview => {
-            workspace.update(cx, |ws, cx| {
-                ws.seed_task_editor_for_shot(true, false, window, cx)
-            });
-        }
-        ScreenshotScenario::TaskEditorRunning => {
-            workspace.update(cx, |ws, cx| {
-                ws.seed_task_editor_for_shot(false, true, window, cx)
-            });
+        ScreenshotScenario::TaskEditor(shot) => {
+            workspace.update(cx, |ws, cx| ws.seed_task_editor_for_shot(shot, window, cx));
         }
         ScreenshotScenario::ClientChrome => {
             crate::title_bar::force_client_chrome_for_shot();
