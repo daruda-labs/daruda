@@ -47,14 +47,8 @@ pub(super) fn spawn(events: Receiver<FlowsEvent>, cx: &mut Context<Workspace>) -
 }
 
 impl Workspace {
-    /// Something in this lane's flow directories changed: forget the panel's
-    /// cached list, and let every open graph re-read its own file.
-    ///
-    /// Panes of *every* lane are told, not just the active one's: the three
-    /// source directories are shared (a project's and the person's own), so a
-    /// change can belong to a graph sitting in a lane that is not on screen.
-    /// Telling it now means the tab is right when it comes back rather than
-    /// showing a picture of a file that has moved on.
+    /// Something in a watched flow directory changed: forget the panel's
+    /// cached list, and let the open graph re-read its file.
     pub(in crate::workspace) fn apply_flows_event(
         &mut self,
         window: &mut Window,
@@ -62,17 +56,19 @@ impl Workspace {
     ) {
         self.invalidate_flow_list();
         self.reload_flow_graphs(None, window, cx);
-        // No blanket notify: a pane that actually changed raised its own, which
+        // No blanket notify: a graph that actually changed raised its own, which
         // marks this view dirty through it, and gpui has no partial redraw — a
         // notify here would repaint the whole window for an event that changed
         // nothing (an editor touching a file, our own write coming back). What
         // it *is* needed for is the panel's list, which is rendered from here.
-        if self.active_page() == Some(crate::workspace::pages::Page::Flows) {
+        if self.active_page() == Some(crate::workspace::pages::Page::Flows)
+            && self.pages.flows.detail.is_none()
+        {
             cx.notify();
         }
     }
 
-    /// Watch active and browsed flow sources. Re-anchor after scope changes
+    /// Watch active and browsed flow sources, and the open graph's. Re-anchor after scope changes
     /// or file creation, which may create a previously absent directory.
     pub(in crate::workspace) fn respawn_flow_watcher(&mut self, cx: &mut Context<Self>) {
         self.pumps.flow = None;
@@ -86,6 +82,12 @@ impl Workspace {
             && let Some(browsed) = self.flow_sources_for(self.flow_browser_lane())
         {
             dirs.extend(browsed.dirs().into_iter().map(|(dir, _)| dir));
+        }
+        // The graph's own lane: the page may have moved on to browse another.
+        if let Some((_, lane, _)) = self.open_graph()
+            && let Some(graph) = self.flow_sources_for(lane)
+        {
+            dirs.extend(graph.dirs().into_iter().map(|(dir, _)| dir));
         }
         dirs.sort();
         dirs.dedup();

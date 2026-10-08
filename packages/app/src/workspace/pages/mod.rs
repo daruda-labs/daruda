@@ -7,7 +7,8 @@ use super::Workspace;
 use crate::surface::strings;
 use crate::ui::icons;
 
-pub(super) mod flows;
+pub(in crate::workspace) mod detail;
+pub(in crate::workspace) mod flows;
 pub(super) mod render;
 pub(in crate::workspace) mod tasks;
 

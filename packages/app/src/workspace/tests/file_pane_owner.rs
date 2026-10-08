@@ -157,43 +157,6 @@ fn a_reference_file_opens_read_only_in_the_lane_on_screen(cx: &mut TestAppContex
     });
 }
 
-#[gpui::test]
-fn a_background_open_waits_in_its_lane_and_marks_it_unread(cx: &mut TestAppContext) {
-    let home = tempfile::tempdir().unwrap();
-    let parked = tempfile::tempdir().unwrap();
-    let report = parked.path().join("report.md");
-    std::fs::write(&report, "# run report").unwrap();
-    let (wh, ws, parked_ref) = workspace_with_parked_lane(cx, home.path(), parked.path());
-    let active = ws.read_with(cx, |ws, _| ws.active);
-    assert!(
-        ws.read_with(cx, |ws, _| !ws.main_area.runtimes.contains_key(&parked_ref)),
-        "the parked lane has never been on screen",
-    );
-
-    cx.update_window(wh.into(), |_, window, cx| {
-        ws.update(cx, |ws, cx| {
-            ws.open_file_in_background(parked_ref, report.clone(), window, cx)
-        });
-    })
-    .unwrap();
-    cx.run_until_parked();
-
-    ws.read_with(cx, |ws, _| {
-        assert_eq!(
-            ws.active, active,
-            "a background open leaves the lane on screen"
-        );
-        assert!(
-            is_loaded(ws, parked_ref, &report),
-            "the tab waits, loaded, in its lane"
-        );
-        assert!(
-            ws.lane_for(parked_ref).is_some_and(|lane| lane.is_unread),
-            "its lane is marked unread",
-        );
-    });
-}
-
 /// No lane's view writes past its root. A pane only reaches a foreign path
 /// through a bug today, so this pins the last line of defence directly.
 #[gpui::test]

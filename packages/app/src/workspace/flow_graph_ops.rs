@@ -1,11 +1,9 @@
-//! The flow graph pane's own lifecycle, and the bridge from a run to it.
+//! The Flows page's graph: opening it, the bridge from its gestures to the
+//! writes in `flow_node_ops.rs`, reading its file again, and the one thing a
+//! run has to say to it — what colour each card is.
 //!
-//! Opening a graph, building the pane, finding one that already draws a file,
-//! reading a file again in every pane that draws it, and following a rename —
-//! plus the one thing a run has to say to a pane, which is what colour each
-//! card is. Nothing here changes a flow: the writing lives in
-//! `flow_node_ops.rs`, and the tabs a pane sits in are the only reason both
-//! files exist rather than one.
+//! The graph is the page's detail: found by its [`FlowDetailId`], run in the
+//! lane it was opened for — never simply the active one.
 
 use std::path::Path;
 #[cfg(feature = "screenshot")]
@@ -14,11 +12,14 @@ use std::path::PathBuf;
 #[cfg(feature = "screenshot")]
 use daruda_flow::NodeId;
 use daruda_flow::event::FlowEvent;
-use gpui::{AppContext as _, Context, Window};
+use daruda_store::project::LaneRef;
+use gpui::{AppContext as _, Context, Entity, Focusable as _, Window};
 
 use super::Workspace;
 use super::command::flow_picker::FlowPurpose;
-use super::main_area::flow_graph_pane::FlowGraphEvent;
+use super::pages::Page;
+use super::pages::flows::detail::{FlowDetail, FlowDetailBody, FlowDetailId};
+use super::pages::flows::graph::{FlowGraphEvent, FlowGraphView};
 use crate::surface::strings as s;
 
 impl Workspace {
@@ -31,7 +32,7 @@ impl Workspace {
         self.open_flow_picker(self.active, FlowPurpose::Graph, cx);
     }
 
-    /// Read the focused graph pane's file again.
+    /// Read the open graph's file again.
     ///
     /// A watcher does this on its own (`sync/flows.rs`), but the key stays: a
     /// file system that reports nothing — a network volume, an editor that
@@ -43,376 +44,301 @@ impl Workspace {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let focused = self.active_runtime().focused_pane_id;
-        self.reload_flow_graph_pane(focused, window, cx);
+        if let Some((id, _, _)) = self.open_graph() {
+            self.reload_flow_graph(id, window, cx);
+        }
     }
 
-    /// Read one graph pane's file again. Does nothing when that pane is not a
-    /// graph, or when the bytes are the ones it already has.
-    pub(in crate::workspace) fn reload_flow_graph_pane(
+    /// Read graph `id`'s file again. Does nothing when the bytes are the ones
+    /// it already has.
+    pub(in crate::workspace) fn reload_flow_graph(
         &mut self,
-        pane_id: super::main_area::pane_tree::PaneId,
+        id: FlowDetailId,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let Some((path, view)) = self.flow_graph_of_pane(pane_id) else {
+        let Some((lane, view)) = self.flow_graph(id) else {
             return;
         };
         view.update(cx, |view, cx| view.reload(window, cx));
-        self.sync_flow_graph_titles(cx);
-        if let Some(colouring) = self.flows.runs.colouring_of(self.active, &path) {
+        self.recolour_flow_graph(lane, &view, cx);
+    }
+
+    /// Put the run's colours back on a graph that was just drawn again.
+    ///
+    /// A reload draws the flow, not the run of it: every card comes back
+    /// pending. The run's own state is here, so put it back — otherwise editing
+    /// a field mid-run greys out everything that already passed, until the
+    /// next event happens to repaint it.
+    fn recolour_flow_graph(
+        &mut self,
+        lane: LaneRef,
+        view: &Entity<FlowGraphView>,
+        cx: &mut Context<Self>,
+    ) {
+        let path = view.read(cx).path().to_path_buf();
+        if let Some(colouring) = self.flows.runs.colouring_of(lane, &path) {
             view.update(cx, |view, cx| view.set_run_states(&colouring, cx));
         }
     }
 
-    /// Run the flow this pane draws, as far as `until` and reusing whatever it
-    /// has pinned.
+    /// Run the flow graph `id` draws, as far as `until` and reusing whatever
+    /// it has pinned.
     ///
     /// The pins are resolved here rather than at the button: this is the last
     /// moment before the run, and the newest run directory — which is where a
     /// reused output comes from — is what the guard is about to lock.
     pub(in crate::workspace) fn run_flow_from_graph(
         &mut self,
-        path: &Path,
+        id: FlowDetailId,
         until: Option<daruda_flow::NodeId>,
-        view: gpui::Entity<super::main_area::flow_graph_pane::FlowGraphView>,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        let Some((lane, view)) = self.flow_graph(id) else {
+            return;
+        };
+        let path = view.read(cx).path().to_path_buf();
         let pinned = view.read(cx).pinned_nodes();
         // Pressing Run is the person having acted on whatever the cards were
         // saying about pins that went away.
         view.update(cx, |view, cx| view.forget_unpinned(cx));
         let selection = super::flow_request::FlowSelection { until, pinned };
-        // A refusal has already said so on screen — this caller is the graph
-        // pane's ▶, and the person pressing it is looking at that toast.
+        // A refusal has already said so on screen — this caller is the graph's
+        // ▶, and the person pressing it is looking at that toast.
         let _refused_on_screen =
-            self.run_flow_at(self.active, path, FlowPurpose::Run, selection, window, cx);
+            self.run_flow_at(lane, &path, FlowPurpose::Run, selection, window, cx);
     }
 
-    /// Pin the graph pane's selection, or unpin it.
+    /// Pin the graph's selection, or unpin it.
     ///
     /// The colouring goes back on afterwards for the same reason a reload puts
-    /// it back: writing the cards again draws the flow, not the run of it, and
-    /// the run's state lives here rather than on the view.
+    /// it back: writing the cards again draws the flow, not the run of it.
     pub(in crate::workspace) fn toggle_flow_pins(
         &mut self,
-        path: &Path,
-        view: gpui::Entity<super::main_area::flow_graph_pane::FlowGraphView>,
+        id: FlowDetailId,
         cx: &mut Context<Self>,
     ) {
+        let Some((lane, view)) = self.flow_graph(id) else {
+            return;
+        };
         view.update(cx, |view, cx| view.toggle_pins(cx));
-        if let Some(colouring) = self.flows.runs.colouring_of(self.active, path) {
-            view.update(cx, |view, cx| view.set_run_states(&colouring, cx));
-        }
+        self.recolour_flow_graph(lane, &view, cx);
     }
 
-    /// Open `path` as a graph in a new tab. A dedupe first: a flow already
-    /// on screen is activated rather than drawn twice, the same way the file
-    /// viewer activates an open file's tab.
+    /// Show `path` as the Flows page's graph, run in `lane`.
     pub(in crate::workspace) fn open_flow_graph(
         &mut self,
+        lane: LaneRef,
         path: &Path,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if let Some(pane_id) = self.find_flow_graph_pane(path) {
-            // By what the tab *contains*, not by what it last focused: a graph
-            // pane in a split whose sibling has focus is still in that tab, and
-            // matching on `last_focused_pane` made the row click do nothing.
-            if let Some(ix) = self.tab_index_for_pane(pane_id) {
-                self.activate_tab(ix, window, cx);
-            }
-            self.focus_pane(pane_id, window, cx);
+        self.open_flow_graph_then(lane, path, window, cx, |_, _, _, _| {});
+    }
+
+    /// Show `path` as the Flows page's graph, run in `lane`, then hand its view
+    /// to `then`. The same graph already open is shown as it is; anything else
+    /// replaces the page's detail, asking first if that holds edits — so
+    /// `then` may run after an answer, or not at all.
+    pub(in crate::workspace) fn open_flow_graph_then(
+        &mut self,
+        lane: LaneRef,
+        path: &Path,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+        then: impl FnOnce(&mut Self, Entity<FlowGraphView>, &mut Window, &mut Context<Self>) + 'static,
+    ) {
+        if let Some((id, open_lane, view)) = self.open_graph_of(path, cx)
+            && open_lane == lane
+        {
+            self.show_flow_graph(id, window, cx);
+            then(self, view, window, cx);
             return;
         }
-        let pane = self.create_flow_graph_pane(path, window, cx);
-        let pane_id = pane.id;
-        let tab_id = self.alloc_id();
-        self.active_runtime_mut().panes.push(pane);
-        self.active_runtime_mut()
-            .tabs
-            .push(super::main_area::pane::TabEntry {
-                id: tab_id,
-                layout: super::main_area::pane_tree::PaneLayout::Pane(pane_id),
-                last_focused_pane: pane_id,
-                user_label: None,
-            });
-        let cur_tab = self.active_runtime().active_tab_index;
-        self.active_runtime_mut().tab_history.push(cur_tab);
-        let last_tab = self.active_runtime().tabs.len() - 1;
-        self.active_runtime_mut().active_tab_index = last_tab;
-        self.set_focused_pane(pane_id, window, cx);
-        self.bump_activity(pane_id);
-        self.focus_pane(pane_id, window, cx);
-        self.resize_all_tabs(window, cx);
+        let path = path.to_path_buf();
+        self.leave_page_detail_then(Page::Flows, window, cx, move |ws, window, cx| {
+            let id = ws.install_flow_graph(lane, &path, window, cx);
+            ws.show_flow_graph(id, window, cx);
+            if let Some((_, view)) = ws.flow_graph(id) {
+                then(ws, view, window, cx);
+            }
+        });
+    }
+
+    /// Bring the Flows page up on graph `id` and give it the keyboard.
+    fn show_flow_graph(&mut self, id: FlowDetailId, window: &mut Window, cx: &mut Context<Self>) {
+        self.show_page(Page::Flows, cx);
+        if let Some((_, view)) = self.flow_graph(id) {
+            view.read(cx).focus_handle(cx).focus(window, cx);
+        }
         cx.notify();
     }
 
-    /// Construct a flow-graph `Pane` (no tab side-effects). Shared by the open
-    /// path above and cold restore (`rebuild_layout`), which have to agree on
-    /// the title and the path the pane is keyed by.
-    pub(in crate::workspace) fn create_flow_graph_pane(
+    /// Make a new graph of `path` the page's detail. The caller has left the
+    /// old one. Shared by opening and restoring, which have to agree on how a
+    /// graph is built and what its gestures reach.
+    pub(in crate::workspace) fn install_flow_graph(
         &mut self,
+        lane: LaneRef,
         path: &Path,
         window: &mut Window,
         cx: &mut Context<Self>,
-    ) -> super::main_area::pane::Pane {
+    ) -> FlowDetailId {
+        let id = FlowDetailId(self.alloc_id());
         let owned = path.to_path_buf();
-        let view =
-            cx.new(|cx| super::main_area::flow_graph_pane::FlowGraphView::new(&owned, window, cx));
-        let title = view.read(cx).name().to_owned();
-        // The inspector's buttons emit; the writing happens here. Detached
-        // because the subscription's life is the view's: when the pane closes the
-        // view is released and gpui drops its subscribers with it.
+        let view = cx.new(|cx| FlowGraphView::new(&owned, window, cx));
+        // Detached: the subscription's life is the view's, which ends when the
+        // detail is dropped. Every handler goes through `id`, so one that
+        // arrives after the graph was replaced does nothing.
         cx.subscribe_in(
             &view,
             window,
-            move |workspace, view, event: &FlowGraphEvent, window, cx| {
-                let for_path = view.read(cx).path().to_path_buf();
-                match event {
-                    FlowGraphEvent::BackToList => {
-                        workspace.open_page(super::pages::Page::Flows, window, cx)
-                    }
-                    FlowGraphEvent::Save => {
-                        workspace.save_node_form(&for_path, view.clone(), window, cx)
-                    }
-                    FlowGraphEvent::Revert => {
-                        workspace.revert_node_form(&for_path, view.clone(), window, cx)
-                    }
-                    FlowGraphEvent::Delete => {
-                        let nodes = view.read(cx).selected_nodes(cx);
-                        workspace.confirm_delete_nodes(&for_path, view.clone(), nodes, window, cx)
-                    }
-                    // A toast rather than something in the pane: what would have
-                    // carried it — the node's form — is the thing that was replaced.
-                    FlowGraphEvent::AddNode => {
-                        workspace.add_node(&for_path, view.clone(), window, cx)
-                    }
-                    // Straight to the funnel the picker enters one question later:
-                    // the flow is already named, and the lock — plus the profile
-                    // question, when the file declares any — still is not.
-                    FlowGraphEvent::Run => {
-                        workspace.run_flow_from_graph(&for_path, None, view.clone(), window, cx)
-                    }
-                    FlowGraphEvent::RunUntil => {
-                        let until = view.read(cx).selected_node(cx);
-                        // No node selected is no stopping point, so there is
-                        // nothing to run — the button is off for exactly this, and
-                        // falling through would run the whole flow instead.
-                        if let Some(until) = until {
-                            workspace.run_flow_from_graph(
-                                &for_path,
-                                Some(until),
-                                view.clone(),
-                                window,
-                                cx,
-                            );
-                        }
-                    }
-                    FlowGraphEvent::TogglePins => {
-                        workspace.toggle_flow_pins(&for_path, view.clone(), cx)
-                    }
-                    FlowGraphEvent::Validate => {
-                        // Same as the ▶ above: a refused validate has already said
-                        // so on screen, to the person who pressed the button.
-                        let _refused_on_screen = workspace.run_flow_at(
-                            workspace.active,
-                            &for_path,
-                            FlowPurpose::Validate,
-                            super::flow_request::FlowSelection::default(),
-                            window,
-                            cx,
-                        );
-                    }
-                    FlowGraphEvent::Connect { out_of, into } => {
-                        workspace.connect_nodes(&for_path, view.clone(), out_of, into, window, cx)
-                    }
-                    FlowGraphEvent::Disconnect { out_of, into } => workspace.disconnect_nodes(
-                        &for_path,
-                        view.clone(),
-                        out_of,
-                        into,
-                        window,
-                        cx,
-                    ),
-                    FlowGraphEvent::TypingDropped => workspace.report_own_flow_refusal(
-                        s::flow::edit_dropped_typing(),
-                        "flow.edit_dropped_typing",
-                        cx,
-                    ),
-                }
+            move |ws, _, event: &FlowGraphEvent, window, cx| {
+                ws.handle_flow_graph_event(id, event, window, cx)
             },
         )
         .detach();
-        super::main_area::pane::Pane {
-            id: self.alloc_id(),
-            content: super::main_area::pane::PaneContent::FlowGraph(
-                super::main_area::pane::FlowGraphContent {
-                    view,
-                    path: owned,
-                    cached_title: title.into(),
-                },
+        // A run already under way colours the graph now, not at its next event.
+        self.recolour_flow_graph(lane, &view, cx);
+        self.mutate_durable(cx, |ws, _| {
+            ws.pages.flows.detail = Some(FlowDetail {
+                id,
+                lane,
+                body: FlowDetailBody::Graph(view),
+            });
+        });
+        self.respawn_flow_watcher(cx);
+        id
+    }
+
+    /// What a press in graph `id` asks for. The inspector's buttons emit; the
+    /// writing happens in `flow_node_ops.rs`.
+    fn handle_flow_graph_event(
+        &mut self,
+        id: FlowDetailId,
+        event: &FlowGraphEvent,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some((lane, view)) = self.flow_graph(id) else {
+            return;
+        };
+        let path = view.read(cx).path().to_path_buf();
+        match event {
+            FlowGraphEvent::BackToList => self.back_to_flow_list(window, cx),
+            FlowGraphEvent::Save => self.save_node_form(&path, view, window, cx),
+            FlowGraphEvent::Revert => self.revert_node_form(&path, view, window, cx),
+            FlowGraphEvent::Delete => {
+                let nodes = view.read(cx).selected_nodes(cx);
+                self.confirm_delete_nodes(&path, view, nodes, window, cx)
+            }
+            // A toast rather than something in the graph: what would have
+            // carried it — the node's form — is the thing that was replaced.
+            FlowGraphEvent::AddNode => self.add_node(&path, view, window, cx),
+            // Straight to the funnel the picker enters one question later:
+            // the flow is already named, and the lock — plus the profile
+            // question, when the file declares any — still is not.
+            FlowGraphEvent::Run => self.run_flow_from_graph(id, None, window, cx),
+            FlowGraphEvent::RunUntil => {
+                // No node selected is no stopping point, so there is nothing
+                // to run — the button is off for exactly this, and falling
+                // through would run the whole flow instead.
+                if let Some(until) = view.read(cx).selected_node(cx) {
+                    self.run_flow_from_graph(id, Some(until), window, cx);
+                }
+            }
+            FlowGraphEvent::TogglePins => self.toggle_flow_pins(id, cx),
+            FlowGraphEvent::Validate => {
+                // Same as the ▶ above: a refused validate has already said so
+                // on screen, to the person who pressed the button.
+                let _refused_on_screen = self.run_flow_at(
+                    lane,
+                    &path,
+                    FlowPurpose::Validate,
+                    super::flow_request::FlowSelection::default(),
+                    window,
+                    cx,
+                );
+            }
+            FlowGraphEvent::Connect { out_of, into } => {
+                self.connect_nodes(&path, view, out_of, into, window, cx)
+            }
+            FlowGraphEvent::Disconnect { out_of, into } => {
+                self.disconnect_nodes(&path, view, out_of, into, window, cx)
+            }
+            FlowGraphEvent::TypingDropped => self.report_own_flow_refusal(
+                s::flow::edit_dropped_typing(),
+                "flow.edit_dropped_typing",
+                cx,
             ),
         }
     }
 
-    /// The file and view of the graph pane `pane_id` names, if it is one.
+    /// Read the file again in the open graph if it draws one that changed.
     ///
-    /// The pane list is the only place an id resolves to what it draws, and
-    /// both a reload and every node write in `flow_node_ops.rs` start from an
-    /// id and need the pair.
-    pub(super) fn flow_graph_of_pane(
-        &self,
-        pane_id: super::main_area::pane_tree::PaneId,
-    ) -> Option<(
-        std::path::PathBuf,
-        gpui::Entity<super::main_area::flow_graph_pane::FlowGraphView>,
-    )> {
-        self.active_runtime()
-            .panes
-            .iter()
-            .find(|pane| pane.id == pane_id)
-            .and_then(|pane| pane.flow_graph_content())
-            .map(|fg| (fg.path.clone(), fg.view.clone()))
-    }
-
-    /// The pane already drawing `path` in the active lane, if any.
-    pub(super) fn find_flow_graph_pane(
-        &self,
-        path: &Path,
-    ) -> Option<super::main_area::pane_tree::PaneId> {
-        self.active_runtime()
-            .panes
-            .iter()
-            .find_map(|pane| match pane.flow_graph_content() {
-                Some(fg) if fg.path == path => Some(pane.id),
-                _ => None,
-            })
-    }
-
-    /// Read the file again in every graph pane drawing it — every lane's, not
-    /// just the active one's, because the project's and the person's own flow
-    /// directories are shared between them.
-    ///
-    /// `only` narrows it to one file (our own write); `None` is every graph
-    /// (a watcher event, which does not say which file changed). Either way a
-    /// pane whose bytes did not change does nothing.
+    /// `only` narrows it to one file (our own write); `None` is any file (a
+    /// watcher event, which does not say which file changed). Either way a
+    /// graph whose bytes did not change does nothing.
     pub(in crate::workspace) fn reload_flow_graphs(
         &mut self,
         only: Option<&Path>,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let targets: Vec<_> = self
-            .main_area
-            .runtimes
-            .iter()
-            .flat_map(|(lane_ref, runtime)| runtime.panes.iter().map(move |pane| (*lane_ref, pane)))
-            .filter_map(|(lane_ref, pane)| Some((lane_ref, pane.flow_graph_content()?)))
-            .filter(|(_, fg)| only.is_none_or(|path| fg.path == path))
-            .map(|(lane_ref, fg)| (lane_ref, fg.path.clone(), fg.view.clone()))
-            .collect();
-        for (lane_ref, path, view) in targets {
-            view.update(cx, |view, cx| view.reload(window, cx));
-            // A reload draws the flow, not the run of it: every card comes back
-            // pending. The run's own state is here, so put it back — otherwise
-            // editing a field mid-run greys out everything that already passed,
-            // until the next event happens to repaint it.
-            if let Some(colouring) = self.flows.runs.colouring_of(lane_ref, &path) {
-                view.update(cx, |view, cx| view.set_run_states(&colouring, cx));
-            }
-        }
-        self.sync_flow_graph_titles(cx);
-    }
-
-    fn sync_flow_graph_titles(&mut self, cx: &mut Context<Self>) {
-        let mut changed = false;
-        for runtime in self.main_area.runtimes.values_mut() {
-            for pane in &mut runtime.panes {
-                if let Some(graph) = pane.flow_graph_content_mut() {
-                    let title = graph.view.read(cx).name();
-                    if graph.cached_title.as_ref() != title {
-                        graph.cached_title = title.to_owned().into();
-                        changed = true;
-                    }
-                }
-            }
-        }
-        if changed {
-            cx.notify();
+        let Some((id, _, view)) = self.open_graph() else {
+            return;
+        };
+        if only.is_none_or(|path| view.read(cx).path() == path) {
+            self.reload_flow_graph(id, window, cx);
         }
     }
 
-    /// Follow a renamed file in every pane drawing it.
+    /// Follow a renamed file in the graph drawing it.
     ///
-    /// Without this the tab survives but its path does not, so the next repaint
-    /// reports the old name as unreadable — technically honest and useless: the
-    /// person renamed the file, they did not lose it.
-    pub(in crate::workspace) fn repoint_flow_graph_panes(
+    /// Without this the graph survives but its path does not, so the next
+    /// repaint reports the old name as unreadable — technically honest and
+    /// useless: the person renamed the file, they did not lose it.
+    pub(in crate::workspace) fn repoint_flow_graph(
         &mut self,
         from: &Path,
         to: &Path,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        // The view holds the path too, and the two have to move together.
-        let mut repointed = Vec::new();
-        for runtime in self.main_area.runtimes.values_mut() {
-            for pane in runtime.panes.iter_mut() {
-                if let Some(fg) = pane.flow_graph_content_mut()
-                    && fg.path == from
-                {
-                    fg.path = to.to_path_buf();
-                    repointed.push(fg.view.clone());
-                }
-            }
+        if let Some((_, _, view)) = self.open_graph_of(from, cx) {
+            // The saved detail names the path, so it moves with it.
+            self.mutate_durable_in(window, cx, |_, window, cx| {
+                view.update(cx, |view, cx| view.repoint(to, window, cx));
+            });
         }
-        for view in repointed {
-            view.update(cx, |view, cx| view.repoint(to, window, cx));
-        }
-        self.sync_flow_graph_titles(cx);
-        cx.notify();
     }
 
     /// Fold the event into this run's per-node states and hand the result to
-    /// the graph pane drawing that flow, if one is open.
+    /// the graph, if it draws that flow for that lane.
     ///
-    /// The pane is matched by lane *and* path: two lanes can hold the same
-    /// flow, and one lane can hold graphs of several. A resumed run matches
-    /// nothing — it cannot say which file it is of ([`FlowSource`]) — so its
-    /// pane stays the static picture it was.
+    /// Matched by lane *and* path: two lanes can run the same flow. A resumed
+    /// run matches nothing — it cannot say which file it is of
+    /// ([`FlowSource`]) — so the graph stays the static picture it was.
     ///
     /// The view is `.cached()`, so what makes a colour change visible is a
-    /// notify on the canvas entity inside it — `set_run_states` raises it, and
-    /// `dispatch_command` raises one too. Marking a view dirty marks its
-    /// ancestors, so that reaches this cached wrapper; a bare `Entity::update`
-    /// with no notify anywhere would leave the old paint on screen (CLAUDE.md
-    /// render-cost rule 10).
+    /// notify on the canvas entity inside it — `set_run_states` raises it.
+    /// Marking a view dirty marks its ancestors, so that reaches this cached
+    /// wrapper (CLAUDE.md render-cost rule 10).
     pub(in crate::workspace) fn colour_flow_graph(
         &mut self,
-        lane_ref: daruda_store::project::LaneRef,
+        lane_ref: LaneRef,
         event: &FlowEvent,
         cx: &mut Context<Self>,
     ) {
         let Some((path, colouring)) = self.flows.runs.colour_after(lane_ref, event) else {
             return;
         };
-        let Some(view) = self
-            .main_area
-            .runtimes
-            .get(&lane_ref)
-            .and_then(|runtime| {
-                runtime
-                    .panes
-                    .iter()
-                    .find_map(|pane| pane.flow_graph_content().filter(|fg| fg.path == path))
-            })
-            .map(|fg| fg.view.clone())
-        else {
-            return;
-        };
-        view.update(cx, |view, cx| view.set_run_states(&colouring, cx));
+        if let Some((_, lane, view)) = self.open_graph_of(&path, cx)
+            && lane == lane_ref
+        {
+            view.update(cx, |view, cx| view.set_run_states(&colouring, cx));
+        }
     }
 
     /// Draw the first flow this lane has and colour it from a scripted run —
@@ -432,8 +358,8 @@ impl Workspace {
         let Some(path) = self.first_flow_path_for_shot() else {
             return;
         };
-        self.open_flow_graph(&path, window, cx);
         let lane = self.active;
+        self.open_flow_graph(lane, &path, window, cx);
         let run_dir = self.active_lane_root().unwrap_or_default();
         self.seed_flow_run_of_for_test(
             lane,
@@ -442,16 +368,8 @@ impl Workspace {
         );
 
         let nodes: Vec<NodeId> = self
-            .main_area
-            .runtimes
-            .get(&lane)
-            .and_then(|runtime| {
-                runtime
-                    .panes
-                    .iter()
-                    .find_map(|pane| pane.flow_graph_content().filter(|fg| fg.path == path))
-            })
-            .map(|fg| fg.view.read(cx).node_ids_for_shot())
+            .open_graph_of(&path, cx)
+            .map(|(_, _, view)| view.read(cx).node_ids_for_shot())
             .unwrap_or_default();
         // Walk the flow in order so the picture reads left to right: the ones
         // behind are done, the one in the middle is working, the rest wait.
@@ -497,13 +415,10 @@ impl Workspace {
         let Some(path) = self.first_flow_path_for_shot() else {
             return;
         };
-        self.open_flow_graph(&path, window, cx);
+        self.open_flow_graph(self.active, &path, window, cx);
         let node = self
-            .active_runtime()
-            .panes
-            .iter()
-            .find_map(|pane| pane.flow_graph_content().filter(|fg| fg.path == path))
-            .map(|fg| fg.view.clone())
+            .open_graph_of(&path, cx)
+            .map(|(_, _, view)| view)
             .and_then(|view| {
                 let first = view.read(cx).node_ids_for_shot().first().cloned();
                 first.map(|node| (view, node))
@@ -562,14 +477,8 @@ nodes:
         if std::fs::write(&path, BEFORE).is_err() {
             return;
         }
-        self.open_flow_graph(&path, window, cx);
-        let Some(view) = self
-            .active_runtime()
-            .panes
-            .iter()
-            .find_map(|pane| pane.flow_graph_content().filter(|fg| fg.path == path))
-            .map(|fg| fg.view.clone())
-        else {
+        self.open_flow_graph(self.active, &path, window, cx);
+        let Some((id, _, view)) = self.open_graph_of(&path, cx) else {
             return;
         };
 
@@ -577,7 +486,7 @@ nodes:
         view.update(cx, |view, cx| {
             view.select_node_for_shot(&"build".into(), window, cx)
         });
-        self.toggle_flow_pins(&path, view.clone(), cx);
+        self.toggle_flow_pins(id, cx);
         if std::fs::write(
             &path,
             BEFORE.replace("write the design", "write the design twice"),
@@ -615,16 +524,10 @@ nodes:
         let Some(path) = self.first_flow_path_for_shot() else {
             return;
         };
-        let Some(view) = self
-            .active_runtime()
-            .panes
-            .iter()
-            .find_map(|pane| pane.flow_graph_content().filter(|fg| fg.path == path))
-            .map(|fg| fg.view.clone())
-        else {
+        let Some((id, _, view)) = self.open_graph_of(&path, cx) else {
             return;
         };
-        self.toggle_flow_pins(&path, view.clone(), cx);
+        self.toggle_flow_pins(id, cx);
         let second = view.read(cx).node_ids_for_shot().get(1).cloned();
         if let Some(node) = second {
             view.update(cx, |view, cx| view.select_node_for_shot(&node, window, cx));
@@ -648,14 +551,7 @@ nodes:
         let Some(path) = self.first_flow_path_for_shot() else {
             return;
         };
-        let Some((_, view)) = self
-            .active_runtime()
-            .panes
-            .iter()
-            .find(|pane| pane.flow_graph_content().is_some_and(|fg| fg.path == path))
-            .and_then(|pane| pane.flow_graph_content())
-            .map(|fg| (fg.path.clone(), fg.view.clone()))
-        else {
+        let Some((_, _, view)) = self.open_graph_of(&path, cx) else {
             return;
         };
         let agent_id = view
@@ -680,7 +576,7 @@ nodes:
         cx: &mut Context<Self>,
     ) {
         if let Some(path) = self.first_flow_path_for_shot() {
-            self.open_flow_graph(&path, window, cx);
+            self.open_flow_graph(self.active, &path, window, cx);
         }
     }
 

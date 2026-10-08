@@ -129,15 +129,12 @@ impl Workspace {
         // The write above may have created the directory itself, which the
         // watcher can only anchor on once it exists.
         self.respawn_flow_watcher(cx);
-        self.open_browsed_flow(lane, &path, window, cx);
-        if let Some(pane) = self.find_flow_graph_pane(&path)
-            && let Some((_, view)) = self.flow_graph_of_pane(pane)
-        {
+        self.open_flow_graph_then(lane, &path, window, cx, |_, view, window, cx| {
             view.update(cx, |view, cx| {
                 view.select_node_after_add(&daruda_flow::NodeId::from("first"), window, cx);
                 view.focus_name(window, cx);
             });
-        }
+        });
     }
 
     /// Rename a flow file, keeping any open graph of it pointed at it.
@@ -171,7 +168,7 @@ impl Workspace {
             self.report_flow_file_error(s::flow::rename_failed_title(), from, &e, cx);
             return;
         }
-        self.repoint_flow_graph_panes(from, &to, window, cx);
+        self.repoint_flow_graph(from, &to, window, cx);
         self.invalidate_flow_list();
         cx.notify();
     }
@@ -182,19 +179,9 @@ impl Workspace {
             self.report_flow_file_error(s::flow::delete_failed_title(), path, &e, cx);
             return;
         }
-        // Tell the panes drawing it directly rather than leaving it to the
-        // watcher: this is our own deletion, so the tab should say so now, and a
-        // pane left alone would persist the path of a file that is gone.
-        let views: Vec<_> = self
-            .main_area
-            .runtimes
-            .values()
-            .flat_map(|runtime| runtime.panes.iter())
-            .filter_map(|pane| pane.flow_graph_content())
-            .filter(|fg| fg.path == path)
-            .map(|fg| fg.view.clone())
-            .collect();
-        for view in views {
+        // Tell the graph drawing it directly rather than leaving it to the
+        // watcher: this is our own deletion, so the graph should say so now.
+        if let Some((_, _, view)) = self.open_graph_of(path, cx) {
             view.update(cx, |view, cx| view.report_file_gone(cx));
         }
         self.invalidate_flow_list();
@@ -222,7 +209,7 @@ impl Workspace {
     /// Change a flow file through its typed shape, or refuse and say why.
     ///
     /// `base` is the text the change was made against — the graph pane holds it
-    /// ([`super::main_area::flow_graph_pane::FlowGraphView::text`]). Two gates
+    /// ([`super::pages::flows::graph::FlowGraphView::text`]). Two gates
     /// stand between a change and the file, and the file is untouched unless
     /// both pass:
     ///
@@ -418,26 +405,6 @@ impl Workspace {
             .get(lane)
             .map(|listing| listing.files.clone())
             .unwrap_or_default()
-    }
-
-    /// Disable Run for files with unsaved inspector edits in any worktree.
-    /// Project and global files can be open in multiple lanes. This scan runs
-    /// only while Flows is visible, before the view receives its snapshot.
-    pub(in crate::workspace) fn flows_with_unsaved_edits(
-        &self,
-        cx: &gpui::App,
-    ) -> Vec<std::path::PathBuf> {
-        if self.active_page() != Some(super::pages::Page::Flows) {
-            return Vec::new();
-        }
-        self.main_area
-            .runtimes
-            .values()
-            .flat_map(|runtime| runtime.panes.iter())
-            .filter_map(|pane| pane.flow_graph_content())
-            .filter(|fg| fg.view.read(cx).has_unsaved_form(cx))
-            .map(|fg| fg.path.clone())
-            .collect()
     }
 }
 

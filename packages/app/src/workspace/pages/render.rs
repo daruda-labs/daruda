@@ -79,7 +79,12 @@ fn close_button(workspace: gpui::WeakEntity<crate::workspace::Workspace>, cx: &A
         .into_any_element()
 }
 
-fn frame(state: &PageState, header: AnyElement, body: AnyElement, cx: &App) -> AnyElement {
+pub(in crate::workspace) fn frame(
+    state: &PageState,
+    header: AnyElement,
+    body: AnyElement,
+    cx: &App,
+) -> AnyElement {
     let t = theme::current(cx);
     div()
         .flex()

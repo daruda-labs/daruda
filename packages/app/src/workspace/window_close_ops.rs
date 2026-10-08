@@ -5,7 +5,6 @@ use daruda_store::observability::error_report::{ErrorReport, ErrorSeverity};
 use crate::workspace::close_guard_ops::prompt_stop_running;
 use crate::workspace::dirty_items::{DirtyItem, DirtyTarget, dirty_listing};
 use crate::workspace::main_area::file_save_ops::FileSaveOutcome;
-use crate::workspace::main_area::pane_tree::PaneId;
 use crate::workspace::{CloseWindow, Workspace};
 
 impl Workspace {
@@ -201,11 +200,7 @@ impl Workspace {
     ) -> bool {
         let mut failed: Vec<gpui::SharedString> = Vec::new();
         for item in dirty {
-            let saved = match item.target {
-                DirtyTarget::Pane(pane_id) => self.save_pane_for_close(pane_id, window, cx),
-                DirtyTarget::TaskEditor(id) => self.commit_task_editor(id, window, cx).is_some(),
-            };
-            if !saved {
+            if !self.save_dirty_target(item.target, window, cx) {
                 failed.push(item.title.clone());
             }
         }
@@ -230,21 +225,27 @@ impl Workspace {
         false
     }
 
-    fn save_pane_for_close(
+    /// Save what `target` names. `false` when it stayed unsaved — an invalid
+    /// form, or a file that changed on disk.
+    pub(in crate::workspace) fn save_dirty_target(
         &mut self,
-        pane_id: PaneId,
+        target: DirtyTarget,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> bool {
-        if let Some((path, view)) = self
-            .main_area
-            .pane(pane_id)
-            .and_then(|pane| pane.flow_graph_content())
-            .map(|graph| (graph.path.clone(), graph.view.clone()))
-        {
-            return self.save_flow_editor(&path, view, window, cx);
+        match target {
+            DirtyTarget::Pane(pane_id) => {
+                self.write_file_pane(pane_id, false, cx) == FileSaveOutcome::Saved
+            }
+            DirtyTarget::TaskEditor(id) => self.commit_task_editor(id, window, cx).is_some(),
+            DirtyTarget::FlowGraph(id) => match self.flow_graph(id) {
+                Some((_, view)) => {
+                    let path = view.read(cx).path().to_path_buf();
+                    self.save_flow_editor(&path, view, window, cx)
+                }
+                None => false,
+            },
         }
-        self.write_file_pane(pane_id, false, cx) == FileSaveOutcome::Saved
     }
 
     /// Every piece of unsaved work in the window — closing it drops the
@@ -263,7 +264,10 @@ impl Workspace {
             .detail
             .iter()
             .filter_map(|d| DirtyItem::of_task_editor(d.id, &d.editor, cx));
-        panes.chain(editor).collect()
+        let graph = self
+            .open_graph()
+            .and_then(|(id, _, view)| DirtyItem::of_flow_graph(id, &view, cx));
+        panes.chain(editor).chain(graph).collect()
     }
 }
 

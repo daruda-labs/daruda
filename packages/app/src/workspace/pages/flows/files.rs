@@ -1,7 +1,7 @@
 //! File row actions retain the same authoring and execution entry points.
 
 use crate::surface::strings;
-use crate::ui::{Disableable as _, DropdownMenu as _, theme, tooltip};
+use crate::ui::{DropdownMenu as _, theme, tooltip};
 use crate::workspace::flow_browser::FlowPageSnapshot;
 use crate::workspace::root_menu::RootContextMenuExt as _;
 use gpui::{IntoElement, SharedString, div, prelude::*};
@@ -80,7 +80,6 @@ fn run_button(
     let workspace = snap.workspace.clone();
     let path = found.path.clone();
     let lane = snap.flow_lane;
-    let unsaved = snap.flows_with_unsaved_edits.contains(&path);
     let id = SharedString::from(format!("flow-run-{}", path.display()));
     let selector = id.to_string();
     div()
@@ -89,12 +88,7 @@ fn run_button(
         .debug_selector(move || selector)
         .child(
             crate::ui::button_icon(id, ICON_PLAY, cx)
-                .tooltip(if unsaved {
-                    strings::flow::needs_save()
-                } else {
-                    strings::flow::run_tooltip()
-                })
-                .disabled(unsaved)
+                .tooltip(strings::flow::run_tooltip())
                 .tab_stop(true)
                 .on_click(move |_, window, cx| {
                     if let Some(ws) = workspace.upgrade() {

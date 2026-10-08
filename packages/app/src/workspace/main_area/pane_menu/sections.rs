@@ -18,7 +18,6 @@ trait PaneMenuSource {
 
 struct TerminalMenu;
 struct AgentChatMenu;
-struct FlowGraphMenu;
 struct DefaultMenu;
 
 impl PaneMenuSource for TerminalMenu {
@@ -97,9 +96,7 @@ impl PaneMenuSource for TerminalMenu {
                     ));
                 }
             }
-            PaneMenuKind::AgentChat { .. }
-            | PaneMenuKind::FlowGraph { .. }
-            | PaneMenuKind::Other => {}
+            PaneMenuKind::AgentChat { .. } | PaneMenuKind::Other => {}
         }
         if let Some(mark_id) = ctx.click.as_ref().and_then(|click| click.annotation) {
             let pane_id = ctx.pane_id;
@@ -161,59 +158,6 @@ impl PaneMenuSource for AgentChatMenu {
     }
 }
 
-impl PaneMenuSource for FlowGraphMenu {
-    fn head(ctx: &PaneMenuContext) -> Vec<MenuEntry> {
-        // Reload keyed to the pane that was clicked, not to the focused one: a
-        // right-click in a split does not move focus, and reloading the other
-        // graph would be silent and wrong.
-        let pane_id = ctx.pane_id;
-        let mut entries = vec![item(
-            s::flow::add_node(),
-            ItemState::Enabled,
-            Activate::Op(Box::new(move |ws, window, cx| {
-                ws.add_node_to_pane(pane_id, window, cx);
-            })),
-        )];
-        // Deleting needs a node, and the menu is reachable with nothing
-        // selected — disabled rather than absent, so the row does not appear
-        // and disappear under the pointer.
-        entries.push(match &ctx.kind {
-            PaneMenuKind::FlowGraph { selected: true, .. } => item(
-                s::flow::delete_node(),
-                ItemState::Enabled,
-                Activate::Op(Box::new(move |ws, window, cx| {
-                    ws.delete_node_in_pane(pane_id, window, cx);
-                })),
-            ),
-            _ => disabled_item(s::flow::delete_node(), None),
-        });
-        // Acts on the selected line, like its neighbour acts on the selected
-        // node — not on whatever the right-click was over. Asks nothing: a line
-        // is one drag to redraw, and the file is the undo stack.
-        entries.push(match &ctx.kind {
-            PaneMenuKind::FlowGraph {
-                dep_selected: true, ..
-            } => item(
-                s::flow::remove_connection(),
-                ItemState::Enabled,
-                Activate::Op(Box::new(move |ws, _window, cx| {
-                    ws.disconnect_selected_edge_in_pane(pane_id, cx);
-                })),
-            ),
-            _ => disabled_item(s::flow::remove_connection(), None),
-        });
-        entries.push(MenuEntry::Separator);
-        entries.push(item(
-            s::ctx::reload_flow_graph(),
-            ItemState::Enabled,
-            Activate::Op(Box::new(move |ws, window, cx| {
-                ws.reload_flow_graph_pane(pane_id, window, cx);
-            })),
-        ));
-        entries
-    }
-}
-
 impl PaneMenuSource for DefaultMenu {
     fn head(_ctx: &PaneMenuContext) -> Vec<MenuEntry> {
         Vec::new()
@@ -224,7 +168,6 @@ pub(super) fn compose(ctx: &PaneMenuContext) -> Vec<MenuEntry> {
     let mut entries = match &ctx.kind {
         PaneMenuKind::Terminal { .. } => TerminalMenu::head(ctx),
         PaneMenuKind::AgentChat { .. } => AgentChatMenu::head(ctx),
-        PaneMenuKind::FlowGraph { .. } => FlowGraphMenu::head(ctx),
         PaneMenuKind::Other => DefaultMenu::head(ctx),
     };
     if !entries.is_empty() {
@@ -580,85 +523,6 @@ mod tests {
             !find(&entries, &s::common::close_tab())
                 .expect("close entry present")
                 .is_disabled()
-        );
-    }
-
-    /// The graph pane's own entry, and only its own: a graph has no selection
-    /// to copy and nothing to stop.
-    #[test]
-    fn a_graph_pane_is_offered_the_reload_and_nothing_of_the_others() {
-        let graph = labels(&compose(&base(PaneMenuKind::FlowGraph {
-            selected: true,
-            dep_selected: false,
-        })));
-        assert!(
-            graph.contains(&s::ctx::reload_flow_graph()),
-            "reload is offered: {graph:?}"
-        );
-        for forbidden in [
-            s::menu::copy(),
-            s::common::btn_stop(),
-            s::menu::scroll_to_bottom(),
-        ] {
-            assert!(
-                !graph.contains(&forbidden),
-                "{forbidden} belongs to another kind of pane"
-            );
-        }
-        assert!(
-            !labels(&compose(&base(PaneMenuKind::Other))).contains(&s::ctx::reload_flow_graph()),
-            "and a pane that is not a graph is not offered it"
-        );
-    }
-
-    /// Removing a line acts on the selected one, so the row is only live when
-    /// there is one — and present either way, so it does not appear and
-    /// disappear under the pointer. Same rule as its neighbour, "Delete Node".
-    #[test]
-    fn removing_a_connection_needs_a_selected_line() {
-        let without = compose(&base(PaneMenuKind::FlowGraph {
-            selected: false,
-            dep_selected: false,
-        }));
-        let with = compose(&base(PaneMenuKind::FlowGraph {
-            selected: false,
-            dep_selected: true,
-        }));
-        assert!(
-            find(&without, &s::flow::remove_connection())
-                .expect("the row is present with nothing selected")
-                .is_disabled()
-        );
-        assert!(
-            !find(&with, &s::flow::remove_connection())
-                .expect("and with a line selected")
-                .is_disabled()
-        );
-    }
-
-    /// A selected line does not make node deletion live, and a selected node
-    /// does not make line removal live — the two gates are independent.
-    #[test]
-    fn a_selected_line_is_not_a_selected_node() {
-        let line_only = compose(&base(PaneMenuKind::FlowGraph {
-            selected: false,
-            dep_selected: true,
-        }));
-        assert!(
-            find(&line_only, &s::flow::delete_node())
-                .expect("present")
-                .is_disabled(),
-            "a line is not a node"
-        );
-        let node_only = compose(&base(PaneMenuKind::FlowGraph {
-            selected: true,
-            dep_selected: false,
-        }));
-        assert!(
-            find(&node_only, &s::flow::remove_connection())
-                .expect("present")
-                .is_disabled(),
-            "and a node is not a line"
         );
     }
 

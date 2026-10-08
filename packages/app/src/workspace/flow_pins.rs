@@ -48,7 +48,7 @@ pub(in crate::workspace) struct ResolvedPins {
 /// `run.yaml` is that spec, and it is resolved, so both sides go through
 /// `load` and the comparison is of resolved nodes. Deliberately the whole
 /// node and not just its prompt: the pane clears a pin on any change to its
-/// node's definition (`flow_graph_pane::pins::surviving`), and one rule that
+/// node's definition (`pages::flows::graph::pins::surviving`), and one rule that
 /// both places share beats two that nearly agree.
 pub(in crate::workspace) fn resolve_in(
     pinned: &[NodeId],
@@ -163,16 +163,12 @@ impl Workspace {
 }
 
 impl Workspace {
-    /// Clear `nodes` from the pane drawing `flow_path`, if one is open.
+    /// Clear `nodes` from the graph drawing `flow_path`, if one is open.
     ///
-    /// Nothing to do when it is not: pins live in the pane, so a flow run from
+    /// Nothing to do when it is not: pins live in the graph, so a flow run from
     /// the picker with no canvas open has none to forget.
     fn forget_pins(&mut self, flow_path: &Path, nodes: &[NodeId], cx: &mut Context<Self>) {
-        let Some(view) = self
-            .find_flow_graph_pane(flow_path)
-            .and_then(|pane| self.flow_graph_of_pane(pane))
-            .map(|(_, view)| view)
-        else {
+        let Some((_, _, view)) = self.open_graph_of(flow_path, cx) else {
             return;
         };
         view.update(cx, |view, cx| view.drop_pins(nodes, cx));

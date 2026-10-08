@@ -404,7 +404,12 @@ impl Workspace {
         {
             self.cancel_rename_subtask(editor_id, cx);
         } else {
-            self.leave_task_detail_then(window, cx, |_, _, _| {});
+            self.leave_page_detail_then(
+                crate::workspace::pages::Page::Tasks,
+                window,
+                cx,
+                |_, _, _| {},
+            );
         }
     }
 

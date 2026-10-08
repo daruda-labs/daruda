@@ -13,16 +13,19 @@ use crate::workspace::{
 
 impl Workspace {
     pub(in crate::workspace) fn stage_flow_page(&mut self, cx: &Context<Self>) {
-        self.flows.browser.page_snapshot =
-            (self.active_page() == Some(Page::Flows)).then(|| super::FlowPageSnapshot {
-                workspace: cx.weak_entity(),
-                flows: self.flow_rows_matching(|lane| lane == self.flow_browser_lane()),
-                flow_lane: self.flow_browser_lane(),
-                flow_history: self.flow_history_for_panel(),
-                flow_files: self.flow_list_for_panel(),
-                flow_browser: self.flow_browser_snapshot(cx),
-                flows_with_unsaved_edits: self.flows_with_unsaved_edits(cx),
-            });
+        // Only while the list is what the page draws: reading the browser's
+        // inputs for a page showing its graph would re-arm their repaints
+        // for nothing on screen (render-cost rule 10).
+        let list_shown =
+            self.active_page() == Some(Page::Flows) && self.pages.flows.detail.is_none();
+        self.flows.browser.page_snapshot = list_shown.then(|| super::FlowPageSnapshot {
+            workspace: cx.weak_entity(),
+            flows: self.flow_rows_matching(|lane| lane == self.flow_browser_lane()),
+            flow_lane: self.flow_browser_lane(),
+            flow_history: self.flow_history_for_panel(),
+            flow_files: self.flow_list_for_panel(),
+            flow_browser: self.flow_browser_snapshot(cx),
+        });
     }
 
     pub(in crate::workspace) fn flow_browser_lane(&self) -> LaneRef {
@@ -174,7 +177,8 @@ impl Workspace {
         self.create_flow_in(lane, &s::flow::untitled(), window, cx);
     }
 
-    /// Opening an editor explicitly enters its worktree; changing scope never does.
+    /// Open the graph in the page, run in the worktree the page browses —
+    /// the active one stays as it is.
     pub(in crate::workspace) fn open_browsed_flow(
         &mut self,
         lane: LaneRef,
@@ -185,26 +189,7 @@ impl Workspace {
         if self.lane_for(lane).is_none() {
             return;
         }
-        if self.active != lane {
-            self.activate_lane(lane, window, cx);
-        }
-        self.open_flow_graph(path, window, cx);
-    }
-
-    pub(in crate::workspace) fn open_browsed_report(
-        &mut self,
-        lane: LaneRef,
-        path: &Path,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
-        if self.lane_for(lane).is_none() {
-            return;
-        }
-        if self.active != lane {
-            self.activate_lane(lane, window, cx);
-        }
-        self.open_flow_report(path, window, cx);
+        self.open_flow_graph(lane, path, window, cx);
     }
 
     pub(in crate::workspace) fn edit_browsed_flow_name(
@@ -217,12 +202,9 @@ impl Workspace {
         if self.lane_for(lane).is_none() {
             return;
         }
-        self.open_browsed_flow(lane, path, window, cx);
-        if let Some(id) = self.find_flow_graph_pane(path)
-            && let Some((_, view)) = self.flow_graph_of_pane(id)
-        {
+        self.open_flow_graph_then(lane, path, window, cx, |_, view, window, cx| {
             view.update(cx, |view, cx| view.focus_name(window, cx));
-        }
+        });
     }
 
     pub(in crate::workspace) fn run_browsed_flow(
@@ -232,21 +214,6 @@ impl Workspace {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if self
-            .flows_with_unsaved_edits(cx)
-            .iter()
-            .any(|held| held == path)
-        {
-            self.report_error(
-                daruda_store::observability::error_report::ErrorReport::new(s::flow::needs_save())
-                    .severity(daruda_store::observability::error_report::ErrorSeverity::Warning)
-                    .at(file!(), line!())
-                    .dedup("flow.browser.unsaved")
-                    .build(),
-                cx,
-            );
-            return;
-        }
         let _refused_on_screen = self.run_flow_at(
             lane,
             path,

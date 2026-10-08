@@ -12,6 +12,7 @@ mod files;
 mod graph;
 mod inspector;
 mod partial;
+mod report;
 mod run;
 
 use super::*;

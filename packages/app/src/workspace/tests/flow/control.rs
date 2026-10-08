@@ -444,73 +444,58 @@ async fn a_named_worktree_already_running_refuses_without_a_dialog(cx: &mut Test
     .expect("window is live");
 }
 
-/// A run that ends in a worktree nobody is looking at settles without opening
-/// its report there.
-///
-/// `open_pane_file_view` pushes into the *active* runtime while stamping the
-/// pane with the owner it is handed, so a parked lane's report built a pane
-/// whose owner named one runtime and whose home was another.
-/// `load_pane_file_content` then resolves it by owner, misses, and drops the
-/// content — the pane sits on "Loading" for good. Reachable from the desktop
-/// alone (start a run, switch worktrees, wait).
+/// A run that ends opens nothing over what the person is looking at: its
+/// report waits in the Flows page's past runs. A worktree off screen is marked
+/// unread instead; the one on screen is not, since it is already in view.
 ///
 /// The run directory has to hold a real `RUN_REPORT_FILE`: `settle_flow_run`
-/// answers `None` without one (`flow_history::report_in` checks `is_file`), and
-/// then the guard under test is never even reached. Both poles are asserted —
-/// the active lane *does* gain the pane, the parked one does not — so neither
-/// half can pass by accident.
+/// answers `None` without one, and then neither pole is reached.
 #[gpui::test]
-async fn a_run_ending_in_a_parked_worktree_opens_no_report_there(cx: &mut TestAppContext) {
-    let (_lane, ws, _path, wh) = workspace_with_a_flow(cx, COMMAND_ONLY);
+async fn a_run_ending_opens_no_tab_and_marks_its_worktree_unread(cx: &mut TestAppContext) {
+    let (here_dir, ws, _path, wh) = workspace_with_a_flow(cx, COMMAND_ONLY);
     let (other_dir, other) = add_lane_with_a_flow(&ws, wh, cx, "deploy.yaml", COMMAND_ONLY);
-
-    // The run belongs to `other`, so its directory lives under `other`'s tree.
-    let parked_run = other_dir.path().join("run-elsewhere");
-    std::fs::create_dir_all(&parked_run).expect("run dir");
-    std::fs::write(
-        parked_run.join(daruda_flow::record::RUN_REPORT_FILE),
-        "# Run",
-    )
-    .expect("report");
-
     let ended = daruda_flow::event::FlowEvent::RunEnded {
         end: daruda_flow::event::RunEnd::Done,
     };
+    let run_in = |root: &std::path::Path, name: &str| {
+        let dir = root.join(name);
+        std::fs::create_dir_all(&dir).expect("run dir");
+        std::fs::write(dir.join(daruda_flow::record::RUN_REPORT_FILE), "# Run").expect("report");
+        dir
+    };
+    let parked_run = run_in(other_dir.path(), "run-elsewhere");
+    let here_run = run_in(here_dir.path(), "run-here");
 
-    cx.update_window(wh.into(), |_, window, cx| {
+    cx.update_window(wh.into(), |_, _window, cx| {
         ws.update(cx, |ws, cx| {
             let active = ws.active;
             assert_ne!(other, active);
             let before = ws.active_runtime().panes.len();
 
             ws.seed_flow_run_for_test(other, parked_run.clone());
-            ws.apply_flow_event_with_window_for_test(other, &ended, window, cx);
-
+            ws.apply_flow_event_whole_for_test(other, &ended, cx);
+            assert!(!ws.flows.runs.is_running(other), "the run settled");
             assert!(
-                !ws.flows.runs.is_running(other),
-                "settling still has to happen — only the pane is withheld"
+                ws.lane_for(other).is_some_and(|lane| lane.is_unread),
+                "the worktree off screen is marked unread"
             );
-            assert_eq!(
-                ws.active_runtime().panes.len(),
-                before,
-                "a parked lane's report must not land in the active runtime"
-            );
-            assert_eq!(ws.active, active, "and the screen must not move");
 
-            // The other pole: the same event for the lane on screen *does*
-            // open its report, so the assertion above is about the guard and
-            // not about a report that was never produced.
-            let here_run = _lane.path().join("run-here");
-            std::fs::create_dir_all(&here_run).expect("run dir");
-            std::fs::write(here_run.join(daruda_flow::record::RUN_REPORT_FILE), "# Run")
-                .expect("report");
-            ws.seed_flow_run_for_test(active, here_run);
-            ws.apply_flow_event_with_window_for_test(active, &ended, window, cx);
-            assert_eq!(
-                ws.active_runtime().panes.len(),
-                before + 1,
-                "the active lane's report is what the parked one was withheld from"
+            ws.seed_flow_run_for_test(active, here_run.clone());
+            ws.apply_flow_event_whole_for_test(active, &ended, cx);
+            assert!(
+                ws.lane_for(active).is_some_and(|lane| !lane.is_unread),
+                "the one on screen is not"
             );
+
+            assert_eq!(ws.active_runtime().panes.len(), before, "no tab opened");
+            assert!(
+                !ws.main_area
+                    .runtimes
+                    .get(&other)
+                    .is_some_and(|rt| !rt.tabs.is_empty()),
+                "not in the worktree it ran in either"
+            );
+            assert_eq!(ws.active, active, "and the screen did not move");
         });
     })
     .expect("window is live");

@@ -18,7 +18,7 @@ use daruda_flow::runner::CancelToken;
 use daruda_store::project::LaneRef;
 
 use super::flow_request::FlowSource;
-use super::main_area::flow_graph_pane::model::{NodeRunStates, RunColouring, apply_run_event};
+use super::pages::flows::graph::model::{NodeRunStates, RunColouring, apply_run_event};
 use crate::surface::strings as s;
 
 /// A run in flight. The token is the whole of the stop switch; the handle

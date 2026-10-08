@@ -3,13 +3,12 @@
 //! The editor lives here rather than in a lane's runtime — a task belongs to
 //! no lane, and hiding the page (a lane switch, focusing a pane) must not
 //! drop unsaved edits. Only leaving the detail clears it, through
-//! [`Workspace::leave_task_detail_then`].
+//! [`crate::workspace::Workspace::leave_page_detail_then`].
 
 pub(in crate::workspace) mod editor;
 
 use daruda_store::project::TaskDetailTarget;
 
-use crate::surface::strings;
 use editor::state::TaskEditContent;
 
 /// Names the Task editor. Distinct from a pane id: the editor is not a pane,
@@ -28,94 +27,7 @@ pub(in crate::workspace) struct TasksPage {
     pub detail: Option<TaskDetail>,
 }
 
-/// What each page remembers while it is not on screen.
-#[derive(Default)]
-pub(in crate::workspace) struct PageDetails {
-    pub tasks: TasksPage,
-}
-
 impl crate::workspace::Workspace {
-    /// Leave the Tasks page's detail, then run `next`. Unsaved edits ask
-    /// first — Save (Save Draft for a new task) goes on only if the save
-    /// landed, Discard drops them, Cancel stays. The one way an editor closes,
-    /// so Back, Escape, closing and opening another task all ask the same.
-    pub(in crate::workspace) fn leave_task_detail_then(
-        &mut self,
-        window: &mut gpui::Window,
-        cx: &mut gpui::Context<Self>,
-        next: impl FnOnce(&mut Self, &mut gpui::Window, &mut gpui::Context<Self>) + 'static,
-    ) {
-        let Some(detail) = self.pages.tasks.detail.as_ref() else {
-            next(self, window, cx);
-            return;
-        };
-        if !detail.editor.is_dirty(cx) {
-            self.drop_task_detail(cx);
-            next(self, window, cx);
-            return;
-        }
-        let id = detail.id;
-        let is_draft = detail.editor.task_id.is_none();
-        let can_save = detail.editor.can_save(cx);
-        let heading = if is_draft {
-            strings::task::edit_discard_draft_prompt().to_string()
-        } else {
-            strings::task::edit_save_prompt(detail.editor.title())
-        };
-        let save_label = if is_draft {
-            strings::task::edit_save_draft()
-        } else {
-            strings::common::btn_save()
-        };
-        let discard = strings::task::edit_discard();
-        let cancel = strings::common::btn_cancel();
-        let receiver = window.prompt(
-            gpui::PromptLevel::Warning,
-            &heading,
-            None,
-            &[save_label.as_str(), discard.as_str(), cancel.as_str()],
-            cx,
-        );
-        cx.spawn_in(window, async move |this, cx| {
-            let Ok(answer) = receiver.await else {
-                return;
-            };
-            // SILENT-OK: the window may close before the answer arrives
-            let _ = this.update_in(cx, |ws, window, cx| {
-                // Answered for an editor since replaced: nothing to leave.
-                if ws.pages.tasks.detail.as_ref().map(|d| d.id) != Some(id) {
-                    return;
-                }
-                let leave = match answer {
-                    // An invalid form cannot save; the editor stays.
-                    0 => can_save && ws.commit_task_editor(id, window, cx).is_some(),
-                    1 => true,
-                    _ => false,
-                };
-                if leave {
-                    ws.drop_task_detail(cx);
-                    next(ws, window, cx);
-                }
-            });
-        })
-        .detach();
-    }
-
-    /// Close what the Tasks page shows on top of its list — the editor —
-    /// asking first if it holds edits. `false` when the page is not on
-    /// screen or shows only the list, so the caller closes what it would.
-    pub(in crate::workspace) fn close_page_detail(
-        &mut self,
-        window: &mut gpui::Window,
-        cx: &mut gpui::Context<Self>,
-    ) -> bool {
-        if self.active_page() != Some(super::Page::Tasks) || self.pages.tasks.detail.is_none() {
-            return false;
-        }
-        self.leave_task_detail_then(window, cx, |_, _, _| {});
-        true
-    }
-
     /// The editor the Tasks page holds, if any.
     pub(in crate::workspace) fn task_detail_id(&self) -> Option<TaskEditorId> {
         self.pages.tasks.detail.as_ref().map(|detail| detail.id)
@@ -143,15 +55,7 @@ impl crate::workspace::Workspace {
         id: TaskEditorId,
         cx: &mut gpui::Context<Self>,
     ) {
-        if self.task_detail_id() == Some(id) {
-            self.drop_task_detail(cx);
-        }
-    }
-
-    /// Drop the editor — its watcher and subscriptions go with it.
-    fn drop_task_detail(&mut self, cx: &mut gpui::Context<Self>) {
-        self.mutate_durable(cx, |ws, _| ws.pages.tasks.detail = None);
-        cx.notify();
+        self.close_page_detail_now(super::detail::PageDetailId::TaskEditor(id), cx);
     }
 }
 

@@ -1215,6 +1215,7 @@ mod new_schema_fixtures {
             active_right_panel_view: RightDockView::default(),
             active_page: None,
             task_detail: None,
+            flow_detail: None,
             window_open_policy: Default::default(),
             next_group_id: Default::default(),
             project_tabs: BTreeMap::new(),
@@ -1225,8 +1226,8 @@ mod new_schema_fixtures {
 mod new_schema {
     use super::new_schema_fixtures::{sample_project, sample_workspace};
     use crate::project::{
-        ProjectOverride, ProjectState, ProjectUuid, RecentEntry, TaskDetailTarget, WorkspaceState,
-        WorkspaceUuid,
+        FlowDetailTarget, ProjectOverride, ProjectState, ProjectUuid, RecentEntry,
+        TaskDetailTarget, WorkspaceState, WorkspaceUuid,
     };
 
     #[test]
@@ -1294,6 +1295,23 @@ mod new_schema {
         old.as_object_mut().unwrap().remove("task_detail");
         let back: WorkspaceState = serde_json::from_value(old).unwrap();
         assert_eq!(back.task_detail, None);
+    }
+
+    #[test]
+    fn flow_detail_roundtrips_and_defaults_when_absent() {
+        let p = ProjectUuid::new();
+        let mut w = sample_workspace(p);
+        w.flow_detail = Some(FlowDetailTarget::Graph {
+            project: p,
+            lane: Default::default(),
+            path: "/repo/.daruda/flows/ship.yaml".into(),
+        });
+        let json = serde_json::to_string(&w).unwrap();
+        assert_eq!(serde_json::from_str::<WorkspaceState>(&json).unwrap(), w);
+        let mut old = serde_json::to_value(sample_workspace(p)).unwrap();
+        old.as_object_mut().unwrap().remove("flow_detail");
+        let back: WorkspaceState = serde_json::from_value(old).unwrap();
+        assert_eq!(back.flow_detail, None);
     }
 
     #[test]

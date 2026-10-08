@@ -1,20 +1,24 @@
-//! Unsaved work a close has to ask about. A lane's file and flow panes and the
-//! Tasks page's editor are kept in different places, so each item names what holds
-//! it; saving one dispatches on that.
+//! Unsaved work a close has to ask about. A lane's file panes and the pages'
+//! details are kept in different places, so each item names what holds it;
+//! saving one dispatches on that.
 
 use gpui::{App, SharedString};
 
 use super::main_area::pane::Pane;
 use super::main_area::pane_tree::PaneId;
+use super::pages::flows::detail::FlowDetailId;
+use super::pages::flows::graph::FlowGraphView;
 use super::pages::tasks::editor::TaskEditorId;
 use super::pages::tasks::editor::state::TaskEditContent;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(in crate::workspace) enum DirtyTarget {
-    /// A file or flow-graph pane in a lane.
+    /// A file pane in a lane.
     Pane(PaneId),
     /// A Task editor.
     TaskEditor(TaskEditorId),
+    /// The Flows page's graph.
+    FlowGraph(FlowDetailId),
 }
 
 #[derive(Debug, Clone)]
@@ -49,6 +53,38 @@ impl DirtyItem {
             title: editor.title(),
             is_draft: editor.task_id.is_none(),
         })
+    }
+
+    /// The Flows page's graph `id` as unsaved work, or `None` when it has none.
+    pub(in crate::workspace) fn of_flow_graph(
+        id: FlowDetailId,
+        view: &gpui::Entity<FlowGraphView>,
+        cx: &App,
+    ) -> Option<Self> {
+        let view = view.read(cx);
+        view.has_unsaved_form(cx).then(|| Self {
+            target: DirtyTarget::FlowGraph(id),
+            title: view.name().to_owned().into(),
+            is_draft: false,
+        })
+    }
+
+    /// The heading of the prompt that asks before this item is left.
+    pub(in crate::workspace) fn leave_heading(&self) -> String {
+        if self.is_draft {
+            crate::surface::strings::task::edit_discard_draft_prompt()
+        } else {
+            crate::surface::strings::task::edit_save_prompt(&self.title)
+        }
+    }
+
+    /// The label of that prompt's save button.
+    pub(in crate::workspace) fn save_label(&self) -> String {
+        if self.is_draft {
+            crate::surface::strings::task::edit_save_draft()
+        } else {
+            crate::surface::strings::common::btn_save()
+        }
     }
 
     /// The prompt's line for this item.

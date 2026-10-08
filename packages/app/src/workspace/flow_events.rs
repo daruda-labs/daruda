@@ -39,8 +39,8 @@ impl Workspace {
                 // pump — the same shape the MCP and JSONL pumps use, and
                 // the reason this is not a silently discarded `Result`.
                 if this
-                    .update_in(cx, |workspace, window, cx| {
-                        workspace.apply_flow_event(lane_ref, &event, window, cx);
+                    .update(cx, |workspace, cx| {
+                        workspace.apply_flow_event(lane_ref, &event, cx);
                     })
                     .is_err()
                     || is_end
@@ -153,7 +153,6 @@ impl Workspace {
         &mut self,
         lane_ref: daruda_store::project::LaneRef,
         event: &FlowEvent,
-        window: &mut Window,
         cx: &mut Context<Self>,
     ) {
         self.colour_flow_graph(lane_ref, event, cx);
@@ -161,12 +160,11 @@ impl Workspace {
             self.advance_flow_stage(lane_ref, event, cx);
             return;
         };
-        // What a completion toast would have said, in the form a person can
-        // actually read afterwards — the run's own narrative. It opens in the
-        // run's lane: on screen that is an ordinary open, otherwise the tab
-        // waits there and the lane is marked unread.
-        if let Some(report) = self.settle_flow_run(lane_ref, end, cx) {
-            self.open_file_in_background(lane_ref, report, window, cx);
+        // The report waits in the Flows page's past runs; nothing opens over
+        // what the person is looking at. A worktree off screen is marked
+        // unread, the way an agent's finished turn marks it.
+        if self.settle_flow_run(lane_ref, end, cx).is_some() {
+            self.mark_lane_unread(lane_ref, cx);
         }
     }
 
@@ -252,25 +250,23 @@ impl Workspace {
         event: &FlowEvent,
         cx: &mut Context<Self>,
     ) {
-        // Both halves the real path runs, in the same order. Only the
-        // `RunEnded` report — which opens a pane and so needs a window — is
-        // left to `apply_flow_event` itself.
+        // Both halves the real path runs for a run still going, in the same
+        // order.
         self.colour_flow_graph(lane, event, cx);
         self.advance_flow_stage(lane, event, cx);
     }
 
-    /// The whole path, including the `RunEnded` arm that opens the report and
-    /// so needs a window. Separate from [`Self::apply_flow_event_for_test`] so
-    /// a stage-transition test does not have to hold a window it never uses.
+    /// The whole path, `RunEnded` included — settling the run and saying it
+    /// ended. Separate from [`Self::apply_flow_event_for_test`], which only
+    /// moves a run's stage along.
     #[cfg(test)]
-    pub(in crate::workspace) fn apply_flow_event_with_window_for_test(
+    pub(in crate::workspace) fn apply_flow_event_whole_for_test(
         &mut self,
         lane: daruda_store::project::LaneRef,
         event: &FlowEvent,
-        window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        self.apply_flow_event(lane, event, window, cx);
+        self.apply_flow_event(lane, event, cx);
     }
 
     /// Park a question on a seeded run, so a test can exercise answering

@@ -165,6 +165,9 @@ pub struct WorkspaceState {
     /// Absent in files written before the Tasks page held an editor.
     #[serde(default)]
     pub task_detail: Option<TaskDetailTarget>,
+    /// Absent in files written before the Flows page held a graph.
+    #[serde(default)]
+    pub flow_detail: Option<FlowDetailTarget>,
     pub window_open_policy: WindowOpenPolicy,
 
     #[serde(default)]
@@ -191,6 +194,23 @@ pub struct WorkspaceState {
 pub enum TaskDetailTarget {
     Task { id: TaskId },
     NewDraft { project: ProjectUuid },
+}
+
+/// What the Flows page's detail showed, and the worktree it ran in.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum FlowDetailTarget {
+    Graph {
+        project: ProjectUuid,
+        lane: LaneId,
+        path: PathBuf,
+    },
+    /// A past run, by its run directory.
+    Run {
+        project: ProjectUuid,
+        lane: LaneId,
+        dir: PathBuf,
+    },
 }
 
 /// Entry in `recent-workspaces.json`. Keyed by workspace UUID;

@@ -19,7 +19,6 @@
 //! leave a run directory behind in whichever repository was open.
 
 use crate::agent::launch_resolve::ConnectCommandError;
-use crate::workspace::main_area::file_view_pane::DiffSource;
 use std::path::{Path, PathBuf};
 
 use daruda_flow::event::{FlowEvent, RunEnd};
@@ -347,9 +346,8 @@ impl Workspace {
         match purpose {
             FlowPurpose::Validate => self.validate_flow(lane, path, profile, window, cx),
             FlowPurpose::Run => self.submit_flow_run(lane, path, profile, selection, cx),
-            // The graph pane shows a file; which worktree would run it is not
-            // part of opening it.
-            FlowPurpose::Graph => self.open_flow_graph(path, window, cx),
+            // The picker's worktree is the one the graph then runs in.
+            FlowPurpose::Graph => self.open_flow_graph(lane, path, window, cx),
         }
     }
 
@@ -531,26 +529,6 @@ impl Workspace {
     pub(in crate::workspace) fn reveal_flows_panel(&mut self, cx: &mut Context<Self>) {
         self.set_flow_tab(super::flow_browser::FlowTab::Runs, cx);
         self.show_page(super::pages::Page::Flows, cx);
-    }
-
-    /// Open a past run's narrative in the active lane. The same view a run
-    /// opens on its own when it finishes, so a run read later looks like
-    /// the one read as it ended.
-    pub(in crate::workspace) fn open_flow_report(
-        &mut self,
-        report: &Path,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
-        self.open_pane_file_view(
-            self.active,
-            report.to_path_buf(),
-            DiffSource::WorkingTree,
-            super::main_area::file_view_pane::FileViewMode::Preview,
-            super::main_area::tab_ops::OpenIntent::Enter,
-            window,
-            cx,
-        );
     }
 
     /// Put a killed run in the panel's history, for `--screenshot`. The

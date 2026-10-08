@@ -257,14 +257,13 @@ fn run_row(
         RunRow::Past(past) => {
             let workspace = snap.workspace.clone();
             let lane = snap.flow_lane;
-            row.when_some(past.report.clone(), |row, report| {
+            let dir = past.dir.clone();
+            row.when(past.report.is_some(), |row| {
                 row.cursor_pointer()
                     .hover(|style| style.bg(t.overlay_hover))
                     .on_click(move |_, window, cx| {
                         if let Some(ws) = workspace.upgrade() {
-                            ws.update(cx, |ws, cx| {
-                                ws.open_browsed_report(lane, &report, window, cx)
-                            });
+                            ws.update(cx, |ws, cx| ws.open_run_detail(lane, &dir, window, cx));
                         }
                     })
             })

@@ -653,7 +653,7 @@ impl NodeRenderer for FlowNodeRenderer {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::workspace::main_area::flow_graph_pane::model::{
+    use crate::workspace::pages::flows::graph::model::{
         AgentAxes, FailPolicy, GraphNode, GraphNodeKind, PromptSummary,
     };
     use std::time::Duration;

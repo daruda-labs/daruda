@@ -13,7 +13,6 @@ pub(in crate::workspace) mod context;
 pub(in crate::workspace) mod file_pane_ops;
 pub(in crate::workspace) mod file_save_ops;
 pub(in crate::workspace) mod file_view_pane;
-pub(in crate::workspace) mod flow_graph_pane;
 pub(in crate::workspace) mod nav;
 mod on_screen;
 pub(in crate::workspace) mod pane;
@@ -304,17 +303,6 @@ pub(in crate::workspace) fn render_layout(
                     // than an overlay scrim, so window translucency survives.
                     .child(
                         AnyView::from(ac.view.clone())
-                            .cached(StyleRefinement::default().size_full().flex()),
-                    ),
-                self::pane::PaneContent::FlowGraph(fg) => div()
-                    .flex_1()
-                    .min_h(px(0.))
-                    .overflow_hidden()
-                    // Cached for the same reason as the AgentChat arm: a run
-                    // reports node by node, and this keeps those repaints in
-                    // the view's own subtree. It tracks its own focus handle.
-                    .child(
-                        AnyView::from(fg.view.clone())
                             .cached(StyleRefinement::default().size_full().flex()),
                     ),
                 self::pane::PaneContent::Terminal(t) => {

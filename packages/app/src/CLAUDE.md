@@ -25,7 +25,8 @@ app/src/
     │   ├── bottom_dock/  # Macro grid, terminal input, tab strip
     │   └── file_view_pane/  # File-viewer data + renderers
     ├── pages/            # Workspace-level Tasks / Flows pages, beside the lanes
-    │   └── tasks/editor/ # The Task editor — the Tasks page's detail
+    │   ├── tasks/editor/ # The Task editor — the Tasks page's detail
+    │   └── flows/        # The Flows list, and its detail — a flow's graph or a past run's report
     ├── render/           # GPUI render — `impl Render` for Workspace
     ├── right_dock/       # Right-dock views — usage, skills, tasks, tools
     ├── sync/             # Background pumps — PTY, JSONL, limits, MCP, skills watchers
@@ -119,7 +120,7 @@ The Workspace entity and its subsystems.
 - **`layout/`** — `Dock` entity (left/bottom/right; named `left_dock`/`right_dock`/`bottom_dock` on `Workspace`), divider + dock drag ops, plain-data snapshots for re-entrancy-safe render.
 - **`main_area/`** — TabBar + recursive PaneTree runtime. Houses `MainAreaContext`, the pure pane split-tree, pane structs + PTY spawn, directional navigation, tab lifecycle, viewport resize propagation, and the recursive `PaneLayout` renderer. Sub-domains: `file_view_pane/` (file viewer), `bottom_dock/` (macro grid + terminal input + tab strip + macro data ops).
 - **`left_dock/`** — Lanes view (displayed as "Worktrees" tab) rendered as a 2-level tree (`TopRow::Group(GroupId)` / `TopRow::UngroupedProject(ProjectId)` at the top rank, expanding into project headers and lane rows). Group/Project drag payloads share a single `Vec<TopRow>` ordering pool with 0..N renumbering on drop; intra-project lane DnD stays within its project. Also git-changes view, files view, lazy file-tree context + walker, git-status fetch.
-- **`pages/`** — Tasks and Flows, shown in place of the lane's tabs and belonging to no lane. What a page shows on top of its list lives in `Workspace.pages` and survives the page being hidden; `tasks/editor/` is the Task editor and its prompt-file watcher.
+- **`pages/`** — Tasks and Flows, shown in place of the lane's tabs and belonging to no lane. What a page shows on top of its list lives in `Workspace.pages` and survives the page being hidden; only `leave_page_detail_then` (`pages/detail.rs`) clears it, asking first about unsaved edits. `tasks/editor/` is the Task editor and its prompt-file watcher; `flows/graph/` is the flow graph, which runs in the worktree it was opened for, not the active one.
 - **`right_dock/`** — Usage / skills / tasks / tools views.
 - **`render/`** — `impl Render for Workspace`. Reads only plain-data snapshots — no re-entrant entity reads.
 - **`sync/`** — Background event pumps: PTY drain (tick), JSONL NDJSON watcher, HTTP usage/limits poll, MCP filesystem watcher, skills filesystem watcher.

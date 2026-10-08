@@ -310,8 +310,8 @@ pub struct Workspace {
     pub(in crate::workspace) docks: layout::docks::Docks,
     pub(in crate::workspace) workspace_page: Option<pages::PageState>,
     /// What each page keeps while it is not on screen — see
-    /// [`pages::tasks::PageDetails`].
-    pub(in crate::workspace) pages: pages::tasks::PageDetails,
+    /// [`pages::detail::PageDetails`].
+    pub(in crate::workspace) pages: pages::detail::PageDetails,
     /// Claude Code integration state — usage / plan-limits / service-
     /// status / session-status / PTY tracker / JSONL fallback +
     /// associated background tasks. Grouped into one struct so the
@@ -665,7 +665,7 @@ impl Workspace {
             window_runtime: window_runtime::WindowRuntime::new(window, cx),
             docks: layout::docks::Docks::new(&ws_weak, config, cx),
             workspace_page: None,
-            pages: pages::tasks::PageDetails::default(),
+            pages: pages::detail::PageDetails::default(),
             unseen_outcomes: unseen_outcomes::UnseenOutcomes::default(),
             claude: claude_session_ops::ClaudeContext {
                 usage_by_account: claude_session_ops::PerAccountUsage::default(),

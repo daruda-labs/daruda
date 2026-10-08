@@ -62,7 +62,6 @@ pub(in crate::workspace) struct FlowPageSnapshot {
     pub flow_history: Option<crate::workspace::flow_history::FlowHistory>,
     pub flow_files: Vec<crate::workspace::flow_paths::FoundFlow>,
     pub flow_browser: FlowBrowserSnapshot,
-    pub flows_with_unsaved_edits: Vec<std::path::PathBuf>,
 }
 
 #[cfg(test)]

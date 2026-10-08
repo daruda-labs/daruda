@@ -48,11 +48,11 @@ const NAME_CLIENT_CHROME: &str = "client-chrome";
 const NAME_PANE_CONTEXT_MENU: &str = "pane-context-menu";
 /// CLI token for the mermaid-diagram lightbox scenario.
 const NAME_MERMAID_LIGHTBOX: &str = "mermaid-lightbox";
-/// CLI token for the flow-graph pane scenario.
+/// CLI token for the Flows page's graph scenario.
 const NAME_FLOW_GRAPH: &str = "flow-graph";
-/// CLI token for the flow-graph pane with a run colouring it.
+/// CLI token for the Flows page's graph with a run colouring it.
 const NAME_FLOW_GRAPH_RUNNING: &str = "flow-graph-running";
-/// CLI token for the flow-graph pane with a node selected and its inspector up.
+/// CLI token for the Flows page's graph with a node selected and its inspector up.
 const NAME_FLOW_GRAPH_FORM: &str = "flow-graph-form";
 /// CLI token for the inspector showing why a save was refused.
 const NAME_FLOW_GRAPH_FORM_REFUSED: &str = "flow-graph-form-refused";
@@ -60,6 +60,8 @@ const NAME_FLOW_GRAPH_PINNED: &str = "flow-graph-pinned";
 /// CLI token for the card affordances that only exist while authoring: an
 /// issue count, a failure policy, a dropped pin's reason, inherited defaults.
 const NAME_FLOW_GRAPH_AUTHORING: &str = "flow-graph-authoring";
+/// CLI token for a past run's report as the Flows page's detail.
+const NAME_FLOW_RUN_DETAIL: &str = "flow-run-detail";
 const NAME_AGENT_CHAT_FAILURE: &str = "agent-chat-failure";
 const NAME_AGENT_CHAT_TRANSPORT_CLOSED: &str = "agent-chat-transport-closed";
 const NAME_AGENT_CHAT_PACKAGE_NETWORK: &str = "agent-chat-package-network";
@@ -248,6 +250,9 @@ pub(crate) enum ScreenshotScenario {
     /// A flow the engine refuses, with a pin that has just gone — the only way
     /// to see the card header carrying three things at once.
     FlowGraphAuthoring,
+    /// A past run's report as the Flows page's detail. Reached only by a row
+    /// click on a run that wrote one, which no restored state holds.
+    FlowRunDetail,
     /// An agent-chat pane parked on an expired login: the connect banner with
     /// its remedy buttons, and the failure card the conversation ends on.
     AgentChatFailure,
@@ -426,6 +431,7 @@ impl ScreenshotScenario {
             NAME_FLOW_GRAPH_FORM_REFUSED => Some(Self::FlowGraphFormRefused),
             NAME_FLOW_GRAPH_PINNED => Some(Self::FlowGraphPinned),
             NAME_FLOW_GRAPH_AUTHORING => Some(Self::FlowGraphAuthoring),
+            NAME_FLOW_RUN_DETAIL => Some(Self::FlowRunDetail),
             NAME_AGENT_CHAT_FAILURE => Some(Self::AgentChatFailure),
             NAME_AGENT_CHAT_TRANSPORT_CLOSED => Some(Self::AgentChatTransportClosed),
             NAME_AGENT_CHAT_PACKAGE_NETWORK => Some(Self::AgentChatPreparationFailure(
@@ -709,6 +715,9 @@ pub(crate) fn drive(
             workspace.update(cx, |ws, cx| {
                 ws.open_authoring_flow_graph_for_shot(window, cx)
             });
+        }
+        ScreenshotScenario::FlowRunDetail => {
+            workspace.update(cx, |ws, cx| ws.open_run_detail_for_shot(window, cx));
         }
         ScreenshotScenario::FlowGraphFormRefused => {
             workspace.update(cx, |ws, cx| {

@@ -28,14 +28,20 @@ use crate::workspace::main_area::render_layout;
 /// Reads only `&Workspace` (the `cx` is for the embedded views'
 /// listeners), so it stays render-pure.
 pub(super) fn render_center_content(ws: &Workspace, cx: &mut Context<Workspace>) -> AnyElement {
+    // Each page shows its detail when it holds one, its list otherwise. The
+    // detail is read off the workspace, not a dock's snapshot.
+    if let Some(page) = &ws.workspace_page
+        && page.page == crate::workspace::pages::Page::Flows
+        && let Some(detail) = &ws.pages.flows.detail
+    {
+        return crate::workspace::pages::flows::detail_render::render(detail, page, cx);
+    }
     if let Some(page) = &ws.workspace_page
         && page.page == crate::workspace::pages::Page::Flows
         && let Some(snap) = &ws.flows.browser.page_snapshot
     {
         return crate::workspace::pages::render::flow_content(page, snap, cx);
     }
-    // The Tasks page shows its editor when it holds one, its list otherwise.
-    // The editor is read off the workspace, not the dock's snapshot.
     if let Some(page) = &ws.workspace_page
         && page.page == crate::workspace::pages::Page::Tasks
         && let Some(detail) = &ws.pages.tasks.detail

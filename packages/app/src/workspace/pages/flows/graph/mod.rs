@@ -1,9 +1,9 @@
-//! The flow graph pane — a flow's shape, and the run driving it.
+//! The Flows page's graph — a flow's shape, and the run driving it.
 //!
-//! Entity-backed rather than a plain struct: a run reports node by node,
-//! and a plain-struct pane renders inline under `Workspace::render`, where
-//! one `cx.notify()` dirties the whole window. Holding the canvas in its
-//! own entity and caching it keeps a run's repaints inside this subtree.
+//! Entity-backed rather than drawn inline: a run reports node by node, and
+//! inline under `Workspace::render` one `cx.notify()` dirties the whole
+//! window. Holding the canvas in its own entity and caching it keeps a run's
+//! repaints inside this subtree.
 
 mod build;
 mod click;

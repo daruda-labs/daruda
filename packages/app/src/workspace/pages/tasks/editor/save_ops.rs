@@ -10,13 +10,17 @@ use crate::workspace::Workspace;
 
 impl Workspace {
     /// Commit the form as shown, including a typed-but-unsubmitted subtask
-    /// and an open rename — the sequence every interactive save shares.
+    /// and an open rename — the sequence every interactive save shares. An
+    /// invalid form commits nothing, so the editor it stays in is unchanged.
     pub(in crate::workspace) fn commit_task_editor(
         &mut self,
         editor_id: TaskEditorId,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Option<TaskId> {
+        if !self.task_editor(editor_id)?.can_save(cx) {
+            return None;
+        }
         self.submit_new_subtask(editor_id, window, cx);
         self.commit_rename_subtask(editor_id, cx);
         self.commit_task_form(editor_id, cx)

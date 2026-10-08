@@ -187,18 +187,6 @@ impl Workspace {
                     kind: PaneMenuKind::AgentChat { busy },
                 })
             }
-            PaneContent::FlowGraph(content) => {
-                let view = content.view.read(cx);
-                let selected = view.selected_node(cx).is_some();
-                let dep_selected = view.has_selected_edge(cx);
-                Some(PaneMenuSnapshot {
-                    selection: None,
-                    kind: PaneMenuKind::FlowGraph {
-                        selected,
-                        dep_selected,
-                    },
-                })
-            }
             PaneContent::File(_) => Some(PaneMenuSnapshot {
                 selection: None,
                 kind: PaneMenuKind::Other,

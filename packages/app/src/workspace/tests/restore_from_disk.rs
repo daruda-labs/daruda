@@ -123,6 +123,7 @@ fn restore_into_empty_workspace_applies_dock_state(cx: &mut TestAppContext) {
         active_right_panel_view: RightDockView::Skills,
         active_page: Some(daruda_store::project::WorkspacePage::Tasks),
         task_detail: None,
+        flow_detail: None,
         window_open_policy: WindowOpenPolicy::default(),
         next_group_id: 0,
         project_tabs: BTreeMap::new(),

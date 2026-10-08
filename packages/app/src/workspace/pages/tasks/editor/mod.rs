@@ -99,7 +99,12 @@ fn render(
                     )
                     .tooltip(strings::task::edit_back())
                     .on_click(cx.listener(|this, _, window, cx| {
-                        this.leave_task_detail_then(window, cx, |_, _, _| {})
+                        this.leave_page_detail_then(
+                            crate::workspace::pages::Page::Tasks,
+                            window,
+                            cx,
+                            |_, _, _| {},
+                        )
                     })),
                 )
                 .child(
@@ -112,9 +117,14 @@ fn render(
         .child(
             ui::button_close(("task-edit-close", editor_id.0 as usize), cx).on_click(cx.listener(
                 |this, _, window, cx| {
-                    this.leave_task_detail_then(window, cx, |ws, window, cx| {
-                        ws.return_to_worktree(window, cx);
-                    })
+                    this.leave_page_detail_then(
+                        crate::workspace::pages::Page::Tasks,
+                        window,
+                        cx,
+                        |ws, window, cx| {
+                            ws.return_to_worktree(window, cx);
+                        },
+                    )
                 },
             )),
         );

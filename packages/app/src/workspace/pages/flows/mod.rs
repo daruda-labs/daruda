@@ -5,11 +5,15 @@ use crate::workspace::flow_browser::{FlowPageSnapshot, FlowTab};
 use gpui::{AnyElement, IntoElement, prelude::*, px};
 
 mod controls;
+pub(in crate::workspace) mod detail;
+pub(in crate::workspace) mod detail_render;
 mod files;
+pub(in crate::workspace) mod graph;
 mod list;
 mod live;
 mod past;
 mod rows;
+mod run_detail;
 mod toolbar;
 
 pub(in crate::workspace) use controls::header;

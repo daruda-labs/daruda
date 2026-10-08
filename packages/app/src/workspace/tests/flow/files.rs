@@ -7,12 +7,8 @@ async fn inline_flow_name_saves_without_moving_the_file(cx: &mut TestAppContext)
     let (_lane, ws, path, wh) = workspace_with_a_flow(cx, ONE_AGENT);
     let mut vcx = gpui::VisualTestContext::from_window(wh.into(), cx);
     let view = ws.update_in(&mut vcx, |ws, window, cx| {
-        ws.open_flow_graph(&path, window, cx);
-        ws.active_runtime()
-            .panes
-            .iter()
-            .find_map(|pane| pane.flow_graph_content().map(|graph| graph.view.clone()))
-            .unwrap()
+        ws.open_flow_graph(ws.active, &path, window, cx);
+        ws.open_graph().map(|(_, _, view)| view).unwrap()
     });
     let name = "Release / review: ready?";
     view.update_in(&mut vcx, |view, window, cx| {
@@ -33,14 +29,9 @@ async fn inline_flow_name_saves_without_moving_the_file(cx: &mut TestAppContext)
             listed.iter().find(|file| file.path == path).unwrap().name,
             name
         );
-        let graph = ws
-            .active_runtime()
-            .panes
-            .iter()
-            .find_map(|pane| pane.flow_graph_content())
-            .unwrap();
-        assert_eq!(graph.path, path);
-        assert_eq!(graph.cached_title.as_ref(), name);
+        let (_, _, graph) = ws.open_graph().unwrap();
+        assert_eq!(graph.read(cx).path(), path);
+        assert_eq!(graph.read(cx).name(), name);
     });
     let file =
         daruda_flow::parse::parse_flow_file(&std::fs::read_to_string(&path).unwrap()).unwrap();
@@ -75,20 +66,19 @@ async fn new_flow_opens_the_editor_with_a_selected_first_node(cx: &mut TestAppCo
     let mut vcx = gpui::VisualTestContext::from_window(wh.into(), cx);
     ws.update_in(&mut vcx, |ws, window, cx| {
         ws.prompt_new_flow(ws.active, window, cx);
-        assert!(ws.active_page().is_none());
-        let graph = ws
-            .active_runtime()
-            .panes
-            .iter()
-            .find_map(|pane| pane.flow_graph_content())
-            .unwrap();
-        assert!(graph.path.is_file());
         assert_eq!(
-            graph.cached_title.as_ref(),
+            ws.active_page(),
+            Some(crate::workspace::pages::Page::Flows),
+            "a new flow opens as the page's graph"
+        );
+        let (_, _, graph) = ws.open_graph().unwrap();
+        assert!(graph.read(cx).path().is_file());
+        assert_eq!(
+            graph.read(cx).name(),
             crate::surface::strings::flow::untitled()
         );
         assert_eq!(
-            graph.view.read(cx).selected_node(cx),
+            graph.read(cx).selected_node(cx),
             Some(daruda_flow::NodeId::from("first"))
         );
     });
@@ -99,12 +89,8 @@ async fn external_name_change_preserves_pending_node_edits(cx: &mut TestAppConte
     let (_lane, ws, path, wh) = workspace_with_a_flow(cx, ONE_AGENT);
     let mut vcx = gpui::VisualTestContext::from_window(wh.into(), cx);
     let view = ws.update_in(&mut vcx, |ws, window, cx| {
-        ws.open_flow_graph(&path, window, cx);
-        ws.active_runtime()
-            .panes
-            .iter()
-            .find_map(|pane| pane.flow_graph_content().map(|graph| graph.view.clone()))
-            .unwrap()
+        ws.open_flow_graph(ws.active, &path, window, cx);
+        ws.open_graph().map(|(_, _, view)| view).unwrap()
     });
     view.update_in(&mut vcx, |view, window, cx| {
         view.select_node_for_test(&"design".into(), window, cx);
@@ -251,10 +237,15 @@ async fn a_created_flow_is_listed_and_loads(cx: &mut TestAppContext) {
     });
     vcx.run_until_parked();
 
-    let listed = ws.update(&mut vcx, |ws, cx| {
-        assert_eq!(ws.active_page(), None, "creating a flow opens its graph");
-        ws.show_page(crate::workspace::pages::Page::Flows, cx);
-        ws.flow_list_for_panel()
+    let (drawn, listed) = ws.update(&mut vcx, |ws, cx| {
+        let drawn = ws
+            .open_graph()
+            .map(|(_, _, view)| view.read(cx).path().to_path_buf());
+        ws.close_page_detail_now(
+            crate::workspace::pages::detail::PageDetailId::Flow(ws.flow_detail_id().unwrap()),
+            cx,
+        );
+        (drawn, ws.flow_list_for_panel())
     });
     let made = listed
         .iter()
@@ -275,20 +266,13 @@ async fn a_created_flow_is_listed_and_loads(cx: &mut TestAppContext) {
     daruda_flow::load(&text, None)
         .expect("the starter flow has to load, or the graph opens broken");
 
-    // And the graph pane for it is what opening left behind.
-    let drawn: Vec<std::path::PathBuf> = ws.read_with(&vcx, |ws, _| {
-        ws.active_runtime()
-            .panes
-            .iter()
-            .filter_map(|p| p.flow_graph_content().map(|fg| fg.path.clone()))
-            .collect()
-    });
-    assert_eq!(drawn, vec![made.path.clone()]);
+    // And the graph creating it opened is of it.
+    assert_eq!(drawn, Some(made.path.clone()));
 }
 
-/// Renaming a flow follows it in the pane drawing it.
+/// Renaming a flow follows it in the graph drawing it.
 ///
-/// The tab surviving with a stale path would report the old name as unreadable
+/// The graph surviving with a stale path would report the old name as unreadable
 /// on the next repaint — technically true and useless, since the person renamed
 /// the file rather than losing it.
 #[gpui::test]
@@ -301,11 +285,9 @@ async fn renaming_a_flow_is_followed_by_the_graph_of_it(cx: &mut TestAppContext)
     });
     vcx.run_until_parked();
     let before = ws
-        .read_with(&vcx, |ws, _| {
-            ws.active_runtime()
-                .panes
-                .iter()
-                .find_map(|p| p.flow_graph_content().map(|fg| fg.path.clone()))
+        .read_with(&vcx, |ws, cx| {
+            ws.open_graph()
+                .map(|(_, _, view)| view.read(cx).path().to_path_buf())
         })
         .expect("the created flow is open");
 
@@ -315,34 +297,25 @@ async fn renaming_a_flow_is_followed_by_the_graph_of_it(cx: &mut TestAppContext)
     vcx.run_until_parked();
 
     let (path, title) = ws
-        .read_with(&vcx, |ws, _| {
-            ws.active_runtime().panes.iter().find_map(|p| {
-                p.flow_graph_content()
-                    .map(|fg| (fg.path.clone(), fg.cached_title.clone()))
+        .read_with(&vcx, |ws, cx| {
+            ws.open_graph().map(|(_, _, view)| {
+                let view = view.read(cx);
+                (view.path().to_path_buf(), view.name().to_owned())
             })
         })
-        .expect("the pane is still open");
+        .expect("the graph is still open");
     assert_eq!(
         path.file_name().map(|n| n.to_string_lossy().into_owned()),
         Some("after.yaml".to_string())
     );
-    assert_eq!(
-        title.as_ref(),
-        "before",
-        "file renaming preserves the display name"
-    );
+    assert_eq!(title, "before", "file renaming preserves the display name");
     assert!(!before.exists(), "the old file is gone");
     assert!(path.exists(), "the new one is there");
 
     // The view holds the path too, and a reload reads it. Left behind, it would
     // read the file that was renamed away and report the graph as gone.
     let view = ws
-        .read_with(&vcx, |ws, _| {
-            ws.active_runtime()
-                .panes
-                .iter()
-                .find_map(|p| p.flow_graph_content().map(|fg| fg.view.clone()))
-        })
+        .read_with(&vcx, |ws, _| ws.open_graph().map(|(_, _, view)| view))
         .expect("the pane is still open");
     view.update_in(&mut vcx, |v, window, cx| v.reload(window, cx));
     vcx.run_until_parked();
@@ -354,7 +327,7 @@ async fn renaming_a_flow_is_followed_by_the_graph_of_it(cx: &mut TestAppContext)
         view.set_name_for_test("After rename", window, cx)
     });
     view.update(&mut vcx, |_, cx| {
-        cx.emit(crate::workspace::main_area::flow_graph_pane::FlowGraphEvent::Save)
+        cx.emit(crate::workspace::pages::flows::graph::FlowGraphEvent::Save)
     });
     vcx.run_until_parked();
     let saved =
@@ -366,7 +339,7 @@ async fn renaming_a_flow_is_followed_by_the_graph_of_it(cx: &mut TestAppContext)
     );
 }
 
-/// Deleting a flow tells the pane drawing it. Nothing re-reads a flow file, so
+/// Deleting a flow tells the graph drawing it. Nothing re-reads a flow file, so
 /// a pane left alone keeps showing a graph of something that is no longer
 /// there — looking fine until the next launch, and persisting the dead path.
 #[gpui::test]
@@ -379,11 +352,9 @@ async fn deleting_a_flow_tells_the_graph_of_it(cx: &mut TestAppContext) {
     });
     vcx.run_until_parked();
     let (path, view) = ws
-        .read_with(&vcx, |ws, _| {
-            ws.active_runtime().panes.iter().find_map(|p| {
-                p.flow_graph_content()
-                    .map(|fg| (fg.path.clone(), fg.view.clone()))
-            })
+        .read_with(&vcx, |ws, cx| {
+            ws.open_graph()
+                .map(|(_, _, view)| (view.read(cx).path().to_path_buf(), view))
         })
         .expect("the created flow is open");
     assert!(
@@ -396,9 +367,9 @@ async fn deleting_a_flow_tells_the_graph_of_it(cx: &mut TestAppContext) {
 
     assert!(!path.exists(), "the file is gone");
     let named = view.read_with(&vcx, |v, _| match v.unreadable_for_test() {
-        Some(crate::workspace::main_area::flow_graph_pane::FlowGraphError::Read {
-            path, ..
-        }) => path.clone(),
+        Some(crate::workspace::pages::flows::graph::FlowGraphError::Read { path, .. }) => {
+            path.clone()
+        }
         other => panic!("expected the pane to report the file gone, got {other:?}"),
     });
     assert_eq!(named, path);
@@ -416,16 +387,11 @@ async fn a_flow_that_comes_back_is_drawn_again(cx: &mut TestAppContext) {
     let (_lane, ws, flow_path, wh) = workspace_with_a_flow(cx, TWO_NODE_CHAIN);
     let mut vcx = gpui::VisualTestContext::from_window(wh.into(), cx);
     ws.update_in(&mut vcx, |ws, window, cx| {
-        ws.open_flow_graph(&flow_path, window, cx)
+        ws.open_flow_graph(ws.active, &flow_path, window, cx)
     });
     vcx.run_until_parked();
     let view = ws
-        .read_with(&vcx, |ws, _| {
-            ws.active_runtime()
-                .panes
-                .iter()
-                .find_map(|p| p.flow_graph_content().map(|fg| fg.view.clone()))
-        })
+        .read_with(&vcx, |ws, _| ws.open_graph().map(|(_, _, view)| view))
         .expect("the graph pane opened");
 
     let bytes = std::fs::read_to_string(&flow_path).expect("the flow is on disk");

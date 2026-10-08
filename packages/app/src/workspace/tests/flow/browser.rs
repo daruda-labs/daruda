@@ -118,14 +118,17 @@ async fn flow_browser_creation_writes_only_to_the_selected_project(cx: &mut Test
         ws.create_flow_in(target, "scoped", window, cx);
         assert!(right.is_dir());
         assert!(!wrong.exists());
-        assert_eq!(
-            ws.active, target,
-            "explicit editing enters the target worktree"
+        let active = ws.active;
+        assert_ne!(
+            active, target,
+            "the page opens the graph; the worktree stays"
         );
-        assert!(ws.active_runtime().panes.iter().any(|pane| {
-            pane.flow_graph_content()
-                .is_some_and(|graph| graph.path.parent() == Some(right.as_path()))
-        }));
+        let (_, lane, view) = ws.open_graph().expect("the new flow is the page's graph");
+        assert_eq!(
+            lane, target,
+            "and the graph runs in the worktree it was made for"
+        );
+        assert_eq!(view.read(cx).path().parent(), Some(right.as_path()));
     });
 }
 
@@ -192,7 +195,14 @@ async fn flow_browser_table_alignment_and_grouping_survive_narrow_windows(cx: &m
     let file = vcx.debug_bounds(selector("flow-title-", &path)).unwrap();
     vcx.simulate_click(file.center(), Modifiers::default());
     vcx.run_until_parked();
-    assert_eq!(ws.read_with(&vcx, |ws, _| ws.active_page()), None);
+    ws.read_with(&vcx, |ws, _| {
+        assert_eq!(
+            ws.active_page(),
+            Some(Page::Flows),
+            "the graph opens in the page"
+        );
+        assert!(ws.open_graph().is_some());
+    });
     let back = vcx
         .debug_bounds("flow-back-to-list")
         .expect("editor return action");
@@ -200,6 +210,7 @@ async fn flow_browser_table_alignment_and_grouping_survive_narrow_windows(cx: &m
     vcx.run_until_parked();
     ws.read_with(&vcx, |ws, _| {
         assert_eq!(ws.active_page(), Some(Page::Flows));
+        assert!(ws.open_graph().is_none(), "back is the list");
         assert_eq!(ws.flows.browser.state.grouping, FlowGrouping::Origin);
     });
 }

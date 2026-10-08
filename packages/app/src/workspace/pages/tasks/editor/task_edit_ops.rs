@@ -74,15 +74,20 @@ impl Workspace {
             self.show_task_detail(id, window, cx);
             return;
         }
-        self.leave_task_detail_then(window, cx, move |ws, window, cx| {
-            let initial = task_id.as_deref().and_then(|id| {
-                cx.global::<crate::agent::tasks_global::GlobalTasks>()
-                    .get(id)
-                    .cloned()
-            });
-            let id = ws.install_task_editor(task_id, initial, draft_project, window, cx);
-            ws.show_task_detail(id, window, cx);
-        });
+        self.leave_page_detail_then(
+            crate::workspace::pages::Page::Tasks,
+            window,
+            cx,
+            move |ws, window, cx| {
+                let initial = task_id.as_deref().and_then(|id| {
+                    cx.global::<crate::agent::tasks_global::GlobalTasks>()
+                        .get(id)
+                        .cloned()
+                });
+                let id = ws.install_task_editor(task_id, initial, draft_project, window, cx);
+                ws.show_task_detail(id, window, cx);
+            },
+        );
     }
 
     /// Reopen the editor a saved workspace showed, as a fresh form. A task

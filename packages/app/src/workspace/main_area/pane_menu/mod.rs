@@ -18,6 +18,7 @@
 
 mod adapter;
 mod context;
+mod flow_graph;
 mod ops;
 mod sections;
 mod spec;

@@ -1,38 +1,50 @@
 //! The graph pane: opening one, framing it, colouring it from a run, and
 //! reading the file again.
 //!
-//! `flow_graph_pane/policy.rs` decides what a reload does and is tested without
+//! `pages/flows/graph/policy.rs` decides what a reload does and is tested without
 //! a window; these check that the decision reaches the screen — a canvas kept,
 //! a layout rebuilt, a repaint budget held.
 
 use super::*;
 
-/// A graph pane has to come back after a restart. It persists the flow's
-/// path and nothing else — the graph itself is derived from the file, so
-/// storing coordinates would let a stale layout outlive the YAML that
-/// produced it.
+/// An older session kept a graph in a lane's tab. The graph is the Flows
+/// page's detail now, so that leaf drops out on restore: a split closes up
+/// around the pane beside it, and a tab holding nothing else goes.
 #[gpui::test]
-async fn a_flow_graph_pane_survives_a_save_and_restore(cx: &mut TestAppContext) {
+async fn a_graph_leaf_from_an_older_session_drops_out_of_its_tab(cx: &mut TestAppContext) {
+    use daruda_store::project::{
+        SerializedFlowGraphContent, SerializedLayout, SerializedPaneContent, SerializedTab,
+        SplitDirectionSerde,
+    };
+
     let (lane, ws, flow_path, wh) = workspace_with_a_flow(cx, ONE_AGENT);
-    let (saved_workspace, saved_projects) = {
-        let mut vcx = gpui::VisualTestContext::from_window(wh.into(), cx);
-        ws.update_in(&mut vcx, |ws, window, cx| {
-            ws.open_flow_graph(&flow_path, window, cx)
-        });
+    let (saved_workspace, mut saved_projects) = {
+        let vcx = gpui::VisualTestContext::from_window(wh.into(), cx);
         ws.read_with(&vcx, |ws, app_cx| ws.snapshot_for_disk(app_cx))
     };
-    let saved_tabs = &saved_projects[0].lanes[0].tabs;
-    assert!(
-        saved_tabs.iter().any(|t| matches!(
-            &t.layout,
-            daruda_store::project::SerializedLayout::Leaf {
-                content: daruda_store::project::SerializedPaneContent::FlowGraph(fg),
-                ..
-            } if fg.path == flow_path
-        )),
-        "saved state must carry a flow-graph leaf for {}",
-        flow_path.display()
-    );
+    let graph_leaf = |pane_id| SerializedLayout::Leaf {
+        pane_id,
+        content: SerializedPaneContent::FlowGraph(SerializedFlowGraphContent {
+            path: flow_path.clone(),
+        }),
+    };
+    let tabs = &mut saved_projects[0].lanes[0].tabs;
+    let beside = tabs[0].layout.clone();
+    tabs.clear();
+    tabs.push(SerializedTab {
+        layout: SerializedLayout::Split {
+            direction: SplitDirectionSerde::Horizontal,
+            children: vec![beside, graph_leaf(9001)],
+            ratios: vec![0.3, 0.7],
+        },
+        last_focused_pane: 9001,
+        user_label: None,
+    });
+    tabs.push(SerializedTab {
+        layout: graph_leaf(9002),
+        last_focused_pane: 9002,
+        user_label: None,
+    });
 
     let config = daruda_config::Config::default();
     let project = daruda_store::project::Project::from_path(lane.path());
@@ -44,23 +56,51 @@ async fn a_flow_graph_pane_survives_a_save_and_restore(cx: &mut TestAppContext) 
     vcx2.run_until_parked();
     drop(vcx2);
 
-    let restored: Vec<std::path::PathBuf> = ws2.read_with(cx, |ws2, _| {
-        ws2.active_runtime()
-            .panes
-            .iter()
-            .filter_map(|p| match &p.content {
-                crate::workspace::main_area::pane::PaneContent::FlowGraph(fg) => {
-                    Some(fg.path.clone())
-                }
-                _ => None,
-            })
-            .collect()
+    ws2.read_with(cx, |ws2, _| {
+        let tabs = &ws2.active_runtime().tabs;
+        assert_eq!(tabs.len(), 1, "the graph-only tab is gone");
+        assert!(
+            matches!(
+                tabs[0].layout,
+                crate::workspace::main_area::pane_tree::PaneLayout::Pane(_)
+            ),
+            "the split closed up around the pane beside the graph"
+        );
+        assert!(
+            ws2.open_graph().is_none(),
+            "nothing became the page's graph"
+        );
     });
-    assert_eq!(
-        restored,
-        vec![flow_path],
-        "the restored lane should hold exactly the graph pane that was saved"
-    );
+}
+
+/// The page's graph comes back after a restart, in the worktree it ran in.
+/// It persists the flow's path and nothing else — the graph is derived from
+/// the file, so storing coordinates would let a stale layout outlive it.
+#[gpui::test]
+async fn the_open_graph_reopens_after_a_restart(cx: &mut TestAppContext) {
+    let (lane, ws, flow_path, wh) = workspace_with_a_flow(cx, ONE_AGENT);
+    let (saved_workspace, saved_projects) = {
+        let mut vcx = gpui::VisualTestContext::from_window(wh.into(), cx);
+        ws.update_in(&mut vcx, |ws, window, cx| {
+            ws.open_flow_graph(ws.active, &flow_path, window, cx)
+        });
+        ws.read_with(&vcx, |ws, app_cx| ws.snapshot_for_disk(app_cx))
+    };
+
+    let config = daruda_config::Config::default();
+    let project = daruda_store::project::Project::from_path(lane.path());
+    let (wh2, ws2) = build_workspace_with(cx, &config, Some(project));
+    let mut vcx2 = gpui::VisualTestContext::from_window(wh2.into(), cx);
+    ws2.update_in(&mut vcx2, |ws2, window, cx| {
+        ws2.restore_from_disk(&saved_workspace, &saved_projects, window, cx)
+    });
+    vcx2.run_until_parked();
+
+    ws2.read_with(&vcx2, |ws2, cx| {
+        let (_, graph_lane, view) = ws2.open_graph().expect("the graph came back");
+        assert_eq!(view.read(cx).path(), flow_path);
+        assert_eq!(graph_lane, ws2.active, "in the worktree it ran in");
+    });
 }
 
 /// Opening a graph puts **all** of it on screen.
@@ -75,17 +115,12 @@ async fn opening_a_graph_brings_every_node_into_view(cx: &mut TestAppContext) {
     let (_lane, ws, flow_path, wh) = workspace_with_a_flow(cx, LONG_CHAIN);
     let mut vcx = gpui::VisualTestContext::from_window(wh.into(), cx);
     ws.update_in(&mut vcx, |ws, window, cx| {
-        ws.open_flow_graph(&flow_path, window, cx)
+        ws.open_flow_graph(ws.active, &flow_path, window, cx)
     });
     vcx.run_until_parked();
 
     let canvas = ws
-        .read_with(&vcx, |ws, _| {
-            ws.active_runtime()
-                .panes
-                .iter()
-                .find_map(|p| p.flow_graph_content().map(|fg| fg.view.clone()))
-        })
+        .read_with(&vcx, |ws, _| ws.open_graph().map(|(_, _, view)| view))
         .expect("the lane should hold the graph pane just opened");
 
     let (offenders, unfitted_width, drawable_width) = canvas.read_with(&vcx, |view, cx| {
@@ -147,17 +182,12 @@ async fn a_graph_smaller_than_the_pane_is_centred_not_magnified(cx: &mut TestApp
     let (_lane, ws, flow_path, wh) = workspace_with_a_flow(cx, ONE_AGENT);
     let mut vcx = gpui::VisualTestContext::from_window(wh.into(), cx);
     ws.update_in(&mut vcx, |ws, window, cx| {
-        ws.open_flow_graph(&flow_path, window, cx)
+        ws.open_flow_graph(ws.active, &flow_path, window, cx)
     });
     vcx.run_until_parked();
 
     let view = ws
-        .read_with(&vcx, |ws, _| {
-            ws.active_runtime()
-                .panes
-                .iter()
-                .find_map(|p| p.flow_graph_content().map(|fg| fg.view.clone()))
-        })
+        .read_with(&vcx, |ws, _| ws.open_graph().map(|(_, _, view)| view))
         .expect("the lane should hold the graph pane just opened");
 
     let (zoom, node_left, node_top) = view.read_with(&vcx, |view, cx| {
@@ -195,7 +225,7 @@ async fn a_restored_graph_whose_file_vanished_says_so(cx: &mut TestAppContext) {
     let (saved_workspace, saved_projects) = {
         let mut vcx = gpui::VisualTestContext::from_window(wh.into(), cx);
         ws.update_in(&mut vcx, |ws, window, cx| {
-            ws.open_flow_graph(&flow_path, window, cx)
+            ws.open_flow_graph(ws.active, &flow_path, window, cx)
         });
         ws.read_with(&vcx, |ws, app_cx| ws.snapshot_for_disk(app_cx))
     };
@@ -212,18 +242,13 @@ async fn a_restored_graph_whose_file_vanished_says_so(cx: &mut TestAppContext) {
     vcx2.run_until_parked();
 
     let view = ws2
-        .read_with(&vcx2, |ws2, _| {
-            ws2.active_runtime()
-                .panes
-                .iter()
-                .find_map(|p| p.flow_graph_content().map(|fg| fg.view.clone()))
-        })
+        .read_with(&vcx2, |ws2, _| ws2.open_graph().map(|(_, _, view)| view))
         .expect("the tab should still be restored — the pane reports the failure");
 
     let named = view.read_with(&vcx2, |view, _| match view.unreadable_for_test() {
-        Some(crate::workspace::main_area::flow_graph_pane::FlowGraphError::Read {
-            path, ..
-        }) => path.clone(),
+        Some(crate::workspace::pages::flows::graph::FlowGraphError::Read { path, .. }) => {
+            path.clone()
+        }
         other => panic!("expected a Read failure naming the path, got {other:?}"),
     });
     assert_eq!(named, flow_path);
@@ -240,18 +265,13 @@ async fn a_run_colours_the_graph_of_the_flow_it_is_of(cx: &mut TestAppContext) {
     let (lane, ws, flow_path, wh) = workspace_with_a_flow(cx, LONG_CHAIN);
     let mut vcx = gpui::VisualTestContext::from_window(wh.into(), cx);
     ws.update_in(&mut vcx, |ws, window, cx| {
-        ws.open_flow_graph(&flow_path, window, cx)
+        ws.open_flow_graph(ws.active, &flow_path, window, cx)
     });
     vcx.run_until_parked();
 
     let here = ws.update(&mut vcx, |ws, _| ws.active);
     let view = ws
-        .read_with(&vcx, |ws, _| {
-            ws.active_runtime()
-                .panes
-                .iter()
-                .find_map(|p| p.flow_graph_content().map(|fg| fg.view.clone()))
-        })
+        .read_with(&vcx, |ws, _| ws.open_graph().map(|(_, _, view)| view))
         .expect("the graph pane just opened");
 
     ws.update(&mut vcx, |ws, _| {
@@ -262,17 +282,16 @@ async fn a_run_colours_the_graph_of_the_flow_it_is_of(cx: &mut TestAppContext) {
         )
     });
 
-    let accent_of =
-        |view: &gpui::Entity<crate::workspace::main_area::flow_graph_pane::FlowGraphView>,
-         vcx: &mut gpui::VisualTestContext,
-         node: &str| {
-            view.read_with(vcx, |v, cx| {
-                v.cards_for_test(cx)
-                    .get(node)
-                    .map(|(_, accent)| accent.clone())
-                    .unwrap_or_else(|| panic!("no card for {node}"))
-            })
-        };
+    let accent_of = |view: &gpui::Entity<crate::workspace::pages::flows::graph::FlowGraphView>,
+                     vcx: &mut gpui::VisualTestContext,
+                     node: &str| {
+        view.read_with(vcx, |v, cx| {
+            v.cards_for_test(cx)
+                .get(node)
+                .map(|(_, accent)| accent.clone())
+                .unwrap_or_else(|| panic!("no card for {node}"))
+        })
+    };
 
     assert_eq!(
         accent_of(&view, &mut vcx, "n1"),
@@ -339,18 +358,13 @@ async fn a_resumed_run_leaves_an_open_graph_alone(cx: &mut TestAppContext) {
     let (lane, ws, flow_path, wh) = workspace_with_a_flow(cx, LONG_CHAIN);
     let mut vcx = gpui::VisualTestContext::from_window(wh.into(), cx);
     ws.update_in(&mut vcx, |ws, window, cx| {
-        ws.open_flow_graph(&flow_path, window, cx)
+        ws.open_flow_graph(ws.active, &flow_path, window, cx)
     });
     vcx.run_until_parked();
 
     let here = ws.update(&mut vcx, |ws, _| ws.active);
     let view = ws
-        .read_with(&vcx, |ws, _| {
-            ws.active_runtime()
-                .panes
-                .iter()
-                .find_map(|p| p.flow_graph_content().map(|fg| fg.view.clone()))
-        })
+        .read_with(&vcx, |ws, _| ws.open_graph().map(|(_, _, view)| view))
         .expect("the graph pane just opened");
 
     let run_dir = lane.path().join("run");
@@ -407,7 +421,7 @@ async fn a_resumed_run_leaves_an_open_graph_alone(cx: &mut TestAppContext) {
 /// the cost more than a guard against losing it.
 #[gpui::test]
 async fn one_run_event_costs_one_frame(cx: &mut TestAppContext) {
-    use crate::workspace::main_area::flow_graph_pane::CARDS_DRAWN;
+    use crate::workspace::pages::flows::graph::CARDS_DRAWN;
     use crate::workspace::render::WORKSPACE_RENDERS;
 
     let (lane, ws, flow_path, wh) = workspace_with_a_flow(cx, LONG_CHAIN);
@@ -421,7 +435,7 @@ async fn one_run_event_costs_one_frame(cx: &mut TestAppContext) {
         )
     });
     ws.update_in(&mut vcx, |ws, window, cx| {
-        ws.open_flow_graph(&flow_path, window, cx)
+        ws.open_flow_graph(ws.active, &flow_path, window, cx)
     });
     vcx.run_until_parked();
 
@@ -526,14 +540,11 @@ nodes:
         ws.read_with(&vcx, |ws, _| ws.overlays.flow_picker.choosing().is_none()),
         "Graph goes straight to the defaults graph"
     );
-    let paths: Vec<std::path::PathBuf> = ws.read_with(&vcx, |ws, _| {
-        ws.active_runtime()
-            .panes
-            .iter()
-            .filter_map(|p| p.flow_graph_content().map(|fg| fg.path.clone()))
-            .collect()
+    let drawn = ws.read_with(&vcx, |ws, cx| {
+        ws.open_graph()
+            .map(|(_, _, view)| view.read(cx).path().to_path_buf())
     });
-    assert_eq!(paths, vec![flow_path], "and it drew");
+    assert_eq!(drawn, Some(flow_path), "and it drew");
 }
 
 /// A file that fails validation says what a person can read.
@@ -562,17 +573,12 @@ nodes:
     let (_lane, ws, flow_path, wh) = workspace_with_a_flow(cx, CLASHING);
     let mut vcx = gpui::VisualTestContext::from_window(wh.into(), cx);
     ws.update_in(&mut vcx, |ws, window, cx| {
-        ws.open_flow_graph(&flow_path, window, cx)
+        ws.open_flow_graph(ws.active, &flow_path, window, cx)
     });
     vcx.run_until_parked();
 
     let view = ws
-        .read_with(&vcx, |ws, _| {
-            ws.active_runtime()
-                .panes
-                .iter()
-                .find_map(|p| p.flow_graph_content().map(|fg| fg.view.clone()))
-        })
+        .read_with(&vcx, |ws, _| ws.open_graph().map(|(_, _, view)| view))
         .expect("the pane opened");
 
     assert!(
@@ -610,21 +616,16 @@ nodes:
 /// graph, pointing a watcher at this pane would be a loop.
 #[gpui::test]
 async fn reloading_an_unchanged_flow_rebuilds_nothing(cx: &mut TestAppContext) {
-    use crate::workspace::main_area::flow_graph_pane::CARDS_DRAWN;
+    use crate::workspace::pages::flows::graph::CARDS_DRAWN;
 
     let (_lane, ws, flow_path, wh) = workspace_with_a_flow(cx, ONE_AGENT);
     let mut vcx = gpui::VisualTestContext::from_window(wh.into(), cx);
     ws.update_in(&mut vcx, |ws, window, cx| {
-        ws.open_flow_graph(&flow_path, window, cx)
+        ws.open_flow_graph(ws.active, &flow_path, window, cx)
     });
     vcx.run_until_parked();
     let view = ws
-        .read_with(&vcx, |ws, _| {
-            ws.active_runtime()
-                .panes
-                .iter()
-                .find_map(|p| p.flow_graph_content().map(|fg| fg.view.clone()))
-        })
+        .read_with(&vcx, |ws, _| ws.open_graph().map(|(_, _, view)| view))
         .expect("the graph pane opened");
     let canvas_before = view
         .read_with(&vcx, |v, _| {
@@ -678,16 +679,11 @@ nodes:
     let (_lane, ws, flow_path, wh) = workspace_with_a_flow(cx, ONE_AGENT);
     let mut vcx = gpui::VisualTestContext::from_window(wh.into(), cx);
     ws.update_in(&mut vcx, |ws, window, cx| {
-        ws.open_flow_graph(&flow_path, window, cx)
+        ws.open_flow_graph(ws.active, &flow_path, window, cx)
     });
     vcx.run_until_parked();
     let view = ws
-        .read_with(&vcx, |ws, _| {
-            ws.active_runtime()
-                .panes
-                .iter()
-                .find_map(|p| p.flow_graph_content().map(|fg| fg.view.clone()))
-        })
+        .read_with(&vcx, |ws, _| ws.open_graph().map(|(_, _, view)| view))
         .expect("the graph pane opened");
     assert_eq!(
         view.read_with(&vcx, |v, cx| v.cards_for_test(cx).len()),
@@ -711,7 +707,7 @@ nodes:
     assert!(
         matches!(
             view.read_with(&vcx, |v, _| v.unreadable_for_test().cloned()),
-            Some(crate::workspace::main_area::flow_graph_pane::FlowGraphError::Parse { .. })
+            Some(crate::workspace::pages::flows::graph::FlowGraphError::Parse { .. })
         ),
         "a broken file is reported, not ignored"
     );
@@ -748,16 +744,11 @@ nodes:
     let (lane, ws, flow_path, wh) = workspace_with_a_flow(cx, ONE_AGENT);
     let mut vcx = gpui::VisualTestContext::from_window(wh.into(), cx);
     ws.update_in(&mut vcx, |ws, window, cx| {
-        ws.open_flow_graph(&flow_path, window, cx)
+        ws.open_flow_graph(ws.active, &flow_path, window, cx)
     });
     vcx.run_until_parked();
     let view = ws
-        .read_with(&vcx, |ws, _| {
-            ws.active_runtime()
-                .panes
-                .iter()
-                .find_map(|p| p.flow_graph_content().map(|fg| fg.view.clone()))
-        })
+        .read_with(&vcx, |ws, _| ws.open_graph().map(|(_, _, view)| view))
         .expect("the graph pane opened");
 
     // Read the list once so there is a cache to invalidate — the state the
@@ -799,7 +790,7 @@ nodes:
 /// The watcher fires for our own writes and for anything that merely touches a
 /// flow file, and gpui has no partial redraw — one notify here repaints the whole
 /// window. The panel's list is the only thing rendered from the workspace that a
-/// flow file can change, so a hidden Flows tab has nothing to repaint for.
+/// flow file can change, so a page showing its graph has nothing to repaint for.
 #[gpui::test]
 async fn a_flow_event_that_changed_nothing_costs_no_frame(cx: &mut TestAppContext) {
     use crate::workspace::render::WORKSPACE_RENDERS;
@@ -807,7 +798,7 @@ async fn a_flow_event_that_changed_nothing_costs_no_frame(cx: &mut TestAppContex
     let (_lane, ws, flow_path, wh) = workspace_with_a_flow(cx, ONE_AGENT);
     let mut vcx = gpui::VisualTestContext::from_window(wh.into(), cx);
     ws.update_in(&mut vcx, |ws, window, cx| {
-        ws.open_flow_graph(&flow_path, window, cx)
+        ws.open_flow_graph(ws.active, &flow_path, window, cx)
     });
     vcx.run_until_parked();
 
@@ -824,9 +815,14 @@ async fn a_flow_event_that_changed_nothing_costs_no_frame(cx: &mut TestAppContex
         "nothing changed and nothing was on screen to change"
     );
 
-    // With the Flows tab up, the list is rendered from the workspace and a file
-    // added from outside has to reach it.
+    // With the Flows list up, it is rendered from the workspace and a file
+    // added from outside has to reach it. The graph is what the page showed.
     ws.update(&mut vcx, |ws, cx| {
+        let graph = ws.flow_detail_id().expect("the graph is the page's detail");
+        ws.close_page_detail_now(
+            crate::workspace::pages::detail::PageDetailId::Flow(graph),
+            cx,
+        );
         ws.show_page(crate::workspace::pages::Page::Flows, cx)
     });
     vcx.run_until_parked();
@@ -848,16 +844,11 @@ async fn switching_the_theme_recolours_the_graph(cx: &mut TestAppContext) {
     let (_lane, ws, flow_path, wh) = workspace_with_a_flow(cx, TWO_NODE_CHAIN);
     let mut vcx = gpui::VisualTestContext::from_window(wh.into(), cx);
     ws.update_in(&mut vcx, |ws, window, cx| {
-        ws.open_flow_graph(&flow_path, window, cx)
+        ws.open_flow_graph(ws.active, &flow_path, window, cx)
     });
     vcx.run_until_parked();
     let view = ws
-        .read_with(&vcx, |ws, _| {
-            ws.active_runtime()
-                .panes
-                .iter()
-                .find_map(|p| p.flow_graph_content().map(|fg| fg.view.clone()))
-        })
+        .read_with(&vcx, |ws, _| ws.open_graph().map(|(_, _, view)| view))
         .expect("the graph pane opened");
     view.update_in(&mut vcx, |v, window, cx| {
         v.select_node_for_test(&"design".into(), window, cx)
@@ -895,21 +886,16 @@ async fn switching_the_theme_recolours_the_graph(cx: &mut TestAppContext) {
 /// selection with it — under the person who pressed Save.
 #[gpui::test]
 async fn a_save_that_changes_no_shape_keeps_the_canvas(cx: &mut TestAppContext) {
-    use crate::workspace::main_area::flow_graph_pane::FlowGraphEvent;
+    use crate::workspace::pages::flows::graph::FlowGraphEvent;
 
     let (_lane, ws, flow_path, wh) = workspace_with_a_flow(cx, TWO_NODE_CHAIN);
     let mut vcx = gpui::VisualTestContext::from_window(wh.into(), cx);
     ws.update_in(&mut vcx, |ws, window, cx| {
-        ws.open_flow_graph(&flow_path, window, cx)
+        ws.open_flow_graph(ws.active, &flow_path, window, cx)
     });
     vcx.run_until_parked();
     let view = ws
-        .read_with(&vcx, |ws, _| {
-            ws.active_runtime()
-                .panes
-                .iter()
-                .find_map(|p| p.flow_graph_content().map(|fg| fg.view.clone()))
-        })
+        .read_with(&vcx, |ws, _| ws.open_graph().map(|(_, _, view)| view))
         .expect("the graph pane opened");
     view.update_in(&mut vcx, |v, window, cx| {
         v.select_node_for_test(&"design".into(), window, cx)
@@ -970,17 +956,12 @@ async fn a_reload_keeps_the_colours_of_the_run(cx: &mut TestAppContext) {
     let (lane, ws, flow_path, wh) = workspace_with_a_flow(cx, TWO_NODE_CHAIN);
     let mut vcx = gpui::VisualTestContext::from_window(wh.into(), cx);
     ws.update_in(&mut vcx, |ws, window, cx| {
-        ws.open_flow_graph(&flow_path, window, cx)
+        ws.open_flow_graph(ws.active, &flow_path, window, cx)
     });
     vcx.run_until_parked();
     let here = ws.update(&mut vcx, |ws, _| ws.active);
     let view = ws
-        .read_with(&vcx, |ws, _| {
-            ws.active_runtime()
-                .panes
-                .iter()
-                .find_map(|p| p.flow_graph_content().map(|fg| fg.view.clone()))
-        })
+        .read_with(&vcx, |ws, _| ws.open_graph().map(|(_, _, view)| view))
         .expect("the graph pane opened");
 
     ws.update(&mut vcx, |ws, _| {
@@ -1035,17 +1016,12 @@ async fn a_run_does_not_colour_a_flow_whose_nodes_have_changed(cx: &mut TestAppC
     let (lane, ws, flow_path, wh) = workspace_with_a_flow(cx, TWO_NODE_CHAIN);
     let mut vcx = gpui::VisualTestContext::from_window(wh.into(), cx);
     ws.update_in(&mut vcx, |ws, window, cx| {
-        ws.open_flow_graph(&flow_path, window, cx)
+        ws.open_flow_graph(ws.active, &flow_path, window, cx)
     });
     vcx.run_until_parked();
     let here = ws.update(&mut vcx, |ws, _| ws.active);
     let view = ws
-        .read_with(&vcx, |ws, _| {
-            ws.active_runtime()
-                .panes
-                .iter()
-                .find_map(|p| p.flow_graph_content().map(|fg| fg.view.clone()))
-        })
+        .read_with(&vcx, |ws, _| ws.open_graph().map(|(_, _, view)| view))
         .expect("the graph pane opened");
 
     ws.update(&mut vcx, |ws, _| {
@@ -1097,28 +1073,20 @@ async fn a_run_does_not_colour_a_flow_whose_nodes_have_changed(cx: &mut TestAppC
     );
 }
 
-/// The menu that holds Add Node has to be reachable from the graph itself.
-///
-/// It was attached to the pane *header*, which is drawn only when the tab is
-/// split — so a graph opened on its own had no way to reach it at all, and Add
-/// Node was unreachable. Right-clicking the pane body is that way.
+/// The menu that holds Add Node has to be reachable from the graph itself:
+/// right-clicking the canvas is that way.
 #[gpui::test]
-async fn right_clicking_a_graph_opens_the_pane_menu(cx: &mut TestAppContext) {
+async fn right_clicking_a_graph_opens_its_menu(cx: &mut TestAppContext) {
     let (_lane, ws, flow_path, wh) = workspace_with_a_flow(cx, TWO_NODE_CHAIN);
     let mut vcx = gpui::VisualTestContext::from_window(wh.into(), cx);
     ws.update_in(&mut vcx, |ws, window, cx| {
-        ws.open_flow_graph(&flow_path, window, cx)
+        ws.open_flow_graph(ws.active, &flow_path, window, cx)
     });
     vcx.run_until_parked();
-    let pane_id = ws
-        .read_with(&vcx, |ws, _| {
-            ws.active_runtime()
-                .panes
-                .iter()
-                .find(|p| p.flow_graph_content().is_some())
-                .map(|p| p.id)
-        })
-        .expect("the graph pane opened");
+    assert!(
+        ws.read_with(&vcx, |ws, _| ws.open_graph().is_some()),
+        "the graph opened"
+    );
     assert!(
         ws.read_with(&vcx, |ws, _| ws.main_area.popup_menu_deploy.is_none()),
         "nothing deployed yet"
@@ -1126,7 +1094,6 @@ async fn right_clicking_a_graph_opens_the_pane_menu(cx: &mut TestAppContext) {
 
     // The click itself, not the handler it should reach: calling the opener
     // directly would pass with the wiring absent, which is what was wrong.
-    let _ = pane_id;
     vcx.simulate_mouse_down(
         gpui::point(gpui::px(300.), gpui::px(300.)),
         gpui::MouseButton::Right,
@@ -1147,21 +1114,16 @@ async fn right_clicking_a_graph_opens_the_pane_menu(cx: &mut TestAppContext) {
 /// would still pass every test it has.
 #[gpui::test]
 async fn the_toolbar_add_reaches_the_file(cx: &mut TestAppContext) {
-    use crate::workspace::main_area::flow_graph_pane::FlowGraphEvent;
+    use crate::workspace::pages::flows::graph::FlowGraphEvent;
 
     let (_lane, ws, flow_path, wh) = workspace_with_a_flow(cx, TWO_NODE_CHAIN);
     let mut vcx = gpui::VisualTestContext::from_window(wh.into(), cx);
     ws.update_in(&mut vcx, |ws, window, cx| {
-        ws.open_flow_graph(&flow_path, window, cx)
+        ws.open_flow_graph(ws.active, &flow_path, window, cx)
     });
     vcx.run_until_parked();
     let view = ws
-        .read_with(&vcx, |ws, _| {
-            ws.active_runtime()
-                .panes
-                .iter()
-                .find_map(|p| p.flow_graph_content().map(|fg| fg.view.clone()))
-        })
+        .read_with(&vcx, |ws, _| ws.open_graph().map(|(_, _, view)| view))
         .expect("the graph pane opened");
     let before = view.read_with(&vcx, |v, cx| v.cards_for_test(cx).len());
 
@@ -1194,16 +1156,11 @@ async fn a_press_on_the_toolbar_does_not_start_a_drag(cx: &mut TestAppContext) {
     let (_lane, ws, flow_path, wh) = workspace_with_a_flow(cx, TWO_NODE_CHAIN);
     let mut vcx = gpui::VisualTestContext::from_window(wh.into(), cx);
     ws.update_in(&mut vcx, |ws, window, cx| {
-        ws.open_flow_graph(&flow_path, window, cx)
+        ws.open_flow_graph(ws.active, &flow_path, window, cx)
     });
     vcx.run_until_parked();
     let view = ws
-        .read_with(&vcx, |ws, _| {
-            ws.active_runtime()
-                .panes
-                .iter()
-                .find_map(|p| p.flow_graph_content().map(|fg| fg.view.clone()))
-        })
+        .read_with(&vcx, |ws, _| ws.open_graph().map(|(_, _, view)| view))
         .expect("the graph pane opened");
     view.update_in(&mut vcx, |v, window, cx| {
         v.select_node_for_test(&"design".into(), window, cx)
@@ -1230,7 +1187,7 @@ async fn a_press_on_the_toolbar_does_not_start_a_drag(cx: &mut TestAppContext) {
 
     assert_eq!(
         view.read_with(&vcx, |v, cx| v.selection(cx)),
-        crate::workspace::main_area::flow_graph_pane::Selection::One("design".into()),
+        crate::workspace::pages::flows::graph::Selection::One("design".into()),
         "the canvas never saw the press, so the selection stands"
     );
 }
@@ -1245,16 +1202,11 @@ async fn a_file_that_does_not_load_keeps_its_bytes_from_the_first_open(cx: &mut 
     let (_lane, ws, flow_path, wh) = workspace_with_a_flow(cx, "nodes: [\n");
     let mut vcx = gpui::VisualTestContext::from_window(wh.into(), cx);
     ws.update_in(&mut vcx, |ws, window, cx| {
-        ws.open_flow_graph(&flow_path, window, cx)
+        ws.open_flow_graph(ws.active, &flow_path, window, cx)
     });
     vcx.run_until_parked();
     let view = ws
-        .read_with(&vcx, |ws, _| {
-            ws.active_runtime()
-                .panes
-                .iter()
-                .find_map(|p| p.flow_graph_content().map(|fg| fg.view.clone()))
-        })
+        .read_with(&vcx, |ws, _| ws.open_graph().map(|(_, _, view)| view))
         .expect("the pane opened even though the flow does not load");
 
     assert!(
@@ -1298,21 +1250,16 @@ nodes:
 /// isolation — here it is carried through the event, the op and the differ.
 #[gpui::test]
 async fn a_line_drawn_between_two_cards_reaches_the_file(cx: &mut TestAppContext) {
-    use crate::workspace::main_area::flow_graph_pane::FlowGraphEvent;
+    use crate::workspace::pages::flows::graph::FlowGraphEvent;
 
     let (_lane, ws, flow_path, wh) = workspace_with_a_flow(cx, A_SPARE_NODE);
     let mut vcx = gpui::VisualTestContext::from_window(wh.into(), cx);
     ws.update_in(&mut vcx, |ws, window, cx| {
-        ws.open_flow_graph(&flow_path, window, cx)
+        ws.open_flow_graph(ws.active, &flow_path, window, cx)
     });
     vcx.run_until_parked();
     let view = ws
-        .read_with(&vcx, |ws, _| {
-            ws.active_runtime()
-                .panes
-                .iter()
-                .find_map(|p| p.flow_graph_content().map(|fg| fg.view.clone()))
-        })
+        .read_with(&vcx, |ws, _| ws.open_graph().map(|(_, _, view)| view))
         .expect("the graph pane opened");
 
     view.update(&mut vcx, |_, cx| {
@@ -1357,16 +1304,11 @@ async fn a_line_that_would_loop_is_refused_and_not_left_on_the_canvas(cx: &mut T
     let (_lane, ws, flow_path, wh) = workspace_with_a_flow(cx, TWO_NODE_CHAIN);
     let mut vcx = gpui::VisualTestContext::from_window(wh.into(), cx);
     ws.update_in(&mut vcx, |ws, window, cx| {
-        ws.open_flow_graph(&flow_path, window, cx)
+        ws.open_flow_graph(ws.active, &flow_path, window, cx)
     });
     vcx.run_until_parked();
     let view = ws
-        .read_with(&vcx, |ws, _| {
-            ws.active_runtime()
-                .panes
-                .iter()
-                .find_map(|p| p.flow_graph_content().map(|fg| fg.view.clone()))
-        })
+        .read_with(&vcx, |ws, _| ws.open_graph().map(|(_, _, view)| view))
         .expect("the graph pane opened");
     let before_text = std::fs::read_to_string(&flow_path).expect("on disk");
     let before_edges = view.read_with(&vcx, |v, cx| v.drawn_edges_for_test(cx));
@@ -1402,16 +1344,11 @@ async fn an_edge_that_appears_on_the_canvas_is_written_and_taken_off_it(cx: &mut
     let (_lane, ws, flow_path, wh) = workspace_with_a_flow(cx, A_SPARE_NODE);
     let mut vcx = gpui::VisualTestContext::from_window(wh.into(), cx);
     ws.update_in(&mut vcx, |ws, window, cx| {
-        ws.open_flow_graph(&flow_path, window, cx)
+        ws.open_flow_graph(ws.active, &flow_path, window, cx)
     });
     vcx.run_until_parked();
     let view = ws
-        .read_with(&vcx, |ws, _| {
-            ws.active_runtime()
-                .panes
-                .iter()
-                .find_map(|p| p.flow_graph_content().map(|fg| fg.view.clone()))
-        })
+        .read_with(&vcx, |ws, _| ws.open_graph().map(|(_, _, view)| view))
         .expect("the graph pane opened");
     // One already: `build` runs after `design`.
     let before = view.read_with(&vcx, |v, cx| v.drawn_edges_for_test(cx));
@@ -1453,16 +1390,11 @@ async fn a_blank_node_the_file_never_named_is_taken_off_the_canvas(cx: &mut Test
     let (_lane, ws, flow_path, wh) = workspace_with_a_flow(cx, TWO_NODE_CHAIN);
     let mut vcx = gpui::VisualTestContext::from_window(wh.into(), cx);
     ws.update_in(&mut vcx, |ws, window, cx| {
-        ws.open_flow_graph(&flow_path, window, cx)
+        ws.open_flow_graph(ws.active, &flow_path, window, cx)
     });
     vcx.run_until_parked();
     let view = ws
-        .read_with(&vcx, |ws, _| {
-            ws.active_runtime()
-                .panes
-                .iter()
-                .find_map(|p| p.flow_graph_content().map(|fg| fg.view.clone()))
-        })
+        .read_with(&vcx, |ws, _| ws.open_graph().map(|(_, _, view)| view))
         .expect("the graph pane opened");
     let before_text = std::fs::read_to_string(&flow_path).expect("on disk");
     let (nodes, edges) = view.read_with(&vcx, |v, cx| {
@@ -1501,16 +1433,11 @@ async fn a_line_taken_off_the_canvas_is_removed_from_the_file(cx: &mut TestAppCo
     let (_lane, ws, flow_path, wh) = workspace_with_a_flow(cx, TWO_NODE_CHAIN);
     let mut vcx = gpui::VisualTestContext::from_window(wh.into(), cx);
     ws.update_in(&mut vcx, |ws, window, cx| {
-        ws.open_flow_graph(&flow_path, window, cx)
+        ws.open_flow_graph(ws.active, &flow_path, window, cx)
     });
     vcx.run_until_parked();
     let view = ws
-        .read_with(&vcx, |ws, _| {
-            ws.active_runtime()
-                .panes
-                .iter()
-                .find_map(|p| p.flow_graph_content().map(|fg| fg.view.clone()))
-        })
+        .read_with(&vcx, |ws, _| ws.open_graph().map(|(_, _, view)| view))
         .expect("the graph pane opened");
 
     view.update(&mut vcx, |v, cx| v.select_every_edge_for_test(cx));
@@ -1545,16 +1472,11 @@ async fn drawing_a_line_and_taking_it_away_returns_the_file(cx: &mut TestAppCont
     let (_lane, ws, flow_path, wh) = workspace_with_a_flow(cx, A_SPARE_NODE);
     let mut vcx = gpui::VisualTestContext::from_window(wh.into(), cx);
     ws.update_in(&mut vcx, |ws, window, cx| {
-        ws.open_flow_graph(&flow_path, window, cx)
+        ws.open_flow_graph(ws.active, &flow_path, window, cx)
     });
     vcx.run_until_parked();
     let view = ws
-        .read_with(&vcx, |ws, _| {
-            ws.active_runtime()
-                .panes
-                .iter()
-                .find_map(|p| p.flow_graph_content().map(|fg| fg.view.clone()))
-        })
+        .read_with(&vcx, |ws, _| ws.open_graph().map(|(_, _, view)| view))
         .expect("the graph pane opened");
     let before = std::fs::read_to_string(&flow_path).expect("on disk");
 
@@ -1593,9 +1515,7 @@ async fn drawing_a_line_and_taking_it_away_returns_the_file(cx: &mut TestAppCont
 /// either way, and the picker is the discriminator.
 #[gpui::test]
 async fn the_act_buttons_are_off_while_the_inspector_has_unsaved_edits(cx: &mut TestAppContext) {
-    use crate::workspace::main_area::flow_graph_pane::{
-        TOOLBAR_CHECK_SELECTOR, TOOLBAR_RUN_SELECTOR,
-    };
+    use crate::workspace::pages::flows::graph::{TOOLBAR_CHECK_SELECTOR, TOOLBAR_RUN_SELECTOR};
 
     const PROFILED: &str = "\
 version: 1
@@ -1616,16 +1536,11 @@ nodes:
     let (_lane, ws, flow_path, wh) = workspace_with_a_flow(cx, PROFILED);
     let mut vcx = gpui::VisualTestContext::from_window(wh.into(), cx);
     ws.update_in(&mut vcx, |ws, window, cx| {
-        ws.open_flow_graph(&flow_path, window, cx)
+        ws.open_flow_graph(ws.active, &flow_path, window, cx)
     });
     vcx.run_until_parked();
     let view = ws
-        .read_with(&vcx, |ws, _| {
-            ws.active_runtime()
-                .panes
-                .iter()
-                .find_map(|p| p.flow_graph_content().map(|fg| fg.view.clone()))
-        })
+        .read_with(&vcx, |ws, _| ws.open_graph().map(|(_, _, view)| view))
         .expect("the graph pane opened");
     view.update_in(&mut vcx, |v, window, cx| {
         v.select_node_for_test(&"design".into(), window, cx)
@@ -1698,17 +1613,12 @@ async fn holding_the_pan_key_reaches_the_pointer(cx: &mut TestAppContext) {
     let (_lane, ws, flow_path, wh) = workspace_with_a_flow(cx, LONG_CHAIN);
     let mut vcx = gpui::VisualTestContext::from_window(wh.into(), cx);
     ws.update_in(&mut vcx, |ws, window, cx| {
-        ws.open_flow_graph(&flow_path, window, cx)
+        ws.open_flow_graph(ws.active, &flow_path, window, cx)
     });
     vcx.run_until_parked();
 
     let view = ws
-        .read_with(&vcx, |ws, _| {
-            ws.active_runtime()
-                .panes
-                .iter()
-                .find_map(|p| p.flow_graph_content().map(|fg| fg.view.clone()))
-        })
+        .read_with(&vcx, |ws, _| ws.open_graph().map(|(_, _, view)| view))
         .expect("the graph pane just opened");
 
     assert_eq!(
@@ -1762,18 +1672,13 @@ async fn the_pointer_over_the_canvas_is_what_suspends_the_policy(cx: &mut TestAp
     let (_lane, ws, flow_path, wh) = workspace_with_a_flow(cx, LONG_CHAIN);
     let mut vcx = gpui::VisualTestContext::from_window(wh.into(), cx);
     ws.update_in(&mut vcx, |ws, window, cx| {
-        ws.open_flow_graph(&flow_path, window, cx)
+        ws.open_flow_graph(ws.active, &flow_path, window, cx)
     });
     vcx.run_until_parked();
 
     let was = vcx.update(|_, cx| cx.cursor_hide_mode());
     let view = ws
-        .read_with(&vcx, |ws, _| {
-            ws.active_runtime()
-                .panes
-                .iter()
-                .find_map(|p| p.flow_graph_content().map(|fg| fg.view.clone()))
-        })
+        .read_with(&vcx, |ws, _| ws.open_graph().map(|(_, _, view)| view))
         .expect("the graph pane just opened");
 
     // No key touched yet — the pointer arriving is enough.
@@ -1814,20 +1719,20 @@ async fn two_panes_hand_the_policy_back_once(cx: &mut TestAppContext) {
     let newest = |ws: &gpui::Entity<Workspace>,
                   vcx: &mut gpui::VisualTestContext,
                   path: &std::path::Path| {
-        ws.update_in(vcx, |ws, window, cx| ws.open_flow_graph(path, window, cx));
+        ws.update_in(vcx, |ws, window, cx| {
+            ws.open_flow_graph(ws.active, path, window, cx)
+        });
         vcx.run_until_parked();
-        ws.read_with(vcx, |ws, _| {
-            ws.active_runtime()
-                .panes
-                .iter()
-                .filter_map(|p| p.flow_graph_content().map(|fg| fg.view.clone()))
-                .next_back()
-        })
-        .expect("a graph pane")
+        ws.read_with(vcx, |ws, _| ws.open_graph().map(|(_, _, view)| view))
+            .expect("a graph")
     };
     let a = newest(&ws, &mut vcx, &flow_a);
     let b = newest(&ws, &mut vcx, &flow_b);
-    assert_ne!(a.entity_id(), b.entity_id(), "two panes, one per flow file");
+    assert_ne!(
+        a.entity_id(),
+        b.entity_id(),
+        "two graphs, one per flow file"
+    );
 
     a.update_in(&mut vcx, |v, w, cx| v.hover_canvas_for_test(true, w, cx));
     b.update_in(&mut vcx, |v, w, cx| v.hover_canvas_for_test(true, w, cx));
@@ -1858,7 +1763,7 @@ async fn an_auto_repeat_does_not_flip_the_input_modality(cx: &mut TestAppContext
     let (_lane, ws, flow_path, wh) = workspace_with_a_flow(cx, LONG_CHAIN);
     let mut vcx = gpui::VisualTestContext::from_window(wh.into(), cx);
     ws.update_in(&mut vcx, |ws, window, cx| {
-        ws.open_flow_graph(&flow_path, window, cx)
+        ws.open_flow_graph(ws.active, &flow_path, window, cx)
     });
     vcx.run_until_parked();
 

@@ -1,6 +1,6 @@
 //! Running part of a flow: how far, and what not to pay for twice.
 //!
-//! `flow_graph_pane/pins.rs` decides when a pin stops holding and
+//! `pages/flows/graph/pins.rs` decides when a pin stops holding and
 //! `workspace/flow_pins.rs` decides where a reused output comes from, both
 //! without a window. These check that the two reach the screen — a badge that
 //! says which cards are pinned, and a glyph that is only live when there is one
@@ -8,7 +8,7 @@
 
 use super::*;
 
-use crate::workspace::main_area::flow_graph_pane::{
+use crate::workspace::pages::flows::graph::{
     FlowGraphView, TOOLBAR_PIN_SELECTOR, TOOLBAR_RUN_UNTIL_SELECTOR,
 };
 
@@ -17,13 +17,8 @@ fn graph_view(
     ws: &gpui::Entity<crate::workspace::Workspace>,
     vcx: &gpui::VisualTestContext,
 ) -> gpui::Entity<FlowGraphView> {
-    ws.read_with(vcx, |ws, _| {
-        ws.active_runtime()
-            .panes
-            .iter()
-            .find_map(|p| p.flow_graph_content().map(|fg| fg.view.clone()))
-    })
-    .expect("the graph pane opened")
+    ws.read_with(vcx, |ws, _| ws.open_graph().map(|(_, _, view)| view))
+        .expect("the graph pane opened")
 }
 
 /// Which nodes are drawing as reused, read back through the canvas.
@@ -60,7 +55,7 @@ async fn editing_one_node_leaves_another_nodes_pin_alone(cx: &mut TestAppContext
     let (_lane, ws, flow_path, wh) = workspace_with_a_flow(cx, TWO_NODE_CHAIN);
     let mut vcx = gpui::VisualTestContext::from_window(wh.into(), cx);
     ws.update_in(&mut vcx, |ws, window, cx| {
-        ws.open_flow_graph(&flow_path, window, cx)
+        ws.open_flow_graph(ws.active, &flow_path, window, cx)
     });
     vcx.run_until_parked();
     let view = graph_view(&ws, &vcx);
@@ -114,7 +109,7 @@ async fn a_flow_that_stops_loading_clears_every_pin(cx: &mut TestAppContext) {
     let (_lane, ws, flow_path, wh) = workspace_with_a_flow(cx, TWO_NODE_CHAIN);
     let mut vcx = gpui::VisualTestContext::from_window(wh.into(), cx);
     ws.update_in(&mut vcx, |ws, window, cx| {
-        ws.open_flow_graph(&flow_path, window, cx)
+        ws.open_flow_graph(ws.active, &flow_path, window, cx)
     });
     vcx.run_until_parked();
     let view = graph_view(&ws, &vcx);
@@ -197,7 +192,7 @@ async fn a_pinned_node_reaches_the_run_as_a_file_to_copy(cx: &mut TestAppContext
     let run_dir = finished_run_in(lane.path(), PROFILED_CHAIN);
     let mut vcx = gpui::VisualTestContext::from_window(wh.into(), cx);
     ws.update_in(&mut vcx, |ws, window, cx| {
-        ws.open_flow_graph(&flow_path, window, cx)
+        ws.open_flow_graph(ws.active, &flow_path, window, cx)
     });
     vcx.run_until_parked();
     let view = graph_view(&ws, &vcx);
@@ -209,7 +204,7 @@ async fn a_pinned_node_reaches_the_run_as_a_file_to_copy(cx: &mut TestAppContext
 
     press(
         &mut vcx,
-        crate::workspace::main_area::flow_graph_pane::TOOLBAR_RUN_SELECTOR,
+        crate::workspace::pages::flows::graph::TOOLBAR_RUN_SELECTOR,
     );
     // The selection carries the id; which run holds the file is only knowable
     // once the profile is settled, so the request is where that shows up.
@@ -264,7 +259,7 @@ async fn a_pin_with_no_finished_output_is_reported_and_not_sent(cx: &mut TestApp
     let (_lane, ws, flow_path, wh) = workspace_with_a_flow(cx, PROFILED_CHAIN);
     let mut vcx = gpui::VisualTestContext::from_window(wh.into(), cx);
     ws.update_in(&mut vcx, |ws, window, cx| {
-        ws.open_flow_graph(&flow_path, window, cx)
+        ws.open_flow_graph(ws.active, &flow_path, window, cx)
     });
     vcx.run_until_parked();
     let view = graph_view(&ws, &vcx);
@@ -275,7 +270,7 @@ async fn a_pin_with_no_finished_output_is_reported_and_not_sent(cx: &mut TestApp
     press(&mut vcx, TOOLBAR_PIN_SELECTOR);
     press(
         &mut vcx,
-        crate::workspace::main_area::flow_graph_pane::TOOLBAR_RUN_SELECTOR,
+        crate::workspace::pages::flows::graph::TOOLBAR_RUN_SELECTOR,
     );
 
     // The selection still carries what the person picked — dropping it there
@@ -321,7 +316,7 @@ async fn running_as_far_as_a_node_needs_exactly_one_selected(cx: &mut TestAppCon
     let (_lane, ws, flow_path, wh) = workspace_with_a_flow(cx, PROFILED_CHAIN);
     let mut vcx = gpui::VisualTestContext::from_window(wh.into(), cx);
     ws.update_in(&mut vcx, |ws, window, cx| {
-        ws.open_flow_graph(&flow_path, window, cx)
+        ws.open_flow_graph(ws.active, &flow_path, window, cx)
     });
     vcx.run_until_parked();
     let view = graph_view(&ws, &vcx);
@@ -398,7 +393,7 @@ async fn a_dropped_pin_names_the_upstream_node_that_did_it(cx: &mut TestAppConte
     let (_lane, ws, flow_path, wh) = workspace_with_a_flow(cx, TWO_NODE_CHAIN);
     let mut vcx = gpui::VisualTestContext::from_window(wh.into(), cx);
     ws.update_in(&mut vcx, |ws, window, cx| {
-        ws.open_flow_graph(&flow_path, window, cx)
+        ws.open_flow_graph(ws.active, &flow_path, window, cx)
     });
     vcx.run_until_parked();
     let view = graph_view(&ws, &vcx);
@@ -450,7 +445,7 @@ async fn a_previous_runs_colours_do_not_erase_why_a_pin_went(cx: &mut TestAppCon
     let (lane, ws, flow_path, wh) = workspace_with_a_flow(cx, TWO_NODE_CHAIN);
     let mut vcx = gpui::VisualTestContext::from_window(wh.into(), cx);
     ws.update_in(&mut vcx, |ws, window, cx| {
-        ws.open_flow_graph(&flow_path, window, cx)
+        ws.open_flow_graph(ws.active, &flow_path, window, cx)
     });
     vcx.run_until_parked();
     let here = ws.update(&mut vcx, |ws, _| ws.active);

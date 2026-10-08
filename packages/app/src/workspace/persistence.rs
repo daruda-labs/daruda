@@ -241,6 +241,7 @@ impl Workspace {
             active_right_panel_view: self.docks.right_view,
             active_page: self.active_page().map(super::pages::Page::stored),
             task_detail: self.task_detail_target(cx),
+            flow_detail: self.flow_detail_target(cx),
             window_open_policy: self.window_open_policy,
             next_group_id: self.next_group_id,
             project_tabs,
@@ -575,7 +576,9 @@ impl Workspace {
                         window,
                         cx,
                     ) {
-                        Ok(layout) => {
+                        // Every leaf of it dropped out: nothing to restore.
+                        Ok(None) => {}
+                        Ok(Some(layout)) => {
                             let last_focus = id_map
                                 .get(&stab.last_focused_pane)
                                 .copied()
@@ -639,6 +642,9 @@ impl Workspace {
         // After the runtimes, so the editor's id is minted past every pane's.
         if let Some(target) = &workspace.task_detail {
             self.restore_task_detail(target, window, cx);
+        }
+        if let Some(target) = &workspace.flow_detail {
+            self.restore_flow_detail(target, window, cx);
         }
 
         // Invariant: the active lane's runtime must exist before any
@@ -723,7 +729,8 @@ impl Workspace {
         daruda_store::project::LaneRef::default()
     }
 
-    /// Recursively materialize a serialized layout into live panes.
+    /// Recursively materialize a serialized layout into live panes. `None`
+    /// when nothing of it is restored any more.
     /// `id_map` records the new PaneId per serialized pane_id so
     /// cross-references (focus) can be rewritten. `fallback_cwd` is used
     /// when a leaf's serialized cwd is missing — typically the owning
@@ -736,7 +743,7 @@ impl Workspace {
         scratch: &mut Vec<pane::Pane>,
         window: &mut Window,
         cx: &mut Context<Self>,
-    ) -> Result<PaneLayout, PaneSpawnError> {
+    ) -> Result<Option<PaneLayout>, PaneSpawnError> {
         match slayout {
             daruda_store::project::SerializedLayout::Leaf { pane_id, content } => {
                 use daruda_store::project::SerializedPaneContent as Content;
@@ -883,14 +890,10 @@ impl Workspace {
                         }
                         restored
                     }
-                    Content::FlowGraph(fg) => {
-                        // FlowGraph pane — re-reads the flow file and lays the
-                        // graph out again. A file that has since been deleted or
-                        // broken restores as the pane's own "why not" state, which
-                        // is the honest thing to show for a path that was saved
-                        // when it still loaded.
-                        self.create_flow_graph_pane(&fg.path, window, cx)
-                    }
+                    // A flow graph is the Flows page's detail now, not a
+                    // lane's tab: a leaf an older session saved drops out,
+                    // and its split closes up around it.
+                    Content::FlowGraph(_) => return Ok(None),
                     Content::Terminal { cwd, account_id } => {
                         let effective = effective_cwd(cwd.clone(), fallback_cwd);
                         let account = restored_terminal_account(*account_id, &self.accounts);
@@ -909,7 +912,7 @@ impl Workspace {
                 let new_id = pane.id;
                 id_map.insert(*pane_id, new_id);
                 scratch.push(pane);
-                Ok(PaneLayout::Pane(new_id))
+                Ok(Some(PaneLayout::Pane(new_id)))
             }
             daruda_store::project::SerializedLayout::Split {
                 direction,
@@ -924,19 +927,7 @@ impl Workspace {
                         SplitDirection::Vertical
                     }
                 };
-                let mut rebuilt = Vec::with_capacity(children.len());
-                for c in children {
-                    rebuilt.push(self.rebuild_layout(
-                        c,
-                        fallback_cwd,
-                        id_map,
-                        scratch,
-                        window,
-                        cx,
-                    )?);
-                }
-                let n = rebuilt.len();
-                if n == 0 {
+                if children.is_empty() {
                     // Degenerate serialization — materialize a fresh leaf
                     // so we never surface an empty Split to the renderer.
                     // A degenerate Split materializes a terminal, which has
@@ -952,21 +943,31 @@ impl Workspace {
                     )?;
                     let id = pane.id;
                     scratch.push(pane);
-                    return Ok(PaneLayout::Pane(id));
+                    return Ok(Some(PaneLayout::Pane(id)));
                 }
-                if n == 1 {
-                    // Invariant: n == 1, rebuilt has exactly one element.
-                    return Ok(rebuilt
-                        .into_iter()
-                        .next()
-                        .expect("n == 1: rebuilt has one element"));
+                // A dropped child takes its share with it, so the ratios are
+                // those of the children that came back.
+                let mut rebuilt = Vec::with_capacity(children.len());
+                let mut kept_ratios = Vec::with_capacity(children.len());
+                for (ix, c) in children.iter().enumerate() {
+                    if let Some(layout) =
+                        self.rebuild_layout(c, fallback_cwd, id_map, scratch, window, cx)?
+                    {
+                        rebuilt.push(layout);
+                        if let Some(ratio) = ratios.get(ix) {
+                            kept_ratios.push(*ratio);
+                        }
+                    }
                 }
-                let normalized = normalize_ratios(ratios, n);
-                Ok(PaneLayout::Split {
-                    direction: dir,
-                    children: rebuilt,
-                    ratios: normalized,
-                })
+                match rebuilt.len() {
+                    0 => Ok(None),
+                    1 => Ok(rebuilt.pop()),
+                    n => Ok(Some(PaneLayout::Split {
+                        direction: dir,
+                        children: rebuilt,
+                        ratios: normalize_ratios(&kept_ratios, n),
+                    })),
+                }
             }
         }
     }
@@ -1196,11 +1197,6 @@ fn serialize_pane_content(
                 .display_filter
                 .map(|f| f.tokens().into_iter().map(str::to_owned).collect()),
             fold_mode: choices.fold_mode.map(FoldMode::tokens),
-        });
-    }
-    if let Some(fg) = pane.flow_graph_content() {
-        return Content::FlowGraph(daruda_store::project::SerializedFlowGraphContent {
-            path: fg.path.clone(),
         });
     }
     Content::Terminal {

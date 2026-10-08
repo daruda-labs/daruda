@@ -280,7 +280,12 @@ fn leaving_with_save_keeps_an_unsubmitted_subtask(cx: &mut TestAppContext) {
                 let subtask = te.new_subtask_input.clone();
                 title.update(cx, |s, cx| s.set_value("Closing", window, cx));
                 subtask.update(cx, |s, cx| s.set_value("Typed only", window, cx));
-                ws.leave_task_detail_then(window, cx, |_, _, _| {});
+                ws.leave_page_detail_then(
+                    crate::workspace::pages::Page::Tasks,
+                    window,
+                    cx,
+                    |_, _, _| {},
+                );
                 editor
             })
         })
@@ -437,7 +442,12 @@ fn task_editor_close_preserves_unsaved_draft_until_confirmed(cx: &mut TestAppCon
                 .expect("the Tasks page holds the editor");
             let title = ws.task_editor(editor).unwrap().title_input.clone();
             title.update(cx, |s, cx| s.set_value("Keep this draft", window, cx));
-            ws.leave_task_detail_then(window, cx, |_, _, _| {});
+            ws.leave_page_detail_then(
+                crate::workspace::pages::Page::Tasks,
+                window,
+                cx,
+                |_, _, _| {},
+            );
             assert!(
                 ws.task_editor(editor).is_some(),
                 "an unsaved draft is asked about"

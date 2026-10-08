@@ -2423,6 +2423,10 @@ flow:
   pending_questions: "%{count} permission request(s) need your attention"
   show_questions: "Review requests"
   back_to_list: "Back to Flows"
+  # A past run opened from the Flows page: its report, read-only.
+  run_report_title: "Run report"
+  run_report_open_file: "Open as a file"
+  run_report_missing: "This run left no report to read."
   source_repo: "Repository"
   source_project: "Project-only"
   source_global: "Personal shared"
