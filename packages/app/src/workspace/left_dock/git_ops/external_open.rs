@@ -3,7 +3,7 @@
 
 use daruda_store::observability::error_report::{ErrorReport, ErrorSeverity};
 use daruda_store::observability::system_info::redact_home;
-use daruda_store::project::{LaneId, LaneRef};
+use daruda_store::project::LaneRef;
 use gpui::Context;
 
 use crate::workspace::Workspace;
@@ -56,15 +56,11 @@ impl Workspace {
     /// [`Self::open_file_externally`].
     pub(in crate::workspace) fn open_lane_file_with_system_default(
         &mut self,
-        lane_id: LaneId,
+        target: LaneRef,
         path: std::path::PathBuf,
         cx: &mut Context<Self>,
     ) {
-        let lane = LaneRef {
-            project: self.active.project,
-            lane: lane_id,
-        };
-        let Some(wt) = self.lane_for(lane) else {
+        let Some(wt) = self.lane_for(target) else {
             return;
         };
         let full_path = wt.path.join(&path);

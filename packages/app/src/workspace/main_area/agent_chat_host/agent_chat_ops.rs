@@ -131,10 +131,7 @@ fn resolve_restored_agent(
 /// Pure core of the agent-id choice for a freshly opened pane: keep `last`
 /// when still in the catalog, else fall back to `agents[0]`. Factored out for
 /// unit-testability without gpui.
-pub(in crate::workspace) fn resolve_open_agent_id(
-    agents: &[daruda_config::AgentDefinition],
-    last: Option<&str>,
-) -> String {
+fn resolve_open_agent_id(agents: &[daruda_config::AgentDefinition], last: Option<&str>) -> String {
     last.filter(|id| agents.iter().any(|a| a.id == *id))
         .map(str::to_owned)
         .unwrap_or_else(|| catalog_default_id(agents))
@@ -225,6 +222,16 @@ fn should_notify_agent_event(
 }
 
 impl Workspace {
+    /// The agent a newly opened pane runs under: `requested` if given, else
+    /// the window's last-used agent — whichever it is, only while it is still
+    /// in the catalog, else the catalog default.
+    pub(in crate::workspace) fn open_agent_id(&self, requested: Option<&str>) -> String {
+        resolve_open_agent_id(
+            &self.mirrors.agents,
+            requested.or(self.last_agent_id.as_deref()),
+        )
+    }
+
     /// Show a desktop notification `body` for `pane_id`, gated by `enabled`
     /// and the shared in-view rule. A parked-lane pane is never on screen, so
     /// its completion/wait always fires.
@@ -1160,7 +1167,7 @@ impl Workspace {
     ) {
         // Default to the last agent opened (session-local), falling back to the
         // catalog default; a stale last id (agent removed) also falls back.
-        let agent_id = resolve_open_agent_id(&self.mirrors.agents, self.last_agent_id.as_deref());
+        let agent_id = self.open_agent_id(None);
         self.open_agent_chat_pane_with_agent(agent_id, window, cx);
     }
 
@@ -1309,10 +1316,7 @@ impl Workspace {
         // panel — so a caller replaying a capture wants the agent the capture
         // came from, not whatever was last opened. A requested id the catalog
         // does not have falls back exactly as a stale `last_agent_id` would.
-        let agent_id = resolve_open_agent_id(
-            &self.mirrors.agents,
-            agent_id.or(self.last_agent_id.as_deref()),
-        );
+        let agent_id = self.open_agent_id(agent_id);
         let cwds = self.active_lane_cwds();
         let pane_id = self.insert_agent_chat_pane(agent_id, cwds, window, cx)?;
         let view = self.agent_chat_view(pane_id).cloned()?;
@@ -1460,10 +1464,7 @@ impl Workspace {
         }
         if let Some(content) = self
             .main_area
-            .runtimes
-            .values_mut()
-            .flat_map(|rt| rt.panes.iter_mut())
-            .find(|p| p.id == pane_id)
+            .pane_mut(pane_id)
             .and_then(Pane::agent_chat_content_mut)
         {
             content.cwd = Some(cwd);
@@ -1483,10 +1484,7 @@ impl Workspace {
         }
         if let Some(content) = self
             .main_area
-            .runtimes
-            .values_mut()
-            .flat_map(|rt| rt.panes.iter_mut())
-            .find(|p| p.id == pane_id)
+            .pane_mut(pane_id)
             .and_then(Pane::agent_chat_content_mut)
         {
             content.agent_id = agent_id;
@@ -1713,10 +1711,7 @@ impl Workspace {
             return chat.account;
         }
         self.main_area
-            .runtimes
-            .values()
-            .flat_map(|rt| rt.panes.iter())
-            .find(|p| p.id == pane_id)
+            .pane(pane_id)
             .and_then(Pane::agent_chat_content)
             .map(|ac| ac.account)
             .unwrap_or(daruda_store::accounts::AccountSelection::SystemDefault)

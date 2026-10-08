@@ -43,7 +43,7 @@ async fn enter_opens_the_diff_and_keeps_the_panel_focused(cx: &mut TestAppContex
     cx.update_window(w.into(), |_, window, cx| {
         ws.update(cx, |ws, cx| {
             ws.git.panel_focus.clone().focus(window, cx);
-            let lane = ws.active.lane;
+            let lane = ws.active;
             ws.set_git_changes_cursor(lane, PathBuf::from("src/a.rs"), cx);
             ws.activate_git_changes_cursor(window, cx);
         });
@@ -167,7 +167,7 @@ async fn a_git_changes_row_click_previews_and_leaves_the_panel_focused(cx: &mut 
     cx.update_window(w.into(), |_, window, cx| {
         ws.update(cx, |ws, cx| {
             ws.git.panel_focus.clone().focus(window, cx);
-            let lane = ws.active.lane;
+            let lane = ws.active;
             ws.on_git_changes_row_click(lane, PathBuf::from("src/a.rs"), false, 1, window, cx);
         });
     })
@@ -285,7 +285,7 @@ async fn a_second_enter_on_the_open_row_steps_into_the_viewer(cx: &mut TestAppCo
     cx.update_window(w.into(), |_, window, cx| {
         ws.update(cx, |ws, cx| {
             ws.git.panel_focus.clone().focus(window, cx);
-            let lane = ws.active.lane;
+            let lane = ws.active;
             ws.set_git_changes_cursor(lane, PathBuf::from("src/a.rs"), cx);
             ws.activate_git_changes_cursor(window, cx);
         });
@@ -392,7 +392,7 @@ async fn a_preview_replaces_only_the_tab_a_preview_opened(cx: &mut TestAppContex
     cx.update_window(w.into(), |_, window, cx| {
         ws.update(cx, |ws, cx| {
             ws.git.panel_focus.clone().focus(window, cx);
-            let lane = ws.active.lane;
+            let lane = ws.active;
             ws.set_git_changes_cursor(lane, PathBuf::from("src/a.rs"), cx);
             ws.activate_git_changes_cursor(window, cx);
         });
@@ -436,7 +436,7 @@ async fn a_cursor_whose_file_vanished_resumes_in_place(cx: &mut TestAppContext) 
     cx.update_window(w.into(), |_, window, cx| {
         ws.update(cx, |ws, cx| {
             ws.git.panel_focus.clone().focus(window, cx);
-            let lane = ws.active.lane;
+            let lane = ws.active;
             ws.set_git_changes_cursor(lane, PathBuf::from("c.rs"), cx);
         });
     })
@@ -514,7 +514,7 @@ async fn skimming_back_over_a_committed_row_does_not_make_it_replaceable(cx: &mu
     refocus_panel(w, &ws, cx);
     cx.update_window(w.into(), |_, window, cx| {
         ws.update(cx, |ws, cx| {
-            let lane = ws.active.lane;
+            let lane = ws.active;
             ws.set_git_changes_cursor(lane, PathBuf::from("a.rs"), cx);
             ws.activate_git_changes_cursor(window, cx);
         });

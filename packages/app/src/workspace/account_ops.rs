@@ -44,7 +44,6 @@ use crate::surface::strings as s;
 use crate::ui::ButtonVariant;
 use crate::workspace::Workspace;
 use crate::workspace::dialog_helpers::open_confirm_dialog;
-use crate::workspace::main_area::agent_chat_host::agent_chat_ops::resolve_open_agent_id;
 use crate::workspace::main_area::agent_chat_pane::agent_chat_helpers::has_conversation;
 use crate::workspace::main_area::agent_chat_pane::view::AgentSessionStatus;
 use crate::workspace::main_area::pane;
@@ -272,12 +271,7 @@ impl Workspace {
                 let cwd = self.default_cwd_for_new_pane();
                 // Terminal pane: no agent, so no required auth domain —
                 // the account's own recipe decides the env.
-                let prepared = pane::resolve_pane_account(
-                    &self.accounts,
-                    &self.data_dir,
-                    selection,
-                    pane::AccountDomain::Any,
-                );
+                let prepared = self.resolve_account(selection, pane::AccountDomain::Any);
                 match self.create_pane_with_cwd(cwd, selection, prepared.as_ref(), window, cx) {
                     Ok(p) => p,
                     Err(e) => {
@@ -295,9 +289,7 @@ impl Workspace {
                 let agent_id = self
                     .agent_chat_view(source_pane_id)
                     .map(|v| v.read(cx).agent_id().to_owned())
-                    .unwrap_or_else(|| {
-                        resolve_open_agent_id(&self.mirrors.agents, self.last_agent_id.as_deref())
-                    });
+                    .unwrap_or_else(|| self.open_agent_id(None));
                 let mut new_pane = self.create_new_agent_chat_pane(
                     agent_id,
                     local_cwd,

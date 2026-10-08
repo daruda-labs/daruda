@@ -7,7 +7,6 @@ use super::pane_tree::{
     remove_pane_from_layout,
 };
 use crate::workspace::Workspace;
-use crate::workspace::main_area::agent_chat_host::agent_chat_ops::resolve_open_agent_id;
 use crate::workspace::main_area::file_view_pane::images::release_pane_images;
 
 /// What content a newly split-off pane should hold. Keeps the split entry
@@ -837,9 +836,7 @@ impl Workspace {
                 let agent_id = self
                     .agent_chat_view(focused)
                     .map(|v| v.read(cx).agent_id().to_owned())
-                    .unwrap_or_else(|| {
-                        resolve_open_agent_id(&self.mirrors.agents, self.last_agent_id.as_deref())
-                    });
+                    .unwrap_or_else(|| self.open_agent_id(None));
                 self.create_new_agent_chat_pane(
                     agent_id,
                     local_cwd,

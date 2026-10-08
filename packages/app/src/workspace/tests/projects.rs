@@ -489,7 +489,7 @@ fn close_active_project_empties_the_workspace_when_no_survivor_has_a_lane(cx: &m
     .ok();
     // Corrupt the surviving project A (id 0): empty its lane list.
     ws.update(cx, |ws, _| {
-        if let Some(p) = ws.projects.iter_mut().find(|p| p.id == 0) {
+        if let Some(p) = ws.projects.get_mut(0) {
             p.lanes.clear();
         }
     });
@@ -543,8 +543,7 @@ fn workspace_with_background_project_a(
 /// The value of `f` (a lane field accessor) for project `pid`'s lane 0.
 fn lane0_field<T>(ws: &Workspace, pid: u64, f: impl FnOnce(&crate::lane::Lane) -> T) -> T {
     f(ws.projects
-        .iter()
-        .find(|p| p.id == pid)
+        .get(pid)
         .expect("project present")
         .lane(0)
         .expect("lane 0 present"))

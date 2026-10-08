@@ -18,7 +18,7 @@ use gpui::Context;
 use super::Workspace;
 use super::command::flow_picker::FlowPurpose;
 use crate::agent::launch_resolve::{AgentLaunchSpec, account_recipe_for_connect, resolve_launch};
-use crate::workspace::main_area::pane::{AccountDomain, resolve_pane_account};
+use crate::workspace::main_area::pane::AccountDomain;
 
 /// Why a flow could not be submitted. These are refusals, not failures —
 /// nothing has been taken or written when one is returned.
@@ -485,12 +485,7 @@ impl Workspace {
             }
             let recipe = account_recipe_for_connect(&launch, false);
             let selection = self.default_account_selection_for_new_pane(recipe);
-            let prepared = resolve_pane_account(
-                &self.accounts,
-                &self.data_dir,
-                selection,
-                AccountDomain::for_agent(recipe),
-            );
+            let prepared = self.resolve_account(selection, AccountDomain::for_agent(recipe));
             // The same step a freshly created pane takes before its process
             // starts: Codex symlinks its `CODEX_HOME` in, Claude mirrors the
             // shared MCP servers. Skipping it would make only the first run

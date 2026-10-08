@@ -120,18 +120,8 @@ impl Workspace {
     fn probe_missing_git_dirs(&mut self, cx: &mut Context<Self>) {
         let pending: Vec<(LaneRef, PathBuf)> = self
             .projects
-            .iter()
-            .flat_map(|project| {
-                project.lanes.iter().map(move |lane| {
-                    (
-                        LaneRef {
-                            project: project.id,
-                            lane: lane.id,
-                        },
-                        lane,
-                    )
-                })
-            })
+            .lanes()
+            .map(|(target, _, lane)| (target, lane))
             .filter(|(target, lane)| {
                 lane.is_git()
                     && self

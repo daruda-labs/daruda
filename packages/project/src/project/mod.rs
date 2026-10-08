@@ -21,6 +21,9 @@ use daruda_store::project::{
 use crate::lane::Lane;
 use crate::lane::availability::LaneAvailability;
 
+mod projects;
+pub use projects::Projects;
+
 /// Runtime project entry. Contains the runtime lanes plus the
 /// metadata needed to render the left-dock tree (color, tab order,
 /// group membership). One `Project` per opened repository root.

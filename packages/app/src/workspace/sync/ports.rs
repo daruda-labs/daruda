@@ -187,12 +187,10 @@ impl Workspace {
         let ports = scan.ports;
         let lanes: Vec<LaneCandidate> = self
             .projects
-            .iter()
-            .flat_map(|project| {
-                project.lanes.iter().map(|lane| LaneCandidate {
-                    path: lane.path.clone(),
-                    label: crate::workspace::lane_ops::lane_label(&project.name, lane),
-                })
+            .lanes()
+            .map(|(_, project, lane)| LaneCandidate {
+                path: lane.path.clone(),
+                label: crate::workspace::lane_ops::lane_label(&project.name, lane),
             })
             .collect();
         let scanned: Vec<ScannedPort> = ports

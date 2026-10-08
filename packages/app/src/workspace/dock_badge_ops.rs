@@ -39,14 +39,12 @@ impl Workspace {
             })
             .map(|(lane, _)| lane)
             .collect();
-        for project in &self.projects {
-            for lane in project.lanes.iter().filter(|l| l.is_unread) {
-                lanes.insert(daruda_store::project::LaneRef {
-                    project: project.id,
-                    lane: lane.id,
-                });
-            }
-        }
+        lanes.extend(
+            self.projects
+                .lanes()
+                .filter(|(_, _, lane)| lane.is_unread)
+                .map(|(target, _, _)| target),
+        );
         lanes.len()
     }
 

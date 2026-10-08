@@ -204,24 +204,18 @@ impl Workspace {
         let uuid = self.uuid();
         let mut lanes: Vec<(u32, LaneEntry)> = self
             .projects
-            .iter()
-            .flat_map(|project| {
-                project.lanes.iter().map(move |lane| {
-                    let target = LaneRef {
-                        project: project.id,
-                        lane: lane.id,
-                    };
-                    (
-                        lane.tab_order,
-                        LaneEntry {
-                            target: LaneHandle::new(uuid, target),
-                            project: project.name.clone(),
-                            name: lane.display_name(),
-                            is_active: target == active,
-                            chats: self.control_chat_count(target),
-                        },
-                    )
-                })
+            .lanes()
+            .map(|(target, project, lane)| {
+                (
+                    lane.tab_order,
+                    LaneEntry {
+                        target: LaneHandle::new(uuid, target),
+                        project: project.name.clone(),
+                        name: lane.display_name(),
+                        is_active: target == active,
+                        chats: self.control_chat_count(target),
+                    },
+                )
             })
             .collect();
         // Name first so the listing reads alphabetically, then id so two
@@ -330,11 +324,7 @@ impl Workspace {
             return Err(ControlError::TargetGone);
         }
         self.activate_lane(target, window, cx);
-        let agent_id =
-            crate::workspace::main_area::agent_chat_host::agent_chat_ops::resolve_open_agent_id(
-                &self.mirrors.agents,
-                agent.as_deref().or(self.last_agent_id.as_deref()),
-            );
+        let agent_id = self.open_agent_id(agent.as_deref());
         let cwds = self.active_lane_cwds();
         self.insert_agent_chat_pane(agent_id, cwds, window, cx)
             .ok_or(ControlError::TargetGone)
@@ -697,11 +687,7 @@ impl Workspace {
         window: &mut gpui::Window,
         cx: &mut Context<Self>,
     ) -> PaneId {
-        let agent_id =
-            crate::workspace::main_area::agent_chat_host::agent_chat_ops::resolve_open_agent_id(
-                &self.mirrors.agents,
-                self.last_agent_id.as_deref(),
-            );
+        let agent_id = self.open_agent_id(None);
         let cwds = self.active_lane_cwds();
         self.insert_agent_chat_pane(agent_id, cwds, window, cx)
             .expect("pane opened")

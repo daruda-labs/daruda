@@ -34,11 +34,10 @@ impl Workspace {
                 self.data_dir.clone(),
             );
             self.next_project_id += 1;
-            self.active = daruda_store::project::LaneRef {
+            self.set_active(daruda_store::project::LaneRef {
                 project: project.id,
                 lane: project.lanes[0].id,
-            };
-            self.main_area.runtimes.entry(self.active).or_default();
+            });
             self.projects.push(project);
         }
         self.flows.browser.state.scope = FlowScope::Current;

@@ -16,7 +16,6 @@ use super::command::lane_switcher::LaneCandidate;
 use super::command::picker::PickerKey;
 use super::command::picker_key::picker_keystroke;
 use crate::lane::availability::LaneAvailability;
-use crate::workspace::main_area::agent_chat_host::agent_chat_ops::resolve_open_agent_id;
 use crate::workspace::main_area::file_view_pane::images::release_pane_images;
 use crate::workspace::main_area::pane;
 use crate::workspace::main_area::pane_tree::{PaneId, PaneLayout};
@@ -119,17 +118,10 @@ impl Workspace {
     /// [`lane_label`].
     fn lane_switcher_candidates(&self) -> Vec<LaneCandidate> {
         self.projects
-            .iter()
-            .flat_map(|project| {
-                let project_id = project.id;
-                let project_name = project.name.clone();
-                project.lanes.iter().map(move |lane| LaneCandidate {
-                    lane_ref: LaneRef {
-                        project: project_id,
-                        lane: lane.id,
-                    },
-                    label: lane_label(&project_name, lane),
-                })
+            .lanes()
+            .map(|(lane_ref, project, lane)| LaneCandidate {
+                lane_ref,
+                label: lane_label(&project.name, lane),
             })
             .collect()
     }
@@ -301,19 +293,15 @@ impl Workspace {
         // `None` only in the degenerate about-to-be-empty case (the `[+]`
         // is hidden for non-git workspaces, so main lanes keep ≥1 each).
         let fallback_target: Option<LaneRef> = if self.active == target {
-            let same_project = self
-                .projects
-                .iter()
-                .find(|p| p.id == target.project)
-                .and_then(|p| {
-                    p.lanes
-                        .iter()
-                        .find(|w| w.id != target.lane)
-                        .map(|w| LaneRef {
-                            project: target.project,
-                            lane: w.id,
-                        })
-                });
+            let same_project = self.projects.get(target.project).and_then(|p| {
+                p.lanes
+                    .iter()
+                    .find(|w| w.id != target.lane)
+                    .map(|w| LaneRef {
+                        project: target.project,
+                        lane: w.id,
+                    })
+            });
             let cross_project = || {
                 self.projects
                     .iter()
@@ -363,7 +351,7 @@ impl Workspace {
             }
             self.forget_pane_input_draft(*pane_id);
         }
-        if let Some(project) = self.projects.iter_mut().find(|p| p.id == target.project) {
+        if let Some(project) = self.projects.get_mut(target.project) {
             project.lanes.retain(|w| w.id != target.lane);
         }
         if let Some(path) = removed_path {
@@ -417,8 +405,8 @@ impl Workspace {
     /// worktree prune`) and bubble the message back to the modal.
     /// `requested_agent` names the agent the initial chat pane opens under.
     /// `None` keeps the session-sticky default; an id the catalog does not
-    /// hold falls back to that default too, which is
-    /// [`resolve_open_agent_id`]'s existing rule rather than a second one.
+    /// hold falls back to the catalog default, not to the sticky one — the
+    /// rule [`Workspace::open_agent_id`] already applies, not a second one.
     /// Only the control surface passes a value — the create form and the task
     /// workflow both leave the choice to the session.
     pub(in crate::workspace) fn finalize_create_lane(
@@ -449,12 +437,7 @@ impl Workspace {
         let pane = match surface {
             TaskAgentSurface::Terminal => {
                 let account = self.default_account_selection_for_new_pane(None);
-                let prepared = pane::resolve_pane_account(
-                    &self.accounts,
-                    &self.data_dir,
-                    account,
-                    pane::AccountDomain::Any,
-                );
+                let prepared = self.resolve_account(account, pane::AccountDomain::Any);
                 self.create_pane_with_cwd(
                     Some(new_path.clone()),
                     account,
@@ -471,10 +454,7 @@ impl Workspace {
                 // whose command needs the legacy `{{cwd}}` token parks in
                 // the "no remote path set" error rather than connecting;
                 // every other launch shape resolves to `Local`.
-                let agent_id = resolve_open_agent_id(
-                    &self.mirrors.agents,
-                    requested_agent.or(self.last_agent_id.as_deref()),
-                );
+                let agent_id = self.open_agent_id(requested_agent);
                 self.create_new_agent_chat_pane(
                     agent_id,
                     Some(new_path.clone()),
@@ -610,16 +590,13 @@ impl Workspace {
         // Clear keyboard cursor — it lived in the previous visible list.
         self.file_tree.files_selection = None;
 
-        // Re-point the active key. Both runtimes already live in the
-        // single `runtimes` map — nothing to swap. A lane never activated
-        // has no entry yet; `entry().or_default` seeds an empty one so
-        // `active_runtime()` resolves immediately.
-        self.main_area.runtimes.entry(target).or_default();
         // Drop any in-flight drag hover so a stale half-fill overlay does
         // not linger on the newly-activated lane.
         self.main_area.pane_drop_hover = None;
 
-        self.active = target;
+        // Both runtimes live in the single `runtimes` map — nothing to swap;
+        // a lane never activated gets an empty one.
+        self.set_active(target);
         // Seen now. Persisted by the `mutate_durable` each branch below ends on.
         if let Some(lane) = self.lane_for_mut(target)
             && std::mem::take(&mut lane.is_unread)
@@ -633,7 +610,7 @@ impl Workspace {
 
         // Update the last-active-lane hint so clicking the project header
         // snaps back to the lane the user just left.
-        if let Some(project) = self.projects.iter_mut().find(|p| p.id == target.project) {
+        if let Some(project) = self.projects.get_mut(target.project) {
             project.last_active_lane_id = target.lane;
         }
 
@@ -650,7 +627,7 @@ impl Workspace {
             .unwrap_or(false)
         {
             self.reconcile_right_dock_for_inaccessible_lane(window, cx);
-            // Persist the active-ref change (`self.active = target`) so a
+            // Persist the active-ref change (`set_active(target)`) so a
             // quit right after selecting a missing lane keeps the
             // selection. The Present path persists via the tail below.
             self.mutate_durable(cx, |_, _| {});
@@ -814,7 +791,7 @@ impl Workspace {
         if from.project != to.project {
             return;
         }
-        let Some(project) = self.projects.iter_mut().find(|p| p.id == from.project) else {
+        let Some(project) = self.projects.get_mut(from.project) else {
             return;
         };
         let from_idx = project.lanes.iter().position(|w| w.id == from.lane);

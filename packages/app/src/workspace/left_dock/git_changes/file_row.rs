@@ -3,7 +3,7 @@
 
 use std::path::PathBuf;
 
-use daruda_store::project::LaneId;
+use daruda_store::project::{LaneId, LaneRef};
 use gpui::{
     AnyElement, ClickEvent, Context, ElementId, MouseButton, MouseDownEvent, div, prelude::*, px,
 };
@@ -25,7 +25,7 @@ use super::unified_list::UnifiedEntry;
 pub(super) fn unified_file_row(
     idx: usize,
     entry: &UnifiedEntry,
-    lane_id: LaneId,
+    target: LaneRef,
     wt_paths: &LanePaths<'_>,
     selected: Option<&(LaneId, PathBuf, DiffSource)>,
     is_cursor: bool,
@@ -42,7 +42,7 @@ pub(super) fn unified_file_row(
 
     // A range pane shows the same path from commits, not this row's change.
     let is_selected = selected.is_some_and(|(wt, p, source)| {
-        *wt == lane_id && *p == abs_path_for_open && source.is_live()
+        *wt == target.lane && *p == abs_path_for_open && source.is_live()
     });
 
     // Renamed entries (`R` / `C` status) carry the original path —
@@ -138,9 +138,9 @@ pub(super) fn unified_file_row(
                     };
                     ws.update(cx, |ws, cx| {
                         if is_staged {
-                            ws.unstage_file(lane_id, path_for_checkbox.clone(), cx);
+                            ws.unstage_file(target, path_for_checkbox.clone(), cx);
                         } else {
-                            ws.stage_file(lane_id, path_for_checkbox.clone(), cx);
+                            ws.stage_file(target, path_for_checkbox.clone(), cx);
                         }
                     });
                 }),
@@ -176,7 +176,7 @@ pub(super) fn unified_file_row(
                 let cursor_path = path_for_cursor.clone();
                 ws.update(cx, |ws, cx| {
                     ws.on_git_changes_row_click(
-                        lane_id,
+                        target,
                         cursor_path,
                         is_staged,
                         click_count,
@@ -276,7 +276,7 @@ pub(super) fn unified_file_row(
                         move |_, _, cx| {
                             if let Some(w) = ws_stage.upgrade() {
                                 w.update(cx, |ws, cx| {
-                                    ws.unstage_file(lane_id, path_stage.clone(), cx)
+                                    ws.unstage_file(target, path_stage.clone(), cx)
                                 });
                             }
                         },
@@ -286,7 +286,7 @@ pub(super) fn unified_file_row(
                 menu.item(PopupMenuItem::new(app_strings::ctx::git_stage()).on_click(
                     move |_, _, cx| {
                         if let Some(w) = ws_stage.upgrade() {
-                            w.update(cx, |ws, cx| ws.stage_file(lane_id, path_stage.clone(), cx));
+                            w.update(cx, |ws, cx| ws.stage_file(target, path_stage.clone(), cx));
                         }
                     },
                 ))
@@ -300,7 +300,7 @@ pub(super) fn unified_file_row(
                                 // The context menu is a deliberate pick, so
                                 // the tab it opens is not a skim's to reuse.
                                 ws.open_git_file_diff(
-                                    lane_id,
+                                    target.lane,
                                     path_diff.clone(),
                                     DiffSource::from_staged(is_staged),
                                     OpenIntent::Commit,
@@ -318,7 +318,7 @@ pub(super) fn unified_file_row(
                     move |_, window, cx| {
                         if let Some(w) = ws_discard.upgrade() {
                             w.update(cx, |ws, cx| {
-                                ws.on_discard_file(lane_id, path_discard.clone(), window, cx)
+                                ws.on_discard_file(target, path_discard.clone(), window, cx)
                             });
                         }
                     },

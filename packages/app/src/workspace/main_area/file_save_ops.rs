@@ -96,10 +96,7 @@ impl Workspace {
 
     fn file_content_by_id_mut(&mut self, pane_id: PaneId) -> Option<&mut FileContent> {
         self.main_area
-            .runtimes
-            .values_mut()
-            .flat_map(|rt| rt.panes.iter_mut())
-            .find(|p| p.id == pane_id)
+            .pane_mut(pane_id)
             .and_then(|p| p.file_content_mut())
     }
 

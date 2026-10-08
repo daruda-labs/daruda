@@ -1187,6 +1187,16 @@ impl Workspace {
         }
     }
 
+    /// [`resolve_pane_account`] against this window's account cache and
+    /// data directory — the pair every pane-spawn path passes together.
+    pub(in crate::workspace) fn resolve_account(
+        &self,
+        selection: daruda_store::accounts::AccountSelection,
+        domain: AccountDomain,
+    ) -> Option<PreparedAccount> {
+        resolve_pane_account(&self.accounts, &self.data_dir, selection, domain)
+    }
+
     pub(in crate::workspace) fn create_pane(
         &mut self,
         window: &mut Window,
@@ -1205,8 +1215,7 @@ impl Workspace {
         cx: &mut Context<Self>,
     ) -> Result<Pane, PaneSpawnError> {
         let account = self.default_account_selection_for_new_pane(None);
-        let prepared =
-            resolve_pane_account(&self.accounts, &self.data_dir, account, AccountDomain::Any);
+        let prepared = self.resolve_account(account, AccountDomain::Any);
         self.create_pane_with_cwd(cwd, account, prepared.as_ref(), window, cx)
     }
 

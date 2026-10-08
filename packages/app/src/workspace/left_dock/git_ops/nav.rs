@@ -3,7 +3,7 @@
 use crate::workspace::main_area::file_view_pane::DiffSource;
 use std::path::PathBuf;
 
-use daruda_store::project::{LaneId, LaneRef};
+use daruda_store::project::LaneRef;
 use gpui::{Context, Window};
 
 use crate::workspace::Workspace;
@@ -52,14 +52,10 @@ impl Workspace {
     /// to — see [`GitCursor`].
     pub(in crate::workspace) fn set_git_changes_cursor(
         &mut self,
-        lane_id: LaneId,
+        target: LaneRef,
         path: PathBuf,
         cx: &mut Context<Self>,
     ) {
-        let target = LaneRef {
-            project: self.active.project,
-            lane: lane_id,
-        };
         // Keep the previous position when the path is not on screen (its group
         // is collapsed, a refresh is mid-flight): falling back to 0 would send
         // the next arrow key to the top of the list, which is the very thing
@@ -85,7 +81,7 @@ impl Workspace {
     /// to the external editor; a single click moves the cursor and previews.
     pub(in crate::workspace) fn on_git_changes_row_click(
         &mut self,
-        lane_id: LaneId,
+        target: LaneRef,
         repo_path: PathBuf,
         staged: bool,
         click_count: usize,
@@ -100,22 +96,18 @@ impl Workspace {
         // path is repo-root-relative, and a linked lane's root is not the
         // repo root, so only `LanePaths` can absolutise it correctly.
         let Some(abs) = self
-            .active_lane()
+            .lane_for(target)
             .map(|wt| wt.paths().from_git_status(&repo_path))
         else {
             return;
         };
         if click_count >= 2 {
-            let lane = daruda_store::project::LaneRef {
-                project: self.active.project,
-                lane: lane_id,
-            };
-            self.open_file_externally(lane, abs, cx);
+            self.open_file_externally(target, abs, cx);
             return;
         }
-        self.set_git_changes_cursor(lane_id, repo_path, cx);
+        self.set_git_changes_cursor(target, repo_path, cx);
         self.open_git_file_diff(
-            lane_id,
+            target.lane,
             abs,
             DiffSource::from_staged(staged),
             OpenIntent::Preview,
@@ -176,7 +168,6 @@ impl Workspace {
     /// vanished from `git status`.
     pub(in crate::workspace) fn toggle_git_changes_cursor_stage(&mut self, cx: &mut Context<Self>) {
         let active_ref = self.active;
-        let active_id = self.active.lane;
         let Some(cursor) = self
             .lane_scoped
             .get(&active_ref)
@@ -189,9 +180,9 @@ impl Workspace {
         };
         let is_staged = s.staged.iter().any(|e| e.path == cursor);
         if is_staged {
-            self.unstage_file(active_id, cursor, cx);
+            self.unstage_file(active_ref, cursor, cx);
         } else {
-            self.stage_file(active_id, cursor, cx);
+            self.stage_file(active_ref, cursor, cx);
         }
     }
 
@@ -280,14 +271,10 @@ impl Workspace {
     /// since the view is task-driven and stale collapse state is just noise.
     pub(in crate::workspace) fn toggle_git_dir_collapse(
         &mut self,
-        lane_id: LaneId,
+        target: LaneRef,
         dir: String,
         cx: &mut Context<Self>,
     ) {
-        let target = LaneRef {
-            project: self.active.project,
-            lane: lane_id,
-        };
         let set = &mut self.lane_scoped_mut(target).git.collapsed_dirs;
         if !set.remove(&dir) {
             set.insert(dir);

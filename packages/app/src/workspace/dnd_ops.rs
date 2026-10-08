@@ -44,20 +44,10 @@ impl Workspace {
         if from == to {
             return;
         }
-        let Some(to_group) = self
-            .projects
-            .iter()
-            .find(|p| p.id == to)
-            .map(|p| p.group_id)
-        else {
+        let Some(to_group) = self.projects.get(to).map(|p| p.group_id) else {
             return;
         };
-        let Some(from_group_old) = self
-            .projects
-            .iter()
-            .find(|p| p.id == from)
-            .map(|p| p.group_id)
-        else {
+        let Some(from_group_old) = self.projects.get(from).map(|p| p.group_id) else {
             return;
         };
 
@@ -77,7 +67,7 @@ impl Workspace {
                 if from_group_old == to_group && new == original {
                     return;
                 }
-                if let Some(p) = self.projects.iter_mut().find(|p| p.id == from) {
+                if let Some(p) = self.projects.get_mut(from) {
                     p.group_id = to_group;
                 }
                 self.write_group_member_order(&new);
@@ -98,7 +88,7 @@ impl Workspace {
                 if from_group_old == to_group && new == original {
                     return;
                 }
-                if let Some(p) = self.projects.iter_mut().find(|p| p.id == from) {
+                if let Some(p) = self.projects.get_mut(from) {
                     p.group_id = None;
                 }
                 self.write_top_row_order(&new);
@@ -130,19 +120,14 @@ impl Workspace {
         if !self.groups.iter().any(|g| g.id == target) {
             return;
         }
-        let Some(from_group_old) = self
-            .projects
-            .iter()
-            .find(|p| p.id == from)
-            .map(|p| p.group_id)
-        else {
+        let Some(from_group_old) = self.projects.get(from).map(|p| p.group_id) else {
             return;
         };
         if from_group_old == Some(target) {
             return;
         }
 
-        if let Some(p) = self.projects.iter_mut().find(|p| p.id == from) {
+        if let Some(p) = self.projects.get_mut(from) {
             p.group_id = Some(target);
         }
 
@@ -213,8 +198,7 @@ impl Workspace {
             .map(|g| (TopRow::Group(g.id), g.tab_order))
             .chain(
                 self.projects
-                    .iter()
-                    .filter(|p| p.group_id.is_none())
+                    .ungrouped()
                     .map(|p| (TopRow::Project(p.id), p.tab_order)),
             )
             .collect();
@@ -226,10 +210,7 @@ impl Workspace {
     fn top_row_exists(&self, row: TopRow) -> bool {
         match row {
             TopRow::Group(id) => self.groups.iter().any(|g| g.id == id),
-            TopRow::Project(id) => self
-                .projects
-                .iter()
-                .any(|p| p.id == id && p.group_id.is_none()),
+            TopRow::Project(id) => self.projects.get(id).is_some_and(|p| p.group_id.is_none()),
         }
     }
 
@@ -245,7 +226,7 @@ impl Workspace {
                     }
                 }
                 TopRow::Project(id) => {
-                    if let Some(p) = self.projects.iter_mut().find(|p| p.id == *id) {
+                    if let Some(p) = self.projects.get_mut(*id) {
                         p.tab_order = order;
                     }
                 }
@@ -257,8 +238,7 @@ impl Workspace {
     fn group_member_order(&self, group: GroupId) -> Vec<ProjectId> {
         let mut entries: Vec<(ProjectId, u32)> = self
             .projects
-            .iter()
-            .filter(|p| p.group_id == Some(group))
+            .in_group(group)
             .map(|p| (p.id, p.tab_order))
             .collect();
         entries.sort_by_key(|e| e.1);
@@ -271,7 +251,7 @@ impl Workspace {
     /// not listed in `ids` keep their existing `tab_order`.
     fn write_group_member_order(&mut self, ids: &[ProjectId]) {
         for (i, id) in ids.iter().enumerate() {
-            if let Some(p) = self.projects.iter_mut().find(|p| p.id == *id) {
+            if let Some(p) = self.projects.get_mut(*id) {
                 p.tab_order = i as u32;
             }
         }

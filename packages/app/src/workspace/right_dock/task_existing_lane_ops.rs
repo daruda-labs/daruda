@@ -13,7 +13,6 @@ use gpui::{Context, Window};
 
 use super::task_start::{TaskStartError, TaskStarted};
 use crate::workspace::Workspace;
-use crate::workspace::main_area::agent_chat_host::agent_chat_ops::resolve_open_agent_id;
 use crate::workspace::main_area::pane_tree::PaneId;
 
 /// What the prompt header names for a lane: its branch, else its label
@@ -32,16 +31,10 @@ impl Workspace {
     /// The registered lane at `path`, in any project — tasks are shared by
     /// every window and project, so the owner need not be the active one.
     pub(in crate::workspace) fn lane_ref_at(&self, path: &Path) -> Option<LaneRef> {
-        self.projects.iter().find_map(|project| {
-            project
-                .lanes
-                .iter()
-                .find(|lane| daruda_core::path::same_path(&lane.path, path))
-                .map(|lane| LaneRef {
-                    project: project.id,
-                    lane: lane.id,
-                })
-        })
+        self.projects
+            .lanes()
+            .find(|(_, _, lane)| daruda_core::path::same_path(&lane.path, path))
+            .map(|(target, _, _)| target)
     }
 
     /// The lane a task being run again should stay in: the one its earlier
@@ -97,8 +90,7 @@ impl Workspace {
         match surface {
             TaskAgentSurface::Terminal => self.insert_terminal_tab(Some(root), window, cx),
             TaskAgentSurface::AgentChat => {
-                let agent_id =
-                    resolve_open_agent_id(&self.mirrors.agents, self.last_agent_id.as_deref());
+                let agent_id = self.open_agent_id(None);
                 let cwds = self.active_lane_cwds();
                 let pane_id = self.insert_agent_chat_pane(agent_id, cwds, window, cx)?;
                 self.reveal_new_agent_chat_pane(pane_id, window, cx);

@@ -4,7 +4,7 @@ use std::path::PathBuf;
 
 use daruda_store::observability::error_report::{ErrorReport, ErrorSeverity};
 use daruda_store::observability::system_info::redact_home;
-use daruda_store::project::{LaneId, LaneRef};
+use daruda_store::project::LaneRef;
 use gpui::{Context, Window};
 
 use crate::path_ext::PathExt;
@@ -23,14 +23,10 @@ impl Workspace {
     /// anchored main lane whose `wt.path` is a subdirectory.
     pub(in crate::workspace) fn stage_file(
         &mut self,
-        lane_id: LaneId,
+        target: LaneRef,
         path: PathBuf,
         cx: &mut Context<Self>,
     ) {
-        let target = LaneRef {
-            project: self.active.project,
-            lane: lane_id,
-        };
         let Some(wt) = self.lane_for(target) else {
             return;
         };
@@ -67,14 +63,10 @@ impl Workspace {
     /// why `wt.path` and the shared `repo_root` are both unsuitable.
     pub(in crate::workspace) fn unstage_file(
         &mut self,
-        lane_id: LaneId,
+        target: LaneRef,
         path: PathBuf,
         cx: &mut Context<Self>,
     ) {
-        let target = LaneRef {
-            project: self.active.project,
-            lane: lane_id,
-        };
         let Some(wt) = self.lane_for(target) else {
             return;
         };
@@ -109,17 +101,13 @@ impl Workspace {
     /// per-directory "stage all in this dir" checkbox.
     pub(in crate::workspace) fn stage_paths(
         &mut self,
-        lane_id: LaneId,
+        target: LaneRef,
         paths: Vec<PathBuf>,
         cx: &mut Context<Self>,
     ) {
         if paths.is_empty() {
             return;
         }
-        let target = LaneRef {
-            project: self.active.project,
-            lane: lane_id,
-        };
         let Some(wt) = self.lane_for(target) else {
             return;
         };
@@ -154,17 +142,13 @@ impl Workspace {
     /// [`Self::stage_paths`] for the per-dir "unstage all" toggle.
     pub(in crate::workspace) fn unstage_paths(
         &mut self,
-        lane_id: LaneId,
+        target: LaneRef,
         paths: Vec<PathBuf>,
         cx: &mut Context<Self>,
     ) {
         if paths.is_empty() {
             return;
         }
-        let target = LaneRef {
-            project: self.active.project,
-            lane: lane_id,
-        };
         let Some(wt) = self.lane_for(target) else {
             return;
         };
@@ -197,11 +181,7 @@ impl Workspace {
     }
 
     /// Stage all unstaged and untracked files (`git add --all`).
-    pub(in crate::workspace) fn stage_all(&mut self, lane_id: LaneId, cx: &mut Context<Self>) {
-        let target = LaneRef {
-            project: self.active.project,
-            lane: lane_id,
-        };
+    pub(in crate::workspace) fn stage_all(&mut self, target: LaneRef, cx: &mut Context<Self>) {
         let Some(wt) = self.lane_for(target) else {
             return;
         };
@@ -231,11 +211,7 @@ impl Workspace {
     }
 
     /// Unstage all files (`git restore --staged .`).
-    pub(in crate::workspace) fn unstage_all(&mut self, lane_id: LaneId, cx: &mut Context<Self>) {
-        let target = LaneRef {
-            project: self.active.project,
-            lane: lane_id,
-        };
+    pub(in crate::workspace) fn unstage_all(&mut self, target: LaneRef, cx: &mut Context<Self>) {
         let Some(wt) = self.lane_for(target) else {
             return;
         };
@@ -270,7 +246,7 @@ impl Workspace {
     /// are irreversible.
     pub(in crate::workspace) fn on_discard_file(
         &mut self,
-        lane_id: LaneId,
+        target: LaneRef,
         path: PathBuf,
         window: &mut Window,
         cx: &mut Context<Self>,
@@ -279,16 +255,9 @@ impl Workspace {
         if self.git_lock_held(GitLock::Index) {
             return;
         }
-        if !self
-            .active_project()
-            .is_some_and(|p| p.lanes.iter().any(|w| w.id == lane_id))
-        {
+        if self.lane_for(target).is_none() {
             return;
         }
-        let target = LaneRef {
-            project: self.active.project,
-            lane: lane_id,
-        };
         let filename = path.file_name_lossy();
         let body = match self.discard_kind(target, &path) {
             DiscardKind::Untracked => app_strings::git::confirm_discard_untracked_body(&filename),
@@ -305,7 +274,7 @@ impl Workspace {
             move |_, _window, app_cx| {
                 if let Some(ws) = weak.upgrade() {
                     let pinned = vec![path.clone()];
-                    ws.update(app_cx, |ws, cx| ws.discard_changes(lane_id, pinned, cx));
+                    ws.update(app_cx, |ws, cx| ws.discard_changes(target, pinned, cx));
                 }
             },
             window,
@@ -319,17 +288,13 @@ impl Workspace {
     /// is up is not among them.
     pub(in crate::workspace) fn on_discard_all(
         &mut self,
-        lane_id: LaneId,
+        target: LaneRef,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
         if self.git_lock_held(GitLock::Index) {
             return;
         }
-        let target = LaneRef {
-            project: self.active.project,
-            lane: lane_id,
-        };
         let Some(status) = self.lane_git_worktree(target) else {
             return;
         };
@@ -357,7 +322,7 @@ impl Workspace {
             move |_, _window, app_cx| {
                 if let Some(ws) = weak.upgrade() {
                     let pinned = pinned.clone();
-                    ws.update(app_cx, |ws, cx| ws.discard_changes(lane_id, pinned, cx));
+                    ws.update(app_cx, |ws, cx| ws.discard_changes(target, pinned, cx));
                 }
             },
             window,
@@ -370,14 +335,10 @@ impl Workspace {
     /// is now. The caller has already asked.
     pub(in crate::workspace) fn discard_changes(
         &mut self,
-        lane_id: LaneId,
+        target: LaneRef,
         pinned: Vec<PathBuf>,
         cx: &mut Context<Self>,
     ) {
-        let target = LaneRef {
-            project: self.active.project,
-            lane: lane_id,
-        };
         let Some(wt_top) = self
             .lane_for(target)
             .and_then(|wt| wt.git_worktree_root())

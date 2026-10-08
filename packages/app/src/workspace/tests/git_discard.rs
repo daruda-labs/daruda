@@ -39,7 +39,7 @@ fn open(
 ) -> (
     gpui::WindowHandle<gpui_component::Root>,
     gpui::Entity<Workspace>,
-    daruda_store::project::LaneId,
+    daruda_store::project::LaneRef,
 ) {
     let project = daruda_store::project::Project::from_path(root);
     let (wh, ws) = build_workspace_with(cx, &daruda_config::Config::default(), Some(project));
@@ -48,7 +48,7 @@ fn open(
     let id = ws.read_with(cx, |ws, _| ws.active_ref());
     ws.update(cx, |ws, cx| ws.refresh_git_status(id, cx));
     cx.run_until_parked();
-    (wh, ws, id.lane)
+    (wh, ws, id)
 }
 
 fn porcelain(root: &std::path::Path) -> String {

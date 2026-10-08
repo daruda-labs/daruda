@@ -204,7 +204,7 @@ impl Workspace {
     /// lives in) `self.active_runtime_mut()`. Single construction site for
     /// that pairing — see [`debug_assert_owner_is_active`] for why `lane_id`
     /// must match `self.active.lane` here.
-    fn owner_lane_ref(&self, lane_id: LaneId) -> LaneRef {
+    pub(in crate::workspace) fn owner_lane_ref(&self, lane_id: LaneId) -> LaneRef {
         debug_assert_owner_is_active(lane_id, self.active.lane);
         LaneRef {
             project: self.active.project,

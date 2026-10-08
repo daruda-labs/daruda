@@ -238,10 +238,7 @@ impl Workspace {
     ) -> bool {
         if let Some((path, view)) = self
             .main_area
-            .runtimes
-            .values()
-            .flat_map(|runtime| runtime.panes.iter())
-            .find(|pane| pane.id == pane_id)
+            .pane(pane_id)
             .and_then(|pane| pane.flow_graph_content())
             .map(|graph| (graph.path.clone(), graph.view.clone()))
         {

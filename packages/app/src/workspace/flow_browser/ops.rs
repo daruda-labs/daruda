@@ -35,20 +35,12 @@ impl Workspace {
             state: self.flows.browser.state.clone(),
             targets: self
                 .projects
-                .iter()
-                .flat_map(|project| {
-                    project.lanes.iter().map(|lane| {
-                        let target = LaneRef {
-                            project: project.id,
-                            lane: lane.id,
-                        };
-                        FlowTarget {
-                            lane: target,
-                            project: project.name.clone(),
-                            label: self.lane_label_for(target),
-                            current: target == self.active,
-                        }
-                    })
+                .lanes()
+                .map(|(target, project, _)| FlowTarget {
+                    lane: target,
+                    project: project.name.clone(),
+                    label: self.lane_label_for(target),
+                    current: target == self.active,
                 })
                 .collect(),
             search: Handle(search.clone()),

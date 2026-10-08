@@ -28,7 +28,6 @@ use daruda_store::observability::error_report::{ErrorReport, ErrorSeverity};
 use super::{AddManagedAccount, accounts_global, auth_status_global};
 use crate::surface::strings as s;
 use crate::workspace::Workspace;
-use crate::workspace::main_area::agent_chat_host::agent_chat_ops::resolve_open_agent_id;
 
 /// Timeout for a headless add-account login before it's treated as hung
 /// and cancelled. Generous — the flow blocks on the user completing OAuth
@@ -261,7 +260,7 @@ impl Workspace {
         &self,
         requested: AccountRecipeId,
     ) -> String {
-        let active_id = resolve_open_agent_id(&self.mirrors.agents, self.last_agent_id.as_deref());
+        let active_id = self.open_agent_id(None);
         resolve_login_command(&self.mirrors.agents, &active_id, requested)
     }
 
@@ -847,7 +846,7 @@ impl Workspace {
     /// Settings costs nothing.
     fn probe_auth_status(&mut self, target: LoginTarget, supersede: bool, cx: &mut Context<Self>) {
         let recipe_id = target.recipe();
-        let active_id = resolve_open_agent_id(&self.mirrors.agents, self.last_agent_id.as_deref());
+        let active_id = self.open_agent_id(None);
         let Some((command, format)) =
             resolve_status_command(&self.mirrors.agents, &active_id, recipe_id)
         else {

@@ -1344,3 +1344,42 @@ async fn revealing_a_folder_that_is_gone_reports_it(cx: &mut TestAppContext) {
         );
     });
 }
+
+/// A pane is found by id whichever lane holds it — the lookup must not stop
+/// at the active lane, since chat, task and file-save ops address panes in
+/// background lanes too.
+#[gpui::test]
+async fn a_pane_in_a_background_lane_is_found_by_id(cx: &mut TestAppContext) {
+    let (_window, workspace) = build_workspace(cx);
+    workspace.update(cx, |ws, _| {
+        let pane_id = ws
+            .active_runtime()
+            .panes
+            .first()
+            .expect("a fresh workspace opens one pane")
+            .id;
+        let active = ws.active_ref();
+        let runtime = ws
+            .main_area
+            .runtimes
+            .remove(&active)
+            .expect("active runtime");
+        let background = daruda_store::project::LaneRef {
+            project: active.project,
+            lane: active.lane + 1,
+        };
+        ws.main_area.runtimes.insert(background, runtime);
+
+        assert_eq!(ws.main_area.pane(pane_id).map(|p| p.id), Some(pane_id));
+        assert_eq!(ws.main_area.pane_mut(pane_id).map(|p| p.id), Some(pane_id));
+        assert!(ws.main_area.pane(pane_id + 1_000).is_none());
+
+        // Put the runtime back so teardown finds the active lane seeded.
+        let runtime = ws
+            .main_area
+            .runtimes
+            .remove(&background)
+            .expect("moved runtime");
+        ws.main_area.runtimes.insert(active, runtime);
+    });
+}

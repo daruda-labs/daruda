@@ -89,7 +89,7 @@ fn reorder_lane_moves_within_project_and_rejects_cross_project(cx: &mut TestAppC
     });
     ws.update(cx, |ws, cx| ws.reorder_lane(ref_a, ref_b, cx));
     ws.read_with(cx, |ws, _| {
-        let p = ws.projects.iter().find(|p| p.id == project_id).unwrap();
+        let p = ws.projects.get(project_id).unwrap();
         // Expect: [0, 200, 100] in tab_order 0..2.
         let order: Vec<(LaneId, u32)> = p.lanes.iter().map(|w| (w.id, w.tab_order)).collect();
         assert_eq!(order, vec![(0, 0), (200, 1), (100, 2)]);
@@ -146,8 +146,8 @@ fn reorder_project_before_top_level_handles_upward_and_downward_adjacent_moves(
     // Before: [a=0, b=1]. Move b before a → [b=0, a=1].
     ws.update(cx, |ws, cx| ws.reorder_project_before(pb, pa, cx));
     ws.read_with(cx, |ws, _| {
-        let pa_order = ws.projects.iter().find(|p| p.id == pa).unwrap().tab_order;
-        let pb_order = ws.projects.iter().find(|p| p.id == pb).unwrap().tab_order;
+        let pa_order = ws.projects.get(pa).unwrap().tab_order;
+        let pb_order = ws.projects.get(pb).unwrap().tab_order;
         assert!(pb_order < pa_order, "b must sit before a after the move");
         let mut orders: Vec<u32> = vec![pa_order, pb_order];
         orders.sort();
@@ -157,8 +157,8 @@ fn reorder_project_before_top_level_handles_upward_and_downward_adjacent_moves(
     // Move b downward onto a's slot. Downward drops land after the target.
     ws.update(cx, |ws, cx| ws.reorder_project_before(pb, pa, cx));
     ws.read_with(cx, |ws, _| {
-        let pa_order = ws.projects.iter().find(|p| p.id == pa).unwrap().tab_order;
-        let pb_order = ws.projects.iter().find(|p| p.id == pb).unwrap().tab_order;
+        let pa_order = ws.projects.get(pa).unwrap().tab_order;
+        let pb_order = ws.projects.get(pb).unwrap().tab_order;
         assert!(pa_order < pb_order, "b must sit after a after the move");
         let mut orders: Vec<u32> = vec![pa_order, pb_order];
         orders.sort();
@@ -214,8 +214,8 @@ fn reorder_project_before_inherits_target_group_and_swaps_inside_it(cx: &mut Tes
     // pa → pb re-parents into `gid` at pa's position.
     ws.update(cx, |ws, cx| ws.reorder_project_before(pb, pa, cx));
     ws.read_with(cx, |ws, _| {
-        let pa_t = ws.projects.iter().find(|p| p.id == pa).unwrap().tab_order;
-        let pb_after = ws.projects.iter().find(|p| p.id == pb).unwrap();
+        let pa_t = ws.projects.get(pa).unwrap().tab_order;
+        let pb_after = ws.projects.get(pb).unwrap();
         assert_eq!(pb_after.group_id, Some(gid));
         assert!(
             pb_after.tab_order < pa_t,
@@ -234,8 +234,8 @@ fn reorder_project_before_inherits_target_group_and_swaps_inside_it(cx: &mut Tes
 
     ws.update(cx, |ws, cx| ws.reorder_project_before(pa, pb, cx));
     ws.read_with(cx, |ws, _| {
-        let pa_t = ws.projects.iter().find(|p| p.id == pa).unwrap().tab_order;
-        let pb_t = ws.projects.iter().find(|p| p.id == pb).unwrap().tab_order;
+        let pa_t = ws.projects.get(pa).unwrap().tab_order;
+        let pb_t = ws.projects.get(pb).unwrap().tab_order;
         assert!(pa_t < pb_t, "pa must land before pb within the group");
         let mut orders: Vec<u32> = ws
             .projects
@@ -265,9 +265,9 @@ fn reorder_project_before_downward_across_multiple_lands_after_target(cx: &mut T
     });
     ws.update(cx, |ws, cx| ws.reorder_project_before(pa, pc, cx));
     ws.read_with(cx, |ws, _| {
-        let pa_t = ws.projects.iter().find(|p| p.id == pa).unwrap().tab_order;
-        let pb_t = ws.projects.iter().find(|p| p.id == pb).unwrap().tab_order;
-        let pc_t = ws.projects.iter().find(|p| p.id == pc).unwrap().tab_order;
+        let pa_t = ws.projects.get(pa).unwrap().tab_order;
+        let pb_t = ws.projects.get(pb).unwrap().tab_order;
+        let pc_t = ws.projects.get(pc).unwrap().tab_order;
         assert_eq!(pb_t, 0);
         assert_eq!(pc_t, 1);
         assert_eq!(pa_t, 2);
@@ -295,8 +295,8 @@ fn move_project_to_group_end_appends_and_renumbers_top_pool(cx: &mut TestAppCont
     // group's member list, and the top-level pool renumbers without pb.
     ws.update(cx, |ws, cx| ws.move_project_to_group_end(pb, gid, cx));
     let pb_order_after_append = ws.read_with(cx, |ws, _| {
-        let pa_t = ws.projects.iter().find(|p| p.id == pa).unwrap().tab_order;
-        let pb_p = ws.projects.iter().find(|p| p.id == pb).unwrap();
+        let pa_t = ws.projects.get(pa).unwrap().tab_order;
+        let pb_p = ws.projects.get(pb).unwrap();
         assert_eq!(pb_p.group_id, Some(gid));
         assert!(pb_p.tab_order > pa_t, "pb must follow pa in the group");
         // Top-level pool now contains only the group itself; the lone
@@ -307,9 +307,7 @@ fn move_project_to_group_end_appends_and_renumbers_top_pool(cx: &mut TestAppCont
     });
 
     ws.update(cx, |ws, cx| ws.move_project_to_group_end(pb, gid, cx));
-    let after = ws.read_with(cx, |ws, _| {
-        ws.projects.iter().find(|p| p.id == pb).unwrap().tab_order
-    });
+    let after = ws.read_with(cx, |ws, _| ws.projects.get(pb).unwrap().tab_order);
     assert_eq!(pb_order_after_append, after);
 }
 
@@ -344,7 +342,7 @@ fn reorder_group_before_top_level_group_or_project_target(cx: &mut TestAppContex
     let (group_t_before, proj_t_before) = ws.read_with(cx, |ws, _| {
         (
             ws.groups.iter().find(|g| g.id == ga).unwrap().tab_order,
-            ws.projects.iter().find(|p| p.id == pa).unwrap().tab_order,
+            ws.projects.get(pa).unwrap().tab_order,
         )
     });
     assert!(group_t_before > proj_t_before);
@@ -355,7 +353,7 @@ fn reorder_group_before_top_level_group_or_project_target(cx: &mut TestAppContex
     });
     ws.read_with(cx, |ws, _| {
         let group_t = ws.groups.iter().find(|g| g.id == ga).unwrap().tab_order;
-        let proj_t = ws.projects.iter().find(|p| p.id == pa).unwrap().tab_order;
+        let proj_t = ws.projects.get(pa).unwrap().tab_order;
         assert!(group_t < proj_t);
     });
 

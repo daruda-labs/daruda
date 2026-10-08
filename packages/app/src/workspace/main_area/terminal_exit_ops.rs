@@ -3,7 +3,7 @@
 
 use gpui::{Context, Window};
 
-use super::pane::{AccountDomain, PaneContent, resolve_pane_account};
+use super::pane::{AccountDomain, PaneContent};
 use super::pane_tree::PaneId;
 use crate::surface::strings;
 use crate::workspace::Workspace;
@@ -18,10 +18,7 @@ impl Workspace {
     ) {
         let Some(terminal) = self
             .main_area
-            .runtimes
-            .values_mut()
-            .flat_map(|rt| rt.panes.iter_mut())
-            .find(|p| p.id == pane_id)
+            .pane_mut(pane_id)
             .and_then(|p| match &mut p.content {
                 PaneContent::Terminal(t) => Some(t),
                 _ => None,
@@ -64,8 +61,7 @@ impl Workspace {
             .clone()
             .or_else(|| self.default_cwd_for_new_pane());
         let account = terminal.account;
-        let prepared =
-            resolve_pane_account(&self.accounts, &self.data_dir, account, AccountDomain::Any);
+        let prepared = self.resolve_account(account, AccountDomain::Any);
         let fresh =
             match self.spawn_terminal_pane(pane_id, cwd, account, prepared.as_ref(), window, cx) {
                 Ok(fresh) => fresh,

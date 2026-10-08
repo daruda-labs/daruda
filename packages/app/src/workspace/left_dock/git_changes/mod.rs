@@ -12,7 +12,7 @@ pub(super) mod unified_list;
 use std::path::PathBuf;
 
 use crate::ui::theme;
-use daruda_store::project::LaneId;
+use daruda_store::project::{LaneId, LaneRef};
 use gpui::{
     AnyElement, ClickEvent, Context, ElementId, IntoElement, MouseButton, MouseDownEvent, div,
     prelude::*, px, uniform_list,
@@ -46,7 +46,7 @@ pub(in crate::workspace) fn render(snap: &LeftDockSnapshot, cx: &mut Context<Doc
     let active_wt = snap.lanes.iter().find(|w| w.id == active_id);
 
     if !active_wt.map(|w| w.is_git()).unwrap_or(false) {
-        return non_git_placeholder(active_id, snap, cx).into_any_element();
+        return non_git_placeholder(snap.active, snap, cx).into_any_element();
     }
 
     let branch = active_wt
@@ -95,7 +95,7 @@ pub(in crate::workspace) fn render(snap: &LeftDockSnapshot, cx: &mut Context<Doc
                 staged_count,
                 unstaged_count,
                 stage_in_flight,
-                active_id,
+                snap.active,
                 snap,
                 cx,
             ));
@@ -144,7 +144,7 @@ pub(in crate::workspace) fn render(snap: &LeftDockSnapshot, cx: &mut Context<Doc
                             let row = rows_for_list.get(ix)?;
                             Some(match row {
                                 GitChangesRow::DirHeader(dir) => {
-                                    dir_header(ix, dir, active_id, snap, cx)
+                                    dir_header(ix, dir, snap.active, snap, cx)
                                 }
                                 GitChangesRow::File(entry) => {
                                     let is_cursor = snap
@@ -154,7 +154,7 @@ pub(in crate::workspace) fn render(snap: &LeftDockSnapshot, cx: &mut Context<Doc
                                     file_row::unified_file_row(
                                         ix,
                                         entry,
-                                        active_id,
+                                        snap.active,
                                         &wt_paths,
                                         selected.as_ref(),
                                         is_cursor,
@@ -320,7 +320,7 @@ fn summary_bar(
     staged_count: usize,
     unstaged_count: usize,
     in_flight: bool,
-    lane_id: LaneId,
+    target: LaneRef,
     snap: &LeftDockSnapshot,
     cx: &mut Context<Dock>,
 ) -> impl IntoElement {
@@ -360,7 +360,7 @@ fn summary_bar(
         colors,
         cx.listener(move |_dock, _: &MouseDownEvent, window, cx| {
             if let Some(ws) = discard_ws.upgrade() {
-                ws.update(cx, |ws, cx| ws.on_discard_all(lane_id, window, cx));
+                ws.update(cx, |ws, cx| ws.on_discard_all(target, window, cx));
             }
         }),
     );
@@ -374,9 +374,9 @@ fn summary_bar(
                 return;
             };
             if all_staged {
-                ws.update(cx, |ws, cx| ws.unstage_all(lane_id, cx));
+                ws.update(cx, |ws, cx| ws.unstage_all(target, cx));
             } else {
-                ws.update(cx, |ws, cx| ws.stage_all(lane_id, cx));
+                ws.update(cx, |ws, cx| ws.stage_all(target, cx));
             }
         }),
     );
@@ -445,7 +445,7 @@ fn conflict_banner(count: usize) -> impl IntoElement {
 fn dir_header(
     dir_idx: usize,
     row: &GitDirHeaderRow,
-    lane_id: LaneId,
+    target: LaneRef,
     snap: &LeftDockSnapshot,
     cx: &mut Context<Dock>,
 ) -> AnyElement {
@@ -500,9 +500,9 @@ fn dir_header(
                     };
                     let paths = stage_paths.clone();
                     ws.update(cx, |ws, cx| match state {
-                        DirStageState::AllStaged => ws.unstage_paths(lane_id, paths, cx),
+                        DirStageState::AllStaged => ws.unstage_paths(target, paths, cx),
                         DirStageState::NoneStaged | DirStageState::Mixed => {
-                            ws.stage_paths(lane_id, paths, cx)
+                            ws.stage_paths(target, paths, cx)
                         }
                     });
                 }),
@@ -542,7 +542,7 @@ fn dir_header(
                     cx.listener(move |_dock, _: &MouseDownEvent, _window, cx| {
                         if let Some(ws) = workspace_toggle.upgrade() {
                             let dir = dir_for_toggle.clone();
-                            ws.update(cx, |ws, cx| ws.toggle_git_dir_collapse(lane_id, dir, cx));
+                            ws.update(cx, |ws, cx| ws.toggle_git_dir_collapse(target, dir, cx));
                         }
                     }),
                 )
@@ -652,7 +652,7 @@ fn clean_placeholder(cx: &gpui::App) -> impl IntoElement {
 }
 
 fn non_git_placeholder(
-    lane_id: LaneId,
+    target: LaneRef,
     snap: &LeftDockSnapshot,
     cx: &mut Context<Dock>,
 ) -> impl IntoElement {
@@ -662,7 +662,7 @@ fn non_git_placeholder(
     let init_btn = button("git-init", app_strings::git::init_btn()).on_click(cx.listener(
         move |_dock, _: &ClickEvent, _window, cx| {
             if let Some(ws) = workspace.upgrade() {
-                ws.update(cx, |ws, cx| ws.init_git_repo(lane_id, cx));
+                ws.update(cx, |ws, cx| ws.init_git_repo(target, cx));
             }
         },
     ));

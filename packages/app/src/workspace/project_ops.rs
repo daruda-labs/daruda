@@ -62,8 +62,7 @@ impl Workspace {
         // default-ref entry so the "active runtime always present"
         // invariant holds for the Landing view that `render` paints next.
         self.main_area.runtimes.clear();
-        self.active = LaneRef::default();
-        self.main_area.runtimes.entry(self.active).or_default();
+        self.set_active(LaneRef::default());
         self.sync_settings_project(cx);
     }
 
@@ -153,8 +152,8 @@ impl Workspace {
         // blocking the UI thread; this spawn fills it in and persists.
         if let Some(root) = self
             .projects
-            .iter()
-            .find(|p| p.id == new_id && p.lanes.iter().any(|l| l.is_git()))
+            .get(new_id)
+            .filter(|p| p.lanes.iter().any(|l| l.is_git()))
             .map(|p| p.root.clone())
         {
             crate::workspace::spawn_helpers::spawn_bg_work_and_mutate(
@@ -195,7 +194,7 @@ impl Workspace {
         project_id: ProjectId,
         cx: &mut Context<Self>,
     ) {
-        let Some(project) = self.projects.iter_mut().find(|p| p.id == project_id) else {
+        let Some(project) = self.projects.get_mut(project_id) else {
             return;
         };
         project.is_collapsed = !project.is_collapsed;
@@ -223,7 +222,7 @@ impl Workspace {
         project_id: ProjectId,
         cx: &mut Context<Self>,
     ) {
-        let Some(project) = self.projects.iter().find(|p| p.id == project_id) else {
+        let Some(project) = self.projects.get(project_id) else {
             return;
         };
         let root = project.root.clone();
@@ -523,7 +522,7 @@ impl Workspace {
         branch: String,
         cx: &mut Context<Self>,
     ) {
-        let Some(p) = self.projects.iter_mut().find(|p| p.id == project) else {
+        let Some(p) = self.projects.get_mut(project) else {
             return;
         };
         p.default_branch = Some(branch);
@@ -551,7 +550,7 @@ impl Workspace {
                 cx,
                 move || crate::lane::git::default_branch(&root),
                 move |ws, detected, cx| {
-                    let Some(p) = ws.projects.iter().find(|p| p.id == project_id) else {
+                    let Some(p) = ws.projects.get(project_id) else {
                         return;
                     };
                     let Some(branch) =
@@ -617,7 +616,7 @@ impl Workspace {
         if lanes.len() == 1 && !lanes[0].kind.is_git() {
             return;
         }
-        let Some(p) = self.projects.iter_mut().find(|p| p.id == project_id) else {
+        let Some(p) = self.projects.get_mut(project_id) else {
             return; // project closed while discovery ran
         };
         // Swap only while the placeholder is still in place — any real
@@ -648,7 +647,7 @@ impl Workspace {
                 self.main_area.runtimes.insert(new_ref, rt);
             }
             if self.active == old_ref {
-                self.active = new_ref;
+                self.set_active(new_ref);
             }
             self.invalidate_visible_files_cache(old_ref);
             self.invalidate_visible_files_cache(new_ref);

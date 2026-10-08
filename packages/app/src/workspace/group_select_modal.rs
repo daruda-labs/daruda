@@ -46,11 +46,7 @@ impl GroupSelectModal {
         workspace: &Workspace,
         project_id: ProjectId,
     ) -> (Vec<SelectOption>, SharedString) {
-        let current = workspace
-            .projects
-            .iter()
-            .find(|p| p.id == project_id)
-            .and_then(|p| p.group_id);
+        let current = workspace.projects.get(project_id).and_then(|p| p.group_id);
 
         let mut opts = Vec::with_capacity(workspace.groups.len() + 1);
         let ungrouped = s::group::ungrouped();

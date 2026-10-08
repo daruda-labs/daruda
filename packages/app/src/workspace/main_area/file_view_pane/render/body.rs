@@ -90,7 +90,11 @@ pub(super) fn render_file_viewer_body(
                         strings::file_viewer::btn_open_with_default_app(),
                     )
                     .on_click(cx.listener(move |ws, _, _window, cx| {
-                        ws.open_lane_file_with_system_default(lane_id, path.clone(), cx);
+                        ws.open_lane_file_with_system_default(
+                            ws.owner_lane_ref(lane_id),
+                            path.clone(),
+                            cx,
+                        );
                     })),
                 )
                 .into_any_element()

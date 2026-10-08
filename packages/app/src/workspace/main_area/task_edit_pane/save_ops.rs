@@ -168,13 +168,7 @@ impl Workspace {
     /// Read the current form values without holding a `&mut self`
     /// borrow on `self.active_runtime().panes` past the snapshot.
     fn read_task_edit_form(&self, pane_id: PaneId, cx: &Context<Self>) -> Option<TaskEditForm> {
-        let te = self
-            .main_area
-            .runtimes
-            .values()
-            .flat_map(|rt| rt.panes.iter())
-            .find(|p| p.id == pane_id)?
-            .task_edit_content()?;
+        let te = self.main_area.pane(pane_id)?.task_edit_content()?;
         Some(TaskEditForm {
             task_id: te.task_id.clone(),
             editable: super::run_in_ops::location_editable(te, cx.global()),

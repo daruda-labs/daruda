@@ -3,6 +3,7 @@ use std::collections::HashMap;
 use daruda_store::project::LaneRef;
 use gpui::Task;
 
+use super::pane::Pane;
 use super::pane_menu::ResourceRightClick;
 use super::pane_tree::{DropHalf, PaneId};
 use crate::workspace::LaneRuntime;
@@ -57,4 +58,23 @@ pub(in crate::workspace) struct MainAreaContext {
     /// by id (indices shift under reorder/close). `finish_tab_drag` restores
     /// it unless the drag committed a drop. `None` = nothing to unwind.
     pub tab_preview_restore: Option<u64>,
+}
+
+impl MainAreaContext {
+    /// The pane with this id, in whichever lane holds it. Pane ids come from
+    /// the window-wide `Workspace::alloc_id`, so at most one lane matches.
+    pub(in crate::workspace) fn pane(&self, id: PaneId) -> Option<&Pane> {
+        self.runtimes
+            .values()
+            .flat_map(|runtime| runtime.panes.iter())
+            .find(|pane| pane.id == id)
+    }
+
+    /// Mutable counterpart of [`Self::pane`].
+    pub(in crate::workspace) fn pane_mut(&mut self, id: PaneId) -> Option<&mut Pane> {
+        self.runtimes
+            .values_mut()
+            .flat_map(|runtime| runtime.panes.iter_mut())
+            .find(|pane| pane.id == id)
+    }
 }

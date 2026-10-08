@@ -16,7 +16,7 @@ use futures::channel::mpsc::unbounded;
 use gpui::Context;
 
 use super::agent_chat_event_ops::PumpStep;
-use super::agent_chat_ops::{agent_name_for, resolve_open_agent_id};
+use super::agent_chat_ops::agent_name_for;
 use crate::agent::account::PreparedAccount;
 use crate::agent::launch_resolve::{
     AgentLaunchSpec, ConnectCommandError, account_recipe_for_connect, resolve_launch,
@@ -289,8 +289,7 @@ impl Workspace {
         // Stale id — reconcile so the chip / persisted state stop lying, then
         // launch the effective agent (a catalog entry, or the Claude id when the
         // catalog is somehow empty).
-        let effective_id =
-            resolve_open_agent_id(&self.mirrors.agents, self.last_agent_id.as_deref());
+        let effective_id = self.open_agent_id(None);
         let defaults = TranscriptDefaults::resolve(
             self.mirrors.agents.iter().find(|a| a.id == effective_id),
             self.mirrors.agent_reader_defaults,
@@ -385,12 +384,7 @@ impl Workspace {
         let domain = crate::workspace::main_area::pane::AccountDomain::for_agent(
             account_recipe_for_connect(&launch, is_remote),
         );
-        let prepared = crate::workspace::main_area::pane::resolve_pane_account(
-            &self.accounts,
-            &self.data_dir,
-            selection,
-            domain,
-        );
+        let prepared = self.resolve_account(selection, domain);
         if selection.account_id().is_some() && prepared.is_none() {
             // Not an error: the pane falls back to the system account. Log
             // only so a surprised user has ground truth for why.
@@ -556,10 +550,7 @@ impl Workspace {
             let chat = view.read(cx);
             let account = self
                 .main_area
-                .runtimes
-                .values()
-                .flat_map(|rt| rt.panes.iter())
-                .find(|pane| pane.id == pane_id)
+                .pane(pane_id)
                 .and_then(|pane| pane.agent_chat_content())
                 .and_then(|chat| chat.account.to_persisted());
             if !self.task_chat_identity_available(chat.agent_id(), account) {

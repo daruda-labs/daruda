@@ -120,9 +120,7 @@ impl Workspace {
         // Drop pending PostToolUseFailure tallies — ULIDs are never
         // reused, so leaving them would slowly accumulate dead
         // entries across many cancel/reopen cycles.
-        for sid in &cleared_sessions {
-            self.claude.tool_use_failure_counts.remove(sid);
-        }
+        self.claude.forget_tool_use_failures(&cleared_sessions);
         self.cancel_task_chat_execution(task_id, cx);
         self.save_tasks_dirty(cx);
         cx.notify();
@@ -161,9 +159,7 @@ impl Workspace {
                     Vec::new()
                 }
             });
-            for sid in &cleared {
-                self.claude.tool_use_failure_counts.remove(sid);
-            }
+            self.claude.forget_tool_use_failures(&cleared);
             self.save_tasks_dirty(cx);
             cx.notify();
             return;
@@ -221,9 +217,7 @@ impl Workspace {
             task.updated_at = Utc::now();
             std::mem::take(&mut task.session_ids)
         });
-        for sid in &cleared {
-            self.claude.tool_use_failure_counts.remove(sid);
-        }
+        self.claude.forget_tool_use_failures(&cleared);
         self.save_tasks_dirty(cx);
         cx.notify();
     }

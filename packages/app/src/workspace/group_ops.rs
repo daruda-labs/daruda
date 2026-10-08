@@ -98,11 +98,7 @@ impl Workspace {
     /// is empty.
     fn next_top_row_tab_order(&self) -> u32 {
         let from_groups = self.groups.iter().map(|g| g.tab_order);
-        let from_ungrouped = self
-            .projects
-            .iter()
-            .filter(|p| p.group_id.is_none())
-            .map(|p| p.tab_order);
+        let from_ungrouped = self.projects.ungrouped().map(|p| p.tab_order);
         from_groups
             .chain(from_ungrouped)
             .max()
@@ -197,7 +193,7 @@ impl Workspace {
         {
             return;
         }
-        let Some(project) = self.projects.iter_mut().find(|p| p.id == project_id) else {
+        let Some(project) = self.projects.get_mut(project_id) else {
             return;
         };
         if project.group_id == target {

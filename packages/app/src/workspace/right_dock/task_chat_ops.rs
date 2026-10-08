@@ -57,10 +57,7 @@ impl Workspace {
     ) {
         let Some(chat) = self
             .main_area
-            .runtimes
-            .values_mut()
-            .flat_map(|rt| rt.panes.iter_mut())
-            .find(|pane| pane.id == pane_id)
+            .pane_mut(pane_id)
             .and_then(Pane::agent_chat_content_mut)
         else {
             return;
@@ -97,13 +94,7 @@ impl Workspace {
         pane_id: PaneId,
         cx: &gpui::App,
     ) -> Option<String> {
-        let chat = self
-            .main_area
-            .runtimes
-            .values()
-            .flat_map(|rt| rt.panes.iter())
-            .find(|pane| pane.id == pane_id)?
-            .agent_chat_content()?;
+        let chat = self.main_area.pane(pane_id)?.agent_chat_content()?;
         let run = chat.task_run.as_ref()?;
         let tasks = cx.global::<GlobalTasks>();
         let task = tasks.get(&run.task_id)?;
@@ -182,10 +173,7 @@ impl Workspace {
     ) -> bool {
         let Some(chat) = self
             .main_area
-            .runtimes
-            .values()
-            .flat_map(|rt| rt.panes.iter())
-            .find(|pane| pane.id == pane_id)
+            .pane(pane_id)
             .and_then(Pane::agent_chat_content)
         else {
             return false;
@@ -272,16 +260,11 @@ impl Workspace {
         if !self.task_chat_identity_available(&execution.agent_id, execution.account_id) {
             return Err(TaskChatError::AgentUnavailable);
         }
-        let lane = self.projects.iter().find_map(|project| {
-            project
-                .lanes
-                .iter()
-                .find(|lane| daruda_core::path::same_path(&lane.path, &execution.cwd))
-                .map(|lane| LaneRef {
-                    project: project.id,
-                    lane: lane.id,
-                })
-        });
+        let lane = self
+            .projects
+            .lanes()
+            .find(|(_, _, lane)| daruda_core::path::same_path(&lane.path, &execution.cwd))
+            .map(|(target, _, _)| target);
         let lane = lane
             .filter(|_| execution.cwd.is_dir())
             .ok_or(TaskChatError::WorktreeMissing)?;

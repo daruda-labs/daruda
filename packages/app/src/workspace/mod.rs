@@ -321,7 +321,7 @@ pub struct Workspace {
     /// screen). Each project owns its own lanes, reached via
     /// `projects[i].lanes`. `tabs`/`panes` live on the active lane's
     /// `MainAreaContext` slot.
-    pub(in crate::workspace) projects: Vec<crate::project::Project>,
+    pub(in crate::workspace) projects: crate::project::Projects,
     /// Active (project, lane) pair. When `projects` is non-empty,
     /// always points at a live entry — kept normalized by
     /// `activate_lane` and `finalize_remove_*` paths.
@@ -710,10 +710,9 @@ impl Workspace {
             projects: project
                 .as_ref()
                 .map(|p| {
-                    vec![crate::project::Project::bootstrap_placeholder(
-                        0,
-                        p.root.clone(),
-                    )]
+                    crate::project::Projects::from(vec![
+                        crate::project::Project::bootstrap_placeholder(0, p.root.clone()),
+                    ])
                 })
                 .unwrap_or_default(),
             active: daruda_store::project::LaneRef::default(),
@@ -993,8 +992,7 @@ impl Workspace {
     pub(in crate::workspace) fn recent_display_name(&self) -> String {
         let primary = self
             .projects
-            .iter()
-            .find(|p| p.id == self.active.project)
+            .get(self.active.project)
             .or_else(|| self.projects.first());
 
         let label = match primary {
@@ -1027,16 +1025,14 @@ impl Workspace {
     /// Borrow the currently active project. `None` when the workspace
     /// has no projects (Landing state).
     pub(in crate::workspace) fn active_project(&self) -> Option<&crate::project::Project> {
-        let active = self.active;
-        self.projects.iter().find(|p| p.id == active.project)
+        self.projects.get(self.active.project)
     }
 
     /// Mutably borrow the currently active project.
     pub(in crate::workspace) fn active_project_mut(
         &mut self,
     ) -> Option<&mut crate::project::Project> {
-        let active = self.active;
-        self.projects.iter_mut().find(|p| p.id == active.project)
+        self.projects.get_mut(self.active.project)
     }
 
     /// Borrow the currently active lane (active project's active
@@ -1079,7 +1075,7 @@ impl Workspace {
         &self,
         id: daruda_store::project::ProjectId,
     ) -> Option<&crate::project::Project> {
-        self.projects.iter().find(|p| p.id == id)
+        self.projects.get(id)
     }
 
     /// The project open in this window under `uuid`, the durable name a task
@@ -1088,14 +1084,14 @@ impl Workspace {
         &self,
         uuid: daruda_store::project::ProjectUuid,
     ) -> Option<&crate::project::Project> {
-        self.projects.iter().find(|p| p.uuid == uuid)
+        self.projects.by_uuid(uuid)
     }
 
     pub(in crate::workspace) fn project_for_mut(
         &mut self,
         id: daruda_store::project::ProjectId,
     ) -> Option<&mut crate::project::Project> {
-        self.projects.iter_mut().find(|p| p.id == id)
+        self.projects.get_mut(id)
     }
 
     /// Resolve a `LaneRef` to its runtime lane.
@@ -1103,7 +1099,7 @@ impl Workspace {
         &self,
         target: daruda_store::project::LaneRef,
     ) -> Option<&crate::lane::Lane> {
-        self.project_for(target.project)?.lane(target.lane)
+        self.projects.lane(target)
     }
 
     /// Resolve a `LaneRef` to its runtime lane, mutably. Mirror of
@@ -1113,10 +1109,7 @@ impl Workspace {
         &mut self,
         target: daruda_store::project::LaneRef,
     ) -> Option<&mut crate::lane::Lane> {
-        self.projects
-            .iter_mut()
-            .find(|p| p.id == target.project)?
-            .lane_mut(target.lane)
+        self.projects.lane_mut(target)
     }
 
     /// Borrow the active project's lane list. Empty when the

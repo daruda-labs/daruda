@@ -454,12 +454,7 @@ impl Workspace {
         &mut self,
         pane_id: PaneId,
     ) -> Option<&mut TaskEditContent> {
-        self.main_area
-            .runtimes
-            .values_mut()
-            .flat_map(|rt| rt.panes.iter_mut())
-            .find(|p| p.id == pane_id)?
-            .task_edit_content_mut()
+        self.main_area.pane_mut(pane_id)?.task_edit_content_mut()
     }
 
     /// Public counterpart used by the renderer's click handlers (e.g.
@@ -477,12 +472,7 @@ impl Workspace {
     /// field (e.g. the prompt-header "Open file" button reading
     /// `task_id` to dispatch `open_task_prompt_file`).
     pub(super) fn task_edit_content_for_pane(&self, pane_id: PaneId) -> Option<&TaskEditContent> {
-        let pane = self
-            .main_area
-            .runtimes
-            .values()
-            .flat_map(|runtime| runtime.panes.iter())
-            .find(|p| p.id == pane_id)?;
+        let pane = self.main_area.pane(pane_id)?;
         match &pane.content {
             PaneContent::TaskEditPane(te) => Some(te),
             _ => None,

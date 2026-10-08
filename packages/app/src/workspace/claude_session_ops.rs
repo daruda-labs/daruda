@@ -224,6 +224,20 @@ pub(in crate::workspace) struct ClaudeContext {
     pub(in crate::workspace) usage_domain_override: Option<AccountRecipeId>,
 }
 
+impl ClaudeContext {
+    /// Drop the tool-use failure tallies of sessions a task let go of.
+    /// Session ids are never reused, so a tally left behind is only dead
+    /// weight.
+    pub(in crate::workspace) fn forget_tool_use_failures<'a>(
+        &mut self,
+        sessions: impl IntoIterator<Item = &'a String>,
+    ) {
+        for sid in sessions {
+            self.tool_use_failure_counts.remove(sid);
+        }
+    }
+}
+
 // ---- Workspace methods that own the claude field ----
 
 use crate::workspace::Workspace;

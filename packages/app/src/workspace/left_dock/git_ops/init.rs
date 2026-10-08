@@ -2,7 +2,7 @@
 
 use daruda_store::observability::error_report::{ErrorReport, ErrorSeverity};
 use daruda_store::observability::system_info::redact_home;
-use daruda_store::project::{LaneId, LaneRef};
+use daruda_store::project::LaneRef;
 use gpui::Context;
 
 use crate::workspace::Workspace;
@@ -13,11 +13,7 @@ impl Workspace {
     /// lane's `kind` flips from `Default` to `Git` and the Git
     /// Changes view starts surfacing changes immediately. No-op for
     /// lanes that are already git-backed.
-    pub(in crate::workspace) fn init_git_repo(&mut self, lane_id: LaneId, cx: &mut Context<Self>) {
-        let target = LaneRef {
-            project: self.active.project,
-            lane: lane_id,
-        };
+    pub(in crate::workspace) fn init_git_repo(&mut self, target: LaneRef, cx: &mut Context<Self>) {
         let Some(wt) = self.lane_for(target) else {
             return;
         };
@@ -43,10 +39,7 @@ impl Workspace {
                         // Read the branch git actually chose (init defaults to
                         // `main`, but `init.defaultBranch` may differ) so the
                         // header label flips from "detached" to the real name.
-                        if let Some(wt) = ws
-                            .active_project_mut()
-                            .and_then(|p| p.lanes.iter_mut().find(|w| w.id == lane_id))
-                        {
+                        if let Some(wt) = ws.lane_for_mut(target) {
                             let probed_entry = probe
                                 .lanes
                                 .iter()

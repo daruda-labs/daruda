@@ -150,13 +150,7 @@ impl Workspace {
             }
         };
 
-        let Some(pane) = self
-            .main_area
-            .runtimes
-            .values()
-            .flat_map(|runtime| runtime.panes.iter())
-            .find(|p| p.id == pane_id)
-        else {
+        let Some(pane) = self.main_area.pane(pane_id) else {
             return;
         };
         let Some(te) = pane.task_edit_content() else {

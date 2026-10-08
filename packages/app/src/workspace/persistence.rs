@@ -55,6 +55,13 @@ impl Workspace {
     /// `self.active`. Invariant: the entry is seeded at construction, on
     /// every `activate_lane`, and on `reset_to_empty_workspace`, so the
     /// `expect` never fires in correct code.
+    /// Point the window at `target`, seeding its runtime first so
+    /// [`Self::active_runtime`] holds from the next line on.
+    pub(in crate::workspace) fn set_active(&mut self, target: daruda_store::project::LaneRef) {
+        self.main_area.runtimes.entry(target).or_default();
+        self.active = target;
+    }
+
     pub(in crate::workspace) fn active_runtime(&self) -> &LaneRuntime {
         self.main_area
             .runtimes
@@ -202,11 +209,7 @@ impl Workspace {
 
         // Project the runtime `LaneRef` onto the persisted UUID. If the
         // active project has been closed, both fields fall to `None`.
-        let active_project = self
-            .projects
-            .iter()
-            .find(|p| p.id == self.active.project)
-            .map(|p| p.uuid);
+        let active_project = self.projects.get(self.active.project).map(|p| p.uuid);
         let active_lane = active_project.map(|_| self.active.lane);
 
         let workspace = WorkspaceState {
@@ -506,8 +509,7 @@ impl Workspace {
         let requested = match (workspace.active_project, workspace.active_lane) {
             (Some(p_uuid), Some(wt_id)) => self
                 .projects
-                .iter()
-                .find(|p| p.uuid == p_uuid)
+                .by_uuid(p_uuid)
                 .map(|p| daruda_store::project::LaneRef {
                     project: p.id,
                     lane: wt_id,
@@ -693,7 +695,7 @@ impl Workspace {
         &self,
         requested: daruda_store::project::LaneRef,
     ) -> daruda_store::project::LaneRef {
-        if let Some(project) = self.projects.iter().find(|p| p.id == requested.project) {
+        if let Some(project) = self.projects.get(requested.project) {
             if project.lanes.iter().any(|w| w.id == requested.lane) {
                 return requested;
             }
@@ -888,12 +890,7 @@ impl Workspace {
                         let account = restored_terminal_account(*account_id, &self.accounts);
                         // Terminal pane: no agent, so no required auth domain —
                         // the account's own recipe decides the env.
-                        let prepared = pane::resolve_pane_account(
-                            &self.accounts,
-                            &self.data_dir,
-                            account,
-                            pane::AccountDomain::Any,
-                        );
+                        let prepared = self.resolve_account(account, pane::AccountDomain::Any);
                         self.create_pane_with_cwd(
                             effective,
                             account,
@@ -939,12 +936,7 @@ impl Workspace {
                     // A degenerate Split materializes a terminal, which has
                     // no agent and so no domain default to inherit.
                     let account = self.default_account_selection_for_new_pane(None);
-                    let prepared = pane::resolve_pane_account(
-                        &self.accounts,
-                        &self.data_dir,
-                        account,
-                        pane::AccountDomain::Any,
-                    );
+                    let prepared = self.resolve_account(account, pane::AccountDomain::Any);
                     let pane = self.create_pane_with_cwd(
                         fallback_cwd.map(|p| p.to_path_buf()),
                         account,
