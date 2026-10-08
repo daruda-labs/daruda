@@ -1,7 +1,7 @@
 //! Flow tests, split by what they are about.
 //!
 //! One file per surface rather than one per type: a run's submission, a
-//! question's queue, the graph pane, the inspector, and the files themselves
+//! question's queue, the graph, the inspector, and the files themselves
 //! fail for different reasons and want different fixtures. What they share —
 //! a workspace with a flow in it, and the flow texts — is here.
 
@@ -415,4 +415,46 @@ fn told_about_dropped_typing(
             .iter()
             .any(|report| report.dedup_key.as_deref() == Some("flow.edit_dropped_typing"))
     })
+}
+
+/// A second worktree in the same project, holding its own flows directory,
+/// and *not* activated. What a targeted run has to be able to reach.
+fn add_lane_with_a_flow(
+    ws: &gpui::Entity<Workspace>,
+    wh: gpui::WindowHandle<gpui_component::Root>,
+    cx: &mut TestAppContext,
+    file: &str,
+    flow: &str,
+) -> (tempfile::TempDir, daruda_store::project::LaneRef) {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let flows = flow_paths::flows_dir(dir.path());
+    std::fs::create_dir_all(&flows).expect("create flows dir");
+    std::fs::write(flows.join(file), flow).expect("write flow");
+    let target = ws.update(cx, |ws, _cx| {
+        let project = ws.active.project;
+        let lane_id = ws.alloc_id();
+        let mut lane = crate::lane::Lane::default_for_project(lane_id, dir.path().to_path_buf());
+        lane.tab_order = 1;
+        ws.project_for_mut(project)
+            .expect("the fixture's project")
+            .lanes
+            .push(lane);
+        daruda_store::project::LaneRef {
+            project,
+            lane: lane_id,
+        }
+    });
+    // Visit it and come back. Pushing the entry alone leaves the worktree
+    // without the runtime a lane is expected to own, and the round trip is
+    // what builds one — while leaving the original worktree active, which is
+    // the whole point of the fixture.
+    cx.update_window(wh.into(), |_, window, cx| {
+        ws.update(cx, |ws, cx| {
+            let back = ws.active;
+            ws.activate_lane(target, window, cx);
+            ws.activate_lane(back, window, cx);
+        });
+    })
+    .expect("window is live");
+    (dir, target)
 }

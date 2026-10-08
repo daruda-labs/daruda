@@ -193,9 +193,8 @@ impl Workspace {
         cx.notify();
     }
 
-    /// Retire the run `lane_ref` was holding and say what it left to read.
-    /// Separate from opening it so the settling — which lane is released,
-    /// and what the user is told — is decided without a `Window`.
+    /// Retire the run `lane_ref` was holding and say what it left to read:
+    /// which lane is released, and what the user is told.
     pub(in crate::workspace) fn settle_flow_run(
         &mut self,
         lane_ref: daruda_store::project::LaneRef,
@@ -231,8 +230,8 @@ impl Workspace {
             );
         }
         // A run asked for from a phone has to be *told* how it ended. The
-        // report pane and the toast above both land on a desktop the caller
-        // is not at, which is what left a `/flow` answer looking like a hang.
+        // report and the toast above both stay on a desktop the caller is
+        // not at, which is what left a `/flow` answer looking like a hang.
         if owes_remote_answer {
             self.relay_notice_to_telegram(flow_outcome_notice(end, refusal), cx);
         }
@@ -240,9 +239,8 @@ impl Workspace {
         run_dir.as_deref().and_then(|dir| report_to_open(end, dir))
     }
 
-    /// Drive one stream event through the real stage machine. The window
-    /// is only needed by the `RunEnded` arm (it opens the report), so a
-    /// test of the stage transitions reaches the same code without one.
+    /// Drive one stream event through the real stage machine, without the
+    /// `RunEnded` settling — what a test of the stage transitions needs.
     #[cfg(test)]
     pub(in crate::workspace) fn apply_flow_event_for_test(
         &mut self,
@@ -439,8 +437,8 @@ mod tests {
     }
 
     /// A run that ended the way it was asked to has nothing to report — its
-    /// story is `run.md`, which opens either way. Only a run that never got
-    /// to tell one needs a message.
+    /// story is `run.md`, in the page's past runs either way. Only a run that
+    /// never got to tell one needs a message.
     #[test]
     fn only_a_run_that_could_not_speak_for_itself_reports() {
         assert!(end_refusal(&RunEnd::Done).is_none());

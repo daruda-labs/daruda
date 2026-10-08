@@ -350,6 +350,7 @@ impl Workspace {
         if let Some(project) = self.projects.get_mut(target.project) {
             project.lanes.retain(|w| w.id != target.lane);
         }
+        self.drop_flow_detail_of_gone_lane(window, cx);
         if let Some(path) = removed_path {
             use gpui::BorrowAppContext as _;
             cx.update_global::<crate::agent::skills::SkillsState, _>(|s, _| {

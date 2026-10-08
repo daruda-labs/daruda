@@ -992,6 +992,13 @@ fn escape_backs_out_of_the_editor(cx: &mut TestAppContext) {
         assert_eq!(ws.task_detail_id(), None, "a clean editor leaves at once");
         assert_eq!(ws.active_page(), Some(crate::workspace::pages::Page::Tasks));
     });
+    vcx.update(|window, cx| {
+        let page = ws.read(cx).window_runtime.focus_handle.clone();
+        assert!(
+            page.is_focused(window),
+            "the keyboard goes back to the page, not to the editor that went"
+        );
+    });
 
     vcx.update(|window, cx| {
         ws.update(cx, |ws, cx| {
@@ -1131,4 +1138,36 @@ fn a_new_draft_reopens_empty_after_a_restart(cx: &mut TestAppContext) {
     })
     .unwrap();
     assert_eq!(restored_detail(&ws, cx), Some(None));
+}
+
+/// Restoring the editor writes nothing: the file already holds what is being
+/// restored, and a save from inside the restore would write back whatever the
+/// restore could not rebuild yet.
+#[gpui::test]
+fn restoring_the_editor_writes_no_state(cx: &mut TestAppContext) {
+    let (_project, window, ws) = build_workspace_with_project(cx);
+    cx.update_window(window.into(), |_, window, cx| {
+        ws.update(cx, |ws, cx| ws.open_task_editor(None, window, cx));
+    })
+    .unwrap();
+    let (state, projects) = ws.read_with(cx, |ws, cx| ws.snapshot_for_disk(cx));
+    assert!(state.task_detail.is_some());
+    let data_dir = crate::workspace::tests::fresh_test_data_dir();
+    let dir = data_dir.clone();
+    cx.add_window(|window, cx| {
+        let mut ws = crate::workspace::Workspace::new_with_project_for_test(
+            &daruda_config::Config::default(),
+            None,
+            dir,
+            window,
+            cx,
+        );
+        ws.restore_from_disk(&state, &projects, window, cx);
+        ws
+    });
+    cx.run_until_parked();
+    assert!(
+        !data_dir.join("workspaces").exists(),
+        "the restore saved the workspace"
+    );
 }

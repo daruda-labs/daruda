@@ -72,7 +72,7 @@ impl Workspace {
             return;
         };
         let Some(item) = self.page_detail_dirty(id, cx) else {
-            self.close_page_detail_now(id, cx);
+            self.leave_detail(id, window, cx);
             next(self, window, cx);
             return;
         };
@@ -102,7 +102,7 @@ impl Workspace {
                     _ => false,
                 };
                 if leave {
-                    ws.close_page_detail_now(id, cx);
+                    ws.leave_detail(id, window, cx);
                     next(ws, window, cx);
                 }
             });
@@ -126,6 +126,31 @@ impl Workspace {
         }
         self.leave_page_detail_then(page, window, cx, |_, _, _| {});
         true
+    }
+
+    /// Escape on a page leaves its detail for the list. A detail that
+    /// answers Escape itself — a rename it cancels — stops it first.
+    pub(in crate::workspace) fn on_page_key_down(
+        &mut self,
+        ev: &gpui::KeyDownEvent,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if ev.keystroke.key == "escape" && self.close_page_detail(window, cx) {
+            cx.stop_propagation();
+        }
+    }
+
+    /// Drop detail `id` and give the keyboard back to the page: the focus
+    /// was inside what is being dropped, and nothing else would take it.
+    pub(in crate::workspace) fn leave_detail(
+        &mut self,
+        id: PageDetailId,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.close_page_detail_now(id, cx);
+        self.window_runtime.focus_handle.focus(window, cx);
     }
 
     /// Drop detail `id` without asking. A stale id drops nothing.

@@ -6,8 +6,8 @@
 //! loop, the receiver disconnects, and the watcher thread exits.
 //!
 //! What a change means here is deliberately coarse — see
-//! [`crate::hooks::flow_watcher::FlowsEvent`]: every open graph pane reads its
-//! file again, and a pane whose bytes did not change does nothing at all. So the
+//! [`crate::hooks::flow_watcher::FlowsEvent`]: the open graph reads its file
+//! again, and does nothing at all when its bytes did not change. So the
 //! cost of "something in this lane's flows changed" is one small read per open
 //! graph, and a repaint only where the picture is actually different.
 

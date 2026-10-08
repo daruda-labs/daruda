@@ -1248,8 +1248,8 @@ impl Workspace {
         // Key contexts gate search/file-viewer actions on the focused
         // pane's content. Each open file pane carries its own search
         // state; "the file viewer" for action-routing purposes is the
-        // one that currently has focus.
-        let focused_is_file = self.focused_file_view().is_some();
+        // one that currently has focus — never while a page hides it.
+        let focused_is_file = self.workspace_page.is_none() && self.focused_file_view().is_some();
         let focused_search_open = self
             .focused_file_view()
             .is_some_and(|fv| fv.search.is_some());
@@ -1283,6 +1283,11 @@ impl Workspace {
             .on_action(cx.listener(|this, _: &FileViewerSearchPrev, _window, cx| {
                 this.file_view_search_prev(cx);
             }))
+            .when(self.workspace_page.is_some(), |el| {
+                el.on_key_down(cx.listener(|this, ev: &KeyDownEvent, window, cx| {
+                    this.on_page_key_down(ev, window, cx)
+                }))
+            })
             // Keyboard shortcuts when the focused pane is a file viewer.
             // The per-pane Input handles its own typing; this `on_key_down`
             // owns the panel-level shortcuts (close pane, search close,

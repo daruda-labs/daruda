@@ -1600,7 +1600,7 @@ code_block:
   copy: "코드 복사"
   copied: "복사됨"
 
-# Why a branch name was rejected — rendered under the TaskEdit branch field.
+# Why a branch name was rejected — rendered under the Task editor's branch field.
 # Mirrors daruda_core::git::BranchNameRule.
 branch_rule:
   double_dot: "'..'를 포함할 수 없습니다"

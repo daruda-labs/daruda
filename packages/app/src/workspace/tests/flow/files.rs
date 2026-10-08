@@ -392,7 +392,7 @@ async fn a_flow_that_comes_back_is_drawn_again(cx: &mut TestAppContext) {
     vcx.run_until_parked();
     let view = ws
         .read_with(&vcx, |ws, _| ws.open_graph().map(|(_, _, view)| view))
-        .expect("the graph pane opened");
+        .expect("the graph opened");
 
     let bytes = std::fs::read_to_string(&flow_path).expect("the flow is on disk");
     ws.update(&mut vcx, |ws, cx| ws.delete_flow(&flow_path, cx));

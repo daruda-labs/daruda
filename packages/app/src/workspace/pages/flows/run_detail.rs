@@ -31,13 +31,13 @@ impl Workspace {
         }
         let dir = dir.to_path_buf();
         self.leave_page_detail_then(Page::Flows, window, cx, move |ws, _, cx| {
-            ws.install_run_detail(lane, dir, cx);
+            ws.mutate_durable(cx, |ws, cx| ws.install_run_detail(lane, dir, cx));
             ws.show_page(Page::Flows, cx);
         });
     }
 
-    /// Make run `dir` the page's detail and read its report. The caller has
-    /// left the old detail. Shared by opening and restoring.
+    /// Make run `dir` the page's detail and read its report. Shared by opening
+    /// and restoring; the caller has left the old one and saves if this is news.
     pub(in crate::workspace) fn install_run_detail(
         &mut self,
         lane: LaneRef,
@@ -56,16 +56,14 @@ impl Workspace {
             })
             .unwrap_or_default();
         let report = dir.join(daruda_flow::record::RUN_REPORT_FILE);
-        self.mutate_durable(cx, |ws, _| {
-            ws.pages.flows.detail = Some(FlowDetail {
-                id,
-                lane,
-                body: FlowDetailBody::Run(RunDetail {
-                    dir,
-                    started,
-                    report: RunReport::Loading,
-                }),
-            });
+        self.pages.flows.detail = Some(FlowDetail {
+            id,
+            lane,
+            body: FlowDetailBody::Run(RunDetail {
+                dir,
+                started,
+                report: RunReport::Loading,
+            }),
         });
         crate::workspace::spawn_helpers::spawn_bg_work_and_mutate(
             cx,

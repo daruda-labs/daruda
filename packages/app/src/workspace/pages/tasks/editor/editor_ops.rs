@@ -390,26 +390,17 @@ impl Workspace {
         &mut self,
         editor_id: TaskEditorId,
         event: &gpui::KeyDownEvent,
-        window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if event.keystroke.key != "escape" {
-            return;
-        }
-        cx.stop_propagation();
-        // Escape backs out one level: an open rename first, then the editor.
-        if self
-            .task_editor(editor_id)
-            .is_some_and(|te| te.editing_subtask.is_some())
+        // Escape backs out one level: an open rename here; otherwise it goes
+        // on to the page, which leaves the editor.
+        if event.keystroke.key == "escape"
+            && self
+                .task_editor(editor_id)
+                .is_some_and(|te| te.editing_subtask.is_some())
         {
+            cx.stop_propagation();
             self.cancel_rename_subtask(editor_id, cx);
-        } else {
-            self.leave_page_detail_then(
-                crate::workspace::pages::Page::Tasks,
-                window,
-                cx,
-                |_, _, _| {},
-            );
         }
     }
 
@@ -441,7 +432,3 @@ impl Workspace {
         }
     }
 }
-
-#[cfg(test)]
-#[path = "tests.rs"]
-mod tests;

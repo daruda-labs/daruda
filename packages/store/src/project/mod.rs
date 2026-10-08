@@ -189,7 +189,7 @@ pub enum SerializedLayout {
 }
 
 /// What a leaf restores as — one variant per [`PaneContent`] kind that
-/// persists.
+/// persists, plus `FlowGraph`, which only older files carry.
 ///
 /// An enum rather than a field per kind: the file format spells them as four
 /// optional keys, and "at most one is set" is not something optional keys can
@@ -197,9 +197,9 @@ pub enum SerializedLayout {
 /// with the others, which is a rule a reader has to keep rather than one the
 /// type keeps for them.
 ///
-/// The Task editor is absent on purpose: it lives on the Tasks page, not in a
-/// lane, and its unsaved form would come back on screen as if it had been
-/// kept.
+/// The Task editor and the flow graph live on their pages, not in a lane:
+/// what they show is saved as `WorkspaceState`'s `task_detail` /
+/// `flow_detail` instead.
 ///
 /// Deliberately not `Serialize`/`Deserialize`: the file's shape is
 /// [`RawLayout`]'s, and deriving them here would let this type reach a state
@@ -218,7 +218,8 @@ pub enum SerializedPaneContent {
     File(SerializedFileContent),
     /// An agent chat. Carries its own cwd and account.
     AgentChat(SerializedAgentChatContent),
-    /// A flow graph, which is the file's path and nothing else.
+    /// A flow graph an older session kept in a lane's tab. Read so the file
+    /// still loads; restore drops it, and nothing writes it.
     FlowGraph(SerializedFlowGraphContent),
 }
 
@@ -372,10 +373,8 @@ fn modified_status() -> char {
     'M'
 }
 
-/// Persisted state for a `PaneContent::FlowGraph` leaf. The flow file's path
-/// is the whole of it: the graph — nodes, edges, placement — is derived from
-/// that file on every open, so persisting any of it would let a layout
-/// outlive the YAML it was read from.
+/// A flow-graph leaf as older sessions wrote it: the flow file's path and
+/// nothing else. Read only, so those files still load.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct SerializedFlowGraphContent {
     pub path: PathBuf,

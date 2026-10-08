@@ -58,10 +58,15 @@ async fn a_past_run_opens_its_report_in_the_page(cx: &mut TestAppContext) {
         assert!(text.is_some_and(|t| t.contains("All passed")));
     });
 
-    ws.update_in(&mut vcx, |ws, window, cx| ws.back_to_flow_list(window, cx));
+    vcx.cx.update(crate::bind_keys::register_static_bindings);
+    vcx.simulate_keystrokes("escape");
+    vcx.run_until_parked();
     ws.read_with(&vcx, |ws, _| {
         assert_eq!(ws.active_page(), Some(Page::Flows));
-        assert!(ws.pages.flows.detail.is_none(), "back is the list");
+        assert!(
+            ws.pages.flows.detail.is_none(),
+            "Escape is back to the list"
+        );
     });
 }
 

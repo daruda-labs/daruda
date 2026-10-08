@@ -6,6 +6,7 @@ use gpui::{App, SharedString};
 
 use super::main_area::pane::Pane;
 use super::main_area::pane_tree::PaneId;
+use super::pages::detail::PageDetailId;
 use super::pages::flows::detail::FlowDetailId;
 use super::pages::flows::graph::FlowGraphView;
 use super::pages::tasks::editor::TaskEditorId;
@@ -15,10 +16,8 @@ use super::pages::tasks::editor::state::TaskEditContent;
 pub(in crate::workspace) enum DirtyTarget {
     /// A file pane in a lane.
     Pane(PaneId),
-    /// A Task editor.
-    TaskEditor(TaskEditorId),
-    /// The Flows page's graph.
-    FlowGraph(FlowDetailId),
+    /// What a page shows over its list.
+    Detail(PageDetailId),
 }
 
 #[derive(Debug, Clone)]
@@ -49,7 +48,7 @@ impl DirtyItem {
         cx: &App,
     ) -> Option<Self> {
         editor.is_dirty(cx).then(|| Self {
-            target: DirtyTarget::TaskEditor(id),
+            target: DirtyTarget::Detail(PageDetailId::TaskEditor(id)),
             title: editor.title(),
             is_draft: editor.task_id.is_none(),
         })
@@ -63,7 +62,7 @@ impl DirtyItem {
     ) -> Option<Self> {
         let view = view.read(cx);
         view.has_unsaved_form(cx).then(|| Self {
-            target: DirtyTarget::FlowGraph(id),
+            target: DirtyTarget::Detail(PageDetailId::Flow(id)),
             title: view.name().to_owned().into(),
             is_draft: false,
         })
@@ -115,7 +114,7 @@ mod tests {
                 is_draft: false,
             },
             DirtyItem {
-                target: DirtyTarget::TaskEditor(TaskEditorId(2)),
+                target: DirtyTarget::Detail(PageDetailId::TaskEditor(TaskEditorId(2))),
                 title: "New task".into(),
                 is_draft: true,
             },

@@ -140,4 +140,32 @@ impl Workspace {
             FlowDetailTarget::Run { dir, .. } => self.install_run_detail(lane, dir.clone(), cx),
         }
     }
+
+    /// Close the detail once the worktree it runs in is gone — removed, or
+    /// its project closed. Unsaved edits go with it, as that lane's own file
+    /// panes do. Idempotent, so every path that drops lanes calls it.
+    pub(in crate::workspace) fn drop_flow_detail_of_gone_lane(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(detail) = &self.pages.flows.detail else {
+            return;
+        };
+        if self.lane_for(detail.lane).is_some() {
+            return;
+        }
+        let id = crate::workspace::pages::detail::PageDetailId::Flow(detail.id);
+        self.leave_detail(id, window, cx);
+        self.respawn_flow_watcher(cx);
+    }
+
+    /// Follow a lane discovery gave a new id.
+    pub(in crate::workspace) fn rekey_flow_detail_lane(&mut self, from: LaneRef, to: LaneRef) {
+        if let Some(detail) = self.pages.flows.detail.as_mut()
+            && detail.lane == from
+        {
+            detail.lane = to;
+        }
+    }
 }

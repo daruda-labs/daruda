@@ -571,8 +571,10 @@ Workspace
 │   │   │       ├── PaneHeader       — per-pane title bar, visible in split mode only
 │   │   │       └── PaneContent
 │   │   │           ├── TerminalPane — PTY terminal (TerminalTextElement)
-│   │   │           ├── FileViewPane — file viewer (toolbar + virtual list)
-│   │   │           └── TaskEditPane — task edit inline form
+│   │   │           └── FileViewPane — file viewer (toolbar + virtual list)
+│   │   ├── Page                     — Tasks / Flows, in place of TabBar + PaneTree; belongs to no lane
+│   │   │   ├── PageList             — the page's list
+│   │   │   └── PageDetail           — one at a time, over the list: TaskEditor · FlowGraph · RunDetail
 │   │   └── BottomDock
 │   │       ├── DockSwitcher         — BottomDock top tab row
 │   │       ├── TerminalInputDock    — multiline input + submit / action buttons
@@ -605,7 +607,10 @@ Workspace
 | `Pane` | `PaneLayout::Pane` | `workspace/main_area/pane_tree.rs` |
 | `TerminalPane` | `PaneContent::Terminal` | `workspace/main_area/pane.rs` |
 | `FileViewPane` | `PaneContent::File` | `workspace/main_area/pane.rs` |
-| `TaskEditPane` | `PaneContent::TaskEditPane` | `workspace/main_area/pane.rs` |
+| `Page` | `workspace_page: Option<PageState>` | `workspace/pages/mod.rs` |
+| `PageDetail` | `pages: PageDetails`, left only through `leave_page_detail_then` | `workspace/pages/detail.rs` |
+| `TaskEditor` | `TasksPage.detail` | `workspace/pages/tasks/editor/` |
+| `FlowGraph` / `RunDetail` | `FlowsPage.detail` (`FlowDetailBody`) | `workspace/pages/flows/graph/`, `workspace/pages/flows/run_detail.rs` |
 | `ToastLayout` | `toast_layer: Entity<ToastLayer>` | `workspace/toast_layer/mod.rs` |
 | `SettingsView` | `settings: Option<SettingsHost>` — `Some` *is* settings mode | `app/src/settings/`, opened/closed in `workspace/settings_ops.rs` |
 | Project (runtime) | `crate::project::Project` (re-export of `daruda_project::project`) | `packages/project/src/project/mod.rs` |

@@ -7,6 +7,8 @@ pub(in crate::workspace) mod run_in_ops;
 mod save_ops;
 pub(in crate::workspace) mod state;
 pub(super) mod task_edit_ops;
+#[cfg(test)]
+mod tests;
 
 use daruda_store::tasks::{SubTask, TaskAgentSurface, TaskExecution, TaskState};
 use gpui::{Context, IntoElement, MouseButton, SharedString, div, prelude::*, px};
@@ -254,9 +256,9 @@ fn render(
         .size_full()
         .bg(background)
         .text_color(foreground)
-        .on_key_down(cx.listener(move |this, event, window, cx| {
-            this.handle_task_edit_key(editor_id, event, window, cx)
-        }))
+        .on_key_down(
+            cx.listener(move |this, event, _, cx| this.handle_task_edit_key(editor_id, event, cx)),
+        )
         .on_action(cx.listener(
             move |this, _: &crate::workspace::SaveFilePane, window, cx| {
                 this.save_task_editor(editor_id, false, window, cx)

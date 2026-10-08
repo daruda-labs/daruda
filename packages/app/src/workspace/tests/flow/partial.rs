@@ -12,13 +12,13 @@ use crate::workspace::pages::flows::graph::{
     FlowGraphView, TOOLBAR_PIN_SELECTOR, TOOLBAR_RUN_UNTIL_SELECTOR,
 };
 
-/// The graph pane the active lane has open.
+/// The Flows page's graph.
 fn graph_view(
     ws: &gpui::Entity<crate::workspace::Workspace>,
     vcx: &gpui::VisualTestContext,
 ) -> gpui::Entity<FlowGraphView> {
     ws.read_with(vcx, |ws, _| ws.open_graph().map(|(_, _, view)| view))
-        .expect("the graph pane opened")
+        .expect("the graph opened")
 }
 
 /// Which nodes are drawing as reused, read back through the canvas.

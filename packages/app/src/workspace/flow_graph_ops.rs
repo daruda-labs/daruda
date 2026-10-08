@@ -158,7 +158,9 @@ impl Workspace {
         }
         let path = path.to_path_buf();
         self.leave_page_detail_then(Page::Flows, window, cx, move |ws, window, cx| {
-            let id = ws.install_flow_graph(lane, &path, window, cx);
+            let id = ws.mutate_durable_in(window, cx, |ws, window, cx| {
+                ws.install_flow_graph(lane, &path, window, cx)
+            });
             ws.show_flow_graph(id, window, cx);
             if let Some((_, view)) = ws.flow_graph(id) {
                 then(ws, view, window, cx);
@@ -175,9 +177,9 @@ impl Workspace {
         cx.notify();
     }
 
-    /// Make a new graph of `path` the page's detail. The caller has left the
-    /// old one. Shared by opening and restoring, which have to agree on how a
-    /// graph is built and what its gestures reach.
+    /// Make a new graph of `path` the page's detail. Shared by opening and
+    /// restoring, which agree on how a graph is built and what its gestures
+    /// reach; the caller has left the old one and saves if this is news.
     pub(in crate::workspace) fn install_flow_graph(
         &mut self,
         lane: LaneRef,
@@ -201,12 +203,10 @@ impl Workspace {
         .detach();
         // A run already under way colours the graph now, not at its next event.
         self.recolour_flow_graph(lane, &view, cx);
-        self.mutate_durable(cx, |ws, _| {
-            ws.pages.flows.detail = Some(FlowDetail {
-                id,
-                lane,
-                body: FlowDetailBody::Graph(view),
-            });
+        self.pages.flows.detail = Some(FlowDetail {
+            id,
+            lane,
+            body: FlowDetailBody::Graph(view),
         });
         self.respawn_flow_watcher(cx);
         id

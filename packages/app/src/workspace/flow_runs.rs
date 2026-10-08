@@ -29,8 +29,8 @@ pub(in crate::workspace) struct RunHandle {
     pub run_dir: PathBuf,
     /// What the run is doing right now, as its own stream reports it.
     pub doing: RunStage,
-    /// Which flow file this run is of, when that is knowable — the key a
-    /// graph pane is matched by (see [`FlowSource`]).
+    /// Which flow file this run is of, when that is knowable — the key the
+    /// open graph is matched by (see [`FlowSource`]).
     pub source: FlowSource,
     /// Every node's state as the stream has reported it so far. `doing` says
     /// what is happening *now*; this is what a graph needs to colour all of

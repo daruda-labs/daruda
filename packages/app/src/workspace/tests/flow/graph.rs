@@ -1,4 +1,4 @@
-//! The graph pane: opening one, framing it, colouring it from a run, and
+//! The Flows page's graph: opening one, framing it, colouring it from a run, and
 //! reading the file again.
 //!
 //! `pages/flows/graph/policy.rs` decides what a reload does and is tested without
@@ -9,7 +9,8 @@ use super::*;
 
 /// An older session kept a graph in a lane's tab. The graph is the Flows
 /// page's detail now, so that leaf drops out on restore: a split closes up
-/// around the pane beside it, and a tab holding nothing else goes.
+/// around the pane beside it, a tab holding nothing else goes, and the tab
+/// that was active stays active though the ones before it moved.
 #[gpui::test]
 async fn a_graph_leaf_from_an_older_session_drops_out_of_its_tab(cx: &mut TestAppContext) {
     use daruda_store::project::{
@@ -28,9 +29,23 @@ async fn a_graph_leaf_from_an_older_session_drops_out_of_its_tab(cx: &mut TestAp
             path: flow_path.clone(),
         }),
     };
-    let tabs = &mut saved_projects[0].lanes[0].tabs;
+    let lane_state = &mut saved_projects[0].lanes[0];
+    let tabs = &mut lane_state.tabs;
     let beside = tabs[0].layout.clone();
+    // The same kind of pane under its own id, so the two tabs do not share one.
+    let beside_again = match beside.clone() {
+        SerializedLayout::Leaf { content, .. } => SerializedLayout::Leaf {
+            pane_id: 8000,
+            content,
+        },
+        other => other,
+    };
     tabs.clear();
+    tabs.push(SerializedTab {
+        layout: graph_leaf(9000),
+        last_focused_pane: 9000,
+        user_label: None,
+    });
     tabs.push(SerializedTab {
         layout: SerializedLayout::Split {
             direction: SplitDirectionSerde::Horizontal,
@@ -45,6 +60,14 @@ async fn a_graph_leaf_from_an_older_session_drops_out_of_its_tab(cx: &mut TestAp
         last_focused_pane: 9002,
         user_label: None,
     });
+    tabs.push(SerializedTab {
+        layout: beside_again,
+        last_focused_pane: 8000,
+        user_label: Some("kept".into()),
+    });
+    // The split was the active tab: after the graph-only tabs drop out, it
+    // is still the one that comes back active.
+    lane_state.active_tab_index = 1;
 
     let config = daruda_config::Config::default();
     let project = daruda_store::project::Project::from_path(lane.path());
@@ -58,7 +81,12 @@ async fn a_graph_leaf_from_an_older_session_drops_out_of_its_tab(cx: &mut TestAp
 
     ws2.read_with(cx, |ws2, _| {
         let tabs = &ws2.active_runtime().tabs;
-        assert_eq!(tabs.len(), 1, "the graph-only tab is gone");
+        assert_eq!(tabs.len(), 2, "the graph-only tabs are gone");
+        assert_eq!(
+            ws2.active_runtime().active_tab_index,
+            0,
+            "the tab that was active is still the active one"
+        );
         assert!(
             matches!(
                 tabs[0].layout,
@@ -121,7 +149,7 @@ async fn opening_a_graph_brings_every_node_into_view(cx: &mut TestAppContext) {
 
     let canvas = ws
         .read_with(&vcx, |ws, _| ws.open_graph().map(|(_, _, view)| view))
-        .expect("the lane should hold the graph pane just opened");
+        .expect("the page should hold the graph just opened");
 
     let (offenders, unfitted_width, drawable_width) = canvas.read_with(&vcx, |view, cx| {
         let canvas = view
@@ -188,7 +216,7 @@ async fn a_graph_smaller_than_the_pane_is_centred_not_magnified(cx: &mut TestApp
 
     let view = ws
         .read_with(&vcx, |ws, _| ws.open_graph().map(|(_, _, view)| view))
-        .expect("the lane should hold the graph pane just opened");
+        .expect("the page should hold the graph just opened");
 
     let (zoom, node_left, node_top) = view.read_with(&vcx, |view, cx| {
         let canvas = view
@@ -254,7 +282,7 @@ async fn a_restored_graph_whose_file_vanished_says_so(cx: &mut TestAppContext) {
     assert_eq!(named, flow_path);
 }
 
-/// A run drives the colour of the graph pane drawing its flow.
+/// A run drives the colour of the graph drawing its flow.
 ///
 /// The states are accumulated on the run and stamped onto the cards the
 /// canvas holds, so this reads them back through the canvas — the workspace
@@ -272,7 +300,7 @@ async fn a_run_colours_the_graph_of_the_flow_it_is_of(cx: &mut TestAppContext) {
     let here = ws.update(&mut vcx, |ws, _| ws.active);
     let view = ws
         .read_with(&vcx, |ws, _| ws.open_graph().map(|(_, _, view)| view))
-        .expect("the graph pane just opened");
+        .expect("the graph just opened");
 
     ws.update(&mut vcx, |ws, _| {
         ws.seed_flow_run_of_for_test(
@@ -365,7 +393,7 @@ async fn a_resumed_run_leaves_an_open_graph_alone(cx: &mut TestAppContext) {
     let here = ws.update(&mut vcx, |ws, _| ws.active);
     let view = ws
         .read_with(&vcx, |ws, _| ws.open_graph().map(|(_, _, view)| view))
-        .expect("the graph pane just opened");
+        .expect("the graph just opened");
 
     let run_dir = lane.path().join("run");
     ws.update(&mut vcx, |ws, _| {
@@ -626,7 +654,7 @@ async fn reloading_an_unchanged_flow_rebuilds_nothing(cx: &mut TestAppContext) {
     vcx.run_until_parked();
     let view = ws
         .read_with(&vcx, |ws, _| ws.open_graph().map(|(_, _, view)| view))
-        .expect("the graph pane opened");
+        .expect("the graph opened");
     let canvas_before = view
         .read_with(&vcx, |v, _| {
             v.canvas_for_test().map(gpui::Entity::entity_id)
@@ -684,7 +712,7 @@ nodes:
     vcx.run_until_parked();
     let view = ws
         .read_with(&vcx, |ws, _| ws.open_graph().map(|(_, _, view)| view))
-        .expect("the graph pane opened");
+        .expect("the graph opened");
     assert_eq!(
         view.read_with(&vcx, |v, cx| v.cards_for_test(cx).len()),
         1,
@@ -749,7 +777,7 @@ nodes:
     vcx.run_until_parked();
     let view = ws
         .read_with(&vcx, |ws, _| ws.open_graph().map(|(_, _, view)| view))
-        .expect("the graph pane opened");
+        .expect("the graph opened");
 
     // Read the list once so there is a cache to invalidate — the state the
     // panel is in whenever the tab is up.
@@ -849,7 +877,7 @@ async fn switching_the_theme_recolours_the_graph(cx: &mut TestAppContext) {
     vcx.run_until_parked();
     let view = ws
         .read_with(&vcx, |ws, _| ws.open_graph().map(|(_, _, view)| view))
-        .expect("the graph pane opened");
+        .expect("the graph opened");
     view.update_in(&mut vcx, |v, window, cx| {
         v.select_node_for_test(&"design".into(), window, cx)
     });
@@ -896,7 +924,7 @@ async fn a_save_that_changes_no_shape_keeps_the_canvas(cx: &mut TestAppContext) 
     vcx.run_until_parked();
     let view = ws
         .read_with(&vcx, |ws, _| ws.open_graph().map(|(_, _, view)| view))
-        .expect("the graph pane opened");
+        .expect("the graph opened");
     view.update_in(&mut vcx, |v, window, cx| {
         v.select_node_for_test(&"design".into(), window, cx)
     });
@@ -962,7 +990,7 @@ async fn a_reload_keeps_the_colours_of_the_run(cx: &mut TestAppContext) {
     let here = ws.update(&mut vcx, |ws, _| ws.active);
     let view = ws
         .read_with(&vcx, |ws, _| ws.open_graph().map(|(_, _, view)| view))
-        .expect("the graph pane opened");
+        .expect("the graph opened");
 
     ws.update(&mut vcx, |ws, _| {
         ws.seed_flow_run_of_for_test(
@@ -1022,7 +1050,7 @@ async fn a_run_does_not_colour_a_flow_whose_nodes_have_changed(cx: &mut TestAppC
     let here = ws.update(&mut vcx, |ws, _| ws.active);
     let view = ws
         .read_with(&vcx, |ws, _| ws.open_graph().map(|(_, _, view)| view))
-        .expect("the graph pane opened");
+        .expect("the graph opened");
 
     ws.update(&mut vcx, |ws, _| {
         ws.seed_flow_run_of_for_test(
@@ -1124,7 +1152,7 @@ async fn the_toolbar_add_reaches_the_file(cx: &mut TestAppContext) {
     vcx.run_until_parked();
     let view = ws
         .read_with(&vcx, |ws, _| ws.open_graph().map(|(_, _, view)| view))
-        .expect("the graph pane opened");
+        .expect("the graph opened");
     let before = view.read_with(&vcx, |v, cx| v.cards_for_test(cx).len());
 
     view.update(&mut vcx, |_, cx| cx.emit(FlowGraphEvent::AddNode));
@@ -1161,7 +1189,7 @@ async fn a_press_on_the_toolbar_does_not_start_a_drag(cx: &mut TestAppContext) {
     vcx.run_until_parked();
     let view = ws
         .read_with(&vcx, |ws, _| ws.open_graph().map(|(_, _, view)| view))
-        .expect("the graph pane opened");
+        .expect("the graph opened");
     view.update_in(&mut vcx, |v, window, cx| {
         v.select_node_for_test(&"design".into(), window, cx)
     });
@@ -1260,7 +1288,7 @@ async fn a_line_drawn_between_two_cards_reaches_the_file(cx: &mut TestAppContext
     vcx.run_until_parked();
     let view = ws
         .read_with(&vcx, |ws, _| ws.open_graph().map(|(_, _, view)| view))
-        .expect("the graph pane opened");
+        .expect("the graph opened");
 
     view.update(&mut vcx, |_, cx| {
         cx.emit(FlowGraphEvent::Connect {
@@ -1309,7 +1337,7 @@ async fn a_line_that_would_loop_is_refused_and_not_left_on_the_canvas(cx: &mut T
     vcx.run_until_parked();
     let view = ws
         .read_with(&vcx, |ws, _| ws.open_graph().map(|(_, _, view)| view))
-        .expect("the graph pane opened");
+        .expect("the graph opened");
     let before_text = std::fs::read_to_string(&flow_path).expect("on disk");
     let before_edges = view.read_with(&vcx, |v, cx| v.drawn_edges_for_test(cx));
 
@@ -1349,7 +1377,7 @@ async fn an_edge_that_appears_on_the_canvas_is_written_and_taken_off_it(cx: &mut
     vcx.run_until_parked();
     let view = ws
         .read_with(&vcx, |ws, _| ws.open_graph().map(|(_, _, view)| view))
-        .expect("the graph pane opened");
+        .expect("the graph opened");
     // One already: `build` runs after `design`.
     let before = view.read_with(&vcx, |v, cx| v.drawn_edges_for_test(cx));
 
@@ -1395,7 +1423,7 @@ async fn a_blank_node_the_file_never_named_is_taken_off_the_canvas(cx: &mut Test
     vcx.run_until_parked();
     let view = ws
         .read_with(&vcx, |ws, _| ws.open_graph().map(|(_, _, view)| view))
-        .expect("the graph pane opened");
+        .expect("the graph opened");
     let before_text = std::fs::read_to_string(&flow_path).expect("on disk");
     let (nodes, edges) = view.read_with(&vcx, |v, cx| {
         (v.drawn_nodes_for_test(cx), v.drawn_edges_for_test(cx))
@@ -1438,7 +1466,7 @@ async fn a_line_taken_off_the_canvas_is_removed_from_the_file(cx: &mut TestAppCo
     vcx.run_until_parked();
     let view = ws
         .read_with(&vcx, |ws, _| ws.open_graph().map(|(_, _, view)| view))
-        .expect("the graph pane opened");
+        .expect("the graph opened");
 
     view.update(&mut vcx, |v, cx| v.select_every_edge_for_test(cx));
     vcx.run_until_parked();
@@ -1477,7 +1505,7 @@ async fn drawing_a_line_and_taking_it_away_returns_the_file(cx: &mut TestAppCont
     vcx.run_until_parked();
     let view = ws
         .read_with(&vcx, |ws, _| ws.open_graph().map(|(_, _, view)| view))
-        .expect("the graph pane opened");
+        .expect("the graph opened");
     let before = std::fs::read_to_string(&flow_path).expect("on disk");
 
     view.update(&mut vcx, |v, cx| {
@@ -1541,7 +1569,7 @@ nodes:
     vcx.run_until_parked();
     let view = ws
         .read_with(&vcx, |ws, _| ws.open_graph().map(|(_, _, view)| view))
-        .expect("the graph pane opened");
+        .expect("the graph opened");
     view.update_in(&mut vcx, |v, window, cx| {
         v.select_node_for_test(&"design".into(), window, cx)
     });
@@ -1619,7 +1647,7 @@ async fn holding_the_pan_key_reaches_the_pointer(cx: &mut TestAppContext) {
 
     let view = ws
         .read_with(&vcx, |ws, _| ws.open_graph().map(|(_, _, view)| view))
-        .expect("the graph pane just opened");
+        .expect("the graph just opened");
 
     assert_eq!(
         view.read_with(&vcx, |v, _| v.pan_cursor_for_test()),
@@ -1679,7 +1707,7 @@ async fn the_pointer_over_the_canvas_is_what_suspends_the_policy(cx: &mut TestAp
     let was = vcx.update(|_, cx| cx.cursor_hide_mode());
     let view = ws
         .read_with(&vcx, |ws, _| ws.open_graph().map(|(_, _, view)| view))
-        .expect("the graph pane just opened");
+        .expect("the graph just opened");
 
     // No key touched yet — the pointer arriving is enough.
     view.update_in(&mut vcx, |v, w, cx| v.hover_canvas_for_test(true, w, cx));
@@ -1805,4 +1833,115 @@ async fn an_auto_repeat_does_not_flip_the_input_modality(cx: &mut TestAppContext
             "a repeat is not new keyboard input"
         );
     }
+}
+
+/// Escape on the graph leaves it for the list. It must not reach the file
+/// pane the page hides: that pane is still the lane's focused one, and its
+/// Escape closes it.
+#[gpui::test]
+async fn escape_on_the_graph_leaves_it_and_spares_the_hidden_file(cx: &mut TestAppContext) {
+    let (lane, ws, flow_path, wh) = workspace_with_a_flow(cx, ONE_AGENT);
+    let note = lane.path().join("note.md");
+    std::fs::write(&note, "# kept").expect("write");
+    let mut vcx = gpui::VisualTestContext::from_window(wh.into(), cx);
+    vcx.cx.update(crate::bind_keys::register_static_bindings);
+    ws.update_in(&mut vcx, |ws, window, cx| {
+        ws.open_linked_file(note.clone(), window, cx)
+    });
+    vcx.run_until_parked();
+    let file_pane = ws.read_with(&vcx, |ws, _| ws.active_runtime().focused_pane_id);
+    ws.update_in(&mut vcx, |ws, window, cx| {
+        ws.open_flow_graph(ws.active, &flow_path, window, cx);
+        window.refresh();
+    });
+    vcx.run_until_parked();
+
+    vcx.simulate_keystrokes("escape");
+    vcx.run_until_parked();
+    ws.read_with(&vcx, |ws, _| {
+        assert!(ws.open_graph().is_none(), "Escape left the graph");
+        assert_eq!(ws.active_page(), Some(crate::workspace::pages::Page::Flows));
+        assert!(
+            ws.active_runtime().panes.iter().any(|p| p.id == file_pane),
+            "and the file the page hid is still open"
+        );
+    });
+}
+
+/// A page's list over a file pane takes the file's shortcuts away with it:
+/// Escape on the Flows list must not close the file the page hides.
+#[gpui::test]
+async fn escape_on_a_page_list_spares_the_hidden_file(cx: &mut TestAppContext) {
+    let (lane, ws, _flow_path, wh) = workspace_with_a_flow(cx, ONE_AGENT);
+    let note = lane.path().join("note.md");
+    std::fs::write(&note, "# kept").expect("write");
+    let mut vcx = gpui::VisualTestContext::from_window(wh.into(), cx);
+    vcx.cx.update(crate::bind_keys::register_static_bindings);
+    ws.update_in(&mut vcx, |ws, window, cx| {
+        ws.open_linked_file(note.clone(), window, cx)
+    });
+    vcx.run_until_parked();
+    let file_pane = ws.read_with(&vcx, |ws, _| {
+        assert!(
+            ws.focused_file_view().is_some(),
+            "the lane's focused pane is the file"
+        );
+        ws.active_runtime().focused_pane_id
+    });
+    ws.update_in(&mut vcx, |ws, window, cx| {
+        ws.open_page(crate::workspace::pages::Page::Flows, window, cx);
+        window.refresh();
+    });
+    vcx.run_until_parked();
+
+    vcx.simulate_keystrokes("escape");
+    vcx.run_until_parked();
+    ws.read_with(&vcx, |ws, _| {
+        assert!(
+            ws.active_runtime().panes.iter().any(|p| p.id == file_pane),
+            "the file the page hid is still open"
+        );
+    });
+}
+
+/// The graph runs in its worktree, so removing that worktree closes it —
+/// it would otherwise stay on screen with Run pointing nowhere.
+#[gpui::test]
+async fn removing_the_graphs_worktree_closes_it(cx: &mut TestAppContext) {
+    let (_lane, ws, _path, wh) = workspace_with_a_flow(cx, ONE_AGENT);
+    let (other_dir, other) = add_lane_with_a_flow(&ws, wh, cx, "deploy.yaml", ONE_AGENT);
+    let mut vcx = gpui::VisualTestContext::from_window(wh.into(), cx);
+    let flow = flow_paths::flows_dir(other_dir.path()).join("deploy.yaml");
+    ws.update_in(&mut vcx, |ws, window, cx| {
+        ws.open_flow_graph(other, &flow, window, cx)
+    });
+    vcx.run_until_parked();
+    assert!(ws.read_with(&vcx, |ws, _| {
+        ws.open_graph().is_some_and(|(_, lane, _)| lane == other)
+    }));
+
+    ws.update_in(&mut vcx, |ws, window, cx| {
+        ws.finalize_remove_lane(other, window, cx)
+    });
+    vcx.run_until_parked();
+    assert!(
+        ws.read_with(&vcx, |ws, _| ws.open_graph().is_none()),
+        "the graph went with its worktree"
+    );
+}
+
+/// Closing the project the graph runs in closes it too.
+#[gpui::test]
+async fn closing_the_graphs_project_closes_it(cx: &mut TestAppContext) {
+    let (_lane, ws, flow_path, wh) = workspace_with_a_flow(cx, ONE_AGENT);
+    let mut vcx = gpui::VisualTestContext::from_window(wh.into(), cx);
+    ws.update_in(&mut vcx, |ws, window, cx| {
+        ws.open_flow_graph(ws.active, &flow_path, window, cx)
+    });
+    vcx.run_until_parked();
+    ws.update_in(&mut vcx, |ws, window, cx| {
+        ws.close_active_project(window, cx)
+    });
+    vcx.run_until_parked();
+    assert!(ws.read_with(&vcx, |ws, _| ws.open_graph().is_none()));
 }

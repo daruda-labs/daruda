@@ -79,7 +79,7 @@ pub(in crate::workspace) enum FlowSubmitError {
 
 /// Where a run came from, kept because `RunRequest` cannot say.
 ///
-/// A graph pane is keyed by the flow file's path, so colouring one from a
+/// The graph is keyed by the flow file's path, so colouring one from a
 /// run means knowing which file the run was submitted for. A resumed run
 /// cannot answer that: `prepare` reads `run.yaml` and sets `flow_dir` to the
 /// run directory, so the original `.daruda/flows/x.yaml` is not recoverable
@@ -99,7 +99,7 @@ pub(in crate::workspace) enum FlowSource {
 /// A run-scoped axis beside `profile`, and threaded the same way: both are
 /// answers a surface gives about *this* run that the committed file must not
 /// carry. Default is the whole flow, computed fresh — which is what every
-/// surface but the graph pane's two partial-run glyphs asks for.
+/// surface but the graph's two partial-run glyphs asks for.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub(in crate::workspace) struct FlowSelection {
     /// Run no further than this node — it and its ancestors.

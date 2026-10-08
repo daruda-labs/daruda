@@ -160,8 +160,8 @@ impl Workspace {
                     });
                 }
 
-                // Every open Task Edit pane, including panes parked in
-                // inactive lanes, owns four locale-dependent placeholders.
+                // The Task editor, open or hidden behind another page, owns
+                // four locale-dependent placeholders.
                 for (title, branch, prompt, notes) in task_edit_inputs {
                     title.update(cx, |input, cx| {
                         input.set_placeholder(s::task::edit_title_placeholder(), window, cx);

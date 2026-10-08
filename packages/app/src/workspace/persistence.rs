@@ -563,8 +563,11 @@ impl Workspace {
                 let mut scratch: Vec<pane::Pane> = Vec::new();
                 let mut id_map: HashMap<u64, pane_tree::PaneId> = HashMap::new();
                 let mut tabs: Vec<TabEntry> = Vec::new();
+                // The saved active index counts the saved tabs; the ones that
+                // did not come back must not shift it onto a neighbour.
+                let mut kept_before_active = 0;
 
-                for stab in &swt.tabs {
+                for (ix, stab) in swt.tabs.iter().enumerate() {
                     // A tab that fails part-way leaves the panes it did
                     // build in `scratch`; they go with it.
                     let built_before = scratch.len();
@@ -584,6 +587,9 @@ impl Workspace {
                                 .copied()
                                 .unwrap_or_else(|| layout.first_leaf());
                             let tab_id = self.alloc_id();
+                            if ix < swt.active_tab_index {
+                                kept_before_active += 1;
+                            }
                             tabs.push(TabEntry {
                                 id: tab_id,
                                 layout,
@@ -607,7 +613,7 @@ impl Workspace {
                     }
                 }
 
-                let wt_active_tab = swt.active_tab_index.min(tabs.len().saturating_sub(1));
+                let wt_active_tab = kept_before_active.min(tabs.len().saturating_sub(1));
                 let focused = if wt_ref == self.active {
                     let focused_tab = tabs.get(wt_active_tab);
                     let leaves = focused_tab.map(|t| t.layout.pane_ids());

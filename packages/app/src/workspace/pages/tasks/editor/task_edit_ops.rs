@@ -84,7 +84,9 @@ impl Workspace {
                         .get(id)
                         .cloned()
                 });
-                let id = ws.install_task_editor(task_id, initial, draft_project, window, cx);
+                let id = ws.mutate_durable_in(window, cx, |ws, window, cx| {
+                    ws.install_task_editor(task_id, initial, draft_project, window, cx)
+                });
                 ws.show_task_detail(id, window, cx);
             },
         );
@@ -118,7 +120,8 @@ impl Workspace {
         }
     }
 
-    /// Make a new editor the page's detail. The caller has left the old one.
+    /// Make a new editor the page's detail. The caller has left the old one,
+    /// and saves the workspace if this is news — a restore is not.
     fn install_task_editor(
         &mut self,
         task_id: Option<TaskId>,
@@ -129,9 +132,7 @@ impl Workspace {
     ) -> TaskEditorId {
         let id = TaskEditorId(self.alloc_id());
         let editor = self.build_task_editor(id, task_id, initial, draft_project, window, cx);
-        self.mutate_durable(cx, |ws, _| {
-            ws.pages.tasks.detail = Some(TaskDetail { id, editor });
-        });
+        self.pages.tasks.detail = Some(TaskDetail { id, editor });
         id
     }
 
@@ -402,7 +403,7 @@ impl Workspace {
         content
     }
 
-    /// Refresh the tab title from the title input.
+    /// Refresh the editor's cached title from the title input.
     pub(super) fn refresh_task_edit_title(
         &mut self,
         editor_id: TaskEditorId,

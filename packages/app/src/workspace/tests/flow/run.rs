@@ -901,7 +901,7 @@ async fn the_resumed_run_judges_the_stale_lock_the_same_way_it_judged_the_crash(
     );
 }
 
-/// The graph pane's ▶ and the Flows panel's know which flow already, so they
+/// The graph's ▶ and the Flows page's know which flow already, so they
 /// enter the funnel one question in. What is left of it still has to happen —
 /// a profiled flow is asked about, exactly as it would be from the picker.
 #[gpui::test]

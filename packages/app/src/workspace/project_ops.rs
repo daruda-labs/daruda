@@ -62,6 +62,7 @@ impl Workspace {
         // default-ref entry so the "active runtime always present"
         // invariant holds for the Landing view that `render` paints next.
         self.main_area.runtimes.clear();
+        self.drop_flow_detail_of_gone_lane(window, cx);
         self.set_active(LaneRef::default());
         self.sync_settings_project(cx);
     }
@@ -312,6 +313,7 @@ impl Workspace {
         self.lane_scoped.retain(|key, _| key.project != project_id);
 
         self.projects.retain(|p| p.id != project_id);
+        self.drop_flow_detail_of_gone_lane(window, cx);
 
         // No more projects — clear the active runtime fields and leave the
         // window standing on Landing. Persist the empty list (mirrors the
@@ -471,6 +473,7 @@ impl Workspace {
                         // through the activate path.
                         if ws.active.project != project_id {
                             ws.projects.retain(|p| p.id != project_id);
+                            ws.drop_flow_detail_of_gone_lane(window, cx);
                             // Active is in a different project, so dropping
                             // every runtime keyed to `project_id` leaves the
                             // active runtime intact.
@@ -643,6 +646,7 @@ impl Workspace {
             if self.active == old_ref {
                 self.set_active(new_ref);
             }
+            self.rekey_flow_detail_lane(old_ref, new_ref);
             self.invalidate_visible_files_cache(old_ref);
             self.invalidate_visible_files_cache(new_ref);
         }

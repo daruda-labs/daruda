@@ -5,6 +5,7 @@ use daruda_store::observability::error_report::{ErrorReport, ErrorSeverity};
 use crate::workspace::close_guard_ops::prompt_stop_running;
 use crate::workspace::dirty_items::{DirtyItem, DirtyTarget, dirty_listing};
 use crate::workspace::main_area::file_save_ops::FileSaveOutcome;
+use crate::workspace::pages::detail::PageDetailId;
 use crate::workspace::{CloseWindow, Workspace};
 
 impl Workspace {
@@ -237,8 +238,10 @@ impl Workspace {
             DirtyTarget::Pane(pane_id) => {
                 self.write_file_pane(pane_id, false, cx) == FileSaveOutcome::Saved
             }
-            DirtyTarget::TaskEditor(id) => self.commit_task_editor(id, window, cx).is_some(),
-            DirtyTarget::FlowGraph(id) => match self.flow_graph(id) {
+            DirtyTarget::Detail(PageDetailId::TaskEditor(id)) => {
+                self.commit_task_editor(id, window, cx).is_some()
+            }
+            DirtyTarget::Detail(PageDetailId::Flow(id)) => match self.flow_graph(id) {
                 Some((_, view)) => {
                     let path = view.read(cx).path().to_path_buf();
                     self.save_flow_editor(&path, view, window, cx)

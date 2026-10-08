@@ -21,7 +21,7 @@ async fn an_edit_passes_both_gates_or_the_file_is_untouched(cx: &mut TestAppCont
     vcx.run_until_parked();
     let view = ws
         .read_with(&vcx, |ws, _| ws.open_graph().map(|(_, _, view)| view))
-        .expect("the graph pane opened");
+        .expect("the graph opened");
     let base = view
         .read_with(&vcx, |v, _| v.text().map(str::to_string))
         .expect("the pane holds what it read");
@@ -120,7 +120,7 @@ async fn clicking_a_card_selects_it_and_does_not_move_it(cx: &mut TestAppContext
     vcx.run_until_parked();
     let view = ws
         .read_with(&vcx, |ws, _| ws.open_graph().map(|(_, _, view)| view))
-        .expect("the graph pane opened");
+        .expect("the graph opened");
     let canvas = view
         .read_with(&vcx, |v, _| v.canvas_for_test().cloned())
         .expect("it drew");
@@ -217,7 +217,7 @@ async fn the_inspector_saves_one_field_and_keeps_its_place(cx: &mut TestAppConte
     vcx.run_until_parked();
     let view = ws
         .read_with(&vcx, |ws, _| ws.open_graph().map(|(_, _, view)| view))
-        .expect("the graph pane opened");
+        .expect("the graph opened");
     let before = std::fs::read_to_string(&flow_path).expect("readable");
 
     // Selecting the first card fills the form from the file.
@@ -286,7 +286,7 @@ async fn saving_the_form_keeps_the_output_schema_the_form_cannot_show(cx: &mut T
     vcx.run_until_parked();
     let view = ws
         .read_with(&vcx, |ws, _| ws.open_graph().map(|(_, _, view)| view))
-        .expect("the graph pane opened");
+        .expect("the graph opened");
     let before = std::fs::read_to_string(&flow_path).expect("readable");
 
     view.update_in(&mut vcx, |v, window, cx| {
@@ -342,7 +342,7 @@ async fn selecting_another_node_rebuilds_the_form(cx: &mut TestAppContext) {
     vcx.run_until_parked();
     let view = ws
         .read_with(&vcx, |ws, _| ws.open_graph().map(|(_, _, view)| view))
-        .expect("the graph pane opened");
+        .expect("the graph opened");
 
     let read_output = |vcx: &mut gpui::VisualTestContext| {
         view.read_with(vcx, |v, cx| {
@@ -385,7 +385,7 @@ async fn renaming_a_node_takes_the_mentions_of_it_along(cx: &mut TestAppContext)
     vcx.run_until_parked();
     let view = ws
         .read_with(&vcx, |ws, _| ws.open_graph().map(|(_, _, view)| view))
-        .expect("the graph pane opened");
+        .expect("the graph opened");
 
     view.update_in(&mut vcx, |v, window, cx| {
         v.select_node_for_test(&"design".into(), window, cx)
@@ -458,7 +458,7 @@ async fn a_refused_save_says_why_beside_the_fields(cx: &mut TestAppContext) {
     vcx.run_until_parked();
     let view = ws
         .read_with(&vcx, |ws, _| ws.open_graph().map(|(_, _, view)| view))
-        .expect("the graph pane opened");
+        .expect("the graph opened");
     let before = std::fs::read_to_string(&flow_path).expect("readable");
 
     view.update_in(&mut vcx, |v, window, cx| {
@@ -536,7 +536,7 @@ async fn the_agent_override_is_read_and_written_one_field_at_a_time(cx: &mut Tes
     vcx.run_until_parked();
     let view = ws
         .read_with(&vcx, |ws, _| ws.open_graph().map(|(_, _, view)| view))
-        .expect("the graph pane opened");
+        .expect("the graph opened");
     let before = std::fs::read_to_string(&flow_path).expect("readable");
 
     view.update_in(&mut vcx, |v, window, cx| {
@@ -595,7 +595,7 @@ async fn emptying_every_axis_removes_the_agent_block(cx: &mut TestAppContext) {
     vcx.run_until_parked();
     let view = ws
         .read_with(&vcx, |ws, _| ws.open_graph().map(|(_, _, view)| view))
-        .expect("the graph pane opened");
+        .expect("the graph opened");
 
     view.update_in(&mut vcx, |v, window, cx| {
         v.select_node_for_test(&"design".into(), window, cx)
@@ -651,7 +651,7 @@ nodes:
     vcx.run_until_parked();
     let view = ws
         .read_with(&vcx, |ws, _| ws.open_graph().map(|(_, _, view)| view))
-        .expect("the graph pane opened");
+        .expect("the graph opened");
     let before = std::fs::read_to_string(&flow_path).expect("readable");
 
     view.update_in(&mut vcx, |v, window, cx| {
@@ -705,7 +705,7 @@ async fn a_fail_policy_grows_a_block_and_gives_it_back(cx: &mut TestAppContext) 
     vcx.run_until_parked();
     let view = ws
         .read_with(&vcx, |ws, _| ws.open_graph().map(|(_, _, view)| view))
-        .expect("the graph pane opened");
+        .expect("the graph opened");
     let before = std::fs::read_to_string(&flow_path).expect("readable");
 
     let fail_states = |vcx: &mut gpui::VisualTestContext| {
@@ -799,7 +799,7 @@ nodes:
     vcx.run_until_parked();
     let view = ws
         .read_with(&vcx, |ws, _| ws.open_graph().map(|(_, _, view)| view))
-        .expect("the graph pane opened");
+        .expect("the graph opened");
     let before = std::fs::read_to_string(&flow_path).expect("readable");
 
     view.update_in(&mut vcx, |v, window, cx| {
@@ -861,7 +861,7 @@ async fn the_form_blocks_what_cannot_become_a_number_or_a_duration(cx: &mut Test
     vcx.run_until_parked();
     let view = ws
         .read_with(&vcx, |ws, _| ws.open_graph().map(|(_, _, view)| view))
-        .expect("the graph pane opened");
+        .expect("the graph opened");
     view.update_in(&mut vcx, |v, window, cx| {
         v.select_node_for_test(&"design".into(), window, cx)
     });
@@ -917,7 +917,7 @@ async fn adding_a_node_chains_it_and_selects_it(cx: &mut TestAppContext) {
     vcx.run_until_parked();
     let view = ws
         .read_with(&vcx, |ws, _| ws.open_graph().map(|(_, _, view)| view))
-        .expect("the graph pane opened");
+        .expect("the graph opened");
 
     view.update_in(&mut vcx, |v, window, cx| {
         v.select_node_for_test(&"build".into(), window, cx)
@@ -957,7 +957,7 @@ async fn deleting_a_node_takes_the_dependencies_with_it(cx: &mut TestAppContext)
     vcx.run_until_parked();
     let view = ws
         .read_with(&vcx, |ws, _| ws.open_graph().map(|(_, _, view)| view))
-        .expect("the graph pane opened");
+        .expect("the graph opened");
 
     // `build` depends on `design`; deleting `design` has to take that with it.
     ws.update_in(&mut vcx, |ws, window, cx| {
@@ -1005,7 +1005,7 @@ async fn a_prompt_can_come_from_a_file_instead(cx: &mut TestAppContext) {
     vcx.run_until_parked();
     let view = ws
         .read_with(&vcx, |ws, _| ws.open_graph().map(|(_, _, view)| view))
-        .expect("the graph pane opened");
+        .expect("the graph opened");
 
     let prompt_states = |vcx: &mut gpui::VisualTestContext| {
         view.read_with(vcx, |v, cx| {
@@ -1091,7 +1091,7 @@ async fn a_node_can_become_a_command_and_back(cx: &mut TestAppContext) {
     vcx.run_until_parked();
     let view = ws
         .read_with(&vcx, |ws, _| ws.open_graph().map(|(_, _, view)| view))
-        .expect("the graph pane opened");
+        .expect("the graph opened");
 
     view.update_in(&mut vcx, |v, window, cx| {
         v.select_node_for_test(&"build".into(), window, cx)
@@ -1174,7 +1174,7 @@ async fn a_refusal_points_at_the_field_it_is_about(cx: &mut TestAppContext) {
     vcx.run_until_parked();
     let view = ws
         .read_with(&vcx, |ws, _| ws.open_graph().map(|(_, _, view)| view))
-        .expect("the graph pane opened");
+        .expect("the graph opened");
 
     view.update_in(&mut vcx, |v, window, cx| {
         v.select_node_for_test(&"design".into(), window, cx)
@@ -1243,7 +1243,7 @@ async fn typing_lost_to_a_reload_is_reported(cx: &mut TestAppContext) {
     vcx.run_until_parked();
     let view = ws
         .read_with(&vcx, |ws, _| ws.open_graph().map(|(_, _, view)| view))
-        .expect("the graph pane opened");
+        .expect("the graph opened");
     view.update_in(&mut vcx, |v, window, cx| {
         v.select_node_for_test(&"design".into(), window, cx)
     });
@@ -1299,7 +1299,7 @@ async fn typing_lost_to_adding_a_node_is_reported(cx: &mut TestAppContext) {
     vcx.run_until_parked();
     let view = ws
         .read_with(&vcx, |ws, _| ws.open_graph().map(|(_, _, view)| view))
-        .expect("the graph pane opened");
+        .expect("the graph opened");
     view.update_in(&mut vcx, |v, window, cx| {
         v.select_node_for_test(&"design".into(), window, cx)
     });
@@ -1334,7 +1334,7 @@ async fn typing_lost_with_the_node_itself_is_reported(cx: &mut TestAppContext) {
     vcx.run_until_parked();
     let view = ws
         .read_with(&vcx, |ws, _| ws.open_graph().map(|(_, _, view)| view))
-        .expect("the graph pane opened");
+        .expect("the graph opened");
     view.update_in(&mut vcx, |v, window, cx| {
         v.select_node_for_test(&"design".into(), window, cx)
     });
@@ -1376,7 +1376,7 @@ async fn deleting_a_multi_selection_takes_every_node_in_it(cx: &mut TestAppConte
     vcx.run_until_parked();
     let view = ws
         .read_with(&vcx, |ws, _| ws.open_graph().map(|(_, _, view)| view))
-        .expect("the graph pane opened");
+        .expect("the graph opened");
 
     ws.update_in(&mut vcx, |ws, window, cx| {
         ws.delete_nodes(
@@ -1415,7 +1415,7 @@ async fn a_selection_of_every_node_is_refused(cx: &mut TestAppContext) {
     vcx.run_until_parked();
     let view = ws
         .read_with(&vcx, |ws, _| ws.open_graph().map(|(_, _, view)| view))
-        .expect("the graph pane opened");
+        .expect("the graph opened");
     let before = std::fs::read_to_string(&flow_path).expect("on disk");
 
     ws.update_in(&mut vcx, |ws, window, cx| {
@@ -1458,7 +1458,7 @@ async fn the_delete_key_asks_to_remove_the_selected_node(cx: &mut TestAppContext
     vcx.run_until_parked();
     let view = ws
         .read_with(&vcx, |ws, _| ws.open_graph().map(|(_, _, view)| view))
-        .expect("the graph pane opened");
+        .expect("the graph opened");
 
     let asked = std::rc::Rc::new(std::cell::Cell::new(0usize));
     let seen = asked.clone();
@@ -1578,7 +1578,7 @@ nodes:
     vcx.run_until_parked();
     let view = ws
         .read_with(&vcx, |ws, _| ws.open_graph().map(|(_, _, view)| view))
-        .expect("the graph pane opened");
+        .expect("the graph opened");
 
     view.update_in(&mut vcx, |v, window, cx| {
         v.select_node_for_test(&"design".into(), window, cx)
@@ -1641,7 +1641,7 @@ nodes:
     vcx.run_until_parked();
     let view = ws
         .read_with(&vcx, |ws, _| ws.open_graph().map(|(_, _, view)| view))
-        .expect("the graph pane opened");
+        .expect("the graph opened");
 
     let kind_of = |vcx: &mut gpui::VisualTestContext, node: &str| {
         view.update_in(vcx, |v, window, cx| {
@@ -1669,7 +1669,7 @@ async fn a_name_the_engine_could_not_use_is_refused_while_it_is_typed(cx: &mut T
     vcx.run_until_parked();
     let view = ws
         .read_with(&vcx, |ws, _| ws.open_graph().map(|(_, _, view)| view))
-        .expect("the graph pane opened");
+        .expect("the graph opened");
     view.update_in(&mut vcx, |v, window, cx| {
         v.select_node_for_test(&"design".into(), window, cx)
     });
@@ -1718,7 +1718,7 @@ async fn the_turn_cap_has_a_box_and_an_empty_one_writes_no_key(cx: &mut TestAppC
     vcx.run_until_parked();
     let view = ws
         .read_with(&vcx, |ws, _| ws.open_graph().map(|(_, _, view)| view))
-        .expect("the graph pane opened");
+        .expect("the graph opened");
     view.update_in(&mut vcx, |v, window, cx| {
         v.select_node_for_test(&"design".into(), window, cx)
     });

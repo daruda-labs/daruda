@@ -26,7 +26,7 @@ pub use gpui_component::input::LineDecoration;
 /// larger text size is more readable. `.bg(MODAL_INPUT_BG)` overrides
 /// gpui_component's default (which pulls `theme.background` and is
 /// slightly lighter than the bespoke `TextInput`) so every input on
-/// the TaskEdit pane shares the same surface color.
+/// the Task editor shares the same surface color.
 pub fn markdown_editor(state: &Entity<InputState>, cx: &App) -> Input {
     Input::new(state)
         .small()

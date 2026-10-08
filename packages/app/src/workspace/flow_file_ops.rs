@@ -208,7 +208,7 @@ impl Workspace {
 
     /// Change a flow file through its typed shape, or refuse and say why.
     ///
-    /// `base` is the text the change was made against — the graph pane holds it
+    /// `base` is the text the change was made against — the graph holds it
     /// ([`super::pages::flows::graph::FlowGraphView::text`]). Two gates
     /// stand between a change and the file, and the file is untouched unless
     /// both pass:
@@ -437,7 +437,7 @@ pub(in crate::workspace) fn ask_before_deleting(
 /// Why the engine refused the candidate text, in words a person can act on.
 ///
 /// `FlowError::Validate`'s `Display` is a count, so the issues are spelled out
-/// here through the same helper the graph pane uses — otherwise a refused save
+/// here through the same helper the graph uses — otherwise a refused save
 /// says "1 validation problem(s)" and nothing about which one.
 fn load_failure_detail(error: &daruda_flow::FlowError) -> String {
     match error {

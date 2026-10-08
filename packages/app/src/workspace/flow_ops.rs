@@ -215,7 +215,7 @@ impl Workspace {
 
         match picked {
             // Which flow, answered. Whatever is left of it belongs to
-            // `start_flow`, which is also where the graph pane's ▶ comes in —
+            // `start_flow`, which is also where the graph's ▶ comes in —
             // that button knows the flow already and skips only this question.
             Some(FlowPick::Flow {
                 lane,
@@ -591,7 +591,7 @@ impl Workspace {
         self.flows.runs.insert(
             lane,
             // This capture is of the panel and the chip, which read `doing`;
-            // no graph pane is open for it to colour.
+            // no graph is open for it to colour.
             RunHandle::seeded(
                 run_dir.clone(),
                 super::flow_request::FlowSource::Resumed {
@@ -657,7 +657,7 @@ impl Workspace {
         self.seed_flow_run_of_for_test(lane, run_dir, source);
     }
 
-    /// Same, for a run whose origin matters — a graph pane is coloured only
+    /// Same, for a run whose origin matters — a graph is coloured only
     /// when the run can name the file it is of. Also the seed the
     /// `flow-graph-running` capture uses, which is the same need.
     #[cfg(any(test, feature = "screenshot"))]

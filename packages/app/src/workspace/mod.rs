@@ -863,7 +863,7 @@ impl Workspace {
         // every external edit.
         ws.refresh_mcp_watcher(window, cx);
         // Flow watcher: subscribes to the active lane's flow directories so a
-        // graph pane and the Flows panel follow an edit made outside the app.
+        // graph and the Flows page follow an edit made outside the app.
         ws.respawn_flow_watcher(cx);
         // Load the right-panel Tasks tab from this workspace's
         // `data_dir`. Production paths all share the default

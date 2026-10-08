@@ -351,13 +351,13 @@ task:
   picker_empty_retry: "No errored tasks to retry."
   picker_empty_delete: "No tasks to delete."
   # `[📄 Open file]` button shown next to the Prompt section header in
-  # the TaskEdit pane. Click opens
+  # the Task editor. Click opens
   # the task's prompt file (`prompt_file_path`) in a fresh file viewer tab when
   # the task has a lane (Backlog / draft tasks disable the button
   # since no on-disk file exists yet).
   edit_open_file_button: "📄 Open file"
-  # Subtext rendered directly under the "Notes" label in the TaskEdit
-  # pane. Notes are stored on the `Task` and surface in search, but
+  # Subtext rendered directly under the "Notes" label in the Task
+  # editor. Notes are stored on the `Task` and surface in search, but
   # `render_task_prompt` deliberately excludes them — the hint makes
   # that contract visible so users don't expect the agent to read
   # their journal. Kept agent-agnostic since `AgentType` is reserved
@@ -382,7 +382,7 @@ task:
   edit_run_in_lane_busy: "Task “%{title}” is already running in this worktree."
   # A new-worktree branch that a registered lane already checks out.
   edit_branch_exists: "A worktree already uses this branch — choose Existing to run there."
-  # Field label for the base-lane selector on the TaskEdit pane.
+  # Field label for the base-lane selector on the Task editor.
   edit_base_label: "Base"
   # Trailing suffix on the option that maps to "no explicit base
   # lane — fall through to the project's active lane at
@@ -391,7 +391,7 @@ task:
   # rather than blank.
   edit_base_active_label: "Active worktree"
   edit_auto_execute_label: "Auto-execute"
-  # Field label for the execution-surface selector on the TaskEdit pane.
+  # Field label for the execution-surface selector on the Task editor.
   edit_surface_label: "Run on"
   # Option label — run the task on a terminal CLI session.
   edit_surface_terminal: "Terminal (CLI)"
@@ -404,7 +404,7 @@ task:
   # Close prompt for a dirty task pane. The title is a parameter, not a
   # prefix/suffix pair, so each locale puts it where its grammar wants it.
   edit_save_prompt: "Save changes to “%{title}” before closing?"
-  # TaskEdit pane close prompt — copy mirrors Zed `pane.rs:1981-1998`.
+  # Task editor leave prompt — copy mirrors Zed `pane.rs:1981-1998`.
   # Draft branch uses a stronger "Discard new task?" heading since the
   # work has never been persisted.
   edit_discard_draft_prompt: "Discard new task?"
@@ -419,7 +419,7 @@ task:
   # Heading of the prompt-file watcher conflict prompt.
   watcher_heading: "“%{title}” changed on disk"
   # Tab / window batch close prompt. Single 3-button modal
-  # summarising every dirty TaskEdit pane in the closing scope.
+  # summarising every unsaved item in the closing scope.
   batch_close_heading: "Save changes to the following before closing?"
   batch_save_all: "Save all"
   batch_discard_all: "Discard all"
@@ -2333,7 +2333,7 @@ code_block:
   # Tooltip on the rendered-markdown code-block copy button after a copy.
   copied: "Copied"
 
-# Why a branch name was rejected — rendered under the TaskEdit branch field.
+# Why a branch name was rejected — rendered under the Task editor's branch field.
 # Mirrors daruda_core::git::BranchNameRule.
 branch_rule:
   double_dot: "cannot contain '..'"
