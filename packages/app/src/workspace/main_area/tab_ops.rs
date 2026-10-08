@@ -1190,11 +1190,9 @@ impl Workspace {
             };
             // SILENT-OK: user may close window before save-dialog answer arrives
             let _ = this.update_in(cx, |this, window, cx| match answer {
-                0 => {
-                    if this.commit_dirty_items_with_failure_toast(&dirty, window, cx) {
-                        for i in &indices {
-                            this.close_tab_at(*i, window, cx);
-                        }
+                0 if this.commit_dirty_items_with_failure_toast(&dirty, window, cx) => {
+                    for i in &indices {
+                        this.close_tab_at(*i, window, cx);
                     }
                 }
                 1 => {
@@ -1288,10 +1286,8 @@ impl Workspace {
             };
             // SILENT-OK: user may close window before save-dialog answer arrives
             let _ = this.update_in(cx, |this, window, cx| match answer {
-                0 => {
-                    if this.commit_dirty_items_with_failure_toast(&dirty, window, cx) {
-                        this.close_tab_at(index, window, cx);
-                    }
+                0 if this.commit_dirty_items_with_failure_toast(&dirty, window, cx) => {
+                    this.close_tab_at(index, window, cx);
                 }
                 1 => this.close_tab_at(index, window, cx),
                 _ => {} // Cancel

@@ -16,9 +16,8 @@ concurrency:
 jobs:
   metadata:
     name: Validate release version
-    # Pinned rather than `-latest`, as in ci.yml — here it also decides which
-    # OS built the bytes a user downloads, so it should never move silently.
-    runs-on: ubuntu-24.04
+    # Keep release metadata on the same Ubuntu image as CI.
+    runs-on: ubuntu-latest
     outputs:
       version: ${{ steps.version.outputs.version }}
     steps:
@@ -39,7 +38,7 @@ jobs:
   build-dmg:
     name: Build macOS dmg
     needs: metadata
-    runs-on: macos-14  # Apple Silicon runner
+    runs-on: macos-latest  # Apple Silicon runner
     timeout-minutes: 30
 
     steps:
@@ -108,7 +107,7 @@ jobs:
   build-windows:
     name: Build Windows x86_64 ZIP
     needs: metadata
-    runs-on: windows-2025-vs2026  # the image `windows-latest` already served
+    runs-on: windows-latest
     timeout-minutes: 90
     steps:
       - name: Checkout
@@ -180,7 +179,7 @@ jobs:
     name: Publish platform packages
     needs: [metadata, build-dmg, build-windows]
     if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-latest
     permissions:
       contents: write
     steps:

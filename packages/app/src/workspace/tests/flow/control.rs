@@ -447,10 +447,10 @@ async fn a_run_ending_opens_no_tab_and_marks_its_worktree_unread(cx: &mut TestAp
 
             assert_eq!(ws.active_runtime().panes.len(), before, "no tab opened");
             assert!(
-                !ws.main_area
+                ws.main_area
                     .runtimes
                     .get(&other)
-                    .is_some_and(|rt| !rt.tabs.is_empty()),
+                    .is_none_or(|rt| rt.tabs.is_empty()),
                 "not in the worktree it ran in either"
             );
             assert_eq!(ws.active, active, "and the screen did not move");

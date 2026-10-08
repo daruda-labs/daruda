@@ -20,10 +20,8 @@ concurrency:
 jobs:
   lint:
     name: Lint
-    # Every runner here is pinned rather than `-latest`. That label migrates
-    # to Ubuntu 26 on 2026-10-19 and Windows moved image under one already,
-    # which swaps the OS under a green build with no commit to point at.
-    runs-on: ubuntu-24.04
+    # Track the latest GitHub-hosted image for each platform.
+    runs-on: ubuntu-latest
     timeout-minutes: 10
 
     # Nothing here compiles: `cargo fmt` reads the source and the scripts are
@@ -84,7 +82,7 @@ jobs:
 
   macos:
     name: macOS — build and test
-    runs-on: macos-14  # Apple Silicon runner
+    runs-on: macos-latest  # Apple Silicon runner
     timeout-minutes: 15
 
     steps:
@@ -143,7 +141,7 @@ jobs:
 
   linux:
     name: Linux — build and test
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-latest
     # Cold, and building the same tree the macOS job does on a slower
     # runner. Raise rather than let a real failure look like a timeout.
     timeout-minutes: 45
@@ -229,7 +227,7 @@ jobs:
 
   windows:
     name: Windows — build and test
-    runs-on: windows-2025-vs2026  # the image `windows-latest` already served
+    runs-on: windows-latest
     # Slower than either other runner and building the ghostty Zig static lib
     # from scratch on top. Raise rather than let a real failure read as a
     # timeout.

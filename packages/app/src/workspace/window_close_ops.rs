@@ -174,10 +174,8 @@ impl Workspace {
                 let _ = weak_inner.update_in(cx, |this, window, cx| {
                     this.window_runtime.close_in_flight = false;
                     match answer {
-                        0 => {
-                            if this.commit_dirty_items_with_failure_toast(&dirty, window, cx) {
-                                finish_close(after, window, cx);
-                            }
+                        0 if this.commit_dirty_items_with_failure_toast(&dirty, window, cx) => {
+                            finish_close(after, window, cx);
                         }
                         1 => finish_close(after, window, cx),
                         _ => {} // Cancel — leave the window open
