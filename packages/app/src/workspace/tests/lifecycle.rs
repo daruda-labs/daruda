@@ -24,7 +24,7 @@ async fn tab_add_close_switching_and_ids_share_one_three_tab_fixture(cx: &mut Te
     });
     workspace.read_with(cx, |ws, _| {
         assert_eq!(
-            ws.window_user_label.as_ref().map(|s| s.as_ref()),
+            ws.window_runtime.user_label.as_ref().map(|s| s.as_ref()),
             Some("daruda — review"),
             "window_user_label was not stored"
         );
@@ -35,7 +35,7 @@ async fn tab_add_close_switching_and_ids_share_one_three_tab_fixture(cx: &mut Te
     });
     workspace.read_with(cx, |ws, _| {
         assert!(
-            ws.window_user_label.is_none(),
+            ws.window_runtime.user_label.is_none(),
             "window_user_label was not cleared by None"
         );
     });

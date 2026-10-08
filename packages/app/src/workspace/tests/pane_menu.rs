@@ -50,7 +50,7 @@ async fn menu_focus_tracks_right_clicked_pane_without_click_side_effects(cx: &mu
         workspace.update(cx, |ws, cx| {
             ws.set_focused_pane(second, window, cx);
             assert_eq!(ws.active_runtime().focused_pane_id, second);
-            ws.terminal_input_visible = false;
+            ws.input_dock.visible = false;
 
             ws.open_pane_context_menu_at(first, Point::new(px(0.), px(0.)), window, cx);
 
@@ -64,7 +64,7 @@ async fn menu_focus_tracks_right_clicked_pane_without_click_side_effects(cx: &mu
                 "terminal pane context menu should deploy"
             );
             assert!(
-                !ws.terminal_input_visible,
+                !ws.input_dock.visible,
                 "opening a context menu must not surface the bottom input"
             );
             ws.open_pane_context_menu_at(first, Point::new(px(0.), px(0.)), window, cx);
@@ -149,7 +149,7 @@ async fn send_pane_selection_activates_the_target_tab_and_pane(cx: &mut TestAppC
             );
             assert_eq!(ws.active_runtime().focused_pane_id, target);
             assert!(
-                ws.terminal_input.read(cx).value().contains("cargo test"),
+                ws.input_dock.input.read(cx).value().contains("cargo test"),
                 "the captured text lands in the target's composer"
             );
 

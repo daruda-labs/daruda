@@ -161,7 +161,8 @@ impl Workspace {
     ) {
         // Also baked in at construction. No `&mut Window` needed, so inline.
         let new_max_rows = usize::from(config.agent.input_max_rows);
-        self.terminal_input
+        self.input_dock
+            .input
             .update(cx, |s, _cx| s.set_auto_grow(1, new_max_rows));
     }
 
@@ -169,7 +170,7 @@ impl Workspace {
     /// guard). `window.defer` pushes the entity-borrowing work past the window
     /// update this re-enters.
     pub(super) fn resync_input_dock_height(&mut self, cx: &mut Context<Self>) {
-        let handle = self.window_handle;
+        let handle = self.window_runtime.handle;
         let ws_weak = cx.weak_entity();
         crate::windows::try_update_workspace_window(
             handle,

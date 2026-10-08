@@ -82,7 +82,7 @@ impl Workspace {
         cx: &mut Context<Self>,
     ) {
         self.mutate_durable(cx, |ws, cx| {
-            ws.left_dock.update(cx, |d, _| d.toggle());
+            ws.docks.left.update(cx, |d, _| d.toggle());
             ws.main_area.pending_resize = true;
         });
         cx.notify();
@@ -109,8 +109,8 @@ impl Workspace {
         // The dock has to be open for the user to actually be there: GPUI
         // leaves a focus handle focused when its element unmounts, so a panel
         // whose dock was shut with Cmd+B still reports itself focused.
-        let already_there = self.left_dock_view == view
-            && self.left_dock.read(cx).is_open
+        let already_there = self.docks.left_view == view
+            && self.docks.left.read(cx).is_open
             && panel.is_focused(window);
         if already_there {
             let pane = self.active_runtime().focused_pane_id;
@@ -118,9 +118,9 @@ impl Workspace {
             return;
         }
         self.set_left_dock_view(view, cx);
-        if !self.left_dock.read(cx).is_open {
+        if !self.docks.left.read(cx).is_open {
             self.mutate_durable(cx, |ws, cx| {
-                ws.left_dock.update(cx, |d, _| d.is_open = true);
+                ws.docks.left.update(cx, |d, _| d.is_open = true);
                 ws.main_area.pending_resize = true;
             });
         }
@@ -139,7 +139,7 @@ impl Workspace {
             // dock is rendered through `.cached()`, so a Workspace-only
             // notify would leave the cached (closed) view on screen.
             // Per root CLAUDE.md Pitfall #10.
-            ws.bottom_dock.update(cx, |d, cx| {
+            ws.docks.bottom.update(cx, |d, cx| {
                 d.toggle();
                 cx.notify();
             });
@@ -155,7 +155,7 @@ impl Workspace {
         cx: &mut Context<Self>,
     ) {
         self.mutate_durable(cx, |ws, cx| {
-            ws.right_dock.update(cx, |d, _| d.toggle());
+            ws.docks.right.update(cx, |d, _| d.toggle());
             ws.main_area.pending_resize = true;
         });
         cx.notify();
@@ -172,9 +172,9 @@ impl Workspace {
         view: daruda_store::project::RightDockView,
         cx: &mut Context<Self>,
     ) {
-        if !self.right_dock.read(cx).is_open {
+        if !self.docks.right.read(cx).is_open {
             self.mutate_durable(cx, |ws, cx| {
-                ws.right_dock.update(cx, |d, _| d.open());
+                ws.docks.right.update(cx, |d, _| d.open());
                 ws.main_area.pending_resize = true;
             });
         }
@@ -260,11 +260,11 @@ impl Workspace {
         cx: &mut Context<Self>,
     ) {
         let start_size = match position {
-            DockPosition::Left => self.left_dock.read(cx).size,
-            DockPosition::Right => self.right_dock.read(cx).size,
-            DockPosition::Bottom => self.bottom_dock.read(cx).size,
+            DockPosition::Left => self.docks.left.read(cx).size,
+            DockPosition::Right => self.docks.right.read(cx).size,
+            DockPosition::Bottom => self.docks.bottom.read(cx).size,
         };
-        self.dock_drag = Some(DockDrag {
+        self.docks.drag = Some(DockDrag {
             position,
             anchor_px,
             start_size,
@@ -278,7 +278,7 @@ impl Workspace {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let Some(drag) = self.dock_drag else {
+        let Some(drag) = self.docks.drag else {
             return;
         };
         let delta = cursor_px - drag.anchor_px;
@@ -292,12 +292,12 @@ impl Workspace {
             DockPosition::Bottom => drag.start_size - delta,
         };
         match drag.position {
-            DockPosition::Left => self.left_dock.update(cx, |d, _| d.resize(new_size)),
-            DockPosition::Right => self.right_dock.update(cx, |d, _| d.resize(new_size)),
+            DockPosition::Left => self.docks.left.update(cx, |d, _| d.resize(new_size)),
+            DockPosition::Right => self.docks.right.update(cx, |d, _| d.resize(new_size)),
             // Bottom dock renders through `.cached()`, so notify its
             // entity directly (Pitfall #10) — a Workspace-only notify
             // wouldn't repaint the cached view at the new height.
-            DockPosition::Bottom => self.bottom_dock.update(cx, |d, cx| {
+            DockPosition::Bottom => self.docks.bottom.update(cx, |d, cx| {
                 d.resize(new_size);
                 cx.notify();
             }),
@@ -307,9 +307,9 @@ impl Workspace {
     }
 
     pub(in crate::workspace) fn end_dock_drag(&mut self, cx: &mut Context<Self>) {
-        if self.dock_drag.is_some() {
+        if self.docks.drag.is_some() {
             self.mutate_durable(cx, |ws, _| {
-                ws.dock_drag = None;
+                ws.docks.drag = None;
             });
             cx.notify();
         }
@@ -338,7 +338,7 @@ impl Workspace {
     ) {
         self.mutate_durable_in(window, cx, |ws, window, cx| {
             // Cached bottom dock — notify its entity (Pitfall #10).
-            ws.bottom_dock.update(cx, |d, cx| {
+            ws.docks.bottom.update(cx, |d, cx| {
                 d.resize(new_size);
                 cx.notify();
             });
@@ -351,13 +351,13 @@ impl Workspace {
     /// stacked chrome (one text row + action row) is taller than the
     /// single-row macro preset, so under the shared floor it paints clipped.
     pub(in crate::workspace) fn sync_bottom_dock_min_to_panel(&mut self, cx: &mut Context<Self>) {
-        let min = if self.terminal_input_visible {
+        let min = if self.input_dock.visible {
             bottom_dock_height_for_rows(1)
         } else {
             crate::ui::theme::DOCK_BOTTOM_MIN_H
         };
-        let before = self.bottom_dock.read(cx).size;
-        let after = self.bottom_dock.update(cx, |d, cx| {
+        let before = self.docks.bottom.read(cx).size;
+        let after = self.docks.bottom.update(cx, |d, cx| {
             d.set_min_size(min);
             cx.notify();
             d.size
@@ -387,9 +387,9 @@ impl Workspace {
         cx: &mut Context<Self>,
     ) {
         // Read display-row count from the input state (re-entrant-safe: we read
-        // `terminal_input` here while holding `&mut Workspace` — it is a
+        // `InputDock::input` here while holding `&mut Workspace` — it is a
         // separate entity so no re-entry conflict; we are not inside an
-        // `entity.update` on `terminal_input`).
+        // `entity.update` on `InputDock::input`).
         //
         // `display_rows()` returns the soft-wrapped row count that the editor
         // uses for its own layout (`update_auto_grow` → `text_wrapper.len()`),
@@ -399,16 +399,16 @@ impl Workspace {
         // ⚠️ Do NOT call `window.line_height()` / `window.text_style()` here —
         // this method runs in an event handler, outside the paint walk (CLAUDE.md
         // Pitfall #8). The per-row height constant lives in the palette instead.
-        let new_line_count = self.terminal_input.read(cx).display_rows().max(1);
+        let new_line_count = self.input_dock.input.read(cx).display_rows().max(1);
 
         let max_rows = usize::from(self.mirrors.agent.input_max_rows);
         let clamped = new_line_count.min(max_rows);
 
         // Guard: only resize when line count actually changes.
-        if clamped == self.terminal_input_line_count {
+        if clamped == self.input_dock.line_count {
             return;
         }
-        self.terminal_input_line_count = clamped;
+        self.input_dock.line_count = clamped;
 
         let desired = bottom_dock_height_for_rows(clamped);
 
@@ -417,7 +417,7 @@ impl Workspace {
         // height; reducing it (e.g. after clearing the input on submit) would
         // undo that intentional action. A smaller `desired` is silently
         // ignored; only when `desired > current` do we invoke the resize path.
-        let current = self.bottom_dock.read(cx).size;
+        let current = self.docks.bottom.read(cx).size;
         if desired <= current {
             return;
         }

@@ -77,8 +77,8 @@ impl Workspace {
         purpose: FlowPurpose,
         cx: &mut Context<Self>,
     ) {
-        if self.flow_picker.is_open() {
-            self.flow_picker.close();
+        if self.overlays.flow_picker.is_open() {
+            self.overlays.flow_picker.close();
             cx.notify();
             return;
         }
@@ -89,7 +89,7 @@ impl Workspace {
             .flow_sources_for(lane)
             .map(|sources| sources.list_flows())
             .unwrap_or_default();
-        self.flow_picker.open(lane, purpose, listed);
+        self.overlays.flow_picker.open(lane, purpose, listed);
         cx.notify();
     }
 
@@ -123,7 +123,7 @@ impl Workspace {
             // another lane belongs to this process too and would not stop
             // this one.
             Some(_) if self.flows.runs.is_running(lane) => {
-                self.flow_picker = FlowPicker::Stopping { lane };
+                self.overlays.flow_picker = FlowPicker::Stopping { lane };
                 cx.notify();
                 false
             }
@@ -161,7 +161,7 @@ impl Workspace {
     }
 
     pub(in crate::workspace) fn close_flow_picker(&mut self, cx: &mut Context<Self>) {
-        self.flow_picker.close();
+        self.overlays.flow_picker.close();
         cx.notify();
     }
 
@@ -172,13 +172,13 @@ impl Workspace {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if !self.flow_picker.is_open() {
+        if !self.overlays.flow_picker.is_open() {
             return;
         }
         let Some((key, ch)) = picker_keystroke(ev) else {
             return;
         };
-        match self.flow_picker.on_key(key, ch) {
+        match self.overlays.flow_picker.on_key(key, ch) {
             PickerKey::Confirm => self.execute_flow_picker_selection(window, cx),
             PickerKey::Dismiss => self.close_flow_picker(cx),
             PickerKey::Changed => cx.notify(),
@@ -195,7 +195,7 @@ impl Workspace {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        self.flow_picker.focus(ix);
+        self.overlays.flow_picker.focus(ix);
         self.execute_flow_picker_selection(window, cx);
     }
 
@@ -205,11 +205,11 @@ impl Workspace {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let picked = self.flow_picker.focused_pick();
+        let picked = self.overlays.flow_picker.focused_pick();
         // The worktree the prompt was raised for, not whichever is on screen
         // now: the picker can have been opened for a parked one, and a stop
         // must end the run it offered to stop.
-        let stopping = match self.flow_picker {
+        let stopping = match self.overlays.flow_picker {
             FlowPicker::Stopping { lane } => Some(lane),
             _ => None,
         };
@@ -231,7 +231,7 @@ impl Workspace {
                 selection,
                 profile,
             }) => {
-                self.flow_picker.close();
+                self.overlays.flow_picker.close();
                 cx.notify();
                 self.dispatch_flow(
                     FlowDispatch {
@@ -246,7 +246,7 @@ impl Workspace {
                 );
             }
             None => {
-                self.flow_picker.close();
+                self.overlays.flow_picker.close();
                 cx.notify();
                 if let Some(lane) = stopping {
                     self.stop_flow_run_in(lane, cx);
@@ -307,14 +307,15 @@ impl Workspace {
                 // for again on the way out: the profile stage already carries
                 // what has been decided so far, and which nodes to spend on is
                 // one of those things.
-                self.flow_picker
+                self.overlays
+                    .flow_picker
                     .ask_profile(lane, purpose, path, selection, profiles);
                 cx.notify();
                 return;
             }
         }
 
-        self.flow_picker.close();
+        self.overlays.flow_picker.close();
         cx.notify();
         self.dispatch_flow(
             FlowDispatch {
@@ -583,7 +584,7 @@ impl Workspace {
         }) else {
             return;
         };
-        self.flow_picker.ask_profile(
+        self.overlays.flow_picker.ask_profile(
             self.active,
             FlowPurpose::Run,
             path,

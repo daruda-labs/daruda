@@ -507,12 +507,12 @@ nodes:
         ws.execute_flow_picker_selection(window, cx);
     });
     assert!(
-        ws.read_with(&vcx, |ws, _| ws.flow_picker.choosing().is_some()),
+        ws.read_with(&vcx, |ws, _| ws.overlays.flow_picker.choosing().is_some()),
         "a flow with profiles asks — for every purpose but Graph"
     );
 
     // The control left it asking; a fresh question is what Graph is answering.
-    ws.update(&mut vcx, |ws, _| ws.flow_picker.close());
+    ws.update(&mut vcx, |ws, _| ws.overlays.flow_picker.close());
     ws.update_in(&mut vcx, |ws, window, cx| {
         ws.open_flow_picker(
             ws.active,
@@ -523,7 +523,7 @@ nodes:
     });
     vcx.run_until_parked();
     assert!(
-        ws.read_with(&vcx, |ws, _| ws.flow_picker.choosing().is_none()),
+        ws.read_with(&vcx, |ws, _| ws.overlays.flow_picker.choosing().is_none()),
         "Graph goes straight to the defaults graph"
     );
     let paths: Vec<std::path::PathBuf> = ws.read_with(&vcx, |ws, _| {
@@ -1650,7 +1650,7 @@ nodes:
     for selector in [TOOLBAR_RUN_SELECTOR, TOOLBAR_CHECK_SELECTOR] {
         press(&mut vcx, selector);
         assert!(
-            ws.read_with(&vcx, |ws, _| ws.flow_picker.is_open()),
+            ws.read_with(&vcx, |ws, _| ws.overlays.flow_picker.is_open()),
             "{selector} did nothing on a clean form, so this fixture proves nothing"
         );
         ws.update(&mut vcx, |ws, cx| ws.close_flow_picker(cx));
@@ -1674,14 +1674,14 @@ nodes:
 
     press(&mut vcx, TOOLBAR_RUN_SELECTOR);
     assert!(
-        !ws.read_with(&vcx, |ws, _| ws.flow_picker.is_open()),
+        !ws.read_with(&vcx, |ws, _| ws.overlays.flow_picker.is_open()),
         "the run button was pressable with unsaved edits in the inspector"
     );
     // ✓ reads the file too, and would go further than ▶ — it would call the
     // version on disk valid while the screen shows something else.
     press(&mut vcx, TOOLBAR_CHECK_SELECTOR);
     assert!(
-        !ws.read_with(&vcx, |ws, _| ws.flow_picker.is_open()),
+        !ws.read_with(&vcx, |ws, _| ws.overlays.flow_picker.is_open()),
         "the check button was pressable with unsaved edits in the inspector"
     );
 }

@@ -309,8 +309,8 @@ mod resolve_default_cwd {
     }
 
     #[test]
-    fn focused_pane_cwd_wins_when_inherit_is_on() {
-        let got = resolve_default_cwd(true, typical_candidates());
+    fn focused_pane_cwd_wins() {
+        let got = resolve_default_cwd(typical_candidates());
         assert_eq!(got, Some(p("/Users/x/proj-feat-a/src")));
     }
 
@@ -319,22 +319,10 @@ mod resolve_default_cwd {
         // Fresh `new_with_project`: no panes yet, focused-pane cwd
         // is None. The new tab MUST spawn at the lane path,
         // not at the main repo root.
-        let got = resolve_default_cwd(
-            true,
-            CwdCandidates {
-                focused_pane: None,
-                ..typical_candidates()
-            },
-        );
-        assert_eq!(got, Some(p("/Users/x/proj-feat-a")));
-    }
-
-    #[test]
-    fn active_worktree_path_wins_when_inherit_disabled() {
-        // User opted out of cwd inheritance — every new tab should
-        // still respect lane isolation, ignoring focused_pane
-        // even when it would otherwise have been used.
-        let got = resolve_default_cwd(false, typical_candidates());
+        let got = resolve_default_cwd(CwdCandidates {
+            focused_pane: None,
+            ..typical_candidates()
+        });
         assert_eq!(got, Some(p("/Users/x/proj-feat-a")));
     }
 
@@ -342,13 +330,10 @@ mod resolve_default_cwd {
     fn project_root_is_last_resort() {
         // No lane info available (legacy / non-lane
         // workspace). Falls through to project root.
-        let got = resolve_default_cwd(
-            true,
-            CwdCandidates {
-                project_root: Some(p("/Users/x/proj")),
-                ..Default::default()
-            },
-        );
+        let got = resolve_default_cwd(CwdCandidates {
+            project_root: Some(p("/Users/x/proj")),
+            ..Default::default()
+        });
         assert_eq!(got, Some(p("/Users/x/proj")));
     }
 
@@ -356,7 +341,7 @@ mod resolve_default_cwd {
     fn returns_none_when_no_candidates() {
         // Project-less Workspace, no lanes, no focused pane.
         // The PTY then falls back to the parent process's cwd.
-        let got = resolve_default_cwd(true, CwdCandidates::default());
+        let got = resolve_default_cwd(CwdCandidates::default());
         assert_eq!(got, None);
     }
 
@@ -366,13 +351,10 @@ mod resolve_default_cwd {
         // reported cwd verbatim — even if it has navigated into a
         // subdirectory of the lane, we don't reset to the
         // lane root.
-        let got = resolve_default_cwd(
-            true,
-            CwdCandidates {
-                focused_pane: Some(p("/Users/x/proj-feat-a/deep/nested/dir")),
-                ..typical_candidates()
-            },
-        );
+        let got = resolve_default_cwd(CwdCandidates {
+            focused_pane: Some(p("/Users/x/proj-feat-a/deep/nested/dir")),
+            ..typical_candidates()
+        });
         assert_eq!(got, Some(p("/Users/x/proj-feat-a/deep/nested/dir")));
     }
 }

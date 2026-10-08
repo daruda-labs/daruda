@@ -40,7 +40,7 @@ async fn status_pulse_repaints_the_left_dock_only_where_a_badge_lives(cx: &mut T
 
     cx.update_window(wh.into(), |_, _window, cx| {
         ws.update(cx, |ws, cx| {
-            ws.left_dock.update(cx, |d, cx| {
+            ws.docks.left.update(cx, |d, cx| {
                 d.is_open = true;
                 cx.notify();
             });
@@ -77,7 +77,7 @@ async fn status_pulse_repaints_the_left_dock_only_where_a_badge_lives(cx: &mut T
         .update_window(wh.into(), |_, _window, cx| {
             ws.update(cx, |ws, cx| {
                 ws.set_left_dock_view(LeftDockView::Lanes, cx);
-                ws.left_dock.update(cx, |d, cx| {
+                ws.docks.left.update(cx, |d, cx| {
                     d.is_open = false;
                     cx.notify();
                 });
@@ -91,7 +91,7 @@ async fn status_pulse_repaints_the_left_dock_only_where_a_badge_lives(cx: &mut T
     // does repaint — otherwise the gate would silently freeze the badge.
     cx.update_window(wh.into(), |_, _window, cx| {
         ws.update(cx, |ws, cx| {
-            ws.left_dock.update(cx, |d, cx| {
+            ws.docks.left.update(cx, |d, cx| {
                 d.is_open = true;
                 cx.notify();
             });
@@ -100,10 +100,10 @@ async fn status_pulse_repaints_the_left_dock_only_where_a_badge_lives(cx: &mut T
     .unwrap();
     cx.run_until_parked();
 
-    let before = ws.read_with(cx, |ws, cx| ws.left_dock.read(cx).render_count.get());
+    let before = ws.read_with(cx, |ws, cx| ws.docks.left.read(cx).render_count.get());
     ws.update(cx, |ws, cx| ws.notify_left_dock(cx));
     cx.run_until_parked();
-    let after = ws.read_with(cx, |ws, cx| ws.left_dock.read(cx).render_count.get());
+    let after = ws.read_with(cx, |ws, cx| ws.docks.left.read(cx).render_count.get());
     assert!(
         after > before,
         "notify_left_dock did not repaint the dock ({before} -> {after}); \

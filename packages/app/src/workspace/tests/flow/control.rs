@@ -326,7 +326,7 @@ async fn a_runnable_flow_starts_and_names_the_file_that_ran(cx: &mut TestAppCont
             assert_eq!(entry.name, "ship.yaml", "named by the file, not the input");
             assert_eq!(entry.origin, FlowOriginKind::Repo);
             assert!(
-                !ws.flow_picker.is_open(),
+                !ws.overlays.flow_picker.is_open(),
                 "a phone command must never raise a desktop dialog"
             );
         });
@@ -351,7 +351,7 @@ async fn a_lane_already_running_a_flow_refuses_the_next(cx: &mut TestAppContext)
                 })
             );
             assert!(
-                !ws.flow_picker.is_open(),
+                !ws.overlays.flow_picker.is_open(),
                 "the refusal is the answer, not a dialog"
             );
         });
@@ -436,7 +436,7 @@ async fn a_named_worktree_already_running_refuses_without_a_dialog(cx: &mut Test
                 })
             );
             assert!(
-                !ws.flow_picker.is_open(),
+                !ws.overlays.flow_picker.is_open(),
                 "the refusal is the answer, not a dialog"
             );
         });
@@ -547,7 +547,11 @@ async fn the_profile_question_dispatches_to_the_worktree_it_was_opened_for(
                 window,
                 cx,
             ));
-            let pick = ws.flow_picker.focused_pick().expect("the profile question");
+            let pick = ws
+                .overlays
+                .flow_picker
+                .focused_pick()
+                .expect("the profile question");
             assert!(
                 matches!(
                     pick,
@@ -577,7 +581,7 @@ async fn the_stop_prompt_stops_the_run_it_was_raised_for(cx: &mut TestAppContext
             ws.seed_flow_run_for_test(other, runs.join("run-elsewhere"));
 
             // Raised for `other`, answered with Enter.
-            ws.flow_picker =
+            ws.overlays.flow_picker =
                 crate::workspace::command::flow_picker::FlowPicker::Stopping { lane: other };
             ws.execute_flow_picker_selection(window, cx);
 

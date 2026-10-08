@@ -846,12 +846,12 @@ pub(in crate::workspace) struct TabEntry {
 /// catches what would otherwise silently pick the wrong tier.
 #[derive(Debug, Default)]
 pub(in crate::workspace) struct CwdCandidates {
-    /// The pane the user currently has focus on. Only consulted when
-    /// the workspace has `inherit_cwd` on.
+    /// The pane the user currently has focus on — a new pane reuses its
+    /// directory (iTerm2 "Reuse previous session's directory").
     pub focused_pane: Option<PathBuf>,
     /// The active lane's filesystem path. The "always preserve
     /// 1 lane = 1 cwd" tier — wins whenever the focused-pane
-    /// path is unavailable or `inherit_cwd` is off.
+    /// path is unavailable.
     pub active_lane: Option<PathBuf>,
     /// Umbrella project root. Last-resort fallback for legacy /
     /// non-lane workspaces; in the steady state it is shadowed
@@ -870,21 +870,18 @@ fn home_dir() -> Option<PathBuf> {
 
 /// Pure resolver for a new pane's spawn cwd, keeping the "1 lane = 1 cwd"
 /// invariant. Priority:
-/// 1) `focused_pane` (when `inherit_cwd`),
+/// 1) `focused_pane`,
 /// 2) `active_lane` — pins `Cmd+T` inside the lane even before OSC 7 lands,
 /// 3) `project_root` — last resort for non-lane workspaces.
 ///
 /// The `active_lane`-over-`project_root` order matters: swapping it would
 /// spawn shells at the repo root from inside a lane, breaking isolation for
 /// fresh starts, restored sessions, and `Cmd+T` before OSC 7 reports.
-pub(in crate::workspace) fn resolve_default_cwd(
-    inherit_cwd: bool,
-    candidates: CwdCandidates,
-) -> Option<PathBuf> {
-    if inherit_cwd && let Some(cwd) = candidates.focused_pane {
-        return Some(cwd);
-    }
-    candidates.active_lane.or(candidates.project_root)
+pub(in crate::workspace) fn resolve_default_cwd(candidates: CwdCandidates) -> Option<PathBuf> {
+    candidates
+        .focused_pane
+        .or(candidates.active_lane)
+        .or(candidates.project_root)
 }
 
 /// Which auth domains a pane may resolve a managed account from. Three
@@ -1085,7 +1082,7 @@ impl Workspace {
             active_lane: self.active_lane().map(|w| w.path.clone()),
             project_root: self.active_project().map(|p| p.root.clone()),
         };
-        resolve_default_cwd(self.inherit_cwd, candidates).or_else(home_dir)
+        resolve_default_cwd(candidates).or_else(home_dir)
     }
 
     /// Resolve the focused pane's effective account — the usage-cache key,
@@ -1595,7 +1592,7 @@ impl Workspace {
         // path.
         //
         // `apply_input_placeholder` reads mode state and modifier policy
-        // and writes to `terminal_input` using the live `window` — avoids
+        // and writes to `InputDock::input` using the live `window` — avoids
         // nested `update_window` re-entry that the windowless
         // `refresh_terminal_input_placeholder` path would trigger.
         let is_agent = self.is_agent_chat_pane(pane_id);
@@ -1610,7 +1607,8 @@ impl Workspace {
             self.maybe_connect_agent_chat(pane_id, cx);
             // Agent chat panes have no in-pane input; keyboard focus goes
             // to the shared bottom input so the user can type immediately.
-            self.terminal_input
+            self.input_dock
+                .input
                 .read(cx)
                 .focus_handle(cx)
                 .focus(window, cx);

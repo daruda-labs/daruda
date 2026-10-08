@@ -32,7 +32,7 @@ impl Workspace {
 
     /// Register the platform `on_window_should_close` callback that
     /// holds the window open while the batch close prompt runs. The
-    /// `window_close_in_flight` flag guards against the callback
+    /// `WindowRuntime::close_in_flight` flag guards against the callback
     /// firing again while the prompt is on screen.
     pub(in crate::workspace) fn install_window_close_hook(
         weak: gpui::WeakEntity<Workspace>,
@@ -106,7 +106,7 @@ impl Workspace {
         if !ws.update(app, |this, cx| this.commit_settings_edits(window, cx)) {
             return false;
         }
-        if ws.read(app).window_close_in_flight {
+        if ws.read(app).window_runtime.close_in_flight {
             return false;
         }
         if !running_confirmed {
@@ -115,7 +115,7 @@ impl Workspace {
                 this.running_pane_titles(&this.all_pane_ids(), app)
             };
             if !running.is_empty() {
-                ws.update(app, |this, _| this.window_close_in_flight = true);
+                ws.update(app, |this, _| this.window_runtime.close_in_flight = true);
                 let receiver = prompt_stop_running(&running, window, app);
                 let weak = weak.clone();
                 window
@@ -124,7 +124,9 @@ impl Workspace {
                         // SILENT-OK: the window may be gone before the answer arrives
                         let _ = cx.update(|window, app| {
                             if let Some(ws) = weak.upgrade() {
-                                ws.update(app, |this, _| this.window_close_in_flight = false);
+                                ws.update(app, |this, _| {
+                                    this.window_runtime.close_in_flight = false
+                                });
                             }
                             if answer == 0
                                 && Self::may_close_window_then(&weak, after, true, window, app)
@@ -143,7 +145,7 @@ impl Workspace {
             return true;
         }
         ws.update(app, |this, _| {
-            this.window_close_in_flight = true;
+            this.window_runtime.close_in_flight = true;
         });
 
         let detail = dirty
@@ -174,7 +176,7 @@ impl Workspace {
                 let answer = receiver.await.unwrap_or(2);
                 // SILENT-OK: workspace may drop during async save-dialog wait
                 let _ = weak_inner.update_in(cx, |this, window, cx| {
-                    this.window_close_in_flight = false;
+                    this.window_runtime.close_in_flight = false;
                     match answer {
                         0 => {
                             if this.commit_dirty_panes_with_failure_toast(&dirty, window, cx) {

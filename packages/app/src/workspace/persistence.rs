@@ -218,20 +218,24 @@ impl Workspace {
             active_project,
             active_lane,
             docks: DockStates {
-                left_open: self.left_dock.read(cx).is_open,
-                left_size: self.left_dock.read(cx).size,
-                bottom_open: self.bottom_dock.read(cx).is_open,
-                bottom_size: self.bottom_dock.read(cx).size,
-                right_open: self.right_dock.read(cx).is_open,
-                right_size: self.right_dock.read(cx).size,
+                left_open: self.docks.left.read(cx).is_open,
+                left_size: self.docks.left.read(cx).size,
+                bottom_open: self.docks.bottom.read(cx).is_open,
+                bottom_size: self.docks.bottom.read(cx).size,
+                right_open: self.docks.right.read(cx).is_open,
+                right_size: self.docks.right.read(cx).size,
             },
-            window: self.cached_window_bounds.clone().unwrap_or_default(),
+            window: self
+                .window_runtime
+                .cached_bounds
+                .clone()
+                .unwrap_or_default(),
             font_size: self.mirrors.terminal_config.font_size,
             vertical_spacing: self.mirrors.terminal_config.vertical_spacing,
             horizontal_spacing: self.mirrors.terminal_config.horizontal_spacing,
             focused_pane_id,
-            active_dock_view: self.left_dock_view,
-            active_right_panel_view: self.right_dock_view,
+            active_dock_view: self.docks.left_view,
+            active_right_panel_view: self.docks.right_view,
             active_page: self.active_page().map(super::pages::Page::stored),
             window_open_policy: self.window_open_policy,
             next_group_id: self.next_group_id,
@@ -241,7 +245,7 @@ impl Workspace {
         (workspace, project_states)
     }
 
-    /// Sample the window's geometry into `cached_window_bounds`: its rect,
+    /// Sample the window's geometry into `WindowRuntime::cached_bounds`: its rect,
     /// the display it is on, and whether it is maximized. Fullscreen is
     /// skipped; relaunching into it would take over a Space unasked, so the
     /// last windowed geometry stays cached instead.
@@ -264,12 +268,12 @@ impl Workspace {
         let new = crate::window_placement::captured_geometry(
             reported,
             window.is_maximized(),
-            self.cached_window_bounds.as_ref(),
+            self.window_runtime.cached_bounds.as_ref(),
         );
         if !new.is_valid() {
             return;
         }
-        self.cached_window_bounds = Some(new);
+        self.window_runtime.cached_bounds = Some(new);
     }
 
     #[cfg(feature = "screenshot")]
@@ -403,20 +407,20 @@ impl Workspace {
         // Restore dock states.
         let left_open = workspace.docks.left_open;
         let left_size = workspace.docks.left_size;
-        self.left_dock.update(cx, |d, _| {
+        self.docks.left.update(cx, |d, _| {
             d.is_open = left_open;
             if left_size > 0.0 {
                 d.size = left_size;
             }
         });
-        self.left_dock_view = workspace.active_dock_view;
-        self.right_dock_view = workspace.active_right_panel_view;
+        self.docks.left_view = workspace.active_dock_view;
+        self.docks.right_view = workspace.active_right_panel_view;
         self.workspace_page = workspace
             .active_page
             .map(|page| self.page_state(super::pages::Page::from_stored(page)));
         let bottom_open = workspace.docks.bottom_open;
         let bottom_size = workspace.docks.bottom_size;
-        self.bottom_dock.update(cx, |d, _| {
+        self.docks.bottom.update(cx, |d, _| {
             d.is_open = bottom_open;
             if bottom_size > 0.0 {
                 d.size = bottom_size;
@@ -424,7 +428,7 @@ impl Workspace {
         });
         let right_open = workspace.docks.right_open;
         let right_size = workspace.docks.right_size;
-        self.right_dock.update(cx, |d, _| {
+        self.docks.right.update(cx, |d, _| {
             d.is_open = right_open;
             if right_size > 0.0 {
                 d.size = right_size;
@@ -447,7 +451,7 @@ impl Workspace {
         self.groups = workspace.groups.clone();
         // Cache window bounds so the next save round-trips the same
         // geometry even if `observe_window_bounds` hasn't fired yet.
-        self.cached_window_bounds = Some(workspace.window.clone());
+        self.window_runtime.cached_bounds = Some(workspace.window.clone());
 
         // Empty workspace — the Landing state. Everything above (geometry,
         // docks, uuid, open policy) has already been adopted, which is what
@@ -658,7 +662,7 @@ impl Workspace {
             if self.workspace_page.is_none() {
                 self.focus_pane(focus, window, cx);
             } else {
-                self.focus_handle.focus(window, cx);
+                self.window_runtime.focus_handle.focus(window, cx);
             }
             // Seed the input-draft owner so text typed into the bottom
             // input before the first focus change is attributed to the
@@ -666,12 +670,12 @@ impl Workspace {
             // notify a not-yet-cached view (see its doc), and
             // `focused_pane_id` is already restored from the runtime.
             if self.pane_consumes_bottom_input(focus) {
-                self.input_owner = Some(focus);
+                self.input_dock.owner = Some(focus);
             }
         }
         self.main_area.pending_resize = true;
 
-        if self.left_dock_view == daruda_store::project::LeftDockView::GitChanges {
+        if self.docks.left_view == daruda_store::project::LeftDockView::GitChanges {
             let target = self.active;
             self.refresh_git_status(target, cx);
         }

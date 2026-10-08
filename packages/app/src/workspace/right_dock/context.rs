@@ -1,6 +1,6 @@
 //! Right-dock view state owned by [`crate::workspace::Workspace`]: what the
 //! Tasks and Skills tabs remember between frames, and the folds and scroll
-//! every tab shares. Which tab is showing is layout (`right_dock_view`).
+//! every tab shares. Which tab is showing is layout (`Docks::right_view`).
 
 use std::collections::HashSet;
 

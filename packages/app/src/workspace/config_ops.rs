@@ -123,7 +123,7 @@ impl Workspace {
                 })
             })
             .collect::<Vec<_>>();
-        let handle = self.window_handle;
+        let handle = self.window_runtime.handle;
         // Keep the amend-mode labels if a language switch lands mid-amend.
         let amend_mode = self.is_amend_mode();
 
@@ -207,8 +207,8 @@ impl Workspace {
         cx: &mut Context<Self>,
     ) {
         let placeholder = self.compute_input_placeholder(cx);
-        let terminal_input = self.terminal_input.clone();
-        let handle = self.window_handle;
+        let terminal_input = self.input_dock.input.clone();
+        let handle = self.window_runtime.handle;
         crate::windows::try_update_workspace_window(
             handle,
             cx,
@@ -230,7 +230,7 @@ impl Workspace {
         cx: &mut Context<Self>,
     ) {
         let placeholder = self.compute_input_placeholder(cx);
-        let terminal_input = self.terminal_input.clone();
+        let terminal_input = self.input_dock.input.clone();
         terminal_input.update(cx, |state, cx| {
             state.set_placeholder(placeholder, window, cx);
         });

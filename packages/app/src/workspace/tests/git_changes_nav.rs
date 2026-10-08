@@ -214,7 +214,7 @@ async fn toggling_git_changes_focus_switches_the_view_opens_the_dock_and_round_t
     cx.update_window(w.into(), |_, window, cx| {
         ws.update(cx, |ws, cx| {
             ws.set_left_dock_view(daruda_store::project::LeftDockView::Lanes, cx);
-            ws.left_dock.update(cx, |d, cx| {
+            ws.docks.left.update(cx, |d, cx| {
                 d.is_open = false;
                 cx.notify();
             });
@@ -238,8 +238,8 @@ async fn toggling_git_changes_focus_switches_the_view_opens_the_dock_and_round_t
         .update_window(w.into(), |_, window, cx| {
             let ws = ws.read(cx);
             (
-                ws.left_dock.read(cx).is_open,
-                ws.left_dock_view,
+                ws.docks.left.read(cx).is_open,
+                ws.docks.left_view,
                 ws.git.panel_focus.is_focused(window),
             )
         })
@@ -331,7 +331,7 @@ async fn a_second_enter_on_the_open_row_steps_into_the_viewer(cx: &mut TestAppCo
 async fn previewing_a_row_does_not_surface_the_bottom_input(cx: &mut TestAppContext) {
     let (w, ws) = dock_showing_changes(cx, vec![entry("src/a.rs")]);
     assert!(
-        !ws.read_with(cx, |ws, _| ws.terminal_input_visible),
+        !ws.read_with(cx, |ws, _| ws.input_dock.visible),
         "fixture must start on the macro grid or this proves nothing"
     );
 
@@ -351,7 +351,7 @@ async fn previewing_a_row_does_not_surface_the_bottom_input(cx: &mut TestAppCont
         "the preview must still have opened, or the assertion below is vacuous"
     );
     assert!(
-        !ws.read_with(cx, |ws, _| ws.terminal_input_visible),
+        !ws.read_with(cx, |ws, _| ws.input_dock.visible),
         "the preview surfaced the bottom Input panel, replacing the macro grid \
          for a pane the user never entered"
     );
@@ -363,7 +363,7 @@ async fn previewing_a_row_does_not_surface_the_bottom_input(cx: &mut TestAppCont
     .unwrap();
     cx.run_until_parked();
     assert!(
-        ws.read_with(cx, |ws, _| ws.terminal_input_visible),
+        ws.read_with(cx, |ws, _| ws.input_dock.visible),
         "stepping into the viewer is entering a pane, and must surface its input"
     );
 }
@@ -603,7 +603,7 @@ async fn the_focus_binding_reopens_a_dock_the_user_closed(cx: &mut TestAppContex
         .update_window(w.into(), |_, window, cx| {
             let r = ws.read(cx);
             (
-                r.left_dock.read(cx).is_open,
+                r.docks.left.read(cx).is_open,
                 r.git.panel_focus.is_focused(window),
             )
         })

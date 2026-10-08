@@ -104,7 +104,7 @@ impl Workspace {
         if self.active_runtime().panes.iter().any(|p| p.id == pane_id) {
             self.focus_pane(pane_id, window, cx);
         } else {
-            self.focus_handle.focus(window, cx);
+            self.window_runtime.focus_handle.focus(window, cx);
         }
         cx.notify();
     }

@@ -534,7 +534,11 @@ impl Workspace {
     ) {
         use crate::surface::strings as s;
 
-        let initial = self.window_user_label.as_ref().map(|s| s.to_string());
+        let initial = self
+            .window_runtime
+            .user_label
+            .as_ref()
+            .map(|s| s.to_string());
         let workspace_handle = cx.entity().downgrade();
         super::dialog_helpers::open_single_field_dialog(
             workspace_handle,
@@ -747,10 +751,10 @@ impl Workspace {
         _window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if self.command_palette.is_open {
-            self.command_palette.close();
+        if self.overlays.palette.is_open {
+            self.overlays.palette.close();
         } else {
-            self.command_palette.open();
+            self.overlays.palette.open();
         }
         cx.notify();
     }

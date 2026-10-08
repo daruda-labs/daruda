@@ -6,9 +6,9 @@ use super::*;
 fn command_palette_toggles_and_resolves_core_actions(cx: &mut TestAppContext) {
     let (_wh, ws) = build_workspace(cx);
     ws.update(cx, |ws, _cx| {
-        assert!(!ws.command_palette.is_open);
-        ws.command_palette.open();
-        assert!(ws.command_palette.is_open);
+        assert!(!ws.overlays.palette.is_open);
+        ws.overlays.palette.open();
+        assert!(ws.overlays.palette.is_open);
 
         // Both spellings of every query on purpose: matching is smart-case,
         // so the Title-Case form exercises the case-*sensitive* branch (it
@@ -24,21 +24,22 @@ fn command_palette_toggles_and_resolves_core_actions(cx: &mut TestAppContext) {
             ("Quit", "quit"),
             ("quit", "quit"),
         ] {
-            ws.command_palette.open();
+            ws.overlays.palette.open();
             for ch in query.chars() {
-                let visible_len = ws.command_palette.visible().len();
-                ws.command_palette
+                let visible_len = ws.overlays.palette.visible().len();
+                ws.overlays
+                    .palette
                     .picker
                     .on_key(&ch.to_string(), Some(ch), visible_len);
             }
             assert_eq!(
-                ws.command_palette.focused_action_id(),
+                ws.overlays.palette.focused_action_id(),
                 Some(expected),
                 "{query:?} should resolve to {expected}"
             );
         }
 
-        ws.command_palette.close();
-        assert!(!ws.command_palette.is_open);
+        ws.overlays.palette.close();
+        assert!(!ws.overlays.palette.is_open);
     });
 }

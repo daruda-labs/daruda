@@ -156,7 +156,8 @@ impl Workspace {
         let was_editing = view.read(cx).queue().editing().is_some();
         view.update(cx, |v, cx| v.clear_queue(cx));
         if was_editing {
-            self.terminal_input
+            self.input_dock
+                .input
                 .update(cx, |s, cx_state| s.set_value("", window, cx_state));
         }
     }
@@ -178,7 +179,7 @@ impl Workspace {
             return;
         };
         // Reading the view entity here is safe — it is a different entity from
-        // `self` (Workspace) and from `terminal_input`.
+        // `self` (Workspace) and from `InputDock::input`.
         let found = view.read(cx).queue().find(id).map(|q| q.text.clone());
         let Some(text) = found else {
             return;
@@ -186,7 +187,7 @@ impl Workspace {
         // Pull the text into the composer, cursor at end (mirrors
         // `do_history_navigate`). Separate `entity.update` from the view update
         // below — never nest two updates on entities in one call.
-        self.terminal_input.update(cx, |s, cx_state| {
+        self.input_dock.input.update(cx, |s, cx_state| {
             s.set_value(&text, window, cx_state);
             s.move_cursor_to_end(cx_state);
         });
@@ -206,7 +207,8 @@ impl Workspace {
         if let Some(view) = self.agent_chat_view(pane_id).cloned() {
             view.update(cx, |v, cx| v.cancel_edit(cx));
         }
-        self.terminal_input
+        self.input_dock
+            .input
             .update(cx, |s, cx_state| s.set_value("", window, cx_state));
     }
 
@@ -250,7 +252,7 @@ impl Workspace {
     /// for empty text. An unconditional disarm there cancels the arm of the very
     /// pane being focused, while its confirmation is still on screen.
     pub(in crate::workspace) fn disarm_queue_resume(&mut self, cx: &mut Context<Self>) {
-        if self.terminal_input.read(cx).value().is_empty() {
+        if self.input_dock.input.read(cx).value().is_empty() {
             return;
         }
         let focused = self.active_runtime().focused_pane_id;

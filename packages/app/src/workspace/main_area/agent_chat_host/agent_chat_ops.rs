@@ -1231,8 +1231,8 @@ impl Workspace {
         // input lives in the bottom dock; open the dock first so it's visible
         // before `focus_pane` activates the input panel and moves focus to it.
         // The focused *pane* stays this one, so input routes to its ACP session.
-        if !self.bottom_dock.read(cx).is_open {
-            self.bottom_dock.update(cx, |d, cx| {
+        if !self.docks.bottom.read(cx).is_open {
+            self.docks.bottom.update(cx, |d, cx| {
                 d.toggle();
                 cx.notify();
             });

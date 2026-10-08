@@ -117,10 +117,10 @@ async fn settings_mode_does_not_answer_a_dock_action(cx: &mut TestAppContext) {
     let mut vcx = gpui::VisualTestContext::from_window(window_handle.into(), cx);
 
     // Control: outside Settings the same dispatch flips the dock.
-    let before = workspace.read_with(&vcx, |ws, cx| ws.left_dock.read(cx).is_open);
+    let before = workspace.read_with(&vcx, |ws, cx| ws.docks.left.read(cx).is_open);
     vcx.dispatch_action(crate::workspace::ToggleLeftDock);
     vcx.run_until_parked();
-    let toggled = workspace.read_with(&vcx, |ws, cx| ws.left_dock.read(cx).is_open);
+    let toggled = workspace.read_with(&vcx, |ws, cx| ws.docks.left.read(cx).is_open);
     assert_ne!(before, toggled, "the dock action works outside Settings");
 
     vcx.update(|window, cx| {
@@ -138,7 +138,7 @@ async fn settings_mode_does_not_answer_a_dock_action(cx: &mut TestAppContext) {
     vcx.run_until_parked();
 
     assert_eq!(
-        workspace.read_with(&vcx, |ws, cx| ws.left_dock.read(cx).is_open),
+        workspace.read_with(&vcx, |ws, cx| ws.docks.left.read(cx).is_open),
         toggled,
         "Settings must swallow the dock chord, not pass it to a hidden dock",
     );
@@ -235,7 +235,11 @@ async fn closing_without_a_pane_to_return_to_keeps_the_keyboard(cx: &mut TestApp
     vcx.update(|window, cx| {
         assert!(!workspace.read(cx).settings_is_open());
         assert!(
-            workspace.read(cx).focus_handle.is_focused(window),
+            workspace
+                .read(cx)
+                .window_runtime
+                .focus_handle
+                .is_focused(window),
             "the workspace root has to take focus when no pane can",
         );
     });

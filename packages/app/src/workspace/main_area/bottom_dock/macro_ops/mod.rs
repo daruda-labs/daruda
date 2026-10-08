@@ -470,24 +470,24 @@ impl Workspace {
             return;
         }
         let already_active =
-            !self.terminal_input_visible && self.panels.active_tab_id.as_ref() == Some(&tab_id);
+            !self.input_dock.visible && self.panels.active_tab_id.as_ref() == Some(&tab_id);
         if already_active {
             return;
         }
-        self.terminal_input_visible = false;
+        self.input_dock.visible = false;
         self.sync_bottom_dock_min_to_panel(cx);
         self.panels.active_tab_id = Some(tab_id);
         self.save_panels(cx);
-        self.bottom_dock.update(cx, |_, cx| cx.notify());
+        self.docks.bottom.update(cx, |_, cx| cx.notify());
         cx.notify();
     }
 
     /// Switch the bottom dock to the built-in "Input" panel.
     pub(in crate::workspace) fn activate_bottom_input(&mut self, cx: &mut Context<Self>) {
-        if self.terminal_input_visible {
+        if self.input_dock.visible {
             return;
         }
-        self.terminal_input_visible = true;
+        self.input_dock.visible = true;
         self.sync_bottom_dock_min_to_panel(cx);
         cx.notify();
     }
@@ -509,7 +509,7 @@ impl Workspace {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let raw = self.terminal_input.read(cx).value().to_string();
+        let raw = self.input_dock.input.read(cx).value().to_string();
         let trimmed = raw.trim_end_matches(['\n', '\r']);
         if trimmed.is_empty() {
             // An empty composer is not a command: through the funnel a focused
@@ -535,8 +535,8 @@ impl Workspace {
         // Submitted text is no longer a draft — drop the saved entry for
         // the pane whose text is visible (`input_owner`) so returning to
         // it after send shows an empty input.
-        if let Some(owner) = self.input_owner {
-            self.input_drafts.remove(&owner);
+        if let Some(owner) = self.input_dock.owner {
+            self.input_dock.drafts.remove(&owner);
         }
         // Route through the single pane-delivery funnel. It branches on the
         // focused pane's kind: a Terminal receives the bytes (embedded `\n` →
@@ -552,7 +552,8 @@ impl Workspace {
             window,
             cx,
         );
-        self.terminal_input
+        self.input_dock
+            .input
             .update(cx, |s, cx_state| s.set_value("", window, cx_state));
     }
 
@@ -614,7 +615,7 @@ impl Workspace {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let current = self.terminal_input.read(cx).value().to_string();
+        let current = self.input_dock.input.read(cx).value().to_string();
         // ↑ in an EMPTY composer, with a non-empty queue on the focused agent
         // pane, pulls the most-recent queued prompt into the composer for
         // editing instead of recalling input history. A non-empty composer,
@@ -636,7 +637,7 @@ impl Workspace {
         let Some(new_text) = new_text else {
             return;
         };
-        self.terminal_input.update(cx, |s, cx_state| {
+        self.input_dock.input.update(cx, |s, cx_state| {
             s.set_value(&new_text, window, cx_state);
             // Move cursor to end so the user can append/edit immediately —
             // shell history convention (bash/zsh/fish). `set_value` on a

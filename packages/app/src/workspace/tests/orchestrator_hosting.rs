@@ -223,7 +223,7 @@ fn closing_a_project_stashes_the_orchestrator_draft_for_its_next_open(cx: &mut T
             let pane = seed(ws, window, cx);
             let view = ws.agent_chat_view(pane).unwrap().entity_id();
             ws.show_orchestrator_tab(window, cx);
-            ws.terminal_input.update(cx, |input, cx| {
+            ws.input_dock.input.update(cx, |input, cx| {
                 input.set_value("Keep this unsent prompt", window, cx)
             });
             ws.close_active_project(window, cx);
@@ -241,9 +241,9 @@ fn closing_a_project_stashes_the_orchestrator_draft_for_its_next_open(cx: &mut T
             // The unsent prompt is not lost with the tab — it comes back with
             // it, in whichever project survived.
             assert!(ws.show_orchestrator_tab(window, cx));
-            assert_eq!(ws.input_owner, Some(pane));
+            assert_eq!(ws.input_dock.owner, Some(pane));
             assert_eq!(
-                ws.terminal_input.read(cx).value().as_str(),
+                ws.input_dock.input.read(cx).value().as_str(),
                 "Keep this unsent prompt"
             );
         });

@@ -37,7 +37,7 @@ impl Workspace {
                 &acp_statuses,
             );
         LeftDockSnapshot {
-            left_dock_view: self.left_dock_view,
+            left_dock_view: self.docks.left_view,
             workspace_page: self.active_page(),
             lanes: self.active_lanes().to_vec(),
             projects: {
@@ -159,7 +159,7 @@ impl Workspace {
                 }),
             agent_install_banner_visible: self.mirrors.claude_status_enabled
                 && !self.claude.claude_hooks_installed,
-            workspace: Handle(self.left_dock.read(cx).workspace.clone()),
+            workspace: Handle(self.docks.left.read(cx).workspace.clone()),
         }
     }
 
@@ -197,7 +197,7 @@ impl Workspace {
             .as_deref()
             .map(daruda_core::shell::quote::Shell::detect_from_program)
             .unwrap_or_default();
-        let bottom_dock_size = self.bottom_dock.read(cx).size;
+        let bottom_dock_size = self.docks.bottom.read(cx).size;
         // When the focused pane is an Agent chat pane that is busy (a turn in
         // flight OR a background subagent still running), the bottom-input
         // button toggles to "Stop" and cancels that pane's activity instead of
@@ -298,19 +298,19 @@ impl Workspace {
                     loading: v.status().is_connecting(),
                 })
             }),
-            terminal_input_visible: self.terminal_input_visible,
+            terminal_input_visible: self.input_dock.visible,
             active_tab_id,
             tab_summaries,
             active_tab_widgets,
             grid_columns: self.mirrors.panels_grid_columns,
             bottom_dock_size,
-            terminal_input: self.terminal_input.clone(),
+            terminal_input: self.input_dock.input.clone(),
             agent_stop_pane,
             agent_mode,
             agent_config_options,
             queued_prompts,
             shell,
-            workspace: Handle(self.bottom_dock.read(cx).workspace.clone()),
+            workspace: Handle(self.docks.bottom.read(cx).workspace.clone()),
         }
     }
 
@@ -483,8 +483,8 @@ impl Workspace {
             })
             .collect();
         RightDockSnapshot {
-            right_dock_view: self.right_dock_view,
-            workspace: Handle(self.right_dock.read(cx).workspace.clone()),
+            right_dock_view: self.docks.right_view,
+            workspace: Handle(self.docks.right.read(cx).workspace.clone()),
             usage: usage_sections,
             focused_agent_domain: pane_domain,
             usage_domain_override: self.claude.usage_domain_override,

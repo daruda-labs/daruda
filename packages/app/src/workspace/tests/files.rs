@@ -1918,7 +1918,7 @@ async fn toggling_files_focus_switches_the_view_opens_the_dock_and_round_trips(
     cx.update_window(wh.into(), |_, window, cx| {
         ws.update(cx, |ws, cx| {
             ws.set_left_dock_view(daruda_store::project::LeftDockView::Lanes, cx);
-            ws.left_dock.update(cx, |d, cx| {
+            ws.docks.left.update(cx, |d, cx| {
                 d.is_open = false;
                 cx.notify();
             });
@@ -1938,8 +1938,8 @@ async fn toggling_files_focus_switches_the_view_opens_the_dock_and_round_trips(
         .update_window(wh.into(), |_, window, cx| {
             let r = ws.read(cx);
             (
-                r.left_dock.read(cx).is_open,
-                r.left_dock_view,
+                r.docks.left.read(cx).is_open,
+                r.docks.left_view,
                 r.file_tree.files_panel_focus.is_focused(window),
             )
         })
@@ -2057,7 +2057,7 @@ async fn files_arrow_navigation_previews_the_cursor_file(cx: &mut TestAppContext
         .unwrap();
     assert!(focused, "the preview must not take the panel's focus");
     assert!(
-        !ws.read_with(cx, |ws, _| ws.terminal_input_visible),
+        !ws.read_with(cx, |ws, _| ws.input_dock.visible),
         "and must not surface the input of a pane nobody entered"
     );
 

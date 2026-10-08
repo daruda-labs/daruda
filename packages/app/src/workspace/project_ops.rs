@@ -310,7 +310,7 @@ impl Workspace {
         }
         // Bottom-dock drafts are keyed per pane, not per lane, so drop the
         // entry for every pane the closing project owned; clear
-        // `input_owner` if it pointed at one of them.
+        // `InputDock::owner` if it pointed at one of them.
         for pane_id in &owned_pane_ids {
             self.forget_pane_input_draft(*pane_id);
         }

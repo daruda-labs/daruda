@@ -153,7 +153,8 @@ async fn the_picker_offers_the_flows_in_the_active_lane(cx: &mut TestAppContext)
             crate::workspace::command::flow_picker::FlowPurpose::Validate,
             cx,
         );
-        ws.flow_picker
+        ws.overlays
+            .flow_picker
             .choosing()
             .map(|c| {
                 c.visible()
@@ -237,7 +238,7 @@ async fn a_run_owned_by_another_process_is_not_offered_a_stop_button(cx: &mut Te
             crate::workspace::command::flow_picker::FlowPurpose::Run,
             cx,
         );
-        format!("{:?}", ws.flow_picker)
+        format!("{:?}", ws.overlays.flow_picker)
     });
     assert!(
         state.starts_with("Closed"),
@@ -532,13 +533,13 @@ async fn revealing_a_run_lands_on_its_lane_with_the_panel_open(cx: &mut TestAppC
         ws.update(cx, |ws, cx| {
             // Start from a closed dock on another tab, so both of the
             // non-lane parts of the move have something to do.
-            ws.right_dock.update(cx, |d, _| d.is_open = false);
+            ws.docks.right.update(cx, |d, _| d.is_open = false);
             ws.set_right_dock_view(daruda_store::project::RightDockView::Usage, cx);
 
             ws.reveal_flow_run(here, window, cx);
 
             assert!(
-                !ws.right_dock.read(cx).is_open,
+                !ws.docks.right.read(cx).is_open,
                 "pages leave the utility dock alone"
             );
             assert_eq!(
@@ -600,16 +601,17 @@ async fn the_palette_can_reach_the_flows_panel(cx: &mut TestAppContext) {
     cx.update_window(wh.into(), |_, window, cx| {
         ws.update(cx, |ws, cx| {
             ws.show_page(crate::workspace::pages::Page::Tasks, cx);
-            ws.command_palette.open();
+            ws.overlays.palette.open();
             // Smart-case matching requires the label's capitalization here.
             for ch in "Open Flows".chars() {
-                let visible_len = ws.command_palette.visible().len();
-                ws.command_palette
+                let visible_len = ws.overlays.palette.visible().len();
+                ws.overlays
+                    .palette
                     .picker
                     .on_key(&ch.to_string(), Some(ch), visible_len);
             }
             assert_eq!(
-                ws.command_palette.visible().len(),
+                ws.overlays.palette.visible().len(),
                 1,
                 "the palette does not offer the Flows panel"
             );
@@ -641,7 +643,7 @@ async fn a_flow_with_profiles_asks_which_one_before_running(cx: &mut TestAppCont
             ws.execute_flow_picker_selection(window, cx);
 
             assert!(
-                ws.flow_picker.is_open(),
+                ws.overlays.flow_picker.is_open(),
                 "the picker closed before asking which profile"
             );
             let rows = picker_rows(ws);
@@ -655,9 +657,9 @@ async fn a_flow_with_profiles_asks_which_one_before_running(cx: &mut TestAppCont
             // The second Enter: the half that actually starts the run under
             // the chosen name. Asserted through `focused_pick` rather than
             // by executing, because executing submits a real run.
-            ws.flow_picker.on_key("down", None);
+            ws.overlays.flow_picker.on_key("down", None);
             assert_eq!(
-                ws.flow_picker.focused_pick(),
+                ws.overlays.flow_picker.focused_pick(),
                 Some(crate::workspace::command::flow_picker::FlowPick::Profile {
                     lane: ws.active,
                     purpose: crate::workspace::command::flow_picker::FlowPurpose::Run,
@@ -689,9 +691,12 @@ async fn answering_the_second_question_runs_under_that_profile(cx: &mut TestAppC
                 cx,
             );
             ws.execute_flow_picker_selection(window, cx);
-            ws.flow_picker.on_key("down", None);
+            ws.overlays.flow_picker.on_key("down", None);
             ws.execute_flow_picker_selection(window, cx);
-            assert!(!ws.flow_picker.is_open(), "the picker is still asking");
+            assert!(
+                !ws.overlays.flow_picker.is_open(),
+                "the picker is still asking"
+            );
         });
     })
     .expect("the test window is live");
@@ -712,7 +717,7 @@ async fn a_flow_without_profiles_is_never_asked_about_one(cx: &mut TestAppContex
             );
             ws.execute_flow_picker_selection(window, cx);
             assert!(
-                !ws.flow_picker.is_open(),
+                !ws.overlays.flow_picker.is_open(),
                 "a flow with no profiles was asked about one"
             );
         });
@@ -919,7 +924,7 @@ async fn naming_the_flow_still_asks_which_profile(cx: &mut TestAppContext) {
                 "the guard let this one through"
             );
             assert!(
-                ws.flow_picker.is_open(),
+                ws.overlays.flow_picker.is_open(),
                 "a profiled flow was run without being asked which profile"
             );
             let rows = picker_rows(ws);
@@ -930,9 +935,9 @@ async fn naming_the_flow_still_asks_which_profile(cx: &mut TestAppContext) {
             );
             // And the question is about *this* flow — the list of flows was
             // never shown, so nothing else could have named it.
-            ws.flow_picker.on_key("down", None);
+            ws.overlays.flow_picker.on_key("down", None);
             assert_eq!(
-                ws.flow_picker.focused_pick(),
+                ws.overlays.flow_picker.focused_pick(),
                 Some(crate::workspace::command::flow_picker::FlowPick::Profile {
                     lane: ws.active,
                     purpose: crate::workspace::command::flow_picker::FlowPurpose::Validate,
@@ -966,7 +971,7 @@ async fn naming_a_flow_with_no_profiles_opens_no_picker(cx: &mut TestAppContext)
                 "the guard let this one through"
             );
             assert!(
-                !ws.flow_picker.is_open(),
+                !ws.overlays.flow_picker.is_open(),
                 "a flow with no profiles was asked about one"
             );
         });
@@ -1015,7 +1020,7 @@ async fn naming_a_flow_while_one_runs_offers_to_stop_it(cx: &mut TestAppContext)
             );
             assert!(
                 matches!(
-                    ws.flow_picker,
+                    ws.overlays.flow_picker,
                     crate::workspace::command::flow_picker::FlowPicker::Stopping { .. }
                 ),
                 "a second run was started behind the first"
@@ -1058,17 +1063,23 @@ async fn the_stop_prompt_stops_the_run_on_enter_and_leaves_it_on_escape(cx: &mut
             ws.seed_flow_run_for_test(lane_ref, runs.join("0000000000000001-00000001-0001"));
 
             // Escape: the prompt goes away and the run keeps going.
-            ws.flow_picker =
+            ws.overlays.flow_picker =
                 crate::workspace::command::flow_picker::FlowPicker::Stopping { lane: ws.active };
             ws.on_flow_picker_key(&key("escape"), window, cx);
-            assert!(!ws.flow_picker.is_open(), "Escape left the prompt up");
+            assert!(
+                !ws.overlays.flow_picker.is_open(),
+                "Escape left the prompt up"
+            );
             assert_eq!(canceled(ws), vec![false], "Escape stopped the run");
 
             // Enter: the stop. Nothing else in the prompt can reach it.
-            ws.flow_picker =
+            ws.overlays.flow_picker =
                 crate::workspace::command::flow_picker::FlowPicker::Stopping { lane: ws.active };
             ws.on_flow_picker_key(&key("enter"), window, cx);
-            assert!(!ws.flow_picker.is_open(), "Enter left the prompt up");
+            assert!(
+                !ws.overlays.flow_picker.is_open(),
+                "Enter left the prompt up"
+            );
             assert_eq!(canceled(ws), vec![true], "Enter did not stop the run");
         });
     })
@@ -1098,7 +1109,7 @@ async fn a_list_key_in_the_stop_prompt_changes_nothing(cx: &mut TestAppContext) 
         ws.update(cx, |ws, cx| {
             let lane_ref = ws.active_ref();
             ws.seed_flow_run_for_test(lane_ref, runs.join("0000000000000001-00000001-0001"));
-            ws.flow_picker =
+            ws.overlays.flow_picker =
                 crate::workspace::command::flow_picker::FlowPicker::Stopping { lane: ws.active };
 
             for (k, ch) in [
@@ -1110,7 +1121,7 @@ async fn a_list_key_in_the_stop_prompt_changes_nothing(cx: &mut TestAppContext) 
                 ws.on_flow_picker_key(&key(k, ch), window, cx);
                 assert!(
                     matches!(
-                        ws.flow_picker,
+                        ws.overlays.flow_picker,
                         crate::workspace::command::flow_picker::FlowPicker::Stopping { .. }
                     ),
                     "{k} closed the stop prompt"
@@ -1155,7 +1166,7 @@ async fn the_run_button_on_a_row_does_not_also_open_the_graph(cx: &mut TestAppCo
     let mut vcx = gpui::VisualTestContext::from_window(wh.into(), cx);
     ws.update_in(&mut vcx, |ws, _window, cx| {
         ws.show_page(crate::workspace::pages::Page::Flows, cx);
-        ws.right_dock.update(cx, |dock, cx| {
+        ws.docks.right.update(cx, |dock, cx| {
             dock.open();
             cx.notify();
         });
@@ -1201,7 +1212,7 @@ async fn the_panel_run_button_is_off_while_that_flows_graph_has_unsaved_edits(
     let mut vcx = gpui::VisualTestContext::from_window(wh.into(), cx);
     ws.update_in(&mut vcx, |ws, window, cx| {
         ws.show_page(crate::workspace::pages::Page::Flows, cx);
-        ws.right_dock.update(cx, |dock, cx| {
+        ws.docks.right.update(cx, |dock, cx| {
             dock.open();
             cx.notify();
         });
@@ -1240,7 +1251,7 @@ async fn the_panel_run_button_is_off_while_that_flows_graph_has_unsaved_edits(
 
     press(&mut vcx);
     assert!(
-        ws.read_with(&vcx, |ws, _| ws.flow_picker.is_open()),
+        ws.read_with(&vcx, |ws, _| ws.overlays.flow_picker.is_open()),
         "the button did nothing on a clean form, so this fixture proves nothing"
     );
     ws.update(&mut vcx, |ws, cx| ws.close_flow_picker(cx));
@@ -1258,7 +1269,7 @@ async fn the_panel_run_button_is_off_while_that_flows_graph_has_unsaved_edits(
 
     press(&mut vcx);
     assert!(
-        !ws.read_with(&vcx, |ws, _| ws.flow_picker.is_open()),
+        !ws.read_with(&vcx, |ws, _| ws.overlays.flow_picker.is_open()),
         "the panel's run button was pressable with unsaved edits in the graph"
     );
 }

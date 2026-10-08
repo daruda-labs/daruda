@@ -99,7 +99,7 @@ async fn flow_browser_run_button_keeps_its_target_through_profile_selection(
     ws.read_with(&vcx, |ws, _| {
         assert_eq!(ws.active, active);
         assert_eq!(ws.active_page(), Some(Page::Flows), "Run did not open the graph");
-        assert!(matches!(ws.flow_picker.focused_pick(),
+        assert!(matches!(ws.overlays.flow_picker.focused_pick(),
             Some(crate::workspace::command::flow_picker::FlowPick::Profile { lane, .. }) if lane == target));
     });
 }

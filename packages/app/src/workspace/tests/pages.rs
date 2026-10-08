@@ -65,13 +65,13 @@ fn pages_preserve_the_active_lane_and_utility_selection(cx: &mut TestAppContext)
             ws.set_right_dock_view(RightDockView::Skills, cx);
             ws.open_page(Page::Tasks, window, cx);
             assert_eq!(ws.active_page(), Some(Page::Tasks));
-            assert_eq!(ws.right_dock_view, RightDockView::Skills);
+            assert_eq!(ws.docks.right_view, RightDockView::Skills);
             ws.set_right_dock_view(RightDockView::Tools, cx);
             assert_eq!(ws.active_page(), Some(Page::Tasks));
             ws.open_page(Page::Flows, window, cx);
             assert_eq!(ws.active_page(), Some(Page::Flows));
             assert_eq!(ws.active, lane);
-            assert_eq!(ws.right_dock_view, RightDockView::Tools);
+            assert_eq!(ws.docks.right_view, RightDockView::Tools);
         });
     })
     .unwrap();
@@ -215,7 +215,7 @@ fn page_selection_survives_restore_with_an_existing_pane(cx: &mut TestAppContext
             ws.restore_from_disk(&state, &projects, window, cx);
             assert_eq!(ws.active_page(), Some(Page::Tasks));
             // The page no longer borrows the tab's slot, so the tab survives.
-            assert_eq!(ws.right_dock_view, RightDockView::Skills);
+            assert_eq!(ws.docks.right_view, RightDockView::Skills);
         });
     })
     .unwrap();
@@ -279,7 +279,7 @@ fn assert_page_close_preserves_workspace(
                     .iter()
                     .find(|pane| pane.id == runtime.focused_pane_id)
                     .map(|pane| pane.focus_handle(cx))
-                    .unwrap_or_else(|| ws.focus_handle.clone());
+                    .unwrap_or_else(|| ws.window_runtime.focus_handle.clone());
                 assert!(
                     focus.is_focused(window),
                     "focus must return to the worktree"

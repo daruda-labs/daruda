@@ -210,7 +210,8 @@ impl Workspace {
         if text.is_empty() {
             return;
         }
-        self.terminal_input
+        self.input_dock
+            .input
             .update(cx, |state, cx_state| state.insert(text, window, cx_state));
     }
 }

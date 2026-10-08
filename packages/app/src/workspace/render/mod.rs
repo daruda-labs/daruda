@@ -321,7 +321,7 @@ impl Workspace {
         // manual per-site `notify_left_dock()`). The lone exception is the
         // status pulse, which advances badge animation frames not present in
         // the snapshot and so keeps its explicit notify. Per Pitfall #10.
-        self.left_dock.update(cx, |d, cx| {
+        self.docks.left.update(cx, |d, cx| {
             if d.stage(DockSnapshot::Left(Box::new(left_snap))) {
                 cx.notify();
             }
@@ -332,12 +332,12 @@ impl Workspace {
         // stale data, and an unconditional notify would defeat the cache
         // by repainting on every 250 ms status-pulse tick (which leaves
         // this snapshot identical). Per root CLAUDE.md Pitfall #10.
-        self.bottom_dock.update(cx, |d, cx| {
+        self.docks.bottom.update(cx, |d, cx| {
             if d.stage(DockSnapshot::Bottom(Box::new(bottom_snap))) {
                 cx.notify();
             }
         });
-        self.right_dock.update(cx, |d, cx| {
+        self.docks.right.update(cx, |d, cx| {
             if d.stage(DockSnapshot::Right(Box::new(right_snap))) {
                 cx.notify();
             }
@@ -345,17 +345,17 @@ impl Workspace {
 
         // Read dock display state after staging snapshots.
         // Which handle is being held, so its cursor can reach past itself.
-        let dragged_dock = self.dock_drag.map(|drag| drag.position);
+        let dragged_dock = self.docks.drag.map(|drag| drag.position);
         let (left_dock_open, left_dock_size) = {
-            let d = self.left_dock.read(cx);
+            let d = self.docks.left.read(cx);
             (d.is_open, d.size)
         };
         let (bottom_dock_open, bottom_dock_size) = {
-            let d = self.bottom_dock.read(cx);
+            let d = self.docks.bottom.read(cx);
             (d.is_open, d.size)
         };
         let (right_dock_open, right_dock_size) = {
-            let d = self.right_dock.read(cx);
+            let d = self.docks.right.read(cx);
             (d.is_open, d.size)
         };
         DockFrame {
@@ -473,7 +473,7 @@ impl Workspace {
         // otherwise show `<project> · <branch>` for the active lane
         // (active project only, no aggregate count). Landing state
         // (no projects) leaves the title untouched.
-        if let Some(label) = self.window_user_label.as_ref() {
+        if let Some(label) = self.window_runtime.user_label.as_ref() {
             window.set_window_title(label.as_ref());
         } else if let Some(title) = self.window_title_label() {
             window.set_window_title(&title);
@@ -493,22 +493,22 @@ impl Workspace {
             // full Workspace repaint.
             .child(self.toast_layer.clone())
             .child(command_palette::CommandPaletteOverlay::new(
-                self.command_palette.clone(),
+                self.overlays.palette.clone(),
                 cx.listener(|this, _, _, cx| this.close_command_palette(cx)),
                 cx.listener(|this, index: &usize, window, cx| {
                     this.pick_palette_row(*index, window, cx)
                 }),
             ))
             .child(lane_switcher::LaneSwitcherOverlay::new(
-                self.lane_switcher.clone(),
+                self.overlays.lane_switcher.clone(),
                 cx.listener(|this, _, _, cx| this.close_lane_switcher(cx)),
                 cx.listener(|this, index: &usize, window, cx| {
                     this.pick_lane_switcher_row(*index, window, cx)
                 }),
             ))
             .child(flow_picker::FlowPickerOverlay::new(
-                self.flow_picker.clone(),
-                self.flow_picker.prompt(),
+                self.overlays.flow_picker.clone(),
+                self.overlays.flow_picker.prompt(),
                 crate::surface::strings::flow::picker_empty(),
                 crate::surface::strings::flow::stop_prompt(),
                 crate::surface::strings::flow::stop_action(),
@@ -562,7 +562,7 @@ impl Workspace {
             .flex()
             .flex_col()
             .key_context(key_ctx)
-            .track_focus(&self.focus_handle)
+            .track_focus(&self.window_runtime.focus_handle)
             .capture_key_down(cx.listener(Self::cancel_drag_on_escape))
             // `OpenSettings` is also how the menu moves an already-open view
             // to another section.
@@ -1170,7 +1170,7 @@ impl Workspace {
             // on its own edits (Pitfall #10).
             .when(bottom_dock_open && self.workspace_page.is_none(), |el| {
                 el.child(
-                    gpui::AnyView::from(self.bottom_dock.clone()).cached(
+                    gpui::AnyView::from(self.docks.bottom.clone()).cached(
                         gpui::StyleRefinement::default()
                             .w_full()
                             .h(gpui::px(bottom_dock_size)),
@@ -1206,7 +1206,7 @@ impl Workspace {
             // and dirty the dock as an ancestor (Pitfall #10).
             .when(left_dock_open, |el| {
                 el.child(
-                    gpui::AnyView::from(self.left_dock.clone()).cached(
+                    gpui::AnyView::from(self.docks.left.clone()).cached(
                         gpui::StyleRefinement::default()
                             .h_full()
                             .w(gpui::px(left_dock_size)),
@@ -1221,7 +1221,7 @@ impl Workspace {
             // tick, whose changes (animation, `now`) aren't in the snapshot.
             .when(right_dock_open, |el| {
                 el.child(
-                    gpui::AnyView::from(self.right_dock.clone()).cached(
+                    gpui::AnyView::from(self.docks.right.clone()).cached(
                         gpui::StyleRefinement::default()
                             .h_full()
                             .w(gpui::px(right_dock_size)),
@@ -1343,17 +1343,17 @@ impl Workspace {
             // ever sees them. Capture runs root → leaf, so these intercept,
             // and each handler's `stop_propagation` keeps the keystroke out of
             // the shell.
-            .when(self.command_palette.is_open, |el| {
+            .when(self.overlays.palette.is_open, |el| {
                 el.capture_key_down(cx.listener(|this, ev: &KeyDownEvent, window, cx| {
                     this.on_palette_key(ev, window, cx)
                 }))
             })
-            .when(self.lane_switcher.is_open, |el| {
+            .when(self.overlays.lane_switcher.is_open, |el| {
                 el.capture_key_down(cx.listener(|this, ev: &KeyDownEvent, window, cx| {
                     this.on_lane_switcher_key(ev, window, cx)
                 }))
             })
-            .when(self.flow_picker.is_open(), |el| {
+            .when(self.overlays.flow_picker.is_open(), |el| {
                 el.capture_key_down(cx.listener(|this, ev: &KeyDownEvent, window, cx| {
                     this.on_flow_picker_key(ev, window, cx)
                 }))
@@ -1374,7 +1374,7 @@ impl Workspace {
                     this.finish_tab_drag(false, cx);
                     return;
                 }
-                if let Some(drag) = this.dock_drag {
+                if let Some(drag) = this.docks.drag {
                     let cursor_px: f32 = match drag.position {
                         DockPosition::Left | DockPosition::Right => ev.position.x.into(),
                         DockPosition::Bottom => ev.position.y.into(),

@@ -265,7 +265,7 @@ pub(in crate::workspace) struct BottomDockSnapshot {
     /// the bottom-dock macro tile grid. Already clamped (>= 1).
     pub grid_columns: u8,
     /// Current bottom dock height in px, mirrored from
-    /// `Workspace::bottom_dock.read(cx).size`. Used by the tab-strip
+    /// `Docks::bottom.read(cx).size`. Used by the tab-strip
     /// suffix to pick the active row-preset label and the menu
     /// checkmark without re-reading the dock entity during render.
     pub bottom_dock_size: f32,

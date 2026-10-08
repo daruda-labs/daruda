@@ -9,6 +9,7 @@
 //!     call back into `Workspace::run_widget`.
 
 mod config_chip;
+pub(in crate::workspace) mod input_dock;
 pub(super) mod macro_edit_modal;
 pub(super) mod macro_key;
 pub(in crate::workspace) mod macro_ops;

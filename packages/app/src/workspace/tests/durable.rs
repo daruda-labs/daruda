@@ -33,11 +33,11 @@ async fn mutate_durable_returns_inner_value(cx: &mut TestAppContext) {
 #[gpui::test]
 async fn mutate_durable_runs_inner_closure(cx: &mut TestAppContext) {
     // Assert the wrapper drives the closure to completion: the
-    // `left_dock_view` change is visible afterward. Persist scheduling
+    // `Docks::left_view` change is visible afterward. Persist scheduling
     // is async (cx.defer), so persisted state is not asserted here.
     let wh = make_workspace_with_dirs(cx, "/tmp/daruda_durable_runs");
     let ws = wh.root(cx).unwrap();
-    let before = ws.read_with(cx, |ws, _| ws.left_dock_view);
+    let before = ws.read_with(cx, |ws, _| ws.docks.left_view);
     let target = match before {
         daruda_store::project::LeftDockView::Lanes => {
             daruda_store::project::LeftDockView::GitChanges
@@ -46,9 +46,9 @@ async fn mutate_durable_runs_inner_closure(cx: &mut TestAppContext) {
     };
     ws.update(cx, |ws, cx| {
         ws.mutate_durable(cx, |ws, _| {
-            ws.left_dock_view = target;
+            ws.docks.left_view = target;
         });
     });
-    let after = ws.read_with(cx, |ws, _| ws.left_dock_view);
+    let after = ws.read_with(cx, |ws, _| ws.docks.left_view);
     assert_eq!(after, target);
 }

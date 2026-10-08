@@ -134,7 +134,7 @@ fn diag_wheel_after_drag_then_lane_swap(cx: &mut TestAppContext) {
     // Open the left dock explicitly so the worktree rows are rendered and
     // clickable whatever the config default is.
     ws.update(cx, |ws, cx| {
-        ws.left_dock.update(cx, |d, _| d.open());
+        ws.docks.left.update(cx, |d, _| d.open());
         cx.notify();
     });
 

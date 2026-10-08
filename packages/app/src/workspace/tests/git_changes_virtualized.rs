@@ -59,7 +59,7 @@ pub(super) fn dock_showing_changes(
                         worktree_root: repo.clone(),
                     };
                 }
-                ws.left_dock.update(cx, |d, cx| {
+                ws.docks.left.update(cx, |d, cx| {
                     d.is_open = true;
                     cx.notify();
                 });
@@ -98,7 +98,7 @@ async fn a_changed_file_row_spans_the_dock_so_its_checkbox_stays_right(cx: &mut 
     }];
     let (w, ws) = dock_showing_changes(cx, files);
 
-    let dock_width = ws.read_with(cx, |ws, cx| ws.left_dock.read(cx).size);
+    let dock_width = ws.read_with(cx, |ws, cx| ws.docks.left.read(cx).size);
     let mut vcx = gpui::VisualTestContext::from_window(w.into(), cx);
     let row = vcx
         .debug_bounds("git-changes-row")
@@ -144,7 +144,7 @@ fn rows_built_for(cx: &mut TestAppContext, n: usize) -> usize {
                         worktree_root: repo.clone(),
                     };
                 }
-                ws.left_dock.update(cx, |d, cx| {
+                ws.docks.left.update(cx, |d, cx| {
                     d.is_open = true;
                     cx.notify();
                 });

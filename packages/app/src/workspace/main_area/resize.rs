@@ -33,13 +33,13 @@ impl Workspace {
         // they don't eat flex space — no handle subtraction needed.
         // Left dock always renders via dock content/header overrides
         // regardless of panels, so check is_open only.
-        let left_open = self.left_dock.read(cx).is_open;
-        let left_size = self.left_dock.read(cx).size;
-        let right_open = self.right_dock.read(cx).is_open;
-        let right_size = self.right_dock.read(cx).size;
-        let right_panels_empty = self.right_dock.read(cx).panels.is_empty();
-        let bottom_open = self.bottom_dock.read(cx).is_open;
-        let bottom_size = self.bottom_dock.read(cx).size;
+        let left_open = self.docks.left.read(cx).is_open;
+        let left_size = self.docks.left.read(cx).size;
+        let right_open = self.docks.right.read(cx).is_open;
+        let right_size = self.docks.right.read(cx).size;
+        let right_panels_empty = self.docks.right.read(cx).panels.is_empty();
+        let bottom_open = self.docks.bottom.read(cx).is_open;
+        let bottom_size = self.docks.bottom.read(cx).size;
         if left_open {
             width = (width - left_size).max(1.0);
         }

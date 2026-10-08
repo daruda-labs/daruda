@@ -94,7 +94,7 @@ impl Workspace {
         cx: &mut Context<Self>,
     ) {
         self.show_page(page, cx);
-        self.focus_handle.focus(window, cx);
+        self.window_runtime.focus_handle.focus(window, cx);
     }
 
     pub(in crate::workspace) fn close_page(&mut self, cx: &mut Context<Self>) {
@@ -126,7 +126,7 @@ impl Workspace {
         {
             self.focus_pane(focused, window, cx);
         } else {
-            self.focus_handle.focus(window, cx);
+            self.window_runtime.focus_handle.focus(window, cx);
         }
         true
     }

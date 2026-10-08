@@ -86,7 +86,7 @@ impl Workspace {
         cx: &mut Context<Self>,
     ) {
         self.mutate_durable(cx, |ws, _| {
-            ws.window_user_label = label.map(gpui::SharedString::from);
+            ws.window_runtime.user_label = label.map(gpui::SharedString::from);
         });
         cx.notify();
     }
@@ -108,26 +108,26 @@ impl Workspace {
     ) {
         // Swap the bottom-dock draft only when focus moves to a *different*
         // input-consuming pane (Terminal / AgentChat). The visible text is
-        // saved to its owner (`input_owner`, the pane it was typed for), then
+        // saved to its owner (`InputDock::owner`, the pane it was typed for), then
         // the incoming pane's draft is restored. Non-input panes leave the
         // text and owner in place. The `input_owner != Some(id)` guard matters
         // because `InputState::set_value` resets selection/scroll even for
         // identical text, which would jump the cursor mid-edit.
-        if self.pane_consumes_bottom_input(id) && self.input_owner != Some(id) {
-            let current = self.terminal_input.read(cx).value().to_string();
-            if let Some(owner) = self.input_owner {
+        if self.pane_consumes_bottom_input(id) && self.input_dock.owner != Some(id) {
+            let current = self.input_dock.input.read(cx).value().to_string();
+            if let Some(owner) = self.input_dock.owner {
                 if current.is_empty() {
-                    self.input_drafts.remove(&owner);
+                    self.input_dock.drafts.remove(&owner);
                 } else {
-                    self.input_drafts.insert(owner, current);
+                    self.input_dock.drafts.insert(owner, current);
                 }
             }
-            let incoming = self.input_drafts.get(&id).cloned().unwrap_or_default();
-            let terminal_input = self.terminal_input.clone();
+            let incoming = self.input_dock.drafts.get(&id).cloned().unwrap_or_default();
+            let terminal_input = self.input_dock.input.clone();
             terminal_input.update(cx, |state, cx_state| {
                 state.set_value(&incoming, window, cx_state);
             });
-            self.input_owner = Some(id);
+            self.input_dock.owner = Some(id);
         }
         self.active_runtime_mut().focused_pane_id = id;
         cx.notify();
@@ -138,15 +138,15 @@ impl Workspace {
         // method only tracks the focused pane + swaps the draft.
     }
 
-    /// Drop a removed pane's bottom-dock input draft and clear `input_owner`
+    /// Drop a removed pane's bottom-dock input draft and clear `InputDock::owner`
     /// when it pointed here, so the next focus does not save stale visible
     /// text back to a gone pane. Single site every pane-removal path (close
-    /// pane / tab / lane / project) calls, keeping `input_drafts` free of
+    /// pane / tab / lane / project) calls, keeping `InputDock::drafts` free of
     /// dead entries.
     pub(in crate::workspace) fn forget_pane_input_draft(&mut self, pane_id: PaneId) {
-        self.input_drafts.remove(&pane_id);
-        if self.input_owner == Some(pane_id) {
-            self.input_owner = None;
+        self.input_dock.drafts.remove(&pane_id);
+        if self.input_dock.owner == Some(pane_id) {
+            self.input_dock.owner = None;
         }
     }
 
@@ -865,8 +865,8 @@ impl Workspace {
         // mark the pane active before `focus_pane` moves keyboard focus there.
         // Mirrors `open_agent_chat_pane`'s reveal + lazy connect.
         if matches!(kind, NewPaneKind::AgentChat) {
-            if !self.bottom_dock.read(cx).is_open {
-                self.bottom_dock.update(cx, |d, cx| {
+            if !self.docks.bottom.read(cx).is_open {
+                self.docks.bottom.update(cx, |d, cx| {
                     d.toggle();
                     cx.notify();
                 });

@@ -218,7 +218,7 @@ async fn a_pinned_node_reaches_the_run_as_a_file_to_copy(cx: &mut TestAppContext
         pinned: vec!["design".into()],
     };
     assert_eq!(
-        ws.read_with(&vcx, |ws, _| ws.flow_picker.focused_pick()),
+        ws.read_with(&vcx, |ws, _| ws.overlays.flow_picker.focused_pick()),
         Some(crate::workspace::command::flow_picker::FlowPick::Profile {
             lane: ws.read_with(&vcx, |ws, _| ws.active),
             purpose: crate::workspace::command::flow_picker::FlowPurpose::Run,
@@ -334,7 +334,7 @@ async fn running_as_far_as_a_node_needs_exactly_one_selected(cx: &mut TestAppCon
     // Nothing selected: no stopping point, so nothing happens.
     press(&mut vcx, TOOLBAR_RUN_UNTIL_SELECTOR);
     assert!(
-        !ws.read_with(&vcx, |ws, _| ws.flow_picker.is_open()),
+        !ws.read_with(&vcx, |ws, _| ws.overlays.flow_picker.is_open()),
         "▶| ran with nothing selected"
     );
 
@@ -345,7 +345,7 @@ async fn running_as_far_as_a_node_needs_exactly_one_selected(cx: &mut TestAppCon
     vcx.run_until_parked();
     press(&mut vcx, TOOLBAR_RUN_UNTIL_SELECTOR);
     assert_eq!(
-        ws.read_with(&vcx, |ws, _| ws.flow_picker.focused_pick()),
+        ws.read_with(&vcx, |ws, _| ws.overlays.flow_picker.focused_pick()),
         Some(crate::workspace::command::flow_picker::FlowPick::Profile {
             lane: ws.read_with(&vcx, |ws, _| ws.active),
             purpose: crate::workspace::command::flow_picker::FlowPurpose::Run,
@@ -384,7 +384,7 @@ async fn running_as_far_as_a_node_needs_exactly_one_selected(cx: &mut TestAppCon
     vcx.run_until_parked();
     press(&mut vcx, TOOLBAR_RUN_UNTIL_SELECTOR);
     assert!(
-        !ws.read_with(&vcx, |ws, _| ws.flow_picker.is_open()),
+        !ws.read_with(&vcx, |ws, _| ws.overlays.flow_picker.is_open()),
         "▶| ran with two nodes selected"
     );
 }

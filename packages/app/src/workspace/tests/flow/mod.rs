@@ -219,7 +219,8 @@ fn model_of_first_node(request: &daruda_flow::request::RunRequest) -> Option<Str
 }
 
 fn picker_rows(ws: &crate::workspace::Workspace) -> Vec<String> {
-    ws.flow_picker
+    ws.overlays
+        .flow_picker
         .choosing()
         .map(|c| {
             c.visible()

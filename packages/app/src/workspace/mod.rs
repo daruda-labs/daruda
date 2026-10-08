@@ -85,6 +85,7 @@ mod unseen_outcomes;
 mod update_ops;
 mod usage_labels;
 mod window_close_ops;
+mod window_runtime;
 
 pub(in crate::workspace) use config_sync::ConfigMirrors;
 pub(in crate::workspace) use modal_view::ModalView;
@@ -92,7 +93,7 @@ pub(in crate::workspace) use persistence::LaneRuntime;
 
 use std::collections::{HashMap, HashSet};
 
-use gpui::{AppContext, Context, FocusHandle, Window, actions};
+use gpui::{AppContext, Context, Window, actions};
 
 use command::picker::PickerKey;
 use command::picker_key::picker_keystroke;
@@ -300,21 +301,12 @@ pub struct Workspace {
     /// See [`orchestrator_ops::OrchestratorHost`].
     orchestrator: orchestrator_ops::OrchestratorHost,
     next_id: u64,
-    focus_handle: FocusHandle,
-    /// Dock resize drag — active while the user is pulling on the
-    /// right edge of the left dock, the left edge of the right dock,
-    /// or the top edge of the bottom dock.
-    pub(in crate::workspace) dock_drag: Option<layout::ops::DockDrag>,
-    /// When true, new tabs/panes spawn with the focused pane's cwd
-    /// (iTerm2 "Reuse previous session's directory").
-    pub(in crate::workspace) inherit_cwd: bool,
-    /// Left dock (lane list, git changes, files — the
-    /// active view is picked by `left_dock_view`).
-    pub(in crate::workspace) left_dock: gpui::Entity<layout::Dock>,
-    /// Active view inside `left_dock`. Persisted via ProjectState.
-    pub(in crate::workspace) left_dock_view: daruda_store::project::LeftDockView,
-    /// Active utility tab (Usage / Skills / Tools), independent of pages.
-    pub(in crate::workspace) right_dock_view: daruda_store::project::RightDockView,
+    /// The window this workspace lives in — see
+    /// [`window_runtime::WindowRuntime`].
+    pub(in crate::workspace) window_runtime: window_runtime::WindowRuntime,
+    /// The three docks and which view each side shows — see
+    /// [`layout::docks::Docks`].
+    pub(in crate::workspace) docks: layout::docks::Docks,
     pub(in crate::workspace) workspace_page: Option<pages::PageState>,
     /// Claude Code integration state — usage / plan-limits / service-
     /// status / session-status / PTY tracker / JSONL fallback +
@@ -325,9 +317,6 @@ pub struct Workspace {
     /// Outcomes of turns that ended while their pane was not seen — what
     /// the tab strip's result dot reads. See `agent_outcome_ops`.
     pub(in crate::workspace) unseen_outcomes: unseen_outcomes::UnseenOutcomes,
-    /// Whether this window is in the foreground. Written only by
-    /// `set_window_active`.
-    pub(in crate::workspace) window_active: bool,
     /// Runtime projects in this workspace. Zero entries = empty (Landing
     /// screen). Each project owns its own lanes, reached via
     /// `projects[i].lanes`. `tabs`/`panes` live on the active lane's
@@ -350,24 +339,19 @@ pub struct Workspace {
     /// current window vs. opening a new one; mutated when the user
     /// ticks "Don't ask again" inside the chooser modal.
     pub(in crate::workspace) window_open_policy: daruda_store::project::WindowOpenPolicy,
-    /// Bottom dock (terminal panel, problems, output).
-    pub(in crate::workspace) bottom_dock: gpui::Entity<layout::Dock>,
-    /// Right dock (file explorer, git changes).
-    pub(in crate::workspace) right_dock: gpui::Entity<layout::Dock>,
     /// What the right dock's tabs remember — see
     /// [`right_dock::context::RightDockViews`].
     pub(in crate::workspace) right_views: right_dock::context::RightDockViews,
+    /// The bottom dock's shared input and each pane's draft — see
+    /// [`main_area::bottom_dock::input_dock::InputDock`].
+    pub(in crate::workspace) input_dock: main_area::bottom_dock::input_dock::InputDock,
     /// The Settings view this window is showing, if any. `Some` *is* settings
     /// mode: it swaps the body and gates the workspace actions, so there is no
     /// separate flag to disagree with it.
     pub(in crate::workspace) settings: Option<settings_ops::SettingsHost>,
-    /// Command palette state (Cmd+Shift+P).
-    pub(in crate::workspace) command_palette: command::palette::CommandPaletteState,
-    /// Lane switcher state (Cmd+P) — fuzzy quick-switch across every
-    /// project's lanes.
-    pub(in crate::workspace) lane_switcher: command::lane_switcher::LaneSwitcherState,
-    /// Flow picker state — the list opened by `Run Flow…` / `Check Flow…`.
-    pub(in crate::workspace) flow_picker: command::flow_picker::FlowPicker,
+    /// Command palette, lane switcher and flow picker — see
+    /// [`command::overlays::CommandOverlays`].
+    pub(in crate::workspace) overlays: command::overlays::CommandOverlays,
     /// Flow runs and the Flows tab — see [`flow_context::FlowContext`].
     pub(in crate::workspace) flows: flow_context::FlowContext,
     /// Lazy per-lane state, removed together by lane and project teardown.
@@ -402,22 +386,12 @@ pub struct Workspace {
     /// a toast change triggers only the toast layer's repaint, not a
     /// full Workspace repaint.
     pub(in crate::workspace) toast_layer: gpui::Entity<toast_layer::ToastLayer>,
-    /// Most recently observed window bounds (position + size). Updated by
-    /// the `observe_window_bounds` callback so `save_state()` can
-    /// persist the live window geometry without taking `Window` as a
-    /// parameter.
-    pub(in crate::workspace) cached_window_bounds: Option<daruda_store::project::WindowState>,
     /// Memoized status-bar "project config layer exists" flag, keyed by the
     /// active project root. `render()` runs every frame, so statting per
     /// render burned syscalls; recompute only when the root changes.
     /// `reload_config` clears it so a freshly created layer surfaces
     /// immediately.
     pub(in crate::workspace) cached_project_config: Option<(std::path::PathBuf, bool)>,
-    /// User-set window title (Window > Edit Window Title…). When
-    /// `Some`, replaces the auto-derived `"<pane title> — <cwd>"`
-    /// string passed to `window.set_window_title`. Persisted to
-    /// `ProjectState.window_user_label`.
-    pub(in crate::workspace) window_user_label: Option<gpui::SharedString>,
     /// The agent the user most recently opened a chat pane under (session-local,
     /// not persisted). A fresh pane defaults to this so switching agents "sticks"
     /// for the window; falls back to the catalog default when unset or stale.
@@ -485,30 +459,6 @@ pub struct Workspace {
     /// invocations from racing on `git worktree add` against the same
     /// repository. Cleared after `finalize_create_lane` returns.
     pub(in crate::workspace) pending_lane_creates: HashSet<std::path::PathBuf>,
-    /// Re-entry guard for the platform `on_window_should_close`
-    /// callback. Set to `true` while the batch close prompt is
-    /// awaiting the user's answer; cleared once the answer lands or
-    /// the workspace is dropped.
-    pub(in crate::workspace) window_close_in_flight: bool,
-    /// Multi-line text input bound to the built-in "Input" bottom panel.
-    /// Sends typed text verbatim to the focused terminal pane on
-    /// Cmd+Enter or the inline Submit button click. The send button and
-    /// drop chrome live alongside the input in
-    /// `workspace/bottom/terminal_input.rs` rather than wrapping the
-    /// state in an `InputPanel` composite (commit input still uses
-    /// `InputPanel` for its dropdown + floating-bar layout).
-    pub(in crate::workspace) terminal_input: gpui::Entity<crate::ui::InputState>,
-    /// Keeps the terminal_input subscription alive for the lifetime of
-    /// the Workspace entity.
-    _terminal_input_subscription: gpui::Subscription,
-    /// Cached line count of `terminal_input`. Updated on every
-    /// `InputEvent::Change` so `adapt_dock_to_input_lines` can guard
-    /// against redundant resizes without re-reading the entity on every
-    /// render cycle.
-    pub(in crate::workspace) terminal_input_line_count: usize,
-    /// When true, the bottom dock shows the built-in "Input" panel
-    /// instead of the active macro tab.
-    pub(in crate::workspace) terminal_input_visible: bool,
     /// Background watches and their pumps — see [`lifetimes::Pumps`].
     pub(in crate::workspace) pumps: lifetimes::Pumps,
     /// Cached Project-scope `.mcp.json` directories (lane root + the
@@ -520,28 +470,6 @@ pub struct Workspace {
     /// against re-toasting the same version on repeated `Available`
     /// notifies.
     last_update_toast_version: Option<semver::Version>,
-    /// Handle to this workspace's GPUI window. Stored so that methods
-    /// called from `observe_global` (which has no `&mut Window`) can
-    /// re-enter the window via `cx.update_window` when they need to
-    /// update widgets whose setters require `&mut Window`.
-    pub(in crate::workspace) window_handle: gpui::AnyWindowHandle,
-    /// Per-pane unsent draft text for the shared bottom-dock input. Keyed
-    /// by the workspace-global `PaneId` of the input-capable pane
-    /// (Terminal / AgentChat) the text was typed for. Swapped in/out by
-    /// `set_focused_pane` on every focus change: the outgoing pane's text
-    /// is saved to its `input_owner` and the incoming pane's draft is
-    /// restored, so each pane keeps its own in-progress text. Empty
-    /// strings are never stored — `remove` is used instead to avoid
-    /// leaking entries for empty drafts or closed panes.
-    pub(in crate::workspace) input_drafts:
-        std::collections::HashMap<main_area::pane_tree::PaneId, String>,
-    /// The input-capable pane whose draft is currently visible in
-    /// `terminal_input` — the last-focused Terminal / AgentChat pane.
-    /// Draft saves key off this rather than the outgoing `focused_pane_id`,
-    /// so text typed while a non-input pane (File / TaskEdit) held focus
-    /// still saves to the pane it was meant for on the next input-pane
-    /// focus. `None` until the first input-capable pane is focused.
-    pub(in crate::workspace) input_owner: Option<main_area::pane_tree::PaneId>,
     /// Latest listening-TCP-port scan — see [`sync::ports::PortsState`].
     pub(in crate::workspace) ports: sync::ports::PortsState,
 }
@@ -639,7 +567,7 @@ impl Workspace {
     ) -> Self {
         let mut ws = Self::new_with_project_impl(config, project, data_dir, window, cx, true);
         ws.add_tab(window, cx);
-        // `persist_state` snapshots `cached_window_bounds`; production
+        // `persist_state` snapshots `WindowRuntime::cached_bounds`; production
         // captures them between `install_window_close_hook` and the
         // first persist. Mirror that here so the saved state has real
         // geometry instead of `None`.
@@ -676,134 +604,8 @@ impl Workspace {
         crate::ui::theme::DarudaTheme::init(cx);
         crate::settings_store::SettingsStore::init(cx);
 
-        let focus_handle = cx.focus_handle();
         let ws_weak = cx.entity().downgrade();
         let toast_layer = cx.new(|_| toast_layer::ToastLayer::new(ws_weak.clone()));
-
-        let ws_for_input = ws_weak.clone();
-        let ws_for_tab = ws_weak.clone();
-        let ws_for_escape = ws_weak.clone();
-        let ws_for_accept = ws_weak.clone();
-        let ws_for_provider = ws_weak.clone();
-        let ws_for_history = ws_weak.clone();
-        let terminal_input = cx.new(|cx_state| {
-            let max_rows = usize::from(config.agent.input_max_rows);
-            let mut state = crate::ui::InputState::new(window, cx_state)
-                .auto_grow(1, max_rows)
-                // While an agent chat pane is focused and the user hasn't opted
-                // into modifier-to-send, plain Enter submits and Shift+Enter
-                // inserts a newline (Zed's agent-panel default). Evaluated live
-                // on each Enter so it tracks focus + config without any sync.
-                .submit_on_enter(move |app| {
-                    ws_for_input.upgrade().is_some_and(|ws| {
-                        let ws = ws.read(app);
-                        ws.is_agent_chat_pane(ws.active_runtime().focused_pane_id)
-                            && !ws.mirrors.agent.use_modifier_to_send
-                    })
-                })
-                // Shift+Tab cycles the focused agent pane's session mode (Claude
-                // Code's permission-mode cycle). `cycle_agent_mode` returns true
-                // only when it actually switched (agent pane focused with ≥2
-                // modes); the input then skips outdent. Otherwise it falls
-                // through to the default outdent. Evaluated live on each press.
-                .on_secondary_tab(move |_window, app| {
-                    ws_for_tab.upgrade().is_some_and(|ws| {
-                        let focused = ws.read(app).active_runtime().focused_pane_id;
-                        ws.update(app, |ws, cx| ws.cycle_agent_mode(focused, cx))
-                    })
-                })
-                // Escape cancels the focused agent pane's activity — the
-                // keyboard counterpart of the bottom-dock "Stop" button. Returns
-                // true only when the pane was actually busy (so Escape keeps
-                // propagating normally otherwise). Fires only as a fallback after
-                // the input's own Escape handling (see `InputState::on_escape`),
-                // so an open completion menu still closes on the first Escape.
-                .on_escape(move |_window, app| {
-                    ws_for_escape.upgrade().is_some_and(|ws| {
-                        let focused = ws.read(app).active_runtime().focused_pane_id;
-                        ws.update(app, |ws, cx| ws.cancel_agent_turn_if_active(focused, cx))
-                    })
-                })
-                // ↑/↓ at the boundary of the multi-line input navigates the
-                // per-lane history buffer (shell-style). The hook checks whether
-                // navigation is possible (entries exist / cursor is active), then
-                // defers the actual `set_value` call. Deferring is the same re-
-                // entry guard as `on_completion_accept`: the hook fires inside
-                // `InputState`'s update, so we cannot call `terminal_input.update`
-                // or `terminal_input.read` synchronously (CLAUDE.md pitfall #5).
-                // Reading the workspace's lane history is fine — Workspace is a
-                // different entity from terminal_input.
-                .on_history_navigate(move |dir, window, app| {
-                    let Some(ws) = ws_for_history.upgrade() else {
-                        return false;
-                    };
-                    // Decide whether to consume before mutating any state.
-                    // Reading ws (Workspace) is safe here: we're inside
-                    // terminal_input's update, but Workspace is a different entity.
-                    if !ws.read(app).history_navigate_possible(dir, app) {
-                        return false;
-                    }
-                    let ws_deferred = ws.downgrade();
-                    window.defer(app, move |window, cx| {
-                        // SILENT-OK: workspace dropped between key press and defer
-                        if let Some(ws) = ws_deferred.upgrade() {
-                            ws.update(cx, |ws, cx| ws.do_history_navigate(dir, window, cx));
-                        }
-                    });
-                    true
-                })
-                // Accepting a slash-command completion routes through the
-                // workspace. The accept hook fires inside this `InputState`'s
-                // update; `cx.defer_in` would re-lease this same InputState, so
-                // `complete_slash_command` -> `send_terminal_input` (which
-                // reads/clears `terminal_input`) would re-enter and panic. Defer
-                // at window/app level — no entity re-lease (CLAUDE.md pitfall #5).
-                .on_completion_accept(move |item, window, cx| {
-                    let name = item.label.clone();
-                    let ws = ws_for_accept.clone();
-                    window.defer(cx, move |window, cx| {
-                        if let Some(ws) = ws.upgrade() {
-                            ws.update(cx, |ws, cx| ws.complete_slash_command(name, window, cx));
-                        }
-                    });
-                });
-            state.set_placeholder(
-                crate::surface::strings::bottom_dock::input_placeholder(),
-                window,
-                cx_state,
-            );
-            // Feed the native completion menu with ACP slash commands when a
-            // chat pane is focused and a `/`-token is being typed.
-            state.lsp.completion_provider = Some(std::rc::Rc::new(
-                crate::workspace::main_area::bottom_dock::slash_command::SlashCommandProvider {
-                    workspace: ws_for_provider,
-                },
-            ));
-            state
-        });
-        // The bottom-dock body wires the Submit-button click →
-        // `send_terminal_input`; this subscription covers the keyboard path.
-        // `PressEnter { secondary: true }` is emitted on every *submit* —
-        // Cmd+Enter always, plus a plain Enter when the `submit_on_enter`
-        // predicate above is active (agent pane focused, modifier-to-send off).
-        // Shift+Tab mode cycling is handled directly by the `on_secondary_tab`
-        // handler installed above (no event round-trip needed).
-        let terminal_input_sub = cx.subscribe_in(
-            &terminal_input,
-            window,
-            |this, _, ev: &crate::ui::InputEvent, window, cx| match ev {
-                crate::ui::InputEvent::PressEnter { secondary: true } => {
-                    this.send_terminal_input(window, cx);
-                }
-                crate::ui::InputEvent::Change => {
-                    this.adapt_dock_to_input_lines(window, cx);
-                    // The composer no longer holds what the resume gesture was
-                    // armed against, so the next Enter sends rather than confirms.
-                    this.disarm_queue_resume(cx);
-                }
-                _ => {}
-            },
-        );
 
         // PTY tracker — single thread polls sysinfo every 3 s for
         // claude descendants of registered panes. The tracker handle
@@ -856,28 +658,10 @@ impl Workspace {
             main_area: main_area::MainAreaContext::default(),
             orchestrator: orchestrator_ops::OrchestratorHost::default(),
             next_id: 0,
-            focus_handle,
-            dock_drag: None,
-            inherit_cwd: true,
-            left_dock: {
-                let ws = ws_weak.clone();
-                cx.new(|_| {
-                    let mut d = layout::Dock::new(layout::DockPosition::Left, ws);
-                    d.resize(config.left_dock.left_default_width);
-                    d.is_open = !config.left_dock.left_collapsed_by_default;
-                    // Register the three left-dock views. Only the count is
-                    // read (by the layout pass); the tab strip owns selection.
-                    d.add_panel(layout::LanesPanel);
-                    d.add_panel(layout::GitChangesPanel);
-                    d.add_panel(layout::FilesPanel);
-                    d
-                })
-            },
-            left_dock_view: daruda_store::project::LeftDockView::default(),
-            right_dock_view: daruda_store::project::RightDockView::default(),
+            window_runtime: window_runtime::WindowRuntime::new(window, cx),
+            docks: layout::docks::Docks::new(&ws_weak, config, cx),
             workspace_page: None,
             unseen_outcomes: unseen_outcomes::UnseenOutcomes::default(),
-            window_active: window.is_window_active(),
             claude: claude_session_ops::ClaudeContext {
                 usage_by_account: claude_session_ops::PerAccountUsage::default(),
                 service_status: std::collections::HashMap::new(),
@@ -937,18 +721,8 @@ impl Workspace {
             next_project_id: if project.is_some() { 1 } else { 0 },
             next_group_id: 0,
             window_open_policy: daruda_store::project::WindowOpenPolicy::default(),
-            bottom_dock: {
-                let ws = ws_weak.clone();
-                cx.new(|_| {
-                    let mut d = layout::Dock::new(layout::DockPosition::Bottom, ws);
-                    d.add_panel(layout::MacrosPanel);
-                    d
-                })
-            },
             settings: None,
-            command_palette: command::palette::CommandPaletteState::default(),
-            lane_switcher: command::lane_switcher::LaneSwitcherState::default(),
-            flow_picker: command::flow_picker::FlowPicker::default(),
+            overlays: command::overlays::CommandOverlays::default(),
             flows: flow_context::FlowContext::new(window, cx),
             lane_scoped: HashMap::new(),
             file_tree: left_dock::file_tree_context::FileTreeContext {
@@ -966,9 +740,7 @@ impl Workspace {
             #[cfg(test)]
             error_history: Vec::new(),
             toast_layer,
-            cached_window_bounds: None,
             cached_project_config: None,
-            window_user_label: None,
             last_agent_id: None,
             agent_pulse_prev: Vec::new(),
             git: left_dock::git_ops::context::GitContext::new(&ws_weak, window, cx),
@@ -982,13 +754,11 @@ impl Workspace {
             // repaints whenever any window mutates it (single, symmetric
             // cross-window propagation path — see `accounts_global`).
             right_views: right_dock::context::RightDockViews::new(window, cx),
+            input_dock: main_area::bottom_dock::input_dock::InputDock::new(
+                &ws_weak, config, window, cx,
+            ),
             persistence_suspended: false,
             pending_lane_creates: HashSet::new(),
-            window_close_in_flight: false,
-            terminal_input,
-            _terminal_input_subscription: terminal_input_sub,
-            terminal_input_line_count: 1,
-            terminal_input_visible: false,
             // The shared root in production; under the test's own data
             // directory otherwise, so a suite takes no lock the developer's
             // app could see and leaves nothing in their config directory.
@@ -998,14 +768,6 @@ impl Workspace {
                 daruda_store::persistence::flow_lock_root()
             },
             data_dir,
-            right_dock: {
-                let ws = ws_weak.clone();
-                cx.new(|_| {
-                    let mut d = layout::Dock::new(layout::DockPosition::Right, ws);
-                    d.add_panel(layout::AgentChatPanel);
-                    d
-                })
-            },
             mcp_project_dirs: Vec::new(),
             // Re-resolve the user layer with this workspace's project
             // overlay and reapply whenever `SettingsStore` changes —
@@ -1015,9 +777,6 @@ impl Workspace {
             // transition, so the handler filters for `Available` and toasts
             // once per new version.
             last_update_toast_version: None,
-            window_handle: window.window_handle(),
-            input_drafts: std::collections::HashMap::new(),
-            input_owner: None,
             ports: sync::ports::PortsState::default(),
             _observers: lifetimes::GlobalObservers::new(
                 cx.observe_global::<accounts_global::AccountsGlobal>(|ws, cx| {
@@ -1214,11 +973,11 @@ impl Workspace {
         cx: &mut Context<Self>,
     ) {
         self.close_page(cx);
-        if self.left_dock_view == view {
+        if self.docks.left_view == view {
             return;
         }
         self.mutate_durable(cx, |ws, _| {
-            ws.left_dock_view = view;
+            ws.docks.left_view = view;
         });
         if view == daruda_store::project::LeftDockView::GitChanges {
             let target = self.active;
@@ -1439,7 +1198,7 @@ impl Workspace {
         self.project_branch_label_with("/", false)
     }
 
-    /// Window title fallback (`window_user_label` overrides this).
+    /// Window title fallback (`WindowRuntime::user_label` overrides this).
     /// Folds the detached marker into the text — macOS window titles
     /// are plain strings, so the chip cannot ride along the way it
     /// does in the status bar.
@@ -1500,7 +1259,7 @@ impl Workspace {
     /// Lease-free (`App::notify`) — dock event listeners run inside a
     /// `Context<Dock>` lease, so leasing the dock here would double-lease.
     pub(crate) fn notify_right_dock(&self, cx: &mut Context<Self>) {
-        let dock_id = self.right_dock.entity_id();
+        let dock_id = self.docks.right.entity_id();
         gpui::App::notify(cx, dock_id);
     }
 
@@ -1518,12 +1277,12 @@ impl Workspace {
     /// builds one row element per changed file, so on a large branch that is a
     /// full rebuild of the list four times a second to animate nothing.
     pub(crate) fn left_dock_paints_status_pulse(&self, cx: &gpui::App) -> bool {
-        self.left_dock.read(cx).is_open
-            && self.left_dock_view == daruda_store::project::LeftDockView::Lanes
+        self.docks.left.read(cx).is_open
+            && self.docks.left_view == daruda_store::project::LeftDockView::Lanes
     }
 
     pub(crate) fn notify_left_dock(&self, cx: &mut Context<Self>) {
-        let dock_id = self.left_dock.entity_id();
+        let dock_id = self.docks.left.entity_id();
         gpui::App::notify(cx, dock_id);
     }
 
@@ -1613,11 +1372,11 @@ impl Workspace {
         view: daruda_store::project::RightDockView,
         cx: &mut Context<Self>,
     ) {
-        if self.right_dock_view == view {
+        if self.docks.right_view == view {
             return;
         }
         self.mutate_durable(cx, |ws, _| {
-            ws.right_dock_view = view;
+            ws.docks.right_view = view;
         });
         cx.notify();
     }
@@ -1631,14 +1390,14 @@ impl Workspace {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if !self.command_palette.is_open {
+        if !self.overlays.palette.is_open {
             return;
         }
         let Some((key, ch)) = picker_keystroke(ev) else {
             return;
         };
-        let visible_len = self.command_palette.visible().len();
-        match self.command_palette.picker.on_key(key, ch, visible_len) {
+        let visible_len = self.overlays.palette.visible().len();
+        match self.overlays.palette.picker.on_key(key, ch, visible_len) {
             PickerKey::Confirm => self.execute_palette_action(window, cx),
             PickerKey::Dismiss => self.close_command_palette(cx),
             PickerKey::Changed => cx.notify(),
@@ -1649,7 +1408,7 @@ impl Workspace {
 
     /// Close the palette without running anything — the backdrop click.
     pub(in crate::workspace) fn close_command_palette(&mut self, cx: &mut Context<Self>) {
-        self.command_palette.close();
+        self.overlays.palette.close();
         cx.notify();
     }
 
@@ -1661,13 +1420,13 @@ impl Workspace {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        self.command_palette.picker.focus(ix);
+        self.overlays.palette.picker.focus(ix);
         self.execute_palette_action(window, cx);
     }
 
     /// Execute the currently focused palette action and close.
     pub(super) fn execute_palette_action(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let action_id = self.command_palette.focused_action_id();
+        let action_id = self.overlays.palette.focused_action_id();
         self.close_command_palette(cx);
 
         if let Some(id) = action_id {

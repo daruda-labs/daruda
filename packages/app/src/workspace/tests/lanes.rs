@@ -539,7 +539,8 @@ fn input_draft_is_per_pane(cx: &mut TestAppContext) {
             let pane0 = ws.active_runtime().focused_pane_id;
 
             // Lane 0's terminal pane is focused; type a draft into the input.
-            ws.terminal_input
+            ws.input_dock
+                .input
                 .update(cx, |s, cx_state| s.set_value("draft-a", window, cx_state));
 
             // Switch to lane 1 and open its own pane (activation doesn't
@@ -550,33 +551,34 @@ fn input_draft_is_per_pane(cx: &mut TestAppContext) {
             assert_eq!(ws.active, lane1);
             let pane1 = ws.active_runtime().focused_pane_id;
             assert_ne!(pane1, pane0, "each lane has its own input pane");
-            let after_switch = ws.terminal_input.read(cx).value().to_string();
+            let after_switch = ws.input_dock.input.read(cx).value().to_string();
             assert_eq!(
                 after_switch, "",
                 "input must be empty after focusing a pane with no draft"
             );
             // The saved draft for pane 0 must be in the map.
             assert_eq!(
-                ws.input_drafts.get(&pane0).map(String::as_str),
+                ws.input_dock.drafts.get(&pane0).map(String::as_str),
                 Some("draft-a"),
                 "pane 0 draft must be persisted on focus away"
             );
 
             // Type a draft for lane 1's pane.
-            ws.terminal_input
+            ws.input_dock
+                .input
                 .update(cx, |s, cx_state| s.set_value("draft-b", window, cx_state));
 
             // Switch back to lane 0 — pane 1's draft must be saved and
             // pane 0's draft ("draft-a") must be restored.
             ws.activate_lane(lane0, window, cx);
             assert_eq!(ws.active, lane0);
-            let restored = ws.terminal_input.read(cx).value().to_string();
+            let restored = ws.input_dock.input.read(cx).value().to_string();
             assert_eq!(
                 restored, "draft-a",
                 "pane 0 draft must be restored on focus back"
             );
             assert_eq!(
-                ws.input_drafts.get(&pane1).map(String::as_str),
+                ws.input_dock.drafts.get(&pane1).map(String::as_str),
                 Some("draft-b"),
                 "pane 1 draft must be persisted on focus away"
             );
@@ -584,14 +586,14 @@ fn input_draft_is_per_pane(cx: &mut TestAppContext) {
             // And forward to lane 1 again shows its own draft.
             ws.activate_lane(lane1, window, cx);
             assert_eq!(
-                ws.terminal_input.read(cx).value().to_string(),
+                ws.input_dock.input.read(cx).value().to_string(),
                 "draft-b",
                 "pane 1 draft must be restored on focus back"
             );
 
             ws.activate_lane(lane0, window, cx);
             assert_eq!(
-                ws.terminal_input.read(cx).value().to_string(),
+                ws.input_dock.input.read(cx).value().to_string(),
                 "draft-a",
                 "pane 0 draft must still survive the lane round-trip"
             );
@@ -599,12 +601,12 @@ fn input_draft_is_per_pane(cx: &mut TestAppContext) {
             // Submit pane 0's draft — the saved entry must be cleared.
             ws.send_terminal_input(window, cx);
             assert_eq!(
-                ws.input_drafts.get(&pane0),
+                ws.input_dock.drafts.get(&pane0),
                 None,
                 "submitting must drop the owner pane's saved draft"
             );
             // The input widget itself must also be empty after send.
-            let after_send = ws.terminal_input.read(cx).value().to_string();
+            let after_send = ws.input_dock.input.read(cx).value().to_string();
             assert_eq!(after_send, "", "input must be empty after send");
         });
     })
@@ -647,19 +649,20 @@ fn input_draft_round_trips_across_panes_and_cleans_up(cx: &mut TestAppContext) {
             // Focus A and type a draft.
             ws.activate_tab(0, window, cx);
             assert_eq!(ws.active_runtime().focused_pane_id, pane_a);
-            ws.terminal_input
+            ws.input_dock
+                .input
                 .update(cx, |s, cx_state| s.set_value("foo", window, cx_state));
 
             // Focus B — "foo" is saved for A; B has no draft, input clears.
             ws.activate_tab(1, window, cx);
             assert_eq!(ws.active_runtime().focused_pane_id, pane_b);
             assert_eq!(
-                ws.terminal_input.read(cx).value().to_string(),
+                ws.input_dock.input.read(cx).value().to_string(),
                 "",
                 "pane B shows its own (empty) draft"
             );
             assert_eq!(
-                ws.input_drafts.get(&pane_a).map(String::as_str),
+                ws.input_dock.drafts.get(&pane_a).map(String::as_str),
                 Some("foo"),
                 "pane A draft persisted on focus away"
             );
@@ -667,12 +670,12 @@ fn input_draft_round_trips_across_panes_and_cleans_up(cx: &mut TestAppContext) {
             // Focus A again — "foo" restored; B never gained a draft.
             ws.activate_tab(0, window, cx);
             assert_eq!(
-                ws.terminal_input.read(cx).value().to_string(),
+                ws.input_dock.input.read(cx).value().to_string(),
                 "foo",
                 "pane A draft restored on focus back"
             );
             assert_eq!(
-                ws.input_drafts.get(&pane_b),
+                ws.input_dock.drafts.get(&pane_b),
                 None,
                 "pane B has no stored draft"
             );
@@ -694,30 +697,31 @@ fn input_draft_round_trips_across_panes_and_cleans_up(cx: &mut TestAppContext) {
             ws.set_focused_pane(file_id, window, cx);
 
             assert_eq!(
-                ws.terminal_input.read(cx).value().to_string(),
+                ws.input_dock.input.read(cx).value().to_string(),
                 "foo",
                 "non-input focus leaves the visible draft untouched"
             );
             assert_eq!(
-                ws.input_owner,
+                ws.input_dock.owner,
                 Some(pane_a),
                 "non-input focus leaves the owner pointer at pane A"
             );
 
             // Edit the still-visible text, then focus a fresh input pane —
             // the edit must be saved to pane A (the owner), never the file.
-            ws.terminal_input
+            ws.input_dock
+                .input
                 .update(cx, |s, cx_state| s.set_value("foobar", window, cx_state));
             ws.add_tab(window, cx);
             let pane_b = ws.active_runtime().focused_pane_id;
             assert_ne!(pane_b, file_id);
             assert_eq!(
-                ws.input_drafts.get(&pane_a).map(String::as_str),
+                ws.input_dock.drafts.get(&pane_a).map(String::as_str),
                 Some("foobar"),
                 "edit made while a non-input pane held focus saves to owner A"
             );
             assert_eq!(
-                ws.input_drafts.get(&file_id),
+                ws.input_dock.drafts.get(&file_id),
                 None,
                 "the file pane never stores a draft"
             );
@@ -725,21 +729,21 @@ fn input_draft_round_trips_across_panes_and_cleans_up(cx: &mut TestAppContext) {
             // Closing an input pane drops its stored draft and clears the owner
             // if it pointed at that pane.
             ws.activate_tab(0, window, cx);
-            assert_eq!(ws.input_owner, Some(pane_a));
+            assert_eq!(ws.input_dock.owner, Some(pane_a));
             assert_eq!(
-                ws.input_drafts.get(&pane_a).map(String::as_str),
+                ws.input_dock.drafts.get(&pane_a).map(String::as_str),
                 Some("foobar"),
                 "pane A has a stored draft before close"
             );
 
             ws.close_pane_by_id(pane_a, window, cx);
             assert_eq!(
-                ws.input_drafts.get(&pane_a),
+                ws.input_dock.drafts.get(&pane_a),
                 None,
                 "closing pane A drops its draft"
             );
             assert_ne!(
-                ws.input_owner,
+                ws.input_dock.owner,
                 Some(pane_a),
                 "owner no longer points at the closed pane"
             );

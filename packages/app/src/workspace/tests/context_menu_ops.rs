@@ -18,7 +18,7 @@ fn context_menu_open_close_and_empty_close_update_popup_deploy(cx: &mut TestAppC
             let menu = PopupMenu::build(window, cx, |menu, _window, _cx| menu);
 
             workspace.update(cx, |ws, cx| {
-                let previous_focus = ws.focus_handle.clone();
+                let previous_focus = ws.window_runtime.focus_handle.clone();
                 previous_focus.focus(window, cx);
                 assert!(
                     ws.main_area.popup_menu_deploy.is_none(),
@@ -86,7 +86,7 @@ async fn a_dock_row_right_click_deploys_at_the_workspace_root(cx: &mut TestAppCo
             p.lanes
                 .push(crate::lane::Lane::default_for_project(1, root.clone()));
         }
-        ws.left_dock.update(cx, |d, _| d.open());
+        ws.docks.left.update(cx, |d, _| d.open());
         cx.notify();
     });
 

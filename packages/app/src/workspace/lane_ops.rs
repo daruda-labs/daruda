@@ -106,11 +106,11 @@ impl Workspace {
         _window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if self.lane_switcher.is_open {
-            self.lane_switcher.close();
+        if self.overlays.lane_switcher.is_open {
+            self.overlays.lane_switcher.close();
         } else {
             let candidates = self.lane_switcher_candidates();
-            self.lane_switcher.open(candidates);
+            self.overlays.lane_switcher.open(candidates);
         }
         cx.notify();
     }
@@ -149,7 +149,7 @@ impl Workspace {
 
     /// Close the switcher without activating anything — the backdrop click.
     pub(in crate::workspace) fn close_lane_switcher(&mut self, cx: &mut Context<Self>) {
-        self.lane_switcher.close();
+        self.overlays.lane_switcher.close();
         cx.notify();
     }
 
@@ -161,7 +161,7 @@ impl Workspace {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        self.lane_switcher.picker.focus(ix);
+        self.overlays.lane_switcher.picker.focus(ix);
         self.execute_lane_switcher_selection(window, cx);
     }
 
@@ -171,7 +171,7 @@ impl Workspace {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let target = self.lane_switcher.focused_lane_ref();
+        let target = self.overlays.lane_switcher.focused_lane_ref();
         self.close_lane_switcher(cx);
         if let Some(target) = target {
             self.activate_lane(target, window, cx);
@@ -188,14 +188,19 @@ impl Workspace {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if !self.lane_switcher.is_open {
+        if !self.overlays.lane_switcher.is_open {
             return;
         }
         let Some((key, ch)) = picker_keystroke(ev) else {
             return;
         };
-        let visible_len = self.lane_switcher.visible().len();
-        match self.lane_switcher.picker.on_key(key, ch, visible_len) {
+        let visible_len = self.overlays.lane_switcher.visible().len();
+        match self
+            .overlays
+            .lane_switcher
+            .picker
+            .on_key(key, ch, visible_len)
+        {
             PickerKey::Confirm => self.execute_lane_switcher_selection(window, cx),
             PickerKey::Dismiss => self.close_lane_switcher(cx),
             PickerKey::Changed => cx.notify(),
@@ -220,7 +225,7 @@ impl Workspace {
             return;
         };
         first.label = LANE_SWITCHER_LONG_LABEL_SAMPLE.to_string();
-        self.lane_switcher.open(candidates);
+        self.overlays.lane_switcher.open(candidates);
         cx.notify();
     }
 
@@ -347,7 +352,7 @@ impl Workspace {
         // `RecommendedWatcher`, stopping the kernel-side watch.
         self.lane_scoped.remove(&target);
         // Bottom-dock drafts are keyed per pane: drop the entry for every
-        // pane in the removed lane; clear `input_owner` if it pointed at
+        // pane in the removed lane; clear `InputDock::owner` if it pointed at
         // one of them.
         for pane_id in &removed_pane_ids {
             // Never the orchestrator's: its pane can be in the runtime being

@@ -18,7 +18,7 @@ async fn drive_command_palette_opens_palette(cx: &mut TestAppContext) {
 
     workspace.read_with(cx, |ws, _| {
         assert!(
-            ws.command_palette.is_open,
+            ws.overlays.palette.is_open,
             "command-palette scenario should open the palette",
         );
     });
@@ -171,10 +171,11 @@ async fn drive_lane_switcher_reuses_a_real_lane_ref(cx: &mut TestAppContext) {
 
     workspace.read_with(cx, |ws, _| {
         assert!(
-            ws.lane_switcher.is_open,
+            ws.overlays.lane_switcher.is_open,
             "lane-switcher scenario should open the switcher",
         );
         let seeded = ws
+            .overlays
             .lane_switcher
             .candidates
             .first()

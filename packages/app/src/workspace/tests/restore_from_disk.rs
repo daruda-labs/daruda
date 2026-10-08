@@ -157,16 +157,16 @@ fn restore_into_empty_workspace_applies_dock_state(cx: &mut TestAppContext) {
             ws.active_runtime().tabs.is_empty(),
             "a re-bootstrapped lane lands on the empty-state, not an auto-seeded tab"
         );
-        assert!(ws.left_dock.read(cx).is_open);
-        assert_eq!(ws.left_dock.read(cx).size, 321.0);
-        assert!(ws.bottom_dock.read(cx).is_open);
-        assert_eq!(ws.bottom_dock.read(cx).size, 199.0);
-        assert!(!ws.right_dock.read(cx).is_open);
+        assert!(ws.docks.left.read(cx).is_open);
+        assert_eq!(ws.docks.left.read(cx).size, 321.0);
+        assert!(ws.docks.bottom.read(cx).is_open);
+        assert_eq!(ws.docks.bottom.read(cx).size, 199.0);
+        assert!(!ws.docks.right.read(cx).is_open);
         assert_eq!(ws.mirrors.terminal_config.font_size, 17.0);
         assert!((ws.mirrors.terminal_config.vertical_spacing - 1.25).abs() < f32::EPSILON);
-        assert_eq!(ws.left_dock_view, LeftDockView::GitChanges);
+        assert_eq!(ws.docks.left_view, LeftDockView::GitChanges);
         assert_eq!(ws.active_page(), Some(crate::workspace::pages::Page::Tasks));
-        assert_eq!(ws.right_dock_view, RightDockView::Skills);
+        assert_eq!(ws.docks.right_view, RightDockView::Skills);
     });
 
     let _ = std::fs::remove_dir_all(&project_root);

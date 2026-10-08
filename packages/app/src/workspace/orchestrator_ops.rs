@@ -221,8 +221,8 @@ impl Workspace {
         self.orchestrator.zoom_to_restore = self.main_area.zoomed_pane_id.take();
         self.main_area.pane_drop_hover = None;
         self.set_focused_pane(id, window, cx);
-        if !self.bottom_dock.read(cx).is_open {
-            self.bottom_dock.update(cx, |dock, cx| {
+        if !self.docks.bottom.read(cx).is_open {
+            self.docks.bottom.update(cx, |dock, cx| {
                 dock.toggle();
                 cx.notify();
             });
@@ -230,7 +230,8 @@ impl Workspace {
         self.activate_bottom_input(cx);
         self.apply_input_placeholder(window, cx);
         // Focus the composer directly: displaying the existing session must not reconnect it.
-        self.terminal_input
+        self.input_dock
+            .input
             .read(cx)
             .focus_handle(cx)
             .focus(window, cx);
@@ -307,15 +308,17 @@ impl Workspace {
                 self.set_focused_pane(focused, window, cx);
                 self.focus_pane(focused, window, cx);
             } else {
-                if self.input_owner == Some(id) {
-                    self.input_drafts
-                        .insert(id, self.terminal_input.read(cx).value().to_string());
-                    self.input_owner = None;
-                    self.terminal_input
+                if self.input_dock.owner == Some(id) {
+                    self.input_dock
+                        .drafts
+                        .insert(id, self.input_dock.input.read(cx).value().to_string());
+                    self.input_dock.owner = None;
+                    self.input_dock
+                        .input
                         .update(cx, |input, cx| input.set_value("", window, cx));
                 }
                 if restore_focus {
-                    self.focus_handle.focus(window, cx);
+                    self.window_runtime.focus_handle.focus(window, cx);
                 }
             }
         }

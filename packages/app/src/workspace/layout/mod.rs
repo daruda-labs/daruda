@@ -6,6 +6,7 @@
 //! split tree — they resize via drag handles but do not split.
 
 pub(in crate::workspace) mod diff_policy;
+pub(in crate::workspace) mod docks;
 pub(in crate::workspace) mod ops;
 pub(in crate::workspace) mod snap;
 
@@ -146,7 +147,7 @@ impl Dock {
     }
 
     /// Register a panel. Which view is *shown* comes from `Workspace`
-    /// (`left_dock_view` / `right_dock_view`); the list only records how many
+    /// (`Docks::left_view` / `Docks::right_view`); the list only records how many
     /// a dock has, which is what the layout pass reads.
     pub fn add_panel<P: Panel + Send + Sync + 'static>(&mut self, panel: P) {
         self.panels.push(Box::new(panel));

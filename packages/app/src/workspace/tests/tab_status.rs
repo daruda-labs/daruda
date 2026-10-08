@@ -360,7 +360,10 @@ async fn the_window_coming_forward_shows_the_active_tab(cx: &mut TestAppContext)
     .unwrap();
     cx.run_until_parked();
     let agent = ws.read_with(cx, |ws, _| {
-        assert!(!ws.window_active, "a test window starts in the background");
+        assert!(
+            !ws.window_runtime.active,
+            "a test window starts in the background"
+        );
         ws.active_runtime().focused_pane_id
     });
     finish(&ws, agent, TurnOutcome::Completed, cx);
@@ -369,7 +372,7 @@ async fn the_window_coming_forward_shows_the_active_tab(cx: &mut TestAppContext)
     cx.update_window(wh.into(), |_, window, _| window.activate_window())
         .unwrap();
     cx.run_until_parked();
-    assert!(ws.read_with(cx, |ws, _| ws.window_active));
+    assert!(ws.read_with(cx, |ws, _| ws.window_runtime.active));
     assert_eq!(unseen(&ws, agent, cx), None);
 }
 /// The tab strip reads the mark: the hidden tab shows it, the visible one

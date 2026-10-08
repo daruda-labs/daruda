@@ -1059,7 +1059,8 @@ async fn up_arrow_consumes_queue_and_edits_last_prompt(cx: &mut TestAppContext) 
                     .last()
                     .expect("queue non-empty")
                     .id;
-                ws.terminal_input
+                ws.input_dock
+                    .input
                     .update(cx, |s, cx_state| s.set_value("typing", window, cx_state));
                 last
             })
@@ -1077,7 +1078,7 @@ async fn up_arrow_consumes_queue_and_edits_last_prompt(cx: &mut TestAppContext) 
 
     workspace.read_with(cx, |ws, cx| {
         assert_eq!(
-            ws.terminal_input.read(cx).value(),
+            ws.input_dock.input.read(cx).value(),
             "typing",
             "a non-empty composer is left for history recall, not a queue edit"
         );
@@ -1093,7 +1094,8 @@ async fn up_arrow_consumes_queue_and_edits_last_prompt(cx: &mut TestAppContext) 
 
     cx.update_window(window_handle.into(), |_, window, cx| {
         workspace.update(cx, |ws, cx| {
-            ws.terminal_input
+            ws.input_dock
+                .input
                 .update(cx, |s, cx_state| s.set_value("", window, cx_state));
         });
     })
@@ -1120,7 +1122,7 @@ async fn up_arrow_consumes_queue_and_edits_last_prompt(cx: &mut TestAppContext) 
 
     workspace.read_with(cx, |ws, cx| {
         assert_eq!(
-            ws.terminal_input.read(cx).value(),
+            ws.input_dock.input.read(cx).value(),
             "q2",
             "the composer receives the last queued prompt's text"
         );
@@ -1168,7 +1170,7 @@ async fn queued_prompt_edit_exit_paths_clear_state(cx: &mut TestAppContext) {
 
     // begin pulled the text into the composer and set the editing flag.
     workspace.read_with(cx, |ws, cx| {
-        assert_eq!(ws.terminal_input.read(cx).value(), "editable");
+        assert_eq!(ws.input_dock.input.read(cx).value(), "editable");
         assert_eq!(
             agent_view(ws, pane_id).read(cx).queue().editing_prompt,
             Some(id)
@@ -1185,7 +1187,7 @@ async fn queued_prompt_edit_exit_paths_clear_state(cx: &mut TestAppContext) {
 
     workspace.read_with(cx, |ws, cx| {
         assert_eq!(
-            ws.terminal_input.read(cx).value(),
+            ws.input_dock.input.read(cx).value(),
             "",
             "cancel empties the composer"
         );
@@ -1223,7 +1225,7 @@ async fn queued_prompt_edit_exit_paths_clear_state(cx: &mut TestAppContext) {
     cx.run_until_parked();
 
     workspace.read_with(cx, |ws, cx| {
-        assert_eq!(ws.terminal_input.read(cx).value(), "q2");
+        assert_eq!(ws.input_dock.input.read(cx).value(), "q2");
         assert_eq!(
             agent_view(ws, pane_id).read(cx).queue().editing_prompt,
             Some(clear_id)
@@ -1247,7 +1249,7 @@ async fn queued_prompt_edit_exit_paths_clear_state(cx: &mut TestAppContext) {
             "editing flag cleared"
         );
         assert_eq!(
-            ws.terminal_input.read(cx).value(),
+            ws.input_dock.input.read(cx).value(),
             "",
             "the orphaned edit text is cleared from the composer"
         );
@@ -1292,7 +1294,7 @@ async fn queued_prompt_edit_exit_paths_clear_state(cx: &mut TestAppContext) {
             "the queued prompt is left intact (edit cancelled, not sent)"
         );
         assert_eq!(
-            ws.terminal_input.read(cx).value(),
+            ws.input_dock.input.read(cx).value(),
             "",
             "the composer is emptied"
         );
@@ -2813,7 +2815,8 @@ async fn only_a_non_empty_composer_disarms_the_resume_gesture(cx: &mut TestAppCo
                 "an empty composer leaves the gesture armed"
             );
 
-            ws.terminal_input
+            ws.input_dock
+                .input
                 .update(cx, |s, cx_state| s.set_value("next", window, cx_state));
             ws.disarm_queue_resume(cx);
             assert!(
@@ -2856,7 +2859,8 @@ async fn empty_composer_enter_cancels_a_queued_edit_before_arming(cx: &mut TestA
             ws.begin_edit_queued_prompt(pane_id, parked_id, window, cx);
             // `begin_edit_queued_prompt` filled the composer; clearing it is what
             // makes the next Enter an empty submit.
-            ws.terminal_input
+            ws.input_dock
+                .input
                 .update(cx, |s, cx_state| s.set_value("", window, cx_state));
 
             ws.send_terminal_input(window, cx);

@@ -46,9 +46,9 @@ impl Workspace {
         .detach();
     }
 
-    /// The single writer of `window_active`.
+    /// The single writer of `WindowRuntime::active`.
     pub(in crate::workspace) fn set_window_active(&mut self, active: bool, cx: &mut Context<Self>) {
-        self.window_active = active;
+        self.window_runtime.active = active;
         self.acknowledge_seen_outcomes(cx);
     }
 
@@ -69,7 +69,7 @@ impl Workspace {
     /// A turn that ends in the active tab of a background window is still
     /// news when the user comes back.
     fn pane_seen(&self, pane_id: PaneId) -> bool {
-        self.window_active && self.pane_on_screen(pane_id)
+        self.window_runtime.active && self.pane_on_screen(pane_id)
     }
 
     /// Mark the lane holding `pane_id` unread unless it is the one on screen.

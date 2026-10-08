@@ -36,7 +36,7 @@ pub(super) fn render_center_content(ws: &Workspace, cx: &mut Context<Workspace>)
     }
     if let Some(page) = &ws.workspace_page
         && page.page == crate::workspace::pages::Page::Tasks
-        && let crate::workspace::layout::DockSnapshot::Right(snap) = &ws.right_dock.read(cx).snap
+        && let crate::workspace::layout::DockSnapshot::Right(snap) = &ws.docks.right.read(cx).snap
     {
         return crate::workspace::pages::render::content(page, snap, cx);
     }

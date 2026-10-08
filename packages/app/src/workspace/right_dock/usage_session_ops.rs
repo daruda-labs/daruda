@@ -83,8 +83,8 @@ impl Workspace {
         self.active_runtime_mut().tab_history.push(cur_tab);
         let last_tab = self.active_runtime().tabs.len() - 1;
         self.active_runtime_mut().active_tab_index = last_tab;
-        if !self.bottom_dock.read(cx).is_open {
-            self.bottom_dock.update(cx, |d, cx| {
+        if !self.docks.bottom.read(cx).is_open {
+            self.docks.bottom.update(cx, |d, cx| {
                 d.toggle();
                 cx.notify();
             });
