@@ -2026,13 +2026,9 @@ mcp:
   # Body when local scope is empty (active lane, no `projects[<lane>]`
   # servers in `~/.claude.json`).
   empty_local: "No local MCP servers for this project."
-  # Row status label — server has `"disabled": true` in config.
-  status_disabled: "disabled"
-  # Row status label — the config leaves the server switched on.
-  status_enabled: "enabled"
   # Tooltip on the server row's enable switch.
   toggle_tooltip: "Enable or disable this server"
-  # Server row's second line: config state beside its transport.
+  # Server row's second line when the config is malformed: that label beside its transport.
   row_summary: "%{status} · %{transport}"
   # Tools tab footer: servers configured across every scope.
   footer_servers: "%{n} MCP servers"

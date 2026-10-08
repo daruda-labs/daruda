@@ -1392,8 +1392,6 @@ mcp:
   no_project_hint: "프로젝트 및 로컬 MCP 서버는 활성 Worktree가 필요합니다. 프로젝트를 열어 이 범위를 활성화하세요."
   empty_user: "설정된 사용자 MCP 서버가 없습니다."
   empty_local: "이 프로젝트의 로컬 MCP 서버가 없습니다."
-  status_disabled: "비활성화됨"
-  status_enabled: "활성화됨"
   toggle_tooltip: "이 서버 사용 여부 전환"
   row_summary: "%{status} · %{transport}"
   footer_servers: "MCP 서버 %{n}개"

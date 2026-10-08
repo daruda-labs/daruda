@@ -6,9 +6,9 @@
 //! ┌─ Tools ──────────────────────────────────────── [+] ┐
 //! │  ▾ PROJECT                                        2 │
 //! │  ▤ filesystem                                  [on] │
-//! │    enabled · stdio                                  │
+//! │    stdio                                            │
 //! │  ▤ playwright                                 [off] │
-//! │    disabled · stdio                                 │
+//! │    stdio                                            │
 //! │  ─────────────────────────────────────────────────  │
 //! │  ▾ USER                                           1 │
 //! ├─────────────────────────────────────────────────────┤
@@ -168,19 +168,20 @@ fn server_row(
     // the buttons.
     let row_hover_bg = t.skill_row_hover_bg;
 
-    // The switch mirrors the config's `disabled` flag; there is no live
-    // connection state to show, so the summary line reports config only.
-    let (status, status_color) = if s.is_malformed() {
-        (strings::mcp::status_malformed(), t.mcp_malformed_badge_text)
-    } else if s.disabled {
-        (strings::mcp::status_disabled(), t.text_subtle)
-    } else {
-        (strings::mcp::status_enabled(), t.text_muted)
-    };
+    // The switch already shows on / off, so the summary is the transport
+    // alone; only a malformed config, which the switch can't show, is named.
     let transport_label = s.transport.slug();
-    let summary = div()
-        .text_color(status_color)
-        .child(strings::mcp::row_summary(&status, transport_label));
+    let (summary_text, status_color) = if s.is_malformed() {
+        (
+            strings::mcp::row_summary(strings::mcp::status_malformed(), transport_label),
+            t.mcp_malformed_badge_text,
+        )
+    } else if s.disabled {
+        (transport_label.to_string(), t.text_subtle)
+    } else {
+        (transport_label.to_string(), t.text_muted)
+    };
+    let summary = div().text_color(status_color).child(summary_text);
     let name = div()
         .when(s.disabled, |d| d.text_color(t.text_subtle))
         .child(SharedString::from(s.name.clone()));
