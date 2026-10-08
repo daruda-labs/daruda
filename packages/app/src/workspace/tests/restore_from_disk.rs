@@ -171,3 +171,80 @@ fn restore_into_empty_workspace_applies_dock_state(cx: &mut TestAppContext) {
 
     let _ = std::fs::remove_dir_all(&project_root);
 }
+
+/// One tab whose shell cannot spawn costs that tab only. The lanes and
+/// projects restored after it must come back with their own tabs, rather
+/// than the whole restore stopping at the first failure.
+#[gpui::test]
+fn a_tab_that_fails_to_spawn_does_not_cost_the_lanes_after_it(cx: &mut TestAppContext) {
+    use crate::workspace::main_area::file_view_pane::{DiffSource, FileViewMode};
+    use crate::workspace::main_area::tab_ops::OpenIntent;
+
+    let temp = tempfile::tempdir().unwrap();
+    let a_root = temp.path().join("a");
+    let b_root = temp.path().join("b");
+    std::fs::create_dir_all(&a_root).unwrap();
+    std::fs::create_dir_all(&b_root).unwrap();
+    let note = b_root.join("note.txt");
+    std::fs::write(&note, "kept").unwrap();
+
+    // Project A holds a shell; project B, restored after it, holds a file
+    // viewer, which spawns no shell and so cannot fail.
+    let config = daruda_config::Config::default();
+    let (original_handle, original) = build_workspace_with(
+        cx,
+        &config,
+        Some(daruda_store::project::Project::from_path(&a_root)),
+    );
+    cx.update_window(original_handle.into(), |_, window, cx| {
+        original.update(cx, |ws, cx| {
+            ws.add_tab(window, cx);
+            ws.add_project(b_root.clone(), window, cx)
+                .expect("project B added");
+            let lane = ws.active.lane;
+            ws.open_pane_file_view(
+                lane,
+                note.clone(),
+                DiffSource::WorkingTree,
+                FileViewMode::Raw,
+                OpenIntent::Commit,
+                window,
+                cx,
+            );
+        });
+    })
+    .unwrap();
+    let (workspace_state, project_states) =
+        original.read_with(cx, |ws, app_cx| ws.snapshot_for_disk(app_cx));
+
+    // Restore where no shell can start, so A's tab fails.
+    let mut broken = daruda_config::Config::default();
+    broken.shell.program = Some(daruda_terminal::pty::STUB_FAILING_SHELL.into());
+    let restored_handle = cx.add_window(|window, cx| {
+        let mut ws =
+            Workspace::new_with_project_for_test(&broken, None, fresh_test_data_dir(), window, cx);
+        ws.restore_from_disk(&workspace_state, &project_states, window, cx);
+        ws
+    });
+    let restored = restored_handle.root(cx).unwrap();
+
+    restored.read_with(cx, |ws, _| {
+        let b = &ws.projects[1];
+        let b_lane = daruda_store::project::LaneRef {
+            project: b.id,
+            lane: b.lanes[0].id,
+        };
+        let runtime = ws
+            .main_area
+            .runtimes
+            .get(&b_lane)
+            .expect("project B's lane is restored");
+        assert!(
+            runtime
+                .panes
+                .iter()
+                .any(|p| p.file_view().is_some_and(|fv| fv.path == note)),
+            "project B's file tab survives project A's failed shell",
+        );
+    });
+}

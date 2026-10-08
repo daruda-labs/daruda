@@ -142,6 +142,22 @@ impl Workspace {
     /// text back to a gone pane. Single site every pane-removal path (close
     /// pane / tab / lane / project) calls, keeping `InputDock::drafts` free of
     /// dead entries.
+    /// Forget every per-pane record the workspace keeps for panes that are
+    /// going away — tracking, unseen outcomes, focus recency, input draft.
+    /// The one call each teardown (pane, tab, lane, project) makes, so none
+    /// of them forgets a smaller set than the others.
+    pub(in crate::workspace) fn forget_panes(
+        &mut self,
+        pane_ids: &[PaneId],
+        cx: &mut Context<Self>,
+    ) {
+        self.release_pane_tracking(pane_ids, cx);
+        for id in pane_ids {
+            self.main_area.activity_counter.remove(id);
+            self.forget_pane_input_draft(*id);
+        }
+    }
+
     pub(in crate::workspace) fn forget_pane_input_draft(&mut self, pane_id: PaneId) {
         self.input_dock.drafts.remove(&pane_id);
         if self.input_dock.owner == Some(pane_id) {
@@ -342,12 +358,8 @@ impl Workspace {
             self.main_area.zoomed_pane_id = None;
         }
         self.main_area.pane_drop_hover = None;
-        self.release_pane_tracking(&pane_ids, cx);
+        self.forget_panes(&pane_ids, cx);
         release_pane_images(&mut self.active_runtime_mut().panes, &pane_ids, window, cx);
-        for id in &pane_ids {
-            self.main_area.activity_counter.remove(id);
-            self.forget_pane_input_draft(*id);
-        }
         *self.active_runtime_mut() = crate::workspace::LaneRuntime::default();
         // Emptying a lane is a durable change that must survive restart, so
         // self-schedule the persist here: interactive close paths reach
@@ -390,15 +402,11 @@ impl Workspace {
         {
             self.main_area.zoomed_pane_id = None;
         }
-        self.release_pane_tracking(&pane_ids, cx);
+        self.forget_panes(&pane_ids, cx);
         release_pane_images(&mut self.active_runtime_mut().panes, &pane_ids, window, cx);
         self.active_runtime_mut()
             .panes
             .retain(|p| !pane_ids.contains(&p.id));
-        for id in &pane_ids {
-            self.main_area.activity_counter.remove(id);
-            self.forget_pane_input_draft(*id);
-        }
 
         // Adjust history for the removed tab: drop direct references to it
         // and shift all higher indices down by one so they remain valid.
@@ -912,11 +920,9 @@ impl Workspace {
             &mut self.active_runtime_mut().tabs[tab_index].layout,
             pane_id,
         );
-        self.release_pane_tracking(&[pane_id], cx);
+        self.forget_panes(&[pane_id], cx);
         release_pane_images(&mut self.active_runtime_mut().panes, &[pane_id], window, cx);
         self.active_runtime_mut().panes.retain(|p| p.id != pane_id);
-        self.main_area.activity_counter.remove(&pane_id);
-        self.forget_pane_input_draft(pane_id);
 
         if tab_index == self.active_runtime().active_tab_index {
             self.set_focused_pane(next_focus, window, cx);

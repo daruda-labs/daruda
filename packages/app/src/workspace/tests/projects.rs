@@ -696,3 +696,42 @@ fn group_crud_round_trips_and_demotes_deleted_members(cx: &mut TestAppContext) {
     assert_eq!(group.color.as_deref(), Some("#abcdef"));
     assert!(group.is_collapsed);
 }
+
+/// Closing a project forgets every per-pane record of its panes, the
+/// focus-recency counter included — not only the ones a tab close clears.
+#[gpui::test]
+fn closing_a_project_forgets_its_panes_activity(cx: &mut TestAppContext) {
+    let temp = tempfile::tempdir().unwrap();
+    let a = temp.path().join("a");
+    let b = temp.path().join("b");
+    let (wh, ws) =
+        workspace_with_background_project_a(cx, a.to_str().unwrap(), b.to_str().unwrap());
+
+    let b_panes = cx
+        .update_window(wh.into(), |_, window, cx| {
+            ws.update(cx, |ws, cx| {
+                ws.add_tab(window, cx);
+                let ids: Vec<_> = ws.active_runtime().panes.iter().map(|p| p.id).collect();
+                for id in &ids {
+                    ws.bump_activity(*id);
+                }
+                ids
+            })
+        })
+        .unwrap();
+    assert!(!b_panes.is_empty(), "project B holds a pane");
+
+    cx.update_window(wh.into(), |_, window, cx| {
+        ws.update(cx, |ws, cx| ws.close_active_project(window, cx))
+    })
+    .unwrap();
+
+    ws.read_with(cx, |ws, _| {
+        for id in &b_panes {
+            assert!(
+                !ws.main_area.activity_counter.contains_key(id),
+                "pane {id} of the closed project left its activity behind",
+            );
+        }
+    });
+}

@@ -180,9 +180,17 @@ pub fn runs_foreground_job(master: &(dyn MasterPty + Send), shell_pid: Option<u3
 ///
 /// In production builds this is identical to [`spawn_pty_real`].
 #[cfg(any(test, feature = "test-support"))]
-pub fn spawn_pty(_config: &PtyConfig) -> Result<PtyHandle, PtyError> {
+pub fn spawn_pty(config: &PtyConfig) -> Result<PtyHandle, PtyError> {
+    if config.shell == STUB_FAILING_SHELL {
+        return Err(PtyError::SpawnShell(STUB_FAILING_SHELL.to_owned()));
+    }
     spawn_pty_stub()
 }
+
+/// A shell name the test stub refuses, so a dependent crate's test can make
+/// one spawn fail — the stub otherwise always succeeds.
+#[cfg(any(test, feature = "test-support"))]
+pub const STUB_FAILING_SHELL: &str = "daruda-test-stub://spawn-fails";
 
 /// Production PTY spawn — opens a kernel PTY pair, forks the shell,
 /// and wires the I/O channels.

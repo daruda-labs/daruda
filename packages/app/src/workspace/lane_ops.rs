@@ -327,8 +327,16 @@ impl Workspace {
             .get(&target)
             .map(|runtime| runtime.panes.iter().map(|p| p.id).collect::<Vec<_>>())
             .unwrap_or_default();
+        // Never the orchestrator's: its pane can be in the runtime being torn
+        // down, but it belongs to a session that outlives any worktree —
+        // `hide_orchestrator_tab` is what stashes its draft.
+        let forgotten: Vec<_> = removed_pane_ids
+            .iter()
+            .copied()
+            .filter(|id| !self.is_orchestrator_pane(*id))
+            .collect();
         if target != self.active {
-            self.release_pane_tracking(&removed_pane_ids, cx);
+            self.forget_panes(&forgotten, cx);
             if let Some(runtime) = self.main_area.runtimes.get_mut(&target) {
                 release_pane_images(&mut runtime.panes, &removed_pane_ids, window, cx);
             }
@@ -339,18 +347,6 @@ impl Workspace {
         // leaks. Dropping the entries also drops the embedded
         // `RecommendedWatcher`, stopping the kernel-side watch.
         self.lane_scoped.remove(&target);
-        // Bottom-dock drafts are keyed per pane: drop the entry for every
-        // pane in the removed lane; clear `InputDock::owner` if it pointed at
-        // one of them.
-        for pane_id in &removed_pane_ids {
-            // Never the orchestrator's: its pane can be in the runtime being
-            // torn down, but its draft belongs to a session that outlives any
-            // worktree. `hide_orchestrator_tab` is what stashes it.
-            if self.is_orchestrator_pane(*pane_id) {
-                continue;
-            }
-            self.forget_pane_input_draft(*pane_id);
-        }
         if let Some(project) = self.projects.get_mut(target.project) {
             project.lanes.retain(|w| w.id != target.lane);
         }

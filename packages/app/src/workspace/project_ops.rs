@@ -295,7 +295,7 @@ impl Workspace {
             .flat_map(|(_, runtime)| runtime.panes.iter().map(|p| p.id))
             .filter(|id| !self.is_orchestrator_pane(*id))
             .collect();
-        self.release_pane_tracking(&owned_pane_ids, cx);
+        self.forget_panes(&owned_pane_ids, cx);
         // Same reason, for the GPU images a Markdown preview holds: the
         // sprite atlas never evicts on its own, so a pane that drops without
         // this keeps its textures for the process's lifetime.
@@ -306,12 +306,6 @@ impl Workspace {
             .filter(|(key, _)| key.project == project_id)
         {
             release_pane_images(&mut runtime.panes, &owned_pane_ids, window, cx);
-        }
-        // Bottom-dock drafts are keyed per pane, not per lane, so drop the
-        // entry for every pane the closing project owned; clear
-        // `InputDock::owner` if it pointed at one of them.
-        for pane_id in &owned_pane_ids {
-            self.forget_pane_input_draft(*pane_id);
         }
         // Drop per-lane caches for the closing project so they do
         // not leak across project deletes.

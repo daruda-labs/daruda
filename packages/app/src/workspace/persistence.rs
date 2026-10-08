@@ -527,16 +527,9 @@ impl Workspace {
         self.main_area.activity_counter.clear();
 
         let mut active_focus: Option<pane_tree::PaneId> = None;
-        let mut early_exit = false;
         for (idx, ps) in project_states.iter().enumerate() {
-            if early_exit {
-                break;
-            }
             let runtime_project_id = idx as daruda_store::project::ProjectId;
             for swt in &ps.lanes {
-                if early_exit {
-                    break;
-                }
                 let wt_ref = daruda_store::project::LaneRef {
                     project: runtime_project_id,
                     lane: swt.id,
@@ -568,9 +561,11 @@ impl Workspace {
                 let mut scratch: Vec<pane::Pane> = Vec::new();
                 let mut id_map: HashMap<u64, pane_tree::PaneId> = HashMap::new();
                 let mut tabs: Vec<TabEntry> = Vec::new();
-                let mut failed = false;
 
                 for stab in &swt.tabs {
+                    // A tab that fails part-way leaves the panes it did
+                    // build in `scratch`; they go with it.
+                    let built_before = scratch.len();
                     match self.rebuild_layout(
                         &stab.layout,
                         Some(&swt.path),
@@ -596,21 +591,16 @@ impl Workspace {
                             });
                         }
                         Err(e) => {
-                            // Drop the whole lane's partial panes (scratch
-                            // goes out of scope) — restore aborts here.
+                            // Only this tab is lost; the lane's other tabs
+                            // and every lane after it still restore.
                             self.report_pane_error(
                                 &crate::surface::strings::error::pane_context_restore(),
                                 e,
                                 cx,
                             );
-                            failed = true;
-                            break;
+                            scratch.truncate(built_before);
                         }
                     }
-                }
-                if failed {
-                    early_exit = true;
-                    break;
                 }
 
                 let wt_active_tab = swt.active_tab_index.min(tabs.len().saturating_sub(1));
