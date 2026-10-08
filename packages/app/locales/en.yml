@@ -2226,7 +2226,6 @@ error:
   pane_spawn_status: "%{context} failed — %{error}"
   pane_vt_init_failed: "VT initialization failed: %{error}"
   prompt_file_not_found: "Prompt file not found"
-  prompt_file_outside_lanes: "Prompt file is outside all known worktrees"
   reveal_path_missing: "Cannot reveal: the folder no longer exists"
   prompt_watcher_read_failed: "Prompt watcher read failed"
   project_config_create_dir_failed: "Failed to create project config directory"

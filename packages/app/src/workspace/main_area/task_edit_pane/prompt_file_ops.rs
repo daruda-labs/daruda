@@ -282,33 +282,15 @@ impl Workspace {
             self.report_error(report, cx);
             return;
         }
-        let Some(wt_id) = self.lane_containing(&path) else {
-            let report =
-                ErrorReport::new(crate::surface::strings::error::prompt_file_outside_lanes())
-                    .severity(ErrorSeverity::Warning)
-                    .at(file!(), line!())
-                    .with_context("path", redact_home(&path))
-                    .dedup("tasks.open_prompt_file.no_lane")
-                    .build();
-            self.report_error(report, cx);
-            return;
-        };
-        let wt_ref = daruda_store::project::LaneRef {
-            project: self.active.project,
-            lane: wt_id,
-        };
-        self.open_files_entry(
-            wt_ref,
-            path,
-            crate::workspace::main_area::tab_ops::OpenIntent::Enter,
-            window,
-            cx,
-        );
+        // A task's worktree may be any lane of any project, not the one on
+        // screen: the prompt opens where it lives, or for reference if no
+        // lane holds it any more.
+        self.open_linked_file(path, window, cx);
     }
 
     /// The conflict prompt's `[Diff]`: open `path` split to the right of the
-    /// TaskEdit pane, so its edits and the disk version sit side by side.
-    /// Does nothing when the path isn't inside any known lane.
+    /// TaskEdit pane, so its edits and the disk version sit side by side. A
+    /// path no lane holds opens for reference instead.
     fn open_disk_file_for_diff(
         &mut self,
         pane_id: PaneId,
@@ -316,22 +298,9 @@ impl Workspace {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let Some(wt) = self.lane_containing(&path) else {
-            return;
-        };
-        self.open_file_split_right(wt, path, pane_id, window, cx);
-    }
-}
-
-impl Workspace {
-    /// The active lane `path` lies in — the deepest, so a worktree nested
-    /// inside another lane's checkout wins over its parent. Spellings are
-    /// compared as one place, since a prompt path may come through a symlink.
-    fn lane_containing(&self, path: &std::path::Path) -> Option<daruda_store::project::LaneId> {
-        self.active_lanes()
-            .iter()
-            .filter(|w| daruda_core::path::is_within(path, &w.path))
-            .max_by_key(|w| w.path.components().count())
-            .map(|w| w.id)
+        match self.projects.lane_owning(&path) {
+            Some(lane) => self.open_file_split_right(lane, path, pane_id, window, cx),
+            None => self.open_reference_file(path, window, cx),
+        }
     }
 }

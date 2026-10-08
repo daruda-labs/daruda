@@ -107,7 +107,7 @@ impl Workspace {
         }
         self.set_git_changes_cursor(target, repo_path, cx);
         self.open_git_file_diff(
-            target.lane,
+            target,
             abs,
             DiffSource::from_staged(staged),
             OpenIntent::Preview,
@@ -231,7 +231,6 @@ impl Workspace {
         cx: &mut Context<Self>,
     ) {
         let active_ref = self.active;
-        let active_id = self.active.lane;
         let Some(cursor) = self
             .lane_scoped
             .get(&active_ref)
@@ -257,7 +256,7 @@ impl Workspace {
         };
         let abs = wt.paths().from_git_status(&cursor);
         self.open_git_file_diff(
-            active_id,
+            self.active,
             abs,
             DiffSource::from_staged(is_staged),
             intent,

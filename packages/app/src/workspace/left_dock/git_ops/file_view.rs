@@ -2,15 +2,16 @@
 
 use std::path::PathBuf;
 
-use daruda_store::project::{LaneId, LaneRef};
+use daruda_store::project::LaneRef;
 use gpui::{Context, Window, point, px};
 
+use crate::lane::availability::LaneAvailability;
 use crate::ui::diff_editor::{DiffColors, build_diff_editor_model};
 use crate::ui::mermaid_palette;
 use crate::workspace::Workspace;
 use crate::workspace::main_area::file_view_pane::file_content::LoadOutcome;
 use crate::workspace::main_area::file_view_pane::{
-    DiffSource, FileViewMode, PaneFileContent, PaneFileView,
+    DiffSource, FileOrigin, FileViewMode, PaneFileContent, PaneFileView,
 };
 use crate::workspace::main_area::pane::FileContent;
 use crate::workspace::main_area::pane_tree::PaneId;
@@ -44,35 +45,8 @@ impl FilePaneLoadRequest {
     }
 
     fn matches_view(&self, view: &PaneFileView) -> bool {
-        view.lane_id == self.owner.lane
-            && view.path == self.path
-            && view.source == self.source
-            && view.view_mode == self.mode
+        view.path == self.path && view.source == self.source && view.view_mode == self.mode
     }
-}
-
-/// Debug-only guard for the invariant `load_pane_file_content`'s owner-keyed
-/// runtime lookup depends on: every file pane that lives in
-/// `self.active_runtime_mut()` must carry an `owner`/`fv.lane_id` equal to
-/// `active_lane`. A pane is *always* pushed into the active runtime
-/// (`open_pane_file_view` et al. never target a parked lane's runtime), but
-/// `owner` is built from a caller-supplied `lane_id` that isn't
-/// type-constrained to match — `lane_ref_for_pane` in particular resolves
-/// across *all* lanes by design, so a future caller that feeds its result
-/// into a pane-opening path here would violate this silently. If that
-/// happens, `load_pane_file_content`'s completion callback looks the pane up
-/// via `runtimes.get_mut(&owner)` — a *different* runtime than the one the
-/// pane was actually pushed into — never finds it, and drops the loaded
-/// content: the pane sticks on "Loading" forever with no error surfaced.
-/// Panics only in debug builds, matching a programming-error guard rather
-/// than a recoverable runtime condition.
-fn debug_assert_owner_is_active(lane_id: LaneId, active_lane: LaneId) {
-    debug_assert_eq!(
-        lane_id, active_lane,
-        "file pane content targets lane {lane_id:?} but is pushed into the \
-         active runtime for lane {active_lane:?} — load_pane_file_content's \
-         owner-keyed lookup will silently miss it"
-    );
 }
 
 fn title_for_file_path(path: &std::path::Path) -> gpui::SharedString {
@@ -200,18 +174,6 @@ impl Workspace {
         self.release_preview_tab(idx);
     }
 
-    /// The `owner: LaneRef` for a file pane that is pushed into (or already
-    /// lives in) `self.active_runtime_mut()`. Single construction site for
-    /// that pairing — see [`debug_assert_owner_is_active`] for why `lane_id`
-    /// must match `self.active.lane` here.
-    pub(in crate::workspace) fn owner_lane_ref(&self, lane_id: LaneId) -> LaneRef {
-        debug_assert_owner_is_active(lane_id, self.active.lane);
-        LaneRef {
-            project: self.active.project,
-            lane: lane_id,
-        }
-    }
-
     /// Select a file in the Git Changes view: open the pane-area file viewer
     /// in a new tab (or activate the existing tab if the file is already open).
     ///
@@ -221,7 +183,7 @@ impl Workspace {
     /// the row ([`OpenIntent::Preview`]) and picking it ([`OpenIntent::Commit`]).
     pub(in crate::workspace) fn open_git_file_diff(
         &mut self,
-        lane_id: LaneId,
+        target: LaneRef,
         path: PathBuf,
         source: DiffSource,
         intent: OpenIntent,
@@ -230,7 +192,7 @@ impl Workspace {
     ) {
         debug_assert_ne!(intent, OpenIntent::Enter, "a git row never enters the pane");
         self.open_pane_file_view(
-            lane_id,
+            target,
             path,
             source,
             FileViewMode::Changes,
@@ -267,7 +229,7 @@ impl Workspace {
     #[allow(clippy::too_many_arguments)]
     pub(in crate::workspace) fn open_pane_file_view(
         &mut self,
-        lane_id: LaneId,
+        target: LaneRef,
         path: PathBuf,
         source: DiffSource,
         initial_mode: FileViewMode,
@@ -275,19 +237,189 @@ impl Workspace {
         window: &mut gpui::Window,
         cx: &mut Context<Self>,
     ) {
+        self.open_file_pane(
+            target,
+            FileOrigin::Lane,
+            path,
+            source,
+            initial_mode,
+            intent,
+            window,
+            cx,
+        );
+    }
+
+    /// Open a file an agent pointed at: in the lane that owns it, like any
+    /// lane file — or, when no lane holds it, for reference in the lane on
+    /// screen, read-only. An agent may name any path on disk.
+    pub(in crate::workspace) fn open_linked_file(
+        &mut self,
+        path: PathBuf,
+        window: &mut gpui::Window,
+        cx: &mut Context<Self>,
+    ) {
+        match self.projects.lane_owning(&path) {
+            Some(owner) => self.open_pane_file_view(
+                owner,
+                path,
+                DiffSource::WorkingTree,
+                FileViewMode::Raw,
+                OpenIntent::Enter,
+                window,
+                cx,
+            ),
+            None => self.open_reference_file(path, window, cx),
+        }
+    }
+
+    /// Open `path` read-only in the lane on screen, for a panel that only
+    /// consults lanes (Skills, Tools). The file may live anywhere on disk,
+    /// so no lane is looked up and none is moved to.
+    pub(in crate::workspace) fn open_reference_file(
+        &mut self,
+        path: PathBuf,
+        window: &mut gpui::Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.open_file_pane(
+            self.active,
+            FileOrigin::Reference,
+            path,
+            DiffSource::WorkingTree,
+            FileViewMode::Raw,
+            OpenIntent::Enter,
+            window,
+            cx,
+        );
+    }
+
+    /// Add a tab for `path` to `target` without leaving the lane on screen —
+    /// for a result something else produced there. The lane is marked
+    /// unread instead; on screen, this is an ordinary open.
+    pub(in crate::workspace) fn open_file_in_background(
+        &mut self,
+        target: LaneRef,
+        path: PathBuf,
+        window: &mut gpui::Window,
+        cx: &mut Context<Self>,
+    ) {
+        if target == self.active {
+            self.open_pane_file_view(
+                target,
+                path,
+                DiffSource::WorkingTree,
+                FileViewMode::Preview,
+                OpenIntent::Enter,
+                window,
+                cx,
+            );
+            return;
+        }
+        // A lane whose path is gone cannot show a file; one that was simply
+        // never on screen gets the runtime its first visit would have.
+        if !self
+            .lane_for(target)
+            .is_some_and(|lane| lane.availability == LaneAvailability::Present)
+        {
+            return;
+        }
+        let mode = FileViewMode::effective_for_path(FileViewMode::Preview, &path);
+        let live_status = self.git_status_for_path(target, &path, &DiffSource::WorkingTree);
+        let pane = self.create_file_pane(
+            FileOrigin::Lane,
+            path,
+            DiffSource::WorkingTree,
+            live_status,
+            mode,
+            window,
+            cx,
+        );
+        let pane_id = pane.id;
+        let load_request =
+            FilePaneLoadRequest::from_view(pane_id, target, pane.file_view().expect("file pane"));
+        let tab_id = self.alloc_id();
+        let runtime = self.main_area.runtimes.entry(target).or_default();
+        runtime.panes.push(pane);
+        runtime
+            .tabs
+            .push(crate::workspace::main_area::pane::TabEntry {
+                id: tab_id,
+                layout: crate::workspace::main_area::pane_tree::PaneLayout::Pane(pane_id),
+                last_focused_pane: pane_id,
+                user_label: None,
+            });
+        // Opened there, not here: the lane's own active tab and focus stay.
+        if runtime.tabs.len() == 1 {
+            runtime.focused_pane_id = pane_id;
+        }
+        self.mark_lane_unread(target, cx);
+        // The tab is durable on its own, not only when the unread mark is new.
+        self.mutate_durable(cx, |_, _| {});
+        self.load_pane_file_content(load_request, cx);
+    }
+
+    /// The one place a file pane is opened. A pane lives in the runtime of
+    /// the lane it belongs to, so a user's open of another lane's file moves
+    /// there first — the pane and the lane its content is read against are
+    /// then the same by construction.
+    #[allow(clippy::too_many_arguments)]
+    fn open_file_pane(
+        &mut self,
+        target: LaneRef,
+        origin: FileOrigin,
+        path: PathBuf,
+        source: DiffSource,
+        initial_mode: FileViewMode,
+        intent: OpenIntent,
+        window: &mut gpui::Window,
+        cx: &mut Context<Self>,
+    ) {
+        // A lane whose path is gone cannot show a file, and is not moved to.
+        let present = |ws: &Self| {
+            ws.lane_for(target)
+                .filter(|lane| lane.availability == LaneAvailability::Present)
+                .map(|lane| lane.path.clone())
+        };
+        // A pane is its lane's content only when the file is inside the lane;
+        // anything else is read for reference. Decided here, once, so whether
+        // a pane edits and whether it saves are one answer. A reference file
+        // belongs to no lane, so it needs none — not even in an empty window.
+        let origin = match origin {
+            FileOrigin::Lane => {
+                let Some(lane_root) = present(self) else {
+                    return;
+                };
+                if daruda_core::path::is_within(&path, &lane_root) {
+                    FileOrigin::Lane
+                } else {
+                    FileOrigin::Reference
+                }
+            }
+            FileOrigin::Reference => FileOrigin::Reference,
+        };
+        if target != self.active {
+            self.activate_lane(target, window, cx);
+            // Activation re-checks the path; a lane found gone opens nothing.
+            if target != self.active || present(self).is_none() {
+                return;
+            }
+        }
         let entry = intent.pane_entry();
-        let owner = self.owner_lane_ref(lane_id);
+        let owner = target;
         let live_status = self.git_status_for_path(owner, &path, &source);
 
         // Always dedupe: clicking the same file activates its existing tab.
-        if let Some((tab_idx, pane_id)) = self.find_existing_file_tab(lane_id, &path, &source) {
+        if let Some((tab_idx, pane_id)) = self.find_existing_file_tab(&path, &source) {
             // Re-stamp the tab being reused. It was opened against an older
             // the lane's cached status, and the toolbar's mode strip reads
             // `status()` to decide whether Changes is offered at all.
             if let Some(fc) = self.file_content_mut_for_pane(pane_id)
-                && fc.view.live_status != live_status
+                && (fc.view.live_status != live_status || fc.view.origin != origin)
             {
                 fc.view.live_status = live_status;
+                // A file first opened for reference may since have become a
+                // lane's own, or the reverse.
+                fc.view.origin = origin;
                 cx.notify();
             }
             // Re-activating a tab that already holds this file: a deliberate
@@ -308,16 +440,8 @@ impl Workspace {
         if self.mirrors.file_viewer_preview_tab
             && let Some((tab_idx, pane_id)) = self.find_preview_file_tab(cx)
         {
-            let project = self.active.project;
             // Replace the pane's view in place; keep its scroll handle,
             // search input, focus handle, and subscription unchanged.
-            let prev_lane = self
-                .active_runtime()
-                .panes
-                .iter()
-                .find(|p| p.id == pane_id)
-                .and_then(|p| p.file_view())
-                .map(|fv| fv.lane_id);
             let Some(load_request) = (if let Some(pane) = self
                 .active_runtime_mut()
                 .panes
@@ -329,7 +453,7 @@ impl Workspace {
                 // The reused pane's images belong to the file it is leaving.
                 fc.release_images(Some(&mut *window), cx);
                 fc.view.replace_with_loading(
-                    lane_id,
+                    origin,
                     path.clone(),
                     source,
                     live_status,
@@ -354,16 +478,9 @@ impl Workspace {
             if entry == PaneEntry::Enter {
                 self.focus_pane(pane_id, window, cx);
             }
-            if let Some(prev_id) = prev_lane {
-                self.invalidate_visible_files_cache(daruda_store::project::LaneRef {
-                    project,
-                    lane: prev_id,
-                });
-            }
-            self.invalidate_visible_files_cache(daruda_store::project::LaneRef {
-                project,
-                lane: lane_id,
-            });
+            // The reused pane already lived in this lane, so one lane's
+            // selection is all that moved.
+            self.invalidate_visible_files_cache(owner);
             cx.notify();
             self.load_pane_file_content(load_request, cx);
             return;
@@ -371,7 +488,7 @@ impl Workspace {
 
         // No reusable tab (or multi-tab mode): open a new tab.
         let pane = self.create_file_pane(
-            lane_id,
+            origin,
             path.clone(),
             source,
             live_status,
@@ -380,7 +497,6 @@ impl Workspace {
             cx,
         );
         let pane_id = pane.id;
-        let owner = self.owner_lane_ref(lane_id);
         let load_request =
             FilePaneLoadRequest::from_view(pane_id, owner, pane.file_view().expect("file pane"));
         let tab_id = self.alloc_id();
@@ -405,10 +521,7 @@ impl Workspace {
         }
 
         // Selection moved — the dock row picks up its selected background.
-        self.invalidate_visible_files_cache(daruda_store::project::LaneRef {
-            project: self.active.project,
-            lane: lane_id,
-        });
+        self.invalidate_visible_files_cache(owner);
         cx.notify();
 
         self.load_pane_file_content(load_request, cx);
@@ -422,18 +535,32 @@ impl Workspace {
     /// default. Falls back silently when `anchor` no longer exists.
     pub(in crate::workspace) fn open_file_split_right(
         &mut self,
-        lane_id: LaneId,
+        target: LaneRef,
         path: PathBuf,
         anchor: crate::workspace::main_area::pane_tree::PaneId,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        // The anchor lives in the lane on screen. A file of another lane
+        // cannot sit beside it, so it opens in its own lane instead.
+        if target != self.active {
+            self.open_pane_file_view(
+                target,
+                path,
+                DiffSource::WorkingTree,
+                FileViewMode::Raw,
+                OpenIntent::Commit,
+                window,
+                cx,
+            );
+            return;
+        }
         let effective_mode = FileViewMode::effective_for_path(FileViewMode::Raw, &path);
 
-        let owner = self.owner_lane_ref(lane_id);
+        let owner = target;
         let live_status = self.git_status_for_path(owner, &path, &DiffSource::WorkingTree);
         let pane = self.create_file_pane(
-            lane_id,
+            FileOrigin::Lane,
             path.clone(),
             DiffSource::WorkingTree,
             live_status,
@@ -479,10 +606,7 @@ impl Workspace {
         self.bump_activity(new_pane_id);
         self.focus_pane(new_pane_id, window, cx);
         self.resize_all_tabs(window, cx);
-        self.invalidate_visible_files_cache(daruda_store::project::LaneRef {
-            project: self.active.project,
-            lane: lane_id,
-        });
+        self.invalidate_visible_files_cache(owner);
         cx.notify();
 
         self.load_pane_file_content(load_request, cx);
@@ -513,8 +637,9 @@ impl Workspace {
         // Apply the mutation in an inner scope so the focused-pane borrow
         // releases before we call `load_pane_file_content` (which reborrows
         // self for the spawn).
-        let project = self.active.project;
-        let active_lane = self.active.lane;
+        let Some(owner) = self.lane_ref_for_pane(pane_id) else {
+            return;
+        };
         let load_request = {
             let Some(fc) = self.file_content_mut_for_pane(pane_id) else {
                 return;
@@ -525,14 +650,6 @@ impl Workspace {
             fc.scroll_handle = gpui::ScrollHandle::new();
 
             if needs_reload {
-                // `fc` already borrows `self` mutably here, so this can't go
-                // through `Self::owner_lane_ref` (an `&self` method) — see
-                // its doc comment for what this guards against.
-                debug_assert_owner_is_active(fc.view.lane_id, active_lane);
-                let owner = LaneRef {
-                    project,
-                    lane: fc.view.lane_id,
-                };
                 Some(FilePaneLoadRequest::from_view(pane_id, owner, &fc.view))
             } else {
                 None
@@ -680,9 +797,8 @@ impl Workspace {
                     .map(|fv| FilePaneLoadRequest::from_view(p.id, active, fv))
             })
             .collect();
-        // Every pending pane lives in the active lane, so the owning ref
-        // is `self.active` (a file pane always references the lane it
-        // lives in — `fv.lane_id == active.lane`).
+        // Every pending pane lives in the active lane, and a pane's lane is
+        // the one whose runtime holds it, so the owning ref is `self.active`.
         for request in pending {
             self.load_pane_file_content(request, cx);
         }
@@ -733,14 +849,10 @@ impl Workspace {
     /// mode)` — if no pane still matches when the load returns (because the
     /// user switched mode or closed the tab), the result is dropped.
     fn load_pane_file_content(&mut self, request: FilePaneLoadRequest, cx: &mut Context<Self>) {
-        // `owner` is the lane that holds the pane *and* the lane the file
-        // belongs to (a file pane always lives in the lane it references),
-        // so it drives both the path/repo resolution here and the
-        // pane-match scan in the completion callback below. This lets the
-        // loader run for a parked lane, not just the active one — but only
-        // for a pane whose `owner` was actually built by `Self::owner_lane_ref`
-        // (or, in `reload_file_panes`, from the pane's own runtime key); see
-        // `debug_assert_owner_is_active` for what breaks if that's not true.
+        // `owner` is the lane whose runtime holds the pane, which is the lane
+        // the file belongs to — every opener puts a pane there. It drives
+        // both the path/repo resolution here and the pane-match scan in the
+        // completion callback, so a parked lane's pane loads as well.
         let target = request.owner;
         let Some(wt) = self.lane_for(target) else {
             return;

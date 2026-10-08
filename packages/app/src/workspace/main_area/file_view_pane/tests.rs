@@ -7,7 +7,7 @@ fn selected_text_for_copy_no_selection() {
     let rows_no_ctx = build_diff_rows(&hunks, true);
     let (added, removed) = count_diff_stats(&hunks);
     let fv = PaneFileView {
-        lane_id: 0,
+        origin: FileOrigin::Lane,
         path: "test.rs".into(),
         source: super::DiffSource::WorkingTree,
         live_status: None,
@@ -52,7 +52,13 @@ fn a_range_pane_reads_its_pinned_status_and_a_live_pane_its_live_one() {
         old_path: None,
         status: 'A',
     };
-    let mut fv = PaneFileView::loading(0, "a.rs".into(), range, None, FileViewMode::Changes);
+    let mut fv = PaneFileView::loading(
+        FileOrigin::Lane,
+        "a.rs".into(),
+        range,
+        None,
+        FileViewMode::Changes,
+    );
     assert_eq!(fv.status(), Some('A'));
     fv.source = super::DiffSource::WorkingTree;
     assert_eq!(fv.status(), None);

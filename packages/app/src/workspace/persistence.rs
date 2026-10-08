@@ -3,7 +3,7 @@
 //! translating between the in-memory pane tree and the on-disk JSON form.
 //! Owns `LaneRuntime`, the per-lane runtime in the single `runtimes` map.
 
-use crate::workspace::main_area::file_view_pane::DiffSource;
+use crate::workspace::main_area::file_view_pane::{DiffSource, FileOrigin};
 use std::collections::{BTreeMap, HashMap};
 
 use daruda_store::observability::error_report::{ErrorReport, ErrorSeverity};
@@ -134,7 +134,7 @@ impl Workspace {
                         .iter()
                         .filter(|tab| !self.is_orchestrator_tab(tab))
                         .map(|tab| daruda_store::project::SerializedTab {
-                            layout: serialize_layout(&tab.layout, panes_src, cx),
+                            layout: serialize_layout(&tab.layout, panes_src, wt.id, cx),
                             last_focused_pane: tab.last_focused_pane,
                             user_label: tab.user_label.as_ref().map(|s| s.to_string()),
                         })
@@ -742,8 +742,18 @@ impl Workspace {
                         // own letter in its source). Content stays `Loading`
                         // until the owning lane becomes active and
                         // `load_pending_file_panes` fires.
+                        // The lane is the one being restored, whatever id the
+                        // file recorded. A path outside it is read for
+                        // reference — older sessions did not mark those.
+                        let inside = fallback_cwd
+                            .is_some_and(|root| daruda_core::path::is_within(&fc.path, root));
+                        let origin = if fc.reference || !inside {
+                            FileOrigin::Reference
+                        } else {
+                            FileOrigin::Lane
+                        };
                         self.create_file_pane(
-                            fc.lane_id,
+                            origin,
                             fc.path.clone(),
                             DiffSource::from_serialized(fc),
                             None,
@@ -1141,17 +1151,19 @@ fn anchor_lane_paths_to_project_root(
 /// that is decided — a leaf can no longer be handed two of them.
 fn serialize_pane_content(
     pane: &pane::Pane,
+    lane: daruda_store::project::LaneId,
     cx: &App,
 ) -> daruda_store::project::SerializedPaneContent {
     use daruda_store::project::SerializedPaneContent as Content;
     if let Some(fv) = pane.file_view() {
         let (staged, range) = fv.source.to_serialized();
         return Content::File(daruda_store::project::SerializedFileContent {
-            lane_id: fv.lane_id,
+            lane_id: lane,
             path: fv.path.clone(),
             staged,
             range,
             view_mode: serialize_view_mode(fv.view_mode),
+            reference: fv.origin == FileOrigin::Reference,
         });
     }
     if let Some(ac) = pane.agent_chat_content() {
@@ -1194,6 +1206,7 @@ fn serialize_pane_content(
 fn serialize_layout(
     layout: &pane_tree::PaneLayout,
     panes: &[pane::Pane],
+    lane: daruda_store::project::LaneId,
     cx: &App,
 ) -> daruda_store::project::SerializedLayout {
     match layout {
@@ -1210,7 +1223,7 @@ fn serialize_layout(
                     cwd: None,
                     account_id: None,
                 },
-                |p| serialize_pane_content(p, cx),
+                |p| serialize_pane_content(p, lane, cx),
             );
             daruda_store::project::SerializedLayout::Leaf {
                 pane_id: *id,
@@ -1234,7 +1247,7 @@ fn serialize_layout(
                 direction: dir,
                 children: children
                     .iter()
-                    .map(|c| serialize_layout(c, panes, cx))
+                    .map(|c| serialize_layout(c, panes, lane, cx))
                     .collect(),
                 ratios: ratios.clone(),
             }

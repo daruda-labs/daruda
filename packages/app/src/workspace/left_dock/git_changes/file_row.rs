@@ -300,7 +300,7 @@ pub(super) fn unified_file_row(
                                 // The context menu is a deliberate pick, so
                                 // the tab it opens is not a skim's to reuse.
                                 ws.open_git_file_diff(
-                                    target.lane,
+                                    target,
                                     path_diff.clone(),
                                     DiffSource::from_staged(is_staged),
                                     OpenIntent::Commit,

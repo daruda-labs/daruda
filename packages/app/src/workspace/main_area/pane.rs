@@ -338,11 +338,8 @@ impl Pane {
         matches!(self.content, PaneContent::AgentChat(_))
     }
 
-    pub(in crate::workspace) fn file_identity(
-        &self,
-    ) -> Option<(PathBuf, daruda_store::project::LaneId)> {
-        self.file_content()
-            .map(|file| (file.view.path.clone(), file.view.lane_id))
+    pub(in crate::workspace) fn file_path(&self) -> Option<PathBuf> {
+        self.file_content().map(|file| file.view.path.clone())
     }
 
     /// Focus handle the pane gives to the window when activated.

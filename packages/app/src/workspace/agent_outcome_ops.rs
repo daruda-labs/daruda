@@ -6,6 +6,7 @@
 //! outcome once its pane is in front of the user.
 
 use daruda_agent::AgentOutcome;
+use daruda_store::project::LaneRef;
 use gpui::{Context, Window};
 
 use super::Workspace;
@@ -75,9 +76,18 @@ impl Workspace {
     /// Mark the lane holding `pane_id` unread unless it is the one on screen.
     /// [`Self::activate_lane`] clears the mark.
     fn mark_lane_unread_for_pane(&mut self, pane_id: PaneId, cx: &mut Context<Self>) {
-        let Some(lane_ref) = self.lane_ref_for_pane(pane_id) else {
-            return;
-        };
+        if let Some(lane_ref) = self.lane_ref_for_pane(pane_id) {
+            self.mark_lane_unread(lane_ref, cx);
+        }
+    }
+
+    /// Mark `lane_ref` unread unless it is the one on screen.
+    /// [`Self::activate_lane`] clears the mark.
+    pub(in crate::workspace) fn mark_lane_unread(
+        &mut self,
+        lane_ref: LaneRef,
+        cx: &mut Context<Self>,
+    ) {
         if lane_ref == self.active {
             return;
         }

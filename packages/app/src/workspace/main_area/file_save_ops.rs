@@ -65,10 +65,19 @@ impl Workspace {
         overwrite: bool,
         cx: &mut Context<Self>,
     ) -> FileSaveOutcome {
+        // A pane writes only inside the lane that holds it: a reference
+        // file is read-only, and no lane's view may write past its root.
+        let lane_root = self
+            .lane_ref_for_pane(pane_id)
+            .and_then(|lane| self.lane_for(lane))
+            .map(|lane| lane.path.clone());
         let Some(fc) = self.file_content_by_id_mut(pane_id) else {
             return FileSaveOutcome::NotSavable;
         };
-        if !fc.view.holds_editable_buffer() || !fc.view.path.is_absolute() {
+        if !fc.view.holds_editable_buffer()
+            || !fc.view.path.is_absolute()
+            || !lane_root.is_some_and(|root| daruda_core::path::is_within(&fc.view.path, &root))
+        {
             return FileSaveOutcome::NotSavable;
         }
         let path = fc.view.path.clone();

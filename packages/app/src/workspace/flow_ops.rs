@@ -543,7 +543,7 @@ impl Workspace {
         cx: &mut Context<Self>,
     ) {
         self.open_pane_file_view(
-            self.active.lane,
+            self.active,
             report.to_path_buf(),
             DiffSource::WorkingTree,
             super::main_area::file_view_pane::FileViewMode::Preview,

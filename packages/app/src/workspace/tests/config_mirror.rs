@@ -178,7 +178,7 @@ async fn a_second_window_reloads_its_file_panes_for_a_shared_setting(cx: &mut Te
     );
     cx.update_window(wh2.into(), |_, window, cx| {
         second.update(cx, |ws, cx| {
-            let lane = ws.active.lane;
+            let lane = ws.active;
             ws.open_pane_file_view(
                 lane,
                 doc.clone(),

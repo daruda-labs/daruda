@@ -67,6 +67,7 @@ fn file_leaf_round_trip_preserves_viewer_state() {
             staged: false,
             range: None,
             view_mode: SerializedFileViewMode::Raw,
+            reference: false,
         }),
     };
 
@@ -1667,6 +1668,7 @@ fn a_range_file_leaf_round_trips_and_older_files_read_without_one() {
                 status: 'R',
             }),
             view_mode: SerializedFileViewMode::Changes,
+            reference: false,
         }),
     };
     let json = serde_json::to_string(&leaf).unwrap();
@@ -1683,6 +1685,7 @@ fn a_range_file_leaf_round_trips_and_older_files_read_without_one() {
             staged: true,
             range: None,
             view_mode: SerializedFileViewMode::Changes,
+            reference: false,
         }),
     })
     .unwrap();
@@ -1697,4 +1700,31 @@ fn a_range_file_leaf_round_trips_and_older_files_read_without_one() {
         }
         other => panic!("unexpected layout {other:?}"),
     }
+}
+
+#[test]
+fn a_reference_file_leaf_round_trips_and_older_files_read_as_lane_files() {
+    let reference = SerializedFileContent {
+        lane_id: 2,
+        path: PathBuf::from("/home/u/.claude/skills/x/SKILL.md"),
+        staged: false,
+        range: None,
+        view_mode: SerializedFileViewMode::Raw,
+        reference: true,
+    };
+    let json = serde_json::to_string(&reference).unwrap();
+    assert!(json.contains("\"reference\":true"));
+    let restored: SerializedFileContent = serde_json::from_str(&json).unwrap();
+    assert!(restored.reference);
+
+    // A lane file omits the field, and a file written before it existed
+    // reads as one.
+    let lane_file = SerializedFileContent {
+        reference: false,
+        ..reference
+    };
+    let json = serde_json::to_string(&lane_file).unwrap();
+    assert!(!json.contains("reference"));
+    let restored: SerializedFileContent = serde_json::from_str(&json).unwrap();
+    assert!(!restored.reference);
 }

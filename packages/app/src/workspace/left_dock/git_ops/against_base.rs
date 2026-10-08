@@ -152,7 +152,7 @@ impl Workspace {
             return;
         };
         let (abs, source) = range_pane_for(found, file, &paths);
-        self.open_git_file_diff(target.lane, abs, source, intent, window, cx);
+        self.open_git_file_diff(target, abs, source, intent, window, cx);
     }
 
     /// A click on an against-base row: the panel takes focus, as for the

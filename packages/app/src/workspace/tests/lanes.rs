@@ -682,9 +682,8 @@ fn input_draft_round_trips_across_panes_and_cleans_up(cx: &mut TestAppContext) {
 
             // A File pane is not input-capable. Focusing it must not touch
             // the visible draft or the owner pointer.
-            let lane_id = ws.active.lane;
             let file_pane = ws.create_file_pane(
-                lane_id,
+                crate::workspace::main_area::file_view_pane::FileOrigin::Lane,
                 root.join("note.txt"),
                 DiffSource::WorkingTree,
                 None,

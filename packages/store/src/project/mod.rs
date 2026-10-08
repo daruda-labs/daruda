@@ -336,6 +336,8 @@ impl From<SerializedLayout> for RawLayout {
 /// state and re-derives when the lane's git status refreshes.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct SerializedFileContent {
+    /// The lane the pane was saved under. Written for older readers only: a
+    /// pane belongs to the lane whose tabs hold it, so restore ignores this.
     #[serde(rename = "worktree_id", alias = "lane_id")]
     pub lane_id: LaneId,
     pub path: PathBuf,
@@ -346,6 +348,10 @@ pub struct SerializedFileContent {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub range: Option<SerializedDiffRange>,
     pub view_mode: SerializedFileViewMode,
+    /// A read-only file a lane-independent panel opened for reference; it
+    /// may lie outside the lane it is saved under. Absent in older files.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub reference: bool,
 }
 
 /// The commits a range file pane compares, as SHAs so a restore re-opens the

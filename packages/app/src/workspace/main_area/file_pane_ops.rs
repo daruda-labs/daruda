@@ -57,17 +57,18 @@ impl Workspace {
         let Some(path) = path else {
             return false;
         };
+        // The focused pane is in the lane on screen, so its lane is that one.
         let open = self
             .focused_file_view()
-            .map(|fv| (fv.lane_id, fv.path.clone(), fv.source.clone()));
-        let Some((lane_id, open_path, open_source)) = open else {
+            .map(|fv| (fv.path.clone(), fv.source.clone()));
+        let Some((open_path, open_source)) = open else {
             return false;
         };
         // `source` is part of the identity for the same reason
         // `find_existing_file_tab` keys on it: the staged diff and the working
         // copy of one path are two different panes, and Enter on one must not
         // walk into the other.
-        if lane_id != self.active.lane || open_path != path || open_source != source {
+        if open_path != path || open_source != source {
             return false;
         }
         let pane = self.active_runtime().focused_pane_id;
@@ -156,12 +157,11 @@ impl Workspace {
         self.preview_tab_slot()
     }
 
-    /// Find an existing single-pane tab showing the given file
-    /// (lane + path + source). Returns `(tab_index, pane_id)`.
-    /// Used by `open_file_in_new_tab` to dedupe.
+    /// Find an existing single-pane tab in the lane on screen showing the
+    /// given file (path + source). Returns `(tab_index, pane_id)`. Every pane
+    /// there belongs to that lane, so the lane is not part of the match.
     pub(in crate::workspace) fn find_existing_file_tab(
         &self,
-        lane_id: daruda_store::project::LaneId,
         path: &std::path::Path,
         source: &DiffSource,
     ) -> Option<(usize, PaneId)> {
@@ -169,7 +169,6 @@ impl Workspace {
             if let PaneLayout::Pane(pane_id) = tab.layout
                 && let Some(pane) = self.active_runtime().panes.iter().find(|p| p.id == pane_id)
                 && let Some(fv) = pane.file_view()
-                && fv.lane_id == lane_id
                 && daruda_core::path::same_path(&fv.path, path)
                 && fv.source == *source
             {
@@ -187,7 +186,7 @@ impl Workspace {
     #[allow(clippy::too_many_arguments)]
     pub(in crate::workspace) fn create_file_pane(
         &mut self,
-        lane_id: daruda_store::project::LaneId,
+        origin: crate::workspace::main_area::file_view_pane::FileOrigin,
         path: std::path::PathBuf,
         source: DiffSource,
         live_status: Option<char>,
@@ -257,7 +256,7 @@ impl Workspace {
         Pane {
             id: pane_id,
             content: PaneContent::File(FileContent {
-                view: PaneFileView::loading(lane_id, path, source, live_status, view_mode),
+                view: PaneFileView::loading(origin, path, source, live_status, view_mode),
                 scroll_handle: gpui::ScrollHandle::new(),
                 search_input,
                 focus_handle,

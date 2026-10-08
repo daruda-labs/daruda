@@ -26,8 +26,6 @@ pub(in crate::workspace) use selection::{CharPos, CharSelection, SelectionDrag};
 
 use std::path::PathBuf;
 
-use daruda_store::project::LaneId;
-
 /// Maximum lines shown in the file viewer body before truncation.
 pub(in crate::workspace) const FILE_VIEWER_MAX_LINES: usize = 2000;
 /// Maximum bytes read from a file in Raw mode. Files larger than this are
@@ -142,8 +140,20 @@ impl DiffSource {
     }
 }
 
+/// Whether a file pane shows its lane's content or only consults a file.
+/// Which lane a pane belongs to is never stored on it: it is the lane
+/// whose runtime holds the pane.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(in crate::workspace) enum FileOrigin {
+    /// A file inside the holding lane — editable and saved with it.
+    Lane,
+    /// A file a lane-independent panel (Skills, Tools) shows for reference.
+    /// It may live anywhere on disk, so it is read-only.
+    Reference,
+}
+
 pub(in crate::workspace) struct PaneFileView {
-    pub lane_id: LaneId,
+    pub origin: FileOrigin,
     pub path: PathBuf,
     pub source: DiffSource,
     /// Git's letter (M / A / D / R / ? …) for a change pending in the lane
@@ -278,7 +288,8 @@ impl PaneFileView {
     /// Whether the pane holds text the user can edit and save: raw content of
     /// the file on disk. The one answer the save, dirty and can-save checks read.
     pub(in crate::workspace) fn holds_editable_buffer(&self) -> bool {
-        self.source.is_editable()
+        self.origin == FileOrigin::Lane
+            && self.source.is_editable()
             && matches!(
                 self.content,
                 PaneFileContent::LoadedRaw { truncated: false }
@@ -286,14 +297,14 @@ impl PaneFileView {
     }
 
     pub(super) fn loading(
-        lane_id: LaneId,
+        origin: FileOrigin,
         path: PathBuf,
         source: DiffSource,
         live_status: Option<char>,
         view_mode: FileViewMode,
     ) -> Self {
         Self {
-            lane_id,
+            origin,
             path,
             source,
             live_status,
@@ -308,13 +319,13 @@ impl PaneFileView {
 
     pub(in crate::workspace) fn replace_with_loading(
         &mut self,
-        lane_id: LaneId,
+        origin: FileOrigin,
         path: PathBuf,
         source: DiffSource,
         live_status: Option<char>,
         view_mode: FileViewMode,
     ) {
-        self.lane_id = lane_id;
+        self.origin = origin;
         self.path = path;
         self.source = source;
         self.live_status = live_status;

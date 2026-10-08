@@ -20,6 +20,7 @@ mod dock_badge;
 mod durable;
 mod error_modal;
 mod error_ops;
+mod file_pane_owner;
 mod file_save;
 mod files;
 mod flow;

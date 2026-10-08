@@ -54,15 +54,9 @@ impl Workspace {
                 } else {
                     base_label.clone()
                 };
-                let (file_path, worktree_root) = match pane.and_then(|p| p.file_identity()) {
-                    Some((path, wt_id)) => {
-                        let root = self
-                            .active_lanes()
-                            .iter()
-                            .find(|wt| wt.id == wt_id)
-                            .map(|wt| wt.path.clone());
-                        (Some(path), root)
-                    }
+                // A tab strip shows the lane on screen, which owns its panes.
+                let (file_path, worktree_root) = match pane.and_then(|p| p.file_path()) {
+                    Some(path) => (Some(path), self.active_lane().map(|wt| wt.path.clone())),
                     None => (None, None),
                 };
                 let pane_ids = tab.layout.pane_ids();

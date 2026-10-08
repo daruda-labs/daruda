@@ -594,7 +594,7 @@ impl Workspace {
         cx: &mut Context<Self>,
     ) {
         self.open_pane_file_view(
-            wt_ref.lane,
+            wt_ref,
             path,
             DiffSource::WorkingTree,
             FileViewMode::Raw,

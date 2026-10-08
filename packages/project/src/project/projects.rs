@@ -10,6 +10,7 @@ use daruda_store::project::{GroupId, LaneRef, ProjectId, ProjectUuid};
 
 use super::Project;
 use crate::lane::Lane;
+use crate::lane::availability::LaneAvailability;
 
 /// A window's open projects, in left-dock order.
 #[derive(Debug, Default)]
@@ -49,6 +50,19 @@ impl Projects {
                 (target, project, lane)
             })
         })
+    }
+
+    /// The lane `path` lies in, across every project — the deepest, so a
+    /// worktree nested inside another lane's checkout wins over its parent.
+    /// Spellings are compared as one place, since a path may come through a
+    /// symlink. Only a lane whose root is present can own a file; `None` when
+    /// no such lane holds it.
+    pub fn lane_owning(&self, path: &std::path::Path) -> Option<LaneRef> {
+        self.lanes()
+            .filter(|(_, _, lane)| lane.availability == LaneAvailability::Present)
+            .filter(|(_, _, lane)| daruda_core::path::is_within(path, &lane.path))
+            .max_by_key(|(_, _, lane)| lane.path.components().count())
+            .map(|(target, _, _)| target)
     }
 
     /// Projects in no group — the ones the left dock ranks beside groups.
@@ -190,5 +204,50 @@ mod tests {
 
         let _ = std::fs::remove_dir_all(first_dir);
         let _ = std::fs::remove_dir_all(second_dir);
+    }
+
+    #[test]
+    fn a_path_is_owned_by_the_deepest_lane_holding_it_in_any_project() {
+        let (outer, outer_dir) = project(0, "daruda_projects_owning_outer");
+        let (mut other, other_dir) = project(1, "daruda_projects_owning_other");
+        // A worktree checked out inside the first project's root, filed under
+        // the second project: the deeper lane wins even across projects.
+        let nested_dir = outer_dir.join("nested");
+        std::fs::create_dir_all(&nested_dir).unwrap();
+        let nested = Lane::default_for_project(5, nested_dir.clone());
+        other.lanes.push(nested);
+        let projects = Projects::from(vec![outer, other]);
+
+        let in_nested = nested_dir.join("a.txt");
+        let in_outer = outer_dir.join("b.txt");
+        let in_other = other_dir.join("c.txt");
+        assert_eq!(
+            projects.lane_owning(&in_nested),
+            Some(LaneRef {
+                project: 1,
+                lane: 5
+            })
+        );
+        assert_eq!(
+            projects.lane_owning(&in_outer),
+            Some(LaneRef {
+                project: 0,
+                lane: 0
+            })
+        );
+        assert_eq!(
+            projects.lane_owning(&in_other),
+            Some(LaneRef {
+                project: 1,
+                lane: 0
+            })
+        );
+        assert_eq!(
+            projects.lane_owning(std::path::Path::new("/nowhere/at/all")),
+            None
+        );
+
+        let _ = std::fs::remove_dir_all(outer_dir);
+        let _ = std::fs::remove_dir_all(other_dir);
     }
 }

@@ -201,7 +201,7 @@ fn a_tab_that_fails_to_spawn_does_not_cost_the_lanes_after_it(cx: &mut TestAppCo
             ws.add_tab(window, cx);
             ws.add_project(b_root.clone(), window, cx)
                 .expect("project B added");
-            let lane = ws.active.lane;
+            let lane = ws.active;
             ws.open_pane_file_view(
                 lane,
                 note.clone(),

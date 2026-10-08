@@ -157,7 +157,7 @@ async fn clicking_file_opens_raw_viewer_dedupes_and_selection_moves_independentl
 
     ws.read_with(cx, |ws, _| {
         let fv = ws.focused_file_view().expect("file viewer open");
-        assert_eq!(fv.lane_id, id.lane);
+        assert_eq!(ws.active, id, "the pane opened in its own lane");
         assert_eq!(fv.path, std::path::PathBuf::from("a.txt"));
         assert_eq!(
             fv.source,
@@ -274,7 +274,7 @@ async fn clicking_file_opens_raw_viewer_dedupes_and_selection_moves_independentl
             .focused_file_view()
             .expect("restored workspace must focus the file pane");
         assert_eq!(fv.path, std::path::PathBuf::from("a.txt"));
-        assert_eq!(fv.lane_id, id.lane);
+        assert_eq!(ws.active, id, "the pane opened in its own lane");
         assert!(matches!(
             fv.view_mode,
             crate::workspace::main_area::file_view_pane::FileViewMode::Raw
@@ -1199,11 +1199,11 @@ async fn toggle_hide_unchanged_swaps_diff_context_in_the_toggled_pane(cx: &mut T
     ws.update(cx, |ws, cx| ws.reconcile_bootstrapped_lanes(cx));
     cx.run_until_parked();
 
-    let lane_id = ws.read_with(cx, |ws, _| ws.active_ref().lane);
+    let lane = ws.read_with(cx, |ws, _| ws.active_ref());
     cx.update_window(wh.into(), |_, window, cx| {
         ws.update(cx, |ws, cx| {
             ws.open_git_file_diff(
-                lane_id,
+                lane,
                 std::path::PathBuf::from("f.txt"),
                 DiffSource::WorkingTree,
                 crate::workspace::main_area::tab_ops::OpenIntent::Preview,
@@ -1339,13 +1339,13 @@ async fn toggle_hide_unchanged_for_pane_targets_the_clicked_pane_not_the_focused
     ws.update(cx, |ws, cx| ws.reconcile_bootstrapped_lanes(cx));
     cx.run_until_parked();
 
-    let lane_id = ws.read_with(cx, |ws, _| ws.active_ref().lane);
+    let lane = ws.read_with(cx, |ws, _| ws.active_ref());
 
     // Pane A: f.txt in Changes mode. Becomes the focused pane.
     cx.update_window(wh.into(), |_, window, cx| {
         ws.update(cx, |ws, cx| {
             ws.open_git_file_diff(
-                lane_id,
+                lane,
                 std::path::PathBuf::from("f.txt"),
                 DiffSource::WorkingTree,
                 crate::workspace::main_area::tab_ops::OpenIntent::Preview,
@@ -1363,7 +1363,7 @@ async fn toggle_hide_unchanged_for_pane_targets_the_clicked_pane_not_the_focused
     cx.update_window(wh.into(), |_, window, cx| {
         ws.update(cx, |ws, cx| {
             ws.open_file_split_right(
-                lane_id,
+                lane,
                 std::path::PathBuf::from("g.txt"),
                 pane_a_id,
                 window,
@@ -1427,26 +1427,23 @@ async fn toggle_hide_unchanged_for_pane_targets_the_clicked_pane_not_the_focused
     });
 }
 
+/// A file pane lives in the lane it belongs to. Asked to open in a lane
+/// that does not exist, it opens nothing — there is no runtime it could
+/// live in, and none other may stand in for it.
 #[gpui::test]
-#[should_panic(expected = "file pane content targets lane")]
-async fn open_pane_file_view_asserts_lane_id_matches_active_lane(cx: &mut TestAppContext) {
-    // `open_pane_file_view` always pushes the new pane into
-    // `self.active_runtime_mut()`, but stamps the pane's owner/`lane_id` from
-    // the caller-supplied `lane_id`. `load_pane_file_content`'s completion
-    // callback later looks the pane back up via `runtimes.get_mut(&owner)` —
-    // a *different* runtime than the active one the pane actually lives in,
-    // if `lane_id` isn't the active lane. That silently drops the load (the
-    // pane sticks on "Loading" forever, no error surfaced). The debug assert
-    // in `Workspace::active_lane_ref` is the only thing standing between
-    // that regression and a green test suite — pin it firing here so a
-    // future edit can't drop it unnoticed.
+async fn opening_into_a_missing_lane_opens_nothing(cx: &mut TestAppContext) {
     let (wh, ws, _temp) = build_workspace_with_temp_project(cx);
-    let active_lane = ws.read_with(cx, |ws, _| ws.active_ref().lane);
-    let bogus_lane = active_lane + 1;
+    let (active, panes_before) = ws.read_with(cx, |ws, _| {
+        (ws.active_ref(), ws.active_runtime().panes.len())
+    });
+    let missing = daruda_store::project::LaneRef {
+        project: active.project,
+        lane: active.lane + 1,
+    };
     cx.update_window(wh.into(), |_, window, cx| {
         ws.update(cx, |ws, cx| {
             ws.open_pane_file_view(
-                bogus_lane,
+                missing,
                 std::path::PathBuf::from("a.txt"),
                 DiffSource::WorkingTree,
                 crate::workspace::main_area::file_view_pane::FileViewMode::Raw,
@@ -1457,6 +1454,11 @@ async fn open_pane_file_view_asserts_lane_id_matches_active_lane(cx: &mut TestAp
         });
     })
     .unwrap();
+    ws.read_with(cx, |ws, _| {
+        assert_eq!(ws.active, active, "the lane on screen stays");
+        assert_eq!(ws.active_runtime().panes.len(), panes_before);
+        assert!(!ws.main_area.runtimes.contains_key(&missing));
+    });
 }
 
 /// A workspace over a real git repo holding one committed `f.txt`, with the
@@ -1650,7 +1652,7 @@ async fn opening_a_changed_file_without_git_context_still_resolves_its_status(
     cx.update_window(wh.into(), |_, window, cx| {
         ws.update(cx, |ws, cx| {
             ws.open_pane_file_view(
-                id.lane,
+                id,
                 abs.clone(),
                 DiffSource::WorkingTree,
                 FileViewMode::Raw,
@@ -1680,7 +1682,7 @@ async fn opening_a_changed_file_without_git_context_still_resolves_its_status(
     cx.update_window(wh.into(), |_, window, cx| {
         ws.update(cx, |ws, cx| {
             ws.open_pane_file_view(
-                id.lane,
+                id,
                 abs.clone(),
                 DiffSource::WorkingTree,
                 FileViewMode::Raw,

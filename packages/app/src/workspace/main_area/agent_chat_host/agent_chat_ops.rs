@@ -10,7 +10,6 @@
 //! [`super::telegram_ops`]; this file only tees into it from
 //! `maybe_notify_agent_event` and `fire_activity_completion`.
 
-use crate::workspace::main_area::file_view_pane::DiffSource;
 use daruda_config::AgentLaunch;
 use daruda_store::agent_vocabulary::VocabEntry;
 use daruda_store::observability::error_report::{ErrorReport, ErrorSeverity};
@@ -1527,8 +1526,10 @@ impl Workspace {
     /// Open a diff block's file in the pane-area file viewer. Dispatched from
     /// the agent-chat diff header (`render/diff.rs`); `path` is ACP's
     /// `Diff.path`, which the spec guarantees absolute, so no lane-root join is
-    /// needed. A no-op if `pane_id`'s lane can't be resolved (pane closed
-    /// mid-click — the render that produced this callback is already gone).
+    /// needed; it opens in whichever lane owns it, or for reference when none
+    /// does. A no-op if `pane_id`'s lane
+    /// can't be resolved (pane closed mid-click — the render that produced
+    /// this callback is already gone).
     /// Toasts and returns instead if the pane's session is remote — see
     /// [`Self::diff_pane_is_remote`].
     pub(in crate::workspace) fn open_diff_in_file_view(
@@ -1538,9 +1539,9 @@ impl Workspace {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let Some(lane) = self.lane_ref_for_pane(pane_id) else {
+        if self.lane_ref_for_pane(pane_id).is_none() {
             return;
-        };
+        }
         if self.diff_pane_is_remote(pane_id, cx) {
             let report = ErrorReport::new(s::agent_chat::diff_remote_path_unsupported())
                 .severity(ErrorSeverity::Warning)
@@ -1550,15 +1551,7 @@ impl Workspace {
             self.report_error(report, cx);
             return;
         }
-        self.open_pane_file_view(
-            lane.lane,
-            path,
-            DiffSource::WorkingTree,
-            crate::workspace::main_area::file_view_pane::FileViewMode::Raw,
-            crate::workspace::main_area::tab_ops::OpenIntent::Enter,
-            window,
-            cx,
-        );
+        self.open_linked_file(path, window, cx);
     }
 
     /// Classify a link as `pane_id`'s session sees it — the view's own answer
@@ -1639,19 +1632,13 @@ impl Workspace {
                 self.open_path_with_system_default(path, cx);
             }
             LocalKind::Text => {
-                // Only the viewer needs a lane; an orchestrator pane has none.
-                let Some(lane) = self.lane_ref_for_pane(pane_id) else {
+                // An orchestrator pane belongs to no lane, so its links do
+                // not open a lane's file viewer.
+                if self.lane_ref_for_pane(pane_id).is_none() {
                     return true;
-                };
-                self.open_pane_file_view(
-                    lane.lane,
-                    path,
-                    DiffSource::WorkingTree,
-                    crate::workspace::main_area::file_view_pane::FileViewMode::Raw,
-                    crate::workspace::main_area::tab_ops::OpenIntent::Enter,
-                    window,
-                    cx,
-                );
+                }
+                // The file opens in whichever lane owns it, or for reference.
+                self.open_linked_file(path, window, cx);
                 if let Some(line) = line {
                     self.set_file_view_mode(
                         crate::workspace::main_area::file_view_pane::FileViewMode::Raw,

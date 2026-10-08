@@ -72,7 +72,6 @@ pub(super) fn render_file_viewer_body(
 
         // Not a dead end: the bytes the viewer cannot show, the OS can.
         PaneFileContent::Binary => {
-            let lane_id = fv.lane_id;
             let path = fv.path.clone();
             frame
                 .overflow_hidden()
@@ -90,11 +89,8 @@ pub(super) fn render_file_viewer_body(
                         strings::file_viewer::btn_open_with_default_app(),
                     )
                     .on_click(cx.listener(move |ws, _, _window, cx| {
-                        ws.open_lane_file_with_system_default(
-                            ws.owner_lane_ref(lane_id),
-                            path.clone(),
-                            cx,
-                        );
+                        // A rendered file pane belongs to the lane on screen.
+                        ws.open_lane_file_with_system_default(ws.active, path.clone(), cx);
                     })),
                 )
                 .into_any_element()

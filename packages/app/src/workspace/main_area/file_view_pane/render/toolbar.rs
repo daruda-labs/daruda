@@ -203,7 +203,6 @@ pub(super) fn render_file_viewer_toolbar(
     };
 
     let path_for_menu = fv.path.clone();
-    let lane_id_for_menu = fv.lane_id;
     let ws_for_menu = cx.entity().downgrade();
 
     let file_status = fv.status();
@@ -239,12 +238,8 @@ pub(super) fn render_file_viewer_toolbar(
                     let Some(ws) = ws_for_menu.upgrade() else {
                         return menu;
                     };
-                    let wt = ws
-                        .read(cx)
-                        .active_lanes()
-                        .iter()
-                        .find(|wt| wt.id == lane_id_for_menu)
-                        .cloned();
+                    // A rendered file pane belongs to the lane on screen.
+                    let wt = ws.read(cx).active_lane().cloned();
                     let worktree_root = wt.as_ref().map(|wt| wt.path.clone());
                     // `path_for_menu` is absolute (set at the left-dock entry point).
                     // For legacy relative paths from old session state use
@@ -397,7 +392,7 @@ mod tests {
 
     fn view(name: &str, live_status: Option<char>, view_mode: FileViewMode) -> PaneFileView {
         let mut fv = PaneFileView::loading(
-            0,
+            crate::workspace::main_area::file_view_pane::FileOrigin::Lane,
             name.into(),
             DiffSource::WorkingTree,
             live_status,

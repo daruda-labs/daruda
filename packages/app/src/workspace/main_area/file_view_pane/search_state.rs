@@ -165,7 +165,7 @@ mod tests {
 
     fn raw_viewer(_contents: &[&str]) -> PaneFileView {
         PaneFileView {
-            lane_id: 0,
+            origin: crate::workspace::main_area::file_view_pane::FileOrigin::Lane,
             path: "test.txt".into(),
             source: crate::workspace::main_area::file_view_pane::DiffSource::WorkingTree,
             live_status: None,
@@ -193,7 +193,7 @@ mod tests {
             })
             .collect();
         PaneFileView {
-            lane_id: 0,
+            origin: crate::workspace::main_area::file_view_pane::FileOrigin::Lane,
             path: "test.diff".into(),
             source: crate::workspace::main_area::file_view_pane::DiffSource::WorkingTree,
             live_status: None,
@@ -213,7 +213,7 @@ mod tests {
 
     fn markdown_viewer(markdown: &str) -> PaneFileView {
         PaneFileView {
-            lane_id: 0,
+            origin: crate::workspace::main_area::file_view_pane::FileOrigin::Lane,
             path: "test.md".into(),
             source: crate::workspace::main_area::file_view_pane::DiffSource::WorkingTree,
             live_status: None,

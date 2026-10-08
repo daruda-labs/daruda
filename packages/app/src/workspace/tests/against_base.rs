@@ -212,6 +212,7 @@ fn a_persisted_range_restores_ahead_of_the_staged_flag_and_round_trips() {
         staged: true,
         range: None,
         view_mode: SerializedFileViewMode::Changes,
+        reference: false,
     };
     assert_eq!(DiffSource::from_serialized(&fc), DiffSource::Index);
     fc.staged = false;
@@ -299,7 +300,7 @@ fn a_file_split_right_knows_its_pending_change(cx: &mut TestAppContext) {
     cx.update_window(wh.into(), |_, window, cx| {
         ws.update(cx, |ws, cx| {
             let anchor = ws.active_runtime().focused_pane_id;
-            ws.open_file_split_right(target.lane, abs.clone(), anchor, window, cx);
+            ws.open_file_split_right(target, abs.clone(), anchor, window, cx);
         });
     })
     .unwrap();

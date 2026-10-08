@@ -12,7 +12,6 @@
 //! below, and holds the [`CancelToken`](daruda_flow::runner::CancelToken) that
 //! ends it.
 
-use crate::workspace::main_area::file_view_pane::DiffSource;
 use std::path::{Path, PathBuf};
 
 use daruda_flow::event::{FlowEvent, RunEnd};
@@ -163,38 +162,11 @@ impl Workspace {
             return;
         };
         // What a completion toast would have said, in the form a person can
-        // actually read afterwards — the run's own narrative.
-        //
-        // Only when the run's lane is the one on screen. `open_pane_file_view`
-        // always pushes into the *active* runtime while stamping the pane with
-        // the `owner` it is handed, so opening a parked lane's report built a
-        // pane whose owner named one runtime and whose home was another — and
-        // `load_pane_file_content` then looks it up by owner, misses, and drops
-        // the content, leaving a pane on "Loading" for good (the invariant
-        // `git_ops::file_view::debug_assert_owner_is_active` guards).
-        //
-        // Settling is unconditional — it is the let-chain's left-hand side, so
-        // the outcome still reaches the panel, the chip and the phone either
-        // way. Only the pane is withheld, and getting to that report means
-        // switching to the worktree first: the past-runs list is active-lane
-        // scoped, and the chip drops the run once settling retires it.
-        //
-        // WORKAROUND: the real fix is for a pane to be able to live in its own
-        // lane's runtime rather than always the active one — that is the
-        // file-pane subsystem's shape, not this call site's, and changing it
-        // also decides whether a background lane may silently gain a tab.
-        if let Some(report) = self.settle_flow_run(lane_ref, end, cx)
-            && lane_ref == self.active
-        {
-            self.open_pane_file_view(
-                lane_ref.lane,
-                report,
-                DiffSource::WorkingTree,
-                super::main_area::file_view_pane::FileViewMode::Preview,
-                super::main_area::tab_ops::OpenIntent::Enter,
-                window,
-                cx,
-            );
+        // actually read afterwards — the run's own narrative. It opens in the
+        // run's lane: on screen that is an ordinary open, otherwise the tab
+        // waits there and the lane is marked unread.
+        if let Some(report) = self.settle_flow_run(lane_ref, end, cx) {
+            self.open_file_in_background(lane_ref, report, window, cx);
         }
     }
 

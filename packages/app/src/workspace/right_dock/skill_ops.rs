@@ -7,7 +7,6 @@
 //! `dialog_helpers`, file-viewer dispatch, Finder spawn, and
 //! plugin-group fold state.
 
-use crate::workspace::main_area::file_view_pane::DiffSource;
 use gpui::{Context, Window};
 
 use crate::surface::strings;
@@ -98,30 +97,17 @@ impl Workspace {
         );
     }
 
-    /// Open the SKILL.md inside `dir` in the daruda file viewer
-    /// (the same one the left dock (Files / Git Changes) views use). Used
-    /// for plugin-scope skills (read-only on disk) so the user can
-    /// still inspect contents without an Edit button. The active
-    /// lane id is borrowed only to satisfy the file-pane API —
-    /// the file is read by absolute path so it can live anywhere on
-    /// disk.
+    /// Open the SKILL.md inside `dir` in the daruda file viewer, read-only.
+    /// The Skills tab only consults lanes, and a personal or plugin skill
+    /// lives outside every one, so it opens for reference in the lane on
+    /// screen.
     pub fn open_skill_in_file_viewer(
         &mut self,
         dir: std::path::PathBuf,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let path = dir.join("SKILL.md");
-        let lane_id = self.active.lane;
-        self.open_pane_file_view(
-            lane_id,
-            path,
-            DiffSource::WorkingTree,
-            crate::workspace::main_area::file_view_pane::FileViewMode::Raw,
-            crate::workspace::main_area::tab_ops::OpenIntent::Enter,
-            window,
-            cx,
-        );
+        self.open_reference_file(dir.join("SKILL.md"), window, cx);
     }
 
     /// Open the skill directory in macOS Finder via the `open` crate.
