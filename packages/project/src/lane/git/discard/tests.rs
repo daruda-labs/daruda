@@ -87,6 +87,7 @@ fn repo() -> tempfile::TempDir {
     git(root, &["init", "-q", "-b", "main"]);
     git(root, &["config", "user.email", "daruda@test"]);
     git(root, &["config", "user.name", "daruda"]);
+    git(root, &["config", "core.autocrlf", "false"]);
     temp
 }
 
@@ -152,21 +153,26 @@ fn a_glob_named_file_discards_only_itself() {
     }
     let temp = repo();
     let root = temp.path();
-    for name in ["[id].tsx", "i.tsx", "star*", "starfoo"] {
+    let mut names = vec!["[id].tsx", "i.tsx"];
+    if !cfg!(windows) {
+        names.extend(["star*", "starfoo"]);
+    }
+    for name in &names {
         std::fs::write(root.join(name), "base\n").unwrap();
     }
     git(root, &["add", "-A"]);
     git(root, &["commit", "-qm", "base"]);
-    for name in ["[id].tsx", "i.tsx", "star*", "starfoo"] {
+    for name in &names {
         std::fs::write(root.join(name), "edited\n").unwrap();
     }
-    discard(root, &[PathBuf::from("[id].tsx"), PathBuf::from("star*")]).unwrap();
-    for (name, want) in [
-        ("[id].tsx", "base\n"),
-        ("star*", "base\n"),
-        ("i.tsx", "edited\n"),
-        ("starfoo", "edited\n"),
-    ] {
+    let restored: Vec<_> = names.iter().step_by(2).map(PathBuf::from).collect();
+    discard(root, &restored).unwrap();
+    for (index, name) in names.iter().enumerate() {
+        let want = if index.is_multiple_of(2) {
+            "base\n"
+        } else {
+            "edited\n"
+        };
         assert_eq!(
             std::fs::read_to_string(root.join(name)).unwrap(),
             want,

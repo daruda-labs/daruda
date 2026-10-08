@@ -24,6 +24,7 @@ mod control_flow_ops;
 mod control_lane_ops;
 mod control_ops;
 mod control_task_ops;
+mod notification_ops;
 /// The external control surface's vocabulary answer — see [`SlashClaim`].
 /// Re-exported because `telegram::global`'s poll loop folds per-window answers
 /// and lives outside `crate::workspace`.

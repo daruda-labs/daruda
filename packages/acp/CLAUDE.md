@@ -101,6 +101,12 @@ for the feature to work end to end.
   cancellation, integrity, and configuration errors never trigger fallback.
   The host records fallback and cleanup notices in its log or flow report.
 - Installation locks are per package and shared across profiles/processes.
+  Package directories use the supported adapter's unique bin name rather than
+  a hash, keeping nested Codex executable paths below Windows launch limits
+  under the default data root. Version and selector keys remain SHA-256 hashes.
+  Windows publication and quarantine renames retry access/sharing/lock errors
+  up to six attempts with 750 ms total backoff, checking cancellation before
+  each attempt. Exhausted failures include both paths and preserve the OS error.
   A prepared adapter and every connection using it hold a shared installation
   lease. Cleanup retains three recent installations and one quarantined tree
   per package, plus any installations still leased by a running session.

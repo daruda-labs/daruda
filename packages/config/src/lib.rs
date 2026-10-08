@@ -10,6 +10,7 @@ pub mod claude_status;
 pub mod clipboard;
 pub mod colors;
 pub mod cursor;
+pub mod desktop;
 pub mod editor;
 pub mod file_viewer;
 pub mod flow;
@@ -142,6 +143,7 @@ impl Default for ThemeConfig {
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(default)]
 pub struct Config {
+    pub desktop: desktop::DesktopConfig,
     pub general: GeneralConfig,
     pub font: FontConfig,
     pub cursor: CursorConfig,
@@ -206,6 +208,7 @@ impl Default for Config {
         // this `Config::default()` for missing-field fallbacks, so a
         // deserializing Default would recurse infinitely.
         Self {
+            desktop: Default::default(),
             general: Default::default(),
             font: Default::default(),
             cursor: Default::default(),

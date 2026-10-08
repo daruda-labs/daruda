@@ -153,6 +153,10 @@ welcome:
 
 # Menus — top-level names
 menu:
+  tray_show: "daruda 열기"
+  tray_check_updates: "업데이트 확인"
+  export_diagnostics: "진단 정보 내보내기…"
+  err_export_diagnostics: "진단 정보를 내보내지 못했습니다"
   file: "파일"
   view: "보기"
   edit: "편집"

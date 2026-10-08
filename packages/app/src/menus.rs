@@ -211,6 +211,7 @@ fn build_menu_bar(recent: &[daruda_store::project::RecentEntry]) -> Vec<Menu> {
                 ),
                 MenuItem::separator(),
                 MenuItem::action(s::menu::report_issue(), OpenReportIssue),
+                MenuItem::action(s::menu::export_diagnostics(), crate::ExportDiagnostics),
                 MenuItem::action(s::menu::github_repo(), OpenGithubRepo),
             ],
         },

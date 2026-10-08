@@ -28,7 +28,9 @@ pub(super) fn install(
     root: &Path,
     context: &PreparationContext<'_>,
 ) -> Result<InstalledAdapter, PreparationError> {
-    let root = root.join(ADAPTER_DIRECTORY).join(digest(adapter.name));
+    // Supported adapters have unique, fixed bin names. Hashing this component
+    // makes nested Codex executables exceed Windows' process-launch path limit.
+    let root = root.join(ADAPTER_DIRECTORY).join(adapter.bin);
     let _lock = cache::lock_package(&root, context)?;
     // The durable cache is the installed artifact, not another unbounded copy
     // of every historical dependency tarball in npm's content cache.
@@ -62,26 +64,32 @@ pub(super) fn install(
             resolved_version(&json)?
         };
         context.check()?;
-        install_at(adapter, &version, &destination(&version), |staging| {
-            let spec = format!("{}@{version}", adapter.name);
-            output(
-                runtime
-                    .npm(&root, npm_cache.path())?
-                    .args(["install", "--prefix"])
-                    .arg(staging)
-                    .args([
-                        "--engine-strict",
-                        "--include=optional",
-                        "--save-exact",
-                        "--json",
-                        "--",
-                        &spec,
-                    ]),
-                context,
-            )?;
-            context.check()?;
-            Ok(())
-        })?;
+        install_at(
+            adapter,
+            &version,
+            &destination(&version),
+            context,
+            |staging| {
+                let spec = format!("{}@{version}", adapter.name);
+                output(
+                    runtime
+                        .npm(&root, npm_cache.path())?
+                        .args(["install", "--prefix"])
+                        .arg(staging)
+                        .args([
+                            "--engine-strict",
+                            "--include=optional",
+                            "--save-exact",
+                            "--json",
+                            "--",
+                            &spec,
+                        ]),
+                    context,
+                )?;
+                context.check()?;
+                Ok(())
+            },
+        )?;
         Ok(version)
     })?;
     if let Err(error) = cache::sweep(&root, context) {
@@ -151,6 +159,7 @@ fn install_at(
     adapter: &NpmAdapter,
     version: &str,
     destination: &Path,
+    context: &PreparationContext<'_>,
     install: impl FnOnce(&Path) -> anyhow::Result<()>,
 ) -> anyhow::Result<PathBuf> {
     if let Ok(entry) = validate_entry(adapter, version, destination) {
@@ -173,9 +182,10 @@ fn install_at(
             .prefix(".invalid-")
             .tempdir_in(root)?
             .keep();
-        fs::rename(destination, quarantine.join("package"))?;
+        super::publish::rename(destination, &quarantine.join("package"), context)?;
     }
-    fs::rename(staging.path(), destination).context("publishing adapter installation")?;
+    super::publish::rename(staging.path(), destination, context)
+        .context("publishing adapter installation")?;
     validate_entry(adapter, version, destination)
         .map_err(validation_error)
         .map_err(Into::into)

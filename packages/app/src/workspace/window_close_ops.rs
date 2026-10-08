@@ -53,6 +53,9 @@ impl Workspace {
         window: &mut Window,
         app: &mut App,
     ) -> bool {
+        if crate::platform::desktop::hide_to_tray(window, app) {
+            return false;
+        }
         Self::may_close_window_then(weak, AfterClose::Stay, false, window, app)
     }
 

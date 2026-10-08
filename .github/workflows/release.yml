@@ -105,7 +105,7 @@ jobs:
           compression-level: 0
 
   build-windows:
-    name: Build Windows x86_64 ZIP
+    name: Build Windows x86_64 ZIP and installer
     needs: metadata
     runs-on: windows-latest
     timeout-minutes: 90
@@ -153,6 +153,26 @@ jobs:
         id: package
         run: ./scripts/package-windows.ps1
 
+      - name: Install pinned NSIS toolchain
+        shell: pwsh
+        run: |
+          $archive = Join-Path $env:RUNNER_TEMP 'nsis-3.11.zip'
+          Invoke-WebRequest 'https://github.com/tauri-apps/binary-releases/releases/download/nsis-3.11/nsis-3.11.zip' -OutFile $archive
+          if ((Get-FileHash $archive -Algorithm SHA256).Hash -ne 'C7D27F780DDB6CFFB4730138CD1591E841F4B7EDB155856901CDF5F214394FA1') {
+            throw 'NSIS archive checksum mismatch'
+          }
+          $tools = Join-Path $env:RUNNER_TEMP 'nsis-tools'
+          Expand-Archive -LiteralPath $archive -DestinationPath $tools
+          (Join-Path $tools 'nsis-3.11') | Add-Content $env:GITHUB_PATH
+
+      - name: Build per-user installer
+        id: installer
+        run: ./scripts/build-windows-installer.ps1 -Archive '${{ steps.package.outputs.archive }}'
+
+      - name: Verify installation and removal
+        timeout-minutes: 5
+        run: ./scripts/test-windows-installer.ps1 -Installer '${{ steps.installer.outputs.installer }}'
+
       # The bytes that ship, not the ones that built them: a release-profile
       # failure would otherwise be found by whoever downloaded it. `--smoke`
       # opens the real window and exits non-zero if nothing is drawn.
@@ -171,7 +191,9 @@ jobs:
         uses: actions/upload-artifact@v7
         with:
           name: release-windows
-          path: ${{ steps.package.outputs.archive }}
+          path: |
+            ${{ steps.package.outputs.archive }}
+            ${{ steps.installer.outputs.installer }}
           if-no-files-found: error
           compression-level: 0
 
@@ -208,6 +230,7 @@ jobs:
           files: |
             packages/daruda-${{ needs.metadata.outputs.version }}.dmg
             packages/daruda-${{ needs.metadata.outputs.version }}-windows-x86_64.zip
+            packages/daruda-${{ needs.metadata.outputs.version }}-windows-x86_64-setup.exe
             packages/SHA256SUMS.txt
           body: |
             ## macOS
@@ -219,10 +242,12 @@ jobs:
 
             ## Windows (x86_64)
 
-            Download `daruda-${{ needs.metadata.outputs.version }}-windows-x86_64.zip`,
-            extract the entire archive, and run `daruda.exe`.
-            Keep the included runtime DLLs beside the executable.
-            This portable build is unsigned; no installer is required.
+            Download `daruda-${{ needs.metadata.outputs.version }}-windows-x86_64-setup.exe`
+            for a per-user installation with Start Menu and desktop shortcuts.
+            Administrator permission is not required. Uninstalling preserves app data.
+            The unsigned installer may show a Windows SmartScreen warning.
+            Alternatively, extract the entire ZIP and run `daruda.exe`, keeping
+            its included runtime DLLs beside it.
             Install Git for Windows to use repositories, shell flows, and agents.
 
             ## Verifying a download

@@ -454,9 +454,10 @@ impl Pane {
         match &self.content {
             PaneContent::Terminal(t) => {
                 !t.exited
-                    && t.master.as_deref().is_some_and(|master| {
-                        daruda_terminal::pty::runs_foreground_job(master, t.shell_pid)
-                    })
+                    && (t.view.read(cx).session().command_is_running()
+                        || t.master.as_deref().is_some_and(|master| {
+                            daruda_terminal::pty::runs_foreground_job(master, t.shell_pid)
+                        }))
             }
             PaneContent::AgentChat(ac) => ac.view.read(cx).is_busy(),
             PaneContent::File(_) => false,

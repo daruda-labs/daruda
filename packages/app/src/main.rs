@@ -3,6 +3,8 @@
 //! Dev loop accelerator for Claude Code.
 //! Built on GPUI (Metal rendering) + ghostty_vt (Zig SIMD terminal emulation).
 
+#![cfg_attr(windows, windows_subsystem = "windows")]
+
 rust_i18n::i18n!("locales", fallback = "en");
 
 pub mod agent;
@@ -12,6 +14,7 @@ mod bind_keys;
 mod bootstrap;
 mod config_watcher;
 mod control;
+mod diagnostics;
 mod dir_watch;
 mod env_strip;
 pub(crate) mod file_name;
@@ -98,6 +101,7 @@ actions!(
         OpenDarudaHelp,
         OpenReportIssue,
         OpenGithubRepo,
+        ExportDiagnostics,
     ]
 );
 
@@ -235,9 +239,37 @@ fn main() {
 
     bootstrap::init_observability();
 
+    if std::env::args_os().any(|arg| arg == "--unregister-desktop") {
+        if let Err(error) = platform::notifications::unregister_desktop() {
+            platform::report_error(
+                "desktop.shortcuts",
+                "Desktop shortcut cleanup failed",
+                error.as_ref(),
+            );
+            std::process::exit(1);
+        }
+        return;
+    }
+
+    let desktop = platform::desktop_instance::start(
+        &daruda_store::persistence::default_data_dir(),
+        std::env::args_os().skip(1),
+    );
+    let instance = match desktop {
+        Ok(platform::desktop_instance::Launch::Primary(instance)) => instance,
+        Ok(platform::desktop_instance::Launch::Forwarded) => return,
+        Err(error) => {
+            platform::report_error("desktop.startup", "Desktop startup failed", error.as_ref());
+            std::process::exit(1);
+        }
+    };
+
     let app = bootstrap::new_application();
-    app.run(|cx: &mut App| {
+    app.run(move |cx: &mut App| {
         globals::init_all(cx);
+        platform::desktop_instance::install(instance, cx);
+        platform::notifications::install(cx);
+        platform::desktop::install(cx);
         bind_keys::register_static_bindings(cx);
 
         // SettingsStore is the single source of truth — read the

@@ -162,6 +162,10 @@ welcome:
 
 # Menus — top-level names
 menu:
+  tray_show: "Open daruda"
+  tray_check_updates: "Check for updates"
+  export_diagnostics: "Export diagnostics…"
+  err_export_diagnostics: "Could not export diagnostics"
   file: "File"
   view: "View"
   edit: "Edit"

@@ -54,9 +54,31 @@ fn prepares_published_adapters_without_starting_acp() {
             crate::launch_env::prepare_adapter_command(&launch, root.path(), &mut |_| {}).unwrap();
         let command = prepared.command();
         let config = AcpAgent::from_str(&command.0).unwrap().into_config();
-        assert_eq!(config.command().file_name().unwrap(), "node");
+        assert_eq!(config.command().file_stem().unwrap(), "node");
         assert!(Path::new(&config.arguments()[0]).is_file());
         assert!(!config.arguments().iter().any(|arg| arg == "-y"));
+        if *name == "@agentclientprotocol/codex-acp" {
+            // Exercise the nested native executable through its Node launcher.
+            // A readable ACP entry alone misses Windows' process-launch path limit.
+            let mut probe = daruda_core::process::command(config.command());
+            probe
+                .arg("-e")
+                .arg(concat!(
+                    "const r=require('node:module').createRequire(process.argv[1]);",
+                    "const p=require('node:path');",
+                    "const cli=p.join(p.dirname(r.resolve('@openai/codex/package.json')),'bin','codex.js');",
+                    "const child=require('node:child_process').spawnSync(process.execPath,[cli,'--version'],{encoding:'utf8'});",
+                    "if(child.error)throw child.error;",
+                    "process.stdout.write(child.stdout||'');",
+                    "process.stderr.write(child.stderr||'');",
+                    "process.exit(child.status??1);"
+                ))
+                .arg(&config.arguments()[0]);
+            let version =
+                crate::preparation::process::output(&mut probe, &PreparationContext::default())
+                    .unwrap();
+            assert!(version.contains("codex-cli"));
+        }
         let offline_config = AcpAgent::from_str(&launch.command)
             .unwrap()
             .into_config()

@@ -82,6 +82,11 @@ use a shell with the symlink privilege before running it. Use Git for Windows
 Runtime shell flows and ACP environment filtering also require Git for Windows;
 daruda resolves its POSIX tools relative to `git.exe` when needed.
 
+Use `./scripts/test-windows.ps1` to select a supported Git from PATH, add its
+shell tools, check symlink permission, and run the full package suite. Use
+`-CheckOnly` to verify prerequisites without compiling. The script restores
+PATH on exit and does not change Git configuration or Windows settings.
+
 On macOS and Linux:
 
 ```bash
@@ -202,12 +207,48 @@ This is an unsigned portable build, with experimental Windows GUI support.
 To package an existing debug build for testing, use
 `./scripts/package-windows.ps1 -Profile debug -SkipBuild`.
 
+Build a per-user installer from that ZIP with NSIS 3.11 on PATH:
+
+```powershell
+./scripts/build-windows-installer.ps1 -Archive target/packages/daruda-0.2.16-windows-x86_64.zip
+./scripts/test-windows-installer.ps1 -Installer target/packages/daruda-0.2.16-windows-x86_64-setup.exe
+```
+
+The installer defaults to `%LOCALAPPDATA%\Programs\daruda`, requires no
+administrator permission, and registers shortcuts and an uninstall entry.
+It refuses to replace a running executable. Uninstall removes only shipped
+files and preserves application data and user-created files. The installation
+test refuses to run if existing daruda desktop integration would be overwritten.
+For signed builds, pass `-CertificateThumbprint <thumbprint>` to the installer
+build script. The certificate must be in `Cert:\CurrentUser\My` with an accessible
+private key. The app, uninstaller, and installer are signed and timestamped;
+signature verification failure stops the build. CI builds remain unsigned
+until a release signing identity is provisioned.
+
+Windows desktop preferences can be set in the profile's `config.toml`:
+
+```toml
+[desktop]
+tray_enabled = true
+close_to_tray = true
+keep_awake_while_working = true
+```
+
+Tray creation takes effect on the next launch. Closing a window then hides it;
+the tray or a second launch restores it. Explicit Quit retains the running-work
+and unsaved-edits prompts. The optional sleep lease covers active agent turns
+and terminal work reported by shell integration; it does not keep the display
+awake or change the lid-close policy. Defaults preserve existing behavior.
+Help > Export Diagnostics writes a ZIP with version/platform information and
+bounded error metadata, excluding raw messages, personal paths, prompts, and transcripts.
+Windows toast clicks reveal the originating pane while the app is running.
+
 GitHub Actions produces Windows downloads in two ways:
 
 - **CI** (push, pull request, or **Run workflow**): the Windows job uploads
   `daruda-windows-x86_64-debug` under the run's **Artifacts**, retained for 14 days.
 - **Release**: pushing a `v<version>` tag matching `Cargo.toml` builds the macOS
-  DMG and Windows release ZIP, then publishes both in one GitHub Release after
+  DMG, Windows release ZIP, and per-user installer, then publishes them after
   both builds succeed. **Run workflow** builds downloadable release artifacts
   without publishing a GitHub Release.
 

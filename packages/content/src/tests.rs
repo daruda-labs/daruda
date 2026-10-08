@@ -61,7 +61,7 @@ fn mermaid_raster_canvas_is_transparent_across_diagram_types() {
         );
         // The raster still contains opaque content (node fill / text).
         assert!(
-            img.bgra.chunks_exact(4).any(|px| px[3] == 255),
+            img.bgra.as_chunks::<4>().0.iter().any(|px| px[3] == 255),
             "diagram content must remain opaque for {source:?}"
         );
     }

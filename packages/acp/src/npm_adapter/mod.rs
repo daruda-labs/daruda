@@ -3,6 +3,8 @@
 
 pub(crate) mod cache;
 mod package;
+mod probe;
+mod publish;
 mod runtime;
 
 use std::path::Path;
@@ -85,6 +87,7 @@ impl NpmAdapter {
         )?;
         let runtime = runtime::NpmRuntime::resolve(node, self.config.environment(), strip_env)?;
         let installed = package::install(self, &runtime, root, context)?;
+        probe::verify(self, &runtime, &installed.entry, context)?;
         let config = AcpAgentConfig::new(&runtime.node)
             .arg(installed.entry.to_string_lossy().into_owned())
             .args(self.config.arguments().iter().cloned())

@@ -37,10 +37,10 @@ fn elapsed_seconds(now: u32, last: u32) -> f64 {
     f64::from(now.wrapping_sub(last)) / 1000.0
 }
 
-/// A taskbar overlay badge needs an icon drawn per count
-/// (`ITaskbarList3::SetOverlayIcon`), which daruda does not ship yet, so the
-/// count stays in-app.
-pub fn set_badge_count(_count: usize) {}
+/// Show the app-wide attention count; zero removes the overlay.
+pub fn set_badge_count(count: usize) {
+    super::super::taskbar_windows::set(count);
+}
 
 pub fn apply(kind: AttentionKind) {
     let flags = match kind {

@@ -24,26 +24,36 @@ fn fixture(root: &Path, version: &str, bin: &str) -> PathBuf {
 fn publishes_once_and_reuses_a_readable_non_executable_entry() {
     let root = tempfile::tempdir().unwrap();
     let dest = root.path().join("version");
-    let entry = install_at(&adapter(), "1.2.3", &dest, |staging| {
-        let entry = fixture(staging, "1.2.3", "dist/index.js");
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt;
-            fs::set_permissions(entry, fs::Permissions::from_mode(0o644)).unwrap();
-        }
-        // Executability is a mode bit only on unix; elsewhere the entry is
-        // already what the test wants it to be.
-        #[cfg(not(unix))]
-        let _ = entry;
-        assert!(!dest.exists());
-        Ok(())
-    })
+    let entry = install_at(
+        &adapter(),
+        "1.2.3",
+        &dest,
+        &PreparationContext::default(),
+        |staging| {
+            let entry = fixture(staging, "1.2.3", "dist/index.js");
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt;
+                fs::set_permissions(entry, fs::Permissions::from_mode(0o644)).unwrap();
+            }
+            // Executability is a mode bit only on unix; elsewhere the entry is
+            // already what the test wants it to be.
+            #[cfg(not(unix))]
+            let _ = entry;
+            assert!(!dest.exists());
+            Ok(())
+        },
+    )
     .unwrap();
     assert!(entry.is_file());
     assert_eq!(
-        install_at(&adapter(), "1.2.3", &dest, |_| panic!(
-            "warm installation must not run npm"
-        ))
+        install_at(
+            &adapter(),
+            "1.2.3",
+            &dest,
+            &PreparationContext::default(),
+            |_| panic!("warm installation must not run npm")
+        )
         .unwrap(),
         entry
     );
@@ -54,10 +64,16 @@ fn failed_install_never_publishes_a_partial_tree() {
     let root = tempfile::tempdir().unwrap();
     let dest = root.path().join("version");
     assert!(
-        install_at(&adapter(), "1.2.3", &dest, |staging| {
-            fixture(staging, "1.2.3", "dist/missing.js");
-            Ok(())
-        })
+        install_at(
+            &adapter(),
+            "1.2.3",
+            &dest,
+            &PreparationContext::default(),
+            |staging| {
+                fixture(staging, "1.2.3", "dist/missing.js");
+                Ok(())
+            }
+        )
         .is_err()
     );
     assert!(!dest.exists());
@@ -68,10 +84,16 @@ fn damaged_cache_is_reinstalled_without_deleting_the_old_tree() {
     let root = tempfile::tempdir().unwrap();
     let dest = root.path().join("version");
     fixture(&dest, "wrong", "dist/index.js");
-    install_at(&adapter(), "1.2.3", &dest, |staging| {
-        fixture(staging, "1.2.3", "dist/index.js");
-        Ok(())
-    })
+    install_at(
+        &adapter(),
+        "1.2.3",
+        &dest,
+        &PreparationContext::default(),
+        |staging| {
+            fixture(staging, "1.2.3", "dist/index.js");
+            Ok(())
+        },
+    )
     .unwrap();
     assert!(fs::read_dir(root.path()).unwrap().any(|e| {
         e.unwrap()
@@ -178,10 +200,16 @@ fn refuses_to_replace_a_damaged_installation_that_is_still_in_use() {
     let dest = root.path().join("version");
     fixture(&dest, "wrong", "dist/index.js");
     let _lease = InstallationLease::acquire(&dest).unwrap();
-    let error = install_at(&adapter(), "1.2.3", &dest, |staging| {
-        fixture(staging, "1.2.3", "dist/index.js");
-        Ok(())
-    })
+    let error = install_at(
+        &adapter(),
+        "1.2.3",
+        &dest,
+        &PreparationContext::default(),
+        |staging| {
+            fixture(staging, "1.2.3", "dist/index.js");
+            Ok(())
+        },
+    )
     .unwrap_err();
     assert!(error.to_string().contains("still in use"));
     assert!(dest.is_dir());

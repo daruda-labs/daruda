@@ -1,4 +1,4 @@
-//! Desktop notifications via `osascript display notification`.
+//! Desktop notifications behind an OS-specific delivery boundary.
 //!
 //! Why osascript and not `UNUserNotificationCenter`: the latter
 //! requires the running binary to be code-signed and notarized into
@@ -13,19 +13,54 @@
 //! preventing external side effects, thread-local storage keeps parallel test
 //! cases from consuming each other's notifications.
 //!
-//! The call shells out and detaches; we never wait for the user to
-//! dismiss. Concurrency is unbounded by design (one notification per
-//! pane event), but `osascript` is cheap (~50 ms cold, fork+exec) and
-//! macOS itself coalesces duplicates in Notification Center.
+//! Windows uses native toast notifications with a profile-specific identity.
+//! Linux delegates delivery to notify-send. No backend waits for dismissal.
 
 #[cfg(test)]
 use std::cell::RefCell;
-#[cfg(not(test))]
+#[cfg(all(not(test), target_os = "macos"))]
 use std::process::{Command, Stdio};
 
-#[cfg(not(test))]
+#[cfg(windows)]
+#[path = "notifications_windows.rs"]
+mod windows;
+
+/// A live pane to reveal when a notification is selected.
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct Target {
+    pub workspace: daruda_store::project::WorkspaceUuid,
+    pub pane: u64,
+}
+
+/// Keep notification activation on the GPUI foreground thread.
+pub(crate) fn install(cx: &mut gpui::App) {
+    #[cfg(windows)]
+    windows::install(cx);
+    #[cfg(not(windows))]
+    let _ = cx;
+}
+
+/// Remove generated shortcuts belonging to the executable being uninstalled.
+pub(crate) fn unregister_desktop() -> anyhow::Result<()> {
+    #[cfg(windows)]
+    return windows::unregister();
+    #[cfg(not(windows))]
+    Ok(())
+}
+
+pub(crate) fn show_for(title: &str, body: &str, target: Target) {
+    #[cfg(all(windows, not(test)))]
+    report(windows::deliver(title, body, Some(target)));
+    #[cfg(any(not(windows), test))]
+    {
+        let _ = (target.workspace, target.pane);
+        deliver(title, body);
+    }
+}
+
+#[cfg(any(not(test), windows))]
 use daruda_store::observability::error_report::{ErrorReport, ErrorSeverity};
-#[cfg(not(test))]
+#[cfg(any(not(test), windows))]
 use daruda_store::observability::log_writer::LogWriter;
 
 #[cfg(test)]
@@ -42,7 +77,7 @@ pub fn show(title: &str, body: &str) {
     deliver(title, body);
 }
 
-#[cfg(not(test))]
+#[cfg(all(not(test), target_os = "macos"))]
 fn deliver(title: &str, body: &str) {
     let script = format!(
         r#"display notification "{}" with title "{}""#,
@@ -72,6 +107,39 @@ fn deliver(title: &str, body: &str) {
     }
 }
 
+#[cfg(all(not(test), windows))]
+fn deliver(title: &str, body: &str) {
+    report(windows::deliver(title, body, None));
+}
+
+#[cfg(all(not(test), target_os = "linux"))]
+fn deliver(title: &str, body: &str) {
+    report(
+        daruda_core::process::command("notify-send")
+            .args(["--app-name=daruda", "--", title, body])
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .spawn()
+            .map(|_| ())
+            .map_err(Into::into),
+    );
+}
+
+#[cfg(any(windows, all(not(test), target_os = "linux")))]
+fn report(result: anyhow::Result<()>) {
+    if let Err(error) = result {
+        LogWriter::log(
+            ErrorReport::new("Desktop notification delivery failed")
+                .severity(ErrorSeverity::Info)
+                .from_error(error.root_cause())
+                .at(file!(), line!())
+                .dedup("platform.notification.delivery")
+                .build(),
+        );
+    }
+}
+
 #[cfg(test)]
 fn deliver(title: &str, body: &str) {
     RECORDED_NOTIFICATIONS.with(|notifications| {
@@ -90,6 +158,7 @@ pub(crate) fn take_recorded_for_test() -> Vec<(String, String)> {
 /// Newlines pass through unchanged — AppleScript renders them as
 /// real line breaks in the notification body, which matches what the
 /// shell intends.
+#[cfg(any(test, target_os = "macos"))]
 fn escape_applescript(s: &str) -> String {
     let mut out = String::with_capacity(s.len() + 8);
     for c in s.chars() {

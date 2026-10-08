@@ -52,13 +52,10 @@ impl NpmRuntime {
         let (os, arch) = crate::node::node_platform().map_err(|error| {
             PreparationError::new(PreparationKind::Configuration, error.to_string())
         })?;
-        let mut command = daruda_core::process::command(&self.node);
+        let mut command = self.command();
         // App-managed dependencies do not consume an arbitrary workspace .npmrc.
         // User/global npm settings and explicit launch environment still apply.
-        command.arg(&self.npm).current_dir(root).envs(&self.env);
-        for name in &self.strip_env {
-            command.env_remove(name);
-        }
+        command.arg(&self.npm).current_dir(root);
         command.env("npm_config_cpu", arch).env("npm_config_os", os);
         if !self.env.contains_key("npm_config_cache") {
             command.env("npm_config_cache", cache);
@@ -71,6 +68,15 @@ impl NpmRuntime {
             "--no-fund",
         ]);
         Ok(command)
+    }
+
+    pub(super) fn command(&self) -> Command {
+        let mut command = daruda_core::process::command(&self.node);
+        command.envs(&self.env);
+        for name in &self.strip_env {
+            command.env_remove(name);
+        }
+        command
     }
 }
 

@@ -243,7 +243,14 @@ impl Workspace {
         ) {
             return;
         }
-        crate::platform::notifications::show(&self.pane_title(pane_id, cx), &body);
+        crate::platform::notifications::show_for(
+            &self.pane_title(pane_id, cx),
+            &body,
+            crate::platform::notifications::Target {
+                workspace: self.uuid(),
+                pane: pane_id,
+            },
+        );
     }
 
     /// The pane's display title for a notification: its live session title, or

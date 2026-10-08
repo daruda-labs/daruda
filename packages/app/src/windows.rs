@@ -460,6 +460,15 @@ fn handle_picked_folder(
     }
 }
 
+/// External launch requests follow the same project-open policy as the picker.
+pub(crate) fn open_requested_directory(
+    config: std::sync::Arc<daruda_config::Config>,
+    path: std::path::PathBuf,
+    cx: &mut App,
+) {
+    handle_picked_folder(config, path, cx);
+}
+
 /// Activate (focus) a previously-registered workspace window. Used by
 /// the duplicate-root check so the user sees their existing project
 /// instead of getting a second copy in a new window.

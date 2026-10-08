@@ -345,7 +345,7 @@ fn is_installed(db: &resvg::usvg::fontdb::Database, family: &str) -> bool {
 /// Convert premultiplied-alpha RGBA (tiny-skia's pixmap format) to straight
 /// alpha, matching the straight-alpha contract shared with `decode_image`.
 fn unpremultiply(rgba: &mut [u8]) {
-    for px in rgba.chunks_exact_mut(4) {
+    for px in rgba.as_chunks_mut::<4>().0 {
         let a = px[3];
         match a {
             0 => {
@@ -368,7 +368,7 @@ fn unpremultiply(rgba: &mut [u8]) {
 /// between the two. Shared by every [`RasterImage`] producer so the swap runs
 /// once, on the background thread that decodes or rasterizes the bitmap.
 fn swap_rb_in_place(bytes: &mut [u8]) {
-    for px in bytes.chunks_exact_mut(4) {
+    for px in bytes.as_chunks_mut::<4>().0 {
         px.swap(0, 2);
     }
 }

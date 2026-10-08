@@ -19,7 +19,7 @@ pub(crate) fn output(
     output_with_timeout(command, context, COMMAND_TIMEOUT)
 }
 
-fn output_with_timeout(
+pub(crate) fn output_with_timeout(
     command: &mut Command,
     context: &PreparationContext<'_>,
     timeout: Duration,

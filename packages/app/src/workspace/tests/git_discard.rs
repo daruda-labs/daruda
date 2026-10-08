@@ -21,6 +21,7 @@ fn changed_repo(temp: &std::path::Path) -> std::path::PathBuf {
     git(&root, &["init", "-q", "-b", "main"]);
     git(&root, &["config", "user.email", "daruda@test"]);
     git(&root, &["config", "user.name", "daruda"]);
+    git(&root, &["config", "core.autocrlf", "false"]);
     for name in ["staged.txt", "edited.txt"] {
         std::fs::write(root.join(name), b"base\n").unwrap();
     }

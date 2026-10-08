@@ -553,6 +553,22 @@ impl TerminalSession {
         std::mem::take(&mut self.prompt_arrived)
     }
 
+    /// Whether shell integration reports an executing command (OSC 133 C).
+    /// Typing at the prompt (B) is idle; a new prompt also closes an orphaned C.
+    pub fn command_is_running(&self) -> bool {
+        self.prompt_marks
+            .iter()
+            .rev()
+            .find_map(|mark| match mark.kind {
+                PromptMarkKind::CommandExecuted => Some(true),
+                PromptMarkKind::PromptStart
+                | PromptMarkKind::CommandStart
+                | PromptMarkKind::CommandFinished => Some(false),
+                _ => None,
+            })
+            .unwrap_or(false)
+    }
+
     /// Return the row range of the most recent complete command output,
     /// derived from the last FTCS `E`…`F` pair (or `C`…`D` fallback).
     /// Returns `None` if no closed block has been observed, or if

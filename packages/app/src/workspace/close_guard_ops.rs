@@ -9,6 +9,15 @@ use crate::workspace::Workspace;
 use crate::workspace::main_area::pane_tree::PaneId;
 
 impl Workspace {
+    /// Shared activity truth for the app-wide power lease.
+    #[cfg(windows)]
+    pub(crate) fn has_active_desktop_work(&self, cx: &App) -> bool {
+        self.main_area
+            .runtimes
+            .values()
+            .flat_map(|runtime| runtime.panes.iter())
+            .any(|pane| pane.runs_work(cx))
+    }
     /// Titles of the panes among `pane_ids` still running something, found in
     /// any lane.
     pub(in crate::workspace) fn running_pane_titles(

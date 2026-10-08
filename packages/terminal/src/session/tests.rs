@@ -661,6 +661,24 @@ fn aborted_command_drops_command_start() {
     assert!(session.take_finished_command_elapsed().is_none());
 }
 
+#[test]
+fn command_activity_begins_at_execution_and_ends_at_finish_or_new_prompt() {
+    let mut session =
+        TerminalSession::new(TerminalDims::default(), TerminalConfig::default()).unwrap();
+    for (mark, running) in [
+        (b'B', false),
+        (b'C', true),
+        (b'D', false),
+        (b'C', true),
+        (b'A', false),
+    ] {
+        session
+            .feed(&[0x1b, b']', b'1', b'3', b'3', b';', mark, 7])
+            .unwrap();
+        assert_eq!(session.command_is_running(), running);
+    }
+}
+
 // `OSC 1337 ; ClearScrollback` (bare key, no `=`) — recognised
 // and translated into `\x1b[3J` re-fed to ghostty_vt. Visible
 // effect can't be observed through the public API, so this just

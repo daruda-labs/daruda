@@ -14,6 +14,7 @@
 //! - [`log_writer`] — NDJSON append + 30-day rotation, gated by
 //!   `cfg!(debug_assertions)` into `~/.daruda/logs/{debug,release}/`.
 
+pub mod diagnostics;
 pub mod error_report;
 pub mod log_writer;
 pub mod system_info;
