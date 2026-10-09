@@ -87,6 +87,16 @@ Use `./scripts/test-windows.ps1` to select a supported Git from PATH, add its
 shell tools, check symlink permission, and run the full package suite. Use
 `-CheckOnly` to verify prerequisites without compiling. The script restores
 PATH on exit and does not change Git configuration or Windows settings.
+The test process and its child tools share a hidden console; output still
+streams to the invoking terminal. For other validation commands, use:
+
+```powershell
+./scripts/run-hidden.ps1 -FilePath cargo.exe -ArgumentList @('clippy', '--locked', '-p', 'daruda', '--all-targets')
+```
+
+These runners accept non-interactive commands. Run
+`./scripts/test-hidden-process.ps1` to verify console inheritance, argument
+quoting, output streaming, and exit-code propagation on Windows.
 
 On macOS and Linux:
 
@@ -254,6 +264,10 @@ Package a DMG:
 brew install create-dmg
 ./scripts/build-dmg.sh
 ```
+
+Windows builds embed `assets/icon.ico` into `daruda.exe`; the installer and
+uninstaller use the same icon. After changing `assets/icon.png`, regenerate
+the committed ICO with `./scripts/make-icon.ps1` on Windows before building.
 
 Build a portable Windows x86_64 ZIP (including MSVC runtime DLLs):
 

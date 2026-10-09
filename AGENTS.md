@@ -127,6 +127,10 @@ just the change — and pick the one with the smallest blast radius.
 
 ### Verification
 
+- On Windows, run non-interactive Cargo and shell checks through
+  `scripts/run-hidden.ps1`, or use `scripts/test-windows.ps1` for the test
+  suite. Their child tools inherit a hidden console while logs and exit
+  codes remain available to the caller.
 - Provide explicit verification steps (commands + expected outcomes)
   for every non-trivial change.
 - Do not claim to have executed a command unless the tool output for

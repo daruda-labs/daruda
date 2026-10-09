@@ -1749,6 +1749,7 @@ dependencies = [
  "daruda_ui",
  "daruda_update",
  "dirs",
+ "embed-resource",
  "fs4",
  "futures",
  "ghostty_vt",
@@ -8169,6 +8170,7 @@ name = "test_process"
 version = "0.2.16"
 dependencies = [
  "shell-words",
+ "tempfile",
 ]
 
 [[package]]

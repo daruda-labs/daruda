@@ -1,6 +1,34 @@
 use std::io::Write;
 
+#[cfg(windows)]
+fn report_console_state() {
+    let Some(directory) = std::env::var_os("TEST_PROCESS_CONSOLE_DIR") else {
+        return;
+    };
+    #[link(name = "kernel32")]
+    unsafe extern "system" {
+        fn GetConsoleWindow() -> *mut std::ffi::c_void;
+    }
+    #[link(name = "user32")]
+    unsafe extern "system" {
+        fn IsWindowVisible(window: *mut std::ffi::c_void) -> i32;
+    }
+    // SAFETY: the OS owns the console window; querying it borrows no memory.
+    let window = unsafe { GetConsoleWindow() };
+    let state = if window.is_null() {
+        "none"
+    } else if unsafe { IsWindowVisible(window) } != 0 {
+        "visible"
+    } else {
+        "hidden"
+    };
+    let path = std::path::PathBuf::from(directory).join(format!("{}.state", std::process::id()));
+    std::fs::write(path, state).expect("write console state");
+}
+
 fn main() {
+    #[cfg(windows)]
+    report_console_state();
     let mut args = std::env::args().skip(1);
     let mut exit = 0;
     while let Some(arg) = args.next() {
@@ -46,7 +74,14 @@ fn main() {
                 // children fork well after that window; a test that raced it
                 // would just be flaky about a limitation it is not testing.
                 std::thread::sleep(std::time::Duration::from_millis(300));
-                let child = std::process::Command::new(std::env::current_exe().unwrap())
+                let mut command = std::process::Command::new(std::env::current_exe().unwrap());
+                #[cfg(windows)]
+                {
+                    use std::os::windows::process::CommandExt as _;
+                    const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+                    command.creation_flags(CREATE_NO_WINDOW);
+                }
+                let child = command
                     // Detached from our streams and short-lived on its own:
                     // a test that fails to kill it must not then hand the
                     // harness a pipe nobody will close.

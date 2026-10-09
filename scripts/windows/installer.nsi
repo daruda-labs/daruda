@@ -18,6 +18,8 @@ ShowUninstDetails show
 !endif
 
 !define MUI_ABORTWARNING
+!define MUI_ICON "..\..\assets\icon.ico"
+!define MUI_UNICON "..\..\assets\icon.ico"
 !insertmacro MUI_PAGE_WELCOME
 !insertmacro MUI_PAGE_LICENSE "${BUNDLE}\LICENSE"
 !insertmacro MUI_PAGE_DIRECTORY

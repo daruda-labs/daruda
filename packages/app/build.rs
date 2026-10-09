@@ -12,6 +12,18 @@ const KO: &str = "locales/ko.yml";
 const CUSTOM_DIR: &str = "src/surface/strings/custom";
 
 fn main() {
+    let target_os = std::env::var("CARGO_CFG_TARGET_OS").expect("CARGO_CFG_TARGET_OS");
+    if target_os == "windows" {
+        println!("cargo:rerun-if-changed=resources/windows/icon.rc");
+        println!("cargo:rerun-if-changed=../../assets/icon.ico");
+        embed_resource::compile_for(
+            "resources/windows/icon.rc",
+            ["daruda"],
+            embed_resource::NONE,
+        )
+        .manifest_required()
+        .expect("embed Windows application icon");
+    }
     println!("cargo:rerun-if-changed={EN}");
     println!("cargo:rerun-if-changed={KO}");
     println!("cargo:rerun-if-changed={CUSTOM_DIR}");

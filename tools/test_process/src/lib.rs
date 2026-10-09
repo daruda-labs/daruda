@@ -21,16 +21,26 @@ impl Drop for RunningChild {
     }
 }
 
-pub fn sleeping() -> RunningChild {
-    let mut command = std::process::Command::new(executable());
-    command.args(["--sleep-ms", "60000"]);
+fn fixture_command() -> std::process::Command {
+    let command = std::process::Command::new(executable());
     #[cfg(windows)]
-    {
+    let command = {
+        let mut command = command;
         use std::os::windows::process::CommandExt as _;
         const CREATE_NO_WINDOW: u32 = 0x0800_0000;
         command.creation_flags(CREATE_NO_WINDOW);
-    }
-    RunningChild(command.spawn().expect("spawn scoped process fixture"))
+        command
+    };
+    command
+}
+
+pub fn sleeping() -> RunningChild {
+    RunningChild(
+        fixture_command()
+            .args(["--sleep-ms", "60000"])
+            .spawn()
+            .expect("spawn scoped process fixture"),
+    )
 }
 
 /// Quote argv for APIs whose documented input uses shell-words syntax.
@@ -44,7 +54,7 @@ pub fn command_line(args: &[&str]) -> String {
 mod tests {
     #[test]
     fn process_reports_output_exit_and_environment_independently() {
-        let result = std::process::Command::new(super::executable())
+        let result = super::fixture_command()
             .args([
                 "--stdout",
                 "out",
@@ -69,5 +79,49 @@ mod tests {
         let args = ["a b", "c'd", "C:\\a\\b"];
         let parsed = shell_words::split(&super::command_line(&args)).unwrap();
         assert_eq!(&parsed[1..], args);
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn an_orphaned_fixture_does_not_create_a_console() {
+        use std::os::windows::process::CommandExt as _;
+        let directory = tempfile::tempdir().unwrap();
+        let pid_file = directory.path().join("child.pid");
+        let status = super::fixture_command()
+            .args(["--orphan", pid_file.to_str().unwrap()])
+            .env("TEST_PROCESS_CONSOLE_DIR", directory.path())
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .status()
+            .unwrap();
+        assert!(status.success());
+        let pid = std::fs::read_to_string(pid_file).unwrap();
+        struct Cleanup(String);
+        impl Drop for Cleanup {
+            fn drop(&mut self) {
+                const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+                let _ = std::process::Command::new("taskkill.exe")
+                    .creation_flags(CREATE_NO_WINDOW)
+                    .args(["/F", "/PID", &self.0])
+                    .output();
+            }
+        }
+        let _cleanup = Cleanup(pid.clone());
+        let state_file = directory.path().join(format!("{pid}.state"));
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        let state = loop {
+            if let Ok(state) = std::fs::read_to_string(&state_file)
+                && !state.is_empty()
+            {
+                break state;
+            }
+            assert!(
+                std::time::Instant::now() < deadline,
+                "descendant did not start"
+            );
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        };
+        assert_eq!(state, "none");
     }
 }

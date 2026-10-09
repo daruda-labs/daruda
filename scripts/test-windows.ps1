@@ -1,3 +1,4 @@
+#Requires -Version 5.1
 param(
     [switch]$CheckOnly,
     [Parameter(ValueFromRemainingArguments = $true)][string[]]$CargoArgs
@@ -6,13 +7,14 @@ param(
 $ErrorActionPreference = 'Stop'
 $repoRoot = Split-Path $PSScriptRoot -Parent
 $previousPath = $env:PATH
+. "$PSScriptRoot/windows/hidden-process.ps1"
 
 Push-Location $repoRoot
 try {
     $candidates = @(Get-Command git.exe -All -ErrorAction SilentlyContinue)
     $supported = @($candidates | Where-Object {
-        $versionText = & $_.Source --version
-        $LASTEXITCODE -eq 0 -and $versionText -match 'git version (\d+\.\d+\.\d+)' -and
+        $version = Invoke-HiddenConsoleCommand -FilePath $_.Source -ArgumentList @('--version') -CaptureOutput
+        $version.ExitCode -eq 0 -and $version.Stdout -match 'git version (\d+\.\d+\.\d+)' -and
             [version]$Matches[1] -ge [version]'2.28.0'
     })
     if ($supported.Count -eq 0) {
@@ -60,8 +62,8 @@ try {
             'ferrum_flow', 'gpui_component', 'strings_gen', 'vendor_gpui', 'test_process'
         )) { $testArgs += @('-p', $package) }
     }
-    & cargo @testArgs
-    if ($LASTEXITCODE -ne 0) { throw "Cargo tests failed with exit code $LASTEXITCODE" }
+    $testExit = Invoke-HiddenConsoleCommand -FilePath cargo.exe -ArgumentList $testArgs
+    if ($testExit -ne 0) { throw "Cargo tests failed with exit code $testExit" }
 } finally {
     $env:PATH = $previousPath
     Pop-Location
