@@ -138,15 +138,29 @@ license symlink as a regular file on every OS. Git and tar are required for this
 maintenance check; no patching step is required before building.
 `scripts/apply-gpui-patch.sh` remains a read-only verification entry point.
 
-Windows CI gates the native app build, all app target compilation (including
-`screenshot`), Clippy, Ghostty tests, vendor tool tests, platform adapters, and MCP tests.
-The full Windows runtime suite still reports experimental diagnostics;
-macOS and Linux retain their full required checks. GUI runtime requires a real
-desktop check on each platform.
+Windows CI requires the native build, all app target compilation (including
+`screenshot`), Clippy, and the same full test package list as macOS and Linux.
+It also checks platform adapters, MCP transport, packaging, and `--smoke` startup.
+UI behavior still needs native desktop verification beyond these automated checks.
 
-Windows runtime gaps remain: OS credential storage and listening-port discovery
-are unavailable, and subprocess cancellation does not yet terminate descendant
-processes as Unix process groups do.
+Windows remote-channel secrets use Credential Manager. Listening-port discovery
+uses native IPv4/IPv6 TCP tables and reports owning PIDs. Managed subprocesses
+join checked Job Objects before resuming; cancellation verifies group termination.
+Native IME composition and changes between monitors with different DPI still
+require desktop verification.
+
+Build with `--features screenshot` to capture a visible Windows window:
+
+```powershell
+cargo build --locked -p daruda --features screenshot
+$env:DARUDA_DATA_DIR = "$PWD/target/visual-state"
+./target/debug/daruda.exe --screenshot "$PWD/target/settings.png" --screenshot-scenario settings:font --screenshot-theme light,dark
+```
+
+Windows capture reads the composed native client surface and keeps its physical
+pixel dimensions. Launch the GUI normally; a launcher that hides its window
+cannot produce a capture. Blank captures fail instead of producing a success.
+macOS continues to use offscreen Metal capture; Linux capture remains unavailable.
 
 ---
 
@@ -303,11 +317,36 @@ to exit, updates its file manifest and Windows registration, and relaunches the
 app after successful installation. The verified setup remains in the user's
 temporary directory for retry or diagnosis. Portable ZIP deployments retain
 their existing file-swap update path.
-For signed builds, pass `-CertificateThumbprint <thumbprint>` to the installer
+For signed builds, pass `-CertificateThumbprint <thumbprint>` to both the ZIP
+packaging script and the installer
 build script. The certificate must be in `Cert:\CurrentUser\My` with an accessible
 private key. The app, uninstaller, and installer are signed and timestamped;
 signature verification failure stops the build. CI builds remain unsigned
-until a release signing identity is provisioned.
+until a release signing identity is provisioned. The release workflow accepts
+`WINDOWS_SIGNING_PFX_BASE64` and `WINDOWS_SIGNING_PFX_PASSWORD` repository secrets.
+Set the `WINDOWS_SIGNING_REQUIRED` repository variable to `true` to refuse an
+unsigned Windows release. Signing or signature-verification errors fail packaging.
+Updates to an already signed installation must retain its verified publisher;
+existing unsigned releases continue to use release checksums.
+
+Workspace and project records retain their previous readable `.bak` generation.
+Recovery preserves damaged original bytes before restoring a valid backup;
+an unrecoverable project prevents partial workspace restoration from replacing
+the saved workspace. Portable updates use a durable swap journal and recover
+interrupted replacements before clearing rollback files.
+
+To retain the terminal's last visible text across app restarts, opt in:
+
+```toml
+[shell]
+restore_output = true
+```
+
+This setting also supports project overrides. Each pane retains at most 64 KiB,
+within an 8 MiB workspace limit, in profile-scoped storage. Restored text is
+marked as previous output and control sequences are filtered. A fresh shell
+starts; the snapshot does not preserve a process, colours, or full scrollback.
+Disable the setting to remove stored snapshots on the next workspace save.
 
 Windows desktop preferences can be set in the profile's `config.toml`:
 

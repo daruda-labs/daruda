@@ -131,6 +131,12 @@ just the change — and pick the one with the smallest blast radius.
   `scripts/run-hidden.ps1`, or use `scripts/test-windows.ps1` for the test
   suite. Their child tools inherit a hidden console while logs and exit
   codes remain available to the caller.
+- On Windows, nested `powershell.exe`, `pwsh.exe`, and `-EncodedCommand`
+  invocations are allowed, but every newly launched shell must run hidden
+  without opening a visible console window. Launch background shells with
+  `Start-Process -WindowStyle Hidden` or an equivalent hidden process API.
+  `scripts/run-hidden.ps1` hides its child tools only; its parent shells
+  must also be launched hidden. Preserve command output and exit codes.
 - Provide explicit verification steps (commands + expected outcomes)
   for every non-trivial change.
 - Do not claim to have executed a command unless the tool output for
@@ -204,7 +210,7 @@ daruda/
 - **Zig**: 0.14.1 (`./scripts/bootstrap-zig.sh` on macOS/Linux, `./scripts/bootstrap-zig.ps1` on Windows x86_64; alternatively set `ZIG=<path>` or put `zig` on `PATH`)
 - **macOS**: Apple Silicon or Intel + Xcode Command Line Tools — the primary, fully-verified target.
 - **Linux**: built and tested by the `linux` CI job, which gates like the macOS one — the claim is green, not merely measured. GUI runtime (window/menu/tray) is still unverified on a real desktop, since CI has no one to look at the window. Needs system `libfontconfig`/`libxcb` and real fonts (the job installs them).
-- **Windows**: native MSVC build via `cargo build --locked -p daruda` or `scripts/build-windows.ps1`. The `windows` CI job gates everything the other two do, the whole test suite included, plus `daruda --smoke` — which opens the real window on a runner with no GPU (D3D11 falls back to a software device) and fails if nothing is drawn. What is still unverified is a person *looking* at it, and `--screenshot`, which needs a `render_to_image` only Metal implements.
+- **Windows**: native MSVC build via `cargo build --locked -p daruda` or `scripts/build-windows.ps1`. The `windows` CI job gates the full test suite and `daruda --smoke` startup. The optional `screenshot` feature captures the visible composed client surface through Windows APIs. Native IME composition and transitions between monitors with different DPI still require desktop verification.
 
 ### Build
 
@@ -282,7 +288,12 @@ backlog and join the list a crate at a time as that is worked off. Measured
 
 Render the UI offscreen to a PNG and read it back — text, layout, colors, images, and toasts all render, permission-free (no Screen Recording grant). Capture goes through gpui's `render_to_image`, gated upstream behind `test-support`; the `--screenshot` path below requires it, plus `gpui_macos/font-kit` (without that feature glyphs don't rasterize — shapes render but **text is invisible**).
 
-**macOS only.** `render_to_image` has one implementation upstream — `MetalHeadlessRenderer` — and `gpui_platform::current_headless_renderer` answers `None` everywhere else, so the default `bail!` is what Linux and Windows get. That is a gap in the *capture* path, not in either port: what a capture would add over the macOS one is the platform's own text stack (DirectWrite, fontconfig), since daruda's layout and widget code is platform-neutral. On those hosts, `daruda --smoke` is what says the window came up and painted.
+**macOS:** offscreen capture uses `MetalHeadlessRenderer`. **Windows:**
+`--screenshot` uses the visible composed client surface instead of
+`render_to_image`, including native fonts and physical DPI-scaled pixels.
+Launch the GUI normally; `run-hidden.ps1` can hide its first window and make
+capture fail. Hidden and uniform blank captures return an error. **Linux:**
+no capture implementation is available; use `daruda --smoke` for startup checks.
 
 **Whole app** — the `--screenshot` flag captures the live workspace window:
 
