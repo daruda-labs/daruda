@@ -12,13 +12,7 @@ pub fn default_terminal_font() -> gpui::Font {
     // macOS primary mirrors iTerm2's factory default (`Monaco 12` in
     // `DefaultBookmark.plist`) so a fresh daruda profile lands on the
     // same glyph shapes a returning iTerm2 user expects.
-    let family = if cfg!(target_os = "macos") {
-        "Monaco"
-    } else if cfg!(target_os = "windows") {
-        "Consolas"
-    } else {
-        "DejaVu Sans Mono"
-    };
+    let family = daruda_core::font::default_monospace_family();
 
     let fallbacks = terminal_font_fallbacks();
     let mut font = gpui::font(family);

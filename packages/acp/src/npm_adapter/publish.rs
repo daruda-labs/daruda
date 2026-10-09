@@ -6,14 +6,7 @@ use anyhow::Context as _;
 
 use crate::preparation::PreparationContext;
 
-#[cfg(windows)]
 const RETRY_DELAYS_MS: [u64; 5] = [50, 100, 150, 200, 250];
-#[cfg(windows)]
-const ERROR_ACCESS_DENIED: i32 = 5;
-#[cfg(windows)]
-const ERROR_SHARING_VIOLATION: i32 = 32;
-#[cfg(windows)]
-const ERROR_LOCK_VIOLATION: i32 = 33;
 
 pub(super) fn rename(
     source: &Path,
@@ -46,23 +39,19 @@ pub(super) fn rename(
 }
 
 fn retry_delay(error: &std::io::Error, attempts: usize) -> Option<std::time::Duration> {
-    #[cfg(windows)]
-    {
-        if matches!(
-            error.raw_os_error(),
-            Some(ERROR_ACCESS_DENIED | ERROR_SHARING_VIOLATION | ERROR_LOCK_VIOLATION)
-        ) {
-            return RETRY_DELAYS_MS
-                .get(attempts - 1)
-                .map(|delay| std::time::Duration::from_millis(*delay));
-        }
-        None
+    use daruda_core::path::io_error::{FileAccessFailure, classify};
+    if matches!(
+        classify(error),
+        FileAccessFailure::AccessDenied
+            | FileAccessFailure::SharingViolation
+            | FileAccessFailure::LockViolation
+    ) {
+        return attempts
+            .checked_sub(1)
+            .and_then(|index| RETRY_DELAYS_MS.get(index))
+            .map(|delay| std::time::Duration::from_millis(*delay));
     }
-    #[cfg(not(windows))]
-    {
-        let _ = (error, attempts);
-        None
-    }
+    None
 }
 
 #[cfg(test)]

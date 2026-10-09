@@ -64,13 +64,10 @@ fn runtime_error(error: NodeError) -> PreparationError {
 }
 
 fn system_node(env: &BTreeMap<String, String>, strip_env: &[String]) -> Option<PathBuf> {
-    if strip_env.iter().any(|name| {
-        if cfg!(windows) {
-            name.eq_ignore_ascii_case("PATH")
-        } else {
-            name == "PATH"
-        }
-    }) {
+    if strip_env
+        .iter()
+        .any(|name| daruda_core::process::env_name_eq(name.as_ref(), std::ffi::OsStr::new("PATH")))
+    {
         return None;
     }
     let path = daruda_core::process::child_path(env.iter())
@@ -128,12 +125,8 @@ fn from_identity(identity: serde_json::Value) -> Result<ResolvedNode, Preparatio
 
 fn npm_entry(bin: &Path) -> Result<PathBuf, PreparationError> {
     // Do not pair this Node with an unrelated npm installation found elsewhere.
-    let entry = if cfg!(windows) {
-        "node_modules/npm/bin/npm-cli.js"
-    } else {
-        "npm"
-    };
-    let npm = daruda_core::path::canonicalize(bin.join(entry)).map_err(configuration)?;
+    let entry = super::layout::NodeLayout::current().npm_entry(bin);
+    let npm = daruda_core::path::canonicalize(entry).map_err(configuration)?;
     if npm.file_name().is_none_or(|name| name != "npm-cli.js") {
         return Err(configuration(
             "npm-cli.js not found alongside the selected Node runtime",

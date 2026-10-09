@@ -563,9 +563,18 @@ Adding a fourth means adding it to `clippy.toml`'s allow reasoning too.
 
 **The two allowed regions:**
 - `daruda_core`'s capability modules (`host`, `process`, `path`, `shell`, plus the pure `file_url`) — the gates. `daruda_core` is otherwise pure-by-default; these are the named exception, stated in its `lib.rs`.
-- `packages/app/src/platform/` — capabilities needing a window handle, which a GPUI-free crate cannot hold.
+- `packages/app/src/platform/` — app-owned desktop capabilities, including window APIs and listening-port inspection. Native port metadata stays here; workspace polling and Lane attribution stay in their domain modules.
 
 Plus three files that are gates of their own, each the single door to its capability: `app/src/remote_channel/keychain.rs` (daruda's own secrets), `daruda_agent/src/accounts/credentials.rs` (an entry *another program* owns), `app/src/shell_env.rs` (a macOS-only `.app`-launch PATH problem, not the "which shell" question).
+
+Capability entry points select private OS backends once. `core::process`
+retains the public process API over `process/{unix,windows}.rs`;
+`terminal::pty` owns PTY I/O over `pty/backend/`, including ConPTY drain
+ordering. Credential gates keep their distinct ownership and profile
+contracts over private backends. OS file-error classification lives in
+`core::path::io_error`; retry budgets and cancellation stay with each caller.
+Pure policies use values: `acp::node::layout` describes Node distributions,
+and `core::font` provides shared factory font names without GPUI objects.
 
 **Prefer a value over a `cfg`.** `#[cfg(windows)]` code never compiles on a macOS dev machine, so it is only ever checked by CI. Decide the platform once at the boundary with `cfg!()` and pass the answer down as a value — `daruda_core::shell::login_args_for(program)` answers "does this shell take `-l`?" from the program name, so a Windows shell's rules are asserted from macOS. Reserve `#[cfg]` attributes for the leaf that actually calls the OS.
 

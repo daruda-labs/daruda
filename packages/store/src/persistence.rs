@@ -90,9 +90,11 @@ fn write_json_atomic<T: Serialize>(dir: &Path, target: &Path, value: &T) -> std:
         match tmp.persist(target) {
             Ok(_) => return Ok(()),
             Err(error) => {
-                if !cfg!(windows)
-                    || !matches!(error.error.raw_os_error(), Some(32 | 33))
-                    || attempt == 3
+                if !matches!(
+                    daruda_core::path::io_error::classify(&error.error),
+                    daruda_core::path::io_error::FileAccessFailure::SharingViolation
+                        | daruda_core::path::io_error::FileAccessFailure::LockViolation
+                ) || attempt == 3
                 {
                     return Err(error.error);
                 }

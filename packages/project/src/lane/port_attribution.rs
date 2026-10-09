@@ -115,41 +115,77 @@ where
 /// boundary — e.g. lane path `/repo/app` matches `cd /repo/app &&
 /// npm start` but not `/repo/app-2`.
 fn includes_path_boundary(haystack: &str, needle: &Path) -> bool {
-    let needle = needle.to_string_lossy();
+    includes_path_boundary_for(
+        haystack,
+        &needle.to_string_lossy(),
+        daruda_core::path_style::PathStyle::local(),
+    )
+}
+
+fn includes_path_boundary_for(
+    haystack: &str,
+    needle: &str,
+    style: daruda_core::path_style::PathStyle,
+) -> bool {
+    use daruda_core::path_style::PathStyle;
+    use std::borrow::Cow;
+
+    let normalize = |value: &str| value.replace('\\', "/").to_ascii_lowercase();
+    let (haystack, needle) = if style == PathStyle::Windows {
+        (
+            Cow::Owned(normalize(haystack)),
+            Cow::Owned(normalize(needle)),
+        )
+    } else {
+        (Cow::Borrowed(haystack), Cow::Borrowed(needle))
+    };
     if needle.is_empty() {
         return false;
     }
-    // A byte continues the matched path's own name (rather than
-    // terminating it) when it's alphanumeric or `_`/`-`/`.` — so
-    // `/repo/app` does not match inside `/repo/app-2` or `/repo/app.old`.
-    // `/` is a boundary: it starts a new path segment, so a file
-    // *inside* the matched directory (`/repo/app/server.js`) still
-    // counts as a match.
+    // A directory name must not match its sibling app-2 or app.old.
+    // Separators begin a descendant and are therefore valid boundaries.
     let is_boundary = |byte: Option<u8>| match byte {
         None => true,
         Some(b) => !(b.is_ascii_alphanumeric() || matches!(b, b'_' | b'-' | b'.')),
     };
-    let mut search_start = 0;
-    while let Some(rel_idx) = haystack[search_start..].find(needle.as_ref()) {
-        let idx = search_start + rel_idx;
-        let end = idx + needle.len();
-        let before = if idx == 0 {
-            None
-        } else {
-            Some(haystack.as_bytes()[idx - 1])
-        };
-        let after = haystack.as_bytes().get(end).copied();
-        if is_boundary(before) && is_boundary(after) {
-            return true;
-        }
-        search_start = idx + 1;
-    }
-    false
+    haystack.match_indices(needle.as_ref()).any(|(start, _)| {
+        let before = start
+            .checked_sub(1)
+            .and_then(|index| haystack.as_bytes().get(index))
+            .copied();
+        let after = haystack.as_bytes().get(start + needle.len()).copied();
+        is_boundary(before) && is_boundary(after)
+    })
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn command_paths_follow_the_named_platform_and_preserve_boundaries() {
+        use daruda_core::path_style::PathStyle::{Posix, Windows};
+        assert!(includes_path_boundary_for(
+            r#"node "c:/REPO/App/server.js""#,
+            r"C:\repo\app",
+            Windows
+        ));
+        assert!(!includes_path_boundary_for(
+            r"node C:\repo\app-2\server.js",
+            r"C:\repo\app",
+            Windows
+        ));
+        assert!(!includes_path_boundary_for(
+            "node /repo/APP/server.js",
+            "/repo/app",
+            Posix
+        ));
+        assert!(includes_path_boundary_for(
+            "node /repo/한글-2 /repo/한글/server.js",
+            "/repo/한글",
+            Posix
+        ));
+    }
 
     fn lane(path: &str, label: &str) -> LaneCandidate {
         LaneCandidate {

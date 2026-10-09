@@ -28,9 +28,9 @@ impl NpmRuntime {
         let original_path = daruda_core::process::child_path(env.iter())
             .map(std::ffi::OsString::from)
             .unwrap_or_else(|| std::env::var_os("PATH").unwrap_or_default());
-        if cfg!(windows) {
-            env.retain(|key, _| !key.eq_ignore_ascii_case("PATH"));
-        }
+        env.retain(|key, _| {
+            !daruda_core::process::env_name_eq(key.as_ref(), std::ffi::OsStr::new("PATH"))
+        });
         let paths = std::iter::once(bin.to_path_buf()).chain(std::env::split_paths(&original_path));
         env.insert(
             "PATH".into(),

@@ -53,6 +53,7 @@ const MIN_NODE_VERSION: Version = Version::new(20, 0, 0);
 
 #[cfg(test)]
 mod cache_tests;
+mod layout;
 pub(crate) mod resolved;
 
 /// Base URL for the official Node.js distribution.
@@ -537,11 +538,7 @@ fn npx_cache_dir(install_root: &Path) -> PathBuf {
 /// does not use `bin/` everywhere, so the arm for that belongs here and
 /// nowhere else.
 pub fn bin_dir(node_dir: &Path) -> PathBuf {
-    if cfg!(windows) {
-        node_dir.to_path_buf()
-    } else {
-        node_dir.join("bin")
-    }
+    layout::NodeLayout::current().bin_dir(node_dir)
 }
 
 /// `PATH` with a managed runtime's executables in front of it.
@@ -560,12 +557,7 @@ fn node_binary(node_dir: &Path) -> PathBuf {
 }
 
 pub(crate) fn managed_launcher(node_dir: &Path, launcher: &str) -> PathBuf {
-    let name = match (cfg!(windows), launcher) {
-        (true, "node") => "node.exe",
-        (true, "npx") => "npx.cmd",
-        _ => launcher,
-    };
-    bin_dir(node_dir).join(name)
+    layout::NodeLayout::current().launcher(node_dir, launcher)
 }
 
 /// `true` if a managed install exists and its `node` runs. Cheap validity gate

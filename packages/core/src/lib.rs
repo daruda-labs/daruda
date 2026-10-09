@@ -45,6 +45,7 @@
 //! proposed addition fails one of them, it belongs elsewhere.
 
 pub mod file_url;
+pub mod font;
 pub mod git;
 pub mod host;
 pub mod language;

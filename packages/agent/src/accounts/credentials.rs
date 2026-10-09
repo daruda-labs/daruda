@@ -10,17 +10,19 @@
 
 use std::path::Path;
 
+#[cfg(not(target_os = "macos"))]
+mod file;
+#[cfg(target_os = "macos")]
+mod macos;
+#[cfg(not(target_os = "macos"))]
+use file as backend;
+#[cfg(target_os = "macos")]
+use macos as backend;
+
+pub use backend::{delete_scoped_credentials, read_scoped_credentials, read_system_credentials};
+
 use crate::http::FetchError;
 use serde_json::Value;
-
-/// Keychain service holding the ambient Claude login — the entry the CLI
-/// writes when no per-account dir scopes it. Shared by every daruda profile
-/// and by the user's own terminal usage.
-#[cfg(target_os = "macos")]
-const SYSTEM_KEYCHAIN_SERVICE: &str = "Claude Code-credentials";
-
-#[allow(unused_imports)] // used only on macOS (scoped Keychain service name)
-use super::layout::scoped_keychain_service;
 
 #[derive(Debug, thiserror::Error)]
 pub enum AccountError {
@@ -42,76 +44,6 @@ pub struct PlanInfo {
     /// ("default_claude_ai_5x", carrying the 5x/20x multiplier) is the only
     /// one so far; domains without one leave it `None`.
     pub qualifier: Option<String>,
-}
-
-/// System-wide Claude Code login: the macOS Keychain item, or the
-/// `.credentials.json` file (`$CLAUDE_CONFIG_DIR`-aware) elsewhere. Every
-/// failure — no login yet, non-macOS build, malformed contents — collapses to
-/// [`FetchError::NoToken`] so callers render one "unavailable" state.
-#[cfg(target_os = "macos")]
-pub fn read_system_credentials() -> Result<(String, PlanInfo), FetchError> {
-    let KeychainLookup::Found(secret) = find_keychain_secret(SYSTEM_KEYCHAIN_SERVICE) else {
-        return Err(FetchError::NoToken);
-    };
-    let raw = String::from_utf8(secret).map_err(|_| FetchError::NoToken)?;
-    parse_credentials(&raw)
-}
-
-/// What one Keychain lookup found.
-#[cfg(target_os = "macos")]
-enum KeychainLookup {
-    Found(Vec<u8>),
-    Missing,
-    /// `security` itself could not run.
-    Failed,
-}
-
-/// The one place this module reads the Keychain. A test never reaches the
-/// user's login keychain: under test the store answers as an empty one.
-#[cfg(target_os = "macos")]
-fn find_keychain_secret(service: &str) -> KeychainLookup {
-    if cfg!(test) {
-        return KeychainLookup::Missing;
-    }
-    match std::process::Command::new("security")
-        .args(["find-generic-password", "-s", service, "-w"])
-        .output()
-    {
-        Ok(out) if out.status.success() => KeychainLookup::Found(out.stdout),
-        Ok(_) => KeychainLookup::Missing,
-        Err(_) => KeychainLookup::Failed,
-    }
-}
-
-#[cfg(not(target_os = "macos"))]
-pub fn read_system_credentials() -> Result<(String, PlanInfo), FetchError> {
-    // The ambient login is the user's own; under test it reads as absent, as
-    // the Keychain does on macOS.
-    if cfg!(test) {
-        return Err(FetchError::NoToken);
-    }
-    let path = credentials_path().ok_or(FetchError::NoToken)?;
-    let raw = std::fs::read_to_string(path).map_err(|_| FetchError::NoToken)?;
-    parse_credentials(&raw)
-}
-
-#[cfg(not(target_os = "macos"))]
-fn credentials_path() -> Option<std::path::PathBuf> {
-    credentials_path_from(std::env::var_os("CLAUDE_CONFIG_DIR"), dirs::home_dir())
-}
-
-/// Pure core of [`credentials_path`], split out so the `$CLAUDE_CONFIG_DIR`
-/// override and the `~/.claude` default can be unit-tested without mutating
-/// the real process environment (parallel `cargo test` runs share one).
-#[cfg(not(target_os = "macos"))]
-fn credentials_path_from(
-    config_dir: Option<std::ffi::OsString>,
-    home: Option<std::path::PathBuf>,
-) -> Option<std::path::PathBuf> {
-    if let Some(dir) = config_dir {
-        return Some(std::path::PathBuf::from(dir).join(".credentials.json"));
-    }
-    Some(home?.join(".claude").join(".credentials.json"))
 }
 
 /// Extract `(access token, plan info)` from the credentials JSON. A missing
@@ -136,38 +68,6 @@ fn parse_credentials(raw: &str) -> Result<(String, PlanInfo), FetchError> {
         qualifier: oauth["rateLimitTier"].as_str().map(str::to_string),
     };
     Ok((token, plan))
-}
-
-/// Read the OAuth token + plan for a specific account's config dir.
-///
-/// On macOS the Keychain is where the CLI normally puts them, but not the only
-/// place it ever has: a build that writes `.credentials.json` into the config
-/// dir instead would otherwise read as "no credentials" — and a *successful*
-/// login reported that way is not merely a wrong label, it makes the add flow
-/// discard the directory it just created. Trying the file after the Keychain
-/// costs one `stat` on the normal path.
-#[cfg(target_os = "macos")]
-pub fn read_scoped_credentials(config_dir: &Path) -> Result<(String, PlanInfo), AccountError> {
-    match read_scoped_keychain_credentials(config_dir) {
-        Ok(found) => Ok(found),
-        Err(keychain_error) => read_credentials_file(config_dir).map_err(|_| keychain_error),
-    }
-}
-
-#[cfg(target_os = "macos")]
-fn read_scoped_keychain_credentials(config_dir: &Path) -> Result<(String, PlanInfo), AccountError> {
-    let secret = match find_keychain_secret(&scoped_keychain_service(config_dir)) {
-        KeychainLookup::Found(secret) => secret,
-        KeychainLookup::Missing => return Err(AccountError::Credentials(FetchError::NoToken)),
-        KeychainLookup::Failed => return Err(AccountError::Keychain),
-    };
-    let raw = String::from_utf8(secret).map_err(|_| AccountError::Keychain)?;
-    Ok(parse_credentials(&raw)?)
-}
-
-#[cfg(not(target_os = "macos"))]
-pub fn read_scoped_credentials(config_dir: &Path) -> Result<(String, PlanInfo), AccountError> {
-    read_credentials_file(config_dir)
 }
 
 /// The `.credentials.json` the CLI writes inside a config dir — the only store
@@ -197,232 +97,15 @@ fn read_credentials_file(config_dir: &Path) -> Result<(String, PlanInfo), Accoun
 /// no ambient Keychain item at all).
 #[must_use]
 pub fn system_credentials_digest() -> Option<String> {
-    #[cfg(target_os = "macos")]
-    {
-        match find_keychain_secret(SYSTEM_KEYCHAIN_SERVICE) {
-            KeychainLookup::Found(secret) => Some(secret_digest(&secret)),
-            KeychainLookup::Missing | KeychainLookup::Failed => None,
-        }
-    }
-    #[cfg(not(target_os = "macos"))]
-    {
-        None
-    }
+    backend::system_credentials_digest()
 }
 
 /// Hex SHA-256 of a credential store entry, so a comparison never holds it.
-#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+#[cfg(any(test, target_os = "macos"))]
 fn secret_digest(secret: &[u8]) -> String {
     use sha2::{Digest, Sha256};
     format!("{:x}", Sha256::digest(secret))
 }
 
-/// Best-effort delete of the scoped macOS Keychain item a Claude Code
-/// login writes into `config_dir`'s isolated `CLAUDE_CONFIG_DIR` (see
-/// [`scoped_keychain_service`]). Called by every `app`-side cleanup path
-/// that discards a login attempt without keeping it (dedup hit, denied,
-/// timed out, failed, or cancelled) so a discarded login never leaves an
-/// orphaned OS credential behind. Mirrors the `security
-/// delete-generic-password` invocation in
-/// `app/src/telegram/keychain.rs::delete_token`. "Item not found" is the
-/// expected common case (the login never got far enough to write
-/// credentials) and is silently ignored; any other failure is logged,
-/// not surfaced — same "no functional impact" call as the config-dir
-/// removal this runs alongside.
-#[cfg(target_os = "macos")]
-pub fn delete_scoped_credentials(config_dir: &Path) {
-    use daruda_store::observability::error_report::{ErrorReport, ErrorSeverity};
-    use daruda_store::observability::log_writer::LogWriter;
-    use std::process::{Command, Stdio};
-
-    // Same rule as `find_keychain_secret`: a test never touches the keychain.
-    if cfg!(test) {
-        return;
-    }
-    let service = scoped_keychain_service(config_dir);
-    let output = Command::new("security")
-        .args(["delete-generic-password", "-s", &service])
-        .stdout(Stdio::null())
-        .stderr(Stdio::piped())
-        .output();
-    match output {
-        Ok(output) if output.status.success() => {}
-        Ok(output) => {
-            let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
-            if !stderr.contains("could not be found") {
-                LogWriter::log(
-                    ErrorReport::new("Failed to delete scoped account Keychain item")
-                        .message(stderr)
-                        .severity(ErrorSeverity::Warning)
-                        .at(file!(), line!())
-                        .dedup("account.add.cleanup_keychain_failed")
-                        .build(),
-                );
-            }
-        }
-        Err(e) => {
-            LogWriter::log(
-                ErrorReport::new("Failed to delete scoped account Keychain item")
-                    .from_error(&e)
-                    .severity(ErrorSeverity::Warning)
-                    .at(file!(), line!())
-                    .dedup("account.add.cleanup_keychain_failed")
-                    .build(),
-            );
-        }
-    }
-}
-
-/// Non-macOS no-op: the scoped credential lives in `.credentials.json`
-/// inside `config_dir`, already removed by the caller's directory
-/// cleanup (`std::fs::remove_dir_all`) — there is no separate OS
-/// credential store to touch.
-#[cfg(not(target_os = "macos"))]
-pub fn delete_scoped_credentials(_config_dir: &Path) {}
-
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn credentials_extract_token_and_plan_info() {
-        let raw = r#"{
-            "claudeAiOauth": {
-                "accessToken": "sk-ant-oat01-abc",
-                "refreshToken": "sk-ant-ort01-def",
-                "expiresAt": 1778112000000,
-                "scopes": ["user:inference", "user:profile"],
-                "subscriptionType": "team",
-                "rateLimitTier": "default_claude_ai_5x"
-            }
-        }"#;
-        let (token, plan) = parse_credentials(raw).unwrap();
-        assert_eq!(token, "sk-ant-oat01-abc");
-        assert_eq!(plan.tier.as_deref(), Some("team"));
-        assert_eq!(plan.qualifier.as_deref(), Some("default_claude_ai_5x"));
-    }
-
-    #[test]
-    fn credentials_tolerate_missing_plan_fields() {
-        // Older payloads carry only the token — the read must still proceed.
-        let (token, plan) =
-            parse_credentials(r#"{ "claudeAiOauth": { "accessToken": "tok" } }"#).unwrap();
-        assert_eq!(token, "tok");
-        assert_eq!(plan.tier, None);
-        assert_eq!(plan.qualifier, None);
-    }
-
-    #[test]
-    fn credentials_without_a_token_is_no_token() {
-        let err =
-            parse_credentials(r#"{ "claudeAiOauth": { "subscriptionType": "pro" } }"#).unwrap_err();
-        assert!(matches!(err, FetchError::NoToken));
-    }
-
-    #[test]
-    fn malformed_json_is_no_token() {
-        assert!(matches!(
-            parse_credentials("{ not json").unwrap_err(),
-            FetchError::NoToken
-        ));
-    }
-
-    #[test]
-    fn credentials_accept_the_flat_shape() {
-        // Claude Code CLI's Linux/Windows `.credentials.json` shape was never
-        // confirmed against a live install — this fixture is the defensive
-        // fallback (fields at the top level), not a verified-real sample.
-        let raw = r#"{
-            "accessToken": "sk-ant-oat01-flat",
-            "subscriptionType": "pro",
-            "rateLimitTier": "default_claude_ai"
-        }"#;
-        let (token, plan) = parse_credentials(raw).unwrap();
-        assert_eq!(token, "sk-ant-oat01-flat");
-        assert_eq!(plan.tier.as_deref(), Some("pro"));
-        assert_eq!(plan.qualifier.as_deref(), Some("default_claude_ai"));
-    }
-
-    #[cfg(not(target_os = "macos"))]
-    #[test]
-    fn credentials_path_prefers_the_claude_config_dir_override() {
-        assert_eq!(
-            credentials_path_from(
-                Some(std::ffi::OsString::from("/custom/claude-dir")),
-                Some(std::path::PathBuf::from("/home/someone")),
-            ),
-            Some(std::path::PathBuf::from(
-                "/custom/claude-dir/.credentials.json"
-            ))
-        );
-    }
-
-    #[cfg(not(target_os = "macos"))]
-    #[test]
-    fn credentials_path_falls_back_to_home_dot_claude() {
-        assert_eq!(
-            credentials_path_from(None, Some(std::path::PathBuf::from("/home/someone"))),
-            Some(std::path::PathBuf::from(
-                "/home/someone/.claude/.credentials.json"
-            ))
-        );
-    }
-
-    #[cfg(not(target_os = "macos"))]
-    #[test]
-    fn credentials_path_is_none_without_config_dir_or_home() {
-        assert_eq!(credentials_path_from(None, None), None);
-    }
-
-    /// A config dir whose credentials landed in the file rather than the
-    /// Keychain still has credentials. Reading only the Keychain reports a
-    /// successful login as a failed one — and the add flow deletes the
-    /// directory on that answer.
-    #[test]
-    fn a_config_dir_with_only_a_credentials_file_is_still_signed_in() {
-        let dir = tempfile::tempdir().expect("tempdir");
-        std::fs::write(
-            dir.path().join(".credentials.json"),
-            r#"{"claudeAiOauth":{"accessToken":"sk-ant-oat01-x","subscriptionType":"pro"}}"#,
-        )
-        .expect("fixture");
-        let (token, plan) = read_scoped_credentials(dir.path()).expect("the file is read");
-        assert_eq!(token, "sk-ant-oat01-x");
-        assert_eq!(plan.tier.as_deref(), Some("pro"));
-    }
-
-    /// Neither store holding anything is still "signed out".
-    #[test]
-    fn an_empty_config_dir_has_no_credentials() {
-        let dir = tempfile::tempdir().expect("tempdir");
-        assert!(read_scoped_credentials(dir.path()).is_err());
-    }
-
-    /// The same entry must digest alike — otherwise the comparison this
-    /// exists for would report a clobber on every login.
-    #[test]
-    fn the_digest_is_stable_for_the_same_entry() {
-        let entry = br#"{"claudeAiOauth":{"accessToken":"sk-ant-oat01-x"}}"#;
-        assert_eq!(secret_digest(entry), secret_digest(entry));
-        assert_ne!(secret_digest(entry), secret_digest(b"another entry"));
-    }
-
-    /// And it must never be the secret itself.
-    #[test]
-    fn the_digest_is_sha256_hex_not_the_secret() {
-        assert_eq!(
-            secret_digest(b"abc"),
-            "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
-        );
-        let digest = secret_digest(br#"{"accessToken":"sk-ant-oat01-x"}"#);
-        assert!(!digest.contains("sk-ant"));
-    }
-
-    /// Tests never read the user's own sign-in: the ambient store answers as
-    /// an empty one.
-    #[test]
-    fn the_ambient_store_reads_as_empty_under_test() {
-        assert_eq!(system_credentials_digest(), None);
-        assert!(read_system_credentials().is_err());
-    }
-}
+mod tests;

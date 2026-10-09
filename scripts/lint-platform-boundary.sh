@@ -48,32 +48,28 @@ cd "$ROOT"
 # The two places a platform call may live.
 #
 #   - `daruda_core`'s capability modules: the gates themselves.
-#   - `packages/app/src/platform/`: capabilities that need a window handle,
-#     which a GPUI-free crate cannot hold.
+#   - `packages/app/src/platform/`: app-owned desktop capabilities,
+#     including window APIs and listening-port inspection.
 #
 # Plus the narrow cases where the call *is* the subject rather than a way
 # to get something done:
 #   - `daruda_store/src/persistence.rs` + `profile.rs`: resolve where
 #     daruda's own state lives, which is what a data dir is.
 #
-# And two credential readers. Both reach an OS credential store, and the
-# honest reason they are two rather than one is crate layering:
-# `daruda_agent` cannot see `packages/app`. It shows — `keychain.rs` has a
-# Linux `secret-tool` arm while `credentials.rs` falls back to a JSON
-# file — so this pair is a deferral, not a design:
+# Two credential gates have different ownership contracts:
 #   - `app/src/remote_channel/keychain.rs`: daruda's own secrets. Takes the
 #     service name as a parameter, so it is already the single door for
 #     everything in `app` (`telegram/keychain.rs` delegates to it).
 #   - `daruda_agent/src/accounts/credentials.rs`: reads an entry *another
 #     program* owns (Claude Code's), whose location is that CLI's choice.
 #
-# Moving both behind one gate means putting it where daruda_agent can
-# reach — a job for the stage that adds the Windows arm, since that is
-# when the divergence starts costing something.
+# Each gate selects private OS backends. Keep provider-owned account
+# storage separate from daruda-owned profile secrets.
 WHITELIST_PREFIXES=(
     "packages/core/src/file_url.rs"
     "packages/core/src/host.rs"
     "packages/core/src/process.rs"
+    "packages/core/src/process/"
     "packages/core/src/path.rs"
     "packages/core/src/path/"
     "packages/core/src/shell.rs"
@@ -83,23 +79,9 @@ WHITELIST_PREFIXES=(
     "packages/store/src/profile.rs"
     "packages/app/src/remote_channel/keychain.rs"
     "packages/agent/src/accounts/credentials.rs"
+    "packages/agent/src/accounts/credentials/"
 )
 
-# Known violations, listed so they are visible rather than silently exempt.
-# These are not allowed regions — each is a capability that belongs behind
-# the boundary and has not moved yet.
-#
-#   - `workspace/sync/ports.rs`: `#[cfg(target_os)] mod macos` (lsof/ps) and
-#     `mod linux` (/proc) are 371 of the file's 776 lines — exactly the shape
-#     this rule forbids. Its spawns do go through the gate, so what is left
-#     is a file move into `app/src/platform/`, big enough to be its own
-#     change and not worth burying in this one.
-#
-# A file here still fails the lint if it calls the OS *outside* what is
-# already noted — the point is to not grow the debt, not to pardon it.
-DEFERRED=(
-    "packages/app/src/workspace/sync/ports.rs — platform modules not yet moved to app/src/platform/"
-)
 
 is_whitelisted() {
     local file="$1"
@@ -213,10 +195,3 @@ if [ -n "$violations" ]; then
 fi
 
 echo "✓ Platform capabilities stay behind their gates."
-if [ ${#DEFERRED[@]} -gt 0 ]; then
-    echo
-    echo "  Known and not yet moved (this lint does not catch these):"
-    for d in "${DEFERRED[@]}"; do
-        echo "    - $d"
-    done
-fi

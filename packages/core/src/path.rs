@@ -7,6 +7,7 @@ use std::io;
 use std::path::{Path, PathBuf};
 
 pub mod directories;
+pub mod io_error;
 
 /// Make a path absolute without requiring it to exist or following symlinks.
 /// Resolves Windows drive-relative paths using the OS drive context as well.

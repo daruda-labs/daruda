@@ -11,14 +11,13 @@ pub(crate) mod desktop_instance;
 pub(crate) mod installer_update;
 pub(crate) mod local_socket;
 pub mod notifications;
+pub(crate) mod ports;
 #[cfg(windows)]
 pub(crate) mod power;
 pub mod presence;
 pub(crate) mod startup_failure;
 #[cfg(windows)]
 mod taskbar_windows;
-#[cfg(windows)]
-pub(crate) mod tcp_windows;
 pub(crate) mod window_controls;
 
 /// Record a native capability failure without coupling its domain to IPC.

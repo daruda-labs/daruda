@@ -1,10 +1,22 @@
-//! Profile-scoped OS credential storage. Secrets never enter config or logs.
+//! Profile-scoped credential policy over a native storage backend.
 
+#[cfg(target_os = "linux")]
+mod linux;
+#[cfg(target_os = "macos")]
+mod macos;
+#[cfg(not(any(windows, target_os = "macos", target_os = "linux")))]
+mod unsupported;
 #[cfg(windows)]
 mod windows;
 
-#[cfg(any(target_os = "macos", target_os = "linux"))]
-use std::process::{Command, Stdio};
+#[cfg(target_os = "linux")]
+use linux as backend;
+#[cfg(target_os = "macos")]
+use macos as backend;
+#[cfg(not(any(windows, target_os = "macos", target_os = "linux")))]
+use unsupported as backend;
+#[cfg(windows)]
+use windows as backend;
 
 pub fn service(base: &str) -> String {
     match daruda_store::persistence::profile_suffix() {
@@ -21,47 +33,13 @@ pub fn read(service: &str, account: &str) -> Option<String> {
     if cfg!(test) {
         return None;
     }
-    #[cfg(windows)]
-    return match windows::read(service, account) {
+    match backend::read(service, account) {
         Ok(secret) => secret,
         Err(error) => {
-            crate::platform::report_error(
-                "credentials.read",
-                "Windows credential read failed",
-                &error,
-            );
+            crate::platform::report_error("credentials.read", "Credential read failed", &error);
             None
         }
-    };
-    #[cfg(target_os = "macos")]
-    let output = Command::new("security")
-        .args(["find-generic-password", "-s", service, "-a", account, "-w"])
-        .stderr(Stdio::null())
-        .output()
-        .ok()?;
-    #[cfg(target_os = "linux")]
-    let output = Command::new("secret-tool")
-        .args(["lookup", "service", service, "account", account])
-        .stderr(Stdio::null())
-        .output()
-        .ok()?;
-    #[cfg(any(target_os = "macos", target_os = "linux"))]
-    return output
-        .status
-        .success()
-        .then(|| normalize(&output.stdout))
-        .flatten();
-    #[cfg(not(any(target_os = "macos", target_os = "linux", windows)))]
-    {
-        let _ = (service, account);
-        None
     }
-}
-
-#[cfg(any(test, target_os = "macos", target_os = "linux"))]
-fn normalize(bytes: &[u8]) -> Option<String> {
-    let value = std::str::from_utf8(bytes).ok()?.trim();
-    (!value.is_empty()).then(|| value.to_owned())
 }
 
 pub fn write(service: &str, account: &str, value: &str) -> std::io::Result<()> {
@@ -70,59 +48,7 @@ pub fn write(service: &str, account: &str, value: &str) -> std::io::Result<()> {
             "Credential writes are disabled in tests",
         ));
     }
-    #[cfg(windows)]
-    return windows::write(service, account, value);
-    #[cfg(target_os = "macos")]
-    let status = Command::new("security")
-        .args([
-            "add-generic-password",
-            "-U",
-            "-s",
-            service,
-            "-a",
-            account,
-            "-w",
-            value,
-        ])
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .status()?;
-    #[cfg(target_os = "linux")]
-    let status = {
-        use std::io::Write;
-        let mut child = Command::new("secret-tool")
-            .args([
-                "store",
-                "--label=daruda remote channel",
-                "service",
-                service,
-                "account",
-                account,
-            ])
-            .stdin(Stdio::piped())
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .spawn()?;
-        if let Some(mut input) = child.stdin.take() {
-            input.write_all(value.as_bytes())?;
-        }
-        child.wait()?
-    };
-    #[cfg(any(target_os = "macos", target_os = "linux"))]
-    return if status.success() {
-        Ok(())
-    } else {
-        Err(std::io::Error::other(
-            "OS credential store rejected the write",
-        ))
-    };
-    #[cfg(not(any(target_os = "macos", target_os = "linux", windows)))]
-    {
-        let _ = (service, account, value);
-        Err(std::io::Error::other(
-            "OS credential storage is unavailable",
-        ))
-    }
+    backend::write(service, account, value)
 }
 
 pub fn delete(service: &str, account: &str) -> std::io::Result<()> {
@@ -131,34 +57,23 @@ pub fn delete(service: &str, account: &str) -> std::io::Result<()> {
             "Credential deletes are disabled in tests",
         ));
     }
-    #[cfg(windows)]
-    return windows::delete(service, account);
-    #[cfg(target_os = "macos")]
-    let status = Command::new("security")
-        .args(["delete-generic-password", "-s", service, "-a", account])
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .status()?;
-    #[cfg(target_os = "linux")]
-    let status = Command::new("secret-tool")
-        .args(["clear", "service", service, "account", account])
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .status()?;
-    #[cfg(any(target_os = "macos", target_os = "linux"))]
-    return if status.success() {
+    backend::delete(service, account)
+}
+
+#[cfg(any(test, target_os = "macos", target_os = "linux"))]
+fn normalize(bytes: &[u8]) -> Option<String> {
+    let value = std::str::from_utf8(bytes).ok()?.trim();
+    (!value.is_empty()).then(|| value.to_owned())
+}
+
+#[cfg(any(target_os = "macos", target_os = "linux"))]
+fn status_result(status: std::process::ExitStatus, operation: &str) -> std::io::Result<()> {
+    if status.success() {
         Ok(())
     } else {
-        Err(std::io::Error::other(
-            "OS credential store rejected the delete",
-        ))
-    };
-    #[cfg(not(any(target_os = "macos", target_os = "linux", windows)))]
-    {
-        let _ = (service, account);
-        Err(std::io::Error::other(
-            "OS credential storage is unavailable",
-        ))
+        Err(std::io::Error::other(format!(
+            "OS credential store rejected the {operation}"
+        )))
     }
 }
 

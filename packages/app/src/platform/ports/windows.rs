@@ -6,7 +6,7 @@ use std::{
     path::PathBuf,
 };
 use windows_sys::Win32::{
-    Foundation::{CloseHandle, ERROR_INSUFFICIENT_BUFFER},
+    Foundation::{CloseHandle, ERROR_INSUFFICIENT_BUFFER, ERROR_NOT_SUPPORTED},
     NetworkManagement::IpHelper::{
         GetExtendedTcpTable, MIB_TCP6ROW_OWNER_PID, MIB_TCPROW_OWNER_PID,
         TCP_TABLE_OWNER_PID_LISTENER,
@@ -17,13 +17,56 @@ use windows_sys::Win32::{
     },
 };
 
-pub(crate) struct Listener {
+struct Listener {
     pub address: SocketAddr,
     pub pid: u32,
     pub process_name: Option<String>,
 }
 
-pub(crate) fn scan() -> io::Result<Vec<Listener>> {
+/// Refresh only socket owners, once per scan. A denied metadata query must
+/// not hide a socket; it remains visible as an external port.
+pub(super) fn scan() -> io::Result<Vec<super::ListeningPort>> {
+    use sysinfo::{Pid, ProcessRefreshKind, ProcessesToUpdate, System, UpdateKind};
+
+    let listeners = listeners()?;
+    let mut pids: Vec<_> = listeners.iter().map(|row| Pid::from_u32(row.pid)).collect();
+    pids.sort_unstable();
+    pids.dedup();
+    let mut system = System::new();
+    system.refresh_processes_specifics(
+        ProcessesToUpdate::Some(&pids),
+        true,
+        ProcessRefreshKind::new()
+            .with_cwd(UpdateKind::Always)
+            .with_cmd(UpdateKind::Always),
+    );
+    Ok(listeners
+        .into_iter()
+        .map(|row| {
+            let process = system.process(Pid::from_u32(row.pid));
+            let command = process.and_then(|process| {
+                (!process.cmd().is_empty()).then(|| {
+                    process
+                        .cmd()
+                        .iter()
+                        .map(|arg| arg.to_string_lossy())
+                        .collect::<Vec<_>>()
+                        .join(" ")
+                })
+            });
+            super::ListeningPort {
+                port: row.address.port(),
+                address: row.address.to_string(),
+                pid: row.pid,
+                process_name: row.process_name,
+                cwd: process.and_then(|process| process.cwd()).map(PathBuf::from),
+                command,
+            }
+        })
+        .collect())
+}
+
+fn listeners() -> io::Result<Vec<Listener>> {
     let mut listeners = Vec::new();
     for row in rows::<MIB_TCPROW_OWNER_PID>(u32::from(AF_INET))? {
         listeners.push(Listener {
@@ -35,7 +78,12 @@ pub(crate) fn scan() -> io::Result<Vec<Listener>> {
             process_name: process_name(row.dwOwningPid),
         });
     }
-    for row in rows::<MIB_TCP6ROW_OWNER_PID>(u32::from(AF_INET6))? {
+    let ipv6 = match rows::<MIB_TCP6ROW_OWNER_PID>(u32::from(AF_INET6)) {
+        Ok(rows) => rows,
+        Err(error) if error.raw_os_error() == Some(ERROR_NOT_SUPPORTED as i32) => Vec::new(),
+        Err(error) => return Err(error),
+    };
+    for row in ipv6 {
         listeners.push(Listener {
             address: SocketAddr::V6(SocketAddrV6::new(
                 Ipv6Addr::from(row.ucLocalAddr),
@@ -144,7 +192,29 @@ mod tests {
     fn native_scan_finds_own_ipv4_and_ipv6_listeners_with_owner_pid() {
         let v4 = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
         let v6 = std::net::TcpListener::bind("[::1]:0").ok();
-        let listeners = scan().unwrap();
+        let enriched = scan().unwrap();
+        let owned = enriched
+            .iter()
+            .find(|row| {
+                row.pid == std::process::id() && row.port == v4.local_addr().unwrap().port()
+            })
+            .unwrap();
+        assert!(
+            owned
+                .cwd
+                .as_deref()
+                .is_some_and(|cwd| daruda_core::path::same_path(
+                    cwd,
+                    &std::env::current_dir().unwrap()
+                ))
+        );
+        assert!(
+            owned
+                .command
+                .as_deref()
+                .is_some_and(|command| !command.is_empty())
+        );
+        let listeners = listeners().unwrap();
         for address in std::iter::once(v4.local_addr().unwrap())
             .chain(v6.as_ref().map(|v| v.local_addr().unwrap()))
         {

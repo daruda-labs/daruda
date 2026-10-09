@@ -13,8 +13,7 @@ use std::thread;
 use daruda_store::observability::error_report::{ErrorReport, ErrorSeverity};
 use portable_pty::{CommandBuilder, MasterPty, PtySize, native_pty_system};
 
-#[cfg(windows)]
-mod draining_master;
+mod backend;
 
 #[cfg(all(test, windows))]
 mod windows_input_tests;
@@ -182,23 +181,7 @@ impl PtyHandle {
 /// any other foreground group is a job it started. `false` where the platform
 /// cannot tell (Windows ConPTY has no process groups).
 pub fn runs_foreground_job(master: &(dyn MasterPty + Send), shell_pid: Option<u32>) -> bool {
-    #[cfg(unix)]
-    {
-        match (master.process_group_leader(), shell_pid) {
-            (Some(group), Some(shell)) => i64::from(group) != i64::from(shell),
-            _ => false,
-        }
-    }
-    #[cfg(windows)]
-    {
-        let _ = master;
-        shell_pid.is_some_and(|pid| daruda_core::process::has_descendants(pid).unwrap_or(true))
-    }
-    #[cfg(not(any(unix, windows)))]
-    {
-        let _ = (master, shell_pid);
-        false
-    }
+    backend::runs_foreground_job(master, shell_pid)
 }
 
 /// Spawn a PTY session with the given configuration.
@@ -251,15 +234,7 @@ pub fn spawn_pty_with_args(
         })
         .map_err(|e| PtyError::OpenPty(e.to_string()))?;
 
-    #[cfg(windows)]
-    let master_lifetime = Arc::new(());
-    #[cfg(windows)]
-    let master: Arc<dyn MasterPty + Send> = Arc::new(draining_master::DrainingMaster {
-        _alive: master_lifetime.clone(),
-        inner: std::sync::Mutex::new(pty_pair.master),
-    });
-    #[cfg(not(windows))]
-    let master: Arc<dyn MasterPty + Send> = Arc::from(pty_pair.master);
+    let (master, output_lifecycle) = backend::wrap_master(pty_pair.master);
 
     let mut cmd = CommandBuilder::new(&config.shell);
     cmd.args(args);
@@ -347,14 +322,6 @@ pub fn spawn_pty_with_args(
 
     // PTY reader thread: PTY → stdout channel
     let reader_error_tx = error_tx;
-    #[cfg(windows)]
-    let closing = {
-        let weak = Arc::downgrade(&master_lifetime);
-        drop(master_lifetime);
-        move || weak.strong_count() == 0
-    };
-    #[cfg(not(windows))]
-    let closing = || false;
     thread::spawn(move || {
         let mut buf = [0u8; OUTPUT_CHUNK_BYTES];
         loop {
@@ -381,7 +348,10 @@ pub fn spawn_pty_with_args(
             // A full queue applies backpressure while the pane lives. Once
             // master teardown starts, discard queued delivery and drain the
             // ConPTY pipe so ClosePseudoConsole cannot wait on this producer.
-            if !enqueue_output(&stdout_tx, buf[..n].to_vec(), &closing) && !cfg!(windows) {
+            let delivered = enqueue_output(&stdout_tx, buf[..n].to_vec(), &|| {
+                output_lifecycle.closing()
+            });
+            if output_lifecycle.stop_reading(delivered) {
                 break;
             }
         }

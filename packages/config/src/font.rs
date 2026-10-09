@@ -103,13 +103,7 @@ impl FontConfig {
 }
 
 fn default_monospace_font_family() -> &'static str {
-    if cfg!(target_os = "macos") {
-        "Monaco"
-    } else if cfg!(target_os = "windows") {
-        "Consolas"
-    } else {
-        "DejaVu Sans Mono"
-    }
+    daruda_core::font::default_monospace_family()
 }
 
 // Option-backed input types retain whether each nested key was present. This
