@@ -2,6 +2,7 @@ use std::path::PathBuf;
 use std::process::Command;
 
 mod build_target;
+mod darwin_archive;
 
 const ZIG_VERSION: &str = "0.14.1";
 
@@ -114,20 +115,7 @@ fn main() {
         // WORKAROUND: Zig 0.14.1 does not align Mach-O archive members to 8 bytes.
         // Ghostty pins this toolchain; use Apple's archiver until Zig can be upgraded.
         let native_dir = prefix.join("darwin-lib");
-        std::fs::create_dir_all(&native_dir).expect("create native archive directory");
-        let archive = native_dir.join("libghostty_vt.a");
-        // Run outside Zig's DEVELOPER_DIR override so xcrun can find Xcode tools.
-        let status = Command::new("xcrun")
-            .args(["libtool", "-static", "-o"])
-            .arg(&archive)
-            .arg(lib_dir.join("libghostty_vt.a"))
-            .status()
-            .expect("failed to invoke xcrun libtool; install Xcode Command Line Tools");
-        assert!(
-            status.success(),
-            "macOS archive repack failed: {}",
-            archive.display()
-        );
+        darwin_archive::repack(&lib_dir.join("libghostty_vt.a"), &native_dir);
         lib_dir = native_dir;
     }
 
