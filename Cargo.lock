@@ -7770,6 +7770,7 @@ dependencies = [
 name = "strings_gen"
 version = "0.2.16"
 dependencies = [
+ "syn 2.0.117",
  "tempfile",
  "yaml_serde",
 ]

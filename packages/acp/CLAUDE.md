@@ -42,7 +42,7 @@ feature the client advertises at `initialize`. `session.configOptions.boolean`
 adapters check it and *degrade a native boolean toggle to a two-value select*
 when it is absent — so before daruda advertised it, Claude's "Fast mode" arrived
 as a select and the boolean path was simply unreachable. `client_capabilities()`
-in `session.rs` is the single place this is declared; advertise a capability only
+in `session/requests.rs` is the single place this is declared; advertise a capability only
 once the host actually renders it.
 
 **Implemented but not advertised: `_meta.terminal_output`.** A vendor-private,
@@ -50,7 +50,7 @@ non-standard claude-agent-acp flag. Setting it makes a Bash result *content-less
 (`content: [{type:"terminal"}]`) and moves the bytes to
 `_meta.terminal_output.data`; unset, the adapter returns a fenced ```` ```console ````
 block. It also gates `_meta.terminal_exit`, the exit badge's only source. The
-mapper parses both (`adapter.rs` + `mapping.rs`, with the three-notification
+mapper parses both (`adapter.rs` + `mapping/tools.rs`, with the three-notification
 sequence pinned by a test), but `client_capabilities()` deliberately withholds
 the advertisement until a live wire capture confirms that sequence. The shape is
 read from adapter source (`dist/acp-agent.js`, `dist/tools.js`, 0.62.0), not the
@@ -86,6 +86,26 @@ newest Rust schema (`1.1.0+`) models them as `SessionConfigOption` (category
 `configOptions`, or a schema too old to carry them, makes model and
 reasoning-effort selection invisible to the client — so both sides must be current
 for the feature to work end to end.
+
+## Module responsibilities
+
+`session/mod.rs` is the public handle and event contract. The connection
+handshake lives in `session/connection.rs`, raw notification compatibility in
+`session/notifications.rs`, and FIFO command/turn execution in `session/turn.rs`.
+`session/requests.rs` constructs requests and normalizes capabilities and
+responses. Moving code between these modules must preserve one queued prompt
+to one ordered `TurnEnded` event, including cancellation.
+
+`mapping/mod.rs` dispatches updates and owns lifecycle reconciliation.
+`mapping/messages.rs` owns streaming and replay markers; `mapping/tools.rs`
+owns tool updates; `mapping/content.rs` decodes bounded output;
+`mapping/permissions.rs` builds permission cards. These are pure transforms
+over the shared render model. Public imports remain under `session` and
+`mapping`; callers do not depend on the private implementation modules.
+
+Tests are grouped by behavior under each module's `tests/`, with shared
+fixtures in `tests/mod.rs`. No protocol messages or expected outcomes are
+changed merely to accommodate a module split.
 
 ## Adapter preparation and lifetime
 

@@ -12,6 +12,7 @@ workspace = true
 
 [dependencies]
 yaml_serde = "0.10"
+syn = { version = "2", features = ["full"] }
 
 [dev-dependencies]
 tempfile = "3"

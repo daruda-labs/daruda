@@ -24,11 +24,13 @@ pub fn generate(en: &str, custom_dir: &Path) -> Result<String, String> {
             Ok(text) => {
                 seen_custom.insert(section.clone());
                 custom_fn_names(&text)
+                    .map_err(|error| format!("{}: {error}", custom_file.display()))?
             }
-            Err(_) => BTreeSet::new(),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => BTreeSet::new(),
+            Err(error) => return Err(format!("{}: {error}", custom_file.display())),
         };
         writeln!(out, "pub mod {section} {{").unwrap();
-        if custom_file.exists() {
+        if seen_custom.contains(&section) {
             writeln!(out, "    pub(crate) use super::custom::{section}::*;").unwrap();
         }
         for key in keys {
@@ -71,16 +73,21 @@ pub fn generate(en: &str, custom_dir: &Path) -> Result<String, String> {
         writeln!(out, "}}").unwrap();
     }
     // A custom file whose section does not exist would be silently ignored.
-    if let Ok(dir) = std::fs::read_dir(custom_dir) {
-        for entry in dir.flatten() {
-            let path = entry.path();
-            let Some(stem) = path.file_stem().and_then(|s| s.to_str()) else {
-                continue;
-            };
-            if stem != "mod" && !seen_custom.contains(stem) {
-                return Err(format!("{} names no section", path.display()));
+    match std::fs::read_dir(custom_dir) {
+        Ok(dir) => {
+            for entry in dir {
+                let entry = entry.map_err(|error| format!("{}: {error}", custom_dir.display()))?;
+                let path = entry.path();
+                let Some(stem) = path.file_stem().and_then(|s| s.to_str()) else {
+                    continue;
+                };
+                if stem != "mod" && !seen_custom.contains(stem) {
+                    return Err(format!("{} names no section", path.display()));
+                }
             }
         }
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+        Err(error) => return Err(format!("{}: {error}", custom_dir.display())),
     }
     Ok(out)
 }
@@ -170,16 +177,24 @@ fn check_ident(name: &str, line: usize) -> Result<(), String> {
     Ok(())
 }
 
-/// `pub(crate) fn name` items of a custom file — each replaces its key.
-fn custom_fn_names(text: &str) -> BTreeSet<String> {
-    text.lines()
-        .filter_map(|l| l.strip_prefix("pub(crate) fn "))
-        .filter_map(|rest| {
-            rest.split(|c: char| !(c.is_ascii_alphanumeric() || c == '_'))
-                .next()
+/// Crate-visible top-level functions replace their keys, regardless of
+/// formatting or platform attributes. Restricted helpers and nested items do not.
+fn custom_fn_names(text: &str) -> Result<BTreeSet<String>, syn::Error> {
+    Ok(syn::parse_file(text)?
+        .items
+        .into_iter()
+        .filter_map(|item| match item {
+            syn::Item::Fn(function) => {
+                let exported = match &function.vis {
+                    syn::Visibility::Public(_) => true,
+                    syn::Visibility::Restricted(visibility) => visibility.path.is_ident("crate"),
+                    syn::Visibility::Inherited => false,
+                };
+                exported.then(|| function.sig.ident.to_string())
+            }
+            _ => None,
         })
-        .map(str::to_string)
-        .collect()
+        .collect())
 }
 
 /// Every dotted key (`section.key`) whose value is a scalar, with the
@@ -350,6 +365,54 @@ mod tests {
             assert!(!out.contains("fn tray_show("), "{out}");
             assert!(out.contains("fn settings()"), "{out}");
         }
+    }
+
+    #[test]
+    fn overrides_are_items_instead_of_text_matches() {
+        let names = custom_fn_names(
+            r#"
+            // pub(crate) fn comment() {}
+            const EXAMPLE: &str = "pub(crate) fn string() {}";
+            #[cfg(windows)]
+            pub(crate)
+            const fn platform() -> usize { 0 }
+            pub fn visible() {}
+            fn helper() {}
+            pub(self) fn private_self() {}
+            pub(super) fn private_parent() {}
+            pub(in crate::custom) fn private_module() {}
+            mod nested { pub(crate) fn hidden() {} }
+            "#,
+        )
+        .expect("valid Rust");
+        assert_eq!(names, BTreeSet::from(["platform".into(), "visible".into()]));
+    }
+
+    #[test]
+    fn invalid_custom_source_reports_its_path() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let file = dir.path().join("menu.rs");
+        std::fs::write(&file, "pub(crate) fn broken(").expect("write");
+        let error = generate("menu:\n  open: \"Open\"\n", dir.path()).expect_err("invalid Rust");
+        assert!(error.contains(&file.display().to_string()), "{error}");
+    }
+
+    #[test]
+    fn unreadable_custom_source_is_not_treated_as_absent() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let file = dir.path().join("menu.rs");
+        std::fs::write(&file, [0xff]).expect("write");
+        let error = generate("menu:\n  open: \"Open\"\n", dir.path()).expect_err("invalid UTF-8");
+        assert!(error.contains(&file.display().to_string()), "{error}");
+    }
+
+    #[test]
+    fn an_absent_custom_directory_still_generates_all_keys() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let out = generate("menu:\n  open: \"Open\"\n", &dir.path().join("absent"))
+            .expect("no overrides");
+        assert!(out.contains("fn open()"));
+        assert!(!out.contains("use super::custom"));
     }
 
     #[test]

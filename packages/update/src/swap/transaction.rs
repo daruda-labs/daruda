@@ -15,10 +15,49 @@ struct Entry {
 
 #[derive(Serialize, Deserialize)]
 struct Journal {
+    #[serde(flatten)]
+    phase: Phase,
+    files: Vec<Entry>,
+}
+
+/// In memory, a swap has exactly one phase. The wire format remains the
+/// original two booleans so an older installer can recover this journal.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(from = "PhaseRecord", into = "PhaseRecord")]
+enum Phase {
+    Staging,
+    Prepared,
+    Committed,
+}
+
+#[derive(Serialize, Deserialize)]
+struct PhaseRecord {
     committed: bool,
     #[serde(default)]
     prepared: bool,
-    files: Vec<Entry>,
+}
+
+impl From<PhaseRecord> for Phase {
+    fn from(record: PhaseRecord) -> Self {
+        // Old journals may omit prepared, including committed journals.
+        // Committed has always taken precedence during recovery.
+        if record.committed {
+            Self::Committed
+        } else if record.prepared {
+            Self::Prepared
+        } else {
+            Self::Staging
+        }
+    }
+}
+
+impl From<Phase> for PhaseRecord {
+    fn from(phase: Phase) -> Self {
+        Self {
+            committed: phase == Phase::Committed,
+            prepared: phase != Phase::Staging,
+        }
+    }
 }
 
 fn lock(root: &Path) -> Result<std::fs::File, UpdateError> {
@@ -122,14 +161,13 @@ pub(super) fn install(bundle: &Path, root: &Path) -> Result<(), UpdateError> {
         });
     }
     let mut journal = Journal {
-        committed: false,
-        prepared: false,
+        phase: Phase::Staging,
         files,
     };
     // Publish before staging so an abandoned attempt always has an owner.
     publish(root, &journal)?;
     let result = stage(&plan).and_then(|staged| {
-        journal.prepared = true;
+        journal.phase = Phase::Prepared;
         publish(root, &journal)?;
         commit(staged)
     });
@@ -141,7 +179,7 @@ pub(super) fn install(bundle: &Path, root: &Path) -> Result<(), UpdateError> {
             ))),
         };
     }
-    journal.committed = true;
+    journal.phase = Phase::Committed;
     if let Err(error) = publish(root, &journal) {
         recover_owned(root)?;
         return Err(error);
@@ -206,7 +244,7 @@ fn recover_owned(root: &Path) -> Result<(), UpdateError> {
         .collect::<Result<Vec<_>, UpdateError>>()?;
     for (live, aside) in files.iter().rev() {
         let staged = staged_path(live);
-        if journal.committed {
+        if journal.phase == Phase::Committed {
             if let Some(aside) = aside {
                 remove_if_present(aside)?;
             }
@@ -217,7 +255,7 @@ fn recover_owned(root: &Path) -> Result<(), UpdateError> {
                 }
                 std::fs::rename(aside, live).map_err(io)?;
             }
-        } else if journal.prepared
+        } else if journal.phase == Phase::Prepared
             && !staged.try_exists().map_err(io)?
             && live.try_exists().map_err(io)?
         {
@@ -240,6 +278,51 @@ fn remove_if_present(path: &Path) -> Result<(), UpdateError> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn legacy_journals_keep_their_recovery_phase() {
+        for (flags, expected) in [
+            (serde_json::json!({"committed": false}), Phase::Staging),
+            (serde_json::json!({"committed": true}), Phase::Committed),
+            (
+                serde_json::json!({"committed": false, "prepared": false}),
+                Phase::Staging,
+            ),
+            (
+                serde_json::json!({"committed": false, "prepared": true}),
+                Phase::Prepared,
+            ),
+            (
+                serde_json::json!({"committed": true, "prepared": false}),
+                Phase::Committed,
+            ),
+            (
+                serde_json::json!({"committed": true, "prepared": true}),
+                Phase::Committed,
+            ),
+        ] {
+            let mut value = flags;
+            value["files"] = serde_json::json!([]);
+            let journal: Journal = serde_json::from_value(value).expect("legacy journal");
+            assert_eq!(journal.phase, expected);
+        }
+    }
+
+    #[test]
+    fn new_journals_remain_readable_by_the_legacy_format() {
+        for phase in [Phase::Staging, Phase::Prepared, Phase::Committed] {
+            let encoded = serde_json::to_value(Journal {
+                phase,
+                files: vec![],
+            })
+            .expect("serialize journal");
+            assert!(encoded.get("phase").is_none());
+            assert_eq!(encoded["committed"], phase == Phase::Committed);
+            assert_eq!(encoded["prepared"], phase != Phase::Staging);
+            let decoded: Journal = serde_json::from_value(encoded).expect("round trip");
+            assert_eq!(decoded.phase, phase);
+        }
+    }
 
     #[test]
     fn install_refuses_symlinked_parents_before_staging() {
@@ -295,8 +378,7 @@ mod tests {
         publish(
             root.path(),
             &Journal {
-                committed: false,
-                prepared: true,
+                phase: Phase::Prepared,
                 files: vec![
                     Entry {
                         live: "app.exe".into(),
@@ -328,8 +410,7 @@ mod tests {
         publish(
             root.path(),
             &Journal {
-                committed: false,
-                prepared: true,
+                phase: Phase::Prepared,
                 files: vec![
                     Entry {
                         live: "app.exe".into(),
@@ -361,8 +442,7 @@ mod tests {
         publish(
             root.path(),
             &Journal {
-                committed: false,
-                prepared: true,
+                phase: Phase::Prepared,
                 files: vec![Entry {
                     live: "../escape".into(),
                     aside: None,

@@ -107,6 +107,27 @@ mixed widget types without resetting; reuse the same index pool
 across chip-driven branches so the user lands on the same logical
 slot regardless of which fields are visible.
 
+## `settings/`
+
+`SettingsView` remains the one per-window entity that owns widget state and
+emits `SettingsEvent`. Its modules separate the reasons that state changes:
+
+- `initialize.rs` constructs widgets and installs global observers;
+  `bindings.rs` owns ordinary input subscriptions and value synchronization.
+- `catalog/` owns agent rows, subscriptions, collection and saving. Its
+  `validation.rs` is pure; `path_warning.rs` performs advisory executable
+  lookup on edits, never while rendering.
+- `hosts/` owns host rows and saving; `hosts/reconcile.rs` is GPUI-free and
+  owns identity retirement and tombstone reconciliation.
+- `persistence.rs` is the common save boundary: field patches, drafts,
+  external changes, and conflicts. Domain collectors use this boundary
+  instead of writing config independently.
+- `sections/` and `render/` build the surface. The root module keeps view
+  state, navigation, events, and presentation helpers.
+
+Domain internals are visible inside `crate::settings` only. The host uses the
+existing view/event API and does not reach into catalog or host editors.
+
 ## `project/` (`daruda_project::project`)
 
 Runtime [`Project`] — the workspace-visible counterpart to
@@ -123,7 +144,7 @@ The Workspace entity and its subsystems.
 - **Entity & actions** — `Workspace` struct, construction (`new_with_project`), config apply, `on_*` action shims, command palette + history picker, modal openers (`dialog_helpers`), persistence (save/restore/rebuild + `LaneRuntime`), status-bar snapshot, lane create/remove/activate. Holds `projects: Vec<Project>` + `groups: Vec<SerializedGroup>` + `active: LaneRef`; `lane_scoped: HashMap<LaneRef, LaneScoped>` owns per-lane git state, file data/watchers, and input history.
 - **`project_ops.rs` / `group_ops.rs` / `project_palette_ops.rs`** — Project CRUD (add / close / delete-on-disk / rename + `window_open_policy`), Group CRUD (add/rename/recolor/collapse/delete + `move_project_to_group`), and palette dialog plumbing (`New Group`, `Rename Project`, `Move Project to Group…`).
 - **`layout/`** — `Dock` entity (left/bottom/right; named `left_dock`/`right_dock`/`bottom_dock` on `Workspace`), divider + dock drag ops, plain-data snapshots for re-entrancy-safe render.
-- **`main_area/`** — TabBar + recursive PaneTree runtime. Houses `MainAreaContext`, the pure pane split-tree, pane structs + PTY spawn, directional navigation, tab lifecycle, viewport resize propagation, and the recursive `PaneLayout` renderer. Sub-domains: `file_view_pane/` (file viewer), `bottom_dock/` (macro grid + terminal input + tab strip + macro data ops).
+- **`main_area/`** — TabBar + recursive PaneTree runtime. Houses `MainAreaContext`, the pure pane split-tree, pane structs + PTY spawn, directional navigation, tab lifecycle, viewport resize propagation, and the recursive `PaneLayout` renderer. `pane/mod.rs` owns pane models and view coordination; `pane/accounts/model.rs` resolves account selection without GPUI; `pane/accounts/mod.rs` owns workspace queries and preparation; `pane/terminal.rs` starts PTYs; `pane/output.rs` drains output and owns the adaptive poll policy. Sub-domains: `file_view_pane/` (file viewer), `bottom_dock/` (macro grid + terminal input + tab strip + macro data ops).
 - **`left_dock/`** — Lanes view (displayed as "Worktrees" tab) rendered as a 2-level tree (`TopRow::Group(GroupId)` / `TopRow::UngroupedProject(ProjectId)` at the top rank, expanding into project headers and lane rows). Group/Project drag payloads share a single `Vec<TopRow>` ordering pool with 0..N renumbering on drop; intra-project lane DnD stays within its project. Also git-changes view, files view, lazy file-tree context + walker, git-status fetch.
 - **`pages/`** — Tasks and Flows, shown in place of the lane's tabs and belonging to no lane. What a page shows on top of its list lives in `Workspace.pages` and survives the page being hidden; only `leave_page_detail_then` (`pages/detail.rs`) clears it, asking first about unsaved edits. `tasks/editor/` is the Task editor and its prompt-file watcher; `flows/graph/` is the flow graph, which runs in the worktree it was opened for, not the active one.
 - **`right_dock/`** — Usage / skills / tasks / tools views.
@@ -156,7 +177,7 @@ Runtime `Lane` model (id / path / status / `base_ref` / description) plus a GPUI
 | New global action + keybinding | `actions!()` → handler in ops file → `surface/keybindings.rs` const → `main.rs` bind_keys → `action_map.rs` arm → `command/palette.rs` entry |
 | New dock panel | `PlaceholderKind` variant → `Workspace::new_with_project` push → renderer module → `render.rs` dock match arm → persistence if needed |
 | New modal | See G9. `impl ModalView` + `.tab_group()` on root; open via `dialog_helpers::*`. |
-| New pane content kind (plain-struct) | `PaneContent` variant + struct in `main_area/pane.rs` → match arms (title/cwd/focus_handle/resize) → `main_area/mod.rs` walker arm (free-fn `render(&content, cx)`) → `daruda_project` persistence mirror + `#[serde(default)]` → `create_*_pane` constructor → `workspace/tests` round-trip. Rendered inline under `Workspace::render`, so its `cx.notify()` dirties the whole window. Fine for small, rarely-updating panes (File). |
+| New pane content kind (plain-struct) | `PaneContent` variant + struct in `main_area/pane/mod.rs` → match arms (title/cwd/focus_handle/resize) → `main_area/mod.rs` walker arm (free-fn `render(&content, cx)`) → `daruda_project` persistence mirror + `#[serde(default)]` → `create_*_pane` constructor → `workspace/tests` round-trip. Rendered inline under `Workspace::render`, so its `cx.notify()` dirties the whole window. Fine for small, rarely-updating panes (File). |
 | New pane content kind (entity-backed / cached) | For a pane needing **scroll/perf isolation or its own internal state** (Terminal, AgentChat): hold a thin `XxxContent { view: Entity<XxxView>, cached_title, cwd }` wrapper; `XxxView: Render + Focusable`, its `render` calls `track_focus(&self.focus_handle)` and `cx.notify()`s itself; walker arm embeds `AnyView::from(view.clone()).cached(StyleRefinement::default().size_full().flex())`; `wrapper_focus_handle → None`; `Pane::{title,cwd}` read the wrapper (cx-free), `focus_handle(cx)` reads `view.read(cx)`. A `cx.notify()` on the view then dirties only its subtree — siblings keep their cached paint. |
 | Virtualized list inside a pane (variable-height) | Use gpui core `list(state, cx.processor(\|this, ix, win, cx\| …))` + `ListState` (`Top` align + `FollowMode::Tail` for chat-like append) — **not** `crate::ui::list` (that's the gpui_component delegate/searchable list) and not `uniform_list` (fixed height). Keep `list_state` count in sync after each items mutation; `remeasure_items(tail)` on streaming grow, `remeasure()` after any visible item's height changes (fold, async image/diff landing). Thumb + at-bottom: `crate::ui::scrollbar::{vertical_thumb_for_list, list_at_bottom}` (display-only thumb). Synthetic fold headers (turn ⊃ response ⊃ tool-group ⊃ block) are not stored — `rows::project(items, &fold)` derives a stable `Vec<RenderRow>` (header rows + `hidden`/`indent` flags) each rebuild; the list virtualizes over rows and `rebuild_rows` diff-splices so a fold toggle remeasures in place (no scroll drift). Reference: `main_area/agent_chat_pane/{view/,render/,rows.rs,fold.rs}`. |
 | Skills / Tools / Tasks tab feature | Mutate the relevant Global via `cx.update_global::<SkillsState\|McpState\|GlobalTasks, _>(...)` → renderer reads through the snapshot in `RightDockSnapshot` → `cx.observe_global` rebroadcasts to every Workspace and every open Settings view |
@@ -171,7 +192,7 @@ Runtime `Lane` model (id / path / status / `base_ref` / description) plus a GPUI
 | GPUI render only | `agent/<view>.rs`, `workspace/left_dock/<view>/`, `workspace/render/` |
 | Workspace action handler | `workspace/mod.rs` (tab/pane/focus) · `workspace/lane_ops.rs` · `workspace/layout/ops.rs` |
 | Workspace data discarded on lane/project teardown | `workspace/lane_scoped.rs::LaneScoped`; runtimes and flow runs retain their own lifecycle containers |
-| New pane content kind | `main_area/pane.rs` + `main_area/mod.rs` walker arm + `daruda_project` + `workspace/mod.rs` constructor |
+| New pane content kind | `main_area/pane/mod.rs` + `main_area/mod.rs` walker arm + `daruda_project` + `workspace/mod.rs` constructor |
 | New modal / text input in modal | See G9. |
 | Reusable widget | `crate::ui`. Never inline `div().flex().hover(...).on_mouse_down(...)` at call site. |
 | Right-click menu on any element | `workspace/root_menu.rs::root_context_menu`. Never the vendored `.context_menu(...)` — it renders inside the caller's subtree, where an ancestor clip cuts the menu *and* its hit-testing. |
