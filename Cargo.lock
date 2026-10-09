@@ -1983,6 +1983,7 @@ dependencies = [
  "tempfile",
  "tracing",
  "unicode-width",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -2011,6 +2012,7 @@ name = "daruda_update"
 version = "0.2.16"
 dependencies = [
  "daruda_core",
+ "fs4",
  "semver",
  "serde",
  "serde_json",

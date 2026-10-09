@@ -123,7 +123,15 @@ tray-icon = { version = "0.21.3", default-features = false }
 raw-window-handle = "0.6"
 windows_api = { package = "windows", version = "0.61.3", features = ["Data_Xml_Dom", "UI_Notifications", "Foundation", "Win32_System_Com", "Win32_System_Com_StructuredStorage", "Win32_System_Variant", "Win32_System_WinRT", "Win32_UI_Shell", "Win32_UI_Shell_PropertiesSystem", "Win32_Storage_EnhancedStorage", "Win32_Storage_FileSystem", "Win32_UI_WindowsAndMessaging"] }
 uds_windows = "1.2.1"
-windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Security_Authorization", "Win32_System_SystemInformation", "Win32_System_Power", "Win32_System_Threading", "Win32_UI_Input_KeyboardAndMouse", "Win32_UI_WindowsAndMessaging", "Win32_UI_Shell"] }
+windows-sys = { version = "0.61", features = [
+    "Win32_Foundation", "Win32_Security_Authorization", "Win32_Security_Credentials",
+    "Win32_Security_Cryptography", "Win32_Security_Cryptography_Catalog",
+    "Win32_Security_Cryptography_Sip", "Win32_Security_WinTrust",
+    "Win32_System_SystemInformation", "Win32_System_Power", "Win32_System_Threading",
+    "Win32_UI_Input_KeyboardAndMouse", "Win32_UI_WindowsAndMessaging", "Win32_UI_Shell",
+    "Win32_NetworkManagement_IpHelper", "Win32_Networking_WinSock",
+    "Win32_Graphics_Gdi", "Win32_Storage_Xps",
+] }
 # Same reasoning as Linux: ReadDirectoryChangesW is unconditional, so there is
 # no feature to opt into — only `macos_fsevent` is gated. Without this section
 # the app has no `notify` at all on Windows and does not compile.
