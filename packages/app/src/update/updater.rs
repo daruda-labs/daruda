@@ -380,7 +380,14 @@ impl InstallTarget {
                 daruda_update::install_dmg(package, bundle).map(|()| self.clone())
             }
             Self::Directory(root) => {
-                daruda_update::install_zip(package, root).map(|()| self.clone())
+                daruda_update::install_zip_verified(package, root, &|bundle| {
+                    crate::platform::authenticode::verify_update(
+                        &root.join("daruda.exe"),
+                        &bundle.join("daruda.exe"),
+                    )
+                    .map_err(|error| UpdateError::Sync(error.to_string()))
+                })
+                .map(|()| self.clone())
             }
         }
     }
@@ -390,7 +397,16 @@ impl InstallTarget {
     /// there is `/Applications`, which is nobody's install root.
     pub fn sweep(&self) {
         if let Self::Directory(root) = self {
-            daruda_update::sweep_aside(root);
+            match daruda_update::recover_update(root) {
+                Ok(()) => daruda_update::sweep_aside(root),
+                Err(error) => LogWriter::log(
+                    ErrorReport::new("Interrupted update recovery failed")
+                        .message(error.to_string())
+                        .at(file!(), line!())
+                        .dedup("update.recovery.failed")
+                        .build(),
+                ),
+            }
         }
     }
 

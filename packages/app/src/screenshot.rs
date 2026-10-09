@@ -1,5 +1,5 @@
 //! `daruda --screenshot <path>` — render the live workspace window to a PNG
-//! via gpui's permission-free `render_to_image` (offscreen Metal capture),
+//! via gpui's offscreen Metal capture on macOS or composed window pixels on Windows,
 //! then quit. This is the automation entry point for visual verification:
 //! render the real app → PNG → an agent reads the PNG back.
 //!
@@ -208,6 +208,7 @@ pub(crate) fn schedule_capture(
             themes.iter().copied().map(Some).collect()
         };
         let batch = steps.len() > 1;
+        let mut failed = false;
 
         for theme in steps {
             if let Some(theme) = theme {
@@ -240,8 +241,14 @@ pub(crate) fn schedule_capture(
             let outcome = cx.update(|cx| capture_window(&out, cx));
             match outcome {
                 Ok(()) => println!("screenshot written: {}", out.display()),
-                Err(error) => println!("screenshot failed: {error:#}"),
+                Err(error) => {
+                    failed = true;
+                    println!("screenshot failed: {error:#}");
+                }
             }
+        }
+        if failed {
+            std::process::exit(1);
         }
         cx.update(|cx| cx.quit());
     })
@@ -522,6 +529,13 @@ fn capture_window(path: &Path, cx: &mut App) -> Result<()> {
 /// Render a named window to `path`. The widen-reflow harness opens its own
 /// window rather than driving the restored workspace, so it says which.
 fn capture_window_on(window: AnyWindowHandle, path: &Path, cx: &mut App) -> Result<()> {
+    #[cfg(windows)]
+    let image = cx
+        .update_window(window, |_, window, _| {
+            crate::platform::capture_windows::capture(window)
+        })
+        .context("capture window is gone")??;
+    #[cfg(not(windows))]
     let image = cx
         .update_window(window, |_, window, _| window.render_to_image())
         .context("capture window is gone")??;

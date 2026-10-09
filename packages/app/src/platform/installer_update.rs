@@ -5,6 +5,7 @@ use std::path::Path;
 pub(crate) fn launch(package: &Path, root: &Path) -> std::io::Result<()> {
     #[cfg(windows)]
     {
+        super::authenticode::verify_update(&root.join("daruda.exe"), package)?;
         command(package, root, std::process::id()).spawn()?;
         Ok(())
     }

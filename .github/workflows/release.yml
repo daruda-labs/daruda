@@ -109,6 +109,8 @@ jobs:
     needs: metadata
     runs-on: windows-latest
     timeout-minutes: 90
+    outputs:
+      signed: ${{ steps.signing.outputs.signed }}
     steps:
       - name: Checkout
         uses: actions/checkout@v6
@@ -149,9 +151,39 @@ jobs:
       - name: Verify vendored GPUI
         run: cargo run --locked -p vendor_gpui -- --check
 
+      - name: Prepare Windows signing identity
+        id: signing
+        shell: pwsh
+        env:
+          SIGNING_PFX: ${{ secrets.WINDOWS_SIGNING_PFX_BASE64 }}
+          SIGNING_PASSWORD: ${{ secrets.WINDOWS_SIGNING_PFX_PASSWORD }}
+          SIGNING_REQUIRED: ${{ vars.WINDOWS_SIGNING_REQUIRED }}
+        run: |
+          if (-not $env:SIGNING_PFX) {
+            if ($env:SIGNING_REQUIRED -eq 'true') { throw 'Windows release signing is required but no certificate was provided' }
+            'signed=false' | Add-Content $env:GITHUB_OUTPUT
+            return
+          }
+          $pfx = Join-Path $env:RUNNER_TEMP 'daruda-signing.pfx'
+          try {
+            [IO.File]::WriteAllBytes($pfx, [Convert]::FromBase64String($env:SIGNING_PFX))
+            $password = if ($env:SIGNING_PASSWORD) {
+              ConvertTo-SecureString $env:SIGNING_PASSWORD -AsPlainText -Force
+            } else { [Security.SecureString]::new() }
+            $certificates = @(Import-PfxCertificate -FilePath $pfx -CertStoreLocation 'Cert:/CurrentUser/My' -Password $password)
+            $signers = @($certificates | Where-Object {
+              $_.HasPrivateKey -and ($_.EnhancedKeyUsageList.ObjectId -contains '1.3.6.1.5.5.7.3.3')
+            })
+            if ($signers.Count -ne 1) { throw 'Expected one code-signing certificate with a private key' }
+            "thumbprint=$($signers[0].Thumbprint)" | Add-Content $env:GITHUB_OUTPUT
+            'signed=true' | Add-Content $env:GITHUB_OUTPUT
+          } finally {
+            if (Test-Path -LiteralPath $pfx) { Remove-Item -LiteralPath $pfx -Force }
+          }
+
       - name: Build and package Windows application
         id: package
-        run: ./scripts/package-windows.ps1
+        run: ./scripts/package-windows.ps1 -CertificateThumbprint '${{ steps.signing.outputs.thumbprint }}'
 
       - name: Install pinned NSIS toolchain
         shell: pwsh
@@ -167,7 +199,7 @@ jobs:
 
       - name: Build per-user installer
         id: installer
-        run: ./scripts/build-windows-installer.ps1 -Archive '${{ steps.package.outputs.archive }}'
+        run: ./scripts/build-windows-installer.ps1 -Archive '${{ steps.package.outputs.archive }}' -CertificateThumbprint '${{ steps.signing.outputs.thumbprint }}'
 
       - name: Verify installation and removal
         timeout-minutes: 5
@@ -212,8 +244,7 @@ jobs:
           merge-multiple: true
           path: packages
 
-      # Neither package is signed, so a digest published beside them is the
-      # only thing a downloader can check them against.
+      # Digests cover the final bytes, including any Windows signatures.
       - name: Write checksums
         working-directory: packages
         # `daruda-*` rather than `*`, which would or would not include the
@@ -245,16 +276,18 @@ jobs:
             Download `daruda-${{ needs.metadata.outputs.version }}-windows-x86_64-setup.exe`
             for a per-user installation with Start Menu and desktop shortcuts.
             Administrator permission is not required. Uninstalling preserves app data.
-            The unsigned installer may show a Windows SmartScreen warning.
+            Windows Authenticode signing enabled for this release: `${{ needs.build-windows.outputs.signed }}`.
+            Unsigned downloads may show a Windows SmartScreen warning.
             Alternatively, extract the entire ZIP and run `daruda.exe`, keeping
             its included runtime DLLs beside it.
             Install Git for Windows to use repositories, shell flows, and agents.
 
             ## Verifying a download
 
-            `SHA256SUMS.txt` holds a digest for each file above. Neither
-            package is signed, so this is what a download can be checked
-            against: `sha256sum -c SHA256SUMS.txt` (or `Get-FileHash`).
+            `SHA256SUMS.txt` holds a digest for each file above:
+            `sha256sum -c SHA256SUMS.txt` (or `Get-FileHash`).
+            For a signed Windows release, also verify `Get-AuthenticodeSignature`
+            reports `Valid` and the expected publisher before installation.
 
             ## Build from source
 

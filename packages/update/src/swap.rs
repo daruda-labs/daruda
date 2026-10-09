@@ -9,6 +9,9 @@ use std::path::{Path, PathBuf};
 
 use crate::UpdateError;
 
+mod transaction;
+pub use transaction::recover_update;
+
 /// Marks a file the swap moved out of the way. Left behind on purpose: the
 /// running process still has it open, so only a later run can remove it.
 pub const ASIDE_SUFFIX: &str = ".daruda-old";
@@ -21,7 +24,7 @@ pub const ASIDE_SUFFIX: &str = ".daruda-old";
 /// untouched rather than half-swapped.
 pub fn swap_into(bundle: &Path, root: &Path) -> Result<(), UpdateError> {
     prove_writable(root)?;
-    commit(stage(&plan(bundle, root)?)?)
+    transaction::install(bundle, root)
 }
 
 /// Marks a file copied into place but not yet live.
@@ -40,7 +43,15 @@ fn stage(plan: &[(PathBuf, PathBuf)]) -> Result<Vec<(PathBuf, PathBuf)>, UpdateE
             .map_or(Ok(()), std::fs::create_dir_all)
             .and_then(|()| {
                 let target = staged_path(to);
-                std::fs::copy(from, &target).map(|_| target)
+                let mut source = std::fs::File::open(from)?;
+                let mut staged = std::fs::OpenOptions::new()
+                    .create_new(true)
+                    .write(true)
+                    .open(&target)?;
+                std::io::copy(&mut source, &mut staged)?;
+                staged.set_permissions(source.metadata()?.permissions())?;
+                staged.sync_all()?;
+                Ok(target)
             });
         match step {
             Ok(target) => staged.push((target, to.clone())),
@@ -136,6 +147,15 @@ fn clear_staged(staged: &[(PathBuf, PathBuf)]) {
 /// The published archive carries one top directory holding the whole install,
 /// so that directory — not the archive root — is what gets swapped.
 pub fn install_zip(zip: &Path, install_root: &Path) -> Result<(), UpdateError> {
+    install_zip_verified(zip, install_root, &|_| Ok(()))
+}
+
+/// Validate the extracted application before the first install mutation.
+pub fn install_zip_verified(
+    zip: &Path,
+    install_root: &Path,
+    verify: &impl Fn(&Path) -> Result<(), UpdateError>,
+) -> Result<(), UpdateError> {
     let staging = tempfile::tempdir().map_err(io)?;
     let extracted = daruda_core::process::archive_command()
         .arg("-xf")
@@ -149,7 +169,9 @@ pub fn install_zip(zip: &Path, install_root: &Path) -> Result<(), UpdateError> {
             String::from_utf8_lossy(&extracted.stderr).into_owned(),
         ));
     }
-    swap_into(&sole_bundle(staging.path())?, install_root)
+    let bundle = sole_bundle(staging.path())?;
+    verify(&bundle)?;
+    swap_into(&bundle, install_root)
 }
 
 /// The one directory an unpacked archive should contain.

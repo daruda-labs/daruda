@@ -1,6 +1,7 @@
 param(
     [ValidateSet('debug', 'release')][string]$Profile = 'release',
-    [switch]$SkipBuild
+    [switch]$SkipBuild,
+    [string]$CertificateThumbprint
 )
 
 $ErrorActionPreference = 'Stop'
@@ -48,14 +49,18 @@ try {
     New-Item -ItemType Directory -Path $bundle | Out-Null
     try {
         Copy-Item -LiteralPath $binary -Destination (Join-Path $bundle 'daruda.exe')
+        if ($CertificateThumbprint) {
+            & "$PSScriptRoot/sign-windows.ps1" -Path (Join-Path $bundle 'daruda.exe') -CertificateThumbprint $CertificateThumbprint
+        }
         Copy-Item -LiteralPath (Join-Path $repoRoot 'LICENSE') -Destination $bundle
         Copy-Item -LiteralPath (Join-Path $repoRoot 'licenses') -Destination $bundle -Recurse
         foreach ($dll in $runtime) { Copy-Item -LiteralPath $dll.FullName -Destination $bundle }
+        $signing = if ($CertificateThumbprint) { 'Authenticode signed and timestamped' } else { 'Unsigned' }
         @"
 daruda $version ($Profile, Windows x86_64)
 
 Extract the entire ZIP, then run daruda.exe. Keep the runtime DLLs beside it.
-This is a portable, unsigned build. Windows GUI support is experimental.
+Portable build: $signing. Windows GUI support is experimental.
 Install Git for Windows to use repositories, shell flows, and ACP agents.
 Source and build instructions: https://github.com/daruda-labs/daruda
 "@ | Set-Content -LiteralPath (Join-Path $bundle 'README.txt') -Encoding utf8

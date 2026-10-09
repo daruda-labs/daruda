@@ -13,7 +13,10 @@ pub mod verify;
 pub use check::{check_latest, download_verified};
 pub use install::{install_dmg, relaunch};
 pub use release::{ReleaseInfo, asset_suffix, parse_release};
-pub use swap::{AWAIT_EXIT_SUBCOMMAND, install_zip, relaunch_from, sweep_aside};
+pub use swap::{
+    AWAIT_EXIT_SUBCOMMAND, install_zip, install_zip_verified, recover_update, relaunch_from,
+    sweep_aside,
+};
 
 /// Errors that can occur anywhere in the update flow: checking for a new
 /// release, downloading this platform's package, mounting it, and installing

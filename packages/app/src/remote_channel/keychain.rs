@@ -1,5 +1,8 @@
 //! Profile-scoped OS credential storage. Secrets never enter config or logs.
 
+#[cfg(windows)]
+mod windows;
+
 #[cfg(any(target_os = "macos", target_os = "linux"))]
 use std::process::{Command, Stdio};
 
@@ -18,6 +21,18 @@ pub fn read(service: &str, account: &str) -> Option<String> {
     if cfg!(test) {
         return None;
     }
+    #[cfg(windows)]
+    return match windows::read(service, account) {
+        Ok(secret) => secret,
+        Err(error) => {
+            crate::platform::report_error(
+                "credentials.read",
+                "Windows credential read failed",
+                &error,
+            );
+            None
+        }
+    };
     #[cfg(target_os = "macos")]
     let output = Command::new("security")
         .args(["find-generic-password", "-s", service, "-a", account, "-w"])
@@ -36,7 +51,7 @@ pub fn read(service: &str, account: &str) -> Option<String> {
         .success()
         .then(|| normalize(&output.stdout))
         .flatten();
-    #[cfg(not(any(target_os = "macos", target_os = "linux")))]
+    #[cfg(not(any(target_os = "macos", target_os = "linux", windows)))]
     {
         let _ = (service, account);
         None
@@ -55,6 +70,8 @@ pub fn write(service: &str, account: &str, value: &str) -> std::io::Result<()> {
             "Credential writes are disabled in tests",
         ));
     }
+    #[cfg(windows)]
+    return windows::write(service, account, value);
     #[cfg(target_os = "macos")]
     let status = Command::new("security")
         .args([
@@ -99,7 +116,7 @@ pub fn write(service: &str, account: &str, value: &str) -> std::io::Result<()> {
             "OS credential store rejected the write",
         ))
     };
-    #[cfg(not(any(target_os = "macos", target_os = "linux")))]
+    #[cfg(not(any(target_os = "macos", target_os = "linux", windows)))]
     {
         let _ = (service, account, value);
         Err(std::io::Error::other(
@@ -114,6 +131,8 @@ pub fn delete(service: &str, account: &str) -> std::io::Result<()> {
             "Credential deletes are disabled in tests",
         ));
     }
+    #[cfg(windows)]
+    return windows::delete(service, account);
     #[cfg(target_os = "macos")]
     let status = Command::new("security")
         .args(["delete-generic-password", "-s", service, "-a", account])
@@ -134,7 +153,7 @@ pub fn delete(service: &str, account: &str) -> std::io::Result<()> {
             "OS credential store rejected the delete",
         ))
     };
-    #[cfg(not(any(target_os = "macos", target_os = "linux")))]
+    #[cfg(not(any(target_os = "macos", target_os = "linux", windows)))]
     {
         let _ = (service, account);
         Err(std::io::Error::other(

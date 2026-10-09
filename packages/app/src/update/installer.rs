@@ -32,6 +32,17 @@ impl InstallerTarget {
 
     /// Keep a private copy: the download is removed after preparation completes.
     pub(super) fn prepare(&self, verified_package: &Path) -> Result<Self, UpdateError> {
+        self.prepare_checked(verified_package, &|candidate| {
+            crate::platform::authenticode::verify_update(&self.root.join("daruda.exe"), candidate)
+                .map_err(io_error)
+        })
+    }
+
+    fn prepare_checked(
+        &self,
+        verified_package: &Path,
+        verify: &impl Fn(&Path) -> Result<(), UpdateError>,
+    ) -> Result<Self, UpdateError> {
         let temporary = tempfile::Builder::new()
             .prefix("daruda-verified-update-")
             .suffix(".exe")
@@ -39,6 +50,7 @@ impl InstallerTarget {
             .map_err(io_error)?;
         std::fs::copy(verified_package, temporary.path()).map_err(io_error)?;
         temporary.as_file().sync_all().map_err(io_error)?;
+        verify(temporary.path())?;
         let (file, path) = temporary.keep().map_err(|error| io_error(error.error))?;
         drop(file);
         // The staged installer stays available for retry and diagnosis in Temp.
@@ -78,7 +90,7 @@ mod tests {
         assert!(installed.relaunch().is_err());
         let download = root.path().join("verified-setup.exe");
         std::fs::write(&download, "verified package bytes").unwrap();
-        let prepared = installed.prepare(&download).unwrap();
+        let prepared = installed.prepare_checked(&download, &|_| Ok(())).unwrap();
         let InstallerState::Prepared(package) = prepared.state else {
             panic!("expected prepared installer")
         };

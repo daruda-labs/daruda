@@ -313,7 +313,26 @@ fn scan() -> PortScanResult {
     let ports = macos::scan();
     #[cfg(target_os = "linux")]
     let ports = linux::scan();
-    #[cfg(not(any(target_os = "macos", target_os = "linux")))]
+    #[cfg(windows)]
+    let ports = match crate::platform::tcp_windows::scan() {
+        Ok(rows) => Some(
+            rows.into_iter()
+                .map(|row| ListeningPort {
+                    port: row.address.port(),
+                    address: row.address.to_string(),
+                    pid: row.pid,
+                    process_name: row.process_name,
+                    cwd: None,
+                    command: None,
+                })
+                .collect(),
+        ),
+        Err(error) => {
+            crate::platform::report_error("ports.scan", "Windows port scan failed", &error);
+            None
+        }
+    };
+    #[cfg(not(any(target_os = "macos", target_os = "linux", windows)))]
     let ports = None;
     ports
         .map(dedupe_listening_ports)

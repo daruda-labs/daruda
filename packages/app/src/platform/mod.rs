@@ -3,6 +3,9 @@
 //! `unsafe` surface stays auditable.
 
 pub mod attention;
+pub(crate) mod authenticode;
+#[cfg(all(windows, feature = "screenshot"))]
+pub(crate) mod capture_windows;
 pub(crate) mod desktop;
 pub(crate) mod desktop_instance;
 pub(crate) mod installer_update;
@@ -14,6 +17,8 @@ pub mod presence;
 pub(crate) mod startup_failure;
 #[cfg(windows)]
 mod taskbar_windows;
+#[cfg(windows)]
+pub(crate) mod tcp_windows;
 pub(crate) mod window_controls;
 
 /// Record a native capability failure without coupling its domain to IPC.
