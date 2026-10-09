@@ -7,6 +7,64 @@ use super::*;
 use gpui::BorrowAppContext as _;
 
 #[gpui::test]
+fn terminal_output_restore_uses_the_owning_project_and_profile(cx: &mut TestAppContext) {
+    let data = tempfile::tempdir().unwrap();
+    let other_profile = tempfile::tempdir().unwrap();
+    let root_a = tempfile::tempdir().unwrap();
+    let root_b = tempfile::tempdir().unwrap();
+    let write_override = |data: &std::path::Path, root: &std::path::Path, enabled: bool| {
+        let path = daruda_config::project::project_config_path_in(data, root);
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(path, format!("[shell]\nrestore_output = {enabled}\n")).unwrap();
+    };
+    write_override(data.path(), root_a.path(), true);
+    write_override(data.path(), root_b.path(), false);
+    write_override(other_profile.path(), root_b.path(), true);
+    let handle = cx.add_window(|window, cx| {
+        Workspace::new_with_project_for_test_full(
+            &daruda_config::Config::default(),
+            Some(daruda_store::project::Project::from_path(root_a.path())),
+            data.path().to_owned(),
+            window,
+            cx,
+        )
+    });
+    let ws = handle.root(cx).unwrap();
+    cx.update_window(handle.into(), |_, window, cx| {
+        ws.update(cx, |ws, cx| {
+            ws.add_project(root_b.path().to_owned(), window, cx);
+            ws.add_tab(window, cx);
+            assert_eq!(ws.projects.len(), 2);
+            let enabled_project = ws.projects[0].id;
+            let expected: std::collections::BTreeSet<_> = ws
+                .main_area
+                .runtimes
+                .iter()
+                .filter(|(lane, _)| lane.project == enabled_project)
+                .flat_map(|(_, runtime)| &runtime.panes)
+                .filter(|pane| pane.terminal_view().is_some())
+                .map(|pane| pane.id)
+                .collect();
+            assert!(!expected.is_empty());
+            ws.persist_state(cx);
+            let store = daruda_store::project::WorkspaceStore::in_directory(data.path());
+            let saved = store.load_terminal_snapshots(ws.uuid).unwrap();
+            assert_eq!(
+                saved
+                    .keys()
+                    .copied()
+                    .collect::<std::collections::BTreeSet<_>>(),
+                expected
+            );
+            write_override(data.path(), root_a.path(), false);
+            ws.persist_state(cx);
+            assert!(store.load_terminal_snapshots(ws.uuid).unwrap().is_empty());
+        });
+    })
+    .unwrap();
+}
+
+#[gpui::test]
 fn persist_state_namespaces_workspace_and_project_files(cx: &mut TestAppContext) {
     // Two workspaces sharing a project root:
     // - W1: projects A + B, persist

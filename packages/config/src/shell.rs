@@ -28,6 +28,8 @@ pub struct ShellConfig {
     /// keep their default behaviour (`Cmd+Arrow` does nothing, `Opt+Arrow`
     /// sends the xterm CSI sequence).
     pub natural_text_editing: bool,
+    /// Retain a bounded text viewport across app restarts. Processes restart.
+    pub restore_output: bool,
 }
 
 impl Default for ShellConfig {
@@ -36,6 +38,7 @@ impl Default for ShellConfig {
             program: None,
             close_pane_on_exit: true,
             natural_text_editing: true,
+            restore_output: false,
         }
     }
 }

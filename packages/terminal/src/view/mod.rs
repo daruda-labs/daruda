@@ -569,6 +569,16 @@ impl TerminalView {
         &self.session
     }
 
+    /// Render historical text without replaying terminal escape commands.
+    pub fn restore_text_snapshot(&mut self, text: &str, label: &str, cx: &mut Context<Self>) {
+        let text: String = text
+            .chars()
+            .filter(|c| !c.is_control() || matches!(c, '\n' | '\t'))
+            .collect();
+        let output = format!("{}\r\n{label}\r\n", text.trim_end().replace('\n', "\r\n"));
+        self.feed_output_bytes(output.as_bytes(), cx);
+    }
+
     /// Create a new annotation at `range` with `text`. Thin wrapper over
     /// [`TerminalSession::add_annotation`] — exists so workspace-side
     /// callers do not need a `&mut TerminalSession`.

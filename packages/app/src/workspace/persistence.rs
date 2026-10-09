@@ -51,6 +51,23 @@ pub(in crate::workspace) struct LaneRuntime {
 }
 
 impl Workspace {
+    fn restore_terminal_output_for(
+        &self,
+        project_id: daruda_store::project::ProjectId,
+        cx: &App,
+    ) -> bool {
+        let project = self
+            .projects
+            .iter()
+            .find(|project| project.id == project_id);
+        let user = crate::settings_store::SettingsStore::global(cx).user();
+        // Persistence resolves the owning project, independent of the active UI layer.
+        project
+            .and_then(|project| {
+                daruda_config::ProjectConfig::load_in(&self.data_dir, &project.root).shell
+            })
+            .map_or(user.shell.restore_output, |shell| shell.restore_output)
+    }
     /// The active lane's live runtime, resolved from `runtimes` by
     /// `self.active`. Invariant: the entry is seeded at construction, on
     /// every `activate_lane`, and on `reset_to_empty_workspace`, so the
@@ -325,6 +342,8 @@ impl Workspace {
                         .dedup("project.save")
                         .build(),
                 );
+                // Do not publish a workspace referencing an unsaved project.
+                return;
             }
         }
 
@@ -336,6 +355,48 @@ impl Workspace {
                     .at(file!(), line!())
                     .with_context("workspace_uuid", workspace.uuid.as_inner().to_string())
                     .dedup("workspace.save")
+                    .build(),
+            );
+            return;
+        }
+        let snapshots: BTreeMap<_, _> = self
+            .main_area
+            .runtimes
+            .iter()
+            .filter(|(lane, _)| self.restore_terminal_output_for(lane.project, cx))
+            .flat_map(|(_, rt)| &rt.panes)
+            .filter_map(|pane| {
+                let text = pane
+                    .terminal_view()?
+                    .read(cx)
+                    .session()
+                    .dump_viewport()
+                    .ok()?;
+                (text.len() <= 64 * 1024).then_some((pane.id, text))
+            })
+            .collect();
+        if !snapshots.is_empty() {
+            if let Err(error) = self
+                .workspace_store
+                .save_terminal_snapshots(workspace.uuid, &snapshots)
+            {
+                LogWriter::log(
+                    ErrorReport::new("Failed to save terminal output snapshots")
+                        .from_error(&error)
+                        .at(file!(), line!())
+                        .dedup("workspace.terminal_snapshots.save")
+                        .build(),
+                );
+            }
+        } else if let Err(error) = self
+            .workspace_store
+            .delete_terminal_snapshots(workspace.uuid)
+        {
+            LogWriter::log(
+                ErrorReport::new("Failed to clear disabled terminal output snapshots")
+                    .from_error(&error)
+                    .at(file!(), line!())
+                    .dedup("workspace.terminal_snapshots.clear")
                     .build(),
             );
         }
@@ -406,6 +467,18 @@ impl Workspace {
         cx: &mut Context<Self>,
     ) {
         // Restore dock states.
+        let terminal_snapshots = self
+            .workspace_store
+            .load_terminal_snapshots(workspace.uuid)
+            .unwrap_or_else(|error| {
+                LogWriter::log(
+                    ErrorReport::new("Failed to load terminal output snapshots")
+                        .from_error(&error)
+                        .at(file!(), line!())
+                        .build(),
+                );
+                Default::default()
+            });
         let left_open = workspace.docks.left_open;
         let left_size = workspace.docks.left_size;
         self.docks.left.update(cx, |d, _| {
@@ -626,6 +699,26 @@ impl Workspace {
                         .unwrap_or_default()
                 };
 
+                let restore_output = self.restore_terminal_output_for(runtime_project_id, cx);
+                for (old_id, new_id) in &id_map {
+                    if !restore_output {
+                        break;
+                    }
+                    if let Some(text) = terminal_snapshots.get(old_id)
+                        && let Some(view) = scratch
+                            .iter()
+                            .find(|pane| pane.id == *new_id)
+                            .and_then(|pane| pane.terminal_view())
+                    {
+                        view.update(cx, |view, cx| {
+                            view.restore_text_snapshot(
+                                text,
+                                &crate::surface::strings::terminal::restored_output(),
+                                cx,
+                            )
+                        });
+                    }
+                }
                 let runtime = LaneRuntime {
                     preview_tab_id: None,
                     tabs,

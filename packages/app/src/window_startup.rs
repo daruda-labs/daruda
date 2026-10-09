@@ -23,14 +23,13 @@ pub(crate) fn open_first_window(
     let store = crate::workspace_storage::current(cx);
     let recent = store.load_recent();
     let restored = recent.first().and_then(|entry| {
-        store.load_workspace(entry.workspace_uuid).map(|ws| {
-            let projects: Vec<_> = ws
-                .project_ids
-                .iter()
-                .filter_map(|p| store.load_project(*p))
-                .collect();
-            (ws, projects)
-        })
+        match store.load_complete_workspace(entry.workspace_uuid) {
+            Ok(saved) => saved,
+            Err(error) => {
+                crate::windows::report_restore_failure(error, cx);
+                None
+            }
+        }
     });
 
     if let Some((ws_state, project_states)) = restored {

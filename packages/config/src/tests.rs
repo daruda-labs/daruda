@@ -1702,6 +1702,7 @@ fn resolve_overrides_shell_section_only() {
         program: Some("/usr/local/bin/zsh".into()),
         close_pane_on_exit: false,
         natural_text_editing: true,
+        restore_output: false,
     };
     let project = ProjectConfig {
         shell: Some(project_shell),

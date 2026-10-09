@@ -1,22 +1,6 @@
-//! Shared file-based persistence helpers for `tasks.json`, `panels.json`,
-//! and `recent.json` / per-project `state.json`.
-//!
-//! All three share the same atomic-rename write strategy and exhibit the
-//! same operational failure mode: a parse error currently looks
-//! identical to "file missing" because both return `None`. That hides
-//! data corruption from the user and makes silent partial restores
-//! debugging-hostile. This module factors the read/parse path so every
-//! caller logs the same way and treats the same failures consistently.
-//!
-//! Atomicity note: writes use `tempfile::NamedTempFile::new_in(dir)?`
-//! followed by `persist(target)`, which is a same-FS rename — atomic on
-//! POSIX. There is no window where a reader can see a truncated file:
-//! the kernel's `rename(2)` either flips the directory entry to the new
-//! inode or it doesn't. Concurrent readers either see the old contents
-//! (full file) or the new contents (full file). The "corruption"
-//! failure mode this module addresses is therefore not a write race —
-//! it's a user (or external tool) hand-editing the file into invalid
-//! JSON, or a power loss during a non-atomic third-party write.
+//! Shared JSON persistence with synced atomic replacement and a previous
+//! readable generation. Reads distinguish missing records from corruption;
+//! recovery preserves the damaged bytes before restoring the backup.
 
 use std::io::Write as _;
 use std::path::{Path, PathBuf};
@@ -27,6 +11,9 @@ use serde::{Serialize, de::DeserializeOwned};
 use crate::observability::error_report::{ErrorReport, ErrorSeverity};
 use crate::observability::log_writer::LogWriter;
 use crate::observability::system_info::redact_home;
+
+mod recovery;
+pub use recovery::{delete_recoverable_json, load_recoverable_json, save_recoverable_json};
 
 /// Outcome of [`load_json_file`]. `Missing` and `Parsed` are the
 /// callers' two normal paths; `Corrupt` is surfaced separately so a
@@ -39,7 +26,7 @@ pub enum LoadOutcome<T> {
     /// File present and parsed successfully.
     Parsed(T),
     /// File present but unreadable (I/O error or invalid JSON). The
-    /// helper logged a single line to stderr; the caller decides
+    /// helper logged the failure; the caller decides
     /// whether to treat this like `Missing` or surface it to the user.
     Corrupt,
 }
@@ -58,14 +45,11 @@ impl<T> LoadOutcome<T> {
 /// Load + parse a JSON file under `path`. Logs once on parse / I/O
 /// failure (tagged with `subsystem` so users can grep `daruda` logs).
 ///
-/// Retries the read once on a transient I/O error other than NotFound:
-/// rare, but cheap insurance against the brief window where another
-/// process is mid-rename across the same target. The retry is a single
-/// 50 ms sleep — not a backoff loop.
+/// Recover a valid prior generation while preserving damaged original bytes.
 pub fn load_json_file<T: DeserializeOwned>(subsystem: &str, path: &Path) -> LoadOutcome<T> {
-    let json = match read_with_one_retry(path) {
-        Ok(Some(s)) => s,
-        Ok(None) => return LoadOutcome::Missing,
+    match load_recoverable_json(subsystem, path) {
+        Ok(Some(value)) => LoadOutcome::Parsed(value),
+        Ok(None) => LoadOutcome::Missing,
         Err(e) => {
             LogWriter::log(
                 ErrorReport::new(format!("Failed to read {subsystem} state"))
@@ -77,41 +61,7 @@ pub fn load_json_file<T: DeserializeOwned>(subsystem: &str, path: &Path) -> Load
                     .dedup(format!("store.{subsystem}.read"))
                     .build(),
             );
-            return LoadOutcome::Corrupt;
-        }
-    };
-
-    match serde_json::from_str::<T>(&json) {
-        Ok(t) => LoadOutcome::Parsed(t),
-        Err(e) => {
-            LogWriter::log(
-                ErrorReport::new(format!("Failed to parse {subsystem} state"))
-                    .severity(ErrorSeverity::Error)
-                    .from_error(&e)
-                    .at(file!(), line!())
-                    .with_context("subsystem", subsystem)
-                    .with_context("path", redact_home(path))
-                    .dedup(format!("store.{subsystem}.parse"))
-                    .build(),
-            );
             LoadOutcome::Corrupt
-        }
-    }
-}
-
-/// `Ok(Some(_))` = read succeeded. `Ok(None)` = file does not exist.
-/// `Err(_)` = I/O error other than NotFound, after one retry.
-fn read_with_one_retry(path: &Path) -> std::io::Result<Option<String>> {
-    match std::fs::read_to_string(path) {
-        Ok(s) => Ok(Some(s)),
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
-        Err(_) => {
-            std::thread::sleep(std::time::Duration::from_millis(50));
-            match std::fs::read_to_string(path) {
-                Ok(s) => Ok(Some(s)),
-                Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
-                Err(e) => Err(e),
-            }
         }
     }
 }
@@ -120,12 +70,37 @@ fn read_with_one_retry(path: &Path) -> std::io::Result<Option<String>> {
 /// directory, then `persist` (rename) into place. Creates `dir` if
 /// missing. Returns the kind of `io::Error` callers already handle.
 pub fn save_json_atomic<T: Serialize>(dir: &Path, target: &Path, value: &T) -> std::io::Result<()> {
+    recovery::save_json_with_backup(dir, target, value)
+}
+
+fn write_json_atomic<T: Serialize>(dir: &Path, target: &Path, value: &T) -> std::io::Result<()> {
     std::fs::create_dir_all(dir)?;
     let mut tmp = tempfile::NamedTempFile::new_in(dir)?;
     let json = serde_json::to_string_pretty(value).map_err(std::io::Error::other)?;
+    if json.len() > recovery::MAX_RECORD_BYTES {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            "State record is too large",
+        ));
+    }
     tmp.write_all(json.as_bytes())?;
     tmp.flush()?;
-    tmp.persist(target).map_err(|e| e.error)?;
+    tmp.as_file().sync_all()?;
+    for attempt in 0..4 {
+        match tmp.persist(target) {
+            Ok(_) => return Ok(()),
+            Err(error) => {
+                if !cfg!(windows)
+                    || !matches!(error.error.raw_os_error(), Some(32 | 33))
+                    || attempt == 3
+                {
+                    return Err(error.error);
+                }
+                tmp = error.file;
+                std::thread::sleep(std::time::Duration::from_millis(25 * (attempt + 1)));
+            }
+        }
+    }
     Ok(())
 }
 

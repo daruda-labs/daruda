@@ -6,6 +6,7 @@ use std::path::PathBuf;
 use super::{ProjectState, ProjectUuid, RecentEntry, WorkspaceState, WorkspaceUuid, persistence};
 
 mod migration;
+mod terminal_snapshots;
 
 /// Workspace, project and recent-list persistence, independent of config paths.
 #[derive(Clone)]
@@ -34,6 +35,49 @@ impl WorkspaceStore {
         persistence::load_workspace_state_in(&self.root, uuid)
     }
 
+    /// Restore every referenced project, or refuse a partial workspace.
+    /// Damaged records are recovered from retained backups where possible.
+    pub fn load_complete_workspace(
+        &self,
+        uuid: WorkspaceUuid,
+    ) -> io::Result<Option<(WorkspaceState, Vec<ProjectState>)>> {
+        let path =
+            persistence::workspaces_dir_in(&self.root).join(format!("{}.json", uuid.as_inner()));
+        let Some(workspace) =
+            crate::persistence::load_recoverable_json::<WorkspaceState>("workspace", &path)?
+        else {
+            return Ok(None);
+        };
+        if workspace.uuid != uuid || workspace.schema_version > super::WORKSPACE_SCHEMA_VERSION {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "Workspace identity mismatch",
+            ));
+        }
+        let mut projects = Vec::new();
+        for id in &workspace.project_ids {
+            let path =
+                persistence::projects_dir_in(&self.root).join(format!("{}.json", id.as_inner()));
+            let project =
+                crate::persistence::load_recoverable_json::<ProjectState>("project", &path)?
+                    .filter(|project| {
+                        project.uuid == *id
+                            && project.schema_version <= super::WORKSPACE_SCHEMA_VERSION
+                    })
+                    .ok_or_else(|| {
+                        io::Error::new(
+                            io::ErrorKind::InvalidData,
+                            format!(
+                                "Referenced project {} is unavailable; workspace was preserved",
+                                id.as_inner()
+                            ),
+                        )
+                    })?;
+            projects.push(project);
+        }
+        Ok(Some((workspace, projects)))
+    }
+
     /// Atomically persist a workspace.
     pub fn save_workspace(&self, state: &WorkspaceState) -> io::Result<()> {
         persistence::save_workspace_state_in(&self.root, state)
@@ -41,6 +85,7 @@ impl WorkspaceStore {
 
     /// Remove a workspace that can no longer be reached.
     pub fn delete_workspace(&self, uuid: WorkspaceUuid) -> io::Result<()> {
+        self.delete_terminal_snapshots(uuid)?;
         persistence::delete_workspace_state_in(&self.root, uuid)
     }
 
@@ -77,5 +122,30 @@ impl WorkspaceStore {
     /// Refresh an existing row without inserting or reordering it.
     pub fn refresh_recent_if_present(&self, uuid: WorkspaceUuid, name: String) -> io::Result<bool> {
         persistence::refresh_recent_if_present_in(&self.root, uuid, name)
+    }
+}
+
+#[cfg(test)]
+mod recovery_tests {
+    use super::*;
+    use crate::project::tests::new_schema_fixtures::{sample_project, sample_workspace};
+
+    #[test]
+    fn incomplete_workspace_is_preserved_instead_of_partially_restored() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = WorkspaceStore::in_directory(dir.path());
+        let project = sample_project();
+        let workspace = sample_workspace(project.uuid);
+        store.save_workspace(&workspace).unwrap();
+        assert!(store.load_complete_workspace(workspace.uuid).is_err());
+        assert_eq!(
+            store.load_workspace(workspace.uuid),
+            Some(workspace.clone())
+        );
+        store.save_project(&project).unwrap();
+        assert_eq!(
+            store.load_complete_workspace(workspace.uuid).unwrap(),
+            Some((workspace, vec![project]))
+        );
     }
 }

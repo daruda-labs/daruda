@@ -14,7 +14,10 @@
 
 use std::path::{Path, PathBuf};
 
-use crate::persistence::{LoadOutcome, load_json_file, save_json_atomic};
+use crate::persistence::{
+    LoadOutcome, delete_recoverable_json, load_json_file, load_recoverable_json,
+    save_recoverable_json,
+};
 
 use super::types::{ProjectState, ProjectUuid, RecentEntry, WorkspaceState, WorkspaceUuid};
 
@@ -70,7 +73,7 @@ pub fn is_uuid_filename_stem(stem: &str) -> bool {
 pub fn save_workspace_state_in(data_dir: &Path, state: &WorkspaceState) -> std::io::Result<()> {
     let dir = workspaces_dir_in(data_dir);
     let path = workspace_path_in(data_dir, state.uuid);
-    save_json_atomic(&dir, &path, state)
+    save_recoverable_json(&dir, &path, state)
 }
 
 pub fn load_workspace_state_in(data_dir: &Path, uuid: WorkspaceUuid) -> Option<WorkspaceState> {
@@ -83,10 +86,7 @@ pub fn load_workspace_state_in(data_dir: &Path, uuid: WorkspaceUuid) -> Option<W
 
 pub fn delete_workspace_state_in(data_dir: &Path, uuid: WorkspaceUuid) -> std::io::Result<()> {
     let path = workspace_path_in(data_dir, uuid);
-    if path.exists() {
-        std::fs::remove_file(path)?;
-    }
-    Ok(())
+    delete_recoverable_json(&path)
 }
 
 /// Iterate every workspace file in `<data_dir>/workspaces/`. Used
@@ -115,7 +115,7 @@ pub fn for_each_workspace_state_in<F: FnMut(WorkspaceState)>(data_dir: &Path, mu
 pub fn save_project_state_in(data_dir: &Path, state: &ProjectState) -> std::io::Result<()> {
     let dir = projects_dir_in(data_dir);
     let path = project_path_in(data_dir, state.uuid);
-    save_json_atomic(&dir, &path, state)
+    save_recoverable_json(&dir, &path, state)
 }
 
 pub fn load_project_state_in(data_dir: &Path, uuid: ProjectUuid) -> Option<ProjectState> {
@@ -128,10 +128,7 @@ pub fn load_project_state_in(data_dir: &Path, uuid: ProjectUuid) -> Option<Proje
 
 pub fn delete_project_state_in(data_dir: &Path, uuid: ProjectUuid) -> std::io::Result<()> {
     let path = project_path_in(data_dir, uuid);
-    if path.exists() {
-        std::fs::remove_file(path)?;
-    }
-    Ok(())
+    delete_recoverable_json(&path)
 }
 
 /// Iterate every project file in `<data_dir>/projects/` that has a
@@ -159,14 +156,27 @@ pub fn for_each_project_state_in<F: FnMut(ProjectState)>(data_dir: &Path, mut f:
 // ---- Recent ----
 
 pub fn load_recent_in(data_dir: &Path) -> Vec<RecentEntry> {
-    match load_json_file::<Vec<RecentEntry>>("recent_workspaces", &recent_path_in(data_dir)) {
-        LoadOutcome::Parsed(v) => v,
-        LoadOutcome::Missing | LoadOutcome::Corrupt => Vec::new(),
+    match load_recoverable_json::<Vec<RecentEntry>>("recent_workspaces", &recent_path_in(data_dir))
+    {
+        Ok(Some(entries)) => entries,
+        Ok(None) => Vec::new(),
+        Err(error) => {
+            crate::observability::log_writer::LogWriter::log(
+                crate::observability::error_report::ErrorReport::new(
+                    "Recent workspace recovery failed",
+                )
+                .from_error(&error)
+                .at(file!(), line!())
+                .dedup("recent.recovery.failed")
+                .build(),
+            );
+            Vec::new()
+        }
     }
 }
 
 pub fn save_recent_in(data_dir: &Path, entries: &[RecentEntry]) -> std::io::Result<()> {
-    save_json_atomic(data_dir, &recent_path_in(data_dir), &entries)
+    save_recoverable_json(data_dir, &recent_path_in(data_dir), &entries.to_vec())
 }
 
 pub fn touch_recent_in(

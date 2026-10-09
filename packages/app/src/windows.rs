@@ -282,7 +282,15 @@ pub(crate) fn open_recent_uuid(
     }
     let initiating_window = active_window_to_close(cx);
     let store = crate::workspace_storage::current(cx);
-    let Some(ws_state) = store.load_workspace(uuid) else {
+    let saved = match store.load_complete_workspace(uuid) {
+        Ok(saved) => saved,
+        Err(error) => {
+            report_restore_failure(error, cx);
+            leave_open();
+            return;
+        }
+    };
+    let Some((ws_state, project_states)) = saved else {
         // Stale recent entry — prune and bail. The user perceives
         // this as the menu row vanishing on next refresh.
         let mut entries = store.load_recent();
@@ -302,11 +310,6 @@ pub(crate) fn open_recent_uuid(
         leave_open();
         return;
     };
-    let project_states: Vec<_> = ws_state
-        .project_ids
-        .iter()
-        .filter_map(|p| store.load_project(*p))
-        .collect();
     let opts = build_window_options(&config);
     open_project_with_mode(
         config.clone(),
@@ -319,6 +322,32 @@ pub(crate) fn open_recent_uuid(
     );
     crate::menus::refresh_recent_menu(cx);
     leave_open();
+}
+
+pub(crate) fn report_restore_failure(error: std::io::Error, cx: &mut App) {
+    let report = ErrorReport::new(crate::surface::strings::error::workspace_recovery_failed())
+        .severity(ErrorSeverity::Error)
+        .from_error(&error)
+        .at(file!(), line!())
+        .dedup("workspace.restore.failed")
+        .build();
+    LogWriter::log(report.clone());
+    cx.defer(move |cx| {
+        if let Some((handle, workspace)) =
+            WindowRegistry::active_workspace(cx).or_else(|| WindowRegistry::first_workspace(cx))
+        {
+            try_update_workspace_window(handle, cx, "workspace.restore.failure", move |_, cx| {
+                if let Err(error) = workspace.update(cx, |ws, cx| ws.report_error(report, cx)) {
+                    LogWriter::log(
+                        ErrorReport::new("Cannot display workspace recovery error")
+                            .message(error.to_string())
+                            .at(file!(), line!())
+                            .build(),
+                    );
+                }
+            });
+        }
+    });
 }
 
 /// Folder-picker entry point used by `OpenFolderInNewWindow` and the
