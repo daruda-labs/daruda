@@ -83,7 +83,8 @@ jobs:
   macos:
     name: macOS — build and test
     runs-on: macos-latest  # Apple Silicon runner
-    timeout-minutes: 15
+    # Cold builds need time for test compilation after Clippy and doc checks.
+    timeout-minutes: 45
 
     steps:
       - name: Checkout
