@@ -128,8 +128,8 @@ jobs:
         run: cargo clippy --locked -p ghostty_vt -p ghostty_vt_sys -p daruda_terminal -p daruda -p daruda_config -p daruda_store -p daruda_agent -p daruda_update -p daruda_acp -p daruda_core -p daruda_flow -p daruda_project -p daruda_ui -p daruda_control_types -p daruda_content -p daruda_flow_edit -p ferrum_flow -p vendor_gpui -p test_process -p strings_gen --all-targets -- -D warnings
 
       # Every app feature is off by default, so the clippy above never reads
-      # what only `screenshot` or `replay` compiles. macOS is where a capture
-      # actually runs.
+      # what only `screenshot` or `replay` compiles. Check every feature on
+      # each OS, even when its capture backend is unavailable at runtime.
       - name: Clippy (all app features)
         run: cargo clippy --locked -p daruda --all-features --all-targets -- -D warnings
 
@@ -220,6 +220,9 @@ jobs:
       - name: Clippy
         run: cargo clippy --locked --keep-going -p ghostty_vt -p ghostty_vt_sys -p daruda_terminal -p daruda -p daruda_config -p daruda_store -p daruda_agent -p daruda_update -p daruda_acp -p daruda_core -p daruda_flow -p daruda_project -p daruda_ui -p daruda_control_types -p daruda_content -p daruda_flow_edit -p ferrum_flow -p vendor_gpui -p test_process -p strings_gen --all-targets -- -D warnings
 
+      - name: Clippy (all app features)
+        run: cargo clippy --locked -p daruda --all-features --all-targets -- -D warnings
+
       # `--no-fail-fast` so one early failure does not hide the rest —
       # the point of the first run is the whole list.
       - name: Test
@@ -278,8 +281,8 @@ jobs:
       - name: Build native application
         run: ./scripts/build-windows.ps1
 
-      - name: Check all app targets and screenshot feature
-        run: cargo check --locked -p daruda --all-targets --features screenshot
+      - name: Clippy (all app features)
+        run: cargo clippy --locked -p daruda --all-features --all-targets -- -D warnings
 
       # The one thing a build and a unit test cannot answer: whether gpui's
       # platform layer comes up on a runner with no GPU, where D3D11 falls

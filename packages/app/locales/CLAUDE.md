@@ -113,6 +113,19 @@ Do **not** add domain-prefixed duplicates like `ui.file_viewer_loading`.
 4. **Call the function at the call site** (`s::section::key()`). Never embed
    raw string literals for user-visible text.
 
+### Platform-only strings
+
+Keep translation keys in both locale files. If every caller is compiled only
+for one OS, define the string function in `custom/<section>.rs` with the same
+`#[cfg]` condition as its callers. The generator recognizes that override
+regardless of the build host and omits the unconditional generated function.
+For example, Windows tray labels belong in `custom/menu.rs` under
+`#[cfg(windows)]`. Do not edit `OUT_DIR/strings.rs` or suppress `dead_code`.
+
+`cfg!(windows)` does not exclude code from compilation; use `#[cfg]` for
+platform-only declarations. Run the `strings_gen` tests when changing an
+override, and verify default and all-feature Clippy on all three CI platforms.
+
 ## YAML syntax rules
 
 - Use double-quoted strings (`"…"`) for all values.

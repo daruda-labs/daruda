@@ -325,6 +325,33 @@ mod tests {
         assert!(err.contains("names no section"), "{err}");
     }
 
+    /// A platform-only override must not leave an unconditional generated
+    /// function behind on targets where the custom function is absent.
+    #[test]
+    fn platform_gated_custom_functions_replace_generated_keys() {
+        for condition in ["windows", "target_os = \"linux\"", "target_os = \"macos\""] {
+            let dir = tempfile::tempdir().expect("tempdir");
+            std::fs::write(
+                dir.path().join("menu.rs"),
+                format!(
+                    "#[cfg({condition})]\npub(crate) fn tray_show() -> String {{\n    String::new()\n}}\n"
+                ),
+            )
+            .expect("write");
+            let out = super::generate(
+                "menu:\n  tray_show: \"Open\"\n  settings: \"Settings\"\n",
+                dir.path(),
+            )
+            .expect("generates");
+            assert!(
+                out.contains("pub(crate) use super::custom::menu::*;"),
+                "{out}"
+            );
+            assert!(!out.contains("fn tray_show("), "{out}");
+            assert!(out.contains("fn settings()"), "{out}");
+        }
+    }
+
     #[test]
     fn a_key_missing_from_either_side_is_reported() {
         let en = "a:\n  x: \"X\"\n  y: \"Y\"\n";

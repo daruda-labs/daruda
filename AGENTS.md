@@ -141,6 +141,9 @@ just the change — and pick the one with the smallest blast radius.
   for every non-trivial change.
 - Do not claim to have executed a command unless the tool output for
   that execution is actually visible in the conversation.
+- Platform changes require default and all-feature Clippy on macOS, Linux,
+  and Windows. A local pass proves only the host's compiled branches; report
+  other OS results as pending until their CI jobs pass.
 - For UI-visible behavior (rendering, IME, window state), a test suite
   pass alone is not proof — call out what still needs manual
   verification.
@@ -280,7 +283,7 @@ backlog and join the list a crate at a time as that is worked off. Measured
 2026-09-18: `daruda_config` 8, `daruda_store` 8, `daruda_terminal` 11,
 `daruda_acp` 16, `daruda` 85 — the app crate is most of what is left. `lint-render-purity.sh`, `lint-daruda-path-literals.sh`, `lint-file-size.sh`, `lint-mark-dirty-direct-call.sh`, `lint-fold-header.sh`, `lint-agent-list-sync.sh`, `lint-declarative-context-menu.sh`, `lint-acp-air-gate.sh`, `lint-raw-mouse-button.sh`, `lint-comment-length.sh`, and `gen_acp_presets -- --check` are local/reviewer checks not yet wired into CI.
 
-`cargo clippy -p daruda --all-features` is on the list, and on the macOS job, because every feature is off by default: whatever only `screenshot` or `replay` reaches — the `*_for_shot` seams, `screenshot_scenario`'s two modules, `screenshot.rs` itself — is neither compiled nor linted by the plain clippy run above. A visibility-narrowing pass left the feature uncompilable for a while, and a clippy error in `screenshot.rs` then sat unnoticed for a week, with nothing to say so either time. `--all-features` rather than a named list, so a new feature is covered the day it lands.
+`cargo clippy -p daruda --all-features` is on the list, and on all three platform jobs, because every feature is off by default: whatever only `screenshot` or `replay` reaches — the `*_for_shot` seams, `screenshot_scenario`'s two modules, `screenshot.rs` itself — is neither compiled nor linted by the plain clippy run above. A visibility-narrowing pass left the feature uncompilable for a while, and a clippy error in `screenshot.rs` then sat unnoticed for a week, with nothing to say so either time. `--all-features` rather than a named list, so a new feature is covered the day it lands.
 
 `gen_acp_presets -- --check` is the ACP preset drift gate: it regenerates the `// BEGIN GENERATED` block of `packages/config/src/agent/preset.rs` from the committed `tools/gen_acp_presets/registry-snapshot.json` and fails on any difference. It is offline; `scripts/sync-acp-registry.sh` is the separate path that refreshes the snapshot from the live registry.
 
@@ -561,6 +564,14 @@ Plus three files that are gates of their own, each the single door to its capabi
 **Prefer a value over a `cfg`.** `#[cfg(windows)]` code never compiles on a macOS dev machine, so it is only ever checked by CI. Decide the platform once at the boundary with `cfg!()` and pass the answer down as a value — `daruda_core::shell::login_args_for(program)` answers "does this shell take `-l`?" from the program name, so a Windows shell's rules are asserted from macOS. Reserve `#[cfg]` attributes for the leaf that actually calls the OS.
 
 **Adding a platform** = adding an arm inside the boundary. If it means touching domain crates, the capability is in the wrong place.
+
+**Platform-only declarations:** gate modules, imports, functions, constants,
+and generated-string overrides with the same `#[cfg]` as their callers.
+`cfg!()` selects a value but still compiles both branches. Keep common control
+flow independent of platform-only statements: isolate retry policy in a
+capability function rather than compiling a loop's only `continue` away.
+OS-only locale keys stay in both languages, with a matching gated function
+in `surface/strings/custom/`; never edit generated output or silence dead code.
 
 **Enforcement:** `scripts/lint-platform-boundary.sh`. Deliberately a grep rather than `clippy.toml` — `disallowed-methods` has no per-file exception, so under `--all-targets` it would also catch test fixtures spawning `git init`, which have no reason to go through the gate.
 
