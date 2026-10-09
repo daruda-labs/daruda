@@ -272,8 +272,18 @@ impl LoginProcessHandle {
             // well have exited already — `npx` forks and goes — and that is
             // precisely when the descendants need the signal. A zombie keeps
             // its pid until we reap it, so the group id stays ours to name.
-            if !self.reaped.load(Ordering::Acquire) {
-                self.group.kill_tree();
+            if !self.reaped.load(Ordering::Acquire)
+                && let Err(error) = self.group.try_kill_tree()
+            {
+                daruda_store::observability::log_writer::LogWriter::log(
+                    daruda_store::observability::error_report::ErrorReport::new(
+                        "Failed to terminate login process tree",
+                    )
+                    .from_error(&error)
+                    .at(file!(), line!())
+                    .dedup("account.login.termination")
+                    .build(),
+                );
             }
             let _ = child.kill();
         }
@@ -319,7 +329,14 @@ pub fn spawn_login(
     let mut child = cmd.spawn().map_err(|e| LoginError::Spawn(e.to_string()))?;
     // Immediately: on Windows the child is spawned suspended and this is what
     // lets it run, so nothing that could fail may sit in between.
-    let group = Arc::new(daruda_core::process::Group::adopt(child.id()));
+    let group = match daruda_core::process::Group::try_adopt(child.id()) {
+        Ok(group) => Arc::new(group),
+        Err(error) => {
+            let _ = child.kill();
+            let _ = child.wait();
+            return Err(LoginError::Spawn(error.to_string()));
+        }
+    };
 
     let stdout: ChildStdout = child.stdout.take().expect("stdout was piped");
     let stderr: ChildStderr = child.stderr.take().expect("stderr was piped");

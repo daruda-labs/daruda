@@ -117,7 +117,14 @@ fn run(request: Request) -> i32 {
             // the app and the adapter, so without a job the tear-down that
             // kills it leaves `npx` and `node` holding the protocol pipes —
             // and the child was spawned suspended, so this is what runs it.
-            let group = daruda_core::process::Group::adopt(child.id());
+            let group = match daruda_core::process::Group::try_adopt(child.id()) {
+                Ok(group) => group,
+                Err(error) => {
+                    let _ = child.kill();
+                    let _ = child.wait();
+                    return unrunnable(&request.program, &error);
+                }
+            };
             let code = match child.wait() {
                 Ok(status) => status.code().unwrap_or(1),
                 Err(error) => unrunnable(&request.program, &error),

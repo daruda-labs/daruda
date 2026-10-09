@@ -64,11 +64,16 @@ fn runtime_error(error: NodeError) -> PreparationError {
 }
 
 fn system_node(env: &BTreeMap<String, String>, strip_env: &[String]) -> Option<PathBuf> {
-    if strip_env.iter().any(|name| name == "PATH") {
+    if strip_env.iter().any(|name| {
+        if cfg!(windows) {
+            name.eq_ignore_ascii_case("PATH")
+        } else {
+            name == "PATH"
+        }
+    }) {
         return None;
     }
-    let path = env
-        .get("PATH")
+    let path = daruda_core::process::child_path(env.iter())
         .map(std::ffi::OsString::from)
         .or_else(|| std::env::var_os("PATH"));
     which::which_in("node", path, std::env::current_dir().ok()?).ok()

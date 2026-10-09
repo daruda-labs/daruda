@@ -921,6 +921,25 @@ fn run_git_returns_timeout_error_when_child_runs_past_deadline() {
 // git dirs — where a lane's state actually lives
 // ----------------------------------------------------------------
 
+#[test]
+fn excessive_output_stops_the_running_git_tree_before_the_deadline() {
+    if !has_git() {
+        return;
+    }
+    let started = Instant::now();
+    let result = run_git_with_timeout(
+        &std::env::temp_dir(),
+        [
+            "-c",
+            "alias.noisy=!while :; do printf '%01024d\\n' 0 >&2; done",
+            "noisy",
+        ],
+        Duration::from_secs(15),
+    );
+    assert!(matches!(result, Err(GitError::Parse(message)) if message.contains("exceeded")));
+    assert!(started.elapsed() < Duration::from_secs(8));
+}
+
 /// The split this probe exists for. A linked worktree keeps `index` and
 /// `HEAD` to itself while sharing `refs/`, so watching only one of the two
 /// directories misses either the staging or the fetch.

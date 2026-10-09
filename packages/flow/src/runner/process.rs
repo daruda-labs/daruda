@@ -1,11 +1,8 @@
 //! A command node: one shell line acting as a gate. The only file in this
 //! crate that starts a process — everything else is handed finished values.
 //!
-//! On Unix the child leads its own process group, so a timeout or a cancel
-//! kills the whole tree. **Elsewhere only the direct child is killed**: a
-//! gate's grandchildren (the compiler, the test runner) survive. This repo
-//! is macOS-first and Windows is unported, and a difference this large is
-//! written down rather than left to be discovered.
+//! Cancellation reaches the whole tree through POSIX groups or Windows jobs.
+//! Termination failures are part of the command outcome, not a successful stop.
 
 use crate::model::AgentSpec;
 use crate::runner::{
@@ -60,7 +57,13 @@ impl ProcessRunner {
             Ok(child) => child,
             Err(e) => return failed(artifacts, format!("could not run `{run}`: {e}")),
         };
-        let group = daruda_core::process::Group::adopt(child.id());
+        let group = match daruda_core::process::Group::try_adopt(child.id()) {
+            Ok(group) => group,
+            Err(error) => {
+                let _ = child.kill();
+                return failed(artifacts, format!("could not own process tree: {error}"));
+            }
+        };
         let started = std::time::Instant::now();
 
         // Scoped so the racing futures are dropped before `child` is used
@@ -84,13 +87,19 @@ impl ProcessRunner {
             }
             Stop::Timeout => {
                 let elapsed = started.elapsed();
-                kill_tree(&group, &mut child).await;
-                Err(NodeFailure::Timeout { elapsed })
+                match kill_tree(&group, &mut child).await {
+                    Ok(()) => Err(NodeFailure::Timeout { elapsed }),
+                    Err(error) => Err(NodeFailure::SessionError(format!(
+                        "Could not terminate timed out command: {error}"
+                    ))),
+                }
             }
-            Stop::Canceled => {
-                kill_tree(&group, &mut child).await;
-                Err(NodeFailure::SessionError(CANCELED.to_string()))
-            }
+            Stop::Canceled => match kill_tree(&group, &mut child).await {
+                Ok(()) => Err(NodeFailure::SessionError(CANCELED.to_string())),
+                Err(error) => Err(NodeFailure::SessionError(format!(
+                    "Could not terminate canceled command: {error}"
+                ))),
+            },
         };
         RunResult {
             tools: Vec::new(),
@@ -171,15 +180,29 @@ async fn watch_cancel(cancel: &CancelToken) -> Stop {
 /// `child.kill()` reaches only `sh`, and a gate's real work is its children.
 /// The reap afterwards is what keeps a night of repeated timeouts from
 /// accumulating zombies.
-async fn kill_tree(group: &daruda_core::process::Group, child: &mut smol::process::Child) {
+async fn kill_tree(
+    group: &daruda_core::process::Group,
+    child: &mut smol::process::Child,
+) -> std::io::Result<()> {
     // The child is unreaped here — the reap is the line below — so the pid is
     // still this process's to name, which is what the group requires.
-    group.kill_tree();
+    let termination = group.try_kill_tree();
     // Where there was no group to signal, this is the only reach; where there
     // was, it is a no-op on a child already gone. Same order every caller of
     // `kill_tree` uses.
     let _ = child.kill();
-    let _ = child.status().await;
+    let reaped = smol::future::or(child.status(), async {
+        // ALLOW: this GPUI-free runner has no BackgroundExecutor.
+        #[allow(clippy::disallowed_methods)]
+        smol::Timer::after(Duration::from_secs(2)).await;
+        Err(std::io::Error::new(
+            std::io::ErrorKind::TimedOut,
+            "Command process did not exit after termination",
+        ))
+    })
+    .await;
+    termination?;
+    reaped.map(|_| ())
 }
 
 impl NodeRunner for ProcessRunner {

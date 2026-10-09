@@ -94,3 +94,11 @@ fn absent_path_override_uses_the_host_path_but_an_empty_override_does_not() {
     let env = BTreeMap::from([("PATH".into(), String::new())]);
     assert_eq!(system_node(&env, &[]), None);
 }
+
+#[cfg(windows)]
+#[test]
+fn mixed_case_path_overrides_and_unsets_do_not_select_host_node() {
+    let env = BTreeMap::from([("Path".into(), String::new())]);
+    assert_eq!(system_node(&env, &[]), None);
+    assert_eq!(system_node(&BTreeMap::new(), &["pAtH".into()]), None);
+}

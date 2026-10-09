@@ -1280,6 +1280,10 @@ impl Workspace {
                 let mut batch = Vec::new();
                 while let Ok(chunk) = stdout_rx.try_recv() {
                     batch.extend_from_slice(&chunk);
+                    // Bound one UI tick even when the producer never goes idle.
+                    if batch.len() >= 256 * 1024 {
+                        break;
+                    }
                 }
                 if batch.is_empty() {
                     streaming_ticks = 0;

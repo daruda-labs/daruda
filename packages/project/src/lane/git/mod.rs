@@ -112,7 +112,6 @@ where
     I: IntoIterator<Item = S>,
     S: AsRef<OsStr>,
 {
-    use std::io::Read as _;
     use std::thread;
 
     // Pre-spawn guard: surface a clear "git not on PATH" error instead
@@ -128,28 +127,43 @@ where
     // to reach those, not just git.
     daruda_core::process::lead_own_group(&mut command);
     let mut child = command.spawn().map_err(GitError::Spawn)?;
-    let group = daruda_core::process::Group::adopt(child.id());
+    let group = match daruda_core::process::Group::try_adopt(child.id()) {
+        Ok(group) => group,
+        Err(error) => {
+            let _ = child.kill();
+            let _ = child.wait();
+            return Err(GitError::Spawn(error));
+        }
+    };
 
     // Drain stdout/stderr concurrently so the child never blocks on a
     // full pipe buffer while we're polling `try_wait`. Each handle
-    // returns the bytes it captured up to EOF (which the child closes
-    // on exit, so the threads always terminate cleanly after `wait`).
+    // returns captured bytes or a limit failure. Helpers can retain a pipe
+    // after root exit, so the drain below also has its own deadline.
     // Invariant: Stdio::piped() was set above; stdlib guarantees Some after successful spawn().
-    let mut stdout = child.stdout.take().expect("piped stdout");
-    let mut stderr = child.stderr.take().expect("piped stderr");
+    let stdout = child.stdout.take().expect("piped stdout");
+    let stderr = child.stderr.take().expect("piped stderr");
+    let (output_tx, output_rx) = std::sync::mpsc::channel();
+    let stderr_tx = output_tx.clone();
     let stdout_thread = thread::spawn(move || {
-        let mut buf = Vec::new();
-        let _ = stdout.read_to_end(&mut buf);
-        buf
+        let _ = output_tx.send((true, capture_git_output(stdout, 64 * 1024 * 1024)));
     });
     let stderr_thread = thread::spawn(move || {
-        let mut buf = Vec::new();
-        let _ = stderr.read_to_end(&mut buf);
-        buf
+        let _ = stderr_tx.send((false, capture_git_output(stderr, 1024 * 1024)));
     });
 
     let started = Instant::now();
+    let mut captured = Vec::with_capacity(2);
     let status = loop {
+        while let Ok((is_stdout, result)) = output_rx.try_recv() {
+            match result {
+                Ok(bytes) => captured.push((is_stdout, bytes)),
+                Err(error) => {
+                    terminate_git(&mut child, &group)?;
+                    return Err(error);
+                }
+            }
+        }
         match child.try_wait() {
             Ok(Some(s)) => break s,
             Ok(None) => {
@@ -157,24 +171,43 @@ where
                     // The whole tree, so no helper is left holding the pipes
                     // the drain threads read. Unreaped until the `wait`
                     // below, so the pid is still ours to name.
-                    group.kill_tree();
-                    let _ = child.kill();
-                    let _ = child.wait();
+                    let termination = terminate_git(&mut child, &group);
                     // Still detached rather than joined: a timeout is already
                     // a failure path and the caller gets `Timeout` now, not
                     // after the OS has finished tearing the pipes down.
                     drop(stdout_thread);
                     drop(stderr_thread);
+                    termination?;
                     return Err(GitError::Timeout(timeout));
                 }
                 thread::sleep(RUN_GIT_POLL_INTERVAL);
             }
-            Err(e) => return Err(GitError::Spawn(e)),
+            Err(e) => {
+                terminate_git(&mut child, &group)?;
+                return Err(GitError::Spawn(e));
+            }
         }
     };
 
-    let stdout_buf = stdout_thread.join().unwrap_or_default();
-    let stderr_buf = stderr_thread.join().unwrap_or_default();
+    // Root exit does not guarantee EOF: helpers can inherit either pipe.
+    let drain_deadline = (started + timeout).min(Instant::now() + Duration::from_secs(2));
+    let mut stdout_buf = Vec::new();
+    let mut stderr_buf = Vec::new();
+    for _ in captured.len()..2 {
+        let (is_stdout, result) = output_rx
+            .recv_timeout(drain_deadline.saturating_duration_since(Instant::now()))
+            .map_err(|_| GitError::Timeout(timeout))?;
+        captured.push((is_stdout, result?));
+    }
+    for (is_stdout, bytes) in captured {
+        if is_stdout {
+            stdout_buf = bytes;
+        } else {
+            stderr_buf = bytes;
+        }
+    }
+    let _ = stdout_thread.join();
+    let _ = stderr_thread.join();
 
     if !status.success() {
         return Err(GitError::Exit {
@@ -183,6 +216,30 @@ where
         });
     }
     String::from_utf8(stdout_buf).map_err(|_| GitError::Utf8)
+}
+
+fn terminate_git(
+    child: &mut std::process::Child,
+    group: &daruda_core::process::Group,
+) -> Result<(), GitError> {
+    group.try_terminate_child(child).map_err(GitError::Spawn)
+}
+
+fn capture_git_output(mut reader: impl std::io::Read, limit: usize) -> Result<Vec<u8>, GitError> {
+    let mut bytes = Vec::new();
+    let mut chunk = [0; 8192];
+    loop {
+        let count = reader.read(&mut chunk).map_err(GitError::Spawn)?;
+        if count == 0 {
+            return Ok(bytes);
+        }
+        if count > limit.saturating_sub(bytes.len()) {
+            return Err(GitError::Parse(format!(
+                "git output exceeded {limit} bytes"
+            )));
+        }
+        bytes.extend_from_slice(&chunk[..count]);
+    }
 }
 
 /// `git init` in `path`. Used by the Git Changes view's "Initialize

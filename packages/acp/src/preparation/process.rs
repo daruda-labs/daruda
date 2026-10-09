@@ -25,6 +25,7 @@ pub(crate) fn output_with_timeout(
     timeout: Duration,
 ) -> Result<String, PreparationError> {
     context.check()?;
+    let notice = |detail: &str| context.notice(detail);
     daruda_core::process::lead_own_group(command);
     let replacement = daruda_core::process::command(command.get_program());
     let mut command = smol::process::Command::from(std::mem::replace(command, replacement));
@@ -34,7 +35,13 @@ pub(crate) fn output_with_timeout(
         .stderr(Stdio::piped())
         .kill_on_drop(true)
         .spawn()?;
-    let mut group = ProcessGroup(Some(daruda_core::process::Group::adopt(child.id())));
+    let mut group = match daruda_core::process::Group::try_adopt(child.id()) {
+        Ok(group) => ProcessGroup(Some(group), &notice),
+        Err(error) => {
+            let _ = child.kill();
+            return Err(error.into());
+        }
+    };
     smol::block_on(async {
         let stdout = child.stdout.take().expect("piped stdout");
         let stderr = child.stderr.take().expect("piped stderr");
@@ -72,31 +79,47 @@ pub(crate) fn output_with_timeout(
                 })
             }
             Err(error) => {
-                group.kill();
+                let termination = group.kill();
                 // The tree is stopped before its staging directory can be removed.
                 let _ = child.kill();
-                let _ = child.status().await;
+                let reaped = smol::future::or(child.status(), async {
+                    // ALLOW: this GPUI-free worker has no BackgroundExecutor.
+                    #[allow(clippy::disallowed_methods)]
+                    smol::Timer::after(Duration::from_secs(2)).await;
+                    Err(std::io::Error::new(
+                        std::io::ErrorKind::TimedOut,
+                        "Preparation process did not exit after termination",
+                    ))
+                })
+                .await;
+                termination?;
+                reaped?;
                 Err(error)
             }
         }
     })
 }
 
-struct ProcessGroup(Option<daruda_core::process::Group>);
+struct ProcessGroup<'a>(Option<daruda_core::process::Group>, &'a dyn Fn(&str));
 
-impl ProcessGroup {
-    fn kill(&mut self) {
+impl ProcessGroup<'_> {
+    fn kill(&mut self) -> std::io::Result<()> {
         // Taking the group disarms the guard: the child is unreaped while
         // this runs, which is what makes the id still ours to name.
         if let Some(group) = self.0.take() {
-            group.kill_tree();
+            group.try_kill_tree()?;
         }
+        Ok(())
     }
 }
 
-impl Drop for ProcessGroup {
+impl Drop for ProcessGroup<'_> {
     fn drop(&mut self) {
-        self.kill();
+        if let Err(error) = self.kill() {
+            (self.1)(&format!(
+                "Failed to terminate preparation process tree: {error}"
+            ));
+        }
     }
 }
 

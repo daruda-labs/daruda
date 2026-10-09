@@ -25,10 +25,12 @@ impl NpmRuntime {
     ) -> Result<Self, PreparationError> {
         let bin = node.node.parent().expect("resolved Node has a parent");
         let mut env = env.clone();
-        let original_path = env
-            .get("PATH")
-            .cloned()
-            .unwrap_or_else(|| std::env::var("PATH").unwrap_or_default());
+        let original_path = daruda_core::process::child_path(env.iter())
+            .map(std::ffi::OsString::from)
+            .unwrap_or_else(|| std::env::var_os("PATH").unwrap_or_default());
+        if cfg!(windows) {
+            env.retain(|key, _| !key.eq_ignore_ascii_case("PATH"));
+        }
         let paths = std::iter::once(bin.to_path_buf()).chain(std::env::split_paths(&original_path));
         env.insert(
             "PATH".into(),

@@ -13,6 +13,36 @@ use std::thread;
 use daruda_store::observability::error_report::{ErrorReport, ErrorSeverity};
 use portable_pty::{CommandBuilder, MasterPty, PtySize, native_pty_system};
 
+#[cfg(windows)]
+mod draining_master;
+
+#[cfg(all(test, windows))]
+mod windows_input_tests;
+
+const OUTPUT_QUEUE_CHUNKS: usize = 128;
+const OUTPUT_CHUNK_BYTES: usize = 8192;
+const OUTPUT_BACKPRESSURE_POLL: std::time::Duration = std::time::Duration::from_millis(2);
+
+fn enqueue_output(
+    tx: &mpsc::SyncSender<Vec<u8>>,
+    mut bytes: Vec<u8>,
+    closing: impl Fn() -> bool,
+) -> bool {
+    loop {
+        if closing() {
+            return false;
+        }
+        match tx.try_send(bytes) {
+            Ok(()) => return true,
+            Err(mpsc::TrySendError::Disconnected(_)) => return false,
+            Err(mpsc::TrySendError::Full(pending)) => {
+                bytes = pending;
+                thread::sleep(OUTPUT_BACKPRESSURE_POLL);
+            }
+        }
+    }
+}
+
 /// Errors that can occur during PTY operations.
 #[derive(Debug)]
 pub enum PtyError {
@@ -159,7 +189,12 @@ pub fn runs_foreground_job(master: &(dyn MasterPty + Send), shell_pid: Option<u3
             _ => false,
         }
     }
-    #[cfg(not(unix))]
+    #[cfg(windows)]
+    {
+        let _ = master;
+        shell_pid.is_some_and(|pid| daruda_core::process::has_descendants(pid).unwrap_or(true))
+    }
+    #[cfg(not(any(unix, windows)))]
     {
         let _ = (master, shell_pid);
         false
@@ -198,6 +233,14 @@ pub const STUB_FAILING_SHELL: &str = "daruda-test-stub://spawn-fails";
 /// Call this instead of `spawn_pty` when a test genuinely needs a real
 /// shell (echo I/O, resize kernel events, exit-signal delivery).
 pub fn spawn_pty_real(config: &PtyConfig) -> Result<PtyHandle, PtyError> {
+    spawn_pty_with_args(config, &[])
+}
+
+/// Spawn a concrete executable with explicit argv, without a shell command string.
+pub fn spawn_pty_with_args(
+    config: &PtyConfig,
+    args: &[std::ffi::OsString],
+) -> Result<PtyHandle, PtyError> {
     let pty_system = native_pty_system();
     let pty_pair = pty_system
         .openpty(PtySize {
@@ -208,14 +251,25 @@ pub fn spawn_pty_real(config: &PtyConfig) -> Result<PtyHandle, PtyError> {
         })
         .map_err(|e| PtyError::OpenPty(e.to_string()))?;
 
+    #[cfg(windows)]
+    let master_lifetime = Arc::new(());
+    #[cfg(windows)]
+    let master: Arc<dyn MasterPty + Send> = Arc::new(draining_master::DrainingMaster {
+        _alive: master_lifetime.clone(),
+        inner: std::sync::Mutex::new(pty_pair.master),
+    });
+    #[cfg(not(windows))]
     let master: Arc<dyn MasterPty + Send> = Arc::from(pty_pair.master);
 
     let mut cmd = CommandBuilder::new(&config.shell);
+    cmd.args(args);
     // Login args belong to the shell being run — `-l` is POSIX, and handing
     // it to a Windows shell is an error rather than a no-op. The config may
     // name a different shell than the default, so ask about that one.
-    for arg in daruda_core::shell::login_args_for(&config.shell) {
-        cmd.arg(arg);
+    if args.is_empty() {
+        for arg in daruda_core::shell::login_args_for(&config.shell) {
+            cmd.arg(arg);
+        }
     }
     for (key, value) in &config.env {
         cmd.env(key, value);
@@ -264,7 +318,7 @@ pub fn spawn_pty_real(config: &PtyConfig) -> Result<PtyHandle, PtyError> {
         .map_err(|e| PtyError::Io(e.to_string()))?;
 
     let (stdin_tx, stdin_rx) = mpsc::channel::<Vec<u8>>();
-    let (stdout_tx, stdout_rx) = mpsc::channel::<Vec<u8>>();
+    let (stdout_tx, stdout_rx) = mpsc::sync_channel::<Vec<u8>>(OUTPUT_QUEUE_CHUNKS);
     let (error_tx, error_rx) = mpsc::channel::<ErrorReport>();
 
     // PTY writer thread: stdin channel → PTY
@@ -293,8 +347,16 @@ pub fn spawn_pty_real(config: &PtyConfig) -> Result<PtyHandle, PtyError> {
 
     // PTY reader thread: PTY → stdout channel
     let reader_error_tx = error_tx;
+    #[cfg(windows)]
+    let closing = {
+        let weak = Arc::downgrade(&master_lifetime);
+        drop(master_lifetime);
+        move || weak.strong_count() == 0
+    };
+    #[cfg(not(windows))]
+    let closing = || false;
     thread::spawn(move || {
-        let mut buf = [0u8; 8192];
+        let mut buf = [0u8; OUTPUT_CHUNK_BYTES];
         loop {
             let n = match pty_reader.read(&mut buf) {
                 Ok(0) => {
@@ -316,7 +378,10 @@ pub fn spawn_pty_real(config: &PtyConfig) -> Result<PtyHandle, PtyError> {
             };
             // ConPTY close waits for its output pipe to drain. Keep reading
             // to EOF even after the pane drops its receiver, or teardown hangs.
-            if stdout_tx.send(buf[..n].to_vec()).is_err() && !cfg!(windows) {
+            // A full queue applies backpressure while the pane lives. Once
+            // master teardown starts, discard queued delivery and drain the
+            // ConPTY pipe so ClosePseudoConsole cannot wait on this producer.
+            if !enqueue_output(&stdout_tx, buf[..n].to_vec(), &closing) && !cfg!(windows) {
                 break;
             }
         }
@@ -374,6 +439,33 @@ pub fn compute_grid_size(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn backpressure_releases_when_master_closes_before_receiver() {
+        use std::sync::atomic::{AtomicBool, Ordering};
+        let (tx, _rx) = mpsc::sync_channel(1);
+        tx.send(vec![1]).unwrap();
+        let closing = Arc::new(AtomicBool::new(false));
+        let producer_closing = closing.clone();
+        let (done_tx, done_rx) = mpsc::channel();
+        let worker = thread::spawn(move || {
+            let delivered =
+                enqueue_output(&tx, vec![2], || producer_closing.load(Ordering::Acquire));
+            done_tx.send(delivered).unwrap();
+        });
+        assert!(
+            done_rx
+                .recv_timeout(std::time::Duration::from_millis(30))
+                .is_err()
+        );
+        closing.store(true, Ordering::Release);
+        assert!(
+            !done_rx
+                .recv_timeout(std::time::Duration::from_secs(2))
+                .unwrap()
+        );
+        worker.join().unwrap();
+    }
 
     /// A pane writes into its PTY without knowing it is stubbed, so the
     /// stub must accept input and stay "running" like a live shell.

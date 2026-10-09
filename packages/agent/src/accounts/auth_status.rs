@@ -17,6 +17,8 @@
 //! [`PlanInfo`](super::credentials::PlanInfo): providers add values without
 //! notice, and a stale enum would report a metered login as unknown.
 
+use daruda_store::observability::{error_report::ErrorReport, log_writer::LogWriter};
+
 /// How a domain's CLI reports its status, and the arguments that ask for it.
 ///
 /// Paired rather than two fields: arguments whose output format is unknown are
@@ -151,9 +153,15 @@ fn field(v: &serde_json::Value, names: &[&str]) -> Option<String> {
 fn kill_probe_tree(group: &daruda_core::process::Group, child: &mut std::process::Child) {
     // Unreaped — the `wait` below is the reap — so the pid is still this
     // process's to name, which is what the group requires.
-    group.kill_tree();
-    let _ = child.kill();
-    let _ = child.wait();
+    if let Err(error) = group.try_terminate_child(child) {
+        LogWriter::log(
+            ErrorReport::new("Failed to terminate authentication probe tree")
+                .from_error(&error)
+                .at(file!(), line!())
+                .dedup("account.auth_probe.termination")
+                .build(),
+        );
+    }
 }
 
 /// Ask the agent CLI for its current auth status.
@@ -197,7 +205,20 @@ pub fn read_auth_status(
     daruda_core::process::lead_own_group(&mut cmd);
 
     let mut child = cmd.spawn().ok()?;
-    let group = daruda_core::process::Group::adopt(child.id());
+    let group = match daruda_core::process::Group::try_adopt(child.id()) {
+        Ok(group) => group,
+        Err(error) => {
+            let _ = child.kill();
+            let _ = child.wait();
+            LogWriter::log(
+                ErrorReport::new("Cannot own authentication probe process")
+                    .from_error(&error)
+                    .at(file!(), line!())
+                    .build(),
+            );
+            return None;
+        }
+    };
     let deadline = std::time::Instant::now() + timeout;
     loop {
         match child.try_wait() {
