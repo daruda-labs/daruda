@@ -26,7 +26,7 @@ const OUTPUT_BACKPRESSURE_POLL: std::time::Duration = std::time::Duration::from_
 fn enqueue_output(
     tx: &mpsc::SyncSender<Vec<u8>>,
     mut bytes: Vec<u8>,
-    closing: impl Fn() -> bool,
+    closing: &impl Fn() -> bool,
 ) -> bool {
     loop {
         if closing() {
@@ -450,7 +450,7 @@ mod tests {
         let (done_tx, done_rx) = mpsc::channel();
         let worker = thread::spawn(move || {
             let delivered =
-                enqueue_output(&tx, vec![2], || producer_closing.load(Ordering::Acquire));
+                enqueue_output(&tx, vec![2], &|| producer_closing.load(Ordering::Acquire));
             done_tx.send(delivered).unwrap();
         });
         assert!(

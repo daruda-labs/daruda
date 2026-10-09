@@ -27,15 +27,10 @@ pub(super) fn rename(
         match std::fs::rename(source, target) {
             Ok(()) => return Ok(()),
             Err(error) => {
-                #[cfg(windows)]
-                if matches!(
-                    error.raw_os_error(),
-                    Some(ERROR_ACCESS_DENIED | ERROR_SHARING_VIOLATION | ERROR_LOCK_VIOLATION)
-                ) && let Some(delay) = RETRY_DELAYS_MS.get(attempts - 1)
-                {
+                if let Some(delay) = retry_delay(&error, attempts) {
                     // Windows scanners can briefly hold files beneath this directory.
                     // This runs on the preparation worker; cancellation is checked each attempt.
-                    std::thread::sleep(std::time::Duration::from_millis(*delay));
+                    std::thread::sleep(delay);
                     continue;
                 }
                 return Err(error).with_context(|| {
@@ -47,6 +42,26 @@ pub(super) fn rename(
                 });
             }
         }
+    }
+}
+
+fn retry_delay(error: &std::io::Error, attempts: usize) -> Option<std::time::Duration> {
+    #[cfg(windows)]
+    {
+        if matches!(
+            error.raw_os_error(),
+            Some(ERROR_ACCESS_DENIED | ERROR_SHARING_VIOLATION | ERROR_LOCK_VIOLATION)
+        ) {
+            return RETRY_DELAYS_MS
+                .get(attempts - 1)
+                .map(|delay| std::time::Duration::from_millis(*delay));
+        }
+        None
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = (error, attempts);
+        None
     }
 }
 
