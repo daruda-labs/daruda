@@ -109,10 +109,29 @@ fn main() {
         panic!("zig build failed");
     }
 
-    println!(
-        "cargo:rustc-link-search=native={}",
-        prefix.join("lib").display()
-    );
+    let mut lib_dir = prefix.join("lib");
+    if cfg!(target_os = "macos") && os == "macos" {
+        // WORKAROUND: Zig 0.14.1 does not align Mach-O archive members to 8 bytes.
+        // Ghostty pins this toolchain; use Apple's archiver until Zig can be upgraded.
+        let native_dir = prefix.join("darwin-lib");
+        std::fs::create_dir_all(&native_dir).expect("create native archive directory");
+        let archive = native_dir.join("libghostty_vt.a");
+        // Run outside Zig's DEVELOPER_DIR override so xcrun can find Xcode tools.
+        let status = Command::new("xcrun")
+            .args(["libtool", "-static", "-o"])
+            .arg(&archive)
+            .arg(lib_dir.join("libghostty_vt.a"))
+            .status()
+            .expect("failed to invoke xcrun libtool; install Xcode Command Line Tools");
+        assert!(
+            status.success(),
+            "macOS archive repack failed: {}",
+            archive.display()
+        );
+        lib_dir = native_dir;
+    }
+
+    println!("cargo:rustc-link-search=native={}", lib_dir.display());
     println!("cargo:rustc-link-lib=static=ghostty_vt");
     // MSVC has no `c` to link — the Rust target pulls the UCRT in itself, and
     // naming a library that does not exist fails the link outright. Read the
