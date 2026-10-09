@@ -22,6 +22,8 @@ pub mod native_subagents;
 pub mod node;
 mod npm_adapter;
 pub mod preparation;
+mod prompt;
+pub use prompt::{AttachmentContent, PromptAttachment};
 mod prepared;
 pub use prepared::PreparedAdapter;
 pub(crate) mod output_highlight;

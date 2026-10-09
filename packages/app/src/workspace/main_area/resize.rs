@@ -39,7 +39,7 @@ impl Workspace {
         let right_size = self.docks.right.read(cx).size;
         let right_panels_empty = self.docks.right.read(cx).panels.is_empty();
         let bottom_open = self.docks.bottom.read(cx).is_open;
-        let bottom_size = self.docks.bottom.read(cx).size;
+        let bottom_size = self.bottom_dock_display_size(cx);
         if left_open {
             width = (width - left_size).max(1.0);
         }

@@ -2,6 +2,7 @@ use super::super::fold::{FoldContext, FoldKey};
 use super::super::rows::RowKind;
 use crate::transcript::fold_mode::FoldPreset;
 
+mod attachments;
 mod settle;
 mod transitions;
 
@@ -401,6 +402,7 @@ pub(super) fn queued(id: u64, text: &str) -> super::QueuedPrompt {
     super::QueuedPrompt {
         id: super::PromptId(id),
         text: text.to_string(),
+        attachments: Vec::new(),
         origin: super::PromptOrigin::InApp,
     }
 }

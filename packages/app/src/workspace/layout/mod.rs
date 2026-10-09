@@ -261,9 +261,13 @@ impl Render for Dock {
                     .child(content_el),
             );
 
+        let display_size = match &self.snap {
+            DockSnapshot::Bottom(snap) => snap.bottom_dock_size,
+            _ => self.size,
+        };
         let sized = match self.position {
             DockPosition::Left | DockPosition::Right => container.w(px(self.size)).h_full(),
-            DockPosition::Bottom => container.h(px(self.size)).w_full(),
+            DockPosition::Bottom => container.h(px(display_size)).w_full(),
         };
 
         sized.into_any_element()

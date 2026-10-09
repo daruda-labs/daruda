@@ -198,7 +198,7 @@ impl Workspace {
             .as_deref()
             .map(daruda_core::shell::quote::Shell::detect_from_program)
             .unwrap_or_default();
-        let bottom_dock_size = self.docks.bottom.read(cx).size;
+        let bottom_dock_size = self.bottom_dock_display_size(cx);
         // When the focused pane is an Agent chat pane that is busy (a turn in
         // flight OR a background subagent still running), the bottom-input
         // button toggles to "Stop" and cancels that pane's activity instead of
@@ -274,7 +274,10 @@ impl Workspace {
                     .in_strip_order()
                     .map(|(q, paused)| crate::workspace::layout::QueuedPromptView {
                         id: q.id,
-                        text: q.text.clone(),
+                        text: crate::workspace::main_area::agent_chat_pane::view::display_prompt(
+                            &q.text,
+                            &q.attachments,
+                        ),
                         editing: editing == Some(q.id),
                         paused,
                     })
@@ -290,6 +293,19 @@ impl Workspace {
                 },
             );
         BottomDockSnapshot {
+            attachment_draft: self
+                .agent_chat_view(focused_id)
+                .filter(|v| !v.read(cx).is_read_only())
+                .map(|v| {
+                    (
+                        focused_id,
+                        v.read(cx)
+                            .draft_attachments()
+                            .iter()
+                            .map(|a| a.name.clone())
+                            .collect(),
+                    )
+                }),
             agent_cli_snapshot: self.agent_chat_view(focused_id).and_then(|view| {
                 let v = view.read(cx);
                 let run = v.mirrored_run()?;

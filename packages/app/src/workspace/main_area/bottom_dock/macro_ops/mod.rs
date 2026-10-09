@@ -511,6 +511,17 @@ impl Workspace {
     ) {
         let raw = self.input_dock.input.read(cx).value().to_string();
         let trimmed = raw.trim_end_matches(['\n', '\r']);
+        if let Some(accepted) = self.send_attached_composer_if_any(trimmed.to_owned(), cx) {
+            if accepted {
+                if let Some(owner) = self.input_dock.owner {
+                    self.input_dock.drafts.remove(&owner);
+                }
+                self.input_dock
+                    .input
+                    .update(cx, |state, cx| state.set_value("", window, cx));
+            }
+            return;
+        }
         if trimmed.is_empty() {
             // An empty composer is not a command: through the funnel a focused
             // terminal would take the submit and receive a bare `\r`. Only an

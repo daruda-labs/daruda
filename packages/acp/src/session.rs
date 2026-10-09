@@ -37,6 +37,7 @@
 //! handler returns, so an inline await would freeze every queued update for as
 //! long as the permission prompt stays open.
 
+use crate::prompt::PromptInput;
 use std::collections::HashMap;
 use std::collections::VecDeque;
 use std::future::Future;
@@ -50,12 +51,13 @@ use std::time::Duration;
 use agent_client_protocol::schema::ProtocolVersion;
 use agent_client_protocol::schema::v1::{
     AuthCapabilities, BooleanConfigOptionCapabilities, CancelNotification, ClientCapabilities,
-    ClientSessionCapabilities, ContentBlock, InitializeRequest, LoadSessionRequest, McpServer,
-    NewSessionRequest, PromptRequest, RequestPermissionOutcome, RequestPermissionRequest,
-    RequestPermissionResponse, SelectedPermissionOutcome, SessionConfigOptionValue,
-    SessionConfigOptionsCapabilities, SessionId, SessionUpdate, SetSessionConfigOptionRequest,
-    SetSessionModeRequest, StopReason, TextContent,
+    ClientSessionCapabilities, InitializeRequest, LoadSessionRequest, McpServer, NewSessionRequest,
+    PromptRequest, RequestPermissionOutcome, RequestPermissionRequest, RequestPermissionResponse,
+    SelectedPermissionOutcome, SessionConfigOptionValue, SessionConfigOptionsCapabilities,
+    SessionId, SessionUpdate, SetSessionConfigOptionRequest, SetSessionModeRequest, StopReason,
 };
+#[cfg(test)]
+use agent_client_protocol::schema::v1::{ContentBlock, TextContent};
 use agent_client_protocol::{Agent, Client, ConnectTo, ConnectionTo, JsonRpcNotification};
 use futures::FutureExt;
 use futures::StreamExt;
@@ -331,7 +333,7 @@ pub enum AcpEvent {
 /// the handle's public methods build these.
 enum Command {
     /// Send a `session/prompt` with this user text.
-    Prompt(String),
+    Prompt(PromptInput),
     /// Send a `session/cancel` notification for the active turn.
     Cancel,
     /// Send a `session/set_mode` request to switch the agent to the named mode.
@@ -396,7 +398,18 @@ impl AcpSessionHandle {
     /// is dropped because the host learns of termination via the event stream
     /// (an [`AcpEvent::Error`] or end-of-stream).
     pub fn send_prompt(&self, text: String) {
-        let _ = self.commands.unbounded_send(Command::Prompt(text));
+        self.send_prompt_with_attachments(text, Vec::new());
+    }
+
+    /// Queue immutable attachments alongside their text for one serialized turn.
+    pub fn send_prompt_with_attachments(
+        &self,
+        text: String,
+        attachments: Vec<crate::PromptAttachment>,
+    ) {
+        let _ = self
+            .commands
+            .unbounded_send(Command::Prompt(PromptInput { text, attachments }));
     }
 
     /// Request cancellation of the active turn via `session/cancel`. The agent
@@ -1198,6 +1211,7 @@ async fn run_connection(
                 command_rx,
                 &event_tx,
                 &mode_tracker,
+                capabilities,
             )
             .await?;
             Ok(())
@@ -1281,8 +1295,9 @@ async fn prompt_loop(
     mut command_rx: UnboundedReceiver<Command>,
     event_tx: &UnboundedSender<AcpEvent>,
     mode_tracker: &ModeTracker,
+    capabilities: SessionCapabilitiesView,
 ) -> Result<(), agent_client_protocol::Error> {
-    let mut stash: VecDeque<String> = VecDeque::new();
+    let mut stash: VecDeque<PromptInput> = VecDeque::new();
     loop {
         // Prefer a prompt queued during the previous turn; otherwise block on
         // the channel for the next command.
@@ -1317,6 +1332,16 @@ async fn prompt_loop(
                 None => return Ok(()),
             },
         };
+        if text
+            .attachments
+            .iter()
+            .any(|attachment| !attachment.supported_by(capabilities))
+        {
+            let _ = event_tx.unbounded_send(AcpEvent::TurnFailed(AcpFailure::unclassified(
+                "The agent does not support this prompt attachment",
+            )));
+            continue;
+        }
         let dropped = run_turn(
             connection,
             &session_id,
@@ -1341,17 +1366,14 @@ async fn prompt_loop(
 async fn run_turn(
     connection: &ConnectionTo<Agent>,
     session_id: &SessionId,
-    text: String,
+    text: PromptInput,
     command_rx: &mut UnboundedReceiver<Command>,
-    stash: &mut VecDeque<String>,
+    stash: &mut VecDeque<PromptInput>,
     event_tx: &UnboundedSender<AcpEvent>,
     mode_tracker: &ModeTracker,
 ) -> Result<bool, agent_client_protocol::Error> {
     let response = connection
-        .send_request(PromptRequest::new(
-            session_id.clone(),
-            vec![ContentBlock::Text(TextContent::new(text))],
-        ))
+        .send_request(PromptRequest::new(session_id.clone(), text.into_blocks()))
         .block_task()
         .fuse();
     // `block_task()`'s future is `!Unpin`; `select!` requires `Unpin`.
@@ -1571,6 +1593,8 @@ fn session_capabilities_from_protocol(
         list: session.list.is_some(),
         resume: session.resume.is_some(),
         close: session.close.is_some(),
+        images: caps.prompt_capabilities.image,
+        embedded_context: caps.prompt_capabilities.embedded_context,
     }
 }
 
@@ -2191,7 +2215,7 @@ mod tests {
 
         let (command_tx, command_rx) = unbounded::<Command>();
         command_tx
-            .unbounded_send(Command::Prompt("queued during connect".to_string()))
+            .unbounded_send(Command::Prompt("queued during connect".into()))
             .unwrap();
         let (event_tx, mut event_rx) = unbounded::<AcpEvent>();
         let permission_parks: PermissionParks = Arc::new(Mutex::new(HashMap::new()));
@@ -2640,7 +2664,7 @@ mod tests {
                 }
             }
             command_tx
-                .unbounded_send(Command::Prompt("go".to_string()))
+                .unbounded_send(Command::Prompt("go".into()))
                 .unwrap();
 
             let mut items: Vec<ChatItem> = Vec::new();
@@ -2765,7 +2789,7 @@ mod tests {
                 }
             }
             command_tx
-                .unbounded_send(Command::Prompt("go".to_string()))
+                .unbounded_send(Command::Prompt("go".into()))
                 .unwrap();
 
             let mut legacy = 0usize;

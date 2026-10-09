@@ -75,6 +75,23 @@ pub(in crate::workspace) fn bottom_dock_height_for_rows(rows: usize) -> f32 {
 }
 
 impl Workspace {
+    /// Draft attachments occupy one scrollable row without changing the saved dock size.
+    pub(in crate::workspace) fn bottom_dock_display_size(&self, cx: &gpui::App) -> f32 {
+        let size = self.docks.bottom.read(cx).size;
+        let has_attachments = self.input_dock.visible
+            && self
+                .agent_chat_view(self.active_runtime().focused_pane_id)
+                .is_some_and(|view| !view.read(cx).draft_attachments().is_empty());
+        if has_attachments {
+            size.max(
+                bottom_dock_height_for_rows(self.input_dock.line_count.max(1))
+                    + crate::ui::theme::BUTTON_HEIGHT
+                    + crate::ui::theme::GAP_SM,
+            )
+        } else {
+            size
+        }
+    }
     pub(in crate::workspace) fn on_toggle_left_dock(
         &mut self,
         _: &ToggleLeftDock,

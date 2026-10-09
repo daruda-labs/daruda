@@ -48,7 +48,7 @@ impl AgentChatView {
         &mut self,
         cx: &mut Context<Self>,
     ) -> Option<String> {
-        self.drain_next_queued_prompt(cx)
+        self.drain_next_queued_prompt(cx).map(|(text, _)| text)
     }
 
     /// Test-only hook: arm the phone turn without needing a live ACP handle.
@@ -105,6 +105,16 @@ impl AgentChatView {
         origin: PromptOrigin,
         cx: &mut Context<Self>,
     ) -> PromptDispatch {
+        self.send_prompt_content(text, Vec::new(), origin, cx)
+    }
+
+    pub(super) fn send_prompt_content(
+        &mut self,
+        text: String,
+        attachments: Vec<daruda_acp::PromptAttachment>,
+        origin: PromptOrigin,
+        cx: &mut Context<Self>,
+    ) -> PromptDispatch {
         if self.is_read_only() {
             return PromptDispatch::ReadOnly;
         }
@@ -124,6 +134,7 @@ impl AgentChatView {
                 .find(|q| q.id == id)
         {
             qp.text = text;
+            qp.attachments.extend(attachments);
             // Queue-only change: `items` (and thus the projected rows) are
             // untouched, so notifying re-stages the strip without a transcript
             // reproject.
@@ -132,7 +143,10 @@ impl AgentChatView {
         }
         let ready = matches!(self.status, AgentSessionStatus::Connected)
             && self.live_handle().is_some()
-            && self.queue.turn.can_dispatch();
+            && self.queue.turn.can_dispatch()
+            && attachments
+                .iter()
+                .all(|attachment| attachment.supported_by(self.session_capabilities));
         let dispatch = if ready {
             // Connected and idle: send now, mark the turn in flight, and echo.
             // What goes on the wire and what the transcript shows are not the
@@ -140,10 +154,10 @@ impl AgentChatView {
             // is borrowed, because taking the briefing needs `&mut self`.
             let wire = self.wire_text(&text);
             if let Some(handle) = self.live_handle() {
-                handle.send_prompt(wire);
+                handle.send_prompt_with_attachments(wire, attachments.clone());
             }
             self.queue.turn.start(std::time::Instant::now());
-            self.echo_prompt(text, cx);
+            self.echo_attached_prompt(text, &attachments, cx);
             self.arm_phone_turn_if(origin);
             PromptDispatch::SentNow
         } else {
@@ -155,7 +169,11 @@ impl AgentChatView {
             // `pump_pending_prompt` (after `Connected`, on each `TurnEnded`, and
             // when the cancel window closes) and is echoed then. Do *not* mark
             // the turn in flight: nothing new is on the wire yet.
-            match self.enqueue_prompt(text, origin) {
+            match if attachments.is_empty() {
+                self.enqueue_prompt(text, origin)
+            } else {
+                self.enqueue_attached_prompt(text, attachments, origin)
+            } {
                 Some(_) => PromptDispatch::Queued,
                 None => PromptDispatch::QueueFull,
             }
@@ -348,14 +366,26 @@ impl AgentChatView {
         text: String,
         origin: PromptOrigin,
     ) -> Option<PromptId> {
+        self.enqueue_attached_prompt(text, Vec::new(), origin)
+    }
+
+    fn enqueue_attached_prompt(
+        &mut self,
+        text: String,
+        attachments: Vec<daruda_acp::PromptAttachment>,
+        origin: PromptOrigin,
+    ) -> Option<PromptId> {
         if self.queued_prompt_count() >= crate::control::guards::QUEUE_DEPTH_MAX {
             return None;
         }
         let id = PromptId(self.queue.next_prompt_id);
         self.queue.next_prompt_id += 1;
-        self.queue
-            .pending_prompts
-            .push(QueuedPrompt { id, text, origin });
+        self.queue.pending_prompts.push(QueuedPrompt {
+            id,
+            text,
+            attachments,
+            origin,
+        });
         Some(id)
     }
 
@@ -368,6 +398,7 @@ impl AgentChatView {
             self.queue.pending_prompts.push(QueuedPrompt {
                 id,
                 text: String::new(),
+                attachments: Vec::new(),
                 origin: PromptOrigin::InApp,
             });
         }
@@ -423,8 +454,26 @@ impl AgentChatView {
 
     /// Move the next queued prompt into the active-turn model and return the
     /// text that should be sent over ACP. No-op while a turn or cancel is active.
-    fn drain_next_queued_prompt(&mut self, cx: &mut Context<Self>) -> Option<String> {
+    fn drain_next_queued_prompt(
+        &mut self,
+        cx: &mut Context<Self>,
+    ) -> Option<(String, Vec<daruda_acp::PromptAttachment>)> {
         if !self.queue.turn.can_dispatch() || self.queue.pending_prompts.is_empty() {
+            return None;
+        }
+        if self.queue.pending_prompts[0]
+            .attachments
+            .iter()
+            .any(|attachment| !attachment.supported_by(self.session_capabilities))
+        {
+            cx.emit(super::AgentChatEvent::ReportError(
+                daruda_store::observability::error_report::ErrorReport::new(
+                    crate::surface::strings::agent_chat::attachment_unsupported(),
+                )
+                .at(file!(), line!())
+                .dedup("agent_chat.attachment.unsupported")
+                .build(),
+            ));
             return None;
         }
         let qp = self.queue.pending_prompts.remove(0);
@@ -436,9 +485,9 @@ impl AgentChatView {
         }
         self.queue.turn.start(std::time::Instant::now());
         let text = qp.text;
-        self.echo_prompt(text.clone(), cx);
+        self.echo_attached_prompt(text.clone(), &qp.attachments, cx);
         self.arm_phone_turn_if(qp.origin);
-        Some(text)
+        Some((text, qp.attachments))
     }
 
     /// Send the next buffered prompt iff connected and idle. Pops the FRONT of
@@ -453,14 +502,14 @@ impl AgentChatView {
         if !matches!(self.status, AgentSessionStatus::Connected) || self.live_handle().is_none() {
             return;
         };
-        let Some(text) = self.drain_next_queued_prompt(cx) else {
+        let Some((text, attachments)) = self.drain_next_queued_prompt(cx) else {
             return;
         };
         // `drain_next_queued_prompt` already echoed `text`; the wire gets the
         // briefed form, which is why the two are separate strings.
         let wire = self.wire_text(&text);
         if let Some(handle) = self.live_handle() {
-            handle.send_prompt(wire);
+            handle.send_prompt_with_attachments(wire, attachments);
         }
         cx.notify();
     }

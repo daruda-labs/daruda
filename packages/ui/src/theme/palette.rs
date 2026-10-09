@@ -238,6 +238,7 @@ pub const DOCK_BOTTOM_ROW_PRESET_3_H: f32 = 152.0;
 pub const DOCK_BOTTOM_INPUT_EXTRA_LINE_H: f32 = 20.0;
 pub const DOCK_BOTTOM_INPUT_TEXT_PAD_H: f32 = INPUT_TEXTAREA_PAD_Y * 2.0;
 pub const DOCK_BOTTOM_INPUT_ACTION_ROW_H: f32 = BUTTON_HEIGHT + INPUT_PANEL_BUTTON_GAP;
+pub const AGENT_ATTACHMENT_CHIP_MAX_W: f32 = 290.0;
 
 // ── Bottom dock input and macro tiles ───────────────────────────────────────
 

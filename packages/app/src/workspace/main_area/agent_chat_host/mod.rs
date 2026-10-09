@@ -18,5 +18,6 @@ pub(super) mod agent_chat_connect_ops;
 pub(in crate::workspace) mod agent_chat_event_ops;
 pub(in crate::workspace) mod agent_chat_ops;
 pub(super) mod agent_chat_queue_ops;
+mod attachment_ops;
 mod host_event_ops;
 pub(in crate::workspace) mod telegram_ops;

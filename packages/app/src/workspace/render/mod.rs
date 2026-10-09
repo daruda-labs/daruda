@@ -352,7 +352,7 @@ impl Workspace {
         };
         let (bottom_dock_open, bottom_dock_size) = {
             let d = self.docks.bottom.read(cx);
-            (d.is_open, d.size)
+            (d.is_open, self.bottom_dock_display_size(cx))
         };
         let (right_dock_open, right_dock_size) = {
             let d = self.docks.right.read(cx);

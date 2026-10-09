@@ -264,8 +264,8 @@ pub(in crate::workspace) struct BottomDockSnapshot {
     /// Mirror of `Workspace::panels_grid_columns` — column count for
     /// the bottom-dock macro tile grid. Already clamped (>= 1).
     pub grid_columns: u8,
-    /// Current bottom dock height in px, mirrored from
-    /// `Docks::bottom.read(cx).size`. Used by the tab-strip
+    /// Current displayed bottom dock height, including transient attachment space.
+    /// Used by the tab-strip
     /// suffix to pick the active row-preset label and the menu
     /// checkmark without re-reading the dock entity during render.
     pub bottom_dock_size: f32,
@@ -276,6 +276,8 @@ pub(in crate::workspace) struct BottomDockSnapshot {
     /// instead of `send_terminal_input`. `None` for every other focus
     /// state (terminal focus, idle agent pane), where the button is "Send".
     pub agent_stop_pane: Option<crate::workspace::main_area::pane_tree::PaneId>,
+    /// Names only: image payloads never enter render snapshots.
+    pub attachment_draft: Option<(crate::workspace::main_area::pane_tree::PaneId, Vec<String>)>,
     /// Set when the focused pane is an Agent chat pane that advertises session
     /// modes. Carries that pane's id + its mode state so the bottom-input
     /// renders the mode chip to the left of the Submit button. `None` for a

@@ -5,8 +5,8 @@
 //! [`daruda_core::shell::quote`] using the focused pane's shell flavour before
 //! insertion.
 
+use crate::ui::ScrollableElement as _;
 use crate::ui::theme;
-use daruda_core::shell::quote::{format_paths_for_drop, quote_path};
 use gpui::{AnyElement, ClickEvent, Context, ExternalPaths, IntoElement, div, prelude::*, px};
 
 use crate::workspace::layout::BottomDockSnapshot;
@@ -19,10 +19,10 @@ pub(super) fn render_body(snap: &BottomDockSnapshot, cx: &mut Context<Dock>) -> 
         return render_cli_snapshot(snap, cli, cx);
     }
     let state = snap.terminal_input.clone();
-    let state_for_path = state.clone();
-    let state_for_external = state.clone();
+    let ws_for_path = snap.workspace.clone();
+    let ws_for_external = snap.workspace.clone();
+    let ws_for_paste = snap.workspace.clone();
     let workspace = snap.workspace.clone();
-    let shell = snap.shell;
     // Input edit shortcuts are handled by gpui_component's `"Input"` context.
     // Mid-turn agent panes show Stop; otherwise the button sends input.
     // DESIGN.md: Submit button — height 28px, radius md (6px). The primary / danger
@@ -56,6 +56,34 @@ pub(super) fn render_body(snap: &BottomDockSnapshot, cx: &mut Context<Dock>) -> 
     // carries `None`, so only Submit shows. Selecting dispatches through
     // `Workspace::set_agent_mode` / `set_agent_config_option` (one-way data flow).
     let mut chips: Vec<AnyElement> = Vec::new();
+    if snap.attachment_draft.is_some() {
+        let ws = snap.workspace.clone();
+        chips.push(
+            crate::ui::button(
+                "attach-files",
+                crate::surface::strings::agent_chat::attachment_add(),
+            )
+            .on_click(move |_, _, cx| {
+                if let Some(ws) = ws.upgrade() {
+                    ws.update(cx, |ws, cx| ws.pick_composer_attachments(cx));
+                }
+            })
+            .into_any_element(),
+        );
+        let ws = snap.workspace.clone();
+        chips.push(
+            crate::ui::button_icon("paste-attachment", crate::ui::icons::ADD, cx)
+                .tooltip(crate::surface::strings::agent_chat::attachment_paste())
+                .on_click(move |_, _, cx| {
+                    if let Some(ws) = ws.upgrade() {
+                        ws.update(cx, |ws, cx| {
+                            ws.paste_composer_attachments(cx);
+                        });
+                    }
+                })
+                .into_any_element(),
+        );
+    }
     if let Some((pane_id, modes)) = &snap.agent_mode {
         chips.push(
             super::mode_chip::mode_chip(*pane_id, modes, snap.workspace.clone()).into_any_element(),
@@ -89,7 +117,7 @@ pub(super) fn render_body(snap: &BottomDockSnapshot, cx: &mut Context<Dock>) -> 
     // via `set_auto_grow`); the outer dock height is driven by
     // `adapt_dock_to_input_lines` on every `InputEvent::Change`. In fill
     // mode (fallback) the editor fills the dock's fixed height and scrolls.
-    let cell = div()
+    let mut cell = div()
         .flex_1()
         .flex()
         .child(crate::ui::input_with_action_grow(
@@ -99,7 +127,56 @@ pub(super) fn render_body(snap: &BottomDockSnapshot, cx: &mut Context<Dock>) -> 
             0_isize,
             crate::ui::InputGrowMode::AutoGrow,
         ));
+    if let Some((pane, names)) = &snap.attachment_draft
+        && !names.is_empty()
+    {
+        let pane = *pane;
+        let mut attachments = div().flex().flex_row().gap(px(theme::GAP_SM));
+        for (index, name) in names.iter().enumerate() {
+            let ws = snap.workspace.clone();
+            attachments = attachments.child(
+                div()
+                    .flex()
+                    .items_center()
+                    .flex_shrink_0()
+                    .max_w(px(theme::AGENT_ATTACHMENT_CHIP_MAX_W))
+                    .gap(px(theme::GAP_SM))
+                    .px(px(theme::GAP_SM))
+                    .border_1()
+                    .border_color(theme::current(cx).border)
+                    .rounded(px(theme::RADIUS_MD))
+                    .text_color(theme::current(cx).text_body)
+                    .text_size(px(theme::FONT_SIZE_SM))
+                    .child(div().min_w_0().truncate().child(name.clone()))
+                    .child(
+                        crate::ui::button_delete_glyph(("attachment", index), cx)
+                            .tooltip(crate::surface::strings::agent_chat::attachment_remove(name))
+                            .on_click(move |_, _, cx| {
+                                if let Some(ws) = ws.upgrade() {
+                                    ws.update(cx, |ws, cx| {
+                                        ws.remove_composer_attachment(pane, index, cx)
+                                    });
+                                }
+                            }),
+                    ),
+            );
+        }
+        cell = cell.flex_col().min_w_0().gap(px(theme::GAP_SM)).child(
+            div()
+                .id("composer-attachments")
+                .h(px(theme::BUTTON_HEIGHT))
+                .min_w_0()
+                .flex_shrink_0()
+                .overflow_x_scrollbar()
+                .child(attachments),
+        );
+    }
     super::bottom_panel_body()
+        .capture_action(move |_: &crate::ui::InputPaste, _, cx| {
+            if let Some(ws) = ws_for_paste.upgrade() {
+                ws.update(cx, |ws, cx| ws.composer_paste_action(cx));
+            }
+        })
         .drag_over::<PathDrag>(|style, _, _, cx| {
             style.bg(theme::current(cx).input_panel_drop_target_bg)
         })
@@ -107,16 +184,19 @@ pub(super) fn render_body(snap: &BottomDockSnapshot, cx: &mut Context<Dock>) -> 
             style.bg(theme::current(cx).input_panel_drop_target_bg)
         })
         .on_drop::<PathDrag>(cx.listener(move |_dock, drag: &PathDrag, window, cx| {
-            let quoted = quote_path(&drag.path, shell);
-            state_for_path.update(cx, |s, cx_state| s.insert(quoted, window, cx_state));
+            if let Some(ws) = ws_for_path.upgrade() {
+                ws.update(cx, |ws, cx| {
+                    ws.composer_drop(vec![drag.path.clone()], window, cx)
+                });
+            }
         }))
         .on_drop::<ExternalPaths>(
             cx.listener(move |_dock, paths: &ExternalPaths, window, cx| {
-                if paths.paths().is_empty() {
-                    return;
+                if let Some(ws) = ws_for_external.upgrade() {
+                    ws.update(cx, |ws, cx| {
+                        ws.composer_drop(paths.paths().to_vec(), window, cx)
+                    });
                 }
-                let formatted = format_paths_for_drop(paths.paths(), shell);
-                state_for_external.update(cx, |s, cx_state| s.insert(formatted, window, cx_state));
             }),
         )
         .child(cell)

@@ -70,6 +70,7 @@ const NAME_AGENT_CHAT_PACKAGE_INVALID: &str = "agent-chat-package-invalid";
 const NAME_AGENT_CHAT_EMPTY: &str = "agent-chat-empty";
 /// CLI token for the settled-transcript scenario.
 const NAME_AGENT_CHAT: &str = "agent-chat";
+const NAME_AGENT_CHAT_ATTACHMENTS: &str = "agent-chat-attachments";
 const NAME_ORCHESTRATOR_CHIP: &str = "orchestrator-chip";
 const NAME_ORCHESTRATOR_TAB: &str = "orchestrator-tab";
 const NAME_TAB_INDICATORS: &str = "tab-indicators";
@@ -267,6 +268,7 @@ pub(crate) enum ScreenshotScenario {
     /// controls, and whether a group bar's rollup says anything about what it
     /// folded.
     AgentChat,
+    AgentChatAttachments,
     /// The transcript mid-turn: the agent has run tools and written the
     /// preamble in front of them, but not yet the answer. The run's last prose
     /// is therefore a preamble rather than a conclusion — the one shape
@@ -442,6 +444,7 @@ impl ScreenshotScenario {
             )),
             NAME_AGENT_CHAT_EMPTY => Some(Self::AgentChatEmpty),
             NAME_AGENT_CHAT => Some(Self::AgentChat),
+            NAME_AGENT_CHAT_ATTACHMENTS => Some(Self::AgentChatAttachments),
             NAME_AGENT_CHAT_WORKING => Some(Self::AgentChatWorking),
             NAME_AGENT_CHAT_NARROWED => Some(Self::AgentChatNarrowed),
             NAME_AGENT_CHAT_FOLD => Some(Self::AgentChatFold),
@@ -765,6 +768,9 @@ pub(crate) fn drive(
             workspace.update(cx, |ws, cx| {
                 ws.open_agent_chat_transcript_for_shot(window, cx)
             });
+        }
+        ScreenshotScenario::AgentChatAttachments => {
+            workspace.update(cx, |ws, cx| ws.open_attachment_draft_for_shot(window, cx));
         }
         ScreenshotScenario::OrchestratorChip => {
             workspace.update(cx, |ws, cx| {

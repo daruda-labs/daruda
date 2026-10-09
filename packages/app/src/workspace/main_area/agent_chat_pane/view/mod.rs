@@ -445,6 +445,7 @@ enum PhoneTurnAction {
 pub(in crate::workspace) struct QueuedPrompt {
     pub id: PromptId,
     pub text: String,
+    pub attachments: Vec<daruda_acp::PromptAttachment>,
     pub origin: PromptOrigin,
 }
 
@@ -864,6 +865,7 @@ pub(in crate::workspace) struct AgentChatView {
     /// `list` / `resume` / `close`), consumed by resume gating. Re-read each
     /// connect; default = baseline agent (nothing extra).
     pub(super) session_capabilities: SessionCapabilitiesView,
+    pub(super) draft_attachments: Vec<daruda_acp::PromptAttachment>,
     /// Live context-window / cost accounting from `UsageChanged`. Drives the
     /// context meter — distinct from the cumulative Usage tab. Cleared on a
     /// fresh session.
@@ -923,12 +925,14 @@ mod activity_ops;
 mod agent_default_ops;
 pub(in crate::workspace) use activity_ops::RunSummary;
 mod apply_event;
+mod attachments;
 mod event;
 mod host_commands;
 mod host_surface;
 pub(super) mod list_sync;
 mod pane_choices;
 mod queue_ops;
+pub(in crate::workspace) use attachments::display_prompt;
 mod session_ops;
 #[cfg(feature = "screenshot")]
 mod shot_ops;
@@ -1060,6 +1064,7 @@ impl AgentChatView {
             activity_title: None,
             session_config: SessionConfig::default(),
             session_capabilities: SessionCapabilitiesView::default(),
+            draft_attachments: Vec::new(),
             session_usage: None,
             plan: Vec::new(),
             // Seed the persisted title so a restored dormant pane shows its

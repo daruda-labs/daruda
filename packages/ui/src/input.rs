@@ -13,6 +13,7 @@ use gpui::{
 };
 use gpui_component::Sizable as _;
 
+pub use gpui_component::input::Paste as InputPaste;
 pub use gpui_component::input::{
     CompletionProvider, HistoryDir, Input, InputEvent, InputState, Rope, RopeExt,
     ScrollWheelBehavior,

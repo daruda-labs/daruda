@@ -447,6 +447,10 @@ pub struct SessionCapabilitiesView {
     pub resume: bool,
     /// `session/close` — explicitly end a session.
     pub close: bool,
+    /// `promptCapabilities.image` — accept embedded image blocks.
+    pub images: bool,
+    /// `promptCapabilities.embeddedContext` — accept file content snapshots.
+    pub embedded_context: bool,
     // `session/fork` is intentionally absent: it is gated behind the schema's
     // `unstable_session_fork` feature, which daruda does not enable, so the
     // protocol field is not compiled in and the capability is unreachable.
