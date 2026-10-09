@@ -408,6 +408,15 @@ file_viewer:
 
 # Agent chat pane (ACP)
 agent_chat:
+  attachment_add: "파일 첨부"
+  attachment_remove: "%{name} 제거"
+  attachment_clipboard_name: "클립보드 이미지"
+  attachment_paste: "이미지 또는 파일 붙여넣기"
+  attachment_connect_first: "첨부하려면 먼저 에이전트에 연결하세요."
+  attachment_unsupported: "이 에이전트는 해당 첨부 유형을 지원하지 않습니다."
+  attachment_limit: "첨부 한도를 초과했습니다(파일 8개, 프롬프트당 12 MiB, 대기열 48 MiB)."
+  attachment_failed: "파일 또는 클립보드 내용을 첨부하지 못했습니다."
+  attachment_names: "첨부: %{names}"
   queue_full: "그 대화에 이미 대기 중인 프롬프트가 너무 많습니다. 처리될 때까지 기다려 주세요."
   session_notice: "세션은 계속되지만 설정대로는 아닙니다"
   legacy_delegation_notice: "이 에이전트는 네이티브 서브에이전트 세션 없이 위임했기 때문에, 서브에이전트 자신의 도구 호출은 표시되지 않습니다. 어댑터가 이 기능을 지원하지 않거나, 설정 → 에이전트 및 채팅의 환경 변수를 읽지 못하는 것일 수 있습니다."
@@ -1497,6 +1506,7 @@ error_modal:
   button_open_log: "로그 파일 열기"
 
 error:
+  workspace_recovery_failed: "작업공간을 복구하지 못했습니다. 기존 상태는 보존되었습니다."
   acp_connect_failed: "ACP 세션 연결 실패"
   cannot_read_directory: "디렉터리를 읽을 수 없습니다"
   cannot_read_directory_detail: "디렉터리를 읽을 수 없습니다: %{error}"
@@ -1584,6 +1594,7 @@ notification:
 
 # Terminal annotations (SP-1)
 terminal:
+  restored_output: "이전 출력을 복원했습니다. 새 셸이 시작되었습니다."
   process_exited: "[프로세스가 종료되었습니다 — 패널 메뉴에서 다시 시작할 수 있습니다]"
   annotation_action_add: "주석 추가"
   annotation_action_add_disabled_tooltip: "먼저 한 줄의 텍스트를 선택하세요"

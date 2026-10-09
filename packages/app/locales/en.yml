@@ -489,6 +489,15 @@ file_viewer:
 
 # Agent chat pane (ACP)
 agent_chat:
+  attachment_add: "Attach files"
+  attachment_remove: "Remove %{name}"
+  attachment_clipboard_name: "Clipboard image"
+  attachment_paste: "Paste an image or files"
+  attachment_connect_first: "Connect the agent before adding attachments."
+  attachment_unsupported: "This agent does not support this attachment type."
+  attachment_limit: "Attachment limit exceeded (8 files, 12 MiB per prompt, 48 MiB queued)."
+  attachment_failed: "Could not attach the file or clipboard contents."
+  attachment_names: "Attachments: %{names}"
   queue_full: "That chat already has too many prompts waiting. Wait for it to catch up."
   # Heading for an inline permission card.
   # Toast title for a non-fatal session advisory (`AcpEvent::Notice`): the
@@ -2189,6 +2198,7 @@ error_modal:
   button_open_log: "Open log file"
 
 error:
+  workspace_recovery_failed: "Could not restore the workspace. Existing state was preserved."
   acp_connect_failed: "ACP session connect failed"
   cannot_read_directory: "Cannot read directory"
   cannot_read_directory_detail: "Cannot read directory: %{error}"
@@ -2299,6 +2309,7 @@ notification:
 
 # Terminal annotations (SP-1)
 terminal:
+  restored_output: "Previous output restored; a new shell has started."
   # Written under a shell's last output when it exits in a pane kept open.
   process_exited: "[Process exited — restart it from the pane menu]"
   # Context-menu entry that opens the annotation create dialog.
