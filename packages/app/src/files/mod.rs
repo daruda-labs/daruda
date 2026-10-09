@@ -11,4 +11,5 @@ pub mod gitignore;
 pub mod icons;
 pub mod load;
 pub mod tree;
+mod watch_backend;
 pub mod watcher;

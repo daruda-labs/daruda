@@ -15,7 +15,7 @@ use std::path::{Path, PathBuf};
 use std::sync::mpsc;
 use std::time::{Duration, Instant};
 
-use notify::{Event, RecommendedWatcher, RecursiveMode, Watcher};
+use notify::Event;
 
 /// Coalescing window for git-dir events. Wider than the file tree's, because
 /// one user action rewrites several files here (a commit moves `index`, a ref
@@ -117,7 +117,7 @@ pub fn classify_git_path(rel: &Path) -> Option<GitDirSignal> {
 /// Owns the `notify::Watcher` over one git directory plus its debounce
 /// thread. The watch stops when this struct is dropped.
 pub struct GitDirWatcher {
-    _watcher: RecommendedWatcher,
+    _watcher: super::watch_backend::WatchBackend,
     /// Receiver of coalesced signals. The `Workspace` polling task drains
     /// this on each tick.
     pub events_rx: mpsc::Receiver<GitDirEvent>,
@@ -125,13 +125,8 @@ pub struct GitDirWatcher {
 
 impl GitDirWatcher {
     pub fn new(git_dir: PathBuf) -> Result<Self, notify::Error> {
-        let (raw_tx, raw_rx) = mpsc::channel::<Result<Event, String>>();
-        let mut watcher: RecommendedWatcher =
-            notify::recommended_watcher(move |res: Result<Event, notify::Error>| {
-                let event = res.map_err(|error| error.to_string());
-                let _ = raw_tx.send(event);
-            })?;
-        watcher.watch(&git_dir, RecursiveMode::Recursive)?;
+        let (raw_tx, raw_rx) = mpsc::sync_channel::<Result<Event, String>>(256);
+        let watcher = super::watch_backend::WatchBackend::new(git_dir.clone(), raw_tx)?;
 
         let (out_tx, out_rx) = mpsc::channel::<GitDirEvent>();
         std::thread::spawn(move || debounce_loop(&git_dir, raw_rx, out_tx));
@@ -194,6 +189,9 @@ fn flush_signal(signal: &mut GitDirSignal, out_tx: &mpsc::Sender<GitDirEvent>) {
 /// Merge every path in one event into a single signal. Paths outside
 /// `git_dir` cannot be classified against it and are skipped.
 fn signal_for(git_dir: &Path, ev: &Event) -> GitDirSignal {
+    if ev.need_rescan() {
+        return GitDirSignal::BOTH;
+    }
     let mut signal = GitDirSignal::default();
     for path in &ev.paths {
         if let Ok(rel) = path.strip_prefix(git_dir)
@@ -208,6 +206,16 @@ fn signal_for(git_dir: &Path, ev: &Event) -> GitDirSignal {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn pathless_rescan_refreshes_refs_and_worktree() {
+        let mut event = Event::new(notify::EventKind::Any);
+        event.attrs.set_flag(notify::event::Flag::Rescan);
+        assert_eq!(
+            signal_for(Path::new("/repo/.git"), &event),
+            GitDirSignal::BOTH
+        );
+    }
 
     fn classify(rel: &str) -> Option<GitDirSignal> {
         classify_git_path(Path::new(rel))

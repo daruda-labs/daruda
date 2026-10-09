@@ -54,8 +54,22 @@ pub fn spawn_dir_watcher<T: Send + 'static>(
 
     let mut watcher: Box<dyn notify::Watcher + Send> =
         match notify::recommended_watcher(move |res: Result<notify::Event, notify::Error>| {
-            let Ok(ev) = res else {
-                return;
+            let ev = match res {
+                Ok(ev) => ev,
+                Err(error) => {
+                    LogWriter::log(
+                        ErrorReport::new("Directory watcher lost events")
+                            .severity(ErrorSeverity::Warning)
+                            .from_error(&error)
+                            .at(file!(), line!())
+                            .dedup("dir_watch.event")
+                            .build(),
+                    );
+                    for item in rescan() {
+                        let _ = tx.send(item);
+                    }
+                    return;
+                }
             };
             for item in route(&ev, &classify, &rescan) {
                 // SILENT-OK: a dropped receiver means the consumer is gone and

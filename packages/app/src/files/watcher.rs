@@ -12,7 +12,7 @@ use std::path::{Path, PathBuf};
 use std::sync::mpsc;
 use std::time::{Duration, Instant};
 
-use notify::{Event, EventKind, RecommendedWatcher, RecursiveMode, Watcher};
+use notify::{Event, EventKind};
 
 const DEBOUNCE_WINDOW: Duration = Duration::from_millis(30);
 const BULK_THRESHOLD: usize = 100;
@@ -42,7 +42,7 @@ pub enum DebouncedEvent {
 pub struct FileTreeWatcher {
     /// `notify::Watcher`; stops the kernel-side watch on drop. Held
     /// in a field so it lives as long as `FileTreeWatcher`.
-    _watcher: RecommendedWatcher,
+    _watcher: super::watch_backend::WatchBackend,
     /// Receiver of debounced events. The `Workspace` polling task
     /// drains this on each tick.
     pub events_rx: mpsc::Receiver<DebouncedEvent>,
@@ -50,23 +50,8 @@ pub struct FileTreeWatcher {
 
 impl FileTreeWatcher {
     pub fn new(root: PathBuf) -> Result<Self, notify::Error> {
-        let (raw_tx, raw_rx) = mpsc::channel::<Result<Event, String>>();
-        let mut watcher: RecommendedWatcher =
-            notify::recommended_watcher(move |res: Result<Event, notify::Error>| {
-                match res {
-                    Ok(ev) => {
-                        let _ = raw_tx.send(Ok(ev));
-                    }
-                    Err(e) => {
-                        // Kernel queue overflow or permission error: forward
-                        // the message so the debounce loop can emit an Error
-                        // event to the Workspace, which surfaces it in the
-                        // status bar.
-                        let _ = raw_tx.send(Err(e.to_string()));
-                    }
-                }
-            })?;
-        watcher.watch(&root, RecursiveMode::Recursive)?;
+        let (raw_tx, raw_rx) = mpsc::sync_channel::<Result<Event, String>>(256);
+        let watcher = super::watch_backend::WatchBackend::new(root, raw_tx)?;
 
         let (out_tx, out_rx) = mpsc::channel::<DebouncedEvent>();
         std::thread::spawn(move || debounce_loop(raw_rx, out_tx));
@@ -94,7 +79,7 @@ fn debounce_loop(
         };
         let mut changed: Vec<PathBuf> = Vec::new();
         let mut removed: Vec<PathBuf> = Vec::new();
-        classify(first, &mut changed, &mut removed);
+        let mut bulk = classify(first, &mut changed, &mut removed);
         let deadline = Instant::now() + DEBOUNCE_WINDOW;
 
         loop {
@@ -103,19 +88,19 @@ fn debounce_loop(
                 break;
             }
             match raw_rx.recv_timeout(deadline - now) {
-                Ok(Ok(ev)) => classify(ev, &mut changed, &mut removed),
+                Ok(Ok(ev)) => bulk |= classify(ev, &mut changed, &mut removed),
                 Ok(Err(msg)) => {
-                    flush(&mut changed, &mut removed, &out_tx);
+                    flush_batch(&mut bulk, &mut changed, &mut removed, &out_tx);
                     let _ = out_tx.send(DebouncedEvent::Error(msg));
                 }
                 Err(mpsc::RecvTimeoutError::Timeout) => break,
                 Err(mpsc::RecvTimeoutError::Disconnected) => {
-                    flush(&mut changed, &mut removed, &out_tx);
+                    flush_batch(&mut bulk, &mut changed, &mut removed, &out_tx);
                     return;
                 }
             }
         }
-        flush(&mut changed, &mut removed, &out_tx);
+        flush_batch(&mut bulk, &mut changed, &mut removed, &out_tx);
     }
 }
 
@@ -124,13 +109,38 @@ fn debounce_loop(
 /// granularity — a single `Event` may carry multiple paths, all of the
 /// same kind by notify's contract. Paths inside `.git/` are dropped at
 /// this step (see module docs).
-fn classify(ev: Event, changed: &mut Vec<PathBuf>, removed: &mut Vec<PathBuf>) {
+fn classify(ev: Event, changed: &mut Vec<PathBuf>, removed: &mut Vec<PathBuf>) -> bool {
+    if ev.need_rescan() {
+        return true;
+    }
+    let remaining = BULK_THRESHOLD.saturating_sub(changed.len() + removed.len());
     let bucket = if matches!(ev.kind, EventKind::Remove(_)) {
         removed
     } else {
         changed
     };
-    bucket.extend(ev.paths.into_iter().filter(|p| !path_inside_git_dir(p)));
+    bucket.extend(
+        ev.paths
+            .into_iter()
+            .filter(|p| !path_inside_git_dir(p))
+            .take(remaining),
+    );
+    false
+}
+
+fn flush_batch(
+    bulk: &mut bool,
+    changed: &mut Vec<PathBuf>,
+    removed: &mut Vec<PathBuf>,
+    tx: &mpsc::Sender<DebouncedEvent>,
+) {
+    if std::mem::take(bulk) {
+        changed.clear();
+        removed.clear();
+        let _ = tx.send(DebouncedEvent::Bulk);
+    } else {
+        flush(changed, removed, tx);
+    }
 }
 
 /// True when any component of `path` equals `.git` — matches `.git/`
@@ -173,6 +183,18 @@ mod tests {
     use super::*;
     use notify::EventKind;
     use notify::event::EventAttributes;
+
+    #[test]
+    fn pathless_rescan_invalidates_the_entire_tree() {
+        let (raw_tx, raw_rx) = mpsc::channel();
+        let (out_tx, out_rx) = mpsc::channel();
+        let mut event = Event::new(EventKind::Any);
+        event.attrs.set_flag(notify::event::Flag::Rescan);
+        raw_tx.send(Ok(event)).unwrap();
+        drop(raw_tx);
+        debounce_loop(raw_rx, out_tx);
+        assert!(matches!(out_rx.try_recv(), Ok(DebouncedEvent::Bulk)));
+    }
 
     fn dummy_event(path: &str) -> Result<Event, String> {
         Ok(Event {
