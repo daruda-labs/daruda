@@ -1,19 +1,15 @@
-//! Delete confirmation modal — routes through
-//! [`crate::workspace::dialog_helpers::open_confirm_dialog`] so every
-//! confirm-style dialog in the app shares one opener (consistency
-//! with lane / panels delete confirmations).
+//! Retryable delete confirmation that retains its target and error on failure.
 
 use std::path::PathBuf;
 
 use daruda_store::observability::error_report::{ErrorReport, ErrorSeverity};
 use daruda_store::observability::system_info::redact_home;
-use gpui::{Context, Window};
+use gpui::{Context, SharedString, Window};
 
+use super::super::delete_modal;
 use crate::agent::skills::{SkillScope, persist};
 use crate::surface::strings;
-use crate::ui::dialog::ButtonVariant;
 use crate::workspace::Workspace;
-use crate::workspace::dialog_helpers::open_confirm_dialog;
 
 pub fn open_delete_skill_confirm(
     _ws: &mut Workspace,
@@ -36,16 +32,18 @@ pub fn open_delete_skill_confirm(
         dir.display(),
     );
 
-    open_confirm_dialog(
+    delete_modal::open(
         strings::skills::delete_title(),
         body,
-        strings::common::btn_delete(),
-        ButtonVariant::Danger,
-        move |_, _window, app_cx| {
-            if let Some(ws) = workspace.upgrade() {
+        move |_window, app_cx| {
+            let Some(ws) = workspace.upgrade() else {
+                return Err(strings::common::form_target_gone().into());
+            };
+            {
                 let dir = dir.clone();
                 ws.update(app_cx, |ws, cx| {
                     if let Err(e) = persist::delete_skill(&dir) {
+                        let message = SharedString::from(e.to_string());
                         let report =
                             ErrorReport::new(crate::surface::strings::error::skill_delete_failed())
                                 .severity(ErrorSeverity::Error)
@@ -55,10 +53,11 @@ pub fn open_delete_skill_confirm(
                                 .dedup("skills.delete")
                                 .build();
                         ws.report_error(report, cx);
-                        return;
+                        return Err(message);
                     }
                     ws.refresh_skills_watcher(cx);
-                });
+                    Ok(())
+                })
             }
         },
         window,

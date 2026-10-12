@@ -80,12 +80,8 @@ fn scope_slot_mut<'a>(
     }
 }
 
-/// Re-read `~/.claude.json` from disk into the Global before patching a
-/// User / Local server. `~/.claude.json` holds the user's entire Claude
-/// Code state and Claude Code rewrites it constantly; refreshing right
-/// before our whole-file atomic rewrite shrinks the lost-update window
-/// against a concurrent write. No-op for the Project scope, whose
-/// `.mcp.json` is daruda-owned and low-collision.
+/// Reload the target before patching it so unrelated external edits survive
+/// the whole-file atomic rewrite, for both `.claude.json` and `.mcp.json`.
 fn refresh_before_write(
     state: &mut McpState,
     scope: McpScope,
@@ -93,6 +89,8 @@ fn refresh_before_write(
 ) -> Result<(), McpPersistError> {
     if scope.in_claude_json() {
         state.reload_claude_json(lane)?;
+    } else {
+        state.reload_project(lane)?;
     }
     Ok(())
 }
@@ -148,10 +146,10 @@ impl Workspace {
     pub(super) fn add_mcp_server(
         &mut self,
         scope: McpScope,
+        lane: Option<PathBuf>,
         draft: McpServerDraft,
         cx: &mut Context<Self>,
     ) -> Result<(), McpPersistError> {
-        let lane = self.active_lane_root();
         let (path, location) =
             target_meta(scope, lane.as_deref()).ok_or(McpPersistError::NoProjectRoot)?;
         let result = cx.update_global::<McpState, _>(|state, _| {
@@ -172,10 +170,10 @@ impl Workspace {
     pub(super) fn update_mcp_server(
         &mut self,
         scope: McpScope,
+        lane: Option<PathBuf>,
         draft: McpServerDraft,
         cx: &mut Context<Self>,
     ) -> Result<(), McpPersistError> {
-        let lane = self.active_lane_root();
         let (path, location) =
             target_meta(scope, lane.as_deref()).ok_or(McpPersistError::NoProjectRoot)?;
         let result = cx.update_global::<McpState, _>(|state, _| {
@@ -201,10 +199,10 @@ impl Workspace {
     pub(super) fn delete_mcp_server_internal(
         &mut self,
         scope: McpScope,
+        lane: Option<PathBuf>,
         name: &str,
         cx: &mut Context<Self>,
     ) -> Result<(), McpPersistError> {
-        let lane = self.active_lane_root();
         let (path, location) =
             target_meta(scope, lane.as_deref()).ok_or(McpPersistError::NoProjectRoot)?;
         let result = cx.update_global::<McpState, _>(|state, _| {

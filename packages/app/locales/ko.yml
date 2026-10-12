@@ -6,6 +6,9 @@ startup:
   failure_log_unavailable: "진단 로그를 저장할 수 없습니다: %{error}"
 
 common:
+  form_target_gone: "작업 공간을 더 이상 사용할 수 없습니다."
+  unsaved_form_title: "저장하지 않은 변경사항"
+  btn_discard: "버리기"
   column_status: "상태"
   filter_count: "%{label} %{count}"
   group_by: "그룹: %{group}"
@@ -1181,6 +1184,7 @@ settings:
 
 # Skills tab
 skills:
+  changed_on_disk: "디스크의 스킬이 변경되었습니다. 다시 열어 최신 내용을 불러온 뒤 저장해 주세요."
   section_plugin: "플러그인"
   count_chip_with_plugins: "스킬 %{skills}개 · 플러그인 %{plugins}개"
   footer_available: "사용 가능한 스킬 %{n}개"
@@ -1226,6 +1230,10 @@ skills:
 
 # MCP / Tools tab
 mcp:
+  headers_invalid: "헤더 %{line}번째 줄은 KEY=VALUE 형식이어야 합니다."
+  pairs_invalid: "환경변수 %{line}번째 줄은 KEY=VALUE 형식이어야 합니다."
+  pairs_duplicate: "%{line}번째 줄에서 %{key} 키가 중복됩니다."
+  args_invalid: "인수의 따옴표를 모두 닫아 주세요."
   new_button: "서버 추가"
   empty_project: "프로젝트 MCP 서버 없음 — `+ 서버 추가`로 `.mcp.json`을 생성하세요."
   no_project_hint: "프로젝트 및 로컬 MCP 서버는 활성 Worktree가 필요합니다. 프로젝트를 열어 이 범위를 활성화하세요."
@@ -1240,7 +1248,7 @@ mcp:
   delete_title: "MCP 서버를 삭제할까요?"
   field_transport: "전송"
   field_command: "명령"
-  field_args: "인수 (공백으로 구분)"
+  field_args: "인자 (따옴표로 값 묶기 · 역슬래시 그대로 유지)"
   field_url: "URL"
   field_env: "환경 변수 (줄당 KEY=VALUE)"
   field_headers: "헤더 (줄당 KEY=VALUE)"

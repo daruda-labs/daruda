@@ -1,8 +1,8 @@
 //! Helpers for opening `gpui_component::Dialog` based modals.
 //!
 //! Covers single-field dialogs, form-body modals, destructive confirmations,
-//! and the error-report modal. Dialog owns outer chrome and Escape handling;
-//! form entities own their custom body/footer behaviour.
+//! and the error-report modal. Dialog owns outer chrome; guarded form entities
+//! also own Escape handling alongside their custom body/footer behaviour.
 
 use std::rc::Rc;
 
@@ -10,7 +10,7 @@ use crate::ui::theme;
 use daruda_store::observability::error_report::ErrorReport;
 use gpui::{
     App, AppContext as _, ClickEvent, Context, Focusable, ParentElement as _, Pixels, SharedString,
-    WeakEntity, Window, px,
+    WeakEntity, Window, div, prelude::*, px,
 };
 
 use crate::surface::strings as s;
@@ -213,9 +213,20 @@ pub(in crate::workspace) fn open_form_modal<E, B>(
     let entity = cx.new(|cx_modal| build(window, cx_modal));
     let entity_for_focus = entity.clone();
 
-    window.open_dialog(cx, move |dialog, _window, _cx| {
+    window.open_dialog(cx, move |dialog, _window, cx| {
+        let guarded = entity.read(cx).guards_close();
+        let close_entity = entity.clone();
+        let body = div().child(entity.clone()).when(guarded, |body| {
+            body.on_key_down(move |event, window, cx| {
+                if event.keystroke.key == "escape" {
+                    cx.stop_propagation();
+                    close_entity.update(cx, |modal, cx| modal.request_close(window, cx));
+                }
+            })
+        });
         let mut d = dialog
-            .child(entity.clone())
+            .keyboard(!guarded)
+            .child(body)
             .close_button(false)
             .overlay_closable(false);
         if !title.is_empty() {

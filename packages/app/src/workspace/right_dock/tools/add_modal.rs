@@ -23,14 +23,14 @@ use super::modal_shared::{
     field_error_to_msg, field_label, scope_options, split_args, transport_options,
 };
 use crate::agent::mcp::{
-    McpScope, McpServerDraft, McpTransport, NameError, parse_env_lines, validate_command,
-    validate_name, validate_url,
+    McpScope, McpServerDraft, McpTransport, NameError, validate_command, validate_name,
+    validate_url,
 };
 use crate::surface::strings;
 use crate::ui::Disableable as _;
 use crate::ui::Selectable as _;
 use crate::ui::WindowExt as _;
-use crate::ui::{InputEvent, InputState, button, button_group, button_primary, checkbox, input};
+use crate::ui::{InputEvent, InputState, button, button_group, button_primary, checkbox};
 use crate::workspace::ModalView;
 use crate::workspace::Workspace;
 
@@ -57,6 +57,7 @@ pub struct AddMcpInitial {
 
 pub struct AddMcpServerModal {
     panel_focus_handle: FocusHandle,
+    form: super::super::form_state::FormState,
 
     name_input: Entity<InputState>,
     command_input: Entity<InputState>,
@@ -73,6 +74,7 @@ pub struct AddMcpServerModal {
     initial: AddMcpInitial,
 
     error: Option<SharedString>,
+    error_field: Option<isize>,
     submitting: bool,
 
     workspace: WeakEntity<Workspace>,
@@ -131,7 +133,8 @@ impl AddMcpServerModal {
             forward_multi_input(&headers_input, window, cx),
         ];
 
-        Self {
+        let mut modal = Self {
+            form: Default::default(),
             panel_focus_handle: cx.focus_handle(),
             name_input,
             command_input,
@@ -145,22 +148,29 @@ impl AddMcpServerModal {
             disabled: false,
             initial,
             error: None,
+            error_field: None,
             submitting: false,
             workspace,
             _input_subs: subs,
-        }
+        };
+        modal.form.baseline = modal.values(cx);
+        modal
     }
 
-    fn build_draft(&self, cx: &gpui::App) -> Result<McpServerDraft, SharedString> {
+    fn build_draft(&self, cx: &gpui::App) -> Result<McpServerDraft, (isize, SharedString)> {
         let raw_name = self.name_input.read(cx).value().to_string();
         let raw_name = raw_name.trim().to_string();
         match validate_name(&raw_name) {
             Ok(()) => {}
-            Err(NameError::Empty) => return Err(strings::common::name_required().into()),
-            Err(NameError::TooLong { .. }) => return Err(strings::mcp::name_too_long().into()),
-            Err(NameError::InvalidChar { .. }) => return Err(strings::mcp::name_invalid().into()),
+            Err(NameError::Empty) => return Err((0, strings::common::name_required().into())),
+            Err(NameError::TooLong { .. }) => {
+                return Err((0, strings::mcp::name_too_long().into()));
+            }
+            Err(NameError::InvalidChar { .. }) => {
+                return Err((0, strings::mcp::name_invalid().into()));
+            }
             Err(NameError::InvalidLeading { .. }) => {
-                return Err(strings::mcp::name_leading().into());
+                return Err((0, strings::mcp::name_leading().into()));
             }
             Err(NameError::DuplicateInScope { .. }) => unreachable!("validate_name is syntactic"),
         }
@@ -170,26 +180,30 @@ impl AddMcpServerModal {
             .iter()
             .any(|(scope, name)| *scope == self.scope && name == &raw_name)
         {
-            return Err(strings::mcp::name_duplicate().into());
+            return Err((0, strings::mcp::name_duplicate().into()));
         }
 
         let command_text = self.command_input.read(cx).value().to_string();
         let url_text = self.url_input.read(cx).value().to_string();
         if let Err(e) = validate_command(&command_text, self.transport) {
-            return Err(field_error_to_msg(e));
+            return Err((1, field_error_to_msg(e)));
         }
         if let Err(e) = validate_url(&url_text, self.transport) {
-            return Err(field_error_to_msg(e));
+            return Err((1, field_error_to_msg(e)));
         }
 
         let env_text = self.env_input.read(cx).value().to_string();
-        let env = parse_env_lines(&env_text).map_err(|e| field_error_to_msg(e.into()))?;
+        let env = super::modal_shared::parse_pairs(&env_text, false).map_err(|e| (3, e))?;
         let headers_text = self.headers_input.read(cx).value().to_string();
-        let headers = parse_env_lines(&headers_text).map_err(|e| field_error_to_msg(e.into()))?;
+        let headers = if self.transport.is_remote() {
+            super::modal_shared::parse_pairs(&headers_text, true).map_err(|e| (2, e))?
+        } else {
+            Default::default()
+        };
 
         let args_text = self.args_input.read(cx).value().to_string();
         let args = match self.transport {
-            McpTransport::Stdio => split_args(&args_text),
+            McpTransport::Stdio => split_args(&args_text).map_err(|e| (2, e))?,
             _ => Vec::new(),
         };
 
@@ -221,13 +235,20 @@ impl AddMcpServerModal {
         }
         let draft = match self.build_draft(cx) {
             Ok(d) => d,
-            Err(msg) => {
+            Err((field, msg)) => {
+                self.error_field = Some(field);
                 self.error = Some(msg);
+                if let Some(input) = self.visible_inputs().get(field as usize) {
+                    window.focus(&input.focus_handle(cx), cx);
+                }
                 cx.notify();
                 return;
             }
         };
         let scope = self.scope;
+        let target_root = self.initial.project_root.clone();
+        super::super::form_state::freeze_inputs(&self.inputs(), true, cx);
+        self.error_field = None;
         self.submitting = true;
         cx.notify();
 
@@ -244,7 +265,7 @@ impl AddMcpServerModal {
             // window via `update_window(handle, ...)` to recover the
             // `&mut Window` needed for `dismiss`.
             ws.update(cx, |ws, cx_inner| {
-                let result = ws.add_mcp_server(scope, draft, cx_inner);
+                let result = ws.add_mcp_server(scope, target_root, draft, cx_inner);
                 let me = me.clone();
                 cx_inner.defer(move |cx| {
                     // SILENT-OK: window may be gone by the time this defer runs — with no window there is nothing to dismiss or show the save error on, so the no-op is correct.
@@ -254,6 +275,7 @@ impl AddMcpServerModal {
                             Ok(()) => me.update(cx, |modal, cx| modal.dismiss(window, cx)),
                             Err(e) => me.update(cx, |modal, cx| {
                                 modal.submitting = false;
+                                super::super::form_state::freeze_inputs(&modal.inputs(), false, cx);
                                 modal.error = Some(SharedString::from(e.to_string()));
                                 cx.notify();
                             }),
@@ -263,8 +285,79 @@ impl AddMcpServerModal {
             });
         } else {
             self.submitting = false;
+            super::super::form_state::freeze_inputs(&self.inputs(), false, cx);
             cx.notify();
         }
+    }
+
+    fn values(&self, cx: &App) -> Vec<String> {
+        vec![
+            self.scope.slug().to_string(),
+            self.transport.slug().to_string(),
+            self.disabled.to_string(),
+            self.name_input.read(cx).value().to_string(),
+            self.command_input.read(cx).value().to_string(),
+            self.args_input.read(cx).value().to_string(),
+            self.url_input.read(cx).value().to_string(),
+            self.env_input.read(cx).value().to_string(),
+            self.headers_input.read(cx).value().to_string(),
+        ]
+    }
+
+    fn visible_inputs(&self) -> Vec<Entity<InputState>> {
+        if self.transport.is_remote() {
+            vec![
+                self.name_input.clone(),
+                self.url_input.clone(),
+                self.headers_input.clone(),
+                self.env_input.clone(),
+            ]
+        } else {
+            vec![
+                self.name_input.clone(),
+                self.command_input.clone(),
+                self.args_input.clone(),
+                self.env_input.clone(),
+            ]
+        }
+    }
+
+    fn inputs(&self) -> Vec<Entity<InputState>> {
+        vec![
+            self.name_input.clone(),
+            self.command_input.clone(),
+            self.args_input.clone(),
+            self.url_input.clone(),
+            self.env_input.clone(),
+            self.headers_input.clone(),
+        ]
+    }
+
+    fn leave(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        use super::super::form_state::{LeaveChoice, ask_to_leave};
+        if self.submitting || self.form.asking {
+            return;
+        }
+        let dirty = self.form.is_dirty(&self.values(cx));
+        if !dirty {
+            self.dismiss(window, cx);
+            return;
+        }
+        ask_to_leave(
+            &mut self.form,
+            dirty,
+            self.submitting,
+            window,
+            cx,
+            |this, choice, window, cx| {
+                this.form.asking = false;
+                match choice {
+                    LeaveChoice::Save => this.submit(window, cx),
+                    LeaveChoice::Discard => this.dismiss(window, cx),
+                    LeaveChoice::Continue => {}
+                }
+            },
+        );
     }
 
     fn dismiss(&mut self, window: &mut Window, cx: &mut App) {
@@ -274,6 +367,7 @@ impl AddMcpServerModal {
     fn clear_error(&mut self, cx: &mut Context<Self>) {
         if self.error.is_some() {
             self.error = None;
+            self.error_field = None;
             cx.notify();
         }
     }
@@ -321,7 +415,14 @@ impl Focusable for AddMcpServerModal {
     }
 }
 
-impl ModalView for AddMcpServerModal {}
+impl ModalView for AddMcpServerModal {
+    fn guards_close(&self) -> bool {
+        true
+    }
+    fn request_close(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.leave(window, cx);
+    }
+}
 
 impl Render for AddMcpServerModal {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
@@ -331,6 +432,7 @@ impl Render for AddMcpServerModal {
         let banner = self
             .error
             .as_ref()
+            .filter(|_| self.error_field.is_none())
             .map(|msg| crate::ui::alert::error("add-tool-error", msg.clone()));
 
         // Scope segmented selector. Children align with `scope_values`
@@ -347,8 +449,12 @@ impl Render for AddMcpServerModal {
                     .selected(self.scope == scope)
             }))
             .on_click(cx.listener(move |this, ixs: &Vec<usize>, _w, cx| {
+                if this.submitting {
+                    return;
+                }
                 if let Some(&ix) = ixs.first() {
                     this.scope = scope_values[ix];
+                    this.clear_error(cx);
                     cx.notify();
                 }
             }));
@@ -365,8 +471,12 @@ impl Render for AddMcpServerModal {
                 .selected(self.transport == tp)
             }))
             .on_click(cx.listener(move |this, ixs: &Vec<usize>, _w, cx| {
+                if this.submitting {
+                    return;
+                }
                 if let Some(&ix) = ixs.first() {
                     this.transport = transport_values[ix];
+                    this.clear_error(cx);
                     cx.notify();
                 }
             }));
@@ -376,7 +486,13 @@ impl Render for AddMcpServerModal {
             .flex_col()
             .gap(px(theme::FORM_MODAL_SECTION_GAP))
             .child(field_label(strings::common::field_name(), &t))
-            .child(input(&self.name_input, cx, 0))
+            .child(super::super::form_state::field_input(
+                &self.name_input,
+                cx,
+                0,
+                self.error_field,
+                self.error.as_ref(),
+            ))
             .child(field_label(strings::common::field_scope(), &t))
             .child(scope_chip)
             .child(field_label(strings::mcp::field_transport(), &t))
@@ -386,16 +502,40 @@ impl Render for AddMcpServerModal {
             McpTransport::Stdio => {
                 body = body
                     .child(field_label(strings::mcp::field_command(), &t))
-                    .child(input(&self.command_input, cx, 1))
+                    .child(super::super::form_state::field_input(
+                        &self.command_input,
+                        cx,
+                        1,
+                        self.error_field,
+                        self.error.as_ref(),
+                    ))
                     .child(field_label(strings::mcp::field_args(), &t))
-                    .child(input(&self.args_input, cx, 2));
+                    .child(super::super::form_state::field_input(
+                        &self.args_input,
+                        cx,
+                        2,
+                        self.error_field,
+                        self.error.as_ref(),
+                    ));
             }
             McpTransport::Sse | McpTransport::Http => {
                 body = body
                     .child(field_label(strings::mcp::field_url(), &t))
-                    .child(input(&self.url_input, cx, 1))
+                    .child(super::super::form_state::field_input(
+                        &self.url_input,
+                        cx,
+                        1,
+                        self.error_field,
+                        self.error.as_ref(),
+                    ))
                     .child(field_label(strings::mcp::field_headers(), &t))
-                    .child(input(&self.headers_input, cx, 2));
+                    .child(super::super::form_state::field_input(
+                        &self.headers_input,
+                        cx,
+                        2,
+                        self.error_field,
+                        self.error.as_ref(),
+                    ));
             }
         }
 
@@ -405,11 +545,20 @@ impl Render for AddMcpServerModal {
         // uses 1,2 for url+headers — env uses 3 across both branches).
         body = body
             .child(field_label(strings::mcp::field_env(), &t))
-            .child(input(&self.env_input, cx, 3))
+            .child(super::super::form_state::field_input(
+                &self.env_input,
+                cx,
+                3,
+                self.error_field,
+                self.error.as_ref(),
+            ))
             .child(
                 checkbox("mcp-disabled", strings::mcp::field_disabled(), 4)
                     .checked(self.disabled)
                     .on_click(cx.listener(|this, checked: &bool, _w, cx| {
+                        if this.submitting {
+                            return;
+                        }
                         this.disabled = *checked;
                         cx.notify();
                     })),
@@ -428,11 +577,11 @@ impl Render for AddMcpServerModal {
             .mt(px(theme::MODAL_FOOTER_MARGIN_TOP))
             .child(
                 button("add-mcp-cancel", strings::common::btn_cancel())
-                    .on_click(cx.listener(|this, _: &ClickEvent, w, cx| this.dismiss(w, cx))),
+                    .on_click(cx.listener(|this, _: &ClickEvent, w, cx| this.leave(w, cx))),
             )
             .child(
                 button_primary("add-mcp-save", save_label)
-                    .disabled(submitting)
+                    .disabled(submitting || self.name_input.read(cx).value().trim().is_empty())
                     .on_click(cx.listener(|this, _: &ClickEvent, w, cx| this.submit(w, cx))),
             );
 

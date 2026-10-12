@@ -6,6 +6,9 @@ startup:
 
 # Common UI tokens — reused across sections
 common:
+  form_target_gone: "The workspace is no longer available."
+  unsaved_form_title: "Unsaved changes"
+  btn_discard: "Discard"
   column_status: "Status"
   filter_count: "%{label} %{count}"
   group_by: "Group: %{group}"
@@ -1651,6 +1654,7 @@ settings:
 
 # Skills tab
 skills:
+  changed_on_disk: "The skill changed on disk. Reopen it to load the latest version before saving."
   # Section heading for the plugin-scope group. Plugin skills come
   # from marketplace installs (`~/.claude/plugins/cache/...`) and are
   # **read-only** in daruda — Edit / Delete / Rename are disabled.
@@ -1717,6 +1721,10 @@ skills:
 
 # MCP / Tools tab
 mcp:
+  headers_invalid: "Header line %{line} must be KEY=VALUE."
+  pairs_invalid: "Environment line %{line} must be KEY=VALUE."
+  pairs_duplicate: "Line %{line} repeats key %{key}."
+  args_invalid: "Close every quote in the arguments."
   # Header button — opens AddMcpServerModal.
   new_button: "Add server"
   # Body when project scope has no servers and there is an active lane.
@@ -1742,7 +1750,7 @@ mcp:
   delete_title: "Delete MCP server?"
   field_transport: "Transport"
   field_command: "Command"
-  field_args: "Args (space-separated)"
+  field_args: "Args (quoted values; literal backslashes)"
   field_url: "URL"
   field_env: "Env (KEY=VALUE per line)"
   field_headers: "Headers (KEY=VALUE per line)"

@@ -29,7 +29,7 @@ use crate::surface::strings;
 use crate::ui::Disableable as _;
 use crate::ui::Selectable as _;
 use crate::ui::WindowExt as _;
-use crate::ui::{InputEvent, InputState, button, button_group, button_primary, checkbox, input};
+use crate::ui::{InputEvent, InputState, button, button_group, button_primary, checkbox};
 use crate::workspace::ModalView;
 use crate::workspace::Workspace;
 use crate::workspace::right_dock::skills::modal_shared::field_label;
@@ -46,6 +46,7 @@ fn blank_to_none(s: &str) -> Option<String> {
 
 pub struct CreateSkillModal {
     panel_focus_handle: FocusHandle,
+    form: super::super::form_state::FormState,
 
     name_input: Entity<InputState>,
     description_input: Entity<InputState>,
@@ -67,6 +68,7 @@ pub struct CreateSkillModal {
     state_snapshot: SkillsSnapshot,
 
     error: Option<SharedString>,
+    error_field: Option<isize>,
     submitting: bool,
 
     workspace: WeakEntity<Workspace>,
@@ -139,7 +141,8 @@ impl CreateSkillModal {
             forward_body_editor(&body_editor, window, cx),
         ];
 
-        Self {
+        let mut modal = Self {
+            form: Default::default(),
             panel_focus_handle: cx.focus_handle(),
             name_input,
             description_input,
@@ -156,29 +159,34 @@ impl CreateSkillModal {
             project_root,
             state_snapshot,
             error: None,
+            error_field: None,
             submitting: false,
             workspace,
             _input_subs: subs,
-        }
+        };
+        modal.form.baseline = modal.values(cx);
+        modal
     }
 
-    fn build_draft(&self, cx: &gpui::App) -> Result<SkillDraft, SharedString> {
+    fn build_draft(&self, cx: &gpui::App) -> Result<SkillDraft, (isize, SharedString)> {
         let raw_name = self.name_input.read(cx).value().to_string();
         let raw_name = raw_name.trim().to_string();
         match validate_name(&raw_name) {
             Ok(()) => {}
-            Err(NameError::Empty) => return Err(strings::common::name_required().into()),
-            Err(NameError::TooLong { .. }) => return Err(strings::skills::name_too_long().into()),
+            Err(NameError::Empty) => return Err((0, strings::common::name_required().into())),
+            Err(NameError::TooLong { .. }) => {
+                return Err((0, strings::skills::name_too_long().into()));
+            }
             Err(NameError::InvalidChar { .. }) => {
-                return Err(strings::skills::name_invalid().into());
+                return Err((0, strings::skills::name_invalid().into()));
             }
             Err(NameError::InvalidLeading { .. }) => {
-                return Err(strings::skills::name_leading().into());
+                return Err((0, strings::skills::name_leading().into()));
             }
             Err(NameError::DuplicateInScope { .. }) => unreachable!("validate_name is syntactic"),
         }
         if self.state_snapshot.name_exists(self.scope, &raw_name) {
-            return Err(strings::skills::name_duplicate().into());
+            return Err((0, strings::skills::name_duplicate().into()));
         }
 
         let mut fm = SkillFrontmatter::empty();
@@ -206,22 +214,33 @@ impl CreateSkillModal {
         }
         let draft = match self.build_draft(cx) {
             Ok(d) => d,
-            Err(msg) => {
+            Err((field, msg)) => {
+                self.error_field = Some(field);
                 self.error = Some(msg);
+                if let Some(input) = self.inputs().get(field as usize) {
+                    window.focus(&input.focus_handle(cx), cx);
+                }
                 cx.notify();
                 return;
             }
         };
         let project_root = self.project_root.clone();
         let workspace = self.workspace.clone();
+        super::super::form_state::freeze_inputs(&self.inputs(), true, cx);
+        self.error_field = None;
         self.submitting = true;
         cx.notify();
 
         let me = cx.entity().downgrade();
         window
             .spawn(cx, async move |async_cx| {
-                let result = persist::write_skill(&draft, project_root.as_deref(), false)
-                    .map_err(|e| e.to_string());
+                let result = async_cx
+                    .background_executor()
+                    .spawn(async move {
+                        persist::write_skill(&draft, project_root.as_deref(), false)
+                            .map_err(|e| e.to_string())
+                    })
+                    .await;
                 // SILENT-OK: modal may close during async skill create
                 let _ = async_cx.update(|window, cx| {
                     let Some(me) = me.upgrade() else { return };
@@ -235,6 +254,7 @@ impl CreateSkillModal {
                                 modal.dismiss(window, cx);
                             }
                             Err(msg) => {
+                                super::super::form_state::freeze_inputs(&modal.inputs(), false, cx);
                                 modal.error = Some(SharedString::from(msg));
                                 cx.notify();
                             }
@@ -245,6 +265,62 @@ impl CreateSkillModal {
             .detach();
     }
 
+    fn values(&self, cx: &App) -> Vec<String> {
+        vec![
+            self.scope.slug().to_string(),
+            self.user_invocable.to_string(),
+            self.disable_model_invocation.to_string(),
+            self.name_input.read(cx).value().to_string(),
+            self.description_input.read(cx).value().to_string(),
+            self.when_to_use_input.read(cx).value().to_string(),
+            self.argument_hint_input.read(cx).value().to_string(),
+            self.allowed_tools_input.read(cx).value().to_string(),
+            self.paths_input.read(cx).value().to_string(),
+            self.model_input.read(cx).value().to_string(),
+            self.body_editor.read(cx).value().to_string(),
+        ]
+    }
+
+    fn inputs(&self) -> Vec<Entity<InputState>> {
+        vec![
+            self.name_input.clone(),
+            self.description_input.clone(),
+            self.when_to_use_input.clone(),
+            self.argument_hint_input.clone(),
+            self.allowed_tools_input.clone(),
+            self.paths_input.clone(),
+            self.model_input.clone(),
+            self.body_editor.clone(),
+        ]
+    }
+
+    fn leave(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        use super::super::form_state::{LeaveChoice, ask_to_leave};
+        if self.submitting || self.form.asking {
+            return;
+        }
+        let dirty = self.form.is_dirty(&self.values(cx));
+        if !dirty {
+            self.dismiss(window, cx);
+            return;
+        }
+        ask_to_leave(
+            &mut self.form,
+            dirty,
+            self.submitting,
+            window,
+            cx,
+            |this, choice, window, cx| {
+                this.form.asking = false;
+                match choice {
+                    LeaveChoice::Save => this.submit(window, cx),
+                    LeaveChoice::Discard => this.dismiss(window, cx),
+                    LeaveChoice::Continue => {}
+                }
+            },
+        );
+    }
+
     fn dismiss(&mut self, window: &mut Window, cx: &mut App) {
         window.close_dialog(cx);
     }
@@ -252,6 +328,7 @@ impl CreateSkillModal {
     fn clear_error(&mut self, cx: &mut Context<Self>) {
         if self.error.is_some() {
             self.error = None;
+            self.error_field = None;
             cx.notify();
         }
     }
@@ -303,7 +380,14 @@ impl Focusable for CreateSkillModal {
     }
 }
 
-impl ModalView for CreateSkillModal {}
+impl ModalView for CreateSkillModal {
+    fn guards_close(&self) -> bool {
+        true
+    }
+    fn request_close(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.leave(window, cx);
+    }
+}
 
 impl Render for CreateSkillModal {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
@@ -315,6 +399,7 @@ impl Render for CreateSkillModal {
         let banner = self
             .error
             .as_ref()
+            .filter(|_| self.error_field.is_none())
             .map(|msg| crate::ui::alert::error("create-skill-error", msg.clone()));
 
         // Scope segmented selector. Children align with `scope_values`
@@ -338,8 +423,12 @@ impl Render for CreateSkillModal {
                     .selected(self.scope == scope)
             }))
             .on_click(cx.listener(move |this, ixs: &Vec<usize>, _w, cx| {
+                if this.submitting {
+                    return;
+                }
                 if let Some(&ix) = ixs.first() {
                     this.scope = scope_values[ix];
+                    this.clear_error(cx);
                     cx.notify();
                 }
             }));
@@ -350,21 +439,63 @@ impl Render for CreateSkillModal {
             .flex_1()
             .gap(px(theme::FORM_MODAL_SECTION_GAP))
             .child(field_label(strings::common::field_name(), &t))
-            .child(input(&self.name_input, cx, 0))
+            .child(super::super::form_state::field_input(
+                &self.name_input,
+                cx,
+                0,
+                self.error_field,
+                self.error.as_ref(),
+            ))
             .child(field_label(strings::common::field_scope(), &t))
             .child(scope_chip)
             .child(field_label(strings::skills::field_description(), &t))
-            .child(input(&self.description_input, cx, 1))
+            .child(super::super::form_state::field_input(
+                &self.description_input,
+                cx,
+                1,
+                self.error_field,
+                self.error.as_ref(),
+            ))
             .child(field_label(strings::skills::field_when_to_use(), &t))
-            .child(input(&self.when_to_use_input, cx, 2))
+            .child(super::super::form_state::field_input(
+                &self.when_to_use_input,
+                cx,
+                2,
+                self.error_field,
+                self.error.as_ref(),
+            ))
             .child(field_label(strings::skills::field_allowed_tools(), &t))
-            .child(input(&self.allowed_tools_input, cx, 3))
+            .child(super::super::form_state::field_input(
+                &self.allowed_tools_input,
+                cx,
+                3,
+                self.error_field,
+                self.error.as_ref(),
+            ))
             .child(field_label(strings::skills::field_arg_hint(), &t))
-            .child(input(&self.argument_hint_input, cx, 4))
+            .child(super::super::form_state::field_input(
+                &self.argument_hint_input,
+                cx,
+                4,
+                self.error_field,
+                self.error.as_ref(),
+            ))
             .child(field_label(strings::skills::field_paths(), &t))
-            .child(input(&self.paths_input, cx, 5))
+            .child(super::super::form_state::field_input(
+                &self.paths_input,
+                cx,
+                5,
+                self.error_field,
+                self.error.as_ref(),
+            ))
             .child(field_label(strings::skills::field_model(), &t))
-            .child(input(&self.model_input, cx, 6))
+            .child(super::super::form_state::field_input(
+                &self.model_input,
+                cx,
+                6,
+                self.error_field,
+                self.error.as_ref(),
+            ))
             .child(
                 checkbox(
                     "skill-user-invocable",
@@ -373,6 +504,9 @@ impl Render for CreateSkillModal {
                 )
                 .checked(user_invocable)
                 .on_click(cx.listener(|this, checked: &bool, _w, cx| {
+                    if this.submitting {
+                        return;
+                    }
                     this.user_invocable = *checked;
                     cx.notify();
                 })),
@@ -385,6 +519,9 @@ impl Render for CreateSkillModal {
                 )
                 .checked(disable_model)
                 .on_click(cx.listener(|this, checked: &bool, _w, cx| {
+                    if this.submitting {
+                        return;
+                    }
                     this.disable_model_invocation = *checked;
                     cx.notify();
                 })),
@@ -400,7 +537,13 @@ impl Render for CreateSkillModal {
             // toggles so Tab flows from the last metadata field into
             // the markdown body before reaching the tail-of-form
             // toggles.
-            .child(input(&self.body_editor, cx, 7));
+            .child(super::super::form_state::field_input(
+                &self.body_editor,
+                cx,
+                7,
+                self.error_field,
+                self.error.as_ref(),
+            ));
 
         let body = div()
             .flex()
@@ -422,11 +565,11 @@ impl Render for CreateSkillModal {
             .mt(px(theme::MODAL_FOOTER_MARGIN_TOP))
             .child(
                 button("create-skill-cancel", strings::common::btn_cancel())
-                    .on_click(cx.listener(|this, _: &ClickEvent, w, cx| this.dismiss(w, cx))),
+                    .on_click(cx.listener(|this, _: &ClickEvent, w, cx| this.leave(w, cx))),
             )
             .child(
                 button_primary("create-skill-save", save_label)
-                    .disabled(submitting)
+                    .disabled(submitting || self.name_input.read(cx).value().trim().is_empty())
                     .on_click(cx.listener(|this, _: &ClickEvent, w, cx| this.submit(w, cx))),
             );
 
@@ -466,3 +609,7 @@ pub fn open_create_skill_modal(
         cx,
     );
 }
+
+#[cfg(test)]
+#[path = "create_modal/tests.rs"]
+mod tests;

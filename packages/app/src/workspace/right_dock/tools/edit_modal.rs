@@ -18,14 +18,13 @@ use super::modal_shared::{
     field_error_to_msg, field_label, join_args, split_args, transport_options,
 };
 use crate::agent::mcp::{
-    McpScope, McpServerDraft, McpTransport, format_env_lines, parse_env_lines, validate_command,
-    validate_url,
+    McpScope, McpServerDraft, McpTransport, format_env_lines, validate_command, validate_url,
 };
 use crate::surface::strings;
 use crate::ui::Disableable as _;
 use crate::ui::Selectable as _;
 use crate::ui::WindowExt as _;
-use crate::ui::{InputEvent, InputState, button, button_group, button_primary, checkbox, input};
+use crate::ui::{InputEvent, InputState, button, button_group, button_primary, checkbox};
 use crate::workspace::ModalView;
 use crate::workspace::Workspace;
 
@@ -43,6 +42,8 @@ fn blank_to_none(s: &str) -> Option<String> {
 /// read the workspace.
 #[derive(Clone, Debug)]
 pub struct EditMcpInitial {
+    pub original: McpServerDraft,
+    pub project_root: Option<std::path::PathBuf>,
     pub scope: McpScope,
     pub name: String,
     pub transport: McpTransport,
@@ -62,9 +63,12 @@ impl EditMcpInitial {
         state: &crate::agent::mcp::McpSnapshot,
         scope: McpScope,
         name: &str,
+        project_root: Option<std::path::PathBuf>,
     ) -> Option<Self> {
         let s = state.find(scope, name)?;
         Some(Self {
+            original: McpServerDraft::from_server(s),
+            project_root,
             scope,
             name: s.name.clone(),
             transport: s.transport,
@@ -81,6 +85,7 @@ impl EditMcpInitial {
 
 pub struct EditMcpServerModal {
     panel_focus_handle: FocusHandle,
+    form: super::super::form_state::FormState,
 
     command_input: Entity<InputState>,
     args_input: Entity<InputState>,
@@ -93,6 +98,7 @@ pub struct EditMcpServerModal {
     disabled: bool,
 
     error: Option<SharedString>,
+    error_field: Option<isize>,
     submitting: bool,
 
     workspace: WeakEntity<Workspace>,
@@ -135,7 +141,8 @@ impl EditMcpServerModal {
         let transport = initial.transport;
         let disabled = initial.disabled;
 
-        Self {
+        let mut modal = Self {
+            form: Default::default(),
             panel_focus_handle: cx.focus_handle(),
             command_input,
             args_input,
@@ -146,30 +153,47 @@ impl EditMcpServerModal {
             transport,
             disabled,
             error: None,
+            error_field: None,
             submitting: false,
             workspace,
             _input_subs: subs,
-        }
+        };
+        modal.form.baseline = modal.values(cx);
+        modal
     }
 
-    fn build_draft(&self, cx: &gpui::App) -> Result<McpServerDraft, SharedString> {
+    fn build_draft(&self, cx: &gpui::App) -> Result<McpServerDraft, (isize, SharedString)> {
         let command_text = self.command_input.read(cx).value().to_string();
         let url_text = self.url_input.read(cx).value().to_string();
         if let Err(e) = validate_command(&command_text, self.transport) {
-            return Err(field_error_to_msg(e));
+            return Err((0, field_error_to_msg(e)));
         }
         if let Err(e) = validate_url(&url_text, self.transport) {
-            return Err(field_error_to_msg(e));
+            return Err((0, field_error_to_msg(e)));
         }
 
         let env_text = self.env_input.read(cx).value().to_string();
-        let env = parse_env_lines(&env_text).map_err(|e| field_error_to_msg(e.into()))?;
+        let env = if env_text == self.initial.env_text {
+            Ok(self.initial.original.env.clone())
+        } else {
+            super::modal_shared::parse_pairs(&env_text, false)
+        }
+        .map_err(|e| (2, e))?;
         let headers_text = self.headers_input.read(cx).value().to_string();
-        let headers = parse_env_lines(&headers_text).map_err(|e| field_error_to_msg(e.into()))?;
+        let headers = if self.transport.is_remote() {
+            if headers_text == self.initial.headers_text {
+                Ok(self.initial.original.headers.clone())
+            } else {
+                super::modal_shared::parse_pairs(&headers_text, true)
+            }
+            .map_err(|e| (1, e))?
+        } else {
+            Default::default()
+        };
 
         let args_text = self.args_input.read(cx).value().to_string();
         let args = match self.transport {
-            McpTransport::Stdio => split_args(&args_text),
+            McpTransport::Stdio => split_args(&args_text).map_err(|e| (1, e))?,
             _ => Vec::new(),
         };
 
@@ -201,13 +225,20 @@ impl EditMcpServerModal {
         }
         let draft = match self.build_draft(cx) {
             Ok(d) => d,
-            Err(msg) => {
+            Err((field, msg)) => {
+                self.error_field = Some(field);
                 self.error = Some(msg);
+                if let Some(input) = self.visible_inputs().get(field as usize) {
+                    window.focus(&input.focus_handle(cx), cx);
+                }
                 cx.notify();
                 return;
             }
         };
         let scope = self.initial.scope;
+        let target_root = self.initial.project_root.clone();
+        super::super::form_state::freeze_inputs(&self.inputs(), true, cx);
+        self.error_field = None;
         self.submitting = true;
         cx.notify();
 
@@ -219,7 +250,7 @@ impl EditMcpServerModal {
             // modal entity from inside its own listener panics). Use
             // `update_window` to recover `&mut Window` for `dismiss`.
             ws.update(cx, |ws, cx_inner| {
-                let result = ws.update_mcp_server(scope, draft, cx_inner);
+                let result = ws.update_mcp_server(scope, target_root, draft, cx_inner);
                 let me = me.clone();
                 cx_inner.defer(move |cx| {
                     // SILENT-OK: window may be gone by the time this defer runs — with no window there is nothing to dismiss or show the save error on, so the no-op is correct.
@@ -229,6 +260,7 @@ impl EditMcpServerModal {
                             Ok(()) => me.update(cx, |modal, cx| modal.dismiss(window, cx)),
                             Err(e) => me.update(cx, |modal, cx| {
                                 modal.submitting = false;
+                                super::super::form_state::freeze_inputs(&modal.inputs(), false, cx);
                                 modal.error = Some(SharedString::from(e.to_string()));
                                 cx.notify();
                             }),
@@ -238,8 +270,74 @@ impl EditMcpServerModal {
             });
         } else {
             self.submitting = false;
+            super::super::form_state::freeze_inputs(&self.inputs(), false, cx);
             cx.notify();
         }
+    }
+
+    fn values(&self, cx: &App) -> Vec<String> {
+        vec![
+            self.transport.slug().to_string(),
+            self.disabled.to_string(),
+            self.command_input.read(cx).value().to_string(),
+            self.args_input.read(cx).value().to_string(),
+            self.url_input.read(cx).value().to_string(),
+            self.env_input.read(cx).value().to_string(),
+            self.headers_input.read(cx).value().to_string(),
+        ]
+    }
+
+    fn visible_inputs(&self) -> Vec<Entity<InputState>> {
+        if self.transport.is_remote() {
+            vec![
+                self.url_input.clone(),
+                self.headers_input.clone(),
+                self.env_input.clone(),
+            ]
+        } else {
+            vec![
+                self.command_input.clone(),
+                self.args_input.clone(),
+                self.env_input.clone(),
+            ]
+        }
+    }
+
+    fn inputs(&self) -> Vec<Entity<InputState>> {
+        vec![
+            self.command_input.clone(),
+            self.args_input.clone(),
+            self.url_input.clone(),
+            self.env_input.clone(),
+            self.headers_input.clone(),
+        ]
+    }
+
+    fn leave(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        use super::super::form_state::{LeaveChoice, ask_to_leave};
+        if self.submitting || self.form.asking {
+            return;
+        }
+        let dirty = self.form.is_dirty(&self.values(cx));
+        if !dirty {
+            self.dismiss(window, cx);
+            return;
+        }
+        ask_to_leave(
+            &mut self.form,
+            dirty,
+            self.submitting,
+            window,
+            cx,
+            |this, choice, window, cx| {
+                this.form.asking = false;
+                match choice {
+                    LeaveChoice::Save => this.submit(window, cx),
+                    LeaveChoice::Discard => this.dismiss(window, cx),
+                    LeaveChoice::Continue => {}
+                }
+            },
+        );
     }
 
     fn dismiss(&mut self, window: &mut Window, cx: &mut App) {
@@ -249,6 +347,7 @@ impl EditMcpServerModal {
     fn clear_error(&mut self, cx: &mut Context<Self>) {
         if self.error.is_some() {
             self.error = None;
+            self.error_field = None;
             cx.notify();
         }
     }
@@ -302,7 +401,14 @@ impl Focusable for EditMcpServerModal {
     }
 }
 
-impl ModalView for EditMcpServerModal {}
+impl ModalView for EditMcpServerModal {
+    fn guards_close(&self) -> bool {
+        true
+    }
+    fn request_close(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.leave(window, cx);
+    }
+}
 
 impl Render for EditMcpServerModal {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
@@ -312,6 +418,7 @@ impl Render for EditMcpServerModal {
         let banner = self
             .error
             .as_ref()
+            .filter(|_| self.error_field.is_none())
             .map(|msg| crate::ui::alert::error("edit-tool-error", msg.clone()));
 
         // Read-only summary line: "Name @ Scope"
@@ -342,8 +449,12 @@ impl Render for EditMcpServerModal {
                 .selected(self.transport == tp)
             }))
             .on_click(cx.listener(move |this, ixs: &Vec<usize>, _w, cx| {
+                if this.submitting {
+                    return;
+                }
                 if let Some(&ix) = ixs.first() {
                     this.transport = transport_values[ix];
+                    this.clear_error(cx);
                     cx.notify();
                 }
             }));
@@ -361,16 +472,40 @@ impl Render for EditMcpServerModal {
             McpTransport::Stdio => {
                 body = body
                     .child(field_label(strings::mcp::field_command(), &t))
-                    .child(input(&self.command_input, cx, 0))
+                    .child(super::super::form_state::field_input(
+                        &self.command_input,
+                        cx,
+                        0,
+                        self.error_field,
+                        self.error.as_ref(),
+                    ))
                     .child(field_label(strings::mcp::field_args(), &t))
-                    .child(input(&self.args_input, cx, 1));
+                    .child(super::super::form_state::field_input(
+                        &self.args_input,
+                        cx,
+                        1,
+                        self.error_field,
+                        self.error.as_ref(),
+                    ));
             }
             McpTransport::Sse | McpTransport::Http => {
                 body = body
                     .child(field_label(strings::mcp::field_url(), &t))
-                    .child(input(&self.url_input, cx, 0))
+                    .child(super::super::form_state::field_input(
+                        &self.url_input,
+                        cx,
+                        0,
+                        self.error_field,
+                        self.error.as_ref(),
+                    ))
                     .child(field_label(strings::mcp::field_headers(), &t))
-                    .child(input(&self.headers_input, cx, 1));
+                    .child(super::super::form_state::field_input(
+                        &self.headers_input,
+                        cx,
+                        1,
+                        self.error_field,
+                        self.error.as_ref(),
+                    ));
             }
         }
 
@@ -380,11 +515,20 @@ impl Render for EditMcpServerModal {
         // indices start at 0 (both branches use 0,1 for their inputs).
         body = body
             .child(field_label(strings::mcp::field_env(), &t))
-            .child(input(&self.env_input, cx, 2))
+            .child(super::super::form_state::field_input(
+                &self.env_input,
+                cx,
+                2,
+                self.error_field,
+                self.error.as_ref(),
+            ))
             .child(
                 checkbox("mcp-edit-disabled", strings::mcp::field_disabled(), 3)
                     .checked(self.disabled)
                     .on_click(cx.listener(|this, checked: &bool, _w, cx| {
+                        if this.submitting {
+                            return;
+                        }
                         this.disabled = *checked;
                         cx.notify();
                     })),
@@ -403,7 +547,7 @@ impl Render for EditMcpServerModal {
             .mt(px(theme::MODAL_FOOTER_MARGIN_TOP))
             .child(
                 button("edit-mcp-cancel", strings::common::btn_cancel())
-                    .on_click(cx.listener(|this, _: &ClickEvent, w, cx| this.dismiss(w, cx))),
+                    .on_click(cx.listener(|this, _: &ClickEvent, w, cx| this.leave(w, cx))),
             )
             .child(
                 button_primary("edit-mcp-save", save_label)
@@ -446,7 +590,7 @@ pub fn open_edit_mcp_server_modal(
     let snapshot = cx
         .global::<crate::agent::mcp::McpState>()
         .snapshot_for(lane.as_deref(), &ws.mcp_project_dirs);
-    let Some(initial) = EditMcpInitial::from_state(&snapshot, scope, &name) else {
+    let Some(initial) = EditMcpInitial::from_state(&snapshot, scope, &name, lane) else {
         return;
     };
     crate::workspace::dialog_helpers::open_form_modal(
