@@ -312,7 +312,7 @@ esac
 validate_registry
 
 file_list="$(git ls-files --cached --others --exclude-standard -- \
-    ':(glob)packages/**/*.rs' ':(glob)crates/**/*.rs' ':(glob)tools/**/*.rs')" || {
+    ':(glob)packages/**/*.rs' ':(glob)tools/**/*.rs')" || {
     echo "[lint-env-literals] source discovery failed" >&2
     exit 2
 }
@@ -320,12 +320,6 @@ file_list="$(git ls-files --cached --others --exclude-standard -- \
 files=()
 while IFS= read -r file; do
     [ -n "$file" ] || continue
-    case "$file" in
-        crates/gpui_component/*|crates/gpui_component_assets/*|\
-        crates/gpui_component_macros/*|crates/ferrum_flow/*)
-            continue
-            ;;
-    esac
     files+=("$file")
 done <<<"$file_list"
 

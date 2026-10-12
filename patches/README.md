@@ -154,7 +154,7 @@ this patch when the pin moves past upstream's fix.
 
 ## `gpui-component-input-state-ime-selection.patch`
 
-Targets the **vendored `crates/gpui_component/src/input/state.rs`**
+Targets the **vendored `vendor/gpui-component/gpui_component/src/input/state.rs`**
 inside this repository. This patch is **already applied** to the file
 on disk and records daruda's IME selection-range fix for re-vendoring.
 After replacing `state.rs` from upstream, re-apply it from the repo
@@ -173,7 +173,7 @@ UTF-16 offsets through the document-wide converter.
 
 ## `gpui-component-root.patch`
 
-Targets the **vendored `crates/gpui_component/src/root.rs`** inside
+Targets the **vendored `vendor/gpui-component/gpui_component/src/root.rs`** inside
 this repository. Unlike the cargo-cache patch above, this one is
 **already applied** to the file on disk — daruda is the source of
 truth for the vendored copy. The patch file exists for two purposes:
@@ -191,7 +191,7 @@ truth for the vendored copy. The patch file exists for two purposes:
 # 1. Pull fresh upstream root.rs into the vendor tree
 curl -sL \
   https://raw.githubusercontent.com/longbridge/gpui-component/<tag>/crates/ui/src/root.rs \
-  -o crates/gpui_component/src/root.rs
+  -o vendor/gpui-component/gpui_component/src/root.rs
 
 # 2. Re-apply daruda patches (from repo root)
 git apply patches/gpui-component-root.patch
@@ -207,7 +207,7 @@ manually, then:
 ```bash
 # (after fixing the file)
 curl -sL <upstream-url> -o /tmp/upstream-root.rs
-diff -u /tmp/upstream-root.rs crates/gpui_component/src/root.rs \
+diff -u /tmp/upstream-root.rs vendor/gpui-component/gpui_component/src/root.rs \
   > patches/gpui-component-root.patch
 # fix the patch header paths to a/... b/... form
 ```
@@ -235,7 +235,7 @@ Three groups of changes captured in a single diff:
 
 ---
 
-## `crates/gpui_component/Cargo.toml` - shared command grammars
+## `vendor/gpui-component/gpui_component/Cargo.toml` - shared command grammars
 
 The Bash and Python grammars match the app's command-analysis dependencies:
 `tree-sitter-bash = "0.25.1"` and `tree-sitter-python = "0.25.0"`.
@@ -244,7 +244,7 @@ highlighting and analysis can resolve both consumers to the same native parser.
 Keep these dependencies aligned when re-vendoring. The app's
 `links_the_current_grammar_abi` test guards against linking an older parser.
 
-## `crates/gpui_component/src/highlighter/` — vendored, **compiled-query cache**
+## `vendor/gpui-component/gpui_component/src/highlighter/` — vendored, **compiled-query cache**
 
 Applied in place, like `gpui-component-root.patch` above: daruda is the
 source of truth for the vendored copy, and this section is the record of
@@ -314,7 +314,7 @@ Copy the fresh upstream `highlighter/` in, then re-apply the split by hand.
 
 ---
 
-## `crates/gpui_component/src/checkbox.rs` / `radio.rs` - vendored, **mixed-state checkbox**
+## `vendor/gpui-component/gpui_component/src/checkbox.rs` / `radio.rs` - vendored, **mixed-state checkbox**
 
 Adds `Checkbox::indeterminate(bool)` for partial selections. The checkbox draws
 `IconName::Minus`, treats checked and indeterminate as visible marks for
@@ -327,7 +327,7 @@ argument changes. Inline tests cover the click and mark behavior.
 
 ---
 
-## `crates/gpui_component/src/button/button.rs` — vendored, **a selected segment can pick its own label colour**
+## `vendor/gpui-component/gpui_component/src/button/button.rs` — vendored, **a selected segment can pick its own label colour**
 
 Applied in place, on the same terms as the sections above.
 
@@ -370,7 +370,7 @@ Guide requires computing the ratio for the actual fg/bg pair, not eyeballing it.
 
 ---
 
-## `crates/gpui_component/src/{dialog,tooltip}.rs` — vendored, **every float reads one slot**
+## `vendor/gpui-component/gpui_component/src/{dialog,tooltip}.rs` — vendored, **every float reads one slot**
 
 Applied in place, on the same terms as the sections above.
 
@@ -404,7 +404,7 @@ dialog must read as lighter than the docks behind it in both appearances.
 
 ---
 
-## `crates/gpui_component/src/popover.rs` — vendored, **the trigger consumes its press**
+## `vendor/gpui-component/gpui_component/src/popover.rs` — vendored, **the trigger consumes its press**
 
 Applied in place, on the same terms as the sections above.
 
@@ -454,7 +454,7 @@ you forget — the second is what pins the dropdown's inheritance.
 
 ---
 
-## `crates/gpui_component/src/text/` — vendored, **an overlay's clicks stop at it**
+## `vendor/gpui-component/gpui_component/src/text/` — vendored, **an overlay's clicks stop at it**
 
 Applied in place, on the same terms as the sections above.
 
@@ -507,7 +507,7 @@ dropping either button check fails the right/middle case.
 
 ---
 
-## `crates/gpui_component/src/text/` — vendored, **intrinsic table columns**
+## `vendor/gpui-component/gpui_component/src/text/` — vendored, **intrinsic table columns**
 
 Applied in place, on the same terms as the sections above. Independent of the
 overlay patch above, in the same subtree.
@@ -577,7 +577,7 @@ in both appearances.
 
 ---
 
-## `crates/gpui_component/` — vendored, **a raw mouse listener names its button**
+## `vendor/gpui-component/gpui_component/` — vendored, **a raw mouse listener names its button**
 
 Applied in place across six files, on the same terms as the sections above.
 The link-click half of it is written up under "an overlay's clicks stop at it";
@@ -625,7 +625,7 @@ section.
 
 ---
 
-## `crates/gpui_component/locales/ko.yml` — vendored, **an added file, not a patch**
+## `vendor/gpui-component/gpui_component/locales/ko.yml` — vendored, **an added file, not a patch**
 
 The only Korean the vendored widgets have. Upstream's `locales/ui.yml` carries
 `en` / `zh-CN` / `zh-HK` / `it`, so `gpui_component::set_locale("ko")` fell all
@@ -653,20 +653,20 @@ Copy `ui.yml` from upstream as usual and leave this file alone. Then check the
 key sets still line up — an upstream-added key silently renders English:
 
 ```sh
-diff <(grep -oE '^  [^ ].*:$' crates/gpui_component/locales/ui.yml | sort) \
-     <(grep -oE '^  [^ ].*:$' crates/gpui_component/locales/ko.yml | sort)
+diff <(grep -oE '^  [^ ].*:$' vendor/gpui-component/gpui_component/locales/ui.yml | sort) \
+     <(grep -oE '^  [^ ].*:$' vendor/gpui-component/gpui_component/locales/ko.yml | sort)
 ```
 
 ### Editing it leaves a stale binary
 
 cargo does not track a proc-macro's file reads, so changing only a locale file
 rebuilds nothing and the old strings stay compiled in — measured, not assumed.
-`touch crates/gpui_component/src/lib.rs` (or `cargo clean -p gpui_component`)
+`touch vendor/gpui-component/gpui_component/src/lib.rs` (or `cargo clean -p gpui_component`)
 forces the re-read. The same holds for `packages/app/locales/`.
 
 ---
 
-## `crates/gpui_component/src/input/state.rs` — vendored, **a re-wrap reaches the host**
+## `vendor/gpui-component/gpui_component/src/input/state.rs` — vendored, **a re-wrap reaches the host**
 
 Applied in place, on the same terms as the sections above. Separate from
 `gpui-component-input-state-ime-selection.patch`, which targets the same file
@@ -706,7 +706,7 @@ embed stayed at the logical height) and
 
 ---
 
-## `crates/ferrum_flow/` — vendored, **seven source patches**
+## `vendor/ferrum-flow/ferrum_flow/` — vendored, **seven source patches**
 
 Provenance for a vendored crate, plus the source deltas it now carries.
 Re-vendoring stays a file copy followed by re-applying those.
@@ -716,7 +716,7 @@ Re-vendoring stays a file copy followed by re-applying those.
 | Upstream | [tu6ge/ferrum-flow](https://github.com/tu6ge/ferrum-flow) — Apache-2.0 |
 | Pinned at | `43b762ced6f61313bbc2b388871bdc93f64893d0` on `master` (2026-06-05) |
 | Version string | `0.3.1` — the last tag, 127 commits behind this pin. Upstream has been silent since 2026-06-07, so `master` is effectively its final state; the tag would have forgone level-of-detail node rendering and lazy paint-order traversal, both of which matter as a flow grows. |
-| Copied | `crates/core/src/` → `crates/ferrum_flow/src/`, plus `crates/core/README.md` and the repository-root `LICENSE` |
+| Copied | `crates/core/src/` → `vendor/ferrum-flow/ferrum_flow/src/`, plus `crates/core/README.md` and the repository-root `LICENSE` |
 | Not copied | `crates/core/examples/` — they call `Application::new()`, which no longer exists at daruda's pinned GPUI rev. Also the sibling `crates/sync_plugin` (Yrs CRDT collaboration), which daruda does not use. |
 
 ### Source patches
@@ -757,9 +757,9 @@ upstream's in four ways, none of which touch source:
 ```bash
 git clone https://github.com/tu6ge/ferrum-flow /tmp/ff && cd /tmp/ff
 git checkout <new-commit>
-rm -rf <daruda>/crates/ferrum_flow/src
-cp -R crates/core/src <daruda>/crates/ferrum_flow/src
-cp crates/core/README.md LICENSE <daruda>/crates/ferrum_flow/
+rm -rf <daruda>/vendor/ferrum-flow/ferrum_flow/src
+cp -R crates/core/src <daruda>/vendor/ferrum-flow/ferrum_flow/src
+cp crates/core/README.md LICENSE <daruda>/vendor/ferrum-flow/ferrum_flow/
 # Cargo.toml is daruda's — reconcile it against upstream's dependency
 # list by hand, re-apply the source patches above (the viewport one's
 # `mod tests` fails loudly if you forget), then:

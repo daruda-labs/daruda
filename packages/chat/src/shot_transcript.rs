@@ -187,7 +187,7 @@ fn cycles() -> Vec<Cycle> {
             prose: "Confirming the vendored crates are an intended exception.",
             tools: vec![
                 Call::new("Read patches/README.md", ToolKindView::Read, Some("Read")),
-                Call::new("Read crates/ferrum_flow/Cargo.toml", ToolKindView::Read, Some("Read")),
+                Call::new("Read vendor/ferrum-flow/ferrum_flow/Cargo.toml", ToolKindView::Read, Some("Read")),
                 Call::new("Edit CLAUDE.md", ToolKindView::Edit, Some("Edit")),
             ],
         },

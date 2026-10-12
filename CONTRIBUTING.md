@@ -428,15 +428,16 @@ daruda/
 │   ├── ghostty-vt/             # ghostty_vt: safe Rust wrapper over libghostty-vt
 │   ├── ghostty-vt-sys/         # ghostty_vt_sys: Zig C FFI bindings
 │   └── visual-tests/           # visual_tests: offscreen render snapshot tests
-├── crates/                     # vendored third-party packages only
-│   ├── ferrum_flow/            # vendored node-graph canvas
-│   └── gpui_component*/        # vendored gpui-component crates
 ├── tools/
 │   ├── acp_replay/             # ACP wire-log replay helper
 │   ├── gen_acp_presets/        # generated agent preset drift gate
 │   ├── gen_licenses/           # third-party license manifest generator
 │   └── vt_dump/                # headless VT diagnostic CLI
-├── vendor/ghostty/             # Ghostty v1.2.3 submodule
+├── vendor/                     # third-party sources, one directory per upstream
+│   ├── ghostty/                # Ghostty v1.2.3 submodule
+│   ├── zed/                    # patched GPUI; regenerate with tools/vendor_gpui
+│   ├── gpui-component/         # vendored gpui-component crates
+│   └── ferrum-flow/            # vendored node-graph canvas
 └── scripts/
 ```
 

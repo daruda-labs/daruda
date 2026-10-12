@@ -1,5 +1,5 @@
---- a/crates/gpui_component/src/input/state.rs
-+++ b/crates/gpui_component/src/input/state.rs
+--- a/vendor/gpui-component/gpui_component/src/input/state.rs
++++ b/vendor/gpui-component/gpui_component/src/input/state.rs
 @@ -2324,6 +2324,55 @@ impl InputState {
      }
  }

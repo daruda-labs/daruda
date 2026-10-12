@@ -26,7 +26,7 @@ impl SettingsView {
 
     /// [`Self::subscribe_agent_input`] for a row's multi-line field. Plain
     /// Enter inserts a newline and *still* emits `PressEnter` (see `enter` in
-    /// the vendored `crates/gpui_component/src/input/state.rs`), so submitting
+    /// the vendored `vendor/gpui-component/gpui_component/src/input/state.rs`), so submitting
     /// on it would rewrite `config.toml` on every line break and pop the
     /// validation banner on a line the user has not finished. Only the
     /// secondary form (Cmd/Ctrl+Enter) submits — the same split the MCP env /

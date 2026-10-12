@@ -341,7 +341,7 @@ access, ask first whether the access belongs in `ui/` instead.
 
 ---
 
-## Vendor patches in `crates/gpui_component/`
+## Vendor patches in `vendor/gpui-component/gpui_component/`
 
 Small patches over upstream `longbridge/gpui-component` v0.5.1
 keep daruda's theme propagation + modal tab containment + tab font /
@@ -423,7 +423,7 @@ rev bump (the table below is the full list):
 | `gpui` test-support dev-dep | `Cargo.toml` (`[dev-dependencies] gpui = { workspace = true, features = ["test-support"] }`) | the lib-test target needs `#[gpui::test]` / `TestAppContext`, which require gpui's `test-support` feature; without it `tree.rs` (and any App-context test) fails to compile and takes the whole `cargo test -p gpui_component` suite down. Dev-only — never in the shipping binary. Fixes the pre-existing `tree.rs` compile failure noted in the sibling render-patch rows and unblocks App-context unit tests (e.g. the active-text-selection test). |
 | Per-instance code-editor surface override | `src/input/input.rs` (`CodeEditorSurface`, `Input::code_editor_surface` field + `.code_editor_surface(surface)` builder, with `.editor_background(color)` kept as a compatibility shortcut), `src/input/state.rs` (`InputState::code_editor_surface` field + `pub(super) fn editor_background(&self, cx) -> Hsla` accessor falling back to `cx.theme().editor_background()`), `src/input/element.rs` (`TextElement::paint` reads `state.editor_background(cx)` once and reuses it for the ghost-line fill, the ghost-lines-height background quad, and the inline-completion background quad, instead of three separate `cx.theme().editor_background()` reads) | code-editor surfaces that intentionally paint on a host-picked background (the file viewer's terminal-mirrored pane surface, an agent-chat embed's dimmed chat surface) previously always fell back to the single App-wide `editor_background` theme slot, so their editor-owned paints (line-number gutter fill, ghost rows, inline-completion backdrop) mismatched the surrounding pane once that pane stopped using the fixed UI background. `CodeEditorSurface::default()` keeps upstream behaviour. |
 
-Plus `[lints]` in `crates/gpui_component/Cargo.toml` silencing all
+Plus `[lints]` in `vendor/gpui-component/gpui_component/Cargo.toml` silencing all
 upstream clippy warnings (vendored code is not in our lint scope).
 
 ### Enabled upstream modules
@@ -441,7 +441,7 @@ rev bump if the re-vendor trims them again):
 | `text` | `src/lib.rs` (already declared) | `crate::ui::markdown` → agent chat selectable/copyable markdown (`TextView`: markdown render + char drag-select + copy + code highlight). |
 
 The patches live directly in the vendored tree (not in
-`patches/<name>.patch`) because `crates/gpui_component/` is an
+`patches/<name>.patch`) because `vendor/gpui-component/gpui_component/` is an
 in-repo copy. GPUI itself is vendored the other way round — a pristine
 tree under `vendor/zed/` with `patches/gpui-*.patch` applied by
 `tools/vendor_gpui`, which CI reruns with `--check`. On a

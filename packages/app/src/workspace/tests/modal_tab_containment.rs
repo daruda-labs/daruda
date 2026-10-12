@@ -1,6 +1,6 @@
 //! Tests for the `gpui_component::Root` modal Tab containment patch.
 //!
-//! `crates/gpui_component/src/root.rs` is patched so the global Tab
+//! `vendor/gpui-component/gpui_component/src/root.rs` is patched so the global Tab
 //! action checks `active_dialogs.last()` and wraps focus back inside
 //! the topmost dialog whenever `window.focus_next` / `focus_prev`
 //! escapes the dialog subtree. A second `focus_within` check parks

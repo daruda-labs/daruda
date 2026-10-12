@@ -46,14 +46,10 @@ fi
 
 BUDGET=6
 
-# Skip directories — vendored crates and target builds aren't ours (see
-# CLAUDE.md: gpui_component "is excluded from clippy/lint/comment-cleanup
-# passes").
+# Skip directories that aren't ours. Vendored code under `vendor/` is never
+# scanned (CLAUDE.md: gpui_component "is excluded from clippy/lint/
+# comment-cleanup passes").
 SKIP_DIRS=(
-    "crates/gpui_component"
-    "crates/gpui_component_assets"
-    "crates/gpui_component_macros"
-    "crates/ferrum_flow"
     "packages/ghostty-vt"
     "packages/ghostty-vt-sys"
     "vendor"
@@ -110,7 +106,7 @@ while IFS= read -r f; do
         continue
     fi
     check_file "$f"
-done < <(find packages crates -name '*.rs' -type f | sort)
+done < <(find packages -name '*.rs' -type f | sort)
 
 if [ ${#hits[@]} -eq 0 ]; then
     echo "[lint-comment-length] OK — no over-budget comment blocks."

@@ -53,6 +53,9 @@ import re
 import sys
 from pathlib import Path
 
+# Vendored trees scanned with first-party code, for the reason above.
+VENDORED = ("vendor/gpui-component", "vendor/ferrum-flow")
+
 # The raw tier is `window.on_mouse_event(..)` and nothing else: the safe
 # tier (`.on_mouse_down(MouseButton::X, ..)`) names the button in the call,
 # so its closure looks identical and must not be flagged. Anchoring on the
@@ -254,7 +257,9 @@ def self_test() -> int:
 if __name__ == "__main__":
     if sys.argv[1:2] == ["--self-test"]:
         sys.exit(self_test())
-    found = scan_tree(Path("packages")) + scan_tree(Path("crates"))
+    found = scan_tree(Path("packages"))
+    for vendored in VENDORED:
+        found += scan_tree(Path(vendored))
     if found:
         print("\n".join(found))
         sys.exit(1)
@@ -264,10 +269,12 @@ if [[ "${1-}" == "--self-test" ]]; then
     exec python3 "$SCANNER" --self-test
 fi
 
-if [[ ! -d packages || ! -d crates ]]; then
-    echo "lint-raw-mouse-button: packages/ or crates/ not found — run from the repo root." >&2
-    exit 2
-fi
+for dir in packages vendor/gpui-component vendor/ferrum-flow; do
+    if [[ ! -d "$dir" ]]; then
+        echo "lint-raw-mouse-button: $dir/ not found — run from the repo root." >&2
+        exit 2
+    fi
+done
 
 if ! HITS=$(python3 "$SCANNER"); then
     echo "lint-raw-mouse-button: raw mouse listeners that answer every button" >&2
