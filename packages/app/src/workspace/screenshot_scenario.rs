@@ -162,6 +162,7 @@ const PANE_MENU_ANCHOR_Y: f32 = 160.;
 /// One scenario per capture — these overlays are mutually exclusive on screen.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum ScreenshotScenario {
+    QuickEntry(super::right_dock::quick_entry_shot::QuickEntryShot),
     FlowBrowser(super::flow_browser::screenshot::FlowBrowserShot),
     Tasks,
     TasksAll,
@@ -381,7 +382,12 @@ impl ScreenshotScenario {
     /// `settings:<slug>` selects a Settings section; bare `settings` uses the
     /// default section.
     pub(crate) fn from_cli_name(name: &str) -> Option<Self> {
+        use super::right_dock::quick_entry_shot::QuickEntryShot;
         match name {
+            "mcp-paste" => Some(Self::QuickEntry(QuickEntryShot::McpPaste)),
+            "mcp-review" => Some(Self::QuickEntry(QuickEntryShot::McpReview)),
+            "skill-paste" => Some(Self::QuickEntry(QuickEntryShot::SkillPaste)),
+            "skill-review" => Some(Self::QuickEntry(QuickEntryShot::SkillReview)),
             "flow-create" => Some(Self::FlowCreate),
             "flows" => Some(Self::FlowBrowser(
                 super::flow_browser::screenshot::FlowBrowserShot::Definitions,
@@ -509,6 +515,9 @@ pub(crate) fn drive(
 ) {
     workspace.update(cx, |ws, _| ws.suspend_persistence_for_shot());
     match scenario {
+        ScreenshotScenario::QuickEntry(shot) => {
+            super::right_dock::quick_entry_shot::drive(shot, workspace, window, cx)
+        }
         ScreenshotScenario::Tasks
         | ScreenshotScenario::TasksAll
         | ScreenshotScenario::TasksNoResults

@@ -6,6 +6,11 @@ startup:
 
 # Common UI tokens — reused across sections
 common:
+  btn_review: "Review fields"
+  btn_manual: "Enter manually"
+  btn_back: "Back to paste"
+  btn_duplicate: "Duplicate"
+  field_advanced: "Advanced settings"
   form_target_gone: "The workspace is no longer available."
   unsaved_form_title: "Unsaved changes"
   btn_discard: "Discard"
@@ -1654,6 +1659,14 @@ settings:
 
 # Skills tab
 skills:
+  quick_placeholder: "Paste a complete SKILL.md or Markdown instructions"
+  quick_hint: "Frontmatter fills the fields automatically. Plain Markdown becomes the instructions. Only SKILL.md is imported; supporting files are not copied."
+  import_error: "Invalid frontmatter. Use a YAML mapping between matching --- lines."
+  invocation_name: "Invocation name (optional)"
+  folder_name: "Folder identifier"
+  empty_body_warning: "The instructions are empty. Add guidance so the skill can be useful."
+  duplicate_instructions: "Copy instructions"
+  duplicate_hint: "Only SKILL.md is copied. Scripts, references, and assets must be added separately."
   changed_on_disk: "The skill changed on disk. Reopen it to load the latest version before saving."
   # Section heading for the plugin-scope group. Plugin skills come
   # from marketplace installs (`~/.claude/plugins/cache/...`) and are
@@ -1721,6 +1734,25 @@ skills:
 
 # MCP / Tools tab
 mcp:
+  scope_local_short: "Local"
+  source_changed: "This server changed outside this dialog. Your draft is intact; reopen the server to review the latest settings."
+  auth_headers_hint: "Authorization follows the Authentication selection above. Choose Custom headers to edit it here."
+  reveal_values: "Reveal environment and header values"
+  field_auth: "Authentication"
+  auth_none: "None"
+  auth_variable: "Environment variable"
+  auth_token: "Token"
+  auth_custom: "Custom headers"
+  auth_custom_hint: "Edit custom authentication in Advanced settings."
+  auth_invalid: "Enter a valid environment variable name or a non-empty, single-line token."
+  quick_placeholder: "Paste an MCP URL, launch command, JSON, or Codex MCP TOML"
+  quick_hint: "Review before saving. Commands are never executed here. TOML is converted to Claude settings; unsupported fields are rejected."
+  import_error: "Cannot import this input. Check syntax and field types; shell scripts and unsupported conversions require manual entry."
+  choose_server: "Choose one server to add. Other entries will not be saved."
+  extra_preserved: "Additional source fields are preserved: %{keys}"
+  target_claude: "Claude · %{path}"
+  transport_warning: "Changing transport omits incompatible command, arguments, URL, or headers on save. Hidden field values remain in this draft."
+  duplicate_hint: "Connection copied. Environment values, headers, and additional fields were cleared; review credentials before saving."
   headers_invalid: "Header line %{line} must be KEY=VALUE."
   pairs_invalid: "Environment line %{line} must be KEY=VALUE."
   pairs_duplicate: "Line %{line} repeats key %{key}."

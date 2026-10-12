@@ -74,9 +74,9 @@ pub(super) fn transport_options() -> Vec<(McpTransport, &'static str)> {
 
 pub(super) fn scope_options() -> Vec<(McpScope, String)> {
     vec![
-        (McpScope::Project, strings::mcp::scope_project()),
-        (McpScope::Local, strings::mcp::scope_local()),
-        (McpScope::User, strings::mcp::scope_user()),
+        (McpScope::Project, strings::common::section_project()),
+        (McpScope::Local, strings::mcp::scope_local_short()),
+        (McpScope::User, strings::common::section_user()),
     ]
 }
 
@@ -139,7 +139,9 @@ pub(super) fn parse_pairs(
                 })
             })?;
         let key = key.trim().to_string();
-        if pairs.contains_key(&key) {
+        if pairs.contains_key(&key)
+            || (headers && pairs.keys().any(|k: &String| k.eq_ignore_ascii_case(&key)))
+        {
             return Err(strings::mcp::pairs_duplicate(index + 1, &key).into());
         }
         pairs.insert(key, value.to_string());

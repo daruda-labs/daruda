@@ -8,6 +8,7 @@
 //! parsing, persistence, watchers, and renderer data.
 
 pub mod global;
+pub(crate) mod import;
 pub mod parse;
 pub mod persist;
 
@@ -556,7 +557,10 @@ pub fn validate_url(s: &str, transport: McpTransport) -> Result<(), FieldError> 
     if s.is_empty() {
         return Err(FieldError::UrlRequired);
     }
-    if !(s.starts_with("http://") || s.starts_with("https://")) {
+    if !(s.starts_with("http://") || s.starts_with("https://"))
+        || s.chars().any(char::is_whitespace)
+        || (!s.contains("${") && url::Url::parse(s).is_err())
+    {
         return Err(FieldError::UrlInvalidScheme);
     }
     Ok(())

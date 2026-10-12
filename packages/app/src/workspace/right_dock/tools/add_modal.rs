@@ -1,15 +1,5 @@
-//! Add-MCP-server modal.
-//!
-//! UI-FM-based form modal: name + scope + transport + transport-specific
-//! fields (command/args for stdio, url/headers for sse/http) + env +
-//! disabled toggle. Snapshot opener pattern: `AddMcpInitial` is built by
-//! `super::open_add_mcp_server_modal` so the modal's `new()` never
-//! re-enters the workspace entity.
-//!
-//! Tab navigation: GPUI `.tab_group()` on the panel root + per-input
-//! `tab_index`. The transport chip swaps which inputs are rendered but
-//! the unused inputs' focus handles simply sit out of paint and never
-//! receive focus.
+//! Paste-first MCP creation. Review a connection, then save to a captured scope.
+//! Parsing never runs commands; hidden source fields remain in the draft.
 
 use std::path::PathBuf;
 
@@ -70,8 +60,16 @@ pub struct AddMcpServerModal {
     scope_options: Vec<McpScope>,
     transport: McpTransport,
     disabled: bool,
+    auth: super::auth::Auth,
 
     initial: AddMcpInitial,
+    paste_input: Entity<InputState>,
+    pasting: bool,
+    candidates: Vec<McpServerDraft>,
+    imported: Option<McpServerDraft>,
+    advanced: bool,
+    reveal_values: bool,
+    duplicate: bool,
 
     error: Option<SharedString>,
     error_field: Option<isize>,
@@ -88,9 +86,15 @@ impl AddMcpServerModal {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Self {
+        let paste_input = cx.new(|cx| {
+            InputState::new(window, cx)
+                .auto_grow(6, 12)
+                .placeholder(strings::mcp::quick_placeholder())
+        });
         let name_input = cx.new(|cx_state| {
             InputState::new(window, cx_state).placeholder(strings::mcp::placeholder_name())
         });
+        let auth = super::auth::Auth::new(window, cx);
         let command_input = cx.new(|cx_state| {
             InputState::new(window, cx_state).placeholder(strings::mcp::placeholder_command())
         });
@@ -125,6 +129,8 @@ impl AddMcpServerModal {
         };
 
         let subs = vec![
+            forward_input(&auth.input, window, cx),
+            forward_multi_input(&paste_input, window, cx),
             forward_input(&name_input, window, cx),
             forward_input(&command_input, window, cx),
             forward_input(&args_input, window, cx),
@@ -134,6 +140,14 @@ impl AddMcpServerModal {
         ];
 
         let mut modal = Self {
+            paste_input,
+            pasting: true,
+            candidates: Vec::new(),
+            imported: None,
+            advanced: false,
+            reveal_values: false,
+            duplicate: false,
+            auth,
             form: Default::default(),
             panel_focus_handle: cx.focus_handle(),
             name_input,
@@ -193,13 +207,33 @@ impl AddMcpServerModal {
         }
 
         let env_text = self.env_input.read(cx).value().to_string();
-        let env = super::modal_shared::parse_pairs(&env_text, false).map_err(|e| (3, e))?;
+        let env = if let Some(d) = self
+            .imported
+            .as_ref()
+            .filter(|d| crate::agent::mcp::format_env_lines(&d.env) == env_text)
+        {
+            d.env.clone()
+        } else {
+            super::modal_shared::parse_pairs(&env_text, false).map_err(|e| (3, e))?
+        };
         let headers_text = self.headers_input.read(cx).value().to_string();
-        let headers = if self.transport.is_remote() {
-            super::modal_shared::parse_pairs(&headers_text, true).map_err(|e| (2, e))?
+        let mut headers = if self.transport.is_remote() {
+            if let Some(d) = self
+                .imported
+                .as_ref()
+                .filter(|d| crate::agent::mcp::format_env_lines(&d.headers) == headers_text)
+            {
+                d.headers.clone()
+            } else {
+                super::modal_shared::parse_pairs(&headers_text, true).map_err(|e| (2, e))?
+            }
         } else {
             Default::default()
         };
+
+        if self.transport.is_remote() {
+            self.auth.apply(&mut headers, cx).map_err(|e| (-1, e))?;
+        }
 
         let args_text = self.args_input.read(cx).value().to_string();
         let args = match self.transport {
@@ -225,7 +259,11 @@ impl AddMcpServerModal {
                 _ => Default::default(),
             },
             disabled: self.disabled,
-            extra: Default::default(),
+            extra: self
+                .imported
+                .as_ref()
+                .map(|d| d.extra.clone())
+                .unwrap_or_default(),
         })
     }
 
@@ -233,10 +271,19 @@ impl AddMcpServerModal {
         if self.submitting {
             return;
         }
+        if self.pasting {
+            self.review_paste(window, cx);
+            return;
+        }
         let draft = match self.build_draft(cx) {
             Ok(d) => d,
             Err((field, msg)) => {
-                self.error_field = Some(field);
+                self.advanced = true;
+                self.reveal_values = true;
+                self.error_field = (field >= 0).then_some(field);
+                if field < 0 {
+                    window.focus(&self.auth.input.focus_handle(cx), cx);
+                }
                 self.error = Some(msg);
                 if let Some(input) = self.visible_inputs().get(field as usize) {
                     window.focus(&input.focus_handle(cx), cx);
@@ -291,7 +338,8 @@ impl AddMcpServerModal {
     }
 
     fn values(&self, cx: &App) -> Vec<String> {
-        vec![
+        let mut values = vec![
+            self.paste_input.read(cx).value().to_string(),
             self.scope.slug().to_string(),
             self.transport.slug().to_string(),
             self.disabled.to_string(),
@@ -301,7 +349,9 @@ impl AddMcpServerModal {
             self.url_input.read(cx).value().to_string(),
             self.env_input.read(cx).value().to_string(),
             self.headers_input.read(cx).value().to_string(),
-        ]
+        ];
+        values.extend(self.auth.values(cx));
+        values
     }
 
     fn visible_inputs(&self) -> Vec<Entity<InputState>> {
@@ -324,6 +374,8 @@ impl AddMcpServerModal {
 
     fn inputs(&self) -> Vec<Entity<InputState>> {
         vec![
+            self.auth.input.clone(),
+            self.paste_input.clone(),
             self.name_input.clone(),
             self.command_input.clone(),
             self.args_input.clone(),
@@ -383,7 +435,13 @@ fn forward_input(
         window,
         |this, _, ev: &InputEvent, window, cx| match ev {
             InputEvent::PressEnter { .. } => this.submit(window, cx),
-            InputEvent::Change => this.clear_error(cx),
+            InputEvent::Change => {
+                if this.pasting {
+                    this.candidates.clear();
+                }
+                this.clear_error(cx);
+                cx.notify();
+            }
             InputEvent::Focus | InputEvent::Blur => {}
         },
     )
@@ -403,7 +461,13 @@ fn forward_multi_input(
         window,
         |this, _, ev: &InputEvent, window, cx| match ev {
             InputEvent::PressEnter { secondary } if *secondary => this.submit(window, cx),
-            InputEvent::Change => this.clear_error(cx),
+            InputEvent::Change => {
+                if this.pasting {
+                    this.candidates.clear();
+                }
+                this.clear_error(cx);
+                cx.notify();
+            }
             _ => {}
         },
     )
@@ -411,7 +475,11 @@ fn forward_multi_input(
 
 impl Focusable for AddMcpServerModal {
     fn focus_handle(&self, cx: &gpui::App) -> FocusHandle {
-        self.name_input.focus_handle(cx)
+        if self.pasting {
+            self.paste_input.focus_handle(cx)
+        } else {
+            self.name_input.focus_handle(cx)
+        }
     }
 }
 
@@ -424,6 +492,7 @@ impl ModalView for AddMcpServerModal {
     }
 }
 
+mod quick_entry;
 mod render;
 
 pub fn open_add_mcp_server_modal(
@@ -449,4 +518,35 @@ pub fn open_add_mcp_server_modal(
         window,
         cx,
     );
+}
+
+impl AddMcpServerModal {
+    pub(super) fn seed_duplicate(
+        &mut self,
+        draft: McpServerDraft,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.apply_import(draft, window, cx);
+        self.duplicate = true;
+    }
+}
+
+#[cfg(test)]
+mod tests;
+
+#[cfg(feature = "screenshot")]
+impl AddMcpServerModal {
+    pub(in crate::workspace) fn seed_for_shot(
+        &mut self,
+        review: bool,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.paste_input.update(cx,|input,cx|input.set_value(
+            r#"{"mcpServers":{"docs":{"type":"http","url":"https://docs.example.com/mcp","headers":{"Authorization":"Bearer example-token"}}}}"#,window,cx));
+        if review {
+            self.review_paste(window, cx);
+        }
+    }
 }

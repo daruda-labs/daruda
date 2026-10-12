@@ -10,6 +10,7 @@
 //! - This `mod.rs` re-exports the openers so callers stay one-liners.
 
 pub(super) mod add_modal;
+mod auth;
 pub(super) mod delete_confirm;
 pub(super) mod edit_modal;
 mod modal_shared;

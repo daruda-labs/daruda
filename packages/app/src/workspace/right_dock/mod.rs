@@ -11,6 +11,8 @@ pub(in crate::workspace) mod context;
 mod delete_modal;
 mod form_state;
 pub(in crate::workspace) mod mcp_ops;
+#[cfg(feature = "screenshot")]
+pub(in crate::workspace) mod quick_entry_shot;
 pub(in crate::workspace) mod section;
 pub(in crate::workspace) mod section_ops;
 pub(in crate::workspace) mod section_view;

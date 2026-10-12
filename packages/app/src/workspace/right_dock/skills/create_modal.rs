@@ -1,17 +1,5 @@
-//! Create-skill modal.
-//!
-//! Left column: meta fields (name, scope select, description, when-to-use,
-//! flags, optional fields). Right column: markdown body editor.
-//! Shell width = `theme::FORM_MODAL_WIDE` (900px).
-//!
-//! Validation runs synchronously: name regex, in-scope duplicate
-//! check, description-length warning. The Save button is disabled
-//! while the name is empty so first-time users can't fire a
-//! malformed write.
-//!
-//! Tab cycling is delegated to GPUI's tab system via `.tab_group()`
-//! on the modal root; each input's `InputState` exposes a tab-stop
-//! focus handle (and `tab_index` order is assigned in `new`).
+//! Paste-first skill creation with a body-first form and optional metadata.
+//! Captures the destination and preserves imported source until explicit Save.
 
 use std::path::PathBuf;
 
@@ -49,6 +37,11 @@ pub struct CreateSkillModal {
     form: super::super::form_state::FormState,
 
     name_input: Entity<InputState>,
+    invocation_input: Entity<InputState>,
+    paste_input: Entity<InputState>,
+    pasting: bool,
+    advanced: bool,
+    imported: Option<crate::agent::skills::import::ImportedSkill>,
     description_input: Entity<InputState>,
     when_to_use_input: Entity<InputState>,
     argument_hint_input: Entity<InputState>,
@@ -86,6 +79,12 @@ impl CreateSkillModal {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Self {
+        let paste_input = cx.new(|cx| {
+            InputState::new(window, cx)
+                .auto_grow(6, 12)
+                .placeholder(strings::skills::quick_placeholder())
+        });
+        let invocation_input = cx.new(|cx| InputState::new(window, cx));
         let name_input = cx.new(|cx_state| {
             InputState::new(window, cx_state).placeholder(strings::skills::placeholder_name())
         });
@@ -111,7 +110,7 @@ impl CreateSkillModal {
         });
         let body_editor = cx.new(|cx_state| {
             InputState::new(window, cx_state)
-                .multi_line(true)
+                .auto_grow(8, 12)
                 .placeholder(strings::skills::placeholder_body())
         });
 
@@ -131,6 +130,8 @@ impl CreateSkillModal {
             });
 
         let subs = vec![
+            forward_body_editor(&paste_input, window, cx),
+            forward_input(&invocation_input, window, cx),
             forward_input(&name_input, window, cx),
             forward_input(&description_input, window, cx),
             forward_input(&when_to_use_input, window, cx),
@@ -142,6 +143,11 @@ impl CreateSkillModal {
         ];
 
         let mut modal = Self {
+            paste_input,
+            invocation_input,
+            pasting: true,
+            advanced: false,
+            imported: None,
             form: Default::default(),
             panel_focus_handle: cx.focus_handle(),
             name_input,
@@ -189,14 +195,39 @@ impl CreateSkillModal {
             return Err((0, strings::skills::name_duplicate().into()));
         }
 
-        let mut fm = SkillFrontmatter::empty();
-        fm.name = blank_to_none(&raw_name);
-        fm.description = blank_to_none(&self.description_input.read(cx).value());
-        fm.when_to_use = blank_to_none(&self.when_to_use_input.read(cx).value());
-        fm.argument_hint = blank_to_none(&self.argument_hint_input.read(cx).value());
-        fm.allowed_tools = blank_to_none(&self.allowed_tools_input.read(cx).value());
-        fm.paths = blank_to_none(&self.paths_input.read(cx).value());
-        fm.model = blank_to_none(&self.model_input.read(cx).value());
+        let mut fm = self
+            .imported
+            .as_ref()
+            .map(|i| i.frontmatter.clone())
+            .unwrap_or_else(SkillFrontmatter::empty);
+        let value = self.invocation_input.read(cx).value();
+        if value.as_str() != fm.name.as_deref().unwrap_or("") {
+            fm.name = blank_to_none(&value);
+        }
+        let value = self.description_input.read(cx).value();
+        if value.as_str() != fm.description.as_deref().unwrap_or("") {
+            fm.description = blank_to_none(&value);
+        }
+        let value = self.when_to_use_input.read(cx).value();
+        if value.as_str() != fm.when_to_use.as_deref().unwrap_or("") {
+            fm.when_to_use = blank_to_none(&value);
+        }
+        let value = self.argument_hint_input.read(cx).value();
+        if value.as_str() != fm.argument_hint.as_deref().unwrap_or("") {
+            fm.argument_hint = blank_to_none(&value);
+        }
+        let value = self.allowed_tools_input.read(cx).value();
+        if value.as_str() != fm.allowed_tools.as_deref().unwrap_or("") {
+            fm.allowed_tools = blank_to_none(&value);
+        }
+        let value = self.paths_input.read(cx).value();
+        if value.as_str() != fm.paths.as_deref().unwrap_or("") {
+            fm.paths = blank_to_none(&value);
+        }
+        let value = self.model_input.read(cx).value();
+        if value.as_str() != fm.model.as_deref().unwrap_or("") {
+            fm.model = blank_to_none(&value);
+        }
         fm.user_invocable = self.user_invocable;
         fm.disable_model_invocation = self.disable_model_invocation;
 
@@ -212,6 +243,10 @@ impl CreateSkillModal {
         if self.submitting {
             return;
         }
+        if self.pasting {
+            self.review_paste(window, cx);
+            return;
+        }
         let draft = match self.build_draft(cx) {
             Ok(d) => d,
             Err((field, msg)) => {
@@ -224,6 +259,7 @@ impl CreateSkillModal {
                 return;
             }
         };
+        let imported = self.imported.clone();
         let project_root = self.project_root.clone();
         let workspace = self.workspace.clone();
         super::super::form_state::freeze_inputs(&self.inputs(), true, cx);
@@ -237,7 +273,21 @@ impl CreateSkillModal {
                 let result = async_cx
                     .background_executor()
                     .spawn(async move {
-                        persist::write_skill(&draft, project_root.as_deref(), false)
+                        let source = if let Some(imported) = imported {
+                            crate::agent::skills::frontmatter::render_edited_skill_md(
+                                &imported.source,
+                                &imported.frontmatter,
+                                &draft.frontmatter,
+                                &draft.body,
+                            )
+                            .map_err(|e| e.to_string())?
+                        } else {
+                            crate::agent::skills::frontmatter::render_skill_md(
+                                &draft.frontmatter,
+                                &draft.body,
+                            )
+                        };
+                        persist::create_skill_source(&draft, project_root.as_deref(), &source)
                             .map_err(|e| e.to_string())
                     })
                     .await;
@@ -267,6 +317,8 @@ impl CreateSkillModal {
 
     fn values(&self, cx: &App) -> Vec<String> {
         vec![
+            self.paste_input.read(cx).value().to_string(),
+            self.invocation_input.read(cx).value().to_string(),
             self.scope.slug().to_string(),
             self.user_invocable.to_string(),
             self.disable_model_invocation.to_string(),
@@ -291,6 +343,8 @@ impl CreateSkillModal {
             self.paths_input.clone(),
             self.model_input.clone(),
             self.body_editor.clone(),
+            self.paste_input.clone(),
+            self.invocation_input.clone(),
         ]
     }
 
@@ -376,7 +430,11 @@ fn forward_body_editor(
 
 impl Focusable for CreateSkillModal {
     fn focus_handle(&self, cx: &gpui::App) -> FocusHandle {
-        self.name_input.focus_handle(cx)
+        if self.pasting {
+            self.paste_input.focus_handle(cx)
+        } else {
+            self.body_editor.focus_handle(cx)
+        }
     }
 }
 
@@ -389,6 +447,7 @@ impl ModalView for CreateSkillModal {
     }
 }
 
+mod quick_entry;
 mod render;
 
 pub fn open_create_skill_modal(
@@ -416,3 +475,46 @@ pub fn open_create_skill_modal(
 #[cfg(test)]
 #[path = "create_modal/tests.rs"]
 mod tests;
+
+impl CreateSkillModal {
+    pub(super) fn seed_duplicate(
+        &mut self,
+        source: String,
+        name: String,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        match crate::agent::skills::import::parse(&source) {
+            Ok(imported) => {
+                self.apply_import(imported, window, cx);
+                self.name_input.update(cx, |input, cx| {
+                    input.set_value(format!("{name}-copy"), window, cx)
+                });
+                // A new invocation defaults to its new folder identifier.
+                self.invocation_input
+                    .update(cx, |input, cx| input.set_value("", window, cx));
+            }
+            Err(()) => {
+                self.paste_input
+                    .update(cx, |input, cx| input.set_value(source, window, cx));
+                self.error = Some(strings::skills::import_error().into());
+            }
+        }
+    }
+}
+
+#[cfg(feature = "screenshot")]
+impl CreateSkillModal {
+    pub(in crate::workspace) fn seed_for_shot(
+        &mut self,
+        review: bool,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.paste_input.update(cx,|input,cx|input.set_value(
+            "---\nname: review-changes\ndescription: Review changes before a commit.\n---\n# Review changes\n\nRead the diff and nearby source.\n\n1. Find correctness issues.\n2. Explain the impact with a concrete example.\n3. Cite the affected file and line.\n",window,cx));
+        if review {
+            self.review_paste(window, cx);
+        }
+    }
+}

@@ -94,8 +94,11 @@ pub struct EditMcpServerModal {
     headers_input: Entity<InputState>,
 
     initial: EditMcpInitial,
+    advanced: bool,
+    reveal_values: bool,
     transport: McpTransport,
     disabled: bool,
+    auth: super::auth::Auth,
 
     error: Option<SharedString>,
     error_field: Option<isize>,
@@ -112,6 +115,8 @@ impl EditMcpServerModal {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Self {
+        let mut auth = super::auth::Auth::new(window, cx);
+        auth.seed(&initial.original.headers, window, cx);
         let command_input = cx.new(|cx_state| {
             InputState::new(window, cx_state).default_value(initial.command.clone())
         });
@@ -131,6 +136,7 @@ impl EditMcpServerModal {
         });
 
         let subs = vec![
+            forward_input(&auth.input, window, cx),
             forward_input(&command_input, window, cx),
             forward_input(&args_input, window, cx),
             forward_input(&url_input, window, cx),
@@ -142,6 +148,9 @@ impl EditMcpServerModal {
         let disabled = initial.disabled;
 
         let mut modal = Self {
+            auth,
+            advanced: false,
+            reveal_values: false,
             form: Default::default(),
             panel_focus_handle: cx.focus_handle(),
             command_input,
@@ -180,7 +189,7 @@ impl EditMcpServerModal {
         }
         .map_err(|e| (2, e))?;
         let headers_text = self.headers_input.read(cx).value().to_string();
-        let headers = if self.transport.is_remote() {
+        let mut headers = if self.transport.is_remote() {
             if headers_text == self.initial.headers_text {
                 Ok(self.initial.original.headers.clone())
             } else {
@@ -190,6 +199,10 @@ impl EditMcpServerModal {
         } else {
             Default::default()
         };
+
+        if self.transport.is_remote() {
+            self.auth.apply(&mut headers, cx).map_err(|e| (-1, e))?;
+        }
 
         let args_text = self.args_input.read(cx).value().to_string();
         let args = match self.transport {
@@ -226,7 +239,12 @@ impl EditMcpServerModal {
         let draft = match self.build_draft(cx) {
             Ok(d) => d,
             Err((field, msg)) => {
-                self.error_field = Some(field);
+                self.advanced = true;
+                self.reveal_values = true;
+                self.error_field = (field >= 0).then_some(field);
+                if field < 0 {
+                    window.focus(&self.auth.input.focus_handle(cx), cx);
+                }
                 self.error = Some(msg);
                 if let Some(input) = self.visible_inputs().get(field as usize) {
                     window.focus(&input.focus_handle(cx), cx);
@@ -250,7 +268,13 @@ impl EditMcpServerModal {
             // modal entity from inside its own listener panics). Use
             // `update_window` to recover `&mut Window` for `dismiss`.
             ws.update(cx, |ws, cx_inner| {
-                let result = ws.update_mcp_server(scope, target_root, draft, cx_inner);
+                let result = ws.update_mcp_server(
+                    scope,
+                    target_root,
+                    draft,
+                    &self.initial.original,
+                    cx_inner,
+                );
                 let me = me.clone();
                 cx_inner.defer(move |cx| {
                     // SILENT-OK: window may be gone by the time this defer runs — with no window there is nothing to dismiss or show the save error on, so the no-op is correct.
@@ -276,7 +300,7 @@ impl EditMcpServerModal {
     }
 
     fn values(&self, cx: &App) -> Vec<String> {
-        vec![
+        let mut values = vec![
             self.transport.slug().to_string(),
             self.disabled.to_string(),
             self.command_input.read(cx).value().to_string(),
@@ -284,7 +308,9 @@ impl EditMcpServerModal {
             self.url_input.read(cx).value().to_string(),
             self.env_input.read(cx).value().to_string(),
             self.headers_input.read(cx).value().to_string(),
-        ]
+        ];
+        values.extend(self.auth.values(cx));
+        values
     }
 
     fn visible_inputs(&self) -> Vec<Entity<InputState>> {
@@ -305,6 +331,7 @@ impl EditMcpServerModal {
 
     fn inputs(&self) -> Vec<Entity<InputState>> {
         vec![
+            self.auth.input.clone(),
             self.command_input.clone(),
             self.args_input.clone(),
             self.url_input.clone(),
@@ -410,6 +437,7 @@ impl ModalView for EditMcpServerModal {
     }
 }
 
+mod duplicate;
 mod render;
 
 pub fn open_edit_mcp_server_modal(

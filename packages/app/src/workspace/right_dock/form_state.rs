@@ -75,11 +75,23 @@ pub(super) fn field_input(
     error_field: Option<isize>,
     error: Option<&gpui::SharedString>,
 ) -> impl gpui::IntoElement {
+    ordered_field_input(input, cx, index, index, error_field, error)
+}
+
+/// A field keeps its validation identity when optional controls alter tab order.
+pub(super) fn ordered_field_input(
+    input: &Entity<crate::ui::InputState>,
+    cx: &App,
+    index: isize,
+    tab: isize,
+    error_field: Option<isize>,
+    error: Option<&gpui::SharedString>,
+) -> impl gpui::IntoElement {
     use gpui::{div, prelude::*};
     div()
         .flex()
         .flex_col()
-        .child(crate::ui::input(input, cx, index))
+        .child(crate::ui::input(input, cx, tab))
         .when(error_field == Some(index), |field| {
             field.children(error.map(|message| {
                 crate::ui::alert::error(

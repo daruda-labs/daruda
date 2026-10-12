@@ -37,6 +37,9 @@ impl Render for EditMcpServerModal {
                     label,
                 )
                 .selected(self.transport == tp)
+                .disabled(submitting)
+                .tab_stop(true)
+                .tab_index(2)
             }))
             .on_click(cx.listener(move |this, ixs: &Vec<usize>, _w, cx| {
                 if this.submitting {
@@ -58,71 +61,111 @@ impl Render for EditMcpServerModal {
             .child(field_label(strings::mcp::field_transport(), &t))
             .child(transport_chip);
 
-        match self.transport {
-            McpTransport::Stdio => {
-                body = body
-                    .child(field_label(strings::mcp::field_command(), &t))
-                    .child(super::super::super::form_state::field_input(
-                        &self.command_input,
-                        cx,
-                        0,
-                        self.error_field,
-                        self.error.as_ref(),
-                    ))
-                    .child(field_label(strings::mcp::field_args(), &t))
-                    .child(super::super::super::form_state::field_input(
-                        &self.args_input,
-                        cx,
-                        1,
-                        self.error_field,
-                        self.error.as_ref(),
-                    ));
-            }
-            McpTransport::Sse | McpTransport::Http => {
-                body = body
-                    .child(field_label(strings::mcp::field_url(), &t))
-                    .child(super::super::super::form_state::field_input(
-                        &self.url_input,
-                        cx,
-                        0,
-                        self.error_field,
-                        self.error.as_ref(),
-                    ))
-                    .child(field_label(strings::mcp::field_headers(), &t))
-                    .child(super::super::super::form_state::field_input(
-                        &self.headers_input,
-                        cx,
-                        1,
-                        self.error_field,
-                        self.error.as_ref(),
-                    ));
-            }
-        }
-
-        // Env sits one past the last transport-specific input and the
-        // disabled checkbox one past env, so the cycle ends at the
-        // checkbox regardless of transport. Name is read-only here, so
-        // indices start at 0 (both branches use 0,1 for their inputs).
+        let connection = if self.transport.is_remote() {
+            &self.url_input
+        } else {
+            &self.command_input
+        };
         body = body
-            .child(field_label(strings::mcp::field_env(), &t))
-            .child(super::super::super::form_state::field_input(
-                &self.env_input,
+            .child(field_label(
+                if self.transport.is_remote() {
+                    strings::mcp::field_url()
+                } else {
+                    strings::mcp::field_command()
+                },
+                &t,
+            ))
+            .child(super::super::super::form_state::ordered_field_input(
+                connection,
                 cx,
-                2,
+                0,
+                3,
                 self.error_field,
                 self.error.as_ref(),
-            ))
-            .child(
-                checkbox("mcp-edit-disabled", strings::mcp::field_disabled(), 3)
-                    .checked(self.disabled)
-                    .on_click(cx.listener(|this, checked: &bool, _w, cx| {
-                        if this.submitting {
-                            return;
-                        }
-                        this.disabled = *checked;
+            ));
+        if self.transport.is_remote() {
+            body = body.child(self.auth.render(submitting, |this| &mut this.auth, cx));
+        }
+        body = body.child(
+            button("advanced", strings::common::field_advanced())
+                .disabled(submitting)
+                .tab_stop(true)
+                .tab_index(7)
+                .on_click(cx.listener(|this, _, _, cx| {
+                    this.advanced = !this.advanced;
+                    cx.notify();
+                })),
+        );
+        if self.advanced {
+            let extra_input = if self.transport.is_remote() {
+                &self.headers_input
+            } else {
+                &self.args_input
+            };
+            if !self.transport.is_remote() {
+                body = body
+                    .child(field_label(strings::mcp::field_args(), &t))
+                    .child(super::super::super::form_state::ordered_field_input(
+                        extra_input,
+                        cx,
+                        1,
+                        8,
+                        self.error_field,
+                        self.error.as_ref(),
+                    ));
+            }
+            body = body.child(
+                button("reveal-values", strings::mcp::reveal_values())
+                    .disabled(submitting)
+                    .tab_stop(true)
+                    .tab_index(9)
+                    .on_click(cx.listener(|this, _, _, cx| {
+                        this.reveal_values = !this.reveal_values;
                         cx.notify();
                     })),
             );
+            if self.reveal_values {
+                if self.transport.is_remote() {
+                    body = body
+                        .child(field_label(strings::mcp::field_headers(), &t))
+                        .child(field_label(strings::mcp::auth_headers_hint(), &t))
+                        .child(super::super::super::form_state::ordered_field_input(
+                            extra_input,
+                            cx,
+                            1,
+                            10,
+                            self.error_field,
+                            self.error.as_ref(),
+                        ));
+                }
+                body = body
+                    .child(field_label(strings::mcp::field_env(), &t))
+                    .child(super::super::super::form_state::ordered_field_input(
+                        &self.env_input,
+                        cx,
+                        2,
+                        11,
+                        self.error_field,
+                        self.error.as_ref(),
+                    ));
+            }
+            body = body.child(
+                checkbox("mcp-disabled", strings::mcp::field_disabled(), 12)
+                    .checked(self.disabled)
+                    .on_click(cx.listener(|this, checked: &bool, _, cx| {
+                        if !this.submitting {
+                            this.disabled = *checked;
+                            cx.notify();
+                        }
+                    })),
+            );
+        }
+        if self.transport != self.initial.transport {
+            body = body.child(crate::ui::alert::warning(
+                "transport-warning",
+                strings::mcp::transport_warning(),
+            ));
+        }
 
         let save_label = if submitting {
             strings::mcp::saving_label()
@@ -136,11 +179,22 @@ impl Render for EditMcpServerModal {
             .gap(px(theme::MODAL_FOOTER_GAP))
             .mt(px(theme::MODAL_FOOTER_MARGIN_TOP))
             .child(
+                button("duplicate", strings::common::btn_duplicate())
+                    .disabled(submitting)
+                    .tab_stop(true)
+                    .tab_index(13)
+                    .on_click(cx.listener(|this, _, w, cx| this.duplicate(w, cx))),
+            )
+            .child(
                 button("edit-mcp-cancel", strings::common::btn_cancel())
+                    .tab_stop(true)
+                    .tab_index(14)
                     .on_click(cx.listener(|this, _: &ClickEvent, w, cx| this.leave(w, cx))),
             )
             .child(
                 button_primary("edit-mcp-save", save_label)
+                    .tab_stop(true)
+                    .tab_index(15)
                     .disabled(submitting)
                     .on_click(cx.listener(|this, _: &ClickEvent, w, cx| this.submit(w, cx))),
             );

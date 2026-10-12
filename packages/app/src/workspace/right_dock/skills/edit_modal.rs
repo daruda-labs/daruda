@@ -41,10 +41,12 @@ pub struct EditSkillModal {
     panel_focus_handle: FocusHandle,
     form: super::super::form_state::FormState,
 
+    advanced: bool,
     name: String,
     scope: SkillScope,
     dir: PathBuf,
 
+    invocation_input: Entity<InputState>,
     description_input: Entity<InputState>,
     when_to_use_input: Entity<InputState>,
     argument_hint_input: Entity<InputState>,
@@ -89,6 +91,9 @@ impl EditSkillModal {
         let frontmatter = skill.frontmatter.clone();
         let body_text = String::new();
 
+        let invocation_input = cx.new(|cx| {
+            InputState::new(window, cx).default_value(frontmatter.name.clone().unwrap_or_default())
+        });
         let description_input = cx.new(|cx_state| {
             let mut s = InputState::new(window, cx_state)
                 .placeholder(strings::skills::placeholder_description());
@@ -135,7 +140,7 @@ impl EditSkillModal {
         });
         let body_editor = cx.new(|cx_state| {
             let mut s = InputState::new(window, cx_state)
-                .multi_line(true)
+                .auto_grow(8, 12)
                 .placeholder(strings::skills::placeholder_body_loading());
             if !body_text.is_empty() {
                 s = s.default_value(body_text);
@@ -180,6 +185,7 @@ impl EditSkillModal {
                             let (_, body) =
                                 crate::agent::skills::frontmatter::split_frontmatter(&source);
                             for (input, value) in [
+                                (&modal.invocation_input, frontmatter.name.as_deref()),
                                 (&modal.description_input, frontmatter.description.as_deref()),
                                 (&modal.when_to_use_input, frontmatter.when_to_use.as_deref()),
                                 (
@@ -216,6 +222,7 @@ impl EditSkillModal {
         body_editor.update(cx, |input, cx| input.set_disabled(true, cx));
 
         let subs = vec![
+            forward_input(&invocation_input, window, cx),
             forward_input(&description_input, window, cx),
             forward_input(&when_to_use_input, window, cx),
             forward_input(&argument_hint_input, window, cx),
@@ -226,11 +233,13 @@ impl EditSkillModal {
         ];
 
         let mut modal = Self {
+            advanced: false,
             form: Default::default(),
             panel_focus_handle: cx.focus_handle(),
             name: skill.name.clone(),
             scope: skill.scope,
             dir: skill.dir.clone(),
+            invocation_input,
             description_input,
             when_to_use_input,
             argument_hint_input,
@@ -257,6 +266,10 @@ impl EditSkillModal {
 
     fn build_draft(&self, cx: &gpui::App) -> SkillDraft {
         let mut fm = self.original_frontmatter.clone();
+        let value = self.invocation_input.read(cx).value();
+        if value.as_str() != fm.name.as_deref().unwrap_or("") {
+            fm.name = blank_to_none(&value);
+        }
         let value = self.description_input.read(cx).value();
         if value.as_str()
             != self
@@ -436,6 +449,7 @@ impl EditSkillModal {
         vec![
             self.user_invocable.to_string(),
             self.disable_model_invocation.to_string(),
+            self.invocation_input.read(cx).value().to_string(),
             self.description_input.read(cx).value().to_string(),
             self.when_to_use_input.read(cx).value().to_string(),
             self.argument_hint_input.read(cx).value().to_string(),
@@ -448,6 +462,7 @@ impl EditSkillModal {
 
     fn inputs(&self) -> Vec<Entity<InputState>> {
         vec![
+            self.invocation_input.clone(),
             self.description_input.clone(),
             self.when_to_use_input.clone(),
             self.argument_hint_input.clone(),
@@ -537,7 +552,7 @@ fn forward_body_editor(
 
 impl Focusable for EditSkillModal {
     fn focus_handle(&self, cx: &gpui::App) -> FocusHandle {
-        self.description_input.focus_handle(cx)
+        self.body_editor.focus_handle(cx)
     }
 }
 
@@ -550,6 +565,7 @@ impl ModalView for EditSkillModal {
     }
 }
 
+mod duplicate;
 mod render;
 
 pub fn open_edit_skill_modal(

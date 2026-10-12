@@ -172,6 +172,7 @@ impl Workspace {
         scope: McpScope,
         lane: Option<PathBuf>,
         draft: McpServerDraft,
+        expected: &McpServerDraft,
         cx: &mut Context<Self>,
     ) -> Result<(), McpPersistError> {
         let (path, location) =
@@ -180,6 +181,14 @@ impl Workspace {
             refresh_before_write(state, scope, lane.as_deref())?;
             let (servers, raw) = scope_slot_mut(state, scope, lane.as_deref())
                 .ok_or(McpPersistError::NoProjectRoot)?;
+            let current = servers.iter().find(|s| s.name == draft.name);
+            if current
+                .is_none_or(|s| McpServerDraft::from_server(s).to_value() != expected.to_value())
+            {
+                return Err(McpPersistError::Io(std::io::Error::other(
+                    crate::surface::strings::mcp::source_changed(),
+                )));
+            }
             update_server(raw, &path, scope, &location, &draft)?;
             let new_server = make_server_from_draft(scope, &draft);
             if let Some(slot) = servers.iter_mut().find(|s| s.name == draft.name) {
@@ -215,5 +224,45 @@ impl Workspace {
         });
         cx.notify();
         result
+    }
+}
+
+#[cfg(test)]
+mod quick_entry_tests {
+    use super::*;
+    #[gpui::test]
+    async fn quick_entry_external_edit_is_not_overwritten(cx: &mut gpui::TestAppContext) {
+        let (_, workspace) = crate::workspace::tests::build_workspace(cx);
+        let temp = tempfile::tempdir().unwrap();
+        let mut original = crate::agent::mcp::import::parse("npx original")
+            .unwrap()
+            .remove(0);
+        original.name = "sample".into();
+        workspace
+            .update(cx, |ws, cx| {
+                ws.add_mcp_server(
+                    McpScope::Project,
+                    Some(temp.path().into()),
+                    original.clone(),
+                    cx,
+                )
+            })
+            .unwrap();
+        let path = temp.path().join(".mcp.json");
+        let external = r#"{"mcpServers":{"sample":{"command":"other"}},"keep":true}"#;
+        std::fs::write(&path, external).unwrap();
+        let mut changed = original.clone();
+        changed.args = vec!["edited".into()];
+        let result = workspace.update(cx, |ws, cx| {
+            ws.update_mcp_server(
+                McpScope::Project,
+                Some(temp.path().into()),
+                changed,
+                &original,
+                cx,
+            )
+        });
+        assert!(result.is_err());
+        assert_eq!(std::fs::read_to_string(path).unwrap(), external);
     }
 }

@@ -213,7 +213,7 @@ pub(in crate::workspace) fn open_form_modal<E, B>(
     let entity = cx.new(|cx_modal| build(window, cx_modal));
     let entity_for_focus = entity.clone();
 
-    window.open_dialog(cx, move |dialog, _window, cx| {
+    window.open_dialog(cx, move |dialog, window, cx| {
         let guarded = entity.read(cx).guards_close();
         let close_entity = entity.clone();
         let body = div().child(entity.clone()).when(guarded, |body| {
@@ -233,7 +233,8 @@ pub(in crate::workspace) fn open_form_modal<E, B>(
             d = d.title(title.clone());
         }
         if let Some(w) = width {
-            d = d.width(w);
+            let available = window.viewport_size().width - px(theme::PAD_XL + theme::PAD_XL);
+            d = d.width(w.min(available));
         }
         d
     });

@@ -6,6 +6,11 @@ startup:
   failure_log_unavailable: "진단 로그를 저장할 수 없습니다: %{error}"
 
 common:
+  btn_review: "필드 확인"
+  btn_manual: "직접 입력"
+  btn_back: "붙여넣기로 돌아가기"
+  btn_duplicate: "복제"
+  field_advanced: "고급 설정"
   form_target_gone: "작업 공간을 더 이상 사용할 수 없습니다."
   unsaved_form_title: "저장하지 않은 변경사항"
   btn_discard: "버리기"
@@ -1184,6 +1189,14 @@ settings:
 
 # Skills tab
 skills:
+  quick_placeholder: "SKILL.md 전체 또는 Markdown 지침을 붙여넣으세요"
+  quick_hint: "Frontmatter는 필드를 자동으로 채우고 일반 Markdown은 지침이 됩니다. SKILL.md만 가져오며 지원 파일은 복사하지 않습니다."
+  import_error: "Frontmatter가 올바르지 않습니다. --- 구분선 사이에 YAML 매핑을 입력하세요."
+  invocation_name: "호출 이름 (선택)"
+  folder_name: "폴더 식별자"
+  empty_body_warning: "지침이 비어 있습니다. 스킬이 수행할 내용을 추가하세요."
+  duplicate_instructions: "지침 복사"
+  duplicate_hint: "SKILL.md만 복사합니다. 스크립트·참고 자료·자산은 별도로 추가해야 합니다."
   changed_on_disk: "디스크의 스킬이 변경되었습니다. 다시 열어 최신 내용을 불러온 뒤 저장해 주세요."
   section_plugin: "플러그인"
   count_chip_with_plugins: "스킬 %{skills}개 · 플러그인 %{plugins}개"
@@ -1230,6 +1243,25 @@ skills:
 
 # MCP / Tools tab
 mcp:
+  scope_local_short: "로컬"
+  source_changed: "이 서버가 창 밖에서 변경되었습니다. 초안은 유지됩니다. 서버를 다시 열어 최신 설정을 확인하세요."
+  auth_headers_hint: "Authorization은 위 인증 선택을 따릅니다. 여기서 편집하려면 사용자 지정 헤더를 선택하세요."
+  reveal_values: "환경 변수·헤더 값 표시"
+  field_auth: "인증"
+  auth_none: "없음"
+  auth_variable: "환경 변수"
+  auth_token: "토큰"
+  auth_custom: "사용자 지정 헤더"
+  auth_custom_hint: "고급 설정에서 사용자 지정 인증을 편집하세요."
+  auth_invalid: "올바른 환경 변수 이름 또는 줄바꿈 없는 토큰을 입력하세요."
+  quick_placeholder: "MCP URL, 실행 명령, JSON 또는 Codex MCP TOML을 붙여넣으세요"
+  quick_hint: "저장 전에 필드를 확인합니다. 여기서 명령을 실행하지 않습니다. TOML은 Claude 설정으로 변환하며 지원하지 않는 필드는 거부합니다."
+  import_error: "입력을 가져올 수 없습니다. 구문과 필드 형식을 확인하세요. 셸 스크립트와 지원하지 않는 변환은 직접 입력해야 합니다."
+  choose_server: "추가할 서버 하나를 선택하세요. 다른 항목은 저장하지 않습니다."
+  extra_preserved: "추가 원본 필드를 보존합니다: %{keys}"
+  target_claude: "Claude · %{path}"
+  transport_warning: "전송 방식을 바꾸면 호환되지 않는 명령·인수·URL·헤더는 저장에서 제외됩니다. 숨긴 필드 값은 초안에 유지됩니다."
+  duplicate_hint: "연결을 복사했습니다. 환경 변수 값·헤더·추가 필드는 비웠습니다. 저장 전에 인증 정보를 확인하세요."
   headers_invalid: "헤더 %{line}번째 줄은 KEY=VALUE 형식이어야 합니다."
   pairs_invalid: "환경변수 %{line}번째 줄은 KEY=VALUE 형식이어야 합니다."
   pairs_duplicate: "%{line}번째 줄에서 %{key} 키가 중복됩니다."

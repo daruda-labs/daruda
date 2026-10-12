@@ -17,7 +17,7 @@ impl Render for EditSkillModal {
         let user_invocable = self.user_invocable;
         let disable_model = self.disable_model_invocation;
 
-        let left = div()
+        let mut left = div()
             .flex()
             .flex_col()
             .flex_1()
@@ -27,47 +27,62 @@ impl Render for EditSkillModal {
             .child(field_label(strings::common::field_scope(), &t))
             .child(readonly_value(scope_label.to_string(), cx))
             .child(field_label(strings::skills::field_description(), &t))
-            .child(input(&self.description_input, cx, 0))
-            .child(field_label(strings::skills::field_when_to_use(), &t))
-            .child(input(&self.when_to_use_input, cx, 1))
-            .child(field_label(strings::skills::field_allowed_tools(), &t))
-            .child(input(&self.allowed_tools_input, cx, 2))
-            .child(field_label(strings::skills::field_arg_hint(), &t))
-            .child(input(&self.argument_hint_input, cx, 3))
-            .child(field_label(strings::skills::field_paths(), &t))
-            .child(input(&self.paths_input, cx, 4))
-            .child(field_label(strings::skills::field_model(), &t))
-            .child(input(&self.model_input, cx, 5))
-            .child(
-                checkbox(
-                    "edit-skill-user-invocable",
-                    strings::skills::toggle_user_invocable(),
-                    7,
-                )
-                .checked(user_invocable)
-                .on_click(cx.listener(|this, checked: &bool, _w, cx| {
-                    if this.submitting || !this.body_loaded {
-                        return;
-                    }
-                    this.user_invocable = *checked;
+            .child(input(&self.description_input, cx, 0));
+        left = left.child(
+            button("skill-advanced", strings::common::field_advanced())
+                .disabled(self.submitting)
+                .tab_stop(true)
+                .tab_index(1)
+                .on_click(cx.listener(|this, _, _, cx| {
+                    this.advanced = !this.advanced;
                     cx.notify();
                 })),
-            )
-            .child(
-                checkbox(
-                    "edit-skill-disable-model",
-                    strings::skills::toggle_disable_model(),
-                    8,
+        );
+        if self.advanced {
+            left = left
+                .child(field_label(strings::skills::invocation_name(), &t))
+                .child(input(&self.invocation_input, cx, 2))
+                .child(field_label(strings::skills::field_when_to_use(), &t))
+                .child(input(&self.when_to_use_input, cx, 3))
+                .child(field_label(strings::skills::field_allowed_tools(), &t))
+                .child(input(&self.allowed_tools_input, cx, 4))
+                .child(field_label(strings::skills::field_arg_hint(), &t))
+                .child(input(&self.argument_hint_input, cx, 5))
+                .child(field_label(strings::skills::field_paths(), &t))
+                .child(input(&self.paths_input, cx, 6))
+                .child(field_label(strings::skills::field_model(), &t))
+                .child(input(&self.model_input, cx, 7))
+                .child(
+                    checkbox(
+                        "edit-skill-user-invocable",
+                        strings::skills::toggle_user_invocable(),
+                        8,
+                    )
+                    .checked(user_invocable)
+                    .on_click(cx.listener(|this, checked: &bool, _w, cx| {
+                        if this.submitting || !this.body_loaded {
+                            return;
+                        }
+                        this.user_invocable = *checked;
+                        cx.notify();
+                    })),
                 )
-                .checked(disable_model)
-                .on_click(cx.listener(|this, checked: &bool, _w, cx| {
-                    if this.submitting || !this.body_loaded {
-                        return;
-                    }
-                    this.disable_model_invocation = *checked;
-                    cx.notify();
-                })),
-            );
+                .child(
+                    checkbox(
+                        "edit-skill-disable-model",
+                        strings::skills::toggle_disable_model(),
+                        9,
+                    )
+                    .checked(disable_model)
+                    .on_click(cx.listener(|this, checked: &bool, _w, cx| {
+                        if this.submitting || !this.body_loaded {
+                            return;
+                        }
+                        this.disable_model_invocation = *checked;
+                        cx.notify();
+                    })),
+                );
+        }
 
         let right = div()
             .flex()
@@ -75,18 +90,14 @@ impl Render for EditSkillModal {
             .flex_1()
             .gap(px(theme::FORM_MODAL_SECTION_GAP))
             .child(field_label(strings::skills::field_body(), &t))
-            // body_editor sits between the left-column inputs and the
-            // two toggles so Tab moves directly from the last metadata
-            // field into the markdown body — toggles come last as
-            // tail-of-form tweaks.
-            .child(input(&self.body_editor, cx, 6));
+            .child(input(&self.body_editor, cx, -1));
 
         let body = div()
             .flex()
-            .flex_row()
+            .flex_col()
             .gap(px(theme::FORM_MODAL_SPLIT_GAP))
-            .child(left)
-            .child(right);
+            .child(right)
+            .child(left);
 
         let dir_for_finder = self.dir.clone();
         let workspace_for_finder = self.workspace.clone();
@@ -97,24 +108,36 @@ impl Render for EditSkillModal {
             .gap(px(theme::MODAL_FOOTER_GAP))
             .mt(px(theme::MODAL_FOOTER_MARGIN_TOP))
             .child(
+                button("duplicate", strings::skills::duplicate_instructions())
+                    .disabled(self.submitting || !self.body_loaded)
+                    .tab_stop(true)
+                    .tab_index(10)
+                    .on_click(cx.listener(|this, _, w, cx| this.duplicate(w, cx))),
+            )
+            .child(
                 button("edit-skill-rename", strings::common::btn_rename())
+                    .tab_stop(true)
+                    .tab_index(11)
                     .disabled(self.submitting || !self.body_loaded)
                     .on_click(
                         cx.listener(|this, _: &ClickEvent, w, cx| this.request_rename(w, cx)),
                     ),
             )
             .child(
-                button("edit-skill-finder", strings::skills::button_open_finder()).on_click(
-                    cx.listener(move |_, _: &ClickEvent, _w, cx| {
+                button("edit-skill-finder", strings::skills::button_open_finder())
+                    .tab_stop(true)
+                    .tab_index(12)
+                    .on_click(cx.listener(move |_, _: &ClickEvent, _w, cx| {
                         if let Some(ws) = workspace_for_finder.upgrade() {
                             let dir = dir_for_finder.clone();
                             ws.update(cx, |ws, cx| ws.open_skill_dir_in_finder(&dir, cx));
                         }
-                    }),
-                ),
+                    })),
             )
             .child(
                 button("edit-skill-cancel", strings::common::btn_cancel())
+                    .tab_stop(true)
+                    .tab_index(13)
                     .on_click(cx.listener(|this, _: &ClickEvent, w, cx| this.leave(w, cx))),
             )
             .child(
@@ -127,6 +150,8 @@ impl Render for EditSkillModal {
                     },
                 )
                 .disabled(self.submitting || !self.body_loaded)
+                .tab_stop(true)
+                .tab_index(14)
                 .on_click(cx.listener(|this, _: &ClickEvent, w, cx| this.submit(w, cx))),
             );
 

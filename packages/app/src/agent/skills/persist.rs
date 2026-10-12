@@ -160,6 +160,30 @@ pub fn update_skill_source(dir: &Path, expected: &str, source: &str) -> Result<(
     Ok(())
 }
 
+/// Create an imported source without reserializing untouched frontmatter or
+/// replacing a file created after the dialog's snapshot was captured.
+pub(crate) fn create_skill_source(
+    draft: &SkillDraft,
+    project_root: Option<&Path>,
+    source: &str,
+) -> Result<PathBuf, PersistError> {
+    let dir = resolve_skill_dir(draft.scope, &draft.name, project_root)?;
+    std::fs::create_dir_all(&dir)?;
+    let target = dir.join("SKILL.md");
+    let mut tmp = NamedTempFile::new_in(&dir)?;
+    use std::io::Write as _;
+    tmp.write_all(source.as_bytes())?;
+    tmp.as_file().sync_all()?;
+    tmp.persist_noclobber(&target).map_err(|e| {
+        if e.error.kind() == io::ErrorKind::AlreadyExists {
+            PersistError::AlreadyExists(target.clone())
+        } else {
+            PersistError::Io(e.error)
+        }
+    })?;
+    Ok(target)
+}
+
 #[cfg(test)]
 mod source_update_tests {
     use super::*;

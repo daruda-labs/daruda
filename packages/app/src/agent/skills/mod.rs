@@ -13,6 +13,7 @@
 
 pub mod frontmatter;
 pub mod global;
+pub(crate) mod import;
 pub mod persist;
 pub mod plugin_ops;
 pub mod plugins;
