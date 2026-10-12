@@ -4,7 +4,7 @@ version = 4
 
 [[package]]
 name = "acp_replay"
-version = "0.2.16"
+version = "0.2.17"
 dependencies = [
  "serde_json",
 ]
@@ -1729,7 +1729,7 @@ dependencies = [
 
 [[package]]
 name = "daruda"
-version = "0.2.16"
+version = "0.2.17"
 dependencies = [
  "agent-client-protocol",
  "anyhow",
@@ -1804,7 +1804,7 @@ dependencies = [
 
 [[package]]
 name = "daruda_acp"
-version = "0.2.16"
+version = "0.2.17"
 dependencies = [
  "agent-client-protocol",
  "anyhow",
@@ -1825,7 +1825,7 @@ dependencies = [
 
 [[package]]
 name = "daruda_agent"
-version = "0.2.16"
+version = "0.2.17"
 dependencies = [
  "base64",
  "chrono",
@@ -1847,7 +1847,7 @@ dependencies = [
 
 [[package]]
 name = "daruda_config"
-version = "0.2.16"
+version = "0.2.17"
 dependencies = [
  "daruda_core",
  "daruda_store",
@@ -1863,7 +1863,7 @@ dependencies = [
 
 [[package]]
 name = "daruda_content"
-version = "0.2.16"
+version = "0.2.17"
 dependencies = [
  "anyhow",
  "daruda_core",
@@ -1879,7 +1879,7 @@ dependencies = [
 
 [[package]]
 name = "daruda_control_types"
-version = "0.2.16"
+version = "0.2.17"
 dependencies = [
  "daruda_store",
  "serde",
@@ -1888,7 +1888,7 @@ dependencies = [
 
 [[package]]
 name = "daruda_core"
-version = "0.2.16"
+version = "0.2.17"
 dependencies = [
  "dirs",
  "dunce",
@@ -1903,7 +1903,7 @@ dependencies = [
 
 [[package]]
 name = "daruda_flow"
-version = "0.2.16"
+version = "0.2.17"
 dependencies = [
  "daruda_acp",
  "daruda_core",
@@ -1923,7 +1923,7 @@ dependencies = [
 
 [[package]]
 name = "daruda_flow_edit"
-version = "0.2.16"
+version = "0.2.17"
 dependencies = [
  "daruda_flow",
  "tree-sitter",
@@ -1933,7 +1933,7 @@ dependencies = [
 
 [[package]]
 name = "daruda_project"
-version = "0.2.16"
+version = "0.2.17"
 dependencies = [
  "daruda_config",
  "daruda_core",
@@ -1946,7 +1946,7 @@ dependencies = [
 
 [[package]]
 name = "daruda_store"
-version = "0.2.16"
+version = "0.2.17"
 dependencies = [
  "chrono",
  "daruda_core",
@@ -1965,7 +1965,7 @@ dependencies = [
 
 [[package]]
 name = "daruda_terminal"
-version = "0.2.16"
+version = "0.2.17"
 dependencies = [
  "base64",
  "criterion",
@@ -1988,7 +1988,7 @@ dependencies = [
 
 [[package]]
 name = "daruda_ui"
-version = "0.2.16"
+version = "0.2.17"
 dependencies = [
  "daruda_config",
  "daruda_content",
@@ -2009,7 +2009,7 @@ dependencies = [
 
 [[package]]
 name = "daruda_update"
-version = "0.2.16"
+version = "0.2.17"
 dependencies = [
  "daruda_core",
  "fs4",
@@ -2967,7 +2967,7 @@ dependencies = [
 
 [[package]]
 name = "gen_acp_presets"
-version = "0.2.16"
+version = "0.2.17"
 dependencies = [
  "serde",
  "serde_json",
@@ -2975,7 +2975,7 @@ dependencies = [
 
 [[package]]
 name = "gen_licenses"
-version = "0.2.16"
+version = "0.2.17"
 dependencies = [
  "two-face",
 ]
@@ -3052,14 +3052,14 @@ dependencies = [
 
 [[package]]
 name = "ghostty_vt"
-version = "0.2.16"
+version = "0.2.17"
 dependencies = [
  "ghostty_vt_sys",
 ]
 
 [[package]]
 name = "ghostty_vt_sys"
-version = "0.2.16"
+version = "0.2.17"
 
 [[package]]
 name = "gif"
@@ -7768,7 +7768,7 @@ dependencies = [
 
 [[package]]
 name = "strings_gen"
-version = "0.2.16"
+version = "0.2.17"
 dependencies = [
  "syn 2.0.117",
  "tempfile",
@@ -8170,7 +8170,7 @@ dependencies = [
 
 [[package]]
 name = "test_process"
-version = "0.2.16"
+version = "0.2.17"
 dependencies = [
  "shell-words",
  "tempfile",
@@ -9234,7 +9234,7 @@ dependencies = [
 
 [[package]]
 name = "vendor_gpui"
-version = "0.2.16"
+version = "0.2.17"
 dependencies = [
  "anyhow",
  "serde_json",
@@ -9256,7 +9256,7 @@ checksum = "0b928f33d975fc6ad9f86c8f283853ad26bdd5b10b7f1542aa2fa15e2289105a"
 
 [[package]]
 name = "visual_tests"
-version = "0.2.16"
+version = "0.2.17"
 dependencies = [
  "daruda_terminal",
  "gpui",
@@ -9284,7 +9284,7 @@ dependencies = [
 
 [[package]]
 name = "vt_dump"
-version = "0.2.16"
+version = "0.2.17"
 dependencies = [
  "ghostty_vt",
 ]
