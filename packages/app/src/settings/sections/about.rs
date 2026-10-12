@@ -148,6 +148,8 @@ impl SettingsView {
                 // just an explanation.
                 if can_install {
                     col = col.child(update_button(cx));
+                } else if cfg!(target_os = "linux") {
+                    col = col.child(muted_line(s::settings::update_manual_package(), cx));
                 } else {
                     col = col.child(muted_line(s::settings::update_dev_build(), cx));
                 }

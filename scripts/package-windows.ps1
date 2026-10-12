@@ -53,7 +53,7 @@ try {
             & "$PSScriptRoot/sign-windows.ps1" -Path (Join-Path $bundle 'daruda.exe') -CertificateThumbprint $CertificateThumbprint
         }
         Copy-Item -LiteralPath (Join-Path $repoRoot 'LICENSE') -Destination $bundle
-        Copy-Item -LiteralPath (Join-Path $repoRoot 'licenses') -Destination $bundle -Recurse
+        Copy-Item -LiteralPath (Join-Path $repoRoot 'LICENSES') -Destination $bundle -Recurse
         foreach ($dll in $runtime) { Copy-Item -LiteralPath $dll.FullName -Destination $bundle }
         $signing = if ($CertificateThumbprint) { 'Authenticode signed and timestamped' } else { 'Unsigned' }
         @"

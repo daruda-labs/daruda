@@ -26,7 +26,7 @@ daruda locally. For a short product overview and first run instructions, see
 | Dependency | Version / status |
 |---|---|
 | macOS | 12.0 Monterey or later; Apple Silicon and Intel supported |
-| Linux | Builds and tests pass; GUI runtime still needs desktop verification; requires system `libfontconfig` and `libxcb` |
+| Linux | x86_64 `.deb` and portable tar.gz; CI builds, tests, and smoke-tests the window under Xvfb and sway; a real desktop is still unverified; requires system `libfontconfig`, `libxcb`, `libxkbcommon`, `libwayland`, and a Vulkan driver |
 | Windows | Experimental native MSVC build; GUI runtime still needs desktop verification |
 | Rust | 1.95+; CI pins the floor to 1.95 |
 | Zig | 0.14.1; `./scripts/bootstrap-zig.sh` installs the pinned version on macOS |
@@ -279,6 +279,23 @@ brew install create-dmg
 ./scripts/build-dmg.sh
 ```
 
+Build the Linux x86_64 packages — a portable tar.gz and a `.deb` — on a
+Debian or Ubuntu host with `jq`, `imagemagick`, `dpkg-dev`, and the build
+dependencies from `.github/workflows/ci.yml`:
+
+```bash
+./scripts/bootstrap-zig.sh
+./scripts/package-linux.sh
+```
+
+Both land in `target/packages/`. The `.deb` installs `/usr/bin/daruda`, the
+launcher entry (`scripts/linux/daruda.desktop`), and the hicolor icons;
+`dpkg-shlibdeps` derives its `Depends` from the binary, plus `libvulkan1`,
+which wgpu loads at runtime. The tar.gz runs from wherever it is extracted.
+Neither updates itself: Settings › About announces a newer release and the
+package is reinstalled from it. `--profile debug --skip-build` packages an
+existing debug build.
+
 Windows builds embed `assets/icon.ico` into `daruda.exe`; the installer and
 uninstaller use the same icon. After changing `assets/icon.png`, regenerate
 the committed ICO with `./scripts/make-icon.ps1` on Windows before building.
@@ -371,8 +388,8 @@ GitHub Actions produces Windows downloads in two ways:
 - **CI** (push, pull request, or **Run workflow**): the Windows job uploads
   `daruda-windows-x86_64-debug` under the run's **Artifacts**, retained for 14 days.
 - **Release**: pushing a `v<version>` tag matching `Cargo.toml` builds the macOS
-  DMG, Windows release ZIP, and per-user installer, then publishes them after
-  both builds succeed. **Run workflow** builds downloadable release artifacts
+  DMG, the Windows release ZIP and per-user installer, and the Linux `.deb` and
+  tar.gz, then publishes them after every build succeeds. **Run workflow** builds downloadable release artifacts
   without publishing a GitHub Release.
 
 Both Windows workflows use the same Zig installer and package script as local

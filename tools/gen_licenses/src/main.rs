@@ -7,9 +7,9 @@ fn main() {
         .unwrap()
         .parent()
         .unwrap()
-        .join("licenses");
+        .join("LICENSES");
 
-    fs::create_dir_all(&out_dir).expect("create licenses/");
+    fs::create_dir_all(&out_dir).expect("create LICENSES/");
 
     let acks = two_face::acknowledgement::listing();
 

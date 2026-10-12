@@ -64,6 +64,9 @@ fn asset_suffix_for(os: &str) -> Option<&'static str> {
     match os {
         "macos" => Some(".dmg"),
         "windows" => Some("-windows-x86_64.zip"),
+        // The portable archive, not the .deb: a package manager's install
+        // is replaced through the package manager, and this only announces.
+        "linux" => Some("-linux-x86_64.tar.gz"),
         _ => None,
     }
 }
@@ -161,13 +164,15 @@ mod tests {
         ]\
     }";
 
-    /// A real release carries both packages. Picking by suffix is the whole
-    /// mechanism: before it, every platform took the `.dmg`.
-    const BOTH_PACKAGES_JSON: &str = "{\
+    /// A real release carries every platform's package. Picking by suffix is
+    /// the whole mechanism: before it, every platform took the `.dmg`.
+    const ALL_PACKAGES_JSON: &str = "{\
         \"tag_name\": \"v0.3.0\",\
         \"assets\": [\
             { \"name\": \"daruda-0.3.0.dmg\", \"browser_download_url\": \"https://github.com/d/mac\" },\
             { \"name\": \"daruda-0.3.0-windows-x86_64.zip\", \"browser_download_url\": \"https://github.com/d/win\" },\
+            { \"name\": \"daruda-0.3.0-linux-x86_64.tar.gz\", \"browser_download_url\": \"https://github.com/d/linux\" },\
+            { \"name\": \"daruda-0.3.0-linux-x86_64.deb\", \"browser_download_url\": \"https://github.com/d/deb\" },\
             { \"name\": \"SHA256SUMS.txt\", \"browser_download_url\": \"https://github.com/d/sums\" }\
         ]\
     }";
@@ -176,7 +181,7 @@ mod tests {
         let current = semver::Version::parse("0.2.0").unwrap();
         let suffix = asset_suffix_for(os).ok_or(UpdateError::NoPackageForPlatform("test"))?;
         Ok(
-            parse_release_with_suffix(BOTH_PACKAGES_JSON, &current, suffix)
+            parse_release_with_suffix(ALL_PACKAGES_JSON, &current, suffix)
                 .unwrap()
                 .unwrap()
                 .asset_url,
@@ -187,17 +192,18 @@ mod tests {
     fn each_platform_takes_its_own_package() {
         assert_eq!(url_for("macos").unwrap(), "https://github.com/d/mac");
         assert_eq!(url_for("windows").unwrap(), "https://github.com/d/win");
+        assert_eq!(url_for("linux").unwrap(), "https://github.com/d/linux");
     }
 
-    /// No Linux package is published, and saying "up to date" would be a
-    /// different claim than "there is nothing here for you".
+    /// No package is published for this platform, and saying "up to date"
+    /// would be a different claim than "there is nothing here for you".
     #[test]
     fn a_platform_with_no_package_is_refused_not_called_current() {
         assert!(matches!(
-            url_for("linux"),
+            url_for("freebsd"),
             Err(UpdateError::NoPackageForPlatform(_))
         ));
-        assert_eq!(asset_suffix_for("linux"), None);
+        assert_eq!(asset_suffix_for("freebsd"), None);
     }
 
     /// The suffix must not match the other platform's file: `.dmg` and

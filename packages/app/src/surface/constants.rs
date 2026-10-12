@@ -8,6 +8,8 @@ pub const APP_NAME: &str = "Daruda";
 /// `serverInfo.name` and the stem of the per-run server name an agent's
 /// config sees. Distinct from [`APP_NAME`]: this one travels over a wire and
 /// is matched on, so it must not follow display capitalisation.
+/// Also the Linux window `app_id`: a desktop groups a window with its
+/// launcher entry only when this equals the `.desktop` file's basename.
 pub const AGENT_FACING_NAME: &str = "daruda";
 
 /// Help-menu targets.

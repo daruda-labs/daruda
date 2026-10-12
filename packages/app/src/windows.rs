@@ -98,6 +98,7 @@ fn build_titlebar_options() -> TitlebarOptions {
 pub(crate) fn build_window_options(config: &daruda_config::Config) -> WindowOptions {
     let mut opts = WindowOptions {
         titlebar: Some(build_titlebar_options()),
+        app_id: Some(crate::surface::constants::AGENT_FACING_NAME.to_owned()),
         ..Default::default()
     };
     if config.window.opacity < 1.0 || config.window.blur {

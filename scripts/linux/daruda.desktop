@@ -1,0 +1,12 @@
+[Desktop Entry]
+Type=Application
+Name=daruda
+GenericName=AI agent workspace
+Comment=Run AI coding agents in parallel, each in its own git worktree
+Exec=daruda
+Icon=daruda
+Terminal=false
+Categories=Development;IDE;
+Keywords=agent;terminal;git;worktree;
+StartupNotify=true
+StartupWMClass=daruda
