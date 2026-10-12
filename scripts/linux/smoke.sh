@@ -20,7 +20,7 @@ case "$backend" in
         XDG_RUNTIME_DIR=$runtime WLR_BACKENDS=headless WLR_LIBINPUT_NO_DEVICES=1 \
             WLR_RENDERER=pixman sway -c "$runtime/sway.conf" >"$runtime/sway.log" 2>&1 &
         sway_pid=$!
-        trap 'kill "$sway_pid" 2>/dev/null || true; rm -rf "$runtime"' EXIT
+        trap 'kill "$sway_pid" 2>/dev/null || true; wait "$sway_pid" 2>/dev/null || true; rm -rf "$runtime"' EXIT
 
         socket=""
         for _ in $(seq 1 50); do

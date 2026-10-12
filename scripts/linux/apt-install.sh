@@ -5,7 +5,7 @@ set -euo pipefail
 packages=()
 for arg in "$@"; do
     if [ -f "$arg" ]; then
-        while read -r package; do
+        while read -r package || [ -n "$package" ]; do
             [ -n "$package" ] && packages+=("$package")
         done < <(sed 's/#.*//; s/[[:space:]]//g' "$arg")
     else
