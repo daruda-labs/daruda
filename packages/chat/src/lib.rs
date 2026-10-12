@@ -23,7 +23,7 @@ pub(crate) mod autoscroll_ops;
 pub mod fold;
 pub mod labels;
 mod localized;
-pub mod output_editor;
+pub(crate) mod output_editor;
 /// A pane-local view preference plus whether the user or config set it.
 pub mod pane_choice;
 /// The phone's side of one agent turn, owned by the view.
@@ -36,7 +36,7 @@ pub mod session_config;
 #[cfg(feature = "screenshot")]
 pub mod shot_transcript;
 pub mod slash_dispatch;
-pub mod stamp;
+pub(crate) mod stamp;
 mod strings;
 #[cfg(test)]
 mod test_support;

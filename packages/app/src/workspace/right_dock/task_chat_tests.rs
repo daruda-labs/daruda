@@ -206,8 +206,7 @@ fn cancelling_task_stops_its_turn_and_discards_queued_prompts(cx: &mut TestAppCo
                 TaskState::Cancelled { .. }
             ));
             assert!(!view.read(cx).is_busy());
-            assert!(view.read(cx).queue().pending_prompts.is_empty());
-            assert!(view.read(cx).queue().paused_prompts.is_empty());
+            assert!(view.read(cx).queue().in_strip_order().next().is_none());
         })
     })
     .unwrap();

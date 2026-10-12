@@ -32,9 +32,9 @@ pub(super) fn agent_view(ws: &Workspace, pane_id: PaneId) -> Entity<AgentChatVie
 /// (id + text), so tests compare on the text projection.
 fn queue_texts(v: &AgentChatView) -> Vec<String> {
     v.queue()
-        .pending_prompts
-        .iter()
-        .map(|q| q.text.clone())
+        .in_strip_order()
+        .filter(|(_, parked)| !parked)
+        .map(|(q, _)| q.text().to_owned())
         .collect()
 }
 
@@ -227,29 +227,32 @@ async fn cancel_turn_ends_the_turn_locally_without_an_agent_reply(cx: &mut TestA
                 // A turn mid-flight: streaming text + a still-running tool call,
                 // exactly the state a hung agent leaves (no stop reason ever
                 // arrives, so `TurnEnded` would never clear this).
-                view.update(cx, |v, _| {
+                view.update(cx, |v, cx| {
                     v.set_turn_in_flight();
-                    v.set_items_for_test(vec![
-                        ChatItem::AssistantText {
-                            text: "working".into(),
-                            streaming: true,
-                            message_id: None,
-                            phase: Default::default(),
-                        },
-                        ChatItem::ToolCall(ToolCallItem {
-                            id: "t1".into(),
-                            title: "Read".into(),
-                            kind: ToolKindView::Read,
-                            tool_name: None,
-                            status: ToolStatusView::InProgress,
-                            diffs: Vec::new(),
-                            output: Vec::new(),
-                            raw_input: None,
-                            locations: Vec::new(),
-                            parent_tool_id: None,
-                            exit: None,
-                        }),
-                    ]);
+                    v.seed_items_for_test(
+                        vec![
+                            ChatItem::AssistantText {
+                                text: "working".into(),
+                                streaming: true,
+                                message_id: None,
+                                phase: Default::default(),
+                            },
+                            ChatItem::ToolCall(ToolCallItem {
+                                id: "t1".into(),
+                                title: "Read".into(),
+                                kind: ToolKindView::Read,
+                                tool_name: None,
+                                status: ToolStatusView::InProgress,
+                                diffs: Vec::new(),
+                                output: Vec::new(),
+                                raw_input: None,
+                                locations: Vec::new(),
+                                parent_tool_id: None,
+                                exit: None,
+                            }),
+                        ],
+                        cx,
+                    );
                 });
                 // Offline (no handle): `session/cancel` is a no-op, so only the
                 // authoritative local teardown can end the turn.
@@ -263,22 +266,11 @@ async fn cancel_turn_ends_the_turn_locally_without_an_agent_reply(cx: &mut TestA
     workspace.read_with(cx, |ws, cx| {
         let view = agent_view(ws, pane_id);
         let view = view.read(cx);
+        // What Stop does to the items is the chat's own test
+        // (`view/tests/settle.rs`); the host's part is that the turn ends.
         assert!(
             view.turn_is_idle(),
             "Stop ends the turn without an agent reply"
-        );
-        assert!(view.turn_is_idle(), "the turn is settled to idle");
-        let ChatItem::AssistantText { streaming, .. } = &view.items()[0] else {
-            panic!("expected the streamed assistant text");
-        };
-        assert!(!streaming, "streaming text settles on Stop");
-        let ChatItem::ToolCall(tc) = &view.items()[1] else {
-            panic!("expected the tool call");
-        };
-        assert_eq!(
-            tc.status,
-            ToolStatusView::Cancelled,
-            "the in-progress tool call is marked cancelled (stops the rollup pulse)"
         );
     });
 
@@ -591,7 +583,7 @@ struct RestoredChat {
     title: Option<String>,
     replaying: bool,
     dormant: bool,
-    content_width: ChatContentWidth,
+    content_width: Option<ChatContentWidth>,
     tail_steps: PaneChoice<TailWindow>,
     tail_calls: PaneChoice<TailWindow>,
     display_filter: PaneChoice<DisplayFilter>,
@@ -611,11 +603,11 @@ fn restored_chats(ws: &Workspace, cx: &gpui::App) -> Vec<RestoredChat> {
                 title: view.session_title().map(str::to_owned),
                 replaying: view.is_replaying(),
                 dormant: view.any_handle().is_none(),
-                content_width: view.content_width_for_test(),
+                content_width: view.pane_choices().content_width,
                 tail_steps: view.tail_steps_for_test(),
                 tail_calls: view.tail_calls_for_test(),
                 display_filter: view.display_filter_for_test(),
-                fold_mode: view.fold_for_test().chosen_mode(),
+                fold_mode: view.pane_choices().fold_mode,
             }
         })
         .collect()
@@ -676,8 +668,10 @@ async fn agent_chat_agent_id_restore_handles_present_and_removed_owner(cx: &mut 
                     .expect("agent chat view present");
                 view.update(cx, |v, cx| {
                     v.set_session_title_for_test("Investigate flaky test");
-                    v.set_content_width_for_test(ChatContentWidth::Reading);
                     v.restore_pane_choices(ChatPaneChoices {
+                        // Not the configured width, so only a saved choice can
+                        // bring it back.
+                        content_width: Some(ChatContentWidth::Full),
                         // Different windows per level, so a save that collapsed
                         // the axis back to one value would restore the wrong one.
                         tail_steps: Some(TailWindow::Last(3)),
@@ -754,8 +748,8 @@ async fn agent_chat_agent_id_restore_handles_present_and_removed_owner(cx: &mut 
         assert!(titled.dormant, "no live session until first focus connects");
         assert_eq!(
             titled.content_width,
-            ChatContentWidth::Reading,
-            "per-pane reading-width mode must round-trip"
+            Some(ChatContentWidth::Full),
+            "a pane's chosen width must round-trip"
         );
         assert_eq!(
             titled.tail_steps,
@@ -817,7 +811,7 @@ async fn agent_chat_agent_id_restore_handles_present_and_removed_owner(cx: &mut 
             .find(|v| v.session_id.as_deref() == Some("sess-restore-123"))
             .expect("the default-agent session keeps its persisted id");
         assert_eq!(kept.title.as_deref(), Some("Investigate flaky test"));
-        assert_eq!(kept.content_width, ChatContentWidth::Reading);
+        assert_eq!(kept.content_width, Some(ChatContentWidth::Full));
         assert_eq!(kept.tail_steps, PaneChoice::Chosen(TailWindow::Last(3)));
         assert_eq!(kept.tail_calls, PaneChoice::Chosen(TailWindow::Last(10)));
         assert_eq!(
@@ -1032,10 +1026,8 @@ async fn up_arrow_consumes_queue_and_edits_last_prompt(cx: &mut TestAppContext) 
                 let last = agent_view(ws, pane_id)
                     .read(cx)
                     .queue()
-                    .pending_prompts
-                    .last()
-                    .expect("queue non-empty")
-                    .id;
+                    .last_prompt_id()
+                    .expect("queue non-empty");
                 ws.input_dock
                     .input
                     .update(cx, |s, cx_state| s.set_value("typing", window, cx_state));
@@ -1060,11 +1052,7 @@ async fn up_arrow_consumes_queue_and_edits_last_prompt(cx: &mut TestAppContext) 
             "a non-empty composer is left for history recall, not a queue edit"
         );
         assert!(
-            agent_view(ws, pane_id)
-                .read(cx)
-                .queue()
-                .editing_prompt
-                .is_none(),
+            agent_view(ws, pane_id).read(cx).queue().editing().is_none(),
             "no queue edit begins when the composer is non-empty"
         );
     });
@@ -1104,7 +1092,7 @@ async fn up_arrow_consumes_queue_and_edits_last_prompt(cx: &mut TestAppContext) 
             "the composer receives the last queued prompt's text"
         );
         assert_eq!(
-            agent_view(ws, pane_id).read(cx).queue().editing_prompt,
+            agent_view(ws, pane_id).read(cx).queue().editing(),
             Some(last_id),
             "the editing flag targets the last queued prompt"
         );
@@ -1137,7 +1125,14 @@ async fn queued_prompt_edit_exit_paths_clear_state(cx: &mut TestAppContext) {
                 ws.active_runtime_mut().panes.push(pane);
                 ws.active_runtime_mut().focused_pane_id = id;
                 ws.send_agent_prompt_text(id, "editable".into(), cx);
-                let prompt_id = agent_view(ws, id).read(cx).queue().pending_prompts[0].id;
+                let prompt_id = agent_view(ws, id)
+                    .read(cx)
+                    .queue()
+                    .in_strip_order()
+                    .find(|(_, parked)| !parked)
+                    .expect("a queued prompt")
+                    .0
+                    .id();
                 ws.begin_edit_queued_prompt(id, prompt_id, window, cx);
                 (id, prompt_id)
             })
@@ -1148,10 +1143,7 @@ async fn queued_prompt_edit_exit_paths_clear_state(cx: &mut TestAppContext) {
     // begin pulled the text into the composer and set the editing flag.
     workspace.read_with(cx, |ws, cx| {
         assert_eq!(ws.input_dock.input.read(cx).value(), "editable");
-        assert_eq!(
-            agent_view(ws, pane_id).read(cx).queue().editing_prompt,
-            Some(id)
-        );
+        assert_eq!(agent_view(ws, pane_id).read(cx).queue().editing(), Some(id));
     });
 
     cx.update_window(window_handle.into(), |_, window, cx| {
@@ -1169,11 +1161,7 @@ async fn queued_prompt_edit_exit_paths_clear_state(cx: &mut TestAppContext) {
             "cancel empties the composer"
         );
         assert!(
-            agent_view(ws, pane_id)
-                .read(cx)
-                .queue()
-                .editing_prompt
-                .is_none(),
+            agent_view(ws, pane_id).read(cx).queue().editing().is_none(),
             "cancel clears the editing flag; the prompt stays queued"
         );
         assert_eq!(
@@ -1190,10 +1178,8 @@ async fn queued_prompt_edit_exit_paths_clear_state(cx: &mut TestAppContext) {
                 let last = agent_view(ws, pane_id)
                     .read(cx)
                     .queue()
-                    .pending_prompts
-                    .last()
-                    .unwrap()
-                    .id;
+                    .last_prompt_id()
+                    .unwrap();
                 ws.begin_edit_queued_prompt(pane_id, last, window, cx);
                 last
             })
@@ -1204,7 +1190,7 @@ async fn queued_prompt_edit_exit_paths_clear_state(cx: &mut TestAppContext) {
     workspace.read_with(cx, |ws, cx| {
         assert_eq!(ws.input_dock.input.read(cx).value(), "q2");
         assert_eq!(
-            agent_view(ws, pane_id).read(cx).queue().editing_prompt,
+            agent_view(ws, pane_id).read(cx).queue().editing(),
             Some(clear_id)
         );
     });
@@ -1217,12 +1203,9 @@ async fn queued_prompt_edit_exit_paths_clear_state(cx: &mut TestAppContext) {
 
     workspace.read_with(cx, |ws, cx| {
         let view = agent_view(ws, pane_id);
+        assert!(!view.read(cx).queue().has_pending(), "queue cleared");
         assert!(
-            view.read(cx).queue().pending_prompts.is_empty(),
-            "queue cleared"
-        );
-        assert!(
-            view.read(cx).queue().editing_prompt.is_none(),
+            view.read(cx).queue().editing().is_none(),
             "editing flag cleared"
         );
         assert_eq!(
@@ -1235,7 +1218,14 @@ async fn queued_prompt_edit_exit_paths_clear_state(cx: &mut TestAppContext) {
     cx.update_window(window_handle.into(), |_, window, cx| {
         workspace.update(cx, |ws, cx| {
             ws.send_agent_prompt_text(pane_id, "editable".into(), cx);
-            let pid = agent_view(ws, pane_id).read(cx).queue().pending_prompts[0].id;
+            let pid = agent_view(ws, pane_id)
+                .read(cx)
+                .queue()
+                .in_strip_order()
+                .find(|(_, parked)| !parked)
+                .expect("a queued prompt")
+                .0
+                .id();
             ws.begin_edit_queued_prompt(pane_id, pid, window, cx);
         });
     })
@@ -1262,7 +1252,7 @@ async fn queued_prompt_edit_exit_paths_clear_state(cx: &mut TestAppContext) {
     workspace.read_with(cx, |ws, cx| {
         let view = agent_view(ws, pane_id);
         assert!(
-            view.read(cx).queue().editing_prompt.is_none(),
+            view.read(cx).queue().editing().is_none(),
             "whitespace submit cancels the edit"
         );
         assert_eq!(
@@ -1585,12 +1575,12 @@ async fn a_config_reload_moves_an_untouched_panes_transcript_settings(cx: &mut T
             "the reload states no filter, so an untouched pane stays unfiltered"
         );
         assert_eq!(
-            v.fold_for_test().mode(),
+            v.fold_mode_for_test().value(),
             FoldPreset::Summary.mode(),
             "a reloaded fold mode must reach an untouched pane"
         );
         assert_eq!(
-            v.fold_for_test().chosen_mode(),
+            v.pane_choices().fold_mode,
             None,
             "and it is still only a seed"
         );
@@ -1614,7 +1604,7 @@ async fn a_config_reload_moves_an_untouched_panes_transcript_settings(cx: &mut T
             "config must not overwrite a chosen display filter"
         );
         assert_eq!(
-            v.fold_for_test().chosen_mode(),
+            v.pane_choices().fold_mode,
             Some(FoldPreset::Expanded.mode()),
             "config must not overwrite a chosen fold mode"
         );
@@ -1694,7 +1684,7 @@ fn transcript_settings(
     view.read_with(cx, |v, _| {
         (
             v.tail_steps_for_test(),
-            v.fold_for_test().mode(),
+            v.fold_mode_for_test().value(),
             v.display_filter_for_test(),
         )
     })
@@ -2071,12 +2061,12 @@ async fn an_untouched_pane_keeps_following_the_config_defaults(cx: &mut TestAppC
             "a restored pane opens unfiltered — no config key narrows it"
         );
         assert_eq!(
-            view.fold_for_test().mode(),
+            view.fold_mode_for_test().value(),
             FoldPreset::Summary.mode(),
             "the new config fold mode must reach an untouched pane"
         );
         assert_eq!(
-            view.fold_for_test().chosen_mode(),
+            view.pane_choices().fold_mode,
             None,
             "and it is still the seed, not a choice"
         );
@@ -2318,13 +2308,17 @@ async fn a_model_pick_is_remembered_and_survives_a_restore(cx: &mut TestAppConte
                     last_focused_pane: pane_id,
                     user_label: None,
                 });
-                // Stand in for what `Connected` folds in before a chip can be
-                // clicked: the advertised option set the pick lands on.
+                // Advertise the option set the pick lands on, through the same
+                // host fold a live session's event takes.
                 let view = agent_view(ws, pane_id);
-                view.update(cx, |v, _| {
-                    v.session_config_mut_for_test().config_options =
-                        model_options(&[("opus", "Opus"), ("sonnet", "Sonnet")]);
-                });
+                ws.fold_agent_chat_event(
+                    pane_id,
+                    daruda_acp::AcpEvent::ConfigOptionsChanged(model_options(&[
+                        ("opus", "Opus"),
+                        ("sonnet", "Sonnet"),
+                    ])),
+                    cx,
+                );
 
                 // A non-model option must not be mistaken for the model axis.
                 ws.set_agent_config_option(
@@ -2397,91 +2391,6 @@ async fn a_model_pick_is_remembered_and_survives_a_restore(cx: &mut TestAppConte
     });
 
     let _ = std::fs::remove_dir_all(&project_root);
-}
-
-/// Only the user's pick is remembered: a mode the adapter reports — at connect
-/// or by switching on its own — must not outrank the agent's `default_mode` on
-/// the next connect.
-#[gpui::test]
-async fn only_a_user_mode_pick_is_remembered(cx: &mut TestAppContext) {
-    use daruda_acp::{AcpEvent, ModeStateView, SessionCapabilitiesView, SessionModeView};
-
-    let modes = |current: &str| ModeStateView {
-        available: ["default", "plan", "bypassPermissions"]
-            .into_iter()
-            .map(|id| SessionModeView {
-                id: id.into(),
-                name: id.into(),
-                description: None,
-            })
-            .collect(),
-        current: current.into(),
-    };
-    let (window_handle, workspace) = build_workspace(cx);
-    cx.run_until_parked();
-    let pane_id = cx
-        .update_window(window_handle.into(), |_, window, cx| {
-            workspace.update(cx, |ws, cx| {
-                let pane = ws.create_agent_chat_pane(
-                    Some(PaneCwd::Local(std::env::temp_dir())),
-                    None,
-                    daruda_config::AgentDefinition::claude_default().id,
-                    None,
-                    window,
-                    cx,
-                );
-                let id = pane.id;
-                ws.active_runtime_mut().panes.push(pane);
-                id
-            })
-        })
-        .unwrap();
-    cx.run_until_parked();
-
-    let picked = workspace.update(cx, |ws, cx| {
-        ws.fold_agent_chat_event(
-            pane_id,
-            AcpEvent::Connected {
-                program: None,
-                session_id: "s1".into(),
-                modes: Some(modes("default")),
-                config_options: Vec::new(),
-                capabilities: SessionCapabilitiesView::default(),
-                login_methods: Vec::new(),
-            },
-            cx,
-        );
-        ws.fold_agent_chat_event(
-            pane_id,
-            AcpEvent::ModeChanged {
-                state: modes("plan"),
-            },
-            cx,
-        );
-        agent_view(ws, pane_id)
-            .read(cx)
-            .picked_mode_id_for_test()
-            .map(str::to_owned)
-    });
-    assert_eq!(picked, None, "a mode the adapter reported is not a pick");
-
-    let picked = workspace.update(cx, |ws, cx| {
-        let view = agent_view(ws, pane_id);
-        view.update(cx, |v, cx| v.set_mode("bypassPermissions".into(), cx));
-        ws.fold_agent_chat_event(
-            pane_id,
-            AcpEvent::ModeChanged {
-                state: modes("default"),
-            },
-            cx,
-        );
-        view.read(cx).picked_mode_id_for_test().map(str::to_owned)
-    });
-    assert_eq!(
-        picked.as_deref(),
-        Some("bypassPermissions"),
-        "the adapter switching on its own leaves the user's pick standing"
-    );
 }
 
 /// A `default_mode` / `default_model` edit reaches a session that is already
@@ -2560,22 +2469,16 @@ async fn a_config_edit_moves_live_sessions_off_unpicked_defaults(cx: &mut TestAp
     let state = |id: PaneId, cx: &mut TestAppContext| {
         workspace.read_with(cx, |ws, cx| {
             let v = agent_view(ws, id).read(cx);
-            let model = v.session_config().config_options.iter().find_map(|o| {
-                match (&o.category, &o.kind) {
-                    (
-                        daruda_acp::ConfigOptionCategoryView::Model,
-                        daruda_acp::ConfigOptionKindView::Select { current_value, .. },
-                    ) => Some(current_value.clone()),
-                    _ => None,
-                }
-            });
+            let options = v.session_config().config_options_for_chips(&[]);
+            let model = daruda_chat::session_config::model_select(&options)
+                .map(|(_, current, _)| current.to_owned());
             (
                 model,
                 v.session_config()
                     .mode_for_chip()
                     .map(|m| m.current.clone()),
                 v.picked_model_id().map(str::to_owned),
-                v.picked_mode_id_for_test().map(str::to_owned),
+                v.pane_choices().mode_id,
             )
         })
     };
@@ -2603,18 +2506,14 @@ async fn a_config_edit_moves_live_sessions_off_unpicked_defaults(cx: &mut TestAp
     assert_eq!(probes[1].drain().0, 1, "only the model is requested");
 }
 
-/// The inline "Working…" row is projected from `activity_state()`, which is a
-/// *time-dependent* predicate: a trailing subagent counts as busy until its
-/// last activity falls out of the quiescence window. Nothing mutates the model
-/// when that window lapses — the projected row simply goes stale — so the
-/// pulse tick that notices the settle is the only thing that can drop it.
-///
-/// The lapse is constructed by backdating the timestamp rather than sleeping
-/// out the real window; the end state is the same one the clock reaches.
+/// The workspace pulse is what reaches a pane whose run settled on the clock
+/// alone: a trailing subagent stays busy until its quiescence window lapses,
+/// and no event says so. The pulse must still pick that pane up and tick it,
+/// or the working row outlives the run. (What the tick itself does is the
+/// chat's own test.)
 #[gpui::test]
-async fn a_time_driven_settle_drops_the_working_indicator(cx: &mut TestAppContext) {
+async fn the_pulse_reaches_a_pane_that_settles_on_the_clock(cx: &mut TestAppContext) {
     use daruda_acp::{ChatItem, ToolCallItem, ToolKindView, ToolStatusView};
-    use daruda_chat::rows::RowKind;
 
     let (window_handle, workspace) = build_workspace(cx);
     cx.run_until_parked();
@@ -2625,8 +2524,6 @@ async fn a_time_driven_settle_drops_the_working_indicator(cx: &mut TestAppContex
             title: id.to_string(),
             kind: ToolKindView::Read,
             tool_name: None,
-            // Settled: the only thing holding the pane busy is the parent's
-            // quiescence window, which is what makes the settle time-driven.
             status: ToolStatusView::Completed,
             diffs: Vec::new(),
             output: Vec::new(),
@@ -2635,13 +2532,6 @@ async fn a_time_driven_settle_drops_the_working_indicator(cx: &mut TestAppContex
             parent_tool_id: parent.map(str::to_string),
             exit: None,
         })
-    };
-    let working = |ws: &Workspace, id: PaneId, cx: &gpui::App| {
-        agent_view(ws, id)
-            .read(cx)
-            .rows_for_test()
-            .iter()
-            .any(|r| matches!(r.kind, RowKind::WorkingIndicator))
     };
 
     cx.update_window(window_handle.into(), |_, window, cx| {
@@ -2656,37 +2546,34 @@ async fn a_time_driven_settle_drops_the_working_indicator(cx: &mut TestAppContex
             );
             let id = pane.id;
             ws.active_runtime_mut().panes.push(pane);
-
             let view = agent_view(ws, id);
             view.update(cx, |v, cx| {
-                v.set_items_for_test(vec![tool("task-1", None), tool("child-1", Some("task-1"))]);
-                v.activity_mut_for_test()
-                    .subagent_last_activity
-                    .insert("task-1".into(), std::time::Instant::now());
-                // A benign event projects the rows while the subagent is live.
-                v.apply_event(daruda_acp::AcpEvent::Notice("tick".into()), "", false, cx);
+                v.set_subagent_activity_for_test("task-1", std::time::Instant::now());
+                v.seed_items_for_test([tool("task-1", None), tool("child-1", Some("task-1"))], cx);
             });
-            assert!(
-                working(ws, id, cx),
-                "a live subagent puts the indicator on screen"
-            );
-            // Observe busy first so the tick has an edge to detect.
             ws.pulse_agent_chats(cx);
+            let working = view.read(cx).visible_row_count_for_test();
+            assert!(
+                view.read(cx).last_reconciled_busy(),
+                "the live subagent keeps it busy"
+            );
 
-            // The subagent's quiescence window lapses, with no event to say so.
             view.update(cx, |v, _| {
                 let lapsed = std::time::Instant::now()
                     .checked_sub(std::time::Duration::from_secs(20))
                     .expect("the monotonic clock has 20s of history");
-                v.activity_mut_for_test()
-                    .subagent_last_activity
-                    .insert("task-1".into(), lapsed);
+                v.set_subagent_activity_for_test("task-1", lapsed);
             });
             ws.pulse_agent_chats(cx);
 
             assert!(
-                !working(ws, id, cx),
-                "the settle tick must drop the row the run no longer earns"
+                !view.read(cx).last_reconciled_busy(),
+                "the pulse ticked the pane that settled with no event"
+            );
+            assert_eq!(
+                view.read(cx).visible_row_count_for_test(),
+                working - 1,
+                "and the working row went with the run"
             );
         });
     })
@@ -2832,7 +2719,14 @@ async fn empty_composer_enter_cancels_a_queued_edit_before_arming(cx: &mut TestA
             view.update(cx, |v, _| v.set_turn_in_flight());
             ws.send_agent_prompt_text(pane_id, "parked".to_string(), cx);
             view.update(cx, |v, cx| v.cancel_turn(cx));
-            let parked_id = view.read(cx).queue().paused_prompts[0].id;
+            let parked_id = view
+                .read(cx)
+                .queue()
+                .in_strip_order()
+                .find(|(_, parked)| *parked)
+                .expect("a parked prompt")
+                .0
+                .id();
             ws.begin_edit_queued_prompt(pane_id, parked_id, window, cx);
             // `begin_edit_queued_prompt` filled the composer; clearing it is what
             // makes the next Enter an empty submit.
@@ -2842,7 +2736,7 @@ async fn empty_composer_enter_cancels_a_queued_edit_before_arming(cx: &mut TestA
 
             ws.send_terminal_input(window, cx);
             assert!(
-                view.read(cx).queue().editing_prompt.is_none(),
+                view.read(cx).queue().editing().is_none(),
                 "the empty Enter cancelled the edit"
             );
             assert!(

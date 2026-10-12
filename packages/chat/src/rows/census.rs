@@ -13,9 +13,9 @@ mod pinned;
 
 use daruda_acp::ChatItem;
 
-use daruda_chat::fold::FoldState;
-use daruda_chat::rows::tail::{StepWindow, TailWindow};
-use daruda_chat::rows::{LiveSubagentUnits, RenderRow, RowKind, project};
+use crate::fold::FoldState;
+use crate::rows::tail::{StepWindow, TailWindow};
+use crate::rows::{LiveSubagentUnits, RenderRow, RowKind, project};
 use daruda_transcript::display_filter::DisplayFilter;
 use daruda_transcript::fold_mode::{FoldMode, FoldPreset};
 

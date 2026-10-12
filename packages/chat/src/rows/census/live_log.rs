@@ -7,7 +7,7 @@
 //! ```text
 //! DARUDA_CENSUS_LOG=~/.daruda/logs/debug/acp-wire-codex-acp.log \
 //!   DARUDA_CENSUS_AGENT=codex-acp \
-//!   cargo test -p daruda --bin daruda workspace::tests::agent_chat_row_census \
+//!   cargo test -p daruda_chat rows::census \
 //!   -- --nocapture
 //! ```
 
@@ -15,7 +15,7 @@ use daruda_acp::ChatItem;
 use daruda_core::process_env;
 
 use super::{Lens, per_turn_as_last, per_turn_settled, turn_bounds};
-use daruda_chat::rows::tail::TailWindow;
+use crate::rows::tail::TailWindow;
 use daruda_transcript::display_filter::DisplayFilter;
 use daruda_transcript::fold_mode::FoldPreset;
 

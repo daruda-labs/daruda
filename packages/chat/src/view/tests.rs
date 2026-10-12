@@ -2,7 +2,11 @@ use super::super::fold::{FoldContext, FoldKey};
 use super::super::rows::RowKind;
 use daruda_transcript::fold_mode::FoldPreset;
 
+mod activity;
 mod attachments;
+mod diff_layout;
+mod output_layout;
+mod session_modes;
 mod settle;
 mod transitions;
 
@@ -59,11 +63,8 @@ pub(super) fn permission_card(id: u64) -> daruda_acp::ChatItem {
 
 /// Build a minimal, offline `AgentChatView` (no cwd → `Idle` status, no
 /// adapter spawned) as its own window root, so the activity methods
-/// (`&mut self` + `Instant`/`Duration`, no `Workspace`) can be driven
-/// directly. Lighter than `workspace/tests/agent_chat.rs`'s
-/// `make_activity_view` (which goes through a full `Workspace` +
-/// `create_agent_chat_pane`): `AgentChatView::new` only needs a
-/// `Context<Self>`, not a `Workspace` at all.
+/// (`&mut self` + `Instant`/`Duration`) can be driven directly:
+/// `AgentChatView::new` only needs a `Context<Self>`, no host at all.
 pub(crate) fn make_test_view(
     cx: &mut gpui::TestAppContext,
 ) -> gpui::WindowHandle<super::AgentChatView> {
@@ -78,6 +79,16 @@ pub(crate) fn make_test_view_with_writer(
 ) -> gpui::WindowHandle<super::AgentChatView> {
     crate::test_support::init_gpui_component(cx);
     add_test_view_with_writer(cx, writer)
+}
+
+/// A pane as its window's root, for tests that measure what it paints.
+fn open_view(
+    cx: &mut gpui::TestAppContext,
+) -> (gpui::AnyWindowHandle, gpui::Entity<super::AgentChatView>) {
+    let handle = make_test_view(cx);
+    cx.run_until_parked();
+    let view = handle.root(cx).expect("the view's window is open");
+    (handle.into(), view)
 }
 
 fn add_test_view(cx: &mut gpui::TestAppContext) -> gpui::WindowHandle<super::AgentChatView> {

@@ -4,8 +4,6 @@ mod against_base;
 mod agent_chat;
 mod agent_chat_disconnect;
 mod agent_chat_events;
-mod agent_diff_layout;
-mod agent_output_layout;
 mod agent_switch_cost;
 mod annotation_ops_tests;
 mod close_running;
@@ -124,4 +122,3 @@ pub(in crate::workspace) fn build_workspace_with(
     let workspace = workspace_for_root.borrow().clone().unwrap();
     (window_handle, workspace)
 }
-mod agent_chat_row_census;

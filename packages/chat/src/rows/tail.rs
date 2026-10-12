@@ -63,7 +63,7 @@ impl TailLevel {
 /// Both levels' resolved windows. The projection takes the pair rather than one
 /// window per call site, so a level cannot read the other's value by accident.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub struct StepWindow {
+pub(crate) struct StepWindow {
     pub(crate) steps: TailWindow,
     pub(crate) calls: TailWindow,
 }
@@ -77,8 +77,8 @@ impl StepWindow {
         }
     }
 
-    #[cfg(any(test, feature = "test-support"))]
-    pub fn uniform(window: TailWindow) -> Self {
+    #[cfg(test)]
+    pub(crate) fn uniform(window: TailWindow) -> Self {
         Self {
             steps: window,
             calls: window,

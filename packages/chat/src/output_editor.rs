@@ -167,7 +167,7 @@ pub(super) fn embed_text_height(rows: usize, row_height: f32) -> Pixels {
 ///
 /// `max_rows` is the caller's: a diff and a verbatim output are worth different
 /// budgets (see [`theme::AGENT_CHAT_DIFF_EMBED_MAX_ROWS`]).
-pub fn bounded_embed_height(rows: usize, max_rows: usize, row_height: f32) -> Pixels {
+pub(crate) fn bounded_embed_height(rows: usize, max_rows: usize, row_height: f32) -> Pixels {
     let text_h = f32::from(embed_text_height(rows, row_height));
     let max_h = max_rows.max(1) as f32 * row_height;
     px(text_h.min(max_h))

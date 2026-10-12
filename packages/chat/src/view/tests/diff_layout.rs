@@ -16,9 +16,9 @@ use gpui::{
     point, prelude::*, px, size,
 };
 
+use crate::output_editor::bounded_embed_height;
 use crate::test_support::init_gpui_component;
-use crate::ui::theme;
-use daruda_chat::output_editor::bounded_embed_height;
+use daruda_ui::theme;
 
 /// Six display rows: a hunk header + five added lines — the shape of the
 /// screenshot repro (`Write /tmp/daruda_word_diff_repro.rs`, `@@ -1,0 +1,5 @@`).
@@ -44,7 +44,7 @@ fn max_visible_rows() -> usize {
 }
 
 struct DiffProbe {
-    editor: Entity<crate::ui::InputState>,
+    editor: Entity<daruda_ui::InputState>,
     focus_handle: gpui::FocusHandle,
 }
 
@@ -56,7 +56,7 @@ impl DiffProbe {
         let rows = text.lines().count().max(1);
         let text = text.to_owned();
         let editor = cx.new(|cx_state| {
-            let mut state = crate::ui::InputState::new(window, cx_state)
+            let mut state = daruda_ui::InputState::new(window, cx_state)
                 .multi_line(true)
                 .soft_wrap(true)
                 .code_editor("rust")
@@ -89,7 +89,7 @@ impl Render for DiffProbe {
             theme::AGENT_CHAT_DIFF_EMBED_MAX_ROWS,
             theme::agent_chat_embed_row_height(cx),
         );
-        let surface = crate::ui::theme::agent_chat_bg(cx);
+        let surface = daruda_ui::theme::agent_chat_bg(cx);
         div().flex().flex_col().w_full().child(
             div()
                 .id("diff-wrapper")
@@ -98,7 +98,7 @@ impl Render for DiffProbe {
                 .w_full()
                 .flex_none()
                 .h(height)
-                .child(crate::ui::embedded_code_viewer(&self.editor, surface, cx).h(height)),
+                .child(daruda_ui::embedded_code_viewer(&self.editor, surface, cx).h(height)),
         )
     }
 }
@@ -204,31 +204,13 @@ async fn diff_editor_keeps_seeded_rows_and_paints_full_height(cx: &mut TestAppCo
 /// screenshot regressions share one workspace fixture.
 #[gpui::test]
 async fn streaming_write_diff_rebuilds_and_collapsed_header_keeps_height(cx: &mut TestAppContext) {
-    use crate::workspace::main_area::pane::PaneContent;
+    use crate::fold::FoldKey;
     use agent_client_protocol::schema::v1::{
         Content, ContentBlock, Diff, SessionUpdate, TextContent, ToolCall, ToolCallContent,
         ToolCallStatus, ToolCallUpdate, ToolCallUpdateFields, ToolKind,
     };
-    use daruda_chat::fold::FoldKey;
 
-    let (window_handle, workspace) = super::build_workspace(cx);
-    cx.run_until_parked();
-    cx.update_window(window_handle.into(), |_, window, cx| {
-        workspace.update(cx, |ws, cx| ws.open_agent_chat_pane(window, cx));
-    })
-    .unwrap();
-    cx.run_until_parked();
-
-    let view = workspace.read_with(cx, |ws, _| {
-        ws.active_runtime()
-            .panes
-            .iter()
-            .find_map(|p| match &p.content {
-                PaneContent::AgentChat(ac) => Some(ac.view.clone()),
-                _ => None,
-            })
-            .expect("agent chat pane present")
-    });
+    let (window_handle, view) = super::open_view(cx);
 
     const PARTIAL: &str = "use std::collections::{HashMap, HashSet, BTreeMap, BTreeSet};\n";
     const FULL: &str = "use std::collections::{HashMap, HashSet, BTreeMap, BTreeSet};\nlet a = 1;\nlet b = 2;\nlet c = 3;\nlet d = 4;\n";
@@ -275,17 +257,17 @@ async fn streaming_write_diff_rebuilds_and_collapsed_header_keeps_height(cx: &mu
     cx.run_until_parked();
     // Completed flips the tool card to its collapsed default; the screenshot
     // repro has the card expanded — expand everything before measuring.
-    fold_in_window(cx, window_handle.into(), &view, |v, window, cx| {
+    fold_in_window(cx, window_handle, &view, |v, window, cx| {
         v.set_all_folds(true, window, cx)
     });
     cx.run_until_parked();
-    cx.update_window(window_handle.into(), |_, window, _| window.refresh())
+    cx.update_window(window_handle, |_, window, _| window.refresh())
         .unwrap();
     cx.run_until_parked();
 
     let (rows, bounds) = view.read_with(cx, |v, cx| {
         let editor = v
-            .assets_for_test()
+            .assets
             .diff_editors
             .get("w1#0")
             .expect("diff editor built for the tool call");
@@ -311,7 +293,7 @@ async fn streaming_write_diff_rebuilds_and_collapsed_header_keeps_height(cx: &mu
     // (`overflow_hidden` zeroes the container's automatic minimum size in
     // flex layout, so an over-constrained ancestor squeezes exactly this
     // node — the screenshot's clipped-diff shape.)
-    let mut vcx = gpui::VisualTestContext::from_window(window_handle.into(), cx);
+    let mut vcx = gpui::VisualTestContext::from_window(window_handle, cx);
     let container = vcx
         .debug_bounds("agent-chat-diff-container-w1#0")
         .expect("diff container painted");
@@ -353,19 +335,19 @@ async fn streaming_write_diff_rebuilds_and_collapsed_header_keeps_height(cx: &mu
     cx.run_until_parked();
     // Expand the completed card (screenshot state), then collapse just the
     // diff — the reported clipping fold state.
-    fold_in_window(cx, window_handle.into(), &view, |v, window, cx| {
+    fold_in_window(cx, window_handle, &view, |v, window, cx| {
         v.set_all_folds(true, window, cx)
     });
     cx.run_until_parked();
-    fold_in_window(cx, window_handle.into(), &view, |v, window, cx| {
+    fold_in_window(cx, window_handle, &view, |v, window, cx| {
         v.toggle_fold(FoldKey::Diff("e1#0".into()), window, cx)
     });
     cx.run_until_parked();
-    cx.update_window(window_handle.into(), |_, window, _| window.refresh())
+    cx.update_window(window_handle, |_, window, _| window.refresh())
         .unwrap();
     cx.run_until_parked();
 
-    let mut vcx = gpui::VisualTestContext::from_window(window_handle.into(), cx);
+    let mut vcx = gpui::VisualTestContext::from_window(window_handle, cx);
     let container = vcx
         .debug_bounds("agent-chat-diff-container-e1#0")
         .expect("collapsed diff container painted");
@@ -387,30 +369,12 @@ async fn streaming_write_diff_rebuilds_and_collapsed_header_keeps_height(cx: &mu
 /// it, decorations and all.
 #[gpui::test]
 async fn a_large_write_diff_renders_through_the_capped_embed(cx: &mut TestAppContext) {
-    use crate::workspace::main_area::pane::PaneContent;
     use agent_client_protocol::schema::v1::{
         Diff, SessionUpdate, ToolCall, ToolCallContent, ToolCallStatus, ToolCallUpdate,
         ToolCallUpdateFields, ToolKind,
     };
 
-    let (window_handle, workspace) = super::build_workspace(cx);
-    cx.run_until_parked();
-    cx.update_window(window_handle.into(), |_, window, cx| {
-        workspace.update(cx, |ws, cx| ws.open_agent_chat_pane(window, cx));
-    })
-    .unwrap();
-    cx.run_until_parked();
-
-    let view = workspace.read_with(cx, |ws, _| {
-        ws.active_runtime()
-            .panes
-            .iter()
-            .find_map(|p| match &p.content {
-                PaneContent::AgentChat(ac) => Some(ac.view.clone()),
-                _ => None,
-            })
-            .expect("agent chat pane present")
-    });
+    let (window_handle, view) = super::open_view(cx);
 
     let mut new_text = String::new();
     for n in 1..=LARGE_ROWS {
@@ -443,17 +407,17 @@ async fn a_large_write_diff_renders_through_the_capped_embed(cx: &mut TestAppCon
     });
     cx.run_until_parked();
     // Completed collapses the card by default; the embed only renders expanded.
-    fold_in_window(cx, window_handle.into(), &view, |v, window, cx| {
+    fold_in_window(cx, window_handle, &view, |v, window, cx| {
         v.set_all_folds(true, window, cx)
     });
     cx.run_until_parked();
-    cx.update_window(window_handle.into(), |_, window, _| window.refresh())
+    cx.update_window(window_handle, |_, window, _| window.refresh())
         .unwrap();
     cx.run_until_parked();
 
     let (rows, visible, scroll_h) = view.read_with(cx, |v, cx| {
         let state = v
-            .assets_for_test()
+            .assets
             .diff_editors
             .get("w1#0")
             .expect("diff editor built for the write")
@@ -465,7 +429,7 @@ async fn a_large_write_diff_renders_through_the_capped_embed(cx: &mut TestAppCon
         )
     });
 
-    let mut vcx = gpui::VisualTestContext::from_window(window_handle.into(), cx);
+    let mut vcx = gpui::VisualTestContext::from_window(window_handle, cx);
     let embed = vcx
         .debug_bounds("agent-chat-out-embed-diff-w1#0")
         .expect("the bounded embed painted — diff_body did not embed the editor");
@@ -509,30 +473,12 @@ async fn a_large_write_diff_renders_through_the_capped_embed(cx: &mut TestAppCon
 /// memory-file `Edit` whose prose lines ran to several hundred characters.
 #[gpui::test]
 async fn long_diff_lines_wrap_to_the_embed_width(cx: &mut TestAppContext) {
-    use crate::workspace::main_area::pane::PaneContent;
     use agent_client_protocol::schema::v1::{
         Diff, SessionUpdate, ToolCall, ToolCallContent, ToolCallStatus, ToolCallUpdate,
         ToolCallUpdateFields, ToolKind,
     };
 
-    let (window_handle, workspace) = super::build_workspace(cx);
-    cx.run_until_parked();
-    cx.update_window(window_handle.into(), |_, window, cx| {
-        workspace.update(cx, |ws, cx| ws.open_agent_chat_pane(window, cx));
-    })
-    .unwrap();
-    cx.run_until_parked();
-
-    let view = workspace.read_with(cx, |ws, _| {
-        ws.active_runtime()
-            .panes
-            .iter()
-            .find_map(|p| match &p.content {
-                PaneContent::AgentChat(ac) => Some(ac.view.clone()),
-                _ => None,
-            })
-            .expect("agent chat pane present")
-    });
+    let (window_handle, view) = super::open_view(cx);
 
     let long_line = "word ".repeat(40).trim_end().to_string();
     let old_text = "---\nname: note\n---\n".to_string();
@@ -562,17 +508,17 @@ async fn long_diff_lines_wrap_to_the_embed_width(cx: &mut TestAppContext) {
         );
     });
     cx.run_until_parked();
-    fold_in_window(cx, window_handle.into(), &view, |v, window, cx| {
+    fold_in_window(cx, window_handle, &view, |v, window, cx| {
         v.set_all_folds(true, window, cx)
     });
     cx.run_until_parked();
-    cx.update_window(window_handle.into(), |_, window, _| window.refresh())
+    cx.update_window(window_handle, |_, window, _| window.refresh())
         .unwrap();
     cx.run_until_parked();
 
     let (logical_rows, rows, viewport_w, content_w) = view.read_with(cx, |v, cx| {
         let state = v
-            .assets_for_test()
+            .assets
             .diff_editors
             .get("e1#0")
             .expect("diff editor built for the edit")
@@ -598,7 +544,7 @@ async fn long_diff_lines_wrap_to_the_embed_width(cx: &mut TestAppContext) {
          scrolls sideways"
     );
 
-    let mut vcx = gpui::VisualTestContext::from_window(window_handle.into(), cx);
+    let mut vcx = gpui::VisualTestContext::from_window(window_handle, cx);
     let embed = vcx
         .debug_bounds("agent-chat-out-embed-diff-e1#0")
         .expect("the bounded embed painted — diff_body did not embed the editor");
@@ -619,11 +565,11 @@ async fn long_diff_lines_wrap_to_the_embed_width(cx: &mut TestAppContext) {
 fn fold_in_window<R>(
     cx: &mut TestAppContext,
     window_handle: gpui::AnyWindowHandle,
-    view: &gpui::Entity<daruda_chat::view::AgentChatView>,
+    view: &gpui::Entity<crate::view::AgentChatView>,
     f: impl FnOnce(
-        &mut daruda_chat::view::AgentChatView,
+        &mut crate::view::AgentChatView,
         &mut gpui::Window,
-        &mut gpui::Context<daruda_chat::view::AgentChatView>,
+        &mut gpui::Context<crate::view::AgentChatView>,
     ) -> R,
 ) -> R {
     cx.update_window(window_handle, |_, window, cx| {

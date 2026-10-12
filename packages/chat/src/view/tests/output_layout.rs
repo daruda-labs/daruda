@@ -16,10 +16,10 @@ use gpui::{
     point, prelude::*, px, size,
 };
 
+use crate::output_editor::bounded_embed_height;
+use crate::render::embed::bounded_editor_embed;
 use crate::test_support::init_gpui_component;
-use crate::ui::theme;
-use daruda_chat::output_editor::bounded_embed_height;
-use daruda_chat::render::embed::bounded_editor_embed;
+use daruda_ui::theme;
 
 /// Far more rows than the cap can show, standing in for large command output
 /// that fits inside the 64 KiB byte cap.
@@ -58,7 +58,7 @@ fn numbered_lines(rows: usize) -> String {
 }
 
 struct OutputProbe {
-    editor: Entity<crate::ui::InputState>,
+    editor: Entity<daruda_ui::InputState>,
     focus_handle: gpui::FocusHandle,
 }
 
@@ -68,10 +68,10 @@ impl OutputProbe {
     fn new(rows: usize, window: &mut Window, cx: &mut Context<Self>) -> Self {
         let text = numbered_lines(rows);
         let editor = cx.new(|cx_state| {
-            let mut state = crate::ui::InputState::new(window, cx_state)
+            let mut state = daruda_ui::InputState::new(window, cx_state)
                 .multi_line(true)
                 .soft_wrap(true)
-                .code_editor(crate::ui::highlighter::PLAIN_LANGUAGE)
+                .code_editor(daruda_ui::highlighter::PLAIN_LANGUAGE)
                 .line_number(false);
             state.set_value(text, window, cx_state);
             state.set_disabled(true, cx_state);
@@ -229,10 +229,7 @@ fn render_shell_output_card(
     cx: &mut TestAppContext,
     rows: usize,
     trailing_newline: bool,
-) -> (
-    gpui::AnyWindowHandle,
-    Entity<daruda_chat::view::AgentChatView>,
-) {
+) -> (gpui::AnyWindowHandle, Entity<crate::view::AgentChatView>) {
     let mut printed = numbered_lines(rows);
     if trailing_newline {
         printed.push('\n');
@@ -245,33 +242,12 @@ fn render_shell_output_card(
 fn render_shell_output_card_with(
     cx: &mut TestAppContext,
     printed: String,
-) -> (
-    gpui::AnyWindowHandle,
-    Entity<daruda_chat::view::AgentChatView>,
-) {
-    use crate::workspace::main_area::pane::PaneContent;
+) -> (gpui::AnyWindowHandle, Entity<crate::view::AgentChatView>) {
     use agent_client_protocol::schema::v1::{
         SessionUpdate, ToolCall, ToolCallStatus, ToolCallUpdate, ToolCallUpdateFields, ToolKind,
     };
 
-    let (window_handle, workspace) = super::build_workspace(cx);
-    cx.run_until_parked();
-    cx.update_window(window_handle.into(), |_, window, cx| {
-        workspace.update(cx, |ws, cx| ws.open_agent_chat_pane(window, cx));
-    })
-    .unwrap();
-    cx.run_until_parked();
-
-    let view = workspace.read_with(cx, |ws, _| {
-        ws.active_runtime()
-            .panes
-            .iter()
-            .find_map(|p| match &p.content {
-                PaneContent::AgentChat(ac) => Some(ac.view.clone()),
-                _ => None,
-            })
-            .expect("agent chat pane present")
-    });
+    let (window_handle, view) = super::open_view(cx);
 
     view.update(cx, |v, cx| {
         let mut fields = ToolCallUpdateFields::default();
@@ -298,14 +274,14 @@ fn render_shell_output_card_with(
         );
     });
     cx.run_until_parked();
-    fold_in_window(cx, window_handle.into(), &view, |v, window, cx| {
+    fold_in_window(cx, window_handle, &view, |v, window, cx| {
         v.set_all_folds(true, window, cx)
     });
     cx.run_until_parked();
-    cx.update_window(window_handle.into(), |_, window, _| window.refresh())
+    cx.update_window(window_handle, |_, window, _| window.refresh())
         .unwrap();
     cx.run_until_parked();
-    (window_handle.into(), view)
+    (window_handle, view)
 }
 
 /// Replace the `b1` call's output with `printed`, the way a streamed command's
@@ -316,7 +292,7 @@ fn render_shell_output_card_with(
 /// embed.
 fn update_shell_output(
     cx: &mut TestAppContext,
-    view: &Entity<daruda_chat::view::AgentChatView>,
+    view: &Entity<crate::view::AgentChatView>,
     printed: String,
 ) {
     use agent_client_protocol::schema::v1::{
@@ -347,11 +323,11 @@ fn update_shell_output(
 /// wider than the viewport is the absence of the sideways scroll it replaces.
 fn output_editor_wrap_facts(
     cx: &mut TestAppContext,
-    view: &Entity<daruda_chat::view::AgentChatView>,
+    view: &Entity<crate::view::AgentChatView>,
 ) -> (usize, gpui::Pixels, gpui::Pixels) {
     view.read_with(cx, |v, cx| {
         let state = v
-            .assets_for_test()
+            .assets
             .output_editors
             .get("b1#0")
             .expect("output editor built for the shell output")
@@ -422,14 +398,14 @@ async fn long_output_lines_wrap_to_the_embed_width(cx: &mut TestAppContext) {
 
     // The pane narrows: every row re-wraps at the new width and the embed's
     // height follows, with nothing but the list's own re-measure to carry it.
-    // 640px is well under the reading width the column is otherwise capped at,
-    // so the embed itself gets narrower — a wider window would only shrink the
-    // margins around it.
+    // 400px is well under the reading width the column is otherwise capped at,
+    // and narrow enough that each long line takes a row more — a pane only a
+    // little narrower can still fit it in the rows it already had.
     let viewport = cx
         .update_window(window_handle, |_, window, _| window.viewport_size())
         .expect("the window is open");
     gpui::VisualTestContext::from_window(window_handle, cx)
-        .simulate_resize(size(px(640.), viewport.height));
+        .simulate_resize(size(px(400.), viewport.height));
     cx.run_until_parked();
     let narrowed = assert_wrapped(cx, LOGICAL_ROWS + 1, "after narrowing the pane");
     assert!(
@@ -446,7 +422,7 @@ async fn long_output_lines_wrap_to_the_embed_width(cx: &mut TestAppContext) {
 fn push_filler_cards(
     cx: &mut TestAppContext,
     window_handle: gpui::AnyWindowHandle,
-    view: &Entity<daruda_chat::view::AgentChatView>,
+    view: &Entity<crate::view::AgentChatView>,
     count: usize,
 ) {
     use agent_client_protocol::schema::v1::{
@@ -485,7 +461,7 @@ fn push_filler_cards(
         v.set_all_folds(true, window, cx);
         // The transcript follows its tail, so the filler would push the card
         // under test out of the virtualized window and it would never paint.
-        v.list_state_for_test().scroll_to(gpui::ListOffset {
+        v.list_state.scroll_to(gpui::ListOffset {
             item_ix: 0,
             offset_in_item: px(0.),
         });
@@ -498,13 +474,10 @@ fn push_filler_cards(
 /// the pair a chaining test must check before trusting either outcome.
 fn transcript_scroll_range(
     cx: &mut TestAppContext,
-    view: &Entity<daruda_chat::view::AgentChatView>,
+    view: &Entity<crate::view::AgentChatView>,
 ) -> (usize, gpui::Pixels) {
     view.read_with(cx, |v, _| {
-        (
-            v.items().len(),
-            v.list_state_for_test().max_offset_for_scrollbar().y,
-        )
+        (v.items().len(), v.list_state.max_offset_for_scrollbar().y)
     })
 }
 
@@ -535,9 +508,7 @@ async fn capped_embed_wheel_chains_only_after_the_embed_is_exhausted(cx: &mut Te
         "the transcript has no scrollable range, so the fixture is vacuous"
     );
 
-    let before = view.read_with(cx, |v, _| {
-        v.list_state_for_test().scroll_px_offset_for_scrollbar()
-    });
+    let before = view.read_with(cx, |v, _| v.list_state.scroll_px_offset_for_scrollbar());
     let mut vcx = gpui::VisualTestContext::from_window(window_handle, cx);
     let embed = vcx
         .debug_bounds("agent-chat-out-embed-b1#0")
@@ -551,7 +522,7 @@ async fn capped_embed_wheel_chains_only_after_the_embed_is_exhausted(cx: &mut Te
             _ => false,
         });
         let visible = v
-            .assets_for_test()
+            .assets
             .output_editors
             .get("b1#0")
             .expect("output editor built for the codex shell block")
@@ -583,8 +554,8 @@ async fn capped_embed_wheel_chains_only_after_the_embed_is_exhausted(cx: &mut Te
 
     let (after, editor_offset) = view.read_with(&vcx, |v, cx| {
         (
-            v.list_state_for_test().scroll_px_offset_for_scrollbar(),
-            v.assets_for_test()
+            v.list_state.scroll_px_offset_for_scrollbar(),
+            v.assets
                 .output_editors
                 .get("b1#0")
                 .expect("output editor built")
@@ -607,7 +578,7 @@ async fn capped_embed_wheel_chains_only_after_the_embed_is_exhausted(cx: &mut Te
     for _ in 0..3 {
         wheel_down_over_embed(&mut vcx, embed);
         offsets.push(view.read_with(&vcx, |v, cx| {
-            v.assets_for_test()
+            v.assets
                 .output_editors
                 .get("b1#0")
                 .expect("output editor built")
@@ -628,7 +599,7 @@ async fn capped_embed_wheel_chains_only_after_the_embed_is_exhausted(cx: &mut Te
     }
 
     let editor = view.read_with(&vcx, |v, _| {
-        v.assets_for_test()
+        v.assets
             .output_editors
             .get("b1#0")
             .expect("output editor built")
@@ -646,15 +617,13 @@ async fn capped_embed_wheel_chains_only_after_the_embed_is_exhausted(cx: &mut Te
         "the embed should have scrolled somewhere, got {end:?}"
     );
 
-    let before = view.read_with(&vcx, |v, _| {
-        v.list_state_for_test().scroll_px_offset_for_scrollbar()
-    });
+    let before = view.read_with(&vcx, |v, _| v.list_state.scroll_px_offset_for_scrollbar());
     wheel_down_over_embed(&mut vcx, embed);
 
     let (after, still_at_end) = view.read_with(&vcx, |v, cx| {
         (
-            v.list_state_for_test().scroll_px_offset_for_scrollbar(),
-            v.assets_for_test()
+            v.list_state.scroll_px_offset_for_scrollbar(),
+            v.assets
                 .output_editors
                 .get("b1#0")
                 .expect("output editor built")
@@ -680,7 +649,7 @@ async fn capped_embed_wheel_chains_only_after_the_embed_is_exhausted(cx: &mut Te
     let (viewport_h, scroll_h) = output_editor_extents(cx, &view);
 
     let rows = view.read_with(cx, |v, cx| {
-        v.assets_for_test()
+        v.assets
             .output_editors
             .get("b1#0")
             .expect("output editor built for the codex shell block")
@@ -732,34 +701,13 @@ fn render_read_output_card(
     cx: &mut TestAppContext,
     path: &str,
     body: String,
-) -> (
-    gpui::AnyWindowHandle,
-    Entity<daruda_chat::view::AgentChatView>,
-) {
-    use crate::workspace::main_area::pane::PaneContent;
+) -> (gpui::AnyWindowHandle, Entity<crate::view::AgentChatView>) {
     use agent_client_protocol::schema::v1::{
         Content, ContentBlock, SessionUpdate, TextContent, ToolCall, ToolCallContent,
         ToolCallStatus, ToolCallUpdate, ToolCallUpdateFields, ToolKind,
     };
 
-    let (window_handle, workspace) = super::build_workspace(cx);
-    cx.run_until_parked();
-    cx.update_window(window_handle.into(), |_, window, cx| {
-        workspace.update(cx, |ws, cx| ws.open_agent_chat_pane(window, cx));
-    })
-    .unwrap();
-    cx.run_until_parked();
-
-    let view = workspace.read_with(cx, |ws, _| {
-        ws.active_runtime()
-            .panes
-            .iter()
-            .find_map(|p| match &p.content {
-                PaneContent::AgentChat(ac) => Some(ac.view.clone()),
-                _ => None,
-            })
-            .expect("agent chat pane present")
-    });
+    let (window_handle, view) = super::open_view(cx);
 
     let raw_input = serde_json::json!({ "file_path": path });
     view.update(cx, |v, cx| {
@@ -788,20 +736,20 @@ fn render_read_output_card(
         );
     });
     cx.run_until_parked();
-    fold_in_window(cx, window_handle.into(), &view, |v, window, cx| {
+    fold_in_window(cx, window_handle, &view, |v, window, cx| {
         v.set_all_folds(true, window, cx)
     });
     cx.run_until_parked();
-    cx.update_window(window_handle.into(), |_, window, _| window.refresh())
+    cx.update_window(window_handle, |_, window, _| window.refresh())
         .unwrap();
     cx.run_until_parked();
-    (window_handle.into(), view)
+    (window_handle, view)
 }
 
 /// The sole output block of the `t1` tool call.
 fn only_output_block(
     cx: &mut TestAppContext,
-    view: &Entity<daruda_chat::view::AgentChatView>,
+    view: &Entity<crate::view::AgentChatView>,
 ) -> daruda_acp::ToolOutputBlock {
     view.read_with(cx, |v, _| {
         let blocks = v
@@ -865,7 +813,7 @@ async fn read_tool_outputs_render_through_the_capped_embed(cx: &mut TestAppConte
 
     let (editor_language, value, rows, visible) = view.read_with(cx, |v, cx| {
         let state = v
-            .assets_for_test()
+            .assets
             .output_editors
             .get("t1#0")
             .expect("no output editor built — the read fell back to markdown")
@@ -912,11 +860,11 @@ async fn read_tool_outputs_render_through_the_capped_embed(cx: &mut TestAppConte
 /// The embedded editor's painted viewport height and its `scroll_size()` height.
 fn output_editor_extents(
     cx: &mut TestAppContext,
-    view: &Entity<daruda_chat::view::AgentChatView>,
+    view: &Entity<crate::view::AgentChatView>,
 ) -> (gpui::Pixels, gpui::Pixels) {
     view.read_with(cx, |v, cx| {
         let state = v
-            .assets_for_test()
+            .assets
             .output_editors
             .get("b1#0")
             .expect("output editor built for the bare-fence block")
@@ -938,11 +886,11 @@ fn output_editor_extents(
 fn fold_in_window<R>(
     cx: &mut TestAppContext,
     window_handle: gpui::AnyWindowHandle,
-    view: &gpui::Entity<daruda_chat::view::AgentChatView>,
+    view: &gpui::Entity<crate::view::AgentChatView>,
     f: impl FnOnce(
-        &mut daruda_chat::view::AgentChatView,
+        &mut crate::view::AgentChatView,
         &mut gpui::Window,
-        &mut gpui::Context<daruda_chat::view::AgentChatView>,
+        &mut gpui::Context<crate::view::AgentChatView>,
     ) -> R,
 ) -> R {
     cx.update_window(window_handle, |_, window, cx| {
@@ -972,7 +920,7 @@ async fn clicking_a_floating_button_still_ends_the_selection_drag(cx: &mut TestA
     vcx.simulate_mouse_down(button.center(), gpui::MouseButton::Left, Default::default());
     vcx.run_until_parked();
     assert!(
-        view.read_with(&vcx, |v, _| v.selection_drag_active_for_test()),
+        view.read_with(&vcx, |v, _| v.selection_drag_active),
         "the container's mouse-down starts the drag, so the fixture is vacuous \
          if it never does"
     );
@@ -980,7 +928,7 @@ async fn clicking_a_floating_button_still_ends_the_selection_drag(cx: &mut TestA
     vcx.simulate_mouse_up(button.center(), gpui::MouseButton::Left, Default::default());
     vcx.run_until_parked();
     assert!(
-        !view.read_with(&vcx, |v, _| v.selection_drag_active_for_test()),
+        !view.read_with(&vcx, |v, _| v.selection_drag_active),
         "the drag outlived its mouse-up, so the autoscroll poll is still running"
     );
 }

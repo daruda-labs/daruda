@@ -91,7 +91,7 @@ fn probe_height(
     // draw") can land before layout has fully settled; force + wait out a
     // second frame so `debug_bounds` reads the settled wrap, not a
     // first-frame transient (same rationale as the diff-editor probe's
-    // frame-1-vs-frame-2 check in `workspace/tests/agent_diff_layout.rs`).
+    // frame-1-vs-frame-2 check in `packages/chat/src/view/tests/diff_layout.rs`).
     vcx.update(|window, _| window.refresh());
     vcx.run_until_parked();
     vcx.debug_bounds("markdown-probe")

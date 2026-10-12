@@ -32,7 +32,7 @@ impl Shape {
 
 /// Stamp "now" for a field that is stored and parsed back, not displayed.
 /// UTC, matching what agents send over ACP.
-pub fn now_rfc3339() -> String {
+pub(crate) fn now_rfc3339() -> String {
     Utc::now().to_rfc3339()
 }
 
@@ -40,14 +40,14 @@ pub fn now_rfc3339() -> String {
 /// when it does not parse — the caller owns what an unreadable timestamp
 /// should look like, and the protocol allows ISO 8601 shapes wider than the
 /// RFC 3339 subset read here.
-pub fn local_datetime(iso: &str) -> Option<String> {
+pub(crate) fn local_datetime(iso: &str) -> Option<String> {
     rfc3339_in_zone(iso, &Local, Shape::DateAndTime)
 }
 
 /// Time of day in the local zone, for a stamp whose date the surrounding UI
 /// already implies. The clock convention travels with the locale, so a call
 /// site must not assemble one by hand.
-pub fn local_time<T: TimeZone>(when: DateTime<T>) -> String {
+pub(crate) fn local_time<T: TimeZone>(when: DateTime<T>) -> String {
     in_zone(when, &Local, Shape::TimeOnly)
 }
 

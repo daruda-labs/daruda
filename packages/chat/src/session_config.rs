@@ -25,7 +25,7 @@ pub struct SessionConfig {
     /// Select config options advertised by the agent, replaced wholesale on
     /// `ConfigOptionsChanged`. Never carries a `Mode`-category option:
     /// `daruda_acp` strips it, since [`Self::modes`] already holds that fact.
-    pub config_options: Vec<ConfigOptionView>,
+    pub(crate) config_options: Vec<ConfigOptionView>,
     /// Slash commands the agent advertises, replaced wholesale on
     /// `AvailableCommandsChanged`.
     pub(crate) available_commands: Vec<SlashCommand>,

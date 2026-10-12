@@ -98,12 +98,7 @@ fn active_agent_chat_eof_completes_once_through_the_activity_edge(cx: &mut TestA
                 TaskState::Error { .. }
             ));
             assert!(!view.read(cx).is_busy());
-            assert!(
-                view.read(cx)
-                    .activity_for_test()
-                    .pending_completion
-                    .is_none()
-            );
+            assert!(!view.read(cx).owes_completion_for_test());
             let next_task = running_task(cx);
             ws.agent_chat_stream_ended(pane, cx);
             ws.pulse_agent_chats(cx);

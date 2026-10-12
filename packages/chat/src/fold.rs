@@ -97,7 +97,7 @@ impl FoldContext {
 
 /// Fold state for one conversation: the pane's mode plus explicit user choices.
 #[derive(Default)]
-pub struct FoldState {
+pub(crate) struct FoldState {
     /// Present = an explicit user choice; absent = the mode's rule decides.
     /// Nothing but a user gesture writes here.
     overrides: HashMap<FoldKey, bool>,
@@ -109,7 +109,7 @@ pub struct FoldState {
 }
 
 impl FoldState {
-    pub fn with_mode(mode: FoldMode) -> Self {
+    pub(crate) fn with_mode(mode: FoldMode) -> Self {
         Self {
             overrides: HashMap::new(),
             held_response: None,
@@ -117,11 +117,11 @@ impl FoldState {
         }
     }
 
-    pub fn mode(&self) -> FoldMode {
+    pub(crate) fn mode(&self) -> FoldMode {
         self.mode.value()
     }
 
-    pub fn chosen_mode(&self) -> Option<FoldMode> {
+    pub(crate) fn chosen_mode(&self) -> Option<FoldMode> {
         self.mode.chosen()
     }
 

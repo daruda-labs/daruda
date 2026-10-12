@@ -7,9 +7,9 @@ use super::{
     Lens, TAIL_N, invariant_violations, per_turn_as_last, per_turn_settled, rows, turn_bounds,
     visible_per_turn,
 };
-use daruda_chat::fold::FoldState;
-use daruda_chat::rows::tail::{StepWindow, TailWindow};
-use daruda_chat::rows::{LiveSubagentUnits, project};
+use crate::fold::FoldState;
+use crate::rows::tail::{StepWindow, TailWindow};
+use crate::rows::{LiveSubagentUnits, project};
 use daruda_transcript::display_filter::DisplayFilter;
 use daruda_transcript::fold_mode::{FoldMode, FoldPreset};
 

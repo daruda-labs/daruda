@@ -13,7 +13,7 @@ use super::tool_hierarchy::ToolHierarchy;
 
 /// Tool ids with a live descendant, built by walking upward from live calls.
 #[derive(Default)]
-pub struct LiveSubagentUnits {
+pub(crate) struct LiveSubagentUnits {
     ids: HashSet<String>,
 }
 
@@ -44,8 +44,8 @@ impl LiveSubagentUnits {
     /// Test convenience: derive the hierarchy for this one call. Production
     /// shares a single hierarchy across the whole projection pass. Keeps the
     /// idle early-out ahead of the build so the cheap case stays cheap here too.
-    #[cfg(any(test, feature = "test-support"))]
-    pub fn of(items: &[ChatItem]) -> Self {
+    #[cfg(test)]
+    pub(crate) fn of(items: &[ChatItem]) -> Self {
         if Self::nested_live(items).next().is_none() {
             return Self::default();
         }

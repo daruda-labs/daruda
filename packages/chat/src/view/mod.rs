@@ -244,7 +244,7 @@ impl Replay {
 /// no start time" or "idle with one" — the level and the anchor move together
 /// on every edge, which is the only way they are ever written.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
-pub enum ActivitySpan {
+pub(crate) enum ActivitySpan {
     #[default]
     Idle,
     Busy {
@@ -254,7 +254,7 @@ pub enum ActivitySpan {
 
 impl ActivitySpan {
     /// The edge-detection memory: whether the pane was busy at the last tick.
-    pub fn is_busy(self) -> bool {
+    pub(crate) fn is_busy(self) -> bool {
         matches!(self, Self::Busy { .. })
     }
 
@@ -448,10 +448,24 @@ enum PhoneTurnAction {
 /// the queued-prompt strip) until drained and echoed as a `UserText`.
 #[derive(Debug, Clone)]
 pub struct QueuedPrompt {
-    pub id: PromptId,
-    pub text: String,
-    pub attachments: Vec<daruda_acp::PromptAttachment>,
-    pub origin: PromptOrigin,
+    pub(crate) id: PromptId,
+    pub(crate) text: String,
+    pub(crate) attachments: Vec<daruda_acp::PromptAttachment>,
+    pub(crate) origin: PromptOrigin,
+}
+
+impl QueuedPrompt {
+    pub fn id(&self) -> PromptId {
+        self.id
+    }
+
+    pub fn text(&self) -> &str {
+        &self.text
+    }
+
+    pub fn attachments(&self) -> &[daruda_acp::PromptAttachment] {
+        &self.attachments
+    }
 }
 
 /// What the Escape shortcut resolved to for a focused Agent chat pane. Returned
@@ -491,18 +505,18 @@ pub struct PromptQueue {
     /// already in flight, in submission order. Not echoed into `items` — the
     /// queued-prompt strip reads this until `pump_pending_prompt` drains and
     /// echoes it as a `UserText`. Cleared on connect failure; never serialized.
-    pub pending_prompts: Vec<QueuedPrompt>,
+    pub(crate) pending_prompts: Vec<QueuedPrompt>,
     /// Prompts parked by a Stop (`cancel_turn`) while buffered behind the
     /// cancelled turn. NOT auto-drained — resumed explicitly (the strip's
     /// Resume button) or discarded (a second Esc / clear-all). Runtime-only.
-    pub paused_prompts: Vec<QueuedPrompt>,
+    pub(crate) paused_prompts: Vec<QueuedPrompt>,
     /// Monotonic counter minting the next [`PromptId`]. Never read outside
     /// `view/`. Runtime-only; never serialized.
     next_prompt_id: u64,
     /// The queued prompt currently being edited in the composer, if any. Set
     /// by `begin_edit`, cleared on send/cancel/drain. While `Some`, a send
     /// replaces its text instead of enqueuing a new prompt. Runtime-only.
-    pub editing_prompt: Option<PromptId>,
+    pub(crate) editing_prompt: Option<PromptId>,
     /// Whether a second empty-composer Enter resumes `paused_prompts`. Set by
     /// the first such Enter, cleared by a composer change and by every path
     /// that mutates the parked queue. Read only through `resume_armed()`, which
@@ -522,11 +536,11 @@ pub struct PromptQueue {
 /// One field instead of nine, with one [`Self::clear`] wiping all of them on a
 /// session reset.
 #[derive(Default)]
-pub struct AssetCache {
+pub(crate) struct AssetCache {
     /// Read-only diff editor entities for tool-call file edits, keyed by
     /// `"{tool_call_id}#{diff_index}"`. Built by `reconcile_diff_editors`;
     /// `render` only embeds them, never creates one.
-    pub diff_editors: DiffEditors,
+    pub(crate) diff_editors: DiffEditors,
     /// Fingerprint each `diff_editors` entry was built from. Lets
     /// `reconcile_diff_editors` detect a replaced diff (streaming growth from
     /// a partial snapshot) and rebuild instead of leaving it stale.
@@ -537,7 +551,7 @@ pub struct AssetCache {
     /// Read-only editor entities for verbatim tool-output blocks, keyed by
     /// `"{tool_call_id}#{block_index}"`. Built by `reconcile_output_editors`;
     /// `render` only embeds them, never creates one.
-    pub output_editors: OutputEditors,
+    pub(crate) output_editors: OutputEditors,
     /// Fingerprint each `output_editors` entry was built from, so a streamed
     /// output that grew is rebuilt rather than left frozen on a partial
     /// snapshot.
@@ -607,11 +621,11 @@ impl AssetCache {
 /// `reconcile_activity`, …) stay `impl AgentChatView` rather than `Self`
 /// since they also need `queue.turn` and `items`, which live outside this type.
 #[derive(Default)]
-pub struct ActivityTracker {
+pub(crate) struct ActivityTracker {
     /// Per-subagent last-activity timestamps by parent tool id. Bumped on each
     /// child tool-call event; keeps a subagent's badge "active" across the
     /// gaps between its sequential child calls (see [`SUBAGENT_QUIESCENCE`]).
-    pub subagent_last_activity: HashMap<String, std::time::Instant>,
+    pub(crate) subagent_last_activity: HashMap<String, std::time::Instant>,
     /// When each tool call seen in the current busy span was first reported, by
     /// tool id. The protocol carries no timestamp and the mapper is deliberately
     /// clock-free, so the host records the first sighting here — the only source
@@ -627,11 +641,11 @@ pub struct ActivityTracker {
     /// idle→busy / busy→idle transitions, and the wall-clock anchor the
     /// working-indicator timer runs off. The anchor spans the whole run (turn
     /// + trailing subagents), not just the foreground turn.
-    pub span: ActivitySpan,
+    pub(crate) span: ActivitySpan,
     /// Outcome captured when the turn/session ended, held until the pane
     /// actually settles busy→idle (may trail `end_turn` while subagents
     /// finish), so the completion signal fires at the true settle point.
-    pub pending_completion: Option<TurnOutcome>,
+    pub(crate) pending_completion: Option<TurnOutcome>,
     /// What each settled run cost, keyed by the run's first item — the same key
     /// the run's fold uses, so a record and the bar above it name one thing.
     pub(super) turn_records: HashMap<usize, TurnRecord>,

@@ -698,11 +698,11 @@ the steady-state frame.
 ### Re-vendor procedure
 
 Copy upstream `state.rs` in, re-apply the IME `.patch`, then restore the
-deferred notify. Paired tests in `packages/app/src/workspace/tests/` fail
-loudly if you forget — `agent_output_layout::long_output_lines_wrap_to_the_embed_width`
+deferred notify. Paired tests in `packages/chat/src/view/tests/` fail loudly
+if you forget — `output_layout::long_output_lines_wrap_to_the_embed_width`
 (its "after a streamed update" stage is the exact repro: a rebuilt editor whose
 embed stayed at the logical height) and
-`agent_diff_layout::long_diff_lines_wrap_to_the_embed_width`.
+`diff_layout::long_diff_lines_wrap_to_the_embed_width`.
 
 ---
 

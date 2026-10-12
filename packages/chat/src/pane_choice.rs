@@ -8,7 +8,7 @@ pub enum PaneChoice<T> {
 }
 
 impl<T: Copy> PaneChoice<T> {
-    pub(super) fn value(self) -> T {
+    pub fn value(self) -> T {
         match self {
             Self::Seeded(value) | Self::Chosen(value) => value,
         }

@@ -70,9 +70,8 @@ async fn switch_pane_account_handles_system_default_noop_and_conversation_guard(
                     seed_agent_pane(ws, AccountSelection::Managed(revert_account), window, cx);
                 let guarded =
                     seed_agent_pane(ws, AccountSelection::Managed(guarded_account), window, cx);
-                agent_view(ws, guarded).update(cx, |v, _| {
-                    v.items_mut_for_test()
-                        .push(ChatItem::UserText("a long investigation".into()));
+                agent_view(ws, guarded).update(cx, |v, cx| {
+                    v.seed_items_for_test([ChatItem::UserText("a long investigation".into())], cx);
                 });
                 (revert, guarded, ws.active_runtime().panes.len())
             })

@@ -1,5 +1,6 @@
-//! Chat wording the host shows too — a Telegram relay, an attachment refusal,
-//! a Settings field — so the two say it in the same words.
+//! Chat wording the host shows too — a Telegram relay, an attachment refusal —
+//! so the two say it in the same words. The `test-support` ones exist for the
+//! host's tests to compare against, not for the host to show.
 
 use crate::strings as s;
 
@@ -19,21 +20,25 @@ pub fn diff_fallback_truncated(n: usize) -> String {
 }
 
 /// A session whose transport closed under it.
+#[cfg(any(test, feature = "test-support"))]
 pub fn transport_closed() -> String {
     s::agent_chat::transport_closed()
 }
 
 /// An axis value that comes from the agent's defaults.
+#[cfg(any(test, feature = "test-support"))]
 pub fn source_following_agent() -> String {
     s::agent_chat::source_following_agent()
 }
 
 /// An axis value this chat chose for itself.
+#[cfg(any(test, feature = "test-support"))]
 pub fn source_this_chat() -> String {
     s::agent_chat::source_this_chat()
 }
 
 /// The prefix a failure banner puts ahead of the reason it reports.
+#[cfg(any(test, feature = "test-support"))]
 pub fn error_prefix() -> String {
     s::agent_chat::error_prefix()
 }
