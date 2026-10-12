@@ -140,7 +140,7 @@ pub struct SwitchPaneAccount(pub daruda_store::accounts::AccountSelection);
 
 /// Start a headless add-account login. Carries the [`AccountRecipeId`] bucket
 /// the resulting account is filed under; the login *command* is
-/// resolved for that same domain (`Workspace::login_command_for_recipe`),
+/// resolved for that same domain (`Workspace::login_cli_for_recipe`),
 /// so the two can't disagree. `no_json`:
 /// dispatched only from the status-bar "+ Add account…" menu item, never
 /// from keymap.json.

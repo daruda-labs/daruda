@@ -7,7 +7,7 @@
 
 use std::path::PathBuf;
 
-use daruda_acp::preparation::{PreparationCancellation, PreparationContext};
+use daruda_acp::preparation::PreparationCancellation;
 use daruda_acp::{NodeProgress, connect_prepared_session};
 use daruda_store::observability::error_report::{ErrorReport, ErrorSeverity};
 use daruda_store::project::{LaneSessionHost, PaneCwd};
@@ -26,9 +26,6 @@ use crate::workspace::Workspace;
 use crate::workspace::main_area::agent_chat_pane::transcript_defaults::TranscriptDefaults;
 use crate::workspace::main_area::agent_chat_pane::view::{AgentSessionStatus, RuntimePrepPhase};
 use crate::workspace::main_area::pane_tree::PaneId;
-
-/// Why a connect fails under test, where no adapter is ever launched.
-const OFFLINE_ADAPTER: &str = "adapters are not launched in tests";
 
 struct AgentChatConnectionPlan {
     agent_id: String,
@@ -522,7 +519,6 @@ impl Workspace {
         resume: Option<String>,
         cx: &mut Context<Self>,
     ) {
-        let node_root = daruda_store::persistence::node_install_dir();
         let load_intent = self
             .agent_chat_view(pane_id)
             .and_then(|view| view.read(cx).load_intent());
@@ -701,32 +697,12 @@ impl Workspace {
                 .background_executor()
                 .spawn(async move {
                     let mut progress = move |milestone| drop(progress_tx.unbounded_send(milestone));
-                    let canceled = || cancellation.is_canceled();
-                    let notice = |detail: &str| {
-                        daruda_store::observability::log_writer::LogWriter::log(
-                            ErrorReport::new("ACP adapter preparation notice")
-                                .severity(ErrorSeverity::Warning)
-                                .with_context("detail", detail)
-                                .at(file!(), line!())
-                                .build(),
-                        );
-                    };
-                    let context = PreparationContext::new(&canceled, &notice);
-                    // Tests must never launch a real adapter: preparing one runs
-                    // `npm` against the registry into the shared node root, and
-                    // the adapter itself signs in with the user's account.
-                    if cfg!(test) {
-                        return Err(
-                            daruda_acp::NodeError::Download(OFFLINE_ADAPTER.to_owned()).into()
-                        );
-                    }
-                    let adapter = daruda_acp::launch_env::prepare_adapter(
+                    // Refuses under test, so no real adapter ever signs in.
+                    let adapter = crate::agent::adapter_prep::prepare(
                         &launch_spec,
-                        &node_root,
+                        &cancellation,
                         &mut progress,
-                        &context,
                     )?;
-                    context.check()?;
                     // `Some` resumes the persisted session (`session/load`);
                     // `None` starts a fresh session (`session/new`).
                     connect_prepared_session(

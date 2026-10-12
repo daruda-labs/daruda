@@ -24,6 +24,7 @@ notify = { version = "7", default-features = false, features = ["macos_fsevent"]
 notify = { version = "7", default-features = false }
 
 [dev-dependencies]
+shell-words = "1"
 test_process = { workspace = true }
 
 [dependencies]
@@ -38,7 +39,6 @@ serde_json = "1"
 sha2 = "0.10"
 # Which process each pane runs, for `pty_tracker`.
 sysinfo = "0.32"
-shell-words = "1"
 tempfile = "3"
 thiserror = "2"
 ureq = { version = "2", default-features = false, features = ["tls"] }

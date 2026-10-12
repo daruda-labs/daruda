@@ -291,15 +291,17 @@ fn connect_wire_path(cwd: &PaneCwd) -> PathBuf {
 /// is defined by running under whatever the user's own environment says.
 fn account_strip_env(prepared: Option<&PreparedAccount>) -> Vec<String> {
     prepared
-        .map(|account| {
-            account
-                .env
-                .strip
-                .iter()
-                .map(|name| (*name).to_string())
-                .collect()
-        })
+        .map(|account| strip_names(&account.env))
         .unwrap_or_default()
+}
+
+/// The account's strip list in the shape `LaunchSpec::strip_env` takes.
+pub(crate) fn strip_names(account: &AccountEnv) -> Vec<String> {
+    account
+        .strip
+        .iter()
+        .map(|name| (*name).to_string())
+        .collect()
 }
 
 /// The environment one adapter process launches with: what the agent's own
@@ -333,6 +335,21 @@ fn launch_env(agent_env: &[(String, String)], account: Option<&AccountEnv>) -> A
     AccountEnv {
         inject,
         strip: account.strip,
+    }
+}
+
+/// The launch an agent CLI run (login, auth status) prepares on this machine:
+/// the agent's command and its own environment, assembled as a local session
+/// assembles them. The account is layered on per run, after preparation, so
+/// one preparation serves every account.
+pub(crate) fn resolve_local_cli_launch(
+    adapter: &str,
+    agent_env: &[(String, String)],
+) -> daruda_acp::LaunchSpec {
+    let env = launch_env(agent_env, None);
+    daruda_acp::LaunchSpec {
+        command: session_host::wrap_with_env(&LaneSessionHost::Local, adapter, &env),
+        strip_env: Vec::new(),
     }
 }
 

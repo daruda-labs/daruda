@@ -134,7 +134,7 @@ const JSON_STDIO_PREFIX: char = '{';
 /// pure assembler with no error channel wide enough to say why it declined,
 /// so the refusal lives one layer up, at the only caller that also knows the
 /// resolved host — the app's `agent::launch_resolve::json_stdio_refusal`.
-/// [`AgentLaunch::login_command`] is not gated either; a JSON stdio config
+/// [`AgentLaunch::local_command`] is not gated either; a JSON stdio config
 /// has no auth domain (`account_recipe` is `None`), so no caller ever asks it
 /// for one.
 fn is_json_stdio_str(command: &str) -> bool {
@@ -299,13 +299,12 @@ impl AgentLaunch {
         account_recipe_for_local_command(command)
     }
 
-    /// The interactive login command for this agent, or `None` for remote
-    /// launches (SSH/Docker) where a local desktop browser can't complete
-    /// OAuth. `login_args` comes from the auth domain's `AccountRecipe`,
-    /// which owns the exact flag text; this only joins the two.
-    pub fn login_command(&self, login_args: &str) -> Option<String> {
+    /// The adapter command this agent runs on this machine, or `None` for
+    /// remote launches (SSH/Docker), whose CLI a local desktop browser
+    /// cannot sign in.
+    pub fn local_command(&self) -> Option<&str> {
         match self {
-            AgentLaunch::Raw(command) => Some(format!("{command} {login_args}")),
+            AgentLaunch::Raw(command) => Some(command),
             AgentLaunch::Ssh { .. } | AgentLaunch::Docker { .. } => None,
         }
     }

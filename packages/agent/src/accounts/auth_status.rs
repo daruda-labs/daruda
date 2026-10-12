@@ -25,8 +25,8 @@ use daruda_store::observability::{error_report::ErrorReport, log_writer::LogWrit
 /// useless, and a format with no arguments has nothing to read.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct AuthStatusProbe {
-    /// Suffix appended to the agent's launch command.
-    pub args: &'static str,
+    /// CLI words run on the prepared adapter.
+    pub args: &'static [&'static str],
     pub format: AuthStatusFormat,
 }
 
@@ -143,7 +143,7 @@ fn field(v: &serde_json::Value, names: &[&str]) -> Option<String> {
 
 /// Tear down a probe and everything it forked.
 ///
-/// The command routinely forks (`npx` → the CLI), and the child leads its own
+/// The command routinely forks (adapter → the CLI), and the child leads its own
 /// group, so its pid doubles as a group id. Reaped afterwards so the handle is
 /// not dropped on a live child.
 ///
@@ -166,34 +166,19 @@ fn kill_probe_tree(group: &daruda_core::process::Group, child: &mut std::process
 
 /// Ask the agent CLI for its current auth status.
 ///
-/// **Blocking**, and it spawns a process — the command is the agent's launch
-/// line, which for a default install goes through `npx`. Callers must run this
-/// off the UI thread, the same rule `spawn_login` carries.
+/// **Blocking**, and it spawns a process. Callers must run this off the UI
+/// thread, the same rule `spawn_login` carries. `timeout` bounds only this
+/// run: the caller prepares `command` (any install included) beforehand.
 ///
 /// Every failure collapses to `None`: this is a display and diagnostic
 /// surface, and a probe that cannot answer must leave the host showing nothing
 /// rather than asserting a wrong sign-in method.
 pub fn read_auth_status(
-    command: &str,
+    command: &super::CliCommand,
     format: AuthStatusFormat,
-    inject_env: &[(String, String)],
-    strip_env: &[&str],
     timeout: std::time::Duration,
 ) -> Option<AuthStatus> {
-    let tokens = shell_words::split(command).ok()?;
-    let (program, args) = tokens.split_first()?;
-
-    let mut cmd = daruda_core::process::command_on_path(
-        program,
-        daruda_core::process::child_path(inject_env.iter().map(|(k, v)| (k, v))),
-    );
-    cmd.args(args);
-    for name in strip_env {
-        cmd.env_remove(name);
-    }
-    for (name, value) in inject_env {
-        cmd.env(name, value);
-    }
+    let mut cmd = command.command();
     cmd.stdin(std::process::Stdio::null());
     cmd.stdout(std::process::Stdio::piped());
     // Both streams: the reading is not always on stdout. The codex CLI prints
@@ -201,7 +186,7 @@ pub fn read_auth_status(
     // nothing at all — indistinguishable from being signed out.
     cmd.stderr(std::process::Stdio::piped());
     // Own group, so a probe that hangs can be torn down whole — the command
-    // routinely forks (`npx` → the CLI), exactly as the login path does.
+    // routinely forks (adapter → the CLI), exactly as the login path does.
     daruda_core::process::lead_own_group(&mut cmd);
 
     let mut child = cmd.spawn().ok()?;
@@ -246,7 +231,7 @@ pub fn read_auth_status(
     // Both payloads are a line or two, well under the pipe buffers, so the
     // child cannot have blocked on a full pipe before exiting above.
     let out = child.wait_with_output().ok()?;
-    // stdout first: that is where a JSON payload lands, and where `npx`'s own
+    // stdout first: that is where a JSON payload lands, and where a wrapper's own
     // chatter does *not* go — parsing the streams merged would let a warning
     // line break the JSON.
     parse_status(&String::from_utf8_lossy(out.stdout.as_slice()), format)
@@ -255,6 +240,7 @@ pub fn read_auth_status(
 
 #[cfg(test)]
 mod tests {
+    use super::super::cli_command::from_line;
     use super::*;
 
     /// The exact payload `claude auth status --json` produced for a
@@ -376,10 +362,8 @@ mod tests {
         let path = dir.path().join("status.json");
         std::fs::write(&path, SUBSCRIPTION).expect("fixture");
         let status = read_auth_status(
-            &format!("/bin/cat {}", path.display()),
+            &from_line(&format!("/bin/cat {}", path.display())),
             AuthStatusFormat::Json,
-            &[],
-            &[],
             std::time::Duration::from_secs(10),
         )
         .expect("the probe parses what the command printed");
@@ -396,26 +380,24 @@ mod tests {
     #[test]
     fn a_reading_on_stderr_is_still_found() {
         let status = read_auth_status(
-            "/bin/sh -c 'echo Logged in using ChatGPT 1>&2'",
+            &from_line("/bin/sh -c 'echo Logged in using ChatGPT 1>&2'"),
             AuthStatusFormat::Prose,
-            &[],
-            &[],
             std::time::Duration::from_secs(10),
         )
         .expect("the probe reads the stream the CLI actually used");
         assert_eq!(status.auth_method.as_deref(), Some("ChatGPT"));
     }
 
-    /// stdout wins when both carry something, so `npx`'s chatter on stderr
+    /// stdout wins when both carry something, so a wrapper's chatter on stderr
     /// cannot displace a real payload.
     #[cfg(unix)]
     #[test]
     fn stdout_wins_over_stderr() {
         let status = read_auth_status(
-            "/bin/sh -c 'echo Logged in using ChatGPT; echo Logged in using an API key 1>&2'",
+            &from_line(
+                "/bin/sh -c 'echo Logged in using ChatGPT; echo Logged in using an API key 1>&2'",
+            ),
             AuthStatusFormat::Prose,
-            &[],
-            &[],
             std::time::Duration::from_secs(10),
         )
         .expect("parses");
@@ -427,10 +409,8 @@ mod tests {
     fn a_hanging_probe_gives_up() {
         let started = std::time::Instant::now();
         let status = read_auth_status(
-            "/bin/sh -c 'sleep 30'",
+            &from_line("/bin/sh -c 'sleep 30'"),
             AuthStatusFormat::Json,
-            &[],
-            &[],
             std::time::Duration::from_millis(200),
         );
         assert_eq!(status, None);
@@ -441,10 +421,8 @@ mod tests {
     fn a_command_that_does_not_exist_is_not_a_reading() {
         assert_eq!(
             read_auth_status(
-                "/nonexistent/daruda-probe",
+                &from_line("/nonexistent/daruda-probe"),
                 AuthStatusFormat::Json,
-                &[],
-                &[],
                 std::time::Duration::from_secs(1)
             ),
             None

@@ -121,9 +121,8 @@ pub(in crate::workspace) fn resolve_pane_account(
     if matches!(domain, AccountDomain::Exactly(r) if account.recipe != r) {
         return None;
     }
-    let recipe = daruda_agent::accounts::recipe_for(account.recipe);
     let config_dir = daruda_agent::accounts::account_config_dir(data_dir, id);
-    let env = daruda_config::account_env(recipe.config_dir_env(), &config_dir, recipe.strip_env());
+    let env = crate::agent::account::managed_env(account.recipe, &config_dir);
     Some(PreparedAccount {
         recipe: account.recipe,
         config_dir,

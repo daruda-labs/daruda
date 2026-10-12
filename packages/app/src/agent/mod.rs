@@ -4,6 +4,8 @@
 //! solely to attach the `impl Global` marker.
 
 pub mod account;
+pub mod adapter_cli;
+pub mod adapter_prep;
 pub mod icons;
 pub mod launch_resolve;
 pub mod mcp;

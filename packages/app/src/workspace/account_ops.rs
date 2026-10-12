@@ -29,7 +29,7 @@
 //! `observe_global`), not a per-window broadcast. The headless add-account
 //! / reauthenticate
 //! *login* flow that creates and refreshes accounts in the first place
-//! lives in the sibling `account_login_ops.rs` — split out because it is
+//! lives in the sibling `account_login_ops/` — split out because it is
 //! a distinct, self-contained domain (spawn/poll/finish machinery) large
 //! enough to warrant its own file; both mirror
 //! `settings/sections/accounts.rs` owning the Settings-side half

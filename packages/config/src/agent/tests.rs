@@ -773,29 +773,22 @@ fn wrap_with_env_remote_value_survives_a_real_shell() {
 }
 
 #[test]
-fn login_command_appends_the_given_args_for_raw_only() {
+fn local_command_is_the_raw_command_and_none_for_remote_launches() {
     let raw = AgentLaunch::Raw("npx -y @agentclientprotocol/claude-agent-acp@latest".into());
     assert_eq!(
-        raw.login_command("--cli auth login --claudeai").as_deref(),
-        Some("npx -y @agentclientprotocol/claude-agent-acp@latest --cli auth login --claudeai")
-    );
-    // A different auth domain's args have a different shape — the
-    // recipe owns the exact text, this only joins with one space.
-    let codex = AgentLaunch::Raw("npx -y @agentclientprotocol/codex-acp@latest".into());
-    assert_eq!(
-        codex.login_command("cli login").as_deref(),
-        Some("npx -y @agentclientprotocol/codex-acp@latest cli login")
+        raw.local_command(),
+        Some("npx -y @agentclientprotocol/claude-agent-acp@latest")
     );
     let ssh = AgentLaunch::Ssh {
         adapter_command: "x".into(),
         host: "h".into(),
     };
-    assert_eq!(ssh.login_command("cli login"), None);
+    assert_eq!(ssh.local_command(), None);
     let docker = AgentLaunch::Docker {
         adapter_command: "x".into(),
         container: "c".into(),
     };
-    assert_eq!(docker.login_command("cli login"), None);
+    assert_eq!(docker.local_command(), None);
 }
 
 #[test]

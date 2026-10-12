@@ -59,7 +59,7 @@ App-shell glue — process entry, native menu bar + Open Recent, window lifecycl
 
 Agent-side data models for the right dock — MCP servers, skills, tasks. Each submodule splits responsibility into a GPUI-free state core (state struct, snapshot, disk scan, persistence writers, parsers) and a sibling GPUI Global wrapper. Personal/plugin layers are user-global; project layers are keyed per-lane. Tasks wraps `daruda_store::TasksState` as a newtype to satisfy the orphan rule.
 
-Not every submodule is a right-dock model with a Global wrapper: `account.rs` (`PreparedAccount`) and `launch_resolve.rs` (`resolve_launch` and its pure helpers) are a GPUI-free pair resolving what an ACP launch needs to spawn — command line, working directory, env, and session-host write-back — shared by the agent-chat connect pump and the shell-pane spawn funnel.
+Not every submodule is a right-dock model with a Global wrapper: `account.rs` (`PreparedAccount`) and `launch_resolve.rs` (`resolve_launch` and its pure helpers) are a GPUI-free pair resolving what an ACP launch needs to spawn — command line, working directory, env, and session-host write-back — shared by the agent-chat connect pump and the shell-pane spawn funnel. `adapter_cli.rs` prepares an agent CLI run (login, auth status) through the same rules and installer, so it runs the adapter a session would.
 
 ## `surface/`
 

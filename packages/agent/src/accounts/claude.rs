@@ -24,16 +24,15 @@ const AUTH_ENV_STRIP: &[&str] = &[
     "ANTHROPIC_CUSTOM_HEADERS",
 ];
 
-/// Suffix appended to an agent's launch command for Claude Code's headless
-/// subscription-login flow (see `daruda_config::AgentLaunch::login_command`).
-const LOGIN_ARGS: &str = "--cli auth login --claudeai";
+/// CLI words for Claude Code's headless subscription-login flow.
+const LOGIN_ARGS: &[&str] = &["--cli", "auth", "login", "--claudeai"];
 
-/// Suffix that makes the CLI print its auth status as JSON — how the user
+/// CLI words that make the CLI print its auth status as JSON — how the user
 /// signed in, which no other source tells daruda (the ACP adapter does not
 /// forward it, and a login the user ran themselves left daruda no record).
 /// Honours `CLAUDE_CONFIG_DIR`, so it answers for a managed account and the
 /// ambient home alike.
-const STATUS_ARGS: &str = "--cli auth status --json";
+const STATUS_ARGS: &[&str] = &["--cli", "auth", "status", "--json"];
 
 /// System Claude home, relative to `$HOME`. Declared as a macro so the
 /// display hint below is concatenated from the same single source.
@@ -89,7 +88,7 @@ impl AccountRecipe for ClaudeRecipe {
         AUTH_ENV_STRIP
     }
 
-    fn login_args(&self) -> &'static str {
+    fn login_args(&self) -> &'static [&'static str] {
         LOGIN_ARGS
     }
 

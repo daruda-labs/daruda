@@ -37,9 +37,8 @@ pub trait AccountRecipe: Send + Sync {
     /// Auth-carrying env vars that must be stripped from a spawned account
     /// process so its own config-dir credentials win over an inherited one.
     fn strip_env(&self) -> &'static [&'static str];
-    /// Suffix appended to an agent's launch command to run this domain's
-    /// headless login flow.
-    fn login_args(&self) -> &'static str;
+    /// CLI words run on the prepared adapter for this domain's headless login.
+    fn login_args(&self) -> &'static [&'static str];
     /// How to ask this domain's CLI how the user signed in — arguments plus the
     /// shape of what it prints, for [`super::auth_status::read_auth_status`].
     ///
@@ -120,7 +119,10 @@ mod tests {
         let recipe = recipe_for(AccountRecipeId::Claude);
         assert_eq!(recipe.id(), AccountRecipeId::Claude);
         assert_eq!(recipe.config_dir_env(), "CLAUDE_CONFIG_DIR");
-        assert_eq!(recipe.login_args(), "--cli auth login --claudeai");
+        assert_eq!(
+            recipe.login_args(),
+            ["--cli", "auth", "login", "--claudeai"]
+        );
         assert_eq!(recipe.system_home_hint(), "~/.claude");
         let strip = recipe.strip_env();
         for var in [
@@ -140,7 +142,7 @@ mod tests {
         let recipe = recipe_for(AccountRecipeId::Codex);
         assert_eq!(recipe.id(), AccountRecipeId::Codex);
         assert_eq!(recipe.config_dir_env(), "CODEX_HOME");
-        assert_eq!(recipe.login_args(), "cli login");
+        assert_eq!(recipe.login_args(), ["cli", "login"]);
         assert_eq!(recipe.system_home_hint(), "~/.codex");
         assert!(recipe.strip_env().is_empty());
     }
@@ -231,13 +233,13 @@ mod tests {
         let claude = recipe_for(AccountRecipeId::Claude)
             .status_probe()
             .expect("claude reports status");
-        assert_eq!(claude.args, "--cli auth status --json");
+        assert_eq!(claude.args, ["--cli", "auth", "status", "--json"]);
         assert_eq!(claude.format, AuthStatusFormat::Json);
 
         let codex = recipe_for(AccountRecipeId::Codex)
             .status_probe()
             .expect("codex reports status");
-        assert_eq!(codex.args, "cli login status");
+        assert_eq!(codex.args, ["cli", "login", "status"]);
         assert_eq!(codex.format, AuthStatusFormat::Prose);
     }
 

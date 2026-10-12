@@ -113,6 +113,10 @@ changed merely to accommodate a module split.
   `PreparedAdapter`; `connect_prepared_session` only starts ACP. A flow keeps
   its prepared adapters for the whole run, so individual nodes do not resolve
   versions or install packages again.
+- A one-off adapter CLI run (account login, auth status) goes through the same
+  preparation and `PreparedAdapter::cli`, holding the installation lease until
+  it exits. For a supported npm adapter that keeps it off `npx`'s shared,
+  unlocked cache; any other launch runs exactly as its sessions do.
 - Supported Claude/Codex npm adapters run as `node <validated JS entry>`.
   Unknown packages, remote launchers, and explicit executable overrides retain
   their configured launch path.

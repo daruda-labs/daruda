@@ -1,10 +1,10 @@
-//! Headless subprocess runner for interactive OAuth login (the command
-//! produced by `AgentLaunch::login_command` in `daruda_config::agent`, e.g.
-//! `npx -y <adapter>@latest --cli auth login --claudeai`).
+//! Headless subprocess runner for interactive OAuth login (a [`CliCommand`]
+//! the app resolves from the adapter's prepared installation, e.g.
+//! `node <adapter entry> --cli auth login --claudeai`).
 //!
-//! Spawns the login command with piped (non-PTY) stdio and the caller's
-//! `inject_env` — which carries whichever config-dir variable the auth
-//! domain uses — lets the CLI open the system browser for OAuth, and
+//! Spawns the login command with piped (non-PTY) stdio — its environment
+//! already carries whichever config-dir variable the auth domain uses —
+//! lets the CLI open the system browser for OAuth, and
 //! detects completion by the caller-supplied [`WaitPolicy`] — this module
 //! never touches the browser or the OAuth callback itself. Mirrors orca's
 //! `claude-accounts/service.ts` `runClaudeCommand` (the managed-login path,
@@ -14,7 +14,7 @@
 //! timeout that cancels the process.
 //!
 //! Cancellation kills the process **group**, matching orca: a login command
-//! that forks (an `npx`-wrapped adapter forking the CLI) leaves the forked
+//! that forks (the adapter forking the native CLI it wraps) leaves the forked
 //! process holding the OAuth callback port, and a cancel that spared it would
 //! block the very next attempt. `spawn_login` puts the child in its own group
 //! so the signal reaches the tree and nothing else.
@@ -34,6 +34,8 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{Duration, Instant};
+
+use super::cli_command::CliCommand;
 
 /// Output captured from the login process is capped so a chatty/misbehaving
 /// CLI can't grow this buffer without bound; 64 KiB comfortably holds any
@@ -124,18 +126,6 @@ pub enum LoginOutcome {
 pub enum LoginError {
     #[error("failed to spawn login command: {0}")]
     Spawn(String),
-    #[error("login command is empty")]
-    EmptyCommand,
-}
-
-/// Tokenizes `command` with [`shell_words::split`] (quote-aware). Falls
-/// back to a plain whitespace split on a parse error (e.g. an unmatched
-/// quote in a hand-written command) so a malformed string still yields
-/// *some* tokens instead of dropping the command entirely — mirrors
-/// `daruda_acp::node::split_env_prefixed_tokens`.
-fn tokenize(command: &str) -> Vec<String> {
-    shell_words::split(command)
-        .unwrap_or_else(|_| command.split_whitespace().map(str::to_string).collect())
 }
 
 /// Substring markers for an OAuth consent denial, checked (case-insensitive)
@@ -261,7 +251,7 @@ impl LoginProcessHandle {
     pub fn cancel(&self) {
         if let Ok(mut child) = self.child.lock() {
             // The whole login tree, not just the process that was spawned.
-            // A login command routed through `npx` forks the CLI that owns the
+            // The adapter forks the native CLI that owns the
             // OAuth callback server, and that server keeps its port bound; kill
             // only the direct child and the next sign-in cannot complete, which
             // is exactly the attempt a cancel exists to make room for.
@@ -269,7 +259,7 @@ impl LoginProcessHandle {
             // doubles as the group id.
             //
             // Gated on *reaped*, not on "still running": the direct child may
-            // well have exited already — `npx` forks and goes — and that is
+            // well have exited already — a wrapper may fork and go — and that is
             // precisely when the descendants need the signal. A zombie keeps
             // its pid until we reap it, so the group id stays ours to name.
             if !self.reaped.load(Ordering::Acquire)
@@ -290,31 +280,11 @@ impl LoginProcessHandle {
     }
 }
 
-/// Spawns `command`'s login process with piped (non-PTY) stdio, `strip_env`
-/// removed and then `inject_env` applied — in that order, so a stale
-/// inherited value can't survive. `inject_env` is the only source for the
-/// account's config dir, since which variable carries it is auth-domain
-/// specific ([`AccountRecipe::config_dir_env`](super::recipe::AccountRecipe::config_dir_env)).
-pub fn spawn_login(
-    command: &str,
-    inject_env: &[(String, String)],
-    strip_env: &[&str],
-    timeout: Duration,
-) -> Result<LoginProcess, LoginError> {
-    let tokens = tokenize(command);
-    let (program, args) = tokens.split_first().ok_or(LoginError::EmptyCommand)?;
-
-    let mut cmd = daruda_core::process::command_on_path(
-        program,
-        daruda_core::process::child_path(inject_env.iter().map(|(k, v)| (k, v))),
-    );
-    cmd.args(args);
-    for name in strip_env {
-        cmd.env_remove(name);
-    }
-    for (name, value) in inject_env {
-        cmd.env(name, value);
-    }
+/// Spawns `command`'s login process with piped (non-PTY) stdio. The account's
+/// config dir and strip list arrive inside `command`, folded in where the
+/// adapter was prepared.
+pub fn spawn_login(command: &CliCommand, timeout: Duration) -> Result<LoginProcess, LoginError> {
+    let mut cmd = command.command();
     cmd.stdin(Stdio::piped());
     cmd.stdout(Stdio::piped());
     cmd.stderr(Stdio::piped());
@@ -322,8 +292,8 @@ pub fn spawn_login(
     // Isolate the child into its own process group, which buys two things:
     // signals aimed at *this* app's group (a terminal Ctrl+C in a dev build)
     // stop at the boundary, and the child's pid doubles as a group id that
-    // `LoginProcessHandle::cancel` can signal to reach the descendants an
-    // `npx`-wrapped login forks.
+    // `LoginProcessHandle::cancel` can signal to reach the descendants a
+    // wrapped login forks.
     daruda_core::process::lead_own_group(&mut cmd);
 
     let mut child = cmd.spawn().map_err(|e| LoginError::Spawn(e.to_string()))?;
@@ -537,429 +507,4 @@ impl LoginProcess {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::super::recipe::recipe_for;
-    use super::*;
-    use daruda_store::accounts::AccountRecipeId;
-
-    /// Test-scoped grace/timeout values — short enough to keep the suite
-    /// fast, long enough to survive a loaded CI machine's scheduling jitter.
-    const TEST_GRACE: Duration = Duration::from_millis(300);
-    const TEST_TIMEOUT: Duration = Duration::from_millis(600);
-    /// Timeout for the cases that must run a child to completion rather
-    /// than time out.
-    const TEST_LONG_TIMEOUT: Duration = Duration::from_secs(10);
-
-    fn spawn_for_test(command: &str, timeout: Duration) -> LoginProcess {
-        spawn_login(command, &[], &[], timeout).expect("spawn the test child")
-    }
-
-    fn spawn_fixture(args: &[&str], timeout: Duration) -> LoginProcess {
-        spawn_for_test(&test_process::command_line(args), timeout)
-    }
-
-    /// The cancel path reaps the child before this liveness assertion.
-    fn process_is_running(pid: u32) -> bool {
-        daruda_core::process::is_alive(pid)
-    }
-
-    #[test]
-    fn on_exit_reports_success_for_a_zero_exit() {
-        let process = spawn_fixture(&["--exit", "0"], TEST_LONG_TIMEOUT);
-        assert_eq!(process.wait(WaitPolicy::OnExit), LoginOutcome::Success);
-    }
-
-    #[test]
-    fn on_exit_reports_failed_for_a_nonzero_exit() {
-        let process = spawn_fixture(&["--exit", "1"], TEST_LONG_TIMEOUT);
-        assert!(matches!(
-            process.wait(WaitPolicy::OnExit),
-            LoginOutcome::Failed(_)
-        ));
-    }
-
-    #[test]
-    fn on_exit_times_out_when_the_process_never_exits() {
-        let process = spawn_fixture(&["--sleep-ms", "30000"], TEST_TIMEOUT);
-        let pid = process.child_pid();
-        assert_eq!(process.wait(WaitPolicy::OnExit), LoginOutcome::TimedOut);
-        assert!(!process_is_running(pid), "the timed-out child must be gone");
-    }
-
-    #[test]
-    fn on_credentials_reports_success_when_the_process_exits_within_the_grace() {
-        let dir = tempfile::tempdir().expect("tempdir");
-        let auth = dir.path().join("auth.json");
-        let writer = auth.clone();
-        thread::spawn(move || {
-            thread::sleep(Duration::from_millis(150));
-            std::fs::write(&writer, b"{}").expect("write credentials");
-        });
-
-        let process = spawn_fixture(&["--sleep-ms", "400"], TEST_LONG_TIMEOUT);
-        let landed = || auth.exists();
-        assert_eq!(
-            process.wait(WaitPolicy::OnCredentials {
-                grace: Duration::from_secs(5),
-                credentials_landed: &landed,
-            }),
-            LoginOutcome::Success
-        );
-    }
-
-    #[test]
-    fn on_credentials_cancels_and_succeeds_when_the_process_never_exits() {
-        let dir = tempfile::tempdir().expect("tempdir");
-        let auth = dir.path().join("auth.json");
-        let writer = auth.clone();
-        thread::spawn(move || {
-            thread::sleep(Duration::from_millis(150));
-            std::fs::write(&writer, b"{}").expect("write credentials");
-        });
-
-        let process = spawn_fixture(&["--sleep-ms", "30000"], TEST_LONG_TIMEOUT);
-        let pid = process.child_pid();
-        let landed = || auth.exists();
-        let started = Instant::now();
-        assert_eq!(
-            process.wait(WaitPolicy::OnCredentials {
-                grace: TEST_GRACE,
-                credentials_landed: &landed,
-            }),
-            LoginOutcome::Success
-        );
-        assert!(
-            started.elapsed() < TEST_LONG_TIMEOUT,
-            "credentials landing must end the wait long before the overall timeout"
-        );
-        assert!(
-            !process_is_running(pid),
-            "a child that outlived the grace window must be cancelled"
-        );
-    }
-
-    #[test]
-    fn on_credentials_times_out_when_credentials_never_land() {
-        let process = spawn_fixture(&["--sleep-ms", "30000"], TEST_TIMEOUT);
-        let pid = process.child_pid();
-        let landed = || false;
-        assert_eq!(
-            process.wait(WaitPolicy::OnCredentials {
-                grace: TEST_GRACE,
-                credentials_landed: &landed,
-            }),
-            LoginOutcome::TimedOut
-        );
-        assert!(!process_is_running(pid), "the timed-out child must be gone");
-    }
-
-    #[test]
-    fn on_credentials_lets_an_earlier_exit_decide_the_outcome() {
-        let process = spawn_fixture(&["--exit", "1"], TEST_LONG_TIMEOUT);
-        let landed = || false;
-        assert!(matches!(
-            process.wait(WaitPolicy::OnCredentials {
-                grace: TEST_GRACE,
-                credentials_landed: &landed,
-            }),
-            LoginOutcome::Failed(_)
-        ));
-    }
-
-    #[test]
-    fn on_credentials_lets_an_earlier_denial_decide_the_outcome() {
-        let process = spawn_fixture(&["--stderr", "access_denied", "--exit", "1"], TEST_TIMEOUT);
-        let landed = || false;
-        assert_eq!(
-            process.wait(WaitPolicy::OnCredentials {
-                grace: TEST_GRACE,
-                credentials_landed: &landed,
-            }),
-            LoginOutcome::Denied
-        );
-    }
-
-    #[test]
-    fn detects_oauth_denied_marker() {
-        assert!(is_oauth_denied("... error: access_denied ..."));
-        assert!(is_oauth_denied("Authorization was denied by the user."));
-        assert!(!is_oauth_denied("Login successful"));
-    }
-
-    #[test]
-    fn denial_check_is_case_insensitive() {
-        assert!(is_oauth_denied("ACCESS_DENIED"));
-        assert!(is_oauth_denied("Sign-In Denied"));
-    }
-
-    #[test]
-    fn tokenizes_command_with_shell_words() {
-        let toks = tokenize("npx -y pkg --cli auth login --claudeai");
-        assert_eq!(
-            toks,
-            vec!["npx", "-y", "pkg", "--cli", "auth", "login", "--claudeai"]
-        );
-    }
-
-    #[test]
-    fn tokenize_handles_quoted_path_with_space() {
-        let toks = tokenize("claude --config '/tmp/my dir'");
-        assert_eq!(toks, vec!["claude", "--config", "/tmp/my dir"]);
-    }
-
-    #[test]
-    fn tokenize_falls_back_to_whitespace_on_unmatched_quote() {
-        let toks = tokenize("claude --config 'unterminated");
-        assert_eq!(toks, vec!["claude", "--config", "'unterminated"]);
-    }
-
-    /// Poll until `pid` is gone, or give up. `kill -0` asks only whether the
-    /// process exists, so an orphan reparented to init still answers.
-    #[cfg(unix)]
-    fn gone_within(pid: &str, budget: Duration) -> bool {
-        let deadline = std::time::Instant::now() + budget;
-        while std::time::Instant::now() < deadline {
-            let alive = daruda_core::process::command("kill")
-                .args(["-0", pid])
-                .stdout(Stdio::null())
-                .stderr(Stdio::null())
-                .status()
-                .map(|s| s.success())
-                .unwrap_or(false);
-            if !alive {
-                return true;
-            }
-            std::thread::sleep(Duration::from_millis(50));
-        }
-        false
-    }
-
-    /// The case the group signal exists for, and the one the first attempt at
-    /// it missed: the process daruda spawned **exits first**, leaving the CLI
-    /// it forked holding the OAuth callback port. `npx` is exactly that shape.
-    ///
-    /// Gating the group signal on "not yet reaped" skipped precisely this —
-    /// the direct child is gone, so a cancel touched nothing and the next
-    /// sign-in could not bind the port.
-    #[cfg(unix)]
-    #[test]
-    fn cancelling_kills_a_grandchild_whose_parent_already_exited() {
-        let dir = tempfile::tempdir().expect("tempdir");
-        let pid_file = dir.path().join("grandchild.pid");
-        // No `wait`: the shell exits as soon as it has forked and reported.
-        let command = format!(
-            "/bin/sh -c 'sh -c \"while :; do sleep 0.05; done\" & echo $! > {}'",
-            pid_file.display()
-        );
-        let login = spawn_login(&command, &[], &[], Duration::from_secs(20)).expect("spawn");
-        let handle = login.handle();
-
-        let deadline = std::time::Instant::now() + Duration::from_secs(5);
-        let pid = loop {
-            if let Ok(raw) = std::fs::read_to_string(&pid_file) {
-                let trimmed = raw.trim().to_string();
-                if !trimmed.is_empty() {
-                    break trimmed;
-                }
-            }
-            assert!(
-                std::time::Instant::now() < deadline,
-                "the forked grandchild never reported its pid"
-            );
-            std::thread::sleep(Duration::from_millis(25));
-        };
-        // Let the direct child exit before cancelling, which is the whole point.
-        std::thread::sleep(Duration::from_millis(300));
-
-        handle.cancel();
-        assert!(
-            gone_within(&pid, Duration::from_secs(5)),
-            "grandchild {pid} survived a cancel its parent had already left"
-        );
-    }
-
-    /// A cancelled sign-in has to take the whole login tree with it.
-    ///
-    /// The login runs through `npx`, which forks the CLI that actually holds
-    /// the OAuth callback port; killing only the process daruda spawned leaves
-    /// that port bound, so the *next* attempt cannot complete — and cancel is
-    /// the ordinary recovery path when a user abandons a sign-in.
-    /// `spawn_login` already makes the child a process-group leader; this
-    /// covers the other half.
-    #[cfg(unix)]
-    #[test]
-    fn cancelling_kills_a_grandchild_the_direct_child_forked() {
-        let dir = tempfile::tempdir().expect("tempdir");
-        let pid_file = dir.path().join("grandchild.pid");
-        let command = format!(
-            "/bin/sh -c 'sh -c \"while :; do sleep 0.05; done\" & echo $! > {} ; wait'",
-            pid_file.display()
-        );
-        let login = spawn_login(&command, &[], &[], Duration::from_secs(20)).expect("spawn");
-        let handle = login.handle();
-
-        let deadline = std::time::Instant::now() + Duration::from_secs(5);
-        let pid = loop {
-            if let Ok(raw) = std::fs::read_to_string(&pid_file) {
-                let trimmed = raw.trim().to_string();
-                if !trimmed.is_empty() {
-                    break trimmed;
-                }
-            }
-            assert!(
-                std::time::Instant::now() < deadline,
-                "the forked grandchild never reported its pid"
-            );
-            std::thread::sleep(Duration::from_millis(25));
-        };
-
-        handle.cancel();
-        assert!(
-            gone_within(&pid, Duration::from_secs(5)),
-            "grandchild {pid} survived the cancel — the login tree outlives it"
-        );
-    }
-
-    #[test]
-    fn spawn_login_rejects_empty_command() {
-        let err = spawn_login("   ", &[], &[], Duration::from_secs(1))
-            .expect_err("empty command must fail to spawn");
-        assert!(matches!(err, LoginError::EmptyCommand));
-    }
-
-    /// Native probe exiting 0 only when `want`'s variable holds `expected`
-    /// and `avoid`'s does not — the cross-domain leak being pinned is a
-    /// second, wrong-domain variable carrying the same config dir.
-    fn env_probe(want: &str, avoid: &str, expected: &str) -> String {
-        test_process::command_line(&[
-            "--require-env",
-            want,
-            expected,
-            "--reject-env-value",
-            avoid,
-            expected,
-        ])
-    }
-
-    /// `inject_env` in the shape the production caller builds it: one pair
-    /// naming the recipe's own config-dir variable.
-    fn config_dir_inject(recipe: AccountRecipeId, dir: &str) -> Vec<(String, String)> {
-        vec![(
-            recipe_for(recipe).config_dir_env().to_string(),
-            dir.to_string(),
-        )]
-    }
-
-    fn probe_outcome(probe: &str, inject: &[(String, String)]) -> LoginOutcome {
-        spawn_login(probe, inject, &[], TEST_LONG_TIMEOUT)
-            .expect("spawn the env probe")
-            .wait(WaitPolicy::OnExit)
-    }
-
-    #[test]
-    fn a_codex_login_child_gets_codex_home_and_no_claude_config_dir() {
-        let dir = "/tmp/daruda-login-env-codex";
-        assert_eq!(
-            probe_outcome(
-                &env_probe("CODEX_HOME", "CLAUDE_CONFIG_DIR", dir),
-                &config_dir_inject(AccountRecipeId::Codex, dir)
-            ),
-            LoginOutcome::Success
-        );
-    }
-
-    #[test]
-    fn a_claude_login_child_gets_claude_config_dir_and_no_codex_home() {
-        let dir = "/tmp/daruda-login-env-claude";
-        assert_eq!(
-            probe_outcome(
-                &env_probe("CLAUDE_CONFIG_DIR", "CODEX_HOME", dir),
-                &config_dir_inject(AccountRecipeId::Claude, dir)
-            ),
-            LoginOutcome::Success
-        );
-    }
-
-    #[test]
-    fn the_env_probe_fails_when_nothing_is_injected() {
-        // Negative control: the two assertions above must be proving the
-        // injection rather than passing on a probe that always exits 0.
-        let dir = "/tmp/daruda-login-env-codex";
-        assert!(matches!(
-            probe_outcome(&env_probe("CODEX_HOME", "CLAUDE_CONFIG_DIR", dir), &[]),
-            LoginOutcome::Failed(_)
-        ));
-    }
-
-    /// Real spawn smoke test — not run in CI (spawns an actual process).
-    /// Documents the happy path: a trivial command that exits 0 with clean
-    /// output must resolve to `Success` well within the timeout.
-    #[test]
-    #[ignore = "spawns a real subprocess; run manually with --ignored"]
-    fn spawn_and_wait_success_smoke() {
-        let outcome = spawn_login("/bin/echo hi", &[], &[], Duration::from_secs(5))
-            .expect("spawn should succeed")
-            .wait(WaitPolicy::OnExit);
-        assert_eq!(outcome, LoginOutcome::Success);
-    }
-
-    /// Real spawn smoke test for the timeout + cancel path — not run in
-    /// CI. `sleep 5` outlives the 1s timeout, so `wait` must cancel it and
-    /// return `TimedOut` rather than blocking for the full 5s. This also
-    /// exercises the timeout-path reap (Finding 2): if `reap_after_cancel`
-    /// regressed into not reaping, this test would still pass (it can't
-    /// observe zombie state through `std` alone), but the reap loop runs
-    /// unconditionally on every timeout, so any panic/hang in it would
-    /// surface here.
-    #[test]
-    #[ignore = "spawns a real subprocess; run manually with --ignored"]
-    fn spawn_and_wait_times_out_and_cancels_smoke() {
-        let outcome = spawn_login("/bin/sleep 5", &[], &[], Duration::from_secs(1))
-            .expect("spawn should succeed")
-            .wait(WaitPolicy::OnExit);
-        assert_eq!(outcome, LoginOutcome::TimedOut);
-    }
-
-    /// Compile+shape test for Finding 1: `LoginProcessHandle` must be
-    /// cloneable so `Workspace` can stash one clone (e.g.
-    /// `PendingLogin::InProgress { handle }`) while another clone (or the
-    /// original) is used elsewhere. No process is spawned here.
-    #[test]
-    fn login_process_handle_is_clone() {
-        fn assert_clone<T: Clone>() {}
-        assert_clone::<LoginProcessHandle>();
-    }
-
-    /// Real spawn smoke test proving a cloned [`LoginProcessHandle`]
-    /// cancels the *same* child as the [`LoginProcess`] it was obtained
-    /// from, independently of `self` — the shape Finding 1 exists for:
-    /// grab `handle()` before `wait(self)` moves the process into a
-    /// background executor, then cancel from elsewhere while `wait` is
-    /// still blocked. `sleep 5` with a generous 10s timeout means only
-    /// the handle's cancel (fired after 200ms from another thread) can
-    /// end this early.
-    #[test]
-    #[ignore = "spawns a real subprocess; run manually with --ignored"]
-    fn handle_clone_cancels_independently_of_self_smoke() {
-        let process = spawn_login("/bin/sleep 5", &[], &[], Duration::from_secs(10))
-            .expect("spawn should succeed");
-
-        let handle = process.handle();
-        let cloned = handle.clone();
-        thread::spawn(move || {
-            thread::sleep(Duration::from_millis(200));
-            cloned.cancel();
-        });
-
-        let start = Instant::now();
-        let outcome = process.wait(WaitPolicy::OnExit);
-        assert!(
-            start.elapsed() < Duration::from_secs(5),
-            "cancel via the cloned handle should end wait() well before the 10s timeout"
-        );
-        assert!(
-            matches!(outcome, LoginOutcome::Failed(_)),
-            "expected a killed-process Failed outcome, got {outcome:?}"
-        );
-    }
-}
+mod tests;

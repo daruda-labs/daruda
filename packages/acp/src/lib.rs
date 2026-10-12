@@ -25,7 +25,7 @@ pub mod preparation;
 mod prompt;
 pub use prompt::{AttachmentContent, PromptAttachment};
 mod prepared;
-pub use prepared::PreparedAdapter;
+pub use prepared::{AdapterCli, PreparedAdapter};
 pub(crate) mod output_highlight;
 pub mod session;
 pub mod wire_log;

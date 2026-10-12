@@ -57,6 +57,11 @@ fn prepares_published_adapters_without_starting_acp() {
         assert_eq!(config.command().file_stem().unwrap(), "node");
         assert!(Path::new(&config.arguments()[0]).is_file());
         assert!(!config.arguments().iter().any(|arg| arg == "-y"));
+        // The CLI runs the installation the session runs, never `npx`.
+        let cli = prepared.cli(["--cli", "--version"]).unwrap();
+        assert_eq!(cli.program(), config.command());
+        assert_eq!(cli.args()[0], config.arguments()[0]);
+        assert_eq!(&cli.args()[1..], ["--cli", "--version"]);
         if *name == "@agentclientprotocol/codex-acp" {
             // Exercise the nested native executable through its Node launcher.
             // A readable ACP entry alone misses Windows' process-launch path limit.
@@ -128,4 +133,24 @@ fn node_runs_a_readable_entry_without_execute_permission() {
         .unwrap();
     assert!(output.status.success());
     assert_eq!(String::from_utf8(output.stdout).unwrap().trim(), "ready");
+}
+
+/// The CLI on an installed launch runs the leased entry, inside the account's
+/// strip wrapper, with its words last — the shape a session spawns.
+#[test]
+fn an_installed_launch_runs_its_cli_on_the_leased_entry_under_the_strip() {
+    let dir = tempfile::tempdir().unwrap();
+    let lease = cache::InstallationLease::acquire(dir.path()).unwrap();
+    let config = AcpAgentConfig::new("/runtime/bin/node")
+        .arg("/install/entry.js")
+        .env("CLAUDE_CONFIG_DIR", "/acct");
+    let prepared =
+        crate::PreparedAdapter::installed(config, lease).finalize(&["ANTHROPIC_API_KEY".into()]);
+    let cli = prepared.cli(["--cli", "auth", "login"]).unwrap();
+    let args = cli.args();
+    let unset = args.iter().position(|a| a == "ANTHROPIC_API_KEY").unwrap();
+    let entry = args.iter().position(|a| a == "/install/entry.js").unwrap();
+    assert!(unset < entry, "{args:?}");
+    assert_eq!(&args[entry + 1..], ["--cli", "auth", "login"]);
+    assert_eq!(cli.env()["CLAUDE_CONFIG_DIR"], "/acct");
 }

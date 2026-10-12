@@ -15,6 +15,7 @@
 
 pub mod auth_status;
 pub mod claude;
+pub mod cli_command;
 pub mod codex;
 pub mod credentials;
 pub mod identity;
@@ -25,6 +26,7 @@ pub mod recipe;
 pub mod sweep;
 
 pub use claude::ClaudeRecipe;
+pub use cli_command::CliCommand;
 pub use codex::CodexRecipe;
 pub use credentials::{
     AccountError, PlanInfo, delete_scoped_credentials, read_scoped_credentials,

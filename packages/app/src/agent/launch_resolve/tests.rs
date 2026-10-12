@@ -1030,3 +1030,27 @@ fn the_shipped_codex_row_launches_with_the_subagent_overlay() {
     // Node.js provisioning reads that token.
     assert!(daruda_acp::node::command_needs_node(&command), "{command}");
 }
+
+/// A login or auth-status run prepares the agent's own launch, environment
+/// included, exactly as the preparation will read it back.
+#[test]
+fn a_local_cli_launch_carries_the_agents_environment() {
+    use std::str::FromStr as _;
+    let agent_env = vec![(
+        "npm_config_registry".to_string(),
+        "https://my mirror".to_string(),
+    )];
+    let spec = resolve_local_cli_launch(
+        "npx -y @agentclientprotocol/claude-agent-acp@latest",
+        &agent_env,
+    );
+    let config = agent_client_protocol::AcpAgent::from_str(&spec.command)
+        .expect("the assembled launch parses")
+        .into_config();
+    assert_eq!(
+        config.environment()["npm_config_registry"],
+        "https://my mirror"
+    );
+    assert_eq!(config.command(), std::path::Path::new("npx"));
+    assert!(spec.strip_env.is_empty());
+}

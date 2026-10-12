@@ -80,7 +80,7 @@ fn sections(domain: AccountDomain, accounts: &AccountsState) -> Vec<AccountSecti
 }
 
 /// The dropdown's add-account block. Every offered domain has a login command
-/// (`Workspace::login_command_for_recipe` is total), so an add row is inert
+/// (`Workspace::login_cli_for_recipe` is total), so an add row is inert
 /// only where no domain applies at all.
 fn add_rows(domain: AccountDomain) -> Vec<AddAccountRow> {
     let add_row = |recipe: AccountRecipeId, label: String| AddAccountRow::Add {

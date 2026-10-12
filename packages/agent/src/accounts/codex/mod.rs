@@ -24,12 +24,12 @@ const AUTH_ENV_STRIP: &[&str] = &[];
 /// `cli login` — not `login`. `codex-acp login` resolves the binary as
 /// `CODEX_PATH ?? "codex"` and fails without a system install, while
 /// `cli login` falls back to the bundled `@openai/codex`.
-const LOGIN_ARGS: &str = "cli login";
+const LOGIN_ARGS: &[&str] = &["cli", "login"];
 
 /// `codex login status` behind the adapter's `cli` passthrough (it forwards
 /// everything after `cli` to the CLI). Honours `CODEX_HOME`, so it answers for
 /// a managed account and the ambient home alike.
-const STATUS_ARGS: &str = "cli login status";
+const STATUS_ARGS: &[&str] = &["cli", "login", "status"];
 
 /// How long `codex login` may linger after writing `auth.json` before it is
 /// cancelled. Value taken from orca's
@@ -62,7 +62,7 @@ impl AccountRecipe for CodexRecipe {
         AUTH_ENV_STRIP
     }
 
-    fn login_args(&self) -> &'static str {
+    fn login_args(&self) -> &'static [&'static str] {
         LOGIN_ARGS
     }
 

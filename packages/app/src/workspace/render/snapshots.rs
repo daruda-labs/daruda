@@ -463,7 +463,7 @@ impl Workspace {
                 // variant isn't tracked. A domain with no default agent
                 // configured has nothing to restore into. Catalog-wide scan,
                 // no lane in scope — same `is_remote: false` reasoning as
-                // `resolve_login_command`.
+                // `resolve_login_cli`.
                 let agent_id = self
                     .mirrors
                     .agents

@@ -112,12 +112,16 @@ impl<'a> PreparationContext<'a> {
 }
 
 /// Dropping the foreground owner interrupts its blocking preparation worker.
-#[derive(Clone, Default)]
+#[derive(Clone, Debug, Default)]
 pub struct PreparationCancellation(Arc<AtomicBool>);
 
 impl PreparationCancellation {
     pub fn is_canceled(&self) -> bool {
         self.0.load(Ordering::Acquire)
+    }
+
+    pub fn cancel(&self) {
+        self.0.store(true, Ordering::Release);
     }
 
     pub fn cancel_on_drop(&self) -> CancelPreparationOnDrop {
@@ -129,13 +133,24 @@ pub struct CancelPreparationOnDrop(PreparationCancellation);
 
 impl Drop for CancelPreparationOnDrop {
     fn drop(&mut self) {
-        self.0.0.store(true, Ordering::Release);
+        self.0.cancel();
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A host whose owner outlives the preparation (a pending login) cancels
+    /// it directly rather than through a drop guard.
+    #[test]
+    fn cancel_stops_the_worker_without_a_guard() {
+        let cancel = PreparationCancellation::default();
+        let check = || cancel.is_canceled();
+        let context = PreparationContext::new(&check, &|_| {});
+        cancel.clone().cancel();
+        assert!(context.check().is_err());
+    }
 
     #[test]
     fn dropping_owner_cancels_worker_and_is_not_retryable() {
