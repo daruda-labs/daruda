@@ -1,12 +1,12 @@
 //! App-wide managed-accounts state as a GPUI `Global` — the single source
 //! of truth for `accounts.json`'s in-memory shape, shared across every
-//! `Workspace` window and the Settings window.
+//! `Workspace` window (and, through its host, each open Settings view).
 //!
 //! Mirrors the `GlobalTasks` / `SkillsState` / `McpState` pattern: one
 //! process-wide global, mutated in exactly one way ([`replace`]), with each
 //! window subscribing via `cx.observe_global::<AccountsGlobal>` to refresh
-//! its own read-cache (`Workspace.accounts` / the Settings section's copy)
-//! and repaint. This replaces the former per-window mirrors + manual
+//! its own read-cache (`Workspace.accounts`, which an open Settings view
+//! receives from its host) and repaint. This replaces the former per-window mirrors + manual
 //! `broadcast_accounts_state` / `sync_accounts_state` fan-out, whose login
 //! writers forgot to broadcast — leaving a login in window A invisible to
 //! window B until restart. `observe_global` fires on *every* window
@@ -37,7 +37,7 @@ impl Global for AccountsGlobal {}
 
 /// Install the global from `initial` if it isn't already present
 /// (idempotent). Called once at app startup (`main.rs`) and defensively
-/// from `Workspace`/Settings construction so a window built before startup
+/// from `Workspace` construction so a window built before startup
 /// ran — every test harness — still finds it. The first install wins: a
 /// single process has a single profile (`data_dir`), so every window's
 /// `initial` load is the same content.
@@ -52,8 +52,8 @@ pub(crate) fn install_if_absent(cx: &mut App, initial: AccountsState) {
 
 /// Replace the shared accounts state, firing `observe_global` on every
 /// window. The single cross-window propagation path — writers
-/// (`finish_login_success`, `finish_reauth_success`, Settings
-/// `set_default_account` / `remove_account`) call this after persisting to
+/// (`finish_login_success`, `finish_reauth_success`, and the Settings host
+/// answering `SettingsEvent::AccountsChanged`) call this after persisting to
 /// disk. Falls back to `set_global` if somehow not yet installed.
 ///
 /// The app-wide cache keyed by account follows here, once per process; what

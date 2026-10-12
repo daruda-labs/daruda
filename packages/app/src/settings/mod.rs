@@ -737,8 +737,11 @@ impl SettingsView {
         >,
         cx: &mut Context<Self>,
     ) {
-        self.auth_statuses = statuses;
-        cx.notify();
+        // The Global also changes when a probe merely starts.
+        if self.auth_statuses != statuses {
+            self.auth_statuses = statuses;
+            cx.notify();
+        }
     }
 
     /// The host's answer to whether it has a project to configure.
@@ -803,6 +806,21 @@ impl SettingsView {
     #[cfg(test)]
     pub(crate) fn accounts(&self) -> &daruda_store::accounts::AccountsState {
         &self.accounts
+    }
+
+    #[cfg(test)]
+    pub(crate) fn auth_statuses(
+        &self,
+    ) -> &std::collections::HashMap<
+        daruda_agent::accounts::LoginTarget,
+        daruda_agent::accounts::auth_status::AuthStatus,
+    > {
+        &self.auth_statuses
+    }
+
+    #[cfg(test)]
+    pub(crate) fn agent_vocabulary(&self) -> &daruda_store::agent_vocabulary::AgentVocabularyCache {
+        &self.agent_vocabulary
     }
 
     pub fn active_section(&self) -> BuiltinSection {

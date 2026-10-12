@@ -1,6 +1,6 @@
 //! App-wide owner of persisted ACP mode/model vocabularies.
 //!
-//! Every Workspace and the Settings window mirrors this Global. Keeping the
+//! Every Workspace mirrors this Global, and pushes it into its open Settings. Keeping the
 //! mutable cache here prevents one window from replacing another window's
 //! newer `agent_vocabulary.json` snapshot.
 

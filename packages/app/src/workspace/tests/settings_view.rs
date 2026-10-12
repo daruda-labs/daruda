@@ -527,3 +527,71 @@ async fn an_account_change_in_settings_is_shared_and_mirrored_back(cx: &mut Test
         );
     });
 }
+
+/// Sign-in readings and agent vocabularies land after Settings opens; the host
+/// pushes both in, and stops once Settings is closed.
+#[gpui::test]
+async fn settings_follows_readings_and_vocabulary_until_it_closes(cx: &mut TestAppContext) {
+    let (window_handle, workspace) = build_workspace(cx);
+    let target = daruda_agent::accounts::LoginTarget::System {
+        recipe: daruda_store::accounts::AccountRecipeId::Claude,
+    };
+    let reading = daruda_agent::accounts::auth_status::AuthStatus {
+        logged_in: true,
+        ..Default::default()
+    };
+    let (view, data_dir) = cx
+        .update_window(window_handle.into(), |_, window, cx| {
+            workspace.update(cx, |ws, cx| {
+                ws.on_open_settings(
+                    &OpenSettings(daruda_config::BuiltinSection::Accounts),
+                    window,
+                    cx,
+                );
+                let view = ws.settings_view().expect("settings open").clone();
+                (view, ws.data_dir.clone())
+            })
+        })
+        .unwrap();
+    let record = |cx: &mut gpui::App, agent: &str| {
+        let ticket = crate::workspace::auth_status_global::begin_probe(cx, target, true)
+            .expect("a superseding probe always starts");
+        crate::workspace::auth_status_global::record(cx, ticket, reading.clone());
+        crate::workspace::agent_vocabulary_global::record(
+            cx,
+            &data_dir,
+            agent,
+            "test",
+            Some(vec![daruda_store::agent_vocabulary::VocabEntry::new(
+                "plan", "Plan",
+            )]),
+            None,
+        )
+        .expect("the vocabulary store is writable");
+    };
+    cx.update(|cx| record(cx, "claude"));
+    cx.run_until_parked();
+    cx.update(|cx| {
+        let view = view.read(cx);
+        assert_eq!(view.auth_statuses().get(&target), Some(&reading));
+        assert_eq!(
+            view.agent_vocabulary(),
+            &crate::workspace::agent_vocabulary_global::snapshot(cx, &data_dir),
+        );
+    });
+
+    cx.update_window(window_handle.into(), |_, window, cx| {
+        workspace.update(cx, |ws, cx| ws.close_settings(window, cx));
+    })
+    .unwrap();
+    let pushed = cx.update(|cx| view.read(cx).agent_vocabulary().clone());
+    cx.update(|cx| record(cx, "codex"));
+    cx.run_until_parked();
+    cx.update(|cx| {
+        assert_eq!(
+            view.read(cx).agent_vocabulary(),
+            &pushed,
+            "a closed Settings is no longer pushed to"
+        );
+    });
+}

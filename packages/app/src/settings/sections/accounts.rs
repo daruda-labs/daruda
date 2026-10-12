@@ -473,7 +473,7 @@ impl SettingsView {
         let Some(recipe) = self.accounts.find(account_id).map(|a| a.recipe) else {
             return;
         };
-        let referencing = (self.account_usage.clone())(account_id, cx);
+        let referencing = (self.account_usage)(account_id, cx);
         let weak = cx.weak_entity();
         open_confirm_dialog(
             s::settings::accounts_remove_confirm_title(),
