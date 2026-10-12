@@ -216,8 +216,10 @@ jobs:
           Expand-Archive -LiteralPath '${{ steps.package.outputs.archive }}' -DestinationPath $out -Force
           $exe = Get-ChildItem $out -Recurse -Filter daruda.exe | Select-Object -First 1
           if (-not $exe) { throw 'the package contains no daruda.exe' }
-          & $exe.FullName --smoke
-          if ($LASTEXITCODE -ne 0) { throw "the packaged build did not start (exit $LASTEXITCODE)" }
+          # A GUI-subsystem exe returns to `&` at once, leaving no exit code.
+          $smoke = Start-Process -FilePath $exe.FullName -ArgumentList '--smoke' -PassThru
+          if (-not $smoke.WaitForExit(60000)) { throw 'the packaged build smoke test timed out' }
+          if ($smoke.ExitCode -ne 0) { throw "the packaged build did not start (exit $($smoke.ExitCode))" }
 
       - name: Upload Windows package
         uses: actions/upload-artifact@v7
