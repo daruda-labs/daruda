@@ -47,6 +47,57 @@ impl Auth {
             input.set_masked(mode == Mode::Token, window, cx);
         });
     }
+    pub fn seed_codex(
+        &mut self,
+        draft: &crate::agent::mcp::McpServerDraft,
+        window: &mut Window,
+        cx: &mut App,
+    ) {
+        self.seed(&draft.headers, window, cx);
+        if let Some(value) = draft
+            .extra
+            .get("bearer_token_env_var")
+            .and_then(serde_json::Value::as_str)
+        {
+            self.mode = Mode::Variable;
+            self.input.update(cx, |input, cx| {
+                input.set_value(value, window, cx);
+                input.set_masked(false, window, cx);
+            });
+        } else if draft.extra.contains_key("env_http_headers")
+            || draft.headers.values().any(|v| v.contains("${"))
+        {
+            self.mode = Mode::Custom;
+        }
+    }
+    pub fn apply_codex(
+        &self,
+        headers: &mut BTreeMap<String, String>,
+        extra: &mut BTreeMap<String, serde_json::Value>,
+        cx: &App,
+    ) -> Result<(), SharedString> {
+        if self.mode == Mode::Custom {
+            return Ok(());
+        }
+        extra.remove("bearer_token_env_var");
+        if let Some(map) = extra
+            .get_mut("env_http_headers")
+            .and_then(serde_json::Value::as_object_mut)
+        {
+            map.retain(|key, _| !key.eq_ignore_ascii_case("authorization"));
+        }
+        if self.mode == Mode::Variable {
+            let value = self.input.read(cx).value().to_string();
+            if !crate::agent::mcp::import::valid_variable(&value) {
+                return Err(strings::mcp::auth_invalid().into());
+            }
+            headers.retain(|key, _| !key.eq_ignore_ascii_case("authorization"));
+            extra.insert("bearer_token_env_var".into(), value.into());
+            Ok(())
+        } else {
+            self.apply(headers, cx)
+        }
+    }
     pub fn values(&self, cx: &App) -> Vec<String> {
         vec![
             (self.mode as u8).to_string(),

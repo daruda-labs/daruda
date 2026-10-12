@@ -5,6 +5,10 @@ impl Render for CreateSkillModal {
         if self.pasting {
             return self.render_paste(cx);
         }
+        let codex = self
+            .config
+            .as_ref()
+            .is_some_and(|c| c.provider == crate::agent::configuration::Provider::Codex);
         let panel_focus = self.panel_focus_handle.clone();
         let user_invocable = self.user_invocable;
         let disable_model = self.disable_model_invocation;
@@ -65,6 +69,20 @@ impl Render for CreateSkillModal {
             ))
             .child(field_label(strings::common::field_scope(), &t))
             .child(scope_chip)
+            .children(self.config.as_ref().map(|c| {
+                strings::library::source(
+                    match self.scope {
+                        SkillScope::Personal => c.personal_skills.clone(),
+                        SkillScope::Project => c
+                            .cwd
+                            .as_ref()
+                            .map(|p| c.project_skills(p))
+                            .unwrap_or_default(),
+                        SkillScope::Plugin => Default::default(),
+                    }
+                    .display(),
+                )
+            }))
             .child(field_label(strings::skills::field_description(), &t))
             .child(super::super::super::form_state::field_input(
                 &self.description_input,
@@ -73,17 +91,24 @@ impl Render for CreateSkillModal {
                 self.error_field,
                 self.error.as_ref(),
             ));
-        left = left.child(
-            button("skill-advanced", strings::common::field_advanced())
-                .disabled(submitting)
-                .tab_stop(true)
-                .tab_index(3)
-                .on_click(cx.listener(|this, _, _, cx| {
-                    this.advanced = !this.advanced;
-                    cx.notify();
-                })),
-        );
-        if self.advanced {
+        if codex {
+            left = left
+                .child(field_label(strings::skills::invocation_name(), &t))
+                .child(crate::ui::input(&self.invocation_input, cx, 3));
+        }
+        left = left.when(!codex, |left| {
+            left.child(
+                button("skill-advanced", strings::common::field_advanced())
+                    .disabled(submitting)
+                    .tab_stop(true)
+                    .tab_index(3)
+                    .on_click(cx.listener(|this, _, _, cx| {
+                        this.advanced = !this.advanced;
+                        cx.notify();
+                    })),
+            )
+        });
+        if self.advanced && !codex {
             left = left
                 .child(field_label(strings::skills::invocation_name(), &t))
                 .child(crate::ui::input(&self.invocation_input, cx, 4))

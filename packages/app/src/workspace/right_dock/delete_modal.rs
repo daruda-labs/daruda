@@ -44,18 +44,11 @@ impl ModalView for DeleteModal {
 }
 
 impl Render for DeleteModal {
-    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         div()
             .flex()
             .flex_col()
             .tab_group()
-            .track_focus(&self.focus)
-            .on_key_down(cx.listener(|this, event: &gpui::KeyDownEvent, window, cx| {
-                if event.keystroke.key == "enter" {
-                    cx.stop_propagation();
-                    this.submit(window, cx);
-                }
-            }))
             .gap(px(theme::MODAL_PANEL_GAP))
             .child(self.body.clone())
             .children(
@@ -69,16 +62,24 @@ impl Render for DeleteModal {
                     .justify_end()
                     .gap(px(theme::MODAL_FOOTER_GAP))
                     .child(
-                        button("delete-cancel", strings::common::btn_cancel())
-                            .tab_stop(true)
-                            .tab_index(0)
+                        div()
+                            .track_focus(&self.focus.clone().tab_stop(true).tab_index(0))
+                            .border_1()
+                            .rounded(px(theme::RADIUS_SM))
+                            .border_color(theme::TRANSPARENT)
+                            .when(self.focus.is_focused(window), |d| {
+                                d.border_color(theme::PRIMARY)
+                            })
                             .on_key_down(|event, window, cx| {
                                 if matches!(event.keystroke.key.as_str(), "enter" | "space") {
                                     cx.stop_propagation();
                                     window.close_dialog(cx);
                                 }
                             })
-                            .on_click(|_, window, cx| window.close_dialog(cx)),
+                            .child(
+                                button("delete-cancel", strings::common::btn_cancel())
+                                    .on_click(|_, window, cx| window.close_dialog(cx)),
+                            ),
                     )
                     .child(
                         button_danger("delete-confirm", strings::common::btn_delete())
@@ -152,7 +153,7 @@ mod tests {
             );
         });
         vcx.run_until_parked();
-        vcx.simulate_keystrokes("enter");
+        vcx.simulate_keystrokes("tab enter");
         vcx.run_until_parked();
         assert_eq!(attempts.get(), 1);
         vcx.simulate_keystrokes("enter");
@@ -172,7 +173,7 @@ mod tests {
             );
         });
         vcx.run_until_parked();
-        vcx.simulate_keystrokes("tab enter");
+        vcx.simulate_keystrokes("enter");
         vcx.run_until_parked();
         assert_eq!(attempts.get(), 2, "Enter on Cancel must not delete");
     }

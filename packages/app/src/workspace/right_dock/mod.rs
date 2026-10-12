@@ -10,6 +10,8 @@ use super::layout::RightDockSnapshot;
 pub(in crate::workspace) mod context;
 mod delete_modal;
 mod form_state;
+pub(in crate::workspace) mod library;
+mod library_view;
 pub(in crate::workspace) mod mcp_ops;
 #[cfg(feature = "screenshot")]
 pub(in crate::workspace) mod quick_entry_shot;
@@ -54,10 +56,24 @@ pub(in crate::workspace) fn right_panel_body() -> gpui::Div {
 /// list doesn't push the dock footer off-screen (the outer dock wrapper
 /// sets `overflow_hidden`), with a scrollbar thumb overlay for position.
 pub(in crate::workspace) fn render(snap: &RightDockSnapshot, cx: &mut Context<Dock>) -> AnyElement {
+    let library = snap.right_dock_view != RightDockView::Usage;
+    if library && snap.library.config.is_none() {
+        return library_view::header(snap, cx);
+    }
     let (body, footer) = match snap.right_dock_view {
         RightDockView::Usage => (usage::render(snap, cx), usage::footer(snap, cx)),
         RightDockView::Skills => (skills::render(snap, cx), Some(skills::footer(snap, cx))),
         RightDockView::Tools => (tools::render(snap, cx), Some(tools::footer(snap, cx))),
+    };
+    let body = if library {
+        div()
+            .flex()
+            .flex_col()
+            .child(library_view::header(snap, cx))
+            .child(body)
+            .into_any_element()
+    } else {
+        body
     };
     let handle = snap.right_panel_scroll_handle.clone();
     div()

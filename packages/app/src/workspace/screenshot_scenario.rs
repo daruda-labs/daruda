@@ -386,8 +386,13 @@ impl ScreenshotScenario {
         match name {
             "mcp-paste" => Some(Self::QuickEntry(QuickEntryShot::McpPaste)),
             "mcp-review" => Some(Self::QuickEntry(QuickEntryShot::McpReview)),
+            "mcp-codex-tail" => Some(Self::QuickEntry(QuickEntryShot::McpCodexTail)),
+            "mcp-codex-review" => Some(Self::QuickEntry(QuickEntryShot::McpCodexReview)),
+            "library-claude" => Some(Self::QuickEntry(QuickEntryShot::LibraryClaude)),
+            "library-codex" => Some(Self::QuickEntry(QuickEntryShot::LibraryCodex)),
             "skill-paste" => Some(Self::QuickEntry(QuickEntryShot::SkillPaste)),
             "skill-review" => Some(Self::QuickEntry(QuickEntryShot::SkillReview)),
+            "library-delete" => Some(Self::QuickEntry(QuickEntryShot::DeleteConfirm)),
             "flow-create" => Some(Self::FlowCreate),
             "flows" => Some(Self::FlowBrowser(
                 super::flow_browser::screenshot::FlowBrowserShot::Definitions,

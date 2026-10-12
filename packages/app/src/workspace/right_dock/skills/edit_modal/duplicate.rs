@@ -23,6 +23,8 @@ impl EditSkillModal {
                 return;
             }
         };
+        let config = self.config.clone();
+        let creation_targets = self.creation_targets.clone();
         let state = self.state_snapshot.clone();
         let workspace = self.workspace.clone();
         let scope = self.scope;
@@ -39,6 +41,8 @@ impl EditSkillModal {
                     window,
                     cx,
                 );
+                modal.config = config;
+                modal.creation_targets = creation_targets;
                 modal.seed_duplicate(source, name, window, cx);
                 modal
             },

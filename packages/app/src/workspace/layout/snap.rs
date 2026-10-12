@@ -405,6 +405,7 @@ pub(in crate::workspace) struct RightDockSnapshot {
     /// Carried by-value so the panel renderer never re-enters the
     /// workspace entity.
     pub mcp: crate::agent::mcp::McpSnapshot,
+    pub library: crate::workspace::right_dock::library::LibraryView,
 }
 
 /// One auth domain's block in the Usage tab: whose account it is, what the last
@@ -616,6 +617,7 @@ mod tests {
             now: PerFrame(chrono::Utc::now()),
             right_panel_scroll_handle: Handle(ScrollHandle::new()),
             mcp: crate::agent::mcp::McpSnapshot::default(),
+            library: Default::default(),
         }
     }
 

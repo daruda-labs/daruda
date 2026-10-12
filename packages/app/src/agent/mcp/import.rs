@@ -32,6 +32,38 @@ struct Entry {
     extra: BTreeMap<String, Value>,
 }
 
+/// Refuse lossy edits of known fields while allowing incomplete records to be repaired.
+pub(crate) fn validate_existing(value: &Value) -> Result<(), ImportError> {
+    let entry: Entry =
+        serde_json::from_value(value.clone()).map_err(|_| ImportError::InvalidField)?;
+    if entry
+        .transport
+        .as_deref()
+        .is_some_and(|t| !matches!(t, "stdio" | "http" | "streamable-http" | "sse"))
+    {
+        return Err(ImportError::Unsupported);
+    }
+    Ok(())
+}
+
+pub(crate) fn parse_for(
+    source: &str,
+    provider: Option<crate::agent::configuration::Provider>,
+) -> Result<Vec<McpServerDraft>, ImportError> {
+    if provider == Some(crate::agent::configuration::Provider::Codex)
+        && (source.trim_start().starts_with('[') || source.trim_start().starts_with('#'))
+    {
+        let doc = source.parse().map_err(|_| ImportError::Syntax)?;
+        let servers = crate::agent::configuration::codex::servers(&doc, super::McpScope::User)
+            .map_err(|_| ImportError::InvalidField)?;
+        if servers.is_empty() {
+            return Err(ImportError::Empty);
+        }
+        return Ok(servers.iter().map(McpServerDraft::from_server).collect());
+    }
+    parse(source)
+}
+
 pub(crate) fn parse(source: &str) -> Result<Vec<McpServerDraft>, ImportError> {
     let source = source.trim();
     if source.is_empty() {

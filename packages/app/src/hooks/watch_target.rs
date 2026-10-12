@@ -1,4 +1,4 @@
-//! A path a watcher filters its events by, held in both spellings events
+//! A path a watcher filters its events by, held in the spellings events
 //! arrive in.
 //!
 //! FSEvents reports a resolved path (`/private/var/…` for `/var/…`, a
@@ -11,35 +11,53 @@ use std::path::{Path, PathBuf};
 
 use daruda_core::path::canonicalize_or_self;
 
+#[derive(Clone)]
 pub(crate) struct WatchTarget {
-    given: PathBuf,
-    resolved: PathBuf,
+    spellings: Vec<PathBuf>,
 }
 
 impl WatchTarget {
     /// `target`, resolved up to `anchor` — the nearest ancestor that exists,
     /// which is all that can be resolved while the target itself is missing.
     pub(crate) fn new(target: &Path, anchor: Option<&Path>) -> Self {
-        Self {
-            given: target.to_path_buf(),
-            resolved: resolved_for(target, anchor),
+        let mut spellings = vec![target.to_path_buf(), resolved_for(target, anchor)];
+        // Keep the link's own name beneath each canonical parent as well as
+        // its destination: replacing a link is reported at the former.
+        for parent in target.ancestors().skip(1) {
+            if let Ok(resolved) = daruda_core::path::canonicalize(parent)
+                && let Ok(tail) = target.strip_prefix(parent)
+            {
+                spellings.push(resolved.join(tail));
+            }
         }
+        spellings.sort();
+        spellings.dedup();
+        Self { spellings }
     }
 
     /// Whether `path` is the target or lies under it, in either spelling.
     pub(crate) fn contains(&self, path: &Path) -> bool {
-        path.starts_with(&self.resolved) || path.starts_with(&self.given)
+        self.spellings.iter().any(|p| path.starts_with(p))
+    }
+
+    /// Replacing an ancestor (including a symlink) invalidates the target too.
+    pub(crate) fn affected_by(&self, path: &Path) -> bool {
+        self.contains(path) || self.spellings.iter().any(|p| p.starts_with(path))
     }
 
     /// Whether `path` is the target itself, in either spelling.
+    #[cfg(test)]
     pub(crate) fn is(&self, path: &Path) -> bool {
-        path == self.resolved || path == self.given
+        self.spellings.iter().any(|p| path == p)
     }
 }
 
 /// Canonical up to the anchor, then the target's own components below it —
 /// enough for a `starts_with` against every future resolved event.
 fn resolved_for(target: &Path, anchor: Option<&Path>) -> PathBuf {
+    if let Ok(resolved) = daruda_core::path::canonicalize(target) {
+        return resolved;
+    }
     let Some(anchor) = anchor else {
         return canonicalize_or_self(target);
     };
@@ -68,6 +86,13 @@ mod tests {
 
         assert!(target.contains(&skills.join("a").join("SKILL.md")));
         assert!(target.is(&skills));
+        assert!(
+            target.affected_by(
+                &daruda_core::path::canonicalize(temp.path())
+                    .unwrap()
+                    .join(".claude")
+            )
+        );
         assert!(!target.contains(&anchor.join("other")));
     }
 

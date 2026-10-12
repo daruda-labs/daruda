@@ -38,6 +38,8 @@ fn blank_to_none(s: &str) -> Option<String> {
 }
 
 pub struct EditSkillModal {
+    config: Option<std::sync::Arc<crate::agent::configuration::Configuration>>,
+    creation_targets: Vec<crate::agent::configuration::library::creation::CreationTarget>,
     panel_focus_handle: FocusHandle,
     form: super::super::form_state::FormState,
 
@@ -59,7 +61,10 @@ pub struct EditSkillModal {
     disable_model_invocation: bool,
 
     original_frontmatter: SkillFrontmatter,
+    reload_skill: Skill,
     original_source: Option<String>,
+    original_path: Option<std::path::PathBuf>,
+    companion_path: Option<PathBuf>,
     body_loaded: bool,
     rename_after_save: bool,
 
@@ -174,14 +179,22 @@ impl EditSkillModal {
                                         yaml.unwrap_or(""),
                                     )
                                     .map_err(|error| error.to_string())?;
-                                Ok((raw, frontmatter))
+                                let companion = path
+                                    .parent()
+                                    .map(|dir| dir.join("agents/openai.yaml"))
+                                    .filter(|p| p.is_file());
+                                let physical = daruda_core::path::canonicalize(&path)
+                                    .map_err(|error| error.to_string())?;
+                                Ok((raw, frontmatter, companion, physical))
                             })
                     })
                     .await;
                 // SILENT-OK: closing the modal abandons its pending read.
                 let _ = this.update_in(cx, |modal, window, cx| {
                     match result {
-                        Ok((source, frontmatter)) => {
+                        Ok((source, frontmatter, companion, physical)) => {
+                            modal.original_path = Some(physical);
+                            modal.companion_path = companion;
                             let (_, body) =
                                 crate::agent::skills::frontmatter::split_frontmatter(&source);
                             for (input, value) in [
@@ -233,6 +246,8 @@ impl EditSkillModal {
         ];
 
         let mut modal = Self {
+            config: None,
+            creation_targets: Vec::new(),
             advanced: false,
             form: Default::default(),
             panel_focus_handle: cx.focus_handle(),
@@ -250,7 +265,10 @@ impl EditSkillModal {
             user_invocable: frontmatter.user_invocable,
             disable_model_invocation: frontmatter.disable_model_invocation,
             original_frontmatter: frontmatter,
+            reload_skill: skill.clone(),
             original_source: None,
+            original_path: None,
+            companion_path: None,
             body_loaded: false,
             rename_after_save: false,
             state_snapshot,
@@ -334,6 +352,36 @@ impl EditSkillModal {
             return;
         }
         let draft = self.build_draft(cx);
+        if self
+            .config
+            .as_ref()
+            .is_some_and(|c| c.provider == crate::agent::configuration::Provider::Codex)
+            && (draft
+                .frontmatter
+                .name
+                .as_ref()
+                .is_none_or(|s| s.trim().is_empty())
+                || draft
+                    .frontmatter
+                    .description
+                    .as_ref()
+                    .is_none_or(|s| s.trim().is_empty()))
+        {
+            self.error = Some(strings::library::codex_skill_required().into());
+            let input = if draft
+                .frontmatter
+                .name
+                .as_ref()
+                .is_none_or(|s| s.trim().is_empty())
+            {
+                &self.invocation_input
+            } else {
+                &self.description_input
+            };
+            window.focus(&input.focus_handle(cx), cx);
+            cx.notify();
+            return;
+        }
         let expected = self
             .original_source
             .clone()
@@ -352,6 +400,7 @@ impl EditSkillModal {
             }
         };
         let dir = self.dir.clone();
+        let expected_path = self.original_path.clone();
         let workspace = self.workspace.clone();
         super::super::form_state::freeze_inputs(&self.inputs(), true, cx);
         self.submitting = true;
@@ -363,6 +412,11 @@ impl EditSkillModal {
                 let result = async_cx
                     .background_executor()
                     .spawn(async move {
+                        if daruda_core::path::canonicalize(dir.join("SKILL.md")).ok()
+                            != expected_path
+                        {
+                            return Err(strings::skills::changed_on_disk());
+                        }
                         persist::update_skill_source(&dir, &expected, &source).map_err(|error| {
                             match error {
                                 persist::PersistError::Io(ref error)
@@ -383,7 +437,7 @@ impl EditSkillModal {
                         match result {
                             Ok(_) => {
                                 if let Some(ws) = workspace.upgrade() {
-                                    ws.update(cx, |ws, cx| ws.refresh_skills_watcher(cx));
+                                    ws.update(cx, |ws, cx| ws.refresh_library(cx));
                                 }
                                 if modal.rename_after_save {
                                     modal.begin_rename(window, cx);
@@ -557,6 +611,9 @@ impl Focusable for EditSkillModal {
 }
 
 impl ModalView for EditSkillModal {
+    fn fit_viewport(&self) -> bool {
+        true
+    }
     fn guards_close(&self) -> bool {
         true
     }
@@ -566,6 +623,7 @@ impl ModalView for EditSkillModal {
 }
 
 mod duplicate;
+mod reload;
 mod render;
 
 pub fn open_edit_skill_modal(
@@ -575,10 +633,17 @@ pub fn open_edit_skill_modal(
     cx: &mut Context<Workspace>,
 ) {
     let workspace = cx.weak_entity();
-    let project_root = ws.active_lane_root();
-    let state = cx
-        .global::<crate::agent::skills::SkillsState>()
-        .snapshot_for(project_root.as_deref());
+    let Some(config) = ws.pin_library() else {
+        return;
+    };
+    let state = ws.right_views.library.view.inventory.skills.clone();
+    let creation_targets = ws
+        .right_views
+        .library
+        .view
+        .inventory
+        .creation_targets
+        .clone();
 
     // Locate the skill in the snapshot. Fail-soft: if the row is
     // stale (deleted concurrently) the modal silently does not open.
@@ -593,7 +658,12 @@ pub fn open_edit_skill_modal(
     crate::workspace::dialog_helpers::open_form_modal(
         strings::skills::edit_title(),
         Some(px(crate::ui::theme::FORM_MODAL_WIDE)),
-        move |window, cx| EditSkillModal::new(workspace, skill, state, window, cx),
+        move |window, cx| {
+            let mut modal = EditSkillModal::new(workspace, skill, state, window, cx);
+            modal.config = Some(config);
+            modal.creation_targets = creation_targets;
+            modal
+        },
         window,
         cx,
     );

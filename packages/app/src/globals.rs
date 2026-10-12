@@ -71,7 +71,7 @@ pub(crate) fn init_all(cx: &mut App) {
         // the first paint (counterpart to the background seed above).
         ui::theme::set_agent_chat_fg(cx, term_fg.r, term_fg.g, term_fg.b);
     }
-    crate::agent::skills::global::init(cx);
+    crate::agent::skills::global::start_catalog(cx);
     crate::agent::mcp::global::init(cx);
     crate::agent::tasks_global::init(cx);
     crate::update::init(cx);

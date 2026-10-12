@@ -6,3 +6,6 @@
 pub use gpui_component::WindowExt;
 pub use gpui_component::button::ButtonVariant;
 pub use gpui_component::dialog::{Dialog, DialogButtonProps};
+
+/// The same client-decoration insets that the dialog uses for its bounds.
+pub use gpui_component::window_paddings;

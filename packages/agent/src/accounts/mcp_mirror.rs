@@ -1,7 +1,5 @@
-//! Shared-MCP mirroring: copy the user's canonical `~/.claude.json`
-//! `mcpServers` into a managed account's isolated `<config_dir>/.claude.json`
-//! so the account's adapter sees the same servers as the system default.
-//! Pure/GPUI-free (filesystem + JSON merge, best-effort).
+//! Seed a managed account with canonical MCP servers once.
+//! Existing account configuration is authoritative and never overwritten.
 
 use std::path::Path;
 
@@ -21,28 +19,9 @@ const CLAUDE_JSON_FILE: &str = ".claude.json";
 /// Top-level key shared across every account's config file.
 const MCP_SERVERS_KEY: &str = "mcpServers";
 
-/// Mirror the shared `mcpServers` config from the user's canonical
-/// `~/.claude.json` (the file `app::agent::mcp::parse::claude_json_path`
-/// resolves, and what the MCP tab edits) into a managed account's
-/// isolated `<config_dir>/.claude.json`, so the account's ACP adapter
-/// process — which only reads MCP servers from *its own*
-/// `CLAUDE_CONFIG_DIR` — sees the same servers as the system default.
-///
-/// MCP is shared across accounts by design: there is one `mcpServers`
-/// set, not one per account. Every other key in the
-/// account file — most importantly `oauthAccount`, written there by
-/// that account's own login — is left untouched.
-///
-/// Best-effort: a missing/unreadable/unparseable canonical file is a
-/// no-op (never clobbers the account file just because the canonical
-/// read failed), `dirs::home_dir()` returning `None` is a no-op, and any
-/// write failure is logged, never panics. Call this on a background
-/// thread before spawning a managed-account agent-chat adapter — the
-/// canonical file can be multi-megabyte.
-///
-/// v1 scope: agent-chat only (the actual MCP consumer). Terminal panes
-/// launched under a managed account do not get this mirror yet — a
-/// deferred extension, not a correctness gap for the current use.
+/// Seed an absent account MCP map from the canonical config before launch.
+/// Existing maps (including empty maps) and malformed account files are
+/// preserved. This compatibility name remains for the two existing callers.
 pub fn mirror_shared_mcp_servers(config_dir: &Path) {
     let Some(home) = dirs::home_dir() else {
         return;
@@ -73,7 +52,10 @@ fn mirror_into(canonical_path: &Path, config_dir: &Path) {
 
     let account_path = config_dir.join(CLAUDE_JSON_FILE);
     let mut account_value: Value = match std::fs::read_to_string(&account_path) {
-        Ok(raw) => serde_json::from_str(&raw).unwrap_or_else(|_| Value::Object(Map::new())),
+        Ok(raw) => match serde_json::from_str(&raw) {
+            Ok(value) => value,
+            Err(_) => return,
+        },
         // File genuinely absent — start fresh (nothing to preserve).
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => Value::Object(Map::new()),
         // The file exists but couldn't be read (transient IO/permission
@@ -82,19 +64,13 @@ fn mirror_into(canonical_path: &Path, config_dir: &Path) {
         // mirror this time; a later spawn retries.
         Err(_) => return,
     };
-    match account_value.as_object_mut() {
-        Some(map) => {
-            map.insert(MCP_SERVERS_KEY.to_string(), mcp_servers);
-        }
-        // The existing file's top level isn't an object (corrupt) —
-        // replace it wholesale with a fresh object holding only the
-        // mirrored servers, rather than silently dropping the mirror.
-        None => {
-            let mut map = Map::new();
-            map.insert(MCP_SERVERS_KEY.to_string(), mcp_servers);
-            account_value = Value::Object(map);
-        }
+    let Some(map) = account_value.as_object_mut() else {
+        return;
+    };
+    if map.contains_key(MCP_SERVERS_KEY) {
+        return;
     }
+    map.insert(MCP_SERVERS_KEY.to_string(), mcp_servers);
 
     if let Err(e) = save_json_atomic(config_dir, &account_path, &account_value) {
         LogWriter::log(
@@ -192,5 +168,27 @@ mod tests {
             untouched.get(MCP_SERVERS_KEY).is_none(),
             "no mcpServers key should be introduced on a canonical-missing no-op"
         );
+    }
+    #[test]
+    fn preparation_preserves_account_edits_empty_maps_and_invalid_files() {
+        let home = tempfile::tempdir().unwrap();
+        let canonical = home.path().join(CLAUDE_JSON_FILE);
+        std::fs::write(
+            &canonical,
+            r#"{"mcpServers":{"shared":{"command":"shared"}}}"#,
+        )
+        .unwrap();
+        let account = tempfile::tempdir().unwrap();
+        let path = account.path().join(CLAUDE_JSON_FILE);
+        for source in [
+            r#"{"mcpServers":{"private":{"command":"private"}},"projects":{"/a":{}}}"#,
+            r#"{"mcpServers":{},"oauthAccount":{"id":"account-a"}}"#,
+            "{broken",
+            "[]",
+        ] {
+            std::fs::write(&path, source).unwrap();
+            mirror_into(&canonical, account.path());
+            assert_eq!(std::fs::read_to_string(&path).unwrap(), source);
+        }
     }
 }

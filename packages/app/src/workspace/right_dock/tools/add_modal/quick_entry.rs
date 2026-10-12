@@ -3,7 +3,10 @@ use crate::agent::mcp::{format_env_lines, import};
 
 impl AddMcpServerModal {
     pub(super) fn review_paste(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        match import::parse(&self.paste_input.read(cx).value()) {
+        match import::parse_for(
+            &self.paste_input.read(cx).value(),
+            self.initial.config.as_ref().map(|c| c.provider),
+        ) {
             Ok(mut drafts) if drafts.len() == 1 => self.apply_import(drafts.remove(0), window, cx),
             Ok(drafts) => {
                 self.candidates = drafts;
@@ -41,7 +44,21 @@ impl AddMcpServerModal {
         ] {
             input.update(cx, |input, cx| input.set_value(value, window, cx));
         }
-        self.auth.seed(&draft.headers, window, cx);
+        if self
+            .initial
+            .config
+            .as_ref()
+            .is_some_and(|c| c.provider == crate::agent::configuration::Provider::Codex)
+        {
+            self.auth.seed_codex(&draft, window, cx);
+        } else {
+            self.auth.seed(&draft.headers, window, cx);
+        }
+        self.env_rows
+            .update(cx, |rows, cx| rows.seed_pairs(&draft.env, window, cx));
+        self.header_rows
+            .update(cx, |rows, cx| rows.seed_pairs(&draft.headers, window, cx));
+        self.codex_options.seed(&draft.extra, window, cx);
         self.transport = draft.transport;
         self.disabled = draft.disabled;
         self.imported = Some(draft);
@@ -54,6 +71,14 @@ impl AddMcpServerModal {
     }
 
     pub(super) fn target_label(&self) -> String {
+        if let Some(target) = self.initial.targets.iter().find(|t| t.scope == self.scope) {
+            return target.label();
+        }
+        if let Some(config) = &self.initial.config {
+            return crate::agent::configuration::library::Target::new(config, self.scope, None)
+                .map(|t| t.label())
+                .unwrap_or_default();
+        }
         let path = match self.scope {
             McpScope::Project => self
                 .initial

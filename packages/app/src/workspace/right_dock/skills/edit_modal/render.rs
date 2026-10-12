@@ -3,6 +3,10 @@ use super::*;
 impl Render for EditSkillModal {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let t = crate::ui::theme::current(cx).clone();
+        let codex = self
+            .config
+            .as_ref()
+            .is_some_and(|c| c.provider == crate::agent::configuration::Provider::Codex);
         let panel_focus = self.panel_focus_handle.clone();
         let name_label = self.name.clone();
         let scope_label = match self.scope {
@@ -28,17 +32,24 @@ impl Render for EditSkillModal {
             .child(readonly_value(scope_label.to_string(), cx))
             .child(field_label(strings::skills::field_description(), &t))
             .child(input(&self.description_input, cx, 0));
-        left = left.child(
-            button("skill-advanced", strings::common::field_advanced())
-                .disabled(self.submitting)
-                .tab_stop(true)
-                .tab_index(1)
-                .on_click(cx.listener(|this, _, _, cx| {
-                    this.advanced = !this.advanced;
-                    cx.notify();
-                })),
-        );
-        if self.advanced {
+        if codex {
+            left = left
+                .child(field_label(strings::skills::invocation_name(), &t))
+                .child(crate::ui::input(&self.invocation_input, cx, 3));
+        }
+        left = left.when(!codex, |left| {
+            left.child(
+                button("skill-advanced", strings::common::field_advanced())
+                    .disabled(self.submitting)
+                    .tab_stop(true)
+                    .tab_index(1)
+                    .on_click(cx.listener(|this, _, _, cx| {
+                        this.advanced = !this.advanced;
+                        cx.notify();
+                    })),
+            )
+        });
+        if self.advanced && !codex {
             left = left
                 .child(field_label(strings::skills::invocation_name(), &t))
                 .child(input(&self.invocation_input, cx, 2))
@@ -92,10 +103,29 @@ impl Render for EditSkillModal {
             .child(field_label(strings::skills::field_body(), &t))
             .child(input(&self.body_editor, cx, -1));
 
+        let companion = self.companion_path.clone();
+        let companion_workspace = self.workspace.clone();
         let body = div()
             .flex()
             .flex_col()
             .gap(px(theme::FORM_MODAL_SPLIT_GAP))
+            .child(field_label(
+                strings::library::source(self.dir.display()),
+                &t,
+            ))
+            .when_some(companion, |body, path| {
+                body.child(
+                    button("skill-companion", strings::library::companion()).on_click(
+                        move |_, window, cx| {
+                            if let Some(ws) = companion_workspace.upgrade() {
+                                ws.update(cx, |ws, cx| {
+                                    ws.open_reference_file(path.clone(), window, cx)
+                                });
+                            }
+                        },
+                    ),
+                )
+            })
             .child(right)
             .child(left);
 
@@ -107,6 +137,17 @@ impl Render for EditSkillModal {
             .justify_end()
             .gap(px(theme::MODAL_FOOTER_GAP))
             .mt(px(theme::MODAL_FOOTER_MARGIN_TOP))
+            .when(self.error.is_some(), |footer| {
+                footer.child(
+                    button("reload-source", strings::library::reload())
+                        .disabled(self.submitting)
+                        .tab_stop(true)
+                        .tab_index(19)
+                        .on_click(
+                            cx.listener(|this, _, window, cx| this.request_reload(window, cx)),
+                        ),
+                )
+            })
             .child(
                 button("duplicate", strings::skills::duplicate_instructions())
                     .disabled(self.submitting || !self.body_loaded)

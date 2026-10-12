@@ -9,8 +9,7 @@
 use std::path::{Path, PathBuf};
 
 use super::plugins::{
-    MarketplacePluginSource, PluginAvailability, installed_plugins_manifest,
-    known_marketplaces_manifest, read_installed_plugins, read_known_marketplaces,
+    MarketplacePluginSource, PluginAvailability, read_installed_plugins, read_known_marketplaces,
     read_marketplace_plugins,
 };
 use super::{Skill, SkillScope, parse_frontmatter, split_frontmatter};
@@ -101,11 +100,15 @@ pub fn scan_scope(scope_root: &Path, scope: SkillScope) -> Vec<Skill> {
 /// installed copy wins. Skill names are namespaced (`<plugin>:<skill>`)
 /// so they line up with Claude Code's invocation form.
 pub fn scan_plugins() -> Vec<Skill> {
+    scan_plugins_at(&super::plugins::plugins_root(), &skills_personal_dir())
+}
+
+pub(crate) fn scan_plugins_at(plugin_root: &Path, personal_root: &Path) -> Vec<Skill> {
     let mut out: Vec<Skill> = Vec::new();
     let mut seen_ids: std::collections::HashSet<String> = std::collections::HashSet::new();
 
     // Pass 1 — installed plugins.
-    let installs = read_installed_plugins(&installed_plugins_manifest());
+    let installs = read_installed_plugins(&plugin_root.join("installed_plugins.json"));
     for install in installs {
         let id_local = id_local_part(&install.id);
         seen_ids.insert(install.id.clone());
@@ -120,7 +123,7 @@ pub fn scan_plugins() -> Vec<Skill> {
 
     // Pass 2 — marketplace catalog. Skip plugins whose id is already
     // covered by the installed pass so the panel doesn't double up.
-    let marketplaces = read_known_marketplaces(&known_marketplaces_manifest());
+    let marketplaces = read_known_marketplaces(&plugin_root.join("known_marketplaces.json"));
     for market in marketplaces {
         for plugin in read_marketplace_plugins(&market.install_location) {
             let id = format!("{}@{}", plugin.name, market.id);
@@ -156,7 +159,7 @@ pub fn scan_plugins() -> Vec<Skill> {
     // plugin (`<name>@skills-dir`) whose skills live in
     // `<name>/skills/<skill>/SKILL.md`. Installed/marketplace ids win
     // the de-dup because they were inserted in Passes 1 and 2.
-    scan_skills_dir_plugins(&skills_personal_dir(), &mut seen_ids, &mut out);
+    scan_skills_dir_plugins(personal_root, &mut seen_ids, &mut out);
 
     out.sort_by(|a, b| {
         a.name
@@ -330,7 +333,14 @@ fn count_aux_files(dir: &Path) -> u32 {
     let mut count = 0u32;
     let mut stack = vec![dir.to_path_buf()];
     let skill_md = dir.join("SKILL.md");
+    let mut visited = std::collections::HashSet::new();
     while let Some(cur) = stack.pop() {
+        let Ok(physical) = daruda_core::path::canonicalize(&cur) else {
+            continue;
+        };
+        if !visited.insert(physical) {
+            continue;
+        }
         let read_dir = match std::fs::read_dir(&cur) {
             Ok(rd) => rd,
             Err(_) => continue,

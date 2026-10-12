@@ -33,6 +33,9 @@ fn blank_to_none(s: &str) -> Option<String> {
 }
 
 pub struct CreateSkillModal {
+    pub(super) config: Option<std::sync::Arc<crate::agent::configuration::Configuration>>,
+    pub(super) creation_targets:
+        Vec<crate::agent::configuration::library::creation::CreationTarget>,
     panel_focus_handle: FocusHandle,
     form: super::super::form_state::FormState,
 
@@ -143,6 +146,8 @@ impl CreateSkillModal {
         ];
 
         let mut modal = Self {
+            config: None,
+            creation_targets: Vec::new(),
             paste_input,
             invocation_input,
             pasting: true,
@@ -191,7 +196,21 @@ impl CreateSkillModal {
             }
             Err(NameError::DuplicateInScope { .. }) => unreachable!("validate_name is syntactic"),
         }
-        if self.state_snapshot.name_exists(self.scope, &raw_name) {
+        let destination = self.config.as_ref().and_then(|config| match self.scope {
+            SkillScope::Personal => Some(config.personal_skills.clone()),
+            SkillScope::Project => config.cwd.as_ref().map(|cwd| config.project_skills(cwd)),
+            SkillScope::Plugin => None,
+        });
+        let duplicate = if let Some(root) = destination {
+            self.state_snapshot
+                .project
+                .iter()
+                .chain(&self.state_snapshot.personal)
+                .any(|skill| skill.dir == root.join(&raw_name))
+        } else {
+            self.state_snapshot.name_exists(self.scope, &raw_name)
+        };
+        if duplicate {
             return Err((0, strings::skills::name_duplicate().into()));
         }
 
@@ -259,7 +278,43 @@ impl CreateSkillModal {
                 return;
             }
         };
+        let config = self.config.clone();
+        if config
+            .as_ref()
+            .is_some_and(|c| c.provider == crate::agent::configuration::Provider::Codex)
+            && (draft
+                .frontmatter
+                .name
+                .as_ref()
+                .is_none_or(|s| s.trim().is_empty())
+                || draft
+                    .frontmatter
+                    .description
+                    .as_ref()
+                    .is_none_or(|s| s.trim().is_empty()))
+        {
+            self.error_field = None;
+            self.error = Some(strings::library::codex_skill_required().into());
+            let input = if draft
+                .frontmatter
+                .name
+                .as_ref()
+                .is_none_or(|s| s.trim().is_empty())
+            {
+                &self.invocation_input
+            } else {
+                &self.description_input
+            };
+            window.focus(&input.focus_handle(cx), cx);
+            cx.notify();
+            return;
+        }
         let imported = self.imported.clone();
+        let creation_target = self
+            .creation_targets
+            .iter()
+            .find(|t| t.scope == draft.scope)
+            .cloned();
         let project_root = self.project_root.clone();
         let workspace = self.workspace.clone();
         super::super::form_state::freeze_inputs(&self.inputs(), true, cx);
@@ -287,8 +342,22 @@ impl CreateSkillModal {
                                 &draft.body,
                             )
                         };
-                        persist::create_skill_source(&draft, project_root.as_deref(), &source)
-                            .map_err(|e| e.to_string())
+                        if config.is_some() {
+                            creation_target
+                                .ok_or_else(|| {
+                                    if draft.scope == SkillScope::Project && project_root.is_none()
+                                    {
+                                        strings::mcp::no_project_hint()
+                                    } else {
+                                        strings::skills::changed_on_disk()
+                                    }
+                                })?
+                                .create(&draft.name, &source)
+                                .map_err(|e| e.to_string())
+                        } else {
+                            persist::create_skill_source(&draft, project_root.as_deref(), &source)
+                                .map_err(|e| e.to_string())
+                        }
                     })
                     .await;
                 // SILENT-OK: modal may close during async skill create
@@ -299,7 +368,7 @@ impl CreateSkillModal {
                         match result {
                             Ok(_) => {
                                 if let Some(ws) = workspace.upgrade() {
-                                    ws.update(cx, |ws, cx| ws.refresh_skills_watcher(cx));
+                                    ws.update(cx, |ws, cx| ws.refresh_library(cx));
                                 }
                                 modal.dismiss(window, cx);
                             }
@@ -439,6 +508,9 @@ impl Focusable for CreateSkillModal {
 }
 
 impl ModalView for CreateSkillModal {
+    fn fit_viewport(&self) -> bool {
+        true
+    }
     fn guards_close(&self) -> bool {
         true
     }
@@ -457,15 +529,27 @@ pub fn open_create_skill_modal(
     cx: &mut Context<Workspace>,
 ) {
     let workspace = cx.weak_entity();
-    let project_root = ws.active_lane_root();
-    let state = cx
-        .global::<crate::agent::skills::SkillsState>()
-        .snapshot_for(project_root.as_deref());
+    let Some(config) = ws.pin_library() else {
+        return;
+    };
+    let project_root = config.cwd.clone();
+    let state = ws.right_views.library.view.inventory.skills.clone();
+    let creation_targets = ws
+        .right_views
+        .library
+        .view
+        .inventory
+        .creation_targets
+        .clone();
     crate::workspace::dialog_helpers::open_form_modal(
         strings::skills::new_title(),
         Some(px(crate::ui::theme::FORM_MODAL_WIDE)),
         move |window, cx| {
-            CreateSkillModal::new(workspace, prefill_scope, project_root, state, window, cx)
+            let mut modal =
+                CreateSkillModal::new(workspace, prefill_scope, project_root, state, window, cx);
+            modal.config = Some(config);
+            modal.creation_targets = creation_targets;
+            modal
         },
         window,
         cx,

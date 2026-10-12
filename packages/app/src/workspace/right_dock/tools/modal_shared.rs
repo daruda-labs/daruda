@@ -139,6 +139,15 @@ pub(super) fn parse_pairs(
                 })
             })?;
         let key = key.trim().to_string();
+        let valid = if headers {
+            key.bytes()
+                .all(|b| b.is_ascii_alphanumeric() || b"!#$%&'*+-.^_`|~".contains(&b))
+        } else {
+            crate::agent::mcp::import::valid_variable(&key)
+        };
+        if !valid {
+            return Err(strings::mcp::pairs_invalid(index + 1).into());
+        }
         if pairs.contains_key(&key)
             || (headers && pairs.keys().any(|k: &String| k.eq_ignore_ascii_case(&key)))
         {

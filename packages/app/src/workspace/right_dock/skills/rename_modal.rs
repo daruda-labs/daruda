@@ -28,12 +28,15 @@ fn report_validation(
 }
 
 pub fn open_rename_skill_modal(
-    _ws: &mut Workspace,
+    ws: &mut Workspace,
     scope: SkillScope,
     dir: PathBuf,
     window: &mut Window,
     cx: &mut Context<Workspace>,
 ) {
+    if !scope.is_writable() || ws.library_context().config.is_none() {
+        return;
+    }
     let workspace = cx.weak_entity();
     let current_name = dir
         .file_name()
@@ -101,11 +104,7 @@ pub fn open_rename_skill_modal(
                 }
                 Err(NameError::DuplicateInScope { .. }) => unreachable!(),
             }
-            let lane = ws.active_lane_root();
-            if cx
-                .global::<crate::agent::skills::SkillsState>()
-                .name_exists(scope, &new_name, lane.as_deref())
-            {
+            if dir.parent().is_some_and(|p| p.join(&new_name).exists()) {
                 report_validation(
                     ws,
                     strings::skills::name_duplicate(),
@@ -116,7 +115,7 @@ pub fn open_rename_skill_modal(
             }
             match persist::rename_skill(&dir, &new_name) {
                 Ok(_) => {
-                    ws.refresh_skills_watcher(cx);
+                    ws.refresh_library(cx);
                 }
                 Err(e) => {
                     let report =

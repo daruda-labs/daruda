@@ -38,6 +38,8 @@ fn blank_to_none(s: &str) -> Option<String> {
 /// — every value it needs is captured here.
 #[derive(Clone, Debug)]
 pub struct AddMcpInitial {
+    pub(crate) targets: Vec<crate::agent::configuration::library::Target>,
+    pub(crate) config: Option<std::sync::Arc<crate::agent::configuration::Configuration>>,
     pub default_scope: McpScope,
     pub project_root: Option<PathBuf>,
     /// `(scope, name)` pairs of every server already in either scope —
@@ -61,6 +63,10 @@ pub struct AddMcpServerModal {
     transport: McpTransport,
     disabled: bool,
     auth: super::auth::Auth,
+    codex_options: super::codex_options::CodexOptions,
+    args_rows: Entity<super::rows::Rows>,
+    env_rows: Entity<super::rows::Rows>,
+    header_rows: Entity<super::rows::Rows>,
 
     initial: AddMcpInitial,
     paste_input: Entity<InputState>,
@@ -68,7 +74,6 @@ pub struct AddMcpServerModal {
     candidates: Vec<McpServerDraft>,
     imported: Option<McpServerDraft>,
     advanced: bool,
-    reveal_values: bool,
     duplicate: bool,
 
     error: Option<SharedString>,
@@ -95,6 +100,7 @@ impl AddMcpServerModal {
             InputState::new(window, cx_state).placeholder(strings::mcp::placeholder_name())
         });
         let auth = super::auth::Auth::new(window, cx);
+        let codex_options = super::codex_options::CodexOptions::new(window, cx);
         let command_input = cx.new(|cx_state| {
             InputState::new(window, cx_state).placeholder(strings::mcp::placeholder_command())
         });
@@ -117,18 +123,25 @@ impl AddMcpServerModal {
 
         // Project + Local require an active lane root; User is always
         // available. Order mirrors the Tools-tab section order.
-        let scope_options: Vec<McpScope> = if initial.project_root.is_some() {
+        let mut scope_options: Vec<McpScope> = if initial.project_root.is_some() {
             vec![McpScope::Project, McpScope::Local, McpScope::User]
         } else {
             vec![McpScope::User]
         };
+        if initial
+            .config
+            .as_ref()
+            .is_some_and(|c| c.provider == crate::agent::configuration::Provider::Codex)
+        {
+            scope_options.retain(|s| *s != McpScope::Local);
+        }
         let scope = if scope_options.contains(&initial.default_scope) {
             initial.default_scope
         } else {
             McpScope::User
         };
 
-        let subs = vec![
+        let mut subs = vec![
             forward_input(&auth.input, window, cx),
             forward_multi_input(&paste_input, window, cx),
             forward_input(&name_input, window, cx),
@@ -139,15 +152,33 @@ impl AddMcpServerModal {
             forward_multi_input(&headers_input, window, cx),
         ];
 
+        subs.extend(
+            codex_options
+                .inputs
+                .iter()
+                .map(|input| forward_multi_input(input, window, cx)),
+        );
+        let args_rows = cx.new(|cx| {
+            super::rows::Rows::new(args_input.clone(), super::rows::Kind::Arguments, window, cx)
+        });
+        let env_rows = cx.new(|cx| {
+            super::rows::Rows::new(env_input.clone(), super::rows::Kind::Pairs, window, cx)
+        });
+        let header_rows = cx.new(|cx| {
+            super::rows::Rows::new(headers_input.clone(), super::rows::Kind::Pairs, window, cx)
+        });
         let mut modal = Self {
             paste_input,
             pasting: true,
             candidates: Vec::new(),
             imported: None,
             advanced: false,
-            reveal_values: false,
             duplicate: false,
             auth,
+            codex_options,
+            args_rows,
+            env_rows,
+            header_rows,
             form: Default::default(),
             panel_focus_handle: cx.focus_handle(),
             name_input,
@@ -214,7 +245,10 @@ impl AddMcpServerModal {
         {
             d.env.clone()
         } else {
-            super::modal_shared::parse_pairs(&env_text, false).map_err(|e| (3, e))?
+            self.env_rows
+                .read(cx)
+                .pairs(false, cx)
+                .map_err(|e| (3, e))?
         };
         let headers_text = self.headers_input.read(cx).value().to_string();
         let mut headers = if self.transport.is_remote() {
@@ -225,14 +259,43 @@ impl AddMcpServerModal {
             {
                 d.headers.clone()
             } else {
-                super::modal_shared::parse_pairs(&headers_text, true).map_err(|e| (2, e))?
+                self.header_rows
+                    .read(cx)
+                    .pairs(true, cx)
+                    .map_err(|e| (2, e))?
             }
         } else {
             Default::default()
         };
 
+        let mut extra = self
+            .imported
+            .as_ref()
+            .map(|d| d.extra.clone())
+            .unwrap_or_default();
+        if self
+            .initial
+            .config
+            .as_ref()
+            .is_some_and(|c| c.provider == crate::agent::configuration::Provider::Codex)
+        {
+            self.codex_options
+                .apply(&mut extra, cx)
+                .map_err(|(index, error)| (-(index as isize) - 2, error))?;
+        }
         if self.transport.is_remote() {
-            self.auth.apply(&mut headers, cx).map_err(|e| (-1, e))?;
+            if self
+                .initial
+                .config
+                .as_ref()
+                .is_some_and(|c| c.provider == crate::agent::configuration::Provider::Codex)
+            {
+                self.auth
+                    .apply_codex(&mut headers, &mut extra, cx)
+                    .map_err(|e| (-1, e))?;
+            } else {
+                self.auth.apply(&mut headers, cx).map_err(|e| (-1, e))?;
+            }
         }
 
         let args_text = self.args_input.read(cx).value().to_string();
@@ -259,11 +322,7 @@ impl AddMcpServerModal {
                 _ => Default::default(),
             },
             disabled: self.disabled,
-            extra: self
-                .imported
-                .as_ref()
-                .map(|d| d.extra.clone())
-                .unwrap_or_default(),
+            extra,
         })
     }
 
@@ -279,14 +338,29 @@ impl AddMcpServerModal {
             Ok(d) => d,
             Err((field, msg)) => {
                 self.advanced = true;
-                self.reveal_values = true;
                 self.error_field = (field >= 0).then_some(field);
-                if field < 0 {
+                if field < -1 {
+                    if let Some(input) = self.codex_options.inputs.get((-field - 2) as usize) {
+                        window.focus(&input.focus_handle(cx), cx);
+                    }
+                } else if field == -1 {
                     window.focus(&self.auth.input.focus_handle(cx), cx);
                 }
                 self.error = Some(msg);
                 if let Some(input) = self.visible_inputs().get(field as usize) {
                     window.focus(&input.focus_handle(cx), cx);
+                }
+                let row_focus = if field == 3 {
+                    self.env_rows.read(cx).focus_handle(false, cx)
+                } else if field == 2 && self.transport.is_remote() {
+                    self.header_rows.read(cx).focus_handle(true, cx)
+                } else if field == 2 {
+                    self.args_rows.read(cx).focus_handle(false, cx)
+                } else {
+                    None
+                };
+                if let Some(focus) = row_focus {
+                    window.focus(&focus, cx);
                 }
                 cx.notify();
                 return;
@@ -312,7 +386,24 @@ impl AddMcpServerModal {
             // window via `update_window(handle, ...)` to recover the
             // `&mut Window` needed for `dismiss`.
             ws.update(cx, |ws, cx_inner| {
-                let result = ws.add_mcp_server(scope, target_root, draft, cx_inner);
+                let result = if let Some(config) = &self.initial.config {
+                    let target = self
+                        .initial
+                        .targets
+                        .iter()
+                        .find(|t| t.scope == scope)
+                        .cloned()
+                        .or_else(|| {
+                            crate::agent::configuration::library::Target::new(config, scope, None)
+                        });
+                    let result = target
+                        .ok_or(crate::agent::mcp::McpPersistError::NoProjectRoot)
+                        .and_then(|t| t.mutate(&draft.name, None, Some(&draft)));
+                    ws.refresh_library(cx_inner);
+                    result
+                } else {
+                    ws.add_mcp_server(scope, target_root, draft, cx_inner)
+                };
                 let me = me.clone();
                 cx_inner.defer(move |cx| {
                     // SILENT-OK: window may be gone by the time this defer runs — with no window there is nothing to dismiss or show the save error on, so the no-op is correct.
@@ -351,6 +442,7 @@ impl AddMcpServerModal {
             self.headers_input.read(cx).value().to_string(),
         ];
         values.extend(self.auth.values(cx));
+        values.extend(self.codex_options.values(cx));
         values
     }
 
@@ -373,7 +465,7 @@ impl AddMcpServerModal {
     }
 
     fn inputs(&self) -> Vec<Entity<InputState>> {
-        vec![
+        let mut inputs = vec![
             self.auth.input.clone(),
             self.paste_input.clone(),
             self.name_input.clone(),
@@ -382,7 +474,9 @@ impl AddMcpServerModal {
             self.url_input.clone(),
             self.env_input.clone(),
             self.headers_input.clone(),
-        ]
+        ];
+        inputs.extend(self.codex_options.inputs.clone());
+        inputs
     }
 
     fn leave(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -484,6 +578,9 @@ impl Focusable for AddMcpServerModal {
 }
 
 impl ModalView for AddMcpServerModal {
+    fn fit_viewport(&self) -> bool {
+        true
+    }
     fn guards_close(&self) -> bool {
         true
     }
@@ -502,14 +599,47 @@ pub fn open_add_mcp_server_modal(
     cx: &mut Context<Workspace>,
 ) {
     let workspace = cx.weak_entity();
-    let lane = ws.active_lane_root();
-    let snapshot = cx
-        .global::<crate::agent::mcp::McpState>()
-        .snapshot_for(lane.as_deref(), &ws.mcp_project_dirs);
+    let Some(config) = ws.pin_library() else {
+        return;
+    };
+    let snapshot = ws.right_views.library.view.inventory.mcp.clone();
+    let existing_names = ws
+        .right_views
+        .library
+        .view
+        .inventory
+        .groups
+        .iter()
+        .filter(|group| {
+            group.target.owner.is_none()
+                && (group.target.scope != McpScope::Project
+                    || config
+                        .cwd
+                        .as_ref()
+                        .is_some_and(|cwd| group.target.path == config.project_file(cwd)))
+        })
+        .flat_map(|group| {
+            group
+                .servers
+                .iter()
+                .map(|server| (server.scope, server.name.clone()))
+        })
+        .collect();
     let initial = AddMcpInitial {
+        targets: ws
+            .right_views
+            .library
+            .view
+            .inventory
+            .groups
+            .iter()
+            .filter(|g| g.target.owner.is_none())
+            .map(|g| g.target.clone())
+            .collect(),
+        config: Some(config),
         default_scope: prefill_scope.unwrap_or(McpScope::User),
         project_root: snapshot.project_root.clone(),
-        existing_names: snapshot.all_names(),
+        existing_names,
     };
     crate::workspace::dialog_helpers::open_form_modal(
         strings::mcp::new_title(),
@@ -548,5 +678,18 @@ impl AddMcpServerModal {
         if review {
             self.review_paste(window, cx);
         }
+    }
+}
+
+#[cfg(feature = "screenshot")]
+impl AddMcpServerModal {
+    pub(in crate::workspace) fn seed_codex_for_shot(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.paste_input.update(cx,|input,cx| input.set_value("[mcp_servers.docs]\nurl = 'https://docs.example.com/mcp'\nbearer_token_env_var = 'DOCS_TOKEN'\nstartup_timeout_sec = 20\nenabled_tools = ['search', 'read']\n",window,cx));
+        self.review_paste(window, cx);
+        self.advanced = true;
     }
 }

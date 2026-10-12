@@ -496,6 +496,20 @@ impl Workspace {
                 (!matched.is_empty()).then_some((section.recipe, matched))
             })
             .collect();
+        let context = self.library_context();
+        self.right_views.library.observe_context(&context);
+        let library = if self.right_views.library.view.config == context.config
+            && self.right_views.library.view.remote == context.remote
+            && self.right_views.library.view.provider == context.provider
+            && self.right_views.library.view.local_management == context.local_management
+        {
+            self.right_views.library.view.clone()
+        } else {
+            super::super::right_dock::library::LibraryView {
+                loading: context.config.is_some(),
+                ..context
+            }
+        };
         RightDockSnapshot {
             right_dock_view: self.docks.right_view,
             workspace: Handle(self.docks.right.read(cx).workspace.clone()),
@@ -505,9 +519,8 @@ impl Workspace {
             activity,
             recent_sessions,
             usage_refresh_in_flight: self.claude.usage_refresh_in_flight,
-            skills: cx
-                .global::<crate::agent::skills::SkillsState>()
-                .snapshot_for(self.active_lane_root().as_deref()),
+            skills: library.inventory.skills.clone(),
+            library: library.clone(),
             skill_search_input: Handle(self.right_views.skill_search_input.clone()),
             skill_search_query: self
                 .right_views
@@ -535,9 +548,7 @@ impl Workspace {
             tool_use_failure_counts,
             now: PerFrame(chrono::Utc::now()),
             right_panel_scroll_handle: Handle(self.right_views.scroll_handle.clone()),
-            mcp: cx
-                .global::<crate::agent::mcp::McpState>()
-                .snapshot_for(self.active_lane_root().as_deref(), &self.mcp_project_dirs),
+            mcp: library.inventory.mcp.clone(),
         }
     }
 }

@@ -229,6 +229,15 @@ pub(in crate::workspace) fn open_form_modal<E, B>(
             .child(body)
             .close_button(false)
             .overlay_closable(false);
+        if entity.read(cx).fit_viewport() {
+            let inset = crate::ui::dialog::window_paddings(window);
+            d = d.margin_top(px(theme::PAD_XL)).max_h(
+                window.viewport_size().height
+                    - inset.top
+                    - inset.bottom
+                    - px(theme::TITLE_BAR_HEIGHT + theme::PAD_XL + theme::PAD_XL),
+            );
+        }
         if !title.is_empty() {
             d = d.title(title.clone());
         }

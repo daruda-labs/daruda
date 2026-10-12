@@ -11,7 +11,6 @@ impl Render for AddMcpServerModal {
         let banner = self
             .error
             .as_ref()
-            .filter(|_| self.error_field.is_none())
             .map(|msg| crate::ui::alert::error("add-tool-error", msg.clone()));
 
         // Scope segmented selector. Children align with `scope_values`
@@ -42,10 +41,19 @@ impl Render for AddMcpServerModal {
             }));
 
         // Transport segmented selector — same index→value mapping.
-        let transport_values: Vec<McpTransport> =
-            transport_options().iter().map(|(tp, _)| *tp).collect();
+        let options: Vec<_> =
+            transport_options()
+                .into_iter()
+                .filter(|(transport, _)| {
+                    *transport != McpTransport::Sse
+                        || self.initial.config.as_ref().is_none_or(|c| {
+                            c.provider == crate::agent::configuration::Provider::Claude
+                        })
+                })
+                .collect();
+        let transport_values: Vec<McpTransport> = options.iter().map(|(tp, _)| *tp).collect();
         let transport_chip = button_group("transport-group", cx)
-            .children(transport_options().into_iter().map(|(tp, label)| {
+            .children(options.into_iter().map(|(tp, label)| {
                 button(
                     SharedString::from(format!("transport-{}", tp.slug())),
                     label,
@@ -88,6 +96,16 @@ impl Render for AddMcpServerModal {
             .child(field_label(strings::mcp::field_transport(), &t))
             .child(transport_chip);
 
+        if self.scope == McpScope::Project
+            && self
+                .initial
+                .config
+                .as_ref()
+                .is_some_and(|c| c.provider == crate::agent::configuration::Provider::Codex)
+        {
+            body = body.child(field_label(strings::library::project_load_hint(), &t));
+        }
+
         let connection = if self.transport.is_remote() {
             &self.url_input
         } else {
@@ -124,68 +142,45 @@ impl Render for AddMcpServerModal {
                 })),
         );
         if self.advanced {
-            let extra_input = if self.transport.is_remote() {
-                &self.headers_input
-            } else {
-                &self.args_input
-            };
             if !self.transport.is_remote() {
                 body = body
                     .child(field_label(strings::mcp::field_args(), &t))
-                    .child(super::super::super::form_state::ordered_field_input(
-                        extra_input,
-                        cx,
-                        2,
-                        8,
-                        self.error_field,
-                        self.error.as_ref(),
-                    ));
+                    .child(self.args_rows.clone());
             }
-            body = body.child(
-                button("reveal-values", strings::mcp::reveal_values())
-                    .disabled(submitting)
-                    .tab_stop(true)
-                    .tab_index(9)
-                    .on_click(cx.listener(|this, _, _, cx| {
-                        this.reveal_values = !this.reveal_values;
-                        cx.notify();
-                    })),
-            );
-            if self.reveal_values {
-                if self.transport.is_remote() {
-                    body = body
-                        .child(field_label(strings::mcp::field_headers(), &t))
-                        .child(field_label(strings::mcp::auth_headers_hint(), &t))
-                        .child(super::super::super::form_state::ordered_field_input(
-                            extra_input,
-                            cx,
-                            2,
-                            10,
-                            self.error_field,
-                            self.error.as_ref(),
-                        ));
-                }
+            if self.transport.is_remote() {
                 body = body
-                    .child(field_label(strings::mcp::field_env(), &t))
-                    .child(super::super::super::form_state::ordered_field_input(
-                        &self.env_input,
-                        cx,
-                        3,
-                        11,
-                        self.error_field,
-                        self.error.as_ref(),
-                    ));
+                    .child(field_label(strings::mcp::field_headers(), &t))
+                    .child(field_label(strings::mcp::auth_headers_hint(), &t))
+                    .child(self.header_rows.clone());
             }
-            body = body.child(
-                checkbox("mcp-disabled", strings::mcp::field_disabled(), 12)
-                    .checked(self.disabled)
-                    .on_click(cx.listener(|this, checked: &bool, _, cx| {
-                        if !this.submitting {
-                            this.disabled = *checked;
-                            cx.notify();
-                        }
-                    })),
-            );
+            body = body
+                .child(field_label(strings::mcp::field_env(), &t))
+                .child(self.env_rows.clone());
+            if self
+                .initial
+                .config
+                .as_ref()
+                .is_none_or(|c| c.provider == crate::agent::configuration::Provider::Codex)
+            {
+                body = body.child(
+                    checkbox("mcp-disabled", strings::mcp::field_disabled(), 12)
+                        .checked(self.disabled)
+                        .on_click(cx.listener(|this, checked: &bool, _, cx| {
+                            if !this.submitting {
+                                this.disabled = *checked;
+                                cx.notify();
+                            }
+                        })),
+                );
+            }
+            if self
+                .initial
+                .config
+                .as_ref()
+                .is_some_and(|c| c.provider == crate::agent::configuration::Provider::Codex)
+            {
+                body = body.child(self.codex_options.render(cx));
+            }
         }
 
         if let Some(draft) = &self.imported {
@@ -219,7 +214,7 @@ impl Render for AddMcpServerModal {
                 button("paste-back", strings::common::btn_back())
                     .disabled(submitting)
                     .tab_stop(true)
-                    .tab_index(13)
+                    .tab_index(20)
                     .on_click(cx.listener(|this, _, w, cx| {
                         this.pasting = true;
                         w.focus(&this.paste_input.focus_handle(cx), cx);
@@ -229,13 +224,13 @@ impl Render for AddMcpServerModal {
             .child(
                 button("add-mcp-cancel", strings::common::btn_cancel())
                     .tab_stop(true)
-                    .tab_index(14)
+                    .tab_index(21)
                     .on_click(cx.listener(|this, _: &ClickEvent, w, cx| this.leave(w, cx))),
             )
             .child(
                 button_primary("add-mcp-save", save_label)
                     .tab_stop(true)
-                    .tab_index(15)
+                    .tab_index(22)
                     .disabled(submitting || self.name_input.read(cx).value().trim().is_empty())
                     .on_click(cx.listener(|this, _: &ClickEvent, w, cx| this.submit(w, cx))),
             );

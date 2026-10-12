@@ -12,7 +12,7 @@ use crate::surface::strings;
 use crate::workspace::Workspace;
 
 pub fn open_delete_skill_confirm(
-    _ws: &mut Workspace,
+    ws: &mut Workspace,
     scope: SkillScope,
     dir: PathBuf,
     window: &mut Window,
@@ -25,6 +25,8 @@ pub fn open_delete_skill_confirm(
     if !scope.is_writable() {
         return;
     }
+    let Some(pin) = ws.pin_library() else { return };
+    let expected = persist::deletion_revision(&dir);
     let workspace = cx.weak_entity();
     let body = format!(
         "{}\n\n{}",
@@ -36,6 +38,12 @@ pub fn open_delete_skill_confirm(
         strings::skills::delete_title(),
         body,
         move |_window, app_cx| {
+            let _pin = &pin;
+            if expected.as_ref().ok() != persist::deletion_revision(&dir).as_ref().ok()
+                || expected.is_err()
+            {
+                return Err(strings::mcp::source_changed().into());
+            }
             let Some(ws) = workspace.upgrade() else {
                 return Err(strings::common::form_target_gone().into());
             };
@@ -55,7 +63,7 @@ pub fn open_delete_skill_confirm(
                         ws.report_error(report, cx);
                         return Err(message);
                     }
-                    ws.refresh_skills_watcher(cx);
+                    ws.refresh_library(cx);
                     Ok(())
                 })
             }

@@ -8,7 +8,6 @@ impl Render for EditMcpServerModal {
         let banner = self
             .error
             .as_ref()
-            .filter(|_| self.error_field.is_none())
             .map(|msg| crate::ui::alert::error("edit-tool-error", msg.clone()));
 
         // Read-only summary line: "Name @ Scope"
@@ -20,6 +19,7 @@ impl Render for EditMcpServerModal {
             .text_size(px(theme::RIGHT_PANEL_BODY_FONT_SIZE))
             .text_color(summary_text)
             .child(SharedString::from(self.initial.name.clone()))
+            .children(self.initial.target.as_ref().map(|target| target.label()))
             .child(SharedString::from(format!(
                 "@ {}",
                 scope_label(self.initial.scope)
@@ -28,10 +28,19 @@ impl Render for EditMcpServerModal {
         // Transport segmented selector. Children align with
         // `transport_values` by index; the click callback maps the
         // selected index back to its `McpTransport`.
-        let transport_values: Vec<McpTransport> =
-            transport_options().iter().map(|(tp, _)| *tp).collect();
+        let options: Vec<_> =
+            transport_options()
+                .into_iter()
+                .filter(|(transport, _)| {
+                    *transport != McpTransport::Sse
+                        || self.initial.config.as_ref().is_none_or(|c| {
+                            c.provider == crate::agent::configuration::Provider::Claude
+                        })
+                })
+                .collect();
+        let transport_values: Vec<McpTransport> = options.iter().map(|(tp, _)| *tp).collect();
         let transport_chip = button_group("transport-group", cx)
-            .children(transport_options().into_iter().map(|(tp, label)| {
+            .children(options.into_iter().map(|(tp, label)| {
                 button(
                     SharedString::from(format!("transport-{}", tp.slug())),
                     label,
@@ -60,6 +69,16 @@ impl Render for EditMcpServerModal {
             .child(summary)
             .child(field_label(strings::mcp::field_transport(), &t))
             .child(transport_chip);
+
+        if self.initial.scope == McpScope::Project
+            && self
+                .initial
+                .config
+                .as_ref()
+                .is_some_and(|c| c.provider == crate::agent::configuration::Provider::Codex)
+        {
+            body = body.child(field_label(strings::library::project_load_hint(), &t));
+        }
 
         let connection = if self.transport.is_remote() {
             &self.url_input
@@ -97,68 +116,45 @@ impl Render for EditMcpServerModal {
                 })),
         );
         if self.advanced {
-            let extra_input = if self.transport.is_remote() {
-                &self.headers_input
-            } else {
-                &self.args_input
-            };
             if !self.transport.is_remote() {
                 body = body
                     .child(field_label(strings::mcp::field_args(), &t))
-                    .child(super::super::super::form_state::ordered_field_input(
-                        extra_input,
-                        cx,
-                        1,
-                        8,
-                        self.error_field,
-                        self.error.as_ref(),
-                    ));
+                    .child(self.args_rows.clone());
             }
-            body = body.child(
-                button("reveal-values", strings::mcp::reveal_values())
-                    .disabled(submitting)
-                    .tab_stop(true)
-                    .tab_index(9)
-                    .on_click(cx.listener(|this, _, _, cx| {
-                        this.reveal_values = !this.reveal_values;
-                        cx.notify();
-                    })),
-            );
-            if self.reveal_values {
-                if self.transport.is_remote() {
-                    body = body
-                        .child(field_label(strings::mcp::field_headers(), &t))
-                        .child(field_label(strings::mcp::auth_headers_hint(), &t))
-                        .child(super::super::super::form_state::ordered_field_input(
-                            extra_input,
-                            cx,
-                            1,
-                            10,
-                            self.error_field,
-                            self.error.as_ref(),
-                        ));
-                }
+            if self.transport.is_remote() {
                 body = body
-                    .child(field_label(strings::mcp::field_env(), &t))
-                    .child(super::super::super::form_state::ordered_field_input(
-                        &self.env_input,
-                        cx,
-                        2,
-                        11,
-                        self.error_field,
-                        self.error.as_ref(),
-                    ));
+                    .child(field_label(strings::mcp::field_headers(), &t))
+                    .child(field_label(strings::mcp::auth_headers_hint(), &t))
+                    .child(self.header_rows.clone());
             }
-            body = body.child(
-                checkbox("mcp-disabled", strings::mcp::field_disabled(), 12)
-                    .checked(self.disabled)
-                    .on_click(cx.listener(|this, checked: &bool, _, cx| {
-                        if !this.submitting {
-                            this.disabled = *checked;
-                            cx.notify();
-                        }
-                    })),
-            );
+            body = body
+                .child(field_label(strings::mcp::field_env(), &t))
+                .child(self.env_rows.clone());
+            if self
+                .initial
+                .config
+                .as_ref()
+                .is_none_or(|c| c.provider == crate::agent::configuration::Provider::Codex)
+            {
+                body = body.child(
+                    checkbox("mcp-disabled", strings::mcp::field_disabled(), 12)
+                        .checked(self.disabled)
+                        .on_click(cx.listener(|this, checked: &bool, _, cx| {
+                            if !this.submitting {
+                                this.disabled = *checked;
+                                cx.notify();
+                            }
+                        })),
+                );
+            }
+            if self
+                .initial
+                .config
+                .as_ref()
+                .is_some_and(|c| c.provider == crate::agent::configuration::Provider::Codex)
+            {
+                body = body.child(self.codex_options.render(cx));
+            }
         }
         if self.transport != self.initial.transport {
             body = body.child(crate::ui::alert::warning(
@@ -178,23 +174,34 @@ impl Render for EditMcpServerModal {
             .justify_end()
             .gap(px(theme::MODAL_FOOTER_GAP))
             .mt(px(theme::MODAL_FOOTER_MARGIN_TOP))
+            .when(self.error.is_some(), |footer| {
+                footer.child(
+                    button("reload-source", strings::library::reload())
+                        .disabled(self.submitting)
+                        .tab_stop(true)
+                        .tab_index(19)
+                        .on_click(
+                            cx.listener(|this, _, window, cx| this.request_reload(window, cx)),
+                        ),
+                )
+            })
             .child(
                 button("duplicate", strings::common::btn_duplicate())
                     .disabled(submitting)
                     .tab_stop(true)
-                    .tab_index(13)
+                    .tab_index(20)
                     .on_click(cx.listener(|this, _, w, cx| this.duplicate(w, cx))),
             )
             .child(
                 button("edit-mcp-cancel", strings::common::btn_cancel())
                     .tab_stop(true)
-                    .tab_index(14)
+                    .tab_index(21)
                     .on_click(cx.listener(|this, _: &ClickEvent, w, cx| this.leave(w, cx))),
             )
             .child(
                 button_primary("edit-mcp-save", save_label)
                     .tab_stop(true)
-                    .tab_index(15)
+                    .tab_index(22)
                     .disabled(submitting)
                     .on_click(cx.listener(|this, _: &ClickEvent, w, cx| this.submit(w, cx))),
             );

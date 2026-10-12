@@ -17,8 +17,8 @@ use serde_json::Value;
 use daruda_store::observability::error_report::{ErrorReport, ErrorSeverity};
 
 use crate::agent::mcp::{
-    McpLocation, McpPersistError, McpScope, McpServer, McpServerDraft, McpState, ProjectMcp,
-    delete_server, parse, set_disabled, update_server, write_server,
+    McpLocation, McpPersistError, McpScope, McpServer, McpServerDraft, McpState, ProjectMcp, parse,
+    set_disabled, update_server, write_server,
 };
 
 use crate::workspace::Workspace;
@@ -197,29 +197,6 @@ impl Workspace {
                 servers.push(new_server);
                 servers.sort_by(|a, b| a.name.cmp(&b.name));
             }
-            Ok(())
-        });
-        cx.notify();
-        result
-    }
-
-    /// Remove the named server from `scope`. Caller is the
-    /// delete-confirm modal, which already gated on user confirmation.
-    pub(super) fn delete_mcp_server_internal(
-        &mut self,
-        scope: McpScope,
-        lane: Option<PathBuf>,
-        name: &str,
-        cx: &mut Context<Self>,
-    ) -> Result<(), McpPersistError> {
-        let (path, location) =
-            target_meta(scope, lane.as_deref()).ok_or(McpPersistError::NoProjectRoot)?;
-        let result = cx.update_global::<McpState, _>(|state, _| {
-            refresh_before_write(state, scope, lane.as_deref())?;
-            let (servers, raw) = scope_slot_mut(state, scope, lane.as_deref())
-                .ok_or(McpPersistError::NoProjectRoot)?;
-            delete_server(raw, &path, scope, &location, name)?;
-            servers.retain(|s| s.name != name);
             Ok(())
         });
         cx.notify();

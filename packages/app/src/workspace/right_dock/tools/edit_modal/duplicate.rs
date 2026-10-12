@@ -20,6 +20,8 @@ impl EditMcpServerModal {
         draft.headers.clear();
         draft.extra.clear();
         let initial = AddMcpInitial {
+            targets: self.initial.target.clone().into_iter().collect(),
+            config: self.initial.config.clone(),
             default_scope: self.initial.scope,
             project_root: self.initial.project_root.clone(),
             existing_names: vec![(self.initial.scope, self.initial.name.clone())],

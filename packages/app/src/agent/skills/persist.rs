@@ -110,7 +110,11 @@ pub fn write_skill(
 
     // Atomic replace: temp file in the same dir, fsync, then rename.
     // macOS rename(2) is atomic, so partial reads are impossible.
-    let mut tmp = NamedTempFile::new_in(&dir)?;
+    let mut tmp = NamedTempFile::new_in(
+        target
+            .parent()
+            .ok_or_else(|| io::Error::other("Skill source has no parent"))?,
+    )?;
     use std::io::Write as _;
     tmp.as_file_mut().write_all(serialized.as_bytes())?;
     tmp.as_file().sync_all()?;
@@ -147,11 +151,15 @@ pub fn delete_skill(dir: &Path) -> Result<(), PersistError> {
 /// Replace the loaded file only if its source still matches the editor baseline.
 /// The comparison detects stale edits; atomic replacement prevents partial reads.
 pub fn update_skill_source(dir: &Path, expected: &str, source: &str) -> Result<(), PersistError> {
-    let target = dir.join("SKILL.md");
+    let target = daruda_core::path::canonicalize(dir.join("SKILL.md"))?;
     if std::fs::read_to_string(&target)? != expected {
         return Err(io::Error::new(io::ErrorKind::WouldBlock, "skill changed on disk").into());
     }
-    let mut tmp = NamedTempFile::new_in(dir)?;
+    let mut tmp = NamedTempFile::new_in(
+        target
+            .parent()
+            .ok_or_else(|| io::Error::other("skill source has no parent"))?,
+    )?;
     use std::io::Write as _;
     tmp.as_file_mut().write_all(source.as_bytes())?;
     tmp.as_file().sync_all()?;
@@ -168,9 +176,13 @@ pub(crate) fn create_skill_source(
     source: &str,
 ) -> Result<PathBuf, PersistError> {
     let dir = resolve_skill_dir(draft.scope, &draft.name, project_root)?;
-    std::fs::create_dir_all(&dir)?;
+    create_skill_source_at(&dir, source)
+}
+
+pub(crate) fn create_skill_source_at(dir: &Path, source: &str) -> Result<PathBuf, PersistError> {
+    std::fs::create_dir_all(dir)?;
     let target = dir.join("SKILL.md");
-    let mut tmp = NamedTempFile::new_in(&dir)?;
+    let mut tmp = NamedTempFile::new_in(dir)?;
     use std::io::Write as _;
     tmp.write_all(source.as_bytes())?;
     tmp.as_file().sync_all()?;
@@ -182,6 +194,34 @@ pub(crate) fn create_skill_source(
         }
     })?;
     Ok(target)
+}
+
+/// A delete confirmation owns the entire tree, including auxiliary files.
+/// Symlinks are hashed as links and are never followed below the skill root.
+pub(crate) fn deletion_revision(dir: &Path) -> io::Result<u64> {
+    use std::hash::{Hash, Hasher};
+    let mut hash = std::collections::hash_map::DefaultHasher::new();
+    daruda_core::path::canonicalize(dir)?.hash(&mut hash);
+    let mut pending = vec![dir.to_path_buf()];
+    while let Some(path) = pending.pop() {
+        path.hash(&mut hash);
+        let metadata = std::fs::symlink_metadata(&path)?;
+        metadata.len().hash(&mut hash);
+        metadata.created().ok().hash(&mut hash);
+        metadata.modified().ok().hash(&mut hash);
+        if metadata.is_symlink() {
+            std::fs::read_link(&path)?.hash(&mut hash);
+        } else if metadata.is_dir() {
+            let mut entries = std::fs::read_dir(&path)?
+                .map(|e| e.map(|e| e.path()))
+                .collect::<io::Result<Vec<_>>>()?;
+            entries.sort();
+            pending.extend(entries);
+        } else if metadata.is_file() {
+            std::fs::read(&path)?.hash(&mut hash);
+        }
+    }
+    Ok(hash.finish())
 }
 
 #[cfg(test)]

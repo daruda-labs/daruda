@@ -7,11 +7,3 @@ pub(crate) fn scope_display(scope: crate::agent::mcp::McpScope) -> String {
         crate::agent::mcp::McpScope::Local => s::common::section_local(),
     }
 }
-
-pub(crate) fn user_local_scope_display() -> String {
-    format!(
-        "{}/{}",
-        s::common::section_user(),
-        s::common::section_local()
-    )
-}

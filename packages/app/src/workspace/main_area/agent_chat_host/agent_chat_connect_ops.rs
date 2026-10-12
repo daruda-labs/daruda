@@ -453,6 +453,14 @@ impl Workspace {
             }
         };
 
+        self.capture_library_launch(
+            pane_id,
+            &launch,
+            &agent_env,
+            prepared.as_ref(),
+            &resolved.resolved_cwd,
+        );
+
         Some(AgentChatConnectionPlan {
             agent_id,
             launch_spec,
