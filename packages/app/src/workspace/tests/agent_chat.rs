@@ -7,8 +7,6 @@ use daruda_store::project::PaneCwd;
 use gpui::{AppContext as _, Entity, TestAppContext};
 
 use super::build_workspace;
-use crate::transcript::display_filter::{DisplayFilter, FilterFacet};
-use crate::transcript::fold_mode::{FoldMode, FoldPreset};
 use crate::workspace::Workspace;
 use crate::workspace::main_area::agent_chat_pane::pane_choice::PaneChoice;
 use crate::workspace::main_area::agent_chat_pane::rows::tail::{TailLevel, TailWindow};
@@ -17,6 +15,8 @@ use crate::workspace::main_area::agent_chat_pane::view::{
 };
 use crate::workspace::main_area::pane::PaneContent;
 use crate::workspace::main_area::pane_tree::PaneId;
+use daruda_transcript::display_filter::{DisplayFilter, FilterFacet};
+use daruda_transcript::fold_mode::{FoldMode, FoldPreset};
 
 /// Fetch the `AgentChatView` entity for `pane_id` (panics if the pane is gone
 /// or is not an AgentChat pane).

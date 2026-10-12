@@ -11,14 +11,14 @@ use std::rc::Rc;
 use gpui::{Anchor, AnyElement, IntoElement, SharedString, Window, div, prelude::*, px};
 
 use crate::surface::strings as s;
-use crate::transcript::editor::filter::{FilterEditorActions, filter_editor, filter_value};
-use crate::transcript::editor::fold::{FoldEditorActions, fold_editor, mode_value};
-use crate::transcript::editor::range::{range_editor, value_label};
-use crate::transcript::editor::{
-    ResetSpec, TextRoles, aux_icon, dismiss_press, panel_header, panel_root,
-};
 use crate::ui::theme;
 use crate::ui::{Icon, IconName, Popover, PopoverState, button_bare, icons};
+use daruda_transcript::editor::filter::{FilterEditorActions, filter_editor, filter_value};
+use daruda_transcript::editor::fold::{FoldEditorActions, fold_editor, mode_value};
+use daruda_transcript::editor::range::{range_editor, value_label};
+use daruda_transcript::editor::{
+    ResetSpec, TextRoles, aux_icon, dismiss_press, panel_header, panel_root,
+};
 
 use super::super::super::{AgentCatalogRow, SettingsView};
 
@@ -176,8 +176,8 @@ pub(in crate::settings) fn fold_mode_control(
 fn fold_panel(
     settings: &gpui::WeakEntity<SettingsView>,
     catalog_index: usize,
-    mode: crate::transcript::fold_mode::FoldMode,
-    editor_state: crate::transcript::editor::state::FoldEditorState,
+    mode: daruda_transcript::fold_mode::FoldMode,
+    editor_state: daruda_transcript::editor::state::FoldEditorState,
     overridden: bool,
     cx: &mut gpui::Context<crate::ui::PopoverState>,
 ) -> AnyElement {
@@ -343,8 +343,8 @@ pub(in crate::settings) fn range_control(
 fn filter_panel(
     settings: &gpui::WeakEntity<SettingsView>,
     catalog_index: usize,
-    filter: crate::transcript::display_filter::DisplayFilter,
-    editor_state: crate::transcript::editor::state::FilterEditorState,
+    filter: daruda_transcript::display_filter::DisplayFilter,
+    editor_state: daruda_transcript::editor::state::FilterEditorState,
     overridden: bool,
     cx: &mut gpui::Context<crate::ui::PopoverState>,
 ) -> AnyElement {

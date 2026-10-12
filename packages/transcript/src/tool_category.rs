@@ -3,7 +3,7 @@
 use daruda_acp::{ToolCallItem, ToolKindView};
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub(crate) enum ToolCategory {
+pub enum ToolCategory {
     Read,
     Edit,
     /// A removal. Split from [`Self::Edit`] because it is the one file change
@@ -28,7 +28,7 @@ pub(crate) enum ToolCategory {
 impl ToolCategory {
     /// [`Self::Other`] stays last: it is the catch-all, so a new category
     /// takes the slot before it rather than displacing the tail.
-    pub(crate) const ALL: [Self; 9] = [
+    pub const ALL: [Self; 9] = [
         Self::Read,
         Self::Edit,
         Self::Delete,
@@ -54,7 +54,7 @@ impl ToolCategory {
         }
     }
 
-    pub(crate) const fn token(self) -> &'static str {
+    pub const fn token(self) -> &'static str {
         match self {
             Self::Read => "read",
             Self::Edit => "edit",
@@ -78,7 +78,7 @@ impl ToolCategory {
     /// keyed `FoldKey::Subagent` and folded by its own block row, so its
     /// category never reaches `FoldMode::tool_rule` — listing it would render a
     /// rule nothing can apply.
-    pub(crate) const fn folds_as_a_tool_card(self) -> bool {
+    pub const fn folds_as_a_tool_card(self) -> bool {
         !matches!(self, Self::Agent)
     }
 
@@ -139,7 +139,7 @@ const TOOL_NAME_CATEGORIES: [(&str, ToolCategory); 12] = [
 const MCP_TOOL_PREFIX: &str = "mcp__";
 
 /// Whether `name` is an MCP server's tool.
-pub(crate) fn is_mcp_tool_name(name: &str) -> bool {
+pub fn is_mcp_tool_name(name: &str) -> bool {
     name.starts_with(MCP_TOOL_PREFIX)
 }
 
@@ -170,7 +170,7 @@ fn category_for_kind(kind: ToolKindView) -> ToolCategory {
 /// like any reasoning tool, and every adapter reports an MCP tool as `other`.
 /// A reported diff still wins over the prefix: it is evidence of what the call
 /// did, which outranks where it came from.
-pub(crate) fn classify_tool(tc: &ToolCallItem) -> ToolCategory {
+pub fn classify_tool(tc: &ToolCallItem) -> ToolCategory {
     if tc.is_subagent_launch() {
         return ToolCategory::Agent;
     }
@@ -195,9 +195,9 @@ pub(crate) fn classify_tool(tc: &ToolCallItem) -> ToolCategory {
 /// practice — measured at up to four categories in one group — so this returns
 /// the whole tally rather than picking a representative.
 ///
-/// Ties break by [`ToolCategory::index`] so a header does not reorder itself
+/// Ties break by `ToolCategory::index` so a header does not reorder itself
 /// between renders of the same group.
-pub(crate) fn tally_categories<'a>(
+pub fn tally_categories<'a>(
     calls: impl IntoIterator<Item = &'a ToolCallItem>,
 ) -> Vec<(ToolCategory, usize)> {
     let mut counts = [0usize; ToolCategory::ALL.len()];
@@ -342,42 +342,6 @@ mod tests {
             tally_categories(calls.iter()),
             vec![(ToolCategory::Read, 2)]
         );
-    }
-
-    /// A segment of one is the common case in a mixed group, so every category
-    /// needs a singular form — "1 files read" is the shape this guards against.
-    #[test]
-    fn every_category_has_both_a_singular_and_a_plural_form() {
-        for locale in ["en", "ko"] {
-            for category in ToolCategory::ALL {
-                let one_key = format!("agent_chat.group_{}_one", category.token());
-                let many_key = format!("agent_chat.group_{}", category.token());
-                let one = rust_i18n::t!(&one_key, locale = locale);
-                let many = rust_i18n::t!(&many_key, count = 3, locale = locale);
-                assert!(
-                    !one.contains("group_") && !many.contains("group_"),
-                    "{locale}/{} is missing a form (t! echoes the key when unresolved)",
-                    category.token()
-                );
-                assert_ne!(one, many, "{locale}/{}", category.token());
-            }
-        }
-        // Pinned, because the defect this guards is a *wording* one: the plural
-        // form printed for a count of one ("1 files read").
-        for (category, expected) in [
-            ("read", "1 file read"),
-            ("edit", "1 file edited"),
-            ("delete", "1 file deleted"),
-            ("search", "1 search"),
-            ("run", "1 command"),
-            ("fetch", "1 web call"),
-            ("mcp", "1 MCP call"),
-            ("agent", "1 agent"),
-            ("other", "1 other call"),
-        ] {
-            let key = format!("agent_chat.group_{category}_one");
-            assert_eq!(rust_i18n::t!(&key, locale = "en"), expected);
-        }
     }
 
     #[test]

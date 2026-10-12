@@ -14,7 +14,7 @@ use super::super::rows::tail::TailWindow;
 use super::super::session_config::SessionConfig;
 use super::super::transcript_defaults::TranscriptDefaults;
 use super::{ActivityTracker, AgentChatView, AgentSessionStatus, AssetCache, ChatContentWidth};
-use crate::transcript::display_filter::DisplayFilter;
+use daruda_transcript::display_filter::DisplayFilter;
 
 // Restated here so a per-file scan sees the impl is test-only.
 #[cfg(test)]

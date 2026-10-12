@@ -1,6 +1,6 @@
 use super::*;
-use crate::transcript::display_filter::DisplayFilter;
 use daruda_acp::{ToolKindView, ToolStatusView};
+use daruda_transcript::display_filter::DisplayFilter;
 
 fn call(id: &str, parent: Option<&str>, status: ToolStatusView, kind: ToolKindView) -> ChatItem {
     ChatItem::ToolCall(ToolCallItem {

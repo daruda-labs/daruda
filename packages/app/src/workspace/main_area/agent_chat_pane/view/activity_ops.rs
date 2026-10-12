@@ -217,7 +217,7 @@ impl AgentChatView {
                 .turn_records
                 .get(&run_start)
                 .map(|r| r.worked_for),
-            tools: crate::transcript::tool_category::tally_categories(calls),
+            tools: daruda_transcript::tool_category::tally_categories(calls),
         })
     }
 
@@ -294,7 +294,7 @@ impl AgentChatView {
 /// A settled run in brief — what a phone is told alongside the answer.
 pub(in crate::workspace) struct RunSummary {
     pub(in crate::workspace) worked_for: Option<std::time::Duration>,
-    pub(in crate::workspace) tools: Vec<(crate::transcript::tool_category::ToolCategory, usize)>,
+    pub(in crate::workspace) tools: Vec<(daruda_transcript::tool_category::ToolCategory, usize)>,
 }
 
 #[cfg(test)]

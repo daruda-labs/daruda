@@ -18,8 +18,8 @@ use super::transcript_structure::{TranscriptStructure, response_run};
 pub(in crate::workspace) use super::tool_status::{
     LiveSubagentUnits, effective_tool_status, tool_or_subtree_live,
 };
-use crate::transcript::display_filter::DisplayFilter;
-use crate::transcript::tool_category::{ToolCategory, tally_categories};
+use daruda_transcript::display_filter::DisplayFilter;
+use daruda_transcript::tool_category::{ToolCategory, tally_categories};
 use tail::{StepWindow, TailWindow};
 
 pub(super) mod foldable_keys;

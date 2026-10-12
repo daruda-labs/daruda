@@ -754,10 +754,10 @@ impl Workspace {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        use crate::transcript::display_filter::FilterFacet;
-        use crate::transcript::fold_mode::FoldPreset;
         use crate::workspace::main_area::agent_chat_pane::rows::tail::{TailLevel, TailWindow};
         use daruda_config::TAIL_WINDOW_CHOICES;
+        use daruda_transcript::display_filter::FilterFacet;
+        use daruda_transcript::fold_mode::FoldPreset;
 
         self.open_agent_chat_transcript_for_shot(window, cx);
         let pane_id = self.active_runtime().focused_pane_id;
@@ -915,8 +915,8 @@ impl Workspace {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        use crate::transcript::display_filter::FilterFacet;
         use crate::workspace::main_area::agent_chat_pane::rows::tail::{TailLevel, TailWindow};
+        use daruda_transcript::display_filter::FilterFacet;
 
         self.open_agent_chat_transcript_for_shot(window, cx);
         let pane_id = self.active_runtime().focused_pane_id;
@@ -928,7 +928,7 @@ impl Workspace {
             // are not part of what the chip offers, so a folded transcript
             // leaves it with nothing to show and no chip at all.
             v.set_fold_mode(
-                crate::transcript::fold_mode::FoldPreset::Expanded.mode(),
+                daruda_transcript::fold_mode::FoldPreset::Expanded.mode(),
                 window,
                 cx,
             );
@@ -957,12 +957,12 @@ impl Workspace {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        use crate::transcript::display_filter::{DisplayFilter, FilterFacet};
         use crate::workspace::main_area::agent_chat_pane::fold::FoldKey;
         use crate::workspace::main_area::agent_chat_pane::rows::tail::{TailLevel, TailWindow};
         use crate::workspace::main_area::agent_chat_pane::shot_transcript::{
             THOUGHT_RUN_GID, thought_run_transcript,
         };
+        use daruda_transcript::display_filter::{DisplayFilter, FilterFacet};
 
         self.open_agent_chat_pane_seeded(
             None,
@@ -1064,7 +1064,7 @@ impl Workspace {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        use crate::transcript::fold_mode::FoldMode;
+        use daruda_transcript::fold_mode::FoldMode;
 
         self.open_agent_chat_transcript_for_shot(window, cx);
         let pane_id = self.active_runtime().focused_pane_id;
@@ -1145,7 +1145,7 @@ impl Workspace {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        use crate::transcript::fold_mode::FoldMode;
+        use daruda_transcript::fold_mode::FoldMode;
 
         self.open_agent_chat_transcript_for_shot(window, cx);
         let pane_id = self.active_runtime().focused_pane_id;

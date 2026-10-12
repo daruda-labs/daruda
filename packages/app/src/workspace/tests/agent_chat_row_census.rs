@@ -13,13 +13,13 @@ mod pinned;
 
 use daruda_acp::ChatItem;
 
-use crate::transcript::display_filter::DisplayFilter;
-use crate::transcript::fold_mode::{FoldMode, FoldPreset};
 use crate::workspace::main_area::agent_chat_pane::fold::FoldState;
 use crate::workspace::main_area::agent_chat_pane::rows::tail::{StepWindow, TailWindow};
 use crate::workspace::main_area::agent_chat_pane::rows::{
     LiveSubagentUnits, RenderRow, RowKind, project,
 };
+use daruda_transcript::display_filter::DisplayFilter;
+use daruda_transcript::fold_mode::{FoldMode, FoldPreset};
 
 /// The recent-steps level the census measures at — the budgets in `pinned` and
 /// the monotonicity check in [`invariant_violations`] probe the same window.

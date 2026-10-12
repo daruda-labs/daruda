@@ -12,9 +12,9 @@ mod terminal_page;
 mod workspace_page;
 
 use crate::test_support::init_gpui_component;
-use crate::transcript::display_filter::FilterFacet;
-use crate::transcript::editor::range::RangeLevel;
-use crate::transcript::fold_mode::{BlockRule, FoldBlock, FoldMode, FoldPreset, TurnPosition};
+use daruda_transcript::display_filter::FilterFacet;
+use daruda_transcript::editor::range::RangeLevel;
+use daruda_transcript::fold_mode::{BlockRule, FoldBlock, FoldMode, FoldPreset, TurnPosition};
 
 /// Construct a Settings window wrapped in `gpui_component::Root` —
 /// matches the production windowing path so `gpui_component::Input`'s

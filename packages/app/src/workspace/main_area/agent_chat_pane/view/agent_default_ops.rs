@@ -12,8 +12,8 @@ use super::super::pane_choice::PaneChoice;
 use super::super::rows::tail::StepWindow;
 use super::AgentChatView;
 use crate::settings_store::SettingsStore;
-use crate::transcript::display_filter::DisplayFilter;
-use crate::transcript::fold_mode::FoldMode;
+use daruda_transcript::display_filter::DisplayFilter;
+use daruda_transcript::fold_mode::FoldMode;
 
 impl AgentChatView {
     /// Write this pane's fold matrix as its agent's default.
@@ -124,8 +124,8 @@ fn window_size(size: u8) -> Option<u8> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::transcript::display_filter::FilterFacet;
-    use crate::transcript::fold_mode::FoldPreset;
+    use daruda_transcript::display_filter::FilterFacet;
+    use daruda_transcript::fold_mode::FoldPreset;
 
     /// The built-in on every axis writes no key, the same rule Settings keeps.
     #[test]

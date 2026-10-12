@@ -5,11 +5,13 @@ use super::{
     DisplayFilter, FoldMode, PaneChoice, TailChoices, context_meter, every_axis_follows_config,
     format_token_count, last_active_tooltip, options_tooltip,
 };
-use crate::transcript::display_filter::FilterFacet;
-use crate::transcript::fold_mode::FoldPreset;
 use crate::workspace::main_area::agent_chat_pane::rows::tail::TailWindow;
 use daruda_acp::{CostView, UsageView};
 use daruda_config::TAIL_WINDOW_CHOICES;
+use daruda_transcript::display_filter::FilterFacet;
+use daruda_transcript::editor::filter::filter_value;
+use daruda_transcript::editor::fold::mode_value;
+use daruda_transcript::fold_mode::FoldPreset;
 
 /// Zone conversion and the per-locale shapes belong to `surface::timestamp`;
 /// what this pane owns is the fallback — a timestamp it cannot read reaches the
@@ -203,16 +205,16 @@ fn the_compact_tooltip_names_every_axis() {
         tail_pinned(true),
     );
     for value in [
-        crate::surface::strings::agent_chat::fold_mode_custom(),
-        crate::surface::strings::agent_chat::filter_tool_edit(),
+        mode_value(FoldMode::from_tokens(["auto", "last.tool=expanded"])),
+        filter_value(DisplayFilter::default().toggled(FilterFacet::ToolEdit)),
     ] {
         assert!(tip.contains(&value), "{value:?} missing from {tip:?}");
     }
     // And the default reading names the defaults rather than going silent.
     let (fold, filter, tail) = following();
     let quiet = options_tooltip(fold, filter, tail);
-    assert!(quiet.contains(&crate::surface::strings::agent_chat::fold_mode_auto()));
-    assert!(quiet.contains(&crate::surface::strings::agent_chat::filter_none()));
+    assert!(quiet.contains(&mode_value(FoldMode::default())));
+    assert!(quiet.contains(&filter_value(DisplayFilter::default())));
     assert_ne!(
         quiet,
         options_tooltip(PaneChoice::Chosen(FoldMode::default()), filter, tail),

@@ -1,6 +1,6 @@
 use super::super::fold::{FoldContext, FoldKey};
 use super::super::rows::RowKind;
-use crate::transcript::fold_mode::FoldPreset;
+use daruda_transcript::fold_mode::FoldPreset;
 
 mod attachments;
 mod settle;
@@ -86,8 +86,8 @@ fn add_test_view(cx: &mut gpui::TestAppContext) -> gpui::WindowHandle<super::Age
                 tail: super::super::rows::tail::StepWindow::default(),
                 content_width: super::ChatContentWidth::Reading,
                 tool_summary: super::ToolSummaryStyle::Labeled,
-                fold_mode: crate::transcript::fold_mode::FoldMode::default(),
-                filter: crate::transcript::display_filter::DisplayFilter::default(),
+                fold_mode: daruda_transcript::fold_mode::FoldMode::default(),
+                filter: daruda_transcript::display_filter::DisplayFilter::default(),
             },
             daruda_config::file_viewer::DEFAULT_SYNTAX_THEME.to_owned(),
             cx,
@@ -97,7 +97,7 @@ fn add_test_view(cx: &mut gpui::TestAppContext) -> gpui::WindowHandle<super::Age
 
 #[gpui::test]
 fn command_analysis_follows_transcript_rebuilds(cx: &mut gpui::TestAppContext) {
-    use crate::transcript::command_analysis::CommandEffect;
+    use daruda_transcript::command_analysis::CommandEffect;
     let handle = make_test_view(cx);
     handle
         .update(cx, |view, _window, _cx| {
@@ -1951,7 +1951,7 @@ fn only_a_measurement_that_flips_the_split_repaints(cx: &mut gpui::TestAppContex
 use super::super::pane_choice::PaneChoice;
 use super::super::rows::tail::{StepWindow, TailLevel, TailWindow};
 use super::super::transcript_defaults::TranscriptDefaults;
-use crate::transcript::display_filter::{DisplayFilter, FilterFacet};
+use daruda_transcript::display_filter::{DisplayFilter, FilterFacet};
 
 /// A config state distinct from the built-in one on every axis, so a reset
 /// that lands on the *built-in* default instead of the one in force is caught.
@@ -2249,7 +2249,7 @@ fn resetting_the_display_filter_hands_the_axis_back(cx: &mut gpui::TestAppContex
 /// away a hand-edited matrix.
 #[gpui::test]
 fn the_custom_segment_brings_back_the_hand_edited_matrix(cx: &mut gpui::TestAppContext) {
-    use crate::transcript::fold_mode::{BlockRule, FoldBlock, TurnPosition};
+    use daruda_transcript::fold_mode::{BlockRule, FoldBlock, TurnPosition};
 
     let window = make_test_view(cx);
     window
@@ -2276,7 +2276,7 @@ fn the_custom_segment_brings_back_the_hand_edited_matrix(cx: &mut gpui::TestAppC
 /// two adjacent controls lose the same work differently.
 #[gpui::test]
 fn resetting_to_the_default_still_leaves_the_matrix_reachable(cx: &mut gpui::TestAppContext) {
-    use crate::transcript::fold_mode::{BlockRule, FoldBlock, TurnPosition};
+    use daruda_transcript::fold_mode::{BlockRule, FoldBlock, TurnPosition};
 
     let window = make_test_view(cx);
     window
@@ -2306,7 +2306,7 @@ fn resetting_to_the_default_still_leaves_the_matrix_reachable(cx: &mut gpui::Tes
 /// be a preset — otherwise resetting onto a custom default loses it silently.
 #[gpui::test]
 fn a_custom_default_does_not_swallow_the_edit_on_reset(cx: &mut gpui::TestAppContext) {
-    use crate::transcript::fold_mode::{BlockRule, FoldBlock, TurnPosition};
+    use daruda_transcript::fold_mode::{BlockRule, FoldBlock, TurnPosition};
 
     let window = make_test_view(cx);
     window
@@ -2349,7 +2349,7 @@ fn a_custom_default_does_not_swallow_the_edit_on_reset(cx: &mut gpui::TestAppCon
 /// older matrix.
 #[gpui::test]
 fn editing_a_custom_matrix_updates_what_is_remembered(cx: &mut gpui::TestAppContext) {
-    use crate::transcript::fold_mode::{BlockRule, FoldBlock, TurnPosition};
+    use daruda_transcript::fold_mode::{BlockRule, FoldBlock, TurnPosition};
 
     let window = make_test_view(cx);
     window

@@ -7,13 +7,13 @@ use std::rc::Rc;
 
 use super::axis_chip::axis_chip_label;
 use crate::surface::strings as s;
-use crate::transcript::editor::range::{RangeLevel, range_editor};
-use crate::transcript::editor::{ResetSpec, SaveSpec};
 use crate::ui::theme;
 use crate::workspace::main_area::agent_chat_pane::pane_choice::PaneChoice;
 use crate::workspace::main_area::agent_chat_pane::rows::tail::{TailLevel, TailWindow};
 use crate::workspace::main_area::agent_chat_pane::view::AgentChatView;
 use crate::workspace::main_area::pane_tree::PaneId;
+use daruda_transcript::editor::range::{RangeLevel, range_editor};
+use daruda_transcript::editor::{ResetSpec, SaveSpec};
 
 /// Both levels' choices, as the chip and its two surfaces read them.
 #[derive(Clone, Copy)]
@@ -99,7 +99,7 @@ pub(super) fn tail_window_panel(
 /// "N earlier steps" row it sits above.
 fn tail_window_value(tail: TailWindow) -> String {
     match tail {
-        TailWindow::All => s::agent_chat::tail_window_all(),
+        TailWindow::All => daruda_transcript::editor::range::all_label(),
         TailWindow::Last(n) => s::agent_chat::tail_window_last(n),
     }
 }
@@ -120,7 +120,7 @@ mod tests {
     fn the_chip_names_the_current_window() {
         assert!(
             tail_window_chip_label(following(TailWindow::All))
-                .contains(&s::agent_chat::tail_window_all())
+                .contains(&daruda_transcript::editor::range::all_label())
         );
         let last = TailWindow::last(TAIL_WINDOW_CHOICES[0]);
         assert_ne!(
@@ -139,7 +139,7 @@ mod tests {
                 PaneChoice::Seeded(calls),
             ))
         };
-        let all = s::agent_chat::tail_window_all();
+        let all = daruda_transcript::editor::range::all_label();
 
         // Nothing of its own to say: same window as the steps, or no window.
         assert_eq!(

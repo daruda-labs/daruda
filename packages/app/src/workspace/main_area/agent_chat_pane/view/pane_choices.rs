@@ -2,8 +2,8 @@
 //! out to be saved and takes it back on restore, so the workspace owns
 //! the file format without reaching into the view's fields.
 
-use crate::transcript::display_filter::DisplayFilter;
-use crate::transcript::fold_mode::FoldMode;
+use daruda_transcript::display_filter::DisplayFilter;
+use daruda_transcript::fold_mode::FoldMode;
 
 use super::super::pane_choice::PaneChoice;
 use super::super::rows::tail::TailWindow;

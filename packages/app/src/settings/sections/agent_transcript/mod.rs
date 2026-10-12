@@ -7,16 +7,16 @@
 //! resolve alike, and the shorter of the two keeps the file clean.
 //!
 //! All three carry the same editors the chat pane opens (see
-//! [`crate::transcript::editor`]), so every value those keys can hold is one
+//! [`daruda_transcript::editor`]), so every value those keys can hold is one
 //! the row can state and edit — including a matrix with `"<turn>.<block>=<rule>"`
 //! cell overrides or a partial facet set. Range retains select-backed storage
 //! for both levels, including custom sizes loaded from a hand-written config.
 
 use crate::surface::strings as s;
-use crate::transcript::display_filter::DisplayFilter;
-use crate::transcript::fold_mode::FoldMode;
 use crate::ui::select::{self, SelectOption, SelectState};
 use daruda_config::{TAIL_WINDOW_ALL, TAIL_WINDOW_CHOICES, TAIL_WINDOW_DEFAULT};
+use daruda_transcript::display_filter::DisplayFilter;
+use daruda_transcript::fold_mode::FoldMode;
 use gpui::{AppContext as _, Entity, SharedString, Window};
 
 use super::super::{AgentCatalogRow, SettingsView};
@@ -190,7 +190,7 @@ impl SettingsView {
     pub(in crate::settings) fn select_agent_row_fold_preset(
         &mut self,
         catalog_index: usize,
-        preset: Option<crate::transcript::fold_mode::FoldPreset>,
+        preset: Option<daruda_transcript::fold_mode::FoldPreset>,
         cx: &mut gpui::Context<Self>,
     ) {
         let Some(row) = self.agent_editable_row_mut(catalog_index) else {
@@ -238,7 +238,7 @@ impl SettingsView {
     pub(in crate::settings) fn toggle_agent_row_fold_tools(
         &mut self,
         catalog_index: usize,
-        turn: crate::transcript::fold_mode::TurnPosition,
+        turn: daruda_transcript::fold_mode::TurnPosition,
         cx: &mut gpui::Context<Self>,
     ) {
         let Some(row) = self.agent_editable_row_mut(catalog_index) else {
@@ -253,7 +253,7 @@ impl SettingsView {
     pub(in crate::settings) fn toggle_agent_row_filter_disclosure(
         &mut self,
         catalog_index: usize,
-        axis: crate::transcript::display_filter::FilterAxis,
+        axis: daruda_transcript::display_filter::FilterAxis,
         cx: &mut gpui::Context<Self>,
     ) {
         let Some(row) = self.agent_editable_row_mut(catalog_index) else {
@@ -266,7 +266,7 @@ impl SettingsView {
     pub(in crate::settings) fn set_agent_row_range_size(
         &mut self,
         index: usize,
-        level: crate::transcript::editor::range::RangeLevel,
+        level: daruda_transcript::editor::range::RangeLevel,
         size: u8,
         window: &mut Window,
         cx: &mut gpui::Context<Self>,
@@ -323,7 +323,7 @@ impl SettingsView {
     pub(in crate::settings) fn toggle_agent_row_filter_facet(
         &mut self,
         catalog_index: usize,
-        facet: crate::transcript::display_filter::FilterFacet,
+        facet: daruda_transcript::display_filter::FilterFacet,
         cx: &mut gpui::Context<Self>,
     ) {
         let Some(row) = self.agent_editable_row_mut(catalog_index) else {
@@ -336,7 +336,7 @@ impl SettingsView {
     pub(in crate::settings) fn set_agent_row_filter_section(
         &mut self,
         catalog_index: usize,
-        parent: crate::transcript::display_filter::FilterFacet,
+        parent: daruda_transcript::display_filter::FilterFacet,
         on: bool,
         cx: &mut gpui::Context<Self>,
     ) {
@@ -463,7 +463,7 @@ fn picked(state: &Entity<SelectState>, cx: &gpui::App) -> Option<String> {
 fn tail_options() -> Vec<SelectOption> {
     let mut options = vec![SelectOption::new(
         TAIL_WINDOW_ALL.to_string(),
-        s::agent_chat::tail_window_all(),
+        daruda_transcript::editor::range::all_label(),
     )];
     options.extend(TAIL_WINDOW_CHOICES.into_iter().map(|size| {
         SelectOption::new(
@@ -488,8 +488,8 @@ fn tail_value(size: u8) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::transcript::display_filter::FilterFacet;
-    use crate::transcript::fold_mode::{BlockRule, FoldBlock, FoldPreset, TurnPosition};
+    use daruda_transcript::display_filter::FilterFacet;
+    use daruda_transcript::fold_mode::{BlockRule, FoldBlock, FoldPreset, TurnPosition};
 
     fn strings(values: &[&str]) -> Vec<String> {
         values.iter().map(|v| (*v).to_owned()).collect()

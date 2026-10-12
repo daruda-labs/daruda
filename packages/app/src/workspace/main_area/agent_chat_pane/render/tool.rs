@@ -23,8 +23,6 @@ use super::mermaid::{mermaid_code_block_render, mermaid_fence_element};
 use super::status_icon::status_icon_with_age;
 use super::tail_row::call_boundary_label;
 use crate::surface::strings as s;
-use crate::transcript::command_analysis::{CommandAnalysis, CommandAnalysisIndex, CommandEffect};
-use crate::transcript::tool_category::{ToolCategory, is_mcp_tool_name};
 use crate::ui::CachedImage;
 use crate::ui::theme;
 use crate::ui::{Icon, IconName, IconNamed as _, Sizable as _};
@@ -44,6 +42,8 @@ use crate::workspace::main_area::agent_chat_pane::rows::{
     FilterMatchIndex, LiveSubagentUnits, effective_tool_status,
 };
 use crate::workspace::main_area::agent_chat_pane::view::AgentChatView;
+use daruda_transcript::command_analysis::{CommandAnalysis, CommandAnalysisIndex, CommandEffect};
+use daruda_transcript::tool_category::{ToolCategory, is_mcp_tool_name};
 
 #[derive(Clone)]
 struct OutputBlockContext<'a> {

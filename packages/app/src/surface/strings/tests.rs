@@ -19,7 +19,7 @@ fn a_run_start_label_carries_no_year() {
 /// got renders as the key itself — neither fails anywhere else.
 #[test]
 fn every_tool_category_has_its_own_group_label() {
-    use crate::transcript::tool_category::ToolCategory;
+    use daruda_transcript::tool_category::ToolCategory;
     let other = agent_chat::group_category(ToolCategory::Other.token(), 3);
     for category in ToolCategory::ALL {
         for count in [1, 3] {
@@ -40,6 +40,42 @@ fn every_tool_category_has_its_own_group_label() {
                 "{category:?} falls through to the catch-all"
             );
         }
+    }
+}
+
+/// A segment of one is the common case in a mixed group, so every category
+/// needs a singular form — "1 files read" is the shape this guards against.
+#[test]
+fn every_category_has_both_a_singular_and_a_plural_form() {
+    for locale in ["en", "ko"] {
+        for category in daruda_transcript::tool_category::ToolCategory::ALL {
+            let one_key = format!("agent_chat.group_{}_one", category.token());
+            let many_key = format!("agent_chat.group_{}", category.token());
+            let one = rust_i18n::t!(&one_key, locale = locale);
+            let many = rust_i18n::t!(&many_key, count = 3, locale = locale);
+            assert!(
+                !one.contains("group_") && !many.contains("group_"),
+                "{locale}/{} is missing a form (t! echoes the key when unresolved)",
+                category.token()
+            );
+            assert_ne!(one, many, "{locale}/{}", category.token());
+        }
+    }
+    // Pinned, because the defect this guards is a *wording* one: the plural
+    // form printed for a count of one ("1 files read").
+    for (category, expected) in [
+        ("read", "1 file read"),
+        ("edit", "1 file edited"),
+        ("delete", "1 file deleted"),
+        ("search", "1 search"),
+        ("run", "1 command"),
+        ("fetch", "1 web call"),
+        ("mcp", "1 MCP call"),
+        ("agent", "1 agent"),
+        ("other", "1 other call"),
+    ] {
+        let key = format!("agent_chat.group_{category}_one");
+        assert_eq!(rust_i18n::t!(&key, locale = "en"), expected);
     }
 }
 

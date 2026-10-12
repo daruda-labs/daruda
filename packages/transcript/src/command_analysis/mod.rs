@@ -16,18 +16,18 @@ const MAX_DEPTH: usize = 64;
 const PARSE_BUDGET: Duration = Duration::from_millis(10);
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum CommandEffect {
+pub enum CommandEffect {
     Read,
     Edit,
 }
 
 /// Locale-independent metadata. Missing effects stay unknown; they are not reads.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
-pub(crate) struct CommandAnalysis {
+pub struct CommandAnalysis {
     /// Distinct literal program names in source order, including substitutions.
-    pub(crate) programs: Vec<String>,
+    pub programs: Vec<String>,
     /// An edit takes precedence; a read requires every operation to be understood.
-    pub(crate) effect: Option<CommandEffect>,
+    pub effect: Option<CommandEffect>,
 }
 
 struct CachedAnalysis {
@@ -37,17 +37,17 @@ struct CachedAnalysis {
 
 /// Derived once per input change, keyed by the same ID as the tool call.
 #[derive(Default)]
-pub(crate) struct CommandAnalysisIndex {
+pub struct CommandAnalysisIndex {
     entries: HashMap<String, CachedAnalysis>,
 }
 
 impl CommandAnalysisIndex {
-    pub(crate) fn get(&self, tool_id: &str) -> Option<&CommandAnalysis> {
+    pub fn get(&self, tool_id: &str) -> Option<&CommandAnalysis> {
         self.entries.get(tool_id).map(|entry| &entry.analysis)
     }
 
     /// Reconcile input changes, late input, replay, and removed calls together.
-    pub(crate) fn reconcile(&mut self, items: &[ChatItem]) {
+    pub fn reconcile(&mut self, items: &[ChatItem]) {
         let mut retained = HashSet::new();
         for item in items {
             let ChatItem::ToolCall(call) = item else {

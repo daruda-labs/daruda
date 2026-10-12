@@ -18,6 +18,9 @@
 #   - src/windows.rs              — `gpui_component::Root::new(...)`
 #   - src/workspace/render/mod.rs — `Root::render_*_layer` in Workspace
 #
+# A sibling widget package (`packages/transcript/`) has no app facade to go
+# through, so it reaches `daruda_ui` directly — but never `gpui_component`.
+#
 # Usage:
 #   scripts/lint-direct-gpui-component.sh
 #
@@ -43,5 +46,17 @@ if [ -n "$violations" ]; then
     echo "$violations"
     echo
     echo "Route through crate::ui::*. See packages/app/src/ui/mod.rs."
+    exit 1
+fi
+
+package_violations=$(
+    grep -rnE --include="*.rs" '^[^/]*\bgpui_component\b' packages/transcript/src || true
+)
+
+if [ -n "$package_violations" ]; then
+    echo "Direct gpui_component access outside daruda_ui:"
+    echo "$package_violations"
+    echo
+    echo "Route through daruda_ui and re-export what you need there."
     exit 1
 fi

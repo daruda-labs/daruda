@@ -20,12 +20,6 @@ use super::super::fold_mode::fold_mode_chip_label;
 use super::super::tail_window::{TailChoices, tail_window_chip_label};
 use crate::surface::strings as s;
 use crate::surface::timestamp;
-use crate::transcript::display_filter::DisplayFilter;
-use crate::transcript::editor::state::{FilterEditorState, FoldEditorState};
-use crate::transcript::editor::{
-    TextRoles, aux_icon, dismiss_press, panel_header, panel_root, tabs_band,
-};
-use crate::transcript::fold_mode::FoldMode;
 use crate::ui::theme;
 use crate::ui::theme::PaneSurfaceTokens;
 use crate::ui::{
@@ -37,6 +31,12 @@ use crate::workspace::main_area::agent_chat_pane::view::{
     ActivityOptionsTab, AgentChatView, ChatContentWidth,
 };
 use crate::workspace::main_area::pane_tree::PaneId;
+use daruda_transcript::display_filter::DisplayFilter;
+use daruda_transcript::editor::state::{FilterEditorState, FoldEditorState};
+use daruda_transcript::editor::{
+    TextRoles, aux_icon, dismiss_press, panel_header, panel_root, tabs_band,
+};
+use daruda_transcript::fold_mode::FoldMode;
 
 const ICON_EXPAND: &str = "icons/ui/expand.svg";
 const ICON_COMPRESS: &str = "icons/ui/compress.svg";

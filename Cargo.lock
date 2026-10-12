@@ -1746,6 +1746,7 @@ dependencies = [
  "daruda_project",
  "daruda_store",
  "daruda_terminal",
+ "daruda_transcript",
  "daruda_ui",
  "daruda_update",
  "dirs",
@@ -1785,10 +1786,7 @@ dependencies = [
  "test_process",
  "toml 0.8.23",
  "tray-icon",
- "tree-sitter",
- "tree-sitter-bash",
  "tree-sitter-highlight",
- "tree-sitter-python",
  "tungstenite",
  "uds_windows",
  "unicode-segmentation",
@@ -1984,6 +1982,23 @@ dependencies = [
  "tracing",
  "unicode-width",
  "windows-sys 0.61.2",
+]
+
+[[package]]
+name = "daruda_transcript"
+version = "0.2.17"
+dependencies = [
+ "daruda_acp",
+ "daruda_config",
+ "daruda_ui",
+ "gpui",
+ "rust-i18n",
+ "serde_json",
+ "shell-words",
+ "strings_gen",
+ "tree-sitter",
+ "tree-sitter-bash",
+ "tree-sitter-python",
 ]
 
 [[package]]

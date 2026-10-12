@@ -60,8 +60,8 @@ pub mod tab_bar;
 pub mod theme;
 pub mod tooltip;
 
-#[cfg(test)]
-mod test_support;
+#[cfg(any(test, feature = "test-support"))]
+pub mod test_support;
 
 pub use badge::Badge;
 pub use button::{

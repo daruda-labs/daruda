@@ -38,7 +38,7 @@ ALLOW='\bpackages/app/src/ui/'
 
 # Anchored after leading whitespace so `///` doc mentions don't trip it.
 violations=$(
-    grep -rn --include="*.rs" -E '^[[:space:]]*\.context_menu\(' packages/app/src \
+    grep -rn --include="*.rs" -E '^[[:space:]]*\.context_menu\(' packages/app/src packages/transcript/src \
         | grep -Ev "$ALLOW" || true
 )
 

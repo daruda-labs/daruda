@@ -767,30 +767,6 @@ agent_chat:
   # [`agent_chat_filtered_show`], which the reader saw a click ago.
   filtered_hide_again: "Hide them again"
   filter_chip: "Filter: %{value}"
-  filter_hidden: "%{value} hidden"
-  filter_hidden_count: "%{count} kinds hidden"
-  filter_none: "All"
-  filter_axis_kind: "Kind"
-  # The `Reply` section heading — the prose kinds nest under it.
-  filter_axis_reply: "Reply"
-  filter_axis_tool: "Tool"
-  filter_thinking: "Reasoning"
-  filter_prose: "Replies"
-  # The reply itself, as opposed to a preamble.
-  filter_prose_answer: "Answers"
-  # Prose the agent wrote ahead of a step's work. Only an agent that labels its
-  # message phases produces any, so hiding these is inert for the others.
-  filter_prose_preamble: "Preambles"
-  filter_tools: "Tool calls"
-  filter_tool_read: "Reads"
-  filter_tool_edit: "Edits"
-  filter_tool_search: "Searches"
-  filter_tool_run: "Commands"
-  filter_tool_delete: "Deletes"
-  filter_tool_fetch: "Web calls"
-  filter_tool_mcp: "MCP tools"
-  filter_tool_agent: "Agents"
-  filter_tool_other: "Other tools"
   # The marker row where a Stop cut a run. Deliberately not the agent's own
   # wording: the Claude SDK writes `[Request interrupted by user]` into its
   # transcript, which is protocol text in one language that also reads as
@@ -806,44 +782,16 @@ agent_chat:
   tail_more_collapse_calls_one: "Collapse to the last call"
   tail_more_collapse_calls: "Collapse to the last %{count} calls"
   fold_mode_chip: "Fold: %{value}"
-  fold_mode_auto: "Auto"
-  fold_mode_summary: "Compact"
-  fold_mode_expanded: "Detailed"
-  fold_mode_custom: "Custom"
-  fold_editor_rules: "Item"
-  fold_editor_during: "In progress"
-  fold_editor_after: "After completion"
-  fold_editor_mixed: "Mixed"
-  fold_editor_history: "Previous responses"
-  fold_editor_history_rules: "Previous response overrides"
-  fold_editor_tool_categories: "Tool categories"
-  fold_editor_collapse_history: "Fold completed previous responses on a new request"
   use_agent_defaults: "Use agent defaults"
   use_built_in: "Use built-in defaults"
   save_as_agent_default: "Save as agent default"
   view_options_label: "View"
-  fold_editor_rule_expanded: "Expanded"
-  fold_editor_rule_collapsed: "Collapsed"
-  fold_block_response: "Response"
-  fold_block_tool_group: "Tool group"
-  fold_block_tool: "Tool call"
-  fold_block_subagent: "Subagent"
-  fold_block_thinking: "Reasoning"
-  fold_block_thinking_group: "Reasoning group"
-  fold_block_assistant: "Reply"
-  fold_block_diff: "Diff"
-  fold_block_raw_input: "Raw input"
   tail_window_chip: "Recent steps: %{value}"
   # The chip's value slot when the axis's two levels hold different windows.
   # A pane whose levels agree states the single value instead — see
   # `tail_window_chip_label`.
   tail_window_pair: "Steps: %{steps} · Calls: %{calls}"
-  tail_window_all: "All"
   tail_window_last: "%{count}"
-  # Heading of the recent-steps panel's step-level group.
-  tail_level_steps: "Recent steps per response"
-  # Heading of the recent-steps panel's call-level group.
-  tail_level_calls: "Recent tool calls per step"
   # An Activity Bar chip's label with the mark that says this pane has taken
   # the axis off the configured default. A dot, so it costs the chip no reading
   # and no restatement of the value it already carries.
@@ -861,10 +809,6 @@ agent_chat:
   source_this_chat: "This chat only"
   source_built_in: "Built-in default"
   source_agent_set: "Set for this agent"
-  # A Visible-items section's checked rows over its total.
-  filter_section_count: "%{selected} / %{total}"
-  filter_section_show: "Show items"
-  filter_section_hide: "Hide items"
   tool_output_truncated: "… (truncated, %{size} total)"
   # Placeholder shown in place of a tool's image output block while its base64
   # payload is still being decoded (or hasn't been scanned yet) — decode runs

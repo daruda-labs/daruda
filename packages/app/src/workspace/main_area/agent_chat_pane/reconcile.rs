@@ -818,8 +818,8 @@ mod tests {
         MAX_RESOURCE_IMAGE_BYTES, MAX_RESOURCE_IMAGE_PREVIEWS, ReconcileScope, load_resource_image,
         mermaid_key, resource_image_path,
     };
-    use crate::transcript::fold_mode::{FoldMode, FoldPreset};
     use crate::ui::diff_editor::DiffColors;
+    use daruda_transcript::fold_mode::{FoldMode, FoldPreset};
 
     const KEY: &str = "call_1#0";
 

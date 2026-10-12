@@ -5,8 +5,8 @@ use daruda_config::{AgentConfig, AgentDefinition, TAIL_WINDOW_DEFAULT};
 
 use super::rows::tail::{StepWindow, TailWindow};
 use super::view::{ChatContentWidth, ToolSummaryStyle};
-use crate::transcript::display_filter::DisplayFilter;
-use crate::transcript::fold_mode::FoldMode;
+use daruda_transcript::display_filter::DisplayFilter;
+use daruda_transcript::fold_mode::FoldMode;
 
 /// What a chat pane's presentation starts on, as the resolved config states it.
 /// One type because these are always derived together and always applied
@@ -89,8 +89,8 @@ impl TranscriptDefaults {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::transcript::display_filter::FilterFacet;
-    use crate::transcript::fold_mode::FoldPreset;
+    use daruda_transcript::display_filter::FilterFacet;
+    use daruda_transcript::fold_mode::FoldPreset;
 
     fn definition() -> AgentDefinition {
         AgentDefinition::claude_default()
@@ -233,10 +233,10 @@ mod tests {
         assert_eq!(mode.preset(), None, "a matrix, not a preset");
         assert_eq!(
             mode.rule(
-                crate::transcript::fold_mode::TurnPosition::Past,
-                crate::transcript::fold_mode::FoldBlock::Thinking,
+                daruda_transcript::fold_mode::TurnPosition::Past,
+                daruda_transcript::fold_mode::FoldBlock::Thinking,
             ),
-            Some(crate::transcript::fold_mode::BlockRule::Collapsed)
+            Some(daruda_transcript::fold_mode::BlockRule::Collapsed)
         );
     }
 

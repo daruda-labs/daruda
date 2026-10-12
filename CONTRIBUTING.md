@@ -232,7 +232,7 @@ Run these before committing:
 cargo fmt --all -- --check
 cargo clippy -p ghostty_vt -p ghostty_vt_sys -p daruda_terminal -p daruda \
   -p daruda_config -p daruda_store -p daruda_agent -p daruda_update \
-  -p daruda_acp -p daruda_core -p daruda_flow -p daruda_project -p daruda_ui -p daruda_control_types -p daruda_content -p daruda_flow_edit -p ferrum_flow -p strings_gen \
+  -p daruda_acp -p daruda_core -p daruda_flow -p daruda_project -p daruda_ui -p daruda_control_types -p daruda_content -p daruda_flow_edit -p daruda_transcript -p ferrum_flow -p strings_gen \
   --all-targets -- -D warnings
 ./scripts/lint-inline-literals.sh
 ./scripts/lint-paint-scope.sh
@@ -243,7 +243,7 @@ cargo clippy -p ghostty_vt -p ghostty_vt_sys -p daruda_terminal -p daruda \
 ./scripts/lint-viewport-row-scroll.sh
 cargo test -p ghostty_vt -p ghostty_vt_sys -p daruda_terminal -p daruda \
   -p daruda_config -p daruda_store -p daruda_agent -p daruda_update \
-  -p daruda_acp -p daruda_core -p daruda_flow -p daruda_project -p daruda_ui -p daruda_control_types -p daruda_content -p daruda_flow_edit -p ferrum_flow -p strings_gen
+  -p daruda_acp -p daruda_core -p daruda_flow -p daruda_project -p daruda_ui -p daruda_control_types -p daruda_content -p daruda_flow_edit -p daruda_transcript -p ferrum_flow -p strings_gen
 ./scripts/lint-no-silent-update.sh
 ./scripts/lint-agent-activity.sh
 ./scripts/lint-daruda-path-literals.sh
@@ -398,6 +398,7 @@ daruda/
 │   ├── project/                # daruda_project: runtime Project/Lane model, git ops
 │   ├── store/                  # daruda_store: persistence and observability
 │   ├── terminal/               # daruda_terminal: terminal emulation, GPUI rendering
+│   ├── transcript/             # daruda_transcript: transcript presentation model + editors
 │   ├── ui/                     # daruda_ui: domain-free widgets and theme bridge
 │   ├── update/                 # daruda_update: app update checking
 │   ├── ghostty-vt/             # ghostty_vt: safe Rust wrapper over libghostty-vt

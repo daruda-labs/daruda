@@ -38,10 +38,10 @@ use super::rows::tail::TailWindow;
 use super::rows::{FilterMatchIndex, LiveSubagentUnits, RenderRow};
 use super::session_config::SessionConfig;
 use super::transcript_defaults::TranscriptDefaults;
-use crate::transcript::command_analysis::CommandAnalysisIndex;
-use crate::transcript::display_filter::DisplayFilter;
-use crate::transcript::editor::state::{FilterEditorState, FoldEditorState};
 use crate::workspace::main_area::pane_tree::PaneId;
+use daruda_transcript::command_analysis::CommandAnalysisIndex;
+use daruda_transcript::display_filter::DisplayFilter;
+use daruda_transcript::editor::state::{FilterEditorState, FoldEditorState};
 
 /// How long a subagent's run stays "active" after its last child tool event
 /// (~4s observed), bridging gaps between its sequential child calls — the

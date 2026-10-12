@@ -45,13 +45,13 @@ use gpui::{
 
 use crate::lane::session_host;
 use crate::surface::strings as s;
-use crate::transcript::display_filter::DisplayFilter;
-use crate::transcript::editor::state::{FilterEditorState, FoldEditorState};
-use crate::transcript::fold_mode::FoldMode;
 use crate::ui::select::{self, SelectOption, SelectState};
 use crate::ui::{InputEvent, InputState};
 use daruda_store::observability::error_report::{ErrorReport, ErrorSeverity};
 use daruda_store::observability::log_writer::LogWriter;
+use daruda_transcript::display_filter::DisplayFilter;
+use daruda_transcript::editor::state::{FilterEditorState, FoldEditorState};
+use daruda_transcript::fold_mode::FoldMode;
 
 fn settings_button(
     id: impl Into<gpui::ElementId>,
@@ -818,7 +818,7 @@ impl SettingsView {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        use crate::transcript::fold_mode::{BlockRule, FoldBlock, FoldPreset, TurnPosition};
+        use daruda_transcript::fold_mode::{BlockRule, FoldBlock, FoldPreset, TurnPosition};
         let first = self.agent_editable_rows().map(|(index, _)| index).next();
         if let Some(index) = first
             && let Some(row) = self.agent_editable_row_mut(index)

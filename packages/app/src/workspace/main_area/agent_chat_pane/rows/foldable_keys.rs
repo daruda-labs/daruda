@@ -12,7 +12,7 @@ use daruda_acp::ChatItem;
 use super::super::agent_chat_helpers::{diff_editor_key, renders_raw_input, tool_fold_key};
 use super::super::fold::{FoldKey, FoldState};
 use super::{RowKind, project};
-use crate::transcript::display_filter::DisplayFilter;
+use daruda_transcript::display_filter::DisplayFilter;
 
 /// Fold keys controlled by expand-all and collapse-all. Tail and filter reveals
 /// are excluded because their chips own those states.

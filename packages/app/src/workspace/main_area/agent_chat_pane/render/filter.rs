@@ -6,10 +6,6 @@ use gpui::{AnyElement, Context, IntoElement, SharedString, prelude::*, px};
 
 use super::axis_chip::axis_chip_label;
 use crate::surface::strings as s;
-use crate::transcript::display_filter::DisplayFilter;
-use crate::transcript::editor::filter::{FilterEditorActions, filter_editor, filter_value};
-use crate::transcript::editor::state::FilterEditorState;
-use crate::transcript::editor::{ResetSpec, SaveSpec};
 use crate::ui::theme;
 use crate::ui::theme::PaneSurfaceTokens;
 use crate::ui::{Selectable as _, button_chip_on_surface};
@@ -18,6 +14,10 @@ use crate::workspace::main_area::agent_chat_pane::pane_choice::PaneChoice;
 use crate::workspace::main_area::agent_chat_pane::rows::FilteredAway;
 use crate::workspace::main_area::agent_chat_pane::view::AgentChatView;
 use crate::workspace::main_area::pane_tree::PaneId;
+use daruda_transcript::display_filter::DisplayFilter;
+use daruda_transcript::editor::filter::{FilterEditorActions, filter_editor, filter_value};
+use daruda_transcript::editor::state::FilterEditorState;
+use daruda_transcript::editor::{ResetSpec, SaveSpec};
 
 /// The chip's full text, overridden mark included. Also the filter axis's slot
 /// in the compact bar's tooltip, so the two readings of the same setting

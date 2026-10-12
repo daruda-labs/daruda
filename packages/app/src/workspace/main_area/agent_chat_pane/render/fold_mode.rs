@@ -7,14 +7,14 @@ use gpui::{AnyElement, Context};
 
 use super::axis_chip::axis_chip_label;
 use crate::surface::strings as s;
-use crate::transcript::editor::fold::{FoldEditorActions, fold_editor, mode_value};
-use crate::transcript::editor::state::FoldEditorState;
-use crate::transcript::editor::{ResetSpec, SaveSpec};
-use crate::transcript::fold_mode::FoldMode;
 use crate::ui::theme;
 use crate::workspace::main_area::agent_chat_pane::pane_choice::PaneChoice;
 use crate::workspace::main_area::agent_chat_pane::view::AgentChatView;
 use crate::workspace::main_area::pane_tree::PaneId;
+use daruda_transcript::editor::fold::{FoldEditorActions, fold_editor, mode_value};
+use daruda_transcript::editor::state::FoldEditorState;
+use daruda_transcript::editor::{ResetSpec, SaveSpec};
+use daruda_transcript::fold_mode::FoldMode;
 
 /// The chip's full text, overridden mark included. Also the fold axis's slot
 /// in the compact bar's tooltip, so the two readings of the same setting
@@ -106,7 +106,7 @@ pub(super) fn fold_mode_panel(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::transcript::fold_mode::FoldPreset;
+    use daruda_transcript::fold_mode::FoldPreset;
 
     /// A pane that chose the very value it would follow is still an override:
     /// its footer says so and offers the hand-back.

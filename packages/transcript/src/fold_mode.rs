@@ -1,11 +1,11 @@
 //! Fold defaults by turn position and block kind. Explicit user choices still
 //! override these rules; tail and filter rows remain owned by their chips.
 
-use crate::transcript::tool_category::ToolCategory;
+use crate::tool_category::ToolCategory;
 
 /// Whether a block belongs to the newest turn or history.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub(crate) enum TurnPosition {
+pub enum TurnPosition {
     Past,
     Last,
 }
@@ -34,7 +34,7 @@ impl TurnPosition {
 
 /// Foldable block kinds controlled by a mode.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub(crate) enum FoldBlock {
+pub enum FoldBlock {
     Response,
     ToolGroup,
     Tool,
@@ -48,7 +48,7 @@ pub(crate) enum FoldBlock {
 
 impl FoldBlock {
     /// Blocks in menu and serialization order.
-    pub(crate) const ALL: [FoldBlock; 9] = [
+    pub const ALL: [FoldBlock; 9] = [
         Self::Response,
         Self::ToolGroup,
         Self::Tool,
@@ -95,7 +95,7 @@ impl FoldBlock {
 
 /// How one matrix cell folds its block.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub(crate) enum BlockRule {
+pub enum BlockRule {
     Expanded,
     Collapsed,
     /// Open while the block is still being produced, folded once it settles.
@@ -127,7 +127,7 @@ impl BlockRule {
     }
 
     /// Whether a block under this rule is open, given whether it still runs.
-    pub(crate) fn is_expanded(self, active: bool) -> bool {
+    pub fn is_expanded(self, active: bool) -> bool {
         match self {
             Self::Expanded => true,
             Self::Collapsed => false,
@@ -175,7 +175,7 @@ const fn base_rule(block: FoldBlock) -> BlockRule {
 
 /// Named fold-mode presets offered by the chip.
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
-pub(crate) enum FoldPreset {
+pub enum FoldPreset {
     /// Auto reproduces the shipped default behavior exactly, so a pane that
     /// never picks a mode looks the same as one that picks this.
     #[default]
@@ -185,7 +185,7 @@ pub(crate) enum FoldPreset {
 }
 
 impl FoldPreset {
-    pub(crate) const ALL: [FoldPreset; 3] = [Self::Auto, Self::Summary, Self::Expanded];
+    pub const ALL: [FoldPreset; 3] = [Self::Auto, Self::Summary, Self::Expanded];
 
     fn token(self) -> &'static str {
         match self {
@@ -199,7 +199,7 @@ impl FoldPreset {
         Self::ALL.into_iter().find(|p| p.token() == token)
     }
 
-    pub(crate) fn mode(self) -> FoldMode {
+    pub fn mode(self) -> FoldMode {
         let mut mode = FoldMode::base();
         match self {
             Self::Auto => mode.set(TurnPosition::Last, FoldBlock::Response, BlockRule::Expanded),
@@ -229,7 +229,7 @@ impl FoldPreset {
 /// The [`FoldBlock::Tool`] row is not a cell of its own: a tool card always
 /// folds by its category, so the row reads and writes every category at once.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub(crate) struct FoldMode {
+pub struct FoldMode {
     /// The `Tool` slot holds its base value and is never read.
     rules: [[BlockRule; FoldBlock::ALL.len()]; TurnPosition::ALL.len()],
     tool_rules: [[BlockRule; ToolCategory::ALL.len()]; TurnPosition::ALL.len()],
@@ -262,7 +262,7 @@ impl FoldMode {
 
     /// The rule a block row states. `None` only for [`FoldBlock::Tool`] whose
     /// categories disagree, which no single rule describes.
-    pub(crate) fn rule(self, turn: TurnPosition, block: FoldBlock) -> Option<BlockRule> {
+    pub fn rule(self, turn: TurnPosition, block: FoldBlock) -> Option<BlockRule> {
         if block != FoldBlock::Tool {
             return Some(self.rules[turn.index()][block.index()]);
         }
@@ -281,23 +281,18 @@ impl FoldMode {
         }
     }
 
-    pub(crate) fn with_rule(
-        mut self,
-        turn: TurnPosition,
-        block: FoldBlock,
-        rule: BlockRule,
-    ) -> Self {
+    pub fn with_rule(mut self, turn: TurnPosition, block: FoldBlock, rule: BlockRule) -> Self {
         self.set(turn, block, rule);
         self
     }
 
-    pub(crate) fn tool_rule(self, turn: TurnPosition, category: ToolCategory) -> BlockRule {
+    pub fn tool_rule(self, turn: TurnPosition, category: ToolCategory) -> BlockRule {
         self.tool_rules[turn.index()][category.index()]
     }
 
     /// A category outside the tool row folds by its own block, so a rule for
     /// it would never apply and is dropped.
-    pub(crate) fn with_tool_rule(
+    pub fn with_tool_rule(
         mut self,
         turn: TurnPosition,
         category: ToolCategory,
@@ -309,11 +304,11 @@ impl FoldMode {
         self
     }
 
-    pub(crate) fn collapse_history(self) -> bool {
+    pub fn collapse_history(self) -> bool {
         self.collapse_history
     }
 
-    pub(crate) fn with_collapse_history(mut self, collapse: bool) -> Self {
+    pub fn with_collapse_history(mut self, collapse: bool) -> Self {
         self.collapse_history = collapse;
         self
     }
@@ -368,7 +363,7 @@ impl FoldMode {
     }
 
     /// The preset whose matrix this is, or `None` for a custom matrix.
-    pub(crate) fn preset(self) -> Option<FoldPreset> {
+    pub fn preset(self) -> Option<FoldPreset> {
         FoldPreset::ALL
             .into_iter()
             .find(|p| p.mode().with_collapse_history(self.collapse_history) == self)
@@ -377,7 +372,7 @@ impl FoldMode {
     /// Parse tokens left-to-right; a preset replaces the matrix and cell tokens
     /// override it. Within one preset's cells a category token narrows the
     /// `tool` row wherever it is written. Unknown tokens are ignored.
-    pub(crate) fn from_tokens<'a>(tokens: impl IntoIterator<Item = &'a str>) -> Self {
+    pub fn from_tokens<'a>(tokens: impl IntoIterator<Item = &'a str>) -> Self {
         let mut mode = Self::default();
         let mut categories = Vec::new();
         for token in tokens {
@@ -401,7 +396,7 @@ impl FoldMode {
     }
 
     /// Serialize as a preset, or as `summary` plus the cells that differ from it.
-    pub(crate) fn tokens(self) -> Vec<String> {
+    pub fn tokens(self) -> Vec<String> {
         let preset = self.preset();
         let mut out = vec![preset.unwrap_or(FoldPreset::Summary).token().to_owned()];
         if self.collapse_history {

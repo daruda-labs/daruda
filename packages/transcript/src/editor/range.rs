@@ -8,12 +8,12 @@ use gpui::{AnyElement, App, IntoElement, SharedString, Window, div, prelude::*, 
 use super::{
     ResetSpec, TextRoles, aux_icon, editor_column, reset_footer, scroll_content, scroll_region,
 };
-use crate::surface::strings as s;
-use crate::ui::{ButtonVariants as _, Selectable as _, button_bare, choice_variant, icons, theme};
+use crate::strings as s;
+use daruda_ui::{ButtonVariants as _, Selectable as _, button_bare, choice_variant, icons, theme};
 
 /// The two windows, in panel order. Each host maps it onto its own store.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub(crate) enum RangeLevel {
+pub enum RangeLevel {
     Steps,
     Calls,
 }
@@ -22,7 +22,7 @@ impl RangeLevel {
     pub(crate) const ALL: [Self; 2] = [Self::Steps, Self::Calls];
 
     /// This level's slot in a `[u8; 2]` of window sizes.
-    pub(crate) fn index(self) -> usize {
+    pub fn index(self) -> usize {
         match self {
             Self::Steps => 0,
             Self::Calls => 1,
@@ -38,8 +38,8 @@ impl RangeLevel {
 
     fn heading(self) -> String {
         match self {
-            Self::Steps => s::agent_chat::tail_level_steps(),
-            Self::Calls => s::agent_chat::tail_level_calls(),
+            Self::Steps => s::transcript::tail_level_steps(),
+            Self::Calls => s::transcript::tail_level_calls(),
         }
     }
 }
@@ -47,7 +47,7 @@ impl RangeLevel {
 pub(crate) type RangeEdit = Rc<dyn Fn(RangeLevel, u8, &mut Window, &mut App)>;
 
 /// `values` holds each level's size at [`RangeLevel::index`].
-pub(crate) fn range_editor(
+pub fn range_editor(
     id: &str,
     values: [u8; 2],
     font_size: f32,
@@ -130,12 +130,18 @@ fn choices(current: u8) -> Vec<u8> {
     values
 }
 
-pub(crate) fn value_label(value: u8) -> String {
+pub fn value_label(value: u8) -> String {
     if value == TAIL_WINDOW_ALL {
-        s::agent_chat::tail_window_all()
+        all_label()
     } else {
         value.to_string()
     }
+}
+
+/// The name of the window that withholds nothing, wherever a tail window is
+/// shown — this editor, the chat's chip, the Settings select.
+pub fn all_label() -> String {
+    s::transcript::tail_window_all()
 }
 
 #[cfg(test)]

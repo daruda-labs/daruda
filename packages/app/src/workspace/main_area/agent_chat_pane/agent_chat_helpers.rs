@@ -19,9 +19,9 @@ pub(super) use super::transcript_structure::{is_active, response_run};
 use super::view::AgentChatView;
 use super::window_access::WindowAccess;
 use crate::path_ext::PathExt as _;
-use crate::transcript::fold_mode::TurnPosition;
 use crate::ui::diff_editor::{DiffColors, DiffEditorModel, build_diff_editor_model};
 use crate::workspace::main_area::pane_tree::PaneId;
+use daruda_transcript::fold_mode::TurnPosition;
 
 /// Localize host-owned failure classes while retaining raw diagnostics in logs.
 pub(in crate::workspace) fn failure_message(failure: &daruda_acp::AcpFailure) -> String {
@@ -666,7 +666,7 @@ pub(super) fn fold_context_at(
     let context = FoldContext::new(boundary.at(ix), fold_active_at(key, ix, items, live_units));
     match (key, items.get(ix)) {
         (FoldKey::Tool(_), Some(daruda_acp::ChatItem::ToolCall(tc))) => {
-            context.with_tool_category(crate::transcript::tool_category::classify_tool(tc))
+            context.with_tool_category(daruda_transcript::tool_category::classify_tool(tc))
         }
         _ => context,
     }
@@ -717,7 +717,7 @@ pub(super) fn fold_active(key: &FoldKey, items: &[daruda_acp::ChatItem]) -> bool
 }
 
 /// What a `running` rule reads for `key` — the input to
-/// [`BlockRule::WhileRunning`](crate::transcript::fold_mode::BlockRule::WhileRunning).
+/// [`BlockRule::WhileRunning`](daruda_transcript::fold_mode::BlockRule::WhileRunning).
 fn fold_active_at(
     key: &FoldKey,
     ix: usize,

@@ -558,7 +558,7 @@ pub(super) fn pulse_opacity(cx: &gpui::App) -> f32 {
 fn response_bar(
     this: &AgentChatView,
     run_start: usize,
-    categories: &[(crate::transcript::tool_category::ToolCategory, usize)],
+    categories: &[(daruda_transcript::tool_category::ToolCategory, usize)],
     collapsed: bool,
     filtered: FilteredAway,
     filter_revealed: bool,
@@ -741,7 +741,7 @@ fn group_category_title(
     filter_revealed: bool,
     cx: &Context<AgentChatView>,
 ) -> AnyElement {
-    let tally = crate::transcript::tool_category::tally_categories(kept_tool_calls(
+    let tally = daruda_transcript::tool_category::tally_categories(kept_tool_calls(
         this,
         calls.iter().copied(),
         filter_revealed,
@@ -759,7 +759,7 @@ fn group_category_title(
 /// not in how it reads.
 fn category_segments(
     this: &AgentChatView,
-    tally: &[(crate::transcript::tool_category::ToolCategory, usize)],
+    tally: &[(daruda_transcript::tool_category::ToolCategory, usize)],
     thoughts: usize,
     cx: &Context<AgentChatView>,
 ) -> AnyElement {
@@ -840,8 +840,8 @@ fn thought_icon() -> SharedString {
 /// The glyph for one tool category. A category an ACP kind can name borrows the
 /// per-call mapping through a representative kind; the two no kind can name go
 /// through [`tool::name_keyed_icon`], the same source their cards use.
-fn category_icon(category: crate::transcript::tool_category::ToolCategory) -> SharedString {
-    use crate::transcript::tool_category::ToolCategory;
+fn category_icon(category: daruda_transcript::tool_category::ToolCategory) -> SharedString {
+    use daruda_transcript::tool_category::ToolCategory;
     if let Some(icon) = tool::name_keyed_icon(category) {
         return icon;
     }
@@ -1049,7 +1049,7 @@ fn render_item(
     items: &[ChatItem],
     live_units: &LiveSubagentUnits,
     filter_matches: &FilterMatchIndex,
-    command_analysis: &crate::transcript::command_analysis::CommandAnalysisIndex,
+    command_analysis: &daruda_transcript::command_analysis::CommandAnalysisIndex,
     filter_revealed: bool,
     boundary: TurnBoundary,
     assets: RenderAssets<'_>,
@@ -1124,9 +1124,9 @@ mod tests {
     /// (Edit covers Move), so the two are not the same glyph by design.
     #[test]
     fn a_name_keyed_category_shows_the_glyph_its_cards_do() {
-        use crate::transcript::tool_category::classify_tool;
         use crate::ui::IconNamed as _;
         use daruda_acp::{ToolCallItem, ToolKindView, ToolStatusView};
+        use daruda_transcript::tool_category::classify_tool;
 
         let call = |tool_name: Option<&str>, raw_input| ToolCallItem {
             id: "t".into(),

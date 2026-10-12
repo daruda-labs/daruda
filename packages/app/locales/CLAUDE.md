@@ -6,6 +6,12 @@ daruda uses [rust-i18n v3](https://github.com/longbridgeapp/rust-i18n).
 `en.yml` is the canonical source of truth.  
 `ko.yml` is the Korean translation. Both files must stay in sync.
 
+A package that draws its own UI owns its own `locales/`:
+`packages/terminal/locales/` (terminal view) and
+`packages/transcript/locales/` (the fold / filter / tail-window editors,
+generated through `strings_gen` like this crate's).
+A string those editors show goes there, not into `agent_chat:` here.
+
 ## `common:` section — shared tokens
 
 `common:` is the top-level section for strings reused across **two or more unrelated sections**.

@@ -17,7 +17,7 @@ cd "$(dirname "$0")/.."
 ALLOW='\bpackages/ui/src/flow_canvas\.rs'
 
 violations=$(
-    grep -rnE --include="*.rs" '(^[[:space:]]*use[[:space:]]+ferrum_flow\b|\bferrum_flow::)' packages/app/src packages/ui/src \
+    grep -rnE --include="*.rs" '(^[[:space:]]*use[[:space:]]+ferrum_flow\b|\bferrum_flow::)' packages/app/src packages/ui/src packages/transcript/src \
         | grep -Ev "$ALLOW" \
         || true
 )

@@ -11,10 +11,10 @@ use super::{
     ResetSpec, TextRoles, aux_icon, aux_line, editor_column, fixed_band, reset_footer,
     scroll_content, scroll_region,
 };
-use crate::surface::strings as s;
-use crate::transcript::fold_mode::{FoldBlock, FoldMode, FoldPreset, TurnPosition};
-use crate::transcript::tool_category::ToolCategory;
-use crate::ui::{
+use crate::fold_mode::{FoldBlock, FoldMode, FoldPreset, TurnPosition};
+use crate::strings as s;
+use crate::tool_category::ToolCategory;
+use daruda_ui::{
     ButtonCustomVariant, ButtonVariants as _, Disableable as _, DropdownMenu as _, Icon, IconName,
     PopupMenuItem, Selectable as _, button_bare, button_group, checkbox, icons, theme,
 };
@@ -25,7 +25,7 @@ pub(crate) type FoldToolsPress = Rc<dyn Fn(TurnPosition, &mut App)>;
 
 /// What the editor does with a click. Each host binds these to its own store;
 /// the editor itself holds no state and writes nothing.
-pub(crate) struct FoldEditorActions {
+pub struct FoldEditorActions {
     pub on_change: FoldRuleEdit,
     /// A press on the preset strip, as the segment itself — resolving which
     /// matrix that segment stands for is the host's, because the host is what
@@ -39,10 +39,10 @@ pub(crate) struct FoldEditorActions {
 
 /// The value text for a mode — what a chip or a settings row shows without
 /// opening the editor. Shared so the two readings cannot diverge.
-pub(crate) fn mode_value(mode: FoldMode) -> String {
+pub fn mode_value(mode: FoldMode) -> String {
     match mode.preset() {
         Some(preset) => preset_label(preset),
-        None => s::agent_chat::fold_mode_custom(),
+        None => s::transcript::fold_mode_custom(),
     }
 }
 
@@ -60,7 +60,7 @@ const EDITOR_ORDER: [FoldBlock; FoldBlock::ALL.len()] = [
     FoldBlock::RawInput,
 ];
 
-pub(crate) fn fold_editor(
+pub fn fold_editor(
     mode: FoldMode,
     state: FoldEditorState,
     id_prefix: &str,
@@ -92,7 +92,7 @@ pub(crate) fn fold_editor(
         ))
         .child(separated_row(cx).child(disclosure(
             SharedString::from(format!("{id_prefix}-fold-advanced")),
-            s::agent_chat::fold_editor_history_rules(),
+            s::transcript::fold_editor_history_rules(),
             advanced,
             text,
             None,
@@ -125,14 +125,14 @@ pub(crate) fn fold_editor(
                 .child(aux_line(
                     icons::HISTORY,
                     t.text_muted,
-                    s::agent_chat::fold_editor_history(),
+                    s::transcript::fold_editor_history(),
                     t.text_muted,
                     text,
                 ))
                 .child(
                     checkbox(
                         SharedString::from(format!("{id_prefix}-fold-history")),
-                        s::agent_chat::fold_editor_collapse_history(),
+                        s::transcript::fold_editor_collapse_history(),
                         0,
                     )
                     .text_size(px(text.body))
@@ -168,7 +168,7 @@ fn rule_rows(
                 block_label(block),
                 tools_open,
                 text,
-                Some(s::agent_chat::fold_editor_tool_categories()),
+                Some(s::transcript::fold_editor_tool_categories()),
                 Rc::new(move |app| on_tools(turn, app)),
             )
         } else {
@@ -239,18 +239,18 @@ fn rule_headings(text: TextRoles, cx: &App) -> impl IntoElement {
     table_row(
         div()
             .text_color(t.text_body)
-            .child(SharedString::from(s::agent_chat::fold_editor_rules())),
+            .child(SharedString::from(s::transcript::fold_editor_rules())),
         [
             // The glyphs carry the lifecycle by shape; the tones only echo it.
             phase(
                 icons::REFRESH,
                 t.banner_warning_text,
-                s::agent_chat::fold_editor_during(),
+                s::transcript::fold_editor_during(),
             ),
             phase(
                 icons::CHECK_CIRCLE,
                 t.banner_success_text,
-                s::agent_chat::fold_editor_after(),
+                s::transcript::fold_editor_after(),
             ),
         ],
     )
@@ -348,7 +348,7 @@ impl PresetSegment {
     fn label(self) -> String {
         match self {
             Self::Preset(preset) => preset_label(preset),
-            Self::Custom => s::agent_chat::fold_mode_custom(),
+            Self::Custom => s::transcript::fold_mode_custom(),
         }
     }
 
@@ -523,7 +523,7 @@ fn phase_control(
         .active(t.overlay_active);
     let label = match value {
         Some(value) => expansion_label(value),
-        None => s::agent_chat::fold_editor_mixed(),
+        None => s::transcript::fold_editor_mixed(),
     };
     button_bare(id)
         .custom(variant)
@@ -547,7 +547,7 @@ fn phase_control(
                 .child(SharedString::from(label)),
         )
         .child(Icon::new(IconName::ChevronDown))
-        .dropdown_menu(crate::ui::stacked_menu_builder(move |menu, _, _| {
+        .dropdown_menu(daruda_ui::stacked_menu_builder(move |menu, _, _| {
             [true, false].into_iter().fold(menu, |menu, expanded| {
                 let on_pick = on_pick.clone();
                 menu.item(
@@ -570,52 +570,52 @@ fn preset_token(preset: FoldPreset) -> &'static str {
 
 fn preset_label(preset: FoldPreset) -> String {
     match preset {
-        FoldPreset::Auto => s::agent_chat::fold_mode_auto(),
-        FoldPreset::Summary => s::agent_chat::fold_mode_summary(),
-        FoldPreset::Expanded => s::agent_chat::fold_mode_expanded(),
+        FoldPreset::Auto => s::transcript::fold_mode_auto(),
+        FoldPreset::Summary => s::transcript::fold_mode_summary(),
+        FoldPreset::Expanded => s::transcript::fold_mode_expanded(),
     }
 }
 
 fn expansion_label(expanded: bool) -> String {
     if expanded {
-        s::agent_chat::fold_editor_rule_expanded()
+        s::transcript::fold_editor_rule_expanded()
     } else {
-        s::agent_chat::fold_editor_rule_collapsed()
+        s::transcript::fold_editor_rule_collapsed()
     }
 }
 
 fn block_label(block: FoldBlock) -> String {
     match block {
-        FoldBlock::Response => s::agent_chat::fold_block_response(),
-        FoldBlock::ToolGroup => s::agent_chat::fold_block_tool_group(),
-        FoldBlock::Tool => s::agent_chat::fold_block_tool(),
-        FoldBlock::Subagent => s::agent_chat::fold_block_subagent(),
-        FoldBlock::Thinking => s::agent_chat::fold_block_thinking(),
-        FoldBlock::ThinkingGroup => s::agent_chat::fold_block_thinking_group(),
-        FoldBlock::Assistant => s::agent_chat::fold_block_assistant(),
-        FoldBlock::Diff => s::agent_chat::fold_block_diff(),
-        FoldBlock::RawInput => s::agent_chat::fold_block_raw_input(),
+        FoldBlock::Response => s::transcript::fold_block_response(),
+        FoldBlock::ToolGroup => s::transcript::fold_block_tool_group(),
+        FoldBlock::Tool => s::transcript::fold_block_tool(),
+        FoldBlock::Subagent => s::transcript::fold_block_subagent(),
+        FoldBlock::Thinking => s::transcript::fold_block_thinking(),
+        FoldBlock::ThinkingGroup => s::transcript::fold_block_thinking_group(),
+        FoldBlock::Assistant => s::transcript::fold_block_assistant(),
+        FoldBlock::Diff => s::transcript::fold_block_diff(),
+        FoldBlock::RawInput => s::transcript::fold_block_raw_input(),
     }
 }
 
 fn tool_category_label(category: ToolCategory) -> String {
     match category {
-        ToolCategory::Read => s::agent_chat::filter_tool_read(),
-        ToolCategory::Edit => s::agent_chat::filter_tool_edit(),
-        ToolCategory::Delete => s::agent_chat::filter_tool_delete(),
-        ToolCategory::Search => s::agent_chat::filter_tool_search(),
-        ToolCategory::Run => s::agent_chat::filter_tool_run(),
-        ToolCategory::Fetch => s::agent_chat::filter_tool_fetch(),
-        ToolCategory::Mcp => s::agent_chat::filter_tool_mcp(),
-        ToolCategory::Agent => s::agent_chat::filter_tool_agent(),
-        ToolCategory::Other => s::agent_chat::filter_tool_other(),
+        ToolCategory::Read => s::transcript::filter_tool_read(),
+        ToolCategory::Edit => s::transcript::filter_tool_edit(),
+        ToolCategory::Delete => s::transcript::filter_tool_delete(),
+        ToolCategory::Search => s::transcript::filter_tool_search(),
+        ToolCategory::Run => s::transcript::filter_tool_run(),
+        ToolCategory::Fetch => s::transcript::filter_tool_fetch(),
+        ToolCategory::Mcp => s::transcript::filter_tool_mcp(),
+        ToolCategory::Agent => s::transcript::filter_tool_agent(),
+        ToolCategory::Other => s::transcript::filter_tool_other(),
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::transcript::fold_mode::BlockRule;
+    use crate::fold_mode::BlockRule;
 
     #[test]
     fn every_editor_option_has_a_label() {
@@ -710,13 +710,13 @@ mod tests {
     fn the_value_text_names_the_preset_or_says_custom() {
         assert_eq!(
             mode_value(FoldPreset::Auto.mode()),
-            s::agent_chat::fold_mode_auto()
+            s::transcript::fold_mode_auto()
         );
         let matrix = FoldPreset::Summary.mode().with_rule(
             TurnPosition::Past,
             FoldBlock::Thinking,
             BlockRule::Collapsed,
         );
-        assert_eq!(mode_value(matrix), s::agent_chat::fold_mode_custom());
+        assert_eq!(mode_value(matrix), s::transcript::fold_mode_custom());
     }
 }

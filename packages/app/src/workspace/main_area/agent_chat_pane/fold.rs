@@ -7,8 +7,8 @@ use std::collections::HashMap;
 
 use super::pane_choice::PaneChoice;
 use super::rows::tail::TailLevel;
-use crate::transcript::fold_mode::{BlockRule, FoldBlock, FoldMode, TurnPosition};
-use crate::transcript::tool_category::ToolCategory;
+use daruda_transcript::fold_mode::{BlockRule, FoldBlock, FoldMode, TurnPosition};
+use daruda_transcript::tool_category::ToolCategory;
 
 /// Stable identity of a foldable block.
 #[derive(Clone, PartialEq, Eq, Hash, Debug)]
@@ -427,7 +427,7 @@ mod tests {
         assert!(!state.is_expanded(&untouched, FoldContext::past(false)));
     }
 
-    use crate::transcript::fold_mode::FoldPreset;
+    use daruda_transcript::fold_mode::FoldPreset;
 
     fn every_key() -> Vec<FoldKey> {
         vec![
@@ -656,7 +656,7 @@ mod tests {
 
     #[test]
     fn a_custom_rule_can_hold_one_block_kind_open() {
-        use crate::transcript::fold_mode::FoldMode;
+        use daruda_transcript::fold_mode::FoldMode;
         let state = FoldState::with_mode(FoldMode::from_tokens(["auto", "last.tool=expanded"]));
         assert!(state.is_expanded(&FoldKey::Tool("t".into()), FoldContext::last(false)));
         assert!(!state.is_expanded(&FoldKey::Tool("t".into()), FoldContext::past(false)));
@@ -664,7 +664,7 @@ mod tests {
 
     #[test]
     fn a_tool_category_rule_narrows_the_tool_row() {
-        use crate::transcript::tool_category::ToolCategory;
+        use daruda_transcript::tool_category::ToolCategory;
         let mode = FoldPreset::Summary
             .mode()
             .with_rule(TurnPosition::Last, FoldBlock::Tool, BlockRule::Collapsed)
@@ -685,7 +685,7 @@ mod tests {
     /// named category opens, and running no longer opens the rest.
     #[test]
     fn a_legacy_category_config_opens_only_its_category() {
-        use crate::transcript::tool_category::ToolCategory;
+        use daruda_transcript::tool_category::ToolCategory;
         let mode = FoldMode::from_tokens([
             "summary",
             "last.response=expanded",

@@ -3,14 +3,14 @@
 //! the modules cannot drift onto private copies of the same fixture.
 
 use super::*;
-use crate::transcript::display_filter::{DisplayFilter, FilterFacet};
-use crate::transcript::fold_mode::{FoldMode, FoldPreset};
 use crate::workspace::main_area::agent_chat_pane::fold::FoldContext;
 use crate::workspace::main_area::agent_chat_pane::rows::tail::TailWindow;
 use crate::workspace::main_area::agent_chat_pane::tool_hierarchy::SUBAGENT_NEST_DEPTH_CAP;
 use daruda_acp::{
     PermissionItem, PermissionResolution, ToolCallItem, ToolKindView, ToolStatusView,
 };
+use daruda_transcript::display_filter::{DisplayFilter, FilterFacet};
+use daruda_transcript::fold_mode::{FoldMode, FoldPreset};
 
 mod delegation;
 mod filter;

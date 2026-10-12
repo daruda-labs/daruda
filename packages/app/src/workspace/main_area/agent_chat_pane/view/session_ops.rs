@@ -27,8 +27,8 @@ use super::{ActivityOptionsTab, ActivitySpan, AgentChatView, Turn, TurnOutcome};
 // has one.
 #[cfg(feature = "devtools")]
 use super::AgentSessionStatus;
-use crate::transcript::display_filter::{DisplayFilter, FilterFacet};
-use crate::transcript::fold_mode::{FoldMode, FoldPreset, TurnPosition};
+use daruda_transcript::display_filter::{DisplayFilter, FilterFacet};
+use daruda_transcript::fold_mode::{FoldMode, FoldPreset, TurnPosition};
 
 /// Fixed turn facts the capture seed files, so the answer row's trailing slot
 /// reads the same in every shot rather than drifting with the machine.
@@ -716,7 +716,7 @@ impl AgentChatView {
     /// the filter is not touched.
     pub(in crate::workspace) fn toggle_filter_editor_section(
         &mut self,
-        axis: crate::transcript::display_filter::FilterAxis,
+        axis: daruda_transcript::display_filter::FilterAxis,
         cx: &mut Context<Self>,
     ) {
         self.filter_editor.toggle(axis);

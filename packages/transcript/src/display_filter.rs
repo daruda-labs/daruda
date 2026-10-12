@@ -2,14 +2,14 @@
 
 use daruda_acp::{ChatItem, MessagePhase, ToolCallItem};
 
-use crate::transcript::tool_category::{ToolCategory, ToolCategorySet, classify_tool};
+use crate::tool_category::{ToolCategory, ToolCategorySet, classify_tool};
 
 /// How the panel groups facets into labelled sections. Each axis renders one
 /// heading, an optional parent toggle standing for the whole section, and the
-/// rows [`FilterAxis::rows`] derives from [`FilterFacet::axis`] — so a facet
+/// rows `FilterAxis::rows` derives from `FilterFacet::axis` — so a facet
 /// cannot be listed under a heading its own axis disagrees with.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub(crate) enum FilterAxis {
+pub enum FilterAxis {
     Kind,
     Reply,
     Tool,
@@ -42,7 +42,7 @@ impl FilterAxis {
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub(crate) enum FilterFacet {
+pub enum FilterFacet {
     Thinking,
     Prose,
     ProseAnswer,
@@ -60,7 +60,7 @@ pub(crate) enum FilterFacet {
 }
 
 impl FilterFacet {
-    pub(crate) const ALL: [FilterFacet; 14] = [
+    pub const ALL: [FilterFacet; 14] = [
         Self::Thinking,
         Self::Prose,
         Self::ProseAnswer,
@@ -126,7 +126,7 @@ impl FilterFacet {
     }
 
     /// Stable config and persistence token.
-    pub(crate) fn token(self) -> &'static str {
+    pub fn token(self) -> &'static str {
         match self {
             Self::Thinking => "thinking",
             Self::Prose => "prose",
@@ -208,7 +208,7 @@ pub(crate) enum ToolSelection {
 ///
 /// Tool selection distinguishes no tools, all tools, and a partial category set.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub(crate) struct DisplayFilter {
+pub struct DisplayFilter {
     thinking: bool,
     prose: ProseSelection,
     tools: ToolSelection,
@@ -228,7 +228,7 @@ impl Default for DisplayFilter {
 impl DisplayFilter {
     /// Read the pane's stored visible set. Unlike [`Self::default`], an empty
     /// list is a real value here — the pane the user unchecked entirely.
-    pub(crate) fn from_stored(tokens: &[String]) -> Self {
+    pub fn from_stored(tokens: &[String]) -> Self {
         Self::from_tokens(tokens.iter().map(String::as_str))
     }
 
@@ -241,7 +241,7 @@ impl DisplayFilter {
     /// current reading has no such short-circuit, so a pane storing a facet this
     /// build has since removed would come back showing nothing. The condition is
     /// "no facet parsed", not "no token present".
-    pub(crate) fn from_legacy_tokens(tokens: &[String]) -> Self {
+    pub fn from_legacy_tokens(tokens: &[String]) -> Self {
         if !tokens
             .iter()
             .any(|token| FilterFacet::from_token(token).is_some())
@@ -254,7 +254,7 @@ impl DisplayFilter {
     /// Build from a stored visible set. Starts from nothing visible and adds
     /// what the list names, so the empty list is "nothing on screen" — the
     /// state [`Self::default`] is the opposite of.
-    pub(crate) fn from_tokens<'a>(tokens: impl IntoIterator<Item = &'a str>) -> Self {
+    pub fn from_tokens<'a>(tokens: impl IntoIterator<Item = &'a str>) -> Self {
         let mut filter = Self {
             thinking: false,
             prose: ProseSelection::Excluded,
@@ -297,7 +297,7 @@ impl DisplayFilter {
         filter
     }
 
-    pub(crate) fn tokens(self) -> Vec<&'static str> {
+    pub fn tokens(self) -> Vec<&'static str> {
         let mut out = Vec::new();
         if self.thinking {
             out.push(FilterFacet::Thinking.token());
@@ -329,7 +329,7 @@ impl DisplayFilter {
         out
     }
 
-    pub(crate) fn contains(self, facet: FilterFacet) -> bool {
+    pub fn contains(self, facet: FilterFacet) -> bool {
         match facet {
             FilterFacet::Thinking => self.thinking,
             FilterFacet::Prose => !matches!(self.prose, ProseSelection::Excluded),
@@ -347,7 +347,7 @@ impl DisplayFilter {
         }
     }
 
-    pub(crate) fn toggled(mut self, facet: FilterFacet) -> Self {
+    pub fn toggled(mut self, facet: FilterFacet) -> Self {
         match facet {
             FilterFacet::Thinking => self.thinking = !self.thinking,
             FilterFacet::Prose => {
@@ -427,7 +427,7 @@ impl DisplayFilter {
     }
 
     /// Turn a whole parented section on or off in one move.
-    pub(crate) fn with_section(mut self, parent: FilterFacet, on: bool) -> Self {
+    pub fn with_section(mut self, parent: FilterFacet, on: bool) -> Self {
         match parent {
             FilterFacet::Prose => {
                 self.prose = if on {
@@ -452,8 +452,7 @@ impl DisplayFilter {
     /// Nothing is hidden — the pane is not narrowed at all. A property of the
     /// value only: whether the pane still *follows* config is `PaneChoice`'s
     /// question, and the UI asks that one, so this is left to assertions.
-    #[cfg(test)]
-    pub(crate) fn shows_everything(self) -> bool {
+    pub fn shows_everything(self) -> bool {
         self == Self::default()
     }
 
@@ -475,7 +474,7 @@ impl DisplayFilter {
     }
 
     /// Prompts, permissions, failures, and stop markers are never filtered.
-    pub(crate) fn matches(self, item: &ChatItem) -> bool {
+    pub fn matches(self, item: &ChatItem) -> bool {
         match item {
             // A stop marker is structure, like a prompt: hiding it would leave
             // the run it cuts looking like one that simply ended.
@@ -493,7 +492,7 @@ impl DisplayFilter {
         }
     }
 
-    pub(crate) fn matches_tool(self, tc: &ToolCallItem) -> bool {
+    pub fn matches_tool(self, tc: &ToolCallItem) -> bool {
         match self.tools {
             ToolSelection::Excluded => false,
             ToolSelection::All => true,

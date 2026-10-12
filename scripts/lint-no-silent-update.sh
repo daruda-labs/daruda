@@ -48,6 +48,7 @@ SCAN_DIRS=(
     "packages/control-types/src"
     "packages/content/src"
     "packages/flow-edit/src"
+    "packages/transcript/src"
     "packages/agent/src"
 )
 

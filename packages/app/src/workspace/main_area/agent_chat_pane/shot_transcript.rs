@@ -563,7 +563,7 @@ fn tool_call(ix: usize, call: Call) -> ChatItem {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::transcript::tool_category::{ToolCategory, classify_tool};
+    use daruda_transcript::tool_category::{ToolCategory, classify_tool};
 
     /// One cycle earns one tool run, and the tail window can only be looked at
     /// when there is more history than the largest offered window keeps.
@@ -634,7 +634,7 @@ mod tests {
         use super::super::rows::tail::StepWindow;
         use super::super::rows::{LiveSubagentUnits, RowKind, project};
         use super::SHOT_THOUGHT_CALL_WINDOW;
-        use crate::transcript::display_filter::DisplayFilter;
+        use daruda_transcript::display_filter::DisplayFilter;
 
         for working in [false, true] {
             let items = thought_run_transcript(working);

@@ -1,8 +1,8 @@
 //! What the fold editor remembers between frames, as distinct from the matrix
 //! it edits.
 
-use crate::transcript::display_filter::FilterAxis;
-use crate::transcript::fold_mode::{FoldMode, FoldPreset, TurnPosition};
+use crate::display_filter::FilterAxis;
+use crate::fold_mode::{FoldMode, FoldPreset, TurnPosition};
 
 /// Which disclosures are open and the hand-edited matrix `Custom` re-selects.
 ///
@@ -13,7 +13,7 @@ use crate::transcript::fold_mode::{FoldMode, FoldPreset, TurnPosition};
 ///
 /// Every disclosure starts closed.
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
-pub(crate) struct FoldEditorState {
+pub struct FoldEditorState {
     history_rules_open: bool,
     recent_tools_open: bool,
     past_tools_open: bool,
@@ -22,23 +22,23 @@ pub(crate) struct FoldEditorState {
 
 impl FoldEditorState {
     /// Whether the previous-response overrides are shown.
-    pub(crate) fn history_rules_open(self) -> bool {
+    pub fn history_rules_open(self) -> bool {
         self.history_rules_open
     }
 
-    pub(crate) fn toggle_history_rules(&mut self) {
+    pub fn toggle_history_rules(&mut self) {
         self.history_rules_open = !self.history_rules_open;
     }
 
     /// Whether the per-category tool rows under `turn`'s section are shown.
-    pub(crate) fn tools_open(self, turn: TurnPosition) -> bool {
+    pub fn tools_open(self, turn: TurnPosition) -> bool {
         match turn {
             TurnPosition::Last => self.recent_tools_open,
             TurnPosition::Past => self.past_tools_open,
         }
     }
 
-    pub(crate) fn toggle_tools(&mut self, turn: TurnPosition) {
+    pub fn toggle_tools(&mut self, turn: TurnPosition) {
         let open = match turn {
             TurnPosition::Last => &mut self.recent_tools_open,
             TurnPosition::Past => &mut self.past_tools_open,
@@ -46,7 +46,7 @@ impl FoldEditorState {
         *open = !*open;
     }
 
-    pub(crate) fn custom(self) -> Option<FoldMode> {
+    pub fn custom(self) -> Option<FoldMode> {
         self.custom
     }
 
@@ -54,7 +54,7 @@ impl FoldEditorState {
     /// latest hand-edited matrix. Pressing the already-selected `Custom`
     /// segment then re-applies that matrix instead of resurrecting an older
     /// edit, and picking a preset does not throw the edit away.
-    pub(crate) fn remember(&mut self, current: FoldMode, next: FoldMode) {
+    pub fn remember(&mut self, current: FoldMode, next: FoldMode) {
         match (current.preset(), next.preset()) {
             (_, None) => self.custom = Some(next),
             (None, Some(_)) => self.custom = Some(current),
@@ -67,7 +67,7 @@ impl FoldEditorState {
     /// Separate from [`Self::remember`] because the arrival is a hand-back, not
     /// a pick: `target` can itself be a matrix, and that one is where the axis
     /// is *going*, so it must not become the recall.
-    pub(crate) fn remember_before_reset(&mut self, current: FoldMode, target: FoldMode) {
+    pub fn remember_before_reset(&mut self, current: FoldMode, target: FoldMode) {
         if current.preset().is_none() && current != target {
             self.custom = Some(current);
         }
@@ -77,11 +77,7 @@ impl FoldEditorState {
     /// `Custom` segment, which has a target only once something has been
     /// hand-edited — the strip disables it until then. The history flag is not
     /// part of the matrix, so the segment keeps the one `current` has.
-    pub(crate) fn segment_target(
-        self,
-        preset: Option<FoldPreset>,
-        current: FoldMode,
-    ) -> Option<FoldMode> {
+    pub fn segment_target(self, preset: Option<FoldPreset>, current: FoldMode) -> Option<FoldMode> {
         let matrix = match preset {
             Some(preset) => preset.mode(),
             None => self.custom?,
@@ -96,7 +92,7 @@ impl FoldEditorState {
 /// exactly as its checkboxes say. Every section starts open, so a fresh editor
 /// shows every facet it can change.
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
-pub(crate) struct FilterEditorState {
+pub struct FilterEditorState {
     shut: [bool; FilterAxis::ALL.len()],
 }
 
@@ -105,7 +101,7 @@ impl FilterEditorState {
         !self.shut[axis_slot(axis)]
     }
 
-    pub(crate) fn toggle(&mut self, axis: FilterAxis) {
+    pub fn toggle(&mut self, axis: FilterAxis) {
         let slot = &mut self.shut[axis_slot(axis)];
         *slot = !*slot;
     }
@@ -122,7 +118,7 @@ fn axis_slot(axis: FilterAxis) -> usize {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::transcript::fold_mode::{BlockRule, FoldBlock};
+    use crate::fold_mode::{BlockRule, FoldBlock};
 
     fn matrix() -> FoldMode {
         FoldPreset::Summary.mode().with_rule(

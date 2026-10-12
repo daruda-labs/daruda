@@ -610,9 +610,9 @@ fn a_subagent_reads_active_while_a_child_still_runs() {
 /// until the last child settles, not when the launch's own call does.
 #[test]
 fn a_running_rule_holds_a_subagent_open_through_its_children() {
-    use crate::transcript::fold_mode::FoldMode;
     use crate::workspace::main_area::agent_chat_pane::fold::FoldState;
     use daruda_acp::ToolStatusView::{Completed, InProgress};
+    use daruda_transcript::fold_mode::FoldMode;
     let mut child = tool_call("t-child", InProgress, 0);
     child.parent_tool_id = Some("t-parent".to_owned());
     let mut items = vec![
@@ -723,8 +723,8 @@ fn fold_active_resolves_per_key() {
 
 #[test]
 fn fold_turn_places_each_key_relative_to_the_newest_prompt() {
-    use crate::transcript::fold_mode::TurnPosition;
     use daruda_acp::ToolStatusView::Completed;
+    use daruda_transcript::fold_mode::TurnPosition;
     let items = [
         ChatItem::UserText("q1".to_owned()),
         ChatItem::ToolCall(tool_call("t-old", Completed, 0)),
@@ -1256,9 +1256,9 @@ fn agent_run_stops_at_a_stop_marker() {
 /// succeeded.
 #[test]
 fn a_rollup_ignores_the_calls_the_display_filter_removed() {
-    use crate::transcript::display_filter::{DisplayFilter, FilterFacet};
     use crate::workspace::main_area::agent_chat_pane::rows::FilterMatchIndex;
     use daruda_acp::{ToolKindView, ToolStatusView};
+    use daruda_transcript::display_filter::{DisplayFilter, FilterFacet};
 
     let call = |id: &str, kind, status| {
         ChatItem::ToolCall(ToolCallItem {
@@ -1305,9 +1305,9 @@ fn a_rollup_ignores_the_calls_the_display_filter_removed() {
 /// otherwise the glyph denies the reason its own row is on screen.
 #[test]
 fn a_rollup_still_reads_running_when_the_live_call_is_filtered_away() {
-    use crate::transcript::display_filter::{DisplayFilter, FilterFacet};
     use crate::workspace::main_area::agent_chat_pane::rows::FilterMatchIndex;
     use daruda_acp::{ToolKindView, ToolStatusView};
+    use daruda_transcript::display_filter::{DisplayFilter, FilterFacet};
 
     let call = |id: &str, kind, status| {
         ChatItem::ToolCall(ToolCallItem {
@@ -1347,8 +1347,8 @@ fn a_rollup_still_reads_running_when_the_live_call_is_filtered_away() {
 /// as a control that silently does nothing.
 #[test]
 fn the_tool_matrix_covers_exactly_the_categories_a_tool_card_carries() {
-    use crate::transcript::tool_category::{ToolCategory, classify_tool};
     use daruda_acp::{ToolKindView, ToolStatusView::Completed};
+    use daruda_transcript::tool_category::{ToolCategory, classify_tool};
 
     let of_kind = |kind| ToolCallItem {
         kind,

@@ -2,7 +2,7 @@
 
 use gpui::TestAppContext;
 
-pub(crate) fn init_gpui_component(cx: &mut TestAppContext) {
+pub fn init_gpui_component(cx: &mut TestAppContext) {
     cx.update(|cx| {
         gpui_component::init(cx);
         // DarudaTheme must be registered before apply_daruda_palette, which

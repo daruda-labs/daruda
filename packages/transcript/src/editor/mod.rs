@@ -10,13 +10,15 @@ use std::rc::Rc;
 
 use gpui::{App, Context, Div, Hsla, IntoElement, SharedString, Window, div, prelude::*, px};
 
-use crate::ui::theme;
-use crate::ui::{Icon, PopoverState, Sizable as _};
+use daruda_ui::theme;
+use daruda_ui::{Icon, PopoverState, Sizable as _};
 
-pub(crate) mod filter;
-pub(crate) mod fold;
-pub(crate) mod range;
-pub(crate) mod state;
+use crate::strings as s;
+
+pub mod filter;
+pub mod fold;
+pub mod range;
+pub mod state;
 
 /// What the reset button runs.
 pub(crate) type ResetPress = Rc<dyn Fn(&mut Window, &mut App)>;
@@ -25,7 +27,7 @@ pub(crate) type ResetPress = Rc<dyn Fn(&mut Window, &mut App)>;
 /// back. Each host names both — a pane against the agent's stated value, an
 /// agent row against the built-in. `overridden` is the host's call: a value
 /// that merely *equals* the target can still be an override worth undoing.
-pub(crate) struct ResetSpec {
+pub struct ResetSpec {
     pub label: String,
     pub source: String,
     pub overridden: bool,
@@ -36,7 +38,7 @@ pub(crate) struct ResetSpec {
 }
 
 /// The footer's save command: its label and what it runs.
-pub(crate) struct SaveSpec {
+pub struct SaveSpec {
     pub label: String,
     pub on_save: ResetPress,
 }
@@ -44,14 +46,14 @@ pub(crate) struct SaveSpec {
 /// The editor's three text roles, derived from one base size so a configured
 /// font scales the title, the rows and the auxiliary lines together.
 #[derive(Clone, Copy, Debug, PartialEq)]
-pub(crate) struct TextRoles {
+pub struct TextRoles {
     pub title: f32,
     pub body: f32,
     pub aux: f32,
 }
 
 impl TextRoles {
-    pub(crate) fn from_base(base: f32) -> Self {
+    pub fn from_base(base: f32) -> Self {
         Self {
             title: base,
             body: base * theme::TRANSCRIPT_EDITOR_BODY_RATIO,
@@ -65,7 +67,7 @@ impl TextRoles {
 /// [`theme::TRANSCRIPT_EDITOR_RULES_PANEL_W`] names its outer width once. The
 /// height stops at the window edge below the trigger, so the vendored snap
 /// does not lift the panel over the control that opened it.
-pub(crate) fn panel_root(window: &Window, state: &PopoverState) -> Div {
+pub fn panel_root(window: &Window, state: &PopoverState) -> Div {
     let viewport = window.viewport_size();
     let below = state
         .trigger_bounds()
@@ -107,7 +109,7 @@ fn panel_outer_max_h(viewport_h: f32, top: Option<f32>) -> f32 {
 ///
 /// The same two steps the vendored popover runs on an outside press: shut the
 /// state, then repaint the view that renders the trigger.
-pub(crate) fn dismiss_press(window: &Window, cx: &mut Context<PopoverState>) -> ResetPress {
+pub fn dismiss_press(window: &Window, cx: &mut Context<PopoverState>) -> ResetPress {
     let state = cx.entity().downgrade();
     let host = window.current_view();
     Rc::new(move |window, app| {
@@ -120,7 +122,7 @@ pub(crate) fn dismiss_press(window: &Window, cx: &mut Context<PopoverState>) -> 
 
 /// Title and close button above everything else in the panel. Where the values
 /// come from is the footer's to say, so the header does not repeat it.
-pub(crate) fn panel_header(
+pub fn panel_header(
     id: SharedString,
     title: String,
     text: TextRoles,
@@ -149,7 +151,8 @@ pub(crate) fn panel_header(
                 .child(SharedString::from(title)),
         )
         .child(
-            crate::ui::button_close(id, cx)
+            daruda_ui::button_icon(id, daruda_ui::icons::CLOSE, cx)
+                .tooltip(s::transcript::close())
                 .debug_selector(|| "transcript-editor-close".into())
                 .tab_stop(true)
                 .on_click(move |_, window, app| on_close(window, app)),
@@ -157,7 +160,7 @@ pub(crate) fn panel_header(
 }
 
 /// The tab strip's band: full width, its hairline under the tabs.
-pub(crate) fn tabs_band(tabs: impl IntoElement, cx: &App) -> Div {
+pub fn tabs_band(tabs: impl IntoElement, cx: &App) -> Div {
     div()
         .flex_none()
         .px(px(theme::TRANSCRIPT_EDITOR_TABS_PAD_X))
@@ -193,7 +196,7 @@ pub(crate) fn aux_line(
         )
 }
 
-pub(crate) fn aux_icon(icon: &'static str, color: Hsla) -> Icon {
+pub fn aux_icon(icon: &'static str, color: Hsla) -> Icon {
     Icon::empty()
         .path(icon)
         .with_size(px(theme::TRANSCRIPT_EDITOR_AUX_ICON))
@@ -203,8 +206,8 @@ pub(crate) fn aux_icon(icon: &'static str, color: Hsla) -> Icon {
 /// The band a panel scrolls: rules and facets outgrow the popover, the header,
 /// cleanup band and footer must not move when they do. Its thumb rides the
 /// body's right inset.
-pub(crate) fn scroll_region(id: impl Into<SharedString>, content: Div) -> crate::ui::ScrollArea {
-    crate::ui::scroll_area(id, px(0.), content).fill()
+pub(crate) fn scroll_region(id: impl Into<SharedString>, content: Div) -> daruda_ui::ScrollArea {
+    daruda_ui::scroll_area(id, px(0.), content).fill()
 }
 
 /// What [`scroll_region`] scrolls: the body column, inset on both axes.
@@ -249,7 +252,7 @@ pub(crate) fn reset_footer(
     let Some(reset) = reset else {
         return div().flex_none();
     };
-    use crate::ui::{ButtonVariants as _, Disableable as _, icons};
+    use daruda_ui::{ButtonVariants as _, Disableable as _, icons};
     let t = theme::current(cx);
     let (icon, color) = if reset.overridden {
         (icons::PIN, theme::PRIMARY)
@@ -285,7 +288,7 @@ pub(crate) fn reset_footer(
                 .gap(px(theme::GAP_SM))
                 .when_some(reset.save.filter(|_| reset.overridden), |commands, save| {
                     commands.child(
-                        crate::ui::button_bare(SharedString::from(format!("{id}-save")))
+                        daruda_ui::button_bare(SharedString::from(format!("{id}-save")))
                             .ghost()
                             .tab_stop(true)
                             .icon(Icon::empty().path(icons::SAVE))
@@ -298,7 +301,7 @@ pub(crate) fn reset_footer(
                     )
                 })
                 .child(
-                    crate::ui::button_bare(id)
+                    daruda_ui::button_bare(id)
                         .ghost()
                         .tab_stop(true)
                         .icon(Icon::empty().path(icons::UNDO))
@@ -316,7 +319,7 @@ pub(crate) fn reset_footer(
 #[cfg(test)]
 mod tests {
     use super::{TextRoles, panel_outer_max_h, panel_outer_w};
-    use crate::ui::theme;
+    use daruda_ui::theme;
 
     const MARGIN: f32 = theme::TRANSCRIPT_EDITOR_WINDOW_MARGIN;
 
@@ -393,8 +396,7 @@ mod tests {
         };
 
         use super::super::{TextRoles, dismiss_press, panel_header, panel_root};
-        use crate::surface::strings as s;
-        use crate::ui::{Popover, PopoverState, theme};
+        use daruda_ui::{Popover, PopoverState, theme};
 
         type Slot = Rc<RefCell<Option<Entity<PopoverState>>>>;
 
@@ -410,14 +412,14 @@ mod tests {
                     Popover::new(SharedString::from("shell-probe"))
                         .default_open(true)
                         .p_0()
-                        .trigger(crate::ui::button("shell-trigger", "View"))
+                        .trigger(daruda_ui::button("shell-trigger", "View"))
                         .content(move |state, window, cx| {
                             *slot.borrow_mut() = Some(cx.entity());
                             let close = dismiss_press(window, cx);
                             panel_root(window, state)
                                 .child(panel_header(
                                     SharedString::from("shell-close"),
-                                    s::agent_chat::view_options_title(),
+                                    String::from("View options"),
                                     TextRoles::from_base(theme::AGENT_CHAT_MSG_FONT_SIZE),
                                     close,
                                     cx,
@@ -429,7 +431,7 @@ mod tests {
         }
 
         fn open(cx: &mut TestAppContext) -> (VisualTestContext, Slot) {
-            crate::test_support::init_gpui_component(cx);
+            daruda_ui::test_support::init_gpui_component(cx);
             let slot: Slot = Rc::default();
             let probe = slot.clone();
             let bounds = Bounds::new(point(px(0.), px(0.)), size(px(1280.), px(900.)));

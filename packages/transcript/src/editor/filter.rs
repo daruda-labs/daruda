@@ -7,9 +7,9 @@ use gpui::{AnyElement, App, IntoElement, SharedString, div, prelude::*, px};
 
 use super::state::FilterEditorState;
 use super::{ResetSpec, TextRoles, editor_column, reset_footer, scroll_content, scroll_region};
-use crate::surface::strings as s;
-use crate::transcript::display_filter::{DisplayFilter, FilterAxis, FilterFacet, SectionState};
-use crate::ui::{ButtonVariants as _, Icon, IconName, button_bare, checkbox, theme};
+use crate::display_filter::{DisplayFilter, FilterAxis, FilterFacet, SectionState};
+use crate::strings as s;
+use daruda_ui::{ButtonVariants as _, Icon, IconName, button_bare, checkbox, theme};
 
 /// What the editor does with a click. A section toggle is its own action rather
 /// than a run of facet toggles: setting a whole section is one move, and the
@@ -18,7 +18,7 @@ pub(crate) type FilterFacetPress = Rc<dyn Fn(FilterFacet, &mut App)>;
 pub(crate) type FilterSectionPress = Rc<dyn Fn(FilterFacet, bool, &mut App)>;
 pub(crate) type FilterDisclosePress = Rc<dyn Fn(FilterAxis, &mut App)>;
 
-pub(crate) struct FilterEditorActions {
+pub struct FilterEditorActions {
     pub on_toggle: FilterFacetPress,
     pub on_section: FilterSectionPress,
     /// Opens or shuts a parented section's child rows — presentation only.
@@ -32,21 +32,21 @@ pub(crate) struct FilterEditorActions {
 /// It names what is **missing**, not what is left: it is the shorter list, and
 /// it is what the user did — every box starts checked, so a filtered pane is
 /// one the user took something out of.
-pub(crate) fn filter_value(filter: DisplayFilter) -> String {
+pub fn filter_value(filter: DisplayFilter) -> String {
     let hidden = filter.hidden();
     match hidden.as_slice() {
-        [] => s::agent_chat::filter_none(),
-        [one] => s::agent_chat::filter_hidden(facet_label(*one)),
-        [first, second] => s::agent_chat::filter_hidden(format!(
+        [] => s::transcript::filter_none(),
+        [one] => s::transcript::filter_hidden(facet_label(*one)),
+        [first, second] => s::transcript::filter_hidden(format!(
             "{} + {}",
             facet_label(*first),
             facet_label(*second)
         )),
-        _ => s::agent_chat::filter_hidden_count(hidden.len()),
+        _ => s::transcript::filter_hidden_count(hidden.len()),
     }
 }
 
-pub(crate) fn filter_editor(
+pub fn filter_editor(
     current: DisplayFilter,
     state: FilterEditorState,
     id_prefix: &str,
@@ -168,7 +168,7 @@ fn parent_row(
                 .flex_none()
                 .text_size(px(text.aux))
                 .text_color(theme::current(cx).text_muted)
-                .child(SharedString::from(s::agent_chat::filter_section_count(
+                .child(SharedString::from(s::transcript::filter_section_count(
                     selected,
                     rows.len(),
                 ))),
@@ -186,9 +186,9 @@ fn parent_row(
                 IconName::ChevronRight
             }))
             .tooltip(SharedString::from(if open {
-                s::agent_chat::filter_section_hide()
+                s::transcript::filter_section_hide()
             } else {
-                s::agent_chat::filter_section_show()
+                s::transcript::filter_section_show()
             }))
             .on_click(move |_, _, app| on_disclose(axis, app)),
         )
@@ -206,7 +206,7 @@ fn parent_checkbox(
     parent: FilterFacet,
     id_prefix: &str,
     actions: &FilterEditorActions,
-) -> crate::ui::Checkbox {
+) -> daruda_ui::Checkbox {
     let state = current.section_state(parent);
     let on_section = actions.on_section.clone();
     checkbox(
@@ -224,7 +224,7 @@ fn filter_checkbox(
     facet: FilterFacet,
     id_prefix: &str,
     actions: &FilterEditorActions,
-) -> crate::ui::Checkbox {
+) -> daruda_ui::Checkbox {
     let on_toggle = actions.on_toggle.clone();
     checkbox(
         SharedString::from(format!("{id_prefix}-filter-{}", facet.token())),
@@ -237,28 +237,28 @@ fn filter_checkbox(
 
 fn axis_label(axis: FilterAxis) -> String {
     match axis {
-        FilterAxis::Kind => s::agent_chat::filter_axis_kind(),
-        FilterAxis::Reply => s::agent_chat::filter_axis_reply(),
-        FilterAxis::Tool => s::agent_chat::filter_axis_tool(),
+        FilterAxis::Kind => s::transcript::filter_axis_kind(),
+        FilterAxis::Reply => s::transcript::filter_axis_reply(),
+        FilterAxis::Tool => s::transcript::filter_axis_tool(),
     }
 }
 
 fn facet_label(facet: FilterFacet) -> String {
     match facet {
-        FilterFacet::Thinking => s::agent_chat::filter_thinking(),
-        FilterFacet::Prose => s::agent_chat::filter_prose(),
-        FilterFacet::ProseAnswer => s::agent_chat::filter_prose_answer(),
-        FilterFacet::ProsePreamble => s::agent_chat::filter_prose_preamble(),
-        FilterFacet::Tools => s::agent_chat::filter_tools(),
-        FilterFacet::ToolRead => s::agent_chat::filter_tool_read(),
-        FilterFacet::ToolEdit => s::agent_chat::filter_tool_edit(),
-        FilterFacet::ToolDelete => s::agent_chat::filter_tool_delete(),
-        FilterFacet::ToolSearch => s::agent_chat::filter_tool_search(),
-        FilterFacet::ToolRun => s::agent_chat::filter_tool_run(),
-        FilterFacet::ToolFetch => s::agent_chat::filter_tool_fetch(),
-        FilterFacet::ToolMcp => s::agent_chat::filter_tool_mcp(),
-        FilterFacet::ToolAgent => s::agent_chat::filter_tool_agent(),
-        FilterFacet::ToolOther => s::agent_chat::filter_tool_other(),
+        FilterFacet::Thinking => s::transcript::filter_thinking(),
+        FilterFacet::Prose => s::transcript::filter_prose(),
+        FilterFacet::ProseAnswer => s::transcript::filter_prose_answer(),
+        FilterFacet::ProsePreamble => s::transcript::filter_prose_preamble(),
+        FilterFacet::Tools => s::transcript::filter_tools(),
+        FilterFacet::ToolRead => s::transcript::filter_tool_read(),
+        FilterFacet::ToolEdit => s::transcript::filter_tool_edit(),
+        FilterFacet::ToolDelete => s::transcript::filter_tool_delete(),
+        FilterFacet::ToolSearch => s::transcript::filter_tool_search(),
+        FilterFacet::ToolRun => s::transcript::filter_tool_run(),
+        FilterFacet::ToolFetch => s::transcript::filter_tool_fetch(),
+        FilterFacet::ToolMcp => s::transcript::filter_tool_mcp(),
+        FilterFacet::ToolAgent => s::transcript::filter_tool_agent(),
+        FilterFacet::ToolOther => s::transcript::filter_tool_other(),
     }
 }
 
@@ -282,16 +282,16 @@ mod tests {
     fn the_value_text_reads_all_until_a_kind_is_hidden() {
         assert_eq!(
             filter_value(DisplayFilter::default()),
-            s::agent_chat::filter_none()
+            s::transcript::filter_none()
         );
         let one = DisplayFilter::default().toggled(FilterFacet::ToolEdit);
         assert_eq!(
             filter_value(one),
-            s::agent_chat::filter_hidden(facet_label(FilterFacet::ToolEdit))
+            s::transcript::filter_hidden(facet_label(FilterFacet::ToolEdit))
         );
         assert_eq!(
             filter_value(one.toggled(FilterFacet::Thinking)),
-            s::agent_chat::filter_hidden(format!(
+            s::transcript::filter_hidden(format!(
                 "{} + {}",
                 facet_label(FilterFacet::Thinking),
                 facet_label(FilterFacet::ToolEdit)
@@ -305,6 +305,6 @@ mod tests {
             .toggled(FilterFacet::Thinking)
             .toggled(FilterFacet::Prose)
             .toggled(FilterFacet::ToolEdit);
-        assert_eq!(filter_value(three), s::agent_chat::filter_hidden_count(3));
+        assert_eq!(filter_value(three), s::transcript::filter_hidden_count(3));
     }
 }

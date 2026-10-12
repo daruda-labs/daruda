@@ -440,7 +440,7 @@ content builder already receives the `PopoverState`, but the bounds it keeps are
 private, so a panel could not size itself to the space left *below* its trigger.
 Capped at the window alone, a tall panel in a short window is shifted up by
 `snap_to_window_with_margin` until it covers the control that opened it. The
-transcript editors (`packages/app/src/transcript/editor/mod.rs`, `panel_max_h`)
+transcript editors (`packages/transcript/src/editor/mod.rs`, `panel_max_h`)
 read it.
 
 ### Re-vendor procedure

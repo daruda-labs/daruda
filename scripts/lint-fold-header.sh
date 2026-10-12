@@ -66,7 +66,7 @@ cd "$ROOT"
 
 PANE_DIR="packages/app/src/workspace/main_area/agent_chat_pane"
 OWNER="$PANE_DIR/render/fold_header.rs"
-SCAN_DIRS=(packages/app/src packages/ui/src)
+SCAN_DIRS=(packages/app/src packages/ui/src packages/transcript/src)
 
 if [[ ! -f "$OWNER" ]]; then
     echo "lint-fold-header: $OWNER not found — run from the repo root, or update" >&2

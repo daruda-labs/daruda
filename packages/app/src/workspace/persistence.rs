@@ -18,10 +18,10 @@ use gpui::{App, Context, Window};
 use super::Workspace;
 use crate::agent::launch_resolve::account_recipe_for_connect;
 use crate::lane::availability::LaneAvailability;
-use crate::transcript::fold_mode::FoldMode;
 use crate::workspace::main_area::agent_chat_pane::view::ChatPaneChoices;
 use crate::workspace::main_area::pane::{self, PaneSpawnError, TabEntry};
 use crate::workspace::main_area::pane_tree::{self as pane_tree, PaneLayout, SplitDirection};
+use daruda_transcript::fold_mode::FoldMode;
 
 /// Runtime tab/pane state of a single lane. One of these lives in
 /// `MainAreaContext::runtimes` per lane; the active lane is just the
@@ -955,7 +955,7 @@ impl Workspace {
                             // The current field wins; the superseded one is read
                             // only for a file written before the split, where an
                             // empty list meant "unfiltered" rather than "nothing".
-                            use crate::transcript::display_filter::DisplayFilter;
+                            use daruda_transcript::display_filter::DisplayFilter;
                             let display_filter = ac
                                 .visible_kinds
                                 .as_ref()
@@ -966,7 +966,7 @@ impl Workspace {
                                         .map(|tokens| DisplayFilter::from_legacy_tokens(tokens))
                                 });
                             let fold_mode = ac.fold_mode.as_ref().map(|tokens| {
-                                crate::transcript::fold_mode::FoldMode::from_tokens(
+                                daruda_transcript::fold_mode::FoldMode::from_tokens(
                                     tokens.iter().map(String::as_str),
                                 )
                             });
