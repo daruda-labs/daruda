@@ -168,8 +168,10 @@ jobs:
       # not silently depend on what the runner image happens to carry.
       # The last five are for the smoke runs below, not the build: the
       # runner has no GPU, so `mesa-vulkan-drivers` supplies lavapipe for
-      # wgpu to draw with, and Xvfb / weston stand in for the X11 and
-      # Wayland servers a desktop would have.
+      # wgpu to draw with, and Xvfb / sway stand in for the X11 and
+      # Wayland servers a desktop would have. sway rather than weston:
+      # gpui's Wayland client requires a `wl_seat`, which wlroots' headless
+      # backend still creates and weston's does not.
       - name: Install system dependencies
         run: |
           sudo apt-get update
@@ -185,7 +187,7 @@ jobs:
             mesa-vulkan-drivers \
             libegl1 \
             xvfb \
-            weston
+            sway
 
       - name: Cache rustup toolchain
         uses: actions/cache@v5
@@ -262,23 +264,26 @@ jobs:
           export XDG_RUNTIME_DIR="$RUNNER_TEMP/xdg-runtime"
           mkdir -p "$XDG_RUNTIME_DIR"
           chmod 700 "$XDG_RUNTIME_DIR"
-          weston --backend=headless-backend.so --socket=wayland-1 --idle-time=0 --log="$RUNNER_TEMP/weston.log" &
+          : > "$RUNNER_TEMP/sway.conf"
+          WLR_BACKENDS=headless WLR_LIBINPUT_NO_DEVICES=1 WLR_RENDERER=pixman \
+            sway -c "$RUNNER_TEMP/sway.conf" > "$RUNNER_TEMP/sway.log" 2>&1 &
+          socket=""
           for _ in $(seq 1 50); do
-            [ -S "$XDG_RUNTIME_DIR/wayland-1" ] && break
+            socket=$(find "$XDG_RUNTIME_DIR" -maxdepth 1 -type s -name 'wayland-[0-9]*' -printf '%f\n' | head -1)
+            [ -n "$socket" ] && break
             sleep 0.2
           done
-          test -S "$XDG_RUNTIME_DIR/wayland-1"
+          test -n "$socket"
           echo "XDG_RUNTIME_DIR=$XDG_RUNTIME_DIR" >> "$GITHUB_ENV"
+          echo "WAYLAND_DISPLAY=$socket" >> "$GITHUB_ENV"
 
       - name: Smoke-test the window (Wayland)
         timeout-minutes: 5
-        env:
-          WAYLAND_DISPLAY: wayland-1
         run: target/debug/daruda --smoke
 
       - name: Show the compositor log
         if: failure()
-        run: cat "$RUNNER_TEMP/weston.log" || true
+        run: cat "$RUNNER_TEMP/sway.log" || true
 
   windows:
     name: Windows — build and test

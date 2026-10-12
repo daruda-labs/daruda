@@ -98,7 +98,8 @@ pub(crate) fn init_observability() {
     daruda_store::observability::log_writer::LogWriter::init(log_policy);
     std::panic::set_hook(Box::new(|info| {
         let report = daruda_store::observability::error_report::ErrorReport::from_panic(info);
-        eprintln!("[daruda panic] {}", report.message);
+        let at = report.location.as_deref().unwrap_or("unknown location");
+        eprintln!("[daruda panic] {} at {}", report.message, at);
         let _ = daruda_store::observability::log_writer::write_panic_log(&report);
     }));
 }
