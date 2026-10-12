@@ -157,7 +157,7 @@ pub(in crate::settings) fn fold_mode_control(
         panel_root(window, state)
             .child(settings_header(
                 format!("settings-agent-fold-mode-close-{catalog_index}"),
-                s::agent_chat::view_options_fold(),
+                daruda_transcript::editor::fold::title(),
                 window,
                 cx,
             ))
@@ -264,7 +264,7 @@ pub(in crate::settings) fn display_filter_control(
         panel_root(window, state)
             .child(settings_header(
                 format!("settings-agent-display-filter-close-{catalog_index}"),
-                s::agent_chat::view_options_filter(),
+                daruda_transcript::editor::filter::title(),
                 window,
                 cx,
             ))
@@ -296,7 +296,10 @@ pub(in crate::settings) fn range_control(
     .p_0()
     .trigger(field_trigger(
         format!("settings-agent-range-trigger-{catalog_index}"),
-        s::agent_chat::tail_window_pair(value_label(values[0]), value_label(values[1])),
+        daruda_transcript::editor::range::pair_label(
+            value_label(values[0]),
+            value_label(values[1]),
+        ),
         overridden,
         cx,
     ))
@@ -306,7 +309,7 @@ pub(in crate::settings) fn range_control(
         panel_root(window, state)
             .child(settings_header(
                 format!("settings-agent-range-close-{catalog_index}"),
-                s::agent_chat::recent_steps_label(),
+                daruda_transcript::editor::range::title(),
                 window,
                 cx,
             ))
@@ -408,8 +411,8 @@ mod tests {
         assert_eq!(row_source(false), s::agent_chat::source_built_in());
         assert_eq!(row_source(true), s::agent_chat::source_agent_set());
         for source in [row_source(false), row_source(true)] {
-            assert_ne!(source, s::agent_chat::source_following_agent());
-            assert_ne!(source, s::agent_chat::source_this_chat());
+            assert_ne!(source, daruda_chat::labels::source_following_agent());
+            assert_ne!(source, daruda_chat::labels::source_this_chat());
         }
     }
 }

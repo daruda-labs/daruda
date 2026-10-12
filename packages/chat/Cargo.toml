@@ -1,0 +1,48 @@
+[package]
+name = "daruda_chat"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish = false
+license.workspace = true
+description = "daruda's agent chat pane — the transcript view, its rows and folds, and the turn and prompt-queue state behind them"
+
+[lints]
+workspace = true
+
+[features]
+# Seeding a transcript into a pane without an ACP session, shared by the app's
+# `screenshot` and `replay` front-ends.
+devtools = []
+# The capture seams the app's `--screenshot` scenarios drive.
+screenshot = ["devtools", "gpui/test-support"]
+# The seams the app's own tests drive a pane through. Never a shipping default.
+test-support = ["gpui/test-support", "daruda_ui/test-support"]
+
+[dependencies]
+anyhow = "1"
+base64 = "0.22"
+chrono = "0.4"
+daruda_acp = { workspace = true }
+daruda_agent = { workspace = true }
+daruda_config = { workspace = true }
+daruda_content = { workspace = true }
+daruda_core = { workspace = true }
+daruda_store = { workspace = true }
+daruda_transcript = { workspace = true }
+daruda_ui = { workspace = true }
+gpui = { workspace = true }
+image = { version = "0.25", default-features = false, features = ["png", "jpeg", "gif", "webp", "bmp"] }
+pulldown-cmark = { version = "0.13", default-features = false }
+rust-i18n = { workspace = true }
+serde_json = "1"
+
+[build-dependencies]
+strings_gen = { workspace = true }
+
+[dev-dependencies]
+agent-client-protocol = "2.0"
+daruda_ui = { workspace = true, features = ["test-support"] }
+gpui = { workspace = true, features = ["test-support"] }
+strings_gen = { workspace = true }
+tempfile = "3"

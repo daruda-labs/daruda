@@ -1,0 +1,118 @@
+//! Tracks whether a pane preference still follows config or was user-chosen.
+
+/// A setting seeded from config and persisted only after user selection.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum PaneChoice<T> {
+    Seeded(T),
+    Chosen(T),
+}
+
+impl<T: Copy> PaneChoice<T> {
+    pub(super) fn value(self) -> T {
+        match self {
+            Self::Seeded(value) | Self::Chosen(value) => value,
+        }
+    }
+
+    pub(crate) fn chosen(self) -> Option<T> {
+        match self {
+            Self::Chosen(value) => Some(value),
+            Self::Seeded(_) => None,
+        }
+    }
+
+    /// Whether the pane still tracks config. The reset affordance reads this
+    /// rather than comparing values: a pane sitting on `Chosen(default)` is
+    /// overridden, it merely happens to agree.
+    pub(super) fn is_following(self) -> bool {
+        matches!(self, Self::Seeded(_))
+    }
+
+    /// Follow a new config default. A pane the user has already decided for
+    /// keeps its own value — that is what makes `Seeded` mean "still following
+    /// config" rather than "happens to equal the old config".
+    pub(super) fn reseed(&mut self, value: T) {
+        if matches!(self, Self::Seeded(_)) {
+            *self = Self::Seeded(value);
+        }
+    }
+
+    /// Drop this pane's own decision and follow `value` again. The inverse of
+    /// a `Chosen` write: it is the *absence* of a choice, so the pane moves
+    /// with every later [`reseed`](Self::reseed).
+    pub(super) fn reset(&mut self, value: T) {
+        *self = Self::Seeded(value);
+    }
+}
+
+impl<T: Default> Default for PaneChoice<T> {
+    fn default() -> Self {
+        Self::Seeded(T::default())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_seeded_value_is_in_effect_but_not_the_users() {
+        let seeded = PaneChoice::Seeded(7u8);
+        assert_eq!(seeded.value(), 7);
+        assert_eq!(seeded.chosen(), None, "nothing to persist");
+    }
+
+    #[test]
+    fn a_chosen_value_is_both_in_effect_and_persisted() {
+        let chosen = PaneChoice::Chosen(7u8);
+        assert_eq!(chosen.value(), 7);
+        assert_eq!(chosen.chosen(), Some(7));
+    }
+
+    #[test]
+    fn choosing_the_seeded_value_still_records_a_choice() {
+        let seeded = PaneChoice::Seeded(7u8);
+        let chosen = PaneChoice::Chosen(seeded.value());
+        assert_eq!(chosen.value(), seeded.value());
+        assert_ne!(chosen, seeded);
+        assert_eq!(chosen.chosen(), Some(7));
+    }
+
+    #[test]
+    fn reseeding_moves_a_seeded_value_and_leaves_a_chosen_one() {
+        let mut seeded = PaneChoice::Seeded(7u8);
+        seeded.reseed(9);
+        assert_eq!(seeded, PaneChoice::Seeded(9), "an untouched pane follows");
+
+        let mut chosen = PaneChoice::Chosen(7u8);
+        chosen.reseed(9);
+        assert_eq!(
+            chosen,
+            PaneChoice::Chosen(7),
+            "a user choice is not config's"
+        );
+    }
+
+    #[test]
+    fn following_is_about_the_variant_not_the_value() {
+        assert!(PaneChoice::Seeded(7u8).is_following());
+        assert!(
+            !PaneChoice::Chosen(7u8).is_following(),
+            "a choice that agrees with config is still a choice"
+        );
+    }
+
+    #[test]
+    fn a_reset_choice_follows_later_config_edits_again() {
+        let mut chosen = PaneChoice::Chosen(7u8);
+        chosen.reset(3);
+        assert_eq!(chosen, PaneChoice::Seeded(3));
+        chosen.reseed(9);
+        assert_eq!(chosen, PaneChoice::Seeded(9), "the reset put it back");
+    }
+
+    #[test]
+    fn default_seeds_the_types_own_default() {
+        assert_eq!(PaneChoice::<u8>::default(), PaneChoice::Seeded(0));
+    }
+}

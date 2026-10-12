@@ -18,8 +18,8 @@ use gpui::{
 
 use crate::test_support::init_gpui_component;
 use crate::ui::theme;
-use crate::workspace::main_area::agent_chat_pane::output_editor::bounded_embed_height;
-use crate::workspace::main_area::agent_chat_pane::render::embed::bounded_editor_embed;
+use daruda_chat::output_editor::bounded_embed_height;
+use daruda_chat::render::embed::bounded_editor_embed;
 
 /// Far more rows than the cap can show, standing in for large command output
 /// that fits inside the 64 KiB byte cap.
@@ -231,7 +231,7 @@ fn render_shell_output_card(
     trailing_newline: bool,
 ) -> (
     gpui::AnyWindowHandle,
-    Entity<crate::workspace::main_area::agent_chat_pane::view::AgentChatView>,
+    Entity<daruda_chat::view::AgentChatView>,
 ) {
     let mut printed = numbered_lines(rows);
     if trailing_newline {
@@ -247,7 +247,7 @@ fn render_shell_output_card_with(
     printed: String,
 ) -> (
     gpui::AnyWindowHandle,
-    Entity<crate::workspace::main_area::agent_chat_pane::view::AgentChatView>,
+    Entity<daruda_chat::view::AgentChatView>,
 ) {
     use crate::workspace::main_area::pane::PaneContent;
     use agent_client_protocol::schema::v1::{
@@ -316,7 +316,7 @@ fn render_shell_output_card_with(
 /// embed.
 fn update_shell_output(
     cx: &mut TestAppContext,
-    view: &Entity<crate::workspace::main_area::agent_chat_pane::view::AgentChatView>,
+    view: &Entity<daruda_chat::view::AgentChatView>,
     printed: String,
 ) {
     use agent_client_protocol::schema::v1::{
@@ -347,7 +347,7 @@ fn update_shell_output(
 /// wider than the viewport is the absence of the sideways scroll it replaces.
 fn output_editor_wrap_facts(
     cx: &mut TestAppContext,
-    view: &Entity<crate::workspace::main_area::agent_chat_pane::view::AgentChatView>,
+    view: &Entity<daruda_chat::view::AgentChatView>,
 ) -> (usize, gpui::Pixels, gpui::Pixels) {
     view.read_with(cx, |v, cx| {
         let state = v
@@ -446,7 +446,7 @@ async fn long_output_lines_wrap_to_the_embed_width(cx: &mut TestAppContext) {
 fn push_filler_cards(
     cx: &mut TestAppContext,
     window_handle: gpui::AnyWindowHandle,
-    view: &Entity<crate::workspace::main_area::agent_chat_pane::view::AgentChatView>,
+    view: &Entity<daruda_chat::view::AgentChatView>,
     count: usize,
 ) {
     use agent_client_protocol::schema::v1::{
@@ -498,7 +498,7 @@ fn push_filler_cards(
 /// the pair a chaining test must check before trusting either outcome.
 fn transcript_scroll_range(
     cx: &mut TestAppContext,
-    view: &Entity<crate::workspace::main_area::agent_chat_pane::view::AgentChatView>,
+    view: &Entity<daruda_chat::view::AgentChatView>,
 ) -> (usize, gpui::Pixels) {
     view.read_with(cx, |v, _| {
         (
@@ -734,7 +734,7 @@ fn render_read_output_card(
     body: String,
 ) -> (
     gpui::AnyWindowHandle,
-    Entity<crate::workspace::main_area::agent_chat_pane::view::AgentChatView>,
+    Entity<daruda_chat::view::AgentChatView>,
 ) {
     use crate::workspace::main_area::pane::PaneContent;
     use agent_client_protocol::schema::v1::{
@@ -801,7 +801,7 @@ fn render_read_output_card(
 /// The sole output block of the `t1` tool call.
 fn only_output_block(
     cx: &mut TestAppContext,
-    view: &Entity<crate::workspace::main_area::agent_chat_pane::view::AgentChatView>,
+    view: &Entity<daruda_chat::view::AgentChatView>,
 ) -> daruda_acp::ToolOutputBlock {
     view.read_with(cx, |v, _| {
         let blocks = v
@@ -912,7 +912,7 @@ async fn read_tool_outputs_render_through_the_capped_embed(cx: &mut TestAppConte
 /// The embedded editor's painted viewport height and its `scroll_size()` height.
 fn output_editor_extents(
     cx: &mut TestAppContext,
-    view: &Entity<crate::workspace::main_area::agent_chat_pane::view::AgentChatView>,
+    view: &Entity<daruda_chat::view::AgentChatView>,
 ) -> (gpui::Pixels, gpui::Pixels) {
     view.read_with(cx, |v, cx| {
         let state = v
@@ -938,11 +938,11 @@ fn output_editor_extents(
 fn fold_in_window<R>(
     cx: &mut TestAppContext,
     window_handle: gpui::AnyWindowHandle,
-    view: &gpui::Entity<crate::workspace::main_area::agent_chat_pane::view::AgentChatView>,
+    view: &gpui::Entity<daruda_chat::view::AgentChatView>,
     f: impl FnOnce(
-        &mut crate::workspace::main_area::agent_chat_pane::view::AgentChatView,
+        &mut daruda_chat::view::AgentChatView,
         &mut gpui::Window,
-        &mut gpui::Context<crate::workspace::main_area::agent_chat_pane::view::AgentChatView>,
+        &mut gpui::Context<daruda_chat::view::AgentChatView>,
     ) -> R,
 ) -> R {
     cx.update_window(window_handle, |_, window, cx| {

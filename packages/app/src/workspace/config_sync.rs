@@ -9,7 +9,7 @@ use std::time::Duration;
 use daruda_config::{Config, HexColor, IconColorMode, StatusBarConfig};
 use daruda_terminal::TerminalConfig;
 
-use super::main_area::agent_chat_pane::transcript_defaults::ReaderDefaults;
+use daruda_chat::transcript_defaults::ReaderDefaults;
 
 #[derive(Clone)]
 pub(in crate::workspace) struct ConfigMirrors {

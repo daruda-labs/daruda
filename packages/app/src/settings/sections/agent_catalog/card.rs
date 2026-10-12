@@ -237,7 +237,7 @@ impl SettingsView {
                 filter_control,
             ))
             .child(field_row(
-                s::agent_chat::recent_steps_label(),
+                daruda_transcript::editor::range::title(),
                 range_control,
             ))
             .when(

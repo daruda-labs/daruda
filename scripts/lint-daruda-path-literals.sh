@@ -82,6 +82,7 @@ SCAN_DIRS=(
     "packages/content/src"
     "packages/flow-edit/src"
     "packages/transcript/src"
+    "packages/chat/src"
     "packages/agent/src"
 )
 

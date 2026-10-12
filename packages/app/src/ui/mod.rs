@@ -4,10 +4,8 @@
 
 pub use daruda_ui::*;
 
-pub mod agent_icon;
 pub mod agent_status_badge;
 mod localized;
 
-pub use agent_icon::{agent_icon, agent_menu_icon};
-pub use agent_status_badge::{AgentStatusBadge, IndicatorSize, StatusPulseClock, color_for_status};
+pub use agent_status_badge::{AgentStatusBadge, IndicatorSize, color_for_status};
 pub use localized::{button_close, button_delete_glyph, code_copy_button, markdown};

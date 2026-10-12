@@ -35,7 +35,7 @@
 set -uo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-PANE="packages/app/src/workspace/main_area/agent_chat_pane"
+PANE="packages/chat/src"
 ADAPTER="$PANE/view/list_sync.rs"
 
 # Files allowed to mutate `items` structurally, with what each is.
@@ -45,12 +45,13 @@ STRUCTURAL_ALLOW=(
 
 status=0
 
-# Strip `#[cfg(test)]` module bodies so a fixture building a transcript is not
-# mistaken for a production mutation. Brace-counting from the attribute is
-# enough here: every test module in this tree is a top-level `mod tests {`.
+# Strip test-only bodies — `#[cfg(test)]`, and the hooks the app's tests reach
+# through the `test-support` feature — so a fixture building a transcript is
+# not mistaken for a production mutation. Brace-counting from the attribute is
+# enough here: each is a top-level `mod tests {` or `impl AgentChatView {`.
 strip_tests() {
     awk '
-        /^#\[cfg\(test\)\]/ { skipping = 1 }
+        /^#\[cfg\((test|any\(test, feature = "test-support"\))\)\]/ { skipping = 1 }
         skipping {
             depth += gsub(/\{/, "{")
             depth -= gsub(/\}/, "}")

@@ -8,18 +8,9 @@
 //! window tree. The shared ~4 fps clock keeps animating windows alive, leaves
 //! idle windows at zero redraws, and satisfies CLAUDE.md Pitfall #10.
 
-use crate::ui::theme;
+use crate::ui::{StatusPulseClock, theme};
 use daruda_agent::SessionStatus;
-use gpui::{
-    App, Global, Hsla, IntoElement, ParentElement, Pixels, RenderOnce, Styled, Window, div, px,
-};
-
-/// Monotonic animation clock shared by every status badge.
-#[derive(Default)]
-pub struct StatusPulseClock {
-    pub tick: u64,
-}
-impl Global for StatusPulseClock {}
+use gpui::{App, Hsla, IntoElement, ParentElement, Pixels, RenderOnce, Styled, Window, div, px};
 
 /// Ticks each 2-frame blink holds before toggling (~1 Hz at 4 fps).
 const BLINK_HOLD_TICKS: u64 = 2;

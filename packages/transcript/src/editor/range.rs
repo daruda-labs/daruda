@@ -138,6 +138,21 @@ pub fn value_label(value: u8) -> String {
     }
 }
 
+/// A window of `count` items, as a chip or a select names it.
+pub fn count_label(count: impl std::fmt::Display) -> String {
+    s::transcript::tail_window_last(count)
+}
+
+/// Both levels' windows in one slot, for a pane whose levels disagree.
+pub fn pair_label(steps: impl std::fmt::Display, calls: impl std::fmt::Display) -> String {
+    s::transcript::tail_window_pair(steps, calls)
+}
+
+/// The range editor's name, as its tab or its Settings field reads.
+pub fn title() -> String {
+    s::transcript::recent_steps_label()
+}
+
 /// The name of the window that withholds nothing, wherever a tail window is
 /// shown — this editor, the chat's chip, the Settings select.
 pub fn all_label() -> String {

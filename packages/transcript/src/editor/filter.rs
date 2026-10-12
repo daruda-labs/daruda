@@ -32,6 +32,11 @@ pub struct FilterEditorActions {
 /// It names what is **missing**, not what is left: it is the shorter list, and
 /// it is what the user did — every box starts checked, so a filtered pane is
 /// one the user took something out of.
+/// The visible-items editor's name, as its tab or its Settings field reads.
+pub fn title() -> String {
+    s::transcript::view_options_filter()
+}
+
 pub fn filter_value(filter: DisplayFilter) -> String {
     let hidden = filter.hidden();
     match hidden.as_slice() {

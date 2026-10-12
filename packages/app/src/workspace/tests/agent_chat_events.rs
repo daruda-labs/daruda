@@ -9,8 +9,8 @@ use gpui::{AppContext as _, Context, TestAppContext};
 
 use super::build_workspace;
 use crate::workspace::Workspace;
-use crate::workspace::main_area::agent_chat_pane::view::AgentChatEvent;
 use crate::workspace::main_area::pane_tree::PaneId;
+use daruda_chat::view::AgentChatEvent;
 
 fn emit_report(ws: &Workspace, pane: PaneId, title: &'static str, cx: &mut Context<Workspace>) {
     let view = ws.agent_chat_view(pane).expect("a chat pane").clone();

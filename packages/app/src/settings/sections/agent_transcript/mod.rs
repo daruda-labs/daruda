@@ -468,7 +468,7 @@ fn tail_options() -> Vec<SelectOption> {
     options.extend(TAIL_WINDOW_CHOICES.into_iter().map(|size| {
         SelectOption::new(
             size.to_string(),
-            s::agent_chat::tail_window_last(usize::from(size)),
+            daruda_transcript::editor::range::count_label(usize::from(size)),
         )
     }));
     options

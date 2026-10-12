@@ -29,9 +29,7 @@ use crate::control::result::ControlError;
 use crate::telegram::bridge::PaneRef;
 use crate::window_registry::WindowRegistry;
 
-/// Pending prompts one pane may hold. The queue drains one per turn, so an
-/// agent pushing faster than turns complete would grow it without bound.
-pub(crate) const QUEUE_DEPTH_MAX: usize = 10;
+pub(crate) use daruda_chat::QUEUE_DEPTH_MAX;
 
 /// Worktrees the agent may create in one run of the app. Counts *only*
 /// agent-created ones — a user with twenty lanes open must not find the

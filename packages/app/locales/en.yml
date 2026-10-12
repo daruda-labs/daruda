@@ -31,7 +31,6 @@ common:
   btn_stop: "Stop"
   loading: "Loading…"
   refresh: "Refresh"
-  read: "Read"
   section_project: "Project"
   section_personal: "Personal"
   section_user: "User"
@@ -61,15 +60,10 @@ common:
 # Wall-clock timestamp shapes (`chrono` patterns). en-US reads on a 12-hour
 # clock; see `surface::timestamp`.
 timestamp:
-  # `chrono` pattern for a full date and time. A pattern rather than plain
-  # copy: field order, clock convention and the words around the numbers all
-  # differ per locale. Consumed by [`crate::surface::timestamp`], not at call sites.
-  date_and_time: "%b %-d, %Y, %-I:%M %p"
-  # `chrono` pattern for a time of day alone — a stamp whose date the
-  # surrounding UI already implies.
-  time_only: "%-I:%M %p"
   # `chrono` pattern for a month, day and time — a timestamp whose year the
-  # surrounding UI already implies.
+  # surrounding UI already implies. A pattern rather than plain copy: field
+  # order, clock convention and the words around the numbers all differ per
+  # locale. Consumed by [`crate::surface::timestamp`], not at call sites.
   month_day_and_time: "%b %-d, %-I:%M %p"
 
 # Command palette and quick switchers
@@ -493,11 +487,7 @@ agent_chat:
   attachment_remove: "Remove %{name}"
   attachment_clipboard_name: "Clipboard image"
   attachment_paste: "Paste an image or files"
-  attachment_connect_first: "Connect the agent before adding attachments."
-  attachment_unsupported: "This agent does not support this attachment type."
-  attachment_limit: "Attachment limit exceeded (8 files, 12 MiB per prompt, 48 MiB queued)."
   attachment_failed: "Could not attach the file or clipboard contents."
-  attachment_names: "Attachments: %{names}"
   queue_full: "That chat already has too many prompts waiting. Wait for it to catch up."
   # Heading for an inline permission card.
   # Toast title for a non-fatal session advisory (`AcpEvent::Notice`): the
@@ -507,21 +497,6 @@ agent_chat:
   # Body for the one notice daruda authors itself: the agent delegated through
   # its legacy path, so the subagent's work can never be shown.
   legacy_delegation_notice: "This agent delegated to a subagent without native subagent sessions, so the subagent's own tool calls will not appear. Its adapter may not support them, or may not read the Environment in Settings → Agents & Chat."
-  # Closes a diff cut short by the inline fallback. Names the count and points
-  # at the file, since the fallback has no scroller to reach the rest with.
-  diff_fallback_truncated: "%{n} more lines — open the file to see the rest"
-  # Label for the button an agent-chat pane offers when its failure is one a
-  # fresh sign-in actually fixes (`daruda_acp::Remedy::Reauthenticate`).
-  # Deliberately distinct from the Settings row's label: here the user is
-  # recovering a session, not administering accounts.
-  sign_in_again: "Sign in again"
-  # Tooltip on a mermaid diagram card's zoom button, which opens the lightbox.
-  diagram_zoom: "Enlarge diagram"
-  # Tooltip on a mermaid diagram card's copy button — it copies the diagram
-  # source, not the rendered image.
-  diagram_copy: "Copy diagram source"
-  # Tooltip on a mermaid diagram card's copy button right after a copy.
-  diagram_copied: "Copied"
   # Enabled state of a boolean session config option (e.g. "Fast mode"), used
   # as both the chip label and its dropdown entry. The protocol carries only a
   # `bool`, so the two labels are the host's to supply.
@@ -534,45 +509,11 @@ agent_chat:
   config_chip: "%{name}: %{value}"
   # Tab / pane-header title for an Agent chat pane.
   tab_title: "Agent"
-  # Banner copy for a dormant (restored, not-yet-connected) Agent chat pane.
-  # The session starts on first focus, so this shows only for a visible but
-  # unfocused pane.
-  idle: "Idle — focus this pane to start the agent."
-  # Placeholder copy shown while the agent session is connecting, before any
-  # handshake milestone has been reported yet.
-  connecting: "Connecting…"
-  # Status banner shown while `initialize` is in flight (awaiting the agent's
-  # capabilities reply).
-  connecting_handshake: "Connecting — waiting for the agent to respond…"
-  # Status banner shown while `session/new` is in flight (fresh session).
-  connecting_creating_session: "Connecting — starting a new session…"
-  # Status banner shown while `session/load` is in flight (resuming a
-  # persisted session).
-  connecting_loading_session: "Connecting — resuming your conversation…"
-  # Status banner shown while `session/set_mode` is in flight, applying the
-  # configured initial mode to a freshly created session.
-  connecting_applying_mode: "Connecting — applying session mode…"
-  # Status banner shown while the app is downloading the Node.js runtime the
-  # agent adapter needs (first run on a machine without a usable Node.js).
-  runtime_downloading: "Setting up the agent runtime — downloading Node.js (first run only)…"
-  # Status banner shown while the downloaded Node.js runtime is being verified.
-  runtime_verifying: "Setting up the agent runtime — verifying download…"
-  # Status banner shown while the downloaded Node.js runtime is being extracted.
-  runtime_extracting: "Setting up the agent runtime — extracting…"
-  # Prefix for the connection-error status line.
-  error_prefix: "Connection error:"
-  transport_closed: "The connection to the agent was closed. Retry to reconnect."
-  adapter_install_failed: "Could not prepare the agent package. Check the error details, then retry."
-  adapter_setup_required: "Could not prepare the agent package. Check the error details and correct the package or runtime configuration before reconnecting."
-  adapter_integrity_failed: "The agent package failed integrity verification and was not started. Check the error details and the package source."
-  adapter_preparation_canceled: "Agent preparation was canceled."
   # Error-line reason set when the connection's event stream closes while the
   # pane is still `Connecting`/`Handshaking`/`PreparingRuntime` — no
   # `Connected`/`Error` ever arrived, so nothing else would surface a failure.
   # The renderer prepends the error prefix, so this is the bare reason.
   error_stream_ended: "the agent process ended before the connection was ready."
-  # Label for the "Retry" button shown in the Error status banner.
-  retry: "Retry"
   # Status-line reason shown when an Agent chat pane has no resolvable lane
   # working directory to attach a session to. The renderer prepends the error
   # prefix, so this is the bare reason (not itself prefixed).
@@ -610,222 +551,16 @@ agent_chat:
   # be prepared. The connect does not silently fall back to another account,
   # so this names a real blocker rather than a warning.
   account_prepare_failed: "Could not prepare the selected account's configuration directory."
-  # Hint appended to a connection error when the pane's working directory is
-  # a remote (SSH/Docker) path. Guides the user to check the remote path
-  # configuration and network connectivity.
-  remote_connect_error_hint: "This looks like a remote (SSH/Docker) connection failure — check this Worktree's \"Session Host…\" setting in the sidebar (or, for an agent command still using the legacy {{cwd}} placeholder, edit that command in Settings → Agents & Chat) and that the host/container is reachable."
-  # Empty-conversation hint shown before the first message.
-  empty: "Ask the agent anything to get started."
-  # Toolbar button: expand every foldable block in the conversation.
-  expand_all: "Expand all"
-  # Toolbar button: collapse every foldable block in the conversation.
-  collapse_all: "Collapse all"
-  # Toolbar button tooltip when clicking will enable reading-width mode.
-  reading_width_on: "Use reading width"
-  # Toolbar button tooltip when clicking will return to full-width mode.
-  reading_width_off: "Use full width"
-  # Tooltip on a diff block's header path — clicking opens it in the file
-  # viewer.
-  diff_open_in_file_view: "Open in file view"
-  # Tooltip on a diff block header's "open externally" button when no preferred
-  # external editor is configured — the click hands the path to the OS default
-  # handler, which has no name to show.
-  diff_open_externally: "Open externally"
-  # Tooltip on a diff block header's "open externally" button when a preferred
-  # external editor is configured. `editor` is the preset's own display name
-  # (a proper noun — not localized).
-  diff_open_in_editor: "Open in %{editor}"
-  # Tooltip on a diff block header's copy-path button.
-  diff_copy_path: "Copy path"
-  # Tooltip on a diff block header's copy-path button right after a click.
-  diff_path_copied: "Copied"
   # Error toast when "open in file view" / "open externally" is clicked on a
   # diff whose pane's session runs on a remote host — the path is on that
   # remote filesystem, not this machine's, so opening it locally would either
   # fail or (worse) show an unrelated local file at the same path.
   diff_remote_path_unsupported: "Can't open a remote session's file locally."
-  # Tooltip on the activity-bar title showing the session's last-activity time
-  # (`SessionInfoUpdate.updated_at`). `time` is a pre-formatted timestamp.
-  last_active_tooltip: "Last active: %{time}"
-  # Inline label on the context meter. `used`/`size` are pre-formatted token
-  # counts; the separator between them is the locale's business.
-  context_meter: "%{used} / %{size}"
-  # Inline label on the context meter for an agent that reports cumulative
-  # session cost. Its own pattern, so where the amount sits is the locale's.
-  context_meter_with_cost: "%{used} / %{size} · %{amount} %{currency}"
-  # Tooltip on the context meter: the current context-window fill. `used`/`size`
-  # are pre-formatted token counts; `percent` is the fill ratio.
-  context_tooltip: "Context: %{used} / %{size} tokens (%{percent}%)"
-  # Same tooltip for a session whose agent also reports cumulative cost. Its own
-  # pattern, so the separator and where the amount sits relative to the fill
-  # stay translator decisions.
-  context_tooltip_with_cost: "Context: %{used} / %{size} tokens (%{percent}%) · %{amount} %{currency}"
-  # Section label for the bottom plan region.
-  plan_label: "Plan"
-  # Tooltip on the × button that dismisses a completed plan region.
-  plan_dismiss: "Dismiss plan"
-  # Working-indicator label for the number of subagents running right now.
-  subagent_progress: "%{n} subagents"
-  # Label for a collapsed agent reasoning ("thinking") block.
-  thinking_label: "Thinking"
-  tool_kind_delete: "Delete"
-  tool_kind_move: "Move"
-  tool_kind_search: "Search"
-  tool_kind_execute: "Execute"
-  tool_kind_think: "Think"
-  # The header label for a launch the adapter gave no tool name — its `Think`
-  # kind is the one label that misreads, so the card says what it holds.
-  tool_kind_subagent: "Subagent"
-  tool_kind_fetch: "Fetch"
-  tool_kind_switch_mode: "Switch Mode"
-  tool_kind_other: "Tool"
-  # Label above a tool call's plain-text output.
-  tool_output_label: "Output"
-  # Disclosure label for a tool call's raw input (JSON arguments).
-  raw_input_label: "Raw Input"
-  # Tool-call status badge — executing.
-  tool_status_running: "Running"
-  # Tool-call status badge — completed successfully.
-  tool_status_done: "Done"
-  # Tool-call status badge — failed.
-  tool_status_failed: "Failed"
-  # Tool-call status badge — cancelled (the turn was stopped before it settled).
-  tool_status_cancelled: "Cancelled"
-  # Chip marking a shell command launched detached (`run_in_background: true`).
-  tool_background: "Background"
-  command_more: "+%{count}"
-  # Badge naming a shell tool call's nonzero exit code, e.g. "Exit 1".
-  tool_exit_code: "Exit %{code}"
-  # Badge naming the signal that terminated a shell tool call, e.g. "Signal SIGKILL".
-  tool_exit_signal: "Signal %{signal}"
-  # Label above a Task/Agent card's nested subagent tool calls.
-  subagent_label: "Subagent"
-  # Subagent label naming the spawned agent's type (Claude Code's `Task`
-  # `subagent_type`), e.g. "Subagent: code-reviewer". Used in place of the
-  # generic [`agent_chat_subagent_label`] when the type is known.
-  subagent_label_typed: "Subagent: %{kind}"
-  # Metadata chip inside a subagent's always-visible instructions block naming
-  # its type, e.g. "Type: general-purpose".
-  subagent_type_chip: "Type: %{kind}"
-  permission_title: "Permission required"
-  # Prefix shown on a resolved permission card before the chosen option.
-  permission_resolved_prefix: "Selected:"
-  # Shown on a permission card whose turn was cancelled before the user
-  # decided, in place of the chosen-option line.
-  permission_cancelled: "Cancelled."
-  # Elapsed run time under a minute, e.g. "5s". The unit is part of the
-  # translation: a bare number with a hardcoded `s` reads as English in every
-  # locale, and this label sits beside translated text.
-  elapsed_seconds: "%{secs}s"
-  # Elapsed run time at or over a minute, e.g. "1m05s". `secs` arrives
-  # zero-padded: this labels a badge that ticks, so the width has to hold still
-  # as the seconds roll over.
-  elapsed_minutes: "%{mins}m%{secs}s"
-  group_read: "%{count} files read"
-  group_edit: "%{count} files edited"
-  group_search: "%{count} searches"
-  group_run: "%{count} commands"
-  group_delete: "%{count} files deleted"
-  group_fetch: "%{count} web calls"
-  group_mcp: "%{count} MCP calls"
-  group_agent: "%{count} agents"
-  group_other: "%{count} other calls"
-  # Separator between a tool-group header's category segments.
-  group_separator: " · "
-  group_read_one: "1 file read"
-  group_edit_one: "1 file edited"
-  group_search_one: "1 search"
-  group_run_one: "1 command"
-  group_delete_one: "1 file deleted"
-  group_fetch_one: "1 web call"
-  group_mcp_one: "1 MCP call"
-  group_agent_one: "1 agent"
-  group_other_one: "1 other call"
-  # How long the live turn has been going, e.g. "Working · 9s". Present tense
-  # on purpose: this is the bar of a turn still running, while the settled
-  # phrasing belongs to the answer row below it.
-  turn_running: "Working · %{span}"
-  # How long the turn worked, e.g. "Worked for 3s". `span` arrives already
-  # formatted by the shared elapsed formatter, so this only supplies the phrase
-  # around it.
-  turn_worked: "Worked for %{span}"
-  # The turn's output-token count, e.g. "1.5k out". `count` is pre-abbreviated:
-  # the row is a trailing badge, so a six-digit number would push the rest of
-  # the header off the line.
-  turn_output: "%{count} out"
-  # Separator between the answer row's trailing facts.
-  turn_separator: " · "
-  thinking_group_count_one: "1 thought"
-  thinking_group_count: "%{count} thoughts"
-  filtered_show_one: "Show 1 filtered item"
-  filtered_show: "Show %{count} filtered items"
-  # Expanded label for the same disclosure. Takes no count, and there is one
-  # string rather than a singular / plural / partial set: the rows are on screen,
-  # so a number here restates them and reads as a description of the current
-  # state ("12 filtered items, hidden") in exactly the state where they are not.
-  # The reveal's own extent is the *collapsed* label's job — see
-  # [`agent_chat_filtered_show`], which the reader saw a click ago.
-  filtered_hide_again: "Hide them again"
-  filter_chip: "Filter: %{value}"
-  # The marker row where a Stop cut a run. Deliberately not the agent's own
-  # wording: the Claude SDK writes `[Request interrupted by user]` into its
-  # transcript, which is protocol text in one language that also reads as
-  # something the user typed. Names the actor, because the alternative reading
-  # — the agent stopped on its own — is the one worth ruling out.
-  interrupted: "Stopped by user"
-  tail_more_show_one: "Show 1 earlier step"
-  tail_more_show: "Show %{count} earlier steps"
-  tail_more_collapse_one: "Collapse to the last step"
-  tail_more_collapse: "Collapse to the last %{count} steps"
-  tail_more_show_calls_one: "Show 1 earlier call"
-  tail_more_show_calls: "Show %{count} earlier calls"
-  tail_more_collapse_calls_one: "Collapse to the last call"
-  tail_more_collapse_calls: "Collapse to the last %{count} calls"
-  fold_mode_chip: "Fold: %{value}"
-  use_agent_defaults: "Use agent defaults"
   use_built_in: "Use built-in defaults"
-  save_as_agent_default: "Save as agent default"
-  view_options_label: "View"
-  tail_window_chip: "Recent steps: %{value}"
-  # The chip's value slot when the axis's two levels hold different windows.
-  # A pane whose levels agree states the single value instead — see
-  # `tail_window_chip_label`.
-  tail_window_pair: "Steps: %{steps} · Calls: %{calls}"
-  tail_window_last: "%{count}"
-  # An Activity Bar chip's label with the mark that says this pane has taken
-  # the axis off the configured default. A dot, so it costs the chip no reading
-  # and no restatement of the value it already carries.
-  chip_overridden: "%{label} •"
-  # The compact bar's gear tooltip: the wide bar's three chip labels verbatim,
-  # so a narrowed pane still states what the transcript is showing.
-  view_options_tooltip: "View options — %{fold} · %{filter} · %{tail}"
-  view_options_fold: "Fold"
-  view_options_filter: "Visible items"
-  recent_steps_label: "Activity range"
-  # Transcript-editor popover header title.
-  view_options_title: "View options"
-  # Footer and Settings-field source line: where the axis value comes from.
-  source_following_agent: "Following agent defaults"
-  source_this_chat: "This chat only"
   source_built_in: "Built-in default"
   source_agent_set: "Set for this agent"
-  tool_output_truncated: "… (truncated, %{size} total)"
-  # Placeholder shown in place of a tool's image output block while its base64
-  # payload is still being decoded (or hasn't been scanned yet) — decode runs
-  # asynchronously on the background executor via `reconcile_tool_images`, so
-  # this dimmed one-line stand-in covers the brief gap before the real image
-  # (or, on decode failure, `agent_chat_tool_media_label`) replaces it.
-  tool_image_placeholder: "[image]"
   # Toast title when a pane link resolves to a path that no longer exists.
   link_file_missing: "The linked file no longer exists"
-  tool_media_label: "[%{mime} · %{size}]"
-  tool_media_label_no_mime: "[%{size}]"
-  # Pinned working-footer label while the agent is generating a response.
-  working: "Working"
-  # Pinned working-footer label while a named tool call is in progress.
-  working_tool: "Running %{name}"
-  # Pinned working-footer label while the turn is blocked on a permission prompt.
-  awaiting_permission: "Waiting for your approval"
   # Description for the daruda-injected `/clear` slash command, shown in the
   # completion menu's detail column when the connected agent doesn't advertise
   # its own `clear` command.

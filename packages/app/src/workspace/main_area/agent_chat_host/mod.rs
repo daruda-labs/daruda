@@ -1,6 +1,6 @@
 //! The `Workspace` side of the agent chat pane: everything that needs
 //! workspace state to act on a chat. The pane itself is
-//! `super::agent_chat_pane`, which this module drives only through the
+//! `daruda_chat` (`packages/chat`), which this module drives only through the
 //! view's host surface.
 //!
 //! - [`agent_chat_ops`] — pane/tab construction, desktop notifications,
@@ -18,6 +18,7 @@ pub(super) mod agent_chat_connect_ops;
 pub(in crate::workspace) mod agent_chat_event_ops;
 pub(in crate::workspace) mod agent_chat_ops;
 pub(super) mod agent_chat_queue_ops;
+mod agent_default_writer;
 mod attachment_ops;
 mod host_event_ops;
 pub(in crate::workspace) mod telegram_ops;

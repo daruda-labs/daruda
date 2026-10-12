@@ -11,10 +11,10 @@ use std::path::Path;
 use crate::agent::tasks_global::GlobalTasks;
 use crate::surface::strings as s;
 use crate::workspace::Workspace;
-use crate::workspace::main_area::agent_chat_pane::view::LoadIntent;
 use crate::workspace::main_area::pane::PaneContent;
 use crate::workspace::main_area::pane_tree::PaneId;
 use daruda_agent::pty_tracker::PtyBinding;
+use daruda_chat::view::LoadIntent;
 
 impl Workspace {
     pub(super) fn bind_task_cli_execution(
@@ -425,7 +425,7 @@ impl Workspace {
             None,
             move |v, window, cx| {
                 v.seed_transcript(
-                    crate::workspace::main_area::agent_chat_pane::shot_transcript::sample_transcript(),
+                    daruda_chat::shot_transcript::sample_transcript(),
                     window,
                     cx,
                 );

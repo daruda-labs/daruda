@@ -646,11 +646,7 @@ async fn a_turn_that_errored_does_not_leave_its_ledger_behind(cx: &mut gpui::Tes
                 });
             assert!(v.take_phone_first_response_for_test());
         });
-        ws.fire_activity_completion(
-            pane_id,
-            crate::workspace::main_area::agent_chat_pane::view::TurnOutcome::Errored,
-            cx,
-        );
+        ws.fire_activity_completion(pane_id, daruda_chat::view::TurnOutcome::Errored, cx);
         assert!(
             ws.agent_chat_view(pane_id)
                 .expect("view")
@@ -1036,19 +1032,18 @@ async fn permission_delivery_history_tracks_recipient_and_connection(
     cx.run_until_parked();
 
     let options = vec![choice("allow_once", "Allow", PermissionKindView::AllowOnce)];
-    let add_request =
-        |view: &mut crate::workspace::main_area::agent_chat_pane::view::AgentChatView| {
-            view.items_mut_for_test()
-                .push(ChatItem::Permission(PermissionItem {
-                    id: 0,
-                    tool_call_id: String::new(),
-                    tool_title: Some("Write /tmp/x.rs".into()),
-                    raw_input_summary: None,
-                    options: options.clone(),
-                    resolved: None,
-                }));
-            view.pending_permissions_mut_for_test().insert(0);
-        };
+    let add_request = |view: &mut daruda_chat::view::AgentChatView| {
+        view.items_mut_for_test()
+            .push(ChatItem::Permission(PermissionItem {
+                id: 0,
+                tool_call_id: String::new(),
+                tool_title: Some("Write /tmp/x.rs".into()),
+                raw_input_summary: None,
+                options: options.clone(),
+                resolved: None,
+            }));
+        view.pending_permissions_mut_for_test().insert(0);
+    };
 
     workspace.update(cx, |ws, cx| {
         let view = ws.agent_chat_view(pane).cloned().unwrap();

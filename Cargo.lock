@@ -1787,6 +1787,7 @@ dependencies = [
  "chrono",
  "daruda_acp",
  "daruda_agent",
+ "daruda_chat",
  "daruda_config",
  "daruda_content",
  "daruda_control_types",
@@ -1891,6 +1892,31 @@ dependencies = [
  "test_process",
  "thiserror 2.0.18",
  "ureq",
+]
+
+[[package]]
+name = "daruda_chat"
+version = "0.2.17"
+dependencies = [
+ "agent-client-protocol",
+ "anyhow",
+ "base64",
+ "chrono",
+ "daruda_acp",
+ "daruda_agent",
+ "daruda_config",
+ "daruda_content",
+ "daruda_core",
+ "daruda_store",
+ "daruda_transcript",
+ "daruda_ui",
+ "gpui",
+ "image",
+ "pulldown-cmark",
+ "rust-i18n",
+ "serde_json",
+ "strings_gen",
+ "tempfile",
 ]
 
 [[package]]

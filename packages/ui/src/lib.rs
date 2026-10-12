@@ -14,6 +14,7 @@
 //! call site reads as one line: `crate::ui::button_primary("save", "Save")`.
 
 pub mod accordion;
+pub mod agent_icon;
 pub mod alert;
 pub mod badge;
 pub mod button;
@@ -48,6 +49,7 @@ pub mod picker_row;
 pub mod placeholder;
 pub mod popover;
 pub mod progress;
+pub mod pulse_clock;
 pub mod radio;
 pub mod row_highlight;
 pub mod scrollbar;
@@ -63,6 +65,7 @@ pub mod tooltip;
 #[cfg(any(test, feature = "test-support"))]
 pub mod test_support;
 
+pub use agent_icon::{agent_icon, agent_menu_icon};
 pub use badge::Badge;
 pub use button::{
     Button, button, button_add_tile, button_bare, button_bare_on_surface, button_chip,
@@ -103,6 +106,7 @@ pub use picker_row::{picker_empty, picker_row};
 pub use placeholder::placeholder_text;
 pub use popover::{Popover, PopoverState};
 pub use progress::{Progress, progress};
+pub use pulse_clock::StatusPulseClock;
 pub use radio::{Radio, radio};
 pub use scrollbar::{ScrollArea, scroll_area};
 pub use section_header::SectionHeader;

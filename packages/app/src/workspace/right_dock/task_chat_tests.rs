@@ -1,8 +1,8 @@
 //! Task conversations retain exact identity and never share completion ownership.
 
 use super::*;
-use crate::workspace::main_area::agent_chat_pane::view::AgentSessionStatus;
 use crate::workspace::tests::build_workspace;
+use daruda_chat::view::AgentSessionStatus;
 use daruda_store::tasks::{SessionEndReason, Task, TaskState};
 use gpui::{AppContext as _, TestAppContext};
 

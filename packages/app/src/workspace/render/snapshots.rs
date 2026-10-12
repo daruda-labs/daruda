@@ -274,10 +274,7 @@ impl Workspace {
                     .in_strip_order()
                     .map(|(q, paused)| crate::workspace::layout::QueuedPromptView {
                         id: q.id,
-                        text: crate::workspace::main_area::agent_chat_pane::view::display_prompt(
-                            &q.text,
-                            &q.attachments,
-                        ),
+                        text: daruda_chat::view::display_prompt(&q.text, &q.attachments),
                         editing: editing == Some(q.id),
                         paused,
                     })

@@ -39,6 +39,11 @@ pub struct FoldEditorActions {
 
 /// The value text for a mode — what a chip or a settings row shows without
 /// opening the editor. Shared so the two readings cannot diverge.
+/// The fold editor's name, as its tab or its Settings field reads.
+pub fn title() -> String {
+    s::transcript::view_options_fold()
+}
+
 pub fn mode_value(mode: FoldMode) -> String {
     match mode.preset() {
         Some(preset) => preset_label(preset),

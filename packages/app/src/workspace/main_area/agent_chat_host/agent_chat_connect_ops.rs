@@ -23,9 +23,9 @@ use crate::agent::launch_resolve::{
 };
 use crate::surface::strings as s;
 use crate::workspace::Workspace;
-use crate::workspace::main_area::agent_chat_pane::transcript_defaults::TranscriptDefaults;
-use crate::workspace::main_area::agent_chat_pane::view::{AgentSessionStatus, RuntimePrepPhase};
 use crate::workspace::main_area::pane_tree::PaneId;
+use daruda_chat::transcript_defaults::TranscriptDefaults;
+use daruda_chat::view::{AgentSessionStatus, RuntimePrepPhase};
 
 struct AgentChatConnectionPlan {
     agent_id: String,
@@ -294,7 +294,13 @@ impl Workspace {
         if let Some(view) = self.agent_chat_view(pane_id).cloned() {
             let id = effective_id.clone();
             let name = agent_name_for(&self.mirrors.agents, &effective_id);
-            view.update(cx, |v, cx| v.switch_agent(id, name, &defaults, cx));
+            view.update(cx, |v, cx| {
+                v.switch_agent(
+                    super::agent_chat_ops::agent_identity(id, name),
+                    &defaults,
+                    cx,
+                )
+            });
             self.update_agent_chat_agent_id(pane_id, effective_id.clone());
             self.mutate_durable(cx, |_, _| {});
         }
@@ -524,8 +530,7 @@ impl Workspace {
             .and_then(|view| view.read(cx).load_intent());
         let read_only = load_intent.is_some();
         let strict_restore = resume.is_some() && self.requires_exact_resume(pane_id, cx);
-        let snapshot = load_intent
-            == Some(crate::workspace::main_area::agent_chat_pane::view::LoadIntent::Snapshot);
+        let snapshot = load_intent == Some(daruda_chat::view::LoadIntent::Snapshot);
 
         // A CLI snapshot mirrors one exact session; with nothing to load there
         // is nothing to show, and `session/new` would invent a conversation.

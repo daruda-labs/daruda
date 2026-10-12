@@ -6,7 +6,7 @@ use gpui::{AnyElement, App, IntoElement, SharedString, WeakEntity, div, prelude:
 use crate::surface::strings as s;
 use crate::ui::{button_status_pill_bare, theme};
 use crate::workspace::Workspace;
-use crate::workspace::main_area::agent_chat_pane::view::{ActivityState, AgentSessionStatus};
+use daruda_chat::view::{ActivityState, AgentSessionStatus};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(in crate::workspace) enum OrchestratorChipState {

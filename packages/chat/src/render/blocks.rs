@@ -1,0 +1,402 @@
+//! The conversation message blocks: user bubble, assistant prose (labeled
+//! foldable block, header-less inline render, and the turn conclusion), agent
+//! thinking, and surfaced errors. The mermaid `code_block_render` hook shared
+//! by every markdown body lives in the sibling `mermaid` module.
+
+use gpui::{AnyElement, App, IntoElement, SharedString, div, prelude::*, px, relative};
+
+use super::MermaidImages;
+use super::fold_header::{FoldHeader, FoldRow, SummaryLine};
+use super::links::AgentChatMarkdownLinks;
+use super::mermaid::mermaid_code_block_render;
+use crate::fold::FoldKey;
+use crate::strings as s;
+use crate::view::AgentChatView;
+use daruda_ui::ButtonVariants as _;
+use daruda_ui::theme;
+use daruda_ui::{Icon, Sizable as _};
+
+/// The answer's mark — the turn's work, settled. It gives the conclusion row
+/// something beside its chevron, which the row otherwise lacks: it carries no
+/// label, and on a restored turn no trailing facts either. Distinct from the
+/// status rollup's `check-circle` by weight and placement — outline and muted
+/// at the row's head, against a filled green mark at its tail.
+const ICON_ANSWER: &str = "icons/ui/task-alt.svg";
+
+#[derive(Clone)]
+pub(super) struct MarkdownRender<'a> {
+    pub(super) mermaid_images: &'a MermaidImages,
+    pub(super) dim: f32,
+    pub(super) links: AgentChatMarkdownLinks,
+}
+
+impl<'a> MarkdownRender<'a> {
+    pub(super) fn new(
+        mermaid_images: &'a MermaidImages,
+        dim: f32,
+        links: AgentChatMarkdownLinks,
+    ) -> Self {
+        Self {
+            mermaid_images,
+            dim,
+            links,
+        }
+    }
+}
+
+/// User prompt — right-aligned accent-tinted bubble. The body renders as
+/// selectable **plain text** via `daruda_ui::selectable_text` (verbatim, no
+/// markdown interpretation) inside the bubble chrome (bg / padding / rounded),
+/// keyed by `ix` for stable selection identity. A user prompt is a
+/// question/instruction, not authored markup, so `#`, `---` (setext heading),
+/// lists, and code fences must display literally rather than being promoted to
+/// headings / rules / blocks the way the assistant's markdown reply is.
+pub(super) fn user_bubble(
+    ix: usize,
+    text: &str,
+    dim: f32,
+    cx: &mut Context<AgentChatView>,
+) -> impl IntoElement + use<> {
+    let body = daruda_ui::selectable_text(("agent-chat-user", ix), text.to_string())
+        .color(theme::dim_toward_gray(theme::agent_chat_fg(cx), dim))
+        .font_family(theme::agent_chat_font_family(cx))
+        .text_size(px(theme::agent_chat_font_size(cx)))
+        .line_height(theme::agent_chat_line_height(cx))
+        .full_width(false);
+    let inner = div()
+        .max_w(relative(0.85))
+        .px(px(theme::AGENT_CHAT_INPUT_INNER_PAD_X))
+        .py(px(theme::AGENT_CHAT_INPUT_INNER_PAD_Y))
+        .rounded(px(theme::AGENT_CHAT_INPUT_RADIUS))
+        // Translucent accent tint (not the neutral code tint): sets the user's
+        // turn off by hue while riding the pane background on any theme. Border
+        // is the shared neutral hairline (same as code blocks / tool cards), so
+        // accent stays on the fill alone — the card border system is uniform.
+        .bg(theme::dim_toward_gray(theme::AGENT_CHAT_USER_TINT, dim))
+        .border_1()
+        .border_color(theme::dim_toward_gray(
+            theme::agent_chat_border_tint(cx),
+            dim,
+        ))
+        .text_color(theme::dim_toward_gray(theme::agent_chat_fg(cx), dim))
+        .text_size(px(theme::agent_chat_font_size(cx)))
+        .child(body);
+    div().flex().flex_row().justify_end().child(inner)
+}
+
+/// Markdown painted on the chat pane. The body colour, the surface it sits on
+/// and the configured text size always travel together: a caller that sets only
+/// the colour leaves the view deriving its fills and structural lines from the
+/// UI canvas, which this pane does not paint on (DESIGN.md §AgentChatPane) —
+/// under a light `ui_preset` over a dark terminal that erased every table line,
+/// rule, code-block border and inline-code chip at once.
+pub(super) fn pane_markdown(
+    id: impl Into<gpui::ElementId>,
+    text: impl Into<gpui::SharedString>,
+    color: gpui::Hsla,
+    cx: &App,
+) -> daruda_ui::Markdown {
+    crate::localized::markdown(id, text)
+        .color(color)
+        .surface(theme::agent_chat_bg(cx))
+        .font_family(theme::agent_chat_font_family(cx))
+        .text_size(px(theme::agent_chat_font_size(cx)))
+        .line_height(theme::agent_chat_line_height(cx))
+}
+
+/// The assistant prose body — drag-selectable rendered markdown with mermaid
+/// fences rasterized. Shared by the header-less inline render and by
+/// [`conclusion_block`], which wraps the same body in a bare chevron.
+pub(super) fn assistant_markdown(
+    ix: usize,
+    text: &str,
+    markdown: MarkdownRender<'_>,
+    cx: &App,
+) -> AnyElement {
+    pane_markdown(
+        ("agent-chat-md-assistant", ix),
+        text.to_string(),
+        theme::dim_toward_gray(theme::agent_chat_fg(cx), markdown.dim),
+        cx,
+    )
+    .code_block_render(mermaid_code_block_render(
+        markdown.mermaid_images,
+        markdown.dim,
+    ))
+    .link_click_handler(markdown.links.handler())
+    .into_any_element()
+}
+
+/// The turn's conclusion — the run's final assistant message rendered under a
+/// response bar. The [`assistant_markdown`] body with no speaker label and no
+/// rollup glyph (the response bar above already names the speaker and carries
+/// the run's verdict): just the bare disclosure chevron, so the conclusion folds
+/// to its first-line summary independently of the response's process fold. It is
+/// the only fold a reply that *is* its whole response has, since the bar cannot
+/// fold that reply.
+#[allow(clippy::too_many_arguments)]
+pub(super) fn conclusion_block(
+    ix: usize,
+    key: FoldKey,
+    expanded: bool,
+    text: &str,
+    stats: Option<AnyElement>,
+    markdown: MarkdownRender<'_>,
+    cx: &mut Context<AgentChatView>,
+) -> AnyElement {
+    let mut header = FoldHeader::with_summary(|| SummaryLine::from_markdown(text)).leading(
+        Icon::empty()
+            .path(ICON_ANSWER)
+            .xsmall()
+            .text_color(theme::dim_toward_gray(
+                theme::agent_chat_fg_muted(cx),
+                markdown.dim,
+            ))
+            .into_any_element(),
+    );
+    if let Some(stats) = stats {
+        header = header.trailing(stats);
+    }
+    let dim = markdown.dim;
+    FoldRow::block(("agent-chat-conclusion", ix), key, expanded, header, |cx| {
+        assistant_markdown(ix, text, markdown, cx)
+    })
+    .render(dim, cx)
+}
+
+/// Agent reasoning — dimmed, foldable block under a "Thinking" label (default
+/// collapsed once settled, expanded while streaming, handled by the fold
+/// derivation). The body renders as rendered, drag-selectable markdown via
+/// `daruda_ui::markdown` (keyed by `ix`), dimmed via `theme::agent_chat_fg_subtle(cx)`. Collapsed,
+/// the header shows the first non-empty line of `text`, dimmed italic.
+//
+// `daruda_ui::markdown` (TextView) owns its own typography, so the body is
+// not italicized; the "Thinking" label plus the dimmer `text_subtle` colour
+// distinguish reasoning from the assistant body.
+pub(super) fn thinking_block(
+    ix: usize,
+    key: FoldKey,
+    expanded: bool,
+    text: &str,
+    markdown: MarkdownRender<'_>,
+    cx: &mut Context<AgentChatView>,
+) -> AnyElement {
+    let header =
+        FoldHeader::with_summary(|| SummaryLine::from_markdown(text).map(SummaryLine::reasoning))
+            .leading(
+                div()
+                    .flex_none()
+                    .text_color(theme::dim_toward_gray(
+                        theme::agent_chat_fg(cx),
+                        markdown.dim,
+                    ))
+                    .font_weight(gpui::FontWeight::MEDIUM)
+                    .text_size(px(theme::agent_chat_font_size(cx)))
+                    .child(SharedString::from(s::agent_chat::thinking_label()))
+                    .into_any_element(),
+            );
+    let dim = markdown.dim;
+    FoldRow::block(("agent-chat-thinking", ix), key, expanded, header, |cx| {
+        thought_body(ix, text, theme::agent_chat_fg_subtle(cx), markdown, cx)
+    })
+    .render(dim, cx)
+}
+
+/// A thought inside a tool group, shown whole with no fold: these run one to
+/// three lines, so a fold would cost more than it hides. A glyph replaces the
+/// "Thinking" label; the group's fold and call window bound how many show.
+pub(super) fn group_thought_block(
+    ix: usize,
+    text: &str,
+    icon: SharedString,
+    markdown: MarkdownRender<'_>,
+    cx: &mut Context<AgentChatView>,
+) -> AnyElement {
+    let glyph = theme::dim_toward_gray(theme::agent_chat_fg_subtle(cx), markdown.dim);
+    // One text line tall, so the glyph sits on the first line however many
+    // the body wraps to.
+    let line = px(theme::agent_chat_font_size(cx) * theme::agent_chat_line_height(cx));
+    div()
+        .w_full()
+        .min_w_0()
+        .flex()
+        .flex_row()
+        .items_start()
+        .gap(px(theme::GAP_SM))
+        .child(
+            div()
+                .flex_none()
+                .h(line)
+                .flex()
+                .items_center()
+                .child(Icon::empty().path(icon).xsmall().text_color(glyph)),
+        )
+        .child(
+            div()
+                .flex_1()
+                .min_w_0()
+                // The pane's own text colour, as prose has: shown whole among
+                // the calls, a thought is read, not skimmed past.
+                .child(thought_body(
+                    ix,
+                    text,
+                    theme::agent_chat_fg(cx),
+                    markdown,
+                    cx,
+                )),
+        )
+        .into_any_element()
+}
+
+/// A thought's body, shared by both thought rows. [`thinking_block`] keeps it
+/// outside its header's click target, so selecting it cannot fold it.
+fn thought_body(
+    ix: usize,
+    text: &str,
+    color: gpui::Hsla,
+    markdown: MarkdownRender<'_>,
+    cx: &mut Context<AgentChatView>,
+) -> AnyElement {
+    pane_markdown(
+        ("agent-chat-md-thinking", ix),
+        text.to_string(),
+        theme::dim_toward_gray(color, markdown.dim),
+        cx,
+    )
+    .code_block_render(mermaid_code_block_render(
+        markdown.mermaid_images,
+        markdown.dim,
+    ))
+    .link_click_handler(markdown.links.handler())
+    .into_any_element()
+}
+
+/// Surfaced error item — error-tinted block.
+/// A button inside the conversation — on the pane body, whose background
+/// mirrors the terminal's.
+///
+/// Its colours come from that background, which is what a `ghost` button gets
+/// wrong here twice over: ghost paints no fill at all, so the affordance read
+/// as a run of plain text, and it takes its label from the *window* theme,
+/// which knows nothing about the terminal one. A light window theme over a dark
+/// terminal put dark text on a dark surface and the button vanished.
+///
+/// The fill and hairline are the same background-derived overlay every card in
+/// this pane already uses (white over a dark pane, black over a light one), and
+/// the label is the pane's own body colour. Not the error colour it sits under
+/// — an action is not part of the message, and painting it like one reads as
+/// more error text rather than as something to press.
+pub(super) fn pane_action_button(
+    id: impl Into<gpui::ElementId>,
+    label: String,
+    cx: &mut Context<AgentChatView>,
+) -> daruda_ui::Button {
+    daruda_ui::button(id, label).custom(
+        daruda_ui::ButtonCustomVariant::new(cx)
+            .color(theme::agent_chat_tint(cx))
+            .foreground(theme::agent_chat_fg(cx))
+            .border(theme::agent_chat_border_tint(cx))
+            // One step up the same overlay, so hover is felt on any pane
+            // background rather than borrowed from the window theme.
+            .hover(theme::agent_chat_border_tint(cx))
+            .active(theme::agent_chat_border_tint(cx)),
+    )
+}
+
+/// A button on the status banner — which is *not* the pane body.
+///
+/// The banner composites its tint over the window surface, so it reads light
+/// under a light window theme even when the conversation below is dark. Reusing
+/// the pane palette here painted the pane's near-white label onto that light
+/// banner and the button all but disappeared: the same class of mistake as
+/// ghost's, in the opposite direction.
+///
+/// So the chrome comes from the window theme, which is the surface it actually
+/// sits on — and which flips with that theme, so the pairing holds in both.
+pub(super) fn banner_action_button(
+    id: impl Into<gpui::ElementId>,
+    label: String,
+    t: &theme::DarudaTheme,
+    cx: &mut Context<AgentChatView>,
+) -> daruda_ui::Button {
+    daruda_ui::button(id, label).custom(
+        daruda_ui::ButtonCustomVariant::new(cx)
+            .color(t.button_widget_bg)
+            .foreground(t.text_primary)
+            .border(t.border)
+            .hover(t.overlay_hover)
+            .active(t.overlay_active),
+    )
+}
+
+/// A turn failure, with the one action its classification implies.
+///
+/// This is the *main* path an expired login surfaces on, not the connect
+/// banner: the agent creates the session without checking credentials and only
+/// refuses at the first real request, so the session stays alive and the
+/// failure lands here. Without an affordance the conversation just stops with
+/// a red line and no way forward inside the app.
+///
+/// Only `Reauthenticate` gets a button. `Retry` on a turn means re-sending the
+/// prompt rather than reconnecting (the events differ, so the action does),
+/// and the rest are either the user's to fix elsewhere or have no action at
+/// all — for those the message alone is the honest answer.
+pub(super) fn failure_block(
+    ix: usize,
+    failure: &daruda_acp::AcpFailure,
+    t: &theme::DarudaTheme,
+    cx: &mut Context<AgentChatView>,
+) -> impl IntoElement + use<> {
+    let sign_in = matches!(failure.remedy(), daruda_acp::Remedy::Reauthenticate).then(|| {
+        pane_action_button(
+            // Keyed by the item, like every sibling block. Keyed by the pane,
+            // two failures in one conversation shared an element id — gpui
+            // then treats them as one element, so a click on either ran both
+            // of their handlers.
+            ("agent-chat-failure-reauth", ix),
+            s::agent_chat::sign_in_again(),
+            cx,
+        )
+        // The login reaches this same view through the host; it runs on the
+        // event, after this listener has released it (CLAUDE.md Pitfall #5).
+        .on_click(cx.listener(|_this, _ev, _window, cx| {
+            cx.emit(super::super::view::AgentChatEvent::Reauthenticate);
+        }))
+    });
+    div()
+        .w_full()
+        .flex()
+        .flex_col()
+        // Wider than the gap *within* a message (`AGENT_CHAT_MSG_GAP`), so the
+        // button reads as a separate thing to press rather than as the last
+        // line of the text above it.
+        .gap(px(theme::GAP_LG))
+        .child(error_block(
+            &super::super::agent_chat_helpers::failure_message(failure),
+            t,
+            cx,
+        ))
+        .when_some(sign_in, |el, btn| {
+            // Centred under the message. The row stretches to the column's
+            // width (flex-column default), so `justify_center` has something to
+            // centre within; this container is `failure_block`'s alone, so
+            // neither the gap nor the alignment reaches any other block.
+            el.child(div().flex().flex_row().justify_center().child(btn))
+        })
+}
+
+pub(super) fn error_block(
+    message: &str,
+    t: &theme::DarudaTheme,
+    cx: &App,
+) -> impl IntoElement + use<> {
+    div()
+        .w_full()
+        .px(px(theme::AGENT_CHAT_INPUT_INNER_PAD_X))
+        .py(px(theme::AGENT_CHAT_INPUT_INNER_PAD_Y))
+        .rounded(px(theme::AGENT_CHAT_INPUT_RADIUS))
+        .bg(t.banner_error_bg)
+        .text_color(t.banner_error_text)
+        .text_size(px(theme::agent_chat_font_size(cx)))
+        .child(SharedString::from(message.to_string()))
+}

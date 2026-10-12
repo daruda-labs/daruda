@@ -11,10 +11,10 @@
 use gpui::{App, Entity, Point, Window, px};
 
 use super::main_area::agent_chat_host::agent_chat_ops::ThoughtsShot;
-use super::main_area::agent_chat_pane::view::ActivityOptionsTab;
 use super::main_area::tab_ops::OpenIntent;
 use super::pages::tasks::editor::TaskEditorShot;
 use super::{ToggleCommandPalette, Workspace, dialog_helpers};
+use daruda_chat::view::ActivityOptionsTab;
 use daruda_config::BuiltinSection;
 use daruda_store::observability::error_report::{ErrorReport, ErrorSeverity};
 
@@ -887,10 +887,10 @@ pub(crate) fn drive(
 /// Render [`MERMAID_LIGHTBOX_SAMPLE`] and open it in the lightbox — no chat
 /// history needed, the same render path the diagram card's zoom button uses.
 fn open_mermaid_lightbox_sample(window: &mut Window, cx: &mut App) {
-    use super::main_area::agent_chat_pane::render::image_lightbox;
     use super::main_area::file_view_pane::visual::render_mermaid_raster;
     use crate::ui::CachedImage;
     use crate::ui::mermaid_palette;
+    use daruda_chat::render::image_lightbox;
 
     let palette = mermaid_palette::default_palette();
     let Some(raster) = render_mermaid_raster(MERMAID_LIGHTBOX_SAMPLE, &palette) else {

@@ -2,8 +2,8 @@
 //! looking at marks that lane, and visiting it clears the mark.
 
 use super::*;
-use crate::workspace::main_area::agent_chat_pane::view::TurnOutcome;
 use crate::workspace::main_area::pane_tree::PaneId;
+use daruda_chat::view::TurnOutcome;
 use daruda_store::project::LaneRef;
 
 /// A project with an agent-chat pane in its first lane, plus an empty second

@@ -7,7 +7,7 @@
 # (the single slot that eats the leftover width), `trailing` (fixed,
 # right-anchored). That grammar lives in exactly one place:
 #
-#   packages/app/src/workspace/main_area/agent_chat_pane/render/fold_header.rs
+#   packages/chat/src/render/fold_header.rs
 #
 # It used to be two free `AnyElement` parameters on `foldable_block`, so each of
 # the seven headers re-derived the geometry and picked its own two of the three
@@ -27,7 +27,7 @@
 #       through `SummaryLine::from_markdown`. No header can hand-roll a
 #       first-line extraction that skips the markdown flattening.
 #
-#   (c) No header inside agent_chat_pane builds its own disclosure chevron.
+#   (c) No header inside the chat package builds its own disclosure chevron.
 #       `disclosure(` / `Disclosure` belong to fold_header.rs, so a new
 #       collapsible header cannot bypass the grammar by starting from scratch.
 #       There is no exemption: the plan region's collapse lives on a view flag
@@ -64,9 +64,9 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
 
-PANE_DIR="packages/app/src/workspace/main_area/agent_chat_pane"
+PANE_DIR="packages/chat/src"
 OWNER="$PANE_DIR/render/fold_header.rs"
-SCAN_DIRS=(packages/app/src packages/ui/src packages/transcript/src)
+SCAN_DIRS=(packages/app/src packages/ui/src packages/transcript/src packages/chat/src)
 
 if [[ ! -f "$OWNER" ]]; then
     echo "lint-fold-header: $OWNER not found — run from the repo root, or update" >&2

@@ -20,7 +20,7 @@
 # activity signal reports "idle" while work is still running, and firing
 # completion straight from an `AcpEvent::TurnEnded` / `AcpEvent::Error` match arm
 # fires early and can double-fire. `Turn` is therefore module-private to the
-# `agent_chat_pane/view/` module tree (`view/mod.rs` + its submodules —
+# chat package's `view/` module tree (`packages/chat/src/view/`) (`view/mod.rs` + its submodules —
 # `queue_ops.rs` owns the field, `session_ops.rs` / `apply_event.rs` /
 # `tests.rs` touch it as `view`'s own descendants, which is exactly the
 # access `pub(super)` / plain-private grants and nothing outside the tree
@@ -42,7 +42,7 @@
 #       arm, so it is never a candidate here.)
 #
 # Test code is exempt from (a): the tests drive `Turn` through the sanctioned
-# `#[cfg(test)]` hooks (`set_turn_in_flight` / `set_turn_idle` / `turn_is_idle`)
+# test hooks (`cfg(test)`, or the `test-support` feature for the app's tests) (`set_turn_in_flight` / `set_turn_idle` / `turn_is_idle`)
 # on `AgentChatView`, which keep the field encapsulated.
 #
 # Usage:
@@ -58,7 +58,7 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
 
-PANE_DIR="packages/app/src/workspace/main_area/agent_chat_pane"
+PANE_DIR="packages/chat/src"
 VIEW_DIR="$PANE_DIR/view"
 APPLY_EVENT_RS="$VIEW_DIR/apply_event.rs"
 SCAN_DIR="$PANE_DIR"
@@ -72,11 +72,10 @@ FAIL=0
 
 # ── Check (a): no raw `Turn` reads/construction outside view/ ───────────────
 #
-# Scope: production `.rs` under agent_chat_pane/, excluding the view/ module
+# Scope: production `.rs` under the chat package, excluding the view/ module
 # tree (the owner — `Turn` is private to view/mod.rs's `PromptQueue`, and
 # view/{apply_event,queue_ops,session_ops,tests}.rs reach it only as view's
-# own descendants) and test files (which use the sanctioned #[cfg(test)]
-# hooks). Comments are stripped (both a full-line `// …` and a trailing
+# own descendants) and test files (which use the sanctioned test hooks). Comments are stripped (both a full-line `// …` and a trailing
 # `// …` on a code line) before the match, so a doc-comment reference (e.g.
 # pane.rs mentioning `turn.is_in_flight()`) or a trailing comment mentioning
 # `turn`/`Turn::` does not false-positive.
@@ -96,14 +95,14 @@ if ! grep -qE '^enum Turn \{' "$VIEW_DIR/mod.rs"; then
     echo "" >&2
     echo "  Check (a) only scans $SCAN_DIR because nothing outside it can name" >&2
     echo "  \`Turn\`. A visibility wider than module-private breaks that premise —" >&2
-    echo "  either restore it, or widen SCAN_DIR back to packages/app/src." >&2
+    echo "  either restore it, or widen SCAN_DIR to every crate that could name it." >&2
     FAIL=1
 fi
 
 HITS_A=$(
     grep -rEn '\.turn\b|Turn::(InFlight|Idle|AwaitingCancelAck)\b' "$SCAN_DIR" \
         --include='*.rs' \
-        | grep -vE '/agent_chat_pane/view/' \
+        | grep -vE '^packages/chat/src/view/' \
         | grep -vE '/tests?\.rs:|/tests/' \
         | sed -E 's#//.*##' \
         | grep -E '\.turn\b|Turn::(InFlight|Idle|AwaitingCancelAck)\b' \
@@ -118,7 +117,7 @@ if [[ -n "$HITS_A" ]]; then
     echo "  The prompt \`Turn\` is not the activity signal — it settles busy→idle" >&2
     echo "  before trailing subagents finish. Read the derived predicates instead:" >&2
     echo "    is_busy() / activity_state() / activity_elapsed()" >&2
-    echo "  Tests drive it through the #[cfg(test)] hooks on AgentChatView." >&2
+    echo "  Tests drive it through the test hooks on AgentChatView." >&2
     FAIL=1
 else
     echo "✓ No raw agent Turn access outside view/."

@@ -18,7 +18,7 @@ use gpui::{
 
 use crate::test_support::init_gpui_component;
 use crate::ui::theme;
-use crate::workspace::main_area::agent_chat_pane::output_editor::bounded_embed_height;
+use daruda_chat::output_editor::bounded_embed_height;
 
 /// Six display rows: a hunk header + five added lines — the shape of the
 /// screenshot repro (`Write /tmp/daruda_word_diff_repro.rs`, `@@ -1,0 +1,5 @@`).
@@ -204,12 +204,12 @@ async fn diff_editor_keeps_seeded_rows_and_paints_full_height(cx: &mut TestAppCo
 /// screenshot regressions share one workspace fixture.
 #[gpui::test]
 async fn streaming_write_diff_rebuilds_and_collapsed_header_keeps_height(cx: &mut TestAppContext) {
-    use crate::workspace::main_area::agent_chat_pane::fold::FoldKey;
     use crate::workspace::main_area::pane::PaneContent;
     use agent_client_protocol::schema::v1::{
         Content, ContentBlock, Diff, SessionUpdate, TextContent, ToolCall, ToolCallContent,
         ToolCallStatus, ToolCallUpdate, ToolCallUpdateFields, ToolKind,
     };
+    use daruda_chat::fold::FoldKey;
 
     let (window_handle, workspace) = super::build_workspace(cx);
     cx.run_until_parked();
@@ -619,11 +619,11 @@ async fn long_diff_lines_wrap_to_the_embed_width(cx: &mut TestAppContext) {
 fn fold_in_window<R>(
     cx: &mut TestAppContext,
     window_handle: gpui::AnyWindowHandle,
-    view: &gpui::Entity<crate::workspace::main_area::agent_chat_pane::view::AgentChatView>,
+    view: &gpui::Entity<daruda_chat::view::AgentChatView>,
     f: impl FnOnce(
-        &mut crate::workspace::main_area::agent_chat_pane::view::AgentChatView,
+        &mut daruda_chat::view::AgentChatView,
         &mut gpui::Window,
-        &mut gpui::Context<crate::workspace::main_area::agent_chat_pane::view::AgentChatView>,
+        &mut gpui::Context<daruda_chat::view::AgentChatView>,
     ) -> R,
 ) -> R {
     cx.update_window(window_handle, |_, window, cx| {

@@ -17,13 +17,11 @@ use crate::telegram::trace;
 use crate::workspace::Workspace;
 use crate::workspace::main_area::pane_tree::PaneId;
 
-use crate::workspace::main_area::agent_chat_pane::view::PromptDispatch;
+use daruda_chat::view::PromptDispatch;
 
 mod diff_preview;
 
-pub(in crate::workspace) use crate::workspace::main_area::agent_chat_pane::phone_turn::{
-    FirstResponseOutcome, PhoneTurn,
-};
+pub(in crate::workspace) use daruda_chat::phone_turn::{FirstResponseOutcome, PhoneTurn};
 
 /// Leading/trailing characters kept when a response is truncated — head carries
 /// the ask, tail carries the result; the elided middle is usually tool-output
@@ -53,20 +51,16 @@ fn preview_for(text: &str, marker: &str) -> String {
 
 /// The finished run in one line — how long it worked and what its tool calls
 /// did, by category. `None` when there is nothing to say.
-fn run_summary_line(
-    summary: &crate::workspace::main_area::agent_chat_pane::view::RunSummary,
-) -> Option<String> {
-    let segments: Vec<String> = summary
-        .worked_for
-        .map(s::notification::format_duration_compact)
-        .into_iter()
-        .chain(
-            summary
-                .tools
-                .iter()
-                .map(|&(category, count)| s::agent_chat::group_category(category.token(), count)),
-        )
-        .collect();
+fn run_summary_line(summary: &daruda_chat::view::RunSummary) -> Option<String> {
+    let segments: Vec<String> =
+        summary
+            .worked_for
+            .map(s::notification::format_duration_compact)
+            .into_iter()
+            .chain(summary.tools.iter().map(|&(category, count)| {
+                daruda_chat::labels::group_category(category.token(), count)
+            }))
+            .collect();
     (!segments.is_empty()).then(|| s::control::remote_run_summary(&segments))
 }
 
@@ -97,7 +91,8 @@ fn permission_wait_tail(
         prompt.tool_title.as_deref(),
         prompt.raw_input_summary.as_deref(),
     );
-    let Some(preview) = diff_preview::diff_preview(diffs, s::agent_chat::diff_fallback_truncated)
+    let Some(preview) =
+        diff_preview::diff_preview(diffs, daruda_chat::labels::diff_fallback_truncated)
     else {
         return TelegramTail::Plain(text);
     };
@@ -111,7 +106,7 @@ fn permission_wait_tail(
 /// Diffs on the tool call a permission card belongs to. Empty when the
 /// adapter did not send the tool card before asking, or the card is synthetic.
 fn permission_diffs<'a>(
-    view: &'a crate::workspace::main_area::agent_chat_pane::view::AgentChatView,
+    view: &'a daruda_chat::view::AgentChatView,
     tool_call_id: &str,
 ) -> &'a [daruda_acp::DiffView] {
     view.items()

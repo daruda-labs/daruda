@@ -1322,7 +1322,7 @@ impl Workspace {
         // per-tick cost stays bounded.
         type PulseCandidate = (
             main_area::pane_tree::PaneId,
-            gpui::Entity<main_area::agent_chat_pane::view::AgentChatView>,
+            gpui::Entity<daruda_chat::view::AgentChatView>,
         );
         let candidates: Vec<PulseCandidate> = self
             .every_agent_chat()

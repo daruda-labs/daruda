@@ -57,3 +57,10 @@ transcript:
   # Heading of the recent-steps panel's step-level group.
   tail_level_steps: "Recent steps per response"
   tail_window_all: "All"
+  # The chip's value slot when the axis's two levels hold different windows.
+  # A pane whose levels agree states the single value instead.
+  tail_window_pair: "Steps: %{steps} · Calls: %{calls}"
+  tail_window_last: "%{count}"
+  view_options_fold: "Fold"
+  view_options_filter: "Visible items"
+  recent_steps_label: "Activity range"

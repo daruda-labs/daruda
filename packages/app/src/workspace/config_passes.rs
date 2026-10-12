@@ -9,7 +9,7 @@
 use gpui::Context;
 
 use crate::workspace::Workspace;
-use crate::workspace::main_area::agent_chat_pane::transcript_defaults::TranscriptDefaults;
+use daruda_chat::transcript_defaults::TranscriptDefaults;
 
 use super::ConfigMirrors;
 use super::config_ops::cursor_shape_from;

@@ -5,8 +5,8 @@ use gpui::{AppContext as _, BorrowAppContext as _, Context, TestAppContext, Wind
 use super::build_workspace;
 use crate::agent::tasks_global::GlobalTasks;
 use crate::workspace::Workspace;
-use crate::workspace::main_area::agent_chat_pane::view::AgentSessionStatus;
 use crate::workspace::main_area::pane_tree::PaneId;
+use daruda_chat::view::AgentSessionStatus;
 use daruda_store::project::PaneCwd;
 use daruda_store::tasks::{Task, TaskState};
 

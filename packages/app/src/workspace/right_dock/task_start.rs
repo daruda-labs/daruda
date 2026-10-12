@@ -16,8 +16,8 @@ use gpui::{BorrowAppContext, Context, Window};
 use crate::agent::tasks_global::GlobalTasks;
 use crate::workspace::Workspace;
 use crate::workspace::lane_ops::CreateWorktreePlan;
-use crate::workspace::main_area::agent_chat_pane::view::AgentSessionStatus;
 use crate::workspace::main_area::pane_tree::PaneId;
+use daruda_chat::view::AgentSessionStatus;
 
 /// Why a task did not start.
 #[derive(Clone, Debug, PartialEq, Eq)]

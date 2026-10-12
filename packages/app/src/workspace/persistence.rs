@@ -18,9 +18,9 @@ use gpui::{App, Context, Window};
 use super::Workspace;
 use crate::agent::launch_resolve::account_recipe_for_connect;
 use crate::lane::availability::LaneAvailability;
-use crate::workspace::main_area::agent_chat_pane::view::ChatPaneChoices;
 use crate::workspace::main_area::pane::{self, PaneSpawnError, TabEntry};
 use crate::workspace::main_area::pane_tree::{self as pane_tree, PaneLayout, SplitDirection};
+use daruda_chat::view::ChatPaneChoices;
 use daruda_transcript::fold_mode::FoldMode;
 
 /// Runtime tab/pane state of a single lane. One of these lives in
@@ -1151,9 +1151,9 @@ pub(in crate::workspace) fn deserialize_view_mode(
 }
 
 fn serialize_chat_content_width(
-    mode: crate::workspace::main_area::agent_chat_pane::view::ChatContentWidth,
+    mode: daruda_chat::view::ChatContentWidth,
 ) -> daruda_store::project::SerializedChatContentWidth {
-    use crate::workspace::main_area::agent_chat_pane::view::ChatContentWidth;
+    use daruda_chat::view::ChatContentWidth;
     match mode {
         ChatContentWidth::Full => daruda_store::project::SerializedChatContentWidth::Full,
         ChatContentWidth::Reading => daruda_store::project::SerializedChatContentWidth::Reading,
@@ -1161,9 +1161,9 @@ fn serialize_chat_content_width(
 }
 
 fn serialize_chat_tail_window(
-    tail: crate::workspace::main_area::agent_chat_pane::rows::tail::TailWindow,
+    tail: daruda_chat::rows::tail::TailWindow,
 ) -> daruda_store::project::SerializedChatTailWindow {
-    use crate::workspace::main_area::agent_chat_pane::rows::tail::TailWindow;
+    use daruda_chat::rows::tail::TailWindow;
     match tail {
         TailWindow::All => daruda_store::project::SerializedChatTailWindow::All,
         last @ TailWindow::Last(_) => {
@@ -1174,8 +1174,8 @@ fn serialize_chat_tail_window(
 
 fn deserialize_chat_tail_window(
     tail: daruda_store::project::SerializedChatTailWindow,
-) -> crate::workspace::main_area::agent_chat_pane::rows::tail::TailWindow {
-    use crate::workspace::main_area::agent_chat_pane::rows::tail::TailWindow;
+) -> daruda_chat::rows::tail::TailWindow {
+    use daruda_chat::rows::tail::TailWindow;
     match tail {
         daruda_store::project::SerializedChatTailWindow::All => TailWindow::All,
         daruda_store::project::SerializedChatTailWindow::Last(n) => TailWindow::last(n),
@@ -1184,8 +1184,8 @@ fn deserialize_chat_tail_window(
 
 fn deserialize_chat_content_width(
     mode: daruda_store::project::SerializedChatContentWidth,
-) -> crate::workspace::main_area::agent_chat_pane::view::ChatContentWidth {
-    use crate::workspace::main_area::agent_chat_pane::view::ChatContentWidth;
+) -> daruda_chat::view::ChatContentWidth {
+    use daruda_chat::view::ChatContentWidth;
     match mode {
         daruda_store::project::SerializedChatContentWidth::Full => ChatContentWidth::Full,
         daruda_store::project::SerializedChatContentWidth::Reading => ChatContentWidth::Reading,

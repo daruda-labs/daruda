@@ -115,7 +115,7 @@ impl Workspace {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        use super::main_area::agent_chat_pane::shot_transcript::working_transcript;
+        use daruda_chat::shot_transcript::working_transcript;
 
         let first_tab = self.active_runtime().active_tab_index;
         let label_last_tab = |ws: &mut Self, label: &'static str| {

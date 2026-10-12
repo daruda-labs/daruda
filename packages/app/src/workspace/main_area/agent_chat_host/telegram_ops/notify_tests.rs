@@ -102,18 +102,17 @@ async fn a_failed_turn_tells_the_phone_why(cx: &mut gpui::TestAppContext) {
                 },
             ));
         });
-        ws.fire_activity_completion(
-            pane,
-            crate::workspace::main_area::agent_chat_pane::view::TurnOutcome::Errored,
-            cx,
-        );
+        ws.fire_activity_completion(pane, daruda_chat::view::TurnOutcome::Errored, cx);
         let ping = sent(&mut outbound);
         assert_eq!(ping.header, ws.telegram_header(pane, cx));
         let TelegramTail::Plain(tail) = ping.tail else {
             panic!("a failure is our own copy, not agent markdown");
         };
         assert!(tail.starts_with(&s::control::turn_failed()), "{tail}");
-        assert!(tail.contains(&s::agent_chat::transport_closed()), "{tail}");
+        assert!(
+            tail.contains(&daruda_chat::labels::transport_closed()),
+            "{tail}"
+        );
     });
 }
 
@@ -124,18 +123,12 @@ async fn a_dead_session_tells_the_phone_its_error(cx: &mut gpui::TestAppContext)
     workspace.update(cx, |ws, cx| {
         let view = ws.agent_chat_view(pane).cloned().unwrap();
         view.update(cx, |v, _| {
-            v.set_status_for_test(
-                crate::workspace::main_area::agent_chat_pane::view::AgentSessionStatus::Error {
-                    message: "adapter exited with 137".into(),
-                    remedy: daruda_acp::Remedy::NoneAvailable,
-                },
-            );
+            v.set_status_for_test(daruda_chat::view::AgentSessionStatus::Error {
+                message: "adapter exited with 137".into(),
+                remedy: daruda_acp::Remedy::NoneAvailable,
+            });
         });
-        ws.fire_activity_completion(
-            pane,
-            crate::workspace::main_area::agent_chat_pane::view::TurnOutcome::Errored,
-            cx,
-        );
+        ws.fire_activity_completion(pane, daruda_chat::view::TurnOutcome::Errored, cx);
         let TelegramTail::Plain(tail) = sent(&mut outbound).tail else {
             panic!("plain");
         };
@@ -148,11 +141,7 @@ async fn a_dead_session_tells_the_phone_its_error(cx: &mut gpui::TestAppContext)
 async fn a_stopped_turn_sends_nothing(cx: &mut gpui::TestAppContext) {
     let (mut outbound, workspace, pane) = bridged_pane(cx);
     workspace.update(cx, |ws, cx| {
-        ws.fire_activity_completion(
-            pane,
-            crate::workspace::main_area::agent_chat_pane::view::TurnOutcome::Stopped,
-            cx,
-        );
+        ws.fire_activity_completion(pane, daruda_chat::view::TurnOutcome::Stopped, cx);
     });
     assert!(outbound.next().now_or_never().is_none());
 }
@@ -202,25 +191,21 @@ async fn a_completed_run_is_summarised_in_one_line(cx: &mut gpui::TestAppContext
             ]);
             v.record_turn_for_test(std::time::Duration::from_secs(125));
         });
-        ws.fire_activity_completion(
-            pane,
-            crate::workspace::main_area::agent_chat_pane::view::TurnOutcome::Completed,
-            cx,
-        );
+        ws.fire_activity_completion(pane, daruda_chat::view::TurnOutcome::Completed, cx);
         let ping = sent(&mut outbound);
         let summary = ping.header.lines().last().expect("a header").to_string();
         assert!(ping.header.starts_with(&ws.telegram_header(pane, cx)));
         let took = s::notification::format_duration_compact(std::time::Duration::from_secs(125));
         assert!(summary.contains(&took), "{summary}");
         assert!(
-            summary.contains(&s::agent_chat::group_category("edit", 2)),
+            summary.contains(&daruda_chat::labels::group_category("edit", 2)),
             "{summary}"
         );
         assert!(
-            summary.contains(&s::agent_chat::group_category("run", 1)),
+            summary.contains(&daruda_chat::labels::group_category("run", 1)),
             "{summary}"
         );
-        assert!(!summary.contains(&s::agent_chat::group_category("run", 2)));
+        assert!(!summary.contains(&daruda_chat::labels::group_category("run", 2)));
     });
 }
 

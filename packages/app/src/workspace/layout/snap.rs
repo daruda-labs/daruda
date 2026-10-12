@@ -201,13 +201,13 @@ impl LeftDockSnapshot {
 // ----------------------------------------------------------------
 
 /// Read-only projection of one queued prompt for the bottom-dock
-/// queued-prompt strip. The [`crate::workspace::main_area::agent_chat_pane::view::PromptId`]
+/// queued-prompt strip. The [`daruda_chat::view::PromptId`]
 /// is the single source of truth on the `AgentChatView`; this mirrors it plus
 /// the prompt text so the strip renders without re-entering the view entity,
 /// and routes a per-item removal back to that id via `remove_queued_prompt`.
 #[derive(Clone, PartialEq)]
 pub(in crate::workspace) struct QueuedPromptView {
-    pub id: crate::workspace::main_area::agent_chat_pane::view::PromptId,
+    pub id: daruda_chat::view::PromptId,
     pub text: String,
     /// True when this prompt is the one currently pulled into the composer for
     /// editing (mirrors `AgentChatView::editing_prompt == Some(id)`). The strip

@@ -7,9 +7,9 @@ use daruda_store::project::PaneCwd;
 use gpui::{Context, Entity, Focusable as _, Window};
 
 use super::Workspace;
-use super::main_area::agent_chat_pane::view::AgentChatView;
 use super::main_area::pane::{PaneContent, TabEntry};
 use super::main_area::pane_tree::PaneId;
+use daruda_chat::view::AgentChatView;
 
 /// The orchestrator session this window hosts, and what showing its tab
 /// displaced.
@@ -82,7 +82,7 @@ impl Workspace {
             .unwrap()
             .update(cx, |view, cx| {
                 view.seed_transcript(
-                    super::main_area::agent_chat_pane::shot_transcript::sample_transcript(),
+                    daruda_chat::shot_transcript::sample_transcript(),
                     window,
                     cx,
                 );

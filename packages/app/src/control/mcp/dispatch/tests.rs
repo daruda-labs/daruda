@@ -370,7 +370,7 @@ async fn an_ask_to_a_full_queue_is_refused(cx: &mut TestAppContext) {
         .workspace
         .read_with(cx, |ws, cx| ws.control_snapshot(cx)[0].1.target);
     fixture.workspace.update(cx, |ws, cx| {
-        ws.fill_prompt_queue_for_test(target.pane, crate::control::guards::QUEUE_DEPTH_MAX, cx)
+        ws.fill_prompt_queue_for_test(target.pane, daruda_chat::QUEUE_DEPTH_MAX, cx)
     });
 
     let reply = answered(

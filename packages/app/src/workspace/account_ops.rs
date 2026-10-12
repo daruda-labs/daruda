@@ -44,11 +44,11 @@ use crate::surface::strings as s;
 use crate::ui::ButtonVariant;
 use crate::workspace::Workspace;
 use crate::workspace::dialog_helpers::open_confirm_dialog;
-use crate::workspace::main_area::agent_chat_pane::agent_chat_helpers::has_conversation;
-use crate::workspace::main_area::agent_chat_pane::view::AgentSessionStatus;
 use crate::workspace::main_area::pane;
 use crate::workspace::main_area::pane::TabEntry;
 use crate::workspace::main_area::pane_tree::{PaneId, PaneLayout};
+use daruda_chat::agent_chat_helpers::has_conversation;
+use daruda_chat::view::AgentSessionStatus;
 
 /// What a pane would lose if the switch tore it down — so it doesn't. Also
 /// selects which pane constructor the new pane uses and which sentence the
@@ -452,5 +452,22 @@ mod tests {
                 "a busy pane is never torn down mid-work"
             );
         }
+    }
+
+    /// Ties the exclusion to the decision it actually drives: an account switch on
+    /// a failure-only pane reuses the pane instead of opening a new one.
+    #[test]
+    fn a_failure_only_pane_switches_accounts_in_place() {
+        use daruda_acp::ChatItem;
+        use daruda_chat::agent_chat_helpers::has_conversation;
+
+        let items = [ChatItem::Failure(daruda_acp::AcpFailure::classify(
+            &agent_client_protocol::Error::new(-32000, "Authentication required"),
+        ))];
+        assert_eq!(
+            switch_kind(false, has_conversation(&items)),
+            SwitchKind::InPlace,
+            "an expired login leaves nothing to protect — reuse the pane"
+        );
     }
 }

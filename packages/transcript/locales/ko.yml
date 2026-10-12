@@ -49,3 +49,8 @@ transcript:
   tail_level_calls: "단계 안의 최근 도구 호출"
   tail_level_steps: "응답 안의 최근 단계"
   tail_window_all: "전체"
+  tail_window_pair: "단계 %{steps} · 호출 %{calls}"
+  tail_window_last: "%{count}개"
+  view_options_fold: "접기"
+  view_options_filter: "표시 항목"
+  recent_steps_label: "표시 범위"

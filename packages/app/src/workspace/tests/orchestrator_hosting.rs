@@ -154,7 +154,7 @@ fn switching_worktrees_closes_the_orchestrator_tab_and_keeps_the_session(cx: &mu
 
 #[gpui::test]
 fn closing_the_orchestrator_tab_does_not_connect_the_worktree_being_left(cx: &mut TestAppContext) {
-    use crate::workspace::main_area::agent_chat_pane::view::AgentSessionStatus;
+    use daruda_chat::view::AgentSessionStatus;
 
     let root = tempfile::tempdir().unwrap();
     let project = daruda_store::project::Project::from_path(root.path());
@@ -378,7 +378,13 @@ fn hidden_orchestrator_tracks_live_config_updates(cx: &mut TestAppContext) {
         ws.apply_config(&config, cx);
         let view = ws.agent_chat_view(pane).unwrap().read(cx);
         assert_eq!(view.agent_name(), agent.name);
-        assert_eq!(*view.defaults_for_test(), crate::workspace::main_area::agent_chat_pane::transcript_defaults::TranscriptDefaults::resolve(Some(&agent), ws.mirrors.agent_reader_defaults));
+        assert_eq!(
+            *view.defaults_for_test(),
+            daruda_chat::transcript_defaults::TranscriptDefaults::resolve(
+                Some(&agent),
+                ws.mirrors.agent_reader_defaults
+            )
+        );
         assert_eq!(view.syntax_theme(), config.file_viewer.syntax_theme);
     });
 }
@@ -630,30 +636,46 @@ fn hidden_orchestrator_preserves_user_tabs_and_resolves_its_account(cx: &mut Tes
         workspace.update(cx, |ws, cx| {
             let before: Vec<_> = ws.active_runtime().panes.iter().map(|p| p.id).collect();
             assert_eq!(ws.orchestrator_chip_state(cx), None);
-            let pane = ws.seed_orchestrator_chat_pane_unrevealed_for_test(
-                ws.mirrors.agents[0].id.clone(),
-                std::env::temp_dir(),
-                account,
-                Some("Test briefing".into()),
-                window,
-                cx,
-            ).expect("slot seeded");
-            assert_eq!(ws.active_runtime().panes.iter().map(|p| p.id).collect::<Vec<_>>(), before);
+            let pane = ws
+                .seed_orchestrator_chat_pane_unrevealed_for_test(
+                    ws.mirrors.agents[0].id.clone(),
+                    std::env::temp_dir(),
+                    account,
+                    Some("Test briefing".into()),
+                    window,
+                    cx,
+                )
+                .expect("slot seeded");
+            assert_eq!(
+                ws.active_runtime()
+                    .panes
+                    .iter()
+                    .map(|p| p.id)
+                    .collect::<Vec<_>>(),
+                before
+            );
             assert!(ws.agent_chat_view(pane).is_some());
-            assert_eq!(ws.orchestrator_chip_state(cx), Some(crate::workspace::status_bar::orchestrator_chip::OrchestratorChipState::Idle));
+            assert_eq!(
+                ws.orchestrator_chip_state(cx),
+                Some(crate::workspace::status_bar::orchestrator_chip::OrchestratorChipState::Idle)
+            );
             assert_eq!(ws.agent_chat_account_selection(pane), account);
-            ws.agent_chat_view(pane).cloned().unwrap().update(cx, |view, _| {
-                view.set_status_for_test(super::super::main_area::agent_chat_pane::view::AgentSessionStatus::Connected);
-            });
+            ws.agent_chat_view(pane)
+                .cloned()
+                .unwrap()
+                .update(cx, |view, _| {
+                    view.set_status_for_test(daruda_chat::view::AgentSessionStatus::Connected);
+                });
             assert!(!ws.agent_chat_statuses(cx).iter().any(|(id, _)| *id == pane));
         });
-    }).expect("live window");
+    })
+    .expect("live window");
 }
 
 #[gpui::test]
 fn hidden_orchestrator_pulse_emits_completion_and_phone_fallback(cx: &mut TestAppContext) {
     use crate::workspace::main_area::agent_chat_host::telegram_ops::FIRST_RESPONSE_FALLBACK_SECS;
-    use crate::workspace::main_area::agent_chat_pane::view::{ActivitySpan, TurnOutcome};
+    use daruda_chat::view::{ActivitySpan, TurnOutcome};
     let (window, workspace) = build_workspace(cx);
     let mut outbound =
         cx.update(|cx| crate::telegram::global::install_for_test(true, Some(42), cx));

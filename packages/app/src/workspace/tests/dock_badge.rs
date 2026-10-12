@@ -40,12 +40,10 @@ fn failed_agent_and_a_second_lane(
                 user_label: None,
             });
             super::agent_chat::agent_view(ws, pane_id).update(cx, |v, _| {
-                v.set_status_for_test(
-                    crate::workspace::main_area::agent_chat_pane::view::AgentSessionStatus::Error {
-                        message: "adapter exited".into(),
-                        remedy: daruda_acp::Remedy::NoneAvailable,
-                    },
-                );
+                v.set_status_for_test(daruda_chat::view::AgentSessionStatus::Error {
+                    message: "adapter exited".into(),
+                    remedy: daruda_acp::Remedy::NoneAvailable,
+                });
             });
         });
     })
@@ -109,7 +107,7 @@ async fn the_badge_counts_the_registered_windows(cx: &mut TestAppContext) {
 /// marks its lane unread, and that alone recounts the badge.
 #[gpui::test]
 async fn a_turn_finishing_out_of_view_raises_the_badge(cx: &mut TestAppContext) {
-    use crate::workspace::main_area::agent_chat_pane::view::TurnOutcome;
+    use daruda_chat::view::TurnOutcome;
     let (wh, ws, _home, other, _dir) = failed_agent_and_a_second_lane(cx);
     cx.update(|cx| {
         crate::window_registry::WindowRegistry::register(wh.into(), ws.downgrade(), cx);

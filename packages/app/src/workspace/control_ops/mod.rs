@@ -14,10 +14,8 @@ use crate::control::result::{
 };
 use crate::telegram::bridge::PaneRef;
 use crate::workspace::Workspace;
-use crate::workspace::main_area::agent_chat_pane::view::{
-    ActivityState, AgentChatView, AgentSessionStatus, PromptDispatch,
-};
 use crate::workspace::main_area::pane_tree::PaneId;
+use daruda_chat::view::{ActivityState, AgentChatView, AgentSessionStatus, PromptDispatch};
 use daruda_store::project::{LaneRef, ProjectId};
 
 /// What an agent says about a `/name` daruda does not own.

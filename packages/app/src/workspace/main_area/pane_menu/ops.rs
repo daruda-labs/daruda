@@ -1,7 +1,7 @@
 use daruda_store::observability::error_report::{ErrorReport, ErrorSeverity};
 use gpui::{App, Context, Entity, FocusHandle, Pixels, Point, SharedString, Window};
 
-use crate::workspace::main_area::agent_chat_pane::view::AgentChatView;
+use daruda_chat::view::AgentChatView;
 
 use crate::surface::strings as s;
 use crate::workspace::Workspace;

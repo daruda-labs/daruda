@@ -8,13 +8,11 @@ use gpui::{AppContext as _, Entity, TestAppContext};
 
 use super::build_workspace;
 use crate::workspace::Workspace;
-use crate::workspace::main_area::agent_chat_pane::pane_choice::PaneChoice;
-use crate::workspace::main_area::agent_chat_pane::rows::tail::{TailLevel, TailWindow};
-use crate::workspace::main_area::agent_chat_pane::view::{
-    AgentChatView, AgentSessionStatus, ChatContentWidth, ChatPaneChoices,
-};
 use crate::workspace::main_area::pane::PaneContent;
 use crate::workspace::main_area::pane_tree::PaneId;
+use daruda_chat::pane_choice::PaneChoice;
+use daruda_chat::rows::tail::{TailLevel, TailWindow};
+use daruda_chat::view::{AgentChatView, AgentSessionStatus, ChatContentWidth, ChatPaneChoices};
 use daruda_transcript::display_filter::{DisplayFilter, FilterFacet};
 use daruda_transcript::fold_mode::{FoldMode, FoldPreset};
 
@@ -111,7 +109,7 @@ async fn open_agent_chat_pane_creates_agent_chat_leaf(cx: &mut TestAppContext) {
                 assert_eq!(message.as_str(), s::agent_chat::no_lane_cwd());
                 assert_ne!(
                     message.as_str(),
-                    s::agent_chat::error_prefix(),
+                    daruda_chat::labels::error_prefix(),
                     "payload must be the reason, not the prefix the banner re-adds"
                 );
                 assert!(view.items().is_empty(), "items start empty");
@@ -2615,8 +2613,8 @@ async fn a_config_edit_moves_live_sessions_off_unpicked_defaults(cx: &mut TestAp
 /// out the real window; the end state is the same one the clock reaches.
 #[gpui::test]
 async fn a_time_driven_settle_drops_the_working_indicator(cx: &mut TestAppContext) {
-    use crate::workspace::main_area::agent_chat_pane::rows::RowKind;
     use daruda_acp::{ChatItem, ToolCallItem, ToolKindView, ToolStatusView};
+    use daruda_chat::rows::RowKind;
 
     let (window_handle, workspace) = build_workspace(cx);
     cx.run_until_parked();

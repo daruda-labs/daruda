@@ -4,14 +4,12 @@
 use super::*;
 use crate::control::result::ControlError;
 use crate::workspace::main_area::agent_chat_host::agent_chat_event_ops::PumpStep;
-use crate::workspace::main_area::agent_chat_pane::view::{
-    AgentSessionStatus, LoadIntent, PromptDispatch,
-};
 use crate::workspace::main_area::pane::{Pane, TabEntry};
 use crate::workspace::main_area::pane_input_ops::{PaneTextInput, PaneTextIntent};
 use crate::workspace::main_area::pane_tree::PaneLayout;
 use crate::workspace::tests::build_workspace;
 use daruda_agent::pty_tracker::PtyTrackerEvent;
+use daruda_chat::view::{AgentSessionStatus, LoadIntent, PromptDispatch};
 use daruda_store::project::PaneCwd;
 use daruda_store::tasks::{AgentChatAccess, SessionEndReason, Task, TaskAgentSurface};
 use gpui::{AppContext as _, TestAppContext, Window};

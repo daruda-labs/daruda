@@ -1,12 +1,10 @@
 //! Acquire bounded attachment snapshots off the UI thread, bound to their pane.
 
-use super::super::{
-    agent_chat_pane::view::{AgentChatView, PromptDispatch},
-    pane_tree::PaneId,
-};
+use super::super::pane_tree::PaneId;
 use crate::{surface::strings as s, workspace::Workspace};
 use base64::Engine as _;
 use daruda_acp::{AttachmentContent, PromptAttachment};
+use daruda_chat::view::{AgentChatView, PromptDispatch};
 use daruda_store::observability::{error_report::ErrorReport, log_writer::LogWriter};
 use gpui::{ClipboardEntry, Context, WeakEntity, Window};
 use std::{io::Read as _, path::PathBuf};
@@ -122,7 +120,10 @@ impl Workspace {
             match entry {
                 ClipboardEntry::Image(image) => {
                     if image.bytes().len() > FILE_LIMIT {
-                        self.attachment_error(s::agent_chat::attachment_limit().to_string(), cx);
+                        self.attachment_error(
+                            daruda_chat::labels::attachment_limit().to_string(),
+                            cx,
+                        );
                         return true;
                     }
                     sources.push(Source::Image(image.bytes().to_vec()));
@@ -147,7 +148,7 @@ impl Workspace {
         cx: &mut Context<Self>,
     ) {
         if sources.len() > 8 {
-            self.attachment_error(s::agent_chat::attachment_limit().to_string(), cx);
+            self.attachment_error(daruda_chat::labels::attachment_limit().to_string(), cx);
             return;
         }
         cx.spawn(async move |ws, cx| {

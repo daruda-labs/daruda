@@ -21,12 +21,10 @@ use std::path::PathBuf;
 use crate::agent::launch_resolve::{AgentLaunchSpec, account_recipe_for_connect};
 use crate::surface::strings as s;
 use crate::workspace::Workspace;
-use crate::workspace::main_area::agent_chat_pane::transcript_defaults::TranscriptDefaults;
-use crate::workspace::main_area::agent_chat_pane::view::{
-    AgentChatView, AgentSessionStatus, TurnOutcome,
-};
 use crate::workspace::main_area::pane::{AgentChatContent, Pane, PaneContent, TabEntry};
 use crate::workspace::main_area::pane_tree::{PaneId, PaneLayout};
+use daruda_chat::transcript_defaults::TranscriptDefaults;
+use daruda_chat::view::{AgentChatView, AgentIdentity, AgentSessionStatus, TurnOutcome};
 use daruda_content::link_target::{self, LinkTarget, LocalKind};
 
 /// Steps the narrowed screenshot scenario keeps. One of the offered choices,
@@ -34,9 +32,7 @@ use daruda_content::link_target::{self, LinkTarget, LocalKind};
 #[cfg(feature = "screenshot")]
 const SHOT_TAIL_WINDOW: usize = 3;
 #[cfg(feature = "screenshot")]
-use crate::workspace::main_area::agent_chat_pane::shot_transcript::{
-    SHOT_GROUP_TAIL_WINDOW, SHOT_THOUGHT_CALL_WINDOW,
-};
+use daruda_chat::shot_transcript::{SHOT_GROUP_TAIL_WINDOW, SHOT_THOUGHT_CALL_WINDOW};
 
 /// Which state of the thought-run seed a capture shows.
 #[cfg(feature = "screenshot")]
@@ -98,7 +94,7 @@ fn mode_vocabulary(modes: Option<&daruda_acp::ModeStateView>) -> Vec<VocabEntry>
 
 /// The model axis as a vocabulary list. Empty for an agent with no model select.
 fn model_vocabulary(options: &[daruda_acp::ConfigOptionView]) -> Vec<VocabEntry> {
-    crate::workspace::main_area::agent_chat_pane::session_config::model_select(options)
+    daruda_chat::session_config::model_select(options)
         .map(|(_, _, choices)| {
             choices
                 .iter()
@@ -579,11 +575,11 @@ impl Workspace {
                     cwd,
                     status,
                     session_id,
-                    agent_id,
-                    agent_name,
+                    agent_identity(agent_id, agent_name),
                     title,
                     defaults,
                     syntax_theme,
+                    super::agent_default_writer::agent_default_writer(),
                     cx,
                 )
             }
@@ -714,7 +710,7 @@ impl Workspace {
                     cx,
                 );
                 v.set_error(
-                    crate::workspace::main_area::agent_chat_pane::agent_chat_helpers::failure_message(&failure),
+                    daruda_chat::agent_chat_helpers::failure_message(&failure),
                     failure.remedy(),
                     cx,
                 );
@@ -737,10 +733,7 @@ impl Workspace {
             return;
         };
         view.update(cx, |v, cx| {
-            v.pin_options_for_shot(
-                crate::workspace::main_area::agent_chat_pane::view::ActivityOptionsTab::Fold,
-                cx,
-            )
+            v.pin_options_for_shot(daruda_chat::view::ActivityOptionsTab::Fold, cx)
         });
     }
 
@@ -750,11 +743,11 @@ impl Workspace {
     #[cfg(feature = "screenshot")]
     pub(in crate::workspace) fn open_agent_chat_options_for_shot(
         &mut self,
-        tab: crate::workspace::main_area::agent_chat_pane::view::ActivityOptionsTab,
+        tab: daruda_chat::view::ActivityOptionsTab,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        use crate::workspace::main_area::agent_chat_pane::rows::tail::{TailLevel, TailWindow};
+        use daruda_chat::rows::tail::{TailLevel, TailWindow};
         use daruda_config::TAIL_WINDOW_CHOICES;
         use daruda_transcript::display_filter::FilterFacet;
         use daruda_transcript::fold_mode::FoldPreset;
@@ -789,7 +782,11 @@ impl Workspace {
         self.open_agent_chat_pane_seeded(
             None,
             |v, window, cx| {
-                v.seed_transcript(crate::workspace::main_area::agent_chat_pane::shot_transcript::sample_transcript(), window, cx)
+                v.seed_transcript(
+                    daruda_chat::shot_transcript::sample_transcript(),
+                    window,
+                    cx,
+                )
             },
             window,
             cx,
@@ -806,12 +803,16 @@ impl Workspace {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        use crate::workspace::main_area::agent_chat_pane::fold::FoldKey;
+        use daruda_chat::fold::FoldKey;
 
         self.open_agent_chat_pane_seeded(
             None,
             |v, window, cx| {
-                v.seed_transcript(crate::workspace::main_area::agent_chat_pane::shot_transcript::sole_reply_transcript(), window, cx)
+                v.seed_transcript(
+                    daruda_chat::shot_transcript::sole_reply_transcript(),
+                    window,
+                    cx,
+                )
             },
             window,
             cx,
@@ -841,8 +842,12 @@ impl Workspace {
         self.open_agent_chat_pane_seeded(
             None,
             move |v, window, cx| {
-                v.seed_transcript(crate::workspace::main_area::agent_chat_pane::shot_transcript::sample_transcript(), window, cx);
-                v.seed_plan(crate::workspace::main_area::agent_chat_pane::shot_transcript::shot_plan(stopped), cx);
+                v.seed_transcript(
+                    daruda_chat::shot_transcript::sample_transcript(),
+                    window,
+                    cx,
+                );
+                v.seed_plan(daruda_chat::shot_transcript::shot_plan(stopped), cx);
             },
             window,
             cx,
@@ -861,7 +866,11 @@ impl Workspace {
         self.open_agent_chat_pane_seeded(
             None,
             |v, window, cx| {
-                v.seed_transcript(crate::workspace::main_area::agent_chat_pane::shot_transcript::interrupted_transcript(), window, cx)
+                v.seed_transcript(
+                    daruda_chat::shot_transcript::interrupted_transcript(),
+                    window,
+                    cx,
+                )
             },
             window,
             cx,
@@ -882,7 +891,11 @@ impl Workspace {
         self.open_agent_chat_pane_seeded(
             None,
             move |v, window, cx| {
-                v.seed_transcript(crate::workspace::main_area::agent_chat_pane::shot_transcript::interrupted_transcript(), window, cx);
+                v.seed_transcript(
+                    daruda_chat::shot_transcript::interrupted_transcript(),
+                    window,
+                    cx,
+                );
                 v.seed_parked_queue_for_shot(armed, cx);
             },
             window,
@@ -901,7 +914,11 @@ impl Workspace {
         self.open_agent_chat_pane_seeded(
             None,
             |v, window, cx| {
-                v.seed_working_transcript(crate::workspace::main_area::agent_chat_pane::shot_transcript::working_transcript(), window, cx)
+                v.seed_working_transcript(
+                    daruda_chat::shot_transcript::working_transcript(),
+                    window,
+                    cx,
+                )
             },
             window,
             cx,
@@ -915,7 +932,7 @@ impl Workspace {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        use crate::workspace::main_area::agent_chat_pane::rows::tail::{TailLevel, TailWindow};
+        use daruda_chat::rows::tail::{TailLevel, TailWindow};
         use daruda_transcript::display_filter::FilterFacet;
 
         self.open_agent_chat_transcript_for_shot(window, cx);
@@ -957,11 +974,9 @@ impl Workspace {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        use crate::workspace::main_area::agent_chat_pane::fold::FoldKey;
-        use crate::workspace::main_area::agent_chat_pane::rows::tail::{TailLevel, TailWindow};
-        use crate::workspace::main_area::agent_chat_pane::shot_transcript::{
-            THOUGHT_RUN_GID, thought_run_transcript,
-        };
+        use daruda_chat::fold::FoldKey;
+        use daruda_chat::rows::tail::{TailLevel, TailWindow};
+        use daruda_chat::shot_transcript::{THOUGHT_RUN_GID, thought_run_transcript};
         use daruda_transcript::display_filter::{DisplayFilter, FilterFacet};
 
         self.open_agent_chat_pane_seeded(
@@ -1007,8 +1022,8 @@ impl Workspace {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        use crate::workspace::main_area::agent_chat_pane::fold::FoldKey;
-        use crate::workspace::main_area::agent_chat_pane::rows::tail::{TailLevel, TailWindow};
+        use daruda_chat::fold::FoldKey;
+        use daruda_chat::rows::tail::{TailLevel, TailWindow};
 
         self.open_agent_chat_transcript_for_shot(window, cx);
         let pane_id = self.active_runtime().focused_pane_id;
@@ -1033,8 +1048,8 @@ impl Workspace {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        use crate::workspace::main_area::agent_chat_pane::fold::FoldKey;
-        use crate::workspace::main_area::agent_chat_pane::rows::tail::{TailLevel, TailWindow};
+        use daruda_chat::fold::FoldKey;
+        use daruda_chat::rows::tail::{TailLevel, TailWindow};
 
         self.open_agent_chat_transcript_for_shot(window, cx);
         let pane_id = self.active_runtime().focused_pane_id;
@@ -1090,14 +1105,18 @@ impl Workspace {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        use crate::workspace::main_area::agent_chat_pane::fold::FoldKey;
-        use crate::workspace::main_area::agent_chat_pane::rows::tail::{TailLevel, TailWindow};
-        use crate::workspace::main_area::agent_chat_pane::shot_transcript::SUBAGENT_PARENT_ID;
+        use daruda_chat::fold::FoldKey;
+        use daruda_chat::rows::tail::{TailLevel, TailWindow};
+        use daruda_chat::shot_transcript::SUBAGENT_PARENT_ID;
 
         self.open_agent_chat_pane_seeded(
             None,
             |v, window, cx| {
-                v.seed_transcript(crate::workspace::main_area::agent_chat_pane::shot_transcript::subagent_transcript(), window, cx)
+                v.seed_transcript(
+                    daruda_chat::shot_transcript::subagent_transcript(),
+                    window,
+                    cx,
+                )
             },
             window,
             cx,
@@ -1708,6 +1727,16 @@ impl Workspace {
             .and_then(Pane::agent_chat_content)
             .map(|ac| ac.account)
             .unwrap_or(daruda_store::accounts::AccountSelection::SystemDefault)
+    }
+}
+
+/// A catalog agent as a chat pane is given it: the mark is looked up here,
+/// where the agent catalog's icons live.
+pub(super) fn agent_identity(id: String, name: String) -> AgentIdentity {
+    AgentIdentity {
+        icon: crate::agent::icons::icon_for_agent(&id),
+        id,
+        name,
     }
 }
 

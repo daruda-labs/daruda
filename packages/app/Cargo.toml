@@ -19,13 +19,13 @@ path = "src/main.rs"
 # transcript into an agent-chat pane without an ACP session. Not useful alone —
 # `screenshot` and `replay` each turn it on. It exists so the shared seeding path
 # carries one `cfg` instead of an `any(...)` that grows a term per front-end.
-devtools = []
+devtools = ["daruda_chat/devtools"]
 
 # `daruda --screenshot <path>` — render the live window to a PNG via gpui's
 # render_to_image (upstream-gated behind test-support). Off by default to keep
 # the shipping binary clean; enable for visual-verification builds:
 #   cargo build -p daruda --features screenshot
-screenshot = ["devtools", "gpui/test-support", "gpui_macos/test-support"]
+screenshot = ["devtools", "gpui/test-support", "gpui_macos/test-support", "daruda_chat/screenshot"]
 
 # `daruda --replay-acp-log <path>` — replay a captured ACP wire log into a live
 # agent-chat pane for hands-on inspection. Deliberately does NOT pull in
@@ -60,6 +60,7 @@ daruda_flow = { workspace = true }
 daruda_flow_edit = { workspace = true }
 daruda_project = { workspace = true }
 daruda_terminal = { workspace = true }
+daruda_chat = { workspace = true }
 daruda_transcript = { workspace = true }
 daruda_ui = { workspace = true }
 daruda_update = { workspace = true }
@@ -153,6 +154,7 @@ daruda_acp = { workspace = true, features = ["test-support"] }
 # `pty_tracker`'s state read-back the workspace tests assert on.
 daruda_agent = { workspace = true, features = ["test-support"] }
 # Test-only observation hooks the workspace tests read back.
+daruda_chat = { workspace = true, features = ["test-support"] }
 daruda_ui = { workspace = true, features = ["test-support"] }
 gpui = { workspace = true, features = ["test-support"] }
 serde_json = "1"

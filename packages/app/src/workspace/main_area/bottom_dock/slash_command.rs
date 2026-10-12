@@ -3,7 +3,7 @@
 //! When a `/`-prefixed token is typed at the start of the current line
 //! while an AgentChat pane is focused, this provider feeds the native
 //! completion menu with the ACP-advertised commands stored on
-//! [`AgentChatView::available_commands`](super::super::agent_chat_pane). The
+//! `AgentChatView::available_commands` (`daruda_chat`). The
 //! provider is installed on `Workspace.terminal_input` (the shared
 //! bottom-dock `InputState`); the menu's accept hook routes back through
 //! [`Workspace::complete_slash_command`](crate::workspace::Workspace) for the
@@ -21,10 +21,10 @@ use lsp_types::{
     Range, TextEdit,
 };
 
-use super::super::agent_chat_pane::slash_dispatch::CLEAR_COMMAND_NAME;
 use crate::surface::strings as s;
 use crate::ui::{CompletionProvider, InputState, Rope, RopeExt as _};
 use crate::workspace::Workspace;
+use daruda_chat::slash_dispatch::CLEAR_COMMAND_NAME;
 
 /// Removes any agent-advertised `/clear` entry and prepends daruda's own
 /// built-in one. Dispatch (`classify_slash`) always intercepts `/clear`

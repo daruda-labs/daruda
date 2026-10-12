@@ -15,10 +15,10 @@ use daruda_store::panels::{
 };
 use gpui::{App, Context, KeyBinding, Keystroke, SharedString, Window};
 
-use crate::workspace::main_area::agent_chat_pane::view::PromptId;
 use crate::workspace::main_area::pane_input_ops::{PaneTextInput, PaneTextIntent};
 use crate::workspace::main_area::pane_tree::PaneId;
 use crate::workspace::{RunMacroByShortcut, Workspace};
+use daruda_chat::view::PromptId;
 
 /// Remove the tab with `tab_id` from `tabs`, returning the removed
 /// tab on success. `None` when the id was not present (caller should

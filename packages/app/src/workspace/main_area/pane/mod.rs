@@ -32,12 +32,12 @@ use gpui::{
 };
 use portable_pty::MasterPty;
 
-use super::agent_chat_pane::view::AgentChatView;
 use super::file_view_pane::PaneFileView;
 use crate::agent::account::PreparedAccount;
 use crate::path_ext::PathExt;
 use crate::workspace::Workspace;
 use crate::workspace::main_area::pane_tree::{PaneId, PaneLayout};
+use daruda_chat::view::AgentChatView;
 use daruda_terminal::pty::{PtyConfig, PtyError, spawn_pty};
 
 /// Errors that can occur while creating a pane.
@@ -247,21 +247,18 @@ impl Pane {
     /// content has no cache to go stale (see [`AgentChatContent`]'s doc
     /// comment): it reads the live session title, falling back to the first
     /// prompt, then to "New {agent name}" — the same precedence the in-pane
-    /// activity bar uses (`agent_chat_pane::agent_chat_helpers::activity_bar_title`).
+    /// activity bar uses (`daruda_chat::agent_chat_helpers::activity_bar_title`).
     pub(in crate::workspace) fn title(&self, cx: &App) -> SharedString {
         match &self.content {
             PaneContent::Terminal(t) => t.cached_title.clone(),
             PaneContent::File(f) => f.cached_title.clone(),
             PaneContent::AgentChat(ac) => {
                 let v = ac.view.read(cx);
-                super::agent_chat_pane::agent_chat_helpers::activity_bar_title(
-                    v.session_title(),
-                    v.items(),
-                )
-                .map(SharedString::from)
-                .unwrap_or_else(|| {
-                    crate::surface::strings::common::new_agent_chat_named(v.agent_name()).into()
-                })
+                daruda_chat::agent_chat_helpers::activity_bar_title(v.session_title(), v.items())
+                    .map(SharedString::from)
+                    .unwrap_or_else(|| {
+                        crate::surface::strings::common::new_agent_chat_named(v.agent_name()).into()
+                    })
             }
         }
     }
