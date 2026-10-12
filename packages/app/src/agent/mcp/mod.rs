@@ -15,6 +15,8 @@ pub mod persist;
 mod tests;
 
 use std::collections::BTreeMap;
+
+use daruda_config::env_lines::EnvLineError;
 use std::path::{Path, PathBuf};
 use std::time::SystemTime;
 
@@ -562,56 +564,8 @@ pub fn validate_url(s: &str, transport: McpTransport) -> Result<(), FieldError> 
     Ok(())
 }
 
-/// A textarea line that is not `KEY=VALUE`. Its own type rather than
-/// [`FieldError`]: [`parse_env_lines`] is also the agent catalog's
-/// Environment field, which has no command or url to report on.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct EnvLineError {
-    pub line: String,
-}
-
 impl From<EnvLineError> for FieldError {
     fn from(v: EnvLineError) -> Self {
         FieldError::EnvInvalidLine { line: v.line }
     }
-}
-
-/// Parse `KEY=VALUE` lines (one per line) into a sorted map. Empty
-/// lines and lines starting with `#` are treated as comments. Both
-/// the key and the value are trimmed of surrounding whitespace —
-/// `TOKEN=  abc  ` lands in the map as `("TOKEN", "abc")`. Embedded
-/// whitespace (`KEY=foo bar`) is preserved verbatim. An empty value
-/// (`KEY=`) is allowed and stored as the empty string — Claude Code
-/// writes a literal empty env var in this case.
-///
-/// Shared with the agent catalog's Environment field, which edits an
-/// adapter process's environment in the same block form — see
-/// `settings::sections::agent_env`.
-pub fn parse_env_lines(text: &str) -> Result<BTreeMap<String, String>, EnvLineError> {
-    let mut map = BTreeMap::new();
-    for line in text.lines() {
-        let line = line.trim();
-        if line.is_empty() || line.starts_with('#') {
-            continue;
-        }
-        let (k, v) = line.split_once('=').ok_or_else(|| EnvLineError {
-            line: line.to_string(),
-        })?;
-        let k = k.trim();
-        if k.is_empty() {
-            return Err(EnvLineError {
-                line: line.to_string(),
-            });
-        }
-        map.insert(k.to_string(), v.trim().to_string());
-    }
-    Ok(map)
-}
-
-/// Render an env map back to the textarea form used by the modal.
-pub fn format_env_lines(env: &BTreeMap<String, String>) -> String {
-    env.iter()
-        .map(|(k, v)| format!("{k}={v}"))
-        .collect::<Vec<_>>()
-        .join("\n")
 }

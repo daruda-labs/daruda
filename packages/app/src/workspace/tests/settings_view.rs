@@ -88,7 +88,7 @@ async fn the_view_s_close_event_takes_it_down(cx: &mut TestAppContext) {
 
     cx.update_window(window_handle.into(), |_, _window, cx| {
         view.update(cx, |_, cx| {
-            cx.emit(crate::settings::SettingsEvent::Close);
+            cx.emit(daruda_settings::SettingsEvent::Close);
         });
     })
     .unwrap();
@@ -514,7 +514,7 @@ async fn an_account_change_in_settings_is_shared_and_mirrored_back(cx: &mut Test
     let mut state = daruda_store::accounts::AccountsState::default();
     state.accounts.push(account.clone());
     view.update(cx, |_, cx| {
-        cx.emit(crate::settings::SettingsEvent::AccountsChanged(state))
+        cx.emit(daruda_settings::SettingsEvent::AccountsChanged(state))
     });
     cx.run_until_parked();
 
@@ -594,4 +594,41 @@ async fn settings_follows_readings_and_vocabulary_until_it_closes(cx: &mut TestA
             "a closed Settings is no longer pushed to"
         );
     });
+}
+
+/// A plugin-scope rescan reaches an open Settings through its host.
+#[gpui::test]
+async fn settings_follows_the_plugin_scope(cx: &mut TestAppContext) {
+    use gpui::BorrowAppContext as _;
+    let (window_handle, workspace) = build_workspace(cx);
+    let view = cx
+        .update_window(window_handle.into(), |_, window, cx| {
+            workspace.update(cx, |ws, cx| {
+                ws.on_open_settings(
+                    &OpenSettings(daruda_config::BuiltinSection::Plugin),
+                    window,
+                    cx,
+                );
+                ws.settings_view().expect("settings open").clone()
+            })
+        })
+        .unwrap();
+    let skill = crate::agent::skills::Skill {
+        name: "lint".to_string(),
+        dir: std::path::PathBuf::from("/tmp/daruda-test-plugin/skills/lint"),
+        scope: crate::agent::skills::SkillScope::Plugin,
+        frontmatter: Default::default(),
+        body_preview: String::new(),
+        aux_file_count: 0,
+        modified_at: std::time::SystemTime::UNIX_EPOCH,
+        plugin_id: Some("lint@market".to_string()),
+        plugin_availability: None,
+    };
+    cx.update(|cx| {
+        cx.update_global::<crate::agent::skills::global::GlobalSkills, _>(|state, _| {
+            state.plugin = vec![skill.clone()];
+        });
+    });
+    cx.run_until_parked();
+    cx.update(|cx| assert_eq!(view.read(cx).plugin_skills(), [skill]));
 }

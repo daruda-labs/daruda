@@ -103,7 +103,7 @@ pub fn open_rename_skill_modal(
             }
             let lane = ws.active_lane_root();
             if cx
-                .global::<crate::agent::skills::SkillsState>()
+                .global::<crate::agent::skills::global::GlobalSkills>()
                 .name_exists(scope, &new_name, lane.as_deref())
             {
                 report_validation(

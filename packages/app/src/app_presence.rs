@@ -315,4 +315,51 @@ mod tests {
             assert!(is_away(cx));
         });
     }
+
+    /// Coming back to any daruda window ends a tracked absence on the
+    /// activation edge.
+    #[gpui::test]
+    fn returning_to_a_window_clears_tracked_absence_on_the_activation_edge(
+        cx: &mut TestAppContext,
+    ) {
+        crate::test_support::init_gpui_component(cx);
+        cx.update(init);
+        let handle = cx.add_window(|window, cx| {
+            use gpui::AppContext as _;
+            let blank = cx.new(|_| Blank);
+            crate::ui::Root::new(blank, window, cx)
+        });
+        cx.run_until_parked();
+        let mut vcx = gpui::VisualTestContext::from_window(handle.into(), cx);
+        vcx.deactivate_window();
+        vcx.update(|window, cx| {
+            seed_for_test(
+                AwaySignal::HERE.observe(
+                    false,
+                    Some(Duration::from_secs(300)),
+                    Instant::now() - Duration::from_secs(30),
+                ),
+                true,
+                Some(Duration::from_secs(300)),
+                cx,
+            );
+            window.activate_window();
+        });
+        vcx.run_until_parked();
+        vcx.update(|_, cx| {
+            assert!(snapshot(cx).away_secs(Instant::now()).is_none());
+        });
+    }
+
+    struct Blank;
+
+    impl gpui::Render for Blank {
+        fn render(
+            &mut self,
+            _: &mut gpui::Window,
+            _: &mut gpui::Context<Self>,
+        ) -> impl gpui::IntoElement {
+            gpui::Empty
+        }
+    }
 }

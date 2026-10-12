@@ -42,3 +42,7 @@ sysinfo = "0.32"
 tempfile = "3"
 thiserror = "2"
 ureq = { version = "2", default-features = false, features = ["tls"] }
+# A clear "claude not found" before a plugin install spawns it.
+which = "6"
+# Skill frontmatter, parsed losslessly.
+yaml_serde = "0.10"

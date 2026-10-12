@@ -1,5 +1,6 @@
 pub mod assemble;
 pub mod entry;
+pub mod icon;
 pub mod preset;
 #[cfg(test)]
 mod tests;

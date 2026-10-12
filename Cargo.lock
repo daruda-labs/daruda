@@ -1795,6 +1795,7 @@ dependencies = [
  "daruda_flow",
  "daruda_flow_edit",
  "daruda_project",
+ "daruda_settings",
  "daruda_store",
  "daruda_terminal",
  "daruda_transcript",
@@ -1844,7 +1845,6 @@ dependencies = [
  "ureq",
  "url",
  "uuid",
- "which",
  "windows 0.61.3",
  "windows-sys 0.61.2",
  "x11rb",
@@ -1892,6 +1892,8 @@ dependencies = [
  "test_process",
  "thiserror 2.0.18",
  "ureq",
+ "which",
+ "yaml_serde",
 ]
 
 [[package]]
@@ -2014,6 +2016,27 @@ dependencies = [
  "serde_json",
  "shell-words",
  "tempfile",
+ "which",
+]
+
+[[package]]
+name = "daruda_settings"
+version = "0.2.17"
+dependencies = [
+ "daruda_acp",
+ "daruda_agent",
+ "daruda_chat",
+ "daruda_config",
+ "daruda_core",
+ "daruda_project",
+ "daruda_store",
+ "daruda_transcript",
+ "daruda_ui",
+ "gpui",
+ "rust-i18n",
+ "strings_gen",
+ "tempfile",
+ "uuid",
  "which",
 ]
 

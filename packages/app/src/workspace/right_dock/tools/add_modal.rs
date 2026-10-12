@@ -23,8 +23,8 @@ use super::modal_shared::{
     field_error_to_msg, field_label, scope_options, split_args, transport_options,
 };
 use crate::agent::mcp::{
-    McpScope, McpServerDraft, McpTransport, NameError, parse_env_lines, validate_command,
-    validate_name, validate_url,
+    McpScope, McpServerDraft, McpTransport, NameError, validate_command, validate_name,
+    validate_url,
 };
 use crate::surface::strings;
 use crate::ui::Disableable as _;
@@ -33,6 +33,7 @@ use crate::ui::WindowExt as _;
 use crate::ui::{InputEvent, InputState, button, button_group, button_primary, checkbox, input};
 use crate::workspace::ModalView;
 use crate::workspace::Workspace;
+use daruda_config::env_lines::parse_env_lines;
 
 fn blank_to_none(s: &str) -> Option<String> {
     let t = s.trim();

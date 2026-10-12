@@ -17,10 +17,7 @@ use gpui::{
 use super::modal_shared::{
     field_error_to_msg, field_label, join_args, split_args, transport_options,
 };
-use crate::agent::mcp::{
-    McpScope, McpServerDraft, McpTransport, format_env_lines, parse_env_lines, validate_command,
-    validate_url,
-};
+use crate::agent::mcp::{McpScope, McpServerDraft, McpTransport, validate_command, validate_url};
 use crate::surface::strings;
 use crate::ui::Disableable as _;
 use crate::ui::Selectable as _;
@@ -28,6 +25,7 @@ use crate::ui::WindowExt as _;
 use crate::ui::{InputEvent, InputState, button, button_group, button_primary, checkbox, input};
 use crate::workspace::ModalView;
 use crate::workspace::Workspace;
+use daruda_config::env_lines::{format_env_lines, parse_env_lines};
 
 fn blank_to_none(s: &str) -> Option<String> {
     let t = s.trim();

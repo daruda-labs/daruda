@@ -282,7 +282,7 @@ impl Workspace {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        // Capture the path before removal so the per-lane `SkillsState` /
+        // Capture the path before removal so the per-lane `GlobalSkills` /
         // `McpState` Global entries can be pruned (else they grow
         // unbounded across the session).
         let removed_path = self.lane_for(target).map(|w| w.path.clone());
@@ -353,7 +353,7 @@ impl Workspace {
         self.drop_flow_detail_of_gone_lane(window, cx);
         if let Some(path) = removed_path {
             use gpui::BorrowAppContext as _;
-            cx.update_global::<crate::agent::skills::SkillsState, _>(|s, _| {
+            cx.update_global::<crate::agent::skills::global::GlobalSkills, _>(|s, _| {
                 s.forget_lane(&path);
             });
             cx.update_global::<crate::agent::mcp::McpState, _>(|s, _| {

@@ -123,7 +123,7 @@ fn build_new_tab_menu(
             m.item(
                 PopupMenuItem::new(label)
                     .icon(crate::ui::agent_menu_icon(
-                        crate::agent::icons::icon_for_agent(id),
+                        daruda_config::agent::icon::icon_for_agent(id),
                     ))
                     .on_click(move |_, window, app| {
                         if let Some(w) = ws.upgrade() {
@@ -152,7 +152,7 @@ fn build_new_tab_menu(
                     m.item(
                         PopupMenuItem::new(gpui::SharedString::from(name.clone()))
                             .icon(crate::ui::agent_menu_icon(
-                                crate::agent::icons::icon_for_agent(id),
+                                daruda_config::agent::icon::icon_for_agent(id),
                             ))
                             .on_click(move |_, window, app| {
                                 if let Some(w) = ws.upgrade() {
@@ -384,7 +384,7 @@ struct FramePrep {
 /// once, in `prepare_frame`, so a frame drawn behind Settings cannot reach
 /// anything Settings covers.
 enum FrameBody {
-    Settings(gpui::Entity<crate::settings::SettingsView>),
+    Settings(gpui::Entity<daruda_settings::SettingsView>),
     Workspace(DockFrame),
 }
 
@@ -581,7 +581,7 @@ impl Workspace {
     /// surface nobody can see.
     fn build_settings_frame(
         &self,
-        view: gpui::Entity<crate::settings::SettingsView>,
+        view: gpui::Entity<daruda_settings::SettingsView>,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> gpui::Div {

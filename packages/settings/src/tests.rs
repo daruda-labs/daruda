@@ -1,0 +1,3317 @@
+use super::*;
+use daruda_config::BuiltinSection;
+use gpui::{BorrowAppContext, Entity, TestAppContext, WindowHandle};
+
+mod agent_page;
+mod confirmation;
+mod failure_reporting;
+mod focus;
+mod reset;
+mod scrollbar;
+mod terminal_page;
+mod workspace_page;
+
+use daruda_transcript::display_filter::FilterFacet;
+use daruda_transcript::editor::range::RangeLevel;
+use daruda_transcript::fold_mode::{BlockRule, FoldBlock, FoldMode, FoldPreset, TurnPosition};
+use daruda_ui::test_support::init_gpui_component;
+
+/// Construct a Settings window wrapped in `daruda_ui::Root` —
+/// matches the production windowing path so the vendored `Input`'s
+/// `TextElement::paint` can resolve `Root::read` without panicking.
+/// The workspace draws the dialog layer over Settings, so a test window
+/// has to as well for a confirm dialog's OK to be reachable.
+struct DialogHost {
+    view: Entity<SettingsView>,
+}
+
+impl gpui::Render for DialogHost {
+    fn render(
+        &mut self,
+        window: &mut gpui::Window,
+        cx: &mut gpui::Context<Self>,
+    ) -> impl gpui::IntoElement {
+        use gpui::{ParentElement as _, Styled as _};
+        gpui::div()
+            .size_full()
+            .child(self.view.clone())
+            .children(daruda_ui::Root::render_dialog_layer(window, cx))
+    }
+}
+
+/// A host with no accounts in use and an empty credential store; with
+/// `refuse_keychain`, a store that rejects every write.
+#[derive(Default)]
+struct FakeServices {
+    refuse_keychain: bool,
+}
+
+impl SettingsServices for FakeServices {
+    fn account_usage(&self, _: daruda_store::accounts::AccountId, _: &mut gpui::App) -> usize {
+        0
+    }
+
+    fn telegram_token_stored(&self) -> bool {
+        false
+    }
+
+    fn store_telegram_token(&self, _: &str) -> std::io::Result<()> {
+        self.keychain()
+    }
+
+    fn forget_telegram_token(&self) -> std::io::Result<()> {
+        self.keychain()
+    }
+
+    fn telegram_bot_held_elsewhere(&self, _: &gpui::App) -> bool {
+        false
+    }
+
+    fn new_telegram_pair_code(&self, _: &mut gpui::App) -> String {
+        "PAIRCODE".to_string()
+    }
+}
+
+impl FakeServices {
+    fn keychain(&self) -> std::io::Result<()> {
+        if self.refuse_keychain {
+            Err(std::io::Error::other("keychain said no"))
+        } else {
+            Ok(())
+        }
+    }
+}
+
+/// The host's channel settings, which these tests never open.
+struct NoIntegrations;
+
+impl gpui::Render for NoIntegrations {
+    fn render(
+        &mut self,
+        _: &mut gpui::Window,
+        _: &mut gpui::Context<Self>,
+    ) -> impl gpui::IntoElement {
+        gpui::Empty
+    }
+}
+
+/// A view on `section` with nothing shared yet, over `services`.
+fn new_test_view(
+    section: BuiltinSection,
+    services: FakeServices,
+    window: &mut gpui::Window,
+    cx: &mut gpui::Context<SettingsView>,
+) -> SettingsView {
+    let remote_integrations = cx.new(|_| NoIntegrations).into();
+    SettingsView::new_with_section(
+        section,
+        SharedSnapshot::default(),
+        std::rc::Rc::new(services),
+        remote_integrations,
+        window,
+        cx,
+    )
+}
+
+/// Press Enter in the window, which the open dialog takes as OK.
+fn confirm_dialog(cx: &mut TestAppContext, wh: WindowHandle<daruda_ui::Root>) {
+    let mut vcx = gpui::VisualTestContext::from_window(wh.into(), cx);
+    vcx.run_until_parked();
+    vcx.simulate_keystrokes("enter");
+    vcx.run_until_parked();
+}
+
+fn build_window(cx: &mut TestAppContext) -> (WindowHandle<daruda_ui::Root>, Entity<SettingsView>) {
+    build_window_with_config(cx, daruda_config::Config::default())
+}
+
+fn build_window_with_config(
+    cx: &mut TestAppContext,
+    config: daruda_config::Config,
+) -> (WindowHandle<daruda_ui::Root>, Entity<SettingsView>) {
+    build_window_with(cx, config, FakeServices::default())
+}
+
+fn build_window_with(
+    cx: &mut TestAppContext,
+    config: daruda_config::Config,
+    services: FakeServices,
+) -> (WindowHandle<daruda_ui::Root>, Entity<SettingsView>) {
+    init_gpui_component(cx);
+    cx.update(|cx| {
+        crate::store::SettingsStore::init(cx);
+        cx.update_global::<crate::store::SettingsStore, _>(|store, _| {
+            store.set_user_for_testing(config);
+        });
+    });
+    let settings_for_root = std::cell::RefCell::new(None);
+    let wh = cx.add_window(|window, cx| {
+        let settings = cx.new(|cx| new_test_view(BuiltinSection::default(), services, window, cx));
+        *settings_for_root.borrow_mut() = Some(settings.clone());
+        let host = cx.new(|_| DialogHost { view: settings });
+        daruda_ui::Root::new(host, window, cx)
+    });
+    let entity = settings_for_root.borrow().clone().unwrap();
+    (wh, entity)
+}
+
+#[gpui::test]
+fn validate_accepts_defaults(cx: &mut TestAppContext) {
+    let (_wh, win) = build_window(cx);
+    win.read_with(cx, |w, cx| {
+        assert!(w.validate(cx).is_ok());
+    });
+}
+
+#[gpui::test]
+fn boolean_setting_applies_immediately(cx: &mut TestAppContext) {
+    let (_wh, win) = build_window(cx);
+    win.update(cx, |window, cx| {
+        let next = !window.window_blur;
+        window.set_bool_setting(BoolSetting::WindowBlur, next, cx);
+        assert!(window.error.is_none());
+        assert_eq!(window.window_blur, next);
+    });
+
+    win.read_with(cx, |window, cx| {
+        assert_eq!(
+            crate::store::SettingsStore::global(cx).user().window.blur,
+            window.window_blur
+        );
+    });
+}
+
+/// A text setting persists on Enter or Blur only, so a field still holding
+/// focus when the view goes away has never been written. The exit path has to
+/// land it.
+#[gpui::test]
+fn exit_commits_a_text_field_never_blurred(cx: &mut TestAppContext) {
+    let (wh, win) = build_window(cx);
+    set_input(
+        &wh,
+        &win,
+        cx,
+        |window| window.terminal_font_size_input.clone(),
+        "16",
+    );
+
+    commit_pending_edits(&wh, &win, cx);
+
+    win.read_with(cx, |_window, cx| {
+        assert_eq!(
+            crate::store::SettingsStore::global(cx)
+                .user()
+                .font
+                .terminal
+                .size,
+            16.0
+        );
+    });
+}
+
+/// The same path must not write a value the field would have rejected — it
+/// reverts instead, so the input agrees with the config it left behind.
+#[gpui::test]
+fn exit_reverts_a_text_field_that_cannot_parse(cx: &mut TestAppContext) {
+    let (wh, win) = build_window(cx);
+    set_input(
+        &wh,
+        &win,
+        cx,
+        |window| window.terminal_font_size_input.clone(),
+        "999",
+    );
+
+    commit_pending_edits(&wh, &win, cx);
+
+    let input = win.read_with(cx, |window, _| window.terminal_font_size_input.clone());
+    win.read_with(cx, |window, cx| {
+        assert_eq!(
+            crate::store::SettingsStore::global(cx)
+                .user()
+                .font
+                .terminal
+                .size,
+            13.0
+        );
+        assert_eq!(input.read(cx).value(), "13");
+        assert!(window.error.is_none());
+    });
+}
+
+/// Run the exit commit and assert it did not refuse — every caller here is a
+/// case that must settle, so a silent `false` would hide the interesting part.
+fn commit_pending_edits(
+    wh: &WindowHandle<daruda_ui::Root>,
+    win: &Entity<SettingsView>,
+    cx: &mut TestAppContext,
+) {
+    let settled = wh
+        .update(cx, |_root, window, cx| {
+            win.update(cx, |w, cx| w.commit_pending_edits(window, cx))
+        })
+        .expect("settings window should still be open during the test");
+    assert!(settled, "nothing here should block the exit");
+}
+
+#[gpui::test]
+fn valid_text_draft_applies_on_commit(cx: &mut TestAppContext) {
+    let (wh, win) = build_window(cx);
+    set_input(
+        &wh,
+        &win,
+        cx,
+        |window| window.terminal_font_size_input.clone(),
+        "16",
+    );
+    let input = win.read_with(cx, |window, _| window.terminal_font_size_input.clone());
+    win.update(cx, |window, cx| {
+        window.persist_text_setting(&input, TextSetting::TerminalFontSize, cx);
+    });
+
+    win.read_with(cx, |_window, cx| {
+        assert_eq!(
+            crate::store::SettingsStore::global(cx)
+                .user()
+                .font
+                .terminal
+                .size,
+            16.0
+        );
+    });
+}
+
+#[gpui::test]
+fn same_field_external_edit_requires_an_explicit_choice(cx: &mut TestAppContext) {
+    let (wh, win) = build_window(cx);
+    set_input(
+        &wh,
+        &win,
+        cx,
+        |window| window.terminal_font_size_input.clone(),
+        "16",
+    );
+    cx.update(|cx| {
+        cx.update_global::<crate::store::SettingsStore, _>(|store, _| {
+            store
+                .apply_patch(daruda_config::SettingsPatch::TerminalFontSize(20.0))
+                .expect("external edit");
+        });
+    });
+    let input = win.read_with(cx, |window, _| window.terminal_font_size_input.clone());
+    win.update(cx, |window, cx| {
+        window.persist_text_setting(&input, TextSetting::TerminalFontSize, cx);
+    });
+
+    win.read_with(cx, |window, cx| {
+        assert!(window.conflict.is_some());
+        assert_eq!(
+            crate::store::SettingsStore::global(cx)
+                .user()
+                .font
+                .terminal
+                .size,
+            20.0
+        );
+    });
+
+    let win_for_overwrite = win.clone();
+    wh.update(cx, |_root, window, cx| {
+        win_for_overwrite.update(cx, |settings, cx| {
+            settings.overwrite_conflict(window, cx);
+        });
+    })
+    .unwrap();
+    win.read_with(cx, |window, cx| {
+        assert!(window.conflict.is_none());
+        assert_eq!(
+            crate::store::SettingsStore::global(cx)
+                .user()
+                .font
+                .terminal
+                .size,
+            16.0
+        );
+    });
+}
+
+#[gpui::test]
+fn conflict_can_reload_the_external_value(cx: &mut TestAppContext) {
+    let (wh, win) = build_window(cx);
+    set_input(
+        &wh,
+        &win,
+        cx,
+        |window| window.terminal_font_size_input.clone(),
+        "16",
+    );
+    cx.update(|cx| {
+        cx.update_global::<crate::store::SettingsStore, _>(|store, _| {
+            store
+                .apply_patch(daruda_config::SettingsPatch::TerminalFontSize(20.0))
+                .expect("external edit");
+        });
+    });
+    let input = win.read_with(cx, |window, _| window.terminal_font_size_input.clone());
+    win.update(cx, |window, cx| {
+        window.persist_text_setting(&input, TextSetting::TerminalFontSize, cx);
+    });
+    let win_for_reload = win.clone();
+    wh.update(cx, |_root, window, cx| {
+        win_for_reload.update(cx, |settings, cx| {
+            settings.reload_conflict(window, cx);
+        });
+    })
+    .unwrap();
+
+    win.read_with(cx, |window, cx| {
+        assert!(window.conflict.is_none());
+        assert_eq!(
+            window.terminal_font_size_input.read(cx).value().as_ref(),
+            "20"
+        );
+    });
+}
+
+#[gpui::test]
+fn boolean_conflict_overwrite_updates_store_and_visible_value(cx: &mut TestAppContext) {
+    let (wh, win) = build_window(cx);
+    let desired = win.read_with(cx, |window, _| !window.window_blur);
+    win.update(cx, |window, cx| {
+        window.window_blur = desired;
+        cx.notify();
+    });
+    cx.update(|cx| {
+        cx.update_global::<crate::store::SettingsStore, _>(|store, _| {
+            store
+                .apply_patch(daruda_config::SettingsPatch::WindowBlur(desired))
+                .expect("external edit");
+        });
+    });
+
+    win.update(cx, |window, cx| {
+        assert!(!window.persist_bool_setting(BoolSetting::WindowBlur, desired, cx));
+        assert!(window.conflict.is_some());
+    });
+    let win_for_overwrite = win.clone();
+    wh.update(cx, |_root, window, cx| {
+        win_for_overwrite.update(cx, |settings, cx| {
+            settings.overwrite_conflict(window, cx);
+        });
+    })
+    .unwrap();
+
+    win.read_with(cx, |window, cx| {
+        assert!(window.conflict.is_none());
+        assert_eq!(window.window_blur, desired);
+        assert_eq!(
+            crate::store::SettingsStore::global(cx).user().window.blur,
+            desired
+        );
+    });
+}
+
+#[gpui::test]
+fn clean_form_reloads_an_external_setting_immediately(cx: &mut TestAppContext) {
+    let (_wh, win) = build_window(cx);
+    cx.update(|cx| {
+        cx.update_global::<crate::store::SettingsStore, _>(|store, _| {
+            store
+                .apply_patch(daruda_config::SettingsPatch::TerminalFontSize(20.0))
+                .expect("external edit");
+        });
+    });
+
+    win.read_with(cx, |window, cx| {
+        assert_eq!(
+            window.terminal_font_size_input.read(cx).value().as_ref(),
+            "20"
+        );
+        assert_eq!(window.base_config.font.terminal.size, 20.0);
+        assert!(window.conflict.is_none());
+    });
+}
+
+#[gpui::test]
+fn external_off_list_font_family_stays_selected(cx: &mut TestAppContext) {
+    let (_wh, win) = build_window(cx);
+    let family = "Daruda Off List Font For Test".to_string();
+    let external_family = family.clone();
+    cx.update(|cx| {
+        cx.update_global::<crate::store::SettingsStore, _>(|store, _| {
+            store
+                .apply_patch(daruda_config::SettingsPatch::TerminalFontFamily(
+                    external_family,
+                ))
+                .expect("external font edit");
+        });
+    });
+
+    win.read_with(cx, |window, cx| {
+        let selected = window
+            .terminal_font_family_select
+            .read(cx)
+            .selected_value()
+            .map(|value| value.to_string());
+        assert_eq!(selected.as_deref(), Some(family.as_str()));
+        assert_eq!(
+            window.validate(cx).unwrap().font.terminal.family,
+            family.as_str()
+        );
+    });
+}
+
+#[gpui::test]
+fn terminal_font_options_do_not_import_agent_chat_system_ui(cx: &mut TestAppContext) {
+    let mut config = daruda_config::Config::default();
+    config.font.terminal.family = "Daruda Off List Terminal Font".to_string();
+    config.font.agent_chat.family = daruda_config::SYSTEM_UI_FONT_FAMILY.to_string();
+
+    cx.update(|cx| {
+        let terminal_options = font_select_options(cx, &[&config.font.terminal.family]);
+        assert!(
+            terminal_options
+                .iter()
+                .any(|option| option.value.as_ref() == config.font.terminal.family.as_str())
+        );
+        assert!(
+            terminal_options
+                .iter()
+                .all(|option| { option.value.as_ref() != daruda_config::SYSTEM_UI_FONT_FAMILY })
+        );
+
+        let agent_chat_options = font_select_options(cx, &[&config.font.agent_chat.family]);
+        assert!(
+            agent_chat_options
+                .iter()
+                .any(|option| { option.value.as_ref() == daruda_config::SYSTEM_UI_FONT_FAMILY })
+        );
+    });
+}
+
+#[gpui::test]
+fn committing_one_draft_does_not_swallow_an_unrelated_external_edit(cx: &mut TestAppContext) {
+    let (wh, win) = build_window(cx);
+    set_input(
+        &wh,
+        &win,
+        cx,
+        |window| window.terminal_font_size_input.clone(),
+        "16",
+    );
+    cx.update(|cx| {
+        cx.update_global::<crate::store::SettingsStore, _>(|store, _| {
+            store
+                .apply_patch(daruda_config::SettingsPatch::GeneralLanguage(
+                    "en".to_string(),
+                ))
+                .expect("external edit");
+        });
+    });
+
+    let input = win.read_with(cx, |window, _| window.terminal_font_size_input.clone());
+    win.update(cx, |window, cx| {
+        window.persist_text_setting(&input, TextSetting::TerminalFontSize, cx);
+    });
+    cx.run_until_parked();
+
+    win.read_with(cx, |window, cx| {
+        assert_eq!(
+            window
+                .language_select
+                .read(cx)
+                .selected_value()
+                .map(|value| value.as_ref()),
+            Some("en")
+        );
+        assert_eq!(window.base_config.general.language, "en");
+    });
+}
+
+#[gpui::test]
+fn resolving_one_conflict_preserves_another_drafts_baseline(cx: &mut TestAppContext) {
+    let (wh, win) = build_window(cx);
+    set_input(
+        &wh,
+        &win,
+        cx,
+        |window| window.terminal_font_size_input.clone(),
+        "16",
+    );
+    set_input(&wh, &win, cx, |window| window.opacity_input.clone(), "0.8");
+    cx.update(|cx| {
+        cx.update_global::<crate::store::SettingsStore, _>(|store, _| {
+            store
+                .apply_patch(daruda_config::SettingsPatch::TerminalFontSize(20.0))
+                .expect("external font edit");
+            store
+                .apply_patch(daruda_config::SettingsPatch::WindowOpacity(0.7))
+                .expect("external opacity edit");
+        });
+    });
+
+    let font = win.read_with(cx, |window, _| window.terminal_font_size_input.clone());
+    win.update(cx, |window, cx| {
+        window.persist_text_setting(&font, TextSetting::TerminalFontSize, cx);
+        assert!(window.conflict.is_some());
+    });
+    let win_for_reload = win.clone();
+    wh.update(cx, |_root, window, cx| {
+        win_for_reload.update(cx, |settings, cx| {
+            settings.reload_conflict(window, cx);
+        });
+    })
+    .unwrap();
+
+    let opacity = win.read_with(cx, |window, _| window.opacity_input.clone());
+    win.update(cx, |window, cx| {
+        window.persist_text_setting(&opacity, TextSetting::WindowOpacity, cx);
+        assert!(window.conflict.is_some());
+    });
+}
+
+#[gpui::test]
+fn structural_overwrite_reloads_the_persisted_catalog(cx: &mut TestAppContext) {
+    let config = one_ssh_row_config();
+    let (wh, win) = build_window_with_config(cx, config.clone());
+    set_input(
+        &wh,
+        &win,
+        cx,
+        |window| window.terminal_font_size_input.clone(),
+        "16",
+    );
+
+    let mut external_entries = config.session_hosts.clone();
+    external_entries[0].label = "External label".to_string();
+    cx.update(|cx| {
+        cx.update_global::<crate::store::SettingsStore, _>(|store, _| {
+            store
+                .apply_patch(daruda_config::SettingsPatch::SessionHosts {
+                    entries: external_entries,
+                    tombstones: Vec::new(),
+                })
+                .expect("external host edit");
+        });
+    });
+
+    win.update(cx, |window, cx| {
+        window.remove_session_host_row(0, cx);
+        assert!(window.conflict.is_some());
+        assert_eq!(
+            window.session_host_rows().count(),
+            1,
+            "failed edit rolls back"
+        );
+    });
+    let win_for_overwrite = win.clone();
+    wh.update(cx, |_root, window, cx| {
+        win_for_overwrite.update(cx, |settings, cx| {
+            settings.overwrite_conflict(window, cx);
+        });
+    })
+    .unwrap();
+
+    win.read_with(cx, |window, cx| {
+        assert!(window.conflict.is_none());
+        assert_eq!(window.session_host_rows().count(), 0);
+        assert!(
+            crate::store::SettingsStore::global(cx)
+                .user()
+                .session_hosts
+                .is_empty()
+        );
+    });
+}
+
+/// Test-only — write `value` into one of the settings's inputs
+/// through the real `InputState::set_value` pipeline. Tests don't hold
+/// a live `&mut Window`, so re-enter via the window handle.
+fn set_input(
+    wh: &WindowHandle<daruda_ui::Root>,
+    win: &Entity<SettingsView>,
+    cx: &mut TestAppContext,
+    field: fn(&SettingsView) -> Entity<InputState>,
+    value: &str,
+) {
+    let state = win.read_with(cx, |w, _| field(w));
+    wh.update(cx, |_root, window, cx| {
+        state.update(cx, |i, cx_state| {
+            i.set_value(value.to_string(), window, cx_state)
+        });
+    })
+    .expect("settings window should still be open during the test");
+}
+
+#[gpui::test]
+fn validate_scalar_fields_cover_boundaries(cx: &mut TestAppContext) {
+    let (wh, win) = build_window(cx);
+    set_input(&wh, &win, cx, |w| w.terminal_font_size_input.clone(), "999");
+    win.read_with(cx, |w, cx| {
+        let err = w.validate(cx).unwrap_err();
+        assert!(err.contains("72"));
+    });
+    set_input(&wh, &win, cx, |w| w.terminal_font_size_input.clone(), "13");
+
+    set_input(
+        &wh,
+        &win,
+        cx,
+        |w| w.terminal_line_height_input.clone(),
+        "5.0",
+    );
+    win.read_with(cx, |w, cx| {
+        let err = w.validate(cx).unwrap_err();
+        assert!(err.contains("2.0"));
+    });
+    set_input(
+        &wh,
+        &win,
+        cx,
+        |w| w.terminal_line_height_input.clone(),
+        "1.0",
+    );
+
+    set_input(&wh, &win, cx, |w| w.opacity_input.clone(), "0.0");
+    win.read_with(cx, |w, cx| {
+        let err = w.validate(cx).unwrap_err();
+        assert!(err.contains("0.1"));
+    });
+    set_input(&wh, &win, cx, |w| w.opacity_input.clone(), "1.0");
+
+    // 0 bytes < 4096 minimum.
+    set_input(&wh, &win, cx, |w| w.clipboard_streaming_input.clone(), "0");
+    win.read_with(cx, |w, cx| {
+        let err = w.validate(cx).unwrap_err();
+        assert!(err.contains("4 096") || err.contains("4096"));
+    });
+    set_input(
+        &wh,
+        &win,
+        cx,
+        |w| w.clipboard_streaming_input.clone(),
+        "4096",
+    );
+
+    // 0 columns < 1 minimum.
+    set_input(&wh, &win, cx, |w| w.panels_grid_columns_input.clone(), "0");
+    win.read_with(cx, |w, cx| {
+        let err = w.validate(cx).unwrap_err();
+        assert!(err.contains("1") && err.contains("16"));
+    });
+    set_input(&wh, &win, cx, |w| w.panels_grid_columns_input.clone(), "8");
+    win.read_with(cx, |w, cx| {
+        let cfg = w.validate(cx).expect("8 columns must validate");
+        assert_eq!(cfg.panels.grid_columns, 8);
+    });
+}
+
+#[gpui::test]
+fn validate_collects_agent_catalog(cx: &mut TestAppContext) {
+    let (wh, win) = build_window(cx);
+    let win_for_add = win.clone();
+    cx.update_window(wh.into(), |_, window, cx| {
+        win_for_add.update(cx, |w, cx| {
+            // What switching a preset on does.
+            w.add_agent_row(
+                daruda_config::AgentDefinition::codex_default(),
+                Some("codex-acp".to_string()),
+                window,
+                cx,
+            );
+        });
+    })
+    .unwrap();
+
+    win.read_with(cx, |w, cx| {
+        let cfg = w.validate(cx).expect("agent catalog must validate");
+        assert_eq!(
+            cfg.agents,
+            vec![
+                // The built-in default references the `claude-acp` preset it
+                // shares a command with, under its own stable id.
+                daruda_config::AgentEntry::for_definition(
+                    daruda_config::AgentDefinition::claude_default(),
+                    None,
+                ),
+                // The added preset is stored as a reference, not a copy.
+                daruda_config::AgentEntry::preset("codex-acp".to_string()),
+            ]
+        );
+        assert_eq!(
+            cfg.resolved_agents(),
+            vec![
+                daruda_config::AgentDefinition::claude_default(),
+                daruda_config::AgentDefinition::codex_default(),
+            ]
+        );
+    });
+}
+
+/// Test-only — switch a built-in preset on from the catalog's available list.
+fn enable_agent_preset(
+    wh: &WindowHandle<daruda_ui::Root>,
+    win: &Entity<SettingsView>,
+    cx: &mut TestAppContext,
+    preset_id: &str,
+) {
+    let win = win.clone();
+    wh.update(cx, |_root, window, cx| {
+        win.update(cx, |w, cx| w.enable_agent_preset(preset_id, window, cx));
+    })
+    .expect("settings window should still be open during the test");
+}
+
+/// Test-only — pick `kind` in one catalog row's transport dropdown.
+fn select_agent_transport(
+    wh: &WindowHandle<daruda_ui::Root>,
+    win: &Entity<SettingsView>,
+    cx: &mut TestAppContext,
+    index: usize,
+    kind: &str,
+) {
+    let state = win.read_with(cx, |w, _| {
+        w.agent_editable_row(index)
+            .unwrap()
+            .transport_select
+            .clone()
+    });
+    let value = SharedString::from(kind.to_owned());
+    wh.update(cx, |_root, window, cx| {
+        state.update(cx, |s, cx| s.set_selected_value(&value, window, cx));
+    })
+    .expect("settings window should still be open during the test");
+}
+
+/// Test-only — pick `value` in one catalog row's mode/model picker, including
+/// the confirm event a real click emits (`set_selected_value` alone is silent).
+fn confirm_agent_row_select(
+    wh: &WindowHandle<daruda_ui::Root>,
+    win: &Entity<SettingsView>,
+    cx: &mut TestAppContext,
+    index: usize,
+    field: fn(&AgentCatalogRow) -> Entity<SelectState>,
+    value: &str,
+) {
+    let state = win.read_with(cx, |w, _| field(w.agent_editable_row(index).unwrap()));
+    let value = SharedString::from(value.to_owned());
+    wh.update(cx, |_root, window, cx| {
+        state.update(cx, |s, cx| {
+            s.set_selected_value(&value, window, cx);
+            cx.emit(daruda_ui::select::SelectEvent::Confirm(Some(value.clone())));
+        });
+    })
+    .expect("settings window should still be open during the test");
+}
+
+/// Test-only — whether one catalog row's picker offers `value` at all.
+/// `set_selected_value` clears the selection for a value the option list does
+/// not carry, which is the only public read of what a `SelectState` holds.
+fn agent_row_select_offers(
+    wh: &WindowHandle<daruda_ui::Root>,
+    win: &Entity<SettingsView>,
+    cx: &mut TestAppContext,
+    index: usize,
+    field: fn(&AgentCatalogRow) -> Entity<SelectState>,
+    value: &str,
+) -> bool {
+    let state = win.read_with(cx, |w, _| field(w.agent_editable_row(index).unwrap()));
+    let value = SharedString::from(value.to_owned());
+    wh.update(cx, |_root, window, cx| {
+        state.update(cx, |s, cx| s.set_selected_value(&value, window, cx));
+    })
+    .expect("settings window should still be open during the test");
+    win.read_with(cx, |_w, cx| state.read(cx).selected_value() == Some(&value))
+}
+
+/// Test-only — install a known vocabulary cache into the open Settings window.
+fn set_agent_vocabulary(
+    wh: &WindowHandle<daruda_ui::Root>,
+    win: &Entity<SettingsView>,
+    cx: &mut TestAppContext,
+    vocabulary: daruda_store::agent_vocabulary::AgentVocabularyCache,
+) {
+    let win = win.clone();
+    wh.update(cx, |_root, window, cx| {
+        win.update(cx, |w, cx| {
+            w.set_agent_vocabulary_for_test(vocabulary, window, cx)
+        });
+    })
+    .expect("settings window should still be open during the test");
+}
+
+/// Test-only — write `value` into one catalog row's input.
+fn set_agent_row_input(
+    wh: &WindowHandle<daruda_ui::Root>,
+    win: &Entity<SettingsView>,
+    cx: &mut TestAppContext,
+    index: usize,
+    field: fn(&AgentCatalogRow) -> Entity<InputState>,
+    value: &str,
+) {
+    let state = win.read_with(cx, |w, _| field(w.agent_editable_row(index).unwrap()));
+    wh.update(cx, |_root, window, cx| {
+        state.update(cx, |i, cx_state| {
+            i.set_value(value.to_owned(), window, cx_state)
+        });
+    })
+    .expect("settings window should still be open during the test");
+}
+
+/// Switching a preset on saves a reference to it rather than a frozen copy of
+/// its fields.
+#[gpui::test]
+fn enabling_a_preset_collects_a_reference(cx: &mut TestAppContext) {
+    let (wh, win) = build_window(cx);
+    enable_agent_preset(&wh, &win, cx, "gemini");
+    win.read_with(cx, |w, cx| {
+        assert_eq!(w.agent_editable_rows().count(), 2);
+        let cfg = w.validate(cx).expect("agent catalog must validate");
+        assert_eq!(
+            cfg.agents[1],
+            daruda_config::AgentEntry::preset("gemini".to_string())
+        );
+        // Nothing was edited, so nothing it runs differs from the preset.
+        assert!(!w.agent_editable_row(1).unwrap().advanced_overridden(cx));
+    });
+}
+
+/// Editing one field of a preset row overrides that field only — every other
+/// field keeps following the preset.
+#[gpui::test]
+fn editing_one_field_of_a_preset_row_overrides_only_that_field(cx: &mut TestAppContext) {
+    let (wh, win) = build_window(cx);
+    enable_agent_preset(&wh, &win, cx, "gemini");
+    set_agent_row_input(&wh, &win, cx, 1, |r| r.name_input.clone(), "My Gemini");
+
+    win.read_with(cx, |w, cx| {
+        let cfg = w.validate(cx).expect("agent catalog must validate");
+        assert_eq!(
+            cfg.agents[1],
+            daruda_config::AgentEntry::preset_with(
+                "gemini".to_string(),
+                daruda_config::PresetOverrides {
+                    name: Some("My Gemini".to_string()),
+                    ..daruda_config::PresetOverrides::default()
+                }
+            )
+        );
+        let row = w.agent_editable_row(1).unwrap();
+        assert!(!row.command_overridden(cx), "command still follows");
+        assert!(
+            !row.advanced_overridden(cx),
+            "a rename changes nothing that runs"
+        );
+    });
+}
+
+/// A remote transport is not expressible as a preset override, so saving detaches
+/// the row into a self-contained custom entry.
+#[gpui::test]
+fn switching_a_preset_row_to_ssh_detaches_it_into_a_custom_entry(cx: &mut TestAppContext) {
+    let (wh, win) = build_window(cx);
+    enable_agent_preset(&wh, &win, cx, "gemini");
+    select_agent_transport(&wh, &win, cx, 1, "ssh");
+    set_agent_row_input(&wh, &win, cx, 1, |r| r.host_input.clone(), "vm-work");
+
+    win.read_with(cx, |w, cx| {
+        let cfg = w.validate(cx).expect("agent catalog must validate");
+        let base = daruda_config::AgentDefinition::registry_preset("gemini").expect("runnable");
+        let daruda_config::AgentLaunch::Raw(command) = base.launch else {
+            panic!("presets launch Raw");
+        };
+        assert_eq!(
+            cfg.agents[1],
+            daruda_config::AgentEntry::custom(daruda_config::AgentDefinition::new(
+                base.id,
+                base.name,
+                daruda_config::AgentLaunch::Ssh {
+                    adapter_command: command,
+                    host: "vm-work".to_string(),
+                }
+            ))
+        );
+    });
+}
+
+/// The agent-side `Ssh`/`Docker` transport is deprecated (Session Host on
+/// the Lane is the new axis) but stays fully functional for one more
+/// release — an already-persisted `Ssh` row must keep loading and saving
+/// byte-for-byte, untouched.
+#[gpui::test]
+fn an_existing_ssh_row_round_trips_unchanged_through_save(cx: &mut TestAppContext) {
+    let ssh_entry = daruda_config::AgentEntry::custom(daruda_config::AgentDefinition::new(
+        "remote-claude".to_string(),
+        "Remote Claude".to_string(),
+        daruda_config::AgentLaunch::Ssh {
+            adapter_command: "npx -y @agentclientprotocol/claude-agent-acp@latest".to_string(),
+            host: "vm-work".to_string(),
+        },
+    ));
+    let config = daruda_config::Config {
+        agents: vec![ssh_entry.clone()],
+        ..Default::default()
+    };
+    let (_wh, win) = build_window_with_config(cx, config);
+    win.read_with(cx, |w, cx| {
+        let cfg = w.validate(cx).expect("an untouched ssh row must validate");
+        assert_eq!(cfg.agents[0], ssh_entry);
+    });
+}
+
+/// Same as the `Ssh` case, for `Docker`.
+#[gpui::test]
+fn an_existing_docker_row_round_trips_unchanged_through_save(cx: &mut TestAppContext) {
+    let docker_entry = daruda_config::AgentEntry::custom(daruda_config::AgentDefinition::new(
+        "remote-codex".to_string(),
+        "Remote Codex".to_string(),
+        daruda_config::AgentLaunch::Docker {
+            adapter_command: "npx -y @agentclientprotocol/codex-acp@latest".to_string(),
+            container: "dev-1".to_string(),
+        },
+    ));
+    let config = daruda_config::Config {
+        agents: vec![docker_entry.clone()],
+        ..Default::default()
+    };
+    let (_wh, win) = build_window_with_config(cx, config);
+    win.read_with(cx, |w, cx| {
+        let cfg = w
+            .validate(cx)
+            .expect("an untouched docker row must validate");
+        assert_eq!(cfg.agents[0], docker_entry);
+    });
+}
+
+/// A hand-written fold matrix, an off-list step count and a partial visible
+/// set. Fold and Filter load onto their editors, which can state every value
+/// those keys hold; the off-list step count is the one the tail picker cannot
+/// state, so it alone is offered as its own entry and kept verbatim.
+fn hand_tuned_transcript_config() -> (Vec<String>, Vec<String>, daruda_config::Config) {
+    let fold_mode = vec!["summary".to_string(), "last.thinking=expanded".to_string()];
+    let display_filter = vec!["prose".to_string(), "tool_read".to_string()];
+    let tuned = daruda_config::AgentDefinition {
+        fold_mode: Some(fold_mode.clone()),
+        tail_window: Some(12),
+        display_filter: Some(display_filter.clone()),
+        ..daruda_config::AgentDefinition::new(
+            "hand-tuned-claude".to_string(),
+            "Hand Tuned".to_string(),
+            daruda_config::AgentLaunch::Raw(
+                "npx -y @agentclientprotocol/claude-agent-acp@latest".to_string(),
+            ),
+        )
+    };
+    let config = daruda_config::Config {
+        agents: vec![daruda_config::AgentEntry::custom(tuned)],
+        ..Default::default()
+    };
+    (fold_mode, display_filter, config)
+}
+
+/// The save path rebuilds the whole definition from the row, so a hand-tuned
+/// value has to survive an edit to another field. Fold and Filter survive by
+/// round-tripping through their editor's own value — the tokens are rewritten
+/// in canonical form, which reads back as the same matrix and the same visible
+/// set.
+#[gpui::test]
+fn transcript_defaults_survive_a_catalog_save_that_does_not_edit_them(cx: &mut TestAppContext) {
+    let (fold_mode, display_filter, config) = hand_tuned_transcript_config();
+    let (wh, win) = build_window_with_config(cx, config);
+    // Edit a field the form does own: the save rebuilds the whole definition
+    // from the row, so this is the path that would drop the three keys.
+    let name_input = win.read_with(cx, |w, _| {
+        w.agent_editable_row(0).unwrap().name_input.clone()
+    });
+    wh.update(cx, |_root, window, cx| {
+        name_input.update(cx, |i, cx_state| {
+            i.set_value("Renamed".to_owned(), window, cx_state)
+        });
+    })
+    .unwrap();
+    win.read_with(cx, |w, cx| {
+        let cfg = w.validate(cx).expect("a renamed row must validate");
+        let saved = cfg.agents[0].resolve().expect("a custom entry resolves");
+        assert_eq!(saved.name, "Renamed");
+        assert_eq!(saved.tail_window, Some(12), "kept verbatim, off the list");
+        let saved_fold = saved.fold_mode.expect("the matrix is still written");
+        assert_eq!(
+            FoldMode::from_tokens(saved_fold.iter().map(String::as_str)),
+            FoldMode::from_tokens(fold_mode.iter().map(String::as_str)),
+            "the same matrix, however it is spelled"
+        );
+        let saved_filter = saved
+            .display_filter
+            .expect("the visible set is still written");
+        assert_eq!(
+            DisplayFilter::from_stored(&saved_filter),
+            DisplayFilter::from_stored(&display_filter),
+            "the same visible set, however it is spelled"
+        );
+    });
+}
+
+/// The off-list step count is stated by its own extra entry rather than
+/// silently snapping to a neighbouring choice — the visible half of the
+/// preservation the test above asserts on the save path.
+#[gpui::test]
+fn an_off_list_step_count_gets_its_own_entry(cx: &mut TestAppContext) {
+    let (_fold_mode, _display_filter, config) = hand_tuned_transcript_config();
+    let (wh, win) = build_window_with_config(cx, config);
+    let field = |r: &AgentCatalogRow| r.tail_window_select.clone();
+    let selected = win.read_with(cx, |w, cx| {
+        field(w.agent_editable_row(0).unwrap())
+            .read(cx)
+            .selected_value()
+            .map(|v| v.to_string())
+    });
+    assert_eq!(
+        selected.as_deref(),
+        Some(sections::agent_transcript::CUSTOM),
+        "the stored value must stay selected, not fall back to Default"
+    );
+    assert!(
+        agent_row_select_offers(&wh, &win, cx, 0, field, sections::agent_transcript::CUSTOM),
+        "the entry standing for the stored value has to be in the list"
+    );
+}
+
+#[gpui::test]
+fn range_editor_edits_and_resets_without_losing_the_other_custom_size(cx: &mut TestAppContext) {
+    let (_, _, config) = hand_tuned_transcript_config();
+    let (wh, win) = build_window_with_config(cx, config);
+    let original = win.read_with(cx, |s, cx| {
+        s.agent_editable_row(0).unwrap().range_values(cx)
+    });
+    wh.update(cx, |_, window, cx| {
+        win.update(cx, |s, cx| {
+            s.set_agent_row_range_size(0, RangeLevel::Calls, 3, window, cx)
+        });
+    })
+    .unwrap();
+    win.read_with(cx, |s, cx| {
+        assert_eq!(
+            s.agent_editable_row(0).unwrap().range_values(cx),
+            [original[0], 3]
+        )
+    });
+    wh.update(cx, |_, window, cx| {
+        win.update(cx, |s, cx| s.reset_agent_row_range(0, window, cx));
+    })
+    .unwrap();
+    win.read_with(cx, |s, cx| {
+        let row = s.agent_editable_row(0).unwrap();
+        assert_eq!(row.tail_window(cx), None);
+        assert_eq!(row.tail_window_calls(cx), None);
+    });
+}
+
+/// Fold and Filter need no such entry: their editors state every value those
+/// keys can hold, so a hand-tuned one loads onto the editor itself.
+#[gpui::test]
+fn a_hand_tuned_fold_and_filter_load_onto_their_editors(cx: &mut TestAppContext) {
+    let (fold_mode, display_filter, config) = hand_tuned_transcript_config();
+    let (_wh, win) = build_window_with_config(cx, config);
+    win.read_with(cx, |w, _cx| {
+        let row = w.agent_editable_row(0).unwrap();
+        assert_eq!(
+            row.fold_mode_value(),
+            FoldMode::from_tokens(fold_mode.iter().map(String::as_str))
+        );
+        assert_eq!(
+            row.fold_mode_value().preset(),
+            None,
+            "the fixture is a matrix no preset states"
+        );
+        assert_eq!(
+            row.display_filter_value(),
+            DisplayFilter::from_stored(&display_filter)
+        );
+        assert!(!row.display_filter_value().shows_everything());
+    });
+}
+
+/// Editing an axis is the user replacing the value, so the loaded one stops
+/// being written — on every axis, including the one whose stored value was
+/// off-list.
+#[gpui::test]
+fn editing_a_transcript_axis_replaces_the_loaded_value(cx: &mut TestAppContext) {
+    let (_fold_mode, display_filter, config) = hand_tuned_transcript_config();
+    let loaded = DisplayFilter::from_stored(&display_filter);
+    assert!(
+        !loaded.contains(FilterFacet::Thinking),
+        "the fixture starts with thinking hidden, so the toggle below shows it"
+    );
+    let (wh, win) = build_window_with_config(cx, config);
+    confirm_agent_row_select(&wh, &win, cx, 0, |r| r.tail_window_select.clone(), "3");
+    // Showing thinking leaves the set still narrowed, so the axis keeps
+    // stating a value rather than falling back to the built-in.
+    win.update(cx, |w, cx| {
+        w.select_agent_row_fold_preset(0, Some(FoldPreset::Expanded), cx);
+        w.toggle_agent_row_filter_facet(0, FilterFacet::Thinking, cx);
+    });
+
+    win.read_with(cx, |w, cx| {
+        let cfg = w.validate(cx).expect("the edited row must validate");
+        let saved = cfg.agents[0].resolve().expect("a custom entry resolves");
+        assert_eq!(saved.fold_mode, Some(vec!["expanded".to_string()]));
+        assert_eq!(saved.tail_window, Some(3));
+        let filter =
+            DisplayFilter::from_stored(&saved.display_filter.expect("an edited filter is written"));
+        assert!(
+            filter.contains(FilterFacet::Thinking),
+            "the toggle flipped the loaded value rather than restating it"
+        );
+        assert_ne!(filter, loaded, "and it is no longer what was loaded");
+        assert!(!filter.shows_everything(), "still a narrowed set");
+    });
+}
+
+/// The built-in value writes no key: an absent key and a key stating that value
+/// resolve alike, so the row keeps the file clean rather than restating it. The
+/// editors reach it through their reset footer, which drops the key outright.
+#[gpui::test]
+fn handing_an_axis_back_writes_no_key(cx: &mut TestAppContext) {
+    let (_fold_mode, _display_filter, config) = hand_tuned_transcript_config();
+    let (wh, win) = build_window_with_config(cx, config);
+    confirm_agent_row_select(
+        &wh,
+        &win,
+        cx,
+        0,
+        |r| r.tail_window_select.clone(),
+        &daruda_config::TAIL_WINDOW_DEFAULT.to_string(),
+    );
+    win.update(cx, |w, cx| {
+        w.reset_agent_row_fold_mode(0, cx);
+        w.reset_agent_row_display_filter(0, cx);
+    });
+
+    win.read_with(cx, |w, cx| {
+        let cfg = w.validate(cx).expect("the edited row must validate");
+        let saved = cfg.agents[0].resolve().expect("a custom entry resolves");
+        assert_eq!(saved.fold_mode, None);
+        assert_eq!(saved.tail_window, None);
+        assert_eq!(saved.display_filter, None);
+    });
+}
+
+/// The round trip the rule above depends on: a row that wrote nothing reopens
+/// on the built-in value, not on a blank or a stale selection.
+#[gpui::test]
+fn a_row_that_wrote_no_key_reopens_on_the_built_in_value(cx: &mut TestAppContext) {
+    let config = daruda_config::Config {
+        agents: vec![daruda_config::AgentEntry::custom(
+            daruda_config::AgentDefinition::claude_default(),
+        )],
+        ..daruda_config::Config::default()
+    };
+    let (_wh, win) = build_window_with_config(cx, config);
+    win.read_with(cx, |w, cx| {
+        let row = w.agent_editable_row(0).expect("a custom row");
+        assert_eq!(
+            row.tail_window_select
+                .read(cx)
+                .selected_value()
+                .map(|v| v.to_string()),
+            Some(daruda_config::TAIL_WINDOW_DEFAULT.to_string())
+        );
+        assert_eq!(row.fold_mode_value(), FoldMode::default());
+        assert_eq!(row.display_filter_value(), DisplayFilter::default());
+        // And reading them back writes nothing, so an untouched row cannot
+        // grow three keys just by being rendered.
+        assert_eq!(row.fold_mode(), None);
+        assert_eq!(row.tail_window(cx), None);
+        assert_eq!(row.display_filter(), None);
+    });
+}
+
+/// Once the tail picker replaces a preserved value, the still-open Settings
+/// window has to forget the old configured-elsewhere entry. Otherwise selecting
+/// it again would write back a value that is no longer in the live config.
+#[gpui::test]
+fn replacing_a_custom_step_count_rebases_the_row(cx: &mut TestAppContext) {
+    let (_fold_mode, _display_filter, config) = hand_tuned_transcript_config();
+    let (wh, win) = build_window_with_config(cx, config);
+    assert!(
+        agent_row_select_offers(
+            &wh,
+            &win,
+            cx,
+            0,
+            |r| r.tail_window_select.clone(),
+            sections::agent_transcript::CUSTOM,
+        ),
+        "the fixture starts on a preserved step count"
+    );
+    win.read_with(cx, |w, _cx| {
+        assert_eq!(
+            w.agent_editable_row(0).unwrap().tail_window_loaded,
+            Some(12)
+        );
+    });
+
+    confirm_agent_row_select(&wh, &win, cx, 0, |r| r.tail_window_select.clone(), "3");
+
+    win.read_with(cx, |w, cx| {
+        let row = w.agent_editable_row(0).unwrap();
+        assert_eq!(row.tail_window(cx), Some(3));
+        assert_eq!(
+            row.tail_window_loaded, None,
+            "the old count must not remain hidden behind the picker"
+        );
+    });
+    win.read_with(cx, |_w, cx| {
+        let saved = crate::store::SettingsStore::global(cx).user().agents[0]
+            .resolve()
+            .expect("the row remains runnable");
+        assert_eq!(saved.tail_window, Some(3));
+    });
+    assert!(
+        !agent_row_select_offers(
+            &wh,
+            &win,
+            cx,
+            0,
+            |r| r.tail_window_select.clone(),
+            sections::agent_transcript::CUSTOM,
+        ),
+        "the old configured-elsewhere choice is no longer present"
+    );
+}
+
+/// The drift the shared editor exists to prevent: a rule edit that lands back
+/// on a preset still has to leave the matrix recallable, exactly as the chat
+/// pane's `set_fold_mode` does. Settings reaches this through `on_change`,
+/// which no preset-strip test covers.
+#[gpui::test]
+fn a_rule_edit_back_onto_a_preset_keeps_the_matrix_recallable(cx: &mut TestAppContext) {
+    let (_wh, win) = build_window(cx);
+    let matrix = FoldPreset::Summary.mode().with_rule(
+        TurnPosition::Last,
+        FoldBlock::Diff,
+        BlockRule::Collapsed,
+    );
+    win.update(cx, |w, cx| {
+        w.select_agent_row_fold_preset(0, Some(FoldPreset::Summary), cx);
+        w.set_agent_row_fold_mode(0, Some(matrix), cx);
+        // Straight back to the preset — the matrix is now only reachable
+        // through the `Custom` segment.
+        w.set_agent_row_fold_mode(0, Some(FoldPreset::Summary.mode()), cx);
+        let row = w.agent_editable_row(0).unwrap();
+        assert_eq!(
+            row.fold_editor.custom(),
+            Some(matrix),
+            "the edit must survive landing back on a preset"
+        );
+        assert_eq!(row.fold_mode_value(), FoldPreset::Summary.mode());
+
+        w.select_agent_row_fold_preset(0, None, cx);
+        assert_eq!(
+            w.agent_editable_row(0).unwrap().fold_mode_value(),
+            matrix,
+            "the Custom segment returns to it"
+        );
+    });
+}
+
+/// Editing an axis onto the built-in writes no key: an absent key and a key
+/// stating that value resolve alike. The departure is still recallable.
+#[gpui::test]
+fn editing_onto_the_built_in_drops_the_key(cx: &mut TestAppContext) {
+    let (_wh, win) = build_window(cx);
+    let matrix = FoldPreset::Auto.mode().with_rule(
+        TurnPosition::Past,
+        FoldBlock::Thinking,
+        BlockRule::Collapsed,
+    );
+    win.update(cx, |w, cx| {
+        w.set_agent_row_fold_mode(0, Some(matrix), cx);
+        assert!(w.agent_editable_row(0).unwrap().fold_mode().is_some());
+
+        w.set_agent_row_fold_mode(0, Some(FoldMode::default()), cx);
+        let row = w.agent_editable_row(0).unwrap();
+        assert_eq!(row.fold_mode(), None, "the built-in states nothing");
+        assert_eq!(row.fold_editor.custom(), Some(matrix), "still recallable");
+
+        w.toggle_agent_row_filter_facet(0, FilterFacet::Thinking, cx);
+        assert!(w.agent_editable_row(0).unwrap().display_filter().is_some());
+        w.toggle_agent_row_filter_facet(0, FilterFacet::Thinking, cx);
+        assert_eq!(
+            w.agent_editable_row(0).unwrap().display_filter(),
+            None,
+            "back to the unfiltered set, which is the built-in one"
+        );
+    });
+}
+
+/// The editor's disclosures are view switches, not values: opening them must
+/// not make the row state a key it did not state before.
+#[gpui::test]
+fn opening_fold_editor_disclosures_writes_nothing(cx: &mut TestAppContext) {
+    let (_wh, win) = build_window(cx);
+    win.update(cx, |w, cx| {
+        w.toggle_agent_row_fold_history_rules(0, cx);
+        w.toggle_agent_row_fold_tools(0, TurnPosition::Past, cx);
+        let row = w.agent_editable_row(0).unwrap();
+        assert!(row.fold_editor.history_rules_open());
+        assert!(row.fold_editor.tools_open(TurnPosition::Past));
+        assert_eq!(row.fold_mode(), None, "a view switch is not a value");
+    });
+}
+
+/// An axis nobody edited is written back exactly as it was read, so a save that
+/// edits some other field cannot rewrite it — including a token this build does
+/// not know, which the parsers drop on the way in.
+#[gpui::test]
+fn an_untouched_axis_keeps_tokens_this_build_cannot_state(cx: &mut TestAppContext) {
+    let stored_fold = vec!["summary".to_string(), "last.notebook=collapsed".to_string()];
+    let stored_filter = vec!["prose".to_string(), "brand_new_facet".to_string()];
+    let tuned = daruda_config::AgentDefinition {
+        fold_mode: Some(stored_fold.clone()),
+        display_filter: Some(stored_filter.clone()),
+        ..daruda_config::AgentDefinition::new(
+            "forward".to_string(),
+            "Forward".to_string(),
+            daruda_config::AgentLaunch::Raw("npx -y some-acp".to_string()),
+        )
+    };
+    let config = daruda_config::Config {
+        agents: vec![daruda_config::AgentEntry::custom(tuned)],
+        ..Default::default()
+    };
+    let (_wh, win) = build_window_with_config(cx, config);
+    win.read_with(cx, |w, _cx| {
+        let row = w.agent_editable_row(0).unwrap();
+        assert_eq!(row.fold_mode(), Some(stored_fold.clone()));
+        assert_eq!(row.display_filter(), Some(stored_filter.clone()));
+    });
+
+    // Editing the axis moves the value off what the tokens spell, so from then
+    // on the row states the value and the unknown token is gone by choice.
+    win.update(cx, |w, cx| {
+        w.select_agent_row_fold_preset(0, Some(FoldPreset::Expanded), cx);
+        let written = w.agent_editable_row(0).unwrap().fold_mode();
+        assert_eq!(written, Some(vec!["expanded".to_string()]));
+        assert_eq!(
+            w.agent_editable_row(0).unwrap().display_filter(),
+            Some(stored_filter),
+            "the axis nobody touched is still untouched"
+        );
+    });
+}
+
+/// A row that states nothing writes nothing, so the agent keeps falling
+/// through to the built-in values.
+#[gpui::test]
+fn a_fresh_row_leaves_every_transcript_axis_unset(cx: &mut TestAppContext) {
+    let (_wh, win) = build_window(cx);
+    win.read_with(cx, |w, cx| {
+        let row = w.agent_editable_row(0).unwrap();
+        assert_eq!(row.fold_mode(), None);
+        assert_eq!(row.tail_window(cx), None);
+        assert_eq!(row.display_filter(), None);
+        let cfg = w.validate(cx).expect("the default catalog must validate");
+        let saved = cfg.agents[0].resolve().expect("the default entry resolves");
+        assert_eq!(saved.fold_mode, None);
+        assert_eq!(saved.tail_window, None);
+        assert_eq!(saved.display_filter, None);
+    });
+}
+
+/// A preset states none of the transcript axes, so picking a value on one is
+/// saved as an override of that axis alone.
+#[gpui::test]
+fn a_transcript_pick_on_a_preset_row_is_saved_as_an_override(cx: &mut TestAppContext) {
+    let (wh, win) = build_window(cx);
+    enable_agent_preset(&wh, &win, cx, "gemini");
+    win.update(cx, |w, cx| {
+        w.select_agent_row_fold_preset(1, Some(FoldPreset::Summary), cx)
+    });
+
+    // A preset row carries its overrides through `PresetOverrides`, the one
+    // persistence path a `Custom` row never exercises.
+    win.read_with(cx, |w, cx| {
+        let cfg = w.validate(cx).expect("agent catalog must validate");
+        assert_eq!(
+            cfg.agents[1],
+            daruda_config::AgentEntry::preset_with(
+                "gemini".to_string(),
+                daruda_config::PresetOverrides {
+                    fold_mode: Some(vec!["summary".to_string()]),
+                    ..daruda_config::PresetOverrides::default()
+                }
+            ),
+            "the picked axis is an override; the untouched ones stay unset"
+        );
+    });
+}
+
+/// A hand-written `[agents.env]` loads into the Environment field and comes
+/// back out of it unchanged — a save driven by an unrelated field must not
+/// silently drop it.
+#[gpui::test]
+fn an_agents_environment_survives_a_save_that_never_touched_it(cx: &mut TestAppContext) {
+    let env = vec![(
+        "CODEX_CONFIG".to_string(),
+        r#"{"features":{"multi_agent_v2":true}}"#.to_string(),
+    )];
+    let stated = daruda_config::AgentDefinition {
+        env: Some(env.clone()),
+        ..daruda_config::AgentDefinition::new(
+            "stated".to_string(),
+            "Stated".to_string(),
+            daruda_config::AgentLaunch::Raw("npx -y some-acp".to_string()),
+        )
+    };
+    let config = daruda_config::Config {
+        agents: vec![daruda_config::AgentEntry::custom(stated.clone())],
+        ..Default::default()
+    };
+    let (_wh, win) = build_window_with_config(cx, config);
+    win.read_with(cx, |w, cx| {
+        let cfg = w.validate(cx).expect("agent catalog must validate");
+        assert_eq!(cfg.agents, vec![daruda_config::AgentEntry::custom(stated)]);
+        assert_eq!(cfg.resolved_agents()[0].env, Some(env));
+    });
+}
+
+/// The opt-out the Environment field exists for: a `codex-acp` row inherits
+/// the preset's `CODEX_CONFIG`, and emptying the field has to *clear* it
+/// rather than fall back to following the preset. Asserted on the resolved
+/// definition — what the adapter would actually launch with — not on the row.
+#[gpui::test]
+fn clearing_a_preset_shipping_environment_opts_the_row_out(cx: &mut TestAppContext) {
+    let (wh, win) = build_window(cx);
+    enable_agent_preset(&wh, &win, cx, "codex-acp");
+
+    let preset_env = daruda_config::AgentDefinition::registry_preset("codex-acp")
+        .expect("codex-acp is runnable")
+        .env
+        .expect("the preset ships an environment");
+    assert!(!preset_env.is_empty());
+
+    win.read_with(cx, |w, cx| {
+        let cfg = w.validate(cx).expect("agent catalog must validate");
+        assert_eq!(
+            cfg.agents[1],
+            daruda_config::AgentEntry::preset("codex-acp".to_string()),
+            "the untouched row states nothing of its own"
+        );
+        assert_eq!(cfg.resolved_agents()[1].env.as_ref(), Some(&preset_env));
+        assert!(
+            !w.agent_editable_row(1).unwrap().env_overridden(cx),
+            "showing the preset's own value is not an override"
+        );
+    });
+
+    set_agent_row_input(&wh, &win, cx, 1, |r| r.env_input.clone(), "");
+
+    win.read_with(cx, |w, cx| {
+        let cfg = w.validate(cx).expect("agent catalog must validate");
+        assert_eq!(
+            cfg.agents[1],
+            daruda_config::AgentEntry::preset_with(
+                "codex-acp".to_string(),
+                daruda_config::PresetOverrides {
+                    env: Some(Vec::new()),
+                    ..daruda_config::PresetOverrides::default()
+                }
+            ),
+            "an emptied field is an explicit clear, not a return to the preset"
+        );
+        assert_eq!(
+            cfg.resolved_agents()[1].env,
+            Some(Vec::new()),
+            "the launched environment must be empty, not the preset's"
+        );
+        assert!(
+            w.agent_editable_row(1).unwrap().env_overridden(cx),
+            "clearing the preset's environment is an override"
+        );
+    });
+}
+
+/// The Codex note and its caveat belong to a row that actually launches with
+/// the overlay — not to the default catalog's custom `claude` row. Keyed on
+/// the variable, so the answer tracks the field rather than the preset id:
+/// clearing it drops the note, typing it in earns it.
+#[gpui::test]
+fn only_a_row_launching_the_codex_overlay_carries_its_note(cx: &mut TestAppContext) {
+    let (wh, win) = build_window(cx);
+    let ships = |win: &Entity<SettingsView>, cx: &mut TestAppContext, index: usize| {
+        win.read_with(cx, |w, cx| {
+            w.agent_editable_row(index)
+                .unwrap()
+                .ships_codex_subagent_overlay(cx)
+        })
+    };
+
+    assert!(
+        !ships(&win, cx, 0),
+        "the default claude row ships no overlay"
+    );
+
+    enable_agent_preset(&wh, &win, cx, "codex-acp");
+    assert!(ships(&win, cx, 1), "the codex row inherits the overlay");
+
+    set_agent_row_input(&wh, &win, cx, 1, |r| r.env_input.clone(), "");
+    assert!(
+        !ships(&win, cx, 1),
+        "a row that opted out is not told what the overlay does"
+    );
+
+    set_agent_row_input(
+        &wh,
+        &win,
+        cx,
+        0,
+        |r| r.env_input.clone(),
+        "CODEX_CONFIG={\"features\":{\"multi_agent_v2\":true}}",
+    );
+    assert!(
+        ships(&win, cx, 0),
+        "a hand-built codex row earns the note without naming a preset"
+    );
+}
+
+/// Codex's own injected instruction is "do not spawn sub-agents unless the
+/// user *or applicable AGENTS.md/skill instructions* explicitly ask for it".
+/// A caveat that names only the user reads as plainly wrong to anyone who set
+/// the delegation up in AGENTS.md — the exact reader it is written for.
+#[test]
+fn the_codex_caveat_names_every_way_codex_is_asked_to_delegate() {
+    for locale in ["en", "ko"] {
+        let caveat = rust_i18n::t!("settings.agent_env_codex_caveat", locale = locale);
+        assert!(
+            caveat.contains("AGENTS.md"),
+            "{locale}: the user is not the only thing codex takes a delegation from: {caveat}"
+        );
+    }
+}
+
+/// Typing an environment into a preset row overrides only that field, and a
+/// custom row (nothing to clear) that leaves the field empty writes no key —
+/// the third state, which is what keeps such a row free to pick up a preset
+/// default added later.
+#[gpui::test]
+fn a_typed_environment_overrides_and_an_empty_one_stays_unstated(cx: &mut TestAppContext) {
+    let (wh, win) = build_window(cx);
+    enable_agent_preset(&wh, &win, cx, "gemini");
+
+    // `gemini` ships no environment, so an untouched field states none.
+    win.read_with(cx, |w, cx| {
+        let cfg = w.validate(cx).expect("agent catalog must validate");
+        assert_eq!(cfg.resolved_agents()[1].env, None);
+    });
+
+    set_agent_row_input(
+        &wh,
+        &win,
+        cx,
+        1,
+        |r| r.env_input.clone(),
+        "RUST_LOG=debug\nB=two words",
+    );
+
+    win.read_with(cx, |w, cx| {
+        let cfg = w.validate(cx).expect("agent catalog must validate");
+        assert_eq!(
+            cfg.agents[1],
+            daruda_config::AgentEntry::preset_with(
+                "gemini".to_string(),
+                daruda_config::PresetOverrides {
+                    env: Some(vec![
+                        ("B".to_string(), "two words".to_string()),
+                        ("RUST_LOG".to_string(), "debug".to_string()),
+                    ]),
+                    ..daruda_config::PresetOverrides::default()
+                }
+            )
+        );
+        assert!(
+            w.agent_editable_row(1).unwrap().env_overridden(cx),
+            "a row that states one where the preset states none is an override"
+        );
+    });
+}
+
+/// Emit the event the input widget raises for Enter. `secondary` is the
+/// Cmd/Ctrl+Enter flavour; a multi-line field raises the plain one *after*
+/// inserting the newline (`enter` in the vendored input state).
+fn press_enter(
+    wh: &WindowHandle<daruda_ui::Root>,
+    state: &Entity<InputState>,
+    cx: &mut TestAppContext,
+    secondary: bool,
+) {
+    wh.update(cx, |_root, _window, cx| {
+        state.update(cx, |_, cx_state| {
+            cx_state.emit(InputEvent::PressEnter { secondary })
+        });
+    })
+    .expect("settings window should still be open during the test");
+}
+
+/// Emit the focus-loss the field sees when the user clicks away.
+fn blur(wh: &WindowHandle<daruda_ui::Root>, state: &Entity<InputState>, cx: &mut TestAppContext) {
+    wh.update(cx, |_root, _window, cx| {
+        state.update(cx, |_, cx_state| cx_state.emit(InputEvent::Blur));
+    })
+    .expect("settings window should still be open during the test");
+}
+
+/// The environment of the first editable row, as it stands in the live
+/// settings — the thing a save actually moves.
+fn stored_first_agent_env(
+    win: &Entity<SettingsView>,
+    cx: &mut TestAppContext,
+) -> Option<Vec<(String, String)>> {
+    win.read_with(cx, |_w, cx| {
+        crate::store::SettingsStore::global(cx)
+            .user()
+            .resolved_agents()[0]
+            .env
+            .clone()
+    })
+}
+
+/// A newline in the Environment textarea is not a save. The multi-line widget
+/// inserts the `\n` and *then* emits `PressEnter { secondary: false }`, so a
+/// field wired to the single-line subscription rewrites `config.toml` on every
+/// line break — and pops the inline banner on a line the user has not
+/// finished typing. Only the secondary form commits.
+#[gpui::test]
+fn a_newline_in_the_environment_field_is_not_a_save(cx: &mut TestAppContext) {
+    let (wh, win) = build_window(cx);
+    let env_input = win.read_with(cx, |w, _| {
+        w.agent_editable_row(0).unwrap().env_input.clone()
+    });
+    set_agent_row_input(&wh, &win, cx, 0, |r| r.env_input.clone(), "A=1");
+    assert_eq!(
+        stored_first_agent_env(&win, cx),
+        None,
+        "typing alone must not write"
+    );
+
+    press_enter(&wh, &env_input, cx, false);
+    assert_eq!(
+        stored_first_agent_env(&win, cx),
+        None,
+        "a plain Enter is a newline in a multi-line field, not a save"
+    );
+
+    press_enter(&wh, &env_input, cx, true);
+    assert_eq!(
+        stored_first_agent_env(&win, cx),
+        Some(vec![("A".to_string(), "1".to_string())]),
+        "Cmd/Ctrl+Enter still commits the field"
+    );
+
+    // Clicking away commits too — the same way every other Settings field
+    // behaves, and the only way a user who never presses Enter gets saved.
+    set_agent_row_input(&wh, &win, cx, 0, |r| r.env_input.clone(), "A=1\nB=2");
+    blur(&wh, &env_input, cx);
+    assert_eq!(
+        stored_first_agent_env(&win, cx),
+        Some(vec![
+            ("A".to_string(), "1".to_string()),
+            ("B".to_string(), "2".to_string())
+        ]),
+        "losing focus commits the field"
+    );
+}
+
+/// A line that is not `KEY=value` blocks the save and names itself, the same
+/// way a bad agent id or a missing ssh host does.
+#[gpui::test]
+fn a_malformed_environment_line_blocks_the_save(cx: &mut TestAppContext) {
+    let (wh, win) = build_window(cx);
+    set_agent_row_input(
+        &wh,
+        &win,
+        cx,
+        0,
+        |r| r.env_input.clone(),
+        "RUST_LOG=debug\nCODEX_CONFIG",
+    );
+    win.read_with(cx, |w, cx| {
+        let err = w.validate(cx).unwrap_err();
+        // Pinned whole: `contains("CODEX_CONFIG")` alone would also pass on
+        // the wrong row ordinal, or on a message that named the *well-formed*
+        // line instead.
+        assert_eq!(err, s::settings::err_agent_catalog_env(1, "CODEX_CONFIG"));
+        assert!(!err.contains("RUST_LOG"), "{err}");
+    });
+    // An empty key is the other malformation the field has to catch, and the
+    // line it reports is the whole offending line, not the empty name.
+    set_agent_row_input(&wh, &win, cx, 0, |r| r.env_input.clone(), "=oops");
+    win.read_with(cx, |w, cx| {
+        assert_eq!(
+            w.validate(cx).unwrap_err(),
+            s::settings::err_agent_catalog_env(1, "=oops")
+        );
+    });
+}
+
+/// The injection refused at the Settings entry point: the assembler quotes an
+/// env *value* but emits the *name* bare, so a name carrying `;` would run as
+/// its own command inside the remote `sh -c` script. Driven through the real
+/// save path (`validate` → `collect_agent_catalog`), not the field helper, so
+/// a check that only lived in the helper would not pass this.
+#[gpui::test]
+fn an_environment_name_that_could_break_out_of_the_shell_blocks_the_save(cx: &mut TestAppContext) {
+    let (wh, win) = build_window(cx);
+    set_agent_row_input(
+        &wh,
+        &win,
+        cx,
+        0,
+        |r| r.env_input.clone(),
+        "K; echo PWNED >&2 ; X=1",
+    );
+    win.read_with(cx, |w, cx| {
+        let err = w.validate(cx).unwrap_err();
+        assert!(err.contains("K; echo PWNED >&2 ; X"), "{err}");
+    });
+
+    // A name inside the POSIX charset still saves, and reaches the value.
+    set_agent_row_input(&wh, &win, cx, 0, |r| r.env_input.clone(), "K_OK=1");
+    win.read_with(cx, |w, cx| {
+        let cfg = w.validate(cx).expect("a usable name must validate");
+        assert_eq!(
+            cfg.resolved_agents()[0].env,
+            Some(vec![("K_OK".to_string(), "1".to_string())])
+        );
+    });
+}
+
+/// A step count the picker *can* state loads onto the picker itself, not onto
+/// the configured-elsewhere entry — otherwise every row would read as custom.
+#[gpui::test]
+fn a_transcript_value_the_controls_state_loads_onto_them(cx: &mut TestAppContext) {
+    let stated = daruda_config::AgentDefinition {
+        fold_mode: Some(vec!["summary".to_string()]),
+        tail_window: Some(5),
+        ..daruda_config::AgentDefinition::new(
+            "stated".to_string(),
+            "Stated".to_string(),
+            daruda_config::AgentLaunch::Raw("npx -y some-acp".to_string()),
+        )
+    };
+    let config = daruda_config::Config {
+        agents: vec![daruda_config::AgentEntry::custom(stated)],
+        ..Default::default()
+    };
+    let (wh, win) = build_window_with_config(cx, config);
+    win.read_with(cx, |w, cx| {
+        let row = w.agent_editable_row(0).unwrap();
+        assert_eq!(row.fold_mode(), Some(vec!["summary".to_string()]));
+        assert_eq!(row.tail_window(cx), Some(5));
+        assert_eq!(row.display_filter(), None);
+    });
+    // No stored value needed preserving, so no extra entry was added.
+    assert!(
+        !agent_row_select_offers(
+            &wh,
+            &win,
+            cx,
+            0,
+            |r: &AgentCatalogRow| r.tail_window_select.clone(),
+            sections::agent_transcript::CUSTOM,
+        ),
+        "a row with nothing to preserve must not offer the custom entry"
+    );
+}
+
+/// A freshly added custom row defaults to the `Raw` transport — remote-ness
+/// is the lane's job now, so a brand-new row has no reason to default to
+/// the deprecated agent-side host axis.
+#[gpui::test]
+fn a_new_custom_row_defaults_to_the_raw_transport(cx: &mut TestAppContext) {
+    let (wh, win) = build_window(cx);
+    cx.update_window(wh.into(), |_, window, cx| {
+        win.update(cx, |w, cx| w.add_custom_agent_row_for_test(window, cx));
+    })
+    .unwrap();
+    win.read_with(cx, |w, cx| {
+        let selected = w
+            .agent_editable_row(1)
+            .unwrap()
+            .transport_select
+            .read(cx)
+            .selected_value()
+            .map(|v| v.to_string());
+        assert_eq!(selected.as_deref(), Some("raw"));
+    });
+}
+
+/// The built-in default row's command is `npx`-prefixed, so it never gets a
+/// local-PATH warning — daruda provisions Node.js itself for these.
+#[gpui::test]
+fn the_default_npx_row_has_no_path_warning(cx: &mut TestAppContext) {
+    let (_wh, win) = build_window(cx);
+    win.read_with(cx, |w, _cx| {
+        assert_eq!(w.agent_editable_row(0).unwrap().path_warning, None);
+    });
+}
+
+/// A custom row whose command names a binary that is not on `PATH` shows a
+/// warning, but Save still succeeds — registering an agent before installing
+/// its CLI (or adding it to PATH) is a legitimate flow, so the check must
+/// only warn, never block.
+#[gpui::test]
+fn a_custom_row_with_a_missing_command_warns_but_still_saves(cx: &mut TestAppContext) {
+    let (wh, win) = build_window(cx);
+    cx.update_window(wh.into(), |_, window, cx| {
+        win.update(cx, |w, cx| {
+            w.add_agent_row(
+                daruda_config::AgentDefinition::new(
+                    "local-cli".to_string(),
+                    "Local CLI".to_string(),
+                    daruda_config::AgentLaunch::Raw(
+                        "daruda-settings-path-warning-test-missing-binary acp".to_string(),
+                    ),
+                ),
+                None,
+                window,
+                cx,
+            );
+        });
+    })
+    .unwrap();
+
+    win.read_with(cx, |w, cx| {
+        assert_eq!(
+            w.agent_editable_row(1).unwrap().path_warning.as_deref(),
+            Some("daruda-settings-path-warning-test-missing-binary")
+        );
+        assert!(
+            w.validate(cx).is_ok(),
+            "a missing local command must not block Save"
+        );
+    });
+}
+
+/// Editing a row's command recomputes the warning live — typing a missing
+/// binary shows it, and correcting the command to a real one clears it.
+#[gpui::test]
+fn editing_the_command_field_recomputes_the_path_warning(cx: &mut TestAppContext) {
+    let (wh, win) = build_window(cx);
+    set_agent_row_input(
+        &wh,
+        &win,
+        cx,
+        0,
+        |r| r.command_input.clone(),
+        "daruda-settings-path-warning-test-missing-binary",
+    );
+    win.read_with(cx, |w, _cx| {
+        assert_eq!(
+            w.agent_editable_row(0).unwrap().path_warning.as_deref(),
+            Some("daruda-settings-path-warning-test-missing-binary")
+        );
+    });
+
+    set_agent_row_input(&wh, &win, cx, 0, |r| r.command_input.clone(), "sh -c true");
+    win.read_with(cx, |w, _cx| {
+        assert_eq!(w.agent_editable_row(0).unwrap().path_warning, None);
+    });
+}
+
+/// The cached PATH warning is transport-independent by design — switching a
+/// row to ssh does not clear it. The ssh/docker exemption is applied at
+/// render time instead (`sections::agent_catalog::render_agent_catalog_row`, unit-
+/// tested by `transport_needs_local_path_check`), since that needs no fresh
+/// `which` call. Save must still succeed: an ssh row's command runs on the
+/// remote host, so this machine's PATH is irrelevant to it.
+#[gpui::test]
+fn switching_transport_does_not_clear_the_cached_path_warning(cx: &mut TestAppContext) {
+    let (wh, win) = build_window(cx);
+    set_agent_row_input(
+        &wh,
+        &win,
+        cx,
+        0,
+        |r| r.command_input.clone(),
+        "daruda-settings-path-warning-test-missing-binary",
+    );
+    win.read_with(cx, |w, _cx| {
+        assert!(w.agent_editable_row(0).unwrap().path_warning.is_some());
+    });
+
+    select_agent_transport(&wh, &win, cx, 0, "ssh");
+    set_agent_row_input(&wh, &win, cx, 0, |r| r.host_input.clone(), "vm-work");
+    win.read_with(cx, |w, cx| {
+        assert!(w.agent_editable_row(0).unwrap().path_warning.is_some());
+        assert!(
+            w.validate(cx).is_ok(),
+            "an ssh row's command runs remotely, so Save must succeed regardless"
+        );
+    });
+}
+
+/// A catalog entry the editor cannot render a row for (a preset id daruda no
+/// longer knows) must survive a Save — the alternative is silently deleting
+/// part of the user's config on an unrelated settings change.
+#[gpui::test]
+fn validate_preserves_unresolved_agent_catalog_entries(cx: &mut TestAppContext) {
+    let unresolved = daruda_config::AgentEntry::preset("retired-agent".to_string());
+    let claude = daruda_config::AgentEntry::for_definition(
+        daruda_config::AgentDefinition::claude_default(),
+        None,
+    );
+    let config = daruda_config::Config {
+        // Unresolved first, editable second.
+        agents: vec![unresolved.clone(), claude.clone()],
+        ..daruda_config::Config::default()
+    };
+    let (_wh, win) = build_window_with_config(cx, config);
+    win.read_with(cx, |w, cx| {
+        // Only the resolvable entry got an editable row…
+        assert_eq!(w.agent_editable_rows().count(), 1);
+        // …the other is held for the section's "not available" warning, which is
+        // the only place the user can find out why that agent never shows up…
+        assert_eq!(
+            w.agent_unresolved_entries()
+                .map(|(_, e)| e.clone())
+                .collect::<Vec<_>>(),
+            vec![unresolved.clone()]
+        );
+        let cfg = w.validate(cx).expect("agent catalog must validate");
+        // …and it is still there after a save, in its original position.
+        assert_eq!(cfg.agents, vec![unresolved, claude], "order preserved");
+    });
+
+    // A catalog whose every entry is unresolvable still has entries, so a Save
+    // of any unrelated setting must go through. `preset = "cursor"` reaches
+    // this with a preset daruda ships today — the manual-install ones resolve
+    // to nothing.
+    let needs_install = daruda_config::AgentEntry::preset("cursor".to_string());
+    let config = daruda_config::Config {
+        agents: vec![needs_install.clone()],
+        ..daruda_config::Config::default()
+    };
+    let (_wh, win) = build_window_with_config(cx, config);
+    win.read_with(cx, |w, cx| {
+        assert!(w.agent_editable_rows().next().is_none());
+        assert_eq!(
+            w.agent_unresolved_entries()
+                .map(|(_, e)| e.clone())
+                .collect::<Vec<_>>(),
+            vec![needs_install.clone()]
+        );
+        let cfg = w
+            .validate(cx)
+            .expect("an unresolved-only catalog is not an empty catalog");
+        assert_eq!(cfg.agents, vec![needs_install]);
+        // The runtime still has an agent to launch: the fallback in
+        // `resolved_agents` covers what the persisted catalog cannot.
+        assert!(!cfg.resolved_agents().is_empty());
+        // The one predicate the section's placeholder reads too, so it cannot
+        // call this catalog empty while the Save above succeeds.
+        assert!(!w.agent_catalog_is_empty());
+    });
+}
+
+/// Removal addresses the catalog, not the editable subset: dropping the row
+/// that sits *after* a non-editable entry must not drop the wrong entry.
+#[gpui::test]
+fn removing_a_row_after_an_unresolved_entry_drops_the_right_one(cx: &mut TestAppContext) {
+    let unresolved = daruda_config::AgentEntry::preset("retired-agent".to_string());
+    let config = daruda_config::Config {
+        agents: vec![
+            unresolved.clone(),
+            daruda_config::AgentEntry::custom(daruda_config::AgentDefinition::claude_default()),
+        ],
+        ..daruda_config::Config::default()
+    };
+    let (_wh, win) = build_window_with_config(cx, config);
+    // The sole editable row is at catalog index 1, not 0.
+    let catalog_index = win.read_with(cx, |w, _| {
+        w.agent_editable_rows().next().expect("one editable row").0
+    });
+    assert_eq!(catalog_index, 1);
+    win.update(cx, |w, cx| w.remove_agent_catalog_item(catalog_index, cx));
+    win.read_with(cx, |w, cx| {
+        let cfg = w.validate(cx).expect("the unresolved entry still counts");
+        assert_eq!(cfg.agents, vec![unresolved], "only the row went away");
+    });
+}
+
+#[gpui::test]
+fn validate_rejects_agent_catalog_errors(cx: &mut TestAppContext) {
+    let (_wh, win) = build_window(cx);
+    win.update(cx, |w, cx| w.remove_agent_catalog_item(0, cx));
+    win.read_with(cx, |w, cx| {
+        assert_eq!(w.agent_editable_rows().count(), 1);
+        assert!(w.validate(cx).is_ok(), "the last valid agent is restored");
+        assert!(w.error.is_some(), "the rejected removal is explained");
+    });
+
+    let config = daruda_config::Config {
+        agents: vec![
+            daruda_config::AgentEntry::custom(daruda_config::AgentDefinition::codex_default()),
+            daruda_config::AgentEntry::custom(daruda_config::AgentDefinition::codex_default()),
+        ],
+        ..daruda_config::Config::default()
+    };
+    let (_wh, win) = build_window_with_config(cx, config);
+    win.read_with(cx, |w, cx| {
+        let err = w.validate(cx).unwrap_err();
+        assert!(err.contains("codex"));
+    });
+
+    let (wh, win) = build_window(cx);
+    let id_input = win.read_with(cx, |w, _| w.agent_editable_row(0).unwrap().id_input.clone());
+    wh.update(cx, |_root, window, cx| {
+        id_input.update(cx, |i, cx_state| {
+            i.set_value("bad id".to_owned(), window, cx_state)
+        });
+    })
+    .unwrap();
+    win.read_with(cx, |w, cx| {
+        let err = w.validate(cx).unwrap_err();
+        assert!(err.contains("bad id"));
+    });
+}
+
+/// Regression: constructor-seeded agent rows (loaded from config, unlike
+/// rows added at runtime via `add_agent_row`) must wire up every field's
+/// subscription through `subscribe_agent_row`, including the mode and model
+/// pickers — a hand-copied duplicate of that wiring in the constructor once
+/// dropped the mode field's silently.
+#[gpui::test]
+fn a_mode_or_model_pick_persists_for_a_constructor_seeded_row(cx: &mut TestAppContext) {
+    for (field, expected) in [
+        (
+            (|r: &AgentCatalogRow| r.default_mode_select.clone()) as fn(&AgentCatalogRow) -> _,
+            ("plan", None),
+        ),
+        (
+            (|r: &AgentCatalogRow| r.default_model_select.clone()) as fn(&AgentCatalogRow) -> _,
+            ("opus", Some("opus")),
+        ),
+    ] {
+        let (wh, win) = build_window(cx);
+        set_agent_vocabulary(
+            &wh,
+            &win,
+            cx,
+            daruda_store::agent_vocabulary::AgentVocabularyCache::default(),
+        );
+        win.update(cx, |w, cx| {
+            w.error = Some("boom".into());
+            cx.notify();
+        });
+        confirm_agent_row_select(&wh, &win, cx, 0, field, expected.0);
+        win.read_with(cx, |w, cx| {
+            assert!(w.error.is_none(), "a successful persist clears the error");
+            let agents = &crate::store::SettingsStore::global(cx).user().agents;
+            let definition = agents[0].resolve().expect("the built-in default resolves");
+            let (mode, model) = match expected.1 {
+                Some(model) => (None, Some(model.to_string())),
+                None => (Some(expected.0.to_string()), None),
+            };
+            assert_eq!(definition.default_mode, mode);
+            assert_eq!(definition.default_model, model);
+        });
+    }
+}
+
+/// The cached vocabulary is keyed on the row's **id**, which stays editable
+/// after the row was built — retyping it has to re-source both pickers. The
+/// two axes are sourced independently: a cache that only knows this agent's
+/// modes must not erase the models the adapter seed supplies.
+#[gpui::test]
+fn retyping_a_row_id_switches_the_pickers_to_that_agents_vocabulary(cx: &mut TestAppContext) {
+    let (wh, win) = build_window(cx);
+    let mut vocabulary = daruda_store::agent_vocabulary::AgentVocabularyCache::default();
+    vocabulary.record_modes(
+        "beta",
+        "npx -y @agentclientprotocol/claude-agent-acp@latest",
+        vec![daruda_store::agent_vocabulary::VocabEntry::new(
+            "beta-mode",
+            "Beta Mode",
+        )],
+    );
+    set_agent_vocabulary(&wh, &win, cx, vocabulary);
+
+    let mode = |r: &AgentCatalogRow| r.default_mode_select.clone();
+    let model = |r: &AgentCatalogRow| r.default_model_select.clone();
+    // The built-in row's id is "claude", which the cache knows nothing about,
+    // so both axes come from the Claude adapter seed its command names.
+    assert!(agent_row_select_offers(&wh, &win, cx, 0, mode, "plan"));
+    assert!(!agent_row_select_offers(
+        &wh,
+        &win,
+        cx,
+        0,
+        mode,
+        "beta-mode"
+    ));
+    assert!(agent_row_select_offers(&wh, &win, cx, 0, model, "opus"));
+
+    set_agent_row_input(&wh, &win, cx, 0, |r| r.id_input.clone(), "beta");
+    assert!(agent_row_select_offers(&wh, &win, cx, 0, mode, "beta-mode"));
+    assert!(
+        !agent_row_select_offers(&wh, &win, cx, 0, mode, "plan"),
+        "a live mode list replaces the seed rather than joining it"
+    );
+    assert!(
+        agent_row_select_offers(&wh, &win, cx, 0, model, "opus"),
+        "the cache knows no models for this agent, so the seed still fills that axis"
+    );
+}
+
+/// An id is stable across edits, but its command is not. Vocabulary learned
+/// from the old adapter must not follow the row after that command changes.
+#[gpui::test]
+fn changing_a_rows_command_invalidates_cached_vocabulary_from_the_old_adapter(
+    cx: &mut TestAppContext,
+) {
+    const CLAUDE: &str = "npx -y @agentclientprotocol/claude-agent-acp@latest";
+    const CODEX: &str = "npx -y @agentclientprotocol/codex-acp@latest";
+
+    let (wh, win) = build_window(cx);
+    let mut vocabulary = daruda_store::agent_vocabulary::AgentVocabularyCache::default();
+    vocabulary.record_modes(
+        "claude",
+        CLAUDE,
+        vec![daruda_store::agent_vocabulary::VocabEntry::new(
+            "claude-live-only",
+            "Claude Live Only",
+        )],
+    );
+    set_agent_vocabulary(&wh, &win, cx, vocabulary);
+
+    let mode = |row: &AgentCatalogRow| row.default_mode_select.clone();
+    set_agent_row_input(&wh, &win, cx, 0, |row| row.command_input.clone(), CODEX);
+    assert!(
+        !agent_row_select_offers(&wh, &win, cx, 0, mode, "claude-live-only"),
+        "the previous adapter's live vocabulary is suppressed"
+    );
+    assert!(
+        agent_row_select_offers(&wh, &win, cx, 0, mode, "agent"),
+        "until Codex connects, its own seed supplies the replacement vocabulary"
+    );
+}
+
+/// A mode pinned before the agent was ever connected — and for an adapter
+/// daruda has no seed for — must survive as a selectable entry, or opening
+/// Settings would silently drop it on the next save.
+#[gpui::test]
+fn a_saved_value_the_vocabulary_does_not_list_is_kept(cx: &mut TestAppContext) {
+    let entry = daruda_config::AgentEntry::custom(daruda_config::AgentDefinition {
+        default_mode: Some("legacy-mode".to_string()),
+        default_model: Some("legacy-model".to_string()),
+        ..daruda_config::AgentDefinition::new(
+            // No preset runs this command: `AgentEntry::for_definition` promotes
+            // one that does, which would make this a Preset entry.
+            "hand-written".to_string(),
+            "Hand Written".to_string(),
+            daruda_config::AgentLaunch::Raw("hand-written-agent --acp".to_string()),
+        )
+    });
+    let config = daruda_config::Config {
+        agents: vec![entry.clone()],
+        ..Default::default()
+    };
+    let (wh, win) = build_window_with_config(cx, config.clone());
+    set_agent_vocabulary(
+        &wh,
+        &win,
+        cx,
+        daruda_store::agent_vocabulary::AgentVocabularyCache::default(),
+    );
+    win.read_with(cx, |w, cx| {
+        let row = w.agent_editable_row(0).unwrap();
+        assert_eq!(row.default_mode(cx).as_deref(), Some("legacy-mode"));
+        assert_eq!(row.default_model(cx).as_deref(), Some("legacy-model"));
+        assert_eq!(w.validate(cx).expect("must validate").agents, config.agents);
+    });
+}
+
+#[gpui::test]
+fn basic_toggles_and_section_focus(cx: &mut TestAppContext) {
+    let (wh, win) = build_window(cx);
+    win.read_with(cx, |w, _| {
+        assert_eq!(w.active_section(), BuiltinSection::General);
+    });
+
+    let (initial_blur, initial_close) =
+        win.read_with(cx, |w, _| (w.window_blur, w.close_pane_on_exit));
+    win.update(cx, |w, cx| {
+        w.window_blur = !w.window_blur;
+        w.close_pane_on_exit = !w.close_pane_on_exit;
+        cx.notify();
+    });
+    win.read_with(cx, |w, cx| {
+        let cfg = w.validate(cx).expect("toggled settings must validate");
+        assert_eq!(cfg.window.blur, !initial_blur);
+        assert_eq!(cfg.shell.close_pane_on_exit, !initial_close);
+    });
+
+    let win_clone = win.clone();
+    cx.update_window(wh.into(), |_, window, cx| {
+        win_clone.update(cx, |w, cx| {
+            w.focus_section(BuiltinSection::Font, window, cx);
+        });
+    })
+    .unwrap();
+    win.read_with(cx, |w, _| {
+        assert_eq!(w.active_section(), BuiltinSection::Font);
+    });
+
+    let settings_for_root = std::cell::RefCell::new(None);
+    let _wh = cx.add_window(|window, cx| {
+        let settings =
+            cx.new(|cx| new_test_view(BuiltinSection::Keymap, FakeServices::default(), window, cx));
+        *settings_for_root.borrow_mut() = Some(settings.clone());
+        daruda_ui::Root::new(settings, window, cx)
+    });
+    let win = settings_for_root.borrow().clone().unwrap();
+    win.read_with(cx, |w, _| {
+        assert_eq!(w.active_section(), BuiltinSection::Keymap);
+    });
+}
+
+/// Regression: `validate()` must never let clicking Save revert a
+/// Telegram pairing that completed asynchronously (the bridge's poll
+/// loop, via `InboundAction::Paired`) while the Settings window was
+/// still open. `base_config` is a snapshot taken at window-open time,
+/// so the fix re-reads `authorized_chat_id` live from `SettingsStore`
+/// instead of trusting that stale snapshot.
+#[gpui::test]
+fn validate_does_not_revert_background_pairing(cx: &mut TestAppContext) {
+    let (_wh, win) = build_window(cx);
+
+    // Simulate the poll loop's `InboundAction::Paired` persist step —
+    // it mutates `SettingsStore`'s live config directly, bypassing this
+    // window entirely, exactly as `telegram::global::dispatch_action`
+    // does. Uses `set_user_for_testing` (in-memory only), NOT the real
+    // `patch_user` — `patch_user` calls `daruda_config::patch_config_file`,
+    // which writes to the actual `config_path()` on disk regardless of
+    // test context (there is no test-mode redirect), so calling it here
+    // would silently overwrite the developer's real `~/Library/Application
+    // Support/daruda/config.toml` on every test run. This bug shipped and
+    // was caught by a live user report of a repeatedly-clobbered config file.
+    cx.update(|cx| {
+        use gpui::BorrowAppContext as _;
+        cx.update_global::<crate::store::SettingsStore, _>(|store, _| {
+            let mut cfg = (*store.user_arc()).clone();
+            cfg.telegram.authorized_chat_id = Some(42);
+            store.set_user_for_testing(cfg);
+        });
+    });
+
+    win.read_with(cx, |w, cx| {
+        let cfg = w
+            .validate(cx)
+            .expect("defaults plus a live pairing must still validate");
+        assert_eq!(
+            cfg.telegram.authorized_chat_id,
+            Some(42),
+            "Save must not revert a pairing that completed while Settings was open"
+        );
+    });
+}
+
+#[gpui::test]
+fn telegram_enabled_toggle_round_trips_through_validate(cx: &mut TestAppContext) {
+    let (_wh, win) = build_window(cx);
+    win.read_with(cx, |w, cx| {
+        assert!(!w.validate(cx).unwrap().telegram.enabled);
+    });
+
+    win.update(cx, |w, cx| {
+        w.telegram_enabled = true;
+        cx.notify();
+    });
+
+    win.read_with(cx, |w, cx| {
+        assert!(w.validate(cx).unwrap().telegram.enabled);
+    });
+}
+
+#[gpui::test]
+async fn the_orchestrator_pickers_follow_a_change_made_while_settings_is_open(
+    cx: &mut TestAppContext,
+) {
+    let (wh, win) = build_window(cx);
+    let account = daruda_store::accounts::ManagedAccount {
+        id: daruda_store::accounts::AccountId::new(),
+        recipe: daruda_store::accounts::AccountRecipeId::Claude,
+        email: Some("someone@example.com".to_string()),
+        organization: None,
+        config_dir: std::path::PathBuf::from("/tmp/daruda-test-account"),
+        created_at: 0,
+        last_authenticated_at: 0,
+    };
+    let account_value: SharedString = account.id.0.to_string().into();
+
+    let can_pick = |value: &SharedString,
+                    select: fn(&SettingsView) -> &Entity<SelectState>,
+                    cx: &mut TestAppContext|
+     -> bool {
+        let value = value.clone();
+        cx.update_window(wh.into(), |_, window, cx| {
+            let entity = select(win.read(cx)).clone();
+            entity.update(cx, |s, cx| {
+                s.set_selected_value(&value, window, cx);
+                s.selected_value().is_some()
+            })
+        })
+        .expect("window is live")
+    };
+
+    assert!(
+        !can_pick(&account_value, |w| &w.orchestrator_account_select, cx),
+        "not offered before the account exists"
+    );
+
+    let mut state = daruda_store::accounts::AccountsState::default();
+    state.accounts.push(account.clone());
+    cx.update_window(wh.into(), |_, window, cx| {
+        win.update(cx, |w, cx| w.set_accounts(state, false, window, cx));
+    })
+    .expect("window is live");
+    cx.run_until_parked();
+    assert!(
+        can_pick(&account_value, |w| &w.orchestrator_account_select, cx),
+        "a signed-in account has to be selectable without reopening Settings"
+    );
+
+    let added: SharedString = "codex-acp".into();
+    assert!(!can_pick(&added, |w| &w.orchestrator_agent_select, cx));
+    let with_codex = daruda_config::Config {
+        agents: vec![daruda_config::AgentEntry::preset_with(
+            "codex-acp".to_string(),
+            Default::default(),
+        )],
+        ..daruda_config::Config::default()
+    };
+    cx.update(|cx| {
+        cx.update_global::<crate::store::SettingsStore, _>(|store, _| {
+            store.set_user_for_testing(with_codex.clone());
+        });
+    });
+    cx.update_window(wh.into(), |_, window, cx| {
+        win.update(cx, |w, cx| {
+            w.load_settings_patch(
+                &daruda_config::SettingsPatch::AgentCatalog(with_codex.agents.clone()),
+                &with_codex,
+                window,
+                cx,
+            );
+        });
+    })
+    .expect("window is live");
+    assert!(
+        can_pick(&added, |w| &w.orchestrator_agent_select, cx),
+        "an added agent has to become selectable"
+    );
+}
+
+#[gpui::test]
+async fn copy_botfather_commands_writes_the_registration_block(cx: &mut TestAppContext) {
+    let (_wh, win) = build_window(cx);
+
+    cx.update(|cx| {
+        win.update(cx, |w, cx| w.copy_botfather_commands_for_test(cx));
+    });
+
+    let text = cx
+        .read_from_clipboard()
+        .expect("clipboard populated")
+        .text()
+        .expect("clipboard item is text");
+    // That the block names every command is
+    // `control::spec::tests::the_botfather_registration_lists_every_command_name`'s
+    // invariant. This test owns the copy itself — asserted exactly, so a
+    // truncated or doubled paste fails rather than passing a shape check.
+    assert_eq!(text, s::control::botfather_commands());
+    for line in text.lines() {
+        assert!(line.contains(" - "), "not a BotFather row: {line}");
+    }
+    win.read_with(cx, |w, _cx| assert!(w.telegram_botfather_copied()));
+}
+
+#[gpui::test]
+async fn copy_telegram_pair_command_writes_clipboard_and_reverts_label(cx: &mut TestAppContext) {
+    let (_wh, win) = build_window(cx);
+
+    // Write something else first so we can verify the copy overwrites it.
+    cx.update(|cx| {
+        cx.write_to_clipboard(gpui::ClipboardItem::new_string("sentinel".to_string()));
+    });
+
+    cx.update(|cx| {
+        win.update(cx, |w, cx| {
+            w.copy_telegram_pair_command_for_test("AB12CD", cx)
+        });
+    });
+
+    let actual = cx.read_from_clipboard().expect("clipboard populated");
+    let text = actual.text().expect("clipboard item is text");
+    assert_eq!(text, "/pair AB12CD");
+
+    win.read_with(cx, |w, _cx| {
+        assert!(
+            w.telegram_pair_command_copied(),
+            "Copied confirmation should be active"
+        );
+    });
+
+    // Past the 1 s revert window — virtual clock so the test is
+    // deterministic.
+    cx.executor()
+        .advance_clock(std::time::Duration::from_millis(1500));
+    cx.run_until_parked();
+
+    win.read_with(cx, |w, _cx| {
+        assert!(
+            !w.telegram_pair_command_copied(),
+            "Copied label should have reverted to Copy"
+        );
+    });
+}
+
+// ---- Session Hosts section ----
+
+/// Test-only — click "Add Host".
+fn add_session_host(
+    wh: &WindowHandle<daruda_ui::Root>,
+    win: &Entity<SettingsView>,
+    cx: &mut TestAppContext,
+) {
+    let win = win.clone();
+    wh.update(cx, |_root, window, cx| {
+        win.update(cx, |w, cx| w.add_session_host_row(window, cx));
+    })
+    .expect("settings window should still be open during the test");
+}
+
+/// Test-only — pick `kind` in one session-host row's kind dropdown.
+fn select_session_host_kind(
+    wh: &WindowHandle<daruda_ui::Root>,
+    win: &Entity<SettingsView>,
+    cx: &mut TestAppContext,
+    index: usize,
+    kind: &str,
+) {
+    let state = win.read_with(cx, |w, _| {
+        w.session_host_row(index).unwrap().kind_select.clone()
+    });
+    let value = SharedString::from(kind.to_owned());
+    wh.update(cx, |_root, window, cx| {
+        state.update(cx, |s, cx| s.set_selected_value(&value, window, cx));
+    })
+    .expect("settings window should still be open during the test");
+}
+
+/// Test-only — write `value` into one session-host row's input.
+fn set_session_host_row_input(
+    wh: &WindowHandle<daruda_ui::Root>,
+    win: &Entity<SettingsView>,
+    cx: &mut TestAppContext,
+    index: usize,
+    field: fn(&SessionHostRow) -> Entity<InputState>,
+    value: &str,
+) {
+    let state = win.read_with(cx, |w, _| field(w.session_host_row(index).unwrap()));
+    wh.update(cx, |_root, window, cx| {
+        state.update(cx, |i, cx_state| {
+            i.set_value(value.to_owned(), window, cx_state)
+        });
+    })
+    .expect("settings window should still be open during the test");
+}
+
+#[gpui::test]
+fn validate_session_host_catalog_cases(cx: &mut TestAppContext) {
+    let (_wh, win) = build_window(cx);
+    win.read_with(cx, |w, cx| {
+        let cfg = w.validate(cx).expect("an empty registry is a valid state");
+        assert!(cfg.session_hosts.is_empty());
+    });
+
+    let (wh, win) = build_window(cx);
+    add_session_host(&wh, &win, cx);
+    set_session_host_row_input(&wh, &win, cx, 0, |r| r.label_input.clone(), "Build box");
+    set_session_host_row_input(&wh, &win, cx, 0, |r| r.target_input.clone(), "vm-work");
+    win.read_with(cx, |w, cx| {
+        let cfg = w.validate(cx).expect("a filled-in ssh row must validate");
+        assert_eq!(cfg.session_hosts.len(), 1);
+        assert_eq!(cfg.session_hosts[0].label, "Build box");
+        assert_eq!(
+            cfg.session_hosts[0].kind,
+            daruda_config::SessionHostKind::Ssh {
+                target: "vm-work".to_string()
+            }
+        );
+    });
+
+    let (wh, win) = build_window(cx);
+    add_session_host(&wh, &win, cx);
+    select_session_host_kind(&wh, &win, cx, 0, "docker");
+    set_session_host_row_input(&wh, &win, cx, 0, |r| r.label_input.clone(), "Dev container");
+    set_session_host_row_input(&wh, &win, cx, 0, |r| r.container_input.clone(), "dev-1");
+    win.read_with(cx, |w, cx| {
+        let cfg = w
+            .validate(cx)
+            .expect("a filled-in docker row must validate");
+        assert_eq!(cfg.session_hosts.len(), 1);
+        assert_eq!(
+            cfg.session_hosts[0].kind,
+            daruda_config::SessionHostKind::Docker {
+                container: "dev-1".to_string()
+            }
+        );
+    });
+
+    let (wh, win) = build_window(cx);
+    add_session_host(&wh, &win, cx);
+    set_session_host_row_input(&wh, &win, cx, 0, |r| r.target_input.clone(), "vm-work");
+    win.read_with(cx, |w, cx| {
+        let err = w.validate(cx).unwrap_err();
+        assert!(err.contains('1'));
+    });
+
+    let (wh, win) = build_window(cx);
+    add_session_host(&wh, &win, cx);
+    set_session_host_row_input(&wh, &win, cx, 0, |r| r.label_input.clone(), "Build Box");
+    set_session_host_row_input(&wh, &win, cx, 0, |r| r.target_input.clone(), "vm-work");
+    add_session_host(&wh, &win, cx);
+    set_session_host_row_input(&wh, &win, cx, 1, |r| r.label_input.clone(), "  build box  ");
+    set_session_host_row_input(&wh, &win, cx, 1, |r| r.target_input.clone(), "vm-other");
+    win.read_with(cx, |w, cx| {
+        let err = w.validate(cx).unwrap_err();
+        assert!(err.contains("build box") || err.contains("Build Box"));
+    });
+
+    // `target`/`container` are validated through the exact same
+    // `lane::session_host::checked_bare_word` `SessionHostModal` uses.
+    let (wh, win) = build_window(cx);
+    add_session_host(&wh, &win, cx);
+    set_session_host_row_input(&wh, &win, cx, 0, |r| r.label_input.clone(), "Box");
+    set_session_host_row_input(
+        &wh,
+        &win,
+        cx,
+        0,
+        |r| r.target_input.clone(),
+        "box; rm -rf /",
+    );
+    win.read_with(cx, |w, cx| {
+        assert!(w.validate(cx).is_err());
+    });
+
+    let (wh, win) = build_window(cx);
+    add_session_host(&wh, &win, cx);
+    set_session_host_row_input(&wh, &win, cx, 0, |r| r.label_input.clone(), "Box");
+    win.read_with(cx, |w, cx| {
+        assert!(w.validate(cx).is_err());
+    });
+}
+
+/// Deleting a row that was loaded from config and saving must record a
+/// tombstone for it.
+#[gpui::test]
+fn deleting_a_loaded_row_and_saving_records_a_tombstone(cx: &mut TestAppContext) {
+    let id = daruda_store::project::SessionHostId::new();
+    let config = daruda_config::Config {
+        session_hosts: vec![daruda_config::SessionHostEntry {
+            id,
+            label: "Build box".to_string(),
+            kind: daruda_config::SessionHostKind::Ssh {
+                target: "vm-work".to_string(),
+            },
+        }],
+        ..daruda_config::Config::default()
+    };
+    let (_wh, win) = build_window_with_config(cx, config);
+    win.update(cx, |w, cx| w.remove_session_host_row(0, cx));
+    win.read_with(cx, |w, cx| {
+        let cfg = w
+            .validate(cx)
+            .expect("removing the only row is a valid save");
+        assert!(cfg.session_hosts.is_empty());
+        assert_eq!(cfg.session_host_tombstones.len(), 1);
+        assert_eq!(cfg.session_host_tombstones[0].old_id, id);
+        assert_eq!(cfg.session_host_tombstones[0].value, "vm-work");
+        assert_eq!(cfg.session_host_tombstones[0].redirected_to, None);
+    });
+}
+
+/// Re-adding a host with the same `(kind, value)` as a just-deleted one sets
+/// `redirected_to` on the most recent matching tombstone, so a lane still
+/// referencing the deleted id resolves through the redirect chain.
+#[gpui::test]
+fn readding_the_same_target_redirects_the_deleted_tombstone(cx: &mut TestAppContext) {
+    let old_id = daruda_store::project::SessionHostId::new();
+    let config = daruda_config::Config {
+        session_hosts: vec![daruda_config::SessionHostEntry {
+            id: old_id,
+            label: "Build box".to_string(),
+            kind: daruda_config::SessionHostKind::Ssh {
+                target: "vm-work".to_string(),
+            },
+        }],
+        ..daruda_config::Config::default()
+    };
+    let (wh, win) = build_window_with_config(cx, config);
+    win.update(cx, |w, cx| w.remove_session_host_row(0, cx));
+    add_session_host(&wh, &win, cx);
+    set_session_host_row_input(
+        &wh,
+        &win,
+        cx,
+        0,
+        |r| r.label_input.clone(),
+        "Build box again",
+    );
+    set_session_host_row_input(&wh, &win, cx, 0, |r| r.target_input.clone(), "vm-work");
+
+    win.read_with(cx, |w, cx| {
+        let cfg = w.validate(cx).expect("the recreated row must validate");
+        assert_eq!(cfg.session_hosts.len(), 1);
+        let new_id = cfg.session_hosts[0].id;
+        assert_eq!(cfg.session_host_tombstones.len(), 1);
+        assert_eq!(cfg.session_host_tombstones[0].old_id, old_id);
+        assert_eq!(cfg.session_host_tombstones[0].redirected_to, Some(new_id));
+    });
+}
+
+/// A one-row SSH catalog plus the lane host linked to it — the starting
+/// state for the retype tests below.
+fn ssh_catalog_config(
+    id: daruda_store::project::SessionHostId,
+) -> (
+    daruda_config::Config,
+    daruda_store::project::LaneSessionHost,
+) {
+    let config = daruda_config::Config {
+        session_hosts: vec![daruda_config::SessionHostEntry {
+            id,
+            label: "Build box".to_string(),
+            kind: daruda_config::SessionHostKind::Ssh {
+                target: "vm-work".to_string(),
+            },
+        }],
+        ..daruda_config::Config::default()
+    };
+    let lane_host = daruda_store::project::LaneSessionHost::Ssh {
+        target: "vm-work".to_string(),
+        session_path: "/srv/app".to_string(),
+        registry_id: Some(id),
+    };
+    (config, lane_host)
+}
+
+/// Changing a loaded row's Type retires its id. A lane's `registry_id`
+/// resolves on id *and* kind, so keeping the id would leave every linked lane
+/// unresolvable with nothing recorded anywhere; retiring it records the
+/// removal and surfaces the lane as Orphaned (banner + "keep current" path)
+/// instead of silently stale.
+#[gpui::test]
+fn retyping_a_loaded_row_retires_its_id_and_orphans_the_linked_lane(cx: &mut TestAppContext) {
+    let old_id = daruda_store::project::SessionHostId::new();
+    let (config, lane_host) = ssh_catalog_config(old_id);
+    let (wh, win) = build_window_with_config(cx, config);
+    select_session_host_kind(&wh, &win, cx, 0, "docker");
+    set_session_host_row_input(&wh, &win, cx, 0, |r| r.container_input.clone(), "dev-1");
+
+    win.read_with(cx, |w, cx| {
+        let cfg = w.validate(cx).expect("a retyped row must still validate");
+        assert_eq!(cfg.session_hosts.len(), 1);
+        assert_ne!(
+            cfg.session_hosts[0].id, old_id,
+            "a row that switched Type must not keep the id SSH lanes point at"
+        );
+        assert_eq!(cfg.session_host_tombstones.len(), 1);
+        assert_eq!(cfg.session_host_tombstones[0].old_id, old_id);
+        assert_eq!(
+            cfg.session_host_tombstones[0].kind,
+            daruda_config::SessionHostKind::Ssh {
+                target: "vm-work".to_string()
+            }
+        );
+        assert_eq!(
+            cfg.session_host_tombstones[0].redirected_to, None,
+            "an SSH lane must never be redirected onto a Docker entry"
+        );
+
+        use daruda_project::lane::session_host;
+        assert_eq!(
+            session_host::registry_link_status(&lane_host, &cfg.session_hosts),
+            session_host::LinkStatus::Orphaned
+        );
+        assert_eq!(
+            session_host::effective_session_host(
+                Some(&lane_host),
+                None,
+                &daruda_config::AgentLaunch::Raw("adapter".to_string()),
+                &cfg.session_hosts,
+                &cfg.session_host_tombstones,
+            ),
+            Ok(lane_host),
+            "an orphaned lane keeps its cached target, never the Docker one"
+        );
+    });
+}
+
+/// What the retype's tombstone buys: registering the SSH host again later
+/// redirects the retired id, so the linked lane resolves to the new entry
+/// instead of sitting on a stale cache forever.
+#[gpui::test]
+fn re_registering_a_retyped_host_heals_the_linked_lane(cx: &mut TestAppContext) {
+    let old_id = daruda_store::project::SessionHostId::new();
+    let (config, lane_host) = ssh_catalog_config(old_id);
+
+    let (wh, win) = build_window_with_config(cx, config);
+    select_session_host_kind(&wh, &win, cx, 0, "docker");
+    set_session_host_row_input(&wh, &win, cx, 0, |r| r.container_input.clone(), "dev-1");
+    let after_retype = win.read_with(cx, |w, cx| w.validate(cx).expect("retype must validate"));
+
+    // Second Save, over the config the first one produced: the user
+    // re-registers the SSH host they moved off of.
+    let (wh, win) = build_window_with_config(cx, after_retype);
+    add_session_host(&wh, &win, cx);
+    set_session_host_row_input(
+        &wh,
+        &win,
+        cx,
+        1,
+        |r| r.label_input.clone(),
+        "Build box (ssh)",
+    );
+    set_session_host_row_input(&wh, &win, cx, 1, |r| r.target_input.clone(), "vm-work");
+
+    win.read_with(cx, |w, cx| {
+        let cfg = w.validate(cx).expect("re-registering must validate");
+        let new_ssh_id = cfg
+            .session_hosts
+            .iter()
+            .find(|e| matches!(e.kind, daruda_config::SessionHostKind::Ssh { .. }))
+            .expect("the re-registered ssh entry")
+            .id;
+
+        use daruda_project::lane::session_host;
+        assert_eq!(
+            session_host::resolved_registry_id(
+                &lane_host,
+                &cfg.session_hosts,
+                &cfg.session_host_tombstones,
+            ),
+            Some(new_ssh_id),
+            "the retired id must redirect onto the re-registered ssh entry"
+        );
+    });
+}
+
+#[gpui::test]
+fn removing_a_session_host_row_updates_the_row_list_immediately(cx: &mut TestAppContext) {
+    let (wh, win) = build_window(cx);
+    add_session_host(&wh, &win, cx);
+    add_session_host(&wh, &win, cx);
+    win.read_with(cx, |w, _| assert_eq!(w.session_host_rows().count(), 2));
+    win.update(cx, |w, cx| w.remove_session_host_row(0, cx));
+    win.read_with(cx, |w, _| assert_eq!(w.session_host_rows().count(), 1));
+}
+
+// ---- Session Hosts tab cycle ----
+
+/// Test-only — open the Session Hosts page, landing focus where a sidebar
+/// click would.
+fn open_session_hosts_section(
+    wh: &WindowHandle<daruda_ui::Root>,
+    win: &Entity<SettingsView>,
+    cx: &mut TestAppContext,
+) {
+    let win = win.clone();
+    wh.update(cx, |_root, window, cx| {
+        win.update(cx, |w, cx| {
+            w.focus_section(BuiltinSection::SessionHosts, window, cx)
+        });
+    })
+    .expect("settings window should still be open during the test");
+}
+
+/// Test-only — one Tab (`forward`) / Shift-Tab press.
+fn press_tab(
+    wh: &WindowHandle<daruda_ui::Root>,
+    win: &Entity<SettingsView>,
+    cx: &mut TestAppContext,
+    forward: bool,
+) {
+    let win = win.clone();
+    wh.update(cx, |_root, window, cx| {
+        win.update(cx, |w, cx| w.focus_next_input(forward, window, cx));
+    })
+    .expect("settings window should still be open during the test");
+}
+
+/// Test-only — whether one session-host row's input currently holds focus.
+fn session_host_input_is_focused(
+    wh: &WindowHandle<daruda_ui::Root>,
+    win: &Entity<SettingsView>,
+    cx: &mut TestAppContext,
+    index: usize,
+    field: fn(&SessionHostRow) -> Entity<InputState>,
+) -> bool {
+    let state = win.read_with(cx, |w, _| field(w.session_host_row(index).unwrap()));
+    wh.update(cx, |_root, window, cx| {
+        state.read(cx).focus_handle(cx).is_focused(window)
+    })
+    .expect("settings window should still be open during the test")
+}
+
+fn focus_session_host_input(
+    wh: &WindowHandle<daruda_ui::Root>,
+    win: &Entity<SettingsView>,
+    cx: &mut TestAppContext,
+    index: usize,
+    field: fn(&SessionHostRow) -> Entity<InputState>,
+) {
+    let state = win.read_with(cx, |w, _| field(w.session_host_row(index).unwrap()));
+    wh.update(cx, |_root, window, cx| {
+        state.read(cx).focus_handle(cx).focus(window, cx);
+    })
+    .expect("settings window should still be open during the test");
+}
+
+fn session_host_kind_is_focused(
+    wh: &WindowHandle<daruda_ui::Root>,
+    win: &Entity<SettingsView>,
+    cx: &mut TestAppContext,
+    index: usize,
+) -> bool {
+    let state = win.read_with(cx, |w, _| {
+        w.session_host_row(index).unwrap().kind_select.clone()
+    });
+    wh.update(cx, |_root, window, cx| {
+        state.read(cx).focus_handle(cx).is_focused(window)
+    })
+    .expect("settings window should still be open during the test")
+}
+
+/// A one-row SSH catalog config — the seed for the tab-cycle tests.
+fn one_ssh_row_config() -> daruda_config::Config {
+    daruda_config::Config {
+        session_hosts: vec![daruda_config::SessionHostEntry {
+            id: daruda_store::project::SessionHostId::new(),
+            label: "Build box".to_string(),
+            kind: daruda_config::SessionHostKind::Ssh {
+                target: "vm-work".to_string(),
+            },
+        }],
+        ..daruda_config::Config::default()
+    }
+}
+
+/// Tab has to walk a row's fields, not sit on its label: the section's
+/// precomputed focus list holds only the first field, so the cycle is built
+/// from the live rows instead.
+#[gpui::test]
+fn tab_cycle_covers_session_host_rows(cx: &mut TestAppContext) {
+    let (wh, win) = build_window_with_config(cx, one_ssh_row_config());
+    open_session_hosts_section(&wh, &win, cx);
+    assert!(
+        session_host_input_is_focused(&wh, &win, cx, 0, |r| r.label_input.clone()),
+        "opening the page lands on the first row's label"
+    );
+
+    press_tab(&wh, &win, cx, true);
+    assert!(
+        session_host_kind_is_focused(&wh, &win, cx, 0),
+        "Tab from the label must reach the row's kind select"
+    );
+    press_tab(&wh, &win, cx, true);
+    assert!(
+        session_host_input_is_focused(&wh, &win, cx, 0, |r| r.target_input.clone()),
+        "Tab from the kind select must reach the row's target field"
+    );
+
+    press_tab(&wh, &win, cx, false);
+    assert!(session_host_kind_is_focused(&wh, &win, cx, 0));
+    press_tab(&wh, &win, cx, false);
+    assert!(
+        session_host_input_is_focused(&wh, &win, cx, 0, |r| r.label_input.clone()),
+        "Shift-Tab must walk back to the label"
+    );
+
+    add_session_host(&wh, &win, cx);
+    select_session_host_kind(&wh, &win, cx, 1, "docker");
+
+    press_tab(&wh, &win, cx, true);
+    assert!(session_host_kind_is_focused(&wh, &win, cx, 0));
+    press_tab(&wh, &win, cx, true);
+    assert!(
+        session_host_input_is_focused(&wh, &win, cx, 0, |r| r.target_input.clone()),
+        "the first row's value field comes after its label"
+    );
+    press_tab(&wh, &win, cx, true);
+    // The second row's Remove button is a real tab stop and precedes its
+    // fields in render order.
+    press_tab(&wh, &win, cx, true);
+    assert!(
+        session_host_input_is_focused(&wh, &win, cx, 1, |r| r.label_input.clone()),
+        "the cycle carries on into the second row"
+    );
+    press_tab(&wh, &win, cx, true);
+    assert!(session_host_kind_is_focused(&wh, &win, cx, 1));
+    press_tab(&wh, &win, cx, true);
+    assert!(
+        session_host_input_is_focused(&wh, &win, cx, 1, |r| r.container_input.clone()),
+        "a Docker row's container field is the one on screen"
+    );
+    assert!(
+        !session_host_input_is_focused(&wh, &win, cx, 1, |r| r.target_input.clone()),
+        "the hidden target field must never take focus"
+    );
+    let (wh, win) = build_window(cx);
+    open_session_hosts_section(&wh, &win, cx);
+    add_session_host(&wh, &win, cx);
+
+    focus_session_host_input(&wh, &win, cx, 0, |r| r.label_input.clone());
+    assert!(
+        session_host_input_is_focused(&wh, &win, cx, 0, |r| r.label_input.clone()),
+        "the first field of a newly added row can enter the native tab order"
+    );
+    press_tab(&wh, &win, cx, true);
+    assert!(session_host_kind_is_focused(&wh, &win, cx, 0));
+    press_tab(&wh, &win, cx, true);
+    assert!(
+        session_host_input_is_focused(&wh, &win, cx, 0, |r| r.target_input.clone()),
+        "and carries on to its value field"
+    );
+}
+
+#[gpui::test]
+fn focus_section_resets_scroll(cx: &mut TestAppContext) {
+    let (wh, win) = build_window(cx);
+    let win_a = win.clone();
+    cx.update_window(wh.into(), |_, window, cx| {
+        win_a.update(cx, |w, cx| {
+            // First, set a non-zero scroll while on the General page
+            // (so the test exercises the reset path inside focus_section).
+            w.scroll_handle
+                .set_offset(gpui::point(gpui::px(0.), gpui::px(-100.)));
+            w.focus_section(BuiltinSection::Appearance, window, cx);
+        });
+    })
+    .unwrap();
+    win.read_with(cx, |w, _| {
+        assert_eq!(w.scroll_handle.offset().y, gpui::px(0.));
+    });
+}
+
+/// A card opens folded, except for what it hides: a row already running a
+/// command other than its preset's opens with the advanced block showing.
+/// The built-in Claude's own id is not such a difference.
+#[gpui::test]
+fn a_card_opens_its_advanced_block_when_it_runs_something_else(cx: &mut TestAppContext) {
+    let config = daruda_config::Config {
+        agents: vec![
+            daruda_config::AgentEntry::for_definition(
+                daruda_config::AgentDefinition::claude_default(),
+                None,
+            ),
+            daruda_config::AgentEntry::preset_with(
+                "codex-acp",
+                daruda_config::PresetOverrides {
+                    command: Some("npx -y @agentclientprotocol/codex-acp@1.0.0".to_string()),
+                    ..daruda_config::PresetOverrides::default()
+                },
+            ),
+        ],
+        ..daruda_config::Config::default()
+    };
+    let (_wh, win) = build_window_with_config(cx, config);
+    win.read_with(cx, |w, cx| {
+        assert_eq!(w.agent_card_fold_for_test(0), Some(CardFold::default()));
+        assert!(!w.agent_editable_row(0).unwrap().advanced_overridden(cx));
+        assert_eq!(
+            w.agent_card_fold_for_test(1),
+            Some(CardFold {
+                expanded: false,
+                advanced: true,
+            })
+        );
+        assert!(w.agent_editable_row(1).unwrap().advanced_overridden(cx));
+    });
+}
+
+/// Switching a preset on is the whole gesture, so its card arrives folded; a
+/// custom agent opens both its details and its advanced block, where the
+/// command it still needs lives.
+#[gpui::test]
+fn a_custom_card_opens_ready_to_edit_and_a_preset_arrives_folded(cx: &mut TestAppContext) {
+    let (wh, win) = build_window(cx);
+    enable_agent_preset(&wh, &win, cx, "gemini");
+    win.read_with(cx, |w, _| {
+        assert_eq!(w.agent_card_fold_for_test(1), Some(CardFold::default()));
+    });
+    let settings = win.clone();
+    wh.update(cx, |_root, window, cx| {
+        settings.update(cx, |w, cx| w.add_custom_agent_row_for_test(window, cx));
+    })
+    .unwrap();
+    win.read_with(cx, |w, _| {
+        assert_eq!(
+            w.agent_card_fold_for_test(2),
+            Some(CardFold {
+                expanded: true,
+                advanced: true,
+            })
+        );
+    });
+}
+
+/// Folding is view state: it writes nothing, and a save that rebuilds the
+/// catalog from the written config keeps the card the user is editing open.
+#[gpui::test]
+fn folding_a_card_saves_nothing_and_survives_a_save(cx: &mut TestAppContext) {
+    let (wh, win) = build_window(cx);
+    let before = cx.read(|cx| {
+        crate::store::SettingsStore::global(cx)
+            .user()
+            .agents
+            .clone()
+    });
+    win.update(cx, |w, cx| {
+        w.toggle_agent_card_expanded(0, cx);
+        w.toggle_agent_card_advanced(0, cx);
+    });
+    let after = cx.read(|cx| {
+        crate::store::SettingsStore::global(cx)
+            .user()
+            .agents
+            .clone()
+    });
+    assert_eq!(after, before, "a fold toggle writes nothing");
+
+    // A tail pick persists and then reloads every row from the live config.
+    confirm_agent_row_select(&wh, &win, cx, 0, |r| r.tail_window_select.clone(), "3");
+    win.read_with(cx, |w, _| {
+        assert_eq!(
+            w.agent_card_fold_for_test(0),
+            Some(CardFold {
+                expanded: true,
+                advanced: true,
+            })
+        );
+    });
+}
+
+/// A preset that ships binaries only has nothing to run, so switching it on
+/// adds no entry.
+#[gpui::test]
+fn enabling_a_preset_that_needs_a_manual_install_adds_no_row(cx: &mut TestAppContext) {
+    let (wh, win) = build_window(cx);
+    enable_agent_preset(&wh, &win, cx, "cursor");
+    win.read_with(cx, |w, _| assert_eq!(w.agent_editable_rows().count(), 1));
+}
+
+/// Switching an entry off keeps it — every field it states included — and
+/// saves it as off; the runtime catalog then leaves it out.
+#[gpui::test]
+fn switching_an_entry_off_keeps_its_fields(cx: &mut TestAppContext) {
+    let (wh, win) = build_window(cx);
+    enable_agent_preset(&wh, &win, cx, "gemini");
+    confirm_agent_row_select(&wh, &win, cx, 1, |r| r.tail_window_select.clone(), "3");
+    win.update(cx, |w, cx| w.set_agent_enabled(1, false, cx));
+
+    cx.read(|cx| {
+        let user = crate::store::SettingsStore::global(cx).user();
+        let gemini = &user.agents[1];
+        assert!(!gemini.enabled);
+        assert_eq!(gemini.resolve().and_then(|d| d.tail_window), Some(3));
+        let ids: Vec<String> = user.resolved_agents().into_iter().map(|a| a.id).collect();
+        assert_eq!(ids, ["claude"]);
+    });
+}
+
+/// The only agent still on cannot be switched off: a new chat always has one
+/// to open with.
+#[gpui::test]
+fn the_last_agent_on_cannot_be_switched_off(cx: &mut TestAppContext) {
+    let (wh, win) = build_window(cx);
+    enable_agent_preset(&wh, &win, cx, "gemini");
+    win.update(cx, |w, cx| w.set_agent_enabled(0, false, cx));
+    win.update(cx, |w, cx| {
+        assert!(w.agent_is_last_enabled(1));
+        w.set_agent_enabled(1, false, cx);
+    });
+    win.read_with(cx, |w, _| {
+        assert!(w.agent_editable_row(1).unwrap().enabled, "refused");
+        assert_eq!(
+            w.agent_default_index(),
+            Some(1),
+            "the next one on is the default"
+        );
+    });
+}
+
+/// "Make default" moves the entry to the front — the first entry on is the
+/// one a new chat opens with.
+#[gpui::test]
+fn making_an_entry_the_default_moves_it_first(cx: &mut TestAppContext) {
+    let (wh, win) = build_window(cx);
+    enable_agent_preset(&wh, &win, cx, "gemini");
+    win.update(cx, |w, cx| w.make_agent_default(1, cx));
+    cx.read(|cx| {
+        let user = crate::store::SettingsStore::global(cx).user();
+        assert_eq!(user.resolved_agents()[0].id, "gemini");
+    });
+    win.read_with(cx, |w, _| assert_eq!(w.agent_default_index(), Some(0)));
+}
+
+/// Clicking a card's chevrons in the rendered window flips each fold exactly
+/// once. The advanced chevron sits inside a row that owns the same toggle, and
+/// gpui fires every hovered ancestor's click: a listener on both would undo
+/// itself, which calling the toggle directly can never show.
+#[gpui::test]
+fn clicking_a_cards_chevrons_flips_each_fold_once(cx: &mut TestAppContext) {
+    use gpui::{VisualTestContext, size};
+
+    let (window, settings) = build_window(cx);
+    cx.simulate_window_resize(window.into(), size(px(1400.), px(6000.)));
+    let mut vcx = VisualTestContext::from_window(window.into(), cx);
+    vcx.update(|window, cx| {
+        settings.update(cx, |settings, cx| {
+            settings.focus_section(BuiltinSection::Agent, window, cx);
+            settings.toggle_agent_card_expanded(0, cx);
+        });
+    });
+    vcx.run_until_parked();
+
+    let click = |vcx: &mut VisualTestContext, selector: &'static str| {
+        let bounds = vcx
+            .debug_bounds(selector)
+            .unwrap_or_else(|| panic!("{selector} is on screen"));
+        vcx.simulate_click(bounds.center(), Default::default());
+        vcx.run_until_parked();
+    };
+    let fold = |vcx: &mut VisualTestContext| {
+        settings.read_with(vcx, |w, _| w.agent_card_fold_for_test(0).unwrap())
+    };
+
+    click(&mut vcx, "agent-card-advanced-fold-0");
+    assert!(
+        fold(&mut vcx).advanced,
+        "one click opens the advanced block"
+    );
+    click(&mut vcx, "agent-card-advanced-fold-0");
+    assert!(!fold(&mut vcx).advanced, "and one more folds it");
+
+    click(&mut vcx, "agent-card-fold-0");
+    assert!(
+        !fold(&mut vcx).expanded,
+        "the header chevron folds the card"
+    );
+}
+
+/// A custom row that runs a preset's command verbatim is saved as a reference
+/// to that preset; the row then says so too, so the catalog stops offering
+/// the preset as unused — switching it on again would add the same agent twice.
+#[gpui::test]
+fn a_custom_row_saved_as_a_preset_reference_takes_that_preset(cx: &mut TestAppContext) {
+    let (wh, win) = build_window(cx);
+    let settings = win.clone();
+    wh.update(cx, |_root, window, cx| {
+        settings.update(cx, |w, cx| w.add_custom_agent_row_for_test(window, cx));
+    })
+    .unwrap();
+    let gemini = daruda_config::AgentDefinition::registry_preset("gemini").expect("runnable");
+    let daruda_config::AgentLaunch::Raw(command) = gemini.launch else {
+        panic!("a preset runs a plain command");
+    };
+    set_agent_row_input(&wh, &win, cx, 1, |r| r.id_input.clone(), "my-gemini");
+    set_agent_row_input(&wh, &win, cx, 1, |r| r.name_input.clone(), "My Gemini");
+    set_agent_row_input(&wh, &win, cx, 1, |r| r.command_input.clone(), &command);
+    win.read_with(cx, |w, _| {
+        assert_eq!(w.agent_editable_row(1).unwrap().preset, None)
+    });
+
+    win.update(cx, |w, cx| assert!(w.persist_agent_catalog(cx)));
+
+    win.read_with(cx, |w, _| {
+        assert_eq!(
+            w.agent_editable_row(1).unwrap().preset.as_deref(),
+            Some("gemini"),
+            "the row takes the origin its saved entry has"
+        );
+    });
+    cx.read(|cx| {
+        let user = crate::store::SettingsStore::global(cx).user();
+        assert_eq!(user.agents[1].preset_id(), Some("gemini"));
+        assert_eq!(user.resolved_agents()[1].id, "my-gemini");
+    });
+}
+
+/// Only an entry that is on can become the default; the method refuses a
+/// switched-off one even though the card never offers it.
+#[gpui::test]
+fn a_switched_off_entry_cannot_be_made_the_default(cx: &mut TestAppContext) {
+    let (wh, win) = build_window(cx);
+    enable_agent_preset(&wh, &win, cx, "gemini");
+    win.update(cx, |w, cx| {
+        w.set_agent_enabled(1, false, cx);
+        w.make_agent_default(1, cx);
+    });
+    cx.read(|cx| {
+        let user = crate::store::SettingsStore::global(cx).user();
+        assert_eq!(
+            user.agents[0].resolve().map(|d| d.id).as_deref(),
+            Some("claude")
+        );
+    });
+}
+
+/// A custom row that runs a preset's command and states no environment is
+/// saved as a reference that follows the preset's environment — and has to
+/// keep following it on every later save. Its empty field never held the
+/// preset's environment, so emptiness is not the user clearing it.
+#[gpui::test]
+fn a_promoted_rows_empty_environment_keeps_following_the_preset(cx: &mut TestAppContext) {
+    let (wh, win) = build_window(cx);
+    let settings = win.clone();
+    wh.update(cx, |_root, window, cx| {
+        settings.update(cx, |w, cx| w.add_custom_agent_row_for_test(window, cx));
+    })
+    .unwrap();
+    let codex = daruda_config::AgentDefinition::registry_preset("codex-acp").expect("runnable");
+    let daruda_config::AgentLaunch::Raw(command) = codex.launch.clone() else {
+        panic!("a preset runs a plain command");
+    };
+    set_agent_row_input(&wh, &win, cx, 1, |r| r.id_input.clone(), "my-codex");
+    set_agent_row_input(&wh, &win, cx, 1, |r| r.name_input.clone(), "My Codex");
+    set_agent_row_input(&wh, &win, cx, 1, |r| r.command_input.clone(), &command);
+
+    for save in ["first", "second"] {
+        win.update(cx, |w, cx| {
+            assert!(w.persist_agent_catalog(cx), "{save} save")
+        });
+        cx.read(|cx| {
+            let user = crate::store::SettingsStore::global(cx).user();
+            assert_eq!(
+                user.agents[1],
+                daruda_config::AgentEntry::preset_with(
+                    "codex-acp",
+                    daruda_config::PresetOverrides {
+                        id: Some("my-codex".to_string()),
+                        name: Some("My Codex".to_string()),
+                        ..daruda_config::PresetOverrides::default()
+                    }
+                ),
+                "{save} save states no environment of its own"
+            );
+            assert_eq!(user.resolved_agents()[1].env, codex.env, "{save} save");
+        });
+    }
+    win.read_with(cx, |w, cx| {
+        assert!(!w.agent_editable_row(1).unwrap().env_overridden(cx));
+    });
+}

@@ -369,7 +369,7 @@ impl Workspace {
             Some(Err(unusable)) => {
                 if let Some(view) = self.agent_chat_view(pane_id).cloned() {
                     let message = s::agent_chat::session_host_unusable(
-                        s::session_host::host_error(unusable.reason),
+                        daruda_settings::labels::host_error(unusable.reason),
                     );
                     view.update(cx, |v, cx| {
                         v.set_error(message, daruda_acp::Remedy::Configure, cx);

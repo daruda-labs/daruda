@@ -305,13 +305,13 @@ impl Workspace {
         cx: &mut Context<Self>,
     ) {
         // Collect every skill across the three scopes from the live
-        // `SkillsState` Global. Plugin scope is filtered to Installed
+        // `GlobalSkills`. Plugin scope is filtered to Installed
         // (Available rows show in Settings → Plugin only) so the
         // palette never prompts the user to invoke something Claude
         // Code can't actually run.
         let lane = self.active_lane_root();
         let snap = cx
-            .global::<crate::agent::skills::SkillsState>()
+            .global::<crate::agent::skills::global::GlobalSkills>()
             .snapshot_for(lane.as_deref());
         let mut skills: Vec<crate::agent::skills::Skill> = snap.project.clone();
         skills.extend(snap.personal.iter().cloned());

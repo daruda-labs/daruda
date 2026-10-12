@@ -181,7 +181,7 @@ fn domain_switcher(
         .children(
             recipes
                 .iter()
-                .map(|recipe| tab(strings::settings::account_recipe_label(*recipe))),
+                .map(|recipe| tab(daruda_settings::labels::account_recipe_label(*recipe))),
         )
         .on_click(move |ix, _window, cx| {
             let Some(recipe) = recipes.get(*ix).copied() else {
@@ -344,7 +344,7 @@ fn header(
         .w_full()
         .gap(px(theme::USAGE_HEADER_GAP))
         .child(crate::ui::agent_icon(
-            Some(crate::agent::icons::icon_for_recipe(recipe)),
+            Some(daruda_config::agent::icon::icon_for_recipe(recipe)),
             px(theme::USAGE_SECTION_ICON_SIZE),
             t.text_body,
         ))
@@ -354,9 +354,9 @@ fn header(
                 .text_size(px(theme::USAGE_TITLE_FONT_SIZE))
                 .font_weight(gpui::FontWeight::SEMIBOLD)
                 .text_color(t.text_primary)
-                .child(SharedString::from(strings::settings::account_recipe_label(
-                    recipe,
-                ))),
+                .child(SharedString::from(
+                    daruda_settings::labels::account_recipe_label(recipe),
+                )),
         );
 
     if let Some(label) = plan_badge_label(plan) {

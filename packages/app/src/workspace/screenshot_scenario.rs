@@ -217,7 +217,7 @@ pub(crate) enum ScreenshotScenario {
     /// The first catalog row with one transcript editor's popover open — the
     /// Settings host of the shared editors, whose panel a closed field cannot
     /// show.
-    AgentCatalogEditor(crate::settings::EditorShot),
+    AgentCatalogEditor(daruda_settings::EditorShot),
     /// Deploy the focused pane's right-click menu. The only way to eyeball
     /// menu length, edge-flip and the keybinding column — none of which any
     /// unit test can see.
@@ -423,7 +423,7 @@ impl ScreenshotScenario {
             NAME_SETTINGS_SEARCH => Some(Self::SettingsSearch),
             NAME_AGENT_CATALOG_EXPANDED => Some(Self::AgentCatalogExpanded),
             NAME_AGENT_CATALOG_EDITOR => {
-                Some(Self::AgentCatalogEditor(crate::settings::EditorShot::Fold))
+                Some(Self::AgentCatalogEditor(daruda_settings::EditorShot::Fold))
             }
             NAME_PANE_CONTEXT_MENU => Some(Self::PaneContextMenu),
             NAME_MERMAID_LIGHTBOX => Some(Self::MermaidLightbox),
@@ -485,7 +485,7 @@ impl ScreenshotScenario {
                 .or_else(|| {
                     name.strip_prefix(NAME_AGENT_CATALOG_EDITOR)
                         .and_then(|rest| rest.strip_prefix(':'))
-                        .and_then(crate::settings::EditorShot::from_token)
+                        .and_then(daruda_settings::EditorShot::from_token)
                         .map(Self::AgentCatalogEditor)
                 })
                 .or_else(|| Self::settings_section_from_cli_name(name)),
@@ -1111,7 +1111,7 @@ mod tests {
     /// coverage — a closed field shows only the trigger.
     #[test]
     fn every_catalog_editor_is_addressable_by_its_own_token() {
-        use crate::settings::EditorShot;
+        use daruda_settings::EditorShot;
         assert_eq!(
             ScreenshotScenario::from_cli_name("agent-catalog-editor"),
             Some(ScreenshotScenario::AgentCatalogEditor(EditorShot::Fold))

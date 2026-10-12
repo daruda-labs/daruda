@@ -2,7 +2,7 @@
 //! of truth for `accounts.json`'s in-memory shape, shared across every
 //! `Workspace` window (and, through its host, each open Settings view).
 //!
-//! Mirrors the `GlobalTasks` / `SkillsState` / `McpState` pattern: one
+//! Mirrors the `GlobalTasks` / `GlobalSkills` / `McpState` pattern: one
 //! process-wide global, mutated in exactly one way ([`replace`]), with each
 //! window subscribing via `cx.observe_global::<AccountsGlobal>` to refresh
 //! its own read-cache (`Workspace.accounts`, which an open Settings view

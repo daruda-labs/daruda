@@ -129,7 +129,7 @@ fn choices_of(option: &ConfigOptionView) -> (Vec<(ConfigValueView, String)>, Con
 /// so the chip and Settings name the default model alike.
 fn choice_label(category: ConfigOptionCategoryView, choice: &ConfigChoiceView) -> String {
     if category == ConfigOptionCategoryView::Model {
-        strings::agent_chat::agent_model_choice_label(
+        daruda_settings::labels::agent_model_choice_label(
             &choice.value,
             &choice.name,
             choice.description.as_deref(),

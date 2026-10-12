@@ -506,7 +506,7 @@ impl Workspace {
             recent_sessions,
             usage_refresh_in_flight: self.claude.usage_refresh_in_flight,
             skills: cx
-                .global::<crate::agent::skills::SkillsState>()
+                .global::<crate::agent::skills::global::GlobalSkills>()
                 .snapshot_for(self.active_lane_root().as_deref()),
             skill_search_input: Handle(self.right_views.skill_search_input.clone()),
             skill_search_query: self

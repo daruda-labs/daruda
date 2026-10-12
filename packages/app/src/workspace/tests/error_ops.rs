@@ -210,10 +210,10 @@ fn the_legacy_delegation_notice_names_something_the_user_can_check() {
             !notice.contains("multi_agent_v2"),
             "{locale}: daruda ships the overlay, so telling the user to enable it is wrong: {notice}"
         );
-        let section = rust_i18n::t!("settings.nav_agent", locale = locale);
-        let field = rust_i18n::t!("settings.agent_field_env", locale = locale);
+        let section = daruda_settings::translate_for_test("settings.nav_agent", locale);
+        let field = daruda_settings::translate_for_test("settings.agent_field_env", locale);
         assert!(
-            notice.contains(section.as_ref()) && notice.contains(field.as_ref()),
+            notice.contains(&section) && notice.contains(&field),
             "{locale}: the notice must point at {section} → {field}: {notice}"
         );
     }

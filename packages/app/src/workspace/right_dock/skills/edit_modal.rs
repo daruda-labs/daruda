@@ -518,7 +518,7 @@ pub fn open_edit_skill_modal(
     let workspace = cx.weak_entity();
     let project_root = ws.active_lane_root();
     let state = cx
-        .global::<crate::agent::skills::SkillsState>()
+        .global::<crate::agent::skills::global::GlobalSkills>()
         .snapshot_for(project_root.as_deref());
 
     // Locate the skill in the snapshot. Fail-soft: if the row is

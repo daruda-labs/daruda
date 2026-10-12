@@ -2,12 +2,12 @@
 //! "System" fallback), rendered as a dropdown trigger + menu for
 //! switching between managed accounts.
 
-use crate::surface::strings::settings::account_recipe_label;
 use crate::ui::theme;
 use crate::ui::{DropdownMenu as _, PopupMenu, PopupMenuItem, button_status_pill_bare, spinner};
 use crate::workspace::main_area::pane::AccountDomain;
 use crate::workspace::main_area::pane_tree::PaneId;
 use crate::workspace::{AddManagedAccount, OpenSettings, Workspace};
+use daruda_settings::labels::account_recipe_label;
 use daruda_store::accounts::{AccountRecipeId, AccountSelection, AccountsState, ManagedAccount};
 use gpui::{App, IntoElement, SharedString, WeakEntity, div, prelude::*, px};
 
@@ -211,7 +211,7 @@ fn trigger_icon(domain: AccountDomain, density: super::StatusBarDensity) -> Opti
         return None;
     }
     match domain {
-        AccountDomain::Exactly(recipe) => Some(crate::agent::icons::icon_for_recipe(recipe)),
+        AccountDomain::Exactly(recipe) => Some(daruda_config::agent::icon::icon_for_recipe(recipe)),
         AccountDomain::Any | AccountDomain::Unsupported => None,
     }
 }
@@ -302,7 +302,7 @@ fn build_account_menu(slot: &AccountSlot, menu: PopupMenu) -> PopupMenu {
         // The section header carries no icon slot (`PopupMenuItem::Label`), so
         // the mark rides each row — which is also what disambiguates a mixed
         // list once more than one domain has accounts.
-        let icon = crate::agent::icons::icon_for_recipe(section.recipe);
+        let icon = daruda_config::agent::icon::icon_for_recipe(section.recipe);
         section.accounts.iter().fold(menu, |m, account| {
             let workspace = slot.workspace.clone();
             let pane_id = slot.pane_id;
@@ -369,7 +369,7 @@ fn build_account_menu(slot: &AccountSlot, menu: PopupMenu) -> PopupMenu {
                 m.item(
                     PopupMenuItem::new(label.clone())
                         .icon(crate::ui::agent_menu_icon(Some(
-                            crate::agent::icons::icon_for_recipe(recipe),
+                            daruda_config::agent::icon::icon_for_recipe(recipe),
                         )))
                         .on_click(move |_, window, app| {
                             window.dispatch_action(Box::new(AddManagedAccount(recipe)), app);

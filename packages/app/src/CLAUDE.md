@@ -11,7 +11,6 @@ app/src/
 ├── (top-level)           # App entry, window/menu lifecycle, PTY, config watcher, slot actions
 ├── startup/              # Desktop startup and optional replay, capture, and smoke flows
 ├── agent/                # Agent-side data models — MCP, skills, tasks (GPUI-free cores + Global wrappers) — plus GPUI-free account + ACP launch resolution
-├── settings/             # Settings surface — sidebar + one BuiltinSection body; a body-level view a Workspace hosts, not a window
 ├── surface/              # App-shell constants — name, shortcuts, strings, keybinding action map
 ├── title_bar/            # Window chrome — who draws the frame (GPUI-free `policy.rs`), the drag strip, the app-drawn caption controls, the application-menu button
 ├── ui/                   # Facade over `daruda_ui` (packages/ui/) + localized and agent-domain widgets
@@ -107,28 +106,6 @@ mixed widget types without resetting; reuse the same index pool
 across chip-driven branches so the user lands on the same logical
 slot regardless of which fields are visible.
 
-## `settings/`
-
-`SettingsView` remains the one per-window entity that owns widget state and
-emits `SettingsEvent`. Its modules separate the reasons that state changes:
-
-- `initialize.rs` constructs widgets from the host's snapshot and observes
-  the stores Settings itself edits;
-  `bindings.rs` owns ordinary input subscriptions and value synchronization.
-- `catalog/` owns agent rows, subscriptions, collection and saving. Its
-  `validation.rs` is pure; `path_warning.rs` performs advisory executable
-  lookup on edits, never while rendering.
-- `hosts/` owns host rows and saving; `hosts/reconcile.rs` is GPUI-free and
-  owns identity retirement and tombstone reconciliation.
-- `persistence.rs` is the common save boundary: field patches, drafts,
-  external changes, and conflicts. Domain collectors use this boundary
-  instead of writing config independently.
-- `sections/` and `render/` build the surface. The root module keeps view
-  state, navigation, events, and presentation helpers.
-
-Domain internals are visible inside `crate::settings` only. The host uses the
-existing view/event API and does not reach into catalog or host editors.
-
 ## `project/` (`daruda_project::project`)
 
 Runtime [`Project`] — the workspace-visible counterpart to
@@ -181,7 +158,7 @@ Runtime `Lane` model (id / path / status / `base_ref` / description) plus a GPUI
 | New pane content kind (plain-struct) | `PaneContent` variant + struct in `main_area/pane/mod.rs` → match arms (title/cwd/focus_handle/resize) → `main_area/mod.rs` walker arm (free-fn `render(&content, cx)`) → `daruda_project` persistence mirror + `#[serde(default)]` → `create_*_pane` constructor → `workspace/tests` round-trip. Rendered inline under `Workspace::render`, so its `cx.notify()` dirties the whole window. Fine for small, rarely-updating panes (File). |
 | New pane content kind (entity-backed / cached) | For a pane needing **scroll/perf isolation or its own internal state** (Terminal, AgentChat): hold a thin `XxxContent { view: Entity<XxxView>, cached_title, cwd }` wrapper; `XxxView: Render + Focusable`, its `render` calls `track_focus(&self.focus_handle)` and `cx.notify()`s itself; walker arm embeds `AnyView::from(view.clone()).cached(StyleRefinement::default().size_full().flex())`; `wrapper_focus_handle → None`; `Pane::{title,cwd}` read the wrapper (cx-free), `focus_handle(cx)` reads `view.read(cx)`. A `cx.notify()` on the view then dirties only its subtree — siblings keep their cached paint. |
 | Virtualized list inside a pane (variable-height) | Use gpui core `list(state, cx.processor(\|this, ix, win, cx\| …))` + `ListState` (`Top` align + `FollowMode::Tail` for chat-like append) — **not** `crate::ui::list` (that's the gpui_component delegate/searchable list) and not `uniform_list` (fixed height). Keep `list_state` count in sync after each items mutation; `remeasure_items(tail)` on streaming grow, `remeasure()` after any visible item's height changes (fold, async image/diff landing). Thumb + at-bottom: `crate::ui::scrollbar::{vertical_thumb_for_list, list_at_bottom}` (display-only thumb). Synthetic fold headers (turn ⊃ response ⊃ tool-group ⊃ block) are not stored — `rows::project(items, &fold)` derives a stable `Vec<RenderRow>` (header rows + `hidden`/`indent` flags) each rebuild; the list virtualizes over rows and `rebuild_rows` diff-splices so a fold toggle remeasures in place (no scroll drift). Reference: `packages/chat/src/{view/,render/,rows/,fold.rs}`. |
-| Skills / Tools / Tasks tab feature | Mutate the relevant Global via `cx.update_global::<SkillsState\|McpState\|GlobalTasks, _>(...)` → renderer reads through the snapshot in `RightDockSnapshot` → `cx.observe_global` rebroadcasts to every Workspace and every open Settings view |
+| Skills / Tools / Tasks tab feature | Mutate the relevant Global via `cx.update_global::<GlobalSkills\|McpState\|GlobalTasks, _>(...)` → renderer reads through the snapshot in `RightDockSnapshot` → `cx.observe_global` rebroadcasts to every Workspace, which pushes into its open Settings |
 | Worktree drag/context menu | Data ops in `lane/mod.rs` → `LaneDrag` in `layout/ops.rs` → actions in `lane_ops.rs` → UI in `left_dock/projects/list.rs` |
 | New picker (search-and-pick overlay) | Plain shape, no "no list" state (copy lane switcher/palette): `is_open: bool` beside `pub picker: PickerState` on the view state, Workspace handler computes `visible_len` and calls `picker.on_key(...)` directly. Enum shape, has a "no list" state (copy flow picker): openness *is* the enum, `picker` module-private, view calls `FlowPicker::on_key` which answers Escape/Enter through the shared `picker::overlay_key` and delegates the rest only when there is a list. Either way: `PickerState` field → `ui::picker_row`/`picker_empty` → thin `on_*_key` handler in the view's `*_ops.rs` (next to its `execute_*`), opening with `let Some((key, ch)) = picker_keystroke(ev) else { return };` (`command/picker_key.rs` — returning early *without* `stop_propagation` is what keeps `Cmd+W` working) → `.when(is_open, capture_key_down(...))` stays in `render/mod.rs` |
 
@@ -200,7 +177,7 @@ Runtime `Lane` model (id / path / status / `base_ref` / description) plus a GPUI
 | Save/restore logic | `workspace/persistence.rs` |
 | App-global action | `main.rs` (`on_action`) |
 | Window lifecycle | `windows.rs` |
-| Settings section / field | `settings/sections/` + a `spec.rs` row; opened and closed in `workspace/settings_ops.rs` |
+| Settings section / field | `packages/settings/src/sections/` + a `spec.rs` row; opened and closed in `workspace/settings_ops.rs` |
 | Menu bar | `menus.rs` |
 | Key-binding string | `surface/keybindings.rs` |
 | Keybinding-override arm | `surface/action_map.rs` |
@@ -268,7 +245,7 @@ Enforced by `scripts/lint-inline-literals.sh`. When porting from reference imple
 ### G7 — Dependency direction (one-way)
 
 ```
-main.rs → menus.rs, windows.rs → workspace/ → settings/
+main.rs → menus.rs, windows.rs → workspace/
   → title_bar/ → ui/, surface/
   → agent/, project/, lane/, surface/, pty.rs, config_watcher.rs
 
@@ -280,15 +257,9 @@ agent/ → lane/
 - `lane/` imports nothing from `workspace/`, `project/`, or `agent/`.
 - `project/` imports `lane/` only; nothing from `workspace/` or `agent/`.
 - `agent/` imports `lane/` only; nothing from `workspace/` or `project/`.
-- `settings/` imports nothing from `workspace/` or `window_registry`. It
-  talks to its host only through what `workspace/settings_ops.rs` hands it:
-  constructor inputs (a `SharedSnapshot` of the window-shared state and an
-  `AccountUsage` callback that counts pinned panes across windows), pushes
-  (`set_accounts` / `set_auth_statuses` / `set_agent_vocabulary`, from the
-  host's Global observers), and `SettingsEvent` for everything it asks or
-  changes — `AccountsChanged` is how an account write reaches every window.
-  Checkable: `rg 'crate::(workspace|window_registry)' settings/` outside
-  tests finds nothing.
+- The Settings view is `daruda_settings` (`packages/settings/`); its host is
+  `workspace/settings_ops.rs`, and the boundary between them is in
+  `packages/settings/CLAUDE.md`.
 
 When a function references a lane across module boundaries, pass
 the full `daruda_store::project::LaneRef { project, lane }` —

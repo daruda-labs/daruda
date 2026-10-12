@@ -3,8 +3,8 @@
 //! Every 100 ms tick the pump drains queued [`SkillsEvent`]s and dispatches a
 //! per-scope reload through [`Workspace::apply_skills_event`]. Dropping the
 //! returned `Task<()>` (`_skills_event_pump`) cancels the loop and the watcher
-//! threads exit. Mutations land in the app-wide `SkillsState` Global; other
-//! Workspaces re-render via their `observe_global::<SkillsState>` subscription.
+//! threads exit. Mutations land in the app-wide `GlobalSkills`; other
+//! Workspaces re-render via their `observe_global::<crate::agent::skills::global::GlobalSkills>` subscription.
 
 use std::path::PathBuf;
 use std::sync::mpsc::{Receiver, TryRecvError};
@@ -12,7 +12,8 @@ use std::time::Duration;
 
 use gpui::{BorrowAppContext, Context, Task};
 
-use crate::agent::skills::{SkillScope, SkillsState, scan};
+use crate::agent::skills::global::GlobalSkills;
+use crate::agent::skills::{SkillScope, scan};
 use crate::hooks::skills_watcher::{self, SkillsEvent};
 use crate::workspace::Workspace;
 use crate::workspace::lifetimes::Watch;
@@ -46,13 +47,13 @@ impl Workspace {
     /// The event carries only the scope; the lane path is taken
     /// from *this* workspace's active lane at fire time so the
     /// pump never scans against a stale `project_root`. The result
-    /// lands in the `SkillsState` Global, where every other open
+    /// lands in the `GlobalSkills`, where every other open
     /// Workspace picks it up through `observe_global`.
     pub(super) fn apply_skills_event(&mut self, event: SkillsEvent, cx: &mut Context<Self>) {
         let SkillsEvent::Reloaded(scope) = event;
         let lane = self.active_lane_root();
         let personal = scan::skills_personal_dir();
-        cx.update_global::<SkillsState, _>(|state, _| {
+        cx.update_global::<GlobalSkills, _>(|state, _| {
             state.reload_scope(scope, lane.as_deref(), &personal);
             if scope == SkillScope::Personal {
                 // ~/.claude/skills also sources @skills-dir plugins → refresh Plugin too.
@@ -81,7 +82,7 @@ impl Workspace {
         let project_root = self.active_lane_root();
         let personal = scan::skills_personal_dir();
 
-        cx.update_global::<SkillsState, _>(|state, _| {
+        cx.update_global::<GlobalSkills, _>(|state, _| {
             state.reload_scope(SkillScope::Personal, None, &personal);
             state.reload_scope(SkillScope::Plugin, None, &personal);
             state.reload_scope(SkillScope::Project, project_root.as_deref(), &personal);

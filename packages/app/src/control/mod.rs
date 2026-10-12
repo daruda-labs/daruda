@@ -25,25 +25,31 @@ mod tests {
 
     /// The names BotFather is handed have to be the names `parse` accepts, or
     /// a menu entry sends a command daruda answers with "unknown".
+    /// The block Settings hands the user to paste is checked in every locale.
     #[test]
     fn the_botfather_registration_lists_every_command_name() {
-        let registered: Vec<&str> = crate::surface::strings::control::botfather_commands()
-            .lines()
-            .filter_map(|line| line.split(" - ").next())
-            .map(str::trim)
-            .map(|name| {
-                spec::COMMANDS
-                    .iter()
-                    .copied()
-                    .find(|c| *c == name)
-                    .unwrap_or_else(|| panic!("{name} is registered but not a command"))
-            })
-            .collect();
-        for command in spec::COMMANDS {
-            assert!(
-                registered.contains(&command),
-                "/{command} is a command but is not registered"
-            );
+        for locale in ["en", "ko"] {
+            let block = daruda_settings::translate_for_test("control.botfather_commands", locale);
+            let registered: Vec<&str> = block
+                .lines()
+                .filter_map(|line| line.split(" - ").next())
+                .map(str::trim)
+                .map(|name| {
+                    spec::COMMANDS
+                        .iter()
+                        .copied()
+                        .find(|c| *c == name)
+                        .unwrap_or_else(|| {
+                            panic!("{locale}: {name} is registered but not a command")
+                        })
+                })
+                .collect();
+            for command in spec::COMMANDS {
+                assert!(
+                    registered.contains(&command),
+                    "{locale}: /{command} is a command but is not registered"
+                );
+            }
         }
     }
 }

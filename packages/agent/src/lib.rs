@@ -31,6 +31,7 @@ pub mod providers;
 pub mod pty_link;
 pub mod pty_tracker;
 pub mod service_status;
+pub mod skills;
 pub mod status;
 pub mod store;
 pub mod usage;

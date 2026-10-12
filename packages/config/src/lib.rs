@@ -12,6 +12,7 @@ pub mod colors;
 pub mod cursor;
 pub mod desktop;
 pub mod editor;
+pub mod env_lines;
 pub mod file_viewer;
 pub mod flow;
 pub mod font;

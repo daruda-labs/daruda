@@ -277,6 +277,47 @@ impl AssetSource for DarudaAssets {
 mod tests {
     use super::*;
 
+    /// A path the agent icon catalog names but this file never registered
+    /// would paint an empty box with no error anywhere.
+    #[test]
+    fn every_agent_icon_path_is_embedded_in_the_binary() {
+        for path in daruda_config::agent::icon::icon_paths() {
+            let bytes = DarudaAssets
+                .load(path)
+                .unwrap_or_else(|e| panic!("loading {path} errored: {e}"))
+                .unwrap_or_else(|| panic!("{path} is not registered in assets.rs"));
+            // Not `starts_with`: some assets open with an XML declaration.
+            assert!(
+                bytes.windows(4).any(|w| w == b"<svg"),
+                "{path} resolved to something that is not an SVG"
+            );
+        }
+    }
+
+    /// Every Settings page's sidebar icon is bundled.
+    #[test]
+    fn every_settings_section_icon_is_embedded() {
+        for section in daruda_config::BuiltinSection::ALL {
+            let path = daruda_settings::section_icon(*section);
+            assert!(
+                DarudaAssets.load(path).unwrap().is_some(),
+                "{section:?}: {path} is not registered in assets.rs"
+            );
+        }
+    }
+
+    /// Guards the test above from going toothless: `DarudaAssets` falls
+    /// through to gpui_component's own icon set, so an unregistered path must
+    /// actually come back empty for the walk to prove anything.
+    #[test]
+    fn an_unregistered_icon_path_does_not_load() {
+        let loaded = DarudaAssets
+            .load("icons/agents/not-a-real-agent.svg")
+            .ok()
+            .flatten();
+        assert!(loaded.is_none(), "asset fallback resolves unknown paths");
+    }
+
     const UI_ICON_PATHS: &[&str] = &[
         "icons/ui/block.svg",
         "icons/ui/check-circle.svg",

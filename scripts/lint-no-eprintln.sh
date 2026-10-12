@@ -44,6 +44,7 @@ SCAN_DIRS=(
     "packages/flow-edit/src"
     "packages/transcript/src"
     "packages/chat/src"
+    "packages/settings/src"
     "packages/agent/src"
     "packages/ghostty-vt/src"
     "packages/ghostty-vt-sys/src"
