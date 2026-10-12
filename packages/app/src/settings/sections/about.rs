@@ -13,7 +13,7 @@
 use crate::surface::strings as s;
 use crate::ui::Disableable as _;
 use crate::ui::theme;
-use crate::update::AutoUpdateStatus;
+use crate::update::{AutoUpdateStatus, InstallGate};
 use gpui::{ClickEvent, IntoElement, SharedString, div, prelude::*, px};
 
 use super::super::{SettingsView, settings_button as button};
@@ -97,10 +97,7 @@ impl SettingsView {
         // free for the button listeners below.
         let entity = crate::update::Updater::get(cx);
         let status = entity.as_ref().map(|e| e.read(cx).status().clone());
-        let can_install = entity
-            .as_ref()
-            .map(|e| e.read(cx).can_install())
-            .unwrap_or(false);
+        let gate = entity.as_ref().map(|e| e.read(cx).install_gate().clone());
 
         let mut col = div()
             .flex()
@@ -143,16 +140,15 @@ impl SettingsView {
                         cx,
                     ))
                     .child(muted_line(SharedString::from(info.notes.clone()), cx));
-                // Install gate (C4): a dev / `cargo run` build has no
-                // `.app` bundle to swap, so offer no Update button —
-                // just an explanation.
-                if can_install {
-                    col = col.child(update_button(cx));
-                } else if cfg!(target_os = "linux") {
-                    col = col.child(muted_line(s::settings::update_manual_package(), cx));
-                } else {
-                    col = col.child(muted_line(s::settings::update_dev_build(), cx));
-                }
+                col = match gate {
+                    Some(InstallGate::Target(_)) => col.child(update_button(cx)),
+                    Some(InstallGate::ManualPackage) => {
+                        col.child(muted_line(s::settings::update_manual_package(), cx))
+                    }
+                    Some(InstallGate::Unpackaged) | None => {
+                        col.child(muted_line(s::settings::update_dev_build(), cx))
+                    }
+                };
             }
             Some(AutoUpdateStatus::Downloading) => {
                 col = col.child(muted_line(s::settings::update_downloading(), cx));
