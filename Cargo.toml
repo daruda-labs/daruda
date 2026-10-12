@@ -32,7 +32,9 @@ gpui_linux = { git = "https://github.com/zed-industries/zed", package = "gpui_li
 # zed's own OS-dispatch wrapper (`current_platform`/`application`) over
 # gpui_macos/gpui_linux/gpui_windows — lets `bootstrap.rs` build the
 # `gpui::Application` without `#[cfg(target_os = ...)]` of its own.
-gpui_platform = { git = "https://github.com/zed-industries/zed", package = "gpui_platform", rev = "193b55aa3aa71accf0dcd78709ee164a8ca42d54", features = ["font-kit"] }
+# `x11` / `wayland` select gpui_linux's window backends; zed's workspace turns
+# its defaults off, so without them a Linux build opens no window at all.
+gpui_platform = { git = "https://github.com/zed-industries/zed", package = "gpui_platform", rev = "193b55aa3aa71accf0dcd78709ee164a8ca42d54", features = ["font-kit", "x11", "wayland"] }
 
 daruda_acp = { path = "packages/acp" }
 daruda_agent = { path = "packages/agent" }

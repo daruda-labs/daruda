@@ -98,7 +98,7 @@ see [CONTRIBUTING.md](CONTRIBUTING.md).
 | Area | Status |
 |---|---|
 | macOS runtime | Primary supported target, Apple Silicon and Intel |
-| Linux | Builds and tests pass; GUI runtime still needs desktop verification |
+| Linux | Builds and tests pass; CI opens the window under Xvfb and weston; a real desktop (input, IME, menus) is still unverified |
 | Windows | Native x86_64 ZIP and installer; experimental GUI support with CI build, test, and smoke checks |
 | ACP chat sessions | Shipped for configured ACP agents |
 | Claude Code integration | Status, usage, skills, tools, and task launching shipped |

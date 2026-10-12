@@ -166,6 +166,10 @@ jobs:
       # covers Hangul. Latin faces are already there (`fonts-dejavu-core`
       # reports "already the newest version"), named anyway so the suite does
       # not silently depend on what the runner image happens to carry.
+      # The last five are for the smoke runs below, not the build: the
+      # runner has no GPU, so `mesa-vulkan-drivers` supplies lavapipe for
+      # wgpu to draw with, and Xvfb / weston stand in for the X11 and
+      # Wayland servers a desktop would have.
       - name: Install system dependencies
         run: |
           sudo apt-get update
@@ -176,7 +180,12 @@ jobs:
             libxkbcommon-x11-dev \
             libglib2.0-dev \
             fonts-dejavu-core \
-            fonts-noto-cjk
+            fonts-noto-cjk \
+            libvulkan1 \
+            mesa-vulkan-drivers \
+            libegl1 \
+            xvfb \
+            weston
 
       - name: Cache rustup toolchain
         uses: actions/cache@v5
@@ -235,6 +244,41 @@ jobs:
       - name: Test
         shell: bash
         run: bash ./scripts/ci-cargo.sh test --no-fail-fast
+
+      # Built once here so the two timed runs below only have to start it.
+      - name: Build the desktop binary
+        run: cargo build --locked -p daruda
+
+      # What a build and a test never prove: that gpui's X11 and Wayland
+      # clients come up and draw, which `--smoke` answers with its exit
+      # code. Both servers, because each is its own backend.
+      - name: Smoke-test the window (X11)
+        timeout-minutes: 5
+        run: xvfb-run --auto-servernum --server-args="-screen 0 1280x800x24" target/debug/daruda --smoke
+
+      - name: Start a headless Wayland compositor
+        run: |
+          set -euo pipefail
+          export XDG_RUNTIME_DIR="$RUNNER_TEMP/xdg-runtime"
+          mkdir -p "$XDG_RUNTIME_DIR"
+          chmod 700 "$XDG_RUNTIME_DIR"
+          weston --backend=headless-backend.so --socket=wayland-1 --idle-time=0 --log="$RUNNER_TEMP/weston.log" &
+          for _ in $(seq 1 50); do
+            [ -S "$XDG_RUNTIME_DIR/wayland-1" ] && break
+            sleep 0.2
+          done
+          test -S "$XDG_RUNTIME_DIR/wayland-1"
+          echo "XDG_RUNTIME_DIR=$XDG_RUNTIME_DIR" >> "$GITHUB_ENV"
+
+      - name: Smoke-test the window (Wayland)
+        timeout-minutes: 5
+        env:
+          WAYLAND_DISPLAY: wayland-1
+        run: target/debug/daruda --smoke
+
+      - name: Show the compositor log
+        if: failure()
+        run: cat "$RUNNER_TEMP/weston.log" || true
 
   windows:
     name: Windows — build and test
