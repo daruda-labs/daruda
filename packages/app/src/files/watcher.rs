@@ -10,7 +10,7 @@
 
 use std::path::{Path, PathBuf};
 use std::sync::mpsc;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use notify::{Event, EventKind};
 
@@ -66,80 +66,65 @@ fn debounce_loop(
     raw_rx: mpsc::Receiver<Result<Event, String>>,
     out_tx: mpsc::Sender<DebouncedEvent>,
 ) {
-    loop {
-        // Block until the first event arrives — thread parks here
-        // when the filesystem is idle (0 CPU).
-        let first = match raw_rx.recv() {
-            Ok(Ok(ev)) => ev,
-            Ok(Err(msg)) => {
-                let _ = out_tx.send(DebouncedEvent::Error(msg));
-                continue;
-            }
-            Err(_) => return,
-        };
-        let mut changed: Vec<PathBuf> = Vec::new();
-        let mut removed: Vec<PathBuf> = Vec::new();
-        let mut bulk = classify(first, &mut changed, &mut removed);
-        let deadline = Instant::now() + DEBOUNCE_WINDOW;
-
-        loop {
-            let now = Instant::now();
-            if now >= deadline {
-                break;
-            }
-            match raw_rx.recv_timeout(deadline - now) {
-                Ok(Ok(ev)) => bulk |= classify(ev, &mut changed, &mut removed),
-                Ok(Err(msg)) => {
-                    flush_batch(&mut bulk, &mut changed, &mut removed, &out_tx);
-                    let _ = out_tx.send(DebouncedEvent::Error(msg));
-                }
-                Err(mpsc::RecvTimeoutError::Timeout) => break,
-                Err(mpsc::RecvTimeoutError::Disconnected) => {
-                    flush_batch(&mut bulk, &mut changed, &mut removed, &out_tx);
-                    return;
-                }
-            }
-        }
-        flush_batch(&mut bulk, &mut changed, &mut removed, &out_tx);
-    }
-}
-
-/// Route `notify::EventKind::Remove(_)` to `removed`; everything else
-/// (Create / Modify / Access / Any / Other) to `changed`. Path-level
-/// granularity — a single `Event` may carry multiple paths, all of the
-/// same kind by notify's contract. Paths inside `.git/` are dropped at
-/// this step (see module docs).
-fn classify(ev: Event, changed: &mut Vec<PathBuf>, removed: &mut Vec<PathBuf>) -> bool {
-    if ev.need_rescan() {
-        return true;
-    }
-    let remaining = BULK_THRESHOLD.saturating_sub(changed.len() + removed.len());
-    let bucket = if matches!(ev.kind, EventKind::Remove(_)) {
-        removed
-    } else {
-        changed
-    };
-    bucket.extend(
-        ev.paths
-            .into_iter()
-            .filter(|p| !path_inside_git_dir(p))
-            .take(remaining),
+    super::debounce::debounce(
+        raw_rx,
+        DEBOUNCE_WINDOW,
+        Batch::absorb,
+        |batch| batch.flush(&out_tx),
+        |msg| {
+            let _ = out_tx.send(DebouncedEvent::Error(msg));
+        },
     );
-    false
 }
 
-fn flush_batch(
-    bulk: &mut bool,
-    changed: &mut Vec<PathBuf>,
-    removed: &mut Vec<PathBuf>,
-    tx: &mpsc::Sender<DebouncedEvent>,
-) {
-    if std::mem::take(bulk) {
-        changed.clear();
-        removed.clear();
-        let _ = tx.send(DebouncedEvent::Bulk);
-    } else {
-        flush(changed, removed, tx);
+/// Paths gathered in one debounce window, or `bulk` once a rescan asked for
+/// the whole tree.
+#[derive(Default)]
+struct Batch {
+    bulk: bool,
+    changed: Vec<PathBuf>,
+    removed: Vec<PathBuf>,
+}
+
+impl Batch {
+    /// Route `notify::EventKind::Remove(_)` to `removed`; everything else
+    /// (Create / Modify / Access / Any / Other) to `changed`. Paths inside
+    /// `.git/` are dropped here (see module docs).
+    fn absorb(&mut self, ev: Event) {
+        if ev.need_rescan() {
+            self.bulk = true;
+            return;
+        }
+        let remaining = BULK_THRESHOLD.saturating_sub(self.changed.len() + self.removed.len());
+        let bucket = if matches!(ev.kind, EventKind::Remove(_)) {
+            &mut self.removed
+        } else {
+            &mut self.changed
+        };
+        bucket.extend(
+            ev.paths
+                .into_iter()
+                .filter(|p| !path_inside_git_dir(p))
+                .take(remaining),
+        );
+    }
+
+    fn flush(self, tx: &mpsc::Sender<DebouncedEvent>) {
+        let total = self.changed.len() + self.removed.len();
+        if self.bulk || total >= BULK_THRESHOLD {
+            let _ = tx.send(DebouncedEvent::Bulk);
+            return;
+        }
+        if !self.removed.is_empty() {
+            let _ = tx.send(DebouncedEvent::Removed {
+                paths: self.removed,
+            });
+        }
+        if !self.changed.is_empty() {
+            let _ = tx.send(DebouncedEvent::Changed {
+                paths: self.changed,
+            });
+        }
     }
 }
 
@@ -149,33 +134,6 @@ fn flush_batch(
 fn path_inside_git_dir(path: &Path) -> bool {
     path.components()
         .any(|c| c.as_os_str() == std::ffi::OsStr::new(".git"))
-}
-
-fn flush(
-    changed: &mut Vec<PathBuf>,
-    removed: &mut Vec<PathBuf>,
-    tx: &mpsc::Sender<DebouncedEvent>,
-) {
-    let total = changed.len() + removed.len();
-    if total == 0 {
-        return;
-    }
-    if total >= BULK_THRESHOLD {
-        changed.clear();
-        removed.clear();
-        let _ = tx.send(DebouncedEvent::Bulk);
-        return;
-    }
-    if !removed.is_empty() {
-        let _ = tx.send(DebouncedEvent::Removed {
-            paths: std::mem::take(removed),
-        });
-    }
-    if !changed.is_empty() {
-        let _ = tx.send(DebouncedEvent::Changed {
-            paths: std::mem::take(changed),
-        });
-    }
 }
 
 #[cfg(test)]
@@ -315,7 +273,7 @@ mod tests {
     }
 
     #[test]
-    fn classify_drops_git_internal_paths() {
+    fn absorb_drops_git_internal_paths() {
         let ev = Event {
             kind: EventKind::Any,
             paths: vec![
@@ -325,11 +283,10 @@ mod tests {
             ],
             attrs: EventAttributes::new(),
         };
-        let mut changed: Vec<PathBuf> = Vec::new();
-        let mut removed: Vec<PathBuf> = Vec::new();
-        classify(ev, &mut changed, &mut removed);
-        assert_eq!(changed, vec![PathBuf::from("/repo/src/main.rs")]);
-        assert!(removed.is_empty());
+        let mut batch = Batch::default();
+        batch.absorb(ev);
+        assert_eq!(batch.changed, vec![PathBuf::from("/repo/src/main.rs")]);
+        assert!(batch.removed.is_empty());
     }
 
     #[test]

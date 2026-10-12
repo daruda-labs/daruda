@@ -13,7 +13,7 @@
 
 use std::path::{Path, PathBuf};
 use std::sync::mpsc;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use notify::Event;
 
@@ -142,48 +142,19 @@ fn debounce_loop(
     raw_rx: mpsc::Receiver<Result<Event, String>>,
     out_tx: mpsc::Sender<GitDirEvent>,
 ) {
-    loop {
-        // Block until the first event arrives — the thread parks here at
-        // zero CPU while nothing touches the repository.
-        let first = match raw_rx.recv() {
-            Ok(Ok(event)) => event,
-            Ok(Err(error)) => {
-                let _ = out_tx.send(GitDirEvent::Error(error));
-                continue;
+    super::debounce::debounce(
+        raw_rx,
+        GIT_DIR_DEBOUNCE_WINDOW,
+        |signal: &mut GitDirSignal, event| signal.merge(signal_for(git_dir, &event)),
+        |signal| {
+            if !signal.is_empty() {
+                let _ = out_tx.send(GitDirEvent::Changed(signal));
             }
-            Err(_) => return,
-        };
-        let mut signal = signal_for(git_dir, &first);
-        let deadline = Instant::now() + GIT_DIR_DEBOUNCE_WINDOW;
-
-        loop {
-            let now = Instant::now();
-            if now >= deadline {
-                break;
-            }
-            match raw_rx.recv_timeout(deadline - now) {
-                Ok(Ok(event)) => signal.merge(signal_for(git_dir, &event)),
-                Ok(Err(error)) => {
-                    flush_signal(&mut signal, &out_tx);
-                    let _ = out_tx.send(GitDirEvent::Error(error));
-                }
-                Err(mpsc::RecvTimeoutError::Timeout) => break,
-                Err(mpsc::RecvTimeoutError::Disconnected) => {
-                    flush_signal(&mut signal, &out_tx);
-                    return;
-                }
-            }
-        }
-        flush_signal(&mut signal, &out_tx);
-    }
-}
-
-fn flush_signal(signal: &mut GitDirSignal, out_tx: &mpsc::Sender<GitDirEvent>) {
-    if signal.is_empty() {
-        return;
-    }
-    let _ = out_tx.send(GitDirEvent::Changed(*signal));
-    *signal = GitDirSignal::default();
+        },
+        |error| {
+            let _ = out_tx.send(GitDirEvent::Error(error));
+        },
+    );
 }
 
 /// Merge every path in one event into a single signal. Paths outside

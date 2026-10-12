@@ -317,7 +317,7 @@ impl Workspace {
             return;
         }
         // Decide whether to refresh *before* the match consumes `ev`. This
-        // watcher never carries `.git/` paths (`classify` drops them, and
+        // watcher never carries `.git/` paths (`Batch::absorb` drops them, and
         // `git_ops::watch` owns them instead), so every event but a watcher
         // failure is a real working-tree change.
         let should_refresh_git_status = !matches!(ev, DebouncedEvent::Error(_));
@@ -345,11 +345,11 @@ impl Workspace {
                 // reload the parent normally.
                 let Some(root) = root.clone() else { return };
                 if let Some(tree) = self.lane_file_tree_mut(wt_ref) {
-                    // FSEvents reports the resolved path; the root is as the
-                    // lane was opened, which may run through a symlink.
+                    // The watcher reports paths in its root's spelling, and
+                    // it was started from the same `wt.path` as this tree.
                     for abs in paths {
-                        if let Some(rel) = daruda_core::path::strip_root(&abs, &root) {
-                            tree.remove_subtree(&rel);
+                        if let Ok(rel) = abs.strip_prefix(&root) {
+                            tree.remove_subtree(rel);
                         }
                     }
                 }
@@ -507,8 +507,8 @@ impl Workspace {
                         let parent_id = this
                             .update(cx, |ws, _| {
                                 let tree = ws.lane_file_tree(wt_ref)?;
-                                let rel = daruda_core::path::strip_root(&abs, &tree.root)?;
-                                tree.id_for_path(&rel)
+                                let rel = abs.strip_prefix(&tree.root).ok()?;
+                                tree.id_for_path(rel)
                             })
                             .ok()
                             .flatten();
