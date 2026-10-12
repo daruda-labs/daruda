@@ -1717,7 +1717,7 @@ settings:
   update_error: "Update failed: %{msg}"
   update_dev_build: "Updates are only available in a packaged build."
   update_manual_package: "Download the new release from GitHub and reinstall the package to update."
-  update_available_toast: "New version %{version} is available — open Settings › About to update."
+  update_available_toast: "New version %{version} is available — see Settings › About."
   # Status-bar / error-banner copy for the project-config flow.
   project_config_no_project: "Open a project first — project config has nowhere to live."
   project_config_no_dir: "Cannot resolve project config directory."

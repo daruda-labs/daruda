@@ -1,6 +1,6 @@
 [Desktop Entry]
 Type=Application
-Name=daruda
+Name=Daruda
 GenericName=AI agent workspace
 Comment=Run AI coding agents in parallel, each in its own git worktree
 Exec=daruda
