@@ -4,11 +4,7 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT_DIR"
 
-# Read version from [workspace.package] — single source of truth.
-DARUDA_VERSION=$(grep -A20 '^\[workspace\.package\]' Cargo.toml \
-  | grep '^version' \
-  | head -1 \
-  | sed 's/version = "\(.*\)"/\1/')
+DARUDA_VERSION=$(./scripts/version.sh)
 
 echo "Building daruda ${DARUDA_VERSION} (release)..."
 cargo build --locked -p daruda --release

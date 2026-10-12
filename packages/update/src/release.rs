@@ -54,19 +54,18 @@ fn normalize_tag(tag: &str) -> &str {
 /// A suffix rather than a whole name: the release workflow spells the version
 /// into the file, and matching it here would repeat what the tag already says.
 pub fn asset_suffix() -> Option<&'static str> {
-    asset_suffix_for(std::env::consts::OS)
+    asset_suffix_for(std::env::consts::OS, std::env::consts::ARCH)
 }
 
-/// [`asset_suffix`] with the host as a value, so the Windows answer is
-/// checked from a macOS run. Kept next to `.github/workflows/release.yml`,
-/// which is what actually names these files.
-fn asset_suffix_for(os: &str) -> Option<&'static str> {
-    match os {
-        "macos" => Some(".dmg"),
-        "windows" => Some("-windows-x86_64.zip"),
-        // The portable archive, not the .deb: a package manager's install
-        // is replaced through the package manager, and this only announces.
-        "linux" => Some("-linux-x86_64.tar.gz"),
+/// [`asset_suffix`] with the host as a value, so every answer is checked
+/// from any one host. Kept next to `.github/workflows/release.yml`, which is
+/// what actually names these files; an arch it does not build gets `None`.
+fn asset_suffix_for(os: &str, arch: &str) -> Option<&'static str> {
+    match (os, arch) {
+        ("macos", _) => Some(".dmg"),
+        ("windows", "x86_64") => Some("-windows-x86_64.zip"),
+        // The tar.gz rather than the .deb: Linux is announced, not replaced.
+        ("linux", "x86_64") => Some("-linux-x86_64.tar.gz"),
         _ => None,
     }
 }
@@ -179,7 +178,8 @@ mod tests {
 
     fn url_for(os: &str) -> Result<String, UpdateError> {
         let current = semver::Version::parse("0.2.0").unwrap();
-        let suffix = asset_suffix_for(os).ok_or(UpdateError::NoPackageForPlatform("test"))?;
+        let suffix =
+            asset_suffix_for(os, "x86_64").ok_or(UpdateError::NoPackageForPlatform("test"))?;
         Ok(
             parse_release_with_suffix(ALL_PACKAGES_JSON, &current, suffix)
                 .unwrap()
@@ -203,7 +203,16 @@ mod tests {
             url_for("freebsd"),
             Err(UpdateError::NoPackageForPlatform(_))
         ));
-        assert_eq!(asset_suffix_for("freebsd"), None);
+        assert_eq!(asset_suffix_for("freebsd", "x86_64"), None);
+    }
+
+    /// Only x86_64 is built for Windows and Linux; an arm64 build offered the
+    /// x86_64 package would install something it cannot run.
+    #[test]
+    fn an_arch_without_a_package_is_not_offered_another() {
+        assert_eq!(asset_suffix_for("linux", "aarch64"), None);
+        assert_eq!(asset_suffix_for("windows", "aarch64"), None);
+        assert_eq!(asset_suffix_for("macos", "aarch64"), Some(".dmg"));
     }
 
     /// The suffix must not match the other platform's file: `.dmg` and
@@ -215,8 +224,11 @@ mod tests {
         let mac_only = "{\"tag_name\": \"v0.3.0\", \"assets\": [\
             { \"name\": \"daruda-0.3.0.dmg\", \"browser_download_url\": \"https://github.com/d/mac\" }]}";
 
-        let result =
-            parse_release_with_suffix(mac_only, &current, asset_suffix_for("windows").unwrap());
+        let result = parse_release_with_suffix(
+            mac_only,
+            &current,
+            asset_suffix_for("windows", "x86_64").unwrap(),
+        );
 
         assert!(matches!(result, Err(UpdateError::NoAssetForPlatform(_))));
     }

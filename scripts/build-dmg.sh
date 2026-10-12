@@ -15,10 +15,7 @@ if ! command -v create-dmg &>/dev/null; then
     exit 1
 fi
 
-DARUDA_VERSION=$(grep -A20 '^\[workspace\.package\]' Cargo.toml \
-  | grep '^version' \
-  | head -1 \
-  | sed 's/version = "\(.*\)"/\1/')
+DARUDA_VERSION=$(./scripts/version.sh)
 
 DMG_NAME="daruda-${DARUDA_VERSION}.dmg"
 DMG_OUT="target/release/${DMG_NAME}"

@@ -26,9 +26,7 @@ jobs:
         id: version
         shell: bash
         run: |
-          VERSION=$(grep -A20 '^\[workspace\.package\]' Cargo.toml \
-            | grep '^version' | head -1 | sed 's/version = "\(.*\)"/\1/')
-          test -n "$VERSION"
+          VERSION=$(./scripts/version.sh)
           if [ "$GITHUB_EVENT_NAME" = "push" ] && [ "$GITHUB_REF_NAME" != "v$VERSION" ]; then
             echo "Tag $GITHUB_REF_NAME does not match Cargo.toml version $VERSION" >&2
             exit 1
@@ -47,36 +45,10 @@ jobs:
         with:
           submodules: recursive
 
-      - name: Cache rustup toolchain
-        uses: actions/cache@v5
+      - name: Set up the build toolchain
+        uses: ./.github/actions/setup-build
         with:
-          path: ~/.rustup/toolchains
-          key: rustup-1.95-${{ runner.os }}-${{ runner.arch }}
-
-      - name: Install Rust
-        uses: dtolnay/rust-toolchain@stable
-        with:
-          toolchain: "1.95"
-
-      - name: Cache Rust build
-        uses: Swatinem/rust-cache@v2.9.1
-        with:
-          key: release
-
-      - name: Cache Zig
-        uses: actions/cache@v5
-        with:
-          path: .context/zig
-          key: zig-0.14.1-${{ runner.os }}-${{ runner.arch }}
-
-      - name: Install Zig 0.14.1
-        run: ./scripts/bootstrap-zig.sh
-
-      - name: Add Zig to PATH
-        run: echo "$GITHUB_WORKSPACE/.context/zig/0.14.1" >> "$GITHUB_PATH"
-
-      - name: Fetch locked dependencies and verify GPUI source
-        run: cargo fetch --locked && cargo run --locked -p vendor_gpui -- --check
+          cache-key: release
 
       - name: Build .app bundle
         run: ./scripts/build-app.sh
@@ -117,39 +89,10 @@ jobs:
         with:
           submodules: recursive
 
-      - name: Cache rustup toolchain
-        uses: actions/cache@v5
+      - name: Set up the build toolchain
+        uses: ./.github/actions/setup-build
         with:
-          path: ~/.rustup/toolchains
-          key: rustup-1.95-${{ runner.os }}-${{ runner.arch }}
-
-      - name: Install Rust
-        uses: dtolnay/rust-toolchain@stable
-        with:
-          toolchain: "1.95"
-
-      - name: Cache Rust build
-        uses: Swatinem/rust-cache@v2.9.1
-        with:
-          key: release-windows
-
-      - name: Cache Zig
-        uses: actions/cache@v5
-        with:
-          path: .context/zig
-          key: zig-0.14.1-${{ runner.os }}-${{ runner.arch }}
-
-      - name: Install Zig 0.14.1
-        run: ./scripts/bootstrap-zig.ps1
-
-      - name: Add Zig to PATH
-        run: Add-Content $env:GITHUB_PATH "$env:GITHUB_WORKSPACE/.context/zig/0.14.1"
-
-      - name: Fetch locked dependencies
-        run: cargo fetch --locked
-
-      - name: Verify vendored GPUI
-        run: cargo run --locked -p vendor_gpui -- --check
+          cache-key: release-windows
 
       - name: Prepare Windows signing identity
         id: signing
@@ -242,58 +185,17 @@ jobs:
         with:
           submodules: recursive
 
-      # The build list matches ci.yml; the rest is packaging (imagemagick for
-      # the icon sizes, dpkg-dev for dpkg-shlibdeps, desktop-file-utils) and
-      # the smoke runs (lavapipe for a GPU-less runner, Xvfb for a display).
+      # Packaging adds imagemagick (icon sizes), dpkg-dev (dpkg-shlibdeps)
+      # and desktop-file-utils to the build and smoke lists CI uses.
       - name: Install system dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends \
-            libfontconfig-dev \
-            libwayland-dev \
-            libx11-xcb-dev \
-            libxkbcommon-x11-dev \
-            libglib2.0-dev \
-            fonts-dejavu-core \
-            imagemagick \
-            dpkg-dev \
-            desktop-file-utils \
-            jq \
-            libvulkan1 \
-            mesa-vulkan-drivers \
-            libegl1 \
-            xvfb
+        run: >-
+          ./scripts/linux/apt-install.sh scripts/linux/build-deps.txt
+          scripts/linux/smoke-deps.txt imagemagick dpkg-dev desktop-file-utils jq
 
-      - name: Cache rustup toolchain
-        uses: actions/cache@v5
+      - name: Set up the build toolchain
+        uses: ./.github/actions/setup-build
         with:
-          path: ~/.rustup/toolchains
-          key: rustup-1.95-${{ runner.os }}-${{ runner.arch }}
-
-      - name: Install Rust
-        uses: dtolnay/rust-toolchain@stable
-        with:
-          toolchain: "1.95"
-
-      - name: Cache Rust build
-        uses: Swatinem/rust-cache@v2.9.1
-        with:
-          key: release-linux
-
-      - name: Cache Zig
-        uses: actions/cache@v5
-        with:
-          path: .context/zig
-          key: zig-0.14.1-${{ runner.os }}-${{ runner.arch }}
-
-      - name: Install Zig 0.14.1
-        run: ./scripts/bootstrap-zig.sh
-
-      - name: Add Zig to PATH
-        run: echo "$GITHUB_WORKSPACE/.context/zig/0.14.1" >> "$GITHUB_PATH"
-
-      - name: Fetch locked dependencies and verify GPUI source
-        run: cargo fetch --locked && cargo run --locked -p vendor_gpui -- --check
+          cache-key: release-linux
 
       - name: Validate the desktop entry
         run: desktop-file-validate scripts/linux/daruda.desktop
@@ -308,7 +210,7 @@ jobs:
         run: |
           sudo apt-get install -y '${{ steps.package.outputs.deb }}'
           dpkg-query -W -f='${Package} ${Version}\nDepends: ${Depends}\n' daruda
-          xvfb-run --auto-servernum --server-args="-screen 0 1280x800x24" /usr/bin/daruda --smoke
+          ./scripts/linux/smoke.sh x11 /usr/bin/daruda
 
       - name: Smoke-test the portable archive
         timeout-minutes: 5
@@ -318,7 +220,7 @@ jobs:
           tar -xzf '${{ steps.package.outputs.archive }}' -C "$out"
           bin=$(find "$out" -type f -name daruda | head -1)
           test -n "$bin" || { echo 'the archive contains no daruda binary'; exit 1; }
-          xvfb-run --auto-servernum --server-args="-screen 0 1280x800x24" "$bin" --smoke
+          ./scripts/linux/smoke.sh x11 "$bin"
 
       - name: Upload Linux packages
         uses: actions/upload-artifact@v7

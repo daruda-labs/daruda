@@ -22,10 +22,8 @@ for tool in jq convert dpkg-deb dpkg-shlibdeps; do
     command -v "$tool" >/dev/null || { echo "$tool is required" >&2; exit 1; }
 done
 
-metadata=$(cargo metadata --locked --no-deps --format-version 1)
-VERSION=$(jq -r '.packages[] | select(.name == "daruda") | .version' <<<"$metadata")
-TARGET_DIR=$(jq -r '.target_directory' <<<"$metadata")
-[ -n "$VERSION" ] && [ "$VERSION" != null ] || { echo "Cannot determine the daruda version" >&2; exit 1; }
+VERSION=$(./scripts/version.sh)
+TARGET_DIR=$(cargo metadata --locked --no-deps --format-version 1 | jq -er '.target_directory')
 
 case "$(uname -m)" in
     x86_64) ARCH=x86_64; DEB_ARCH=amd64 ;;
@@ -104,8 +102,9 @@ DEPENDS=$(
 )
 rm -rf "$DEB/debian"
 [ -n "$DEPENDS" ] || { echo "dpkg-shlibdeps produced no dependency list" >&2; exit 1; }
-# wgpu opens the Vulkan loader at runtime, so no NEEDED entry names it.
-DEPENDS="$DEPENDS, libvulkan1"
+# Opened at runtime, so no NEEDED entry names them: wgpu's Vulkan loader,
+# and the Wayland client libraries gpui loads through wayland-backend's dlopen.
+DEPENDS="$DEPENDS, libvulkan1, libwayland-client0, libwayland-cursor0"
 
 # A Debian version has no `-`; a prerelease tag's becomes `~`, which also
 # sorts before the release it precedes.

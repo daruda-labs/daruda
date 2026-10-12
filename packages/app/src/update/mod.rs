@@ -6,8 +6,10 @@
 //! machine and the mandatory off-main-thread execution of the blocking
 //! `daruda_update` calls.
 
+mod install_target;
 mod installer;
 mod updater;
+pub use install_target::{InstallGate, InstallTarget};
 pub use installer::InstallerTarget;
 
 pub use updater::*;
