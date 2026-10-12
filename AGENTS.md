@@ -21,7 +21,7 @@ subsystem's real constraints are written down.
 |---|---|
 | **Anything at all, before committing** | [Pre-commit checks](#pre-commit-checks) · [Verification](#verification) |
 | **Terminal, VT parsing, PTY, scrollback** | `packages/terminal/src/view/CLAUDE.md` · [Pitfalls](#pitfall-prevention-rules) 1 (coordinates), 3 (Zig FFI), 7 (text↔pixel), 8 (paint scope), 9 (palette) |
-| **Agent chat, ACP, adapters, wire log** | `packages/acp/CLAUDE.md` · [Pitfall](#pitfall-prevention-rules) 11 (single activity source) |
+| **Agent chat, ACP, adapters, wire log** | `packages/chat/CLAUDE.md` · `packages/transcript/CLAUDE.md` · `packages/acp/CLAUDE.md` · [Pitfall](#pitfall-prevention-rules) 11 (single activity source) |
 | **A widget, a modal, anything visual** | `packages/ui/CLAUDE.md` · [`DESIGN.md`](./DESIGN.md) · [Pitfalls](#pitfall-prevention-rules) 10 (render cost), 12 (mouse buttons) |
 | **Workspace layout — tabs, panes, docks** | `packages/app/src/CLAUDE.md` · [UI component hierarchy](#ui-component-hierarchy) · [MVU rules](#mvu-flavored-guiding-rules) |
 | **Any string a user will see** | `packages/app/locales/CLAUDE.md` |
@@ -81,7 +81,7 @@ cargo test -p ghostty_vt -p ghostty_vt_sys -p daruda_terminal -p daruda \
 ./scripts/lint-raw-mouse-button.sh --self-test
 ./scripts/lint-comment-length.sh
 RUSTDOCFLAGS="-D warnings" cargo doc --no-deps \
-  -p daruda_flow -p daruda_project -p daruda_ui -p daruda_control_types -p daruda_content -p daruda_flow_edit -p daruda_transcript -p daruda_core -p daruda_update -p ghostty_vt_sys \
+  -p daruda_flow -p daruda_project -p daruda_ui -p daruda_control_types -p daruda_content -p daruda_flow_edit -p daruda_transcript -p daruda_chat -p daruda_core -p daruda_update -p ghostty_vt_sys \
   -p ghostty_vt -p daruda_agent
 cargo run -p gen_acp_presets -- --check
 cargo clippy -p daruda --all-features --all-targets -- -D warnings
@@ -259,7 +259,7 @@ scripts/lint-raw-mouse-button.sh
 scripts/lint-raw-mouse-button.sh --self-test
 scripts/lint-comment-length.sh
 RUSTDOCFLAGS="-D warnings" cargo doc --no-deps \
-  -p daruda_flow -p daruda_project -p daruda_ui -p daruda_control_types -p daruda_content -p daruda_flow_edit -p daruda_transcript -p daruda_core -p daruda_update -p ghostty_vt_sys \
+  -p daruda_flow -p daruda_project -p daruda_ui -p daruda_control_types -p daruda_content -p daruda_flow_edit -p daruda_transcript -p daruda_chat -p daruda_core -p daruda_update -p ghostty_vt_sys \
   -p ghostty_vt -p daruda_agent
 cargo run -p gen_acp_presets -- --check
 cargo clippy -p daruda --all-features --all-targets -- -D warnings
@@ -288,12 +288,12 @@ What the `Linux` job carries that no lint could is the `#[cfg]` arms the macOS j
 
 Note: the `Lint` job gates fmt, the 9 lint scripts through `lint-platform-boundary.sh`, `lint-env-literals.sh` with its self-test, `lint-no-silent-update.sh`, and `lint-agent-activity.sh`. The platform jobs gate the clippy list above and the package-scoped `cargo test` list above; the `cargo doc` link check runs on macOS.
 
-The doc-link gate covers twelve crates rather than all of them: clippy does not
+The doc-link gate covers thirteen crates rather than all of them: clippy does not
 read intra-doc links, so a deleted item leaves a dangling `[`Name`]` in the
-prose that explains the module. These twelve are clean today; the rest carry a
+prose that explains the module. These thirteen are clean today; the rest carry a
 backlog and join the list a crate at a time as that is worked off. Measured
 2026-09-18: `daruda_config` 8, `daruda_store` 8, `daruda_terminal` 11,
-`daruda_acp` 16, `daruda` 85 — the app crate is most of what is left; 18 of those moved with the chat pane into `daruda_chat` (2026-10-12). `lint-render-purity.sh`, `lint-daruda-path-literals.sh`, `lint-file-size.sh`, `lint-mark-dirty-direct-call.sh`, `lint-fold-header.sh`, `lint-agent-list-sync.sh`, `lint-declarative-context-menu.sh`, `lint-acp-air-gate.sh`, `lint-raw-mouse-button.sh`, `lint-comment-length.sh`, and `gen_acp_presets -- --check` are local/reviewer checks not yet wired into CI.
+`daruda_acp` 16, `daruda` 85 — the app crate is most of what is left; 18 of those moved with the chat pane into `daruda_chat` (2026-10-12) and were fixed there. `lint-render-purity.sh`, `lint-daruda-path-literals.sh`, `lint-file-size.sh`, `lint-mark-dirty-direct-call.sh`, `lint-fold-header.sh`, `lint-agent-list-sync.sh`, `lint-declarative-context-menu.sh`, `lint-acp-air-gate.sh`, `lint-raw-mouse-button.sh`, `lint-comment-length.sh`, and `gen_acp_presets -- --check` are local/reviewer checks not yet wired into CI.
 
 `cargo clippy -p daruda --all-features` is on the list, and on all three platform jobs, because every feature is off by default: whatever only `screenshot` or `replay` reaches — the `*_for_shot` seams, `screenshot_scenario`'s two modules, `screenshot.rs` itself — is neither compiled nor linted by the plain clippy run above. A visibility-narrowing pass left the feature uncompilable for a while, and a clippy error in `screenshot.rs` then sat unnoticed for a week, with nothing to say so either time. `--all-features` rather than a named list, so a new feature is covered the day it lands.
 
@@ -509,7 +509,7 @@ gpui_component  →  daruda_core                         # vendored; shares the 
 
 `merman` (crates.io, MIT/Apache-2.0) is the mermaid → SVG renderer behind every ` ```mermaid ` fence in the file viewer and agent chat, pulled as a normal dependency of `daruda_content` (not vendored — no daruda-side patch needed) and validated against upstream Mermaid.js SVG baselines. Host theming goes through merman's renderer-level site config, not a document directive: `daruda_content`'s `mermaid_host_theme` builds the profile from a `MermaidPalette` (whose values `daruda_ui::mermaid_palette` resolves from the theme) and `visual::render_mermaid_svg` applies it with `with_host_theme`. A source that sets `theme` / `themeVariables` / `themeCSS` — in an `%%{init}%%` directive or under a leading `---` frontmatter block's `config:` mapping, the two places mermaid accepts a theme — opts out of daruda's **colours** (`source_declares_own_theme`), on the reasoning recorded there that merman's site config overrides the document's own config wholesale rather than merging per-field; a source that only tunes layout or behaviour keeps the host chrome. The opt-out stops at colour: `mermaid_render_profile` is applied unconditionally because the same profile also carries `htmlLabels: false` and the `ResvgSafe` pipeline, and resvg cannot paint the `<foreignObject>` labels merman emits without them — a diagram rendered profile-free comes back as boxes and arrows with every label blank. Both hosts (`file_view_pane::file_content` and `daruda_chat::reconcile`) reach it through `daruda_content::visual::render_mermaid_raster` → `merman::render::HeadlessRenderer::render_svg_sync`.
 
-Interactive Markdown has two independent rendering stacks. The file viewer uses `pulldown-cmark` to build its workspace-owned `MdBlock` / `MdSpan` IR and renders it in `file_view_pane/render/markdown/` (`prose.rs` compiles a span run, `inline.rs` / `block.rs` / `image.rs` render it, `selection.rs` carries the block-selection plumbing); agent chat goes through `crate::ui::markdown`, a wrapper over the vendored `gpui_component::text::TextView` and its mdast parser. A behavior intended for both hosts must be implemented in both stacks and added to the shared rendered-conformance table in `file_view_pane/render/markdown/layout_tests.rs`. Parser coverage for the file-viewer IR lives beside `parse_markdown` and must include semantic field states (`checked`, `loose`, ordered start), not enum variants alone.
+Interactive Markdown has two independent rendering stacks. The file viewer uses `pulldown-cmark` to build its workspace-owned `MdBlock` / `MdSpan` IR and renders it in `file_view_pane/render/markdown/` (`prose.rs` compiles a span run, `inline.rs` / `block.rs` / `image.rs` render it, `selection.rs` carries the block-selection plumbing); agent chat goes through `daruda_ui::markdown`, a wrapper over the vendored `gpui_component::text::TextView` and its mdast parser. A behavior intended for both hosts must be implemented in both stacks and added to the shared rendered-conformance table in `file_view_pane/render/markdown/layout_tests.rs`. Parser coverage for the file-viewer IR lives beside `parse_markdown` and must include semantic field states (`checked`, `loose`, ordered start), not enum variants alone.
 
 `daruda_config` and `daruda_agent` both depend on `daruda_store` for `persistence::default_data_dir()` (see Cross-profile data isolation below).
 

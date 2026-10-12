@@ -45,7 +45,7 @@ impl SessionConfig {
     /// those whose `description` exactly matches an entry of
     /// `hidden_descriptions` (the user's
     /// `[agent] hidden_config_option_descriptions` config). Presentation-only —
-    /// [`Self::config_options`] keeps the full set, so agent pushes and the
+    /// `config_options` keeps the full set, so agent pushes and the
     /// optimistic write path are unaffected.
     ///
     /// Matches on description rather than id because that is where an adapter

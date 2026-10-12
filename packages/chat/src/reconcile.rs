@@ -248,7 +248,7 @@ impl AgentChatView {
     /// scroll position. Mermaid rasters are re-themed by their own pass.
     ///
     /// The swap reaches the reconciler as a moved fingerprint (see
-    /// [`diff_theme_fingerprint`]), so this is a plain full pass — every embed
+    /// `diff_theme_fingerprint`), so this is a plain full pass — every embed
     /// whose inputs actually changed rebuilds, and nothing else does.
     ///
     /// Runs outside any window update: a global observer and the config-reload

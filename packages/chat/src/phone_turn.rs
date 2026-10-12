@@ -6,10 +6,11 @@
 //! where they agree: one value, owned by `AgentChatView`, that outlives the
 //! first response and remembers which message it carried.
 //!
-//! The state is sealed. [`PhoneTurn`] is a newtype over a private [`State`],
-//! so every transition goes through a method here and no caller can put a turn
-//! into a shape the relays would misread. GPUI-free: it reads `ChatItem`s and
-//! answers questions, and the Telegram relay renders and sends.
+//! The state is sealed. [`PhoneTurn`](crate::phone_turn::PhoneTurn) is a
+//! newtype over a private `State`, so every transition goes through a method
+//! here and no caller can put a turn into a shape the relays would misread.
+//! GPUI-free: it reads `ChatItem`s and answers questions, and the Telegram
+//! relay renders and sends.
 
 use daruda_acp::ChatItem;
 
@@ -78,7 +79,7 @@ enum State {
 ///
 /// # Known limitation
 ///
-/// [`Self::answer`] records that a report was *composed*, not that Telegram
+/// `answer` records that a report was *composed*, not that Telegram
 /// received it. A report can still be dropped downstream by the bridge gate
 /// (feature off, nobody paired). That gate is shared with the completion
 /// relay, so a closed gate drops both and the sender sees no difference; only

@@ -17,7 +17,7 @@ use daruda_transcript::fold_mode::FoldMode;
 /// depends on what the agent emits: one agent produces no reasoning at all,
 /// another produces it constantly. An axis the entry does not state falls
 /// straight to the built-in value — there is no layer between the two.
-/// [`Self::content_width`] and [`Self::tool_summary`] are the exceptions — see
+/// `content_width` and `tool_summary` are the exceptions — see
 /// [`ReaderDefaults`].
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub struct TranscriptDefaults {

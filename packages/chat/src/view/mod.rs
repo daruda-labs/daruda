@@ -108,7 +108,7 @@ pub enum AgentSessionStatus {
     /// reducer, rather than in `render` — the view only picks an affordance
     /// for a remedy it is handed. A locally-detected failure (no lane cwd, a
     /// blocked remote path) has nothing to offer and carries
-    /// [`Remedy::NoneAvailable`].
+    /// [`Remedy::NoneAvailable`](daruda_acp::Remedy::NoneAvailable).
     Error {
         message: String,
         remedy: daruda_acp::Remedy,
@@ -1187,7 +1187,8 @@ impl AgentChatView {
     ///
     /// Callers that hold a classified failure pass its
     /// [`remedy`](daruda_acp::AcpFailure::remedy); a locally-raised error with
-    /// nothing to offer passes [`Remedy::NoneAvailable`].
+    /// nothing to offer passes
+    /// [`Remedy::NoneAvailable`](daruda_acp::Remedy::NoneAvailable).
     pub fn set_error(
         &mut self,
         message: String,
@@ -1327,7 +1328,7 @@ pub enum LoadIntent {
 }
 
 impl AgentChatView {
-    /// The persisted form of [`Session`].
+    /// The persisted form of the pane's session — interactive, or a mirror.
     pub fn access(&self) -> daruda_store::tasks::AgentChatAccess {
         match &self.session {
             Session::Interactive(_) => daruda_store::tasks::AgentChatAccess::Interactive,
@@ -1351,7 +1352,7 @@ impl AgentChatView {
 
     /// The handle behind the pane, whatever its access — only for the replay
     /// bookkeeping a mirror still owes the adapter (cancelling permissions).
-    /// User input goes through [`Self::live_handle`].
+    /// User input goes through `live_handle`.
     pub fn any_handle(&self) -> Option<&AcpSessionHandle> {
         match &self.session {
             Session::Interactive(handle) | Session::Mirror { handle, .. } => handle.as_ref(),
