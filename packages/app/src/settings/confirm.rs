@@ -2,13 +2,13 @@
 //!
 //! Each button calls a `request_*` here instead of the action itself; the
 //! action runs only from the dialog's OK. See
-//! [`crate::workspace::dialog_helpers::confirm_destructive`] for the rule.
+//! [`crate::ui::dialog::confirm_destructive`] for the rule.
 
 use gpui::{Context, Window};
 
 use super::{AgentCatalogItem, SettingsView};
 use crate::surface::strings as s;
-use crate::workspace::dialog_helpers::confirm_destructive;
+use crate::ui::dialog::confirm_destructive;
 
 impl SettingsView {
     pub(super) fn request_clear_telegram_token(

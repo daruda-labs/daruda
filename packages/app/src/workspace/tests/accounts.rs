@@ -317,7 +317,8 @@ fn finish_codex_login(
     cx: &mut Context<Workspace>,
 ) -> AccountId {
     use crate::workspace::account_login_ops::PendingLogin;
-    use crate::workspace::account_login_ops::{LoginFinish, LoginTarget, next_login_attempt};
+    use crate::workspace::account_login_ops::{LoginFinish, next_login_attempt};
+    use daruda_agent::accounts::LoginTarget;
     // A real (near-instant) child process is the only way to build a
     // `LoginProcessHandle` — it has no other public constructor.
     let login = daruda_agent::accounts::spawn_login(

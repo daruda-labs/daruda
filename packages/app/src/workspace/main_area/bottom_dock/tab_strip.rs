@@ -385,7 +385,7 @@ fn delete_item(
             let tab_id = tab_id.clone();
             let body = format_delete_body(&current_name, widget_count);
             let callback_ws = workspace.clone();
-            crate::workspace::dialog_helpers::open_confirm_dialog(
+            crate::ui::dialog::open_confirm_dialog(
                 surface_strings::modal::delete_panel_tab_title(),
                 body,
                 surface_strings::common::btn_delete(),

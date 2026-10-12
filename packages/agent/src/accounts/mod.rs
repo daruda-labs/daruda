@@ -21,6 +21,7 @@ pub mod credentials;
 pub mod identity;
 pub mod layout;
 pub mod login;
+pub mod login_target;
 pub mod mcp_mirror;
 pub mod recipe;
 pub mod sweep;
@@ -38,6 +39,7 @@ pub use login::{
     LoginCompletion, LoginError, LoginOutcome, LoginProcess, LoginProcessHandle, WaitPolicy,
     is_oauth_denied, spawn_login,
 };
+pub use login_target::LoginTarget;
 pub use mcp_mirror::mirror_shared_mcp_servers;
 pub use recipe::{AccountRecipe, recipe_for};
 pub use sweep::sweep_orphan_dirs;

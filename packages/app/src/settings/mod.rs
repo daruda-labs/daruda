@@ -90,8 +90,8 @@ impl CopyFeedback {
 }
 
 /// What the view asks of whichever `Workspace` is showing it. Kept as an
-/// event rather than a handle so this module never points back at
-/// `crate::workspace` — the dependency runs one way.
+/// event rather than a handle so this module never points back at its host —
+/// the dependency runs one way.
 pub enum SettingsEvent {
     /// The user is done: Escape, or the sidebar's back button.
     Close,
@@ -102,6 +102,27 @@ pub enum SettingsEvent {
     /// Open the active project's config file, where `[shell]` can be
     /// overridden per project.
     OpenProjectConfig,
+    /// The accounts file was just written with this state; share it with
+    /// every window.
+    AccountsChanged(daruda_store::accounts::AccountsState),
+}
+
+/// How many open panes run under an account. Only the host can count them —
+/// they live in every window, not in Settings.
+pub type AccountUsage =
+    std::rc::Rc<dyn Fn(daruda_store::accounts::AccountId, &mut gpui::App) -> usize>;
+
+/// The state every window mirrors, as the host hands it to Settings when it
+/// opens. Each part is pushed again through its setter whenever it changes.
+#[derive(Default)]
+pub struct SharedSnapshot {
+    pub accounts: daruda_store::accounts::AccountsState,
+    pub account_login_busy: bool,
+    pub auth_statuses: std::collections::HashMap<
+        daruda_agent::accounts::LoginTarget,
+        daruda_agent::accounts::auth_status::AuthStatus,
+    >,
+    pub agent_vocabulary: daruda_store::agent_vocabulary::AgentVocabularyCache,
 }
 
 /// Which login an account row asked for.
@@ -182,30 +203,30 @@ pub struct SettingsView {
     /// decide on its own whether "the catalog" included the non-editable half,
     /// and the two that answered "no" disagreed with the rest.
     agent_catalog: Vec<AgentCatalogItem>,
-    /// What each agent last advertised on the mode / model axes. Mirrored from
-    /// the app-wide vocabulary Global so rows update while Settings remains
-    /// open. A row falls back to [`daruda_config::agent_vocabulary_seed`] per
+    /// What each agent last advertised on the mode / model axes, as the host
+    /// pushes it ([`Self::set_agent_vocabulary`]) so rows update while Settings
+    /// remains open. A row falls back to [`daruda_config::agent_vocabulary_seed`] per
     /// axis when this has nothing for its current id and command.
     pub(super) agent_vocabulary: daruda_store::agent_vocabulary::AgentVocabularyCache,
-    /// The hosting workspace's data dir — the store `agent_vocabulary` mirrors.
-    data_dir: std::path::PathBuf,
     /// The session host registry (`[[session_hosts]]`) in `config.toml`
     /// order — named, reusable SSH/Docker targets a lane's `session_host`
     /// can reference by id instead of repeating the same target/container
     /// as free text on every lane. See [`SessionHostRow`].
     session_host_rows: Vec<SessionHostRow>,
-    // Accounts snapshot loaded from `accounts.json` at construction;
-    // every write goes through the section's own
-    // `set_default_account`/`remove_account` handlers, which persist
-    // immediately and broadcast the new state to every open
-    // `Workspace` window. See `sections/accounts.rs`'s module doc.
+    // The accounts as the host hands them over ([`Self::set_accounts`]).
+    // Every write goes through the section's own handlers, which persist
+    // immediately and tell the host ([`SettingsEvent::AccountsChanged`]),
+    // which shares the new state with every window. See
+    // `sections/accounts.rs`'s module doc.
     accounts: daruda_store::accounts::AccountsState,
     account_login_busy: bool,
-    /// How each set of credentials was signed in, mirrored from
-    /// `auth_status_global`. A scope absent here has not been read yet, which
-    /// the rows show as nothing rather than as a claim.
+    /// How many open panes run under an account — asked before removing it.
+    account_usage: AccountUsage,
+    /// How each set of credentials was signed in, as the host pushes it
+    /// ([`Self::set_auth_statuses`]). A scope absent here has not been read
+    /// yet, which the rows show as nothing rather than as a claim.
     auth_statuses: std::collections::HashMap<
-        crate::workspace::auth_status_global::LoginTarget,
+        daruda_agent::accounts::LoginTarget,
         daruda_agent::accounts::auth_status::AuthStatus,
     >,
     // Render
@@ -332,17 +353,6 @@ pub struct SettingsView {
     /// changes. Clean forms reload immediately; a local draft is preserved
     /// for the same-field conflict flow.
     _settings_global_subscription: Subscription,
-    /// Refreshes every agent row's pickers when a Workspace observes a new
-    /// live vocabulary, including while this Settings window stays open.
-    _agent_vocabulary_global_subscription: Subscription,
-    /// Subscription that refreshes the `accounts` mirror + repaints whenever
-    /// the app-wide `AccountsGlobal` changes — so an add/reauth/default/
-    /// delete in any Workspace window shows here without a restart.
-    _accounts_global_subscription: Subscription,
-    /// Held, not dropped: an `observe_global` unsubscribes when its
-    /// `Subscription` falls out of scope, and the readings this one waits for
-    /// arrive *after* construction — every probe is a background subprocess.
-    _auth_status_subscription: Subscription,
     /// Subscription that calls `cx.notify()` whenever the `Updater`
     /// entity changes status — so the About page reflects check /
     /// download / install progress reactively. `None` when the updater
@@ -688,8 +698,47 @@ impl BoolSetting {
 }
 
 impl SettingsView {
-    pub fn new(data_dir: std::path::PathBuf, window: &mut Window, cx: &mut Context<Self>) -> Self {
-        Self::new_with_section(BuiltinSection::default(), data_dir, window, cx)
+    /// The accounts changed somewhere — this window, another one, a login —
+    /// so the rows and the orchestrator's account picker follow.
+    pub fn set_accounts(
+        &mut self,
+        accounts: daruda_store::accounts::AccountsState,
+        login_busy: bool,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.accounts = accounts;
+        self.account_login_busy = login_busy;
+        self.refresh_orchestrator_account_select(window, cx);
+        cx.notify();
+    }
+
+    /// A connection advertised new modes or models; every agent row's pickers
+    /// follow, including while Settings stays open.
+    pub fn set_agent_vocabulary(
+        &mut self,
+        vocabulary: daruda_store::agent_vocabulary::AgentVocabularyCache,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.agent_vocabulary = vocabulary;
+        for index in 0..self.agent_catalog.len() {
+            self.refresh_agent_row_vocabulary(index, window, cx);
+        }
+    }
+
+    /// New sign-in readings. They arrive after Settings opens: every probe is a
+    /// background subprocess.
+    pub fn set_auth_statuses(
+        &mut self,
+        statuses: std::collections::HashMap<
+            daruda_agent::accounts::LoginTarget,
+            daruda_agent::accounts::auth_status::AuthStatus,
+        >,
+        cx: &mut Context<Self>,
+    ) {
+        self.auth_statuses = statuses;
+        cx.notify();
     }
 
     /// The host's answer to whether it has a project to configure.
@@ -749,6 +798,11 @@ impl SettingsView {
     #[cfg(test)]
     pub(crate) fn project_open(&self) -> bool {
         self.project_open
+    }
+
+    #[cfg(test)]
+    pub(crate) fn accounts(&self) -> &daruda_store::accounts::AccountsState {
+        &self.accounts
     }
 
     pub fn active_section(&self) -> BuiltinSection {

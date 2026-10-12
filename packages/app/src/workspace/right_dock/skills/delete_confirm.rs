@@ -1,5 +1,5 @@
 //! Delete confirmation modal — routes through
-//! [`crate::workspace::dialog_helpers::open_confirm_dialog`] so every
+//! [`crate::ui::dialog::open_confirm_dialog`] so every
 //! confirm-style dialog in the app shares one opener (consistency
 //! with lane / panels delete confirmations).
 
@@ -12,8 +12,8 @@ use gpui::{Context, Window};
 use crate::agent::skills::{SkillScope, persist};
 use crate::surface::strings;
 use crate::ui::dialog::ButtonVariant;
+use crate::ui::dialog::open_confirm_dialog;
 use crate::workspace::Workspace;
-use crate::workspace::dialog_helpers::open_confirm_dialog;
 
 pub fn open_delete_skill_confirm(
     _ws: &mut Workspace,

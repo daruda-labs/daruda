@@ -1,5 +1,5 @@
 //! Delete confirmation for an MCP server entry — routes through
-//! [`crate::workspace::dialog_helpers::open_confirm_dialog`] so every
+//! [`crate::ui::dialog::open_confirm_dialog`] so every
 //! confirm-style dialog in the app shares one opener.
 
 use daruda_store::observability::error_report::{ErrorReport, ErrorSeverity};
@@ -8,8 +8,8 @@ use gpui::{Context, Window};
 use crate::agent::mcp::McpScope;
 use crate::surface::strings;
 use crate::ui::dialog::ButtonVariant;
+use crate::ui::dialog::open_confirm_dialog;
 use crate::workspace::Workspace;
-use crate::workspace::dialog_helpers::open_confirm_dialog;
 
 pub fn open_delete_mcp_server_confirm(
     ws: &mut Workspace,

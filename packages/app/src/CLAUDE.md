@@ -112,7 +112,8 @@ slot regardless of which fields are visible.
 `SettingsView` remains the one per-window entity that owns widget state and
 emits `SettingsEvent`. Its modules separate the reasons that state changes:
 
-- `initialize.rs` constructs widgets and installs global observers;
+- `initialize.rs` constructs widgets from the host's snapshot and observes
+  the stores Settings itself edits;
   `bindings.rs` owns ordinary input subscriptions and value synchronization.
 - `catalog/` owns agent rows, subscriptions, collection and saving. Its
   `validation.rs` is pure; `path_warning.rs` performs advisory executable
@@ -279,16 +280,15 @@ agent/ → lane/
 - `lane/` imports nothing from `workspace/`, `project/`, or `agent/`.
 - `project/` imports `lane/` only; nothing from `workspace/` or `agent/`.
 - `agent/` imports `lane/` only; nothing from `workspace/` or `project/`.
-- `settings/` holds no handle to its host and never calls a `Workspace`
-  method that changes state. It asks its own host by emitting
-  `SettingsEvent`, which `workspace/settings_ops.rs` answers, and it changes
-  what every window shares by writing a Global that lives under `workspace/`
-  (`accounts_global`, `auth_status_global`, `agent_vocabulary_global`) —
-  each window's observer then follows on its own. It may also use
-  `dialog_helpers`, and it may *query* windows through
-  `WindowRegistry::for_each_workspace` (the account-delete confirm counts
-  pinned panes with `panes_referencing_account`). Checkable: no `ws.<verb>`
-  that mutates inside `settings/`.
+- `settings/` imports nothing from `workspace/` or `window_registry`. It
+  talks to its host only through what `workspace/settings_ops.rs` hands it:
+  constructor inputs (a `SharedSnapshot` of the window-shared state and an
+  `AccountUsage` callback that counts pinned panes across windows), pushes
+  (`set_accounts` / `set_auth_statuses` / `set_agent_vocabulary`, from the
+  host's Global observers), and `SettingsEvent` for everything it asks or
+  changes — `AccountsChanged` is how an account write reaches every window.
+  Checkable: `rg 'crate::(workspace|window_registry)' settings/` outside
+  tests finds nothing.
 
 When a function references a lane across module boundaries, pass
 the full `daruda_store::project::LaneRef { project, lane }` —
@@ -297,7 +297,7 @@ project context is implicit in `self`.
 
 ### G9 — Modals go through `gpui_component::Dialog`
 
-- Every modal entity opens via `crate::workspace::dialog_helpers::*` — `open_form_modal` (entity owns full body), `open_single_field_dialog` (one input + OK/Cancel), `open_confirm_dialog` (title + body + OK/Cancel). All wrap `gpui_component::WindowExt::open_dialog`; Dialog handles backdrop, Escape, and outer chrome.
+- Every modal entity opens via `crate::workspace::dialog_helpers::*` — `open_form_modal` (entity owns full body), `open_single_field_dialog` (one input + OK/Cancel) — or, for a plain confirmation, `crate::ui::dialog::{open_confirm_dialog, confirm_destructive}` (title + body + OK/Cancel; domain-free, so it lives in `daruda_ui`). All wrap `gpui_component::WindowExt::open_dialog`; Dialog handles backdrop, Escape, and outer chrome.
 - New modal entity: `impl ModalView` (supertrait of `Render + Focusable`) for entities passed to `open_form_modal`. No `Modal` trait, no `EventEmitter<DismissEvent>`, no `ModalLayer`.
 - `ModalView` applies to `open_form_modal` only; `open_confirm_dialog` / `open_alert_dialog` / `open_single_field_dialog` do not use it.
 - Focus is automatically restored to the previously focused element when the dialog closes (handled by `gpui_component::Root`).

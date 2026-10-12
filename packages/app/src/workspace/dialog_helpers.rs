@@ -1,21 +1,22 @@
 //! Helpers for opening `gpui_component::Dialog` based modals.
 //!
-//! Covers single-field dialogs, form-body modals, destructive confirmations,
-//! and the error-report modal. Dialog owns outer chrome and Escape handling;
-//! form entities own their custom body/footer behaviour.
+//! Covers single-field dialogs, form-body modals, alerts and the error-report
+//! modal; the plain confirmations live in `crate::ui::dialog`. Dialog owns
+//! outer chrome and Escape handling; form entities own their custom
+//! body/footer behaviour.
 
 use std::rc::Rc;
 
 use crate::ui::theme;
 use daruda_store::observability::error_report::ErrorReport;
 use gpui::{
-    App, AppContext as _, ClickEvent, Context, Focusable, ParentElement as _, Pixels, SharedString,
-    WeakEntity, Window, px,
+    App, AppContext as _, Context, Focusable, ParentElement as _, Pixels, SharedString, WeakEntity,
+    Window, px,
 };
 
 use crate::surface::strings as s;
 use crate::ui::WindowExt as _;
-use crate::ui::dialog::{ButtonVariant, DialogButtonProps};
+use crate::ui::dialog::DialogButtonProps;
 use crate::ui::{InputState, input};
 use crate::workspace::Workspace;
 use crate::workspace::error::modal::ErrorReportModal;
@@ -89,82 +90,6 @@ pub(in crate::workspace) fn open_single_field_dialog<Cb>(
         // SILENT-OK: focus restore on possibly-dismissed dialog
         let _ = cx.update_window(wh, |_, window, cx| window.focus(&handle, cx));
     });
-}
-
-/// Open a Dialog with a title, a single body element (typically the
-/// confirmation prompt as plain text), and an OK / Cancel footer.
-///
-/// `ok_label` and `ok_variant` shape the destructive vs. neutral OK
-/// button. `on_ok` runs inside the live `App` context after the user
-/// confirms; the helper closes the dialog regardless of the handler's
-/// outcome.
-///
-/// `pub(crate)` (not `pub(in crate::workspace)`) so `settings`'s
-/// account-delete confirm can reuse the same `gpui_component::Dialog`
-/// chrome instead of duplicating it — the signature has no `Workspace`
-/// coupling.
-pub(crate) fn open_confirm_dialog<F>(
-    title: impl Into<SharedString>,
-    body: impl Into<SharedString>,
-    ok_label: impl Into<SharedString>,
-    ok_variant: ButtonVariant,
-    on_ok: F,
-    window: &mut Window,
-    cx: &mut App,
-) where
-    F: Fn(&ClickEvent, &mut Window, &mut App) + 'static,
-{
-    let title: SharedString = title.into();
-    let body: SharedString = body.into();
-    let ok_label: SharedString = ok_label.into();
-    let on_ok = Rc::new(on_ok);
-    window.open_dialog(cx, move |dialog, _window, _cx| {
-        let on_ok = on_ok.clone();
-        dialog
-            .title(title.clone())
-            .child(body.clone())
-            .confirm()
-            .button_props(
-                DialogButtonProps::default()
-                    .ok_text(ok_label.clone())
-                    .ok_variant(ok_variant),
-            )
-            .on_ok(move |ev, window, app_cx| {
-                (on_ok)(ev, window, app_cx);
-                true
-            })
-    });
-}
-
-/// Ask before a destructive Settings action, then run `on_ok` on `entity`.
-///
-/// The rule it serves: an action that cannot be undone, or that reaches a
-/// system outside daruda (a credential store, a paired chat), confirms first.
-/// A reversible value change never does.
-pub(crate) fn confirm_destructive<T: 'static>(
-    entity: WeakEntity<T>,
-    title: impl Into<SharedString>,
-    body: impl Into<SharedString>,
-    ok_label: impl Into<SharedString>,
-    on_ok: impl Fn(&mut T, &mut Window, &mut Context<T>) + 'static,
-    window: &mut Window,
-    cx: &mut App,
-) {
-    let on_ok = Rc::new(on_ok);
-    open_confirm_dialog(
-        title,
-        body,
-        ok_label,
-        ButtonVariant::Danger,
-        move |_, window, app_cx| {
-            let on_ok = on_ok.clone();
-            if let Some(entity) = entity.upgrade() {
-                entity.update(app_cx, |this, cx| on_ok(this, window, cx));
-            }
-        },
-        window,
-        cx,
-    );
 }
 
 /// Open an OK-only alert with a title, body, and dismiss button.

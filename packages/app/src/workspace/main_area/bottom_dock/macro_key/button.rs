@@ -169,7 +169,7 @@ fn delete_item(
             let workspace_for_modal = cx.entity().downgrade();
             let tab_id = tab_id.clone();
             let widget_id = widget_id.clone();
-            crate::workspace::dialog_helpers::open_confirm_dialog(
+            crate::ui::dialog::open_confirm_dialog(
                 surface_strings::modal::delete_macro_title(),
                 body,
                 surface_strings::common::btn_delete(),

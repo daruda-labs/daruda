@@ -39,14 +39,23 @@ impl gpui::Render for DialogHost {
     }
 }
 
-/// Press Enter in the window, which the open dialog takes as OK.
-/// A data dir no other fixture shares, so Settings never reads the real profile.
-fn test_data_dir() -> std::path::PathBuf {
-    static COUNTER: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
-    let id = COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-    std::env::temp_dir().join(format!("daruda_settings_test_{}_{id}", std::process::id()))
+/// A view on `section` with nothing shared yet and no pane pinned anywhere —
+/// what a host with no accounts hands over.
+fn new_test_view(
+    section: BuiltinSection,
+    window: &mut gpui::Window,
+    cx: &mut gpui::Context<SettingsView>,
+) -> SettingsView {
+    SettingsView::new_with_section(
+        section,
+        SharedSnapshot::default(),
+        std::rc::Rc::new(|_, _| 0),
+        window,
+        cx,
+    )
 }
 
+/// Press Enter in the window, which the open dialog takes as OK.
 fn confirm_dialog(cx: &mut TestAppContext, wh: WindowHandle<gpui_component::Root>) {
     let mut vcx = gpui::VisualTestContext::from_window(wh.into(), cx);
     vcx.run_until_parked();
@@ -73,7 +82,7 @@ fn build_window_with_config(
     });
     let settings_for_root = std::cell::RefCell::new(None);
     let wh = cx.add_window(|window, cx| {
-        let settings = cx.new(|cx| SettingsView::new(test_data_dir(), window, cx));
+        let settings = cx.new(|cx| new_test_view(BuiltinSection::default(), window, cx));
         *settings_for_root.borrow_mut() = Some(settings.clone());
         let host = cx.new(|_| DialogHost { view: settings });
         gpui_component::Root::new(host, window, cx)
@@ -2239,9 +2248,7 @@ fn basic_toggles_and_section_focus(cx: &mut TestAppContext) {
 
     let settings_for_root = std::cell::RefCell::new(None);
     let _wh = cx.add_window(|window, cx| {
-        let settings = cx.new(|cx| {
-            SettingsView::new_with_section(BuiltinSection::Keymap, test_data_dir(), window, cx)
-        });
+        let settings = cx.new(|cx| new_test_view(BuiltinSection::Keymap, window, cx));
         *settings_for_root.borrow_mut() = Some(settings.clone());
         gpui_component::Root::new(settings, window, cx)
     });
@@ -2345,12 +2352,12 @@ async fn the_orchestrator_pickers_follow_a_change_made_while_settings_is_open(
         "not offered before the account exists"
     );
 
-    cx.update(|cx| {
-        crate::workspace::accounts_global::install_if_absent(cx, Default::default());
-        let mut state = crate::workspace::accounts_global::snapshot(cx);
-        state.accounts.push(account.clone());
-        crate::workspace::accounts_global::replace(cx, state);
-    });
+    let mut state = daruda_store::accounts::AccountsState::default();
+    state.accounts.push(account.clone());
+    cx.update_window(wh.into(), |_, window, cx| {
+        win.update(cx, |w, cx| w.set_accounts(state, false, window, cx));
+    })
+    .expect("window is live");
     cx.run_until_parked();
     assert!(
         can_pick(&account_value, |w| &w.orchestrator_account_select, cx),

@@ -21,7 +21,7 @@ use gpui::{App, BorrowAppContext, Global};
 use daruda_agent::accounts::auth_status::AuthStatus;
 use daruda_store::accounts::AccountsState;
 
-pub(crate) use super::account_login_ops::LoginTarget;
+pub(crate) use daruda_agent::accounts::LoginTarget;
 
 /// Process-wide auth-status cache, keyed by the credentials it describes.
 pub(crate) struct AuthStatusGlobal {

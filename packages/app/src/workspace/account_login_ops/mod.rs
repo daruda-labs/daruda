@@ -14,6 +14,7 @@
 //! the same domain (default/delete), but the login flow's spawn/poll/finish
 //! machinery is large enough to warrant its own file.
 
+use daruda_agent::accounts::LoginTarget;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
@@ -52,38 +53,6 @@ pub(in crate::workspace) use resolve::*;
 /// call site's comment for why a login's own timeout is exactly the right
 /// sweep grace period.
 pub(in crate::workspace) const LOGIN_TIMEOUT: Duration = Duration::from_secs(5 * 60);
-
-/// Whose credentials a headless login writes into — the key every part of
-/// the flow is tracked by: `Workspace::pending_login`, the process-wide slot
-/// in [`accounts_global`], and each finish path's staleness guard.
-///
-/// A system login has no [`AccountId`] at all (there is no `accounts.json`
-/// row for the ambient home), which is why this is an enum rather than an
-/// `AccountId` with a sentinel value: a fake id would make an unreal account
-/// representable everywhere a real one is.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub(crate) enum LoginTarget {
-    /// A managed account's own isolated config dir.
-    Managed {
-        id: AccountId,
-        recipe: AccountRecipeId,
-    },
-    /// The user's ambient home for this domain — what a pane runs under with
-    /// [`daruda_store::accounts::AccountSelection::SystemDefault`]. Keyed by
-    /// domain alone: there is exactly one such home per domain per machine,
-    /// and that is precisely why two windows must not sign into it at once.
-    System { recipe: AccountRecipeId },
-}
-
-impl LoginTarget {
-    /// The auth domain this login signs into. Always present, and never a
-    /// second field that could disagree with the variant.
-    pub(in crate::workspace) fn recipe(self) -> AccountRecipeId {
-        match self {
-            LoginTarget::Managed { recipe, .. } | LoginTarget::System { recipe } => recipe,
-        }
-    }
-}
 
 /// Whether cancelling a pending login should remove its target's directory
 /// (+ scoped credential-store entry): only for [`LoginFinish::Add`], whose

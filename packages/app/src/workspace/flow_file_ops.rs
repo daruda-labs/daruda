@@ -418,7 +418,7 @@ pub(in crate::workspace) fn ask_before_deleting(
     window: &mut Window,
     cx: &mut App,
 ) {
-    crate::workspace::dialog_helpers::open_confirm_dialog(
+    crate::ui::dialog::open_confirm_dialog(
         s::flow::delete_confirm_title(),
         super::flow_paths::delete_confirm_body(name, origin),
         s::flow::delete_confirm_ok(),

@@ -228,7 +228,7 @@ impl Workspace {
     /// sign-in button and its next prompt shows whether the login took.
     pub(in crate::workspace) fn reconnect_panes_after_login(
         &mut self,
-        target: crate::workspace::account_login_ops::LoginTarget,
+        target: daruda_agent::accounts::LoginTarget,
         cx: &mut Context<Self>,
     ) {
         // Collected before any reconnect runs: `retry_agent_chat_connect`
@@ -985,8 +985,8 @@ fn notice_dedup_key(pane_id: PaneId, message: &str) -> String {
 /// retrying it automatically would spend the user's attention on a loop
 /// dressed up as progress.
 fn login_revives_pane(
-    target: crate::workspace::account_login_ops::LoginTarget,
-    pane_target: Option<crate::workspace::account_login_ops::LoginTarget>,
+    target: daruda_agent::accounts::LoginTarget,
+    pane_target: Option<daruda_agent::accounts::LoginTarget>,
     remedy: Option<daruda_acp::Remedy>,
 ) -> bool {
     pane_target == Some(target) && remedy == Some(daruda_acp::Remedy::Reauthenticate)
@@ -1021,8 +1021,8 @@ fn retries_fresh(
 #[cfg(test)]
 mod tests {
     use super::{login_revives_pane, notice_dedup_key, retries_fresh, session_resume};
-    use crate::workspace::account_login_ops::LoginTarget;
     use daruda_acp::Remedy;
+    use daruda_agent::accounts::LoginTarget;
     use daruda_store::accounts::AccountRecipeId;
 
     fn claude_system() -> LoginTarget {

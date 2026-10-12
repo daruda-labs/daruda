@@ -5,10 +5,17 @@ use super::*;
 impl SettingsView {
     pub fn new_with_section(
         active: BuiltinSection,
-        data_dir: std::path::PathBuf,
+        shared: SharedSnapshot,
+        account_usage: AccountUsage,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Self {
+        let SharedSnapshot {
+            accounts,
+            account_login_busy,
+            auth_statuses,
+            agent_vocabulary,
+        } = shared;
         // Defensive idempotent init for test fixtures that open a
         // Settings window without going through `globals::init_all`.
         crate::settings_store::SettingsStore::init(cx);
@@ -413,11 +420,6 @@ impl SettingsView {
                 .placeholder(s::settings::agent_catalog_search_placeholder())
         });
 
-        // Vocabulary is shared app-wide so every open window sees a
-        // connection's advertisement; it is read from the host's store.
-        crate::workspace::agent_vocabulary_global::install_path(cx, &data_dir);
-        let agent_vocabulary = crate::workspace::agent_vocabulary_global::snapshot(cx, &data_dir);
-
         // Entries that resolve get an editable row; entries that don't (a preset
         // id daruda no longer knows, or one that needs a manual install) have no
         // fields to edit and are kept verbatim — a config the editor cannot
@@ -533,16 +535,6 @@ impl SettingsView {
         let _updater_subscription =
             crate::update::Updater::get(cx).map(|e| cx.observe(&e, |_, _, cx| cx.notify()));
 
-        // Managed accounts come from the app-wide Global (single source of
-        // truth). Install it from disk if this window opened before any
-        // Workspace (idempotent), then mirror the current value — refreshed
-        // on change by `_accounts_global_subscription`.
-        crate::workspace::accounts_global::install_if_absent(
-            cx,
-            daruda_store::accounts::load_accounts().unwrap_or_default(),
-        );
-        let accounts = crate::workspace::accounts_global::snapshot(cx);
-        let account_login_busy = crate::workspace::accounts_global::login_busy(cx);
         // Built here rather than beside the other selects above: the account
         // picker's options come from `accounts`, which is only in scope now.
         let orchestrator_agent_select = cx.new(|cx| {
@@ -570,37 +562,6 @@ impl SettingsView {
         ] {
             input_subscriptions.push(Self::subscribe_select_setting(state, setting, window, cx));
         }
-        // Rebuilding the account picker needs the current window.
-        let _accounts_global_subscription = cx
-            .observe_global_in::<crate::workspace::accounts_global::AccountsGlobal>(
-                window,
-                |this, window, cx| {
-                    this.accounts = crate::workspace::accounts_global::snapshot(cx);
-                    this.account_login_busy = crate::workspace::accounts_global::login_busy(cx);
-                    this.refresh_orchestrator_account_select(window, cx);
-                    cx.notify();
-                },
-            );
-        let _agent_vocabulary_global_subscription = cx.observe_global_in::<
-            crate::workspace::agent_vocabulary_global::AgentVocabularyGlobal,
-        >(window, |this, window, cx| {
-            this.agent_vocabulary =
-                crate::workspace::agent_vocabulary_global::snapshot(cx, &this.data_dir);
-            for index in 0..this.agent_catalog.len() {
-                this.refresh_agent_row_vocabulary(index, window, cx);
-            }
-        });
-        // Same mirror shape for the sign-in readings: a Workspace produces
-        // them off-thread, so they land after this window is already open.
-        crate::workspace::auth_status_global::install_if_absent(cx);
-        let auth_statuses = crate::workspace::auth_status_global::snapshot(cx);
-        let _auth_status_subscription = cx
-            .observe_global::<crate::workspace::auth_status_global::AuthStatusGlobal>(
-                |this, cx| {
-                    this.auth_statuses = crate::workspace::auth_status_global::snapshot(cx);
-                    cx.notify();
-                },
-            );
 
         Self {
             panel_focus_handle: cx.focus_handle(),
@@ -631,7 +592,6 @@ impl SettingsView {
             agent_tool_summary_labels: config.agent.tool_summary_labels,
             agent_catalog,
             agent_vocabulary,
-            data_dir,
             session_host_rows,
             accounts,
             orchestrator_enabled: config.orchestrator.enabled,
@@ -639,6 +599,7 @@ impl SettingsView {
             orchestrator_account_select,
             account_login_busy,
             auth_statuses,
+            account_usage,
             max_fps_select,
             close_pane_on_exit: config.shell.close_pane_on_exit,
             opacity_input,
@@ -721,9 +682,6 @@ impl SettingsView {
                         this.adopt_external_settings(window, cx);
                     },
                 ),
-            _agent_vocabulary_global_subscription,
-            _accounts_global_subscription,
-            _auth_status_subscription,
             _updater_subscription,
         }
     }

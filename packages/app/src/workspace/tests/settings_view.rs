@@ -484,3 +484,46 @@ async fn settings_learns_whether_the_window_has_a_project(cx: &mut TestAppContex
     })
     .unwrap();
 }
+
+/// An account written in Settings reaches every window through the host, and
+/// comes back to the open view the same way a change from elsewhere does.
+#[gpui::test]
+async fn an_account_change_in_settings_is_shared_and_mirrored_back(cx: &mut TestAppContext) {
+    let (window_handle, workspace) = build_workspace(cx);
+    let account = daruda_store::accounts::ManagedAccount {
+        id: daruda_store::accounts::AccountId::new(),
+        recipe: daruda_store::accounts::AccountRecipeId::Claude,
+        email: None,
+        organization: None,
+        config_dir: std::path::PathBuf::from("/tmp/daruda-test-account"),
+        created_at: 0,
+        last_authenticated_at: 0,
+    };
+    let view = cx
+        .update_window(window_handle.into(), |_, window, cx| {
+            workspace.update(cx, |ws, cx| {
+                ws.on_open_settings(
+                    &OpenSettings(daruda_config::BuiltinSection::Accounts),
+                    window,
+                    cx,
+                );
+                ws.settings_view().expect("settings open").clone()
+            })
+        })
+        .unwrap();
+    let mut state = daruda_store::accounts::AccountsState::default();
+    state.accounts.push(account.clone());
+    view.update(cx, |_, cx| {
+        cx.emit(crate::settings::SettingsEvent::AccountsChanged(state))
+    });
+    cx.run_until_parked();
+
+    cx.update(|cx| {
+        let shared = crate::workspace::accounts_global::snapshot(cx);
+        assert!(shared.find(account.id).is_some(), "the host published it");
+        assert!(
+            view.read(cx).accounts().find(account.id).is_some(),
+            "the open view follows the published state"
+        );
+    });
+}

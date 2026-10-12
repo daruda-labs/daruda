@@ -8,17 +8,17 @@
 //! the user says "no managed default here", and an absent `default_by_recipe`
 //! entry is exactly that state.
 //!
-//! INVARIANT: `accounts.json` is shared across windows through the app-wide
-//! `accounts_global::AccountsGlobal`. This section writes the file and then
-//! publishes via `accounts_global::replace`, which fires `observe_global` on
-//! every window symmetrically — never a manual per-window broadcast, which is
-//! what let logins go stale in other windows.
+//! INVARIANT: `accounts.json` is shared across windows. This section writes the
+//! file and then emits [`SettingsEvent::AccountsChanged`]; the host publishes
+//! it app-wide and every window, this one included, follows from there —
+//! never a per-window broadcast, which is what let logins go stale in other
+//! windows.
 //!
 //! The login buttons are the one case needing a `Workspace` (the login command
 //! comes from that window's agent catalog), so they emit
-//! [`SettingsEvent::Login`] and the host runs it. The process-wide login marker
-//! in `AccountsGlobal` disables competing Settings actions while that Workspace
-//! retains ownership of the process handle and Cancel.
+//! [`SettingsEvent::Login`] and the host runs it. The process-wide login marker,
+//! pushed in with the accounts, disables competing Settings actions while that
+//! Workspace retains ownership of the process handle and Cancel.
 
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -31,11 +31,9 @@ use super::super::{
     settings_button_danger as button_danger,
 };
 use crate::surface::strings as s;
+use crate::ui::dialog::open_confirm_dialog;
 use crate::ui::theme;
 use crate::ui::{ButtonVariant, Disableable as _};
-use crate::window_registry::WindowRegistry;
-use crate::workspace::accounts_global;
-use crate::workspace::dialog_helpers::open_confirm_dialog;
 
 /// Element-id fragment for a recipe's rows — internal, never displayed.
 fn recipe_slug(recipe: AccountRecipeId) -> &'static str {
@@ -76,8 +74,8 @@ fn last_authenticated_label(now: u64, last_authenticated_at: u64) -> String {
 }
 
 /// Body text for the delete-account confirm dialog. `count` is how many
-/// panes (across every open Workspace window) currently override to
-/// this account — see `Workspace::panes_referencing_account`. The path
+/// panes (across every open window) currently override to this account, as
+/// the host counts them ([`super::super::AccountUsage`]). The path
 /// those panes revert to is the deleted account's own auth domain's
 /// ambient home, not a fixed one.
 fn remove_confirm_body(count: usize, recipe: AccountRecipeId) -> String {
@@ -208,8 +206,7 @@ impl SettingsView {
         // The ambient home is the sign-in daruda did not perform, so this is
         // the only place a user who moved it to a metered login themselves can
         // be told.
-        let home = match self
-            .signed_in_with(crate::workspace::auth_status_global::LoginTarget::System { recipe })
+        let home = match self.signed_in_with(daruda_agent::accounts::LoginTarget::System { recipe })
         {
             Some(method) => format!("{home} · {method}"),
             None => home.to_string(),
@@ -262,10 +259,7 @@ impl SettingsView {
     /// `None` when nothing has been read for that scope, or when the CLI
     /// answered without naming one — neither is a fact about how the user
     /// signed in, and rendering either as one would be a guess.
-    fn signed_in_with(
-        &self,
-        target: crate::workspace::auth_status_global::LoginTarget,
-    ) -> Option<String> {
+    fn signed_in_with(&self, target: daruda_agent::accounts::LoginTarget) -> Option<String> {
         let status = self.auth_statuses.get(&target)?;
         let method = status.auth_method.as_deref()?;
         Some(s::settings::accounts_signed_in_with(method))
@@ -294,12 +288,10 @@ impl SettingsView {
         // How this account signed in, when it has been read. Appended rather
         // than replacing anything: the plan and the method answer different
         // questions, and the one that costs money is the method.
-        if let Some(method) =
-            self.signed_in_with(crate::workspace::auth_status_global::LoginTarget::Managed {
-                id: account_id,
-                recipe,
-            })
-        {
+        if let Some(method) = self.signed_in_with(daruda_agent::accounts::LoginTarget::Managed {
+            id: account_id,
+            recipe,
+        }) {
             subtitle = format!("{subtitle} · {method}");
         }
 
@@ -437,11 +429,10 @@ impl SettingsView {
                 return;
             }
         };
-        // Publish to the app-wide Global — `observe_global` refreshes every
-        // window's mirror (including this one). Set this section's mirror
-        // eagerly so its own render below is immediate.
+        // The host shares it with every window, this one included. Set this
+        // section's mirror eagerly so its own render below is immediate.
         self.accounts = state.clone();
-        accounts_global::replace(cx, state);
+        cx.emit(SettingsEvent::AccountsChanged(state));
         cx.notify();
     }
 
@@ -469,11 +460,8 @@ impl SettingsView {
 
     /// G9 confirm dialog before delete — destructive, and (per the
     /// brief) the body must show how many live panes revert to the
-    /// system default. `referencing` sums
-    /// `Workspace::panes_referencing_account` across every open
-    /// Workspace window; a lane not visited this session in a closed or
-    /// not-yet-opened window isn't counted (see that method's doc for
-    /// why this is an accepted simplification rather than a fake count).
+    /// system default. `referencing` is the host's count across every open
+    /// window ([`super::super::AccountUsage`]).
     fn open_remove_confirm(
         &mut self,
         account_id: AccountId,
@@ -485,10 +473,7 @@ impl SettingsView {
         let Some(recipe) = self.accounts.find(account_id).map(|a| a.recipe) else {
             return;
         };
-        let mut referencing = 0usize;
-        WindowRegistry::for_each_workspace(cx, |ws, _window, _cx| {
-            referencing += ws.panes_referencing_account(account_id);
-        });
+        let referencing = (self.account_usage.clone())(account_id, cx);
         let weak = cx.weak_entity();
         open_confirm_dialog(
             s::settings::accounts_remove_confirm_title(),
@@ -547,7 +532,7 @@ impl SettingsView {
         // load. Nothing of ours to clean up, but the reloaded list still is.
         let Some(account) = removed else {
             self.accounts = state.clone();
-            accounts_global::replace(cx, state);
+            cx.emit(SettingsEvent::AccountsChanged(state));
             cx.notify();
             return;
         };
@@ -556,11 +541,11 @@ impl SettingsView {
         // irreversible, so running it before the shorter list was written would
         // leave a live entry pointing at a home that is already gone.
         daruda_agent::accounts::recipe_for(account.recipe).cleanup(&account.config_dir);
-        // Publish the shorter list once. Every window's observer reverts its
-        // own panes pinned to the account (`Workspace::reconcile_account_pins`)
-        // — this view has no business writing into them.
+        // Publish the shorter list once. Every window reverts its own panes
+        // pinned to the account (`Workspace::reconcile_account_pins`) — this
+        // view has no business writing into them.
         self.accounts = state.clone();
-        accounts_global::replace(cx, state);
+        cx.emit(SettingsEvent::AccountsChanged(state));
         cx.notify();
     }
 }

@@ -303,7 +303,8 @@ that trait's methods. Speculative re-exports rot.
 - **Modal shells / dialog chrome** — `gpui_component::Dialog` provides
   the panel chrome (bg / border / padding / title / backdrop). Open via
   `crate::workspace::dialog_helpers::{open_form_modal,
-  open_single_field_dialog, open_confirm_dialog}`. Don't re-create
+  open_single_field_dialog}`, or `dialog::{open_confirm_dialog,
+  confirm_destructive}` here for a plain confirmation. Don't re-create
   `FormModalShell`-style wrappers in ui/.
 - **Composite layouts that consume ui primitives** — small helpers
   like `form_helpers::field_row` are fine in ui/, but anything that
@@ -317,7 +318,7 @@ that trait's methods. Speculative re-exports rot.
 
 An action that cannot be undone, or that reaches a system outside daruda
 (the credential store, a paired chat, a removed config entry), opens
-`workspace::dialog_helpers::confirm_destructive` and runs only from its OK.
+`dialog::confirm_destructive` and runs only from its OK.
 Its button label ends in `…`. A reversible value change, including Reset,
 never confirms.
 
