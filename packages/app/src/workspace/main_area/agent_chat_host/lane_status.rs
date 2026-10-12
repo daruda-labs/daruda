@@ -34,7 +34,7 @@ fn session_status_of(
 
 /// What a finished turn leaves for the user to look at; `None` for a Stop,
 /// which is the user's own doing.
-pub(in crate::workspace) fn agent_outcome(outcome: &TurnOutcome) -> Option<AgentOutcome> {
+pub(super) fn agent_outcome(outcome: &TurnOutcome) -> Option<AgentOutcome> {
     match outcome {
         TurnOutcome::Completed => Some(AgentOutcome::Completed),
         TurnOutcome::Errored => Some(AgentOutcome::Errored),
@@ -49,65 +49,68 @@ mod tests {
 
     use super::*;
 
+    const ACTIVITIES: [ActivityState; 3] = [
+        ActivityState::Idle,
+        ActivityState::Working,
+        ActivityState::AwaitingPermission,
+    ];
+
+    /// Until the pane is connected its activity has nothing to say.
     #[test]
-    fn each_pane_state_reads_as_its_lane_status() {
-        use ActivityState::{AwaitingPermission, Idle, Working};
+    fn a_pane_not_yet_connected_reads_the_same_whatever_its_activity() {
         let failed = AgentSessionStatus::Error {
             message: "adapter exited".into(),
             remedy: daruda_acp::Remedy::NoneAvailable,
         };
-        for (status, activity, expected) in [
-            (AgentSessionStatus::Idle, Working, None),
-            (failed, Idle, Some(SessionStatus::Failed)),
+        for (status, expected) in [
+            (AgentSessionStatus::Idle, None),
+            (failed, Some(SessionStatus::Failed)),
             (
                 AgentSessionStatus::PreparingRuntime(RuntimePrepPhase::Downloading),
-                Idle,
                 Some(SessionStatus::Connecting),
             ),
             (
                 AgentSessionStatus::Connecting,
-                Idle,
                 Some(SessionStatus::Connecting),
             ),
             (
                 AgentSessionStatus::Handshaking(ConnectPhase::Handshaking),
-                Idle,
                 Some(SessionStatus::Connecting),
             ),
-            (
-                AgentSessionStatus::Connected,
-                Working,
-                Some(SessionStatus::Working),
-            ),
-            (
-                AgentSessionStatus::Connected,
-                AwaitingPermission,
-                Some(SessionStatus::NeedsAttention),
-            ),
-            (
-                AgentSessionStatus::Connected,
-                Idle,
-                Some(SessionStatus::Idle),
-            ),
         ] {
+            for activity in ACTIVITIES {
+                assert_eq!(
+                    session_status_of(&status, activity),
+                    expected,
+                    "{status:?} / {activity:?}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn a_connected_pane_reads_as_its_activity() {
+        for (activity, expected) in ACTIVITIES.into_iter().zip([
+            SessionStatus::Idle,
+            SessionStatus::Working,
+            SessionStatus::NeedsAttention,
+        ]) {
             assert_eq!(
-                session_status_of(&status, activity),
-                expected,
-                "{status:?} / {activity:?}"
+                session_status_of(&AgentSessionStatus::Connected, activity),
+                Some(expected),
+                "{activity:?}"
             );
         }
     }
 
     #[test]
     fn a_stop_leaves_nothing_to_report() {
-        assert_eq!(
-            agent_outcome(&TurnOutcome::Completed),
-            Some(AgentOutcome::Completed)
-        );
-        assert_eq!(
-            agent_outcome(&TurnOutcome::Errored),
-            Some(AgentOutcome::Errored)
-        );
-        assert_eq!(agent_outcome(&TurnOutcome::Stopped), None);
+        for (outcome, expected) in [
+            (TurnOutcome::Completed, Some(AgentOutcome::Completed)),
+            (TurnOutcome::Errored, Some(AgentOutcome::Errored)),
+            (TurnOutcome::Stopped, None),
+        ] {
+            assert_eq!(agent_outcome(&outcome), expected, "{outcome:?}");
+        }
     }
 }

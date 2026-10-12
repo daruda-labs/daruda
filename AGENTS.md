@@ -495,7 +495,7 @@ daruda (app)  →  daruda_terminal  →  ghostty_vt  →  ghostty_vt_sys
              →  daruda_control_types  →  daruda_store   # GPUI-free control contract, PaneRef
              →  daruda_ui         →  daruda_terminal, daruda_config, gpui_component, ferrum_flow  # widgets
              →  daruda_transcript →  daruda_acp, daruda_config, daruda_ui   # transcript presentation, shared by chat + Settings
-             →  daruda_chat       →  daruda_transcript, daruda_acp, daruda_content, daruda_ui  # the chat pane view
+             →  daruda_chat       →  daruda_transcript, daruda_acp, daruda_content, daruda_ui, daruda_config, daruda_store, daruda_core  # the chat pane view
              →  daruda_core                         # shared, dependency-free
              →  daruda_update
              →  gpui, gpui_component, merman, portable-pty

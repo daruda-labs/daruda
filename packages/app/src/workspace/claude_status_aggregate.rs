@@ -10,6 +10,7 @@
 use std::collections::HashMap;
 
 use crate::workspace::Workspace;
+use crate::workspace::main_area::agent_chat_host::lane_status;
 use crate::workspace::main_area::pane_tree::PaneId;
 use daruda_agent::SessionStatus;
 use daruda_agent::pty_tracker::PtyBinding;
@@ -205,10 +206,7 @@ impl Workspace {
     ) -> Vec<(PaneId, SessionStatus)> {
         self.lane_agent_chats()
             .filter_map(|(id, view)| {
-                let status =
-                    crate::workspace::main_area::agent_chat_host::lane_status::session_status(
-                        view.read(cx),
-                    )?;
+                let status = lane_status::session_status(view.read(cx))?;
                 Some((id, status))
             })
             .collect()
