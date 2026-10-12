@@ -92,38 +92,8 @@ jobs:
         with:
           submodules: recursive
 
-      - name: Cache rustup toolchain
-        uses: actions/cache@v5
-        with:
-          path: ~/.rustup/toolchains
-          key: rustup-1.95-${{ runner.os }}-${{ runner.arch }}
-
-      - name: Install Rust
-        uses: dtolnay/rust-toolchain@stable
-        with:
-          toolchain: "1.95"
-          components: clippy
-
-      - name: Cache Rust build
-        uses: Swatinem/rust-cache@v2.9.1
-
-      - name: Cache Zig
-        uses: actions/cache@v5
-        with:
-          path: .context/zig
-          key: zig-0.14.1-${{ runner.os }}-${{ runner.arch }}
-
-      - name: Install Zig 0.14.1
-        run: ./scripts/bootstrap-zig.sh
-
-      - name: Add Zig to PATH
-        run: echo "$GITHUB_WORKSPACE/.context/zig/0.14.1" >> "$GITHUB_PATH"
-
-      - name: Fetch locked dependencies
-        run: cargo fetch --locked
-
-      - name: Verify vendored GPUI
-        run: cargo run --locked -p vendor_gpui -- --check
+      - name: Set up the build toolchain
+        uses: ./.github/actions/setup-build
 
       - name: Clippy
         shell: bash
@@ -157,72 +127,17 @@ jobs:
         with:
           submodules: recursive
 
-      # gpui_linux draws through x11/wayland and shapes text through
-      # fontconfig. Trimmed from zed's `script/linux` list — daruda has no
-      # livekit (no libasound/libva) and shells out to git rather than
-      # linking libgit2.
-      # `fonts-noto-cjk` is not for the GUI — the mermaid measurer probes a
-      # Hangul advance from the real font stack, and no font in the base image
-      # covers Hangul. Latin faces are already there (`fonts-dejavu-core`
-      # reports "already the newest version"), named anyway so the suite does
-      # not silently depend on what the runner image happens to carry.
-      # The last five are for the smoke runs below, not the build: the
-      # runner has no GPU, so `mesa-vulkan-drivers` supplies lavapipe for
-      # wgpu to draw with, and Xvfb / sway stand in for the X11 and
-      # Wayland servers a desktop would have. sway rather than weston:
-      # gpui's Wayland client requires a `wl_seat`, which wlroots' headless
-      # backend still creates and weston's does not.
+      # `fonts-noto-cjk` is not for the GUI: the mermaid measurer probes a
+      # Hangul advance from the real font stack, and the base image has none.
       - name: Install system dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends \
-            libfontconfig-dev \
-            libwayland-dev \
-            libx11-xcb-dev \
-            libxkbcommon-x11-dev \
-            libglib2.0-dev \
-            fonts-dejavu-core \
-            fonts-noto-cjk \
-            libvulkan1 \
-            mesa-vulkan-drivers \
-            libegl1 \
-            xvfb \
-            sway
+        run: >-
+          ./scripts/linux/apt-install.sh scripts/linux/build-deps.txt
+          scripts/linux/smoke-deps.txt fonts-noto-cjk
 
-      - name: Cache rustup toolchain
-        uses: actions/cache@v5
+      - name: Set up the build toolchain
+        uses: ./.github/actions/setup-build
         with:
-          path: ~/.rustup/toolchains
-          key: rustup-1.95-${{ runner.os }}-${{ runner.arch }}
-
-      - name: Install Rust
-        uses: dtolnay/rust-toolchain@stable
-        with:
-          toolchain: "1.95"
-          components: clippy
-
-      - name: Cache Rust build
-        uses: Swatinem/rust-cache@v2.9.1
-        with:
-          key: linux
-
-      - name: Cache Zig
-        uses: actions/cache@v5
-        with:
-          path: .context/zig
-          key: zig-0.14.1-${{ runner.os }}-${{ runner.arch }}
-
-      - name: Install Zig 0.14.1
-        run: ./scripts/bootstrap-zig.sh
-
-      - name: Add Zig to PATH
-        run: echo "$GITHUB_WORKSPACE/.context/zig/0.14.1" >> "$GITHUB_PATH"
-
-      - name: Fetch locked dependencies
-        run: cargo fetch --locked
-
-      - name: Verify vendored GPUI
-        run: cargo run --locked -p vendor_gpui -- --check
+          cache-key: linux
 
       # No lint steps: those read source, not platform, and the `lint` job
       # already ran them. What is unproven here is whether this tree
@@ -252,38 +167,14 @@ jobs:
         run: cargo build --locked -p daruda
 
       # What a build and a test never prove: that gpui's X11 and Wayland
-      # clients come up and draw, which `--smoke` answers with its exit
-      # code. Both servers, because each is its own backend.
+      # clients come up and draw. Each is its own backend.
       - name: Smoke-test the window (X11)
         timeout-minutes: 5
-        run: xvfb-run --auto-servernum --server-args="-screen 0 1280x800x24" target/debug/daruda --smoke
-
-      - name: Start a headless Wayland compositor
-        run: |
-          set -euo pipefail
-          export XDG_RUNTIME_DIR="$RUNNER_TEMP/xdg-runtime"
-          mkdir -p "$XDG_RUNTIME_DIR"
-          chmod 700 "$XDG_RUNTIME_DIR"
-          : > "$RUNNER_TEMP/sway.conf"
-          WLR_BACKENDS=headless WLR_LIBINPUT_NO_DEVICES=1 WLR_RENDERER=pixman \
-            sway -c "$RUNNER_TEMP/sway.conf" > "$RUNNER_TEMP/sway.log" 2>&1 &
-          socket=""
-          for _ in $(seq 1 50); do
-            socket=$(find "$XDG_RUNTIME_DIR" -maxdepth 1 -type s -name 'wayland-[0-9]*' -printf '%f\n' | head -1)
-            [ -n "$socket" ] && break
-            sleep 0.2
-          done
-          test -n "$socket"
-          echo "XDG_RUNTIME_DIR=$XDG_RUNTIME_DIR" >> "$GITHUB_ENV"
-          echo "WAYLAND_DISPLAY=$socket" >> "$GITHUB_ENV"
+        run: ./scripts/linux/smoke.sh x11 target/debug/daruda
 
       - name: Smoke-test the window (Wayland)
         timeout-minutes: 5
-        run: target/debug/daruda --smoke
-
-      - name: Show the compositor log
-        if: failure()
-        run: cat "$RUNNER_TEMP/sway.log" || true
+        run: ./scripts/linux/smoke.sh wayland target/debug/daruda
 
   windows:
     name: Windows — build and test
@@ -299,41 +190,10 @@ jobs:
         with:
           submodules: recursive
 
-      - name: Cache rustup toolchain
-        uses: actions/cache@v5
+      - name: Set up the build toolchain
+        uses: ./.github/actions/setup-build
         with:
-          path: ~/.rustup/toolchains
-          key: rustup-1.95-${{ runner.os }}-${{ runner.arch }}
-
-      - name: Install Rust
-        uses: dtolnay/rust-toolchain@stable
-        with:
-          toolchain: "1.95"
-          components: clippy
-
-      - name: Cache Rust build
-        uses: Swatinem/rust-cache@v2.9.1
-        with:
-          key: windows
-
-      - name: Cache Zig
-        uses: actions/cache@v5
-        with:
-          path: .context/zig
-          key: zig-0.14.1-${{ runner.os }}-${{ runner.arch }}
-
-      - name: Install Zig 0.14.1
-        run: ./scripts/bootstrap-zig.ps1
-
-      - name: Add Zig to PATH
-        shell: pwsh
-        run: Add-Content $env:GITHUB_PATH "$env:GITHUB_WORKSPACE\.context\zig\0.14.1"
-
-      - name: Fetch locked dependencies
-        run: cargo fetch --locked
-
-      - name: Verify vendored GPUI
-        run: cargo run --locked -p vendor_gpui -- --check
+          cache-key: windows
 
       - name: Build native application
         run: ./scripts/build-windows.ps1

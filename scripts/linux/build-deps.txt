@@ -1,0 +1,10 @@
+# System packages a Linux build links against, read by both workflows.
+# Trimmed from zed's `script/linux`: no livekit (libasound, libva), and git
+# is a subprocess rather than libgit2. Latin fonts are named so tests do not
+# depend on what the runner image happens to carry.
+libfontconfig-dev
+libwayland-dev
+libx11-xcb-dev
+libxkbcommon-x11-dev
+libglib2.0-dev
+fonts-dejavu-core

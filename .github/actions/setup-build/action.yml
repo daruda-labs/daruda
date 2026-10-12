@@ -1,0 +1,52 @@
+name: Set up the build toolchain
+description: >-
+  Rust 1.95 with clippy, the pinned Zig, locked dependencies, and the vendored
+  GPUI check — the setup every building job shares. Checkout stays in the job.
+inputs:
+  cache-key:
+    description: Swatinem/rust-cache key; jobs building different trees keep separate caches.
+    required: false
+    default: ""
+runs:
+  using: composite
+  steps:
+    - name: Cache rustup toolchain
+      uses: actions/cache@v5
+      with:
+        path: ~/.rustup/toolchains
+        key: rustup-1.95-${{ runner.os }}-${{ runner.arch }}
+
+    - name: Install Rust
+      uses: dtolnay/rust-toolchain@stable
+      with:
+        toolchain: "1.95"
+        components: clippy
+
+    - name: Cache Rust build
+      uses: Swatinem/rust-cache@v2.9.1
+      with:
+        key: ${{ inputs.cache-key }}
+
+    - name: Cache Zig
+      uses: actions/cache@v5
+      with:
+        path: .context/zig
+        key: zig-0.14.1-${{ runner.os }}-${{ runner.arch }}
+
+    - name: Install Zig 0.14.1
+      if: runner.os != 'Windows'
+      shell: bash
+      run: |
+        ./scripts/bootstrap-zig.sh
+        echo "$GITHUB_WORKSPACE/.context/zig/0.14.1" >> "$GITHUB_PATH"
+
+    - name: Install Zig 0.14.1
+      if: runner.os == 'Windows'
+      shell: pwsh
+      run: |
+        ./scripts/bootstrap-zig.ps1
+        Add-Content $env:GITHUB_PATH "$env:GITHUB_WORKSPACE\.context\zig\0.14.1"
+
+    - name: Fetch locked dependencies and verify GPUI source
+      shell: bash
+      run: cargo fetch --locked && cargo run --locked -p vendor_gpui -- --check

@@ -1,0 +1,7 @@
+# What scripts/linux/smoke.sh needs on a runner with no GPU and no display:
+# lavapipe for wgpu to draw with, and an X11 and a Wayland server.
+libvulkan1
+mesa-vulkan-drivers
+libegl1
+xvfb
+sway

@@ -275,9 +275,13 @@ gate — the [pre-commit checks](#pre-commit-checks) still run everything.
 
 `scripts/ci-cargo.sh` owns the platform jobs' shared Cargo package coverage.
 Call it through Bash with `clippy`, `app-features`, `test`, or `doc`; extra
-Cargo options follow the gate name. Keep OS setup, runtime smoke checks and
-packaging in `ci.yml`, and change package coverage in the script rather than
-copying a new list into each job.
+Cargo options follow the gate name. Change package coverage in the script
+rather than copying a new list into each job. The toolchain setup every
+building job shares — Rust, Zig, locked fetch, vendored-GPUI check — is the
+`.github/actions/setup-build` composite action, used by `ci.yml` and
+`release.yml` alike. Linux system packages are listed once in
+`scripts/linux/{build,smoke}-deps.txt`, and the window smoke run is
+`scripts/linux/smoke.sh {x11|wayland} <binary>`, which also runs locally.
 
 What the `Linux` job carries that no lint could is the `#[cfg]` arms the macOS job never compiles: its first three runs turned up two unused imports and a font-resolution defect that left every mermaid label blank on Linux, none of which macOS could have seen.
 

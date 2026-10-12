@@ -280,18 +280,22 @@ brew install create-dmg
 ```
 
 Build the Linux x86_64 packages — a portable tar.gz and a `.deb` — on a
-Debian or Ubuntu host with `jq`, `imagemagick`, `dpkg-dev`, and the build
-dependencies from `.github/workflows/ci.yml`:
+Debian or Ubuntu host:
 
 ```bash
+./scripts/linux/apt-install.sh scripts/linux/build-deps.txt jq imagemagick dpkg-dev
 ./scripts/bootstrap-zig.sh
 ./scripts/package-linux.sh
 ```
 
+To check that a build opens its window without a desktop, install
+`scripts/linux/smoke-deps.txt` the same way and run
+`./scripts/linux/smoke.sh x11 target/release/daruda` (or `wayland`).
+
 Both land in `target/packages/`. The `.deb` installs `/usr/bin/daruda`, the
 launcher entry (`scripts/linux/daruda.desktop`), and the hicolor icons;
-`dpkg-shlibdeps` derives its `Depends` from the binary, plus `libvulkan1`,
-which wgpu loads at runtime. The tar.gz runs from wherever it is extracted.
+`dpkg-shlibdeps` derives its `Depends` from the binary, plus what is loaded
+at runtime and so absent from it: `libvulkan1` and the Wayland client libraries. The tar.gz runs from wherever it is extracted.
 Neither updates itself: Settings › About announces a newer release and the
 package is reinstalled from it. `--profile debug --skip-build` packages an
 existing debug build.
