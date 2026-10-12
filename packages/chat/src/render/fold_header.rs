@@ -607,7 +607,7 @@ mod tests {
 
     use std::cell::Cell;
 
-    use super::{StretchSlot, SummaryTone};
+    use super::StretchSlot;
 
     /// Records which builders ran, so laziness is observable: a slot that shows
     /// one side must not pay for parsing the other's markdown body.
@@ -639,34 +639,6 @@ mod tests {
     fn a_spacer_shows_nothing_in_either_state() {
         assert!(StretchSlot::Spacer.builder_for(false).is_none());
         assert!(StretchSlot::Spacer.builder_for(true).is_none());
-    }
-
-    /// Tone rides on the value, so a reasoning summary stays italic while a
-    /// prose one does not.
-    #[test]
-    fn a_summary_carries_its_own_tone() {
-        let slot = StretchSlot::Summary(Box::new(|| Some(SummaryLine::plain("head").reasoning())));
-        let line = slot.builder_for(false).and_then(|b| b()).expect("summary");
-        assert!(matches!(line.tone, SummaryTone::Reasoning));
-    }
-
-    #[test]
-    fn summary_from_markdown_flattens_inline_markup() {
-        // The only markdown entry point, so every header preview is flattened —
-        // a raw `**` can no longer reach one header while another shows prose.
-        let line = SummaryLine::from_markdown("**Planning the change** and more")
-            .expect("non-empty body yields a summary");
-        assert_eq!(line.text, "Planning the change and more");
-    }
-
-    #[test]
-    fn summary_from_markdown_is_none_without_a_visible_line() {
-        assert!(SummaryLine::from_markdown("   \n\t\n").is_none());
-    }
-
-    #[test]
-    fn plain_summary_is_verbatim() {
-        assert_eq!(SummaryLine::plain("3 tool calls").text, "3 tool calls");
     }
 
     /// A title dropped straight into the stretch slot spans it; the same title

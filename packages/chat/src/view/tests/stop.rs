@@ -1,19 +1,213 @@
-//! A run that can no longer change must stop reading as live.
-//!
-//! The rollup glyph pulses off `Rollup::Running`, which is derived from the
-//! items themselves (a `streaming` flag, a non-terminal tool status) — while the
-//! pulse pump only repaints panes `is_busy()` says are working. So an item left
-//! flagged live on an idle pane gives a dot nothing drives: frozen until an
-//! unrelated repaint samples the free-running clock, which reads as an erratic
-//! blink. Every path that ends a run has to settle its items.
+//! Stop and every other end of a run: what it parks, keeps and marks in the
+//! transcript, and the items it has to settle.
 
+use super::super::AgentChatView;
+use super::*;
+use crate::agent_chat_helpers::Rollup;
+use crate::rows::LiveSubagentUnits;
 use agent_client_protocol::schema::v1::{ContentBlock, ContentChunk, TextContent};
 use daruda_acp::{AcpEvent, PlanEntryView, PlanPriority, PlanStatus, SessionUpdate, ToolCall};
 
-use super::super::AgentChatView;
-use super::make_test_view;
-use crate::agent_chat_helpers::Rollup;
-use crate::rows::LiveSubagentUnits;
+/// Stop must preserve queued work and completion bookkeeping across the local
+/// cancel paths.
+#[gpui::test]
+fn cancel_turn_parks_queue_preserves_completion_and_buffers_reprompt(
+    cx: &mut gpui::TestAppContext,
+) {
+    use daruda_acp::ToolStatusView;
+
+    let window = make_test_view(cx);
+    window
+        .update(cx, |view, _window, cx| {
+            let reset = |view: &mut crate::view::AgentChatView| {
+                view.queue = Default::default();
+                view.items.clear();
+                view.activity = Default::default();
+            };
+
+            view.set_turn_in_flight();
+            view.queue.pending_prompts.push(queued(1, "a"));
+            view.queue.pending_prompts.push(queued(2, "b"));
+
+            view.cancel_turn(cx);
+
+            assert!(view.turn_is_idle(), "Stop settles the turn locally");
+            assert!(
+                view.queue.pending_prompts.is_empty(),
+                "the live queue is emptied by the Stop"
+            );
+            assert_eq!(
+                texts(&view.queue.paused_prompts),
+                vec!["a".to_string(), "b".to_string()],
+                "Stop parks the queue (FIFO) instead of dropping it"
+            );
+
+            reset(view);
+            view.set_turn_idle();
+            view.items = vec![tool_call(
+                "child",
+                ToolStatusView::InProgress,
+                Some("parent"),
+            )];
+            view.activity.pending_completion = Some(crate::view::TurnOutcome::Completed);
+            assert!(
+                view.is_busy(),
+                "a running child subagent keeps the pane busy"
+            );
+
+            view.cancel_turn(cx);
+            assert_eq!(
+                view.activity.pending_completion,
+                Some(crate::view::TurnOutcome::Completed),
+                "Stop with no foreground turn keeps the already-captured completion"
+            );
+
+            reset(view);
+            view.set_turn_in_flight();
+            view.cancel_turn(cx);
+            assert!(view.turn_is_idle(), "Stop settles the live turn locally");
+            assert_eq!(
+                view.activity.pending_completion,
+                Some(crate::view::TurnOutcome::Stopped),
+                "Stop of a live turn stashes Stopped"
+            );
+
+            reset(view);
+            view.set_turn_in_flight();
+            view.cancel_turn(cx);
+            assert!(
+                view.turn_awaiting_cancel_ack(),
+                "the cancel window stays open until the ack"
+            );
+
+            view.send_prompt_text("again".into(), cx);
+            assert!(
+                view.turn_is_idle(),
+                "the re-prompt is buffered, not raced onto the wire, during cancel"
+            );
+            assert_eq!(
+                texts(&view.queue.pending_prompts),
+                vec!["again".to_string()],
+                "the re-prompt buffers client-side"
+            );
+
+            view.cancel_turn(cx);
+            assert!(
+                view.queue.pending_prompts.is_empty(),
+                "the second Stop empties the live queue"
+            );
+            assert_eq!(
+                texts(&view.queue.paused_prompts),
+                vec!["again".to_string()],
+                "the re-prompt is parked, not dropped"
+            );
+
+            view.apply_event(
+                daruda_acp::AcpEvent::TurnEnded {
+                    completed_normally: false,
+                    stop_reason: "Cancelled".into(),
+                    usage: None,
+                },
+                "",
+                false,
+                cx,
+            );
+            assert!(
+                !view.turn_awaiting_cancel_ack(),
+                "the ack closes the cancel window"
+            );
+            assert!(view.turn_is_idle(), "nothing left to run after both Stops");
+        })
+        .unwrap();
+}
+
+/// Stop leaves the same marker the adapter replays on `session/load`, so a live
+/// pane and a restored one show the run cut in the same place. Gated on a live
+/// turn: the SDK only writes its interrupt entry when a request was in flight,
+/// and a marker the replay cannot reproduce would diverge on restore.
+#[gpui::test]
+fn stop_marks_the_transcript_only_when_a_turn_was_in_flight(cx: &mut gpui::TestAppContext) {
+    let window = make_test_view(cx);
+    window
+        .update(cx, |view, _window, cx| {
+            view.items = vec![assistant_text_item("working on it")];
+            view.set_turn_in_flight();
+            view.cancel_turn(cx);
+            assert_eq!(
+                view.items.last(),
+                Some(&daruda_acp::ChatItem::Interrupted),
+                "a stopped turn is marked where it was cut"
+            );
+
+            // Idle already (the trailing-subagent Stop): nothing was
+            // interrupted, so the transcript gains nothing.
+            let before = view.items.len();
+            view.cancel_turn(cx);
+            assert_eq!(
+                view.items.len(),
+                before,
+                "a stop with no live turn adds no marker"
+            );
+        })
+        .expect("view update");
+}
+
+/// A chunk already on the wire when Stop is pressed lands *after* the marker,
+/// because nothing gates `AcpEvent::Update` on the open cancel window and the
+/// adapter's stream path has no cancelled check either. Left there it reads as
+/// a promptless turn under "Stopped by user" — and the SDK persists the
+/// assistant message *before* its interrupt entry, so a restored pane would
+/// order the same conversation the other way. The cancel ack is the point
+/// after which no more chunks for that turn can arrive, so the marker settles
+/// to the end there.
+#[gpui::test]
+fn late_content_does_not_strand_the_stop_marker_above_it(cx: &mut gpui::TestAppContext) {
+    let window = make_test_view(cx);
+    window
+        .update(cx, |view, _window, cx| {
+            view.items = vec![daruda_acp::ChatItem::UserText("go".into())];
+            view.set_turn_in_flight();
+            view.cancel_turn(cx);
+            assert_eq!(view.items.last(), Some(&daruda_acp::ChatItem::Interrupted));
+
+            // A chunk that was already in flight when the cancel went out.
+            view.items.push(assistant_text_item("half a sentence"));
+            view.apply_event(
+                daruda_acp::AcpEvent::TurnEnded {
+                    completed_normally: false,
+                    stop_reason: "Cancelled".into(),
+                    usage: None,
+                },
+                "",
+                false,
+                cx,
+            );
+
+            assert_eq!(
+                view.items.last(),
+                Some(&daruda_acp::ChatItem::Interrupted),
+                "the marker settles below the text that beat it"
+            );
+            assert_eq!(
+                view.items
+                    .iter()
+                    .filter(|i| matches!(i, daruda_acp::ChatItem::Interrupted))
+                    .count(),
+                1,
+                "moved, not duplicated"
+            );
+        })
+        .expect("view update");
+}
+
+// A run that can no longer change must stop reading as live.
+//
+// The rollup glyph pulses off `Rollup::Running`, which is derived from the
+// items themselves (a `streaming` flag, a non-terminal tool status) — while the
+// pulse pump only repaints panes `is_busy()` says are working. So an item left
+// flagged live on an idle pane gives a dot nothing drives: frozen until an
+// unrelated repaint samples the free-running clock, which reads as an erratic
+// blink. Every path that ends a run has to settle its items.
 
 fn chunk(text: &str, message_id: &str) -> AcpEvent {
     AcpEvent::Update(Box::new(SessionUpdate::AgentMessageChunk(

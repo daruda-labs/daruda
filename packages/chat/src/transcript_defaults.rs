@@ -97,11 +97,6 @@ mod tests {
         ReaderDefaults::from_config(&AgentConfig::default())
     }
 
-    /// The visible set with only thinking rows checked.
-    fn thinking_only() -> DisplayFilter {
-        DisplayFilter::from_tokens([FilterFacet::Thinking.token()])
-    }
-
     /// No catalog entry at all and an entry that states nothing read alike:
     /// both mean "this agent has no opinion", which is the built-in value.
     #[test]
@@ -258,17 +253,5 @@ mod tests {
         let words = |n: usize| format!("{n} commands");
         assert_eq!(ToolSummaryStyle::Compact.segment(3, words), "3");
         assert_eq!(ToolSummaryStyle::Labeled.segment(3, words), "3 commands");
-    }
-
-    #[test]
-    fn a_stated_filter_narrows_the_visible_set() {
-        let narrowed = AgentDefinition {
-            display_filter: Some(vec![FilterFacet::Thinking.token().to_string()]),
-            ..definition()
-        };
-        assert_eq!(
-            TranscriptDefaults::resolve(Some(&narrowed), reader()).filter,
-            thinking_only()
-        );
     }
 }

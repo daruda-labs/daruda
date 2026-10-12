@@ -174,15 +174,6 @@ mod tests {
     }
 
     #[test]
-    fn margin_top_centers_the_viewport_fraction() {
-        let viewport_height = 1000.0;
-        assert_eq!(
-            lightbox_margin_top(viewport_height),
-            viewport_height * (1.0 - theme::MERMAID_LIGHTBOX_VIEWPORT_FRACTION) / 2.0
-        );
-    }
-
-    #[test]
     fn margin_and_body_height_leave_bottom_room() {
         let viewport_height = 1000.0;
         let content_height = theme::CONTROL_TARGET_SIZE

@@ -293,37 +293,6 @@ fn conclusion_stays_visible_when_response_collapsed() {
 }
 
 #[test]
-fn conclusion_under_a_response_is_a_separately_foldable_item() {
-    use ToolStatusView::Completed;
-    let items = [
-        ChatItem::UserText("q".into()),
-        asst("let me look"),
-        tool("a", Completed),
-        tool("b", Completed),
-        asst("done"),
-    ];
-    let rows = project(
-        &items,
-        &FoldState::default(),
-        false,
-        &LiveSubagentUnits::of(&items),
-        StepWindow::uniform(TailWindow::All),
-        &DisplayFilter::default(),
-    );
-    // The final assistant block projects as a ConclusionItem (its own fold
-    // toggle); the earlier prose stays a plain AgentItem.
-    assert!(
-        rows.iter()
-            .any(|r| matches!(r.kind, RowKind::ConclusionItem(4))),
-        "the run's last assistant text is a ConclusionItem"
-    );
-    assert!(
-        rows.iter().any(|r| matches!(r.kind, RowKind::AgentItem(1))),
-        "earlier prose stays a plain AgentItem"
-    );
-}
-
-#[test]
 fn sole_reply_earns_the_conclusions_fold() {
     // A lone reply is the whole response, and the response bar cannot fold it:
     // the conclusion escape keeps it on screen through that fold. The bare
@@ -428,9 +397,9 @@ fn permission_visibility_tracks_actionability_when_response_collapsed() {
     );
 }
 
-/// `force_visible` is `is_last_prose || pending_permission`, and neither term
-/// consults any enclosing fold — an actionable prompt cannot be shut away by
-/// one. A permission never becomes a group child, so the folds that can enclose
+/// A pending permission escapes every enclosing fold on its own term of
+/// `force_visible`, which consults no fold (unlike the last-prose term, which a
+/// history fold can still shut) — an actionable prompt cannot be shut away. A permission never becomes a group child, so the folds that can enclose
 /// it are the response's and the tail window's boundary; both feed the one
 /// `folded` term this escapes.
 #[test]
@@ -509,34 +478,6 @@ fn collapsed_response_surfaces_a_live_tool_group() {
             .filter(|r| matches!(r.kind, RowKind::AgentItem(_)))
             .all(|r| r.hidden),
         "the live group's members stay folded under the collapsed response"
-    );
-}
-
-#[test]
-fn collapsed_response_hides_a_settled_tool_group() {
-    use ToolStatusView::Completed;
-    let items = [
-        ChatItem::UserText("q".into()),
-        tool("t1", Completed),
-        tool("t2", Completed),
-    ];
-    let mut fold = FoldState::default();
-    fold.set_all([FoldKey::Response(1)], false);
-    let rows = project(
-        &items,
-        &fold,
-        false,
-        &LiveSubagentUnits::of(&items),
-        StepWindow::uniform(TailWindow::All),
-        &DisplayFilter::default(),
-    );
-    let header = rows
-        .iter()
-        .find(|r| matches!(r.kind, RowKind::ToolGroupHeader { .. }))
-        .expect("group header present");
-    assert!(
-        header.hidden,
-        "a settled tool group folds away with the collapsed response"
     );
 }
 

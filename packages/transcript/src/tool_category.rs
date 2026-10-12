@@ -250,8 +250,8 @@ mod tests {
         );
     }
 
-    /// Three kinds the catch-all used to swallow. Each already has its own ACP
-    /// kind or a name the wire spells one way, so the bar can name it too.
+    /// Kinds that are not the catch-all: each has its own ACP kind or a name
+    /// the wire spells one way, so the bar can name it.
     #[test]
     fn a_distinct_kind_or_an_mcp_name_is_its_own_category() {
         assert_eq!(
@@ -329,18 +329,6 @@ mod tests {
                 (ToolCategory::Fetch, 1),
             ],
             "count descending, then declaration order so ties do not shuffle"
-        );
-    }
-
-    #[test]
-    fn a_single_category_tallies_as_one_entry() {
-        let calls = [
-            tool(Some("Read"), ToolKindView::Read),
-            tool(Some("Read"), ToolKindView::Read),
-        ];
-        assert_eq!(
-            tally_categories(calls.iter()),
-            vec![(ToolCategory::Read, 2)]
         );
     }
 

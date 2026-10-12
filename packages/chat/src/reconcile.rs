@@ -948,7 +948,7 @@ mod tests {
     /// Live (`InProgress`). Running does not open a tool card, so the
     /// editor-lifecycle tests put it on screen with [`make_tools_expanded_view`]
     /// — a collapsed card by design has no embeds at all (see
-    /// `a_collapsed_tool_card_gets_no_embed_editors`).
+    /// `folding_a_tool_card_materializes_and_releases_its_editors`).
     fn tool_call_with(output: Vec<ToolOutputBlock>, diffs: Vec<DiffView>) -> ChatItem {
         ChatItem::ToolCall(ToolCallItem {
             id: "call_1".to_string(),
@@ -1386,29 +1386,6 @@ mod tests {
         ChatItem::ToolCall(tc)
     }
 
-    /// Each embed editor is an `InputState`, and each `InputState` costs ~2 gpui
-    /// focus handles whose slot gpui's `release_dropped_focus_handles` walks on
-    /// every effect drain — a per-conversation, never-shrinking tax. A collapsed
-    /// tool card renders no body at all (`FoldRow::block` only runs the body
-    /// closure when expanded), so an editor built for one is pure cost.
-    #[gpui::test]
-    fn a_collapsed_tool_card_gets_no_embed_editors(cx: &mut TestAppContext) {
-        let window = make_test_view(cx);
-        let view = window.root(cx).expect("the view is the window root");
-
-        view.update(cx, |v, cx| {
-            // No fold rule or user override opens it.
-            v.items = vec![settled_tool("call_a", vec![raw("big output")])];
-            v.reconcile_output_editors(&ReconcileScope::All, &mut by_handle(v), cx);
-        });
-        view.read_with(cx, |v, _| {
-            assert!(
-                v.assets.output_editors.is_empty(),
-                "a collapsed card renders no body, so it needs no editor"
-            );
-        });
-    }
-
     /// A running call opens no card on its own: only the fold mode or a click
     /// does, so with neither its body is off screen and needs no editor.
     #[gpui::test]
@@ -1425,26 +1402,12 @@ mod tests {
         });
     }
 
-    /// The counterpart: a card whose body *is* on screen must have its editor, or
-    /// the body falls back to the inline per-line text walk the embed exists to
-    /// avoid.
-    #[gpui::test]
-    fn an_expanded_live_tool_cards_editors_are_materialized(cx: &mut TestAppContext) {
-        let window = make_tools_expanded_view(cx);
-        let view = window.root(cx).expect("the view is the window root");
-
-        view.update(cx, |v, cx| {
-            v.items = vec![tool_named("call_a", vec![raw("streaming output")])];
-            v.reconcile_output_editors(&ReconcileScope::All, &mut by_handle(v), cx);
-        });
-        view.read_with(cx, |v, _| {
-            assert!(v.assets.output_editors.contains_key("call_a#0"));
-        });
-    }
-
-    /// Materialization has to follow the fold both ways: expanding a settled card
-    /// builds its editors, collapsing it again releases them (and their focus
-    /// handles).
+    /// Materialization has to follow the fold both ways: a collapsed card gets
+    /// no editor, expanding it builds one, collapsing it again releases it. Each
+    /// embed editor is an `InputState` costing ~2 gpui focus handles, whose slot
+    /// `release_dropped_focus_handles` walks on every effect drain — and a
+    /// collapsed card renders no body (`FoldRow::block` only runs the body
+    /// closure when expanded), so an editor built for one is pure cost.
     ///
     /// Driven through `window.update`, which is where the app drives it from: a
     /// fold click arrives via `cx.listener`, i.e. from *inside* the window's own
@@ -1860,7 +1823,7 @@ mod tests {
     /// is gone. Driven the way an ACP event drives it — outside any window
     /// update, resolving the window from the stored handle. The fold-click path
     /// (inside the cycle) is covered by
-    /// `a_fold_click_inside_the_window_update_cycle_builds_its_editors`.
+    /// `folding_a_tool_card_materializes_and_releases_its_editors`.
     #[gpui::test]
     fn output_editors_are_built_reused_rebuilt_and_dropped(cx: &mut TestAppContext) {
         let window = make_tools_expanded_view(cx);

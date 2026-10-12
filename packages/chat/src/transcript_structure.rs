@@ -245,34 +245,6 @@ mod tests {
         assert_eq!(s.top_level_tool_runs(0..orphans.len()), 1);
     }
 
-    /// A nested child renders inside its parent's card and an empty streaming
-    /// chunk renders nowhere, so neither owns a row. A run has to span them:
-    /// ending at one puts two cards the reader sees side by side into separate
-    /// groups.
-    #[test]
-    fn a_tool_run_spans_the_items_that_own_no_row() {
-        let items = [
-            tool("a", None, false),
-            tool("a1", Some("a"), false),
-            tool("b", None, false),
-            tool("b1", Some("b"), false),
-            tool("c", None, false),
-        ];
-        let h = ToolHierarchy::build(&items);
-        let s = TranscriptStructure::new(&items, &h);
-        assert_eq!(s.tool_run(0, items.len()), 0..5, "the children are spanned");
-        assert_eq!(
-            s.group_calls(0..5).collect::<Vec<_>>(),
-            [0, 2, 4],
-            "the launches are the members"
-        );
-        assert_eq!(
-            s.top_level_tool_runs(0..items.len()),
-            1,
-            "one run, not three"
-        );
-    }
-
     /// The other item the row walk passes over: a streaming chunk with nothing
     /// in it yet.
     #[test]

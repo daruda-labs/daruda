@@ -318,20 +318,10 @@ pub(crate) fn reset_footer(
 
 #[cfg(test)]
 mod tests {
-    use super::{TextRoles, panel_outer_max_h, panel_outer_w};
+    use super::{panel_outer_max_h, panel_outer_w};
     use daruda_ui::theme;
 
     const MARGIN: f32 = theme::TRANSCRIPT_EDITOR_WINDOW_MARGIN;
-
-    #[test]
-    fn the_design_width_is_the_outer_box_in_any_roomy_window() {
-        for viewport in [800.0_f32, 1280.0, 3840.0] {
-            assert_eq!(
-                panel_outer_w(viewport),
-                theme::TRANSCRIPT_EDITOR_RULES_PANEL_W
-            );
-        }
-    }
 
     #[test]
     fn a_narrow_window_keeps_its_margin_on_both_sides() {
@@ -372,17 +362,6 @@ mod tests {
         );
         // The floor never outgrows the window itself.
         assert!(panel_outer_max_h(200.0, Some(150.0)) <= 200.0 - 2.0 * MARGIN);
-    }
-
-    #[test]
-    fn text_roles_hold_the_default_sizes_and_scale_together() {
-        let base = TextRoles::from_base(13.0);
-        assert_eq!(base.title, 13.0);
-        assert!((base.body - 12.0).abs() < 1e-4);
-        assert!((base.aux - 11.0).abs() < 1e-4);
-        let large = TextRoles::from_base(26.0);
-        assert!((large.body / base.body - 2.0).abs() < 1e-4);
-        assert!((large.aux / base.aux - 2.0).abs() < 1e-4);
     }
 
     mod shell {

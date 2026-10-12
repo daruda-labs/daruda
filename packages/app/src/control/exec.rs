@@ -874,8 +874,9 @@ fn group(rows: Vec<Row>) -> Vec<WindowGroup> {
 }
 
 /// Run `f` against the workspace `target` names. `WindowRegistry` has no
-/// uuid lookup, so this is the same scan `telegram::global::dispatch_to_workspace`
-/// does — kept separate because that one returns nothing.
+/// uuid lookup, so this is the same scan the remote channel's
+/// `dispatch_to_workspace` does — kept separate because that one returns
+/// nothing.
 fn in_pane_window<T>(
     target: PaneRef,
     cx: &mut App,

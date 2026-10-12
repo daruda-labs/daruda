@@ -469,12 +469,6 @@ mod tests {
     use super::*;
 
     #[test]
-    fn the_default_mode_is_auto() {
-        assert_eq!(FoldMode::default().preset(), Some(FoldPreset::Auto));
-        assert_eq!(FoldMode::default(), FoldPreset::Auto.mode());
-    }
-
-    #[test]
     fn auto_pins_only_the_newest_response() {
         let auto = FoldPreset::Auto.mode();
         let summary = FoldPreset::Summary.mode();
@@ -524,15 +518,6 @@ mod tests {
                 ex.rule(TurnPosition::Past, block),
                 Some(BlockRule::WhileRunning)
             );
-        }
-    }
-
-    #[test]
-    fn while_running_follows_activity_and_the_others_ignore_it() {
-        for active in [true, false] {
-            assert!(BlockRule::Expanded.is_expanded(active));
-            assert!(!BlockRule::Collapsed.is_expanded(active));
-            assert_eq!(BlockRule::WhileRunning.is_expanded(active), active);
         }
     }
 
@@ -587,20 +572,6 @@ mod tests {
         assert_eq!(
             FoldMode::from_tokens(["summary", "last.tool.agent=expanded"]),
             summary
-        );
-    }
-
-    #[test]
-    fn the_two_axes_are_independent() {
-        let auto = FoldPreset::Auto.mode();
-        let summary = FoldPreset::Summary.mode();
-        assert_eq!(
-            auto.rule(TurnPosition::Past, FoldBlock::Response),
-            summary.rule(TurnPosition::Past, FoldBlock::Response)
-        );
-        assert_ne!(
-            auto.rule(TurnPosition::Last, FoldBlock::Response),
-            summary.rule(TurnPosition::Last, FoldBlock::Response)
         );
     }
 

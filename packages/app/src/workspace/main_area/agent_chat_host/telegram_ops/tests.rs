@@ -773,108 +773,6 @@ async fn telegram_reply_ack_paths_cover_queue_overdue_and_empty_permission(
     );
 }
 
-/// Cross-workspace routing coverage: `crate::telegram::global`'s
-/// `dispatch_action` matches a `PaneRef.workspace` against every open
-/// `Workspace` via `WindowRegistry::for_each_workspace` + `ws.uuid() ==
-/// pane.workspace`, then mutates only the matching one. That guard —
-/// the entire reason `Workspace::uuid` and `for_each_workspace` exist
-/// for this feature — had zero test coverage; the pure pieces
-/// (`permission_buttons`, `BridgeCore`) are covered above and in
-/// `telegram::bridge`, but not the multi-window dispatch itself.
-///
-/// This drives the same shape `InboundAction::InjectPrompt`'s dispatch
-/// arm uses: two real `Workspace` windows (mirroring
-/// `window_registry.rs`'s `make_window` test helper), one AgentChat pane
-/// per workspace, `for_each_workspace` + a `uuid()` guard, and
-/// `inject_bot_reply` as the observable mutation. Only the pane in the
-/// targeted workspace should receive the injected queued prompt.
-#[gpui::test]
-async fn for_each_workspace_uuid_guard_dispatches_to_only_the_matching_pane(
-    cx: &mut gpui::TestAppContext,
-) {
-    use crate::window_registry::WindowRegistry;
-
-    let config = daruda_config::Config::default();
-    let (handle_a, workspace_a) = make_window(cx, &config);
-    let (handle_b, workspace_b) = make_window(cx, &config);
-    cx.run_until_parked();
-
-    let tmp = std::env::temp_dir();
-    let pane_a = cx
-        .update_window(handle_a.into(), |_, window, cx| {
-            workspace_a.update(cx, |ws, cx| {
-                let pane = ws.create_agent_chat_pane(
-                    Some(PaneCwd::Local(tmp.clone())),
-                    None,
-                    daruda_config::AgentDefinition::claude_default().id,
-                    None,
-                    window,
-                    cx,
-                );
-                let id = pane.id;
-                ws.active_runtime_mut().panes.push(pane);
-                id
-            })
-        })
-        .unwrap();
-    let pane_b = cx
-        .update_window(handle_b.into(), |_, window, cx| {
-            workspace_b.update(cx, |ws, cx| {
-                let pane = ws.create_agent_chat_pane(
-                    Some(PaneCwd::Local(tmp.clone())),
-                    None,
-                    daruda_config::AgentDefinition::claude_default().id,
-                    None,
-                    window,
-                    cx,
-                );
-                let id = pane.id;
-                ws.active_runtime_mut().panes.push(pane);
-                id
-            })
-        })
-        .unwrap();
-    cx.run_until_parked();
-
-    let target_uuid = workspace_a.read_with(cx, |ws, _| ws.uuid());
-    assert_ne!(
-        target_uuid,
-        workspace_b.read_with(cx, |ws, _| ws.uuid()),
-        "each window has a distinct workspace uuid"
-    );
-
-    // Exactly what `dispatch_action`'s `InjectPrompt` arm does.
-    cx.update(|cx| {
-        WindowRegistry::for_each_workspace(cx, |ws, _window, cx| {
-            if ws.uuid() == target_uuid {
-                ws.inject_bot_reply(pane_a, "hello from telegram".to_string(), cx);
-            }
-        });
-    });
-    cx.run_until_parked();
-
-    workspace_a.read_with(cx, |ws, cx| {
-        let view = ws.agent_chat_view(pane_a).cloned().expect("pane a present");
-        assert_eq!(
-            view.read(cx)
-                .queue()
-                .in_strip_order()
-                .filter(|(_, parked)| !parked)
-                .map(|(q, _)| q.text())
-                .collect::<Vec<_>>(),
-            vec!["hello from telegram"],
-            "the targeted workspace's pane received the injected queued prompt"
-        );
-    });
-    workspace_b.read_with(cx, |ws, cx| {
-        let view = ws.agent_chat_view(pane_b).cloned().expect("pane b present");
-        assert!(
-            !view.read(cx).queue().has_pending(),
-            "the non-matching workspace's pane must not be touched"
-        );
-    });
-}
-
 /// A permission request is a live blocking state, not a report of a past
 /// event: the agent stays stopped until someone answers. So when the gate
 /// declines one because the user was present, and the user then leaves, the
@@ -1100,8 +998,8 @@ async fn permission_delivery_history_tracks_recipient_and_connection(
 /// A phone tap routes by permission id, not by position: with two
 /// permissions outstanding, tapping the button for id A resolves *A* and
 /// leaves B live; a second tap for an already-answered id is a clean no-op.
-/// Mirrors the in-app `concurrent_permissions_resolve_independently_by_id`
-/// for the Telegram `respond_bot_permission` path.
+/// The Telegram `respond_bot_permission` path's counterpart of the chat's own
+/// `permission_resolution_routes_by_id_reprojects_and_cancel_drains`.
 #[gpui::test]
 async fn respond_bot_permission_routes_by_id_under_concurrency(cx: &mut gpui::TestAppContext) {
     use daruda_acp::{

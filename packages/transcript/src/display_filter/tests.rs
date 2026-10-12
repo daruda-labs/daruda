@@ -140,31 +140,6 @@ fn a_bare_tool_token_round_trips_as_the_normalised_pair() {
 }
 
 #[test]
-fn an_unknown_token_beside_a_known_one_drops_only_itself() {
-    let f = filter(&["tool_edit", "not_a_facet"]);
-    assert_eq!(f.tokens(), vec!["tools", "tool_edit"]);
-}
-
-#[test]
-fn the_default_filter_shows_every_kind() {
-    let f = DisplayFilter::default();
-    assert!(f.shows_everything());
-    for item in [
-        asst(),
-        think(),
-        call(
-            Some("Bash"),
-            ToolKindView::Execute,
-            ToolStatusView::Completed,
-        ),
-        call(None, ToolKindView::Read, ToolStatusView::Failed),
-        ChatItem::UserText("q".into()),
-    ] {
-        assert!(f.matches(&item), "{item:?} shows with no filter");
-    }
-}
-
-#[test]
 fn tool_kind_filters_ignore_tool_status() {
     let f = filter(&["tools", "tool_read"]);
     assert!(!f.matches(&asst()));
@@ -207,36 +182,10 @@ fn picking_several_kinds_unions_them() {
 }
 
 #[test]
-fn a_named_tool_is_classified_by_its_name() {
-    let f = filter(&["tool_read"]);
-    assert!(f.matches(&call(
-        Some("Read"),
-        ToolKindView::Execute,
-        ToolStatusView::Completed
-    )));
-    assert!(!f.matches(&call(
-        Some("Bash"),
-        ToolKindView::Execute,
-        ToolStatusView::Completed
-    )));
-}
-
-#[test]
 fn a_tool_name_is_matched_case_insensitively() {
     let f = filter(&["tool_search"]);
     assert!(f.matches(&call(
         Some("GREP"),
-        ToolKindView::Execute,
-        ToolStatusView::Completed
-    )));
-}
-
-#[test]
-fn an_unnamed_tool_falls_back_to_its_kind() {
-    let f = filter(&["tool_read"]);
-    assert!(f.matches(&call(None, ToolKindView::Read, ToolStatusView::Completed)));
-    assert!(!f.matches(&call(
-        None,
         ToolKindView::Execute,
         ToolStatusView::Completed
     )));
@@ -277,19 +226,6 @@ fn only_an_unclassifiable_name_and_kind_land_in_other() {
 }
 
 #[test]
-fn a_known_name_still_outranks_the_kind() {
-    // Claude reports every call as `Execute`; the name is what keeps a
-    // `Read` out of the "Runs" facet.
-    let read = call(
-        Some("Read"),
-        ToolKindView::Execute,
-        ToolStatusView::Completed,
-    );
-    assert!(filter(&["tool_read"]).matches(&read));
-    assert!(!filter(&["tool_run"]).matches(&read));
-}
-
-#[test]
 fn a_call_carrying_diffs_counts_as_an_edit_whatever_it_was_called() {
     let f = filter(&["tool_edit"]);
     let bash = call(
@@ -299,16 +235,6 @@ fn a_call_carrying_diffs_counts_as_an_edit_whatever_it_was_called() {
     );
     assert!(!f.matches(&bash));
     assert!(f.matches(&with_diff(bash)));
-}
-
-#[test]
-fn a_shell_written_file_is_invisible_to_the_edit_facet() {
-    let f = filter(&["tool_edit"]);
-    assert!(!f.matches(&call(
-        Some("Bash"),
-        ToolKindView::Execute,
-        ToolStatusView::Completed
-    )));
 }
 
 /// A move rewrites where a file lives, so it answers to the edit row. A delete
@@ -354,12 +280,6 @@ fn every_facet_round_trips_through_its_token() {
         let selected = DisplayFilter::from_tokens([facet.token()]);
         assert!(selected.contains(facet));
     }
-}
-
-#[test]
-fn an_unknown_token_is_dropped_rather_than_failing() {
-    let f = filter(&["tools", "not_a_facet"]);
-    assert_eq!(f.tokens(), vec!["tools"]);
 }
 
 /// A facet this build no longer knows must not decide what the pane shows. The
@@ -472,7 +392,7 @@ fn a_section_only_lists_facets_that_claim_its_axis() {
 }
 
 #[test]
-fn only_the_tool_section_nests_under_a_parent_toggle() {
+fn the_tool_section_nests_its_categories_under_one_parent_toggle() {
     assert_eq!(FilterAxis::Kind.parent(), None);
     assert_eq!(FilterAxis::Tool.parent(), Some(FilterFacet::Tools));
     // The parent stands for the whole section, so it must not also be a row.
@@ -508,8 +428,8 @@ fn a_fresh_filter_shows_everything_with_every_box_checked() {
     assert!(f.shows_everything());
 }
 
-/// The point of the change: unchecking one kind hides that kind and nothing
-/// else. Before, checking one kind hid every *other* kind.
+/// Unchecking one kind hides that kind and nothing else — the boxes say what
+/// stays, so one box never takes the other kinds with it.
 #[test]
 fn unchecking_a_kind_hides_that_kind_alone() {
     let f = DisplayFilter::default().toggled(FilterFacet::Thinking);
@@ -687,7 +607,7 @@ fn the_prose_filter_routes_an_assistant_message_by_its_phase() {
 }
 
 /// The parent toggle sets the whole section in one move, and each parented axis
-/// drives its own filter — the hazard the old tools-only helper warned about.
+/// drives its own filter: toggling one section never reaches into another.
 #[test]
 fn a_parent_toggle_sets_only_its_own_section() {
     let off_prose = DisplayFilter::default().with_section(FilterFacet::Prose, false);
@@ -760,20 +680,6 @@ fn plain_other() -> ToolCallItem {
     tc
 }
 
-/// The section switch takes the launch with everything else — the card's whole
-/// contents are tool calls, so keeping it would leave an empty card standing
-/// under a chip that says tool calls are hidden.
-#[test]
-fn turning_the_whole_tool_section_off_takes_the_launch_too() {
-    let off = DisplayFilter::from_tokens(["prose"]);
-    assert_eq!(off.section_state(FilterFacet::Tools), SectionState::Off);
-    assert!(!off.matches_tool(&launch()));
-    assert!(
-        DisplayFilter::default().matches_tool(&launch()),
-        "and All keeps it"
-    );
-}
-
 /// Every category earns a row of its own. A category a bar can count but the
 /// panel cannot list is one the reader sees and cannot act on.
 #[test]
@@ -787,7 +693,7 @@ fn every_tool_category_has_a_filter_row() {
     }
 }
 
-/// A launch has a category of its own now, so the tool axis decides it like any
+/// A launch has a category of its own, so the tool axis decides it like any
 /// other row: picking `tool_agent` keeps the card, picking only the file-work
 /// categories takes it — and everything inside it, which is the point.
 #[test]

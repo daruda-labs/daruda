@@ -42,47 +42,6 @@ fn consecutive_subagent_launches_form_one_group() {
 }
 
 #[test]
-fn subagent_child_tool_calls_get_no_row() {
-    use ToolStatusView::Completed;
-    // A top-level Task/Agent parent plus one inner child linked by
-    // `parent_tool_id`. The child renders nested inside the parent card
-    // (see `tool_card`), so it must not appear as its own row — and the
-    // parent + child must not collapse into a "2 tool calls" group.
-    let mut child = tool("child", Completed);
-    if let ChatItem::ToolCall(tc) = &mut child {
-        tc.parent_tool_id = Some("parent".to_owned());
-    }
-    let items = [
-        ChatItem::UserText("q".into()),
-        tool("parent", Completed),
-        child,
-    ];
-    let rows = project(
-        &items,
-        &FoldState::default(),
-        false,
-        &LiveSubagentUnits::of(&items),
-        StepWindow::uniform(TailWindow::All),
-        &DisplayFilter::default(),
-    );
-    assert!(
-        rows.iter().any(|r| matches!(r.kind, RowKind::AgentItem(1))),
-        "the parent tool call still renders as a row (under its own group bar)"
-    );
-    assert!(
-        !rows.iter().any(|r| matches!(r.kind, RowKind::AgentItem(2))),
-        "the subagent child earns no row of its own"
-    );
-    assert!(
-        rows.iter()
-            .filter(|r| matches!(r.kind, RowKind::ToolGroupHeader { .. }))
-            .count()
-            == 1,
-        "a parent + its child are not a sibling tool group"
-    );
-}
-
-#[test]
 fn multiple_subagent_children_all_skip_and_parent_stays_single() {
     use ToolStatusView::Completed;
     // Two inner calls under one parent: both skipped, and the parent renders

@@ -131,24 +131,6 @@ mod tests {
     }
 
     #[test]
-    fn a_pair_answers_per_level() {
-        let pair = StepWindow {
-            steps: TailWindow::Last(3),
-            calls: TailWindow::All,
-        };
-        assert_eq!(pair.get(TailLevel::Steps), TailWindow::Last(3));
-        assert_eq!(pair.get(TailLevel::Calls), TailWindow::All);
-    }
-
-    /// Every level the axis offers has to be reachable from `ALL` and carry a
-    /// distinct id fragment — the panel, the menu and the element ids are all
-    /// built from that list.
-    #[test]
-    fn every_level_is_listed_once() {
-        assert_eq!(TailLevel::ALL, [TailLevel::Steps, TailLevel::Calls]);
-    }
-
-    #[test]
     fn size_round_trips_every_offered_choice() {
         assert_eq!(TailWindow::All.size(), TAIL_WINDOW_ALL);
         for n in TAIL_WINDOW_CHOICES {

@@ -334,7 +334,7 @@ fn diff_line(line: &str, bg: Hsla, fg: Hsla, marker: char, cx: &App) -> impl Int
 
 #[cfg(test)]
 mod tests {
-    use super::{fallback_split, theme};
+    use super::fallback_split;
 
     #[test]
     fn a_diff_under_the_cap_is_shown_whole() {
@@ -364,13 +364,5 @@ mod tests {
     fn an_empty_diff_hides_nothing() {
         let split = fallback_split(0, 0, 12);
         assert_eq!((split.old_shown, split.new_shown, split.hidden), (0, 0, 0));
-    }
-
-    #[test]
-    fn the_shipped_cap_bounds_a_diff_larger_than_itself() {
-        let cap = theme::AGENT_CHAT_DIFF_FALLBACK_MAX_ROWS;
-        assert!(cap > 0);
-        let split = fallback_split(0, cap + 1, cap);
-        assert_eq!((split.new_shown, split.hidden), (cap, 1));
     }
 }

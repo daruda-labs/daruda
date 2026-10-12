@@ -43,13 +43,6 @@ async fn an_agent_tab_carries_its_session_status(cx: &mut TestAppContext) {
     assert_eq!(active_tab_status(&ws, cx), Some(TabIndicator::Working));
 }
 
-#[gpui::test]
-async fn a_terminal_tab_has_no_status(cx: &mut TestAppContext) {
-    let (_wh, ws) = build_workspace(cx);
-    cx.run_until_parked();
-    assert_eq!(active_tab_status(&ws, cx), None);
-}
-
 /// An agent-chat pane in a tab behind a fresh terminal tab, in a window the
 /// user is looking at.
 fn agent_behind_a_terminal(

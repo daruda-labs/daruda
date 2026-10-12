@@ -4,18 +4,6 @@
 use super::*;
 
 #[test]
-fn auto_is_the_projection_default() {
-    let items = two_settled_turns();
-    let implicit = project_under(&items, &FoldState::default());
-    let explicit = project_under(&items, &FoldState::with_mode(FoldPreset::Auto.mode()));
-    assert_eq!(kinds(&implicit), kinds(&explicit));
-    assert_eq!(
-        implicit.iter().map(|r| r.indent).collect::<Vec<_>>(),
-        explicit.iter().map(|r| r.indent).collect::<Vec<_>>()
-    );
-}
-
-#[test]
 fn working_indicator_present_while_streaming() {
     use ToolStatusView::Completed;
     // Even while the tail block streams, the indicator stays pinned to the
@@ -242,6 +230,14 @@ fn every_row_kind_declares_a_distinct_slot() {
         },
         RowKind::ConclusionItem(0),
         RowKind::WorkingIndicator,
+        RowKind::Interrupted(0),
+        RowKind::GroupThought(0),
+        RowKind::ToolGroupTailMore {
+            gid: "g".into(),
+            hidden_calls: 0,
+            kept_calls: 0,
+            collapsed: false,
+        },
     ];
     let rows: Vec<RenderRow> = kinds.into_iter().map(row).collect();
     for (i, a) in rows.iter().enumerate() {

@@ -36,9 +36,3 @@ pub fn source_following_agent() -> String {
 pub fn source_this_chat() -> String {
     s::agent_chat::source_this_chat()
 }
-
-/// The prefix a failure banner puts ahead of the reason it reports.
-#[cfg(any(test, feature = "test-support"))]
-pub fn error_prefix() -> String {
-    s::agent_chat::error_prefix()
-}

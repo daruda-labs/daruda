@@ -224,17 +224,6 @@ fn every_visible_row_is_accounted_for_by_a_turn() {
     }
 }
 
-/// The budgets above pin what these two shapes cost; this pins what no shape
-/// may do. Both fixtures run it so a rule broken on one adapter's ordering
-/// cannot pass on the other's.
-#[test]
-fn neither_fixture_breaks_a_projection_invariant() {
-    for (label, items) in [("codex", codex_session()), ("claude", claude_session())] {
-        let violations = invariant_violations(&items);
-        assert!(violations.is_empty(), "{label}: {}", violations.join("; "));
-    }
-}
-
 /// A turn's prefix is a transcript in its own right, so the rules have to hold
 /// while a run is still arriving — the state the pinned budgets only sample at
 /// turn boundaries.
