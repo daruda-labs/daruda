@@ -412,7 +412,8 @@ impl Workspace {
             .get(task_id)
             .map(|t| t.session_ids.clone())
             .unwrap_or_default();
-        self.claude.forget_tool_use_failures(&stale_sessions);
+        self.claude_sessions
+            .forget_tool_use_failures(&stale_sessions);
         cx.update_global::<GlobalTasks, _>(|g, _| g.remove(task_id));
         self.save_tasks_dirty(cx);
         cx.notify();

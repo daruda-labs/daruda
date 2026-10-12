@@ -3,6 +3,129 @@
 
 use super::*;
 
+#[gpui::test]
+async fn codex_acp_title_survives_pane_close_for_recent_sessions(cx: &mut TestAppContext) {
+    use crate::workspace::agent_usage::UsageKey;
+    use daruda_store::accounts::{AccountRecipeId, AccountSelection};
+
+    let root = tempfile::tempdir().unwrap();
+    let project = daruda_store::project::Project::from_path(root.path());
+    let config = daruda_config::Config::default();
+    let (window_handle, workspace) = super::super::build_workspace_with(cx, &config, Some(project));
+    cx.run_until_parked();
+    cx.update_window(window_handle.into(), |_, window, cx| {
+        workspace.update(cx, |ws, cx| {
+            let agent = daruda_config::AgentDefinition::codex_default();
+            let mut agents = ws.mirrors.agents.to_vec();
+            agents.push(agent.clone());
+            ws.mirrors.agents = agents.into();
+            let pane = ws.create_agent_chat_pane(
+                None,
+                Some("codex-title-session".into()),
+                agent.id,
+                Some("Brief greeting exchange".into()),
+                window,
+                cx,
+            );
+            let pane_id = pane.id;
+            ws.active_runtime_mut().panes.push(pane);
+            let key = UsageKey {
+                recipe: AccountRecipeId::Codex,
+                account: AccountSelection::SystemDefault,
+            };
+            // Replaying a restored pane's unchanged title must still seed the archive.
+            ws.fold_agent_chat_event(
+                pane_id,
+                daruda_acp::AcpEvent::SessionInfoChanged {
+                    title: daruda_acp::InfoFieldChange::Set("Brief greeting exchange".into()),
+                    updated_at: daruda_acp::InfoFieldChange::Unchanged,
+                },
+                cx,
+            );
+            assert_eq!(
+                ws.agent_usage.usage_by_account.session_title(key, "codex-title-session"),
+                Some("Brief greeting exchange")
+            );
+            ws.fold_agent_chat_event(
+                pane_id,
+                daruda_acp::AcpEvent::SessionInfoChanged {
+                    title: daruda_acp::InfoFieldChange::Unchanged,
+                    updated_at: daruda_acp::InfoFieldChange::Set("2026-10-12T00:00:00Z".into()),
+                },
+                cx,
+            );
+            assert_eq!(
+                ws.agent_usage.usage_by_account.session_title(key, "codex-title-session"),
+                Some("Brief greeting exchange")
+            );
+            ws.fold_agent_chat_event(
+                pane_id,
+                daruda_acp::AcpEvent::SessionInfoChanged {
+                    title: daruda_acp::InfoFieldChange::Cleared,
+                    updated_at: daruda_acp::InfoFieldChange::Unchanged,
+                },
+                cx,
+            );
+            assert_eq!(
+                ws.agent_usage.usage_by_account.session_title(key, "codex-title-session"),
+                None
+            );
+            ws.fold_agent_chat_event(
+                pane_id,
+                daruda_acp::AcpEvent::SessionInfoChanged {
+                    title: daruda_acp::InfoFieldChange::Set("Brief greeting exchange".into()),
+                    updated_at: daruda_acp::InfoFieldChange::Unchanged,
+                },
+                cx,
+            );
+            ws.active_runtime_mut().panes.retain(|pane| pane.id != pane_id);
+            let cwd = ws.active_lane().unwrap().path.clone();
+            ws.agent_usage.usage_by_account.set_activity(
+                key,
+                daruda_agent::ActivityStats {
+                    daily: vec![],
+                    recent_sessions: vec![daruda_agent::activity::SessionSummary {
+                        session_id: "codex-title-session".into(),
+                        cwd,
+                        title: None,
+                        prompt_preview: Some("hello".into()),
+                        git_branch: None,
+                        last_active: std::time::UNIX_EPOCH,
+                    }],
+                },
+            );
+            let snap = ws.prepare_right_dock_snapshot(cx);
+            let sessions = &snap
+                .recent_sessions
+                .iter()
+                .find(|(recipe, _)| *recipe == AccountRecipeId::Codex)
+                .unwrap()
+                .1;
+            assert_eq!(sessions[0].title.as_deref(), Some("Brief greeting exchange"));
+            let (saved, _) = ws.snapshot_for_disk(cx);
+            assert_eq!(saved.session_titles[0].title, "Brief greeting exchange");
+            assert_eq!(
+                ws.agent_usage.usage_by_account.session_title(
+                    UsageKey { recipe: AccountRecipeId::Claude, ..key },
+                    "codex-title-session",
+                ),
+                None
+            );
+            assert_eq!(
+                ws.agent_usage.usage_by_account.session_title(
+                    UsageKey {
+                        account: AccountSelection::Managed(daruda_store::accounts::AccountId::new()),
+                        ..key
+                    },
+                    "codex-title-session",
+                ),
+                None
+            );
+        });
+    })
+    .unwrap();
+}
+
 /// Persist AgentChat panes with session identity and a non-default owner, then
 /// restore both with and without that owner still in the catalog. A surviving
 /// owner keeps its session id; a removed owner falls back to the default agent

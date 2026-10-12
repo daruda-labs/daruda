@@ -1,149 +1,28 @@
-//! Claude Code integration state owned by [`super::Workspace`].
-//! Workspace methods that mutate or read `self.claude` live here.
-//!
-//! Groups the fields that together drive the right-panel Usage tab's
-//! gauges + status pill, the per-lane session-status indicator, the
-//! JSONL fallback watcher, the PTY tracker, and the plan-limits /
-//! service-status polls. Workspace owns this struct directly (not as
-//! an `Entity`) so the existing access patterns
-//! (`self.claude.usage_by_account`, etc.) compile without
-//! subscription / re-render plumbing changes — the goal at this stage is
-//! **field grouping**, not actor isolation. A future refactor can
-//! promote `ClaudeContext` to its own GPUI Entity once the call graph is
-//! mapped.
-//!
-//! The `_*` prefixed fields are RAII guards: dropping the struct
-//! cancels the matching pump tasks / shuts down the JSONL fallback
-//! watcher.
+//! Claude-specific hooks, session status, PTY tracking, and JSONL fallback.
+//! Dropping the task and watcher guards stops their background pumps.
 
 use std::collections::HashMap;
 
-use gpui::Task;
+use gpui::{Context, Task};
 
-use daruda_store::accounts::{AccountRecipeId, AccountSelection};
-
+use crate::workspace::Workspace;
 use crate::workspace::main_area::pane_tree::PaneId;
 use daruda_agent::pty_tracker::{PtyBinding, PtyTracker};
+use daruda_store::observability::error_report::{ErrorReport, ErrorSeverity};
+use daruda_store::observability::system_info::redact_home;
 
-/// Which account's usage a cache entry belongs to. The auth domain is part of
-/// the key because [`AccountSelection::SystemDefault`] names a *different*
-/// login in each domain — the ambient Claude login and the ambient Codex login
-/// would otherwise collide on one slot and overwrite each other every tick.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub(in crate::workspace) struct UsageKey {
-    pub recipe: AccountRecipeId,
-    pub account: AccountSelection,
-}
-
-/// Per-account cache of the two usage quantities the Usage tab renders —
-/// plan-rate limits and locally-aggregated activity. Encapsulates the maps
-/// behind typed getters/setters so callers never reach into a raw `HashMap`;
-/// the setters return whether a *visible* field changed, letting the caller
-/// decide `cx.notify()` (keeps GPUI out of this plain-data type).
-#[derive(Default)]
-pub(in crate::workspace) struct PerAccountUsage {
-    usage: HashMap<UsageKey, daruda_agent::UsageOutcome>,
-    /// Keyed the same way `usage` is — a plain `AccountSelection` key would
-    /// let Claude's and Codex's `SystemDefault` ambient logins collide on
-    /// one slot (see [`UsageKey`]'s own doc).
-    activity: HashMap<UsageKey, daruda_agent::ActivityStats>,
-}
-
-impl PerAccountUsage {
-    /// What the last poll established for `key`. `Pending` before the first
-    /// one lands, so callers never have to treat "absent" separately.
-    pub(in crate::workspace) fn usage(&self, key: UsageKey) -> daruda_agent::UsageOutcome {
-        self.usage.get(&key).cloned().unwrap_or_default()
-    }
-
-    /// The cached activity aggregate for `key`, if any has landed.
-    pub(in crate::workspace) fn activity(
-        &self,
-        key: UsageKey,
-    ) -> Option<&daruda_agent::ActivityStats> {
-        self.activity.get(&key)
-    }
-
-    /// Fold a fetch result into `key`'s outcome; returns `true` when what is on
-    /// screen changed, so only a meaningful change triggers a repaint.
-    /// `UsageOutcome::rendered_key` is what "on screen" means, so a newly
-    /// rendered field can't be left out of this comparison by accident.
-    pub(in crate::workspace) fn advance_usage(
-        &mut self,
-        key: UsageKey,
-        result: Result<daruda_agent::ProviderUsage, daruda_agent::FetchError>,
-    ) -> bool {
-        let prev = self.usage(key);
-        let next = prev.clone().advance(result);
-        let visible_changed = prev.rendered_key() != next.rendered_key();
-        self.usage.insert(key, next);
-        visible_changed
-    }
-
-    /// Insert/replace the activity aggregate for `key`; returns `true` when
-    /// it differs from the prior entry (a quiet tick that found no new JSONL
-    /// lines returns `false`, so an idle pane doesn't repaint — Pitfall #10).
-    pub(in crate::workspace) fn set_activity(
-        &mut self,
-        key: UsageKey,
-        activity: daruda_agent::ActivityStats,
-    ) -> bool {
-        if self.activity.get(&key) == Some(&activity) {
-            return false;
-        }
-        self.activity.insert(key, activity);
-        true
-    }
-
-    /// Drop every cached quantity, across all domains, for a managed account
-    /// `state` no longer lists — so no usage lingers under a dangling
-    /// selection. The system-default entries are never touched.
-    pub(in crate::workspace) fn retain_known(
-        &mut self,
-        state: &daruda_store::accounts::AccountsState,
-    ) {
-        let known = |account: AccountSelection| match account {
-            AccountSelection::Managed(id) => state.find(id).is_some(),
-            AccountSelection::SystemDefault => true,
-        };
-        self.usage.retain(|key, _| known(key.account));
-        self.activity.retain(|key, _| known(key.account));
-    }
-}
-
-pub(in crate::workspace) struct ClaudeContext {
-    /// Per-account cache of the Usage tab's two quantities (plan-rate
-    /// limits + locally-aggregated activity), keyed by [`UsageKey`].
-    /// Empty before the first fetch/aggregation, which reads back as
-    /// `UsageOutcome::Pending`. Reads/writes go through [`PerAccountUsage`]'s
-    /// typed getters/setters (`advance_usage` / `set_activity_stats` decide
-    /// `cx.notify()` from the returned "visible changed" flag).
-    pub(in crate::workspace) usage_by_account: PerAccountUsage,
-
-    /// Latest service-status indicator per auth domain. Account-independent —
-    /// a status page reports its provider's health, not a per-account
-    /// quantity — but not domain-independent: each provider hosts its own
-    /// page. Absent before that domain's first fetch lands;
-    /// `set_service_status` updates and bumps `cx.notify()`.
-    pub(in crate::workspace) service_status: HashMap<AccountRecipeId, daruda_agent::ServiceStatus>,
-
-    /// Guards `refresh_usage_now` against overlapping manual refreshes —
-    /// the button's one-shot fetch sets this on entry and clears it when
-    /// the background fetch resolves, so a double-click can't fan out
-    /// two concurrent `/api/oauth/usage` round-trips.
-    pub(in crate::workspace) usage_refresh_in_flight: bool,
-
+pub(in crate::workspace) struct ClaudeSessionState {
     /// Claude Code session-status mirror — driven by the hook channel and
     /// JSONL fallback. Read by the left dock to render the per-lane
     /// Working/NeedsAttention/Idle/Connecting indicator.
-    pub(in crate::workspace) claude_status: daruda_agent::ClaudeStatusStore,
+    pub(in crate::workspace) status: daruda_agent::ClaudeStatusStore,
 
     /// Whether daruda's hook entries are present in
     /// `~/.claude/settings.json`. Cached: refreshed at startup and after
     /// each install/uninstall action; on disk changes by the user
     /// directly editing settings.json the cache will lag until daruda
     /// restarts.
-    pub(in crate::workspace) claude_hooks_installed: bool,
+    pub(in crate::workspace) hooks_installed: bool,
 
     /// PTY → claude session tracker. Polls sysinfo every 3 s to find
     /// `claude` descendants of each registered Pane's shell PID and
@@ -153,7 +32,7 @@ pub(in crate::workspace) struct ClaudeContext {
     /// Last reported `(PaneId → claude session)` bindings from the
     /// tracker. Used by sub-row badges to highlight the focused tab's
     /// session and by `apply_pty_tracker_event` to detect dead sessions.
-    pub(in crate::workspace) pty_claude_bindings: HashMap<PaneId, PtyBinding>,
+    pub(in crate::workspace) pty_bindings: HashMap<PaneId, PtyBinding>,
 
     /// Keeps the tracker event-pump task alive for the Workspace
     /// lifetime; dropped when Workspace is dropped, which lets the
@@ -192,39 +71,9 @@ pub(in crate::workspace) struct ClaudeContext {
     /// Turns the hook channel has seen open, so a `Stop` can be told from
     /// a re-delivered one. Fed by hook updates only; see `turn_end`.
     pub(in crate::workspace) open_turns: daruda_agent::hooks::turn_end::OpenTurns,
-
-    /// Background-poll tasks driving the Usage tab: plan-rate windows and
-    /// service status for each auth domain, plus the local JSONL activity
-    /// aggregation. Each task re-reads the workspace's poll cadence every tick
-    /// so live config edits flow without restart. Dropping the tasks (when
-    /// Workspace is dropped) cancels the loops; held in one field so the set
-    /// grows with the domain list rather than the struct.
-    #[allow(dead_code)]
-    pub(in crate::workspace) _limits_pumps: Vec<Task<()>>,
-
-    /// Sticky per-domain focus: the last [`FocusedAccount`] observed while a
-    /// pane of that domain (`AccountDomain::for_pane`) was actually focused.
-    /// Refreshed once per frame (`Workspace::prepare_frame`) via
-    /// `sync::limits::observe_focus` — the single writer. Reading a domain nobody has focused yet (a fresh
-    /// workspace, or a domain the user never switched to) falls back to
-    /// `FocusedAccount::SystemDefault`. Without this, focusing an unrelated
-    /// pane (a terminal, or another domain's agent) would snap every other
-    /// domain's Usage-tab section back to its ambient login every frame.
-    pub(in crate::workspace) sticky_focus_by_recipe:
-        HashMap<AccountRecipeId, crate::workspace::main_area::pane::FocusedAccount>,
-
-    /// User's manual pick for which domain's section the Usage tab shows when
-    /// the focused pane doesn't name one exactly (a terminal, or an agent
-    /// daruda can't resolve a domain for). Ignored while the focused pane
-    /// does name one — auto mode always wins there. Volatile: not part of
-    /// persisted `WorkspaceState`, and never explicitly cleared — a pick for
-    /// a domain that later signs out (or was never signed in) just stops
-    /// matching anything in `usage_sections`, and the resolver falls through
-    /// to its default.
-    pub(in crate::workspace) usage_domain_override: Option<AccountRecipeId>,
 }
 
-impl ClaudeContext {
+impl ClaudeSessionState {
     /// Drop the tool-use failure tallies of sessions a task let go of.
     /// Session ids are never reused, so a tally left behind is only dead
     /// weight.
@@ -237,13 +86,6 @@ impl ClaudeContext {
         }
     }
 }
-
-// ---- Workspace methods that own the claude field ----
-
-use crate::workspace::Workspace;
-use daruda_store::observability::error_report::{ErrorReport, ErrorSeverity};
-use daruda_store::observability::system_info::redact_home;
-use gpui::Context;
 
 impl Workspace {
     /// Apply one filesystem event from `~/.daruda/status/`. Pumped by
@@ -265,7 +107,7 @@ impl Workspace {
                     // A session starting or ending is the moment its process
                     // may have appeared or gone; a tool call's update is not.
                     if matches!(file.last_event.as_str(), "SessionStart" | "SessionEnd") {
-                        self.claude.pty_tracker.poke();
+                        self.claude_sessions.pty_tracker.poke();
                     }
                     self.apply_task_session_changed(&file.session_id, cx);
                     if file.last_event == "PostToolUseFailure" {
@@ -278,7 +120,9 @@ impl Workspace {
                         self.apply_todo_write(&file.session_id, input, cx);
                     }
                     if let Some(reason) = Self::classify_hook_end_reason(&file.last_event) {
-                        self.claude.tool_use_failure_counts.remove(&file.session_id);
+                        self.claude_sessions
+                            .tool_use_failure_counts
+                            .remove(&file.session_id);
                         self.apply_task_session_ended(&file.session_id, reason, cx);
                     }
                     // Blocking hook notifications surface as a one-shot
@@ -296,11 +140,11 @@ impl Workspace {
                         file.source,
                     );
                     let turn_end = self
-                        .claude
+                        .claude_sessions
                         .open_turns
                         .observe(&file.session_id, file.status, &file.last_event)
                         .zip(self.session_pane_id(&file.session_id));
-                    if self.claude.claude_status.update(file) {
+                    if self.claude_sessions.status.update(file) {
                         self.notify_status_docks(cx);
                         #[cfg(debug_assertions)]
                         {
@@ -329,10 +173,14 @@ impl Workspace {
                 }
             },
             StatusEvent::Removed { session_id, .. } => {
-                self.claude.pty_tracker.poke();
-                self.claude.tool_use_failure_counts.remove(&session_id);
-                self.claude.last_pushed_notification.remove(&session_id);
-                self.claude.open_turns.forget(&session_id);
+                self.claude_sessions.pty_tracker.poke();
+                self.claude_sessions
+                    .tool_use_failure_counts
+                    .remove(&session_id);
+                self.claude_sessions
+                    .last_pushed_notification
+                    .remove(&session_id);
+                self.claude_sessions.open_turns.forget(&session_id);
                 self.apply_task_session_ended(
                     &session_id,
                     daruda_store::tasks::SessionEndReason::Other,
@@ -340,15 +188,15 @@ impl Workspace {
                 );
                 #[cfg(debug_assertions)]
                 let dbg_entry = self
-                    .claude
-                    .claude_status
+                    .claude_sessions
+                    .status
                     .get(&session_id)
                     .map(|f| (f.cwd.clone(), f.source));
                 #[cfg(debug_assertions)]
                 let dbg_probe = dbg_entry
                     .as_ref()
                     .map(|_| self.probe_lane_status(&session_id));
-                if self.claude.claude_status.remove(&session_id).is_some() {
+                if self.claude_sessions.status.remove(&session_id).is_some() {
                     self.notify_status_docks(cx);
                     #[cfg(debug_assertions)]
                     if let (Some((cwd, source)), Some(probe)) = (dbg_entry, dbg_probe) {
@@ -403,7 +251,7 @@ impl Workspace {
         // Dedup: skip when this notification is not strictly newer than
         // the last one already surfaced for the session.
         if self
-            .claude
+            .claude_sessions
             .last_pushed_notification
             .get(&file.session_id)
             .is_some_and(|&t| file.timestamp <= t)
@@ -413,7 +261,7 @@ impl Workspace {
         // Record before the focus-gate return below: a re-delivered file
         // that was suppressed by focus must not fire late once focus
         // moves away — the user already saw the TUI prompt.
-        self.claude
+        self.claude_sessions
             .last_pushed_notification
             .insert(file.session_id.clone(), file.timestamp);
 
@@ -438,8 +286,8 @@ impl Workspace {
 
     /// The pane bound to `session_id`, if this workspace owns its terminal.
     fn session_pane_id(&self, session_id: &str) -> Option<PaneId> {
-        self.claude
-            .pty_claude_bindings
+        self.claude_sessions
+            .pty_bindings
             .iter()
             .find(|(_, binding)| binding.session_id == session_id)
             .map(|(pane_id, _)| *pane_id)
@@ -452,103 +300,6 @@ impl Workspace {
     fn session_pane_on_screen(&self, session_id: &str) -> bool {
         self.session_pane_id(session_id)
             .is_some_and(|pane_id| self.pane_on_screen(pane_id))
-    }
-
-    /// Fold a plan-rate fetch result into `key`'s cached outcome. Called by the
-    /// limits pump and by `refresh_usage_now` — including on failure, since
-    /// which failure it was is what tells a signed-out domain from a domain
-    /// whose refresh merely broke. Skips `cx.notify()` when nothing visible
-    /// moved.
-    pub(in crate::workspace) fn advance_usage(
-        &mut self,
-        key: UsageKey,
-        result: Result<daruda_agent::ProviderUsage, daruda_agent::FetchError>,
-        cx: &mut Context<Self>,
-    ) {
-        if self.claude.usage_by_account.advance_usage(key, result) {
-            cx.notify();
-        }
-    }
-
-    /// Replace one provider's cached service-status snapshot. Called by the
-    /// status pump after a successful fetch of that provider's status page.
-    pub(in crate::workspace) fn set_service_status(
-        &mut self,
-        recipe: AccountRecipeId,
-        status: daruda_agent::ServiceStatus,
-        cx: &mut Context<Self>,
-    ) {
-        let prev = self.claude.service_status.get(&recipe);
-        let visible_changed = prev.is_none_or(|prev| {
-            prev.indicator != status.indicator || prev.description != status.description
-        });
-        self.claude.service_status.insert(recipe, status);
-        if visible_changed {
-            cx.notify();
-        }
-    }
-
-    /// Replace the cached activity aggregate for `key` (the domain + account
-    /// it was aggregated for). Called by the per-domain `Activity` pumps and
-    /// by `refresh_usage_now` after `update_activity` lands. Skips the redraw
-    /// when the stats are unchanged vs. that key's prior entry (a quiet tick
-    /// that found no new JSONL lines) so an idle pane doesn't repaint the
-    /// whole window tree (Pitfall #10).
-    pub(in crate::workspace) fn set_activity_stats(
-        &mut self,
-        key: UsageKey,
-        activity: daruda_agent::ActivityStats,
-        cx: &mut Context<Self>,
-    ) {
-        if self.claude.usage_by_account.set_activity(key, activity) {
-            cx.notify();
-        }
-    }
-
-    /// Manual-refresh backend for the Usage tab's ⟳ button. The tab shows every
-    /// auth domain at once, so this refreshes every domain — limits, status,
-    /// and local activity, each per domain — through the pump's own routing
-    /// (`sync::limits::refresh_round`), which is what keeps the two from
-    /// filing a domain's data under different accounts.
-    ///
-    /// The `usage_refresh_in_flight` guard collapses rapid clicks into a single
-    /// in-flight round; it is cleared when the round resolves (or with the
-    /// workspace if it is gone).
-    pub(in crate::workspace) fn refresh_usage_now(&mut self, cx: &mut Context<Self>) {
-        if self.claude.usage_refresh_in_flight {
-            return;
-        }
-        self.claude.usage_refresh_in_flight = true;
-        cx.notify();
-
-        let sticky = self.claude.sticky_focus_by_recipe.clone();
-
-        cx.spawn(async move |this, cx| {
-            let round = cx
-                .background_executor()
-                .spawn(async move { crate::workspace::sync::limits::refresh_round(&sticky) })
-                .await;
-
-            // The workspace can close mid-refresh; nothing to update or
-            // unset then, so the dropped guard dies with the entity.
-            // SILENT-OK: workspace gone mid-refresh — no state to clear.
-            let _ = this.update(cx, |ws, cx| {
-                for (key, result) in round.limits {
-                    ws.advance_usage(key, result, cx);
-                }
-                for (recipe, result) in round.status {
-                    if let Ok(status) = result {
-                        ws.set_service_status(recipe, status, cx);
-                    }
-                }
-                for (key, stats) in round.activity {
-                    ws.set_activity_stats(key, stats, cx);
-                }
-                ws.claude.usage_refresh_in_flight = false;
-                cx.notify();
-            });
-        })
-        .detach();
     }
 
     /// Drop every trace of `pane_ids` from PTY→claude tracking: the
@@ -565,8 +316,8 @@ impl Workspace {
         cx: &mut Context<Self>,
     ) {
         for id in pane_ids {
-            self.claude.pty_tracker.unregister(*id);
-            self.claude.pty_claude_bindings.remove(id);
+            self.claude_sessions.pty_tracker.unregister(*id);
+            self.claude_sessions.pty_bindings.remove(id);
         }
         self.unseen_outcomes.forget(pane_ids);
         // Dropped bindings feed the left-dock per-lane agent badges and

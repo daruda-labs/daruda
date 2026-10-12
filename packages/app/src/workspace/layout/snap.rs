@@ -336,7 +336,7 @@ pub(in crate::workspace) struct RightDockSnapshot {
     /// once per snapshot build by `AccountDomain::for_pane` and reused here
     /// rather than recomputed in the renderer.
     pub focused_agent_domain: crate::workspace::main_area::pane::AccountDomain,
-    /// Mirrors `ClaudeContext::usage_domain_override` — the switcher's last
+    /// Mirrors `AgentUsageState::usage_domain_override` — the switcher's last
     /// manual pick, read-only from this side.
     pub usage_domain_override: Option<daruda_store::accounts::AccountRecipeId>,
     /// Locally aggregated activity (7-day turns + tokens charts), one entry

@@ -244,8 +244,8 @@ impl Workspace {
         index: &[(PaneId, daruda_store::project::LaneRef)],
     ) -> (Option<PaneId>, Option<daruda_store::project::LaneRef>) {
         let pane_id = self
-            .claude
-            .pty_claude_bindings
+            .claude_sessions
+            .pty_bindings
             .iter()
             .find(|(_, binding)| binding.session_id == session_id)
             .map(|(pane_id, _)| *pane_id);
@@ -267,8 +267,8 @@ impl Workspace {
             // transitions (hook / JSONL watcher).
             let (per_lane, _) = aggregate_over_panes(
                 &index,
-                &self.claude.pty_claude_bindings,
-                &self.claude.claude_status,
+                &self.claude_sessions.pty_bindings,
+                &self.claude_sessions.status,
                 &[],
             );
             // `None` when no pane in the lane has a store entry yet
@@ -277,7 +277,11 @@ impl Workspace {
             per_lane.get(&lane_ref).copied()
         });
         LaneStatusProbe {
-            session: self.claude.claude_status.get(session_id).map(|f| f.status),
+            session: self
+                .claude_sessions
+                .status
+                .get(session_id)
+                .map(|f| f.status),
             aggregate,
             pane_id,
             lane_ref,

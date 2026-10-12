@@ -1197,6 +1197,7 @@ pub(super) mod new_schema_fixtures {
             project_ids: vec![project],
             project_overrides: BTreeMap::from([(project, ProjectOverride::default())]),
             groups: vec![],
+            session_titles: vec![],
             active_project: Some(project),
             active_lane: Some(Default::default()),
             docks: DockStates::default(),
@@ -1277,6 +1278,23 @@ mod new_schema {
         let json = serde_json::to_string(&w).unwrap();
         let back: WorkspaceState = serde_json::from_str(&json).unwrap();
         assert_eq!(w, back);
+    }
+
+    #[test]
+    fn session_titles_roundtrip_and_default_when_absent() {
+        let mut w = sample_workspace(ProjectUuid::new());
+        w.session_titles.push(crate::project::types::SessionTitle {
+            recipe: crate::accounts::AccountRecipeId::Codex,
+            account: None,
+            session_id: "session-1".into(),
+            title: "Brief greeting exchange".into(),
+        });
+        let mut json = serde_json::to_value(&w).unwrap();
+        let back: WorkspaceState = serde_json::from_value(json.clone()).unwrap();
+        assert_eq!(back.session_titles, w.session_titles);
+        json.as_object_mut().unwrap().remove("session_titles");
+        let back: WorkspaceState = serde_json::from_value(json).unwrap();
+        assert!(back.session_titles.is_empty());
     }
 
     #[test]

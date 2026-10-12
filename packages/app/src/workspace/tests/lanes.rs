@@ -440,8 +440,8 @@ fn finalize_remove_active_lane_keeps_main_area_filled(cx: &mut TestAppContext) {
                     .collect();
                 assert!(!pane_ids.is_empty(), "opened tab spawns panes");
                 for id in &pane_ids {
-                    ws.claude.pty_tracker.register(*id, 4242);
-                    ws.claude.pty_claude_bindings.insert(
+                    ws.claude_sessions.pty_tracker.register(*id, 4242);
+                    ws.claude_sessions.pty_bindings.insert(
                         *id,
                         daruda_agent::pty_tracker::PtyBinding {
                             claude_pid: 4242,
@@ -472,10 +472,10 @@ fn finalize_remove_active_lane_keeps_main_area_filled(cx: &mut TestAppContext) {
             !ws.main_area.runtimes.contains_key(&lane1),
             "removed lane's runtime must be cleared"
         );
-        let tracked = ws.claude.pty_tracker.tracked_pane_ids();
+        let tracked = ws.claude_sessions.pty_tracker.tracked_pane_ids();
         for id in &pane_ids {
             assert!(
-                !ws.claude.pty_claude_bindings.contains_key(id),
+                !ws.claude_sessions.pty_bindings.contains_key(id),
                 "removed lane's pane binding must be dropped"
             );
             assert!(
@@ -827,6 +827,7 @@ fn test_restore_inaccessible_active_lane_leaves_no_tab(cx: &mut TestAppContext) 
             project_ids: vec![project_uuid],
             project_overrides,
             groups: Vec::new(),
+            session_titles: Vec::new(),
             active_project: Some(project_uuid),
             active_lane: Some(0),
             docks: DockStates::default(),
@@ -903,6 +904,7 @@ fn test_restore_state_clamps_stale_active_lane_id(cx: &mut TestAppContext) {
             project_ids: vec![project_uuid],
             project_overrides,
             groups: Vec::new(),
+            session_titles: Vec::new(),
             active_project: Some(project_uuid),
             active_lane: Some(999), // stale — only id 3 exists
             docks: DockStates::default(),

@@ -148,7 +148,7 @@ impl Workspace {
         // and bind them back to its session_id. Stub
         // panes (no pty_pid) skip registration.
         if let Some(pid) = pty_pid {
-            self.claude.pty_tracker.register(pane_id, pid);
+            self.claude_sessions.pty_tracker.register(pane_id, pid);
         }
 
         Ok(Pane {

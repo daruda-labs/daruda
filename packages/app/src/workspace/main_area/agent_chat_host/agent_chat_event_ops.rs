@@ -3,6 +3,7 @@
 
 use gpui::Context;
 
+use crate::agent::launch_resolve::account_recipe_for_connect;
 use crate::workspace::Workspace;
 use crate::workspace::main_area::pane_tree::PaneId;
 
@@ -26,6 +27,13 @@ impl Workspace {
         cx: &mut Context<Self>,
     ) -> PumpStep {
         let is_connected = matches!(&event, daruda_acp::AcpEvent::Connected { .. });
+        let has_title_update = matches!(
+            &event,
+            daruda_acp::AcpEvent::SessionInfoChanged {
+                title: daruda_acp::InfoFieldChange::Set(_) | daruda_acp::InfoFieldChange::Cleared,
+                ..
+            }
+        );
         let (syntax_theme, is_light) = self.agent_chat_theme_params(cx);
         let Some(view) = self.agent_chat_view(pane_id).cloned() else {
             return PumpStep::Stop;
@@ -108,9 +116,32 @@ impl Workspace {
         // token-streaming events.
         {
             let v = view.read(cx);
-            if v.session_id() != session_id_before.as_deref()
-                || v.session_title() != title_before.as_deref()
+            let session_changed = v.session_id() != session_id_before.as_deref();
+            let title_changed = v.session_title() != title_before.as_deref();
+            let mut cached_title_changed = false;
+            if (has_title_update || (session_changed && v.session_title().is_some()))
+                && let Some(session_id) = v.session_id()
+                && let Some(recipe) = self.agent_launch_for(v.agent_id()).and_then(|agent| {
+                    account_recipe_for_connect(
+                        &agent.launch,
+                        matches!(
+                            v.cwd(),
+                            Some(daruda_store::project::PaneCwd::Remote(_))
+                        ),
+                    )
+                })
             {
+                let key = crate::workspace::agent_usage::UsageKey {
+                    recipe,
+                    account: self.agent_chat_account_selection(pane_id),
+                };
+                cached_title_changed = self.agent_usage.usage_by_account.set_session_title(
+                    key,
+                    session_id,
+                    v.session_title(),
+                );
+            }
+            if session_changed || title_changed || cached_title_changed {
                 self.mutate_durable(cx, |_, _| {});
             }
         }

@@ -32,8 +32,8 @@ impl Workspace {
         let (agent_status_per_lane, agent_per_session_per_lane) =
             crate::workspace::claude_status_aggregate::aggregate_over_panes(
                 &pane_lane,
-                &self.claude.pty_claude_bindings,
-                &self.claude.claude_status,
+                &self.claude_sessions.pty_bindings,
+                &self.claude_sessions.status,
                 &acp_statuses,
             );
         LeftDockSnapshot {
@@ -145,8 +145,8 @@ impl Workspace {
             agent_status_per_lane,
             agent_per_session_per_lane,
             agent_active_session_id: self
-                .claude
-                .pty_claude_bindings
+                .claude_sessions
+                .pty_bindings
                 .get(&self.active_runtime().focused_pane_id)
                 .map(|b| b.session_id.clone())
                 .or_else(|| {
@@ -159,7 +159,7 @@ impl Workspace {
                         .map(|(pid, _)| format!("acp:{pid}"))
                 }),
             agent_install_banner_visible: self.mirrors.claude_status_enabled
-                && !self.claude.claude_hooks_installed,
+                && !self.claude_sessions.hooks_installed,
             workspace: Handle(self.docks.left.read(cx).workspace.clone()),
         }
     }
@@ -340,8 +340,8 @@ impl Workspace {
             String,
             daruda_agent::SessionStatus,
         > = self
-            .claude
-            .claude_status
+            .claude_sessions
+            .status
             .iter()
             .map(|(sid, file)| (sid.to_string(), file.status))
             .collect();
@@ -350,7 +350,7 @@ impl Workspace {
         // snap so an idle session with 0 failures stays absent from
         // the map (cheaper hash, no false-positive lookups).
         let tool_use_failure_counts: std::collections::HashMap<String, u32> = self
-            .claude
+            .claude_sessions
             .tool_use_failure_counts
             .iter()
             .filter(|&(_, &n)| n > 0)
@@ -371,12 +371,12 @@ impl Workspace {
                 .filter_map(|recipe| {
                     let account = crate::workspace::sync::limits::usage_account(
                         recipe,
-                        &self.claude.sticky_focus_by_recipe,
+                        &self.agent_usage.sticky_focus_by_recipe,
                     );
                     let outcome = self
-                        .claude
+                        .agent_usage
                         .usage_by_account
-                        .usage(crate::workspace::claude_session_ops::UsageKey { recipe, account });
+                        .usage(crate::workspace::agent_usage::UsageKey { recipe, account });
                     if outcome.is_signed_out() {
                         return None;
                     }
@@ -391,7 +391,7 @@ impl Workspace {
                         )
                         .into(),
                         outcome,
-                        service_status: self.claude.service_status.get(&recipe).cloned(),
+                        service_status: self.agent_usage.service_status.get(&recipe).cloned(),
                     })
                 })
                 .collect();
@@ -406,11 +406,11 @@ impl Workspace {
             .filter_map(|section| {
                 let account = crate::workspace::sync::limits::usage_account(
                     section.recipe,
-                    &self.claude.sticky_focus_by_recipe,
+                    &self.agent_usage.sticky_focus_by_recipe,
                 );
-                self.claude
+                self.agent_usage
                     .usage_by_account
-                    .activity(crate::workspace::claude_session_ops::UsageKey {
+                    .activity(crate::workspace::agent_usage::UsageKey {
                         recipe: section.recipe,
                         account,
                     })
@@ -447,10 +447,10 @@ impl Workspace {
             .filter_map(|section| {
                 let account = crate::workspace::sync::limits::usage_account(
                     section.recipe,
-                    &self.claude.sticky_focus_by_recipe,
+                    &self.agent_usage.sticky_focus_by_recipe,
                 );
-                let raw = self.claude.usage_by_account.activity(
-                    crate::workspace::claude_session_ops::UsageKey {
+                let raw = self.agent_usage.usage_by_account.activity(
+                    crate::workspace::agent_usage::UsageKey {
                         recipe: section.recipe,
                         account,
                     },
@@ -483,7 +483,18 @@ impl Workspace {
                             agent_id: agent_id.clone(),
                             account,
                             lane_ref: active_lane_ref,
-                            title: s.title.clone().map(Into::into),
+                            title: self
+                                .agent_usage
+                                .usage_by_account
+                                .session_title(
+                                    crate::workspace::agent_usage::UsageKey {
+                                        recipe: section.recipe,
+                                        account,
+                                    },
+                                    &s.session_id,
+                                )
+                                .map(Into::into)
+                                .or_else(|| s.title.clone().map(Into::into)),
                             prompt_preview: s.prompt_preview.clone().map(Into::into),
                             git_branch: s.git_branch.clone().map(Into::into),
                             cwd: s.cwd.clone(),
@@ -501,10 +512,10 @@ impl Workspace {
             workspace: Handle(self.docks.right.read(cx).workspace.clone()),
             usage: usage_sections,
             focused_agent_domain: pane_domain,
-            usage_domain_override: self.claude.usage_domain_override,
+            usage_domain_override: self.agent_usage.usage_domain_override,
             activity,
             recent_sessions,
-            usage_refresh_in_flight: self.claude.usage_refresh_in_flight,
+            usage_refresh_in_flight: self.agent_usage.usage_refresh_in_flight,
             skills: cx
                 .global::<crate::agent::skills::global::GlobalSkills>()
                 .snapshot_for(self.active_lane_root().as_deref()),

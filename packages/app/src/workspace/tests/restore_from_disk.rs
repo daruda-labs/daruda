@@ -104,6 +104,7 @@ fn restore_into_empty_workspace_applies_dock_state(cx: &mut TestAppContext) {
         project_ids: vec![project_uuid],
         project_overrides,
         groups: Vec::new(),
+        session_titles: Vec::new(),
         active_project: Some(project_uuid),
         active_lane: None,
         docks: DockStates {

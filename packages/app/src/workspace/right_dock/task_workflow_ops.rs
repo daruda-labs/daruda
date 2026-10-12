@@ -120,7 +120,8 @@ impl Workspace {
         // Drop pending PostToolUseFailure tallies — ULIDs are never
         // reused, so leaving them would slowly accumulate dead
         // entries across many cancel/reopen cycles.
-        self.claude.forget_tool_use_failures(&cleared_sessions);
+        self.claude_sessions
+            .forget_tool_use_failures(&cleared_sessions);
         self.cancel_task_chat_execution(task_id, cx);
         self.save_tasks_dirty(cx);
         cx.notify();
@@ -159,7 +160,7 @@ impl Workspace {
                     Vec::new()
                 }
             });
-            self.claude.forget_tool_use_failures(&cleared);
+            self.claude_sessions.forget_tool_use_failures(&cleared);
             self.save_tasks_dirty(cx);
             cx.notify();
             return;
@@ -217,7 +218,7 @@ impl Workspace {
             task.updated_at = Utc::now();
             std::mem::take(&mut task.session_ids)
         });
-        self.claude.forget_tool_use_failures(&cleared);
+        self.claude_sessions.forget_tool_use_failures(&cleared);
         self.save_tasks_dirty(cx);
         cx.notify();
     }
@@ -277,7 +278,9 @@ impl Workspace {
         // the counter is meaningless even if the task is already
         // in a terminal state (e.g. user cancelled before
         // SessionEnd arrived).
-        self.claude.tool_use_failure_counts.remove(session_id);
+        self.claude_sessions
+            .tool_use_failure_counts
+            .remove(session_id);
 
         let dirty = cx.update_global::<GlobalTasks, bool>(|g, _| {
             let mut dirty = false;
@@ -402,14 +405,16 @@ impl Workspace {
             return;
         }
         let count = self
-            .claude
+            .claude_sessions
             .tool_use_failure_counts
             .entry(session_id.to_string())
             .and_modify(|n| *n = n.saturating_add(1))
             .or_insert(1);
         let count = *count;
         if count >= daruda_store::tasks::TASK_TOOL_USE_FAILURE_THRESHOLD {
-            self.claude.tool_use_failure_counts.remove(session_id);
+            self.claude_sessions
+                .tool_use_failure_counts
+                .remove(session_id);
             let message = crate::surface::strings::task::error_tool_use_failure(count);
             self.escalate_task_session_to_error(session_id, message, cx);
         }

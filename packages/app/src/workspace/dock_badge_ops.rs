@@ -25,8 +25,8 @@ impl Workspace {
         let acp = self.agent_chat_statuses(cx);
         let (per_lane, _) = crate::workspace::claude_status_aggregate::aggregate_over_panes(
             &pane_lane,
-            &self.claude.pty_claude_bindings,
-            &self.claude.claude_status,
+            &self.claude_sessions.pty_bindings,
+            &self.claude_sessions.status,
             &acp,
         );
         let mut lanes: std::collections::HashSet<_> = per_lane

@@ -73,7 +73,7 @@ impl Workspace {
             return;
         }
         if let Some(dir) = self.cli_sessions_dir(account_id) {
-            self.claude.pty_tracker.track_task(pane_id, dir);
+            self.claude_sessions.pty_tracker.track_task(pane_id, dir);
         }
         self.save_tasks_dirty(cx);
     }
@@ -145,7 +145,7 @@ impl Workspace {
                 (run.source.cli_process(), &run.session_id)
                 && let Some(dir) = self.cli_sessions_dir(run.account_id)
             {
-                self.claude
+                self.claude_sessions
                     .pty_tracker
                     .track_session(session.clone(), *pid, dir);
             }
@@ -199,8 +199,8 @@ impl Workspace {
             );
         }
         let transcript = self
-            .claude
-            .claude_status
+            .claude_sessions
+            .status
             .get(&binding.session_id)
             .and_then(|file| file.transcript_path.clone());
         let session = binding.session_id.clone();
@@ -269,11 +269,11 @@ impl Workspace {
     /// Whether anything still shows a process writing `session_id`: a pane
     /// bound to it, or a process the tracker has not seen exit.
     fn cli_session_live(&self, session_id: &str) -> bool {
-        self.claude
-            .pty_claude_bindings
+        self.claude_sessions
+            .pty_bindings
             .values()
             .any(|binding| binding.session_id == session_id)
-            || self.claude.pty_tracker.is_running(session_id)
+            || self.claude_sessions.pty_tracker.is_running(session_id)
     }
 
     /// Continuing is safe only once the run's exit is confirmed and nothing
@@ -332,7 +332,7 @@ impl Workspace {
         }
         let Some(cwd) = v.cwd().cloned() else { return };
         // A user-asked reload is also a moment to re-check the process.
-        self.claude.pty_tracker.poke();
+        self.claude_sessions.pty_tracker.poke();
         view.update(cx, |v, cx| {
             v.set_load_intent(intent);
             v.retry_for_reconnect(Some(session.clone()), cx);

@@ -61,14 +61,14 @@ impl Workspace {
                 }
                 let changed = match binding {
                     Some(new) => {
-                        let prev = self.claude.pty_claude_bindings.get(&pane_id);
+                        let prev = self.claude_sessions.pty_bindings.get(&pane_id);
                         let same = prev == Some(&new);
                         if !same {
-                            self.claude.pty_claude_bindings.insert(pane_id, new);
+                            self.claude_sessions.pty_bindings.insert(pane_id, new);
                         }
                         !same
                     }
-                    None => self.claude.pty_claude_bindings.remove(&pane_id).is_some(),
+                    None => self.claude_sessions.pty_bindings.remove(&pane_id).is_some(),
                 };
                 if changed {
                     // `pty_claude_bindings` change → `agent_active_session_id`
@@ -84,8 +84,10 @@ impl Workspace {
                 claude_pid,
             } => {
                 self.record_task_cli_exit(&session_id, claude_pid, cx);
-                self.claude.last_pushed_notification.remove(&session_id);
-                if self.claude.claude_status.remove(&session_id).is_some() {
+                self.claude_sessions
+                    .last_pushed_notification
+                    .remove(&session_id);
+                if self.claude_sessions.status.remove(&session_id).is_some() {
                     if let Ok(dir) = daruda_agent::hooks::status_file::default_dir() {
                         use daruda_agent::hooks::status_file as sf;
                         let _ = sf::delete(&sf::path_for(&dir, &session_id));

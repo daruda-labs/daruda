@@ -9,6 +9,7 @@ mod account_ops;
 pub(crate) mod accounts_global;
 mod actions;
 mod agent_outcome_ops;
+mod agent_usage;
 pub(crate) mod agent_vocabulary_global;
 mod annotation_dialog;
 mod annotation_ops;
@@ -314,12 +315,10 @@ pub struct Workspace {
     /// What each page keeps while it is not on screen — see
     /// [`pages::detail::PageDetails`].
     pub(in crate::workspace) pages: pages::detail::PageDetails,
-    /// Claude Code integration state — usage / plan-limits / service-
-    /// status / session-status / PTY tracker / JSONL fallback +
-    /// associated background tasks. Grouped into one struct so the
-    /// 18 sub-fields don't clutter `Workspace`'s top level. See
-    /// [`claude_session_ops::ClaudeContext`].
-    pub(in crate::workspace) claude: claude_session_ops::ClaudeContext,
+    /// Provider-neutral usage, activity, session titles, and their poll tasks.
+    pub(in crate::workspace) agent_usage: agent_usage::AgentUsageState,
+    /// Claude-specific hooks, status, PTY tracking, and JSONL fallback tasks.
+    pub(in crate::workspace) claude_sessions: claude_session_ops::ClaudeSessionState,
     /// Outcomes of turns that ended while their pane was not seen — what
     /// the tab strip's result dot reads. See `agent_outcome_ops`.
     pub(in crate::workspace) unseen_outcomes: unseen_outcomes::UnseenOutcomes,
@@ -671,13 +670,12 @@ impl Workspace {
             workspace_page: None,
             pages: pages::detail::PageDetails::default(),
             unseen_outcomes: unseen_outcomes::UnseenOutcomes::default(),
-            claude: claude_session_ops::ClaudeContext {
-                usage_by_account: claude_session_ops::PerAccountUsage::default(),
-                service_status: std::collections::HashMap::new(),
-                sticky_focus_by_recipe: std::collections::HashMap::new(),
-                usage_domain_override: None,
-                usage_refresh_in_flight: false,
-                claude_status: {
+            agent_usage: agent_usage::AgentUsageState {
+                _limits_pumps: sync::limits::spawn(cx),
+                ..Default::default()
+            },
+            claude_sessions: claude_session_ops::ClaudeSessionState {
+                status: {
                     // Cold restore: load any status files that survived a
                     // previous run. TTL cleanup runs at the same time so
                     // orphans from past crashes don't accumulate.
@@ -696,18 +694,17 @@ impl Workspace {
                     }
                     store
                 },
-                claude_hooks_installed: daruda_agent::hooks::installer::InstallerPaths::from_env()
+                hooks_installed: daruda_agent::hooks::installer::InstallerPaths::from_env()
                     .map(|p| daruda_agent::hooks::installer::is_installed(&p))
                     .unwrap_or(false),
                 pty_tracker,
-                pty_claude_bindings: HashMap::new(),
+                pty_bindings: HashMap::new(),
                 _pty_event_pump: pty_event_pump,
                 _jsonl_watcher: None,
                 _jsonl_event_pump: None,
                 tool_use_failure_counts: HashMap::new(),
                 last_pushed_notification: HashMap::new(),
                 open_turns: Default::default(),
-                _limits_pumps: sync::limits::spawn(cx),
             },
             // Bootstrap projects for this workspace. When the caller
             // supplies a project root, wrap it in a single runtime
@@ -1150,7 +1147,7 @@ impl Workspace {
         // so a parked lane with a live agent turn still keeps the pulse
         // running.
         let acp_statuses = self.agent_chat_statuses(cx);
-        if self.claude.pty_claude_bindings.is_empty() && acp_statuses.is_empty() {
+        if self.claude_sessions.pty_bindings.is_empty() && acp_statuses.is_empty() {
             return false;
         }
         // Per-session, not per-lane-aggregate: the aggregate's
@@ -1162,8 +1159,8 @@ impl Workspace {
         let index = self.pane_lane_index();
         crate::workspace::claude_status_aggregate::any_pane_session_animating(
             &index,
-            &self.claude.pty_claude_bindings,
-            &self.claude.claude_status,
+            &self.claude_sessions.pty_bindings,
+            &self.claude_sessions.status,
             &acp_statuses,
         )
     }

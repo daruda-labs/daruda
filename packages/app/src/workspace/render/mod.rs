@@ -402,7 +402,7 @@ impl Workspace {
         let pane_domain =
             super::main_area::pane::AccountDomain::for_pane(&self.focused_account_pane());
         super::sync::limits::observe_focus(
-            &mut self.claude.sticky_focus_by_recipe,
+            &mut self.agent_usage.sticky_focus_by_recipe,
             focused,
             pane_domain,
         );
@@ -1546,12 +1546,12 @@ impl Workspace {
             .map(|recipe| {
                 let account = crate::workspace::sync::limits::usage_account(
                     recipe,
-                    &self.claude.sticky_focus_by_recipe,
+                    &self.agent_usage.sticky_focus_by_recipe,
                 );
                 let outcome = self
-                    .claude
+                    .agent_usage
                     .usage_by_account
-                    .usage(crate::workspace::claude_session_ops::UsageKey { recipe, account });
+                    .usage(crate::workspace::agent_usage::UsageKey { recipe, account });
                 (recipe, outcome)
             })
             .filter(|(_, outcome)| outcome.has_numbers())

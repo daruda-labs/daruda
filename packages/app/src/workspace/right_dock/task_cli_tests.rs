@@ -71,8 +71,8 @@ fn bind(ws: &mut Workspace, pane: PaneId, pid: u32, session: &str, cx: &mut Cont
 /// was bound in unbind, then the exit.
 fn exit(ws: &mut Workspace, pid: u32, session: &str, cx: &mut Context<Workspace>) {
     let bound: Vec<PaneId> = ws
-        .claude
-        .pty_claude_bindings
+        .claude_sessions
+        .pty_bindings
         .iter()
         .filter(|(_, binding)| binding.session_id == session && binding.claude_pid == pid)
         .map(|(pane, _)| *pane)
@@ -163,7 +163,7 @@ fn start_creates_a_run_owned_by_the_pane_before_any_session(cx: &mut TestAppCont
             let pane = terminal_panes(ws)[0];
             // A stub pane has no shell to register; a spawned one is
             // registered before any task can be dispatched into it.
-            ws.claude.pty_tracker.register(pane, 4242);
+            ws.claude_sessions.pty_tracker.register(pane, 4242);
             ws.bind_task_cli_execution(&id, pane, &cwd, cx);
             let execution = run(&id, cx);
             assert_eq!(execution.session_id, None);
@@ -180,7 +180,7 @@ fn start_creates_a_run_owned_by_the_pane_before_any_session(cx: &mut TestAppCont
                     execution_id: execution.id
                 })
             );
-            assert!(ws.claude.pty_tracker.awaits_binding(pane));
+            assert!(ws.claude_sessions.pty_tracker.awaits_binding(pane));
         })
     })
     .unwrap();
@@ -310,7 +310,7 @@ fn transcript_fills_whichever_of_hook_and_binding_arrives_first(cx: &mut TestApp
                 "SessionStart",
             );
             file.transcript_path = Some("/tmp/early.jsonl".into());
-            ws.claude.claude_status.update(file);
+            ws.claude_sessions.status.update(file);
             ws.record_task_cli_transcript("early-session", Some(Path::new("/tmp/x")), cx);
             assert_eq!(transcript(run(&early, cx)), None);
             bind(ws, pane, 10, "early-session", cx);
@@ -421,7 +421,7 @@ fn continue_needs_the_session_to_be_idle_everywhere(cx: &mut TestAppContext) {
             assert!(ws.cli_run_may_continue(&run, "cli-session", cx));
 
             let dir = tempfile::tempdir().unwrap();
-            ws.claude.pty_tracker.track_session(
+            ws.claude_sessions.pty_tracker.track_session(
                 "cli-session".into(),
                 std::process::id(),
                 dir.path().to_path_buf(),
@@ -474,10 +474,17 @@ fn restart_rearms_tracking_for_running_pids_only(cx: &mut TestAppContext) {
             set(&orphan, "orphan-session", CliProcessState::Discovering, cx);
             ws.restore_task_cli_tracking(cx);
             assert_eq!(
-                ws.claude.pty_tracker.known_process("running-session"),
+                ws.claude_sessions
+                    .pty_tracker
+                    .known_process("running-session"),
                 Some(4242)
             );
-            assert_eq!(ws.claude.pty_tracker.known_process("ended-session"), None);
+            assert_eq!(
+                ws.claude_sessions
+                    .pty_tracker
+                    .known_process("ended-session"),
+                None
+            );
             // Its pane did not survive the restart, so nothing will bind it.
             assert_eq!(process(&orphan, cx), CliProcessState::Unknown);
         })

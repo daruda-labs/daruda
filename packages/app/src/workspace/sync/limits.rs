@@ -33,7 +33,7 @@ use daruda_store::observability::log_writer::LogWriter;
 use gpui::{Context, Task, WeakEntity};
 
 use crate::workspace::Workspace;
-use crate::workspace::claude_session_ops::UsageKey;
+use crate::workspace::agent_usage::UsageKey;
 use crate::workspace::main_area::pane::FocusedAccount;
 
 /// Re-check cadence while the endpoint is disabled (`secs == 0`). Reuses
@@ -217,11 +217,12 @@ fn spawn_loop(cx: &mut Context<Workspace>, kind: Endpoint) -> Task<()> {
             //    `prepare_frame`; this loop just reads whatever it last
             //    left behind.
             let target = if account_scoped(kind) {
-                let sticky =
-                    match this.read_with(cx, |ws, _| ws.claude.sticky_focus_by_recipe.clone()) {
-                        Ok(s) => s,
-                        Err(_) => break,
-                    };
+                let sticky = match this
+                    .read_with(cx, |ws, _| ws.agent_usage.sticky_focus_by_recipe.clone())
+                {
+                    Ok(s) => s,
+                    Err(_) => break,
+                };
                 target_account(kind, &sticky)
             } else {
                 // Unused for `Status` (`set_service_status` is keyed by domain,

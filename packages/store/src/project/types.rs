@@ -145,6 +145,8 @@ pub struct WorkspaceState {
     pub project_overrides: BTreeMap<ProjectUuid, ProjectOverride>,
     #[serde(default)]
     pub groups: Vec<SerializedGroup>,
+    #[serde(default)]
+    pub session_titles: Vec<SessionTitle>,
 
     pub active_project: Option<ProjectUuid>,
     #[serde(rename = "active_worktree", alias = "active_lane")]
@@ -185,6 +187,15 @@ pub struct WorkspaceState {
     /// per-lane default, this field will become canonical and
     /// `SerializedLane::tabs` will become its initialization seed.
     pub project_tabs: BTreeMap<ProjectUuid, Vec<PaneLayout>>,
+}
+
+/// ACP titles retained after their chat panes close.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SessionTitle {
+    pub recipe: crate::accounts::AccountRecipeId,
+    pub account: Option<crate::accounts::AccountId>,
+    pub session_id: String,
+    pub title: String,
 }
 
 /// What the Tasks page's editor showed. Restored as a fresh form — edits

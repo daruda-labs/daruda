@@ -1,7 +1,7 @@
 //! Usage-tab domain switcher state — the manual pick the switcher tab row
 //! writes when the focused pane's agent domain is ambiguous (a terminal, or
 //! an agent daruda can't resolve a domain for). See
-//! `ClaudeContext::usage_domain_override` for why this is volatile.
+//! `AgentUsageState::usage_domain_override` for why this is volatile.
 
 use daruda_store::accounts::AccountRecipeId;
 use gpui::Context;
@@ -17,8 +17,8 @@ impl Workspace {
         recipe: AccountRecipeId,
         cx: &mut Context<Self>,
     ) {
-        if self.claude.usage_domain_override != Some(recipe) {
-            self.claude.usage_domain_override = Some(recipe);
+        if self.agent_usage.usage_domain_override != Some(recipe) {
+            self.agent_usage.usage_domain_override = Some(recipe);
             cx.notify();
         }
     }

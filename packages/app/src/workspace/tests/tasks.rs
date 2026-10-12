@@ -52,7 +52,7 @@ fn bump_tool_use_failure_thresholds_and_orphans(cx: &mut TestAppContext) {
             ws.bump_tool_use_failure("sess-below", cx);
         }
         assert_eq!(
-            ws.claude.tool_use_failure_counts.get("sess-below"),
+            ws.claude_sessions.tool_use_failure_counts.get("sess-below"),
             Some(&(TASK_TOOL_USE_FAILURE_THRESHOLD - 1))
         );
         let g = cx.global::<crate::agent::tasks_global::GlobalTasks>();
@@ -64,7 +64,7 @@ fn bump_tool_use_failure_thresholds_and_orphans(cx: &mut TestAppContext) {
         }
         // Counter is removed once escalation fires.
         assert!(
-            !ws.claude
+            !ws.claude_sessions
                 .tool_use_failure_counts
                 .contains_key("sess-threshold")
         );
@@ -91,7 +91,7 @@ fn bump_tool_use_failure_thresholds_and_orphans(cx: &mut TestAppContext) {
             ws.bump_tool_use_failure("sess-orphan", cx);
         }
         assert!(
-            !ws.claude
+            !ws.claude_sessions
                 .tool_use_failure_counts
                 .contains_key("sess-orphan"),
             "unowned sessions must not allocate a counter entry"
@@ -107,11 +107,16 @@ fn failure_counter_clears_when_task_leaves_running_or_session_ends(cx: &mut Test
     workspace.update(cx, |ws, cx| {
         ws.bump_tool_use_failure("sess-end", cx);
         ws.bump_tool_use_failure("sess-end", cx);
-        assert_eq!(ws.claude.tool_use_failure_counts.get("sess-end"), Some(&2));
+        assert_eq!(
+            ws.claude_sessions.tool_use_failure_counts.get("sess-end"),
+            Some(&2)
+        );
 
         ws.apply_task_session_ended("sess-end", SessionEndReason::Stop, cx);
         assert!(
-            !ws.claude.tool_use_failure_counts.contains_key("sess-end"),
+            !ws.claude_sessions
+                .tool_use_failure_counts
+                .contains_key("sess-end"),
             "apply_task_session_ended must drop the failure counter"
         );
     });
@@ -121,13 +126,15 @@ fn failure_counter_clears_when_task_leaves_running_or_session_ends(cx: &mut Test
         ws.bump_tool_use_failure("sess-cancel", cx);
         ws.bump_tool_use_failure("sess-cancel", cx);
         assert_eq!(
-            ws.claude.tool_use_failure_counts.get("sess-cancel"),
+            ws.claude_sessions
+                .tool_use_failure_counts
+                .get("sess-cancel"),
             Some(&2)
         );
 
         ws.cancel_task(&task_id, cx);
         assert!(
-            !ws.claude
+            !ws.claude_sessions
                 .tool_use_failure_counts
                 .contains_key("sess-cancel"),
             "cancel_task must drop the failure counter"
@@ -140,7 +147,7 @@ fn failure_counter_clears_when_task_leaves_running_or_session_ends(cx: &mut Test
         ws.bump_tool_use_failure("sess-reopen", cx);
         ws.reopen_task(&task_id, cx);
         assert!(
-            !ws.claude
+            !ws.claude_sessions
                 .tool_use_failure_counts
                 .contains_key("sess-reopen"),
             "reopen_task must drop the failure counter"
@@ -152,7 +159,7 @@ fn failure_counter_clears_when_task_leaves_running_or_session_ends(cx: &mut Test
         ws.bump_tool_use_failure("sess-delete", cx);
         ws.delete_task(&task_id, cx);
         assert!(
-            !ws.claude
+            !ws.claude_sessions
                 .tool_use_failure_counts
                 .contains_key("sess-delete"),
             "delete_task must drop the failure counter"

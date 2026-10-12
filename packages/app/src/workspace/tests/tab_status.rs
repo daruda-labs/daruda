@@ -221,7 +221,7 @@ fn claude_terminal_behind_a_tab(
         .update_window(wh.into(), |_, window, cx| {
             ws.update(cx, |ws, cx| {
                 let pane = ws.active_runtime().focused_pane_id;
-                ws.claude.pty_claude_bindings.insert(
+                ws.claude_sessions.pty_bindings.insert(
                     pane,
                     daruda_agent::pty_tracker::PtyBinding {
                         claude_pid: 4242,
@@ -310,7 +310,7 @@ async fn a_jsonl_idle_ahead_of_the_stop_hook_keeps_the_outcome(cx: &mut TestAppC
     cx.run_until_parked();
     ws.read_with(cx, |ws, _| {
         assert_eq!(
-            ws.claude.claude_status.get(SESSION).map(|f| f.status),
+            ws.claude_sessions.status.get(SESSION).map(|f| f.status),
             Some(SessionStatus::Idle),
             "the fallback did overtake the hook's Working"
         );

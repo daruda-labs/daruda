@@ -138,7 +138,7 @@ async fn a_terminal_claude_finishing_in_a_parked_lane_marks_it_unread(cx: &mut T
 
     let (wh, ws, pane_id, home, other, dir) = two_lanes_with_an_agent(cx);
     ws.update(cx, |ws, _| {
-        ws.claude.pty_claude_bindings.insert(
+        ws.claude_sessions.pty_bindings.insert(
             pane_id,
             daruda_agent::pty_tracker::PtyBinding {
                 claude_pid: 4242,

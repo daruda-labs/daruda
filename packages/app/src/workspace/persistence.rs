@@ -235,6 +235,7 @@ impl Workspace {
             project_ids,
             project_overrides,
             groups: self.groups.clone(),
+            session_titles: self.agent_usage.usage_by_account.session_titles.clone(),
             active_project,
             active_lane,
             docks: DockStates {
@@ -467,6 +468,7 @@ impl Workspace {
         cx: &mut Context<Self>,
     ) {
         // Restore dock states.
+        self.agent_usage.usage_by_account.session_titles = workspace.session_titles.clone();
         let terminal_snapshots = self
             .workspace_store
             .load_terminal_snapshots(workspace.uuid)

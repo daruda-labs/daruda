@@ -62,8 +62,8 @@ impl Workspace {
                 let pane_ids = tab.layout.pane_ids();
                 let live = crate::workspace::claude_status_aggregate::tab_session_status(
                     &pane_ids,
-                    &self.claude.pty_claude_bindings,
-                    &self.claude.claude_status,
+                    &self.claude_sessions.pty_bindings,
+                    &self.claude_sessions.status,
                     &acp_statuses,
                 );
                 let indicator =

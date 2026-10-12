@@ -646,7 +646,7 @@ impl Workspace {
         };
         match result {
             Ok(()) => {
-                self.claude.claude_hooks_installed = true;
+                self.claude_sessions.hooks_installed = true;
                 // Restart the watcher so it picks up any lane
                 // path changes that may have occurred during install.
                 self.refresh_jsonl_watcher(cx);
@@ -677,7 +677,7 @@ impl Workspace {
         };
         match result {
             Ok(()) => {
-                self.claude.claude_hooks_installed = false;
+                self.claude_sessions.hooks_installed = false;
                 // Restart the watcher so it picks up any lane
                 // path changes that may have occurred during uninstall.
                 self.refresh_jsonl_watcher(cx);

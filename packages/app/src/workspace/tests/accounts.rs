@@ -4,7 +4,7 @@
 
 use super::agent_chat::agent_view;
 use super::*;
-use crate::workspace::claude_session_ops::UsageKey;
+use crate::workspace::agent_usage::UsageKey;
 use crate::workspace::main_area::pane::{AccountDomain, FocusedAccount};
 use crate::workspace::main_area::pane_tree::PaneId;
 use daruda_acp::ChatItem;
@@ -443,7 +443,7 @@ fn a_dropped_account_is_pruned_from_the_usage_caches_only(cx: &mut TestAppContex
             // Seed both domains: a deleted account must be pruned from every
             // one of them, not just the domain that happened to be focused.
             for recipe in daruda_store::accounts::AccountRecipeId::all() {
-                ws.claude.usage_by_account.advance_usage(
+                ws.agent_usage.usage_by_account.advance_usage(
                     UsageKey {
                         recipe,
                         account: key,
@@ -451,7 +451,7 @@ fn a_dropped_account_is_pruned_from_the_usage_caches_only(cx: &mut TestAppContex
                     Ok(daruda_agent::ProviderUsage::new(recipe, Vec::new(), None)),
                 );
             }
-            ws.claude.usage_by_account.set_activity(
+            ws.agent_usage.usage_by_account.set_activity(
                 UsageKey {
                     recipe: daruda_store::accounts::AccountRecipeId::Claude,
                     account: key,
@@ -459,7 +459,7 @@ fn a_dropped_account_is_pruned_from_the_usage_caches_only(cx: &mut TestAppContex
                 daruda_agent::ActivityStats::default(),
             );
         }
-        ws.claude.sticky_focus_by_recipe.insert(
+        ws.agent_usage.sticky_focus_by_recipe.insert(
             daruda_store::accounts::AccountRecipeId::Claude,
             crate::workspace::main_area::pane::FocusedAccount::Managed {
                 id: deleted,
@@ -467,7 +467,7 @@ fn a_dropped_account_is_pruned_from_the_usage_caches_only(cx: &mut TestAppContex
                 config_dir: std::path::PathBuf::from("/tmp/deleted"),
             },
         );
-        ws.claude.sticky_focus_by_recipe.insert(
+        ws.agent_usage.sticky_focus_by_recipe.insert(
             daruda_store::accounts::AccountRecipeId::Codex,
             crate::workspace::main_area::pane::FocusedAccount::Managed {
                 id: kept,
@@ -481,7 +481,7 @@ fn a_dropped_account_is_pruned_from_the_usage_caches_only(cx: &mut TestAppContex
     cx.run_until_parked();
 
     ws.update(cx, |ws, _| {
-        let usage = &ws.claude.usage_by_account;
+        let usage = &ws.agent_usage.usage_by_account;
         let outcome = |account| {
             usage.usage(UsageKey {
                 recipe: daruda_store::accounts::AccountRecipeId::Claude,
@@ -524,7 +524,7 @@ fn a_dropped_account_is_pruned_from_the_usage_caches_only(cx: &mut TestAppContex
                 .is_some()
         );
         assert!(
-            !ws.claude
+            !ws.agent_usage
                 .sticky_focus_by_recipe
                 .values()
                 .any(|focused| matches!(
@@ -535,7 +535,7 @@ fn a_dropped_account_is_pruned_from_the_usage_caches_only(cx: &mut TestAppContex
             "deleted accounts must not survive in sticky usage focus"
         );
         assert!(
-            ws.claude
+            ws.agent_usage
                 .sticky_focus_by_recipe
                 .values()
                 .any(|focused| matches!(
@@ -797,7 +797,7 @@ async fn usage_snapshot_sections_activity_and_stale_refresh(cx: &mut TestAppCont
             account: AccountSelection::SystemDefault,
         };
 
-        ws.claude.usage_by_account.advance_usage(
+        ws.agent_usage.usage_by_account.advance_usage(
             claude_key,
             Ok(daruda_agent::ProviderUsage::new(
                 daruda_store::accounts::AccountRecipeId::Claude,
@@ -805,11 +805,11 @@ async fn usage_snapshot_sections_activity_and_stale_refresh(cx: &mut TestAppCont
                 None,
             )),
         );
-        ws.claude
+        ws.agent_usage
             .usage_by_account
             .advance_usage(codex_key, Err(daruda_agent::FetchError::NoToken));
 
-        ws.claude
+        ws.agent_usage
             .usage_by_account
             .set_activity(claude_key, daruda_agent::ActivityStats::default());
         assert!(
@@ -817,7 +817,7 @@ async fn usage_snapshot_sections_activity_and_stale_refresh(cx: &mut TestAppCont
             "empty activity should not render chart headings"
         );
 
-        ws.claude.usage_by_account.set_activity(
+        ws.agent_usage.usage_by_account.set_activity(
             claude_key,
             daruda_agent::ActivityStats {
                 daily: vec![daruda_agent::DayActivity {
@@ -836,7 +836,7 @@ async fn usage_snapshot_sections_activity_and_stale_refresh(cx: &mut TestAppCont
             "a signed-out domain must leave no section behind"
         );
 
-        ws.claude.usage_by_account.advance_usage(
+        ws.agent_usage.usage_by_account.advance_usage(
             claude_key,
             Err(daruda_agent::FetchError::Http("500".into())),
         );
@@ -851,7 +851,7 @@ async fn usage_snapshot_sections_activity_and_stale_refresh(cx: &mut TestAppCont
 
         // Signing out of both leaves nothing, which the renderer replaces with
         // a single "no provider" notice.
-        ws.claude
+        ws.agent_usage
             .usage_by_account
             .advance_usage(claude_key, Err(daruda_agent::FetchError::NoToken));
         assert!(sections(ws, cx).is_empty());
@@ -928,7 +928,7 @@ async fn recent_sessions_are_scoped_to_active_lane_sorted_and_capped(cx: &mut Te
     ws.update(cx, |ws, cx| {
         let managed = AccountId::new();
         let managed_selection = AccountSelection::Managed(managed);
-        ws.claude.sticky_focus_by_recipe.insert(
+        ws.agent_usage.sticky_focus_by_recipe.insert(
             AccountRecipeId::Claude,
             FocusedAccount::Managed {
                 id: managed,
@@ -941,7 +941,7 @@ async fn recent_sessions_are_scoped_to_active_lane_sorted_and_capped(cx: &mut Te
             recipe: AccountRecipeId::Claude,
             account: managed_selection,
         };
-        ws.claude.usage_by_account.advance_usage(
+        ws.agent_usage.usage_by_account.advance_usage(
             key,
             Ok(daruda_agent::ProviderUsage::new(
                 AccountRecipeId::Claude,
@@ -1007,7 +1007,7 @@ async fn recent_sessions_are_scoped_to_active_lane_sorted_and_capped(cx: &mut Te
             });
         }
 
-        ws.claude.usage_by_account.set_activity(
+        ws.agent_usage.usage_by_account.set_activity(
             key,
             daruda_agent::ActivityStats {
                 daily: Vec::new(),
@@ -1037,6 +1037,18 @@ async fn recent_sessions_are_scoped_to_active_lane_sorted_and_capped(cx: &mut Te
         );
         assert_eq!(restorable[0].prompt_preview.as_deref(), Some("Newest prompt"));
         assert_eq!(restorable[0].git_branch.as_deref(), Some("main"));
+        ws.agent_usage.usage_by_account.set_session_title(
+            key,
+            "matched-newest",
+            Some("ACP title"),
+        );
+        let snap = ws.prepare_right_dock_snapshot(cx);
+        let (_, titled) = snap
+            .recent_sessions
+            .iter()
+            .find(|(recipe, _)| *recipe == AccountRecipeId::Claude)
+            .unwrap();
+        assert_eq!(titled[0].title.as_deref(), Some("ACP title"));
         assert!(
             restorable.iter().all(|s| s.account == managed_selection),
             "restore payload must preserve the account whose activity cache produced it"

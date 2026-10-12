@@ -388,8 +388,8 @@ fn close_active_project_releases_pane_tracking(cx: &mut TestAppContext) {
                 .collect();
             assert!(!pane_ids.is_empty(), "tab spawns at least one pane");
             for id in &pane_ids {
-                ws.claude.pty_tracker.register(*id, 4242);
-                ws.claude.pty_claude_bindings.insert(
+                ws.claude_sessions.pty_tracker.register(*id, 4242);
+                ws.claude_sessions.pty_bindings.insert(
                     *id,
                     daruda_agent::pty_tracker::PtyBinding {
                         claude_pid: 4242,
@@ -403,11 +403,11 @@ fn close_active_project_releases_pane_tracking(cx: &mut TestAppContext) {
             assert!(ws.projects.is_empty());
             assert_eq!(ws.active, daruda_store::project::LaneRef::default());
             assert!(
-                ws.claude.pty_claude_bindings.is_empty(),
+                ws.claude_sessions.pty_bindings.is_empty(),
                 "closed project's pane bindings must be dropped"
             );
             assert!(
-                ws.claude.pty_tracker.tracked_pane_ids().is_empty(),
+                ws.claude_sessions.pty_tracker.tracked_pane_ids().is_empty(),
                 "closed project's panes must be unregistered from the tracker"
             );
             assert!(

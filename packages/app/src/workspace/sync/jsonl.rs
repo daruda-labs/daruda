@@ -85,7 +85,7 @@ impl Workspace {
             file.last_event.clone(),
             file.source,
         );
-        if self.claude.claude_status.update(file) {
+        if self.claude_sessions.status.update(file) {
             #[cfg(debug_assertions)]
             {
                 let (sid, cwd, event, source) = dbg_fields;
@@ -117,8 +117,8 @@ impl Workspace {
         // watcher exits before the new one starts subscribing to the
         // same FSEvents paths. Otherwise both would emit duplicate
         // events during the overlap window.
-        self.claude._jsonl_watcher = None;
-        self.claude._jsonl_event_pump = None;
+        self.claude_sessions._jsonl_watcher = None;
+        self.claude_sessions._jsonl_event_pump = None;
 
         let should_run = self.mirrors.claude_status_enabled;
         if !should_run {
@@ -143,7 +143,7 @@ impl Workspace {
 
         let JsonlWatcherHandle { events, watcher } = jsonl_watcher::spawn(pairs);
         let pump = spawn(events, cx);
-        self.claude._jsonl_watcher = Some(watcher);
-        self.claude._jsonl_event_pump = Some(pump);
+        self.claude_sessions._jsonl_watcher = Some(watcher);
+        self.claude_sessions._jsonl_event_pump = Some(pump);
     }
 }

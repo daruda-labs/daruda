@@ -408,15 +408,16 @@ impl Workspace {
                 pane_changed = true;
             }
         }
-        self.claude.usage_by_account.retain_known(accounts);
-        let sticky_focus_len = self.claude.sticky_focus_by_recipe.len();
-        self.claude
+        self.agent_usage.usage_by_account.retain_known(accounts);
+        let sticky_focus_len = self.agent_usage.sticky_focus_by_recipe.len();
+        self.agent_usage
             .sticky_focus_by_recipe
             .retain(|_, focused| match focused {
                 pane::FocusedAccount::Managed { id, .. } => accounts.find(*id).is_some(),
                 pane::FocusedAccount::SystemDefault => true,
             });
-        let sticky_focus_changed = self.claude.sticky_focus_by_recipe.len() != sticky_focus_len;
+        let sticky_focus_changed =
+            self.agent_usage.sticky_focus_by_recipe.len() != sticky_focus_len;
         if pane_changed {
             self.mutate_durable(cx, |_, _| {});
         }
