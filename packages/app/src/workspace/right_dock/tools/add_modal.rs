@@ -1,15 +1,5 @@
-//! Add-MCP-server modal.
-//!
-//! UI-FM-based form modal: name + scope + transport + transport-specific
-//! fields (command/args for stdio, url/headers for sse/http) + env +
-//! disabled toggle. Snapshot opener pattern: `AddMcpInitial` is built by
-//! `super::open_add_mcp_server_modal` so the modal's `new()` never
-//! re-enters the workspace entity.
-//!
-//! Tab navigation: GPUI `.tab_group()` on the panel root + per-input
-//! `tab_index`. The transport chip swaps which inputs are rendered but
-//! the unused inputs' focus handles simply sit out of paint and never
-//! receive focus.
+//! Paste-first MCP creation. Review a connection, then save to a captured scope.
+//! Parsing never runs commands; hidden source fields remain in the draft.
 
 use std::path::PathBuf;
 
@@ -30,10 +20,10 @@ use crate::surface::strings;
 use crate::ui::Disableable as _;
 use crate::ui::Selectable as _;
 use crate::ui::WindowExt as _;
-use crate::ui::{InputEvent, InputState, button, button_group, button_primary, checkbox, input};
+use crate::ui::{InputEvent, InputState, button, button_group, button_primary, checkbox};
 use crate::workspace::ModalView;
 use crate::workspace::Workspace;
-use daruda_config::env_lines::parse_env_lines;
+use daruda_config::env_lines::format_env_lines;
 
 fn blank_to_none(s: &str) -> Option<String> {
     let t = s.trim();
@@ -49,6 +39,8 @@ fn blank_to_none(s: &str) -> Option<String> {
 /// — every value it needs is captured here.
 #[derive(Clone, Debug)]
 pub struct AddMcpInitial {
+    pub(crate) targets: Vec<crate::agent::configuration::library::Target>,
+    pub(crate) config: Option<std::sync::Arc<crate::agent::configuration::Configuration>>,
     pub default_scope: McpScope,
     pub project_root: Option<PathBuf>,
     /// `(scope, name)` pairs of every server already in either scope —
@@ -58,6 +50,7 @@ pub struct AddMcpInitial {
 
 pub struct AddMcpServerModal {
     panel_focus_handle: FocusHandle,
+    form: super::super::form_state::FormState,
 
     name_input: Entity<InputState>,
     command_input: Entity<InputState>,
@@ -70,10 +63,22 @@ pub struct AddMcpServerModal {
     scope_options: Vec<McpScope>,
     transport: McpTransport,
     disabled: bool,
+    auth: super::auth::Auth,
+    codex_options: super::codex_options::CodexOptions,
+    args_rows: Entity<super::rows::Rows>,
+    env_rows: Entity<super::rows::Rows>,
+    header_rows: Entity<super::rows::Rows>,
 
     initial: AddMcpInitial,
+    paste_input: Entity<InputState>,
+    pasting: bool,
+    candidates: Vec<McpServerDraft>,
+    imported: Option<McpServerDraft>,
+    advanced: bool,
+    duplicate: bool,
 
     error: Option<SharedString>,
+    error_field: Option<isize>,
     submitting: bool,
 
     workspace: WeakEntity<Workspace>,
@@ -87,9 +92,16 @@ impl AddMcpServerModal {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Self {
+        let paste_input = cx.new(|cx| {
+            InputState::new(window, cx)
+                .auto_grow(6, 12)
+                .placeholder(strings::mcp::quick_placeholder())
+        });
         let name_input = cx.new(|cx_state| {
             InputState::new(window, cx_state).placeholder(strings::mcp::placeholder_name())
         });
+        let auth = super::auth::Auth::new(window, cx);
+        let codex_options = super::codex_options::CodexOptions::new(window, cx);
         let command_input = cx.new(|cx_state| {
             InputState::new(window, cx_state).placeholder(strings::mcp::placeholder_command())
         });
@@ -112,18 +124,27 @@ impl AddMcpServerModal {
 
         // Project + Local require an active lane root; User is always
         // available. Order mirrors the Tools-tab section order.
-        let scope_options: Vec<McpScope> = if initial.project_root.is_some() {
+        let mut scope_options: Vec<McpScope> = if initial.project_root.is_some() {
             vec![McpScope::Project, McpScope::Local, McpScope::User]
         } else {
             vec![McpScope::User]
         };
+        if initial
+            .config
+            .as_ref()
+            .is_some_and(|c| c.provider == crate::agent::configuration::Provider::Codex)
+        {
+            scope_options.retain(|s| *s != McpScope::Local);
+        }
         let scope = if scope_options.contains(&initial.default_scope) {
             initial.default_scope
         } else {
             McpScope::User
         };
 
-        let subs = vec![
+        let mut subs = vec![
+            forward_input(&auth.input, window, cx),
+            forward_multi_input(&paste_input, window, cx),
             forward_input(&name_input, window, cx),
             forward_input(&command_input, window, cx),
             forward_input(&args_input, window, cx),
@@ -132,7 +153,34 @@ impl AddMcpServerModal {
             forward_multi_input(&headers_input, window, cx),
         ];
 
-        Self {
+        subs.extend(
+            codex_options
+                .inputs
+                .iter()
+                .map(|input| forward_multi_input(input, window, cx)),
+        );
+        let args_rows = cx.new(|cx| {
+            super::rows::Rows::new(args_input.clone(), super::rows::Kind::Arguments, window, cx)
+        });
+        let env_rows = cx.new(|cx| {
+            super::rows::Rows::new(env_input.clone(), super::rows::Kind::Pairs, window, cx)
+        });
+        let header_rows = cx.new(|cx| {
+            super::rows::Rows::new(headers_input.clone(), super::rows::Kind::Pairs, window, cx)
+        });
+        let mut modal = Self {
+            paste_input,
+            pasting: true,
+            candidates: Vec::new(),
+            imported: None,
+            advanced: false,
+            duplicate: false,
+            auth,
+            codex_options,
+            args_rows,
+            env_rows,
+            header_rows,
+            form: Default::default(),
             panel_focus_handle: cx.focus_handle(),
             name_input,
             command_input,
@@ -146,22 +194,29 @@ impl AddMcpServerModal {
             disabled: false,
             initial,
             error: None,
+            error_field: None,
             submitting: false,
             workspace,
             _input_subs: subs,
-        }
+        };
+        modal.form.baseline = modal.values(cx);
+        modal
     }
 
-    fn build_draft(&self, cx: &gpui::App) -> Result<McpServerDraft, SharedString> {
+    fn build_draft(&self, cx: &gpui::App) -> Result<McpServerDraft, (isize, SharedString)> {
         let raw_name = self.name_input.read(cx).value().to_string();
         let raw_name = raw_name.trim().to_string();
         match validate_name(&raw_name) {
             Ok(()) => {}
-            Err(NameError::Empty) => return Err(strings::common::name_required().into()),
-            Err(NameError::TooLong { .. }) => return Err(strings::mcp::name_too_long().into()),
-            Err(NameError::InvalidChar { .. }) => return Err(strings::mcp::name_invalid().into()),
+            Err(NameError::Empty) => return Err((0, strings::common::name_required().into())),
+            Err(NameError::TooLong { .. }) => {
+                return Err((0, strings::mcp::name_too_long().into()));
+            }
+            Err(NameError::InvalidChar { .. }) => {
+                return Err((0, strings::mcp::name_invalid().into()));
+            }
             Err(NameError::InvalidLeading { .. }) => {
-                return Err(strings::mcp::name_leading().into());
+                return Err((0, strings::mcp::name_leading().into()));
             }
             Err(NameError::DuplicateInScope { .. }) => unreachable!("validate_name is syntactic"),
         }
@@ -171,26 +226,82 @@ impl AddMcpServerModal {
             .iter()
             .any(|(scope, name)| *scope == self.scope && name == &raw_name)
         {
-            return Err(strings::mcp::name_duplicate().into());
+            return Err((0, strings::mcp::name_duplicate().into()));
         }
 
         let command_text = self.command_input.read(cx).value().to_string();
         let url_text = self.url_input.read(cx).value().to_string();
         if let Err(e) = validate_command(&command_text, self.transport) {
-            return Err(field_error_to_msg(e));
+            return Err((1, field_error_to_msg(e)));
         }
         if let Err(e) = validate_url(&url_text, self.transport) {
-            return Err(field_error_to_msg(e));
+            return Err((1, field_error_to_msg(e)));
         }
 
         let env_text = self.env_input.read(cx).value().to_string();
-        let env = parse_env_lines(&env_text).map_err(|e| field_error_to_msg(e.into()))?;
+        let env = if let Some(d) = self
+            .imported
+            .as_ref()
+            .filter(|d| format_env_lines(&d.env) == env_text)
+        {
+            d.env.clone()
+        } else {
+            self.env_rows
+                .read(cx)
+                .pairs(false, cx)
+                .map_err(|e| (3, e))?
+        };
         let headers_text = self.headers_input.read(cx).value().to_string();
-        let headers = parse_env_lines(&headers_text).map_err(|e| field_error_to_msg(e.into()))?;
+        let mut headers = if self.transport.is_remote() {
+            if let Some(d) = self
+                .imported
+                .as_ref()
+                .filter(|d| format_env_lines(&d.headers) == headers_text)
+            {
+                d.headers.clone()
+            } else {
+                self.header_rows
+                    .read(cx)
+                    .pairs(true, cx)
+                    .map_err(|e| (2, e))?
+            }
+        } else {
+            Default::default()
+        };
+
+        let mut extra = self
+            .imported
+            .as_ref()
+            .map(|d| d.extra.clone())
+            .unwrap_or_default();
+        if self
+            .initial
+            .config
+            .as_ref()
+            .is_some_and(|c| c.provider == crate::agent::configuration::Provider::Codex)
+        {
+            self.codex_options
+                .apply(&mut extra, cx)
+                .map_err(|(index, error)| (-(index as isize) - 2, error))?;
+        }
+        if self.transport.is_remote() {
+            if self
+                .initial
+                .config
+                .as_ref()
+                .is_some_and(|c| c.provider == crate::agent::configuration::Provider::Codex)
+            {
+                self.auth
+                    .apply_codex(&mut headers, &mut extra, cx)
+                    .map_err(|e| (-1, e))?;
+            } else {
+                self.auth.apply(&mut headers, cx).map_err(|e| (-1, e))?;
+            }
+        }
 
         let args_text = self.args_input.read(cx).value().to_string();
         let args = match self.transport {
-            McpTransport::Stdio => split_args(&args_text),
+            McpTransport::Stdio => split_args(&args_text).map_err(|e| (2, e))?,
             _ => Vec::new(),
         };
 
@@ -212,7 +323,7 @@ impl AddMcpServerModal {
                 _ => Default::default(),
             },
             disabled: self.disabled,
-            extra: Default::default(),
+            extra,
         })
     }
 
@@ -220,15 +331,46 @@ impl AddMcpServerModal {
         if self.submitting {
             return;
         }
+        if self.pasting {
+            self.review_paste(window, cx);
+            return;
+        }
         let draft = match self.build_draft(cx) {
             Ok(d) => d,
-            Err(msg) => {
+            Err((field, msg)) => {
+                self.advanced = true;
+                self.error_field = (field >= 0).then_some(field);
+                if field < -1 {
+                    if let Some(input) = self.codex_options.inputs.get((-field - 2) as usize) {
+                        window.focus(&input.focus_handle(cx), cx);
+                    }
+                } else if field == -1 {
+                    window.focus(&self.auth.input.focus_handle(cx), cx);
+                }
                 self.error = Some(msg);
+                if let Some(input) = self.visible_inputs().get(field as usize) {
+                    window.focus(&input.focus_handle(cx), cx);
+                }
+                let row_focus = if field == 3 {
+                    self.env_rows.read(cx).focus_handle(false, cx)
+                } else if field == 2 && self.transport.is_remote() {
+                    self.header_rows.read(cx).focus_handle(true, cx)
+                } else if field == 2 {
+                    self.args_rows.read(cx).focus_handle(false, cx)
+                } else {
+                    None
+                };
+                if let Some(focus) = row_focus {
+                    window.focus(&focus, cx);
+                }
                 cx.notify();
                 return;
             }
         };
         let scope = self.scope;
+        let target_root = self.initial.project_root.clone();
+        super::super::form_state::freeze_inputs(&self.inputs(), true, cx);
+        self.error_field = None;
         self.submitting = true;
         cx.notify();
 
@@ -245,7 +387,24 @@ impl AddMcpServerModal {
             // window via `update_window(handle, ...)` to recover the
             // `&mut Window` needed for `dismiss`.
             ws.update(cx, |ws, cx_inner| {
-                let result = ws.add_mcp_server(scope, draft, cx_inner);
+                let result = if let Some(config) = &self.initial.config {
+                    let target = self
+                        .initial
+                        .targets
+                        .iter()
+                        .find(|t| t.scope == scope)
+                        .cloned()
+                        .or_else(|| {
+                            crate::agent::configuration::library::Target::new(config, scope, None)
+                        });
+                    let result = target
+                        .ok_or(crate::agent::mcp::McpPersistError::NoProjectRoot)
+                        .and_then(|t| t.mutate(&draft.name, None, Some(&draft)));
+                    ws.refresh_library(cx_inner);
+                    result
+                } else {
+                    ws.add_mcp_server(scope, target_root, draft, cx_inner)
+                };
                 let me = me.clone();
                 cx_inner.defer(move |cx| {
                     // SILENT-OK: window may be gone by the time this defer runs — with no window there is nothing to dismiss or show the save error on, so the no-op is correct.
@@ -255,6 +414,7 @@ impl AddMcpServerModal {
                             Ok(()) => me.update(cx, |modal, cx| modal.dismiss(window, cx)),
                             Err(e) => me.update(cx, |modal, cx| {
                                 modal.submitting = false;
+                                super::super::form_state::freeze_inputs(&modal.inputs(), false, cx);
                                 modal.error = Some(SharedString::from(e.to_string()));
                                 cx.notify();
                             }),
@@ -264,8 +424,87 @@ impl AddMcpServerModal {
             });
         } else {
             self.submitting = false;
+            super::super::form_state::freeze_inputs(&self.inputs(), false, cx);
             cx.notify();
         }
+    }
+
+    fn values(&self, cx: &App) -> Vec<String> {
+        let mut values = vec![
+            self.paste_input.read(cx).value().to_string(),
+            self.scope.slug().to_string(),
+            self.transport.slug().to_string(),
+            self.disabled.to_string(),
+            self.name_input.read(cx).value().to_string(),
+            self.command_input.read(cx).value().to_string(),
+            self.args_input.read(cx).value().to_string(),
+            self.url_input.read(cx).value().to_string(),
+            self.env_input.read(cx).value().to_string(),
+            self.headers_input.read(cx).value().to_string(),
+        ];
+        values.extend(self.auth.values(cx));
+        values.extend(self.codex_options.values(cx));
+        values
+    }
+
+    fn visible_inputs(&self) -> Vec<Entity<InputState>> {
+        if self.transport.is_remote() {
+            vec![
+                self.name_input.clone(),
+                self.url_input.clone(),
+                self.headers_input.clone(),
+                self.env_input.clone(),
+            ]
+        } else {
+            vec![
+                self.name_input.clone(),
+                self.command_input.clone(),
+                self.args_input.clone(),
+                self.env_input.clone(),
+            ]
+        }
+    }
+
+    fn inputs(&self) -> Vec<Entity<InputState>> {
+        let mut inputs = vec![
+            self.auth.input.clone(),
+            self.paste_input.clone(),
+            self.name_input.clone(),
+            self.command_input.clone(),
+            self.args_input.clone(),
+            self.url_input.clone(),
+            self.env_input.clone(),
+            self.headers_input.clone(),
+        ];
+        inputs.extend(self.codex_options.inputs.clone());
+        inputs
+    }
+
+    fn leave(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        use super::super::form_state::{LeaveChoice, ask_to_leave};
+        if self.submitting || self.form.asking {
+            return;
+        }
+        let dirty = self.form.is_dirty(&self.values(cx));
+        if !dirty {
+            self.dismiss(window, cx);
+            return;
+        }
+        ask_to_leave(
+            &mut self.form,
+            dirty,
+            self.submitting,
+            window,
+            cx,
+            |this, choice, window, cx| {
+                this.form.asking = false;
+                match choice {
+                    LeaveChoice::Save => this.submit(window, cx),
+                    LeaveChoice::Discard => this.dismiss(window, cx),
+                    LeaveChoice::Continue => {}
+                }
+            },
+        );
     }
 
     fn dismiss(&mut self, window: &mut Window, cx: &mut App) {
@@ -275,6 +514,7 @@ impl AddMcpServerModal {
     fn clear_error(&mut self, cx: &mut Context<Self>) {
         if self.error.is_some() {
             self.error = None;
+            self.error_field = None;
             cx.notify();
         }
     }
@@ -290,7 +530,13 @@ fn forward_input(
         window,
         |this, _, ev: &InputEvent, window, cx| match ev {
             InputEvent::PressEnter { .. } => this.submit(window, cx),
-            InputEvent::Change => this.clear_error(cx),
+            InputEvent::Change => {
+                if this.pasting {
+                    this.candidates.clear();
+                }
+                this.clear_error(cx);
+                cx.notify();
+            }
             InputEvent::Focus | InputEvent::Blur => {}
         },
     )
@@ -310,7 +556,13 @@ fn forward_multi_input(
         window,
         |this, _, ev: &InputEvent, window, cx| match ev {
             InputEvent::PressEnter { secondary } if *secondary => this.submit(window, cx),
-            InputEvent::Change => this.clear_error(cx),
+            InputEvent::Change => {
+                if this.pasting {
+                    this.candidates.clear();
+                }
+                this.clear_error(cx);
+                cx.notify();
+            }
             _ => {}
         },
     )
@@ -318,139 +570,28 @@ fn forward_multi_input(
 
 impl Focusable for AddMcpServerModal {
     fn focus_handle(&self, cx: &gpui::App) -> FocusHandle {
-        self.name_input.focus_handle(cx)
-    }
-}
-
-impl ModalView for AddMcpServerModal {}
-
-impl Render for AddMcpServerModal {
-    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let t = crate::ui::theme::current(cx).clone();
-        let panel_focus = self.panel_focus_handle.clone();
-        let submitting = self.submitting;
-        let banner = self
-            .error
-            .as_ref()
-            .map(|msg| crate::ui::alert::error("add-tool-error", msg.clone()));
-
-        // Scope segmented selector. Children align with `scope_values`
-        // by index, so the click callback maps the selected index back
-        // to its `McpScope`.
-        let scope_pairs: Vec<(McpScope, String)> = scope_options()
-            .into_iter()
-            .filter(|(scope, _)| self.scope_options.contains(scope))
-            .collect();
-        let scope_values: Vec<McpScope> = scope_pairs.iter().map(|(scope, _)| *scope).collect();
-        let scope_chip = button_group("scope-group", cx)
-            .children(scope_pairs.into_iter().map(|(scope, label)| {
-                button(SharedString::from(format!("scope-{}", scope.slug())), label)
-                    .selected(self.scope == scope)
-            }))
-            .on_click(cx.listener(move |this, ixs: &Vec<usize>, _w, cx| {
-                if let Some(&ix) = ixs.first() {
-                    this.scope = scope_values[ix];
-                    cx.notify();
-                }
-            }));
-
-        // Transport segmented selector — same index→value mapping.
-        let transport_values: Vec<McpTransport> =
-            transport_options().iter().map(|(tp, _)| *tp).collect();
-        let transport_chip = button_group("transport-group", cx)
-            .children(transport_options().into_iter().map(|(tp, label)| {
-                button(
-                    SharedString::from(format!("transport-{}", tp.slug())),
-                    label,
-                )
-                .selected(self.transport == tp)
-            }))
-            .on_click(cx.listener(move |this, ixs: &Vec<usize>, _w, cx| {
-                if let Some(&ix) = ixs.first() {
-                    this.transport = transport_values[ix];
-                    cx.notify();
-                }
-            }));
-
-        let mut body = div()
-            .flex()
-            .flex_col()
-            .gap(px(theme::FORM_MODAL_SECTION_GAP))
-            .child(field_label(strings::common::field_name(), &t))
-            .child(input(&self.name_input, cx, 0))
-            .child(field_label(strings::common::field_scope(), &t))
-            .child(scope_chip)
-            .child(field_label(strings::mcp::field_transport(), &t))
-            .child(transport_chip);
-
-        match self.transport {
-            McpTransport::Stdio => {
-                body = body
-                    .child(field_label(strings::mcp::field_command(), &t))
-                    .child(input(&self.command_input, cx, 1))
-                    .child(field_label(strings::mcp::field_args(), &t))
-                    .child(input(&self.args_input, cx, 2));
-            }
-            McpTransport::Sse | McpTransport::Http => {
-                body = body
-                    .child(field_label(strings::mcp::field_url(), &t))
-                    .child(input(&self.url_input, cx, 1))
-                    .child(field_label(strings::mcp::field_headers(), &t))
-                    .child(input(&self.headers_input, cx, 2));
-            }
-        }
-
-        // Disabled checkbox slot — its tab_index sits one past the last
-        // transport-specific input so it lands at the end of the cycle
-        // regardless of the active transport (Stdio uses 1,2; remote
-        // uses 1,2 for url+headers — env uses 3 across both branches).
-        body = body
-            .child(field_label(strings::mcp::field_env(), &t))
-            .child(input(&self.env_input, cx, 3))
-            .child(
-                checkbox("mcp-disabled", strings::mcp::field_disabled(), 4)
-                    .checked(self.disabled)
-                    .on_click(cx.listener(|this, checked: &bool, _w, cx| {
-                        this.disabled = *checked;
-                        cx.notify();
-                    })),
-            );
-
-        let save_label = if submitting {
-            strings::mcp::saving_label()
+        if self.pasting {
+            self.paste_input.focus_handle(cx)
         } else {
-            strings::common::btn_add()
-        };
-        let footer = div()
-            .flex()
-            .flex_row()
-            .justify_end()
-            .gap(px(theme::MODAL_FOOTER_GAP))
-            .mt(px(theme::MODAL_FOOTER_MARGIN_TOP))
-            .child(
-                button("add-mcp-cancel", strings::common::btn_cancel())
-                    .on_click(cx.listener(|this, _: &ClickEvent, w, cx| this.dismiss(w, cx))),
-            )
-            .child(
-                button_primary("add-mcp-save", save_label)
-                    .disabled(submitting)
-                    .on_click(cx.listener(|this, _: &ClickEvent, w, cx| this.submit(w, cx))),
-            );
-
-        let mut p = div()
-            .flex()
-            .flex_col()
-            .key_context("AddMcpServerModal")
-            .track_focus(&panel_focus)
-            .tab_group()
-            .gap(px(theme::MODAL_PANEL_GAP))
-            .child(body);
-        if let Some(b) = banner {
-            p = p.child(b);
+            self.name_input.focus_handle(cx)
         }
-        p.child(footer)
     }
 }
+
+impl ModalView for AddMcpServerModal {
+    fn fit_viewport(&self) -> bool {
+        true
+    }
+    fn guards_close(&self) -> bool {
+        true
+    }
+    fn request_close(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.leave(window, cx);
+    }
+}
+
+mod quick_entry;
+mod render;
 
 pub fn open_add_mcp_server_modal(
     ws: &mut Workspace,
@@ -459,14 +600,47 @@ pub fn open_add_mcp_server_modal(
     cx: &mut Context<Workspace>,
 ) {
     let workspace = cx.weak_entity();
-    let lane = ws.active_lane_root();
-    let snapshot = cx
-        .global::<crate::agent::mcp::McpState>()
-        .snapshot_for(lane.as_deref(), &ws.mcp_project_dirs);
+    let Some(config) = ws.pin_library() else {
+        return;
+    };
+    let snapshot = ws.right_views.library.view.inventory.mcp.clone();
+    let existing_names = ws
+        .right_views
+        .library
+        .view
+        .inventory
+        .groups
+        .iter()
+        .filter(|group| {
+            group.target.owner.is_none()
+                && (group.target.scope != McpScope::Project
+                    || config
+                        .cwd
+                        .as_ref()
+                        .is_some_and(|cwd| group.target.path == config.project_file(cwd)))
+        })
+        .flat_map(|group| {
+            group
+                .servers
+                .iter()
+                .map(|server| (server.scope, server.name.clone()))
+        })
+        .collect();
     let initial = AddMcpInitial {
+        targets: ws
+            .right_views
+            .library
+            .view
+            .inventory
+            .groups
+            .iter()
+            .filter(|g| g.target.owner.is_none())
+            .map(|g| g.target.clone())
+            .collect(),
+        config: Some(config),
         default_scope: prefill_scope.unwrap_or(McpScope::User),
         project_root: snapshot.project_root.clone(),
-        existing_names: snapshot.all_names(),
+        existing_names,
     };
     crate::workspace::dialog_helpers::open_form_modal(
         strings::mcp::new_title(),
@@ -475,4 +649,48 @@ pub fn open_add_mcp_server_modal(
         window,
         cx,
     );
+}
+
+impl AddMcpServerModal {
+    pub(super) fn seed_duplicate(
+        &mut self,
+        draft: McpServerDraft,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.apply_import(draft, window, cx);
+        self.duplicate = true;
+    }
+}
+
+#[cfg(test)]
+mod tests;
+
+#[cfg(feature = "screenshot")]
+impl AddMcpServerModal {
+    pub(in crate::workspace) fn seed_for_shot(
+        &mut self,
+        review: bool,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.paste_input.update(cx,|input,cx|input.set_value(
+            r#"{"mcpServers":{"docs":{"type":"http","url":"https://docs.example.com/mcp","headers":{"Authorization":"Bearer example-token"}}}}"#,window,cx));
+        if review {
+            self.review_paste(window, cx);
+        }
+    }
+}
+
+#[cfg(feature = "screenshot")]
+impl AddMcpServerModal {
+    pub(in crate::workspace) fn seed_codex_for_shot(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.paste_input.update(cx,|input,cx| input.set_value("[mcp_servers.docs]\nurl = 'https://docs.example.com/mcp'\nbearer_token_env_var = 'DOCS_TOKEN'\nstartup_timeout_sec = 20\nenabled_tools = ['search', 'read']\n",window,cx));
+        self.review_paste(window, cx);
+        self.advanced = true;
+    }
 }

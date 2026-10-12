@@ -143,10 +143,11 @@ pub(in crate::workspace) fn footer(snap: &RightDockSnapshot, cx: &gpui::App) -> 
 
 /// Only installed plugins are listed; the footer counts the same set.
 fn is_installed(skill: &Skill) -> bool {
-    matches!(
-        skill.plugin_availability,
-        Some(crate::agent::skills::plugins::PluginAvailability::Installed)
-    )
+    skill.plugin_availability.is_none()
+        || matches!(
+            skill.plugin_availability,
+            Some(crate::agent::skills::plugins::PluginAvailability::Installed)
+        )
 }
 
 /// Substring filter on `name` + frontmatter `description`. Empty
@@ -315,7 +316,16 @@ fn scope_body(
         return plugin_groups(skills, ctx, t, cx).into_any_element();
     }
     let mut col = div().flex().flex_col();
-    for s in skills {
+    let mut previous_source = None;
+    let mut sorted: Vec<_> = skills.iter().collect();
+    sorted.sort_by_key(|s| s.dir.parent());
+    for s in sorted {
+        if previous_source != s.dir.parent() {
+            previous_source = s.dir.parent();
+            if let Some(path) = previous_source {
+                col = col.child(empty_hint(strings::library::source(path.display()), t));
+            }
+        }
         let overrides =
             matches!(scope, SkillScope::Project) && ctx.state.project_overrides_personal(&s.name);
         col = col.child(skill_row(s, overrides, ctx.workspace.clone(), t, cx));
@@ -439,6 +449,12 @@ fn plugin_groups(
                 }),
         );
         if is_open {
+            col = col.child(
+                div()
+                    .text_size(px(theme::RIGHT_PANEL_LABEL_FONT_SIZE))
+                    .text_color(t.text_muted)
+                    .child(strings::library::read_only(&group.plugin_id)),
+            );
             for s in &group.skills {
                 col = col.child(skill_row(s, false, ctx.workspace.clone(), t, cx));
             }
@@ -486,9 +502,10 @@ fn skill_row(
     // hover / tooltip plumbing can attach state slots. The skill name
     // is unique within its scope, so `scope-name` is collision-free
     // across the entire panel.
-    let name_btn_id = SharedString::from(format!("skill-name-{}-{}", scope.slug(), s.name));
-    let desc_id = SharedString::from(format!("skill-desc-{}-{}", scope.slug(), s.name));
-    let row_id = SharedString::from(format!("skill-{}-{}", scope.slug(), s.name));
+    let name_btn_id =
+        SharedString::from(format!("skill-name-{}-{}", scope.slug(), s.dir.display()));
+    let desc_id = SharedString::from(format!("skill-desc-{}-{}", scope.slug(), s.dir.display()));
+    let row_id = SharedString::from(format!("skill-{}-{}", scope.slug(), s.dir.display()));
 
     // Invocation remains a button; the secondary line gets the full row width.
     let skill_for_invoke = s.clone();
@@ -498,7 +515,7 @@ fn skill_row(
         .ghost()
         .p(px(0.))
         .max_w_full()
-        .tooltip(s.name.clone())
+        .tooltip(strings::library::source(s.dir.display()))
         .on_click({
             let ws = workspace_for_invoke.clone();
             let sk = skill_for_invoke.clone();

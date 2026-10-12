@@ -11,6 +11,9 @@ pub use gpui_component::WindowExt;
 pub use gpui_component::button::ButtonVariant;
 pub use gpui_component::dialog::{Dialog, DialogButtonProps};
 
+/// The same client-decoration insets that the dialog uses for its bounds.
+pub use gpui_component::window_paddings;
+
 /// A title, a body and an OK / Cancel pair, running `on_ok` on OK. The labels
 /// come from the caller, so the dialog says what the caller's locale says.
 pub fn open_confirm_dialog<F>(

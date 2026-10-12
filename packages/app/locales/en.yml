@@ -6,6 +6,14 @@ startup:
 
 # Common UI tokens — reused across sections
 common:
+  btn_review: "Review fields"
+  btn_manual: "Enter manually"
+  btn_back: "Back to paste"
+  btn_duplicate: "Duplicate"
+  field_advanced: "Advanced settings"
+  form_target_gone: "The workspace is no longer available."
+  unsaved_form_title: "Unsaved changes"
+  btn_discard: "Discard"
   column_status: "Status"
   filter_count: "%{label} %{count}"
   group_by: "Group: %{group}"
@@ -1099,6 +1107,15 @@ settings:
 
 # Skills tab
 skills:
+  quick_placeholder: "Paste a complete SKILL.md or Markdown instructions"
+  quick_hint: "Frontmatter fills the fields automatically. Plain Markdown becomes the instructions. Only SKILL.md is imported; supporting files are not copied."
+  import_error: "Invalid frontmatter. Use a YAML mapping between matching --- lines."
+  invocation_name: "Invocation name (optional)"
+  folder_name: "Folder identifier"
+  empty_body_warning: "The instructions are empty. Add guidance so the skill can be useful."
+  duplicate_instructions: "Copy instructions"
+  duplicate_hint: "Only SKILL.md is copied. Scripts, references, and assets must be added separately."
+  changed_on_disk: "The skill changed on disk. Reopen it to load the latest version before saving."
   # Section heading for the plugin-scope group. Plugin skills come
   # from marketplace installs (`~/.claude/plugins/cache/...`) and are
   # **read-only** in daruda — Edit / Delete / Rename are disabled.
@@ -1107,7 +1124,7 @@ skills:
   # several plugins, so the chip carries both numbers.
   count_chip_with_plugins: "%{skills} skills · %{plugins} plugins"
   # Skills tab footer: every skill the panel lists, across scopes.
-  footer_available: "%{n} skills available"
+  footer_available: "%{n} configured skills"
   # Header button — opens the Create modal.
   new_button: "New skill"
   # Header button on the right-panel Skills tab — opens Settings →
@@ -1165,6 +1182,29 @@ skills:
 
 # MCP / Tools tab
 mcp:
+  scope_local_short: "Local"
+  source_changed: "This server changed outside this dialog. Your draft is intact; reopen the server to review the latest settings."
+  auth_headers_hint: "Authorization follows the Authentication selection above. Choose Custom headers to edit it here."
+  reveal_values: "Reveal environment and header values"
+  field_auth: "Authentication"
+  auth_none: "None"
+  auth_variable: "Environment variable"
+  auth_token: "Token"
+  auth_custom: "Custom headers"
+  auth_custom_hint: "Edit custom authentication in Advanced settings."
+  auth_invalid: "Enter a valid environment variable name or a non-empty, single-line token."
+  quick_placeholder: "Paste an MCP URL, launch command, JSON, or Codex MCP TOML"
+  quick_hint: "Review before saving. Commands are never executed here. TOML is converted to Claude settings; unsupported fields are rejected."
+  import_error: "Cannot import this input. Check syntax and field types; shell scripts and unsupported conversions require manual entry."
+  choose_server: "Choose one server to add. Other entries will not be saved."
+  extra_preserved: "Additional source fields are preserved: %{keys}"
+  target_claude: "Claude · %{path}"
+  transport_warning: "Changing transport omits incompatible command, arguments, URL, or headers on save. Hidden field values remain in this draft."
+  duplicate_hint: "Connection copied. Environment values, headers, and additional fields were cleared; review credentials before saving."
+  headers_invalid: "Header line %{line} must be KEY=VALUE."
+  pairs_invalid: "Environment line %{line} must be KEY=VALUE."
+  pairs_duplicate: "Line %{line} repeats key %{key}."
+  args_invalid: "Close every quote in the arguments."
   # Header button — opens AddMcpServerModal.
   new_button: "Add server"
   # Body when project scope has no servers and there is an active lane.
@@ -1190,10 +1230,10 @@ mcp:
   delete_title: "Delete MCP server?"
   field_transport: "Transport"
   field_command: "Command"
-  field_args: "Args (space-separated)"
+  field_args: "Arguments (one value per row)"
   field_url: "URL"
-  field_env: "Env (KEY=VALUE per line)"
-  field_headers: "Headers (KEY=VALUE per line)"
+  field_env: "Environment variables"
+  field_headers: "HTTP headers"
   placeholder_name: "filesystem"
   placeholder_command: "npx"
   placeholder_args: "-y @modelcontextprotocol/server-x"
@@ -2114,3 +2154,37 @@ remote_channel:
   retrying: "Reconnecting"
   failed: "Connection rejected: check bot permissions"
   held_elsewhere: "Another daruda is connected to this bot"
+
+library:
+  toggle_needs_project: "Claude enablement is per project. Open a local project to change it."
+  reload: "Reload from disk"
+  project_load_hint: "Project settings load only in trusted projects. Saving does not grant trust."
+  follow_pane: "Follow pane configuration"
+  choose: "Choose the provider whose local configuration you want to manage."
+  claude: "Claude"
+  codex: "Codex"
+  remote: "Remote pane · Local configuration editing is unavailable."
+  unsupported: "This adapter does not expose a supported local configuration."
+  configured: "Configured on disk · Session availability is not verified."
+  trusted: "Trusted project · Restart or reload the provider to apply changes."
+  untrusted: "Untrusted project · Saved project settings will not load until trusted."
+  trust_unknown: "Project trust is unknown · Saving does not confirm that settings will load."
+  shared: "Shared physical source: %{path}"
+  read_error: "Could not read configuration. The last successful view may be stale."
+  codex_skill_required: "Codex skills require a name and description."
+  source: "Source: %{path}"
+  options_invalid: "Optional timeouts must be non-negative numbers; header references must be environment variable names."
+  startup_timeout: "Startup timeout (seconds)"
+  tool_timeout: "Tool timeout (seconds)"
+  enabled_tools: "Allowed tools (one per line)"
+  disabled_tools: "Disabled tools (one per line)"
+  env_headers: "Headers from environment (Header=VARIABLE)"
+  read_only: "Read only · Managed by %{owner}"
+  managed_exclusive: "Managed MCP is active. Other configured servers may not load."
+  approval_hint: "Project approvals are controlled by Claude settings and /mcp. Saving does not grant approval."
+  local_management: "Explicit local management · This does not change the focused remote or unsupported session."
+  add_row: "Add row"
+  companion: "Inspect agents/openai.yaml (read only)"
+  root_invalid: "Configuration root could not be resolved to an absolute path. Check the account or provider environment."
+  account: "Account: %{name}"
+  system_account: "System environment"

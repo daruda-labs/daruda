@@ -61,6 +61,7 @@ pub fn input_on<T: InputTabSpec>(
     tab: T,
 ) -> impl IntoElement {
     let inner = Input::new(state)
+        .disabled(state.read(cx).is_disabled())
         .small()
         .bordered(true)
         .w_full()
@@ -72,6 +73,7 @@ pub fn input<T: InputTabSpec>(state: &Entity<InputState>, cx: &App, tab: T) -> i
     // gpui draws its own chrome (bg + hairline + 1px accent focus
     // border); `.bg()` overrides the surface to `modal_input_bg`.
     let inner = Input::new(state)
+        .disabled(state.read(cx).is_disabled())
         .small()
         .bordered(true)
         .w_full()

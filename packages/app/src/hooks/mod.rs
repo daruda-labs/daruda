@@ -5,9 +5,12 @@
 //!
 pub mod flow_watcher;
 pub mod jsonl_watcher;
+#[cfg(test)]
 pub mod mcp_watcher;
+#[cfg(test)]
 pub mod skills_watcher;
-mod watch_target;
+pub(crate) mod source_watch;
+pub(crate) mod watch_target;
 pub mod watcher;
 
 #[cfg(test)]

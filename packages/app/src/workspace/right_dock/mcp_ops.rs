@@ -17,8 +17,8 @@ use serde_json::Value;
 use daruda_store::observability::error_report::{ErrorReport, ErrorSeverity};
 
 use crate::agent::mcp::{
-    McpLocation, McpPersistError, McpScope, McpServer, McpServerDraft, McpState, ProjectMcp,
-    delete_server, parse, set_disabled, update_server, write_server,
+    McpLocation, McpPersistError, McpScope, McpServer, McpServerDraft, McpState, ProjectMcp, parse,
+    set_disabled, update_server, write_server,
 };
 
 use crate::workspace::Workspace;
@@ -80,12 +80,8 @@ fn scope_slot_mut<'a>(
     }
 }
 
-/// Re-read `~/.claude.json` from disk into the Global before patching a
-/// User / Local server. `~/.claude.json` holds the user's entire Claude
-/// Code state and Claude Code rewrites it constantly; refreshing right
-/// before our whole-file atomic rewrite shrinks the lost-update window
-/// against a concurrent write. No-op for the Project scope, whose
-/// `.mcp.json` is daruda-owned and low-collision.
+/// Reload the target before patching it so unrelated external edits survive
+/// the whole-file atomic rewrite, for both `.claude.json` and `.mcp.json`.
 fn refresh_before_write(
     state: &mut McpState,
     scope: McpScope,
@@ -93,6 +89,8 @@ fn refresh_before_write(
 ) -> Result<(), McpPersistError> {
     if scope.in_claude_json() {
         state.reload_claude_json(lane)?;
+    } else {
+        state.reload_project(lane)?;
     }
     Ok(())
 }
@@ -148,10 +146,10 @@ impl Workspace {
     pub(super) fn add_mcp_server(
         &mut self,
         scope: McpScope,
+        lane: Option<PathBuf>,
         draft: McpServerDraft,
         cx: &mut Context<Self>,
     ) -> Result<(), McpPersistError> {
-        let lane = self.active_lane_root();
         let (path, location) =
             target_meta(scope, lane.as_deref()).ok_or(McpPersistError::NoProjectRoot)?;
         let result = cx.update_global::<McpState, _>(|state, _| {
@@ -172,16 +170,25 @@ impl Workspace {
     pub(super) fn update_mcp_server(
         &mut self,
         scope: McpScope,
+        lane: Option<PathBuf>,
         draft: McpServerDraft,
+        expected: &McpServerDraft,
         cx: &mut Context<Self>,
     ) -> Result<(), McpPersistError> {
-        let lane = self.active_lane_root();
         let (path, location) =
             target_meta(scope, lane.as_deref()).ok_or(McpPersistError::NoProjectRoot)?;
         let result = cx.update_global::<McpState, _>(|state, _| {
             refresh_before_write(state, scope, lane.as_deref())?;
             let (servers, raw) = scope_slot_mut(state, scope, lane.as_deref())
                 .ok_or(McpPersistError::NoProjectRoot)?;
+            let current = servers.iter().find(|s| s.name == draft.name);
+            if current
+                .is_none_or(|s| McpServerDraft::from_server(s).to_value() != expected.to_value())
+            {
+                return Err(McpPersistError::Io(std::io::Error::other(
+                    crate::surface::strings::mcp::source_changed(),
+                )));
+            }
             update_server(raw, &path, scope, &location, &draft)?;
             let new_server = make_server_from_draft(scope, &draft);
             if let Some(slot) = servers.iter_mut().find(|s| s.name == draft.name) {
@@ -195,27 +202,44 @@ impl Workspace {
         cx.notify();
         result
     }
+}
 
-    /// Remove the named server from `scope`. Caller is the
-    /// delete-confirm modal, which already gated on user confirmation.
-    pub(super) fn delete_mcp_server_internal(
-        &mut self,
-        scope: McpScope,
-        name: &str,
-        cx: &mut Context<Self>,
-    ) -> Result<(), McpPersistError> {
-        let lane = self.active_lane_root();
-        let (path, location) =
-            target_meta(scope, lane.as_deref()).ok_or(McpPersistError::NoProjectRoot)?;
-        let result = cx.update_global::<McpState, _>(|state, _| {
-            refresh_before_write(state, scope, lane.as_deref())?;
-            let (servers, raw) = scope_slot_mut(state, scope, lane.as_deref())
-                .ok_or(McpPersistError::NoProjectRoot)?;
-            delete_server(raw, &path, scope, &location, name)?;
-            servers.retain(|s| s.name != name);
-            Ok(())
+#[cfg(test)]
+mod quick_entry_tests {
+    use super::*;
+    #[gpui::test]
+    async fn quick_entry_external_edit_is_not_overwritten(cx: &mut gpui::TestAppContext) {
+        let (_, workspace) = crate::workspace::tests::build_workspace(cx);
+        let temp = tempfile::tempdir().unwrap();
+        let mut original = crate::agent::mcp::import::parse("npx original")
+            .unwrap()
+            .remove(0);
+        original.name = "sample".into();
+        workspace
+            .update(cx, |ws, cx| {
+                ws.add_mcp_server(
+                    McpScope::Project,
+                    Some(temp.path().into()),
+                    original.clone(),
+                    cx,
+                )
+            })
+            .unwrap();
+        let path = temp.path().join(".mcp.json");
+        let external = r#"{"mcpServers":{"sample":{"command":"other"}},"keep":true}"#;
+        std::fs::write(&path, external).unwrap();
+        let mut changed = original.clone();
+        changed.args = vec!["edited".into()];
+        let result = workspace.update(cx, |ws, cx| {
+            ws.update_mcp_server(
+                McpScope::Project,
+                Some(temp.path().into()),
+                changed,
+                &original,
+                cx,
+            )
         });
-        cx.notify();
-        result
+        assert!(result.is_err());
+        assert_eq!(std::fs::read_to_string(path).unwrap(), external);
     }
 }

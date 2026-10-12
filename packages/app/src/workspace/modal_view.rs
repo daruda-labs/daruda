@@ -6,4 +6,22 @@ use gpui::{Focusable, Render};
 /// Enforces that only intentional modal entities are passed to
 /// `open_form_modal`. Implementors must also satisfy `Render + Focusable`,
 /// which are enforced by the `open_form_modal` generic bound.
-pub trait ModalView: Render + Focusable {}
+pub trait ModalView: Render + Focusable {
+    /// Opt-in height bound for forms with expandable or repeatable fields.
+    fn fit_viewport(&self) -> bool {
+        false
+    }
+
+    /// Opt-in close interception; existing modal lifecycles keep their policy.
+    fn guards_close(&self) -> bool {
+        false
+    }
+
+    fn request_close(&mut self, window: &mut gpui::Window, cx: &mut gpui::Context<Self>)
+    where
+        Self: Sized,
+    {
+        use crate::ui::WindowExt as _;
+        window.close_dialog(cx);
+    }
+}

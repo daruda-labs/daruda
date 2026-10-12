@@ -1,17 +1,5 @@
-//! Create-skill modal.
-//!
-//! Left column: meta fields (name, scope select, description, when-to-use,
-//! flags, optional fields). Right column: markdown body editor.
-//! Shell width = `theme::FORM_MODAL_WIDE` (900px).
-//!
-//! Validation runs synchronously: name regex, in-scope duplicate
-//! check, description-length warning. The Save button is disabled
-//! while the name is empty so first-time users can't fire a
-//! malformed write.
-//!
-//! Tab cycling is delegated to GPUI's tab system via `.tab_group()`
-//! on the modal root; each input's `InputState` exposes a tab-stop
-//! focus handle (and `tab_index` order is assigned in `new`).
+//! Paste-first skill creation with a body-first form and optional metadata.
+//! Captures the destination and preserves imported source until explicit Save.
 
 use std::path::PathBuf;
 
@@ -29,7 +17,7 @@ use crate::surface::strings;
 use crate::ui::Disableable as _;
 use crate::ui::Selectable as _;
 use crate::ui::WindowExt as _;
-use crate::ui::{InputEvent, InputState, button, button_group, button_primary, checkbox, input};
+use crate::ui::{InputEvent, InputState, button, button_group, button_primary, checkbox};
 use crate::workspace::ModalView;
 use crate::workspace::Workspace;
 use crate::workspace::right_dock::skills::modal_shared::field_label;
@@ -45,9 +33,18 @@ fn blank_to_none(s: &str) -> Option<String> {
 }
 
 pub struct CreateSkillModal {
+    pub(super) config: Option<std::sync::Arc<crate::agent::configuration::Configuration>>,
+    pub(super) creation_targets:
+        Vec<crate::agent::configuration::library::creation::CreationTarget>,
     panel_focus_handle: FocusHandle,
+    form: super::super::form_state::FormState,
 
     name_input: Entity<InputState>,
+    invocation_input: Entity<InputState>,
+    paste_input: Entity<InputState>,
+    pasting: bool,
+    advanced: bool,
+    imported: Option<crate::agent::skills::import::ImportedSkill>,
     description_input: Entity<InputState>,
     when_to_use_input: Entity<InputState>,
     argument_hint_input: Entity<InputState>,
@@ -67,6 +64,7 @@ pub struct CreateSkillModal {
     state_snapshot: SkillsSnapshot,
 
     error: Option<SharedString>,
+    error_field: Option<isize>,
     submitting: bool,
 
     workspace: WeakEntity<Workspace>,
@@ -84,6 +82,12 @@ impl CreateSkillModal {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Self {
+        let paste_input = cx.new(|cx| {
+            InputState::new(window, cx)
+                .auto_grow(6, 12)
+                .placeholder(strings::skills::quick_placeholder())
+        });
+        let invocation_input = cx.new(|cx| InputState::new(window, cx));
         let name_input = cx.new(|cx_state| {
             InputState::new(window, cx_state).placeholder(strings::skills::placeholder_name())
         });
@@ -109,7 +113,7 @@ impl CreateSkillModal {
         });
         let body_editor = cx.new(|cx_state| {
             InputState::new(window, cx_state)
-                .multi_line(true)
+                .auto_grow(8, 12)
                 .placeholder(strings::skills::placeholder_body())
         });
 
@@ -129,6 +133,8 @@ impl CreateSkillModal {
             });
 
         let subs = vec![
+            forward_body_editor(&paste_input, window, cx),
+            forward_input(&invocation_input, window, cx),
             forward_input(&name_input, window, cx),
             forward_input(&description_input, window, cx),
             forward_input(&when_to_use_input, window, cx),
@@ -139,7 +145,15 @@ impl CreateSkillModal {
             forward_body_editor(&body_editor, window, cx),
         ];
 
-        Self {
+        let mut modal = Self {
+            config: None,
+            creation_targets: Vec::new(),
+            paste_input,
+            invocation_input,
+            pasting: true,
+            advanced: false,
+            imported: None,
+            form: Default::default(),
             panel_focus_handle: cx.focus_handle(),
             name_input,
             description_input,
@@ -156,39 +170,83 @@ impl CreateSkillModal {
             project_root,
             state_snapshot,
             error: None,
+            error_field: None,
             submitting: false,
             workspace,
             _input_subs: subs,
-        }
+        };
+        modal.form.baseline = modal.values(cx);
+        modal
     }
 
-    fn build_draft(&self, cx: &gpui::App) -> Result<SkillDraft, SharedString> {
+    fn build_draft(&self, cx: &gpui::App) -> Result<SkillDraft, (isize, SharedString)> {
         let raw_name = self.name_input.read(cx).value().to_string();
         let raw_name = raw_name.trim().to_string();
         match validate_name(&raw_name) {
             Ok(()) => {}
-            Err(NameError::Empty) => return Err(strings::common::name_required().into()),
-            Err(NameError::TooLong { .. }) => return Err(strings::skills::name_too_long().into()),
+            Err(NameError::Empty) => return Err((0, strings::common::name_required().into())),
+            Err(NameError::TooLong { .. }) => {
+                return Err((0, strings::skills::name_too_long().into()));
+            }
             Err(NameError::InvalidChar { .. }) => {
-                return Err(strings::skills::name_invalid().into());
+                return Err((0, strings::skills::name_invalid().into()));
             }
             Err(NameError::InvalidLeading { .. }) => {
-                return Err(strings::skills::name_leading().into());
+                return Err((0, strings::skills::name_leading().into()));
             }
             Err(NameError::DuplicateInScope { .. }) => unreachable!("validate_name is syntactic"),
         }
-        if self.state_snapshot.name_exists(self.scope, &raw_name) {
-            return Err(strings::skills::name_duplicate().into());
+        let destination = self.config.as_ref().and_then(|config| match self.scope {
+            SkillScope::Personal => Some(config.personal_skills.clone()),
+            SkillScope::Project => config.cwd.as_ref().map(|cwd| config.project_skills(cwd)),
+            SkillScope::Plugin => None,
+        });
+        let duplicate = if let Some(root) = destination {
+            self.state_snapshot
+                .project
+                .iter()
+                .chain(&self.state_snapshot.personal)
+                .any(|skill| skill.dir == root.join(&raw_name))
+        } else {
+            self.state_snapshot.name_exists(self.scope, &raw_name)
+        };
+        if duplicate {
+            return Err((0, strings::skills::name_duplicate().into()));
         }
 
-        let mut fm = SkillFrontmatter::empty();
-        fm.name = blank_to_none(&raw_name);
-        fm.description = blank_to_none(&self.description_input.read(cx).value());
-        fm.when_to_use = blank_to_none(&self.when_to_use_input.read(cx).value());
-        fm.argument_hint = blank_to_none(&self.argument_hint_input.read(cx).value());
-        fm.allowed_tools = blank_to_none(&self.allowed_tools_input.read(cx).value());
-        fm.paths = blank_to_none(&self.paths_input.read(cx).value());
-        fm.model = blank_to_none(&self.model_input.read(cx).value());
+        let mut fm = self
+            .imported
+            .as_ref()
+            .map(|i| i.frontmatter.clone())
+            .unwrap_or_else(SkillFrontmatter::empty);
+        let value = self.invocation_input.read(cx).value();
+        if value.as_str() != fm.name.as_deref().unwrap_or("") {
+            fm.name = blank_to_none(&value);
+        }
+        let value = self.description_input.read(cx).value();
+        if value.as_str() != fm.description.as_deref().unwrap_or("") {
+            fm.description = blank_to_none(&value);
+        }
+        let value = self.when_to_use_input.read(cx).value();
+        if value.as_str() != fm.when_to_use.as_deref().unwrap_or("") {
+            fm.when_to_use = blank_to_none(&value);
+        }
+        let value = self.argument_hint_input.read(cx).value();
+        if value.as_str() != fm.argument_hint.as_deref().unwrap_or("") {
+            fm.argument_hint = blank_to_none(&value);
+        }
+        let value = self.allowed_tools_input.read(cx).value();
+        if value.as_str() != fm.allowed_tools.as_deref().unwrap_or("") {
+            fm.allowed_tools = blank_to_none(&value);
+        }
+        let value = self.paths_input.read(cx).value();
+        if value.as_str() != fm.paths.as_deref().unwrap_or("") {
+            fm.paths = blank_to_none(&value);
+        }
+        let value = self.model_input.read(cx).value();
+        if value.as_str() != fm.model.as_deref().unwrap_or("") {
+            fm.model = blank_to_none(&value);
+        }
         fm.user_invocable = self.user_invocable;
         fm.disable_model_invocation = self.disable_model_invocation;
 
@@ -204,24 +262,104 @@ impl CreateSkillModal {
         if self.submitting {
             return;
         }
+        if self.pasting {
+            self.review_paste(window, cx);
+            return;
+        }
         let draft = match self.build_draft(cx) {
             Ok(d) => d,
-            Err(msg) => {
+            Err((field, msg)) => {
+                self.error_field = Some(field);
                 self.error = Some(msg);
+                if let Some(input) = self.inputs().get(field as usize) {
+                    window.focus(&input.focus_handle(cx), cx);
+                }
                 cx.notify();
                 return;
             }
         };
+        let config = self.config.clone();
+        if config
+            .as_ref()
+            .is_some_and(|c| c.provider == crate::agent::configuration::Provider::Codex)
+            && (draft
+                .frontmatter
+                .name
+                .as_ref()
+                .is_none_or(|s| s.trim().is_empty())
+                || draft
+                    .frontmatter
+                    .description
+                    .as_ref()
+                    .is_none_or(|s| s.trim().is_empty()))
+        {
+            self.error_field = None;
+            self.error = Some(strings::library::codex_skill_required().into());
+            let input = if draft
+                .frontmatter
+                .name
+                .as_ref()
+                .is_none_or(|s| s.trim().is_empty())
+            {
+                &self.invocation_input
+            } else {
+                &self.description_input
+            };
+            window.focus(&input.focus_handle(cx), cx);
+            cx.notify();
+            return;
+        }
+        let imported = self.imported.clone();
+        let creation_target = self
+            .creation_targets
+            .iter()
+            .find(|t| t.scope == draft.scope)
+            .cloned();
         let project_root = self.project_root.clone();
         let workspace = self.workspace.clone();
+        super::super::form_state::freeze_inputs(&self.inputs(), true, cx);
+        self.error_field = None;
         self.submitting = true;
         cx.notify();
 
         let me = cx.entity().downgrade();
         window
             .spawn(cx, async move |async_cx| {
-                let result = persist::write_skill(&draft, project_root.as_deref(), false)
-                    .map_err(|e| e.to_string());
+                let result = async_cx
+                    .background_executor()
+                    .spawn(async move {
+                        let source = if let Some(imported) = imported {
+                            crate::agent::skills::frontmatter::render_edited_skill_md(
+                                &imported.source,
+                                &imported.frontmatter,
+                                &draft.frontmatter,
+                                &draft.body,
+                            )
+                            .map_err(|e| e.to_string())?
+                        } else {
+                            crate::agent::skills::frontmatter::render_skill_md(
+                                &draft.frontmatter,
+                                &draft.body,
+                            )
+                        };
+                        if config.is_some() {
+                            creation_target
+                                .ok_or_else(|| {
+                                    if draft.scope == SkillScope::Project && project_root.is_none()
+                                    {
+                                        strings::mcp::no_project_hint()
+                                    } else {
+                                        strings::skills::changed_on_disk()
+                                    }
+                                })?
+                                .create(&draft.name, &source)
+                                .map_err(|e| e.to_string())
+                        } else {
+                            persist::create_skill_source(&draft, project_root.as_deref(), &source)
+                                .map_err(|e| e.to_string())
+                        }
+                    })
+                    .await;
                 // SILENT-OK: modal may close during async skill create
                 let _ = async_cx.update(|window, cx| {
                     let Some(me) = me.upgrade() else { return };
@@ -230,11 +368,12 @@ impl CreateSkillModal {
                         match result {
                             Ok(_) => {
                                 if let Some(ws) = workspace.upgrade() {
-                                    ws.update(cx, |ws, cx| ws.refresh_skills_watcher(cx));
+                                    ws.update(cx, |ws, cx| ws.refresh_library(cx));
                                 }
                                 modal.dismiss(window, cx);
                             }
                             Err(msg) => {
+                                super::super::form_state::freeze_inputs(&modal.inputs(), false, cx);
                                 modal.error = Some(SharedString::from(msg));
                                 cx.notify();
                             }
@@ -245,6 +384,66 @@ impl CreateSkillModal {
             .detach();
     }
 
+    fn values(&self, cx: &App) -> Vec<String> {
+        vec![
+            self.paste_input.read(cx).value().to_string(),
+            self.invocation_input.read(cx).value().to_string(),
+            self.scope.slug().to_string(),
+            self.user_invocable.to_string(),
+            self.disable_model_invocation.to_string(),
+            self.name_input.read(cx).value().to_string(),
+            self.description_input.read(cx).value().to_string(),
+            self.when_to_use_input.read(cx).value().to_string(),
+            self.argument_hint_input.read(cx).value().to_string(),
+            self.allowed_tools_input.read(cx).value().to_string(),
+            self.paths_input.read(cx).value().to_string(),
+            self.model_input.read(cx).value().to_string(),
+            self.body_editor.read(cx).value().to_string(),
+        ]
+    }
+
+    fn inputs(&self) -> Vec<Entity<InputState>> {
+        vec![
+            self.name_input.clone(),
+            self.description_input.clone(),
+            self.when_to_use_input.clone(),
+            self.argument_hint_input.clone(),
+            self.allowed_tools_input.clone(),
+            self.paths_input.clone(),
+            self.model_input.clone(),
+            self.body_editor.clone(),
+            self.paste_input.clone(),
+            self.invocation_input.clone(),
+        ]
+    }
+
+    fn leave(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        use super::super::form_state::{LeaveChoice, ask_to_leave};
+        if self.submitting || self.form.asking {
+            return;
+        }
+        let dirty = self.form.is_dirty(&self.values(cx));
+        if !dirty {
+            self.dismiss(window, cx);
+            return;
+        }
+        ask_to_leave(
+            &mut self.form,
+            dirty,
+            self.submitting,
+            window,
+            cx,
+            |this, choice, window, cx| {
+                this.form.asking = false;
+                match choice {
+                    LeaveChoice::Save => this.submit(window, cx),
+                    LeaveChoice::Discard => this.dismiss(window, cx),
+                    LeaveChoice::Continue => {}
+                }
+            },
+        );
+    }
+
     fn dismiss(&mut self, window: &mut Window, cx: &mut App) {
         window.close_dialog(cx);
     }
@@ -252,6 +451,7 @@ impl CreateSkillModal {
     fn clear_error(&mut self, cx: &mut Context<Self>) {
         if self.error.is_some() {
             self.error = None;
+            self.error_field = None;
             cx.notify();
         }
     }
@@ -299,151 +499,28 @@ fn forward_body_editor(
 
 impl Focusable for CreateSkillModal {
     fn focus_handle(&self, cx: &gpui::App) -> FocusHandle {
-        self.name_input.focus_handle(cx)
-    }
-}
-
-impl ModalView for CreateSkillModal {}
-
-impl Render for CreateSkillModal {
-    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let panel_focus = self.panel_focus_handle.clone();
-        let user_invocable = self.user_invocable;
-        let disable_model = self.disable_model_invocation;
-        let submitting = self.submitting;
-        let t = crate::ui::theme::current(cx).clone();
-        let banner = self
-            .error
-            .as_ref()
-            .map(|msg| crate::ui::alert::error("create-skill-error", msg.clone()));
-
-        // Scope segmented selector. Children align with `scope_values`
-        // by index; the click callback maps the selected index back to
-        // its `SkillScope`. `scope_options` only ever holds writable
-        // scopes (Project / Personal) — Plugin is read-only and cannot
-        // reach the Create modal.
-        let scope_pairs: Vec<(SkillScope, SharedString)> = self
-            .scope_options
-            .iter()
-            .filter_map(|scope| match scope {
-                SkillScope::Project => Some((*scope, strings::common::section_project().into())),
-                SkillScope::Personal => Some((*scope, strings::common::section_personal().into())),
-                SkillScope::Plugin => None,
-            })
-            .collect();
-        let scope_values: Vec<SkillScope> = scope_pairs.iter().map(|(scope, _)| *scope).collect();
-        let scope_chip = button_group("skill-scope-group", cx)
-            .children(scope_pairs.into_iter().map(|(scope, label)| {
-                button(SharedString::from(format!("scope-{}", scope.slug())), label)
-                    .selected(self.scope == scope)
-            }))
-            .on_click(cx.listener(move |this, ixs: &Vec<usize>, _w, cx| {
-                if let Some(&ix) = ixs.first() {
-                    this.scope = scope_values[ix];
-                    cx.notify();
-                }
-            }));
-
-        let left = div()
-            .flex()
-            .flex_col()
-            .flex_1()
-            .gap(px(theme::FORM_MODAL_SECTION_GAP))
-            .child(field_label(strings::common::field_name(), &t))
-            .child(input(&self.name_input, cx, 0))
-            .child(field_label(strings::common::field_scope(), &t))
-            .child(scope_chip)
-            .child(field_label(strings::skills::field_description(), &t))
-            .child(input(&self.description_input, cx, 1))
-            .child(field_label(strings::skills::field_when_to_use(), &t))
-            .child(input(&self.when_to_use_input, cx, 2))
-            .child(field_label(strings::skills::field_allowed_tools(), &t))
-            .child(input(&self.allowed_tools_input, cx, 3))
-            .child(field_label(strings::skills::field_arg_hint(), &t))
-            .child(input(&self.argument_hint_input, cx, 4))
-            .child(field_label(strings::skills::field_paths(), &t))
-            .child(input(&self.paths_input, cx, 5))
-            .child(field_label(strings::skills::field_model(), &t))
-            .child(input(&self.model_input, cx, 6))
-            .child(
-                checkbox(
-                    "skill-user-invocable",
-                    strings::skills::toggle_user_invocable(),
-                    8,
-                )
-                .checked(user_invocable)
-                .on_click(cx.listener(|this, checked: &bool, _w, cx| {
-                    this.user_invocable = *checked;
-                    cx.notify();
-                })),
-            )
-            .child(
-                checkbox(
-                    "skill-disable-model",
-                    strings::skills::toggle_disable_model(),
-                    9,
-                )
-                .checked(disable_model)
-                .on_click(cx.listener(|this, checked: &bool, _w, cx| {
-                    this.disable_model_invocation = *checked;
-                    cx.notify();
-                })),
-            );
-
-        let right = div()
-            .flex()
-            .flex_col()
-            .flex_1()
-            .gap(px(theme::FORM_MODAL_SECTION_GAP))
-            .child(field_label(strings::skills::field_body(), &t))
-            // body_editor sits between the left-column inputs and the
-            // toggles so Tab flows from the last metadata field into
-            // the markdown body before reaching the tail-of-form
-            // toggles.
-            .child(input(&self.body_editor, cx, 7));
-
-        let body = div()
-            .flex()
-            .flex_row()
-            .gap(px(theme::FORM_MODAL_SPLIT_GAP))
-            .child(left)
-            .child(right);
-
-        let save_label = if submitting {
-            strings::skills::saving_label()
+        if self.pasting {
+            self.paste_input.focus_handle(cx)
         } else {
-            strings::common::btn_save()
-        };
-        let footer = div()
-            .flex()
-            .flex_row()
-            .justify_end()
-            .gap(px(theme::MODAL_FOOTER_GAP))
-            .mt(px(theme::MODAL_FOOTER_MARGIN_TOP))
-            .child(
-                button("create-skill-cancel", strings::common::btn_cancel())
-                    .on_click(cx.listener(|this, _: &ClickEvent, w, cx| this.dismiss(w, cx))),
-            )
-            .child(
-                button_primary("create-skill-save", save_label)
-                    .disabled(submitting)
-                    .on_click(cx.listener(|this, _: &ClickEvent, w, cx| this.submit(w, cx))),
-            );
-
-        let mut p = div()
-            .flex()
-            .flex_col()
-            .key_context("CreateSkillModal")
-            .track_focus(&panel_focus)
-            .tab_group()
-            .gap(px(theme::MODAL_PANEL_GAP))
-            .child(body);
-        if let Some(b) = banner {
-            p = p.child(b);
+            self.body_editor.focus_handle(cx)
         }
-        p.child(footer)
     }
 }
+
+impl ModalView for CreateSkillModal {
+    fn fit_viewport(&self) -> bool {
+        true
+    }
+    fn guards_close(&self) -> bool {
+        true
+    }
+    fn request_close(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.leave(window, cx);
+    }
+}
+
+mod quick_entry;
+mod render;
 
 pub fn open_create_skill_modal(
     ws: &mut Workspace,
@@ -452,17 +529,76 @@ pub fn open_create_skill_modal(
     cx: &mut Context<Workspace>,
 ) {
     let workspace = cx.weak_entity();
-    let project_root = ws.active_lane_root();
-    let state = cx
-        .global::<crate::agent::skills::global::GlobalSkills>()
-        .snapshot_for(project_root.as_deref());
+    let Some(config) = ws.pin_library() else {
+        return;
+    };
+    let project_root = config.cwd.clone();
+    let state = ws.right_views.library.view.inventory.skills.clone();
+    let creation_targets = ws
+        .right_views
+        .library
+        .view
+        .inventory
+        .creation_targets
+        .clone();
     crate::workspace::dialog_helpers::open_form_modal(
         strings::skills::new_title(),
         Some(px(crate::ui::theme::FORM_MODAL_WIDE)),
         move |window, cx| {
-            CreateSkillModal::new(workspace, prefill_scope, project_root, state, window, cx)
+            let mut modal =
+                CreateSkillModal::new(workspace, prefill_scope, project_root, state, window, cx);
+            modal.config = Some(config);
+            modal.creation_targets = creation_targets;
+            modal
         },
         window,
         cx,
     );
+}
+
+#[cfg(test)]
+#[path = "create_modal/tests.rs"]
+mod tests;
+
+impl CreateSkillModal {
+    pub(super) fn seed_duplicate(
+        &mut self,
+        source: String,
+        name: String,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        match crate::agent::skills::import::parse(&source) {
+            Ok(imported) => {
+                self.apply_import(imported, window, cx);
+                self.name_input.update(cx, |input, cx| {
+                    input.set_value(format!("{name}-copy"), window, cx)
+                });
+                // A new invocation defaults to its new folder identifier.
+                self.invocation_input
+                    .update(cx, |input, cx| input.set_value("", window, cx));
+            }
+            Err(()) => {
+                self.paste_input
+                    .update(cx, |input, cx| input.set_value(source, window, cx));
+                self.error = Some(strings::skills::import_error().into());
+            }
+        }
+    }
+}
+
+#[cfg(feature = "screenshot")]
+impl CreateSkillModal {
+    pub(in crate::workspace) fn seed_for_shot(
+        &mut self,
+        review: bool,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.paste_input.update(cx,|input,cx|input.set_value(
+            "---\nname: review-changes\ndescription: Review changes before a commit.\n---\n# Review changes\n\nRead the diff and nearby source.\n\n1. Find correctness issues.\n2. Explain the impact with a concrete example.\n3. Cite the affected file and line.\n",window,cx));
+        if review {
+            self.review_paste(window, cx);
+        }
+    }
 }

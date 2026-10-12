@@ -11,6 +11,8 @@ use super::tasks::TaskBrowser;
 use crate::workspace::Workspace;
 
 pub(in crate::workspace) struct RightDockViews {
+    pub(in crate::workspace) library: super::library::Library,
+    _library_pump: gpui::Task<()>,
     /// The Tasks list's scope, status, folds and search.
     pub(in crate::workspace) tasks: TaskBrowser,
     /// Search query input rendered atop the Skills tab. Cleared on `Esc`;
@@ -33,6 +35,8 @@ pub(in crate::workspace) struct RightDockViews {
 impl RightDockViews {
     pub(in crate::workspace) fn new(window: &mut Window, cx: &mut Context<Workspace>) -> Self {
         Self {
+            library: super::library::Library::default(),
+            _library_pump: super::library::spawn(cx),
             // Task data lives in the app-wide `GlobalTasks`; the browser's
             // subscription rebroadcasts mutations into this workspace's
             // render path and re-evaluates whether the live tick (pulse +

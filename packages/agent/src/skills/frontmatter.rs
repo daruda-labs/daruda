@@ -370,3 +370,82 @@ fn is_yaml_reserved_scalar(value: &str) -> bool {
     }
     false
 }
+
+/// Patch edited metadata while retaining source values for every unchanged key.
+pub fn render_edited_skill_md(
+    original: &str,
+    before: &SkillFrontmatter,
+    after: &SkillFrontmatter,
+    body: &str,
+) -> Result<String, yaml_serde::Error> {
+    let (yaml, old_body) = split_frontmatter(original);
+    if before == after {
+        return Ok(format!(
+            "{}{}",
+            &original[..original.len() - old_body.len()],
+            body
+        ));
+    }
+    let mapping = |yaml: &str| -> Result<yaml_serde::Mapping, yaml_serde::Error> {
+        if yaml.trim().is_empty() {
+            Ok(yaml_serde::Mapping::new())
+        } else {
+            yaml_serde::from_str(yaml)
+        }
+    };
+    let mut source = mapping(yaml.unwrap_or(""))?;
+    let before = mapping(split_frontmatter(&serialize_frontmatter(before)).0.unwrap())?;
+    let after = mapping(split_frontmatter(&serialize_frontmatter(after)).0.unwrap())?;
+    for key in before.keys().chain(after.keys()) {
+        if before.get(key) == after.get(key) {
+            continue;
+        }
+        match after.get(key) {
+            Some(value) => {
+                source.insert(key.clone(), value.clone());
+            }
+            None => {
+                source.remove(key);
+            }
+        }
+    }
+    let yaml = yaml_serde::to_string(&source)?;
+    Ok(format!("---\n{yaml}---\n{body}"))
+}
+
+#[cfg(test)]
+mod edit_preservation_tests {
+    use super::*;
+
+    #[test]
+    fn modal_safety_editing_a_description_preserves_all_other_yaml_values() {
+        let source = "---\nname: sample\ndescription: old\npaths: [src/**, tests/**]\nallowed-tools: [Read, Bash]\ncontext: fork\nagent: reviewer\neffort: high\nshell: bash\nfuture: {enabled: true}\n---\n\nKeep this body.\n";
+        let (yaml, body) = split_frontmatter(source);
+        let before = parse_frontmatter(yaml.unwrap()).unwrap();
+        let mut after = before.clone();
+        after.description = Some("new".into());
+        let edited = render_edited_skill_md(source, &before, &after, body).unwrap();
+        let (new_yaml, new_body) = split_frontmatter(&edited);
+        let mut old: yaml_serde::Mapping = yaml_serde::from_str(yaml.unwrap()).unwrap();
+        old.insert(
+            Value::String("description".into()),
+            Value::String("new".into()),
+        );
+        assert_eq!(
+            yaml_serde::from_str::<yaml_serde::Mapping>(new_yaml.unwrap()).unwrap(),
+            old
+        );
+        assert_eq!(new_body, body);
+    }
+
+    #[test]
+    fn modal_safety_an_unchanged_edit_is_byte_for_byte_identical() {
+        let source = "---\n# Retain comments too.\nname: sample\nuser-invocable: true\n---\n\n\nBody without final newline";
+        let (yaml, body) = split_frontmatter(source);
+        let fm = parse_frontmatter(yaml.unwrap()).unwrap();
+        assert_eq!(
+            render_edited_skill_md(source, &fm, &fm, body).unwrap(),
+            source
+        );
+    }
+}

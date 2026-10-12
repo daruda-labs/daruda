@@ -468,11 +468,6 @@ pub struct Workspace {
     pub(in crate::workspace) pending_lane_creates: HashSet<std::path::PathBuf>,
     /// Background watches and their pumps — see [`lifetimes::Pumps`].
     pub(in crate::workspace) pumps: lifetimes::Pumps,
-    /// Cached Project-scope `.mcp.json` directories (lane root + the
-    /// focused cwd, each walked up to its git repo root). Recomputed
-    /// only inside `respawn_mcp_watcher` — the render snapshot reads
-    /// this field instead of stat-walking the filesystem every frame.
-    mcp_project_dirs: Vec<std::path::PathBuf>,
     /// Last version surfaced via the "update available" toast. Guards
     /// against re-toasting the same version on repeated `Available`
     /// notifies.
@@ -774,7 +769,7 @@ impl Workspace {
             },
             workspace_store: crate::workspace_storage::for_root(&data_dir, cx),
             data_dir,
-            mcp_project_dirs: Vec::new(),
+
             // Re-resolve the user layer with this workspace's project
             // overlay and reapply whenever `SettingsStore` changes —
             // both the FS watch tick and the Settings-window save

@@ -10,11 +10,14 @@
 //! - This `mod.rs` re-exports the openers so callers stay one-liners.
 
 pub(super) mod add_modal;
+mod auth;
+mod codex_options;
 pub(super) mod delete_confirm;
 pub(super) mod edit_modal;
 mod modal_shared;
 mod ops;
 pub(super) mod render;
+mod rows;
 
 pub(super) use add_modal::open_add_mcp_server_modal;
 pub(super) use delete_confirm::open_delete_mcp_server_confirm;

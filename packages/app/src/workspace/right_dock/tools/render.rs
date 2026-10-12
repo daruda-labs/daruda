@@ -19,60 +19,86 @@
 //! All static text comes from `surface::strings::MCP_*`; pixel +
 //! colour values from `crate::ui::theme::MCP_*`.
 
+use crate::ui::Disableable as _;
 use crate::ui::theme;
 use crate::ui::theme::DarudaTheme;
 use gpui::{AnyElement, Context, IntoElement, SharedString, div, prelude::*, px};
 
-use crate::agent::mcp::{McpScope, McpServer, McpSnapshot};
+use crate::agent::mcp::{McpScope, McpServer};
 use crate::surface::strings;
 use crate::ui::SectionHeader;
 use crate::workspace::Workspace;
 use crate::workspace::layout::Dock;
 use crate::workspace::layout::RightDockSnapshot;
-use crate::workspace::right_dock::section::DockSection;
 use crate::workspace::right_dock::section_view::{
     ScopeSection, SectionFold, hover_actions, library_row, panel_footer,
 };
 
 /// Render the Tools tab body.
 pub(in crate::workspace) fn render(snap: &RightDockSnapshot, cx: &mut Context<Dock>) -> AnyElement {
-    let mcp = &snap.mcp;
     let workspace = snap.workspace.clone();
-    let has_lane = mcp.project_root.is_some();
-    let scopes = [
-        (
-            DockSection::ToolsProject,
-            strings::common::section_project(),
-            McpScope::Project,
-            has_lane,
-        ),
-        (
-            DockSection::ToolsLocal,
-            strings::common::section_local(),
-            McpScope::Local,
-            has_lane,
-        ),
-        (
-            DockSection::ToolsUser,
-            strings::common::section_user(),
-            McpScope::User,
-            true,
-        ),
-    ];
     let mut col =
         crate::workspace::right_dock::right_panel_body().child(header_row(workspace.clone(), cx));
-    for (ix, (section, label, scope, enabled)) in scopes.into_iter().enumerate() {
-        let is_open = snap.sections.is_open(section);
-        let body = is_open.then(|| scope_body(scope, mcp, workspace.clone(), enabled, cx));
+    for group in &snap.library.inventory.groups {
+        let target = group.target.clone();
+        let t = theme::current(cx);
+        let mut rows = div()
+            .id(SharedString::from(target.label()))
+            .flex()
+            .flex_col()
+            .child(
+                div()
+                    .text_size(px(theme::RIGHT_PANEL_LABEL_FONT_SIZE))
+                    .text_color(t.text_muted)
+                    .child(SharedString::from(format!(
+                        "{} · {}",
+                        strings::mcp::scope_display(target.scope),
+                        target.label()
+                    ))),
+            );
+        for server in &group.servers {
+            rows = rows.child(server_row(
+                server,
+                Some(target.clone()),
+                workspace.clone(),
+                t,
+                cx,
+            ));
+        }
+        if group.servers.is_empty() {
+            rows = rows.child(match target.scope {
+                McpScope::User => strings::mcp::empty_user(),
+                McpScope::Project => strings::mcp::empty_project(),
+                McpScope::Local => strings::mcp::empty_local(),
+            });
+        }
+        use crate::workspace::right_dock::section::DockSection;
+        let section = match target.scope {
+            McpScope::User => DockSection::ToolsUser,
+            McpScope::Project => DockSection::ToolsProject,
+            McpScope::Local => DockSection::ToolsLocal,
+        };
+        let open = snap.sections.is_open(section);
         col = col.child(
-            ScopeSection {
-                section,
-                label: label.into(),
-                count: enabled.then(|| mcp.servers(scope).len().to_string().into()),
-                fold: SectionFold::toggleable(is_open),
-                divided: ix > 0,
-            }
-            .render(body, &workspace, cx),
+            div()
+                .id(SharedString::from(format!(
+                    "source-group-{}",
+                    target.label()
+                )))
+                .child(
+                    ScopeSection {
+                        section,
+                        label: strings::mcp::scope_display(target.scope).into(),
+                        count: Some(group.servers.len().to_string().into()),
+                        fold: SectionFold::toggleable(open),
+                        divided: true,
+                    }
+                    .render(
+                        open.then(|| rows.into_any_element()),
+                        &workspace,
+                        cx,
+                    ),
+                ),
         );
     }
     col.into_any_element()
@@ -80,9 +106,12 @@ pub(in crate::workspace) fn render(snap: &RightDockSnapshot, cx: &mut Context<Do
 
 /// Servers configured across every scope.
 pub(in crate::workspace) fn footer(snap: &RightDockSnapshot, cx: &gpui::App) -> AnyElement {
-    let total: usize = [McpScope::Project, McpScope::Local, McpScope::User]
-        .into_iter()
-        .map(|scope| snap.mcp.servers(scope).len())
+    let total: usize = snap
+        .library
+        .inventory
+        .groups
+        .iter()
+        .map(|group| group.servers.len())
         .sum();
     panel_footer(
         crate::ui::icons::SERVER,
@@ -108,50 +137,32 @@ fn new_server_button(workspace: gpui::WeakEntity<Workspace>, cx: &gpui::App) -> 
         })
 }
 
-fn scope_body(
-    scope: McpScope,
-    state: &McpSnapshot,
-    workspace: gpui::WeakEntity<Workspace>,
-    enabled: bool,
-    cx: &gpui::App,
-) -> AnyElement {
-    let t = theme::current(cx);
-    if !enabled {
-        return empty_hint(strings::mcp::no_project_hint(), t);
-    }
-    let servers = state.servers(scope);
-    if servers.is_empty() {
-        let msg = match scope {
-            McpScope::Project => strings::mcp::empty_project(),
-            McpScope::Local => strings::mcp::empty_local(),
-            McpScope::User => strings::mcp::empty_user(),
-        };
-        return empty_hint(msg, t);
-    }
-    servers
-        .iter()
-        .fold(div().flex().flex_col(), |col, s| {
-            col.child(server_row(s, workspace.clone(), t, cx))
-        })
-        .into_any_element()
-}
-
-/// Quiet one-line explanation for a scope with nothing to list.
-fn empty_hint(msg: String, t: &DarudaTheme) -> AnyElement {
-    div()
-        .pb(px(theme::DOCK_SECTION_HEADER_PAD_Y))
-        .text_size(px(theme::RIGHT_PANEL_LABEL_FONT_SIZE))
-        .text_color(t.text_subtle)
-        .child(msg)
-        .into_any_element()
-}
-
 fn server_row(
     s: &McpServer,
+    target: Option<crate::agent::configuration::library::Target>,
     workspace: gpui::WeakEntity<Workspace>,
     t: &DarudaTheme,
     cx: &gpui::App,
 ) -> AnyElement {
+    if let Some(owner) = target.as_ref().and_then(|t| t.owner.as_ref()) {
+        return library_row(
+            crate::ui::icons::SERVER,
+            s.name.clone(),
+            Some(
+                div()
+                    .child(strings::library::read_only(owner))
+                    .into_any_element(),
+            ),
+            cx,
+        )
+        .into_any_element();
+    }
+    let can_toggle = target.as_ref().is_none_or(|target| {
+        target.config.provider == crate::agent::configuration::Provider::Codex
+            || target.config.cwd.is_some()
+    });
+    let toggle_target = target.clone();
+    let expected = crate::agent::mcp::McpServerDraft::from_server(s);
     let scope = s.scope;
     let name = s.name.clone();
     let workspace_toggle = workspace.clone();
@@ -205,12 +216,36 @@ fn server_row(
                 !s.disabled,
                 cx,
             )
-            .tooltip(strings::mcp::toggle_tooltip())
+            .disabled(!can_toggle)
+            .tooltip(if can_toggle {
+                strings::mcp::toggle_tooltip()
+            } else {
+                strings::library::toggle_needs_project()
+            })
             .debug_selector(|| "mcp-toggle".into())
             .on_click(move |_, _window, cx| {
                 if let Some(ws) = workspace_toggle.upgrade() {
                     let n = name_for_toggle.clone();
-                    ws.update(cx, |ws, cx| ws.toggle_mcp_server(scope, &n, cx));
+                    ws.update(cx, |ws, cx| {
+                        if let Some(target) = &toggle_target {
+                            if let Err(error) = target.toggle(&expected) {
+                                ws.report_error(
+                                    daruda_store::observability::error_report::ErrorReport::new(
+                                        strings::error::mcp_toggle_failed(
+                                            strings::mcp::scope_display(scope),
+                                        ),
+                                    )
+                                    .from_error(&error)
+                                    .at(file!(), line!())
+                                    .build(),
+                                    cx,
+                                );
+                            }
+                            ws.refresh_library(cx);
+                        } else {
+                            ws.toggle_mcp_server(scope, &n, cx);
+                        }
+                    });
                 }
             }),
         ),
@@ -223,6 +258,7 @@ fn server_row(
             cx,
         )
         .child(row_actions(
+            target,
             scope,
             name_for_edit,
             name_for_delete,
@@ -235,6 +271,7 @@ fn server_row(
 }
 
 fn row_actions(
+    target: Option<crate::agent::configuration::library::Target>,
     scope: McpScope,
     name_for_edit: String,
     name_for_delete: String,
@@ -242,6 +279,7 @@ fn row_actions(
     workspace_delete: gpui::WeakEntity<Workspace>,
     cx: &gpui::App,
 ) -> impl IntoElement {
+    let edit_target = target.clone();
     div()
         .flex()
         .flex_row()
@@ -254,7 +292,10 @@ fn row_actions(
                 .on_click(move |_, window, cx| {
                     if let Some(ws) = workspace_edit.upgrade() {
                         let n = name_for_edit.clone();
-                        ws.update(cx, |ws, cx| ws.open_edit_mcp_server(scope, n, window, cx));
+                        ws.update(cx, |ws, cx| {
+                            ws.right_views.library.selected_target = edit_target.clone();
+                            ws.open_edit_mcp_server(scope, n, window, cx)
+                        });
                     }
                 }),
         )
@@ -266,6 +307,7 @@ fn row_actions(
                     if let Some(ws) = workspace_delete.upgrade() {
                         let n = name_for_delete.clone();
                         ws.update(cx, |ws, cx| {
+                            ws.right_views.library.selected_target = target.clone();
                             ws.open_delete_mcp_server_confirm(scope, n, window, cx)
                         });
                     }
@@ -295,7 +337,7 @@ mod tests {
             cx,
             &["mcp-edit", "mcp-delete"],
             Some("mcp-toggle"),
-            move |workspace, cx| server_row(&server, workspace, theme::current(cx), cx),
+            move |workspace, cx| server_row(&server, None, workspace, theme::current(cx), cx),
         );
     }
 }

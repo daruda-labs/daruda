@@ -304,37 +304,7 @@ impl Workspace {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        // Collect every skill across the three scopes from the live
-        // `GlobalSkills`. Plugin scope is filtered to Installed
-        // (Available rows show in Settings → Plugin only) so the
-        // palette never prompts the user to invoke something Claude
-        // Code can't actually run.
-        let lane = self.active_lane_root();
-        let snap = cx
-            .global::<crate::agent::skills::global::GlobalSkills>()
-            .snapshot_for(lane.as_deref());
-        let mut skills: Vec<crate::agent::skills::Skill> = snap.project.clone();
-        skills.extend(snap.personal.iter().cloned());
-        skills.extend(
-            snap.plugin
-                .iter()
-                .filter(|s| {
-                    matches!(
-                        s.plugin_availability,
-                        Some(crate::agent::skills::plugins::PluginAvailability::Installed)
-                    )
-                })
-                .cloned(),
-        );
-        if skills.is_empty() {
-            return;
-        }
-        self.open_skill_picker_modal(
-            &skills,
-            crate::surface::strings::skills::invoke_title().into(),
-            window,
-            cx,
-        );
+        self.open_library_skill_palette(window, cx);
     }
 
     // ---- Git ops shims (delegate to `git_ops/` workers) ----

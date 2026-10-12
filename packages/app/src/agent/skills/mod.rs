@@ -2,5 +2,6 @@
 //! `daruda_agent::skills`, and [`global`] makes its state app-wide.
 
 pub mod global;
+pub(crate) mod import;
 
 pub use daruda_agent::skills::*;
