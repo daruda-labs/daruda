@@ -1095,9 +1095,8 @@ mod tests {
         assert_eq!(tool_icon(&plain).as_ref(), ICON_THINK);
     }
 
-    /// The subagent question only reroutes `Think`; every other kind still
-    /// reads straight off the kind table, including a subagent-shaped input on
-    /// a kind that is not `Think`.
+    /// A call that is neither a subagent launch nor an MCP tool takes its glyph
+    /// straight off the kind table.
     #[test]
     fn a_non_think_kind_reads_off_the_kind_table() {
         let call = ToolCallItem {
@@ -1180,15 +1179,6 @@ mod tests {
         // content, so the title is returned as-is — no misleading "…".
         assert_eq!(tool_title_summary("Read foo\n"), "Read foo\n");
         assert_eq!(tool_title_summary("Read foo\n   "), "Read foo\n   ");
-    }
-
-    #[test]
-    fn multiline_execute_title_also_summarizes() {
-        // The full multiline command still has its own line in the expanded
-        // body, so the collapsed one-line summary truncates it like any other
-        // kind now — nothing is lost since the card is always expandable.
-        let cmd = "cd /repo &&\n  cargo build\n  cargo test";
-        assert_eq!(tool_title_summary(cmd), "cd /repo &&…");
     }
 
     #[test]

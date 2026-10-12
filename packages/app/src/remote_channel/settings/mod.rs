@@ -207,7 +207,7 @@ impl ChannelSettings {
     /// reaching daruda, and pairing again needs a fresh code.
     fn request_unpair(&mut self, id: &str, window: &mut Window, cx: &mut Context<Self>) {
         let id = id.to_owned();
-        crate::workspace::dialog_helpers::confirm_destructive(
+        crate::ui::dialog::confirm_destructive(
             cx.weak_entity(),
             s::remote_channel::confirm_unpair_title(),
             s::settings::confirm_unpair_body(),
@@ -228,7 +228,7 @@ impl ChannelSettings {
         cx: &mut Context<Self>,
     ) {
         let id = id.to_owned();
-        crate::workspace::dialog_helpers::confirm_destructive(
+        crate::ui::dialog::confirm_destructive(
             cx.weak_entity(),
             s::remote_channel::confirm_remove_token_title(),
             s::settings::confirm_remove_token_body(),

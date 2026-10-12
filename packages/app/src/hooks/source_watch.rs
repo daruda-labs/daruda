@@ -103,6 +103,22 @@ mod tests {
     use super::*;
 
     #[test]
+    fn dropping_source_subscriptions_disconnects_their_receivers() {
+        let _serial = crate::hooks::tests_common::fsevent_serial();
+        let temp = tempfile::tempdir().unwrap();
+        let SourceWatch { subscriptions } = SourceWatch::new([temp.path().to_path_buf()]);
+        assert_eq!(subscriptions.len(), 2);
+        for (events, handle) in subscriptions {
+            drop(handle);
+            while events.try_recv().is_ok() {}
+            assert!(matches!(
+                events.recv_timeout(std::time::Duration::from_secs(1)),
+                Err(std::sync::mpsc::RecvTimeoutError::Disconnected)
+            ));
+        }
+    }
+
+    #[test]
     fn reading_a_source_does_not_invalidate_it() {
         let path = PathBuf::from("source.json");
         let targets = [WatchTarget::new(&path, None)];

@@ -702,7 +702,7 @@ impl Workspace {
             ),
             FlowSubmitError::UnusableSessionHost { agent, reason } => (
                 s::flow::session_host_unusable(&agent),
-                s::session_host::host_error(reason),
+                daruda_settings::labels::host_error(reason),
             ),
             FlowSubmitError::Read { path, message } => (
                 s::flow::read_failed_title(),

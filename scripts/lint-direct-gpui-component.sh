@@ -18,9 +18,9 @@
 #   - src/windows.rs              — `gpui_component::Root::new(...)`
 #   - src/workspace/render/mod.rs — `Root::render_*_layer` in Workspace
 #
-# Sibling widget packages (`packages/transcript/`, `packages/chat/`) have no
-# app facade to go through, so they reach `daruda_ui` directly — but never
-# `gpui_component`.
+# Sibling widget packages (`packages/transcript/`, `packages/chat/`,
+# `packages/settings/`) have no app facade to go through, so they reach
+# `daruda_ui` directly — but never `gpui_component`.
 #
 # Usage:
 #   scripts/lint-direct-gpui-component.sh
@@ -52,7 +52,7 @@ fi
 
 package_violations=$(
     grep -rnE --include="*.rs" '(^[[:space:]]*use[[:space:]]+gpui_component\b|\bgpui_component::)' \
-        packages/transcript/src packages/chat/src || true
+        packages/transcript/src packages/chat/src packages/settings/src || true
 )
 
 if [ -n "$package_violations" ]; then

@@ -608,6 +608,9 @@ pub const AGENT_CHAT_LIST_GAP: f32 = GAP_LG;
 pub const AGENT_CHAT_TURN_GAP: f32 = PAD_XL;
 pub const AGENT_CHAT_SUMMARY_GAP: f32 = GAP_STANDARD;
 pub const AGENT_CHAT_TRAILING_GAP: f32 = GAP_STANDARD;
+/// How far past the viewport the transcript list renders, so a fast scroll
+/// does not flash blank rows.
+pub const AGENT_CHAT_LIST_OVERDRAW: f32 = 512.0;
 pub const AGENT_CHAT_BOUNDARY_GAP: f32 = GAP_STANDARD;
 pub const AGENT_CHAT_FOLD_STATUS_INSET: f32 = AGENT_CHAT_INPUT_INNER_PAD_X + 1.0;
 pub const AGENT_CHAT_HEADER_ICON_GAP: f32 = GAP_STANDARD;

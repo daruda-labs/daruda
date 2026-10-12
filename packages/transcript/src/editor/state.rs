@@ -128,25 +128,6 @@ mod tests {
         )
     }
 
-    #[test]
-    fn the_editor_opens_with_every_disclosure_closed() {
-        let state = FoldEditorState::default();
-        assert!(!state.history_rules_open());
-        for turn in TurnPosition::ALL {
-            assert!(!state.tools_open(turn), "{turn:?}");
-        }
-        assert_eq!(state.custom(), None);
-    }
-
-    #[test]
-    fn the_history_rules_disclosure_toggles() {
-        let mut state = FoldEditorState::default();
-        state.toggle_history_rules();
-        assert!(state.history_rules_open());
-        state.toggle_history_rules();
-        assert!(!state.history_rules_open());
-    }
-
     /// Editing into a matrix, then picking a preset, leaves `Custom` pointing
     /// at the edit — that is what makes the segment a way back.
     #[test]

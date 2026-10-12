@@ -223,6 +223,35 @@ mod tests {
         assert_ne!(stale, gone);
     }
 
+    /// A phone reply names its pane by workspace uuid because a pane id is only
+    /// unique inside one window: the dispatch reaches the window that uuid
+    /// names, and no other — two windows can hold a pane with the same id.
+    #[gpui::test]
+    async fn dispatch_reaches_only_the_window_its_uuid_names(cx: &mut TestAppContext) {
+        use crate::test_support::workspace_with_agent_chat;
+
+        let target = workspace_with_agent_chat(cx);
+        let other = workspace_with_agent_chat(cx);
+        let target_uuid = target.workspace.read_with(cx, |ws, _| ws.uuid());
+        assert_ne!(
+            target_uuid,
+            other.workspace.read_with(cx, |ws, _| ws.uuid())
+        );
+        let mut async_cx = cx.to_async();
+
+        let mut reached = Vec::new();
+        dispatch_to_workspace(&mut async_cx, target_uuid, |ws, _| reached.push(ws.uuid()));
+        assert_eq!(reached, [target_uuid], "exactly the named window, once");
+
+        reached.clear();
+        let closed = daruda_store::project::WorkspaceUuid::new();
+        dispatch_to_workspace(&mut async_cx, closed, |ws, _| reached.push(ws.uuid()));
+        assert!(
+            reached.is_empty(),
+            "a window that is not open is reached by nothing"
+        );
+    }
+
     /// The restart case the whole fallback exists for: the bridge knows of no
     /// target, and the app's own active lane supplies one. Both cases rejoin
     /// the arms that already had a pane, so `/usage` reaches the agent and

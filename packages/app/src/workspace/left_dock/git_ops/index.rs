@@ -10,8 +10,8 @@ use gpui::{Context, Window};
 use crate::path_ext::PathExt;
 use crate::surface::strings as app_strings;
 use crate::ui::ButtonVariant;
+use crate::ui::dialog::open_confirm_dialog;
 use crate::workspace::Workspace;
-use crate::workspace::dialog_helpers::open_confirm_dialog;
 use crate::workspace::left_dock::git_ops::lock::GitLock;
 
 impl Workspace {

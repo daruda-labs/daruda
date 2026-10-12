@@ -497,7 +497,7 @@ impl Workspace {
         };
         let weak = cx.weak_entity();
         let id = task_id.to_string();
-        crate::workspace::dialog_helpers::open_confirm_dialog(
+        crate::ui::dialog::open_confirm_dialog(
             crate::surface::strings::task::picker_title_delete(),
             body,
             crate::surface::strings::common::btn_delete(),

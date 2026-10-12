@@ -131,7 +131,9 @@ mod tests {
     use std::cell::Cell;
 
     #[gpui::test]
-    async fn modal_safety_delete_enter_retries_and_tab_can_cancel(cx: &mut TestAppContext) {
+    async fn modal_safety_delete_starts_on_cancel_and_explicit_confirmation_retries(
+        cx: &mut TestAppContext,
+    ) {
         let (window, _workspace) = crate::workspace::tests::build_workspace(cx);
         let mut vcx = VisualTestContext::from_window(window.into(), cx);
         let attempts = Rc::new(Cell::new(0));

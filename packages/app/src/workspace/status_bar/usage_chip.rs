@@ -53,11 +53,11 @@ pub(super) fn render(
     // The brand mark is what tells two chips apart once the percentages are
     // all that's left of them at the narrowest density.
     let icon = crate::ui::agent_icon(
-        Some(crate::agent::icons::icon_for_recipe(recipe)),
+        Some(daruda_config::agent::icon::icon_for_recipe(recipe)),
         px(theme::STATUS_BAR_AGENT_ICON_SIZE),
         t.text_muted,
     );
-    let label = crate::surface::strings::settings::account_recipe_label(recipe);
+    let label = daruda_settings::labels::account_recipe_label(recipe);
     Some(
         button_status_pill_bare(SharedString::from(format!("status-usage-{label}")), cx)
             .text_size(px(theme::STATUS_BAR_FONT_SIZE))
@@ -185,9 +185,9 @@ fn build_menu(
 ) -> PopupMenu {
     // Named after the domain, not "PLAN USAGE": with a pill per provider the
     // dropdown has to say whose limits these are.
-    let menu = menu.label(SharedString::from(strings::settings::account_recipe_label(
-        recipe,
-    )));
+    let menu = menu.label(SharedString::from(
+        daruda_settings::labels::account_recipe_label(recipe),
+    ));
     let menu = rows.iter().fold(menu, |menu, row| {
         let row = row.clone();
         menu.item(PopupMenuItem::element(move |_window, cx| {

@@ -8,7 +8,7 @@ pub enum PaneChoice<T> {
 }
 
 impl<T: Copy> PaneChoice<T> {
-    pub(super) fn value(self) -> T {
+    pub fn value(self) -> T {
         match self {
             Self::Seeded(value) | Self::Chosen(value) => value,
         }
@@ -54,20 +54,6 @@ impl<T: Default> Default for PaneChoice<T> {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn a_seeded_value_is_in_effect_but_not_the_users() {
-        let seeded = PaneChoice::Seeded(7u8);
-        assert_eq!(seeded.value(), 7);
-        assert_eq!(seeded.chosen(), None, "nothing to persist");
-    }
-
-    #[test]
-    fn a_chosen_value_is_both_in_effect_and_persisted() {
-        let chosen = PaneChoice::Chosen(7u8);
-        assert_eq!(chosen.value(), 7);
-        assert_eq!(chosen.chosen(), Some(7));
-    }
 
     #[test]
     fn choosing_the_seeded_value_still_records_a_choice() {

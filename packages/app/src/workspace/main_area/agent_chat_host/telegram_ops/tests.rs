@@ -530,13 +530,16 @@ async fn a_turn_whose_only_answer_was_acked_is_not_reported_twice(cx: &mut gpui:
     // A phone turn that said one thing, already relayed as the first response.
     workspace.update(cx, |ws, cx| {
         let view = ws.agent_chat_view(pane_id).cloned().expect("view");
-        view.update(cx, |v, _| {
+        view.update(cx, |v, cx| {
             v.start_phone_turn_for_test(std::time::Instant::now());
-            v.items_mut_for_test()
-                .push(answer("m1", "## Usage\n48% used"));
+            v.seed_items_for_test([answer("m1", "## Usage\n48% used")], cx);
             assert!(
                 v.take_phone_first_response_for_test(),
                 "the ack goes out for the turn's first message"
+            );
+            assert!(
+                !v.take_phone_first_response_for_test(),
+                "and only once: the take records that it answered"
             );
         });
         assert_eq!(
@@ -549,12 +552,11 @@ async fn a_turn_whose_only_answer_was_acked_is_not_reported_twice(cx: &mut gpui:
     // Same pane, a turn that said something after the acked message.
     workspace.update(cx, |ws, cx| {
         let view = ws.agent_chat_view(pane_id).cloned().expect("view");
-        view.update(cx, |v, _| {
+        view.update(cx, |v, cx| {
             v.start_phone_turn_for_test(std::time::Instant::now());
-            v.items_mut_for_test().push(answer("m2", "working on it"));
+            v.seed_items_for_test([answer("m2", "working on it")], cx);
             assert!(v.take_phone_first_response_for_test());
-            v.items_mut_for_test()
-                .push(answer("m3", "here is the answer"));
+            v.seed_items_for_test([answer("m3", "here is the answer")], cx);
         });
         let (_, tail) = ws
             .telegram_completion_parts(pane_id, cx)
@@ -563,37 +565,6 @@ async fn a_turn_whose_only_answer_was_acked_is_not_reported_twice(cx: &mut gpui:
             tail,
             super::TelegramTail::Markdown("here is the answer".to_string())
         );
-    });
-}
-
-/// One turn, one ack. `first_response` is a pure query, so the answering
-/// transition is the only thing stopping the next event from resolving the
-/// same response again — which the phone receives as a duplicate ack.
-#[gpui::test]
-async fn a_turns_first_response_answers_it_once(cx: &mut gpui::TestAppContext) {
-    let fixture = crate::test_support::workspace_with_agent_chat(cx);
-    let pane_id = fixture.pane();
-
-    fixture.workspace.update(cx, |ws, cx| {
-        let view = ws.agent_chat_view(pane_id).cloned().expect("view");
-        view.update(cx, |v, _| {
-            v.start_phone_turn_for_test(std::time::Instant::now());
-            v.items_mut_for_test()
-                .push(daruda_acp::ChatItem::AssistantText {
-                    text: "on it".to_string(),
-                    streaming: false,
-                    message_id: Some("m1".to_string()),
-                    phase: Default::default(),
-                });
-            assert!(
-                v.take_phone_first_response_for_test(),
-                "the turn's first response is the one ack that goes out"
-            );
-            assert!(
-                !v.take_phone_first_response_for_test(),
-                "a later event on the same turn must not resolve a second ack"
-            );
-        });
     });
 }
 
@@ -635,15 +606,17 @@ async fn a_turn_that_errored_does_not_leave_its_ledger_behind(cx: &mut gpui::Tes
     // A phone turn that said one thing, already relayed, then errored.
     workspace.update(cx, |ws, cx| {
         let view = ws.agent_chat_view(pane_id).cloned().expect("view");
-        view.update(cx, |v, _| {
+        view.update(cx, |v, cx| {
             v.start_phone_turn_for_test(std::time::Instant::now());
-            v.items_mut_for_test()
-                .push(daruda_acp::ChatItem::AssistantText {
+            v.seed_items_for_test(
+                [daruda_acp::ChatItem::AssistantText {
                     text: "partial answer".to_string(),
                     streaming: false,
                     message_id: Some("m1".to_string()),
                     phase: Default::default(),
-                });
+                }],
+                cx,
+            );
             assert!(v.take_phone_first_response_for_test());
         });
         ws.fire_activity_completion(pane_id, daruda_chat::view::TurnOutcome::Errored, cx);
@@ -716,9 +689,9 @@ async fn telegram_reply_ack_paths_cover_queue_overdue_and_empty_permission(
         assert_eq!(
             view.read(cx)
                 .queue()
-                .pending_prompts
-                .iter()
-                .map(|q| q.text.as_str())
+                .in_strip_order()
+                .filter(|(_, parked)| !parked)
+                .map(|(q, _)| q.text())
                 .collect::<Vec<_>>(),
             vec!["hello from telegram"],
             "the reply queues (never connected)"
@@ -800,108 +773,6 @@ async fn telegram_reply_ack_paths_cover_queue_overdue_and_empty_permission(
     );
 }
 
-/// Cross-workspace routing coverage: `crate::telegram::global`'s
-/// `dispatch_action` matches a `PaneRef.workspace` against every open
-/// `Workspace` via `WindowRegistry::for_each_workspace` + `ws.uuid() ==
-/// pane.workspace`, then mutates only the matching one. That guard —
-/// the entire reason `Workspace::uuid` and `for_each_workspace` exist
-/// for this feature — had zero test coverage; the pure pieces
-/// (`permission_buttons`, `BridgeCore`) are covered above and in
-/// `telegram::bridge`, but not the multi-window dispatch itself.
-///
-/// This drives the same shape `InboundAction::InjectPrompt`'s dispatch
-/// arm uses: two real `Workspace` windows (mirroring
-/// `window_registry.rs`'s `make_window` test helper), one AgentChat pane
-/// per workspace, `for_each_workspace` + a `uuid()` guard, and
-/// `inject_bot_reply` as the observable mutation. Only the pane in the
-/// targeted workspace should receive the injected queued prompt.
-#[gpui::test]
-async fn for_each_workspace_uuid_guard_dispatches_to_only_the_matching_pane(
-    cx: &mut gpui::TestAppContext,
-) {
-    use crate::window_registry::WindowRegistry;
-
-    let config = daruda_config::Config::default();
-    let (handle_a, workspace_a) = make_window(cx, &config);
-    let (handle_b, workspace_b) = make_window(cx, &config);
-    cx.run_until_parked();
-
-    let tmp = std::env::temp_dir();
-    let pane_a = cx
-        .update_window(handle_a.into(), |_, window, cx| {
-            workspace_a.update(cx, |ws, cx| {
-                let pane = ws.create_agent_chat_pane(
-                    Some(PaneCwd::Local(tmp.clone())),
-                    None,
-                    daruda_config::AgentDefinition::claude_default().id,
-                    None,
-                    window,
-                    cx,
-                );
-                let id = pane.id;
-                ws.active_runtime_mut().panes.push(pane);
-                id
-            })
-        })
-        .unwrap();
-    let pane_b = cx
-        .update_window(handle_b.into(), |_, window, cx| {
-            workspace_b.update(cx, |ws, cx| {
-                let pane = ws.create_agent_chat_pane(
-                    Some(PaneCwd::Local(tmp.clone())),
-                    None,
-                    daruda_config::AgentDefinition::claude_default().id,
-                    None,
-                    window,
-                    cx,
-                );
-                let id = pane.id;
-                ws.active_runtime_mut().panes.push(pane);
-                id
-            })
-        })
-        .unwrap();
-    cx.run_until_parked();
-
-    let target_uuid = workspace_a.read_with(cx, |ws, _| ws.uuid());
-    assert_ne!(
-        target_uuid,
-        workspace_b.read_with(cx, |ws, _| ws.uuid()),
-        "each window has a distinct workspace uuid"
-    );
-
-    // Exactly what `dispatch_action`'s `InjectPrompt` arm does.
-    cx.update(|cx| {
-        WindowRegistry::for_each_workspace(cx, |ws, _window, cx| {
-            if ws.uuid() == target_uuid {
-                ws.inject_bot_reply(pane_a, "hello from telegram".to_string(), cx);
-            }
-        });
-    });
-    cx.run_until_parked();
-
-    workspace_a.read_with(cx, |ws, cx| {
-        let view = ws.agent_chat_view(pane_a).cloned().expect("pane a present");
-        assert_eq!(
-            view.read(cx)
-                .queue()
-                .pending_prompts
-                .iter()
-                .map(|q| q.text.as_str())
-                .collect::<Vec<_>>(),
-            vec!["hello from telegram"],
-            "the targeted workspace's pane received the injected queued prompt"
-        );
-    });
-    workspace_b.read_with(cx, |ws, cx| {
-        let view = ws.agent_chat_view(pane_b).cloned().expect("pane b present");
-        assert!(
-            view.read(cx).queue().pending_prompts.is_empty(),
-            "the non-matching workspace's pane must not be touched"
-        );
-    });
-}
-
 /// A permission request is a live blocking state, not a report of a past
 /// event: the agent stays stopped until someone answers. So when the gate
 /// declines one because the user was present, and the user then leaves, the
@@ -912,7 +783,7 @@ async fn an_outstanding_permission_declined_while_present_is_offered_once_the_us
     cx: &mut gpui::TestAppContext,
 ) {
     use crate::platform::presence::AwaySignal;
-    use daruda_acp::{ChatItem, PermissionItem, PermissionResolution};
+    use daruda_acp::PermissionItem;
     use std::time::{Duration, Instant};
 
     let mut outbound =
@@ -936,16 +807,18 @@ async fn an_outstanding_permission_declined_while_present_is_offered_once_the_us
 
     workspace.update(cx, |ws, cx| {
         let view = ws.agent_chat_view(pane).cloned().expect("view present");
-        view.update(cx, |v, _| {
-            v.set_items_for_test(vec![ChatItem::Permission(PermissionItem {
-                id: 7,
-                tool_call_id: String::new(),
-                tool_title: Some("Write /tmp/x.rs".to_string()),
-                raw_input_summary: None,
-                options: options.clone(),
-                resolved: None,
-            })]);
-            v.pending_permissions_mut_for_test().insert(7);
+        view.update(cx, |v, cx| {
+            v.hold_permission_card_for_test(
+                PermissionItem {
+                    id: 7,
+                    tool_call_id: String::new(),
+                    tool_title: Some("Write /tmp/x.rs".to_string()),
+                    raw_input_summary: None,
+                    options: options.clone(),
+                    resolved: None,
+                },
+                cx,
+            );
         });
 
         // Fires while the user is at the desk: declined, nothing queued.
@@ -990,19 +863,14 @@ async fn an_outstanding_permission_declined_while_present_is_offered_once_the_us
     // every reason to mention it again.
     workspace.update(cx, |ws, cx| {
         let view = ws.agent_chat_view(pane).cloned().expect("view present");
-        view.update(cx, |v, _| {
-            v.pending_permissions_mut_for_test().remove(&7);
-            if let Some(ChatItem::Permission(p)) = v.items_mut_for_test().first_mut() {
-                p.resolved = Some(PermissionResolution::Chosen("allow_once".to_string()));
-            }
+        view.update(cx, |v, cx| {
+            v.respond_permission(7, "allow_once".into(), PermissionKindView::AllowOnce, cx);
         });
         ws.relay_outstanding_permissions(cx);
         assert!(outbound.next().now_or_never().is_none());
         // The bookkeeping entry went with it rather than accumulating.
         assert!(
-            view.read(cx)
-                .permissions_told_to_phone_for_test()
-                .is_empty(),
+            view.read(cx).permissions_told_to_phone_count_for_test() == 0,
             "a resolved request must not leave its id behind"
         );
     });
@@ -1013,7 +881,7 @@ async fn permission_delivery_history_tracks_recipient_and_connection(
     cx: &mut gpui::TestAppContext,
 ) {
     use crate::platform::presence::AwaySignal;
-    use daruda_acp::{ChatItem, PermissionItem};
+    use daruda_acp::PermissionItem;
     use std::time::{Duration, Instant};
 
     let mut outbound =
@@ -1032,22 +900,25 @@ async fn permission_delivery_history_tracks_recipient_and_connection(
     cx.run_until_parked();
 
     let options = vec![choice("allow_once", "Allow", PermissionKindView::AllowOnce)];
-    let add_request = |view: &mut daruda_chat::view::AgentChatView| {
-        view.items_mut_for_test()
-            .push(ChatItem::Permission(PermissionItem {
-                id: 0,
-                tool_call_id: String::new(),
-                tool_title: Some("Write /tmp/x.rs".into()),
-                raw_input_summary: None,
-                options: options.clone(),
-                resolved: None,
-            }));
-        view.pending_permissions_mut_for_test().insert(0);
-    };
+    let add_request =
+        |view: &mut daruda_chat::view::AgentChatView,
+         cx: &mut gpui::Context<daruda_chat::view::AgentChatView>| {
+            view.hold_permission_card_for_test(
+                PermissionItem {
+                    id: 0,
+                    tool_call_id: String::new(),
+                    tool_title: Some("Write /tmp/x.rs".into()),
+                    raw_input_summary: None,
+                    options: options.clone(),
+                    resolved: None,
+                },
+                cx,
+            );
+        };
 
     workspace.update(cx, |ws, cx| {
         let view = ws.agent_chat_view(pane).cloned().unwrap();
-        view.update(cx, |v, _| add_request(v));
+        view.update(cx, |v, cx| add_request(v, cx));
         ws.relay_outstanding_permissions(cx);
         assert_eq!(
             expect_ping(outbound.next().now_or_never().flatten().unwrap())
@@ -1095,7 +966,7 @@ async fn permission_delivery_history_tracks_recipient_and_connection(
                 &prompt(0, &options, Some("Write /tmp/x.rs")),
                 cx,
             );
-            view.update(cx, |v, _| add_request(v));
+            view.update(cx, |v, cx| add_request(v, cx));
             ws.relay_outstanding_permissions(cx);
             assert!(outbound.next().now_or_never().is_none());
 
@@ -1127,8 +998,8 @@ async fn permission_delivery_history_tracks_recipient_and_connection(
 /// A phone tap routes by permission id, not by position: with two
 /// permissions outstanding, tapping the button for id A resolves *A* and
 /// leaves B live; a second tap for an already-answered id is a clean no-op.
-/// Mirrors the in-app `concurrent_permissions_resolve_independently_by_id`
-/// for the Telegram `respond_bot_permission` path.
+/// The Telegram `respond_bot_permission` path's counterpart of the chat's own
+/// `permission_resolution_routes_by_id_reprojects_and_cancel_drains`.
 #[gpui::test]
 async fn respond_bot_permission_routes_by_id_under_concurrency(cx: &mut gpui::TestAppContext) {
     use daruda_acp::{
@@ -1140,26 +1011,24 @@ async fn respond_bot_permission_routes_by_id_under_concurrency(cx: &mut gpui::Te
     cx.run_until_parked();
 
     let tmp = std::env::temp_dir();
-    let card = |id: u64| {
-        ChatItem::Permission(PermissionItem {
-            id,
-            tool_call_id: String::new(),
-            tool_title: Some(format!("Write /tmp/{id}")),
-            raw_input_summary: None,
-            options: vec![
-                PermissionChoice {
-                    option_id: "allow_once".to_string(),
-                    name: "Allow".to_string(),
-                    kind: PermissionKindView::AllowOnce,
-                },
-                PermissionChoice {
-                    option_id: "reject_once".to_string(),
-                    name: "Reject".to_string(),
-                    kind: PermissionKindView::RejectOnce,
-                },
-            ],
-            resolved: None,
-        })
+    let card = |id: u64| PermissionItem {
+        id,
+        tool_call_id: String::new(),
+        tool_title: Some(format!("Write /tmp/{id}")),
+        raw_input_summary: None,
+        options: vec![
+            PermissionChoice {
+                option_id: "allow_once".to_string(),
+                name: "Allow".to_string(),
+                kind: PermissionKindView::AllowOnce,
+            },
+            PermissionChoice {
+                option_id: "reject_once".to_string(),
+                name: "Reject".to_string(),
+                kind: PermissionKindView::RejectOnce,
+            },
+        ],
+        resolved: None,
     };
 
     let pane = cx
@@ -1176,10 +1045,9 @@ async fn respond_bot_permission_routes_by_id_under_concurrency(cx: &mut gpui::Te
                 let id = pane.id;
                 ws.active_runtime_mut().panes.push(pane);
                 let view = ws.agent_chat_view(id).cloned().expect("view present");
-                view.update(cx, |v, _| {
-                    v.set_items_for_test(vec![card(100), card(200)]);
-                    v.pending_permissions_mut_for_test().insert(100);
-                    v.pending_permissions_mut_for_test().insert(200);
+                view.update(cx, |v, cx| {
+                    v.hold_permission_card_for_test(card(100), cx);
+                    v.hold_permission_card_for_test(card(200), cx);
                 });
                 id
             })

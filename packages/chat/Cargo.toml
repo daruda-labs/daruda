@@ -24,7 +24,6 @@ anyhow = "1"
 base64 = "0.22"
 chrono = "0.4"
 daruda_acp = { workspace = true }
-daruda_agent = { workspace = true }
 daruda_config = { workspace = true }
 daruda_content = { workspace = true }
 daruda_core = { workspace = true }

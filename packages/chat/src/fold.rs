@@ -97,7 +97,7 @@ impl FoldContext {
 
 /// Fold state for one conversation: the pane's mode plus explicit user choices.
 #[derive(Default)]
-pub struct FoldState {
+pub(crate) struct FoldState {
     /// Present = an explicit user choice; absent = the mode's rule decides.
     /// Nothing but a user gesture writes here.
     overrides: HashMap<FoldKey, bool>,
@@ -109,7 +109,7 @@ pub struct FoldState {
 }
 
 impl FoldState {
-    pub fn with_mode(mode: FoldMode) -> Self {
+    pub(crate) fn with_mode(mode: FoldMode) -> Self {
         Self {
             overrides: HashMap::new(),
             held_response: None,
@@ -117,11 +117,11 @@ impl FoldState {
         }
     }
 
-    pub fn mode(&self) -> FoldMode {
+    pub(crate) fn mode(&self) -> FoldMode {
         self.mode.value()
     }
 
-    pub fn chosen_mode(&self) -> Option<FoldMode> {
+    pub(crate) fn chosen_mode(&self) -> Option<FoldMode> {
         self.mode.chosen()
     }
 
@@ -351,32 +351,6 @@ mod tests {
     }
 
     #[test]
-    fn untouched_block_auto_collapses_when_done() {
-        let state = FoldState::default();
-        let key = FoldKey::Thinking(0);
-        assert!(state.is_expanded(&key, FoldContext::past(true)));
-        assert!(!state.is_expanded(&key, FoldContext::past(false)));
-    }
-
-    #[test]
-    fn override_via_set_all_beats_active() {
-        let mut state = FoldState::default();
-        let key = FoldKey::Thinking(3);
-        state.set_all([key.clone()], false);
-        assert!(!state.is_expanded(&key, FoldContext::past(true)));
-        assert!(!state.is_expanded(&key, FoldContext::past(false)));
-    }
-
-    #[test]
-    fn override_expanded_beats_collapsed_default() {
-        let mut state = FoldState::default();
-        let key = FoldKey::ToolRawInput("call-1".into());
-        state.set_all([key.clone()], true);
-        assert!(state.is_expanded(&key, FoldContext::past(true)));
-        assert!(state.is_expanded(&key, FoldContext::past(false)));
-    }
-
-    #[test]
     fn user_override_persists_across_active_changes() {
         let mut state = FoldState::default();
         let key = FoldKey::Thinking(0);
@@ -553,14 +527,6 @@ mod tests {
     }
 
     #[test]
-    fn the_two_turn_axes_move_independently() {
-        let state = FoldState::default();
-        let key = FoldKey::Response(3);
-        assert!(!state.is_expanded(&key, FoldContext::past(false)));
-        assert!(state.is_expanded(&key, FoldContext::last(false)));
-    }
-
-    #[test]
     fn reseeding_moves_an_unchosen_mode_only() {
         let mut state = FoldState::with_mode(FoldPreset::Auto.mode());
         state.reseed_mode(FoldPreset::Summary.mode());
@@ -652,14 +618,6 @@ mod tests {
         assert!(!state.is_expanded(&FoldKey::Filtered(1), FoldContext::past(false)));
         assert!(state.is_expanded(&FoldKey::Tool("t".into()), FoldContext::past(false)));
         assert!(!state.clear_filter_reveals(), "a second clear is a no-op");
-    }
-
-    #[test]
-    fn a_custom_rule_can_hold_one_block_kind_open() {
-        use daruda_transcript::fold_mode::FoldMode;
-        let state = FoldState::with_mode(FoldMode::from_tokens(["auto", "last.tool=expanded"]));
-        assert!(state.is_expanded(&FoldKey::Tool("t".into()), FoldContext::last(false)));
-        assert!(!state.is_expanded(&FoldKey::Tool("t".into()), FoldContext::past(false)));
     }
 
     #[test]

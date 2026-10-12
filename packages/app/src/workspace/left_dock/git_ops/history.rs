@@ -7,7 +7,7 @@ use gpui::{AppContext as _, Context, Window};
 use crate::path_ext::PathExt as _;
 use crate::surface::strings as app_strings;
 use crate::ui::ButtonVariant;
-use crate::workspace::dialog_helpers::open_confirm_dialog;
+use crate::ui::dialog::open_confirm_dialog;
 use crate::workspace::left_dock::git_ops::lock::GitLock;
 use crate::workspace::{CommitChanges, PushChanges, Workspace};
 

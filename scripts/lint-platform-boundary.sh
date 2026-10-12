@@ -106,6 +106,7 @@ SCAN_DIRS=(
     "packages/flow-edit/src"
     "packages/transcript/src"
     "packages/chat/src"
+    "packages/settings/src"
     "packages/flow/src"
     "packages/store/src"
     "packages/terminal/src"

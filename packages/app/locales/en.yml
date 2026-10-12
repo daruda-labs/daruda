@@ -512,7 +512,6 @@ agent_chat:
   # Disabled state of a boolean session config option — see
   # [`agent_chat_config_boolean_on`].
   config_boolean_off: "Off"
-  config_default_model: "Default (%{model})"
   session_mode_chip: "Session: %{value}"
   config_chip: "%{name}: %{value}"
   # Tab / pane-header title for an Agent chat pane.
@@ -564,9 +563,6 @@ agent_chat:
   # remote filesystem, not this machine's, so opening it locally would either
   # fail or (worse) show an unrelated local file at the same path.
   diff_remote_path_unsupported: "Can't open a remote session's file locally."
-  use_built_in: "Use built-in defaults"
-  source_built_in: "Built-in default"
-  source_agent_set: "Set for this agent"
   # Toast title when a pane link resolves to a path that no longer exists.
   link_file_missing: "The linked file no longer exists"
   # Description for the daruda-injected `/clear` slash command, shown in the
@@ -955,511 +951,11 @@ git:
 
 # Settings panel
 settings:
-  toggle_on: "On"
-  toggle_off: "Off"
-  group_application: "Application"
-  group_themes: "Themes"
-  group_window: "Window"
-  group_language: "Language"
-  group_rendering: "Output and rendering"
-  group_insets: "Inner padding"
-  group_chat: "Chat display and input"
-  desc_appearance: "Choose app and terminal themes, and adjust how the window appears."
-  desc_workspace: "Sidebar, files, macro panel and the external editor."
-  desc_orchestrator: "The resident agent /daruda talks to. It starts on the first request, not at launch."
-  desc_remote_control: "Reach your agents from Telegram, Slack or Discord."
-  card_terminal_programs: "Terminal programs"
-  card_claude_code_terminals: "Claude Code in terminals"
-  card_agent_chat_notifications: "Agent chat"
-  card_notify_behavior: "Behavior"
-  label_notify_osc9: "Simple notifications from programs"
-  hint_notify_osc9: "A one-line message a program sends. OSC 9."
-  label_notify_osc777: "Titled notifications from programs"
-  hint_notify_osc777: "A title and a body. OSC 777."
-  label_notify_attention: "Let programs ask for attention"
-  hint_notify_attention: "The app icon bounces or flashes. OSC 1337."
-  label_notify_long_running: "Notify when a command runs long"
-  hint_notify_long_running: "Works in shells with shell integration."
-  label_notify_long_running_threshold: "After (seconds)"
-  label_notify_hook: "Permission and input requests"
-  hint_notify_hook: "When Claude Code in a terminal pane stops to ask you."
-  label_notify_agent_completion: "Reply finished"
-  label_notify_agent_waiting: "Waiting for your input"
-  label_notify_skip_focused: "Skip the pane you are looking at"
-  hint_notify_skip_focused: "Only while daruda is the active app."
-  err_long_running_threshold: "Enter whole seconds from 1 to 86400."
-  hint_only_when_away: "Forward only when you are away from daruda. Advanced sets what counts as away."
-  dependent_off: "%{parent} is off."
-  daruda_link_label: "/daruda → Orchestrator: %{state}"
-  daruda_link_hint: "Messages sent with /daruda are answered by the orchestrator."
-  daruda_link_button: "Open Orchestrator"
-  card_used_by: "Used by"
-  used_by_remote_hint: "/daruda from Telegram, Slack or Discord is answered here."
-  used_by_remote_button: "Open Remote Control"
-  card_daruda: "/daruda"
-  placeholder_shell_program: "Your login shell"
-  label_shell_program: "Shell program"
-  hint_shell_program: "Leave empty to use your login shell. Applies to terminals opened after the change."
-  label_natural_text_editing: "Natural text editing"
-  hint_natural_text_editing: "Word and line jumps with the usual modifier and arrow keys, as in other terminals."
-  label_project_shell: "Project overrides"
-  hint_project_shell: "A project can use its own shell. It is set in that project's config file."
-  button_open_project_config: "Open project config"
-  card_advanced: "Advanced"
-  advanced_count_one: "1 setting"
-  advanced_count: "%{count} settings"
-  err_left_default_width: "Enter a width from 150 to 400."
-  icon_color_color: "Color"
-  icon_color_monochrome: "Monochrome"
-  label_left_default_width: "Default width (px)"
-  hint_new_windows_width: "Used for new windows. Existing windows keep their own width."
-  label_left_collapsed: "Start collapsed"
-  hint_new_windows_state: "Used for new windows. Existing windows keep their own state."
-  label_file_icon_colors: "File icon colors"
-  label_preview_tab: "Preview tab"
-  hint_preview_tab: "Browsing reuses one tab until you edit or pin the file."
-  card_files: "Files"
-  card_git: "Git"
-  label_copy_on_select: "Copy on select"
-  hint_copy_on_select: "A finished terminal selection goes to the clipboard on its own."
-  label_git_confirm_commit: "Confirm before committing"
-  hint_git_confirm_commit: "Amending always asks — it rewrites history."
-  label_git_confirm_push: "Confirm before pushing"
-  label_git_default_commit_message: "Commit an empty message as \"Update <file>\""
-  hint_git_default_commit_message: "Off: an empty message is refused."
-  card_status_bar: "Status bar"
-  search_heading: "Results for “%{query}”"
-  search_none: "No settings match “%{query}”."
-  search_group: "%{section} › %{card}"
-  search_open: "Open"
-  search_count_one: "1 setting"
-  search_count: "%{count} settings"
-  reset_to_default: "Reset to default"
-  err_input_max_rows: "Enter a whole number of rows from 2 to 20."
-  err_reading_width: "Enter a width from 360 to 2400."
-  err_whole_number: "Enter a whole number, 0 or more."
-  err_non_negative: "Enter a number, 0 or more."
-  err_currency: "Enter the currency your agent reports, such as USD."
-  label_input_max_rows: "Composer height (rows)"
-  hint_input_max_rows: "Rows the message box grows to before it scrolls."
-  label_reading_width: "Column width (px)"
-  card_flows: "Flows"
-  label_flow_timeout: "Timeout (minutes)"
-  label_flow_max_node_runs: "Max node runs"
-  label_flow_max_cost: "Max cost"
-  hint_zero_no_limit: "0 = no limit."
-  label_flow_currency: "Cost currency"
-  hint_flow_currency: "Only used when Max cost is above 0. Use the currency your agent reports its cost in."
-  label_custom_colors: "Custom terminal colors"
-  hint_custom_colors: "Set terminal_preset = \"custom\" under [theme], then the colors under [colors], in config.toml."
-  err_stale_threshold: "Enter seconds from 30 to 86400."
-  err_file_ttl: "Enter days from 1 to 365."
-  err_ports_poll: "Enter whole seconds, 2 or more."
-  label_stale_threshold: "Treat a Claude status as stale after (seconds)"
-  hint_stale_threshold: "When a window opens, a Claude status older than this counts as reconnecting, and hook alerts older than this are dropped."
-  label_file_ttl: "Keep Claude status files for (days)"
-  hint_file_ttl: "Applies to windows opened after the change."
-  label_usage_limits_poll: "Usage limits refresh (seconds)"
-  label_usage_status_poll: "Service status refresh (seconds)"
-  hint_usage_poll: "0 turns polling off. Values under 60 count as 60."
-  label_ports_poll: "Listening ports scan (seconds)"
-  label_logs_retention: "Keep logs for (days)"
-  hint_logs_retention: "0 keeps them. Applies at the next launch."
-  label_logs_max_size: "Largest log file (MB)"
-  hint_logs_max_size: "0 means no cap. Applies at the next launch."
-  label_presence_grace: "Grace after daruda leaves the front (seconds)"
-  hint_presence_grace: "How long daruda must stay in the background before you can count as away."
-  label_presence_idle: "Idle time while daruda is in the background (seconds)"
-  hint_presence_idle: "No keyboard or mouse input for this long means you are away."
-  label_presence_idle_foreground: "Idle time while daruda is in front (seconds)"
-  hint_presence_idle_foreground: "A longer bar, so reading a long reply does not count as away."
-  card_updates: "Updates"
-  label_update_auto_check: "Check for updates automatically"
-  hint_update_auto_check: "Checks once at launch."
-  desc_general: "Choose the display language for the current profile."
-  desc_font: "Adjust typography independently for terminals, editors, and agent chat."
-  desc_terminal: "Shell, output, padding, cursor and clipboard for terminal panes."
-  desc_agent: "Manage agents and adjust how you read and send messages."
-  desc_session_hosts: "Manage the hosts that run your agent sessions."
-  desc_accounts: "Manage the accounts available to your agents."
-  desc_notifications: "Desktop notifications from terminal programs and agents."
-  desc_keymap: "Edit keyboard shortcuts in the configuration file."
-  desc_plugin: "Browse installed plugins and their configuration."
-  desc_about: "View version information, updates, and licenses."
-  hint_ui_theme: "Colors for the sidebar, menus, and settings."
-  hint_terminal_theme: "The color palette for terminals and agent chat."
-  hint_syntax_theme: "Syntax colors for file previews and code blocks."
-  hint_opacity: "A value from 0.1 (translucent) to 1.0 (opaque)."
-  hint_blur: "Blur the background behind a translucent window."
-  hint_reading_width: "Keep long conversations within a comfortable reading column."
-  hint_cursor_style: "Used until the program in the pane sets its own shape."
-  hint_line_height: "Line height relative to the font size."
-  hint_cell_width: "Width of each terminal cell relative to its default."
-  hint_scrollback: "Maximum number of output lines kept in memory."
-  hint_user_scope: "User settings for the current profile."
   title: "Settings"
-  back: "Back to workspace"
-  external_change: "%{path} changed outside this window. Choose which value to keep."
-  use_external_value: "Use External Value"
-  overwrite_external_value: "Overwrite"
-  search_placeholder: "Search settings"
-  # Placeholder for a numeric setting shown as one sample value. The number is
-  # data, so only the "e.g." carrier is translated.
-  placeholder_example: "e.g. %{value}"
-  # Placeholder for a numeric setting whose whole accepted range fits the field.
-  placeholder_range: "%{min} – %{max}"
-  group_terminal: "Terminal"
-  group_workspace: "Workspace"
-  group_agents: "Agents"
-  group_integrations: "Integrations"
-  group_system: "System"
-  # Subsection header inside the Dock page's left-dock (files) block.
-  section_sidebar: "SIDEBAR"
-  # Subsection header inside the Dock page's bottom-dock (macro grid) block.
-  section_panels: "PANELS"
-  # Subsection header inside the Agent page's session-status block.
-  section_claude_status: "CLAUDE STATUS"
-  section_keymap: "KEYMAP"
-  font_domain_terminal: "Terminal"
-  font_domain_editor: "Editor & Markdown"
-  font_domain_agent_chat: "Agent Chat"
-  font_system_ui: "System UI"
-  label_font_family: "Family"
-  label_font_size: "Size"
-  label_line_height: "Line Height"
-  label_cell_width: "Cell Width"
-  label_cursor_style: "Style"
-  label_close_on_exit: "Close pane on exit"
-  label_window_opacity: "Opacity"
-  label_window_blur: "Background Blur"
-  err_font_size: "Font size must be a number between 6 and 72."
-  err_editor_font_size: "Editor size must be a number between 6 and 72."
-  err_agent_chat_font_size: "Agent chat size must be a number between 6 and 72."
-  err_spacing: "Spacing must be a number between 0.5 and 2.0."
-  err_opacity: "Opacity must be a number between 0.1 and 1.0."
-  cursor_block: "Block"
-  cursor_underline: "Underline"
-  cursor_bar: "Bar"
-  label_language: "Language"
-  language_auto: "Auto (system)"
-  language_en: "English"
-  language_ko: "Korean (한국어)"
-  label_terminal_theme: "Terminal Preset"
-  label_ui_theme: "UI Theme"
-  ui_preset_system: "Match System"
-  label_scrollback: "Scrollback Lines"
-  err_scrollback: "Scrollback must be a number between 1 000 and 500 000."
-  label_max_fps: "Refresh Rate"
-  max_fps_option: "%{fps} fps"
-  label_inset_x: "Padding X"
-  label_inset_y: "Padding Y"
-  err_inset: "Padding must be a number between 0 and 32."
-  label_show_hidden: "Show Hidden Files"
-  label_use_gitignore: "Respect .gitignore"
-  label_syntax_theme: "Syntax Theme"
-  # General-page checkbox: whether a fresh agent-chat pane starts held to the
-  # `agent.reading_width` column.
-  label_agent_use_reading_width: "Hold agent chat to the reading column"
-  label_agent_tool_summary_labels: "Name tool kinds in summaries"
-  hint_agent_tool_summary_labels: "Show \"3 commands\" instead of the icon and count alone."
-  syntax_theme_daruda: "Daruda (Recommended)"
-  syntax_theme_one_dark: "One"
-  syntax_theme_tokyo_night: "Tokyo Night"
-  syntax_theme_catppuccin_mocha: "Catppuccin"
-  syntax_theme_dracula: "Dracula"
-  syntax_theme_github_dark: "GitHub"
-  syntax_theme_material_palenight: "Material"
-  syntax_theme_monokai: "Monokai"
-  syntax_theme_nord: "Nord"
-  syntax_theme_gruvbox_dark: "Gruvbox"
-  syntax_theme_solarized_dark: "Solarized"
-  syntax_theme_ayu_mirage: "Ayu"
-  syntax_theme_night_owl: "Night Owl"
-  syntax_theme_darcula: "Darcula (IntelliJ)"
-  nav_appearance: "Appearance"
-  nav_workspace: "Workspace"
-  nav_orchestrator: "Orchestrator"
-  nav_remote_control: "Remote Control"
-  nav_general: "General"
-  nav_font: "Font"
-  card_cursor: "Cursor"
-  card_shell: "Shell"
-  nav_terminal: "Terminal"
-  card_clipboard: "Clipboard"
-  nav_notifications: "Notifications"
-  nav_keymap: "Keyboard Shortcuts"
-  nav_plugin: "Plugin"
-  nav_agent: "Agents & Chat"
-  card_external_editor: "External Editor"
-  nav_session_hosts: "Session Hosts"
-  nav_about: "About"
-  label_clipboard_streaming: "Clipboard copy limit for programs (bytes)"
-  hint_clipboard_streaming: "How much a terminal program can copy to the clipboard at once. OSC 52 and OSC 1337."
-  # Field label for the preferred-external-editor dropdown.
-  label_preferred_editor: "Preferred Editor"
-  # Dropdown option meaning "no preference — use the OS default handler".
-  editor_system_default: "System default"
-  label_grid_columns: "Macro Grid Columns"
-  label_claude_status_enable: "Enable Claude Code integration"
-  err_clipboard: "Streaming cap must be a number between 4 096 and 67 108 864 (4 KiB – 64 MiB)."
-  err_grid_columns: "Macro grid columns must be a whole number between 1 and 16."
-  # Settings-window banner for an action that could not be carried out. Each
-  # wraps the raw diagnostic (a `daruda_config` persistence message, an OS
-  # credential-store stderr line, an `io::Error`) in a sentence aimed at the
-  # user, since those diagnostics are English-only developer text.
-  err_save_settings: "Could not save your settings: %{error}"
-  err_telegram_unpair: "Could not clear the Telegram pairing: %{error}"
-  err_open_config: "Could not reach the config file: %{error}"
-  err_telegram_token_save: "Could not save the bot token to the system credential store: %{error}"
-  err_telegram_token_clear: "Could not remove the bot token from the system credential store: %{error}"
-  err_accounts_save_default: "Could not save the default account: %{error}"
-  err_accounts_remove: "Could not remove the account: %{error}"
-  open_config_file: "Open Config File"
-  placeholder_keymap: "Keymap GUI editor coming soon. For now, edit the [keybindings] section of your config file directly."
-  telegram_heading: "Telegram"
-  telegram_enabled_label: "Enable Telegram bridge"
-  telegram_token_label: "Bot Token"
-  telegram_token_placeholder: "Paste token from @BotFather"
-  telegram_save_token: "Save Token"
-  telegram_token_configured: "● Token configured"
-  # Status shown when another running daruda holds this bot's claim, so this
-  # one neither polls it nor sends through it.
-  # Shown under the Telegram heading in Settings when another running daruda
-  # holds the bot, so an otherwise "enabled and paired" relay that sends
-  # nothing has a reason on screen.
-  telegram_held_elsewhere: "Another daruda is using this bot — this window sends and receives nothing until it quits"
-  confirm_remove_telegram_token_title: "Remove the Telegram bot token?"
   confirm_remove_token_body: "The token is deleted from the system credential store. The bot stops until you add a token again."
   confirm_ok_remove_token: "Remove token"
-  confirm_unpair_telegram_title: "Unpair Telegram?"
   confirm_unpair_body: "The paired chat can no longer reach daruda. Pairing again needs a new code."
   confirm_ok_unpair: "Unpair"
-  confirm_remove_named: "Remove “%{name}”?"
-  confirm_remove_session_host_title: "Remove this session host?"
-  confirm_remove_from_config_body: "Its entry is removed from config.toml."
-  confirm_ok_remove: "Remove"
-  confirm_uninstall_plugin_title: "Uninstall “%{id}”?"
-  confirm_uninstall_plugin_body: "Its files are removed from the Claude plugin directory. Its skills stop being offered until you install it again."
-  confirm_remove_agent_title: "Remove this agent from the catalog?"
-  telegram_clear_token: "Remove token…"
-  telegram_not_paired: "Not paired"
-  telegram_paired: "Paired (chat ID: %{chat_id})"
-  telegram_generate_code: "Generate Pairing Code"
-  telegram_pair_instructions: "Send /pair %{code} to the bot from your phone"
-  telegram_unpair: "Unpair…"
-  orchestrator_enabled_label: "Enable the orchestrator"
-  orchestrator_agent_label: "Agent"
-  orchestrator_account_label: "Account"
-  orchestrator_agent_default: "First agent in the catalog"
-  orchestrator_account_system: "System (ambient environment)"
-  orchestrator_account_option: "%{domain} — %{identity}"
-  # Label above the copyable `/setcommands` block.
-  telegram_botfather_label: "Bot command list"
-  # What to do with that block.
-  telegram_botfather_help: "Send /setcommands to @BotFather, pick this bot, and paste:"
-  label_agent_use_modifier_to_send: "Use modifier key to send"
-  agent_use_modifier_to_send_description: "When on, Enter inserts a newline and Cmd+Enter sends the message. When off (default), Enter sends and Shift+Enter inserts a newline. Applies to the input while an agent chat pane is focused."
-  section_agent_catalog: "AGENT CATALOG"
-  agent_catalog_description: "Choose the agents you chat with. New chats open with the one marked Default; open a card to change its model or mode."
-  agent_catalog_empty: "No agents configured. Add at least one agent before saving."
-  agent_catalog_row_label: "Agent %{index}"
-  agent_field_id: "ID"
-  agent_id_placeholder: "agent-id"
-  agent_field_name: "Name"
-  agent_name_placeholder: "Display name"
-  agent_field_command: "Command"
-  agent_command_placeholder: "command --acp"
-  # Label for an agent catalog row's optional session-mode override.
-  agent_field_default_mode: "Session mode"
-  # Label for an agent catalog row's optional model override.
-  agent_field_default_model: "Model"
-  # The "no override" entry in a row's mode/model picker, for an adapter whose
-  # own default daruda has no fact about.
-  agent_vocabulary_agent_default: "Agent default"
-  # Same entry, naming the adapter's own default so the pick reads as a stated
-  # choice rather than a blank.
-  agent_vocabulary_agent_default_named: "Agent default — %{name}"
-  # Label for the transport-kind select (`daruda_config::AgentLaunch`'s three
-  # variants) in an agent catalog row.
-  agent_field_transport: "Transport"
-  # Transport-select option label for `AgentLaunch::Raw`.
-  agent_transport_raw: "Local"
-  # Transport-select option label for `AgentLaunch::Ssh`.
-  agent_transport_ssh: "SSH (Deprecated)"
-  # Transport-select option label for `AgentLaunch::Docker`.
-  agent_transport_docker: "Docker (Deprecated)"
-  # Shown under the transport select whenever a row's transport is `ssh` or
-  # `docker` — the agent-side host axis these two carry is deprecated in
-  # favor of the lane's own `session_host` (any `Raw` launch works on any
-  # lane, remote or local — see `lane::session_host::effective_session_host`).
-  # Existing rows keep loading, saving, and connecting unchanged; this only
-  # steers new setups toward the lane.
-  agent_transport_deprecated_hint: "Deprecated — for a new remote setup, use Local and set the host on the worktree instead (right-click one in the sidebar and choose \"Session Host…\")."
-  # Label for the SSH host field, shown only when a row's transport is `ssh`.
-  agent_field_host: "Host"
-  # Label for the Docker container field, shown only when a row's transport
-  # is `docker`.
-  agent_field_container: "Container"
-  # Label for an agent catalog row's launch environment field.
-  agent_field_env: "Environment"
-  # Placeholder inside the empty environment field, showing its line form.
-  agent_env_placeholder: "KEY=value"
-  # What the environment field sets, for any agent.
-  agent_env_description: "Variables the adapter process starts with — one KEY=value per line. Clear the field to start it with none."
-  # What the `CODEX_CONFIG` overlay buys, shown only on a row that launches
-  # with it.
-  agent_env_codex_note: "CODEX_CONFIG is what makes codex report its subagents' tool calls; without it they go out through legacy delegation and never reach this app."
-  # The expectation the overlay does not meet: it reports delegation, it does
-  # not cause it. Shown beside [`settings_agent_env_codex_note`].
-  agent_env_codex_caveat: "This does not ask codex to delegate — it only shows the work when it does. Codex spawns a subagent when you ask, or when an AGENTS.md or skill instruction tells it to."
-  # Heading for the per-agent transcript-presentation group inside a catalog
-  # row.
-  agent_section_transcript: "Transcript"
-  # One-line explanation of what the transcript group's pickers set, and of
-  # what leaving them unset does.
-  agent_transcript_description: "How a new chat pane under this agent presents its transcript. A pane can override any of these and return to them."
-  # Label for an agent catalog row's optional fold-mode override.
-  agent_field_fold_mode: "Fold"
-  # Label for an agent catalog row's optional display-filter override.
-  agent_field_display_filter: "Visible items"
-  # The Recent steps entry standing in for a stored size the list cannot offer.
-  # Selected, and written back untouched while it stays picked.
-  #
-  # Deliberately not "Custom": the Fold field one row above says that, and there
-  # it names a hand-edited matrix the editor can state — the opposite of this.
-  agent_tail_window_off_list: "Other (from config)"
-  # Hint line shown under the host/container field for an `ssh`/`docker`
-  # row, pointing at the Lane's remote-path setting that
-  # `AgentLaunch::wrap` substitutes in at connect time.
-  agent_remote_path_hint: "The remote working directory is set per-Worktree — right-click a Worktree in the sidebar and choose \"Session Host…\"."
-  agent_add_custom: "Add Custom"
-  agent_remove: "Remove…"
-  agent_preset_install_page: "Install Page"
-  # Toggle that opens a catalog card's advanced block (command, transport,
-  # environment).
-  agent_card_advanced: "Advanced settings"
-  # Badge on a catalog card whose advanced settings differ from its preset.
-  agent_card_modified: "Modified"
-  # A collapsed catalog card's one-line summary of what it will run.
-  agent_card_summary: "%{model} · %{mode}"
-  # Badge on the catalog card a new chat opens with.
-  agent_card_default: "Default"
-  # Button that makes a catalog card's agent the default.
-  agent_card_make_default: "Make default"
-  # Why the only agent still on cannot be switched off.
-  agent_card_last_enabled: "Keep at least one agent on"
-  # Heading over the catalog entries.
-  agent_group_in_use: "In use"
-  # Heading over the runnable presets no entry uses yet.
-  agent_group_available: "Available"
-  # Heading over the presets that need a manual install.
-  agent_group_needs_install: "Needs install"
-  # Placeholder for the search over the preset lists.
-  agent_catalog_search_placeholder: "Search agents"
-  # Shown when the search matches no preset in either list.
-  agent_catalog_no_match: "No agents match."
-  agent_row_detach_hint: "A remote transport cannot be expressed as a preset override — saving turns this row into a custom entry and it stops following the preset."
-  agent_unresolved_section: "Not available"
-  agent_unresolved_unknown: "\"%{preset}\" is not a preset daruda knows, so this agent is not offered in any Agent Chat pane. The entry is kept in config.toml untouched — remove it there if you no longer need it."
-  agent_unresolved_needs_install: "\"%{preset}\" (%{name}) ships prebuilt binaries instead of a command daruda can run, so this agent is not offered in any Agent Chat pane. Install it, then register the command with Add Custom."
-  # Inline, non-blocking warning under a catalog row's command field when
-  # `command`'s executable is not found on `PATH`.
-  agent_row_command_not_on_path: "\"%{command}\" was not found on PATH. You can still save — connecting will fail until it is installed or added to PATH."
-  err_agent_catalog_empty: "Add at least one agent before saving."
-  err_agent_catalog_field: "Agent %{index} needs an ID, name, and command."
-  err_agent_catalog_id: "Agent ID \"%{id}\" can only use letters, numbers, '.', '_' and '-'."
-  err_agent_catalog_duplicate: "Agent ID \"%{id}\" is used more than once."
-  err_agent_catalog_env: "Agent %{index}'s environment takes one KEY=value per line — \"%{line}\" is not one."
-  # A well-formed `KEY=value` line whose name daruda cannot put into a launch
-  # command. Separate from `settings_err_agent_catalog_env` because the fix is
-  # different — rename the variable, not reshape the line — and because the
-  # charset is the reason, not the syntax. See
-  # `daruda_config::is_valid_env_name`.
-  err_agent_catalog_env_name: "Agent %{index}'s environment variable name \"%{name}\" can only use letters, digits and '_', and cannot start with a digit."
-  err_agent_catalog_host: "Agent %{index}'s SSH transport needs a host."
-  err_agent_catalog_container: "Agent %{index}'s Docker transport needs a container name."
-  # A host/container that is present but could not be a bare word in the
-  # launch command. Separate from the two "needs a value" strings above
-  # because the fix is different — retype the value, not fill the field in.
-  # See `lane::session_host::checked_bare_word`.
-  err_agent_catalog_host_unsafe: "Agent %{index}'s SSH host has an unusable character — it goes into the launch command as a single word, so it cannot contain spaces or shell punctuation."
-  err_agent_catalog_container_unsafe: "Agent %{index}'s Docker container has an unusable character — it goes into the launch command as a single word, so it cannot contain spaces or shell punctuation."
-  session_hosts_description: "Register named, reusable SSH/Docker hosts a Worktree's Session Host can reference instead of repeating the same target every time."
-  # Shown instead of the row list when the registry has no entries yet — a
-  # valid, non-error state (unlike the agent catalog, which always seeds a
-  # default).
-  session_hosts_empty: "No hosts registered yet. Add one below."
-  session_host_row_label: "Host %{index}"
-  session_host_field_label: "Label"
-  session_host_field_kind: "Type"
-  session_host_kind_ssh: "SSH"
-  session_host_kind_docker: "Docker"
-  session_host_field_target: "Target"
-  # Placeholders for the target / container fields, shared by the session-host
-  # table and the agent catalog's deprecated SSH / Docker transports.
-  session_host_target_placeholder: "user@host"
-  session_host_field_container: "Container"
-  session_host_container_placeholder: "container-name"
-  session_host_add: "Add Host"
-  session_host_remove: "Remove…"
-  err_session_host_label_empty: "Host %{index} needs a label."
-  err_session_host_label_duplicate: "Host label \"%{label}\" is used more than once."
-  # Wraps a reused `session_host.err_*` validator message (see
-  # `session_host_err_target_empty` and friends) with the row's 1-based
-  # ordinal, so a multi-row save can point at which one failed.
-  err_session_host_field: "Host %{index}: %{reason}"
-  plugin_installed_header: "Installed"
-  plugin_available_header: "Available from marketplace"
-  plugin_none_installed: "No plugins installed. Browse the list below to add one."
-  plugin_none_available: "No marketplace plugins registered. Run `claude plugin marketplace add <url>` from a terminal."
-  plugin_install: "Install"
-  plugin_uninstall: "Uninstall"
-  plugin_installing: "Installing…"
-  plugin_uninstalling: "Uninstalling…"
-  plugin_detail_empty: "Select a plugin to see details."
-  plugin_detail_marketplace: "Marketplace"
-  plugin_detail_version: "Version"
-  plugin_detail_path: "Path"
-  plugin_detail_scope: "Scope"
-  plugin_detail_availability: "Availability"
-  plugin_detail_status_installed: "Installed"
-  plugin_detail_status_available: "Available (not installed)"
-  plugin_detail_skills_header: "Skills"
-  plugin_detail_no_skills: "This plugin doesn't expose any skills."
-  plugin_detail_unknown: "—"
-  plugin_skill_view: "View"
-  plugin_skill_description: "Description"
-  plugin_skill_argument_hint: "Argument hint"
-  plugin_skill_allowed_tools: "Allowed tools"
-  plugin_skill_paths: "Paths"
-  plugin_skill_when_to_use: "When to use"
-  plugin_skill_invocation_both: "user + model"
-  plugin_skill_invocation_user_only: "user only"
-  plugin_skill_invocation_model_only: "model only"
-  plugin_skill_invocation_disabled: "disabled"
-  plugin_skill_body: "Body (SKILL.md)"
-  plugin_skill_back: "Back"
-  plugin_skill_body_loading: "Loading SKILL.md…"
-  plugin_skill_body_error: "Failed to load SKILL.md:"
-  plugin_skill_count_one: "1 skill"
-  plugin_skill_count: "%{count} skills"
-  # Inline banner shown when a `claude plugin` run fails.
-  plugin_install_failed: "plugin install %{id}: %{error}"
-  plugin_uninstall_failed: "plugin uninstall %{id}: %{error}"
-  label_current_version: "Current version"
-  button_check_updates: "Check for updates"
-  button_update: "Update"
-  button_restart: "Restart"
-  update_checking: "Checking for updates…"
-  update_up_to_date: "You're on the latest version."
-  update_available: "New version %{version} is available."
-  update_downloading: "Downloading update…"
-  update_installing: "Installing update…"
-  update_ready: "Update installed. Restart to apply."
-  update_ready_installer: "The verified installer is ready. Restart to open it and complete the update."
-  update_error: "Update failed: %{msg}"
-  update_dev_build: "Updates are only available in a packaged build."
-  update_manual_package: "Download the new release from GitHub and reinstall the package to update."
   update_available_toast: "New version %{version} is available — see Settings › About."
   # Status-bar / error-banner copy for the project-config flow.
   project_config_no_project: "Open a project first — project config has nowhere to live."
@@ -1491,8 +987,6 @@ settings:
   # Status-bar account dropdown entry that opens the Settings window
   # directly on the Accounts section.
   status_bar_manage_accounts: "Manage accounts…"
-  status_bar_account_provider_claude: "Claude"
-  status_bar_account_provider_codex: "Codex"
   # Status-bar Ports segment's dropdown trigger label — the count of
   # workspace-owned listening TCP ports found by the last scan.
   status_bar_ports_label: "Ports: %{count}"
@@ -1525,51 +1019,15 @@ settings:
   # Last entry in the Claude-usage dropdown — switches the right dock to
   # the Usage tab, where the same numbers are shown as gauges.
   status_bar_usage_open_panel: "Open Usage panel"
-  # Sidebar nav label + section header for the Settings "Accounts" page
-  # list managed accounts, set the per-domain default, delete.
-  nav_accounts: "Accounts"
   # Placeholder for an account with no captured email (shouldn't happen
   # once login captures `oauthAccount`, but the field is `Option` today).
   accounts_unknown_email: "Unknown"
-  # Title of each auth domain's "System" row — the ambient credentials a
-  # pane runs under when no managed account is pinned. The domain's own
-  # home path (`~/.claude`, `~/.codex`) rides below it as the subtitle,
-  # straight from `AccountRecipe::system_home_hint`.
-  accounts_system_title: "System"
-  # Badge next to the account that's currently its domain's default.
-  accounts_default_badge: "Default"
-  # "Set default" row button — makes this row (an account, or the domain's
-  # System credentials) what new panes of that domain start on. Disabled on
-  # the row that's already the default.
-  accounts_set_default: "Set default"
-  # "Reauthenticate" row button — re-runs a headless login for this
-  # *existing* account, reusing its `config_dir` (see
-  # `Workspace::reauthenticate_account`).
-  accounts_reauthenticate: "Reauthenticate"
-  # "Delete" row button — opens the remove-confirm dialog.
-  accounts_delete: "Delete…"
   # Add-account entry, one per auth domain — `recipe` is that domain's
   # display label, so the entry names which credentials it signs into
   # instead of relying on the heading above it. Used by the Settings
   # section's buttons and by the terminal-pane status-bar dropdown, which
   # lists every domain.
   accounts_add: "+ Add %{recipe} account"
-  accounts_remove_confirm_title: "Delete this account?"
-  # `count` = panes across every open Workspace window currently
-  # pointing at the account being deleted (see
-  # `Workspace::panes_referencing_account`); `path` = the ambient home of
-  # that account's auth domain, which those panes revert to.
-  accounts_remove_confirm_body: "%{count} pane(s) using this account will revert to the system default (%{path})."
-  accounts_remove_confirm_ok: "Delete"
-  # Relative "last authenticated" label buckets — mirrors the Usage tab's
-  # `usage.cache_*` cache-age badge shape, kept as a separate key family
-  # since the two express different concepts (credential freshness vs.
-  # fetch-cache age) that could diverge in wording later.
-  accounts_last_auth_never: "Never authenticated"
-  accounts_last_auth_just_now: "Authenticated just now"
-  accounts_last_auth_minutes: "Authenticated %{n}m ago"
-  accounts_last_auth_hours: "Authenticated %{n}h ago"
-  accounts_last_auth_days: "Authenticated %{n}d ago"
   # Success toast title after a headless add-account login finishes and
   # the account is saved.
   accounts_login_added: "Account added."
@@ -1612,8 +1070,6 @@ settings:
   # Status-bar dropdown's in-progress row, shown in place of "+ Add
   # account" while `Workspace::is_login_pending` is true.
   accounts_login_in_progress: "Adding account…"
-  # Settings label while either add-account or reauthentication is running.
-  accounts_authentication_in_progress: "Authentication in progress…"
   # Success toast title after `Workspace::reauthenticate_account` finishes
   # and the existing account's row is refreshed.
   accounts_reauth_added: "Account reauthenticated."
@@ -1628,10 +1084,6 @@ settings:
   # Settings-window delete raced the reauth dispatch. Folded into
   # `settings_accounts_reauth_failed()`'s report `.message()`.
   accounts_reauth_missing: "The account being reauthenticated no longer exists."
-  # How an account signed in, for a Settings row — `method` is the agent's own
-  # value, shown verbatim because the set of values is the provider's to grow
-  # and a mapped one would report a metered login as unrecognized.
-  accounts_signed_in_with: "signed in with %{method}"
   # Toast title when a managed login replaced the ambient sign-in the user had
   # made themselves — every `SystemDefault` pane now runs as that account.
   accounts_ambient_login_replaced: "Your system sign-in was replaced"
@@ -1648,10 +1100,6 @@ settings:
   # override, so there is nothing to sign into. Folded into
   # `settings_accounts_reauth_failed()`'s report `.message()`.
   accounts_system_home_unknown: "No home directory was found for this agent, so there is nowhere to sign in to."
-  # Label for the Settings System row's re-login button, and for the
-  # re-login button a failed pane shows when it runs on the ambient
-  # credentials rather than a managed account.
-  accounts_system_reauthenticate: "Sign in"
   # Warning toast when a terminal pane's account config dir could not be
   # prepared. A warning rather than a blocker: the account's env still gets
   # injected, so only the mirrored extras are missing.
@@ -1926,7 +1374,6 @@ error:
   claude_hooks_uninstall_failed: "Claude hooks uninstall failed"
   claude_status_file_read_failed: "Claude status file read failed"
   commit_message_empty: "Commit message cannot be empty"
-  create_config_dir_failed: "Failed to create config directory"
   file_watcher_error: "File watcher reported error"
   file_watcher_init_failed: "File watcher init failed"
   git_add_all_failed: "git add --all failed"
@@ -2130,12 +1577,6 @@ session_host:
   # (even choosing Local) retires that legacy pair for good, per
   # `effective_session_host`'s precedence.
   legacy_notice: "This worktree is currently using its agent's own remote setup. Saving here takes over — and retires it, even if you pick Local."
-  err_target_empty: "Target is required."
-  err_target_unsafe: "Target has an unusable character."
-  err_container_empty: "Container is required."
-  err_container_unsafe: "Container has an unusable character."
-  err_session_path_empty: "Session path is required."
-  err_session_path_unsafe: "Session path has an unusable character."
   saving_label: "Saving…"
 
 # Flow engine — picker, validation results, run outcomes
@@ -2686,19 +2127,6 @@ control:
   error_orchestrator_disabled: "The orchestrator is off. Turn it on in daruda's Notifications settings."
   error_orchestrator_unresolvable: "The orchestrator names an agent daruda cannot run. Pick one in Settings."
   error_orchestrator_unavailable: "The orchestrator would not start. daruda has the reason."
-  # Registered with Telegram, not translated: BotFather parses these as
-  # `name - description`, and the names must match what control::spec accepts.
-  # The `/setcommands` block a user pastes into BotFather. Fixed English —
-  # it is registered with Telegram, not shown in daruda's own UI.
-  botfather_commands: |-
-    list - Open agent chats
-    use - Select a target
-    say - Send to a target
-    stop - Stop the running turn
-    flow - Run or list flows
-    task - List, start, stop or open tasks
-    brief - One-line summary
-    daruda - Ask daruda in plain words
 remote_channel:
   slack: "Slack"
   discord: "Discord"

@@ -11,6 +11,3 @@ pub const SOURCE_W: f32 = 128.0;
 pub const STAGE_W: f32 = 120.0;
 pub const ACTIONS_W: f32 = 96.0;
 pub const WORKTREE_SCOPE_MAX_W: f32 = 300.0;
-
-/// Extra transcript content rendered beyond the viewport while scrolling.
-pub const CHAT_OVERSCAN: f32 = 512.0;

@@ -254,9 +254,9 @@ mod ask {
         cx.update_window(fixture.window.into(), |_, _window, cx| {
             fixture.workspace.update(cx, |ws, cx| {
                 let view = ws.agent_chat_view(target.pane).expect("pane").clone();
-                view.update(cx, |v, _| {
+                view.update(cx, |v, cx| {
                     v.set_turn_in_flight();
-                    v.set_items_for_test(items);
+                    v.seed_items_for_test(items, cx);
                 });
                 // Busy is observed first, so the tick has an edge to detect.
                 ws.pulse_agent_chats(cx);
@@ -352,17 +352,20 @@ mod ask {
             .read_with(cx, |ws, cx| ws.control_snapshot(cx)[0].1.target);
         fixture.workspace.update(cx, |ws, cx| {
             let view = ws.agent_chat_view(target.pane).expect("pane").clone();
-            view.update(cx, |v, _| {
+            view.update(cx, |v, cx| {
                 v.set_turn_in_flight();
-                v.set_items_for_test(vec![
-                    said("the previous turn's answer"),
-                    ChatItem::AssistantText {
-                        text: "half a sen".into(),
-                        streaming: true,
-                        message_id: None,
-                        phase: Default::default(),
-                    },
-                ]);
+                v.seed_items_for_test(
+                    vec![
+                        said("the previous turn's answer"),
+                        ChatItem::AssistantText {
+                            text: "half a sen".into(),
+                            streaming: true,
+                            message_id: None,
+                            phase: Default::default(),
+                        },
+                    ],
+                    cx,
+                );
             });
             assert_eq!(
                 ws.control_read(target.pane, cx).expect("pane is there"),
@@ -405,9 +408,9 @@ mod ask {
         cx.update_window(fixture.window.into(), |_, _window, cx| {
             fixture.workspace.update(cx, |ws, cx| {
                 let view = ws.agent_chat_view(target.pane).expect("pane").clone();
-                view.update(cx, |v, _| {
+                view.update(cx, |v, cx| {
                     v.set_turn_in_flight();
-                    v.set_items_for_test(vec![said("nobody is listening")]);
+                    v.seed_items_for_test(vec![said("nobody is listening")], cx);
                 });
                 ws.pulse_agent_chats(cx);
                 view.update(cx, |v, _| v.set_turn_idle());

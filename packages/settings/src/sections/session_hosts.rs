@@ -1,0 +1,119 @@
+//! Session Hosts page: the `[[session_hosts]]` registry editor.
+//!
+//! Model closely mirrors [`super::agent`]'s catalog editor, minus the preset
+//! concept agents have. Every row is a plain user-entered
+//! `{label, kind, target|container}`; each valid row commit persists the whole
+//! catalog atomically with its tombstone/redirect bookkeeping.
+
+use crate::strings as s;
+use daruda_ui::field_row;
+use daruda_ui::theme;
+use gpui::{AnyElement, ClickEvent, IntoElement, div, prelude::*, px};
+
+use super::super::{
+    SessionHostRow, SettingsView, settings_button as button,
+    settings_button_danger as button_danger,
+};
+
+impl SettingsView {
+    pub(crate) fn render_session_hosts(&self, cx: &mut gpui::Context<Self>) -> AnyElement {
+        let description_color = theme::current(cx).text_muted;
+
+        let mut body = div()
+            .flex()
+            .flex_col()
+            .gap(px(theme::SETTINGS_GROUP_GAP))
+            .child(
+                div()
+                    .text_size(px(theme::MODAL_BODY_FONT_SIZE))
+                    .text_color(description_color)
+                    .child(s::settings::session_hosts_description()),
+            )
+            .child(div().flex().flex_row().child(
+                button("settings-session-host-add", s::settings::session_host_add()).on_click(
+                    cx.listener(|this, _: &ClickEvent, window, cx| {
+                        this.add_session_host_row(window, cx);
+                    }),
+                ),
+            ));
+
+        if self.session_host_rows().next().is_none() {
+            body = body.child(
+                div()
+                    .text_size(px(theme::MODAL_BODY_FONT_SIZE))
+                    .text_color(description_color)
+                    .child(s::settings::session_hosts_empty()),
+            );
+        }
+
+        for (index, row) in self.session_host_rows() {
+            body = body.child(Self::render_session_host_row(index, row, cx));
+        }
+
+        body.into_any_element()
+    }
+
+    fn render_session_host_row(
+        index: usize,
+        row: &SessionHostRow,
+        cx: &mut gpui::Context<Self>,
+    ) -> AnyElement {
+        let t = theme::current(cx);
+        let remove_id = format!("settings-session-host-remove-{index}");
+        let is_docker = row.is_docker(cx);
+
+        let mut body = div()
+            .flex()
+            .flex_col()
+            .gap(px(theme::MODAL_PANEL_GAP))
+            .p(px(theme::SETTINGS_CARD_PAD))
+            .bg(t.dock_bg)
+            .border_1()
+            .border_color(t.border)
+            .rounded(px(theme::RADIUS_MD))
+            .child(
+                div()
+                    .flex()
+                    .flex_row()
+                    .items_center()
+                    .justify_between()
+                    .child(
+                        div()
+                            .text_size(px(theme::MODAL_BODY_FONT_SIZE))
+                            .text_color(t.text_primary)
+                            .child(s::settings::session_host_row_label(index + 1)),
+                    )
+                    .child(
+                        button_danger(remove_id, s::settings::session_host_remove()).on_click(
+                            cx.listener(move |this, _: &ClickEvent, window, cx| {
+                                this.request_remove_session_host_row(index, window, cx);
+                            }),
+                        ),
+                    ),
+            )
+            .child(field_row(
+                s::settings::session_host_field_label(),
+                daruda_ui::input(&row.label_input, cx, 0),
+            ))
+            .child(field_row(
+                s::settings::session_host_field_kind(),
+                daruda_ui::select::select(&row.kind_select, cx, 0),
+            ));
+
+        // Only one of target/container is meaningful per kind — show just
+        // that field, mirroring the agent catalog row's ssh/docker split.
+        if is_docker {
+            body = body.child(field_row(
+                s::settings::session_host_field_container(),
+                daruda_ui::input(&row.container_input, cx, 0),
+            ));
+        } else {
+            body = body.child(field_row(
+                s::settings::session_host_field_target(),
+                daruda_ui::input(&row.target_input, cx, 0),
+            ));
+        }
+
+        body.into_any_element()
+    }
+}

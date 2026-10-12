@@ -273,9 +273,9 @@ impl Workspace {
                 let out: Vec<_> = queue
                     .in_strip_order()
                     .map(|(q, paused)| crate::workspace::layout::QueuedPromptView {
-                        id: q.id,
-                        text: daruda_chat::view::display_prompt(&q.text, &q.attachments),
-                        editing: editing == Some(q.id),
+                        id: q.id(),
+                        text: daruda_chat::view::display_prompt(q.text(), q.attachments()),
+                        editing: editing == Some(q.id()),
                         paused,
                     })
                     .collect();

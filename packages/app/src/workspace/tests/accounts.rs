@@ -70,9 +70,8 @@ async fn switch_pane_account_handles_system_default_noop_and_conversation_guard(
                     seed_agent_pane(ws, AccountSelection::Managed(revert_account), window, cx);
                 let guarded =
                     seed_agent_pane(ws, AccountSelection::Managed(guarded_account), window, cx);
-                agent_view(ws, guarded).update(cx, |v, _| {
-                    v.items_mut_for_test()
-                        .push(ChatItem::UserText("a long investigation".into()));
+                agent_view(ws, guarded).update(cx, |v, cx| {
+                    v.seed_items_for_test([ChatItem::UserText("a long investigation".into())], cx);
                 });
                 (revert, guarded, ws.active_runtime().panes.len())
             })
@@ -318,7 +317,8 @@ fn finish_codex_login(
     cx: &mut Context<Workspace>,
 ) -> AccountId {
     use crate::workspace::account_login_ops::PendingLogin;
-    use crate::workspace::account_login_ops::{LoginFinish, LoginTarget, next_login_attempt};
+    use crate::workspace::account_login_ops::{LoginFinish, next_login_attempt};
+    use daruda_agent::accounts::LoginTarget;
     // A real (near-instant) child process is the only way to build a
     // `LoginProcessHandle` — it has no other public constructor.
     let login = daruda_agent::accounts::spawn_login(

@@ -8,9 +8,9 @@ mod axis_chip;
 mod blocks;
 mod chrome;
 mod diff;
-/// The height-capped editor embed. Reachable from `workspace/tests` so the
-/// layout probe measures the shipped builder rather than a copy of it.
-pub mod embed;
+/// The height-capped editor embed. Reachable from `view/tests` so the layout
+/// probe measures the shipped builder rather than a copy of it.
+pub(crate) mod embed;
 mod filter;
 mod fold_header;
 mod fold_mode;

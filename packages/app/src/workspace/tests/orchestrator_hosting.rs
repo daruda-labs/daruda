@@ -379,7 +379,7 @@ fn hidden_orchestrator_tracks_live_config_updates(cx: &mut TestAppContext) {
         let view = ws.agent_chat_view(pane).unwrap().read(cx);
         assert_eq!(view.agent_name(), agent.name);
         assert_eq!(
-            *view.defaults_for_test(),
+            view.defaults_for_test(),
             daruda_chat::transcript_defaults::TranscriptDefaults::resolve(
                 Some(&agent),
                 ws.mirrors.agent_reader_defaults
@@ -675,7 +675,7 @@ fn hidden_orchestrator_preserves_user_tabs_and_resolves_its_account(cx: &mut Tes
 #[gpui::test]
 fn hidden_orchestrator_pulse_emits_completion_and_phone_fallback(cx: &mut TestAppContext) {
     use crate::workspace::main_area::agent_chat_host::telegram_ops::FIRST_RESPONSE_FALLBACK_SECS;
-    use daruda_chat::view::{ActivitySpan, TurnOutcome};
+    use daruda_chat::view::TurnOutcome;
     let (window, workspace) = build_workspace(cx);
     let mut outbound =
         cx.update(|cx| crate::telegram::global::install_for_test(true, Some(42), cx));
@@ -699,11 +699,7 @@ fn hidden_orchestrator_pulse_emits_completion_and_phone_fallback(cx: &mut TestAp
                     .cloned()
                     .unwrap()
                     .update(cx, |view, _| {
-                        view.activity_mut_for_test().span = ActivitySpan::Busy {
-                            started_at: std::time::Instant::now(),
-                        };
-                        view.activity_mut_for_test().pending_completion =
-                            Some(TurnOutcome::Completed);
+                        view.owe_completion_for_test(TurnOutcome::Completed);
                         view.start_phone_turn_for_test(
                             std::time::Instant::now()
                                 - std::time::Duration::from_secs(FIRST_RESPONSE_FALLBACK_SECS + 1),
@@ -717,8 +713,8 @@ fn hidden_orchestrator_pulse_emits_completion_and_phone_fallback(cx: &mut TestAp
                 ws.flush_telegram_first_response_fallbacks(cx);
                 ws.pulse_agent_chats(cx);
                 let view = ws.agent_chat_view(pane).unwrap().read(cx);
-                assert!(!view.activity_for_test().span.is_busy());
-                assert!(view.activity_for_test().pending_completion.is_none());
+                assert!(!view.last_reconciled_busy());
+                assert!(!view.owes_completion_for_test());
                 assert!(!view.is_phone_turn_waiting());
                 pane
             })

@@ -336,7 +336,7 @@ impl Workspace {
         };
         let weak = cx.weak_entity();
         let owned_path = path.to_path_buf();
-        super::dialog_helpers::open_confirm_dialog(
+        crate::ui::dialog::open_confirm_dialog(
             s::flow::delete_node_confirm_title(),
             body,
             s::flow::delete_node(),

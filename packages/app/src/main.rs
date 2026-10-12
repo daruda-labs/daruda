@@ -34,7 +34,6 @@ mod remote_channel;
 mod replay;
 #[cfg(feature = "screenshot")]
 mod screenshot;
-pub mod settings;
 pub mod settings_store;
 mod shell_env;
 mod slot_actions;

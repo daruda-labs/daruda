@@ -21,8 +21,9 @@ subsystem's real constraints are written down.
 |---|---|
 | **Anything at all, before committing** | [Pre-commit checks](#pre-commit-checks) · [Verification](#verification) |
 | **Terminal, VT parsing, PTY, scrollback** | `packages/terminal/src/view/CLAUDE.md` · [Pitfalls](#pitfall-prevention-rules) 1 (coordinates), 3 (Zig FFI), 7 (text↔pixel), 8 (paint scope), 9 (palette) |
-| **Agent chat, ACP, adapters, wire log** | `packages/acp/CLAUDE.md` · [Pitfall](#pitfall-prevention-rules) 11 (single activity source) |
+| **Agent chat, ACP, adapters, wire log** | `packages/chat/CLAUDE.md` · `packages/transcript/CLAUDE.md` · `packages/acp/CLAUDE.md` · [Pitfall](#pitfall-prevention-rules) 11 (single activity source) |
 | **A widget, a modal, anything visual** | `packages/ui/CLAUDE.md` · [`DESIGN.md`](./DESIGN.md) · [Pitfalls](#pitfall-prevention-rules) 10 (render cost), 12 (mouse buttons) |
+| **A Settings page or the config store** | `packages/settings/CLAUDE.md` · [Cross-profile data isolation](#cross-profile-data-isolation) |
 | **Workspace layout — tabs, panes, docks** | `packages/app/src/CLAUDE.md` · [UI component hierarchy](#ui-component-hierarchy) · [MVU rules](#mvu-flavored-guiding-rules) |
 | **Any string a user will see** | `packages/app/locales/CLAUDE.md` |
 | **Where a new file or crate goes** | [Crate dependency graph](#crate-dependency-graph) · [File-structure rules](#file-structure-rules) · [Change-impact discipline](#change-impact-discipline) |
@@ -51,7 +52,7 @@ Run these locally and make them pass before committing:
 cargo fmt --all -- --check
 cargo clippy -p ghostty_vt -p ghostty_vt_sys -p daruda_terminal -p daruda \
   -p daruda_config -p daruda_store -p daruda_agent -p daruda_update \
-  -p daruda_acp -p daruda_core -p daruda_flow -p daruda_project -p daruda_ui -p daruda_control_types -p daruda_content -p daruda_flow_edit -p daruda_transcript -p daruda_chat -p ferrum_flow -p strings_gen \
+  -p daruda_acp -p daruda_core -p daruda_flow -p daruda_project -p daruda_ui -p daruda_control_types -p daruda_content -p daruda_flow_edit -p daruda_transcript -p daruda_chat -p daruda_settings -p ferrum_flow -p strings_gen \
   --all-targets -- -D warnings
 ./scripts/lint-inline-literals.sh
 ./scripts/lint-paint-scope.sh
@@ -65,7 +66,7 @@ cargo clippy -p ghostty_vt -p ghostty_vt_sys -p daruda_terminal -p daruda \
 ./scripts/lint-platform-boundary.sh
 cargo test -p ghostty_vt -p ghostty_vt_sys -p daruda_terminal -p daruda \
   -p daruda_config -p daruda_store -p daruda_agent -p daruda_update \
-  -p daruda_acp -p daruda_core -p daruda_flow -p daruda_project -p daruda_ui -p daruda_control_types -p daruda_content -p daruda_flow_edit -p daruda_transcript -p daruda_chat -p ferrum_flow -p gpui_component -p strings_gen
+  -p daruda_acp -p daruda_core -p daruda_flow -p daruda_project -p daruda_ui -p daruda_control_types -p daruda_content -p daruda_flow_edit -p daruda_transcript -p daruda_chat -p daruda_settings -p ferrum_flow -p gpui_component -p strings_gen
 ./scripts/lint-no-silent-update.sh
 ./scripts/lint-agent-activity.sh
 ./scripts/lint-daruda-path-literals.sh
@@ -81,7 +82,7 @@ cargo test -p ghostty_vt -p ghostty_vt_sys -p daruda_terminal -p daruda \
 ./scripts/lint-raw-mouse-button.sh --self-test
 ./scripts/lint-comment-length.sh
 RUSTDOCFLAGS="-D warnings" cargo doc --no-deps \
-  -p daruda_flow -p daruda_project -p daruda_ui -p daruda_control_types -p daruda_content -p daruda_flow_edit -p daruda_transcript -p daruda_core -p daruda_update -p ghostty_vt_sys \
+  -p daruda_flow -p daruda_project -p daruda_ui -p daruda_control_types -p daruda_content -p daruda_flow_edit -p daruda_transcript -p daruda_chat -p daruda_settings -p daruda_core -p daruda_update -p ghostty_vt_sys \
   -p ghostty_vt -p daruda_agent
 cargo run -p gen_acp_presets -- --check
 cargo clippy -p daruda --all-features --all-targets -- -D warnings
@@ -191,21 +192,22 @@ daruda/
 │   ├── terminal/             # daruda_terminal — terminal emulation + GPUI rendering
 │   ├── transcript/           # daruda_transcript — transcript fold/filter/tool-category model + the editors chat and Settings share
 │   ├── chat/                 # daruda_chat — the agent chat pane (AgentChatView); the app keeps its Workspace host
+│   ├── settings/             # daruda_settings — the Settings surface and the user-config store it edits; the app hosts it
 │   ├── ui/                   # daruda_ui — domain-free widgets + theme bridge (app reaches it via crate::ui)
 │   ├── update/               # daruda_update — app update checking
 │   ├── ghostty-vt/           # ghostty_vt — safe Rust wrapper over libghostty-vt
 │   ├── ghostty-vt-sys/       # ghostty_vt_sys — Zig C FFI bindings
 │   └── visual-tests/         # visual_tests — offscreen render snapshot tests
-├── crates/                   # vendored third-party packages only
-│   ├── ferrum_flow/          # vendored node-graph canvas (do not lint/edit — see below)
-│   └── gpui_component*/      # vendored gpui-component fork (do not lint/edit — see below)
 ├── tools/
 │   ├── acp_replay/            # ACP wire-log replay helper
 │   ├── gen_acp_presets/       # generated agent preset drift gate
 │   ├── gen_licenses/          # generates third-party license manifest
 │   └── vt_dump/               # diagnostic CLI
-├── vendor/ghostty/           # Ghostty v1.2.3 submodule
-├── vendor/zed/               # patched GPUI; regenerate with tools/vendor_gpui
+├── vendor/                   # third-party sources, one directory per upstream
+│   ├── ghostty/              # Ghostty v1.2.3 submodule
+│   ├── zed/                  # patched GPUI; regenerate with tools/vendor_gpui
+│   ├── gpui-component/       # gpui_component* crates, vendored fork (do not lint/edit — see below)
+│   └── ferrum-flow/          # ferrum_flow, vendored node-graph canvas (do not lint/edit — see below)
 └── scripts/
 ```
 
@@ -229,7 +231,7 @@ for macOS app and DMG bundles.
 cargo fmt --all -- --check
 cargo clippy -p ghostty_vt -p ghostty_vt_sys -p daruda_terminal -p daruda \
   -p daruda_config -p daruda_store -p daruda_agent -p daruda_update \
-  -p daruda_acp -p daruda_core -p daruda_flow -p daruda_project -p daruda_ui -p daruda_control_types -p daruda_content -p daruda_flow_edit -p daruda_transcript -p daruda_chat -p ferrum_flow -p strings_gen \
+  -p daruda_acp -p daruda_core -p daruda_flow -p daruda_project -p daruda_ui -p daruda_control_types -p daruda_content -p daruda_flow_edit -p daruda_transcript -p daruda_chat -p daruda_settings -p ferrum_flow -p strings_gen \
   --all-targets -- -D warnings
 scripts/lint-inline-literals.sh
 scripts/lint-paint-scope.sh
@@ -243,7 +245,7 @@ scripts/lint-landing-no-disk-read.sh
 scripts/lint-platform-boundary.sh
 cargo test -p ghostty_vt -p ghostty_vt_sys -p daruda_terminal -p daruda \
   -p daruda_config -p daruda_store -p daruda_agent -p daruda_update \
-  -p daruda_acp -p daruda_core -p daruda_flow -p daruda_project -p daruda_ui -p daruda_control_types -p daruda_content -p daruda_flow_edit -p daruda_transcript -p daruda_chat -p ferrum_flow -p gpui_component -p strings_gen
+  -p daruda_acp -p daruda_core -p daruda_flow -p daruda_project -p daruda_ui -p daruda_control_types -p daruda_content -p daruda_flow_edit -p daruda_transcript -p daruda_chat -p daruda_settings -p ferrum_flow -p gpui_component -p strings_gen
 scripts/lint-no-silent-update.sh
 scripts/lint-agent-activity.sh
 scripts/lint-daruda-path-literals.sh
@@ -259,7 +261,7 @@ scripts/lint-raw-mouse-button.sh
 scripts/lint-raw-mouse-button.sh --self-test
 scripts/lint-comment-length.sh
 RUSTDOCFLAGS="-D warnings" cargo doc --no-deps \
-  -p daruda_flow -p daruda_project -p daruda_ui -p daruda_control_types -p daruda_content -p daruda_flow_edit -p daruda_transcript -p daruda_core -p daruda_update -p ghostty_vt_sys \
+  -p daruda_flow -p daruda_project -p daruda_ui -p daruda_control_types -p daruda_content -p daruda_flow_edit -p daruda_transcript -p daruda_chat -p daruda_settings -p daruda_core -p daruda_update -p ghostty_vt_sys \
   -p ghostty_vt -p daruda_agent
 cargo run -p gen_acp_presets -- --check
 cargo clippy -p daruda --all-features --all-targets -- -D warnings
@@ -288,12 +290,12 @@ What the `Linux` job carries that no lint could is the `#[cfg]` arms the macOS j
 
 Note: the `Lint` job gates fmt, the 9 lint scripts through `lint-platform-boundary.sh`, `lint-env-literals.sh` with its self-test, `lint-no-silent-update.sh`, and `lint-agent-activity.sh`. The platform jobs gate the clippy list above and the package-scoped `cargo test` list above; the `cargo doc` link check runs on macOS.
 
-The doc-link gate covers twelve crates rather than all of them: clippy does not
+The doc-link gate covers fourteen crates rather than all of them: clippy does not
 read intra-doc links, so a deleted item leaves a dangling `[`Name`]` in the
-prose that explains the module. These twelve are clean today; the rest carry a
+prose that explains the module. These fourteen are clean today; the rest carry a
 backlog and join the list a crate at a time as that is worked off. Measured
 2026-09-18: `daruda_config` 8, `daruda_store` 8, `daruda_terminal` 11,
-`daruda_acp` 16, `daruda` 85 — the app crate is most of what is left; 18 of those moved with the chat pane into `daruda_chat` (2026-10-12). `lint-render-purity.sh`, `lint-daruda-path-literals.sh`, `lint-file-size.sh`, `lint-mark-dirty-direct-call.sh`, `lint-fold-header.sh`, `lint-agent-list-sync.sh`, `lint-declarative-context-menu.sh`, `lint-acp-air-gate.sh`, `lint-raw-mouse-button.sh`, `lint-comment-length.sh`, and `gen_acp_presets -- --check` are local/reviewer checks not yet wired into CI.
+`daruda_acp` 16, `daruda` 85 — the app crate is most of what is left; 18 of those moved with the chat pane into `daruda_chat` (2026-10-12) and were fixed there. `lint-render-purity.sh`, `lint-daruda-path-literals.sh`, `lint-file-size.sh`, `lint-mark-dirty-direct-call.sh`, `lint-fold-header.sh`, `lint-agent-list-sync.sh`, `lint-declarative-context-menu.sh`, `lint-acp-air-gate.sh`, `lint-raw-mouse-button.sh`, `lint-comment-length.sh`, and `gen_acp_presets -- --check` are local/reviewer checks not yet wired into CI.
 
 `cargo clippy -p daruda --all-features` is on the list, and on all three platform jobs, because every feature is off by default: whatever only `screenshot` or `replay` reaches — the `*_for_shot` seams, `screenshot_scenario`'s two modules, `screenshot.rs` itself — is neither compiled nor linted by the plain clippy run above. A visibility-narrowing pass left the feature uncompilable for a while, and a clippy error in `screenshot.rs` then sat unnoticed for a week, with nothing to say so either time. `--all-features` rather than a named list, so a new feature is covered the day it lands.
 
@@ -415,7 +417,7 @@ Daruda is not strict MVU, but the architecture leans on three rules. Treat them 
 - **Error handling**: custom error types + `Display`. `unsafe` requires `// SAFETY:` comment.
 - **GPUI dependency**: only view/UI code may import GPUI. PTY, config, git stay GPUI-free.
 - **Workspace per-lane state**: data discarded on lane/project teardown belongs in `workspace/lane_scoped.rs::LaneScoped`; keep `LaneRuntime` and `FlowRuns` in their separate lifecycle containers.
-- **`gpui_component` access**: app code must go through `crate::ui::*` (the app facade over `daruda_ui`); direct `gpui_component` / `daruda_ui` imports forbidden. A widget package beside the app (`daruda_transcript`) uses `daruda_ui` directly, never `gpui_component`. See `packages/ui/CLAUDE.md`.
+- **`gpui_component` access**: app code must go through `crate::ui::*` (the app facade over `daruda_ui`); direct `gpui_component` / `daruda_ui` imports forbidden. A widget package beside the app (`daruda_transcript`, `daruda_chat`, `daruda_settings`) uses `daruda_ui` directly, never `gpui_component`. See `packages/ui/CLAUDE.md`.
 - **Commit only when explicitly asked** — never `git add`/`git commit` without direct instruction.
 - **Commit messages**: `<type>: <subject>` (imperative, ≤72 chars). Types: `feat` `fix` `refactor` `perf` `test` `chore` `ci` `docs`. Body only when WHY is non-obvious. Prohibitions: no Phase/Step/ticket numbers, no "what I did" lists (diff shows that), no future-work notes.
 - **User-facing values go through config** (`daruda_config`). Pixel/color constants → `ux/theme.rs`.
@@ -495,7 +497,8 @@ daruda (app)  →  daruda_terminal  →  ghostty_vt  →  ghostty_vt_sys
              →  daruda_control_types  →  daruda_store   # GPUI-free control contract, PaneRef
              →  daruda_ui         →  daruda_terminal, daruda_config, gpui_component, ferrum_flow  # widgets
              →  daruda_transcript →  daruda_acp, daruda_config, daruda_ui   # transcript presentation, shared by chat + Settings
-             →  daruda_chat       →  daruda_transcript, daruda_acp, daruda_agent, daruda_content, daruda_ui  # the chat pane view
+             →  daruda_chat       →  daruda_transcript, daruda_acp, daruda_content, daruda_ui, daruda_config, daruda_store, daruda_core  # the chat pane view
+             →  daruda_settings   →  daruda_transcript, daruda_agent, daruda_project, daruda_config, daruda_ui  # Settings + the config store
              →  daruda_core                         # shared, dependency-free
              →  daruda_update
              →  gpui, gpui_component, merman, portable-pty
@@ -509,7 +512,7 @@ gpui_component  →  daruda_core                         # vendored; shares the 
 
 `merman` (crates.io, MIT/Apache-2.0) is the mermaid → SVG renderer behind every ` ```mermaid ` fence in the file viewer and agent chat, pulled as a normal dependency of `daruda_content` (not vendored — no daruda-side patch needed) and validated against upstream Mermaid.js SVG baselines. Host theming goes through merman's renderer-level site config, not a document directive: `daruda_content`'s `mermaid_host_theme` builds the profile from a `MermaidPalette` (whose values `daruda_ui::mermaid_palette` resolves from the theme) and `visual::render_mermaid_svg` applies it with `with_host_theme`. A source that sets `theme` / `themeVariables` / `themeCSS` — in an `%%{init}%%` directive or under a leading `---` frontmatter block's `config:` mapping, the two places mermaid accepts a theme — opts out of daruda's **colours** (`source_declares_own_theme`), on the reasoning recorded there that merman's site config overrides the document's own config wholesale rather than merging per-field; a source that only tunes layout or behaviour keeps the host chrome. The opt-out stops at colour: `mermaid_render_profile` is applied unconditionally because the same profile also carries `htmlLabels: false` and the `ResvgSafe` pipeline, and resvg cannot paint the `<foreignObject>` labels merman emits without them — a diagram rendered profile-free comes back as boxes and arrows with every label blank. Both hosts (`file_view_pane::file_content` and `daruda_chat::reconcile`) reach it through `daruda_content::visual::render_mermaid_raster` → `merman::render::HeadlessRenderer::render_svg_sync`.
 
-Interactive Markdown has two independent rendering stacks. The file viewer uses `pulldown-cmark` to build its workspace-owned `MdBlock` / `MdSpan` IR and renders it in `file_view_pane/render/markdown/` (`prose.rs` compiles a span run, `inline.rs` / `block.rs` / `image.rs` render it, `selection.rs` carries the block-selection plumbing); agent chat goes through `crate::ui::markdown`, a wrapper over the vendored `gpui_component::text::TextView` and its mdast parser. A behavior intended for both hosts must be implemented in both stacks and added to the shared rendered-conformance table in `file_view_pane/render/markdown/layout_tests.rs`. Parser coverage for the file-viewer IR lives beside `parse_markdown` and must include semantic field states (`checked`, `loose`, ordered start), not enum variants alone.
+Interactive Markdown has two independent rendering stacks. The file viewer uses `pulldown-cmark` to build its workspace-owned `MdBlock` / `MdSpan` IR and renders it in `file_view_pane/render/markdown/` (`prose.rs` compiles a span run, `inline.rs` / `block.rs` / `image.rs` render it, `selection.rs` carries the block-selection plumbing); agent chat goes through `daruda_ui::markdown`, a wrapper over the vendored `gpui_component::text::TextView` and its mdast parser. A behavior intended for both hosts must be implemented in both stacks and added to the shared rendered-conformance table in `file_view_pane/render/markdown/layout_tests.rs`. Parser coverage for the file-viewer IR lives beside `parse_markdown` and must include semantic field states (`checked`, `loose`, ordered start), not enum variants alone.
 
 `daruda_config` and `daruda_agent` both depend on `daruda_store` for `persistence::default_data_dir()` (see Cross-profile data isolation below).
 
@@ -603,7 +606,7 @@ in `surface/strings/custom/`; never edit generated output or silence dead code.
 ```
 Workspace
 ├── TitleBar                         — shared by Workspace / Settings; off macOS also carries the app-menu button and the caption controls (`app/src/title_bar/`)
-├── SettingsView                     — replaces BodyLayout while open, docks included (`app/src/settings/`)
+├── SettingsView                     — replaces BodyLayout while open, docks included (`packages/settings/`)
 │   ├── SettingsSidebar              — back button + search + section nav
 │   └── SettingsSection              — one BuiltinSection body at a time
 ├── BodyLayout                       — shown when SettingsView is not
@@ -663,7 +666,7 @@ Workspace
 | `TaskEditor` | `TasksPage.detail` | `workspace/pages/tasks/editor/` |
 | `FlowGraph` / `RunDetail` | `FlowsPage.detail` (`FlowDetailBody`) | `workspace/pages/flows/graph/`, `workspace/pages/flows/run_detail.rs` |
 | `ToastLayout` | `toast_layer: Entity<ToastLayer>` | `workspace/toast_layer/mod.rs` |
-| `SettingsView` | `settings: Option<SettingsHost>` — `Some` *is* settings mode | `app/src/settings/`, opened/closed in `workspace/settings_ops.rs` |
+| `SettingsView` | `settings: Option<SettingsHost>` — `Some` *is* settings mode | `packages/settings/`, opened/closed in `workspace/settings_ops.rs` |
 | Project (runtime) | `crate::project::Project` (re-export of `daruda_project::project`) | `packages/project/src/project/mod.rs` |
 | Group (runtime) | `daruda_store::project::SerializedGroup` (used directly — no separate runtime newtype) | `packages/store/src/project/` + `workspace/group_ops.rs` |
 | Lane (runtime) | `crate::lane::Lane` (was `Worktree`, re-export of `daruda_project::lane`) — UI label remains "Worktree" | `packages/project/src/lane/mod.rs` |

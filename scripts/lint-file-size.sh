@@ -54,12 +54,8 @@ WAIVED_PATHS=(
     "packages/ui/src/theme/palette.rs"
 )
 
-# Skip directories — vendored crates and target builds aren't ours.
+# Skip directories that aren't ours; vendored code under `vendor/` is never scanned.
 SKIP_DIRS=(
-    "crates/gpui_component"
-    "crates/gpui_component_assets"
-    "crates/gpui_component_macros"
-    "crates/ferrum_flow"
     "packages/ghostty-vt"
     "packages/ghostty-vt-sys"
     "vendor"
@@ -107,7 +103,7 @@ while IFS= read -r f; do
         hits+=("$f: $lines lines (budget $budget)")
         over_budget=1
     fi
-done < <(find packages crates -name '*.rs' -type f | sort)
+done < <(find packages -name '*.rs' -type f | sort)
 
 if [ ${#hits[@]} -eq 0 ]; then
     echo "[lint-file-size] OK — all .rs files within budget."

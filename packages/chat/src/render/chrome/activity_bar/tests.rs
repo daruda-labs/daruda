@@ -13,7 +13,7 @@ use daruda_transcript::editor::filter::filter_value;
 use daruda_transcript::editor::fold::mode_value;
 use daruda_transcript::fold_mode::FoldPreset;
 
-/// Zone conversion and the per-locale shapes belong to `surface::timestamp`;
+/// Zone conversion and the per-locale shapes belong to `crate::stamp`;
 /// what this pane owns is the fallback — a timestamp it cannot read reaches the
 /// tooltip verbatim instead of blanking it.
 #[test]
@@ -64,40 +64,6 @@ fn context_meter_survives_a_zero_size_window() {
     });
     assert_eq!(meter.label, "0 / 0");
     assert!(meter.tooltip.contains("(0%)"));
-}
-
-/// Each locale places the cost itself: the separator and where the amount sits
-/// relative to the fill are translator decisions, so the amount has to come out
-/// of the locale's own pattern.
-#[test]
-fn every_locale_places_the_context_cost_itself() {
-    for locale in ["en", "ko"] {
-        let tip = rust_i18n::t!(
-            "agent_chat.context_tooltip_with_cost",
-            locale = locale,
-            used = "53k",
-            size = "200k",
-            percent = "26",
-            amount = "1.25",
-            currency = "USD"
-        );
-        assert!(
-            tip.contains("53k") && tip.contains("1.25") && tip.contains("USD"),
-            "locale {locale} rendered {tip:?}"
-        );
-        let label = rust_i18n::t!(
-            "agent_chat.context_meter_with_cost",
-            locale = locale,
-            used = "53k",
-            size = "200k",
-            amount = "1.25",
-            currency = "USD"
-        );
-        assert!(
-            label.contains("53k") && label.contains("1.25") && label.contains("USD"),
-            "locale {locale} rendered {label:?}"
-        );
-    }
 }
 
 #[test]

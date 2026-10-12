@@ -25,10 +25,10 @@ use daruda_ui::theme;
 /// logical height whenever an editor first paints or is rebuilt — never a row
 /// stuck at the wrong size.
 ///
-/// Reaches past `render` so `workspace/tests/agent_output_layout.rs` measures
-/// this builder itself; a probe that re-declares the element tree cannot fail
-/// when a height bound is lost here.
-pub fn bounded_editor_embed(
+/// Reaches past `render` so `view/tests/output_layout.rs` measures this
+/// builder itself; a probe that re-declares the element tree cannot fail when
+/// a height bound is lost here.
+pub(crate) fn bounded_editor_embed(
     id: &str,
     editor: &Entity<daruda_ui::InputState>,
     copy_source: Option<SharedString>,

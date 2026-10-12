@@ -313,7 +313,7 @@ mod tests {
         assert!(library.pins[0].upgrade().is_none());
     }
     #[test]
-    fn configuration_watch_detects_first_file_creation_and_releases_on_drop() {
+    fn configuration_watch_detects_first_file_creation() {
         let _serial = crate::hooks::tests_common::fsevent_serial();
         let temp = tempfile::tempdir().unwrap();
         let root = temp.path().join("account");

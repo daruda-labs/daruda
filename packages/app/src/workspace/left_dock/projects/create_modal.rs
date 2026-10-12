@@ -18,7 +18,7 @@ use gpui::{
     Subscription, WeakEntity, Window, div, prelude::*, px,
 };
 
-use super::modal_shared::{field_label, session_host_error_to_msg};
+use super::modal_shared::field_label;
 use crate::lane::session_host;
 use crate::surface::strings as s;
 use crate::ui::Disableable as _;
@@ -227,7 +227,7 @@ impl CreateWorktreeModal {
                 };
                 let path = self.session_path_input.read(cx).value().to_string();
                 let host = session_host::from_registry_entry(entry, &path)
-                    .map_err(session_host_error_to_msg)?;
+                    .map_err(daruda_settings::labels::host_error)?;
                 Ok(Some(host))
             }
         }
@@ -719,7 +719,9 @@ mod tests {
         modal.read_with(cx, |m, cx| {
             assert_eq!(
                 m.validate(cx).unwrap_err(),
-                session_host_error_to_msg(SessionHostError::Empty(SessionHostField::SessionPath))
+                daruda_settings::labels::host_error(SessionHostError::Empty(
+                    SessionHostField::SessionPath
+                ))
             );
         });
     }
@@ -739,7 +741,9 @@ mod tests {
         modal.read_with(cx, |m, cx| {
             assert_eq!(
                 m.validate(cx).unwrap_err(),
-                session_host_error_to_msg(SessionHostError::Unsafe(SessionHostField::SessionPath))
+                daruda_settings::labels::host_error(SessionHostError::Unsafe(
+                    SessionHostField::SessionPath
+                ))
             );
         });
     }

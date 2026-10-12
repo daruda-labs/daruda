@@ -1,0 +1,44 @@
+[package]
+name = "daruda_settings"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish = false
+license.workspace = true
+description = "daruda's Settings surface and the user-config store it edits"
+
+[lints]
+workspace = true
+
+[features]
+screenshot = ["gpui/test-support"]
+# A store that starts at defaults and writes to a temp file, plus read-back
+# hooks, for the host's own tests.
+test-support = ["gpui/test-support", "daruda_ui/test-support", "dep:tempfile"]
+
+[dependencies]
+daruda_acp = { workspace = true }
+daruda_agent = { workspace = true }
+daruda_config = { workspace = true }
+daruda_core = { workspace = true }
+daruda_project = { workspace = true }
+daruda_store = { workspace = true }
+daruda_transcript = { workspace = true }
+daruda_ui = { workspace = true }
+gpui = { workspace = true }
+rust-i18n = { workspace = true }
+tempfile = { version = "3", optional = true }
+uuid = "1.10"
+# Whether an agent command resolves on PATH, for the catalog's warning.
+which = "6"
+
+[build-dependencies]
+strings_gen = { workspace = true }
+
+[dev-dependencies]
+# A catalog row names its source apart from a chat pane's label for it.
+daruda_chat = { workspace = true, features = ["test-support"] }
+daruda_ui = { workspace = true, features = ["test-support"] }
+gpui = { workspace = true, features = ["test-support"] }
+strings_gen = { workspace = true }
+tempfile = "3"

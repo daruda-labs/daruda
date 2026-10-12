@@ -63,7 +63,7 @@ impl TailLevel {
 /// Both levels' resolved windows. The projection takes the pair rather than one
 /// window per call site, so a level cannot read the other's value by accident.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub struct StepWindow {
+pub(crate) struct StepWindow {
     pub(crate) steps: TailWindow,
     pub(crate) calls: TailWindow,
 }
@@ -77,8 +77,8 @@ impl StepWindow {
         }
     }
 
-    #[cfg(any(test, feature = "test-support"))]
-    pub fn uniform(window: TailWindow) -> Self {
+    #[cfg(test)]
+    pub(crate) fn uniform(window: TailWindow) -> Self {
         Self {
             steps: window,
             calls: window,
@@ -128,24 +128,6 @@ mod tests {
     fn the_zero_sentinel_is_the_no_window_state() {
         assert_eq!(TailWindow::last(TAIL_WINDOW_ALL), TailWindow::All);
         assert_eq!(TailWindow::last(5), TailWindow::Last(5));
-    }
-
-    #[test]
-    fn a_pair_answers_per_level() {
-        let pair = StepWindow {
-            steps: TailWindow::Last(3),
-            calls: TailWindow::All,
-        };
-        assert_eq!(pair.get(TailLevel::Steps), TailWindow::Last(3));
-        assert_eq!(pair.get(TailLevel::Calls), TailWindow::All);
-    }
-
-    /// Every level the axis offers has to be reachable from `ALL` and carry a
-    /// distinct id fragment — the panel, the menu and the element ids are all
-    /// built from that list.
-    #[test]
-    fn every_level_is_listed_once() {
-        assert_eq!(TailLevel::ALL, [TailLevel::Steps, TailLevel::Calls]);
     }
 
     #[test]

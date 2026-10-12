@@ -75,6 +75,7 @@ mod root_menu;
 #[cfg(feature = "screenshot")]
 pub(crate) mod screenshot_scenario;
 mod settings_ops;
+mod settings_update;
 mod spawn_helpers;
 pub(crate) mod status_bar;
 mod status_bar_ops;
@@ -798,7 +799,7 @@ impl Workspace {
                 cx.observe_global::<crate::settings_store::SettingsStore>(|ws, cx| {
                     ws.apply_store_config(cx);
                 }),
-                cx.observe_global::<crate::agent::skills::SkillsState>(|_ws, cx| {
+                cx.observe_global::<crate::agent::skills::global::GlobalSkills>(|_ws, cx| {
                     // Right dock re-stages + diffs on this notify.
                     cx.notify();
                 }),

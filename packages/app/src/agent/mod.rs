@@ -7,7 +7,6 @@ pub mod account;
 pub mod adapter_cli;
 pub mod adapter_prep;
 pub(crate) mod configuration;
-pub mod icons;
 pub mod launch_resolve;
 pub mod mcp;
 pub mod skills;

@@ -488,7 +488,7 @@ impl Render for MergeModal {
                 .bg(if is_selected {
                     row_hover_bg
                 } else {
-                    gpui::transparent_black()
+                    theme::TRANSPARENT
                 })
                 // Branch selection is only interactive before merge starts.
                 .when(!is_conflicts && !is_merging, |d| {

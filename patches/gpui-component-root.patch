@@ -1,5 +1,5 @@
---- a/crates/gpui_component/src/root.rs
-+++ b/crates/gpui_component/src/root.rs
+--- a/vendor/gpui-component/gpui_component/src/root.rs
++++ b/vendor/gpui-component/gpui_component/src/root.rs
 @@ -1,10 +1,9 @@
  use crate::{
 -    ActiveTheme, Placement,

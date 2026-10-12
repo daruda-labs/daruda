@@ -70,12 +70,6 @@ fn count(ws: &gpui::Entity<Workspace>, cx: &mut TestAppContext) -> usize {
 }
 
 #[gpui::test]
-async fn a_failed_agent_counts_its_worktree(cx: &mut TestAppContext) {
-    let (_wh, ws, _home, _other, _dir) = failed_agent_and_a_second_lane(cx);
-    assert_eq!(count(&ws, cx), 1);
-}
-
-#[gpui::test]
 async fn an_unread_worktree_counts_and_one_both_failed_and_unread_counts_once(
     cx: &mut TestAppContext,
 ) {

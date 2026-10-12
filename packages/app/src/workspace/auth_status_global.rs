@@ -1,7 +1,8 @@
 //! Cached "how did this sign-in happen" readings, app-wide.
 //!
-//! Kept in a Global for the same reason `accounts_global` is: the Settings
-//! window shows it, a `Workspace` produces it, and neither owns the other.
+//! Kept in a Global for the same reason `accounts_global` is: any `Workspace`
+//! may produce a reading, and every open Settings view shows it through its
+//! own host.
 //!
 //! Read by *asking the CLI*, which costs a process spawn (through `npx` on a
 //! default install), so this is a cache with named refresh points rather than
@@ -21,7 +22,7 @@ use gpui::{App, BorrowAppContext, Global};
 use daruda_agent::accounts::auth_status::AuthStatus;
 use daruda_store::accounts::AccountsState;
 
-pub(crate) use super::account_login_ops::LoginTarget;
+pub(crate) use daruda_agent::accounts::LoginTarget;
 
 /// Process-wide auth-status cache, keyed by the credentials it describes.
 pub(crate) struct AuthStatusGlobal {
@@ -40,8 +41,8 @@ pub(crate) struct AuthStatusGlobal {
 
 impl Global for AuthStatusGlobal {}
 
-/// Install the (empty) cache if absent. Idempotent; called defensively from
-/// every window that reads it, since either window kind may open first.
+/// Install the (empty) cache if absent. Idempotent; every writer calls it, so
+/// the first probe installs it whichever window starts one.
 pub(crate) fn install_if_absent(cx: &mut App) {
     if !cx.has_global::<AuthStatusGlobal>() {
         cx.set_global(AuthStatusGlobal {

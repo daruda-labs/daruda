@@ -63,7 +63,7 @@ pub(super) fn agent_install_banner(
                 return;
             };
             let weak = workspace.clone();
-            crate::workspace::dialog_helpers::open_confirm_dialog(
+            crate::ui::dialog::open_confirm_dialog(
                 surface_strings::claude::consent_title(),
                 surface_strings::claude::consent_body(),
                 surface_strings::claude::consent_confirm(),

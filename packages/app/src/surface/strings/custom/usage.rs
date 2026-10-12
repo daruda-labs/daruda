@@ -5,7 +5,7 @@ use crate::surface::strings as s;
 /// the generic [`s::usage::no_provider`] notice, which would misleadingly claim
 /// nobody is signed into anything.
 pub(crate) fn no_domain_provider(recipe: daruda_store::accounts::AccountRecipeId) -> String {
-    rust_i18n::t!("usage.no_domain_provider", domain => s::settings::account_recipe_label(recipe))
+    rust_i18n::t!("usage.no_domain_provider", domain => daruda_settings::labels::account_recipe_label(recipe))
         .into_owned()
 }
 

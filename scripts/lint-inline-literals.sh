@@ -7,7 +7,7 @@
 # `gpui::white()` and `px(2.0)` drift away from theming and break the
 # moment a future theme/dpi change is wired up.
 #
-# This script grep-walks `packages/` and `crates/` and fails when any tracked file
+# This script grep-walks `packages/` and fails when any tracked file
 # introduces a banned literal *outside* the few definition sites that
 # are allowed to use them. See CLAUDE.md G4 for the rule + exceptions.
 #
@@ -63,12 +63,6 @@ is_whitelisted() {
     # in `simulate_click(point(px(4.0), px(6.0)))` are load-bearing test
     # input rather than styling literals.
     [[ "$file" == packages/visual-tests/* ]] && return 0
-    # Vendored upstream crates (longbridge/gpui-component, Apache-2.0).
-    # Their inline px / color literals are part of the upstream design
-    # and intentionally not routed through daruda's theme module.
-    [[ "$file" == crates/gpui_component/* ]] && return 0
-    [[ "$file" == crates/gpui_component_macros/* ]] && return 0
-    [[ "$file" == crates/ferrum_flow/* ]] && return 0
     return 1
 }
 
@@ -79,15 +73,16 @@ violations=0
 FILES=()
 while IFS= read -r line; do
     FILES+=("$line")
-done < <(git ls-files 'packages/**/*.rs' 'crates/**/*.rs')
+done < <(git ls-files 'packages/**/*.rs')
 
 for file in "${FILES[@]}"; do
     if is_whitelisted "$file"; then
         continue
     fi
 
-    # Perl one-liner: stop scanning at the first `#[cfg(test)]` so
-    # in-file test modules don't trip the lint. Matches:
+    # Perl one-liner: stop scanning at a `#[cfg(test)]` module so in-file
+    # test modules don't trip the lint. Only a module: a `#[cfg(test)]` field
+    # or fn ahead of production code must not hide what follows it. Matches:
     #   gpui::white() / black() / red() / green() / blue() / yellow()
     #     / transparent_black()  — base colors that should be theme consts
     #   hsla(<numeric>...)        — inline color definition outside theme
@@ -99,7 +94,12 @@ for file in "${FILES[@]}"; do
     #   gpui::white().opacity(<UPPER_IDENT>)  — already-named alpha is
     #     the documented exception in CLAUDE.md G4
     output=$(perl -ne '
-        if (/^\s*#\[cfg\(test\)\]/) { last; }
+        # A `#[cfg(test)]` module, the attribute alone or on the `mod` line;
+        # other attributes, comments and blank lines may sit in between.
+        if ($cfg_test && /^\s*(?:pub(?:\([^)]*\))?\s+)?mod\s/) { last; }
+        if (/^\s*#\[cfg\(test\)\]\s*(?:pub(?:\([^)]*\))?\s+)?mod\s/) { last; }
+        if (/^\s*#\[cfg\(test\)\]/) { $cfg_test = 1; }
+        elsif (!/^\s*(?:#\[|\/\/|$)/) { $cfg_test = 0; }
         my $color = /gpui::(?:white|black|red|green|blue|yellow|transparent_black)\(\)/;
         my $color_named_alpha = /gpui::(?:white|black|red|green|blue|yellow|transparent_black)\(\)\.opacity\(\s*[a-zA-Z_][A-Za-z0-9_:]*\s*\)/;
         my $hsla = /\bhsla\(\s*-?[0-9]/;

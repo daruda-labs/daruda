@@ -7,10 +7,13 @@ daruda uses [rust-i18n v3](https://github.com/longbridgeapp/rust-i18n).
 `ko.yml` is the Korean translation. Both files must stay in sync.
 
 A package that draws its own UI owns its own `locales/`:
-`packages/terminal/locales/` (terminal view) and
-`packages/transcript/locales/` (the fold / filter / tail-window editors,
-generated through `strings_gen` like this crate's).
-A string those editors show goes there, not into `agent_chat:` here.
+`packages/terminal/locales/` (terminal view),
+`packages/transcript/locales/` (the fold / filter / tail-window editors),
+`packages/chat/locales/` (the chat pane itself) and
+`packages/settings/locales/` (the Settings surface), the last three generated
+through `strings_gen` like this crate's. A string one of those shows goes
+there; this crate's `agent_chat:` and `settings:` keep only what the app shows
+around them (composer chips, connect failures, the status bar, login toasts).
 
 ## `common:` section — shared tokens
 

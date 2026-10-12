@@ -257,7 +257,12 @@ impl AgentChatView {
         }
     }
 
-    pub fn toggle_fold(&mut self, key: FoldKey, window: &mut Window, cx: &mut Context<Self>) {
+    pub(crate) fn toggle_fold(
+        &mut self,
+        key: FoldKey,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         // Resolve the context via the shared `fold_context` — the same source
         // `rows::project` uses to derive the default collapsed state — so the
         // first click flips the *visible* state rather than a stale re-derivation.

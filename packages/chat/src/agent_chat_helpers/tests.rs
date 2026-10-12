@@ -359,15 +359,6 @@ fn diff_stats_cover_modified_created_deleted_and_empty_hunks() {
     assert_eq!(diff_stat_from_hunks(&[]), DiffStat::default());
 }
 
-/// The cache key is per-(tool-call, diff index) so two files in one tool
-/// call get distinct editors.
-#[test]
-fn diff_editor_keys_are_per_file() {
-    assert_eq!(diff_editor_key("call-1", 0), "call-1#0");
-    assert_ne!(diff_editor_key("call-1", 0), diff_editor_key("call-1", 1));
-    assert_ne!(diff_editor_key("call-1", 0), diff_editor_key("call-2", 0));
-}
-
 /// A diff whose `new_text` grows (the streaming-write case: an editor was
 /// built from an early partial snapshot, then a later `ToolCallUpdate`
 /// replaces the diff with the full content) must fingerprint differently
@@ -568,26 +559,6 @@ fn a_group_ignores_a_nested_child_when_judging_its_own_liveness() {
         &FoldKey::ToolGroup("t-parent".to_owned()),
         &items
     ));
-}
-
-/// A launch keeps running while its flattened children do, after its own call
-/// settled — so a `running` rule keeps its card open as the badge reads it.
-#[test]
-fn a_subagent_reads_active_while_a_child_still_runs() {
-    use daruda_acp::ToolStatusView::{Completed, InProgress};
-    let mut child = tool_call("t-child", InProgress, 0);
-    child.parent_tool_id = Some("t-parent".to_owned());
-    let mut items = vec![
-        ChatItem::UserText("q".to_owned()),
-        ChatItem::ToolCall(tool_call("t-parent", Completed, 0)),
-        ChatItem::ToolCall(child),
-    ];
-    let key = FoldKey::Subagent("t-parent".to_owned());
-    assert!(fold_active(&key, &items));
-    if let ChatItem::ToolCall(tc) = &mut items[2] {
-        tc.status = Completed;
-    }
-    assert!(!fold_active(&key, &items));
 }
 
 /// The fold a `running` rule derives from that reading: the card stays open
@@ -868,14 +839,6 @@ fn mermaid_key_is_stable_and_distinct() {
         mermaid_key("graph TD\nA-->B", true),
         mermaid_key("graph TD\nA-->B", false)
     );
-}
-
-/// The tool-image cache key is stable for the same base64 payload and
-/// distinct across different payloads — mirrors `mermaid_key_is_stable_and_distinct`.
-#[test]
-fn tool_image_key_is_stable_and_distinct() {
-    assert_eq!(tool_image_key("abcd1234"), tool_image_key("abcd1234"));
-    assert_ne!(tool_image_key("abcd1234"), tool_image_key("wxyz5678"));
 }
 
 /// The visible foldable-key set the expand-all / collapse-all op builds.

@@ -1,6 +1,6 @@
 //! Tests for the `gpui_component::Root` modal Tab containment patch.
 //!
-//! `crates/gpui_component/src/root.rs` is patched so the global Tab
+//! `vendor/gpui-component/gpui_component/src/root.rs` is patched so the global Tab
 //! action checks `active_dialogs.last()` and wraps focus back inside
 //! the topmost dialog whenever `window.focus_next` / `focus_prev`
 //! escapes the dialog subtree. A second `focus_within` check parks
@@ -21,7 +21,6 @@ use gpui::{AppContext as _, TestAppContext};
 
 use super::build_workspace;
 use crate::ui;
-use crate::workspace::dialog_helpers;
 
 /// With a zero-tab-stop dialog open (confirm dialog body is plain
 /// text), Tab + Shift+Tab via `window.focus_next` / `focus_prev`
@@ -37,7 +36,7 @@ async fn tab_inside_zero_stop_confirm_dialog_is_safe(cx: &mut TestAppContext) {
     cx.run_until_parked();
 
     cx.update_window(window_handle.into(), |_, window, cx| {
-        dialog_helpers::open_confirm_dialog(
+        crate::ui::dialog::open_confirm_dialog(
             "Delete lane",
             "Are you sure?",
             "Delete",

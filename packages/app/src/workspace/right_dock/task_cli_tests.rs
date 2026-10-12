@@ -497,7 +497,7 @@ fn cli_snapshot_refuses_every_input_path(cx: &mut TestAppContext) {
             let before = {
                 let v = view.read(cx);
                 (
-                    v.picked_mode_id_for_test().map(str::to_owned),
+                    v.pane_choices().mode_id,
                     v.picked_model_id().map(str::to_owned),
                 )
             };
@@ -536,13 +536,13 @@ fn cli_snapshot_refuses_every_input_path(cx: &mut TestAppContext) {
             assert_eq!(probe.drain(), (0, false));
 
             let v = view.read(cx);
-            assert!(v.queue().pending_prompts.is_empty());
+            assert!(!v.queue().has_pending());
             assert!(v.items().is_empty());
             assert_eq!(v.session_id(), Some("cli-session"));
             assert!(v.is_read_only());
             assert_eq!(
                 (
-                    v.picked_mode_id_for_test().map(str::to_owned),
+                    v.pane_choices().mode_id,
                     v.picked_model_id().map(str::to_owned)
                 ),
                 before

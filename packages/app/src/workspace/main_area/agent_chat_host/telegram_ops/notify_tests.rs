@@ -94,13 +94,14 @@ async fn a_failed_turn_tells_the_phone_why(cx: &mut gpui::TestAppContext) {
     let (mut outbound, workspace, pane) = bridged_pane(cx);
     workspace.update(cx, |ws, cx| {
         let view = ws.agent_chat_view(pane).cloned().unwrap();
-        view.update(cx, |v, _| {
-            v.items_mut_for_test().push(ChatItem::UserText("go".into()));
-            v.items_mut_for_test().push(ChatItem::Failure(
-                daruda_acp::AcpFailure::TransportClosed {
+        view.update(cx, |v, cx| {
+            v.seed_items_for_test([ChatItem::UserText("go".into())], cx);
+            v.seed_items_for_test(
+                [ChatItem::Failure(daruda_acp::AcpFailure::TransportClosed {
                     message: "adapter exited".into(),
-                },
-            ));
+                })],
+                cx,
+            );
         });
         ws.fire_activity_completion(pane, daruda_chat::view::TurnOutcome::Errored, cx);
         let ping = sent(&mut outbound);
@@ -170,25 +171,28 @@ async fn a_completed_run_is_summarised_in_one_line(cx: &mut gpui::TestAppContext
     let (mut outbound, workspace, pane) = bridged_pane(cx);
     workspace.update(cx, |ws, cx| {
         let view = ws.agent_chat_view(pane).cloned().unwrap();
-        view.update(cx, |v, _| {
+        view.update(cx, |v, cx| {
             let mut nested = tool("nested", K::Execute);
             let ChatItem::ToolCall(nested_call) = &mut nested else {
                 unreachable!()
             };
             nested_call.parent_tool_id = Some("e1".into());
-            v.set_items_for_test(vec![
-                ChatItem::UserText("go".into()),
-                tool("e1", K::Edit),
-                tool("e2", K::Edit),
-                tool("x1", K::Execute),
-                nested,
-                ChatItem::AssistantText {
-                    text: "done".into(),
-                    streaming: false,
-                    message_id: None,
-                    phase: Default::default(),
-                },
-            ]);
+            v.seed_items_for_test(
+                vec![
+                    ChatItem::UserText("go".into()),
+                    tool("e1", K::Edit),
+                    tool("e2", K::Edit),
+                    tool("x1", K::Execute),
+                    nested,
+                    ChatItem::AssistantText {
+                        text: "done".into(),
+                        streaming: false,
+                        message_id: None,
+                        phase: Default::default(),
+                    },
+                ],
+                cx,
+            );
             v.record_turn_for_test(std::time::Duration::from_secs(125));
         });
         ws.fire_activity_completion(pane, daruda_chat::view::TurnOutcome::Completed, cx);
@@ -228,7 +232,7 @@ async fn a_permission_to_edit_a_file_shows_the_edit(cx: &mut gpui::TestAppContex
     };
     workspace.update(cx, |ws, cx| {
         let view = ws.agent_chat_view(pane).cloned().unwrap();
-        view.update(cx, |v, _| {
+        view.update(cx, |v, cx| {
             let ChatItem::ToolCall(mut call) = tool("t1", daruda_acp::ToolKindView::Edit) else {
                 unreachable!()
             };
@@ -237,7 +241,7 @@ async fn a_permission_to_edit_a_file_shows_the_edit(cx: &mut gpui::TestAppContex
                 old_text: Some("old line\n".into()),
                 new_text: "new line\n".into(),
             }];
-            v.items_mut_for_test().push(ChatItem::ToolCall(call));
+            v.seed_items_for_test([ChatItem::ToolCall(call)], cx);
         });
         ws.relay_permission_wait_to_telegram(pane, &prompt, cx);
         let TelegramTail::Markdown(tail) = sent(&mut outbound).tail else {

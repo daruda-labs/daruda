@@ -232,7 +232,7 @@ Run these before committing:
 cargo fmt --all -- --check
 cargo clippy -p ghostty_vt -p ghostty_vt_sys -p daruda_terminal -p daruda \
   -p daruda_config -p daruda_store -p daruda_agent -p daruda_update \
-  -p daruda_acp -p daruda_core -p daruda_flow -p daruda_project -p daruda_ui -p daruda_control_types -p daruda_content -p daruda_flow_edit -p daruda_transcript -p daruda_chat -p ferrum_flow -p strings_gen \
+  -p daruda_acp -p daruda_core -p daruda_flow -p daruda_project -p daruda_ui -p daruda_control_types -p daruda_content -p daruda_flow_edit -p daruda_transcript -p daruda_chat -p daruda_settings -p ferrum_flow -p strings_gen \
   --all-targets -- -D warnings
 ./scripts/lint-inline-literals.sh
 ./scripts/lint-paint-scope.sh
@@ -243,7 +243,7 @@ cargo clippy -p ghostty_vt -p ghostty_vt_sys -p daruda_terminal -p daruda \
 ./scripts/lint-viewport-row-scroll.sh
 cargo test -p ghostty_vt -p ghostty_vt_sys -p daruda_terminal -p daruda \
   -p daruda_config -p daruda_store -p daruda_agent -p daruda_update \
-  -p daruda_acp -p daruda_core -p daruda_flow -p daruda_project -p daruda_ui -p daruda_control_types -p daruda_content -p daruda_flow_edit -p daruda_transcript -p daruda_chat -p ferrum_flow -p strings_gen
+  -p daruda_acp -p daruda_core -p daruda_flow -p daruda_project -p daruda_ui -p daruda_control_types -p daruda_content -p daruda_flow_edit -p daruda_transcript -p daruda_chat -p daruda_settings -p ferrum_flow -p strings_gen
 ./scripts/lint-no-silent-update.sh
 ./scripts/lint-agent-activity.sh
 ./scripts/lint-daruda-path-literals.sh
@@ -295,7 +295,8 @@ To check that a build opens its window without a desktop, install
 Both land in `target/packages/`. The `.deb` installs `/usr/bin/daruda`, the
 launcher entry (`scripts/linux/daruda.desktop`), and the hicolor icons;
 `dpkg-shlibdeps` derives its `Depends` from the binary, plus what is loaded
-at runtime and so absent from it: `libvulkan1` and the Wayland client libraries. The tar.gz runs from wherever it is extracted.
+at runtime and so absent from it: `libvulkan1` and the Wayland client
+libraries. The tar.gz runs from wherever it is extracted.
 Neither updates itself: Settings › About announces a newer release and the
 package is reinstalled from it. `--profile debug --skip-build` packages an
 existing debug build.
@@ -421,20 +422,22 @@ daruda/
 │   ├── terminal/               # daruda_terminal: terminal emulation, GPUI rendering
 │   ├── transcript/             # daruda_transcript: transcript presentation model + editors
 │   ├── chat/                   # daruda_chat: the agent chat pane view
+│   ├── settings/               # daruda_settings: the Settings surface and the config store
 │   ├── ui/                     # daruda_ui: domain-free widgets and theme bridge
 │   ├── update/                 # daruda_update: app update checking
 │   ├── ghostty-vt/             # ghostty_vt: safe Rust wrapper over libghostty-vt
 │   ├── ghostty-vt-sys/         # ghostty_vt_sys: Zig C FFI bindings
 │   └── visual-tests/           # visual_tests: offscreen render snapshot tests
-├── crates/                     # vendored third-party packages only
-│   ├── ferrum_flow/            # vendored node-graph canvas
-│   └── gpui_component*/        # vendored gpui-component crates
 ├── tools/
 │   ├── acp_replay/             # ACP wire-log replay helper
 │   ├── gen_acp_presets/        # generated agent preset drift gate
 │   ├── gen_licenses/           # third-party license manifest generator
 │   └── vt_dump/                # headless VT diagnostic CLI
-├── vendor/ghostty/             # Ghostty v1.2.3 submodule
+├── vendor/                     # third-party sources, one directory per upstream
+│   ├── ghostty/                # Ghostty v1.2.3 submodule
+│   ├── zed/                    # patched GPUI; regenerate with tools/vendor_gpui
+│   ├── gpui-component/         # vendored gpui-component crates
+│   └── ferrum-flow/            # vendored node-graph canvas
 └── scripts/
 ```
 

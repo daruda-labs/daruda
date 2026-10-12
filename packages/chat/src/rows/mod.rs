@@ -15,7 +15,7 @@ use super::transcript_structure::{TranscriptStructure, response_run};
 // Re-exported so the many callers that reach these through `rows` keep one
 // path; `tool_status` is the definition site and what breaks the cycle with
 // `agent_chat_helpers`.
-pub use super::tool_status::LiveSubagentUnits;
+pub(crate) use super::tool_status::LiveSubagentUnits;
 pub(crate) use super::tool_status::{effective_tool_status, tool_or_subtree_live};
 use daruda_transcript::display_filter::DisplayFilter;
 use daruda_transcript::tool_category::{ToolCategory, tally_categories};
@@ -32,7 +32,7 @@ pub(crate) use foldable_keys::collect_foldable_keys;
 /// call settles, and letting that move the number made it climb to the group's
 /// size and drop back mid-turn, reporting one cut two ways seconds apart.
 #[derive(Clone, Copy, Default, PartialEq, Eq, Debug)]
-pub struct FilteredAway {
+pub(crate) struct FilteredAway {
     /// Blocks the filter took out of this run.
     pub(super) revealable: usize,
 }
@@ -82,7 +82,7 @@ impl GroupFilter {
 }
 
 /// Projected row kinds keyed by stable item or group identity.
-pub enum RowKind {
+pub(crate) enum RowKind {
     User(usize),
     /// The marker where a Stop cut the run above it. Top-level like
     /// [`RowKind::User`] rather than an item inside the response: it is the
@@ -166,11 +166,11 @@ pub enum RowKind {
     WorkingIndicator,
 }
 
-pub struct RenderRow {
-    pub kind: RowKind,
+pub(crate) struct RenderRow {
+    pub(crate) kind: RowKind,
     /// Hidden rows stay in the sequence to preserve slot stability.
-    pub hidden: bool,
-    pub indent: u8,
+    pub(crate) hidden: bool,
+    pub(crate) indent: u8,
     /// The per-run filter disclosure is open, so rows rejected by the active
     /// display filter are visible again. Header counts, rollups, and nested tool
     /// cards must all use this same answer as the row projection.
@@ -307,7 +307,7 @@ impl RenderRow {
 }
 
 /// Project chat items into stable rows.
-pub fn project(
+pub(crate) fn project(
     items: &[ChatItem],
     fold: &FoldState,
     awaiting_response: bool,
@@ -1067,5 +1067,7 @@ fn tool_id(item: &ChatItem) -> String {
     }
 }
 
+#[cfg(test)]
+mod census;
 #[cfg(test)]
 mod tests;

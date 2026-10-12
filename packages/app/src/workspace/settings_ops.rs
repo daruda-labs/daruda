@@ -8,17 +8,24 @@
 //! is only one place to come back to.
 
 use daruda_config::BuiltinSection;
-use gpui::{AppContext as _, Context, Entity, Subscription, Window};
+use gpui::{App, AppContext as _, Context, Entity, Subscription, Window};
 
-use crate::settings::{LoginRequest, SettingsEvent, SettingsView};
-use crate::workspace::{OpenProjectConfig, Workspace};
+use crate::agent::skills::global::GlobalSkills;
+use crate::window_registry::WindowRegistry;
+use crate::workspace::{
+    OpenProjectConfig, Workspace, accounts_global, agent_vocabulary_global, auth_status_global,
+    settings_update,
+};
+use daruda_settings::{
+    LoginRequest, SettingsEvent, SettingsServices, SettingsView, SharedSnapshot,
+};
 
-/// The Settings view a window is showing, with the subscription carrying its
-/// close request back. Both are built and dropped together, so they are one
-/// value rather than two fields that must agree.
+/// The Settings view a window is showing, with the subscriptions carrying its
+/// requests back and the shared state in. All are built and dropped together,
+/// so they are one value rather than fields that must agree.
 pub(in crate::workspace) struct SettingsHost {
     view: Entity<SettingsView>,
-    _close: Subscription,
+    _subscriptions: Vec<Subscription>,
 }
 
 impl Workspace {
@@ -32,10 +39,28 @@ impl Workspace {
         let view = match self.settings.as_ref() {
             Some(host) => host.view.clone(),
             None => {
-                let data_dir = self.data_dir.clone();
-                let view =
-                    cx.new(|cx| SettingsView::new_with_section(section, data_dir, window, cx));
-                let close = cx.subscribe_in(
+                let shared = SharedSnapshot {
+                    accounts: accounts_global::snapshot(cx),
+                    account_login_busy: accounts_global::login_busy(cx),
+                    auth_statuses: auth_status_global::snapshot(cx),
+                    agent_vocabulary: agent_vocabulary_global::snapshot(cx, &self.data_dir),
+                    plugin_skills: plugin_skills(cx),
+                    update_state: settings_update::update_state(cx),
+                };
+                let remote_integrations: gpui::AnyView = cx
+                    .new(|cx| crate::remote_channel::settings::ChannelSettings::new(window, cx))
+                    .into();
+                let view = cx.new(|cx| {
+                    SettingsView::new_with_section(
+                        section,
+                        shared,
+                        std::rc::Rc::new(HostServices),
+                        remote_integrations,
+                        window,
+                        cx,
+                    )
+                });
+                let events = cx.subscribe_in(
                     &view,
                     window,
                     |this, _, event: &SettingsEvent, window, cx| match event {
@@ -46,11 +71,37 @@ impl Workspace {
                         SettingsEvent::OpenProjectConfig => {
                             this.on_open_project_config(&OpenProjectConfig, window, cx)
                         }
+                        SettingsEvent::AccountsChanged(state) => {
+                            accounts_global::replace(cx, state.clone())
+                        }
+                        SettingsEvent::PluginsChanged => rescan_plugins(cx),
+                        SettingsEvent::Update(command) => settings_update::run(*command, cx),
                     },
                 );
                 self.settings = Some(SettingsHost {
                     view: view.clone(),
-                    _close: close,
+                    _subscriptions: [
+                        events,
+                        cx.observe_global_in::<accounts_global::AccountsGlobal>(
+                            window,
+                            Self::push_settings_accounts,
+                        ),
+                        cx.observe_global_in::<auth_status_global::AuthStatusGlobal>(
+                            window,
+                            Self::push_settings_auth_statuses,
+                        ),
+                        cx.observe_global_in::<agent_vocabulary_global::AgentVocabularyGlobal>(
+                            window,
+                            Self::push_settings_vocabulary,
+                        ),
+                        cx.observe_global::<GlobalSkills>(Self::push_settings_plugin_skills),
+                    ]
+                    .into_iter()
+                    .chain(
+                        crate::update::Updater::get(cx)
+                            .map(|updater| cx.observe(&updater, Self::push_settings_update)),
+                    )
+                    .collect(),
                 });
                 view
             }
@@ -141,6 +192,57 @@ impl Workspace {
         }
     }
 
+    fn push_settings_accounts(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(host) = self.settings.as_ref() else {
+            return;
+        };
+        let accounts = accounts_global::snapshot(cx);
+        let busy = accounts_global::login_busy(cx);
+        host.view
+            .update(cx, |view, cx| view.set_accounts(accounts, busy, window, cx));
+    }
+
+    fn push_settings_auth_statuses(&mut self, _window: &mut Window, cx: &mut Context<Self>) {
+        let Some(host) = self.settings.as_ref() else {
+            return;
+        };
+        let statuses = auth_status_global::snapshot(cx);
+        host.view
+            .update(cx, |view, cx| view.set_auth_statuses(statuses, cx));
+    }
+
+    fn push_settings_vocabulary(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(host) = self.settings.as_ref() else {
+            return;
+        };
+        let vocabulary = agent_vocabulary_global::snapshot(cx, &self.data_dir);
+        host.view.update(cx, |view, cx| {
+            view.set_agent_vocabulary(vocabulary, window, cx)
+        });
+    }
+
+    fn push_settings_update(
+        &mut self,
+        _: gpui::Entity<crate::update::Updater>,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(host) = self.settings.as_ref() else {
+            return;
+        };
+        let state = settings_update::update_state(cx);
+        host.view
+            .update(cx, |view, cx| view.set_update_state(state, cx));
+    }
+
+    fn push_settings_plugin_skills(&mut self, cx: &mut Context<Self>) {
+        let Some(host) = self.settings.as_ref() else {
+            return;
+        };
+        let skills = plugin_skills(cx);
+        host.view
+            .update(cx, |view, cx| view.set_plugin_skills(skills, cx));
+    }
+
     /// Whether Settings is on screen — for tests; `render` matches on
     /// `settings_view` because it needs the entity too.
     #[cfg(test)]
@@ -156,4 +258,55 @@ impl Workspace {
     pub(in crate::workspace) fn settings_view(&self) -> Option<&Entity<SettingsView>> {
         self.settings.as_ref().map(|host| &host.view)
     }
+}
+
+/// What Settings asks of the app: window-wide counts and the Telegram
+/// credential and bridge, none of which a view can reach on its own.
+struct HostServices;
+
+impl SettingsServices for HostServices {
+    fn account_usage(&self, account: daruda_store::accounts::AccountId, cx: &mut App) -> usize {
+        let mut referencing = 0;
+        WindowRegistry::for_each_workspace(cx, |ws, _window, _cx| {
+            referencing += ws.panes_referencing_account(account);
+        });
+        referencing
+    }
+
+    fn telegram_token_stored(&self) -> bool {
+        crate::telegram::keychain::read_token().is_some()
+    }
+
+    fn store_telegram_token(&self, token: &str) -> std::io::Result<()> {
+        crate::telegram::keychain::write_token(token)
+    }
+
+    fn forget_telegram_token(&self) -> std::io::Result<()> {
+        crate::telegram::keychain::delete_token()
+    }
+
+    fn telegram_bot_held_elsewhere(&self, cx: &App) -> bool {
+        crate::telegram::global::TelegramBridge::bot_held_elsewhere(cx)
+    }
+
+    fn new_telegram_pair_code(&self, cx: &mut App) -> String {
+        crate::telegram::global::TelegramBridge::generate_pair_code(cx)
+    }
+}
+
+fn plugin_skills(cx: &App) -> Vec<crate::agent::skills::Skill> {
+    cx.try_global::<GlobalSkills>()
+        .map(|skills| skills.plugin.clone())
+        .unwrap_or_default()
+}
+
+/// Rescan the plugin scope into the app-wide skills; every window's Skills
+/// tab and any open Settings follow from the Global.
+fn rescan_plugins(cx: &mut App) {
+    use gpui::BorrowAppContext as _;
+    let personal = crate::agent::skills::skills_personal_dir();
+    crate::agent::skills::global::init(cx);
+    cx.update_global::<GlobalSkills, _>(|state, _| {
+        state.reload_scope(crate::agent::skills::SkillScope::Plugin, None, &personal);
+    });
 }

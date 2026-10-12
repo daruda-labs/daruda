@@ -23,6 +23,7 @@ use crate::ui::WindowExt as _;
 use crate::ui::{InputEvent, InputState, button, button_group, button_primary, checkbox};
 use crate::workspace::ModalView;
 use crate::workspace::Workspace;
+use daruda_config::env_lines::format_env_lines;
 
 fn blank_to_none(s: &str) -> Option<String> {
     let t = s.trim();
@@ -241,7 +242,7 @@ impl AddMcpServerModal {
         let env = if let Some(d) = self
             .imported
             .as_ref()
-            .filter(|d| crate::agent::mcp::format_env_lines(&d.env) == env_text)
+            .filter(|d| format_env_lines(&d.env) == env_text)
         {
             d.env.clone()
         } else {
@@ -255,7 +256,7 @@ impl AddMcpServerModal {
             if let Some(d) = self
                 .imported
                 .as_ref()
-                .filter(|d| crate::agent::mcp::format_env_lines(&d.headers) == headers_text)
+                .filter(|d| format_env_lines(&d.headers) == headers_text)
             {
                 d.headers.clone()
             } else {

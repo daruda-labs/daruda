@@ -404,7 +404,7 @@ impl Workspace {
         outcome: TurnOutcome,
         cx: &mut Context<Self>,
     ) {
-        if let Some(news) = outcome.agent_outcome() {
+        if let Some(news) = super::lane_status::agent_outcome(&outcome) {
             self.record_agent_outcome(pane_id, news, cx);
         }
         if matches!(outcome, TurnOutcome::Completed) {
@@ -647,7 +647,7 @@ impl Workspace {
                 PaneCwdOutcome::Blocked(s::agent_chat::no_remote_cwd())
             }
             Err(PaneCwdBlocked::UnusableSessionHost(reason)) => PaneCwdOutcome::Blocked(
-                s::agent_chat::session_host_unusable(s::session_host::host_error(reason)),
+                s::agent_chat::session_host_unusable(daruda_settings::labels::host_error(reason)),
             ),
         };
         self.build_agent_chat_pane(outcome, None, agent_id, None, window, cx)
@@ -1734,7 +1734,7 @@ impl Workspace {
 /// where the agent catalog's icons live.
 pub(super) fn agent_identity(id: String, name: String) -> AgentIdentity {
     AgentIdentity {
-        icon: crate::agent::icons::icon_for_agent(&id),
+        icon: daruda_config::agent::icon::icon_for_agent(&id),
         id,
         name,
     }

@@ -7,7 +7,7 @@
 //! the sibling mermaid copy button.
 //!
 //! The app's localized `code_copy_button` renders inside the vendored `TextView`
-//! code-block actions overlay (`crates/gpui_component/src/text/node.rs`), which
+//! code-block actions overlay (`vendor/gpui-component/gpui_component/src/text/node.rs`), which
 //! is hover-revealed against the `"gpui-code-block"` group, so the button
 //! itself stays presentation-neutral (always visible within its
 //! conditionally-visible parent). [`copy_button`] is the icon/tooltip-agnostic

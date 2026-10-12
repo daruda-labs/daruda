@@ -66,7 +66,7 @@ impl AgentChatView {
     }
 
     /// Send `text` from the bottom-dock composer. Sugar over
-    /// [`Self::send_prompt_text_inner`] with [`PromptOrigin::InApp`] — the
+    /// `send_prompt_text_inner` with [`PromptOrigin::InApp`] — the
     /// dispatch outcome is uninteresting since an in-app prompt never arms
     /// the Telegram watch.
     /// Returns the dispatch for the same reason the Telegram form does: a
@@ -77,7 +77,7 @@ impl AgentChatView {
     }
 
     /// Send `text` relayed from a phone-tapped Telegram reply. Sugar over
-    /// [`Self::send_prompt_text_inner`] with [`PromptOrigin::Telegram`] — the
+    /// `send_prompt_text_inner` with [`PromptOrigin::Telegram`] — the
     /// caller needs the returned [`PromptDispatch`] to know whether a
     /// "queued" notice is owed.
     pub fn send_prompt_text_for_telegram(

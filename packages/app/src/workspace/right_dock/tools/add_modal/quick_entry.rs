@@ -1,5 +1,6 @@
 use super::*;
-use crate::agent::mcp::{format_env_lines, import};
+use crate::agent::mcp::import;
+use daruda_config::env_lines::format_env_lines;
 
 impl AddMcpServerModal {
     pub(super) fn review_paste(&mut self, window: &mut Window, cx: &mut Context<Self>) {

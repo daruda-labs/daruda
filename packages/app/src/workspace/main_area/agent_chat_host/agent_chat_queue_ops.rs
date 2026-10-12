@@ -178,7 +178,7 @@ impl Workspace {
         };
         // Reading the view entity here is safe — it is a different entity from
         // `self` (Workspace) and from `InputDock::input`.
-        let found = view.read(cx).queue().find(id).map(|q| q.text.clone());
+        let found = view.read(cx).queue().find(id).map(|q| q.text().to_owned());
         let Some(text) = found else {
             return;
         };

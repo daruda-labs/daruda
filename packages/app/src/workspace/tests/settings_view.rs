@@ -88,7 +88,7 @@ async fn the_view_s_close_event_takes_it_down(cx: &mut TestAppContext) {
 
     cx.update_window(window_handle.into(), |_, _window, cx| {
         view.update(cx, |_, cx| {
-            cx.emit(crate::settings::SettingsEvent::Close);
+            cx.emit(daruda_settings::SettingsEvent::Close);
         });
     })
     .unwrap();
@@ -483,4 +483,152 @@ async fn settings_learns_whether_the_window_has_a_project(cx: &mut TestAppContex
         });
     })
     .unwrap();
+}
+
+/// An account written in Settings reaches every window through the host, and
+/// comes back to the open view the same way a change from elsewhere does.
+#[gpui::test]
+async fn an_account_change_in_settings_is_shared_and_mirrored_back(cx: &mut TestAppContext) {
+    let (window_handle, workspace) = build_workspace(cx);
+    let account = daruda_store::accounts::ManagedAccount {
+        id: daruda_store::accounts::AccountId::new(),
+        recipe: daruda_store::accounts::AccountRecipeId::Claude,
+        email: None,
+        organization: None,
+        config_dir: std::path::PathBuf::from("/tmp/daruda-test-account"),
+        created_at: 0,
+        last_authenticated_at: 0,
+    };
+    let view = cx
+        .update_window(window_handle.into(), |_, window, cx| {
+            workspace.update(cx, |ws, cx| {
+                ws.on_open_settings(
+                    &OpenSettings(daruda_config::BuiltinSection::Accounts),
+                    window,
+                    cx,
+                );
+                ws.settings_view().expect("settings open").clone()
+            })
+        })
+        .unwrap();
+    let mut state = daruda_store::accounts::AccountsState::default();
+    state.accounts.push(account.clone());
+    view.update(cx, |_, cx| {
+        cx.emit(daruda_settings::SettingsEvent::AccountsChanged(state))
+    });
+    cx.run_until_parked();
+
+    cx.update(|cx| {
+        let shared = crate::workspace::accounts_global::snapshot(cx);
+        assert!(shared.find(account.id).is_some(), "the host published it");
+        assert!(
+            view.read(cx).accounts().find(account.id).is_some(),
+            "the open view follows the published state"
+        );
+    });
+}
+
+/// Sign-in readings and agent vocabularies land after Settings opens; the host
+/// pushes both in, and stops once Settings is closed.
+#[gpui::test]
+async fn settings_follows_readings_and_vocabulary_until_it_closes(cx: &mut TestAppContext) {
+    let (window_handle, workspace) = build_workspace(cx);
+    let target = daruda_agent::accounts::LoginTarget::System {
+        recipe: daruda_store::accounts::AccountRecipeId::Claude,
+    };
+    let reading = daruda_agent::accounts::auth_status::AuthStatus {
+        logged_in: true,
+        ..Default::default()
+    };
+    let (view, data_dir) = cx
+        .update_window(window_handle.into(), |_, window, cx| {
+            workspace.update(cx, |ws, cx| {
+                ws.on_open_settings(
+                    &OpenSettings(daruda_config::BuiltinSection::Accounts),
+                    window,
+                    cx,
+                );
+                let view = ws.settings_view().expect("settings open").clone();
+                (view, ws.data_dir.clone())
+            })
+        })
+        .unwrap();
+    let record = |cx: &mut gpui::App, agent: &str| {
+        let ticket = crate::workspace::auth_status_global::begin_probe(cx, target, true)
+            .expect("a superseding probe always starts");
+        crate::workspace::auth_status_global::record(cx, ticket, reading.clone());
+        crate::workspace::agent_vocabulary_global::record(
+            cx,
+            &data_dir,
+            agent,
+            "test",
+            Some(vec![daruda_store::agent_vocabulary::VocabEntry::new(
+                "plan", "Plan",
+            )]),
+            None,
+        )
+        .expect("the vocabulary store is writable");
+    };
+    cx.update(|cx| record(cx, "claude"));
+    cx.run_until_parked();
+    cx.update(|cx| {
+        let view = view.read(cx);
+        assert_eq!(view.auth_statuses().get(&target), Some(&reading));
+        assert_eq!(
+            view.agent_vocabulary(),
+            &crate::workspace::agent_vocabulary_global::snapshot(cx, &data_dir),
+        );
+    });
+
+    cx.update_window(window_handle.into(), |_, window, cx| {
+        workspace.update(cx, |ws, cx| ws.close_settings(window, cx));
+    })
+    .unwrap();
+    let pushed = cx.update(|cx| view.read(cx).agent_vocabulary().clone());
+    cx.update(|cx| record(cx, "codex"));
+    cx.run_until_parked();
+    cx.update(|cx| {
+        assert_eq!(
+            view.read(cx).agent_vocabulary(),
+            &pushed,
+            "a closed Settings is no longer pushed to"
+        );
+    });
+}
+
+/// A plugin-scope rescan reaches an open Settings through its host.
+#[gpui::test]
+async fn settings_follows_the_plugin_scope(cx: &mut TestAppContext) {
+    use gpui::BorrowAppContext as _;
+    let (window_handle, workspace) = build_workspace(cx);
+    let view = cx
+        .update_window(window_handle.into(), |_, window, cx| {
+            workspace.update(cx, |ws, cx| {
+                ws.on_open_settings(
+                    &OpenSettings(daruda_config::BuiltinSection::Plugin),
+                    window,
+                    cx,
+                );
+                ws.settings_view().expect("settings open").clone()
+            })
+        })
+        .unwrap();
+    let skill = crate::agent::skills::Skill {
+        name: "lint".to_string(),
+        dir: std::path::PathBuf::from("/tmp/daruda-test-plugin/skills/lint"),
+        scope: crate::agent::skills::SkillScope::Plugin,
+        frontmatter: Default::default(),
+        body_preview: String::new(),
+        aux_file_count: 0,
+        modified_at: std::time::SystemTime::UNIX_EPOCH,
+        plugin_id: Some("lint@market".to_string()),
+        plugin_availability: None,
+    };
+    cx.update(|cx| {
+        cx.update_global::<crate::agent::skills::global::GlobalSkills, _>(|state, _| {
+            state.plugin = vec![skill.clone()];
+        });
+    });
+    cx.run_until_parked();
+    cx.update(|cx| assert_eq!(view.read(cx).plugin_skills(), [skill]));
 }

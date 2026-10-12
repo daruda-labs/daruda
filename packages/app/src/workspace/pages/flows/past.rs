@@ -70,7 +70,7 @@ pub(super) fn resume_button(
                 // by having clicked a row.
                 let workspace = workspace.clone();
                 let run_dir = run_dir.clone();
-                crate::workspace::dialog_helpers::open_confirm_dialog(
+                crate::ui::dialog::open_confirm_dialog(
                     strings::flow::resume_confirm_title(),
                     strings::flow::resume_confirm_body(),
                     strings::flow::resume_action(),

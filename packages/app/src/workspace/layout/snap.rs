@@ -356,7 +356,7 @@ pub(in crate::workspace) struct RightDockSnapshot {
     /// Whether a manual usage refresh is in flight, so the ⟳ button can
     /// render a disabled / spinning state.
     pub usage_refresh_in_flight: bool,
-    /// Per-lane projection of the app-wide `SkillsState` Global
+    /// Per-lane projection of the app-wide `GlobalSkills`
     /// for the Skills tab renderer. Carried by-value so the panel
     /// renderer never re-enters the workspace entity and never reads
     /// the Global from inside `Render::render`.

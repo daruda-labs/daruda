@@ -25,7 +25,7 @@ pub struct SessionConfig {
     /// Select config options advertised by the agent, replaced wholesale on
     /// `ConfigOptionsChanged`. Never carries a `Mode`-category option:
     /// `daruda_acp` strips it, since [`Self::modes`] already holds that fact.
-    pub config_options: Vec<ConfigOptionView>,
+    pub(crate) config_options: Vec<ConfigOptionView>,
     /// Slash commands the agent advertises, replaced wholesale on
     /// `AvailableCommandsChanged`.
     pub(crate) available_commands: Vec<SlashCommand>,
@@ -45,7 +45,7 @@ impl SessionConfig {
     /// those whose `description` exactly matches an entry of
     /// `hidden_descriptions` (the user's
     /// `[agent] hidden_config_option_descriptions` config). Presentation-only —
-    /// [`Self::config_options`] keeps the full set, so agent pushes and the
+    /// `config_options` keeps the full set, so agent pushes and the
     /// optimistic write path are unaffected.
     ///
     /// Matches on description rather than id because that is where an adapter

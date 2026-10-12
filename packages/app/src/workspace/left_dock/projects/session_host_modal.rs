@@ -18,7 +18,7 @@ use gpui::{
     Subscription, WeakEntity, Window, div, prelude::*, px,
 };
 
-use super::modal_shared::{field_label, session_host_error_to_msg};
+use super::modal_shared::field_label;
 use crate::lane::session_host::{self, LinkStatus};
 use crate::surface::strings as s;
 use crate::ui::Disableable as _;
@@ -255,7 +255,7 @@ impl SessionHostModal {
                 };
                 let path = self.session_path_input.read(cx).value().to_string();
                 session_host::from_registry_entry(entry, &path)
-                    .map_err(|e| SharedString::from(session_host_error_to_msg(e)))
+                    .map_err(|e| SharedString::from(daruda_settings::labels::host_error(e)))
             }
         }
     }
@@ -615,7 +615,7 @@ mod tests {
         modal.read_with(cx, |m, cx| {
             assert_eq!(
                 m.build_host(cx),
-                Err(SharedString::from(session_host_error_to_msg(
+                Err(SharedString::from(daruda_settings::labels::host_error(
                     SessionHostError::Empty(SessionHostField::SessionPath)
                 )))
             );
@@ -634,7 +634,7 @@ mod tests {
         modal.read_with(cx, |m, cx| {
             assert_eq!(
                 m.build_host(cx),
-                Err(SharedString::from(session_host_error_to_msg(
+                Err(SharedString::from(daruda_settings::labels::host_error(
                     SessionHostError::Unsafe(SessionHostField::SessionPath)
                 )))
             );

@@ -1,57 +1,59 @@
 use crate::surface::strings as s;
+use daruda_config::BuiltinSection as Section;
+use daruda_settings::section_label;
 
 pub(crate) fn settings_general() -> String {
-    s::command::settings_section(s::settings::nav_general())
+    s::command::settings_section(section_label(Section::General))
 }
 
 pub(crate) fn settings_appearance() -> String {
-    s::command::settings_section(s::settings::nav_appearance())
+    s::command::settings_section(section_label(Section::Appearance))
 }
 
 pub(crate) fn settings_font() -> String {
-    s::command::settings_section(s::settings::nav_font())
+    s::command::settings_section(section_label(Section::Font))
 }
 
 pub(crate) fn settings_terminal() -> String {
-    s::command::settings_section(s::settings::nav_terminal())
+    s::command::settings_section(section_label(Section::Terminal))
 }
 
 pub(crate) fn settings_workspace() -> String {
-    s::command::settings_section(s::settings::nav_workspace())
+    s::command::settings_section(section_label(Section::Workspace))
 }
 
 pub(crate) fn settings_keymap() -> String {
-    s::command::settings_section(s::settings::nav_keymap())
+    s::command::settings_section(section_label(Section::Keymap))
 }
 
 pub(crate) fn settings_agent() -> String {
-    s::command::settings_section(s::settings::nav_agent())
+    s::command::settings_section(section_label(Section::Agent))
 }
 
 pub(crate) fn settings_orchestrator() -> String {
-    s::command::settings_section(s::settings::nav_orchestrator())
+    s::command::settings_section(section_label(Section::Orchestrator))
 }
 
 pub(crate) fn settings_session_hosts() -> String {
-    s::command::settings_section(s::settings::nav_session_hosts())
+    s::command::settings_section(section_label(Section::SessionHosts))
 }
 
 pub(crate) fn settings_accounts() -> String {
-    s::command::settings_section(s::settings::nav_accounts())
+    s::command::settings_section(section_label(Section::Accounts))
 }
 
 pub(crate) fn settings_notifications() -> String {
-    s::command::settings_section(s::settings::nav_notifications())
+    s::command::settings_section(section_label(Section::Notifications))
 }
 
 pub(crate) fn settings_remote_control() -> String {
-    s::command::settings_section(s::settings::nav_remote_control())
+    s::command::settings_section(section_label(Section::RemoteControl))
 }
 
 pub(crate) fn settings_plugin() -> String {
-    s::command::settings_section(s::settings::nav_plugin())
+    s::command::settings_section(section_label(Section::Plugin))
 }
 
 pub(crate) fn settings_about() -> String {
-    s::command::settings_section(s::settings::nav_about())
+    s::command::settings_section(section_label(Section::About))
 }

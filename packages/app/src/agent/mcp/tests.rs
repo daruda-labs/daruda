@@ -13,8 +13,8 @@ use super::persist::{
     McpServerDraft, delete_server, set_disabled, update_server, write_atomic, write_server,
 };
 use super::{
-    McpLocation, McpScope, McpServer, McpTransport, NameError, format_env_lines, parse,
-    parse_env_lines, validate_command, validate_name, validate_url,
+    McpLocation, McpScope, McpServer, McpTransport, NameError, parse, validate_command,
+    validate_name, validate_url,
 };
 
 /// Read a top-level (`mcpServers`) document into `(servers, raw)` —
@@ -369,53 +369,6 @@ fn validate_command_required_for_stdio_only() {
     assert!(validate_command("", McpTransport::Stdio).is_err());
     assert!(validate_command("", McpTransport::Http).is_ok());
     assert!(validate_command("npx", McpTransport::Stdio).is_ok());
-}
-
-#[test]
-fn parse_env_lines_skips_comments_and_blank_lines() {
-    let text = "# this is a comment\n\nFOO=bar\n  TOKEN=secret\n";
-    let env = parse_env_lines(text).unwrap();
-    assert_eq!(env.get("FOO").unwrap(), "bar");
-    assert_eq!(env.get("TOKEN").unwrap(), "secret");
-    assert_eq!(env.len(), 2);
-}
-
-#[test]
-fn parse_env_lines_trims_value_padding() {
-    let env = parse_env_lines("KEY=  padded  ").unwrap();
-    assert_eq!(env.get("KEY").unwrap(), "padded");
-}
-
-#[test]
-fn parse_env_lines_preserves_embedded_whitespace() {
-    let env = parse_env_lines("MSG=hello world\n").unwrap();
-    assert_eq!(env.get("MSG").unwrap(), "hello world");
-}
-
-#[test]
-fn parse_env_lines_accepts_empty_value() {
-    let env = parse_env_lines("UNSET=").unwrap();
-    assert_eq!(env.get("UNSET").unwrap(), "");
-    assert_eq!(env.len(), 1);
-}
-
-#[test]
-fn parse_env_lines_rejects_bad_form() {
-    assert!(parse_env_lines("no_equals_here").is_err());
-    assert!(parse_env_lines("=novalue").is_err());
-}
-
-#[test]
-fn format_env_lines_round_trip_sorted() {
-    let env: BTreeMap<String, String> = [
-        ("ZED".to_string(), "1".to_string()),
-        ("ALPHA".to_string(), "2".to_string()),
-    ]
-    .into_iter()
-    .collect();
-    let text = format_env_lines(&env);
-    // BTreeMap iteration is sorted — ALPHA precedes ZED.
-    assert!(text.starts_with("ALPHA="));
 }
 
 #[test]

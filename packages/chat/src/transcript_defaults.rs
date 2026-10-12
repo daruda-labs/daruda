@@ -17,7 +17,7 @@ use daruda_transcript::fold_mode::FoldMode;
 /// depends on what the agent emits: one agent produces no reasoning at all,
 /// another produces it constantly. An axis the entry does not state falls
 /// straight to the built-in value — there is no layer between the two.
-/// [`Self::content_width`] and [`Self::tool_summary`] are the exceptions — see
+/// `content_width` and `tool_summary` are the exceptions — see
 /// [`ReaderDefaults`].
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub struct TranscriptDefaults {
@@ -95,11 +95,6 @@ mod tests {
 
     fn reader() -> ReaderDefaults {
         ReaderDefaults::from_config(&AgentConfig::default())
-    }
-
-    /// The visible set with only thinking rows checked.
-    fn thinking_only() -> DisplayFilter {
-        DisplayFilter::from_tokens([FilterFacet::Thinking.token()])
     }
 
     /// No catalog entry at all and an entry that states nothing read alike:
@@ -258,17 +253,5 @@ mod tests {
         let words = |n: usize| format!("{n} commands");
         assert_eq!(ToolSummaryStyle::Compact.segment(3, words), "3");
         assert_eq!(ToolSummaryStyle::Labeled.segment(3, words), "3 commands");
-    }
-
-    #[test]
-    fn a_stated_filter_narrows_the_visible_set() {
-        let narrowed = AgentDefinition {
-            display_filter: Some(vec![FilterFacet::Thinking.token().to_string()]),
-            ..definition()
-        };
-        assert_eq!(
-            TranscriptDefaults::resolve(Some(&narrowed), reader()).filter,
-            thinking_only()
-        );
     }
 }

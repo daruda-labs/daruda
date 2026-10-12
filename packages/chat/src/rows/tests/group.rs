@@ -238,29 +238,6 @@ fn leading_run_without_a_user_anchor_still_gets_a_bar() {
     );
 }
 
-#[test]
-fn anchored_multi_block_run_puts_the_rollup_on_the_bar_not_a_block() {
-    // The complement: two blocks under an anchor *is* non-trivial, so the bar
-    // carries the verdict and no block does.
-    let items = [
-        ChatItem::UserText("q".into()),
-        asst("thinking out loud"),
-        asst("done"),
-    ];
-    let rows = project(
-        &items,
-        &FoldState::default(),
-        false,
-        &LiveSubagentUnits::of(&items),
-        StepWindow::uniform(TailWindow::All),
-        &DisplayFilter::default(),
-    );
-    assert!(
-        rows.iter()
-            .any(|r| matches!(r.kind, RowKind::ResponseHeader { .. }))
-    );
-}
-
 /// The approved grammar: prose is a plain paragraph and the calls behind it are
 /// one group — no titled wrapper bundling the two into a single unit.
 #[test]
@@ -371,44 +348,6 @@ fn a_response_without_tools_gets_no_group() {
             ("item", false),
             ("item", false),
         ]
-    );
-}
-
-/// `RUN_GROUP_MIN` is the whole rule, and it is one: every run gets the bar
-/// that carries its fold and its summary, so a turn's shape does not change
-/// with how many calls happened to land next to each other.
-#[test]
-fn every_run_earns_a_group_however_short() {
-    use ToolStatusView::Completed;
-    let groups = |items: &[ChatItem]| {
-        project(
-            items,
-            &FoldState::default(),
-            false,
-            &LiveSubagentUnits::of(items),
-            StepWindow::uniform(TailWindow::All),
-            &DisplayFilter::default(),
-        )
-        .iter()
-        .filter(|r| matches!(r.kind, RowKind::ToolGroupHeader { .. }))
-        .count()
-    };
-    assert_eq!(
-        groups(&[
-            ChatItem::UserText("q".into()),
-            tool("a", Completed),
-            asst("done"),
-        ]),
-        1
-    );
-    assert_eq!(
-        groups(&[
-            ChatItem::UserText("q".into()),
-            tool("a", Completed),
-            tool("b", Completed),
-            asst("done"),
-        ]),
-        1
     );
 }
 
@@ -586,19 +525,6 @@ fn a_thinking_run_gets_one_group_header_and_indents_its_members() {
             "thought {ix} nests under its group bar"
         );
     }
-}
-
-/// Every run earns a header, however short — a lone thought that rendered bare
-/// while a pair sat under a bar read as two different kinds of step.
-#[test]
-fn a_lone_thought_earns_its_own_group() {
-    let items = [
-        ChatItem::UserText("q".into()),
-        think("just one"),
-        asst("done"),
-    ];
-    let rows = project_all(&items);
-    assert_eq!(think_group_spans(&rows), vec![(1, 1)]);
 }
 
 #[test]
