@@ -145,3 +145,34 @@ fn a_group_leader_is_the_only_thing_killed() {
     let status = child.wait().expect("wait");
     assert!(!status.success(), "the child was signalled");
 }
+
+/// A leader that exits on its own stays an unreaped zombie until waited on,
+/// and Darwin refuses to signal a group of zombies with `EPERM`. That is a
+/// tree with nothing left to stop, not a failure to stop it.
+#[cfg(unix)]
+#[test]
+fn a_tree_whose_leader_already_exited_is_already_stopped() {
+    let mut cmd = command("sh");
+    cmd.arg("-c").arg("exit 0");
+    lead_own_group(&mut cmd);
+    let mut child = cmd.spawn().expect("spawn");
+    let group = Group::try_adopt(child.id()).expect("adopt");
+
+    // SAFETY: `info` is a valid out-parameter; `WNOWAIT` leaves the child
+    // unreaped, so the group id still names it.
+    let waited = unsafe {
+        let mut info: libc::siginfo_t = std::mem::zeroed();
+        libc::waitid(
+            libc::P_PID,
+            child.id() as libc::id_t,
+            &mut info,
+            libc::WEXITED | libc::WNOWAIT,
+        )
+    };
+    assert_eq!(waited, 0, "{}", std::io::Error::last_os_error());
+
+    group
+        .try_kill_tree()
+        .expect("an exited tree counts as stopped");
+    assert!(child.wait().expect("wait").success());
+}

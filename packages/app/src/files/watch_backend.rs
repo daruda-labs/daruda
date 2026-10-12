@@ -69,8 +69,8 @@ impl Reroot {
     }
 }
 
-/// Whether `event` says the watched root itself was removed or renamed —
-/// the one replacement a missing creation stamp leaves the poll blind to.
+/// Whether `event` says the watched root itself was removed or renamed. The
+/// identity poll misses a deleted root whose inode its successor reuses.
 fn moves_root(event: &Event, root: &Path) -> bool {
     matches!(
         event.kind,
@@ -108,9 +108,7 @@ impl WatchBackend {
         let overflow = Arc::new(AtomicBool::new(false));
         // Held only to keep the native watch alive until replaced or stopped.
         let mut _watcher = attach(&root, output.clone(), failed.clone(), overflow.clone())?;
-        let mut root_created = std::fs::metadata(&root)
-            .and_then(|metadata| metadata.created())
-            .ok();
+        let mut root_id = daruda_core::path::file_id(&root).ok();
         let (stop, stopped) = mpsc::channel();
         std::thread::spawn(move || {
             let mut delay = Duration::from_secs(1);
@@ -119,13 +117,10 @@ impl WatchBackend {
                     Err(mpsc::RecvTimeoutError::Timeout) => {}
                     _ => return,
                 }
-                // Windows can keep watching a renamed root's old file handle.
-                // Its creation stamp detects replacement even without a backend error.
-                let metadata = std::fs::metadata(&root).ok();
-                let created = metadata
-                    .as_ref()
-                    .and_then(|metadata| metadata.created().ok());
-                if metadata.is_none() || root_created != created {
+                // Windows keeps watching a renamed root through its old handle
+                // and reports no error; only the name's new identity shows it.
+                let current = daruda_core::path::file_id(&root).ok();
+                if current.is_none() || root_id != current {
                     failed.store(true, Ordering::Release);
                 }
                 if overflow.swap(false, Ordering::AcqRel)
@@ -140,7 +135,7 @@ impl WatchBackend {
                 match attach(&root, output.clone(), failed.clone(), overflow.clone()) {
                     Ok(replacement) => {
                         _watcher = replacement;
-                        root_created = created;
+                        root_id = current;
                         if !deliver(&output, Ok(rescan()), &overflow) {
                             return;
                         }
