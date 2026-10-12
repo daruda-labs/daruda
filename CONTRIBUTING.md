@@ -295,7 +295,8 @@ To check that a build opens its window without a desktop, install
 Both land in `target/packages/`. The `.deb` installs `/usr/bin/daruda`, the
 launcher entry (`scripts/linux/daruda.desktop`), and the hicolor icons;
 `dpkg-shlibdeps` derives its `Depends` from the binary, plus what is loaded
-at runtime and so absent from it: `libvulkan1` and the Wayland client libraries. The tar.gz runs from wherever it is extracted.
+at runtime and so absent from it: `libvulkan1` and the Wayland client
+libraries. The tar.gz runs from wherever it is extracted.
 Neither updates itself: Settings › About announces a newer release and the
 package is reinstalled from it. `--profile debug --skip-build` packages an
 existing debug build.
