@@ -1057,7 +1057,11 @@ impl AgentChatView {
                 // freely, auto-stick to the bottom while streaming. Overdraw
                 // 512px renders a little above/below the viewport so a fast
                 // scroll doesn't flash blank rows.
-                let state = ListState::new(0, ListAlignment::Top, px(512.));
+                let state = ListState::new(
+                    0,
+                    ListAlignment::Top,
+                    px(daruda_ui::theme::list_metrics::CHAT_OVERSCAN),
+                );
                 state.set_follow_mode(FollowMode::Tail);
                 state
             },
