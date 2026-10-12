@@ -124,10 +124,7 @@ impl Workspace {
                 && let Some(recipe) = self.agent_launch_for(v.agent_id()).and_then(|agent| {
                     account_recipe_for_connect(
                         &agent.launch,
-                        matches!(
-                            v.cwd(),
-                            Some(daruda_store::project::PaneCwd::Remote(_))
-                        ),
+                        matches!(v.cwd(), Some(daruda_store::project::PaneCwd::Remote(_))),
                     )
                 })
             {
