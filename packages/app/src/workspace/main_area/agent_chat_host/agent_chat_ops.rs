@@ -404,7 +404,7 @@ impl Workspace {
         outcome: TurnOutcome,
         cx: &mut Context<Self>,
     ) {
-        if let Some(news) = outcome.agent_outcome() {
+        if let Some(news) = super::lane_status::agent_outcome(&outcome) {
             self.record_agent_outcome(pane_id, news, cx);
         }
         if matches!(outcome, TurnOutcome::Completed) {

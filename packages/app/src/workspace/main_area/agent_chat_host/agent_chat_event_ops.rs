@@ -48,7 +48,7 @@ impl Workspace {
         // badge would otherwise freeze at its last animating
         // frame once the pulse stops. Gated on change so
         // token-streaming events don't repaint the docks.
-        let before = view.read(cx).to_session_status();
+        let before = super::lane_status::session_status(view.read(cx));
         // Capture the persisted session identity before the
         // event: `Connected` establishes the live session id
         // and `SessionInfoChanged` sets the title. Both are
@@ -98,7 +98,7 @@ impl Workspace {
         if let Some(outcome) = edge {
             self.fire_activity_completion(pane_id, outcome, cx);
         }
-        if view.read(cx).to_session_status() != before {
+        if super::lane_status::session_status(view.read(cx)) != before {
             self.notify_status_docks(cx);
         }
         // Persist when the session id is newly established

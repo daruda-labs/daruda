@@ -13,27 +13,6 @@ use super::{
 };
 
 impl AgentChatView {
-    /// Map to a [`daruda_agent::SessionStatus`] for the lane indicator.
-    /// `None` for a dormant `Idle`, which has nothing to show; a pane in
-    /// `Error` shows as failed rather than dropping off the lane row.
-    pub fn to_session_status(&self) -> Option<daruda_agent::SessionStatus> {
-        use daruda_agent::SessionStatus;
-        match &self.status {
-            AgentSessionStatus::Idle => None,
-            AgentSessionStatus::Error { .. } => Some(SessionStatus::Failed),
-            // Runtime prep and the handshake are both connecting sub-phases —
-            // same pulsing badge.
-            AgentSessionStatus::PreparingRuntime(_)
-            | AgentSessionStatus::Connecting
-            | AgentSessionStatus::Handshaking(_) => Some(SessionStatus::Connecting),
-            AgentSessionStatus::Connected => Some(match self.activity_state() {
-                ActivityState::AwaitingPermission => SessionStatus::NeedsAttention,
-                ActivityState::Working => SessionStatus::Working,
-                ActivityState::Idle => SessionStatus::Idle,
-            }),
-        }
-    }
-
     /// Cheap O(1) pre-check: could this pane possibly be busy (turn in flight,
     /// or a subagent seen this session)? When false, `is_busy()` is guaranteed
     /// false without scanning `items` — the gate the pulse uses to skip

@@ -21,4 +21,5 @@ pub(super) mod agent_chat_queue_ops;
 mod agent_default_writer;
 mod attachment_ops;
 mod host_event_ops;
+pub(in crate::workspace) mod lane_status;
 pub(in crate::workspace) mod telegram_ops;

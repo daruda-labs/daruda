@@ -205,7 +205,10 @@ impl Workspace {
     ) -> Vec<(PaneId, SessionStatus)> {
         self.lane_agent_chats()
             .filter_map(|(id, view)| {
-                let status = view.read(cx).to_session_status()?;
+                let status =
+                    crate::workspace::main_area::agent_chat_host::lane_status::session_status(
+                        view.read(cx),
+                    )?;
                 Some((id, status))
             })
             .collect()

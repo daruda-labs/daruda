@@ -208,10 +208,6 @@ fn activity_state_maps_permission_turn_and_background_subagent(cx: &mut gpui::Te
             view.set_turn_in_flight();
             view.items.clear();
             assert_eq!(view.activity_state(), crate::view::ActivityState::Working);
-            assert_eq!(
-                view.to_session_status(),
-                Some(daruda_agent::SessionStatus::Working)
-            );
 
             view.set_turn_idle();
             view.items = vec![tool_call(
@@ -224,10 +220,6 @@ fn activity_state_maps_permission_turn_and_background_subagent(cx: &mut gpui::Te
                 crate::view::ActivityState::Working,
                 "a running background child tool keeps the pane Working after end_turn"
             );
-            assert_eq!(
-                view.to_session_status(),
-                Some(daruda_agent::SessionStatus::Working)
-            );
 
             view.set_turn_idle();
             view.items.clear();
@@ -235,10 +227,6 @@ fn activity_state_maps_permission_turn_and_background_subagent(cx: &mut gpui::Te
             assert_eq!(
                 view.activity_state(),
                 crate::view::ActivityState::AwaitingPermission
-            );
-            assert_eq!(
-                view.to_session_status(),
-                Some(daruda_agent::SessionStatus::NeedsAttention)
             );
 
             view.set_turn_idle();
@@ -251,20 +239,6 @@ fn activity_state_maps_permission_turn_and_background_subagent(cx: &mut gpui::Te
                 view.activity_state(),
                 crate::view::ActivityState::Idle,
                 "a completed child and a top-level running tool are not background activity"
-            );
-            assert_eq!(
-                view.to_session_status(),
-                Some(daruda_agent::SessionStatus::Idle)
-            );
-
-            // A pane that failed shows on its lane row instead of dropping off it.
-            view.status = crate::view::AgentSessionStatus::Error {
-                message: "adapter exited".into(),
-                remedy: daruda_acp::Remedy::NoneAvailable,
-            };
-            assert_eq!(
-                view.to_session_status(),
-                Some(daruda_agent::SessionStatus::Failed)
             );
         })
         .unwrap();

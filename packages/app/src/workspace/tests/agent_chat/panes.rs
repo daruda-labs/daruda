@@ -204,7 +204,7 @@ async fn parked_lane_agent_status_reaches_left_dock_aggregate(cx: &mut TestAppCo
     cx.update_window(window_handle.into(), |_, window, cx| {
         workspace.update(cx, |ws, cx| {
             // An agent chat pane in lane 0 (active) with a turn in flight →
-            // `to_session_status()` is `Working`. Wire it into a tab layout
+            // `lane_status::session_status` is `Working`. Wire it into a tab layout
             // (pane + TabEntry) so it appears in `pane_lane_index`; do it
             // directly rather than via the open action to skip `focus_pane`'s
             // lazy `maybe_connect`, which would spawn a real adapter.
