@@ -86,8 +86,9 @@ for file in "${FILES[@]}"; do
         continue
     fi
 
-    # Perl one-liner: stop scanning at the first `#[cfg(test)]` so
-    # in-file test modules don't trip the lint. Matches:
+    # Perl one-liner: stop scanning at a `#[cfg(test)]` module so in-file
+    # test modules don't trip the lint. Only a module: a `#[cfg(test)]` field
+    # or fn ahead of production code must not hide what follows it. Matches:
     #   gpui::white() / black() / red() / green() / blue() / yellow()
     #     / transparent_black()  — base colors that should be theme consts
     #   hsla(<numeric>...)        — inline color definition outside theme
@@ -99,7 +100,12 @@ for file in "${FILES[@]}"; do
     #   gpui::white().opacity(<UPPER_IDENT>)  — already-named alpha is
     #     the documented exception in CLAUDE.md G4
     output=$(perl -ne '
-        if (/^\s*#\[cfg\(test\)\]/) { last; }
+        # A `#[cfg(test)]` module, the attribute alone or on the `mod` line;
+        # other attributes, comments and blank lines may sit in between.
+        if ($cfg_test && /^\s*(?:pub(?:\([^)]*\))?\s+)?mod\s/) { last; }
+        if (/^\s*#\[cfg\(test\)\]\s*(?:pub(?:\([^)]*\))?\s+)?mod\s/) { last; }
+        if (/^\s*#\[cfg\(test\)\]/) { $cfg_test = 1; }
+        elsif (!/^\s*(?:#\[|\/\/|$)/) { $cfg_test = 0; }
         my $color = /gpui::(?:white|black|red|green|blue|yellow|transparent_black)\(\)/;
         my $color_named_alpha = /gpui::(?:white|black|red|green|blue|yellow|transparent_black)\(\)\.opacity\(\s*[a-zA-Z_][A-Za-z0-9_:]*\s*\)/;
         my $hsla = /\bhsla\(\s*-?[0-9]/;

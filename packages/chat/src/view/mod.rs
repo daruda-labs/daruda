@@ -1054,10 +1054,12 @@ impl AgentChatView {
             list_state: {
                 // Starts empty; `sync_list_after` splices items in as events
                 // arrive. `Top` alignment + `Tail` follow = scroll history up
-                // freely, auto-stick to the bottom while streaming. Overdraw
-                // 512px renders a little above/below the viewport so a fast
-                // scroll doesn't flash blank rows.
-                let state = ListState::new(0, ListAlignment::Top, px(512.));
+                // freely, auto-stick to the bottom while streaming.
+                let state = ListState::new(
+                    0,
+                    ListAlignment::Top,
+                    px(daruda_ui::theme::AGENT_CHAT_LIST_OVERDRAW),
+                );
                 state.set_follow_mode(FollowMode::Tail);
                 state
             },
