@@ -28,7 +28,7 @@ use futures::channel::mpsc::UnboundedSender;
 /// the generic [`crate::node::NodeRuntime::wrap_command`], which wraps whatever
 /// command string it is handed. `@latest` keeps the examples/tests on the newest
 /// adapter, which advertises model / effort / mode as session config options; see
-/// ../CLAUDE.md for the upstream-version policy.
+/// ../AGENTS.md for the upstream-version policy.
 pub(crate) const ADAPTER_NPM_PACKAGE: &str = "@agentclientprotocol/claude-agent-acp@latest";
 
 /// How to launch the ACP agent adapter.

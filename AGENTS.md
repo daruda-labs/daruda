@@ -1,676 +1,334 @@
 # Agent Instructions
 
-Shared instructions for coding agents working in this repository. This file
-is the single source of truth for workflow rules, project conventions,
-architecture notes, verification expectations, and common pitfalls.
+Shared coding-agent rules for daruda. Read the applicable documents in
+[Required Reading](#required-reading) before changing their subsystem.
+Instructions use `AGENTS.md` without parallel `CLAUDE.md` copies. Detailed
+contracts live beside the code in linked reference documents.
+See [agent setup and authoring](CONTRIBUTING.md#coding-agent-instructions)
+for tool support, loading behavior, and maintenance rules.
 
-Claude Code reads `CLAUDE.md`, which imports this file with `@AGENTS.md`.
+## Project Summary
 
-## Where to read first
+Daruda runs multiple AI agents in one desktop window, through ACP chat panes
+or CLI terminal panes. The model is `Workspace -> Project -> Lane`; a Lane is
+a git worktree or plain directory, displayed as "Worktree". Chats in a Lane
+share its working directory and branch. Cross-project state uses
+`LaneRef { project, lane }`, not a lane id alone.
 
-This file is long and the rule that decides a change is rarely the one
-nearest the top. Find the row for what you are about to touch and read
-those first; the rest of this file is reference you come back to.
+A window can hold several Projects, optionally organized into Groups. The
+active focus is one LaneRef, and per-lane caches and MainAreaContext swaps
+must include both project and lane identity. Workspace owns the desktop
+composition; package views receive host data and callbacks rather than
+importing Workspace. Tasks and Flows pages belong to the workspace, not a lane.
 
-Paths point at files that live beside the code and go deeper than this
-one. A `CLAUDE.md` under `packages/` is loaded automatically when you open
-a file near it, but it is worth reading up front — it is where that
-subsystem's real constraints are written down.
-
-| Working on… | Read |
-|---|---|
-| **Anything at all, before committing** | [Pre-commit checks](#pre-commit-checks) · [Verification](#verification) |
-| **Terminal, VT parsing, PTY, scrollback** | `packages/terminal/src/view/CLAUDE.md` · [Pitfalls](#pitfall-prevention-rules) 1 (coordinates), 3 (Zig FFI), 7 (text↔pixel), 8 (paint scope), 9 (palette) |
-| **Agent chat, ACP, adapters, wire log** | `packages/chat/CLAUDE.md` · `packages/transcript/CLAUDE.md` · `packages/acp/CLAUDE.md` · [Pitfall](#pitfall-prevention-rules) 11 (single activity source) |
-| **A widget, a modal, anything visual** | `packages/ui/CLAUDE.md` · [`DESIGN.md`](./DESIGN.md) · [Pitfalls](#pitfall-prevention-rules) 10 (render cost), 12 (mouse buttons) |
-| **A Settings page or the config store** | `packages/settings/CLAUDE.md` · [Cross-profile data isolation](#cross-profile-data-isolation) |
-| **Workspace layout — tabs, panes, docks** | `packages/app/src/CLAUDE.md` · [UI component hierarchy](#ui-component-hierarchy) · [MVU rules](#mvu-flavored-guiding-rules) |
-| **Any string a user will see** | `packages/app/locales/CLAUDE.md` |
-| **Where a new file or crate goes** | [Crate dependency graph](#crate-dependency-graph) · [File-structure rules](#file-structure-rules) · [Change-impact discipline](#change-impact-discipline) |
-| **A daruda-owned environment variable** | `daruda_core::process_env` · [`lint-env-literals.sh`](./scripts/lint-env-literals.sh) |
-| **Anything written to disk or keyed per profile** | [Cross-profile data isolation](#cross-profile-data-isolation) |
-| **Spawning a process, resolving a path or shell** | [Platform capability boundary](#platform-capability-boundary) · [`lint-platform-boundary.sh`](./scripts/lint-platform-boundary.sh) |
-| **A failure path — error, toast, log** | [Error reporting](#error-reporting) |
-| **Checking a change actually renders** | [Visual verification](#visual-verification) · [Driving the captured state](#driving-the-captured-state) |
-| **GPUI entity lifecycle, async re-entry** | [Pitfalls](#pitfall-prevention-rules) 5 (reentrancy), 10 (render cost) · zed at the pinned rev (Pitfall 6) |
+First-party crates live in `packages/`; directory names differ from Cargo
+package names. See [project structure](CONTRIBUTING.md#project-structure),
+[crate dependencies](packages/app/src/REFERENCE.md#crate-dependency-graph), and
+[setup requirements](CONTRIBUTING.md#requirements). License: AGPL-3.0-only.
 
 ## Workflow
 
-### Branch & commit
+### Review Mode
 
-- Work on the `main` branch unless the user asks for a feature branch.
-- Keep commits small and reviewable. Prefer one logical change per
-  commit.
-- Only commit when the user asks. Never push to `origin` without an
-  explicit request from the user.
+- Base review findings on the diff and source files only.
+- Do not run build, test, lint, or compile commands unless the user explicitly
+  requests them in the current review request. This takes precedence over
+  pre-commit instructions. Read-only inspection commands are allowed.
+- If a concern requires execution to confirm, report it as unverified.
 
-### Pre-commit checks
+### Scope and Change Impact
 
-Run these locally and make them pass before committing:
+- Implement only the requested task; avoid speculative refactors and abstractions.
+  Do not leave half-finished paths. Surface a blocker if an end-to-end change
+  cannot be completed. Keep necessary refactors separate with a clear reason.
+- Choose the owning layer before adding a feature. Before changing a public
+  type, signature, enum, or business rule, search all consumers and call sites,
+  verify the change for each, and report the affected sites before editing.
+- Prefer additive, compatible extensions and host-installed callbacks.
+  Repeated mechanical edits across unrelated consumers signal a design to
+  reconsider. Check existing precedents and why they are shaped that way.
+  A new enum variant changes every exhaustive match; an optional hook installed
+  by the host can keep a host-specific behavior local. When two designs are
+  equally correct, prefer the one that touches fewer consumers on the next change.
+  Repeating an identical no-op match arm across unrelated modules is a reason
+  to revisit the extension point, not continue copying it.
+- Priority: Correctness > Maintainability > Performance > Brevity.
+- Before UI/design work or a refactoring/improvement pass, read [DESIGN.md](DESIGN.md)
+  and align the change with its design language.
+- Fix the root cause. If it is upstream, outside scope, or deliberately deferred,
+  name the defect and reason, mark `// WORKAROUND: <cause> - <why deferred>`,
+  and report it. Do not present a workaround as a resolved root cause.
+- Trivial tasks: execute. Moderate tasks (2-5 files, clear scope): give a brief
+  plan. Complex tasks (architecture or ambiguous requirements): research first.
 
-```sh
-cargo fmt --all -- --check
-cargo clippy -p ghostty_vt -p ghostty_vt_sys -p daruda_terminal -p daruda \
-  -p daruda_config -p daruda_store -p daruda_agent -p daruda_update \
-  -p daruda_acp -p daruda_core -p daruda_flow -p daruda_project -p daruda_ui -p daruda_control_types -p daruda_content -p daruda_flow_edit -p daruda_transcript -p daruda_chat -p daruda_settings -p ferrum_flow -p strings_gen \
-  --all-targets -- -D warnings
-./scripts/lint-inline-literals.sh
-./scripts/lint-paint-scope.sh
-./scripts/lint-reentrant-reads.sh
-./scripts/lint-direct-gpui-component.sh
-./scripts/lint-direct-ferrum-flow.sh
-./scripts/lint-no-eprintln.sh
-./scripts/lint-viewport-row-scroll.sh
-./scripts/lint-render-purity.sh
-./scripts/lint-landing-no-disk-read.sh
-./scripts/lint-platform-boundary.sh
-cargo test -p ghostty_vt -p ghostty_vt_sys -p daruda_terminal -p daruda \
-  -p daruda_config -p daruda_store -p daruda_agent -p daruda_update \
-  -p daruda_acp -p daruda_core -p daruda_flow -p daruda_project -p daruda_ui -p daruda_control_types -p daruda_content -p daruda_flow_edit -p daruda_transcript -p daruda_chat -p daruda_settings -p ferrum_flow -p gpui_component -p strings_gen
-./scripts/lint-no-silent-update.sh
-./scripts/lint-agent-activity.sh
-./scripts/lint-daruda-path-literals.sh
-./scripts/lint-env-literals.sh
-./scripts/lint-env-literals.sh --self-test
-./scripts/lint-file-size.sh
-./scripts/lint-mark-dirty-direct-call.sh
-./scripts/lint-fold-header.sh
-./scripts/lint-agent-list-sync.sh
-./scripts/lint-declarative-context-menu.sh
-./scripts/lint-acp-air-gate.sh
-./scripts/lint-raw-mouse-button.sh
-./scripts/lint-raw-mouse-button.sh --self-test
-./scripts/lint-comment-length.sh
-RUSTDOCFLAGS="-D warnings" cargo doc --no-deps \
-  -p daruda_flow -p daruda_project -p daruda_ui -p daruda_control_types -p daruda_content -p daruda_flow_edit -p daruda_transcript -p daruda_chat -p daruda_settings -p daruda_core -p daruda_update -p ghostty_vt_sys \
-  -p ghostty_vt -p daruda_agent
-cargo run -p gen_acp_presets -- --check
-cargo clippy -p daruda --all-features --all-targets -- -D warnings
-cargo test -p daruda --features screenshot
-```
+### Branches and Commits
 
-If a hook fails, fix the underlying issue rather than bypassing it
-(`--no-verify`, `-c commit.gpgsign=false`, etc. are off-limits unless
-the user explicitly asks).
+- Work on `main` unless the user requests a feature branch.
+- Only stage or commit when explicitly asked; push to `origin` only on an
+  explicit request. Keep each commit small and focused on one logical change.
+- Commit format: `<type>: <subject>`, imperative, at most 72 characters.
+  Types: `feat`, `fix`, `refactor`, `perf`, `test`, `chore`, `ci`, `docs`.
+  Body only for a non-obvious reason; no Phase/Step/ticket numbers,
+  diff inventories, or future-work notes.
+- Run the full [pre-commit checks](CONTRIBUTING.md#local-checks) before committing.
+  Fix failures; never bypass hooks with `--no-verify`,
+  `-c commit.gpgsign=false`, or similar unless explicitly requested.
 
-### Scope discipline
+### Language and Documentation
 
-- Implement only what the current task explicitly requires. No
-  speculative refactors or abstractions.
-- When a refactor is needed to keep a change reviewable, do it in a
-  separate commit with a clear reason.
-- Don't leave half-finished code paths in the repo; if a change cannot
-  land end-to-end, pause and surface the blocker instead.
+- Code, identifiers, comments, and Markdown documents are English only.
+  Discuss work in the user's language.
+- Comments explain non-obvious reasons in 2-3 lines, describe current logic,
+  and omit history or restatements of the code.
+- In-progress notes, plans, ADRs, and handoffs belong in a personal document
+  store outside the repository. In-repo Markdown is for maintained documents
+  that ship with the code, including these subsystem instructions.
 
-### Change-impact discipline
+## Required Reading
 
-Before editing a shared or public type, decide the *extension point* — not
-just the change — and pick the one with the smallest blast radius.
+Read each matching row; a cross-package change can require several documents.
+Follow these links explicitly rather than relying on tool-specific loading.
 
-- Before changing any shared/public type, function signature, or enum,
-  grep all usages and call sites first. Don't assume isolated impact;
-  state the blast radius (how many sites this forces you to touch).
-- Prefer additive, backward-compatible changes (a new optional field /
-  parameter, a new opt-in hook) over invasive ones (a new enum variant, a
-  changed signature). A host-specific behavior belongs in an opt-in
-  callback installed where it's needed — not in a shared enum that every
-  exhaustive `match` must now grow an arm for.
-- If a single logical change forces the *same mechanical edit* across many
-  unrelated files (Shotgun Surgery — e.g. an identical no-op `match` arm
-  added in N places), stop: the seam is wrong, redesign rather than push
-  the churn through. Copy-pasting the same edit a second time is the tell.
-- Look for an existing precedent in the same module before inventing a new
-  mechanism, and mirror it only after checking *why* it's shaped that way
-  (an existing enum variant is cheap to match; a *new* one is a breaking
-  change to every consumer).
-- When two designs are equally correct, the one that touches fewer sites on
-  the next change wins (Correctness > Maintainability).
+| Working on | Read |
+|---|---|
+| Committing or changing verification coverage | [Local checks](CONTRIBUTING.md#local-checks), [CI coverage](CONTRIBUTING.md#tests-and-ci) |
+| Terminal, VT, PTY, scrollback, IME, Ghostty FFI | [Terminal instructions](packages/terminal/src/view/AGENTS.md) |
+| Agent chat, ACP, adapters, wire log | [Chat](packages/chat/AGENTS.md), [Transcript](packages/transcript/AGENTS.md), [ACP](packages/acp/AGENTS.md) |
+| Widgets, modals, visual behavior, GPUI lifecycle | [UI instructions](packages/ui/AGENTS.md), [Design](DESIGN.md), [Visual verification](CONTRIBUTING.md#visual-verification) |
+| Theme presets or theme field mappings | [Theme instructions](assets/themes/AGENTS.md) |
+| Settings or the config store | [Settings](packages/settings/AGENTS.md), [Storage isolation](packages/store/AGENTS.md) |
+| Workspace, tabs, panes, docks, actions, files or crates | [App instructions](packages/app/src/AGENTS.md) |
+| User-visible strings | [Localization instructions](packages/app/locales/AGENTS.md) |
+| Persistence, profile keys, credentials, diagnostics | [Store instructions](packages/store/AGENTS.md) |
+| Failure paths, errors, toasts, logs | [App error reporting](packages/app/src/AGENTS.md#error-reporting), [Store](packages/store/AGENTS.md#error-reporting) |
+| Process launch, paths, shells, host identity, environment variables | [Core instructions](packages/core/AGENTS.md) |
+| Images, Mermaid, Markdown shared across chat and file viewer | [Content instructions](packages/content/AGENTS.md) |
+| Vendored dependencies or GPUI reference patterns | [Vendor rules](packages/ui/AGENTS.md#vendor-dependencies), [Patches](patches/README.md), [References](#reference-implementations) |
 
-### Verification
+## Shared Constraints
 
-- On Windows, run non-interactive Cargo and shell checks through
-  `scripts/run-hidden.ps1`, or use `scripts/test-windows.ps1` for the test
-  suite. Their child tools inherit a hidden console while logs and exit
-  codes remain available to the caller.
-- On Windows, nested `powershell.exe`, `pwsh.exe`, and `-EncodedCommand`
-  invocations are allowed, but every newly launched shell must run hidden
-  without opening a visible console window. Launch background shells with
-  `Start-Process -WindowStyle Hidden` or an equivalent hidden process API.
-  `scripts/run-hidden.ps1` hides its child tools only; its parent shells
-  must also be launched hidden. Preserve command output and exit codes.
-- Provide explicit verification steps (commands + expected outcomes)
-  for every non-trivial change.
-- Do not claim to have executed a command unless the tool output for
-  that execution is actually visible in the conversation.
+### Ownership and State
+
+- GPUI imports belong in view/UI code. PTY, config, git, and domain logic stay
+  GPUI-free, in separate files from GPUI-dependent code.
+- `daruda_core` cannot depend on `daruda_*` or GPUI. It is pure by default;
+  registered environment reads and named platform capabilities are the
+  exceptions. See [Core](packages/core/AGENTS.md).
+- App widget access goes through `crate::ui::*`; direct `gpui_component`,
+  `daruda_ui`, or `ferrum_flow` access outside the facade's allowed
+  infrastructure sites is forbidden. Sibling widget packages use
+  `daruda_ui`, never `gpui_component`.
+- Workspace state discarded on lane/project teardown belongs in
+  `workspace/lane_scoped.rs::LaneScoped`; `LaneRuntime` and `FlowRuns` retain
+  their own lifecycle containers.
+- Views dispatch to named operations; Workspace and its `*_ops.rs` own model
+  transitions. Mirrored state has one update site. See
+  [view rules](packages/app/src/AGENTS.md#mvu-flavored-guiding-rules).
+  Handler closures are one-line dispatches to those operations. The exception
+  is layout-geometry caching inside `canvas()` (bounds, hitboxes, scroll offsets),
+  which GPUI requires; it cannot carry model transitions. Other exceptions need
+  a `// SAFETY:`-style comment explaining why.
+  When adding a mirrored field, extend its existing synchronization entry point
+  so initial load, live reload, and later edits cannot drift apart.
+- Encode valid states with enums or grouped values; avoid correlated bools,
+  `Option` fields, and `unreachable!()` over flag combinations. Encapsulate
+  multi-field transitions repeated across call paths behind one function and
+  restricted visibility. See [state modeling](packages/app/src/AGENTS.md#state-modeling).
+
+### Storage and Profile Isolation
+
+A debug or alternate-profile process must not overwrite a release install's
+configuration, status files, activity caches, or credential identifiers.
+The storage resolver snapshots the profile and override once for the process;
+a second directory lookup in domain code can silently bypass that isolation.
+
+- Use purpose-specific `daruda_store::persistence` APIs. `default_data_dir()`
+  remains the compatibility data root; `log_dir()` resolves native profile logs
+  or `<DARUDA_DATA_DIR>/logs`. Non-path identifiers use `profile_suffix()`.
+- Directory discovery belongs to `daruda_core::path::directories`; naming and
+  storage policy belong to private `daruda_store::storage::StorageLayout`.
+  Resolving a path must not move existing data.
+- Workspace repository preparation validates a copy and publishes atomically,
+  preserving old files. Domain code receives the repository, not its root path.
+  Do not relocate config, accounts, managed tools, or locks by changing a resolver.
+- Diagnostic export may read old default logs without copying/deleting them;
+  an explicit data override excludes those compatibility sources.
+
+The deliberate shared-resource exceptions are:
+
+| API | Why it crosses profiles |
+|---|---|
+| `node_install_dir()` | One pinned runtime has identical bytes across profiles. |
+| `flow_lock_root()` | All profiles must share the mutex on the user's working tree. |
+| `remote_lock_root()` | All profiles must share the claim on the same bot account. |
+
+An application-state record is profile-scoped; a claim on an external resource
+must exclude competing profiles. New exceptions require documented reasoning
+and the corresponding `clippy.toml` allowance. Review credential service names
+manually: path-literal checks do not detect a hardcoded Keychain identifier.
+Detailed contracts and enforcement: [Store](packages/store/AGENTS.md).
+
+### Platform Boundaries
+
+Domain code calls named capabilities; platform-dependent OS calls live at the
+boundary. This prevents each consumer from growing its own Windows/Unix
+implementation. Common replacements are:
+
+| Operation | Boundary |
+|---|---|
+| Spawn a concrete executable | `daruda_core::process::command` |
+| Launch a user-typed CLI name or Windows shim | `daruda_core::process::command_on_path` |
+| Own/cancel a child process group | `daruda_core::process::{lead_own_group, Group}` |
+| Normalize or compare paths from different producers | `daruda_core::path::{canonicalize, same_path, is_within, strip_root}` |
+| Choose the interactive shell | `daruda_core::shell::interactive` |
+| Decode a local/remote file URL | `daruda_core::file_url` with explicit `PathStyle` |
+
+Pure platform policy takes values so any host can test it. Reserve `#[cfg]`
+for OS leaves; `cfg!()` still compiles both branches. Gate platform-only imports,
+functions, constants, and generated-string overrides with their callers.
+App-owned desktop capabilities live in `packages/app/src/platform/`;
+credentials, app-launch PATH hydration, and PTY I/O have named separate gates.
+The complete API table, exceptions, and enforcement are in
+[Core](packages/core/AGENTS.md#platform-capability-boundary).
+
+### Errors and Environment
+
+- Daruda-owned environment names are registered in
+  `daruda_core::process_env`; use its read API. Bootstrap writes must prove
+  the process is still single-threaded.
+- Use custom errors with `Display`. New `eprintln!` is forbidden.
+  Workspace failures use `report_error` (toast, details, NDJSON);
+  GPUI-free/pre-Workspace failures use `LogWriter::log`.
+- Handle GPUI update Results with `match`, `?`, or the logging helper.
+  Intentional ignores require `// SILENT-OK: <concrete reason>` on the
+  preceding line. This exception is for inconsequential failures, such as focus
+  restoration after a window closes; an empty reason is invalid. The logging
+  helper is `crate::windows::try_update_workspace_window`, which records a site
+  label. See [error reporting](packages/app/src/AGENTS.md#error-reporting).
+- Every `unsafe` block needs a `// SAFETY:` comment.
+
+### Code and UI
+
+- User-tunable values go through `daruda_config`; pixels and colors use
+  designated theme/component metrics, not literals at ordinary call sites.
+  Escape bytes, VT codes, capacities, strings, and shortcuts also have
+  designated definition modules. See the relevant subsystem instructions.
+- User-visible strings use i18n keys with matching English and Korean entries,
+  generated through `strings_gen`; never embed labels at call sites.
+- One Rust file has one responsibility; `impl Render` has its own file and
+  `actions!()` stays at `mod.rs`. Split mixed responsibilities by domain,
+  move tests to `tests.rs` when they reach 40%, and use directory modules for
+  a single domain over 300 lines. App-specific split guidance is in
+  [G1](packages/app/src/AGENTS.md#g1--responsibility-driven-splits).
+- New modules include `#[cfg(test)] mod tests`.
+- The file viewer and chat have independent Markdown parsers/renderers. Shared
+  behavior must be implemented in both and covered by rendered conformance.
+  Mermaid sources can opt out of host colors, but never the resvg-safe label
+  profile. See [Content](packages/content/AGENTS.md).
+
+### Pitfall-Prevention Rules
+
+These rules apply at callers as well as inside the package that owns the API.
+
+1. **Coordinates:** never mix byte offsets with grid coordinates. Convert window
+   positions through `mouse_position_to_local()`; identify the coordinate space
+   before doing selection, viewport, or scrollback arithmetic.
+2. **Definition sites:** escape bytes, VT codes, capacities, pixels, colors,
+   strings, and shortcuts belong in their designated modules. Ordinary UI
+   callers reuse component metrics and shared scales; read
+   [UI metric ownership](packages/ui/AGENTS.md#token-ownership).
+3. **Zig FFI:** Ghostty enums are `u16`. Range-check before narrowing casts.
+4. **IME:** printable characters follow
+   `replace_text_in_range -> commit_text -> PTY`.
+   Sending them directly from `on_key_down` bypasses composition.
+5. **GPUI re-entry:** reading the same entity inside its render/update can panic.
+   Stage plain snapshots; persistence goes through `mark_dirty_and_save`
+   (`cx.defer`), never direct `persist_state` inside that update.
+   A callback's live `&mut Window` should be used directly; recapturing and
+   re-entering the same window can report "window not found".
+6. **Reference versions:** when consulting GPUI reference implementations,
+   use zed at the pinned revision. See the paths below.
+7. **Text/pixel mapping:** use the shaper's reverse mapping, never
+   `index = offset_px / glyph_advance`; variable shaping and wide characters
+   make fixed-width arithmetic incorrect.
+8. **Paint-scope metrics:** `window.text_style()` and `window.rem_size()` do not
+   provide valid per-pane state outside the paint walk. Events use shared metrics;
+   terminal callers use `cell_layout()`. Its measurement and prepaint exceptions
+   are documented in [Terminal](packages/terminal/src/view/AGENTS.md#paint-scope-metrics).
+9. **Palette units:** the terminal theme's local `hsla()` takes degrees (0-360);
+   GPUI and the UI theme bridge take fractions (0-1). Never use `gpui::hsla`
+   inside the terminal theme file.
+10. **Render cost and caching:** GPUI has no partial window redraw. A dirty view
+    repaints the window tree, while cached sibling views can retain their paint.
+    Never use `window.refresh()` / `cx.refresh_windows()` on hot paths: they
+    bypass every `AnyView::cached`. Reserve them for global invalidation such as
+    theme swaps; use targeted `cx.notify(entity)` otherwise.
+    Cached children must notify when parent-staged snapshots change.
+    Reading or staging an off-screen entity during render re-arms its
+    invalidation, even if its element is never built. Apply the visibility gate
+    before the entity access. See [UI safety](packages/ui/AGENTS.md#gpui-render-and-event-safety).
+11. **Agent activity:** work/completion decisions use `activity_state()`,
+    `is_busy()`, or `activity_elapsed()`, never private prompt `Turn`.
+    A prompt can end while background subagents still run. Completion effects
+    fire through `fire_activity_completion` at the reconciled busy-to-idle edge,
+    not directly from `TurnEnded` / `Error`. Stop settles locally, then consumes
+    its expected cancel acknowledgment; prompts in that window buffer until
+    dispatch is allowed. Preserve the FIFO contract in
+    [Chat](packages/chat/AGENTS.md#activity-and-cancellation).
+12. **Mouse buttons:** raw `window.on_mouse_event::<MouseDownEvent>()` receives
+    every button; explicitly filter `event.button`. `div().on_click()` is
+    left-only, and `.on_mouse_down(MouseButton::X, ...)` names its button.
+    A button-agnostic listener needs `// ANY-BUTTON: <reason>`, such as ending
+    a drag or dismissing on an outside press. The raw-mouse lint also scans
+    vendored code so re-vendoring cannot silently remove the checks.
+
+Terminal details live in [Terminal](packages/terminal/src/view/AGENTS.md);
+rendering and event exceptions live in [UI](packages/ui/AGENTS.md).
+
+### Reference Implementations
+
+When GPUI lifecycle, window-context, or async re-entry behavior is unclear,
+consult the version-matched zed source before changing the implementation.
+GPUI is
+`vendor/zed/crates/gpui/` (pinned source plus daruda patches); other zed
+crates at that revision are in
+`~/.cargo/git/checkouts/zed-a70e2ad075855582/193b55a/crates/`.
+Do not use a standalone clone of a different revision.
+
+## Verification
+
+- Provide commands and expected outcomes for non-trivial changes.
+  Claim execution only when its tool output is present in the conversation.
 - Platform changes require default and all-feature Clippy on macOS, Linux,
-  and Windows. A local pass proves only the host's compiled branches; report
-  other OS results as pending until their CI jobs pass.
-- For UI-visible behavior (rendering, IME, window state), a test suite
-  pass alone is not proof — call out what still needs manual
-  verification.
-
-### Documentation
-
-- In-progress docs stay out of the repo: session handoffs, progress
-  reports, and other short-lived notes do not belong in git.
-- Design notes, plans, ADRs, and session handoffs go to a personal
-  document store outside the repository, not `docs/` or anywhere in the
-  repo.
-- Repo-level `.md` is reserved for files that ship with the code
-  (README, CHANGELOG, in-tree architecture docs the project explicitly
-  maintains, license files). When in doubt, use the vault.
-
-### Language
-
-- Code, identifiers, comments, and Markdown documents: English only.
-- Discussion with the user: whatever language the user uses.
-
-## Project Guide
-
-Run multiple AI coding agents in parallel in a single desktop window. Use separate git worktrees for independent tasks. Talk to an agent in an in-app **chat pane** over the Agent Client Protocol (ACP), or drive its CLI in a **terminal pane**. New chats open in the active `Lane`; chats in the same Lane share its working directory and branch. Macro buttons in the bottom dock send preset commands to any terminal with one click or a keyboard shortcut.
-
-**Concept model**: `Workspace → N × Project (= git repo) → N × Lane`. A `Lane` is a worktree-like space — a checked-out branch (git worktree) or a plain directory — and is the unit a Claude session attaches to. Users see "Worktree" in the UI; "Lane" is the internal type.
-
-**Multi-project workspace**: one window holds N `Project`s (each opened repo root). Projects can be bundled into user-defined `Group`s in the left dock; ungrouped projects render at the same rank as groups. The active focus is a single `LaneRef { project, lane }`, so cross-project state (`MainAreaContext` swap key, per-lane caches) is keyed by ref rather than lane id alone.
-
-### Project layout
-
-```
-daruda/
-├── packages/                 # first-party packages; directory ≠ Cargo package name
-│   ├── app/                  # daruda — main app binary (workspace, agent, ui, lane, surface)
-│   ├── acp/                  # daruda_acp — Agent Client Protocol client core (GPUI-free)
-│   ├── flow/                 # daruda_flow — declarative ACP flow engine (GPUI-free)
-│   ├── flow-edit/            # daruda_flow_edit — source-preserving flow-file edits (GPUI-free)
-│   ├── project/              # daruda_project — runtime Project/Lane model, git/worktree ops (GPUI-free)
-│   ├── core/                 # daruda_core — shared dependency-free utilities + core logic
-│   ├── config/               # daruda_config — config system (live reload)
-│   ├── content/              # daruda_content — image decoding + mermaid rendering shared by file viewer and chat (GPUI-free)
-│   ├── control-types/        # daruda_control_types — control command/answer contract + PaneRef (GPUI-free)
-│   ├── store/                # daruda_store — persistence + observability (NDJSON log)
-│   ├── agent/                # daruda_agent — agent provider integrations
-│   ├── terminal/             # daruda_terminal — terminal emulation + GPUI rendering
-│   ├── transcript/           # daruda_transcript — transcript fold/filter/tool-category model + the editors chat and Settings share
-│   ├── chat/                 # daruda_chat — the agent chat pane (AgentChatView); the app keeps its Workspace host
-│   ├── settings/             # daruda_settings — the Settings surface and the user-config store it edits; the app hosts it
-│   ├── ui/                   # daruda_ui — domain-free widgets + theme bridge (app reaches it via crate::ui)
-│   ├── update/               # daruda_update — app update checking
-│   ├── ghostty-vt/           # ghostty_vt — safe Rust wrapper over libghostty-vt
-│   ├── ghostty-vt-sys/       # ghostty_vt_sys — Zig C FFI bindings
-│   └── visual-tests/         # visual_tests — offscreen render snapshot tests
-├── tools/
-│   ├── acp_replay/            # ACP wire-log replay helper
-│   ├── gen_acp_presets/       # generated agent preset drift gate
-│   ├── gen_licenses/          # generates third-party license manifest
-│   └── vt_dump/               # diagnostic CLI
-├── vendor/                   # third-party sources, one directory per upstream
-│   ├── ghostty/              # Ghostty v1.2.3 submodule
-│   ├── zed/                  # patched GPUI; regenerate with tools/vendor_gpui
-│   ├── gpui-component/       # gpui_component* crates, vendored fork (do not lint/edit — see below)
-│   └── ferrum-flow/          # ferrum_flow, vendored node-graph canvas (do not lint/edit — see below)
-└── scripts/
-```
-
-### Requirements
-
-- **Rust**: 2024 edition (1.95.0+). The floor is declared once in `[workspace.package]` and every first-party crate inherits it with `rust-version.workspace = true`, so clippy's `incompatible_msrv` catches a newer std API at the call site. CI pins the toolchain to exactly 1.95, which is what actually enforces the floor — develop on a newer toolchain freely. The three vendored `gpui_component*` crates deliberately stay undeclared to keep the re-vendor diff a file copy; `ferrum_flow` does declare it, because its manifest is daruda-authored either way and the declaration is what arms `incompatible_msrv` there.
-- **Zig**: 0.14.1 (`./scripts/bootstrap-zig.sh` on macOS/Linux, `./scripts/bootstrap-zig.ps1` on Windows x86_64; alternatively set `ZIG=<path>` or put `zig` on `PATH`)
-- **macOS**: Apple Silicon or Intel + Xcode Command Line Tools — the primary, fully-verified target.
-- **Linux**: built and tested by the `linux` CI job, which gates like the macOS one — the claim is green, not merely measured. The job also runs `--smoke` under Xvfb and a headless sway, so a window that fails to open or paint on either gpui backend fails CI; what no CI can see is a real desktop — input, IME, menus, tray. Released as a `.deb` and a portable tar.gz (`scripts/package-linux.sh`), both smoke-tested by the release workflow. Needs system `libfontconfig`/`libxcb`/`libxkbcommon`/`libwayland`, a Vulkan loader, and real fonts (the job installs them).
-- **Windows**: native MSVC build via `cargo build --locked -p daruda` or `scripts/build-windows.ps1`. The `windows` CI job gates the full test suite and `daruda --smoke` startup. The optional `screenshot` feature captures the visible composed client surface through Windows APIs. Native IME composition and transitions between monitors with different DPI still require desktop verification.
-
-### Build
-
-See [contributor setup](CONTRIBUTING.md#setup) for platform-specific Zig
-installation and source builds, and [packaging](CONTRIBUTING.md#packaging)
-for macOS app and DMG bundles.
-
-### Tests & CI
-
-```bash
-cargo fmt --all -- --check
-cargo clippy -p ghostty_vt -p ghostty_vt_sys -p daruda_terminal -p daruda \
-  -p daruda_config -p daruda_store -p daruda_agent -p daruda_update \
-  -p daruda_acp -p daruda_core -p daruda_flow -p daruda_project -p daruda_ui -p daruda_control_types -p daruda_content -p daruda_flow_edit -p daruda_transcript -p daruda_chat -p daruda_settings -p ferrum_flow -p strings_gen \
-  --all-targets -- -D warnings
-scripts/lint-inline-literals.sh
-scripts/lint-paint-scope.sh
-scripts/lint-reentrant-reads.sh
-scripts/lint-direct-gpui-component.sh
-scripts/lint-direct-ferrum-flow.sh
-scripts/lint-no-eprintln.sh
-scripts/lint-viewport-row-scroll.sh
-scripts/lint-render-purity.sh
-scripts/lint-landing-no-disk-read.sh
-scripts/lint-platform-boundary.sh
-cargo test -p ghostty_vt -p ghostty_vt_sys -p daruda_terminal -p daruda \
-  -p daruda_config -p daruda_store -p daruda_agent -p daruda_update \
-  -p daruda_acp -p daruda_core -p daruda_flow -p daruda_project -p daruda_ui -p daruda_control_types -p daruda_content -p daruda_flow_edit -p daruda_transcript -p daruda_chat -p daruda_settings -p ferrum_flow -p gpui_component -p strings_gen
-scripts/lint-no-silent-update.sh
-scripts/lint-agent-activity.sh
-scripts/lint-daruda-path-literals.sh
-scripts/lint-env-literals.sh
-scripts/lint-env-literals.sh --self-test
-scripts/lint-file-size.sh
-scripts/lint-mark-dirty-direct-call.sh
-scripts/lint-fold-header.sh
-scripts/lint-agent-list-sync.sh
-scripts/lint-declarative-context-menu.sh
-scripts/lint-acp-air-gate.sh
-scripts/lint-raw-mouse-button.sh
-scripts/lint-raw-mouse-button.sh --self-test
-scripts/lint-comment-length.sh
-RUSTDOCFLAGS="-D warnings" cargo doc --no-deps \
-  -p daruda_flow -p daruda_project -p daruda_ui -p daruda_control_types -p daruda_content -p daruda_flow_edit -p daruda_transcript -p daruda_chat -p daruda_settings -p daruda_core -p daruda_update -p ghostty_vt_sys \
-  -p ghostty_vt -p daruda_agent
-cargo run -p gen_acp_presets -- --check
-cargo clippy -p daruda --all-features --all-targets -- -D warnings
-```
-
-While iterating, `cargo test -p daruda -- --skip workspace::tests` is the
-same suite minus the one module that dominates it: measured 2026-09-18,
-`workspace::tests` is 388 of 2,863 app tests (13%) but ~74% of the wall time
-(109s → 29s when skipped), because those tests build a real `Workspace` and
-each tab they open spawns an actual shell. It is an iteration loop, not a
-gate — the [pre-commit checks](#pre-commit-checks) still run everything.
-
-`ci.yml` runs one job per platform — `macOS`, `Linux`, `Windows` — each building and testing the same package list, plus a `Lint` job. The lint work is split out because none of it compiles: `cargo fmt` and the lint scripts read source rather than platform, so running them once on the Linux runner answers in seconds instead of behind a platform build, and a lint failure cannot be mistaken for a test failure.
-
-`scripts/ci-cargo.sh` owns the platform jobs' shared Cargo package coverage.
-Call it through Bash with `clippy`, `app-features`, `test`, or `doc`; extra
-Cargo options follow the gate name. Change package coverage in the script
-rather than copying a new list into each job. The toolchain setup every
-building job shares — Rust, Zig, locked fetch, vendored-GPUI check — is the
-`.github/actions/setup-build` composite action, used by `ci.yml` and
-`release.yml` alike. Linux system packages are listed once in
-`scripts/linux/{build,smoke}-deps.txt`, and the window smoke run is
-`scripts/linux/smoke.sh {x11|wayland} <binary>`, which also runs locally.
-
-What the `Linux` job carries that no lint could is the `#[cfg]` arms the macOS job never compiles: its first three runs turned up two unused imports and a font-resolution defect that left every mermaid label blank on Linux, none of which macOS could have seen.
-
-Note: the `Lint` job gates fmt, the 9 lint scripts through `lint-platform-boundary.sh`, `lint-env-literals.sh` with its self-test, `lint-no-silent-update.sh`, and `lint-agent-activity.sh`. The platform jobs gate the clippy list above and the package-scoped `cargo test` list above; the `cargo doc` link check runs on macOS.
-
-The doc-link gate covers fourteen crates rather than all of them: clippy does not
-read intra-doc links, so a deleted item leaves a dangling `[`Name`]` in the
-prose that explains the module. These fourteen are clean today; the rest carry a
-backlog and join the list a crate at a time as that is worked off. Measured
-2026-09-18: `daruda_config` 8, `daruda_store` 8, `daruda_terminal` 11,
-`daruda_acp` 16, `daruda` 85 — the app crate is most of what is left; 18 of those moved with the chat pane into `daruda_chat` (2026-10-12) and were fixed there. `lint-render-purity.sh`, `lint-daruda-path-literals.sh`, `lint-file-size.sh`, `lint-mark-dirty-direct-call.sh`, `lint-fold-header.sh`, `lint-agent-list-sync.sh`, `lint-declarative-context-menu.sh`, `lint-acp-air-gate.sh`, `lint-raw-mouse-button.sh`, `lint-comment-length.sh`, and `gen_acp_presets -- --check` are local/reviewer checks not yet wired into CI.
-
-`cargo clippy -p daruda --all-features` is on the list, and on all three platform jobs, because every feature is off by default: whatever only `screenshot` or `replay` reaches — the `*_for_shot` seams, `screenshot_scenario`'s two modules, `screenshot.rs` itself — is neither compiled nor linted by the plain clippy run above. A visibility-narrowing pass left the feature uncompilable for a while, and a clippy error in `screenshot.rs` then sat unnoticed for a week, with nothing to say so either time. `--all-features` rather than a named list, so a new feature is covered the day it lands.
-
-`gen_acp_presets -- --check` is the ACP preset drift gate: it regenerates the `// BEGIN GENERATED` block of `packages/config/src/agent/preset.rs` from the committed `tools/gen_acp_presets/registry-snapshot.json` and fails on any difference. It is offline; `scripts/sync-acp-registry.sh` is the separate path that refreshes the snapshot from the live registry.
-
-### Visual verification
-
-Render the UI offscreen to a PNG and read it back — text, layout, colors, images, and toasts all render, permission-free (no Screen Recording grant). Capture goes through gpui's `render_to_image`, gated upstream behind `test-support`; the `--screenshot` path below requires it, plus `gpui_macos/font-kit` (without that feature glyphs don't rasterize — shapes render but **text is invisible**).
-
-**macOS:** offscreen capture uses `MetalHeadlessRenderer`. **Windows:**
-`--screenshot` uses the visible composed client surface instead of
-`render_to_image`, including native fonts and physical DPI-scaled pixels.
-Launch the GUI normally; `run-hidden.ps1` can hide its first window and make
-capture fail. Hidden and uniform blank captures return an error. **Linux:**
-no capture implementation is available; use `daruda --smoke` for startup checks.
-
-**Whole app** — the `--screenshot` flag captures the live workspace window:
-
-```bash
-cargo build -p daruda --features screenshot
-target/debug/daruda --screenshot /tmp/shot.png   # opens, settles ~2s, captures, quits
-```
-
-The opt-in `screenshot` feature enables `gpui/test-support` + `gpui_macos/font-kit`; it is off by default to keep the shipping binary clean. Entry point: `packages/app/src/screenshot.rs`.
-
-Verification loop: render → PNG → an agent reads the PNG and checks the result. This catches both rendering bugs and runtime state (e.g. error toasts), so it doubles as a smoke test of the real app's startup.
-
-#### Driving the captured state
-
-`--screenshot` takes no view argument — it captures the **restored** workspace (empty or not), so you steer it by steering what gets restored *before* launch. Two isolation levers + three reach tiers:
-
-- **`DARUDA_DATA_DIR=<dir>`** — points the whole state dir at `<dir>` (verbatim). Pre-seed it; isolates from your real workspace.
-- **`DARUDA_PROFILE=<name>`** — `release` → `daruda/`, else `daruda-<name>/`. Debug builds already use `daruda-debug/`, so runs are isolated by default.
-
-```bash
-export DARUDA_DATA_DIR=/tmp/daruda-shot-state   # throwaway, pre-seeded state
-cargo build -p daruda --features screenshot && target/debug/daruda --screenshot /tmp/shot.png
-```
-
-**Tier 1 — `config.toml` (appearance, mostly live-reload):** `[theme]` (terminal_preset / ui_preset), `[colors]`, `[font]` (size/spacing/inset), `[cursor]`, `[window]`, `[file_viewer]`, `[left_dock]`, `[panels]`, `[render]`, etc. Does **not** control which tab/pane/view is active — that's Tier 2.
-
-For the UI theme specifically, `--screenshot-theme <light|dark>` overrides `ui_preset` at capture time (via `apply_ui_theme`) without touching config — orthogonal to and composable with `--screenshot-scenario` (e.g. shoot the command palette in light mode). Pass a **comma list** (`light,dark`) for a batch: one PNG per theme in a single launch (output names get a `.<theme>` suffix — `shot.png` → `shot.light.png` / `shot.dark.png`), the scenario stays applied and is re-themed in place between captures.
-
-```bash
-target/debug/daruda --screenshot /tmp/s.png --screenshot-theme light --screenshot-scenario command-palette
-target/debug/daruda --screenshot /tmp/s.png --screenshot-theme light,dark   # batch: s.light.png + s.dark.png
-```
-
-Two more capture knobs (compose with everything above):
-- `--screenshot-size WxH` — fix the captured window size (e.g. `1280x800`) instead of the restored bounds; for stable doc / pixel-regression shots.
-- `DARUDA_SCREENSHOT_SETTLE_MS=<ms>` — override the 2 s post-launch settle (raise on slow CI / big workspaces, lower for quick local shots).
-
-**Tier 2 — persisted state under `DARUDA_DATA_DIR` (layout & structure):** `state/workspace/workspaces/<uuid>.json` (`WorkspaceState`: dock open/size, window bounds, active project+lane, `active_dock_view`, `active_right_panel_view`, focused pane, groups), `state/workspace/projects/<uuid>.json` (`ProjectState`: lanes, tabs, pane split tree, file-pane path + view_mode), `panels.json` (macro grid), `tasks.json` (task list). (Schemas in `daruda_store::project::{WorkspaceState,ProjectState}`.) **Easiest seeding: set `DARUDA_DATA_DIR`, drive the app by hand to the scenario once, quit, re-run with `--screenshot` against the same dir** — no schema guessing.
-
-**Tier 3 — transient / live state: NOT reachable by config or state alone.** Restore recomputes these fresh. The `--screenshot-scenario <name>` flag drives one transient overlay into view after settle and before capture (it forces a repaint since `render_to_image` captures the last *painted* frame). Implemented scenarios: `command-palette`, `lane-switcher` (a real lane whose label is swapped for one wide enough to overflow the popup, so clipping is visible), `error-modal`, `settings` / `settings:<section-slug>` (slug = `BuiltinSection::slug`, e.g. `font`, `keymap`, `notifications`), `settings-error` (the one banner every failed Settings action reports through — a unit test can only see the field behind it), `settings-search` (a query typed into Settings search — the results page and the sidebar narrowed to matching pages with counts), `agent-catalog-expanded` (the Agents & Chat catalog with its first card and that card's advanced block open, the preset lists narrowed by a query — Settings restores every card folded), `agent-catalog-editor` / `agent-catalog-editor:<axis>` (axis = `fold`, `filter`, `range`; that card with one transcript editor's popover open — a closed field shows only its trigger; the fold axis is taken off the built-in in memory only, tool categories open), `toast`, `pane-context-menu`, `mermaid-lightbox`, `landing` (the empty-workspace Landing view — a capture always restores a workspace that has projects, so this is the only way to reach what `NewEmptyWindow` and a last-project close land on), `client-chrome` (the title bar as Windows and Linux get it — drag strip plus the app-drawn minimize / maximize / close, which a macOS host resolves away; the real traffic lights still paint over the left inset, so this shot speaks for the right edge and the spacing, not for the left), `tab-indicators` (one tab per status dot — working, waiting, failed, and the two unseen outcomes — behind a resting tab; the dots differ by colour alone, which only a capture can judge); agent chat: `agent-chat`, `agent-chat-working` (mid-turn — the run's last prose sits inside a step, the one shape the settled seed cannot reach), `agent-chat-narrowed`, `agent-chat-fold`, `agent-chat-interrupted` (a run a Stop cut, closed by the marker), `agent-chat-cli-running` / `agent-chat-cli-ended` (a Terminal task's transcript mirrored read-only — the composer replaced by the CLI status row, refresh only while the CLI runs, Continue once its exit is confirmed), `agent-chat-queue-parked` / `agent-chat-queue-armed` (the queued-prompt strip holding a queue a Stop parked, before and after an empty-composer Enter arms the resume gesture — a restored pane has no queue, so the strip is reachable no other way), `agent-chat-sole-reply` (prose-only replies — the `/usage` shape — with the first reply's own fold shut and the second open; such a run renders one block, which the response bar cannot fold), `agent-chat-running-tool` (a tool card mid-call, the one badge state a settled seed cannot reach and the only one carrying a number), `agent-chat-plan` / `agent-chat-plan-stopped` (the plan region mid-run and after a Stop — its four status icons carry meaning by shape, which only a capture can judge), `agent-chat-tail` / `agent-chat-tail-open` (the tail window's boundary row closed / open, nothing floating over it), `agent-chat-group-tail` / `agent-chat-group-tail-open` (the same boundary one level in — a tool group holding more calls than the window keeps, closed / open), `agent-chat-subagent-tail` / `agent-chat-subagent-tail-open` (the same boundary inside a subagent card, whose flattened children own no row, closed / open), `agent-chat-empty`, `agent-chat-failure`, `agent-chat-options[:<tab>]` (tab = `ActivityOptionsTab::token` — `fold`, `filter`, `recent-steps`; the compact Activity Bar with the combined popover on that tab, every axis adjusted and a context meter seeded), `agent-chat-thoughts` / `agent-chat-thoughts-working` / `agent-chat-thoughts-only` (one tool group holding the thoughts between its calls under a call window narrower than it — settled, mid-turn on a thought no call follows yet, and filtered down to its thoughts); flows: `flow-picker`, `flow-profile-picker`, `flow-running`, `flow-asking`, `flow-resumable`, `flow-graph`, `flow-graph-running`, `flow-graph-form`, `flow-graph-form-refused`, `flow-graph-pinned`, `flow-graph-authoring`, `flow-run-detail` (a past run's report as the Flows page's detail, written to a temp directory), `flow-delete-confirm`. Agent-chat scenarios are seeded through `AgentChatView::seed_transcript_for_shot`, so no ACP session is needed. Add a variant to `ScreenshotScenario` + `screenshot_scenario::drive` (`packages/app/src/workspace/screenshot_scenario/`; its CLI name goes in `names.rs`) to cover more. The rest below still need a real backing source, not just a scenario:
-
-```bash
-target/debug/daruda --screenshot /tmp/shot.png --screenshot-scenario command-palette
-target/debug/daruda --screenshot /tmp/s.png   --screenshot-scenario settings:font
-```
-
-| State | On restore |
-|---|---|
-| Modals, command palette, Settings | closed — use `--screenshot-scenario` (`error-modal`, `command-palette`, `settings[:<slug>]`, `settings-error`) |
-| Toasts | empty queue — use `--screenshot-scenario toast` |
-| Drag / hover / text selection | gone (real-time only) |
-| Terminal output | fresh shell prompt — scrollback is **not** persisted |
-| File-viewer content / git-changes | reloaded from disk — needs **real files / git repo** |
-| Usage / Skills / Tools panels | fetched fresh (net / FS / MCP); cold → placeholder |
-| Agent-chat transcript | not persisted — `SerializedAgentChatContent` stores only the pane's cwd / `session_id` / title / agent + account / view preferences, and a restored pane is refilled by the adapter replaying the conversation on `session/load`. For a capture, use the `agent-chat*` scenarios: they seed a fixed transcript and need no session |
-| Live Claude session badge | in-memory — needs a real attached session |
-
-### Coding Best Practices
-
-**Design reference**: before any UI/design work or refactoring/improvement pass, read [`DESIGN.md`](./DESIGN.md) — the design language (colors, surface ladder, typography, accent rules, component chrome). Align changes with it.
-
-**Priority order** when trade-offs arise: Correctness > Maintainability > Performance > Brevity
-
-**Root-cause priority**: fix the root cause, not the symptom — never ship a band-aid when the underlying defect is reachable.
-- When a workaround is the only thing that comes to mind, that is the signal to stop and surface the root problem **first**: name the actual defect, where it lives, and why the symptom appears — then decide whether to fix it or, only with explicit reason, defer.
-- A workaround is acceptable **only** when the root cause is out of scope (upstream dependency, separate subsystem, or deliberately deferred). In that case, mark it inline (`// WORKAROUND: <root cause> — <why deferred>`) and report it; never let it pass silently as if the problem were solved.
-
-#### Task Complexity Assessment
-Before starting, classify the task:
-- **Trivial** (single file, obvious change) → execute immediately
-- **Moderate** (2–5 files, clear scope) → brief plan then execute
-- **Complex** (architectural impact, ambiguous requirements) → full research first
-
-#### Architectural Constraints
-- Before adding any feature, determine which layer owns the responsibility
-- Before changing a business rule, grep all downstream consumers, verify the change is valid for each, and report before proceeding
-
-#### Anti-patterns
-- ❌ Multiplying `if` branches for quick fixes — prefer polymorphism or the strategy pattern
-- ❌ A type with more than one reason to change (SRP violation)
-- ❌ Bypassing existing abstractions with direct calls (breaks encapsulation)
-- ❌ `bool` flag + an `Option`/value field that is only meaningful when the flag is `true` — declare them as separate fields
-  → `enum { Inactive, Active { data } }` to make the invalid state unrepresentable
-- ❌ `match (a, b) { ... _ => unreachable!() }` — a hidden state machine encoded as bool combinations
-  → replace with an `enum` whose variants cover only valid states
-- ❌ Two `Option` fields that are always `Some`/`None` together
-  → `Option<(A, B)>` or a dedicated struct
-- ❌ The same group of fields set directly across multiple call paths
-  → extract a single `fn` and seal the fields with `pub(super)` — two or more call paths copying the same N-step sequence is the extraction signal
-
-#### MVU-flavored guiding rules
-
-Daruda is not strict MVU, but the architecture leans on three rules. Treat them as the default; deviate only with a `// SAFETY:`-style comment that names the exception.
-
-- **View purity** — `render()` and the event-handler closures it builds must not carry state-transition logic. Closure bodies are one-line dispatches: `weak_ws.update(cx, |ws, cx| ws.method(args, cx))`. Same Model → same screen. *Exception*: layout-geometry caching inside `canvas()` (bounds, hitbox, scroll offsets) is allowed — GPUI requires it. Don't smuggle Model changes through this exception.
-- **One-way data flow** — Views dispatch; only `Workspace` (and `*_ops.rs`) modify Model. "Modify" covers every state-change verb — `add_*`, `remove_*`, `set_*`, `insert_*`, `delete_*`, `clear_*`, `toggle_*`, `update_*`, `open_*`, `close_*`. The View calls one of these by name; the body lives in `Workspace` / `*_ops.rs`, not in the closure. A View must not reach across entities to write child state directly.
-- **Single source of truth** — When state is mirrored (e.g. config → cached field), there is exactly one update site. Adding a new mirror means extending that one entry point — not a parallel sync path.
-
-### Development rules
-
-- **License**: AGPL-3.0-only.
-- **Language**: all code, comments, and identifiers in English.
-- **Tests**: every new module needs `#[cfg(test)] mod tests`.
-- **Error handling**: custom error types + `Display`. `unsafe` requires `// SAFETY:` comment.
-- **GPUI dependency**: only view/UI code may import GPUI. PTY, config, git stay GPUI-free.
-- **Workspace per-lane state**: data discarded on lane/project teardown belongs in `workspace/lane_scoped.rs::LaneScoped`; keep `LaneRuntime` and `FlowRuns` in their separate lifecycle containers.
-- **`gpui_component` access**: app code must go through `crate::ui::*` (the app facade over `daruda_ui`); direct `gpui_component` / `daruda_ui` imports forbidden. A widget package beside the app (`daruda_transcript`, `daruda_chat`, `daruda_settings`) uses `daruda_ui` directly, never `gpui_component`. See `packages/ui/CLAUDE.md`.
-- **Commit only when explicitly asked** — never `git add`/`git commit` without direct instruction.
-- **Commit messages**: `<type>: <subject>` (imperative, ≤72 chars). Types: `feat` `fix` `refactor` `perf` `test` `chore` `ci` `docs`. Body only when WHY is non-obvious. Prohibitions: no Phase/Step/ticket numbers, no "what I did" lists (diff shows that), no future-work notes.
-- **User-facing values go through config** (`daruda_config`). Pixel/color constants → `ux/theme.rs`.
-- **User-facing strings go through i18n** — every string visible to the user must be a key in `packages/app/locales/en.yml` (+ matching key in `ko.yml`); `build.rs` generates `surface::strings::<section>::<key>()` from it through `tools/strings_gen`, which also holds the en/ko parity checks. Never embed raw string literals at call sites. See `packages/app/locales/CLAUDE.md` for the full checklist.
-- **Comments**: current logic only. No history, no "used to be X". Keep each to 2-3 lines — summarize, don't explain at length. Don't restate what's already verifiable by reading the code (e.g. what a well-named function/variable does); only note the non-obvious WHY.
-- **In-progress docs**: keep outside the repo in a personal document store.
-
-### File-structure rules
-
-- One `.rs` file = one responsibility. GPUI-free and GPUI-dependent code in separate files.
-- Split order: multiple responsibilities → by domain; tests ≥ 40% → `tests.rs`; single domain > 300 lines → directory module.
-- `impl Render` lives in its own file. `actions!()` macros stay at `mod.rs`.
-
-### Pitfall-prevention rules
-
-1. **Coordinates**: never mix byte offsets with grid coordinates. Always convert window coordinates via `mouse_position_to_local()`.
-2. **Magic numbers**: escape bytes, codes, buffer capacities, colors, pixels, and strings belong only in their designated files (`ansi.rs`, `vt_codes.rs`, `vt_limits.rs`, `theme.rs`, `strings/`, `constants.rs`, `keybindings.rs`). App UI scales and component-owned metric definition sites are documented in `packages/ui/CLAUDE.md`; ordinary call sites reuse those definitions, not inline pixel literals.
-3. **Zig FFI**: Ghostty enums are `u16`. Always range-check before casting.
-4. **IME**: printable characters must go through `replace_text_in_range` → `commit_text` → PTY. Never send directly from `on_key_down`.
-5. **GPUI Entity reentrancy**: calling `.read(cx)` on the same entity during `render()` or `entity.update()` panics. `persist_state` must only be called via `mark_dirty_and_save` (`cx.defer`).
-6. **Reference comparison**: before adding a feature or fixing a bug, check how Alacritty, iTerm2, **zed** (`gpui` itself is `vendor/zed/crates/gpui/` — the pinned rev with daruda's patches applied, which is what actually compiles; the rest of zed at that rev, `workspace`, `gpui_macos`, `gpui_platform`, is the cargo checkout `~/.cargo/git/checkouts/zed-a70e2ad075855582/193b55a/crates/`), and gpui-ghostty implement the same concept. For GPUI-specific patterns (entity lifecycles, window contexts, async re-entry) zed is the closest reference; always read the version-matched source above rather than a standalone clone of a different version.
-7. **Text pixel mapping**: never use `index = offset_px / glyph_advance`. Always use the shaper's reverse-mapping API.
-8. **Paint-scope state**: `window.text_style()` / `window.rem_size()` are invalid outside the paint walk. Share metrics via `cell_dimensions()`.
-9. **Color palette**: `daruda_terminal/src/ux/theme.rs` uses a local `hsla()` with hue in degrees (0–360). `ui/src/theme/` (`daruda_ui::theme`) is the gpui_component bridge using fractions (0–1). Never call `gpui::hsla` from the terminal theme file.
-10. **Render-cost containment** (`window.refresh()` ban + cache rules): GPUI has **no partial redraw** — any dirty view repaints the whole window tree, and cost scales with node count. Two rules keep that cost contained:
-    - **Never call `window.refresh()` / `cx.refresh_windows()` on a hot path.** Refresh sets `window.refreshing`, which **bypasses every `AnyView::cached`** for that frame (see gpui `view.rs` prepaint `!window.refreshing` guard). It is reserved for genuinely global invalidation (theme swap in `ui/theme.rs`). For everything else use **targeted `cx.notify(entity)`** so only that view subtree (and its ancestors) goes dirty and sibling `.cached()` views stay cached. Reference: zed PR #25009.
-    - **Caching a child view requires notify-on-change.** A view that renders from a parent-staged snapshot (e.g. `Dock::snap`) must be marked dirty (`cx.notify(child)`) when that snapshot's content changes, or `.cached()` will show stale data. Self-notifying views (TerminalView, ToastLayer) are already safe. Bare `entity.update(cx, |e, _| e.field = …)` without notify is incompatible with caching that entity.
-    - **Reading an off-screen entity re-arms its invalidation.** gpui keeps `cx.notify(entity)` tight to the windows that *display* it — but it builds that set (`App::notify` → `tracked_entities`) from the entities a render pass **accessed**, which is replaced every pass. So a `render` that stages a snapshot into, or reads geometry from, an entity it then declines to draw tells gpui the window still shows it, and every notify for that entity becomes a full window render whose output is discarded. Measured: with Settings covering the docks, one status-pulse tick (4 fps, live whenever an agent is animating) cost one whole `Workspace::render` until `stage_docks` moved behind the same condition as the body. Declining to *build* the element is not enough — the read is what re-arms it.
-11. **Agent-chat single activity source**: every "is the pane working / did it just finish" decision reads `activity_state()` / `is_busy()` / `activity_elapsed()` on `AgentChatView` — never the raw prompt `Turn`, which settles busy→idle before trailing background subagents finish. Completion side effects (notification + backing-task done) fire only via `fire_activity_completion` at the busy→idle settle edge that `reconcile_activity` detects — never straight from an `AcpEvent::TurnEnded` / `AcpEvent::Error` arm (early + double-fire). `Turn` is module-private to the chat package's `view/` module tree (`packages/chat/src/view/`: `mod.rs` and its submodules) for prompt-queue sequencing only; tests reach it through the test hooks — `#[cfg(test)]`, and the `test-support` feature for the app's own tests (`set_turn_in_flight` / `set_turn_idle` / `turn_is_idle`). Enforced by `scripts/lint-agent-activity.sh`. Stop (`cancel_turn`) settles the turn locally and immediately (responsive + hung-safe) and stashes `Stopped`; the turn moves to `Turn::AwaitingCancelAck`, and the one `cancelled` `TurnEnded` that state expects is **swallowed** by `apply_event` so a stale cancel-ack can't be misattributed to a turn the user re-prompted (the stop-then-reprompt race). A prompt typed inside that window buffers client-side rather than going on the wire, which is what `Turn::can_dispatch` answers — the cancel window and the in-flight turn are one value, not a bool beside an enum. This is sound because `daruda_acp::session/turn.rs` is strictly FIFO — 1 prompt → 1 `TurnEnded`, in order, and a hung turn blocks all later ones.
-
-12. **Raw mouse listeners name their button**: `window.on_mouse_event::<MouseDownEvent>()` hears *every* button, unlike `div().on_click()` (left-only by construction — gpui's `elements/div.rs` routes the rest to `on_aux_click`) and `.on_mouse_down(MouseButton::X, ..)`. A hand-rolled `Element` has no `div`, so it can only use the raw tier, and forgetting the filter is silent: a right click opened agent-chat links, jumped any scrollbar (swallowing the host context menu with it), and dropped a live flow-editor wire. Check `event.button`, or mark a genuinely button-agnostic listener `// ANY-BUTTON: <reason>` — the ones that qualify either *end* a drag or dismiss on an outside press. Enforced by `scripts/lint-raw-mouse-button.sh`, which scans the vendored crates too, since that is where all three bugs lived and a re-vendor drops the gates. Its `--self-test` drives the shapes a naive detector misses (turbofish, path-qualified type, no `move`, a `MouseButton` mentioned only in a comment, a brace inside a string, a braceless listener ahead of a real one) so the guard cannot go quietly green.
-
-### Error reporting
-
-`eprintln!` is forbidden in new code. All failures must go through the 3-layer pipeline (toast → details modal → NDJSON log).
-
-| Scope | API |
-|-------|-----|
-| Inside `Workspace` | `self.report_error(report, cx)` |
-| GPUI-free / pre-Workspace | `LogWriter::log(report)` |
-
-**GPUI Result handling**: `cx.update_window` / `cx.update` / `entity.update` / `entity.update_in` return `Result<T>` (the target window/entity can be gone by the time async or modal-callback code re-enters). `let _ = cx.update_window(...)` is **forbidden** — it silently swallows "window not found" failures and leaves users with no signal. Required forms:
-
-- `match cx.update_window(handle, ...) { Ok(_) => …, Err(e) => report_error / LogWriter::log }`
-- `cx.update_window(handle, ...)?` (when the enclosing fn returns `Result`)
-- `crate::windows::try_update_workspace_window(handle, cx, "site_label", |window, cx| …)` — auto-logs failures with the site label
-- `// SILENT-OK: <concrete reason>` on the previous line — reserved for cases where the failure genuinely doesn't matter (focus restore on a possibly-closed window, test fixtures, etc.). Bare `// SILENT-OK:` without a reason is a review failure.
-
-Enforced by `scripts/lint-no-silent-update.sh`.
-
-Reference: `packages/app/src/workspace/error_ops.rs`, `packages/store/src/observability/`
-
-### Architecture & data flow
-
-```
-GPUI event loop (Metal on macOS)
-  └── app/workspace/
-        └── daruda_terminal  →  ghostty_vt (Zig FFI)  →  pty.rs (PTY)
-
-Output: Shell → PTY → stdout_rx → 16ms batch → TerminalSession → ghostty_vt → GPUI paint
-Input:  GPUI KeyDown → TerminalInput → stdin_tx → PTY → Shell
-```
-
-#### Crate dependency graph
-
-```
-daruda (app)  →  daruda_terminal  →  ghostty_vt  →  ghostty_vt_sys
-             |                   →  daruda_core
-             →  daruda_config     →  daruda_store  →  daruda_core
-             →  daruda_store
-             →  daruda_agent      →  daruda_store
-             →  daruda_acp        →  daruda_core    # GPUI-free ACP client core
-             →  daruda_flow       →  daruda_acp, daruda_core
-             →  daruda_flow_edit  →  daruda_flow   # YAML edits that keep comments and order
-             →  daruda_project    →  daruda_config, daruda_store, daruda_core  # GPUI-free Project/Lane
-             →  daruda_content    →  merman, resvg, image   # GPUI-free image + mermaid pipeline
-             →  daruda_control_types  →  daruda_store   # GPUI-free control contract, PaneRef
-             →  daruda_ui         →  daruda_terminal, daruda_config, gpui_component, ferrum_flow  # widgets
-             →  daruda_transcript →  daruda_acp, daruda_config, daruda_ui   # transcript presentation, shared by chat + Settings
-             →  daruda_chat       →  daruda_transcript, daruda_acp, daruda_content, daruda_ui, daruda_config, daruda_store, daruda_core  # the chat pane view
-             →  daruda_settings   →  daruda_transcript, daruda_agent, daruda_project, daruda_config, daruda_ui  # Settings + the config store
-             →  daruda_core                         # shared, dependency-free
-             →  daruda_update
-             →  gpui, gpui_component, merman, portable-pty
-
-gpui_component  →  daruda_core                         # vendored; shares the text primitives
-```
-
-`gpui_component` is a vendored copy of `longbridge/gpui-component` (Apache-2.0), forwarded as-is so re-vendoring stays a pure file copy — it is excluded from clippy/lint/comment-cleanup passes; app code reaches it only through `crate::ui::*` (see "`gpui_component` access" above). Its **tests** are a separate question and do run in CI: the patches in `patches/README.md` carry daruda-authored tests, and nothing else would ever execute them.
-
-`ferrum_flow` is a vendored copy of `tu6ge/ferrum-flow` at `43b762ce` (Apache-2.0) — the node-graph canvas behind the flow editor. Vendored for the same reason and on the same terms: patched only where daruda hits a real defect, excluded from the same lint passes, reached only through `crate::ui::*`. It carries five source patches (`viewport.rs` — culling against a not-yet-measured drawable blanked the canvas on its only frame; `canvas.rs` — a read-only `viewport()` accessor so a test can assert where the canvas put the graph; and three in `plugins/port/interaction.rs` — a dragged wire coloured only its refusal so a port that would take the drop looked exactly like empty space, a release over empty space left a dangling line whose endpoint built a node the flow file has no place for, and a release re-ran the hit test against a smaller box than the one the wire's colour came from); like `gpui_component`'s, they live in the vendored tree and are listed in `patches/README.md`. Upstream takes `gpui` from crates.io, which resolves to a different crate instance than daruda's pinned zed git rev, so routing it through `gpui = { workspace = true }` is the whole point. It differs from `gpui_component` in one way: it declares `rust-version` and leaves `clippy::incompatible_msrv` armed, so a std API newer than CI's pinned toolchain is caught locally. Provenance, the re-vendor procedure, and why the unused plugin modules are kept rather than pruned (measured: 17% fewer lines buys 0.02s of compile time and costs three retained files on every re-vendor) are in `patches/README.md`.
-
-`merman` (crates.io, MIT/Apache-2.0) is the mermaid → SVG renderer behind every ` ```mermaid ` fence in the file viewer and agent chat, pulled as a normal dependency of `daruda_content` (not vendored — no daruda-side patch needed) and validated against upstream Mermaid.js SVG baselines. Host theming goes through merman's renderer-level site config, not a document directive: `daruda_content`'s `mermaid_host_theme` builds the profile from a `MermaidPalette` (whose values `daruda_ui::mermaid_palette` resolves from the theme) and `visual::render_mermaid_svg` applies it with `with_host_theme`. A source that sets `theme` / `themeVariables` / `themeCSS` — in an `%%{init}%%` directive or under a leading `---` frontmatter block's `config:` mapping, the two places mermaid accepts a theme — opts out of daruda's **colours** (`source_declares_own_theme`), on the reasoning recorded there that merman's site config overrides the document's own config wholesale rather than merging per-field; a source that only tunes layout or behaviour keeps the host chrome. The opt-out stops at colour: `mermaid_render_profile` is applied unconditionally because the same profile also carries `htmlLabels: false` and the `ResvgSafe` pipeline, and resvg cannot paint the `<foreignObject>` labels merman emits without them — a diagram rendered profile-free comes back as boxes and arrows with every label blank. Both hosts (`file_view_pane::file_content` and `daruda_chat::reconcile`) reach it through `daruda_content::visual::render_mermaid_raster` → `merman::render::HeadlessRenderer::render_svg_sync`.
-
-Interactive Markdown has two independent rendering stacks. The file viewer uses `pulldown-cmark` to build its workspace-owned `MdBlock` / `MdSpan` IR and renders it in `file_view_pane/render/markdown/` (`prose.rs` compiles a span run, `inline.rs` / `block.rs` / `image.rs` render it, `selection.rs` carries the block-selection plumbing); agent chat goes through `daruda_ui::markdown`, a wrapper over the vendored `gpui_component::text::TextView` and its mdast parser. A behavior intended for both hosts must be implemented in both stacks and added to the shared rendered-conformance table in `file_view_pane/render/markdown/layout_tests.rs`. Parser coverage for the file-viewer IR lives beside `parse_markdown` and must include semantic field states (`checked`, `loose`, ordered start), not enum variants alone.
-
-`daruda_config` and `daruda_agent` both depend on `daruda_store` for `persistence::default_data_dir()` (see Cross-profile data isolation below).
-
-`daruda_core` sits below everything so knowledge needed on both sides of the GPUI boundary has one home — the app can reach every crate, but the GPUI-free crates cannot reach the app. Admission is deliberately narrow (a "core" name otherwise becomes a junk drawer). Because every consumer points here and this crate points at none of them, the dependency rule is **directional, not a count**: no `daruda_*` dependency (that inverts the layering), and never `gpui` (which would put the crate back out of reach of the GPUI-free crates it exists to serve). Weigh any other external dependency against the fact that every consumer inherits it and `daruda_acp` is deliberately light — prefer a target-gated one, which costs the platforms that do not need it nothing (`libc` is here on `cfg(unix)` for that reason); `serde` would qualify on weight alone and stays out until something here needs it. Modules are **pure by default**: values in, values out, no filesystem/network I/O or hidden caches — with two named exceptions. `process_env` is a read boundary: its opaque `Key` type permits reads of registered daruda-owned names only, and it never writes or caches, because `set_var` is unsafe once other threads may access the environment (bootstrap writes stay where the caller can prove the process is single-threaded). The **platform capability** modules call the OS, because containing those calls is what they exist for — see [Platform capability boundary](#platform-capability-boundary). `scripts/lint-env-literals.sh` enforces single spelling in first-party Rust, including examples and tests. Current contents: `process_env` — the environment-name registry and read boundary; `language` — file extension → source language *identity*, shared by the file viewer's highlighter and the ACP adapter's fenced-output rewriter; `text` — UTF-8 word / logical-line expansion and the selection cell hit-test, shared by the vendored editor widget and the app; `git` — ref-naming rules as pure predicates, shared by the task store's silent filter and the app form's inline diagnostic; `path_style` — path syntax (`Posix` / `Windows`) as a value, for rules that must not follow the build OS; `file_url` — `file:` URL decoding for a named style, the host kept apart; `age` — elapsed seconds → just-now / minutes / hours / days bucket, shared by the app's right-dock labels and Settings' account freshness; `host`, `process`, `path`, `shell` — the platform capability gates. Whether a language can actually be highlighted is a separate, registry-dependent question the app answers in `crate::ui::highlighter`.
-
-#### Cross-profile data isolation
-
-**Rule: storage policy belongs to the private `daruda_store::storage::StorageLayout`.** Domain code uses the existing purpose-specific persistence APIs, not OS directory discovery. `default_data_dir()` remains the compatibility root for persisted data; `log_dir()` resolves native profile logs or `<DARUDA_DATA_DIR>/logs`. Use `profile_suffix()` for non-path identifiers such as Keychain service names. All paths share one process snapshot of the override and profile; never rederive them with a fresh `dirs::*` call or a hardcoded directory literal.
-
-`daruda_core::path::directories` discovers OS roots without application naming or filesystem writes. Storage layout, diagnostics compatibility reads, and log retention remain separate responsibilities. Layout resolution must not move user data. `project::WorkspaceStore` owns UUID workspace/project records and the recent list; the primary desktop instance prepares its native state repository before creating windows. Preparation validates a copy and atomically publishes it, preserving the old files. Domain code receives this repository, not its root path. Explicit injected repositories keep the existing flat layout for tests. Configuration, account data, managed tools and resource-lock locations retain their existing contracts; do not relocate them by changing a resolver alone. Native logs start in their new location, while diagnostic export can read old default logs without copying or deleting them. An explicit data override excludes those old logs.
-
-**Why this is called out explicitly:** four separate places independently re-derived a `daruda`/`.daruda` path instead of calling the shared resolver — `daruda_config::config_path`, `daruda_config::project::project_config_dir`, `daruda_agent::hooks::status_file::default_dir`, and `workspace::sync::limits::activity_paths`'s cache path — so a debug build silently read and overwrote a real release install's `config.toml`, hook-status files, and activity cache. A fifth case (the Telegram bridge's Keychain-stored bot token sharing one service name across profiles) caused two profiles to 409-conflict polling Telegram with the same token, since Telegram's `getUpdates` rejects a second concurrent poller on one token. Each was fixed independently before the pattern was named — this section and the guardrails below exist so the next one is caught before it ships, not after a live incident.
-
-**The deliberate exceptions, and what makes one.** Three paths under
-`daruda_store::persistence` are profile-**independent** on purpose, and each
-is named there with its reasoning:
-
-- `node_install_dir()` — a pinned Node.js runtime is tens of MB and the same
-  bytes for every profile, so one install serves all of them.
-- `flow_lock_root()` — a flow run's lock is not daruda's state at all; it is a
-  mutex on something every profile shares, the user's working tree. A release
-  build and a debug build running flows in one checkout have to exclude each
-  other, so isolating the lock per profile would defeat it.
-- `remote_lock_root()` — the same shape, one layer out: a claim on the bot
-  account, which is not daruda's either. Telegram serves `getUpdates` to one
-  poller per token and Slack hands each event to one of an app's open sockets,
-  so a release install and a debug build pointed at one bot must exclude each
-  other or the user's replies get split between two routing tables.
-
-The test is what the path *is*, not where it lives: state daruda writes and
-reads back is profile-scoped, and a claim on a resource outside daruda is not.
-Adding a fourth means adding it to `clippy.toml`'s allow reasoning too.
-
-**Enforcement:**
-- `clippy.toml`'s `disallowed-methods` bans a bare `dirs::config_dir` call outside `daruda_core::path::directories`'s OS discovery boundary.
-- `scripts/lint-daruda-path-literals.sh` greps for a hand-rolled `.join("daruda")` / `.join(".daruda")` outside the canonical layout (`storage.rs`) and a short, explicit allow-list of genuinely non-profile-scoped exceptions (the per-repo `.daruda/task-*.md` files, the single global `~/.daruda/hooks/notify.sh`).
-- Neither tool catches a hardcoded Keychain/OS-credential-store service name (not a directory path) — review any new one by hand against `packages/app/src/telegram/keychain.rs`'s `service_name()`.
-
-#### Platform capability boundary
-
-**Rule: an OS call that differs by platform lives in exactly one place, and domain code calls it by name.**
-
-| Instead of | Call |
-|---|---|
-| `Command::new` | `daruda_core::process::command` |
-| `libc::kill*` / `process_group` | `daruda_core::process::{lead_own_group, Group}` |
-| `fs::canonicalize` | `daruda_core::path::{canonicalize, canonicalize_or_self}` |
-| `env::var("SHELL")` | `daruda_core::shell::interactive` |
-| `std::os::unix::fs::symlink` | `daruda_core::path::symlink` |
-| `Url::{to,from}_file_path` / a `"file://"` literal | `daruda_core::file_url::{is_file_url, to_local_path, from_local_path, FileUrl}` |
-| `gethostname` / `GetComputerNameExW` | `daruda_core::host::name` |
-| `env::var("HOME")` | `dirs::home_dir` — Windows has no `HOME` |
-| spawning a program named the way a user types it (`npx`, `claude`, an editor CLI) | `daruda_core::process::command_on_path` — Windows finds a `.cmd` shim only through PATHEXT |
-| `==` / `starts_with` / `strip_prefix` on paths from two producers | `daruda_core::path::{same_path, is_within, strip_root}` — `/tmp` vs `/private/tmp`, a symlinked checkout, Windows case |
-
-`to_file_path` is on this list though it makes no OS call: it decodes by the *build* OS, so it asked "is this a file URL?" and answered `false` for `file:///tmp` on Windows alone — a remote session's link then opened as a web URL. `file_url` keeps the two questions apart and takes a `daruda_core::path_style::PathStyle` value, so both styles are asserted from any host; a path another machine wrote goes through that, not `std::path`. The last two rows are review rules rather than lint: whether a name is a shim, or whether two paths came from different producers, is not visible in the text.
-
-**Why this is called out explicitly:** the same call kept being written out per crate. Killing a child's process tree was spelled four times across `daruda_acp`, `daruda_agent` (twice) and `daruda_flow`, in two spellings of one POSIX call (`killpg(pid)` and `kill(-pid)`); `create_owner_only_dir` existed verbatim in two files; the skills, flow and MCP watchers had each defined their own `canonicalize_or_self`; and `account_login_ops.rs` rebuilt a `PATH` with a hardcoded `:` next to a correct `join_paths` helper ten lines away in the crate it was calling. Each was fine alone. Together they meant a second platform would be written four times, which is [Shotgun Surgery](#change-impact-discipline) — the seam being wrong rather than the work being doubled.
-
-**The two allowed regions:**
-- `daruda_core`'s capability modules (`host`, `process`, `path`, `shell`, plus the pure `file_url`) — the gates. `daruda_core` is otherwise pure-by-default; these are the named exception, stated in its `lib.rs`.
-- `packages/app/src/platform/` — app-owned desktop capabilities, including window APIs and listening-port inspection. Native port metadata stays here; workspace polling and Lane attribution stay in their domain modules.
-
-Plus three files that are gates of their own, each the single door to its capability: `app/src/remote_channel/keychain.rs` (daruda's own secrets), `daruda_agent/src/accounts/credentials.rs` (an entry *another program* owns), `app/src/shell_env.rs` (a macOS-only `.app`-launch PATH problem, not the "which shell" question).
-
-Capability entry points select private OS backends once. `core::process`
-retains the public process API over `process/{unix,windows}.rs`;
-`terminal::pty` owns PTY I/O over `pty/backend/`, including ConPTY drain
-ordering. Credential gates keep their distinct ownership and profile
-contracts over private backends. OS file-error classification lives in
-`core::path::io_error`; retry budgets and cancellation stay with each caller.
-Pure policies use values: `acp::node::layout` describes Node distributions,
-and `core::font` provides shared factory font names without GPUI objects.
-
-**Prefer a value over a `cfg`.** `#[cfg(windows)]` code never compiles on a macOS dev machine, so it is only ever checked by CI. Decide the platform once at the boundary with `cfg!()` and pass the answer down as a value — `daruda_core::shell::login_args_for(program)` answers "does this shell take `-l`?" from the program name, so a Windows shell's rules are asserted from macOS. Reserve `#[cfg]` attributes for the leaf that actually calls the OS.
-
-**Adding a platform** = adding an arm inside the boundary. If it means touching domain crates, the capability is in the wrong place.
-
-**Platform-only declarations:** gate modules, imports, functions, constants,
-and generated-string overrides with the same `#[cfg]` as their callers.
-`cfg!()` selects a value but still compiles both branches. Keep common control
-flow independent of platform-only statements: isolate retry policy in a
-capability function rather than compiling a loop's only `continue` away.
-OS-only locale keys stay in both languages, with a matching gated function
-in `surface/strings/custom/`; never edit generated output or silence dead code.
-
-**Enforcement:** `scripts/lint-platform-boundary.sh`. Deliberately a grep rather than `clippy.toml` — `disallowed-methods` has no per-file exception, so under `--all-targets` it would also catch test fixtures spawning `git init`, which have no reason to go through the gate.
-
-#### UI component hierarchy
-
-```
-Workspace
-├── TitleBar                         — shared by Workspace / Settings; off macOS also carries the app-menu button and the caption controls (`app/src/title_bar/`)
-├── SettingsView                     — replaces BodyLayout while open, docks included (`packages/settings/`)
-│   ├── SettingsSidebar              — back button + search + section nav
-│   └── SettingsSection              — one BuiltinSection body at a time
-├── BodyLayout                       — shown when SettingsView is not
-│   ├── LeftDock
-│   │   ├── ViewSwitcher             — Worktrees / Git / Files tab strip
-│   │   ├── WorktreesView            — 2-level tree: Group ▸ Project ▸ Worktree
-│   │   │   ├── GroupHeader          — collapsible accordion (color, name, ▼/▶, context menu)
-│   │   │   ├── ProjectHeader        — project row (inside a group, or ungrouped at top rank)
-│   │   │   └── WorktreeRow          — leaf (create / delete / merge actions, Claude badges)
-│   │   ├── GitChangesView
-│   │   └── FilesView
-│   ├── MainArea
-│   │   ├── TabBar
-│   │   ├── PaneTree                 — one per tab; recursive split tree (single pane = 1-leaf root)
-│   │   │   └── Pane                 — leaf node, single content slot
-│   │   │       ├── PaneHeader       — per-pane title bar, visible in split mode only
-│   │   │       └── PaneContent
-│   │   │           ├── TerminalPane — PTY terminal (TerminalTextElement)
-│   │   │           └── FileViewPane — file viewer (toolbar + virtual list)
-│   │   ├── Page                     — Tasks / Flows, in place of TabBar + PaneTree; belongs to no lane
-│   │   │   ├── PageList             — the page's list
-│   │   │   └── PageDetail           — one at a time, over the list: TaskEditor · FlowGraph · RunDetail
-│   │   └── BottomDock
-│   │       ├── DockSwitcher         — BottomDock top tab row
-│   │       ├── TerminalInputDock    — multiline input + submit / action buttons
-│   │       └── MacroDock            — N-column macro key grid
-│   │           └── MacroKey         — macro key (icon or text mode)
-│   └── RightDock
-│       ├── ViewSwitcher             — Usage / Skills / Tasks / Tools tab strip
-│       ├── UsageView
-│       ├── SkillsView
-│       ├── TasksView
-│       └── ToolsView
-├── StatusBar
-├── ModalLayout                      — modal overlay container (absolute-positioned)
-│   └── ModalView
-└── ToastLayout                      — toast notification container (absolute-positioned)
-    └── ToastView
-```
-
-**Concept-to-code mapping** — identifiers match the hierarchy names above:
-
-| Hierarchy name | Code identifier | Location |
-|---|---|---|
-| `LeftDock` | `left_dock` field / `Dock` entity (position=Left) | `workspace/left_dock/`, `workspace/layout/mod.rs`, `render/workspace_frame.rs` |
-| `RightDock` | `right_dock` field / `Dock` entity (position=Right) | `workspace/right_dock/`, `workspace/layout/mod.rs`, `render/workspace_frame.rs` |
-| `ViewSwitcher` | `render()` in `view_tabs.rs` (both docks) | `left_dock/view_tabs.rs`, `right_dock/view_tabs.rs` |
-| `DockSwitcher` | `PanelTabStrip` | `main_area/bottom_dock/tab_strip.rs` |
-| `TerminalInputDock` | `TerminalInputPanel` | `main_area/bottom_dock/terminal_input.rs` |
-| `MacroKey` | `MacroKey` | `ui/macro_key.rs` |
-| `PaneTree` | `PaneLayout` enum | `workspace/main_area/pane_tree.rs` |
-| `Pane` | `PaneLayout::Pane` | `workspace/main_area/pane_tree.rs` |
-| `TerminalPane` | `PaneContent::Terminal` | `workspace/main_area/pane/mod.rs` |
-| `FileViewPane` | `PaneContent::File` | `workspace/main_area/pane/mod.rs` |
-| `Page` | `workspace_page: Option<PageState>` | `workspace/pages/mod.rs` |
-| `PageDetail` | `pages: PageDetails`, left only through `leave_page_detail_then` | `workspace/pages/detail.rs` |
-| `TaskEditor` | `TasksPage.detail` | `workspace/pages/tasks/editor/` |
-| `FlowGraph` / `RunDetail` | `FlowsPage.detail` (`FlowDetailBody`) | `workspace/pages/flows/graph/`, `workspace/pages/flows/run_detail.rs` |
-| `ToastLayout` | `toast_layer: Entity<ToastLayer>` | `workspace/toast_layer/mod.rs` |
-| `SettingsView` | `settings: Option<SettingsHost>` — `Some` *is* settings mode | `packages/settings/`, opened/closed in `workspace/settings_ops.rs` |
-| Project (runtime) | `crate::project::Project` (re-export of `daruda_project::project`) | `packages/project/src/project/mod.rs` |
-| Group (runtime) | `daruda_store::project::SerializedGroup` (used directly — no separate runtime newtype) | `packages/store/src/project/` + `workspace/group_ops.rs` |
-| Lane (runtime) | `crate::lane::Lane` (was `Worktree`, re-export of `daruda_project::lane`) — UI label remains "Worktree" | `packages/project/src/lane/mod.rs` |
-| Lane (persisted) | `daruda_store::project::SerializedLane` + `LaneKind { Git { .. }, Default }` | `packages/store/src/project/lane.rs` |
-| Active focus ref | `daruda_store::project::LaneRef { project, lane }` — JSON keys remain `worktree` via `#[serde(rename = "worktree", alias = "lane")]` | `daruda_store/src/project/`; per-lane caches keyed by ref in `workspace/mod.rs` |
-| `ProjectsView` 2-level tree | `TopRow` enum dispatch + `group_header_row` / `project_header_row` / `worktree_row` (function name retained — UI affordance) | `workspace/left_dock/projects/rows/{headers,worktree}.rs` |
-| Multi-project DnD | `DragPayload { Worktree | Project | Group }` + `dnd_ops.rs` reorder pool | `workspace/left_dock/projects/drag.rs`, `workspace/dnd_ops.rs` |
+  and Windows. A host pass proves only its branches; report other OS results
+  as pending until their CI jobs pass.
+- UI behavior requires [visual verification](CONTRIBUTING.md#visual-verification):
+  render a PNG and inspect it. Tests alone do not establish rendering, IME,
+  or window-state correctness. State any remaining manual checks.
+  Use a throwaway `DARUDA_DATA_DIR` to isolate capture state and
+  `--screenshot-scenario` for transient UI. macOS captures offscreen; Windows
+  captures a visible composed window; Linux uses startup smoke checks.
+- On Windows, run non-interactive checks through `scripts/run-hidden.ps1`
+  or `scripts/test-windows.ps1`. Every newly launched parent/nested shell must
+  also be hidden; preserve its output and exit status. Background shells use
+  `Start-Process -WindowStyle Hidden` or equivalent. GUI screenshot launches
+  need a visible window; see the capture instructions.
+
+### Choosing Verification
+
+Review mode follows the execution restriction above. During implementation,
+use focused checks for the changed behavior; before a requested commit, run
+the complete [local checklist](CONTRIBUTING.md#local-checks). Its Cargo gates
+delegate package coverage to `scripts/ci-cargo.sh`; do not copy package lists.
+
+The full checklist includes source lints and their listed self-tests, default
+Clippy/tests, all-feature app Clippy, doc links, the offline ACP preset drift
+gate, and screenshot-feature tests. CI runs a subset of local source checks;
+a green CI run does not replace checks that are still local-only.
+Skipping `workspace::tests` is an iteration shortcut only, never a commit gate.
+
+Do not clean up vendored upstream code as part of a general lint/refactor pass.
+Explicit vendor checks still apply, including mouse-button guards,
+`gpui_component` patch tests, and `ferrum_flow`'s MSRV check. GPUI's vendored
+tree is regenerated through `tools/vendor_gpui`; its patch workflow is in
+[patches/README.md](patches/README.md).

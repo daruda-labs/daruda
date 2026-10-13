@@ -88,7 +88,7 @@ pub(in crate::workspace) fn global_flows_dir(data_dir: &Path) -> PathBuf {
 /// The directory name comes from `daruda_config`'s project keying, the same
 /// one holding that project's `config.toml`. Deriving a second key here would
 /// be a second answer to "which directory is this repository's", and the
-/// cross-profile isolation rule in the root `CLAUDE.md` exists because that
+/// cross-profile isolation rule in the root `AGENTS.md` exists because that
 /// question was answered four different ways once already.
 pub(in crate::workspace) fn project_flows_dir(data_dir: &Path, repo_root: &Path) -> PathBuf {
     daruda_config::project::project_config_dir_in(data_dir, repo_root).join(FLOWS_DIR)

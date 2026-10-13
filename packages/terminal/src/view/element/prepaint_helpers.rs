@@ -8,7 +8,7 @@
 //! All helpers go through the row's shaped layout when wide / CJK /
 //! emoji glyphs are present, falling back to grid arithmetic only on
 //! the first frame when `line_layouts` has not been populated yet.
-//! See the root CLAUDE.md §7 (column → pixel must go through
+//! See the root AGENTS.md §7 (column → pixel must go through
 //! shaping) for the rationale.
 
 use ghostty_vt::Rgb;

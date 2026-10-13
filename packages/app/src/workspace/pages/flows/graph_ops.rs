@@ -324,7 +324,7 @@ impl Workspace {
     /// The view is `.cached()`, so what makes a colour change visible is a
     /// notify on the canvas entity inside it — `set_run_states` raises it.
     /// Marking a view dirty marks its ancestors, so that reaches this cached
-    /// wrapper (CLAUDE.md render-cost rule 10).
+    /// wrapper (AGENTS.md render-cost rule 10).
     pub(in crate::workspace) fn colour_flow_graph(
         &mut self,
         lane_ref: LaneRef,

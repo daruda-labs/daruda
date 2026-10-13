@@ -4,7 +4,7 @@
 # Background: `packages/ui/` (`daruda_ui`) is the wrapper home for the
 # vendored `gpui_component` crate, and `packages/app/src/ui/` is the app's
 # facade over it. App code must always go through `crate::ui::*` so that:
-#   - `xsmall()` is auto-applied at one place (CLAUDE.md §10),
+#   - `xsmall()` is auto-applied at one place (packages/ui/AGENTS.md, Wrapper Contracts),
 #   - widget defaults / variants stay consistent across the app,
 #   - future re-styling lives in one module instead of N call sites,
 #   - localized wrappers in the facade are not bypassed for their

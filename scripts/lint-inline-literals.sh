@@ -9,7 +9,7 @@
 #
 # This script grep-walks `packages/` and fails when any tracked file
 # introduces a banned literal *outside* the few definition sites that
-# are allowed to use them. See CLAUDE.md G4 for the rule + exceptions.
+# are allowed to use them. See packages/app/src/AGENTS.md G4 for the rule + exceptions.
 #
 # Anything inside an `#[cfg(test)]` block is excluded — tests
 # legitimately use synthetic pixel sizes and concrete colors.
@@ -92,7 +92,7 @@ for file in "${FILES[@]}"; do
     #   px(0) / px(0.0) / px(0.) — zero clamps and defaults
     #   gpui::black().opacity(<UPPER_IDENT>) /
     #   gpui::white().opacity(<UPPER_IDENT>)  — already-named alpha is
-    #     the documented exception in CLAUDE.md G4
+    #     the documented exception in packages/app/src/AGENTS.md G4
     output=$(perl -ne '
         # A `#[cfg(test)]` module, the attribute alone or on the `mod` line;
         # other attributes, comments and blank lines may sit in between.
@@ -122,7 +122,7 @@ done
 if (( violations > 0 )); then
     echo
     echo "✗ Inline-literal lint failed: $violations file(s) with hits."
-    echo "  See AGENTS.md and ui/CLAUDE.md for definition-site ownership."
+    echo "  See AGENTS.md and packages/ui/AGENTS.md for definition-site ownership."
     echo "  Reuse a shared component or token; do not add call-site literals."
     exit 1
 fi

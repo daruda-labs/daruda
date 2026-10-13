@@ -2,7 +2,7 @@
 //!
 //! `tab(label)` adds padding because upstream underline tabs zero their inner
 //! padding. Font-size independence relies on the vendor patch documented in
-//! `packages/ui/CLAUDE.md`; action chips stay outside this wrapper except
+//! `packages/ui/REFERENCE.md`; action chips stay outside this wrapper except
 //! the bottom-dock suffix.
 
 use gpui::{

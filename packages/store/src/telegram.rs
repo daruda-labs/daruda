@@ -13,7 +13,7 @@
 //! make Telegram re-deliver, and re-run, commands that already ran. Writing it
 //! here also keeps the write off `SettingsStore`, whose every mutation notifies
 //! app-wide observers that rebuild the native menu bar and refresh every window
-//! (see the `cx.refresh_windows()` ban in the root `CLAUDE.md`, pitfall 10).
+//! (see the `cx.refresh_windows()` ban in the root `AGENTS.md`, pitfall 10).
 
 use std::path::{Path, PathBuf};
 

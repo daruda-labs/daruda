@@ -6,7 +6,7 @@
 //! Animation uses one gated [`StatusPulseClock`] instead of `with_animation`:
 //! GPUI has no partial redraw, so a per-badge 60 fps animation repaints the
 //! window tree. The shared ~4 fps clock keeps animating windows alive, leaves
-//! idle windows at zero redraws, and satisfies CLAUDE.md Pitfall #10.
+//! idle windows at zero redraws, and satisfies AGENTS.md Pitfall #10.
 
 use crate::ui::{StatusPulseClock, theme};
 use daruda_agent::SessionStatus;

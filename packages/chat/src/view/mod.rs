@@ -12,7 +12,7 @@
 //!
 //! This entity owns and mutates its own model, like `TerminalView`; it is not a
 //! Workspace-owned model written through a one-way op. The MVU rule applies to
-//! Workspace state; self-notifying pane entities are the sanctioned CLAUDE.md
+//! Workspace state; self-notifying pane entities are the sanctioned AGENTS.md
 //! rule #10 exception also used by `TerminalView` and `ToastLayer`.
 
 use std::collections::{HashMap, HashSet};

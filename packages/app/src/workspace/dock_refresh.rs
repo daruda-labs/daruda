@@ -31,7 +31,7 @@ impl Workspace {
     /// Workspace-owned state (usage, claude status, the MCP/skills/tasks
     /// globals, tab/filter setters, the status + task-live pulses), so
     /// every mutation of a right-dock source must call this — otherwise
-    /// the cache shows stale data (root CLAUDE.md Pitfall #10). Embedded
+    /// the cache shows stale data (root AGENTS.md Pitfall #10). Embedded
     /// input entities (the search boxes, the usage dropdown) self-notify
     /// and dirty this dock as an ancestor, so they need no explicit call.
     /// Lease-free (`App::notify`) — dock event listeners run inside a
@@ -82,7 +82,7 @@ impl Workspace {
     /// settle frame when the run quiesces.
     ///
     /// A busy [`AgentChatView`] is dirtied each tick to animate its pulse
-    /// (root CLAUDE.md Pitfall #10). A view that just went idle gets one
+    /// (root AGENTS.md Pitfall #10). A view that just went idle gets one
     /// more dirty here: its own settling self-notify can miss a cached
     /// view that fell out of the window's tracked set (gpui
     /// `detect_accessed_entities` lost-wakeup, see

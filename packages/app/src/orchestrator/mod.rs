@@ -338,7 +338,7 @@ pub(crate) fn ensure(cx: &mut App) -> Result<PaneRef, EnsureError> {
 /// Split from [`Prepared::seed`] because a caller holding a live `&mut Window`
 /// for the host must seed through *that* window: `cx.update_window` on a
 /// window whose update is already in progress answers "window not found"
-/// (`packages/app/src/CLAUDE.md`, GPUI Result handling). The status bar chip is
+/// (`packages/app/src/AGENTS.md`, GPUI Result handling). The status bar chip is
 /// exactly that caller.
 fn prepare(cx: &mut App) -> Result<Option<Prepared>, EnsureError> {
     // Resolve before reusing a live pane so disabling the feature takes effect

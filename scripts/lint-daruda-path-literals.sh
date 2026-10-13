@@ -124,7 +124,7 @@ if [ -n "$violations" ]; then
     echo "daruda_store::persistence::default_data_dir() instead:"
     echo "$violations"
     echo
-    echo "See the root CLAUDE.md 'Cross-profile data isolation' section."
+    echo "See the root AGENTS.md 'Storage and Profile Isolation' section."
     exit 1
 fi
 

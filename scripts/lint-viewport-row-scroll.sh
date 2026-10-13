@@ -19,7 +19,7 @@
 # The type system can't enforce this — the dispatch lives inside the
 # method, and the FFI takes a bare u16 — so this grep guard backstops it.
 #
-# See packages/terminal/src/view/CLAUDE.md "Coordinate spaces".
+# See packages/terminal/src/view/REFERENCE.md "Coordinate spaces".
 #
 # Usage:   scripts/lint-viewport-row-scroll.sh
 # Exit:    0 — clean   1 — a viewport-row read skips the scroll dispatch
@@ -92,7 +92,7 @@ if [ -n "$violations" ]; then
     echo "A function handing a viewport row to self.terminal.dump_viewport_row* must"
     echo "branch on self.scroll_offset (or recompute the grid row from"
     echo "line_buffer.wrapped_row_count, as dump_screen_row does). See"
-    echo "packages/terminal/src/view/CLAUDE.md \"Coordinate spaces\"."
+    echo "packages/terminal/src/view/REFERENCE.md \"Coordinate spaces\"."
     exit 1
 fi
 

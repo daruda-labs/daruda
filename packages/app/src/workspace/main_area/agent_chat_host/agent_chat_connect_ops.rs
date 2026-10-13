@@ -231,7 +231,7 @@ impl Workspace {
     ) {
         // Collected before any reconnect runs: `retry_agent_chat_connect`
         // leases each view, and holding a read across that would re-enter the
-        // same entity (CLAUDE.md Pitfall #5).
+        // same entity (AGENTS.md Pitfall #5).
         let revived: Vec<PaneId> = self
             .every_agent_chat()
             .map(|(id, _)| (id, Some(self.agent_chat_account_selection(id))))
@@ -487,7 +487,7 @@ impl Workspace {
         // this runs inside `prepare_agent_chat_connection`, which is already
         // inside `Workspace::update`, and the orchestrator seeding its own
         // pane *is* that workspace — so `weak.upgrade().read(cx)` would be a
-        // second lease on the entity we are in (CLAUDE.md pitfall 5).
+        // second lease on the entity we are in (AGENTS.md pitfall 5).
         if weak.entity_id() != cx.entity_id() {
             return Vec::new();
         }

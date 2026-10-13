@@ -119,7 +119,7 @@ pub(in crate::render) fn status_banner(
             cx,
         )
         // The host's retry updates this same view; it runs on the event, after
-        // this listener has released it (CLAUDE.md Pitfall #5).
+        // this listener has released it (AGENTS.md Pitfall #5).
         .on_click(cx.listener(|_this, _ev, _window, cx| {
             cx.emit(AgentChatEvent::RetryConnect);
         }))

@@ -2,7 +2,7 @@
 //!
 //! The terminal juggles three vertical row spaces that are all small
 //! integers, so the compiler cannot catch a mix-up on its own (see
-//! `view/CLAUDE.md` "Coordinate spaces"). This module names them so the
+//! `view/REFERENCE.md` "Coordinate spaces"). This module names them so the
 //! ones that flow through shared APIs are self-documenting at the call
 //! site.
 //!

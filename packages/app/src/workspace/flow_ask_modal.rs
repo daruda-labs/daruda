@@ -85,7 +85,7 @@ impl FlowAskModal {
     ///
     /// `active` is passed rather than read: the only caller is inside
     /// `Workspace`'s own `update`, and reading the entity from there is a
-    /// re-entrant borrow that panics (root `CLAUDE.md` pitfall 5). The
+    /// re-entrant borrow that panics (root `AGENTS.md` pitfall 5). The
     /// *rule* still lives here — one place decides what "in view" means.
     pub(in crate::workspace) fn raise_if_in_view(
         workspace: gpui::WeakEntity<Workspace>,

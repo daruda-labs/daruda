@@ -139,7 +139,7 @@ impl Workspace {
     /// `AcpEvent::TurnEnded` arm, for the reason the notification is: that
     /// event settles before trailing subagents finish, so a call answered
     /// there would report the turn done while work was still running
-    /// (CLAUDE.md pitfall 11).
+    /// (AGENTS.md pitfall 11).
     ///
     /// A pane nobody asked about is the common case, and `resolve` says so by
     /// finding nothing.

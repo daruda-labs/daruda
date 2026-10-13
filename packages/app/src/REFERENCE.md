@@ -1,8 +1,8 @@
-# app crate — source layout
+# App Reference
 
-GPUI-side of daruda. Owns the app entry point, windowing, workspace state
-(tabs + panes + docks), agent panel, agent panel data model, PTY plumbing, and the
-config/keybinding wiring.
+Maintained layout, subsystem contracts, and extension recipes. Read the
+[App Instructions](AGENTS.md) for workflow and safety rules; use the relevant
+sections below when changing a subsystem.
 
 ## Directory layout
 
@@ -71,7 +71,7 @@ The facade over `daruda_ui` (`packages/ui/`), which holds the reusable widget pr
 - **Wrappers** — thin factories / re-exports over `gpui_component::*` with daruda chrome (palette, `xsmall` defaults, modal tab-spec) baked in. Canonical post-migration shape.
 - **Preserved daruda widgets** — kept where `gpui_component` lacks a clean swap: bespoke hover chains, multi-purpose macro tile, absolute-positioned context menu, multi-line input panel composite, procedural status indicator, layout helpers, and `picker_row` / `picker_empty` (`packages/ui/src/picker_row.rs`) — the shared row chrome of every search-and-pick overlay, which owns the focus-accent reservation, the label truncation, the trailing column's `flex_none`, and the row height `theme::PALETTE_MAX_HEIGHT` is derived from.
 
-Theme overlay (`apply_daruda_palette`) is the only place inline `hsla()` / `px(N)` literals are allowed (G4 exempt). See `packages/ui/CLAUDE.md` for wrapper-authoring rules and the "Adding a new primitive" recipe.
+Theme overlay (`apply_daruda_palette`) is the only place inline `hsla()` / `px(N)` literals are allowed (G4 exempt). See [UI rules](../../ui/AGENTS.md) and the [wrapper recipe](../../ui/REFERENCE.md#adding-a-new-wrapper).
 
 ### Tab navigation in modals
 
@@ -144,8 +144,7 @@ Runtime `Lane` model (id / path / status / `base_ref` / description) plus a GPUI
 - **Git CLI on background executor** — `lane::git` is blocking; wrap with `window.spawn` + `background_executor`.
 - **Re-entry guards** — `OPEN_IN_PROGRESS` around folder picker; modal key handlers must `cx.stop_propagation()`.
 - **Tests alongside code** — new modules add `#[cfg(test)] mod tests`.
-- **Errors flow through `report_error` / `LogWriter::log`** — `eprintln!` and `let _ = …` are forbidden in new code. Inside `Workspace` use `self.report_error(report, cx)` (toast + history + log); from GPUI-free / pre-Workspace sites use `LogWriter::log(report)` (log only). See the project root `CLAUDE.md` §Error reporting for the builder shape and `dedup` key conventions.
-- **GPUI Result handling** — `cx.update_window` / `cx.update` / `entity.update_in` return `Result<T>`. Use `match`, `?`, or `crate::windows::try_update_workspace_window(handle, cx, "site", |w, cx| …)` (auto-logs failures). Bare `let _ = cx.update_window(…)` is forbidden — it silently swallows "window not found" errors raised by modal-callback re-entry and async race conditions. Mark intentional ignores with `// SILENT-OK: <reason>` on the previous line. Enforced by `scripts/lint-no-silent-update.sh`.
+- **Errors and GPUI update Results** follow [Error Reporting](AGENTS.md#error-reporting).
 
 ## Extension recipes (quick reference)
 
@@ -154,7 +153,7 @@ Runtime `Lane` model (id / path / status / `base_ref` / description) plus a GPUI
 | New dock view | `LeftDockView` variant (or `RightDockView`) → `view_tabs.rs` → `left_dock/<view>/mod.rs` (export `render`) → `mod.rs` action + handler → `render.rs` match arm → test |
 | New global action + keybinding | `actions!()` → handler in ops file → `surface/keybindings.rs` const → `main.rs` bind_keys → `action_map.rs` arm → `command/palette.rs` entry |
 | New dock panel | `PlaceholderKind` variant → `Workspace::new_with_project` push → renderer module → `render.rs` dock match arm → persistence if needed |
-| New modal | See G9. `impl ModalView` + `.tab_group()` on root; open via `dialog_helpers::*`. |
+| New modal | See [G9](AGENTS.md#g9--modals-go-through-gpui_componentdialog). `impl ModalView` + `.tab_group()` on root; open via `dialog_helpers::*`. |
 | New pane content kind (plain-struct) | `PaneContent` variant + struct in `main_area/pane/mod.rs` → match arms (title/cwd/focus_handle/resize) → `main_area/mod.rs` walker arm (free-fn `render(&content, cx)`) → `daruda_project` persistence mirror + `#[serde(default)]` → `create_*_pane` constructor → `workspace/tests` round-trip. Rendered inline under `Workspace::render`, so its `cx.notify()` dirties the whole window. Fine for small, rarely-updating panes (File). |
 | New pane content kind (entity-backed / cached) | For a pane needing **scroll/perf isolation or its own internal state** (Terminal, AgentChat): hold a thin `XxxContent { view: Entity<XxxView>, cached_title, cwd }` wrapper; `XxxView: Render + Focusable`, its `render` calls `track_focus(&self.focus_handle)` and `cx.notify()`s itself; walker arm embeds `AnyView::from(view.clone()).cached(StyleRefinement::default().size_full().flex())`; `wrapper_focus_handle → None`; `Pane::{title,cwd}` read the wrapper (cx-free), `focus_handle(cx)` reads `view.read(cx)`. A `cx.notify()` on the view then dirties only its subtree — siblings keep their cached paint. |
 | Virtualized list inside a pane (variable-height) | Use gpui core `list(state, cx.processor(\|this, ix, win, cx\| …))` + `ListState` (`Top` align + `FollowMode::Tail` for chat-like append) — **not** `crate::ui::list` (that's the gpui_component delegate/searchable list) and not `uniform_list` (fixed height). Keep `list_state` count in sync after each items mutation; `remeasure_items(tail)` on streaming grow, `remeasure()` after any visible item's height changes (fold, async image/diff landing). Thumb + at-bottom: `crate::ui::scrollbar::{vertical_thumb_for_list, list_at_bottom}` (display-only thumb). Synthetic fold headers (turn ⊃ response ⊃ tool-group ⊃ block) are not stored — `rows::project(items, &fold)` derives a stable `Vec<RenderRow>` (header rows + `hidden`/`indent` flags) each rebuild; the list virtualizes over rows and `rebuild_rows` diff-splices so a fold toggle remeasures in place (no scroll drift). Reference: `packages/chat/src/{view/,render/,rows/,fold.rs}`. |
@@ -171,7 +170,7 @@ Runtime `Lane` model (id / path / status / `base_ref` / description) plus a GPUI
 | Workspace action handler | `workspace/mod.rs` (tab/pane/focus) · `workspace/lane_ops/` · `workspace/layout/ops.rs` |
 | Workspace data discarded on lane/project teardown | `workspace/lane_scoped.rs::LaneScoped`; runtimes and flow runs retain their own lifecycle containers |
 | New pane content kind | `main_area/pane/mod.rs` + `main_area/mod.rs` walker arm + `daruda_project` + `workspace/construct.rs` constructor |
-| New modal / text input in modal | See G9. |
+| New modal / text input in modal | See [G9](AGENTS.md#g9--modals-go-through-gpui_componentdialog). |
 | Reusable widget | `crate::ui`. Never inline `div().flex().hover(...).on_mouse_down(...)` at call site. |
 | Right-click menu on any element | `workspace/root_menu.rs::root_context_menu`. Never the vendored `.context_menu(...)` — it renders inside the caller's subtree, where an ancestor clip cuts the menu *and* its hit-testing. |
 | Save/restore logic | `workspace/persistence/` |
@@ -187,103 +186,107 @@ Runtime `Lane` model (id / path / status / `base_ref` / description) plus a GPUI
 | Blocking subprocess | `lane/git.rs` style — GPUI-free, callers wrap with `background_executor` |
 | Cross-session persistence | `daruda_project` schema + `migrate_legacy` + `#[serde(default)]` |
 
-## Maintenance guardrails
-
-### G1 — Responsibility-driven splits
-
-A file is split when its single responsibility breaks down, not when it crosses a line count. Line count is a *signal* to inspect, not a rule to enforce. A cohesive file with one clear responsibility stays as one file regardless of length.
-
-**Real split triggers** (two or more apply → split):
-
-- Two or more domains coexist in the file.
-- Methods cluster into groups by naming prefix or shared private helpers.
-- Tests require distinct fixtures for different parts of the file.
-- Two engineers cannot work in parallel without merge conflicts.
-- `tests.rs` exceeds 1.5× the parent `mod.rs` (test-data clustering signal).
-
-**Line-count signals** — review trigger, not a hard cap:
-
-- `mod.rs` ~800 lines / regular `.rs` ~600 lines → inspect whether responsibility is still single. Split only if a real trigger above is also true.
-
-### G2 — Responsibility fences
-
-- `render.rs` is `impl Render` + leaf UI builders only. No `std::process`, `std::fs`, or multi-field string formatting. Add display methods on data structs (e.g. `Pane::display_cwd()`).
-- Data modules (`lane/`, `agent/mod.rs`, `main_area/pane_tree.rs`) must not import `gpui::Element`, `Context<Workspace>`, or `Window`.
-- `lane/git.rs` stays GPUI-free. UI callers wrap with `background_executor`.
-- Display-string helpers live next to the call site, not as data struct methods.
-
-### G3 — 4-point chain rule
-
-Every user-facing affordance must update all four:
-1. Type — `actions!()`
-2. Handler — `register_action` or `cx.bind_keys`
-3. Constant — `surface/keybindings.rs::SHORTCUT_*` or a `locales/en.yml` key
-4. Discoverability — `command::palette::PALETTE_ENTRIES` + `surface/action_map.rs` arm
-
-### G4 — Inline-literal ban
-
-| Anti-pattern | Replace with |
-|---|---|
-| `gpui::white()` / `gpui::black()` etc. | Named const in `daruda_terminal::ux::theme` |
-| `hsla(...)` inline | Named const in `theme.rs` |
-| `px(N)` inline | Named metric const in `theme.rs` |
-| `"daruda"` literal outside `surface/constants.rs` | `surface::constants::*` |
-
-Enforced by `scripts/lint-inline-literals.sh`. When porting from reference implementations, hoist inline literals to theme constants in the same commit — never defer.
-
-### G5 — Persistence compatibility (forward-only)
-
-- New field → `#[serde(default)]` always.
-- Renaming → keep both with `#[serde(alias = "old_name")]` for one release.
-- Restructuring → add `migrate_legacy()` branch + regression test.
-
-### G6 — Macro discipline
-
-- `actions!()` calls at module entry point (`mod.rs`) only.
-- Code-generating macros live in one file; extend the macro instead of adding parallel `match`/`const` arrays.
-
-### G7 — Dependency direction (one-way)
+## Crate Dependency Graph
 
 ```
-main.rs → menus.rs, windows.rs → workspace/
-  → title_bar/ → ui/, surface/
-  → agent/, project/, lane/, surface/, pty.rs, config_watcher.rs
+daruda (app)  →  daruda_terminal  →  ghostty_vt  →  ghostty_vt_sys
+             |                   →  daruda_core
+             →  daruda_config     →  daruda_store  →  daruda_core
+             →  daruda_store
+             →  daruda_agent      →  daruda_store
+             →  daruda_acp        →  daruda_core    # GPUI-free ACP client core
+             →  daruda_flow       →  daruda_acp, daruda_core
+             →  daruda_flow_edit  →  daruda_flow   # YAML edits that keep comments and order
+             →  daruda_project    →  daruda_config, daruda_store, daruda_core  # GPUI-free Project/Lane
+             →  daruda_content    →  merman, resvg, image   # GPUI-free image + mermaid pipeline
+             →  daruda_control_types  →  daruda_store   # GPUI-free control contract, PaneRef
+             →  daruda_ui         →  daruda_terminal, daruda_config, gpui_component, ferrum_flow  # widgets
+             →  daruda_transcript →  daruda_acp, daruda_config, daruda_ui   # transcript presentation, shared by chat + Settings
+             →  daruda_chat       →  daruda_transcript, daruda_acp, daruda_content, daruda_ui, daruda_config, daruda_store, daruda_core  # the chat pane view
+             →  daruda_settings   →  daruda_transcript, daruda_agent, daruda_project, daruda_config, daruda_ui  # Settings + the config store
+             →  daruda_core                         # shared, GPUI-free
+             →  daruda_update
+             →  gpui, gpui_component, merman, portable-pty
 
-project/ → lane/
-agent/ → lane/
+gpui_component  →  daruda_core                         # vendored; shares the text primitives
 ```
 
-- `surface/` imports nothing from siblings (except `action_map.rs` → workspace action types).
-- `lane/` imports nothing from `workspace/`, `project/`, or `agent/`.
-- `project/` imports `lane/` only; nothing from `workspace/` or `agent/`.
-- `agent/` imports `lane/` only; nothing from `workspace/` or `project/`.
-- The Settings view is `daruda_settings` (`packages/settings/`); its host is
-  `workspace/settings_ops.rs`, and the boundary between them is in
-  `packages/settings/CLAUDE.md`.
+The app can reach every package; GPUI-free packages cannot reach the app.
+Shared logic below that boundary follows [Core admission](../../core/AGENTS.md).
+Configuration and agent packages use `daruda_store`'s persistence APIs; see
+[profile isolation](../../store/AGENTS.md). Shared image/Mermaid and the two
+Markdown stacks are documented in [Content](../../content/AGENTS.md).
+Vendored dependency rules are in [UI](../../ui/AGENTS.md#vendor-dependencies).
 
-When a function references a lane across module boundaries, pass
-the full `daruda_store::project::LaneRef { project, lane }` —
-plain `LaneId` is only valid inside `Project::*` methods where the
-project context is implicit in `self`.
+## UI Component Hierarchy
 
-### G9 — Modals go through `gpui_component::Dialog`
+```
+Workspace
+├── TitleBar                         — shared by Workspace / Settings; off macOS also carries the app-menu button and the caption controls (`app/src/title_bar/`)
+├── SettingsView                     — replaces BodyLayout while open, docks included (`packages/settings/`)
+│   ├── SettingsSidebar              — back button + search + section nav
+│   └── SettingsSection              — one BuiltinSection body at a time
+├── BodyLayout                       — shown when SettingsView is not
+│   ├── LeftDock
+│   │   ├── ViewSwitcher             — Worktrees / Git / Files tab strip
+│   │   ├── WorktreesView            — 2-level tree: Group ▸ Project ▸ Worktree
+│   │   │   ├── GroupHeader          — collapsible accordion (color, name, ▼/▶, context menu)
+│   │   │   ├── ProjectHeader        — project row (inside a group, or ungrouped at top rank)
+│   │   │   └── WorktreeRow          — leaf (create / delete / merge actions, Claude badges)
+│   │   ├── GitChangesView
+│   │   └── FilesView
+│   ├── MainArea
+│   │   ├── TabBar
+│   │   ├── PaneTree                 — one per tab; recursive split tree (single pane = 1-leaf root)
+│   │   │   └── Pane                 — leaf node, single content slot
+│   │   │       ├── PaneHeader       — per-pane title bar, visible in split mode only
+│   │   │       └── PaneContent
+│   │   │           ├── TerminalPane — PTY terminal (TerminalTextElement)
+│   │   │           ├── FileViewPane — file viewer (toolbar + virtual list)
+│   │   │           └── AgentChatView — cached chat entity (packages/chat/)
+│   │   ├── Page                     — Tasks / Flows, in place of TabBar + PaneTree; belongs to no lane
+│   │   │   ├── PageList             — the page's list
+│   │   │   └── PageDetail           — one at a time, over the list: TaskEditor · FlowGraph · RunDetail
+│   │   └── BottomDock
+│   │       ├── DockSwitcher         — BottomDock top tab row
+│   │       ├── TerminalInputDock    — multiline input + submit / action buttons
+│   │       └── MacroDock            — N-column macro key grid
+│   │           └── MacroKey         — macro key (icon or text mode)
+│   └── RightDock
+│       ├── ViewSwitcher             — Usage / Skills / Tasks / Tools tab strip
+│       ├── UsageView
+│       ├── SkillsView
+│       ├── TasksView
+│       └── ToolsView
+├── StatusBar
+├── Dialog / Sheet / Notification    — gpui_component::Root overlay layers
+└── ToastLayer                       — app error notifications (workspace/toast_layer/)
+```
 
-- Every modal entity opens via `crate::workspace::dialog_helpers::*` — `open_form_modal` (entity owns full body), `open_single_field_dialog` (one input + OK/Cancel) — or, for a plain confirmation, `crate::ui::dialog::{open_confirm_dialog, confirm_destructive}` (title + body + OK/Cancel; domain-free, so it lives in `daruda_ui`). All wrap `gpui_component::WindowExt::open_dialog`; Dialog handles backdrop, Escape, and outer chrome.
-- New modal entity: `impl ModalView` (supertrait of `Render + Focusable`) for entities passed to `open_form_modal`. No `Modal` trait, no `EventEmitter<DismissEvent>`, no `ModalLayer`.
-- `ModalView` applies to `open_form_modal` only; `open_confirm_dialog` / `open_alert_dialog` / `open_single_field_dialog` do not use it.
-- Focus is automatically restored to the previously focused element when the dialog closes (handled by `gpui_component::Root`).
-- Entity owns only the body (fields, validation banner, footer buttons). Never re-render Dialog's chrome (`bg`/`border`/`p`/`rounded`/title) inside the entity.
-- Dismiss via `window.close_dialog(cx)`. In `cx.defer` / async paths without a live `&mut Window`, capture `window.window_handle()` and re-enter via `cx.update_window(handle, ...)`.
-- Async continuations: never nest two `entity.update` on the same `app_cx`. Run workspace finalize first, then update modal.
-- Text input: `Entity<crate::ui::InputState>` rendered via `crate::ui::input(&state, cx, tab)`. IME is handled by `gpui_component`.
-- **Modal callback `&mut Window` is live — use it, don't recapture handles**. When a modal's submit/dismiss callback fires with `(…, &mut Window, &mut App)`, that `Window` is the live workspace window inside its own update cycle. Re-entering `cx.update_window(captured_handle, …)` from the callback triggers a *nested* re-entry on the same window and GPUI returns `"window not found"` — the May-2026 add-project regression. Use the callback's `window` directly with `weak_workspace.update(cx, |ws, cx| ws.action(path, window, cx))`. Captured `AnyWindowHandle` is for `cx.defer` continuations where no `&mut Window` is in scope.
+**Concept-to-code mapping** — identifiers match the hierarchy names above:
 
-### G10 — Debugging policy
-
-Reference: `superpowers:systematic-debugging` skill (Iron Law: no fixes before root cause).
-
-- **Trace before fix** — `cx.update_window` failures, modal-callback hangs, dock not updating, etc. start with `LogWriter::log(Info)` traces at each component boundary (`prompt_and_open_folder_with_policy` → `handle_picked_folder` → `add_path_to_workspace` → `add_project`). Read `~/.daruda/logs/<profile>/daruda-YYYY-MM-DD.log`, grep the dedup tag prefix, identify the layer that breaks. Only then propose a fix.
-- **Fix counter ≥ 2 = stop** — if two consecutive fixes have failed, the architecture is wrong, not the patch. Compare against reference (zed, version-matched to the built rev: `~/.cargo/git/checkouts/zed-a70e2ad075855582/193b55a/crates/{workspace,gpui}/`). Don't try a third patch in the same vein.
-- **Reference comparison early** — for any GPUI domain question (window contexts, async re-entry, modal lifecycle, async/spawn shape) read zed's implementation before reasoning. zed's `workspace::update_in`, `cx.spawn_in(window, ...)`, modal patterns are the closest reference.
-- **Callback signature check** — when reading or writing a callback, account for **every** parameter. `_window` / `_cx` underscored prefixes are silent acceptances that the parameter is unused. If the parameter is `&mut Window`, suspect that you should be using it instead of capturing a handle.
-- **Domain unfamiliar → admit + read references** — "I don't fully understand X" goes in the message, not pretending. Skip ahead only when you can name the reference you checked.
+| Hierarchy name | Code identifier | Location |
+|---|---|---|
+| `LeftDock` | `left_dock` field / `Dock` entity (position=Left) | `workspace/left_dock/`, `workspace/layout/mod.rs`, `render/workspace_frame.rs` |
+| `RightDock` | `right_dock` field / `Dock` entity (position=Right) | `workspace/right_dock/`, `workspace/layout/mod.rs`, `render/workspace_frame.rs` |
+| `ViewSwitcher` | `render()` in `view_tabs.rs` (both docks) | `left_dock/view_tabs.rs`, `right_dock/view_tabs.rs` |
+| `DockSwitcher` | `PanelTabStrip` | `main_area/bottom_dock/tab_strip.rs` |
+| `TerminalInputDock` | `TerminalInputPanel` | `main_area/bottom_dock/terminal_input.rs` |
+| `MacroKey` | `MacroKey` | `ui/macro_key.rs` |
+| `PaneTree` | `PaneLayout` enum | `workspace/main_area/pane_tree.rs` |
+| `Pane` | `PaneLayout::Pane` | `workspace/main_area/pane_tree.rs` |
+| `TerminalPane` | `PaneContent::Terminal` | `workspace/main_area/pane/mod.rs` |
+| `FileViewPane` | `PaneContent::File` | `workspace/main_area/pane/mod.rs` |
+| `Page` | `workspace_page: Option<PageState>` | `workspace/pages/mod.rs` |
+| `PageDetail` | `pages: PageDetails`, left only through `leave_page_detail_then` | `workspace/pages/detail.rs` |
+| `TaskEditor` | `TasksPage.detail` | `workspace/pages/tasks/editor/` |
+| `FlowGraph` / `RunDetail` | `FlowsPage.detail` (`FlowDetailBody`) | `workspace/pages/flows/graph/`, `workspace/pages/flows/run_detail.rs` |
+| `ToastLayer` | `toast_layer: Entity<ToastLayer>` | `workspace/toast_layer/mod.rs` |
+| `SettingsView` | `settings: Option<SettingsHost>` — `Some` *is* settings mode | `packages/settings/`, opened/closed in `workspace/settings_ops.rs` |
+| Project (runtime) | `crate::project::Project` (re-export of `daruda_project::project`) | `packages/project/src/project/mod.rs` |
+| Group (runtime) | `daruda_store::project::SerializedGroup` (used directly — no separate runtime newtype) | `packages/store/src/project/` + `workspace/group_ops.rs` |
+| Lane (runtime) | `crate::lane::Lane` (re-export of `daruda_project::lane`) — UI label remains "Worktree" | `packages/project/src/lane/mod.rs` |
+| Lane (persisted) | `daruda_store::project::SerializedLane` + `LaneKind { Git { .. }, Default }` | `packages/store/src/project/lane.rs` |
+| Active focus ref | `daruda_store::project::LaneRef { project, lane }` — JSON keys remain `worktree` via `#[serde(rename = "worktree", alias = "lane")]` | `packages/store/src/project/`; per-lane caches keyed by ref in `workspace/mod.rs` |
+| `ProjectsView` 2-level tree | `TopRow` enum dispatch + `group_header_row` / `project_header_row` / `worktree_row` (function name retained — UI affordance) | `workspace/left_dock/projects/rows/{headers,worktree}.rs` |
+| Multi-project DnD | `DragPayload { Worktree | Project | Group }` + `dnd_ops.rs` reorder pool | `workspace/left_dock/projects/drag.rs`, `workspace/dnd_ops.rs` |

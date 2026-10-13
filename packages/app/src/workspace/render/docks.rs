@@ -144,7 +144,7 @@ impl Workspace {
         // content actually changes — otherwise the cached view shows
         // stale data, and an unconditional notify would defeat the cache
         // by repainting on every 250 ms status-pulse tick (which leaves
-        // this snapshot identical). Per root CLAUDE.md Pitfall #10.
+        // this snapshot identical). Per root AGENTS.md Pitfall #10.
         self.docks.bottom.update(cx, |d, cx| {
             if d.stage(DockSnapshot::Bottom(Box::new(bottom_snap))) {
                 cx.notify();

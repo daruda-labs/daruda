@@ -89,7 +89,7 @@ pub const SEARCH_LABEL_COUNTER: Hsla = hsla(0.0, 0.0, 0.75, 1.0);
 // What stays here: every constant that *terminal-side* widgets in
 // this crate (cell rendering, cursor, prompt-mark gutter, scrollback
 // search overlay, terminal scrollbar, search bar) read directly. The
-// one-way dependency rule (CLAUDE.md §11) forbids importing
+// one-way dependency rule (AGENTS.md §11) forbids importing
 // `crate::ui::*` from here, so anything the terminal renderer needs
 // must remain locally defined.
 

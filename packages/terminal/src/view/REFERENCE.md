@@ -1,9 +1,8 @@
-# view/ module layout
+# Terminal View Reference
 
-TerminalView's GPUI rendering, input handling, and event dispatch.
-
-> This document — like every CLAUDE.md in the repo — is maintained in English.
-> Translate any new content into English before committing.
+Maintained layout, rendering explanations, and navigation contracts.
+Read [Terminal View Instructions](AGENTS.md) for mandatory safety, state,
+and paint-scope rules, then the relevant sections below.
 
 ## File responsibilities
 
@@ -65,7 +64,7 @@ through the modules below:
 Exceptions: the `cell_width * col` arithmetic in background RLE quads, and
 pixel fields kept inside a `struct` such as `SearchBarLayout` (padding /
 layout tuning where that struct is the single source of truth). Both fall
-under the SSoT rule in `CLAUDE.md § 6`.
+under the SSoT rule in [shared definition-site rules](../../../../AGENTS.md#code-and-ui).
 
 ## Data flow
 
@@ -83,18 +82,6 @@ PTY output → mod.rs (queue_output_bytes / feed_output_bytes)
 Cmd+Shift+↑↓ → actions.rs → jump.rs (next_prompt_index → scroll)
 Cmd+F        → actions.rs → search_bar.rs (render_search_bar / recompute_matches)
 ```
-
-## Field-access rules
-
-- `TerminalView` fields are `pub(super)` — accessible only within `view/`.
-- External crates (app) use the `pub` methods only:
-  `new`, `new_with_input`, `feed_output_bytes`, `queue_output_bytes`,
-  `resize_terminal`, `set_search_query`, `search_step`, `clear_search`,
-  `jump_to_prompt`, `jump_to_command`, `search_state`,
-  `set_dim_amount` / `dim_amount` (inactive-pane dim; see `layout.rs`),
-  `has_selection`, `copy_selection`.
-
----
 
 ## Render-side pixel calculation rules
 
@@ -199,7 +186,7 @@ recurring failure mode is copy-pasting a multi-step sequence (scroll →
 settle, flush → send → stop) into each arm — then one copy drifts. That is
 exactly how the wheel path kept an unconditional viewport lock that froze
 streaming output while every sibling path had already learned to unlock at
-the bottom. Root `CLAUDE.md`'s rule — *"two or more call paths copying the
+the bottom. The [shared state rule](../../../../AGENTS.md#ownership-and-state) — *"two or more call paths copying the
 same N-step sequence is the extraction signal → extract one fn and seal
 it"* — binds hardest here. Each domain sequence has **one** owner; call it,
 never paste it:
@@ -226,49 +213,11 @@ step genuinely sits *between* the two — not for convenience.
 
 ---
 
-## Pitfall #8 entry point — `cell_layout` is the only door
+## State and Metrics
 
-Root CLAUDE.md §8 ("paint-scope state must not leak into events")
-reduces in this crate to a single rule: **never call
-`window.text_style()` or `window.rem_size()` directly in `view/`.**
-Two places legitimately do, and only those:
-
-| File | Why it's allowed |
-|---|---|
-| `text_metrics.rs::cell_metrics_at` (and siblings) | the primitive that consults the GPUI text system once per measurement |
-| `element/prepaint.rs::prepaint` | runs inside the paint walk, where `window.text_style()` returns the real per-pane font |
-
-Every other site — mouse, IME, resize, keyboard, viewport refresh —
-goes through `TerminalView::cell_layout(window)`. That method reads
-`state.font` / `state.font_size` / `state.{vertical,horizontal}_spacing`
-and feeds them into `cell_metrics_at`, so paint and events both see
-the same numbers.
-
-The CI script `scripts/lint-paint-scope.sh` greps for direct calls
-outside the whitelist and fails the build on any new violation. It
-is part of the standard CI command (see `packages/app/src/CLAUDE.md`).
-
-## State boundary — `TerminalView` vs `TerminalViewState`
-
-`TerminalView` (the GPUI entity) holds only resources that *require*
-GPUI:
-
-  * `session: TerminalSession` — VT model
-  * `state: TerminalViewState` — shared paint+event data (this file)
-  * `input: Option<TerminalInput>` — PTY sender closure
-  * `focus_handle: FocusHandle` + three `Subscription` slots
-  * `autoscroll_task: Option<gpui::Task<()>>`
-  * `line_layouts` / `line_layout_key` — paint-time shape cache
-
-Everything else (font metrics, viewport snapshot, search, selection,
-IME, hover, jump anchors, flash deadlines, scrollbar drag state)
-lives in `state::TerminalViewState`. The struct carries no GPUI
-context types; pure unit tests in `state.rs::tests` exercise the
-state machine without `TestAppContext`. Adding a new shared field
-goes there, with a getter on `TerminalView` if external callers need
-read access.
-
----
+[Field access](AGENTS.md#field-access-rules), [paint-scope metrics](AGENTS.md#paint-scope-metrics),
+and the [view/state boundary](AGENTS.md#state-boundary--terminalview-vs-terminalviewstate)
+are maintained in the instruction file.
 
 ## Shared helper modules — split by role
 

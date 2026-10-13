@@ -393,7 +393,7 @@ pub fn button_window_control(
 }
 
 /// The close control. Its own factory rather than a `danger` flag on the one
-/// above — `ui/CLAUDE.md` holds that a variant reads better as a name at the
+/// above — `packages/ui/AGENTS.md` holds that a variant reads better as a name at the
 /// call site than as a bool argument, the way `button` / `button_danger` do.
 pub fn button_window_control_danger(
     id: impl Into<ElementId>,

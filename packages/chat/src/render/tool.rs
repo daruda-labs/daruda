@@ -60,7 +60,7 @@ pub(super) use permission::permission_card;
 /// Everything a card reads that does not change as it recurses into a
 /// subagent's flattened children. Bundled because both call paths — the row
 /// renderer and the recursion itself — otherwise restate the same long
-/// argument list in the same order, which is the copy CLAUDE.md's extraction rule
+/// argument list in the same order, which is the copy AGENTS.md's extraction rule
 /// is about.
 #[derive(Clone, Copy)]
 pub(super) struct CardContext<'a> {

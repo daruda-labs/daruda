@@ -100,7 +100,7 @@ fn parse_proc_net_tcp(content: &str) -> HashMap<u64, (u16, String)> {
 /// (`hex_ip:hex_port`) into `(port, "host:port")`. IPv4 addresses
 /// are fully decoded (4 hex bytes, stored little-endian so the byte
 /// order is reversed); IPv6 falls back to a `*` host — daruda's
-/// Linux GUI runtime isn't yet verified (see project CLAUDE.md), so
+/// Linux GUI runtime isn't yet verified (see project AGENTS.md), so
 /// the extra V6 word-order decoding isn't worth it until that's
 /// real. The port is always decoded correctly either way.
 fn decode_local_address(hex_addr_port: &str) -> Option<(u16, String)> {

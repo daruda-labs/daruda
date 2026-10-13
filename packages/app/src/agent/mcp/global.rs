@@ -1,6 +1,6 @@
 //! GPUI Global registration for [`McpState`]. The `impl Global` and
 //! bootstrap helper live here so `agent/mcp/mod.rs` stays GPUI-free
-//! (CLAUDE.md G2 / G7).
+//! (packages/app/src/AGENTS.md G2 / G7).
 
 use gpui::{App, Global};
 

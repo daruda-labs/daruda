@@ -3,7 +3,7 @@
 //! Mirrors zed's settings-store shape: consumers subscribe via
 //! `cx.observe_global::<SettingsStore>` and mutations go through
 //! `cx.update_global` so observers fire on return. `init` stays idempotent and
-//! removed lanes must call [`SettingsStore::forget_lane`] (CLAUDE.md
+//! removed lanes must call [`SettingsStore::forget_lane`] (AGENTS.md
 //! GPUI shared-state cleanup rule).
 
 use daruda_config::{Config, ProjectConfig, SettingsPatch};
@@ -143,7 +143,7 @@ impl SettingsStore {
         self.project.insert(lane.to_path_buf(), Arc::new(cfg));
     }
 
-    /// Drop an overlay when a lane is removed (CLAUDE.md cleanup rule).
+    /// Drop an overlay when a lane is removed (AGENTS.md cleanup rule).
     pub fn forget_lane(&mut self, lane: &Path) {
         self.project.remove(lane);
     }

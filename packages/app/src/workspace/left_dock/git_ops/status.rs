@@ -202,7 +202,7 @@ impl Workspace {
                     }
                     Err(e) => {
                         // A status failure staleness-freezes the whole Git
-                        // Changes panel, meeting the CLAUDE.md "core function
+                        // Changes panel, meeting the AGENTS.md "core function
                         // broke" bar for Error severity.
                         let report =
                             ErrorReport::new(crate::surface::strings::error::git_status_failed())

@@ -7,7 +7,7 @@
 //! per call site (`"task-create-error"`, `"merge-conflict"`, ...).
 //!
 //! Sizing follows the project default — `xsmall()` is auto-applied
-//! before any other modifier (CLAUDE.md §10).
+//! before any other modifier (packages/ui/REFERENCE.md, factory shape A).
 
 use gpui::ElementId;
 use gpui_component::Sizable as _;

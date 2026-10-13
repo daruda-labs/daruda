@@ -108,7 +108,7 @@ if [ -n "$unmarked" ]; then
     echo
     echo "$unmarked"
     echo
-    echo "See CLAUDE.md §\"Error reporting\" / app/CLAUDE.md §\"Debugging policy\"."
+    echo "See packages/app/src/AGENTS.md: Error Reporting and Debugging policy."
     exit 1
 fi
 

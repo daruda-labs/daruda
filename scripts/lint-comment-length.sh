@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
-# Lint: comment-length budget warnings (CLAUDE.md "Comments" rule).
+# Lint: comment-length budget warnings (AGENTS.md "Comments" rule).
 #
-# Background: root `CLAUDE.md` §"Development rules" says comments should
+# Background: root `AGENTS.md` §"Language and Documentation" says comments should
 # "Keep each to 2-3 lines — summarize, don't explain at length." That rule
 # has no mechanical enforcement today, which is exactly the failure mode
-# CLAUDE.md's own "Cross-profile data isolation" section warns about: a
+# AGENTS.md's own "Storage and Profile Isolation" section warns about: a
 # convention that depends only on generation-time discipline drifts, because
 # nobody re-checks it once the surrounding code already reads a certain way.
 # This script gives the rule the same kind of check every other convention
@@ -14,7 +14,7 @@
 # What it flags: a run of consecutive `///`, `//!`, or `//` comment lines
 # (a blank line or a non-comment line ends the run) longer than the budget.
 #
-# What it exempts: a run containing one of the tags CLAUDE.md already
+# What it exempts: a run containing one of the tags AGENTS.md already
 # recognizes as "this longer explanation is deliberate" —
 # SAFETY: (also the `SAFETY(MVU):`-style qualified variant) / WORKAROUND: /
 # INVARIANT: / SILENT-OK: / DIAG: — since those are already flagged by the
@@ -47,7 +47,7 @@ fi
 BUDGET=6
 
 # Skip directories that aren't ours. Vendored code under `vendor/` is never
-# scanned (CLAUDE.md: gpui_component "is excluded from clippy/lint/
+# scanned (AGENTS.md: gpui_component "is excluded from clippy/lint/
 # comment-cleanup passes").
 SKIP_DIRS=(
     "packages/ghostty-vt"
@@ -113,7 +113,7 @@ if [ ${#hits[@]} -eq 0 ]; then
     exit 0
 fi
 
-echo "[lint-comment-length] over-budget comment blocks (CLAUDE.md \"Comments\" rule):"
+echo "[lint-comment-length] over-budget comment blocks (AGENTS.md \"Comments\" rule):"
 printf '  %s\n' "${hits[@]}"
 echo
 echo "Action: trim to the non-obvious WHY in 2-3 lines. If the length is"

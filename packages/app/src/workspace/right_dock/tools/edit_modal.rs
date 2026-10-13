@@ -383,7 +383,7 @@ impl EditMcpServerModal {
             let me = cx.entity().downgrade();
             let window_handle = window.window_handle();
             // Defer the modal-side update so it lands in a fresh
-            // entity update cycle (CLAUDE.md §4 — re-entering the same
+            // entity update cycle (AGENTS.md §4 — re-entering the same
             // modal entity from inside its own listener panics). Use
             // `update_window` to recover `&mut Window` for `dismiss`.
             ws.update(cx, |ws, cx_inner| {

@@ -358,7 +358,7 @@ pub(super) fn failure_block(
             cx,
         )
         // The login reaches this same view through the host; it runs on the
-        // event, after this listener has released it (CLAUDE.md Pitfall #5).
+        // event, after this listener has released it (AGENTS.md Pitfall #5).
         .on_click(cx.listener(|_this, _ev, _window, cx| {
             cx.emit(super::super::view::AgentChatEvent::Reauthenticate);
         }))

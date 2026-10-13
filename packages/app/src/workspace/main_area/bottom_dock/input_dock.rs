@@ -100,7 +100,7 @@ impl InputDock {
                 // defers the actual `set_value` call. Deferring is the same re-
                 // entry guard as `on_completion_accept`: the hook fires inside
                 // `InputState`'s update, so we cannot call `terminal_input.update`
-                // or `terminal_input.read` synchronously (CLAUDE.md pitfall #5).
+                // or `terminal_input.read` synchronously (AGENTS.md pitfall #5).
                 // Reading the workspace's lane history is fine — Workspace is a
                 // different entity from terminal_input.
                 .on_history_navigate(move |dir, window, app| {
@@ -127,7 +127,7 @@ impl InputDock {
                 // update; `cx.defer_in` would re-lease this same InputState, so
                 // `complete_slash_command` -> `send_terminal_input` (which
                 // reads/clears `terminal_input`) would re-enter and panic. Defer
-                // at window/app level — no entity re-lease (CLAUDE.md pitfall #5).
+                // at window/app level — no entity re-lease (AGENTS.md pitfall #5).
                 .on_completion_accept(move |item, window, cx| {
                     let name = item.label.clone();
                     let ws = ws_for_accept.clone();

@@ -650,7 +650,7 @@ pub fn connect_agent_session_with_model(
 /// Build the stdio MCP server entry a session should be handed.
 ///
 /// Here rather than at the call site so the app never names
-/// `agent_client_protocol` — the crate boundary CLAUDE.md draws is that ACP
+/// `agent_client_protocol` — the crate boundary AGENTS.md draws is that ACP
 /// types live behind `daruda_acp`.
 pub fn stdio_mcp_server(
     name: String,

@@ -145,7 +145,7 @@ impl PickerState {
                 PickerKey::Changed
             }
             // Printable ASCII only: the query is a key-down accumulator,
-            // and CLAUDE.md pitfall #4 forbids routing IME text through
+            // and AGENTS.md pitfall #4 forbids routing IME text through
             // one — so anything an IME would compose is dropped rather
             // than appended half-formed. Detail in the test below.
             _ => match ch {
@@ -317,7 +317,7 @@ mod tests {
     /// dropped, so a Korean user cannot type Hangul into a picker even
     /// though the labels are localized (`locales/ko.yml` has
     /// `"레인 전환…"`). Not fixable here — the query is a key-down
-    /// accumulator, and CLAUDE.md pitfall #4 forbids routing IME text
+    /// accumulator, and AGENTS.md pitfall #4 forbids routing IME text
     /// through `on_key_down`. The real fix is adopting
     /// `crate::ui::input` / `InputState`, as `command/history.rs`
     /// already does.

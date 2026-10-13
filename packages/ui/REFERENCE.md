@@ -1,35 +1,8 @@
-# daruda_ui — widget primitives (`gpui_component` wrappers + preserved daruda widgets)
+# UI Reference
 
-The widgets behind the app's `crate::ui::*`. This package
-(`packages/ui/`) holds everything domain-free; the app's facade at
-`packages/app/src/ui/` re-exports it and adds only what needs the app —
-localized wrappers (`button_close`, `code_copy_button`, a two-argument
-`markdown`) and agent-domain widgets (`agent_icon`, `agent_status_badge`).
-A widget that shows a user-visible string takes it as an argument; the
-facade fills it from `surface::strings`. Two layers in this package:
-
-1. **Wrappers** over the vendored `gpui_component::*` crate
-   (factory / variant / re-export shapes).
-2. **Preserved daruda widgets** — IME-critical inputs, daruda-tone
-   primitives, and bespoke layouts that have no clean
-   `gpui_component` swap. Listed in the parent
-   `packages/app/src/CLAUDE.md` under its `ui/` section.
-
-App code under `packages/app/src/` must always go through `crate::ui::*`;
-direct `gpui_component` or `daruda_ui` imports are forbidden (enforced by
-`scripts/lint-direct-gpui-component.sh`).
-
-The same rule covers the other vendored crate, `ferrum_flow` (the
-node-graph canvas), through `crate::ui::flow_canvas` — enforced by
-`scripts/lint-direct-ferrum-flow.sh`. That one also rejects a
-fully-qualified `ferrum_flow::…` path, not just a `use` line, since such
-a path needs no import and would otherwise walk past the boundary.
-
-This file documents the **wrapper authoring rules** only. For
-preserved-widget conventions (`Entity<T>` + `Render` for stateful, plus
-the IME / focus pitfalls), see root `CLAUDE.md` §3 + §4.
-
----
+Maintained wrapper recipes, module catalogue, and preserved vendor patches.
+The governing rules are in [UI Instructions](AGENTS.md); read the relevant
+sections here before authoring wrappers or changing a vendored widget.
 
 ## Why the wrapper layer
 
@@ -52,8 +25,8 @@ the IME / focus pitfalls), see root `CLAUDE.md` §3 + §4.
 
 ## Wrapper module layout
 
-Wrapper files only — preserved daruda widgets are listed in the parent
-CLAUDE.md `ui/` table.
+Wrapper files only — preserved daruda widgets are listed in the
+[app UI reference](../app/src/REFERENCE.md#ui).
 
 ```
 ui/
@@ -295,83 +268,10 @@ that trait's methods. Speculative re-exports rot.
      bypasses ui/)
    - `cargo fmt -p daruda -- --check`
 
-### Token ownership
+## Shared Constraints
 
-- Shared numeric scales live in `theme/metrics.rs`: padding, gaps, fonts,
-  radii, and standard icon/target sizes. Normal callers use `theme::*`;
-  `palette::*` re-exports the same definitions for compatibility.
-- Colors stay in the palette and live theme. Chrome reads `theme::current`;
-  terminal-mirrored panes use `PaneSurfaceTokens` and surface-aware factories.
-- A component owns its recipe. Use primitive tokens directly for ordinary
-  spacing, type, and corners, not a new screen-prefixed alias. Independent
-  component constraints live beside their owner: `switch.rs` owns its two
-  `Metrics` recipes, `form_helpers.rs` owns its label gutter, and
-  `section_header.rs` owns the existing 10.5px quiet label size. These are
-  definition sites for named metrics, not exemptions for inline `px` literals.
-- Icon buttons and dock toggles share a 24px target and 4px corners. Standard
-  artwork is 16px; dock toggles keep 14px artwork and tree glyph buttons keep
-  their explicit targets. Do not repeat the factory's geometry at call sites.
-  Passive `Badge` labels, actionable chips, and custom status pills remain
-  distinct contracts. Buttons stay outside Tab unless the caller opts in;
-  switches retain their keyboard participation and disabled behavior.
-- `theme/list_metrics.rs` holds actual shared column-content budgets.
-  `ListTable` derives geometry from the visible schema; `list_page` owns page
-  chrome. Neither acquires domain filtering, selection, or state transitions.
-- Keep independent content budgets and semantic color roles even if their
-  values happen to match. Keep runtime limits and timers with feature ops.
-- Before adding a token, check the existing scale, then the existing
-  component, then the independent constraint and its narrowest visibility.
-  `bash scripts/report-ui-token-aliases.sh` reports new direct numeric aliases
-  against HEAD, including untracked UI source. It is advisory; a meaningful
-  role can carry an inline `// token-role: <reason>` exception. Legacy aliases
-  and textual unused candidates are review inputs, not automatic deletions.
-
-### When NOT to add to ui/
-
-- **Workspace-specific widgets** (a button that knows about
-  `Workspace`, `Pane`, etc.) — those live alongside the feature, not in
-  `ui/`. `ui/` only holds primitives that are independent of daruda
-  domain types.
-- **Modal shells / dialog chrome** — `gpui_component::Dialog` provides
-  the panel chrome (bg / border / padding / title / backdrop). Open via
-  `crate::workspace::dialog_helpers::{open_form_modal,
-  open_single_field_dialog}`, or `dialog::{open_confirm_dialog,
-  confirm_destructive}` here for a plain confirmation. Don't re-create
-  `FormModalShell`-style wrappers in ui/.
-- **Composite layouts that consume ui primitives** — small helpers
-  like `form_helpers::field_row` are fine in ui/, but anything that
-  pulls in workspace types belongs alongside the feature.
-- **One-off helpers** used in a single file — keep them inline; ui/ is
-  for primitives that get reused.
-
----
-
-## Destructive actions confirm first
-
-An action that cannot be undone, or that reaches a system outside daruda
-(the credential store, a paired chat, a removed config entry), opens
-`dialog::confirm_destructive` and runs only from its OK.
-Its button label ends in `…`. A reversible value change, including Reset,
-never confirms.
-
-## Allowed exceptions to the import rule
-
-A small set of infrastructure files legitimately calls `gpui_component::*`
-directly. The lint script (`scripts/lint-direct-gpui-component.sh`)
-allow-lists them:
-
-| File | Why |
-|---|---|
-| `src/main.rs` | `gpui_component::init(cx)` + `ui::theme::apply_daruda_palette(cx)` at app startup |
-| `src/test_support.rs` | `init(cx)` + palette overlay for unit-test fixtures |
-| `src/windows.rs` | `gpui_component::Root::new(...)` Workspace window wrapping |
-| `src/workspace/render/mod.rs` | `Root::render_*_layer(...)` in `Workspace::render` |
-| `src/ui/` | The facade over this package |
-
-Don't grow this list. If a new file needs direct `gpui_component`
-access, ask first whether the access belongs in `ui/` instead.
-
----
+Token ownership, placement restrictions, destructive-action confirmation,
+import exceptions, and GPUI safety are maintained in [UI Instructions](AGENTS.md).
 
 ## Vendor patches in `vendor/gpui-component/gpui_component/`
 

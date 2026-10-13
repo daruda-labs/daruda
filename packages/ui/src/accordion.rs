@@ -2,7 +2,7 @@
 //!
 //! Single-call factory plus `pub use` of `Accordion` / `AccordionItem`
 //! so app code can store these in struct fields without bypassing
-//! `crate::ui::*`. See `packages/ui/CLAUDE.md`.
+//! `crate::ui::*`. See `packages/ui/AGENTS.md`.
 
 use gpui::ElementId;
 use gpui_component::Sizable as _;

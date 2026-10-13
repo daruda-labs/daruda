@@ -4,7 +4,7 @@
 //! Precedence is Local > Project > User. Round-tripping must preserve unknown
 //! keys because `.claude.json` also holds unrelated Claude Code state.
 //!
-//! No GPUI imports here; `app/src/CLAUDE.md` G2/G7 reserve this module for
+//! No GPUI imports here; `packages/app/src/AGENTS.md` G2/G7 reserve this module for
 //! parsing, persistence, watchers, and renderer data.
 
 pub mod global;

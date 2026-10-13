@@ -153,7 +153,7 @@ impl Workspace {
                 s.forget_lane(&path);
             });
             // Drop the per-lane slice from `SettingsStore` so its
-            // BTreeMap doesn't grow unbounded (CLAUDE.md §"GPUI
+            // BTreeMap doesn't grow unbounded (AGENTS.md §"GPUI
             // shared-state convention — Cleanup rule").
             cx.update_global::<crate::settings_store::SettingsStore, _>(|s, _| {
                 s.forget_lane(&path);

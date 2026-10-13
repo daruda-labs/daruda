@@ -1,4 +1,4 @@
-# assets/themes/ — UI theme presets (light + dark **together**)
+# Theme Instructions
 
 Bundled `DarudaTheme` presets, compiled into the binary via `include_str!`
 (`packages/ui/src/theme/mod.rs::bundled_theme_json`) and loaded at runtime

@@ -6,7 +6,7 @@
 //! only plain data + sealed value types like `gpui::Font` /
 //! `gpui::Pixels` / `Instant`. That separation makes it possible to
 //! exercise the state machine in pure unit tests (no
-//! `TestAppContext`, no async setup) and turns the daruda CLAUDE.md
+//! `TestAppContext`, no async setup) and turns the daruda AGENTS.md
 //! Pitfall #8 rule ("paint-scope state must not leak into the event
 //! path") into a structural fact rather than a guideline.
 //!

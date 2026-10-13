@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# CI guard for daruda CLAUDE.md Pitfall #8.
+# CI guard for daruda AGENTS.md Pitfall #8.
 #
 # `window.text_style()` and `window.rem_size()` return GPUI's root
 # defaults outside the paint walk. Reading them in event handlers,
@@ -52,7 +52,7 @@ HITS=$(grep -RHn -E 'window\.(text_style|rem_size)\(\)' "$VIEW_DIR" \
 if [[ -n "$HITS" ]]; then
     echo "lint-paint-scope: forbidden window.text_style() / window.rem_size() calls" >&2
     echo "Use TerminalView::cell_layout(window) (or the appropriate state field)" >&2
-    echo "instead. See daruda CLAUDE.md Pitfall #8." >&2
+    echo "instead. See daruda AGENTS.md Pitfall #8." >&2
     echo "" >&2
     echo "$HITS" >&2
     exit 1

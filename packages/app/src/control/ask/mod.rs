@@ -5,7 +5,7 @@
 //! is the same: a tool call has to block on something that happens later. Only
 //! the trigger differs. An approval waits for a person to tap; this waits for a
 //! pane's activity span to settle, which `Workspace::fire_activity_completion`
-//! is the single point of (CLAUDE.md pitfall 11).
+//! is the single point of (AGENTS.md pitfall 11).
 //!
 //! Keyed by pane, because the completion tee has a pane and nothing else to
 //! look a waiter up by. At most one waiter per pane holds by construction: a

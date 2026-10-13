@@ -118,7 +118,7 @@ impl Workspace {
     /// Read-only on purpose: the caller runs this inside
     /// `WindowRegistry::for_each_workspace`, which is already inside a
     /// `Workspace::update`. Mutating an entity there, or reading one twice,
-    /// is the re-entrancy panic in CLAUDE.md pitfall 5.
+    /// is the re-entrancy panic in AGENTS.md pitfall 5.
     pub(crate) fn control_snapshot(&self, cx: &App) -> Vec<(LaneRef, ChatSummary)> {
         let active = self.active;
         let uuid = self.uuid();

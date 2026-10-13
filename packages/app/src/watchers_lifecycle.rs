@@ -97,7 +97,7 @@ fn spawn_presence_and_telegram_pump(cx: &mut App) {
 }
 
 /// Drive the shared status-badge clock at ~4 fps. One gated pulse dirties only
-/// windows with animation, avoiding per-badge animation redraws (CLAUDE.md
+/// windows with animation, avoiding per-badge animation redraws (AGENTS.md
 /// Pitfall #10).
 fn spawn_status_pulse(cx: &mut App) {
     watcher_pumps::spawn_periodic_pump(

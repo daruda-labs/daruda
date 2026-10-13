@@ -70,7 +70,7 @@ pub(in crate::workspace) trait RootContextMenuExt:
             // read the workspace to decide their items (the file viewer reads
             // `active_lanes`), and `PopupMenu::build` runs the closure
             // synchronously — inside a lease that is a double-lease panic
-            // (CLAUDE.md Pitfall 5). Same order as `tab_strip`'s deploy.
+            // (AGENTS.md Pitfall 5). Same order as `tab_strip`'s deploy.
             let menu =
                 PopupMenu::build(window, cx, move |menu, window, cx| build(menu, window, cx));
             workspace.update(cx, |workspace, cx| {

@@ -72,7 +72,7 @@ pub(in crate::workspace) fn render(
             };
             // Build before leasing — `PopupMenu::build` runs the closure
             // synchronously, and a builder that reads the workspace would
-            // double-lease-panic inside `update` (CLAUDE.md Pitfall 5).
+            // double-lease-panic inside `update` (AGENTS.md Pitfall 5).
             let menu = crate::ui::PopupMenu::build(window, cx, move |menu, window, cx| {
                 build(menu, window, cx)
             });

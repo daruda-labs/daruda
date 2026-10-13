@@ -664,7 +664,7 @@ fn open_chooser_modal(
     let weak_for_modal = weak.clone();
     // `handle` is consumed by `try_update_workspace_window` below; the inner
     // modal callback re-enters the workspace via its own live `&mut Window`
-    // instead (matches zed's `update_in` pattern — see `app/CLAUDE.md` G9).
+    // instead (matches zed's `update_in` pattern — see `packages/app/src/AGENTS.md` G9).
     try_update_workspace_window(handle, cx, "open_chooser_modal", move |window, cx_w| {
         let config = config.clone();
         crate::workspace::open_project_modal::open_choose_window_modal(

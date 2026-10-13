@@ -155,7 +155,7 @@ impl Workspace {
             // Notify the Dock entity, not just the Workspace: the bottom
             // dock is rendered through `.cached()`, so a Workspace-only
             // notify would leave the cached (closed) view on screen.
-            // Per root CLAUDE.md Pitfall #10.
+            // Per root AGENTS.md Pitfall #10.
             ws.docks.bottom.update(cx, |d, cx| {
                 d.toggle();
                 cx.notify();
@@ -414,7 +414,7 @@ impl Workspace {
         // Hard-newline count (`text().lines_len()`) would clip long soft-wrapped
         // lines at the bottom.
         // ⚠️ Do NOT call `window.line_height()` / `window.text_style()` here —
-        // this method runs in an event handler, outside the paint walk (CLAUDE.md
+        // this method runs in an event handler, outside the paint walk (AGENTS.md
         // Pitfall #8). The per-row height constant lives in the palette instead.
         let new_line_count = self.input_dock.input.read(cx).display_rows().max(1);
 

@@ -1,6 +1,6 @@
 //! GPUI Global registration at app startup.
 //!
-//! Order constraints (CLAUDE.md "GPUI shared-state convention"):
+//! Order constraints (AGENTS.md "GPUI shared-state convention"):
 //! - `DarudaTheme::init` must precede `apply_daruda_palette` — the
 //!   palette reads `cx.global::<DarudaTheme>()` to map slot values
 //!   into `gpui_component::Theme`.

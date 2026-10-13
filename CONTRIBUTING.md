@@ -10,8 +10,11 @@ daruda locally. For a short product overview and first run instructions, see
 
 - [Requirements](#requirements)
 - [Setup](#setup)
+- [Coding Agent Instructions](#coding-agent-instructions)
 - [Storage locations](#storage-locations)
 - [Local Checks](#local-checks)
+- [Tests and CI](#tests-and-ci)
+- [Visual Verification](#visual-verification)
 - [Packaging](#packaging)
 - [Project Structure](#project-structure)
 - [Code Style](#code-style)
@@ -31,6 +34,18 @@ daruda locally. For a short product overview and first run instructions, see
 | Rust | 1.95+; CI pins the floor to 1.95 |
 | Zig | 0.14.1; `./scripts/bootstrap-zig.sh` installs the pinned version on macOS |
 | Xcode Command Line Tools | Required on macOS |
+
+Rust uses edition 2024. The minimum version is declared once in
+`[workspace.package]`; first-party crates inherit `rust-version.workspace = true`.
+CI pins the floor exactly, while local development can use newer toolchains.
+The vendored `gpui_component*` manifests remain unchanged for re-vendoring;
+`ferrum_flow` declares the floor to enable `clippy::incompatible_msrv`.
+
+Zig can be bootstrapped with `scripts/bootstrap-zig.sh` on macOS/Linux or
+`scripts/bootstrap-zig.ps1` on Windows x86_64; alternatively set `ZIG` or put
+it on PATH. macOS is the primary desktop-verified target. Linux and Windows
+have CI build/test/startup gates; real input, IME, menus, tray behavior, and
+Windows transitions between monitors with different DPI need desktop checks.
 
 ---
 
@@ -164,6 +179,70 @@ macOS continues to use offscreen Metal capture; Linux capture remains unavailabl
 
 ---
 
+## Coding Agent Instructions
+
+The repository uses `AGENTS.md` for shared and directory-specific rules.
+Do not add duplicate `CLAUDE.md` files or import-only bridges. Detailed,
+maintained subsystem material belongs in adjacent `REFERENCE.md` files;
+the applicable instruction file links to the sections a task must read.
+
+### Tool Support and Loading
+
+Use a current Claude Code release with its built-in AGENTS support enabled
+(native support was introduced in v2.1.277). Upgrade older clients.
+By default, a project or ancestor `CLAUDE.md`, `.claude/CLAUDE.md`, or
+`CLAUDE.local.md` disables AGENTS loading. A user-wide
+`~/.claude/CLAUDE.md` does not. If you need an ancestor or local Claude file,
+select `claude-md-and-agents-md` under `/config` -> Project instructions.
+That choice must come from user/managed settings or a `--settings` file;
+project/local settings cannot enforce it. See
+[Claude's loading rules](https://code.claude.com/docs/en/memory#agentsmd).
+
+Codex discovers project instructions from the repository root to its launch
+directory, with a default combined budget of 32 KiB. It does not preload
+every descendant file. Follow the root's Required Reading links when working
+across packages. See
+[Codex instruction discovery](https://learn.chatgpt.com/docs/agent-configuration/agents-md).
+
+### Authoring and Maintenance
+
+- Put shared constraints at the root and package-specific constraints next
+  to their code. Use the exact filename `AGENTS.md`.
+- State the trigger, required action, reason, and allowed exception. Keep
+  non-obvious safety contracts; remove duplication, not safeguards.
+- Move long examples, catalogues, diagrams, and vendor patch explanations
+  into maintained reference documents. Link each from a task-specific
+  Required Reading row; do not make essential contracts optional.
+- Do not eagerly import every reference. Markdown links are navigation;
+  Claude's `@path` imports load content eagerly and do not reduce context.
+- Keep each root-to-directory instruction chain, including separators,
+  below 32 KiB. Aim below 20 KiB at the root and 12 KiB per package, with
+  extra headroom when adding another nested level. Splitting into more
+  ancestor files does not bypass the combined budget.
+- Around 200 lines is a useful editing target for a scoped instruction file,
+  not a reason to delete required constraints. Check bytes as well as lines.
+- Keep the shared pre-commit checklist in [Local Checks](#local-checks), and package
+  coverage in `scripts/ci-cargo.sh`. Mechanical enforcement belongs in the
+  existing tests/lints, not repeated prose.
+
+These conventions follow
+[Claude's authoring guidance](https://code.claude.com/docs/en/best-practices#write-an-effective-claudemd)
+and its [size/import guidance](https://code.claude.com/docs/en/memory#write-effective-instructions).
+
+### Verify Loading After Changes
+
+Check local document links and heading anchors, and measure each ancestor
+chain before changing an instruction file's scope or adding a nested file.
+Do not change personal agent settings as part of a repository edit.
+
+In a fresh Claude session, use `/context` to inspect Memory files, open a
+package source file with Read, then check that its `AGENTS.md` is loaded too.
+In a fresh Codex session started in a package directory, ask it to list its
+instruction sources; expect the root and that directory's applicable file.
+These are manual loading checks, not something a Cargo pass establishes.
+
+---
+
 ## Storage locations
 
 Configuration and account data retain their existing platform
@@ -226,41 +305,204 @@ instead of invoking an installed editor. This applies on every OS, without
 requiring a default file association or an editor on `PATH`. Keep native launch
 verification in an explicit manual smoke check with a persistent file.
 
-Run these before committing:
+Before committing, run the complete checklist below and fix every failure.
+During code review, the [review-mode rule](AGENTS.md#review-mode) takes precedence:
+only execute build, test, lint, or compile commands when the user explicitly
+requests them in that review request.
+
+Cargo package coverage is maintained once in
+[scripts/ci-cargo.sh](scripts/ci-cargo.sh). Use its named gates instead of
+copying package lists into documentation. A successful check exits zero;
+`fmt` reports no formatting drift, Clippy/doc report no warnings, tests pass,
+and the preset generator reports no generated drift.
 
 ```bash
 cargo fmt --all -- --check
-cargo clippy -p ghostty_vt -p ghostty_vt_sys -p daruda_terminal -p daruda \
-  -p daruda_config -p daruda_store -p daruda_agent -p daruda_update \
-  -p daruda_acp -p daruda_core -p daruda_flow -p daruda_project -p daruda_ui -p daruda_control_types -p daruda_content -p daruda_flow_edit -p daruda_transcript -p daruda_chat -p daruda_settings -p ferrum_flow -p strings_gen \
-  --all-targets -- -D warnings
+bash scripts/ci-cargo.sh clippy
+bash scripts/ci-cargo.sh app-features
+bash scripts/ci-cargo.sh test
+bash scripts/ci-cargo.sh doc
+cargo test -p daruda --features screenshot
+cargo run -p gen_acp_presets -- --check
+```
+
+The lint checklist includes CI checks and additional local checks.
+Every script must exit zero:
+
+```bash
 ./scripts/lint-inline-literals.sh
 ./scripts/lint-paint-scope.sh
 ./scripts/lint-reentrant-reads.sh
 ./scripts/lint-direct-gpui-component.sh
+bash ./scripts/lint-input-factories.sh
+bash ./scripts/lint-input-factories.sh --self-test
+bash ./scripts/lint-modal-fields.sh
+bash ./scripts/lint-modal-fields.sh --self-test
 ./scripts/lint-direct-ferrum-flow.sh
 ./scripts/lint-no-eprintln.sh
 ./scripts/lint-viewport-row-scroll.sh
-cargo test -p ghostty_vt -p ghostty_vt_sys -p daruda_terminal -p daruda \
-  -p daruda_config -p daruda_store -p daruda_agent -p daruda_update \
-  -p daruda_acp -p daruda_core -p daruda_flow -p daruda_project -p daruda_ui -p daruda_control_types -p daruda_content -p daruda_flow_edit -p daruda_transcript -p daruda_chat -p daruda_settings -p ferrum_flow -p strings_gen
+./scripts/lint-render-purity.sh
+./scripts/lint-landing-no-disk-read.sh
+./scripts/lint-platform-boundary.sh
 ./scripts/lint-no-silent-update.sh
 ./scripts/lint-agent-activity.sh
 ./scripts/lint-daruda-path-literals.sh
+./scripts/lint-env-literals.sh
+./scripts/lint-env-literals.sh --self-test
 ./scripts/lint-file-size.sh
 ./scripts/lint-mark-dirty-direct-call.sh
 ./scripts/lint-fold-header.sh
+./scripts/lint-agent-list-sync.sh
 ./scripts/lint-declarative-context-menu.sh
 ./scripts/lint-acp-air-gate.sh
+./scripts/lint-raw-mouse-button.sh
+./scripts/lint-raw-mouse-button.sh --self-test
 ./scripts/lint-comment-length.sh
-cargo run -p gen_acp_presets -- --check
 ```
+
+On Windows, run non-interactive checks through `scripts/run-hidden.ps1`
+or the test suite through `scripts/test-windows.ps1`. Every newly launched
+parent or nested shell must also be hidden; preserve output and exit codes.
+Background shells use `Start-Process -WindowStyle Hidden` or equivalent.
+This does not apply to GUI screenshot launches, which need a visible window.
+
+During iteration, `cargo test -p daruda -- --skip workspace::tests` avoids
+the expensive real-Workspace tests, which create tabs and spawn shells.
+It is an iteration shortcut, not a replacement for the full pre-commit suite.
 
 The ACP preset drift gate is offline. It regenerates the generated block in
 `packages/config/src/agent/preset.rs` from
 `tools/gen_acp_presets/registry-snapshot.json` and fails if committed output is
 stale. Use `scripts/sync-acp-registry.sh` only when intentionally refreshing the
 registry snapshot.
+
+---
+
+## Tests and CI
+
+[ci.yml](.github/workflows/ci.yml) defines current job coverage. It runs
+macOS, Linux, and Windows build/test jobs plus one source-only Lint job.
+The Lint job runs format and selected lint scripts; the full local checklist
+above remains required even for checks not yet wired into CI.
+
+[scripts/ci-cargo.sh](scripts/ci-cargo.sh) owns the shared package coverage
+for `clippy`, `app-features`, `test`, and `doc`; extra Cargo options follow
+the gate name. Update coverage there. The `test` gate includes
+`gpui_component`'s daruda-authored patch tests. The doc-link gate covers its
+explicit crate subset, not every workspace crate; Clippy does not validate
+intra-doc links. All app features are off by default, so the `app-features`
+gate checks feature-only code on every OS.
+
+[setup-build](.github/actions/setup-build/action.yml) owns the shared
+Rust/Zig setup, locked fetch, and vendored-GPUI check for CI and release.
+Linux dependencies live in `scripts/linux/{build,smoke}-deps.txt`;
+`scripts/linux/smoke.sh {x11|wayland} <binary>` also runs locally.
+Linux checks both X11 and Wayland startup/paint; Windows checks native
+builds, startup, platform adapters, and packaging.
+
+A local pass establishes only the host's compiled branches. Platform changes
+require default and all-feature Clippy on all three OSes; report other OS
+results as pending until CI passes. For rendering, IME, and window state,
+tests alone are insufficient: use the capture workflow below and report
+remaining desktop checks.
+
+---
+
+## Visual Verification
+
+Render the UI offscreen to a PNG and read it back — text, layout, colors, images, and toasts all render, permission-free (no Screen Recording grant). Capture goes through gpui's `render_to_image`, gated upstream behind `test-support`; the `--screenshot` path below requires it, plus `gpui_macos/font-kit` (without that feature glyphs don't rasterize — shapes render but **text is invisible**).
+
+**macOS:** offscreen capture uses `MetalHeadlessRenderer`. **Windows:**
+`--screenshot` uses the visible composed client surface instead of
+`render_to_image`, including native fonts and physical DPI-scaled pixels.
+Launch the GUI normally; `run-hidden.ps1` can hide its first window and make
+capture fail. Hidden and uniform blank captures return an error. **Linux:**
+no capture implementation is available; use `daruda --smoke` for startup checks.
+
+**Whole app** — the `--screenshot` flag captures the live workspace window:
+
+```bash
+cargo build -p daruda --features screenshot
+target/debug/daruda --screenshot /tmp/shot.png   # opens, settles ~2s, captures, quits
+```
+
+The opt-in `screenshot` feature enables `gpui/test-support` + `gpui_macos/font-kit`; it is off by default to keep the shipping binary clean. Entry point: `packages/app/src/screenshot.rs`.
+
+Verification loop: render → PNG → an agent reads the PNG and checks the result. This catches both rendering bugs and runtime state (e.g. error toasts), so it doubles as a smoke test of the real app's startup.
+
+### Driving the Captured State
+
+`--screenshot` takes no view argument — it captures the **restored** workspace (empty or not), so you steer it by steering what gets restored *before* launch. Two isolation levers + three reach tiers:
+
+- **`DARUDA_DATA_DIR=<dir>`** — points the whole state dir at `<dir>` (verbatim). Pre-seed it; isolates from your real workspace.
+- **`DARUDA_PROFILE=<name>`** — `release` → `daruda/`, else `daruda-<name>/`. Debug builds already use `daruda-debug/`, so runs are isolated by default.
+
+```bash
+export DARUDA_DATA_DIR=/tmp/daruda-shot-state   # throwaway, pre-seeded state
+cargo build -p daruda --features screenshot && target/debug/daruda --screenshot /tmp/shot.png
+```
+
+**Tier 1 — `config.toml` (appearance, mostly live-reload):** `[theme]` (terminal_preset / ui_preset), `[colors]`, `[font]` (size/spacing/inset), `[cursor]`, `[window]`, `[file_viewer]`, `[left_dock]`, `[panels]`, `[render]`, etc. Does **not** control which tab/pane/view is active — that's Tier 2.
+
+For the UI theme specifically, `--screenshot-theme <light|dark>` overrides `ui_preset` at capture time (via `apply_ui_theme`) without touching config — orthogonal to and composable with `--screenshot-scenario` (e.g. shoot the command palette in light mode). Pass a **comma list** (`light,dark`) for a batch: one PNG per theme in a single launch (output names get a `.<theme>` suffix — `shot.png` → `shot.light.png` / `shot.dark.png`), the scenario stays applied and is re-themed in place between captures.
+
+```bash
+target/debug/daruda --screenshot /tmp/s.png --screenshot-theme light --screenshot-scenario command-palette
+target/debug/daruda --screenshot /tmp/s.png --screenshot-theme light,dark   # batch: s.light.png + s.dark.png
+```
+
+Two more capture knobs (compose with everything above):
+- `--screenshot-size WxH` — fix the captured window size (e.g. `1280x800`) instead of the restored bounds; for stable doc / pixel-regression shots.
+- `DARUDA_SCREENSHOT_SETTLE_MS=<ms>` — override the 2 s post-launch settle (raise on slow CI / big workspaces, lower for quick local shots).
+
+**Tier 2 — persisted state under `DARUDA_DATA_DIR` (layout & structure):** `state/workspace/workspaces/<uuid>.json` (`WorkspaceState`: dock open/size, window bounds, active project+lane, `active_dock_view`, `active_right_panel_view`, focused pane, groups), `state/workspace/projects/<uuid>.json` (`ProjectState`: lanes, tabs, pane split tree, file-pane path + view_mode), `panels.json` (macro grid), `tasks.json` (task list). (Schemas in `daruda_store::project::{WorkspaceState,ProjectState}`.) **Easiest seeding: set `DARUDA_DATA_DIR`, drive the app by hand to the scenario once, quit, re-run with `--screenshot` against the same dir** — no schema guessing.
+
+**Tier 3 - transient/live state:** restore recomputes it, so config or persisted
+state alone cannot reach it. `--screenshot-scenario <name>` applies a scenario
+after settle and forces a repaint before capture.
+
+| Area | Example scenarios and capture intent |
+|---|---|
+| Overlays | `command-palette`, `error-modal`, `toast`, `pane-context-menu`, `mermaid-lightbox` |
+| Navigation | `lane-switcher` seeds an overflowing label; `landing` empties the restored workspace |
+| Settings | `settings[:<section-slug>]`, `settings-error`, `settings-search` |
+| Agent catalog | `agent-catalog-expanded`, `agent-catalog-editor[:<fold\|filter\|range>]` |
+| Window chrome | `client-chrome` forces app-drawn controls; native macOS traffic lights still cover the left inset, so assess the right edge and spacing |
+| Tab status | `tab-indicators` seeds each status dot; inspect its color |
+| Agent chat | `agent-chat`, `agent-chat-working`, `agent-chat-empty`, `agent-chat-failure` |
+| Chat interaction | `agent-chat-fold`, `agent-chat-interrupted`, `agent-chat-options[:<tab>]`, `agent-chat-queue-parked`, `agent-chat-queue-armed` |
+| Chat details | `agent-chat-running-tool`, `agent-chat-plan[-stopped]`, `agent-chat-thoughts[-working\|-only]`, `agent-chat-sole-reply` |
+| Transcript boundaries | `agent-chat-tail[-open]`, `agent-chat-group-tail[-open]`, `agent-chat-subagent-tail[-open]` |
+| CLI transcript | `agent-chat-cli-running`, `agent-chat-cli-ended` |
+| Flows | `flow-picker`, `flow-profile-picker`, `flow-running`, `flow-asking`, `flow-resumable`, `flow-delete-confirm` |
+| Flow graph | `flow-graph`, `flow-graph-running`, `flow-graph-form[-refused]`, `flow-graph-pinned`, `flow-graph-authoring`, `flow-run-detail` |
+
+Bracketed forms summarize related names, not literal CLI arguments. The
+[scenario name registry](packages/app/src/workspace/screenshot_scenario/names.rs)
+is authoritative for supported tokens and parameter axes:
+Settings uses `BuiltinSection::slug`; chat options use
+`ActivityOptionsTab::token`. Add a scenario to `ScreenshotScenario` and
+`screenshot_scenario::drive`, and register its CLI name in `names.rs`.
+
+Agent-chat scenarios seed fixed transcripts through
+`AgentChatView::seed_transcript_for_shot` without an ACP session.
+The states below still need a real source or live interaction.
+
+```bash
+target/debug/daruda --screenshot /tmp/shot.png --screenshot-scenario command-palette
+target/debug/daruda --screenshot /tmp/s.png   --screenshot-scenario settings:font
+```
+
+| State | On restore |
+|---|---|
+| Modals, command palette, Settings | closed — use `--screenshot-scenario` (`error-modal`, `command-palette`, `settings[:<slug>]`, `settings-error`) |
+| Toasts | empty queue — use `--screenshot-scenario toast` |
+| Drag / hover / text selection | gone (real-time only) |
+| Terminal output | fresh shell prompt — scrollback is **not** persisted |
+| File-viewer content / git-changes | reloaded from disk — needs **real files / git repo** |
+| Usage / Skills / Tools panels | fetched fresh (net / FS / MCP); cold → placeholder |
+| Agent-chat transcript | not persisted — `SerializedAgentChatContent` stores only the pane's cwd / `session_id` / title / agent + account / view preferences, and a restored pane is refilled by the adapter replaying the conversation on `session/load`. For a capture, use the `agent-chat*` scenarios: they seed a fixed transcript and need no session |
+| Live Claude session badge | in-memory — needs a real attached session |
 
 ---
 
@@ -494,6 +736,9 @@ Common types:
 
 Keep the summary under 72 characters. Use the body for the reason behind the
 change.
+
+Coding agents follow the narrower [agent commit rules](AGENTS.md#branches-and-commits):
+use an unscoped imperative subject, and stage, commit, or push only when requested.
 
 ---
 

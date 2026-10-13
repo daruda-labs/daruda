@@ -423,7 +423,7 @@ impl AddMcpServerModal {
             // modal entity is already being updated. Calling
             // `me.update(...)` synchronously inside the success/error
             // branch panics with "cannot update <Modal> while it is
-            // already being updated" (CLAUDE.md §4). Defer the modal
+            // already being updated" (AGENTS.md §4). Defer the modal
             // update so it runs on a fresh update cycle. The deferred
             // closure receives only `&mut App`, so we re-enter the
             // window via `update_window(handle, ...)` to recover the

@@ -61,7 +61,7 @@ pub(super) fn log_unauthorized_inbound() {
 ///
 /// Deliberately not a `SettingsPatch`: mutating the `SettingsStore` global
 /// notifies app-wide observers that rebuild the native menu bar and call
-/// `cx.refresh_windows()`, which the root `CLAUDE.md` (pitfall 10) reserves for
+/// `cx.refresh_windows()`, which the root `AGENTS.md` (pitfall 10) reserves for
 /// genuinely global invalidation — driving it at message rate is exactly the
 /// ban. See `daruda_store::telegram` for why `config.toml` is also the wrong
 /// file to keep this in.

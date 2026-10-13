@@ -34,7 +34,7 @@ pub(super) async fn with_connect_timeout<T>(
     timeout: Duration,
     fut: impl Future<Output = Result<T, agent_client_protocol::Error>>,
 ) -> Result<T, agent_client_protocol::Error> {
-    // ALLOW: this crate is GPUI-free (see packages/acp/CLAUDE.md) and has
+    // ALLOW: this crate is GPUI-free (see packages/acp/AGENTS.md) and has
     // no BackgroundExecutor to time on; smol::Timer is the only timer source
     // available here. Tests pass a short explicit `timeout`, so this stays
     // deterministic.

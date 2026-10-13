@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# CI guard for GPUI Entity re-entrancy (CLAUDE.md Pitfall #4).
+# CI guard for GPUI Entity re-entrancy (AGENTS.md Pitfall #5).
 #
 # Background
 # ----------
@@ -67,7 +67,7 @@ if ! echo "$BODY" | grep -q "cx\.defer"; then
     echo "lint-reentrant-reads: FAIL — mark_dirty_and_save no longer calls cx.defer." >&2
     echo "  File: $MOD_RS" >&2
     echo "  Removing cx.defer makes every listener-reachable caller a latent panic." >&2
-    echo "  See CLAUDE.md Pitfall #4." >&2
+    echo "  See AGENTS.md Pitfall #5." >&2
     FAIL=1
 else
     echo "✓ mark_dirty_and_save contains cx.defer."
@@ -100,7 +100,7 @@ if [[ -n "$HITS" ]]; then
     echo "  If the call site is provably safe (e.g. no dock entity is in EntityState::Mut)," >&2
     echo "  add a same-line annotation:" >&2
     echo "    self.persist_state(cx); // lint-reentrant-reads: <reason>" >&2
-    echo "  See CLAUDE.md Pitfall #4." >&2
+    echo "  See AGENTS.md Pitfall #5." >&2
     FAIL=1
 else
     echo "✓ No bare persist_state calls outside deferred context."

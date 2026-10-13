@@ -1,7 +1,7 @@
 //! Radio factory with `xsmall()` and daruda Tab-cycle policy.
 //!
 //! Matches the other input wrappers: pass `isize` to include it in the modal
-//! cycle or `()` to exclude it (CLAUDE.md "Tab navigation in modals"). Upstream
+//! cycle or `()` to exclude it (packages/app/src/REFERENCE.md, "Tab navigation in modals"). Upstream
 //! `Radio` has no group manager; callers set exactly one `.checked(true)`.
 
 use gpui::ElementId;

@@ -13,7 +13,7 @@
 pub(super) mod entries;
 
 /// Re-exported so the command table keeps the path the 4-point chain rule
-/// names (`command::palette::PALETTE_ENTRIES`, `packages/app/src/CLAUDE.md`).
+/// names (`command::palette::PALETTE_ENTRIES`, `packages/app/src/AGENTS.md`).
 pub(in crate::workspace) use entries::PALETTE_ENTRIES;
 
 use super::picker::PickerState;

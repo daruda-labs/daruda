@@ -5,11 +5,11 @@
 # details modal → on-disk NDJSON log) so users running the `.app`
 # bundle can see them. Bare `eprintln!` only reaches stderr, which is
 # invisible unless the user launched daruda from a terminal. See the
-# project root CLAUDE.md §"Error reporting" for the full rule set
+# packages/app/src/AGENTS.md §"Error Reporting" for the full rule set
 # (`self.report_error(report, cx)` / `LogWriter::log(report)`).
 #
 # A small allow-list covers four legitimate `eprintln!` callers (do
-# not extend this list without updating CLAUDE.md):
+# not extend this list without updating AGENTS.md):
 #   - bootstrap.rs panic-hook stderr fallback (must survive a dead LogWriter)
 #   - watcher_pumps.rs pump-exit log (normal-shutdown signal, not an error)
 #   - hooks/handler.rs external hook subprocess stderr (boundary)
@@ -68,7 +68,7 @@ if [ -n "$violations" ]; then
     echo "Forbidden eprintln! call sites — route errors through report_error / LogWriter::log:"
     echo "$violations"
     echo
-    echo "See CLAUDE.md §'Error reporting' for the decision tree."
+    echo "See packages/app/src/AGENTS.md §'Error Reporting' for the decision tree."
     echo "Allowed exceptions are listed in this script's header."
     exit 1
 fi

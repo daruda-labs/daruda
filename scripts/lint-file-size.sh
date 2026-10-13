@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
-# Lint: file-size budget warnings (CLAUDE.md G1).
+# Lint: file-size budget warnings (packages/app/src/AGENTS.md G1).
 #
-# Background: `CLAUDE.md` §"File-structure rules" + `app/src/CLAUDE.md`
+# Background: `AGENTS.md` §"Code and UI" + `packages/app/src/AGENTS.md`
 # G1 codify these budgets. They are advisory, not hard limits — a single
 # huge file is sometimes the right answer (e.g. const tables, generated
 # code). This lint surfaces files that have grown past the budget so a
@@ -10,7 +10,7 @@
 # opt in).
 #
 # Budgets:
-#   - mod.rs / regular .rs       : 800 lines  (CLAUDE.md G1, app G1)
+#   - mod.rs / regular .rs       : 800 lines  (packages/app/src/AGENTS.md G1, app G1)
 #   - tests.rs / test files      : 2000 lines (tests dominate; G1 carve-out)
 #   - ux/theme.rs                : 2200 lines (pure const tables)
 #   - vendored / generated       : skipped
@@ -110,7 +110,7 @@ if [ ${#hits[@]} -eq 0 ]; then
     exit 0
 fi
 
-echo "[lint-file-size] over-budget files (CLAUDE.md G1):"
+echo "[lint-file-size] over-budget files (packages/app/src/AGENTS.md G1):"
 printf '  %s\n' "${hits[@]}"
 echo
 echo "Action: extract by responsibility, or convert tests.rs to tests/ dir."

@@ -537,7 +537,7 @@ fn only_the_host_window_shows_a_chip_once_a_session_exists(cx: &mut TestAppConte
 ///
 /// It runs inside the host window's event dispatch, so anything it calls that
 /// re-enters `cx.update_window` on that same window gets "window not found"
-/// (packages/app/src/CLAUDE.md — the May-2026 add-project regression). This
+/// (packages/app/src/AGENTS.md — the May-2026 add-project regression). This
 /// drives the click the way gpui does: from inside `update_window`.
 #[gpui::test]
 fn clicking_the_chip_starts_a_session_from_inside_the_windows_dispatch(cx: &mut TestAppContext) {

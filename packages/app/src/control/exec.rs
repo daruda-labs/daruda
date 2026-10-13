@@ -6,7 +6,7 @@
 //!
 //! The enumeration walk collects plain data inside the per-window callback and
 //! assembles the result afterwards — building it inside would read entities
-//! while their workspace is mid-`update` (CLAUDE.md pitfall 5).
+//! while their workspace is mid-`update` (AGENTS.md pitfall 5).
 
 use gpui::{App, AppContext as _};
 

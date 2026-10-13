@@ -12,7 +12,7 @@
 //!
 //! Chrome comes from the `crate::ui` wrappers, like its sibling
 //! `present_empty_state` — the two empty states are the same family and the
-//! decision matrix in `packages/app/src/CLAUDE.md` bans hand-rolled `div`
+//! decision matrix in `packages/app/src/REFERENCE.md` bans hand-rolled `div`
 //! buttons at a call site. The `WELCOME_*` theme constants that survive here
 //! are the layout metrics the wrappers do not own (panel width, gaps, the
 //! title and version type scale).

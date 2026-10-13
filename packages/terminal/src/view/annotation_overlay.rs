@@ -157,7 +157,7 @@ impl TerminalTextElement {
     /// Shaping happens here (prepaint phase). The paint phase calls
     /// `shaped_line.paint(origin, line_height, window, cx)` on the
     /// returned text entries — callers must not call `window.text_style()`
-    /// from the paint phase (see root CLAUDE.md pitfall §8).
+    /// from the paint phase (see root AGENTS.md pitfall §8).
     #[allow(clippy::too_many_arguments)] // Render helpers need layout + shaping inputs; splitting wraps callers more than it saves.
     pub(crate) fn build_annotation_quads(
         &self,
