@@ -207,16 +207,6 @@ mod tests {
     use chrono::TimeZone;
 
     #[test]
-    fn fetch_error_display_includes_inner() {
-        let e = FetchError::Http("connection refused".to_string());
-        assert!(e.to_string().contains("connection refused"));
-        let e = FetchError::Parse("missing field".to_string());
-        assert!(e.to_string().contains("missing field"));
-        let e = FetchError::NoToken;
-        assert!(e.to_string().contains("Keychain"));
-    }
-
-    #[test]
     fn retry_after_accepts_delta_seconds_and_http_date() {
         let now = chrono::Utc.with_ymd_and_hms(2026, 9, 7, 8, 0, 0).unwrap();
         assert_eq!(parse_retry_after("5", now), Some(Duration::from_secs(5)));

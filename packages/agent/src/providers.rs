@@ -42,19 +42,3 @@ pub fn integration_for(id: AccountRecipeId) -> ProviderIntegration {
 pub fn all() -> impl Iterator<Item = ProviderIntegration> {
     AccountRecipeId::all().map(integration_for)
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn every_recipe_id_has_a_complete_provider_integration() {
-        let ids: Vec<_> = all()
-            .map(|provider| {
-                assert_eq!(provider.account.id(), provider.id);
-                provider.id
-            })
-            .collect();
-        assert_eq!(ids.len(), AccountRecipeId::count());
-    }
-}

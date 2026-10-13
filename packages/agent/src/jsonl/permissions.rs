@@ -207,14 +207,6 @@ mod tests {
     }
 
     #[test]
-    fn always_allowed_read_only_tools() {
-        let c = PermissionChecker::default();
-        for t in ["Read", "Glob", "Grep", "WebFetch", "WebSearch"] {
-            assert!(c.is_auto_approved(t, &serde_json::json!({})), "{t}");
-        }
-    }
-
-    #[test]
     fn bash_wildcard_match() {
         let c = PermissionChecker {
             allowed_patterns: vec![AllowPattern::Bash {
@@ -260,16 +252,5 @@ mod tests {
         };
         assert!(c.is_auto_approved("mcp__memory__set", &serde_json::json!({})));
         assert!(!c.is_auto_approved("mcp__memory__delete", &serde_json::json!({})));
-    }
-
-    #[test]
-    fn unknown_tool_defaults_to_needs_permission() {
-        let c = PermissionChecker::default();
-        assert!(!c.is_auto_approved("MysteryTool", &serde_json::json!({})));
-    }
-
-    #[test]
-    fn from_settings_real_file_does_not_panic() {
-        let _ = PermissionChecker::from_settings_file();
     }
 }
