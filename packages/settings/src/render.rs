@@ -340,7 +340,7 @@ impl SettingsView {
                             },
                         )),
                     )
-                    .child(div().w_full().child(daruda_ui::input(
+                    .child(div().w_full().child(daruda_ui::search_input(
                         &self.sidebar_search_input,
                         cx,
                         0,

@@ -9,7 +9,6 @@ use gpui::{
 };
 
 use crate::surface::strings;
-use crate::ui::{Input, Sizable as _};
 use crate::workspace::Workspace;
 use crate::workspace::main_area::file_view_pane::FileViewerSearch;
 
@@ -81,14 +80,16 @@ pub(super) fn render_search_panel(
                 .items_center()
                 .gap(px(theme::FILE_VIEWER_SEARCH_ITEM_GAP))
                 .child(
-                    div().flex_1().overflow_hidden().child(
-                        Input::new(&search_input)
-                            .small()
-                            .bordered(false)
-                            .w_full()
-                            .bg(input_bg)
-                            .text_color(text_color),
-                    ),
+                    div()
+                        .flex_1()
+                        .overflow_hidden()
+                        .child(crate::ui::search_input_on(
+                            &search_input,
+                            input_bg,
+                            text_color,
+                            cx,
+                            (),
+                        )),
                 )
                 .when(!counter.is_empty(), |d| {
                     d.child(

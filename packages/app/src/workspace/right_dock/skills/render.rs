@@ -186,7 +186,7 @@ fn search_row(snap: &RightDockSnapshot, cx: &gpui::App) -> impl IntoElement {
         .relative()
         .flex()
         .w_full()
-        .child(crate::ui::input(&snap.skill_search_input, cx, ()))
+        .child(crate::ui::search_input(&snap.skill_search_input, cx, ()))
         .when(has_query, |row| {
             row.child(
                 crate::ui::button_icon("skill-search-clear", crate::ui::icons::CLOSE, cx)

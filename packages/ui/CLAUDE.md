@@ -111,7 +111,7 @@ Pick the smallest shape that fits the underlying widget.
 ### A. Factory function — `Sizable` widgets
 
 For widgets that implement `gpui_component::Sizable` and would otherwise
-require `.xsmall()` at every call site.
+require `.small()` at every call site.
 
 ```rust
 // ui/checkbox.rs
@@ -122,19 +122,35 @@ use gpui_component::text::Text;
 pub use gpui_component::checkbox::Checkbox;
 
 pub fn checkbox(id: impl Into<ElementId>, label: impl Into<Text>) -> Checkbox {
-    Checkbox::new(id).xsmall().label(label)
+    Checkbox::new(id).small().label(label)
 }
 ```
 
 Rules:
 - Return the underlying gpui_component type (`Checkbox`, not a newtype).
   Caller chains `.checked(b)`, `.disabled(b)`, `.on_click(...)` directly.
-- Apply `.xsmall()` immediately after `::new(...)`, before any other call.
+- Apply `.small()` immediately after `::new(...)`, before any other call.
 - Take the most ergonomic input types — `impl Into<ElementId>`,
   `impl Into<SharedString>` or `impl Into<Text>` (check the upstream
   signature; not all `label(...)` slots take `SharedString`).
 - Re-export the type via `pub use` so callers that need to store
   `Checkbox` in a struct field can do so without bypassing ui/.
+
+Text fields have a stricter contract: `Input` is not re-exported. Use
+`input` / `input_on` for standard 28px fields, `form_input` for 36px authoring
+fields, and `search_input` / `search_input_on` for search. They return opaque
+elements so callers cannot override height or padding. `readonly_input` and
+`readonly_form_input` use the same profiles; `select::select` and
+`select::form_select` share their metrics. Width belongs to the parent.
+The private `field_geometry` module owns the recipe and `theme::metrics`
+owns its values. Do not copy the recipe into a screen-specific wrapper.
+
+Composers go through `input_with_action_grow` or `InputPanel`, whose text
+metrics share one internal factory. Prose and code editors use the editor
+factories and keep their configured font, line height and row/scroll behavior.
+`scripts/lint-input-factories.sh` prevents raw construction in other packages;
+`input::geometry_tests` checks rendered dimensions and text insets in both
+themes, including disabled, masked, capped multi-line and focused fields.
 
 ### B. Variant factories — Button-like widgets
 

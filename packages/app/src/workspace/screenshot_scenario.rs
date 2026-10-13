@@ -387,6 +387,7 @@ impl ScreenshotScenario {
             "mcp-paste" => Some(Self::QuickEntry(QuickEntryShot::McpPaste)),
             "mcp-review" => Some(Self::QuickEntry(QuickEntryShot::McpReview)),
             "mcp-stdio" => Some(Self::QuickEntry(QuickEntryShot::McpStdio)),
+            "mcp-saved" => Some(Self::QuickEntry(QuickEntryShot::McpSaved)),
             "mcp-error" => Some(Self::QuickEntry(QuickEntryShot::McpError)),
             "mcp-codex-tail" => Some(Self::QuickEntry(QuickEntryShot::McpCodexTail)),
             "mcp-codex-review" => Some(Self::QuickEntry(QuickEntryShot::McpCodexReview)),
@@ -394,6 +395,7 @@ impl ScreenshotScenario {
             "library-codex" => Some(Self::QuickEntry(QuickEntryShot::LibraryCodex)),
             "skill-paste" => Some(Self::QuickEntry(QuickEntryShot::SkillPaste)),
             "skill-review" => Some(Self::QuickEntry(QuickEntryShot::SkillReview)),
+            "skill-codex-review" => Some(Self::QuickEntry(QuickEntryShot::SkillCodexReview)),
             "library-delete" => Some(Self::QuickEntry(QuickEntryShot::DeleteConfirm)),
             "flow-create" => Some(Self::FlowCreate),
             "flows" => Some(Self::FlowBrowser(

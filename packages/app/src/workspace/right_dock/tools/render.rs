@@ -66,11 +66,17 @@ pub(in crate::workspace) fn render(snap: &RightDockSnapshot, cx: &mut Context<Do
             ));
         }
         if group.servers.is_empty() {
-            rows = rows.child(match target.scope {
+            let message = match target.scope {
                 McpScope::User => strings::mcp::empty_user(),
                 McpScope::Project => strings::mcp::empty_project(),
                 McpScope::Local => strings::mcp::empty_local(),
-            });
+            };
+            rows = rows.child(
+                div()
+                    .text_size(px(theme::RIGHT_PANEL_BODY_FONT_SIZE))
+                    .text_color(t.text_subtle)
+                    .child(message),
+            );
         }
         use crate::workspace::right_dock::section::DockSection;
         let section = match target.scope {

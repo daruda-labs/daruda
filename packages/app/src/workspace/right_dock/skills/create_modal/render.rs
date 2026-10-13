@@ -41,11 +41,32 @@ impl Render for CreateSkillModal {
                 window,
             ))
             .child(form_layout::field(
-                field_label(strings::skills::invocation_name(), &t),
-                form_layout::input(&self.invocation_input, cx, 2),
+                field_label(
+                    if codex {
+                        strings::skills::invocation_name_required()
+                    } else {
+                        strings::skills::invocation_name()
+                    },
+                    &t,
+                ),
+                super::super::super::form_state::ordered_field_input(
+                    &self.invocation_input,
+                    cx,
+                    1,
+                    2,
+                    self.error_field,
+                    self.error.as_ref(),
+                ),
             ))
             .child(form_layout::field(
-                field_label(strings::skills::field_description(), &t),
+                field_label(
+                    if codex {
+                        strings::skills::description_required()
+                    } else {
+                        strings::skills::field_description()
+                    },
+                    &t,
+                ),
                 super::super::super::form_state::ordered_field_input(
                     &self.description_input,
                     cx,
@@ -57,7 +78,7 @@ impl Render for CreateSkillModal {
             ))
             .child(form_layout::field(
                 field_label(strings::skills::field_body(), &t),
-                form_layout::input(&self.body_editor, cx, 4),
+                crate::ui::form_input(&self.body_editor, cx, 4),
             ));
         left = left.when(!codex, |left| {
             left.child(

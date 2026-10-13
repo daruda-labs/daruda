@@ -27,7 +27,7 @@ impl SettingsView {
                 s::settings::agent_group_available(),
                 cx,
             ))
-            .child(daruda_ui::input(&self.agent_catalog_search, cx, 0));
+            .child(daruda_ui::search_input(&self.agent_catalog_search, cx, 0));
         if no_match {
             body = body.child(
                 div()

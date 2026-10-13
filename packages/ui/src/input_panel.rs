@@ -21,7 +21,7 @@ use gpui::{
 use gpui_component::Sizable as _;
 
 use super::{ButtonVariants as _, DropdownButton, PopupMenuItem};
-use super::{Input, InputEvent, InputState};
+use super::{InputEvent, InputState};
 
 /// Visual treatment for an action button rendered inside an
 /// [`InputPanel`]. Mirrors the three modal-footer variants exposed by
@@ -275,7 +275,10 @@ impl EventEmitter<InputPanelEvent> for InputPanel {}
 impl Render for InputPanel {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let bar_border = theme::current(cx).border;
-        let area = Input::new(&self.area).small().appearance(self.appearance);
+        let area = crate::input::composer_input(&self.area, cx)
+            .appearance(self.appearance)
+            .px(px(theme::INPUT_TEXTAREA_PAD_X))
+            .py(px(theme::INPUT_TEXTAREA_PAD_Y));
 
         let buttons: Vec<AnyElement> = self
             .actions

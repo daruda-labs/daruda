@@ -6,17 +6,18 @@
 //! `Input` lacks a `tab_stop` builder, so the `()` path mutates the state's
 //! `FocusHandle` directly.
 
+use crate::field_geometry::FieldGeometry;
 use crate::theme as d;
 use gpui::{
     AnyElement, App, Element as _, Entity, Focusable as _, InteractiveElement as _, IntoElement,
-    ParentElement as _, Styled as _, div, px,
+    ParentElement as _, SharedString, Styled as _, div, px,
 };
 use gpui_component::Sizable as _;
 
+use gpui_component::input::Input;
 pub use gpui_component::input::Paste as InputPaste;
 pub use gpui_component::input::{
-    CompletionProvider, HistoryDir, Input, InputEvent, InputState, Rope, RopeExt,
-    ScrollWheelBehavior,
+    CompletionProvider, HistoryDir, InputEvent, InputState, Rope, RopeExt, ScrollWheelBehavior,
 };
 
 /// Tab-participation specifier for [`input`].
@@ -60,25 +61,95 @@ pub fn input_on<T: InputTabSpec>(
     cx: &App,
     tab: T,
 ) -> impl IntoElement {
-    let inner = Input::new(state)
-        .disabled(state.read(cx).is_disabled())
-        .small()
-        .bordered(true)
-        .w_full()
-        .bg(surface);
+    field_input(state, surface, FieldGeometry::STANDARD, cx, tab)
+}
+
+fn field_input<T: InputTabSpec>(
+    state: &Entity<InputState>,
+    surface: gpui::Hsla,
+    geometry: FieldGeometry,
+    cx: &App,
+    tab: T,
+) -> Input {
+    let inner = geometry.apply(
+        Input::new(state)
+            .disabled(state.read(cx).is_disabled())
+            .small()
+            .bordered(true)
+            .w_full()
+            .h_auto()
+            .min_h(px(geometry.height))
+            .bg(surface),
+    );
     tab.apply(state, cx, inner)
 }
 
+/// Standard 28px field. Multi-line states grow with their row count.
 pub fn input<T: InputTabSpec>(state: &Entity<InputState>, cx: &App, tab: T) -> impl IntoElement {
-    // gpui draws its own chrome (bg + hairline + 1px accent focus
-    // border); `.bg()` overrides the surface to `modal_input_bg`.
-    let inner = Input::new(state)
-        .disabled(state.read(cx).is_disabled())
-        .small()
-        .bordered(true)
-        .w_full()
-        .bg(d::current(cx).modal_input_bg);
-    tab.apply(state, cx, inner)
+    input_on(state, d::current(cx).modal_input_bg, cx, tab)
+}
+
+/// Roomier 36px field for authoring forms; shares typography with [`input`].
+pub fn form_input<T: InputTabSpec>(
+    state: &Entity<InputState>,
+    cx: &App,
+    tab: T,
+) -> impl IntoElement {
+    field_input(
+        state,
+        d::current(cx).modal_input_bg,
+        FieldGeometry::FORM,
+        cx,
+        tab,
+    )
+}
+
+/// Search fields use standard geometry and keep the caller's Tab policy.
+pub fn search_input<T: InputTabSpec>(
+    state: &Entity<InputState>,
+    cx: &App,
+    tab: T,
+) -> impl IntoElement {
+    input(state, cx, tab)
+}
+
+/// Borderless search inside a pane-owned search toolbar.
+pub fn search_input_on<T: InputTabSpec>(
+    state: &Entity<InputState>,
+    background: gpui::Hsla,
+    foreground: gpui::Hsla,
+    cx: &App,
+    tab: T,
+) -> impl IntoElement {
+    field_input(state, background, FieldGeometry::STANDARD, cx, tab)
+        .bordered(false)
+        .py(px(FieldGeometry::STANDARD.pad_y + d::INPUT_BORDER_WIDTH))
+        .text_color(foreground)
+}
+
+pub fn readonly_input(value: impl Into<SharedString>, cx: &App) -> impl IntoElement {
+    readonly_field(value, FieldGeometry::STANDARD, cx)
+}
+
+pub fn readonly_form_input(value: impl Into<SharedString>, cx: &App) -> impl IntoElement {
+    readonly_field(value, FieldGeometry::FORM, cx)
+}
+
+fn readonly_field(
+    value: impl Into<SharedString>,
+    geometry: FieldGeometry,
+    cx: &App,
+) -> impl IntoElement {
+    let t = d::current(cx);
+    geometry
+        .apply(div())
+        .min_h(px(geometry.height))
+        .rounded(px(d::MODAL_BUTTON_RADIUS))
+        .bg(t.modal_input_bg)
+        .border_1()
+        .border_color(t.border)
+        .text_color(t.text_primary)
+        .child(value.into())
 }
 
 /// Chrome-cell input variant that hosts an action element (mode chip +
@@ -114,6 +185,16 @@ pub enum InputGrowMode {
     AutoGrow,
 }
 
+pub(crate) fn composer_input(state: &Entity<InputState>, cx: &App) -> Input {
+    Input::new(state)
+        .small()
+        .appearance(false)
+        .input_padding(false)
+        .disabled(state.read(cx).is_disabled())
+        .text_size(px(d::FONT_SIZE_MD))
+        .line_height(px(d::INPUT_LINE_HEIGHT))
+}
+
 pub fn input_with_action<T: InputTabSpec>(
     state: &Entity<InputState>,
     action: impl IntoElement,
@@ -145,21 +226,14 @@ pub fn input_with_action_grow<T: InputTabSpec>(
         // inherits the row's full height — that definite height is what
         // `h_full`'s `relative(1.)` resolves against. Single-line states ignore
         // it.
-        InputGrowMode::Fill => Input::new(state)
-            .small()
-            .appearance(false)
-            .input_padding(false)
-            .h_full(),
+        InputGrowMode::Fill => composer_input(state, cx).h_full(),
         // In `AutoGrow` mode the inner editor self-sizes to N lines (already
         // configured via `InputState::auto_grow`); `h_full` is omitted so the
         // column shrinks to the editor's natural height instead of stretching
         // to fill the parent. The auto-grow cap is owned by `InputState` (set
         // at construction via `auto_grow(1, max_rows)` and updated on live
         // config reload via `set_auto_grow`).
-        InputGrowMode::AutoGrow => Input::new(state)
-            .small()
-            .appearance(false)
-            .input_padding(false),
+        InputGrowMode::AutoGrow => composer_input(state, cx),
     };
     let inner = tab.apply(state, cx, inner);
     let t = d::current(cx);
@@ -248,6 +322,9 @@ pub fn input_with_action_grow<T: InputTabSpec>(
         }
     }
 }
+
+#[cfg(test)]
+mod geometry_tests;
 
 #[cfg(test)]
 mod tests {

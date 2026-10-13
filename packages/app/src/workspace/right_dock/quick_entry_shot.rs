@@ -12,6 +12,7 @@ pub(crate) enum QuickEntryShot {
     McpPaste,
     McpReview,
     McpStdio,
+    McpSaved,
     McpError,
     McpCodexReview,
     McpCodexTail,
@@ -19,6 +20,7 @@ pub(crate) enum QuickEntryShot {
     LibraryCodex,
     SkillPaste,
     SkillReview,
+    SkillCodexReview,
     DeleteConfirm,
 }
 
@@ -72,6 +74,13 @@ pub(crate) fn drive(
     }
     let workspace = workspace.downgrade();
     match shot {
+        QuickEntryShot::McpSaved => super::tools::saved::open(
+            "project-docs".into(),
+            Some(crate::agent::configuration::Provider::Codex),
+            false,
+            window,
+            cx,
+        ),
         QuickEntryShot::DeleteConfirm => super::delete_modal::open(
             strings::skills::delete_title(),
             format!("{} sample", strings::skills::delete_body_prefix()),
@@ -146,7 +155,9 @@ pub(crate) fn drive(
                 cx,
             );
         }
-        QuickEntryShot::SkillPaste | QuickEntryShot::SkillReview => {
+        QuickEntryShot::SkillPaste
+        | QuickEntryShot::SkillReview
+        | QuickEntryShot::SkillCodexReview => {
             dialog_helpers::open_form_modal(
                 strings::skills::new_title(),
                 Some(px(theme::FORM_MODAL_WIDE)),
@@ -159,7 +170,12 @@ pub(crate) fn drive(
                         window,
                         cx,
                     );
-                    modal.seed_for_shot(shot == QuickEntryShot::SkillReview, window, cx);
+                    modal.seed_for_shot(
+                        shot != QuickEntryShot::SkillPaste,
+                        shot == QuickEntryShot::SkillCodexReview,
+                        window,
+                        cx,
+                    );
                     modal
                 },
                 window,

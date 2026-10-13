@@ -4,6 +4,7 @@ use super::{McpServerDraft, McpTransport};
 use serde::Deserialize;
 use serde_json::Value;
 use std::collections::BTreeMap;
+mod registration;
 mod unique_json;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -12,6 +13,7 @@ pub(crate) enum ImportError {
     Syntax,
     Unsupported,
     InvalidField,
+    RegistrationCommand,
 }
 
 #[derive(Deserialize)]
@@ -61,10 +63,21 @@ pub(crate) fn parse_for(
         }
         return Ok(servers.iter().map(McpServerDraft::from_server).collect());
     }
-    parse(source)
+    if provider == Some(crate::agent::configuration::Provider::Codex) {
+        parse_input(source, provider)
+    } else {
+        parse(source)
+    }
 }
 
 pub(crate) fn parse(source: &str) -> Result<Vec<McpServerDraft>, ImportError> {
+    parse_input(source, None)
+}
+
+fn parse_input(
+    source: &str,
+    provider: Option<crate::agent::configuration::Provider>,
+) -> Result<Vec<McpServerDraft>, ImportError> {
     let source = source.trim();
     if source.is_empty() {
         return Err(ImportError::Empty);
@@ -103,6 +116,9 @@ pub(crate) fn parse(source: &str) -> Result<Vec<McpServerDraft>, ImportError> {
             String::new(),
             serde_json::json!({"url":source}),
         )?]);
+    }
+    if let Some(result) = registration::parse(source, provider) {
+        return result.map(|draft| vec![draft]);
     }
     // A launch command, never a shell program. Reject expansions and compounds,
     // including inside quotes, rather than silently changing their semantics.

@@ -17,9 +17,14 @@ impl AddMcpServerModal {
                 self.error = None;
                 cx.notify();
             }
-            Err(_) => {
+            Err(error) => {
+                self.candidates.clear();
                 self.error_field = None;
-                self.error = Some(strings::mcp::import_error().into());
+                self.error = Some(if error == import::ImportError::RegistrationCommand {
+                    strings::mcp::registration_error().into()
+                } else {
+                    strings::mcp::import_error().into()
+                });
                 window.focus(&self.paste_input.focus_handle(cx), cx);
                 cx.notify();
             }
@@ -139,7 +144,7 @@ impl AddMcpServerModal {
             .gap(px(theme::FORM_MODAL_FIELD_SPACING))
             .child(form_layout::field(
                 field_label(strings::mcp::quick_hint(), theme::current(cx)),
-                form_layout::input(&self.paste_input, cx, 0),
+                crate::ui::form_input(&self.paste_input, cx, 0),
             ));
         if !self.candidates.is_empty() {
             body = body.child(field_label(

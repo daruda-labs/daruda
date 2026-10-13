@@ -124,7 +124,7 @@ impl CodexOptions {
         for (index, label) in labels.into_iter().enumerate() {
             body = body.child(form_layout::field(
                 super::modal_shared::field_label(label, theme::current(cx)),
-                form_layout::input(&self.inputs[index], cx, 13 + index as isize),
+                crate::ui::form_input(&self.inputs[index], cx, 13 + index as isize),
             ));
         }
         body

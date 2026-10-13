@@ -22,6 +22,17 @@ pub const RADIUS_LG: f32 = 8.0;
 pub const CONTROL_ICON_SIZE: f32 = 16.0;
 pub const CONTROL_TARGET_SIZE: f32 = 24.0;
 
+/// Field geometry is pixel-based and independent of the vendor size tier.
+pub const INPUT_STANDARD_HEIGHT: f32 = 28.0;
+pub const INPUT_FORM_HEIGHT: f32 = 36.0;
+pub const INPUT_PAD_X: f32 = 9.0;
+pub const INPUT_LINE_HEIGHT: f32 = 20.0;
+pub const INPUT_BORDER_WIDTH: f32 = 1.0;
+pub const INPUT_STANDARD_PAD_Y: f32 =
+    (INPUT_STANDARD_HEIGHT - INPUT_LINE_HEIGHT) / 2.0 - INPUT_BORDER_WIDTH;
+pub const INPUT_FORM_PAD_Y: f32 =
+    (INPUT_FORM_HEIGHT - INPUT_LINE_HEIGHT) / 2.0 - INPUT_BORDER_WIDTH;
+
 #[cfg(test)]
 mod tests {
     use super::*;

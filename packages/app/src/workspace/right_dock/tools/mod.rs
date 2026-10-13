@@ -18,6 +18,7 @@ mod modal_shared;
 mod ops;
 pub(super) mod render;
 mod rows;
+pub(super) mod saved;
 
 pub(super) use add_modal::open_add_mcp_server_modal;
 pub(super) use delete_confirm::open_delete_mcp_server_confirm;

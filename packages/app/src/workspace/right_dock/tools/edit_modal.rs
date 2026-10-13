@@ -370,6 +370,9 @@ impl EditMcpServerModal {
             }
         };
         let scope = self.initial.scope;
+        let saved_name = draft.name.clone();
+        let saved_disabled = draft.disabled;
+        let saved_provider = self.initial.config.as_ref().map(|c| c.provider);
         let target_root = self.initial.project_root.clone();
         super::super::form_state::freeze_inputs(&self.inputs(), true, cx);
         self.error_field = None;
@@ -404,7 +407,16 @@ impl EditMcpServerModal {
                     let _ = cx.update_window(window_handle, |_, window, cx| {
                         let Some(me) = me.upgrade() else { return };
                         match result {
-                            Ok(()) => me.update(cx, |modal, cx| modal.dismiss(window, cx)),
+                            Ok(()) => {
+                                me.update(cx, |modal, cx| modal.dismiss(window, cx));
+                                super::saved::open(
+                                    saved_name,
+                                    saved_provider,
+                                    saved_disabled,
+                                    window,
+                                    cx,
+                                );
+                            }
                             Err(e) => me.update(cx, |modal, cx| {
                                 modal.submitting = false;
                                 super::super::form_state::freeze_inputs(&modal.inputs(), false, cx);

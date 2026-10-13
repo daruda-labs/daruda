@@ -2,6 +2,48 @@ use super::*;
 use gpui::{TestAppContext, VisualTestContext};
 
 #[gpui::test]
+fn codex_missing_metadata_points_to_the_required_field(cx: &mut TestAppContext) {
+    let (window, workspace) = crate::workspace::tests::build_workspace(cx);
+    let mut vcx = VisualTestContext::from_window(window.into(), cx);
+    let temp = tempfile::tempdir().unwrap();
+    vcx.update(|window, cx| {
+        let modal = cx.new(|cx| {
+            CreateSkillModal::new(
+                workspace.downgrade(),
+                None,
+                None,
+                SkillsSnapshot::default(),
+                window,
+                cx,
+            )
+        });
+        modal.update(cx, |modal, cx| {
+            modal.config = crate::agent::configuration::Configuration::resolve(
+                crate::agent::configuration::Provider::Codex,
+                Some(temp.path().into()),
+                None,
+                None,
+            )
+            .map(std::sync::Arc::new);
+            modal.pasting = false;
+            modal
+                .name_input
+                .update(cx, |input, cx| input.set_value("sample", window, cx));
+            modal.submit(window, cx);
+            assert_eq!(modal.error_field, Some(1));
+            assert!(!modal.submitting);
+            modal
+                .invocation_input
+                .update(cx, |input, cx| input.set_value("sample", window, cx));
+            modal.submit(window, cx);
+            assert_eq!(modal.error_field, Some(2));
+            assert!(!modal.submitting);
+            assert!(!temp.path().join(".agents").exists());
+        });
+    });
+}
+
+#[gpui::test]
 async fn quick_entry_skill_reimport_cancel_preserves_body(cx: &mut TestAppContext) {
     let (window, workspace) = crate::workspace::tests::build_workspace(cx);
     let mut vcx = VisualTestContext::from_window(window.into(), cx);

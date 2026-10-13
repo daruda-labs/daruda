@@ -97,7 +97,7 @@ impl CreateSkillModal {
             .gap(px(theme::FORM_MODAL_FIELD_SPACING))
             .child(form_layout::field(
                 field_label(strings::skills::quick_hint(), theme::current(cx)),
-                form_layout::input(&self.paste_input, cx, 0),
+                crate::ui::form_input(&self.paste_input, cx, 0),
             ));
         if let Some(error) = &self.error {
             body = body.child(crate::ui::alert::error("skill-import-error", error.clone()));

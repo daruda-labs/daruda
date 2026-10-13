@@ -6,8 +6,8 @@ use gpui::{
 };
 
 use super::{
-    Button, ButtonVariants as _, InputState, button_bare, button_icon, disclosure, icons, input,
-    theme,
+    Button, ButtonVariants as _, InputState, button_bare, button_icon, disclosure, icons,
+    search_input, theme,
 };
 
 pub fn header(
@@ -54,7 +54,7 @@ pub fn search(
         .flex()
         .w_full()
         .min_w_0()
-        .child(input(state, cx, ()))
+        .child(search_input(state, cx, ()))
         .when(has_query, |row| {
             row.child(
                 button_icon(clear_id, icons::CLOSE, cx)

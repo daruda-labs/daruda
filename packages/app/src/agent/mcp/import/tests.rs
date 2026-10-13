@@ -1,6 +1,23 @@
 use super::*;
 
 #[test]
+fn registration_auth_uses_the_destination_provider_format() {
+    use crate::agent::configuration::Provider;
+    let source = "codex mcp add docs --url https://example.com/mcp --bearer-token-env-var TOKEN";
+    let codex = parse_for(source, Some(Provider::Codex)).unwrap().remove(0);
+    assert_eq!(codex.extra["bearer_token_env_var"], "TOKEN");
+    assert!(codex.headers.is_empty());
+    let claude = parse_for(source, Some(Provider::Claude)).unwrap().remove(0);
+    assert_eq!(claude.headers["Authorization"], "Bearer ${TOKEN}");
+    assert!(!claude.extra.contains_key("bearer_token_env_var"));
+    let json = r#"{"command": "server", "args": ["claude", "mcp", "add"]}"#;
+    assert_eq!(
+        parse_for(json, Some(Provider::Codex)).unwrap()[0].args,
+        ["claude", "mcp", "add"]
+    );
+}
+
+#[test]
 fn quick_entry_preserves_unknown_json_fields_and_multiple_servers() {
     let drafts = parse(r#"{"mcpServers":{"a":{"command":"npx","args":["","a b"],"future":{"x":1}},"b":{"url":"https://example.com/mcp"}}}"#).unwrap();
     assert_eq!(drafts.len(), 2);

@@ -26,11 +26,11 @@ impl Render for EditMcpServerModal {
             .child(form_layout::pair(
                 form_layout::field(
                     field_label(strings::common::field_scope(), &t),
-                    form_layout::readonly_value(scope_label(self.initial.scope), cx),
+                    crate::ui::readonly_form_input(scope_label(self.initial.scope), cx),
                 ),
                 form_layout::field(
                     field_label(strings::common::field_name(), &t),
-                    form_layout::readonly_value(self.initial.name.clone(), cx),
+                    crate::ui::readonly_form_input(self.initial.name.clone(), cx),
                 ),
                 window,
             ))
@@ -166,6 +166,13 @@ impl EditMcpServerModal {
             strings::common::btn_save()
         };
         let footer = form_layout::footer(cx)
+            .child(
+                super::super::saved::guide_button(
+                    self.initial.config.as_ref().map(|c| c.provider),
+                    cx,
+                )
+                .disabled(submitting),
+            )
             .when(self.error.is_some(), |footer| {
                 footer.child(
                     button("reload-source", strings::library::reload())

@@ -55,6 +55,11 @@ jobs:
       - name: Lint — gpui_component direct import
         run: ./scripts/lint-direct-gpui-component.sh
 
+      - name: Lint — text input factories
+        run: |
+          bash ./scripts/lint-input-factories.sh --self-test
+          bash ./scripts/lint-input-factories.sh
+
       - name: Lint — ferrum_flow direct access
         run: ./scripts/lint-direct-ferrum-flow.sh
 

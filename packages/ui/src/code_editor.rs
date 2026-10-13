@@ -31,10 +31,12 @@ pub fn markdown_editor(state: &Entity<InputState>, cx: &App) -> Input {
     Input::new(state)
         .small()
         .bordered(true)
+        .px(px(theme::INPUT_TEXTAREA_PAD_X))
+        .py(px(theme::INPUT_TEXTAREA_PAD_Y))
+        .disabled(state.read(cx).is_disabled())
         .bg(theme::current(cx).modal_input_bg)
         // Follow the config-driven editor font (`font.editor.size`) like the
-        // file-viewer editor; `.small()` still owns the padding/height, this
-        // overrides only the text size via `refine_style`.
+        // file-viewer editor; rows remain sized by the configured line height.
         .font_family(theme::editor_font_family(cx))
         .text_size(px(theme::editor_font_size(cx)))
         .line_height(relative(theme::editor_line_height(cx)))

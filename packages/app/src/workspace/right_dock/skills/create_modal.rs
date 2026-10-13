@@ -314,7 +314,6 @@ impl CreateSkillModal {
                     .as_ref()
                     .is_none_or(|s| s.trim().is_empty()))
         {
-            self.error_field = None;
             self.error = Some(strings::library::codex_skill_required().into());
             let input = if draft
                 .frontmatter
@@ -322,8 +321,10 @@ impl CreateSkillModal {
                 .as_ref()
                 .is_none_or(|s| s.trim().is_empty())
             {
+                self.error_field = Some(1);
                 &self.invocation_input
             } else {
+                self.error_field = Some(2);
                 &self.description_input
             };
             window.focus(&input.focus_handle(cx), cx);
@@ -616,9 +617,19 @@ impl CreateSkillModal {
     pub(in crate::workspace) fn seed_for_shot(
         &mut self,
         review: bool,
+        codex: bool,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        if codex {
+            self.config = crate::agent::configuration::Configuration::resolve(
+                crate::agent::configuration::Provider::Codex,
+                Some(std::env::temp_dir()),
+                None,
+                Some("/workspace/project".into()),
+            )
+            .map(std::sync::Arc::new);
+        }
         self.paste_input.update(cx,|input,cx|input.set_value(
             "---\nname: review-changes\ndescription: Review changes before a commit.\n---\n# Review changes\n\nRead the diff and nearby source.\n\n1. Find correctness issues.\n2. Explain the impact with a concrete example.\n3. Cite the affected file and line.\n",window,cx));
         if review {

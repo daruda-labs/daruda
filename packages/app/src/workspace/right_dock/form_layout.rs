@@ -1,36 +1,10 @@
-//! Geometry shared only by the Skills and Tools authoring forms.
+//! Layout and choices for the Skills and Tools authoring forms.
 
 use crate::ui::ButtonVariants as _;
 use crate::ui::theme;
 use gpui::{
     App, Context, Div, Entity, IntoElement, SharedString, Subscription, Window, div, prelude::*, px,
 };
-
-const CONTROL_HEIGHT: f32 = 36.0;
-const CONTROL_PAD_X: f32 = 9.0;
-const CONTROL_PAD_Y: f32 = 7.0;
-const CONTROL_LINE_HEIGHT: f32 = 20.0;
-
-pub(super) fn input(
-    state: &Entity<crate::ui::InputState>,
-    cx: &App,
-    tab: isize,
-) -> crate::ui::Input {
-    use crate::ui::Sizable as _;
-    crate::ui::Input::new(state)
-        .small()
-        .disabled(state.read(cx).is_disabled())
-        .bordered(true)
-        .w_full()
-        .h_auto()
-        .min_h(px(CONTROL_HEIGHT))
-        .px(px(CONTROL_PAD_X))
-        .py(px(CONTROL_PAD_Y))
-        .text_size(px(theme::FONT_SIZE_MD))
-        .line_height(px(CONTROL_LINE_HEIGHT))
-        .bg(theme::current(cx).modal_input_bg)
-        .tab_index(tab)
-}
 
 pub(super) fn field(label: impl IntoElement, control: impl IntoElement) -> Div {
     div()
@@ -40,22 +14,6 @@ pub(super) fn field(label: impl IntoElement, control: impl IntoElement) -> Div {
         .gap(px(theme::FORM_MODAL_FIELD_GAP))
         .child(label)
         .child(control)
-}
-
-pub(super) fn readonly_value(value: impl Into<SharedString>, cx: &App) -> Div {
-    let t = theme::current(cx);
-    div()
-        .min_h(px(CONTROL_HEIGHT))
-        .px(px(CONTROL_PAD_X))
-        .py(px(CONTROL_PAD_Y))
-        .text_size(px(theme::FONT_SIZE_MD))
-        .line_height(px(CONTROL_LINE_HEIGHT))
-        .rounded(px(theme::MODAL_BUTTON_RADIUS))
-        .bg(t.modal_input_bg)
-        .border_1()
-        .border_color(t.border)
-        .text_color(t.text_primary)
-        .child(value.into())
 }
 
 pub(super) fn footer(cx: &App) -> gpui::Stateful<Div> {
@@ -159,13 +117,8 @@ impl<V: Copy + PartialEq + 'static> Choice<V> {
     }
 
     pub fn render(&self, disabled: bool, tab: isize, cx: &App) -> gpui::AnyElement {
-        crate::ui::select::select(&self.state, cx, tab)
+        crate::ui::select::form_select(&self.state, cx, tab)
             .w_full()
-            .h(px(CONTROL_HEIGHT))
-            .px(px(CONTROL_PAD_X))
-            .py(px(CONTROL_PAD_Y))
-            .text_size(px(theme::FONT_SIZE_MD))
-            .line_height(px(CONTROL_LINE_HEIGHT))
             .disabled(disabled)
             .into_any_element()
     }
@@ -222,13 +175,13 @@ mod tests {
                     div()
                         .id("single")
                         .debug_selector(|| "single".into())
-                        .child(input(&self.single, cx, 0)),
+                        .child(crate::ui::form_input(&self.single, cx, 0)),
                 )
                 .child(
                     div()
                         .id("multi")
                         .debug_selector(|| "multi".into())
-                        .child(input(&self.multi, cx, 1)),
+                        .child(crate::ui::form_input(&self.multi, cx, 1)),
                 )
                 .child(
                     div()
@@ -240,7 +193,7 @@ mod tests {
                     div()
                         .id("readonly")
                         .debug_selector(|| "readonly".into())
-                        .child(readonly_value("Project", cx)),
+                        .child(crate::ui::readonly_form_input("Project", cx)),
                 )
         }
     }
@@ -269,7 +222,7 @@ mod tests {
         vcx.run_until_parked();
         let single = vcx.debug_bounds("single").unwrap();
         let multi = vcx.debug_bounds("multi").unwrap();
-        assert_eq!(single.size.height, px(CONTROL_HEIGHT));
+        assert_eq!(single.size.height, px(36.));
         assert_eq!(
             vcx.debug_bounds("choice").unwrap().size.height,
             single.size.height
@@ -282,9 +235,9 @@ mod tests {
             .update(&mut vcx, |probe, _, cx| {
                 for (state, outer) in [(&probe.single, single), (&probe.multi, multi)] {
                     let text = state.read(cx).last_bounds().unwrap();
-                    assert_eq!(text.left() - outer.left(), px(CONTROL_PAD_X + 1.));
-                    assert_eq!(text.top() - outer.top(), px(CONTROL_PAD_Y + 1.));
-                    assert_eq!(outer.bottom() - text.bottom(), px(CONTROL_PAD_Y + 1.));
+                    assert_eq!(text.left() - outer.left(), px(10.));
+                    assert_eq!(text.top() - outer.top(), px(8.));
+                    assert_eq!(outer.bottom() - text.bottom(), px(8.));
                 }
             })
             .unwrap();

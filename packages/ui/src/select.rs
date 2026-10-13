@@ -1,12 +1,13 @@
 //! Select wrapper over `gpui_component::select`.
 //!
 //! Keeps daruda's `(value, label)` option shape while using upstream
-//! state/render split. `xsmall()` is applied by default (CLAUDE.md §10), and
+//! state/render split. Field geometry is shared with text inputs, and
 //! Tab participation mirrors other inputs: `isize` cycles, `()` skips. The skip
 //! path mutates the stored `FocusHandle` because upstream has no builder for it.
 
+use crate::field_geometry::FieldGeometry;
 use crate::theme;
-use gpui::{App, Context, Entity, Focusable as _, SharedString, Styled as _, Window};
+use gpui::{App, Context, Entity, Focusable as _, SharedString, Styled as _, Window, px};
 use gpui_component::Sizable as _;
 use gpui_component::select::SelectItem;
 
@@ -95,7 +96,7 @@ pub fn state_with_options(
 }
 
 /// Build a render-time [`Select`] element from a state entity, sized
-/// `xsmall`. Caller chains `.placeholder(...)` / `.disabled(...)` etc.
+/// to the standard 28px field. Caller chains `.placeholder(...)` / `.disabled(...)` etc.
 ///
 /// `tab` decides Tab cycle participation (`isize` for a slot, `()` to
 /// skip). The `cx` is needed only to dereference the state entity and
@@ -105,10 +106,31 @@ pub fn select<T: SelectTabSpec>(
     cx: &App,
     tab: T,
 ) -> Select<Vec<SelectOption>> {
+    select_with_geometry(state, cx, tab, FieldGeometry::STANDARD)
+}
+
+/// A 36px select aligned with [`crate::form_input`].
+pub fn form_select<T: SelectTabSpec>(
+    state: &Entity<SelectState>,
+    cx: &App,
+    tab: T,
+) -> Select<Vec<SelectOption>> {
+    select_with_geometry(state, cx, tab, FieldGeometry::FORM)
+}
+
+fn select_with_geometry<T: SelectTabSpec>(
+    state: &Entity<SelectState>,
+    cx: &App,
+    tab: T,
+    geometry: FieldGeometry,
+) -> Select<Vec<SelectOption>> {
     tab.apply(state, cx);
     // Match the `input` surface — override Select's default
     // `theme.background` with `modal_input_bg` (refine_style wins).
-    Select::new(state)
-        .small()
-        .bg(theme::current(cx).modal_input_bg)
+    geometry.apply(
+        Select::new(state)
+            .small()
+            .h(px(geometry.height))
+            .bg(theme::current(cx).modal_input_bg),
+    )
 }

@@ -228,6 +228,21 @@ spacing:
 | Button (standard) | 28px |
 | Input (standard) | 28px |
 
+Text-field geometry is owned by `daruda_ui`, not the vendor's `small()` tier
+or the screen rendering it. Single-line fields use these pixel metrics:
+
+| Field | Height | Horizontal padding | Vertical padding | Line height |
+|-------|--------|--------------------|------------------|-------------|
+| Standard input, search, select, read-only value | 28px | 9px | 3px | 20px |
+| Authoring-form input, select, read-only value | 36px | 9px | 7px | 20px |
+
+Both bordered profiles use 12px text and a 1px border. Multi-line form inputs
+grow by 20px per row, retaining the same padding and the state-owned row cap.
+Borderless pane-search fields retain 28px height with 4px vertical padding.
+Composers and prose editors use 12px horizontal / 8px vertical padding;
+prose and code editors follow the configured editor font and line height.
+Screen code owns width and spacing between fields, never inner padding.
+
 ---
 
 ## Elevation & Depth

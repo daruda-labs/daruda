@@ -234,8 +234,8 @@ pub const DOCK_BOTTOM_MAX_H: f32 = 500.0;
 pub const DOCK_BOTTOM_ROW_PRESET_1_H: f32 = 76.0;
 pub const DOCK_BOTTOM_ROW_PRESET_2_H: f32 = 114.0;
 pub const DOCK_BOTTOM_ROW_PRESET_3_H: f32 = 152.0;
-// One `Size::Small` input line (1.25 rem × 16px), independent of the terminal font.
-pub const DOCK_BOTTOM_INPUT_EXTRA_LINE_H: f32 = 20.0;
+// Same row height as the composer, independent of the terminal font.
+pub const DOCK_BOTTOM_INPUT_EXTRA_LINE_H: f32 = INPUT_LINE_HEIGHT;
 pub const DOCK_BOTTOM_INPUT_TEXT_PAD_H: f32 = INPUT_TEXTAREA_PAD_Y * 2.0;
 pub const DOCK_BOTTOM_INPUT_ACTION_ROW_H: f32 = BUTTON_HEIGHT + INPUT_PANEL_BUTTON_GAP;
 pub const AGENT_ATTACHMENT_CHIP_MAX_W: f32 = 290.0;
