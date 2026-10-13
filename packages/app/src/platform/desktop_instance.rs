@@ -42,7 +42,7 @@ pub(crate) enum Launch {
 }
 
 pub(crate) struct Instance {
-    _lock: File,
+    lock: File,
     endpoint: PathBuf,
     stopped: Arc<AtomicBool>,
     receiver: mpsc::Receiver<Request>,
@@ -57,6 +57,11 @@ impl Drop for Instance {
             && error.kind() != std::io::ErrorKind::NotFound
         {
             log_error("Desktop endpoint cleanup failed", &error);
+        }
+        // Forked children can retain the open file description after this File closes.
+        // Release the lock explicitly, after removing the endpoint we own.
+        if let Err(error) = fs4::fs_std::FileExt::unlock(&self.lock) {
+            log_error("Desktop profile unlock failed", &error);
         }
     }
 }
@@ -133,7 +138,7 @@ fn acquire(dir: &Path, request: Request, exclusive: bool) -> anyhow::Result<Laun
             }
         })?;
     Ok(Launch::Primary(Instance {
-        _lock: lock,
+        lock,
         endpoint,
         stopped,
         receiver,

@@ -25,12 +25,25 @@ fn second_launch_forwards_and_profile_lock_releases_on_exit() {
         Launch::Primary(_)
     ));
     drop(first);
-    // A sibling test's fork can hold the released lock for a moment.
-    let again = crate::test_support::once_released(
-        || acquire(directory.path(), Request::default(), false),
-        |attempt| !matches!(attempt, Ok(Launch::Primary(_))),
-    );
+    let again = acquire(directory.path(), Request::default(), false);
     assert!(matches!(again.unwrap(), Launch::Primary(_)));
+}
+
+#[cfg(unix)]
+#[test]
+fn profile_lock_releases_while_a_duplicate_handle_remains_open() {
+    let directory = tempfile::tempdir().unwrap();
+    let Launch::Primary(first) = acquire(directory.path(), Request::default(), false).unwrap()
+    else {
+        panic!("first launch");
+    };
+    // Model a fork's inherited file description without forking the test process.
+    let inherited = first.lock.try_clone().unwrap();
+    drop(first);
+    assert!(!directory.path().join("desktop.json").exists());
+    let again = acquire(directory.path(), Request::default(), false).unwrap();
+    assert!(matches!(again, Launch::Primary(_)));
+    drop(inherited);
 }
 
 #[test]
