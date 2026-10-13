@@ -15,6 +15,7 @@ use crate::ui::theme;
 use daruda_agent::activity::{ActivityStats, DayActivity};
 use daruda_agent::service_status::{ServiceStatus, StatusIndicator};
 use daruda_agent::{LimitSeverity, PlanInfo, ProviderUsage, UsageWindow};
+use daruda_core::age::{self, AgeBucket};
 use daruda_store::accounts::AccountRecipeId;
 use gpui::{AnyElement, Context, Hsla, IntoElement, SharedString, WeakEntity, div, prelude::*, px};
 
@@ -445,11 +446,11 @@ fn refresh_badge_label(fetched_at: Option<SystemTime>, stale: bool, in_flight: b
     }
     let age = fetched_at.and_then(|t| SystemTime::now().duration_since(t).ok());
     let label = match cache_age_bucket(age) {
-        CacheAge::Never => strings::usage::refresh(),
-        CacheAge::JustNow => strings::usage::cache_just_now(),
-        CacheAge::Minutes(n) => strings::usage::cache_minutes(n),
-        CacheAge::Hours(n) => strings::usage::cache_hours(n),
-        CacheAge::Days(n) => strings::usage::cache_days(n),
+        None => strings::usage::refresh(),
+        Some(AgeBucket::JustNow) => strings::usage::cache_just_now(),
+        Some(AgeBucket::Minutes(n)) => strings::usage::cache_minutes(n),
+        Some(AgeBucket::Hours(n)) => strings::usage::cache_hours(n),
+        Some(AgeBucket::Days(n)) => strings::usage::cache_days(n),
     };
     if stale {
         format!("{label} {}", strings::usage::stale_marker())
@@ -834,42 +835,16 @@ fn session_row_meta_label(session: &RestorableSession) -> SharedString {
 fn relative_time_label(last_active: SystemTime) -> String {
     let age = SystemTime::now().duration_since(last_active).ok();
     match cache_age_bucket(age) {
-        CacheAge::Never | CacheAge::JustNow => strings::usage::session_just_now(),
-        CacheAge::Minutes(n) => strings::usage::session_minutes(n),
-        CacheAge::Hours(n) => strings::usage::session_hours(n),
-        CacheAge::Days(n) => strings::usage::session_days(n),
+        None | Some(AgeBucket::JustNow) => strings::usage::session_just_now(),
+        Some(AgeBucket::Minutes(n)) => strings::usage::session_minutes(n),
+        Some(AgeBucket::Hours(n)) => strings::usage::session_hours(n),
+        Some(AgeBucket::Days(n)) => strings::usage::session_days(n),
     }
 }
 
-/// Cache-age bucket for the refresh badge. Pure so the bucket
-/// boundaries are tested without touching i18n or the clock.
-#[derive(Debug, PartialEq, Eq)]
-enum CacheAge {
-    /// No successful fetch yet.
-    Never,
-    /// Under a minute since the last refresh.
-    JustNow,
-    Minutes(u64),
-    Hours(u64),
-    Days(u64),
-}
-
-/// Bucket a "time since last fetch" into the badge's display unit.
-/// `None` (never fetched) maps to [`CacheAge::Never`].
-fn cache_age_bucket(age: Option<Duration>) -> CacheAge {
-    let Some(age) = age else {
-        return CacheAge::Never;
-    };
-    let secs = age.as_secs();
-    if secs < 60 {
-        CacheAge::JustNow
-    } else if secs < 3_600 {
-        CacheAge::Minutes(secs / 60)
-    } else if secs < 86_400 {
-        CacheAge::Hours(secs / 3_600)
-    } else {
-        CacheAge::Days(secs / 86_400)
-    }
+/// Bucket a "time since" into its display unit; `None` is never fetched.
+fn cache_age_bucket(age: Option<Duration>) -> Option<AgeBucket> {
+    age.map(|age| age::bucket(age.as_secs()))
 }
 
 /// Normalize message counts to pixel bar heights. The busiest day in
@@ -1222,39 +1197,15 @@ mod tests {
     }
 
     #[test]
-    fn cache_age_bucket_boundaries() {
-        assert_eq!(cache_age_bucket(None), CacheAge::Never);
+    fn cache_age_bucket_maps_missing_age_to_never_and_whole_seconds_to_core() {
+        assert_eq!(cache_age_bucket(None), None);
         assert_eq!(
-            cache_age_bucket(Some(Duration::from_secs(0))),
-            CacheAge::JustNow
-        );
-        assert_eq!(
-            cache_age_bucket(Some(Duration::from_secs(59))),
-            CacheAge::JustNow
-        );
-        assert_eq!(
-            cache_age_bucket(Some(Duration::from_secs(60))),
-            CacheAge::Minutes(1)
-        );
-        assert_eq!(
-            cache_age_bucket(Some(Duration::from_secs(59 * 60))),
-            CacheAge::Minutes(59)
+            cache_age_bucket(Some(Duration::from_millis(59_999))),
+            Some(AgeBucket::JustNow)
         );
         assert_eq!(
             cache_age_bucket(Some(Duration::from_secs(3_600))),
-            CacheAge::Hours(1)
-        );
-        assert_eq!(
-            cache_age_bucket(Some(Duration::from_secs(23 * 3_600))),
-            CacheAge::Hours(23)
-        );
-        assert_eq!(
-            cache_age_bucket(Some(Duration::from_secs(86_400))),
-            CacheAge::Days(1)
-        );
-        assert_eq!(
-            cache_age_bucket(Some(Duration::from_secs(3 * 86_400))),
-            CacheAge::Days(3)
+            Some(AgeBucket::Hours(1))
         );
     }
 

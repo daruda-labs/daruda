@@ -44,6 +44,7 @@
 //! guard, and they are enforced by review rather than tooling: if a
 //! proposed addition fails one of them, it belongs elsewhere.
 
+pub mod age;
 pub mod file_url;
 pub mod font;
 pub mod git;

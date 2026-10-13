@@ -1,5 +1,6 @@
 //! Aligned task columns; long metadata stays in the title or a tooltip.
 
+use daruda_core::age::{self, AgeBucket};
 use daruda_store::tasks::{Task, TaskAgentSurface, TaskScope, TaskState};
 use gpui::{AnyElement, App, Div, IntoElement, MouseButton, SharedString, div, prelude::*, px};
 
@@ -234,11 +235,11 @@ fn short_id(task: &Task) -> String {
 }
 
 fn updated_label(seconds: u64) -> String {
-    match seconds {
-        0..60 => strings::task::updated_now(),
-        60..3600 => strings::task::updated_minutes(seconds / 60),
-        3600..86400 => strings::task::updated_hours(seconds / 3600),
-        _ => strings::task::updated_days(seconds / 86400),
+    match age::bucket(seconds) {
+        AgeBucket::JustNow => strings::task::updated_now(),
+        AgeBucket::Minutes(n) => strings::task::updated_minutes(n),
+        AgeBucket::Hours(n) => strings::task::updated_hours(n),
+        AgeBucket::Days(n) => strings::task::updated_days(n),
     }
 }
 

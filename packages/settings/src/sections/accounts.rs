@@ -22,6 +22,7 @@
 
 use std::time::{SystemTime, UNIX_EPOCH};
 
+use daruda_core::age::{self, AgeBucket};
 use daruda_store::accounts::{AccountId, AccountRecipeId, AccountsState, ManagedAccount};
 use daruda_store::observability::error_report::{ErrorReport, ErrorSeverity};
 use gpui::{AnyElement, ClickEvent, IntoElement, SharedString, div, prelude::*, px};
@@ -53,23 +54,17 @@ fn now_unix() -> u64 {
 /// Bucket "time since last authenticated" into a display label. `0` is
 /// the never-authenticated sentinel (`ManagedAccount` has no captured
 /// login yet — unreachable once login stamps this, but the field predates
-/// that guarantee). Mirrors `right_dock::usage`'s
-/// `cache_age_bucket` shape; kept as its own function since account
-/// freshness and fetch-cache age are different concepts that could
-/// diverge in wording later.
+/// that guarantee). Shares [`age::bucket`] with the usage badge but keeps
+/// its own strings, since account freshness may diverge in wording.
 fn last_authenticated_label(now: u64, last_authenticated_at: u64) -> String {
     if last_authenticated_at == 0 {
         return s::settings::accounts_last_auth_never();
     }
-    let age = now.saturating_sub(last_authenticated_at);
-    if age < 60 {
-        s::settings::accounts_last_auth_just_now()
-    } else if age < 3_600 {
-        s::settings::accounts_last_auth_minutes(age / 60)
-    } else if age < 86_400 {
-        s::settings::accounts_last_auth_hours(age / 3_600)
-    } else {
-        s::settings::accounts_last_auth_days(age / 86_400)
+    match age::bucket(now.saturating_sub(last_authenticated_at)) {
+        AgeBucket::JustNow => s::settings::accounts_last_auth_just_now(),
+        AgeBucket::Minutes(n) => s::settings::accounts_last_auth_minutes(n),
+        AgeBucket::Hours(n) => s::settings::accounts_last_auth_hours(n),
+        AgeBucket::Days(n) => s::settings::accounts_last_auth_days(n),
     }
 }
 
