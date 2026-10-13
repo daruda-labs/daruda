@@ -136,6 +136,3 @@ fn run_with_paths(cwd: &Path, head: &[&str], paths: &[PathBuf]) -> Result<(), Gi
     args.extend(paths.iter().map(|p| p.as_os_str()));
     run_git(cwd, args).map(|_| ())
 }
-
-#[cfg(test)]
-mod tests;

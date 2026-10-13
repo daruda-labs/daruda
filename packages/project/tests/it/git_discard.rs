@@ -1,4 +1,9 @@
-use super::*;
+//! Public API tests for git discard.
+
+use daruda_project::lane::git::GitFileEntry;
+use daruda_project::lane::git::discard::{DiscardPlan, discard};
+use std::collections::HashSet;
+use std::path::{Path, PathBuf};
 
 fn entry(x: char, y: char, path: &str, original: Option<&str>) -> GitFileEntry {
     GitFileEntry {
@@ -92,7 +97,7 @@ fn repo() -> tempfile::TempDir {
 }
 
 fn all(root: &Path) -> Vec<PathBuf> {
-    let status = crate::lane::git::git_worktree_status(root).unwrap();
+    let status = daruda_project::lane::git::git_worktree_status(root).unwrap();
     status
         .staged
         .iter()
@@ -104,7 +109,7 @@ fn all(root: &Path) -> Vec<PathBuf> {
 /// Every shape of change at once, then one discard of all of them.
 #[test]
 fn discarding_every_change_leaves_the_tree_at_head() {
-    if !crate::lane::git::has_git() {
+    if !daruda_project::lane::git::has_git() {
         return;
     }
     let temp = repo();
@@ -148,7 +153,7 @@ fn discarding_every_change_leaves_the_tree_at_head() {
 /// A name with glob characters is that one file, not a pattern.
 #[test]
 fn a_glob_named_file_discards_only_itself() {
-    if !crate::lane::git::has_git() {
+    if !daruda_project::lane::git::has_git() {
         return;
     }
     let temp = repo();
@@ -184,7 +189,7 @@ fn a_glob_named_file_discards_only_itself() {
 /// Both sides added the file; undoing the conflict keeps HEAD's copy.
 #[test]
 fn discarding_an_add_add_conflict_keeps_heads_copy() {
-    if !crate::lane::git::has_git() {
+    if !daruda_project::lane::git::has_git() {
         return;
     }
     let temp = repo();
@@ -218,7 +223,7 @@ fn discarding_an_add_add_conflict_keeps_heads_copy() {
 /// was read is left alone, and a listed file since committed is not undone.
 #[test]
 fn only_paths_still_changed_from_the_pinned_list_are_touched() {
-    if !crate::lane::git::has_git() {
+    if !daruda_project::lane::git::has_git() {
         return;
     }
     let temp = repo();

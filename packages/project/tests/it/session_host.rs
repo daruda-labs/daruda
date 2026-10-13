@@ -1,4 +1,10 @@
-use super::*;
+//! Public API tests for session host.
+
+use daruda_config::{
+    AccountEnv, AgentLaunch, SessionHostEntry, SessionHostKind, SessionHostTombstone,
+};
+use daruda_project::lane::session_host::*;
+use daruda_store::project::{LaneSessionHost, SessionHostId};
 
 const ADAPTER: &str = "npx -y @agentclientprotocol/codex-acp@latest";
 

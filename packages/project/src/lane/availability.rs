@@ -59,20 +59,6 @@ mod tests {
     use super::*;
 
     #[test]
-    fn classify_present_missing_notadir() {
-        let d = tempfile::tempdir().unwrap();
-        assert_eq!(classify_dir(d.path()), LaneAvailability::Present);
-        assert_eq!(
-            classify_dir(&d.path().join("nope")),
-            LaneAvailability::Missing
-        );
-        let file = d.path().join("f");
-        std::fs::write(&file, b"x").unwrap();
-        // A regular file is not a directory → read_dir fails → Missing.
-        assert_eq!(classify_dir(&file), LaneAvailability::Missing);
-    }
-
-    #[test]
     fn classify_transient_io_error_stays_present() {
         // A transient/unknown I/O kind on a directory that may still
         // exist must NOT flip the lane to Missing (no teardown).

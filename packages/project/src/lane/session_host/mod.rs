@@ -9,9 +9,6 @@
 //!
 //! GPUI-free (see the `lane/` module doc).
 
-#[cfg(test)]
-mod tests;
-
 use daruda_config::{
     AccountEnv, AgentLaunch, LaunchTransport, SessionHostEntry, SessionHostKind,
     SessionHostTombstone, assemble_launch_command,
