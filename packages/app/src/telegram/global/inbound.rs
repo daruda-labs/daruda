@@ -13,6 +13,8 @@ use crate::remote_channel::dispatch::{
     self,
     target::{aim, compose_edit_body},
 };
+use futures::StreamExt as _;
+use futures::channel::mpsc::{UnboundedSender, unbounded};
 use gpui::App;
 
 use daruda_store::observability::error_report::{ErrorReport, ErrorSeverity};
@@ -35,6 +37,7 @@ use crate::surface::strings as s;
 /// the same pattern `workspace/sync/limits.rs` uses for its poll
 /// cadence.
 pub(super) fn spawn_poll_task(cx: &mut App) {
+    let answers = spawn_answer_task(cx);
     cx.spawn(async move |cx| {
         let lock_root = daruda_store::persistence::remote_lock_root();
         let mut backoff = ErrorBackoff::new();
@@ -62,6 +65,7 @@ pub(super) fn spawn_poll_task(cx: &mut App) {
                 // off, or has lost its token, must not keep the next one from
                 // serving the phone.
                 release_bot(cx);
+                backoff.reset();
                 cx.background_executor().timer(IDLE_RECHECK).await;
                 continue;
             };
@@ -73,6 +77,7 @@ pub(super) fn spawn_poll_task(cx: &mut App) {
             // showing. Asked every iteration rather than once, so the claim is
             // picked up when the holder quits.
             if !claim_bot(&lock_root, &token, cx) {
+                backoff.reset();
                 cx.background_executor().timer(IDLE_RECHECK).await;
                 continue;
             }
@@ -177,66 +182,48 @@ pub(super) fn spawn_poll_task(cx: &mut App) {
                         log_unauthorized_inbound();
                     }
                     let effect = dispatch::handle(aimed, &dispatch::Target::Telegram, cx);
-                    // The answer goes out on its own task, not awaited here:
-                    // this loop is the only thing listening for the next
-                    // message, and every HTTP round trip it waits on is a
-                    // round trip the next `getUpdates` starts late by.
-                    let reply_token = token.clone();
-                    match (answer_callback_id, effect) {
+                    // Queued, not awaited: this loop is the only thing listening
+                    // for the next message, and one queue keeps the answers in
+                    // the order the messages came.
+                    let answer = match (answer_callback_id, effect) {
                         (
                             Some(callback_id),
                             dispatch::Effect::Feedback {
                                 label,
                                 edit: dispatch::Edit::ConsumeButtons,
                             },
-                        ) => cx
-                            .spawn(async move |cx| {
-                                answer_and_edit(
-                                    cx,
-                                    &reply_token,
-                                    callback_id,
-                                    callback_edit,
-                                    &label,
-                                )
-                                .await;
-                            })
-                            .detach(),
-                        (Some(callback_id), dispatch::Effect::Feedback { label, .. }) => cx
-                            .spawn(async move |cx| {
-                                answer_only(cx, &reply_token, callback_id, &label).await;
-                            })
-                            .detach(),
+                        ) => Some(Answer::AckAndEdit {
+                            callback_id,
+                            edit: callback_edit,
+                            label,
+                        }),
+                        (Some(callback_id), dispatch::Effect::Feedback { label, .. }) => {
+                            Some(Answer::Ack { callback_id, label })
+                        }
                         // An unknown or already-consumed token. Answered *and*
                         // edited: leaving the buttons on invites the user to keep
                         // tapping a decision that can no longer land.
-                        (Some(callback_id), _) => cx
-                            .spawn(async move |cx| {
-                                let label = s::notification::telegram_permission_stale();
-                                answer_and_edit(
-                                    cx,
-                                    &reply_token,
-                                    callback_id,
-                                    callback_edit,
-                                    &label,
-                                )
-                                .await;
-                            })
-                            .detach(),
-                        (None, dispatch::Effect::Reply(reply)) => cx
-                            .spawn(async move |cx| {
-                                send_command_reply(cx, &reply_token, reply).await;
-                            })
-                            .detach(),
-                        _ => {}
+                        (Some(callback_id), _) => Some(Answer::AckAndEdit {
+                            callback_id,
+                            edit: callback_edit,
+                            label: s::notification::telegram_permission_stale(),
+                        }),
+                        (None, dispatch::Effect::Reply(reply)) => Some(Answer::Reply(reply)),
+                        _ => None,
+                    };
+                    if let Some(answer) = answer
+                        && answers.unbounded_send((token.clone(), answer)).is_err()
+                    {
+                        trace::delivery("answer.dropped", || "reason=queue_closed".to_string());
                     }
                 }
 
                 // After acting, not before: a crash in between re-delivers
                 // this one update rather than losing it, and writing first
                 // would drop the command outright. Per update rather than per
-                // batch so the replay is bounded to one. The answer above is
-                // not waited for — it is owed to the phone, but the action
-                // the offset records has already happened.
+                // batch so the replay is bounded to one. The queued answer is
+                // owed to the phone, but the action the offset records has
+                // already happened.
                 persist_offset(cx);
             }
 
@@ -246,6 +233,43 @@ pub(super) fn spawn_poll_task(cx: &mut App) {
         }
     })
     .detach();
+}
+
+/// What the phone is owed for one routed update, sent by [`spawn_answer_task`].
+enum Answer {
+    Reply(crate::remote_channel::command::RenderedReply),
+    Ack {
+        callback_id: String,
+        label: String,
+    },
+    AckAndEdit {
+        callback_id: String,
+        edit: Option<CallbackEdit>,
+        label: String,
+    },
+}
+
+/// One task sends every answer in arrival order, so a reply to an earlier
+/// message never lands after a later one and a backlog cannot fan out.
+fn spawn_answer_task(cx: &mut App) -> UnboundedSender<(String, Answer)> {
+    let (sender, mut queue) = unbounded::<(String, Answer)>();
+    cx.spawn(async move |cx| {
+        while let Some((token, answer)) = queue.next().await {
+            match answer {
+                Answer::Reply(reply) => send_command_reply(cx, &token, reply).await,
+                Answer::Ack { callback_id, label } => {
+                    answer_only(cx, &token, callback_id, &label).await
+                }
+                Answer::AckAndEdit {
+                    callback_id,
+                    edit,
+                    label,
+                } => answer_and_edit(cx, &token, callback_id, edit, &label).await,
+            }
+        }
+    })
+    .detach();
+    sender
 }
 
 /// Take or renew this daruda's claim on the bot. See

@@ -25,6 +25,23 @@ fn an_update_this_bridge_cannot_act_on_still_carries_its_id() {
     assert!(matches!(updates[3].kind, UpdateKind::Message { .. }));
 }
 
+/// A socket the server dropped is retried; a slow one is not, since its
+/// request may already have been delivered.
+#[test]
+fn only_a_dead_socket_is_worth_a_retry() {
+    use std::io::ErrorKind;
+    for kind in [
+        ErrorKind::ConnectionReset,
+        ErrorKind::ConnectionAborted,
+        ErrorKind::BrokenPipe,
+    ] {
+        assert!(is_dead_connection_kind(kind), "{kind:?}");
+    }
+    for kind in [ErrorKind::TimedOut, ErrorKind::WouldBlock, ErrorKind::Other] {
+        assert!(!is_dead_connection_kind(kind), "{kind:?}");
+    }
+}
+
 #[test]
 fn a_long_callback_toast_is_clamped_on_a_char_boundary() {
     // The regression: a listing label carries a project/lane/session title,

@@ -112,12 +112,8 @@ const REQUEST_TIMEOUT: Duration = Duration::from_secs(10);
 /// meanwhile. A third would only ever be dropped.
 const IDLE_CONNECTIONS_PER_HOST: usize = 2;
 
-/// The one HTTP agent every call goes through, built on first use.
-///
-/// One agent rather than one per call because the agent owns the connection
-/// pool: a fresh agent per call meant a fresh TCP + TLS handshake per call,
-/// which measured ~0.55 s of a ~0.8 s `sendMessage` round trip. The timeout
-/// is set per request — the long poll needs a longer one than a send.
+/// The one HTTP agent every call goes through: its pool saves the TCP + TLS
+/// handshake, ~0.55 s of a ~0.8 s `sendMessage`. Timeouts are per request.
 fn agent() -> &'static ureq::Agent {
     static AGENT: OnceLock<ureq::Agent> = OnceLock::new();
     AGENT.get_or_init(|| {
@@ -125,6 +121,48 @@ fn agent() -> &'static ureq::Agent {
             .max_idle_connections_per_host(IDLE_CONNECTIONS_PER_HOST)
             .build()
     })
+}
+
+/// POST `payload` to `method`, retrying once on a fresh connection when the
+/// pooled one turns out dead — after sleep or a network change the pool hands
+/// back a socket the server already dropped, and ureq retries no POST itself.
+fn post_json(
+    token: &str,
+    method: &str,
+    payload: serde_json::Value,
+) -> Result<ureq::Response, ClientError> {
+    let url = base_url(token, method);
+    let sent = match agent()
+        .post(&url)
+        .timeout(REQUEST_TIMEOUT)
+        .send_json(payload.clone())
+    {
+        Err(error) if is_dead_connection(&error) => ureq::AgentBuilder::new()
+            .max_idle_connections(0)
+            .build()
+            .post(&url)
+            .timeout(REQUEST_TIMEOUT)
+            .send_json(payload),
+        other => other,
+    };
+    sent.map_err(|e| http_error(token, e))
+}
+
+/// Whether a transport error says the socket was gone rather than slow. A
+/// timeout is excluded: the request may have landed, and a retry would repeat it.
+fn is_dead_connection(error: &ureq::Error) -> bool {
+    std::error::Error::source(error)
+        .and_then(|source| source.downcast_ref::<std::io::Error>())
+        .is_some_and(|io| is_dead_connection_kind(io.kind()))
+}
+
+fn is_dead_connection_kind(kind: std::io::ErrorKind) -> bool {
+    matches!(
+        kind,
+        std::io::ErrorKind::ConnectionReset
+            | std::io::ErrorKind::ConnectionAborted
+            | std::io::ErrorKind::BrokenPipe
+    )
 }
 
 /// Truncate a callback toast to Telegram's limit, counting `char`s so a
@@ -205,11 +243,7 @@ pub fn send_message(
         payload["reply_markup"] = inline_keyboard_json(&keyboard);
     }
 
-    let response = agent()
-        .post(&base_url(token, "sendMessage"))
-        .timeout(REQUEST_TIMEOUT)
-        .send_json(payload)
-        .map_err(|e| http_error(token, e))?;
+    let response = post_json(token, "sendMessage", payload)?;
 
     let body = read_body(response)?;
     parse_send_message_response(&body)
@@ -239,11 +273,7 @@ pub fn answer_callback(
         payload["text"] = serde_json::json!(clamp_callback_text(text));
     }
 
-    let response = agent()
-        .post(&base_url(token, "answerCallbackQuery"))
-        .timeout(REQUEST_TIMEOUT)
-        .send_json(payload)
-        .map_err(|e| http_error(token, e))?;
+    let response = post_json(token, "answerCallbackQuery", payload)?;
 
     let body = read_body(response)?;
     parse_answer_callback_response(&body)
@@ -269,11 +299,7 @@ pub fn edit_message_text(
         "text": text,
     });
 
-    let response = agent()
-        .post(&base_url(token, "editMessageText"))
-        .timeout(REQUEST_TIMEOUT)
-        .send_json(payload)
-        .map_err(|e| http_error(token, e))?;
+    let response = post_json(token, "editMessageText", payload)?;
 
     let body = read_body(response)?;
     parse_edit_message_response(&body)
