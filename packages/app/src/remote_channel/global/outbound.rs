@@ -105,6 +105,7 @@ fn spawn_connection(mut receiver: UnboundedReceiver<Pending>, cx: &mut App) {
                 .await;
             // Keep IDs even when a later chunk fails: delivered chunks must remain replyable.
             cx.update(|cx| {
+                let orchestrator = crate::orchestrator::pane(cx);
                 if let Some(connection) = cx
                     .global_mut::<RemoteChannels>()
                     .connections
@@ -113,7 +114,7 @@ fn spawn_connection(mut receiver: UnboundedReceiver<Pending>, cx: &mut App) {
                     && let Some(pane) = pane
                 {
                     for id in ids {
-                        connection.core.record_sent(id, pane);
+                        connection.core.record_delivered(id, pane, orchestrator);
                     }
                 }
             });

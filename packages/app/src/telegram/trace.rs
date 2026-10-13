@@ -287,6 +287,16 @@ pub(crate) fn action_name(routed: &Routed) -> &'static str {
     }
 }
 
+/// The pane a routed message is about to reach, when routing already named one.
+pub(crate) fn action_target(routed: &Routed) -> Option<PaneRef> {
+    match routed {
+        Routed::Ready(
+            InboundAction::InjectPrompt { pane, .. } | InboundAction::UnknownSlash { pane, .. },
+        ) => Some(*pane),
+        _ => None,
+    }
+}
+
 /// A stable short name per inbound update shape, for the `inbound` line.
 pub(crate) fn update_kind_name(kind: &UpdateKind) -> &'static str {
     match kind {

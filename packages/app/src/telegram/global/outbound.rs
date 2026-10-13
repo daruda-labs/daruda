@@ -268,9 +268,12 @@ pub(super) fn spawn_send_task(
                         )
                     });
                     cx.update(|cx| {
-                        cx.global_mut::<TelegramBridge>()
-                            .core
-                            .record_sent(message_id, pane);
+                        let orchestrator = crate::orchestrator::pane(cx);
+                        cx.global_mut::<TelegramBridge>().core.record_delivered(
+                            message_id,
+                            pane,
+                            orchestrator,
+                        );
                     });
                 }
                 Err(e) => {

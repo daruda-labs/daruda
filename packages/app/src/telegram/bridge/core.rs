@@ -316,7 +316,18 @@ impl BridgeCore {
         }
     }
 
+    #[cfg(test)]
     pub fn record_sent(&mut self, message_id: i64, pane: PaneRef) {
         self.routing.record_sent(message_id, pane);
+    }
+
+    pub fn record_delivered(
+        &mut self,
+        message_id: i64,
+        pane: PaneRef,
+        orchestrator: Option<PaneRef>,
+    ) {
+        self.routing
+            .record_delivered(message_id, pane, orchestrator);
     }
 }

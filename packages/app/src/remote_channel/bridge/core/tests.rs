@@ -58,3 +58,60 @@ fn channel_instances_do_not_share_targets_or_permission_tokens() {
         Routed::NeedsTarget(_)
     ));
 }
+
+fn injected_into(core: &mut RoutingCore<String>) -> Option<PaneRef> {
+    match core.route_text("carry on".into(), None).ready() {
+        InboundAction::InjectPrompt { pane, .. } => Some(pane),
+        _ => None,
+    }
+}
+
+/// A pane chosen with `/use` keeps plain text only until another pane speaks:
+/// the user is answering whoever spoke last.
+#[test]
+fn a_pane_that_speaks_after_the_selection_gets_the_plain_text() {
+    let mut core = RoutingCore::<String>::default();
+    core.command_state_mut().select(Some(pane(1)));
+    core.record_sent("m1".into(), pane(2));
+    assert_eq!(injected_into(&mut core), Some(pane(2)));
+}
+
+/// The orchestrator reporting on a chat it opened must not pull the phone
+/// back to itself; the announced chat stays the target.
+#[test]
+fn a_bystander_ping_leaves_the_target_alone() {
+    let mut core = RoutingCore::<String>::default();
+    core.command_state_mut().select(Some(pane(1)));
+    core.record_sent("announce".into(), pane(1));
+    core.record_bystander_sent("report".into(), pane(9));
+    assert_eq!(injected_into(&mut core), Some(pane(1)));
+    // Still answerable by replying to it.
+    let replied = core.route_text("ok".into(), Some("report".into())).ready();
+    assert!(matches!(
+        replied,
+        InboundAction::InjectPrompt {
+            pane: PaneRef { pane: 9, .. },
+            ..
+        }
+    ));
+}
+
+/// With nothing chosen and only a bystander heard from, plain text still has
+/// somewhere to go rather than none.
+#[test]
+fn a_bystander_is_the_last_resort() {
+    let mut core = RoutingCore::<String>::default();
+    core.record_bystander_sent("report".into(), pane(9));
+    assert_eq!(injected_into(&mut core), Some(pane(9)));
+}
+
+#[test]
+fn only_the_orchestrators_ping_is_a_bystander() {
+    let mut core = RoutingCore::<String>::default();
+    let orchestrator = Some(pane(9));
+    core.record_delivered("worker".into(), pane(1), orchestrator);
+    core.record_delivered("report".into(), pane(9), orchestrator);
+    assert_eq!(injected_into(&mut core), Some(pane(1)));
+    core.record_delivered("worker2".into(), pane(2), orchestrator);
+    assert_eq!(injected_into(&mut core), Some(pane(2)));
+}

@@ -68,7 +68,13 @@ pub(crate) struct CommandState {
     /// label is only the ordinal, nothing on screen would say the two
     /// listings differ.
     generation: u64,
+    /// The pane the user picked. What a bare `/stop` means; plain text follows
+    /// it only until another pane speaks — see `conversation`.
     selected: Option<PaneRef>,
+    /// Where plain text goes: whichever came last of the user's pick and a
+    /// pane that spoke. Kept apart from `selected` so a ping never changes
+    /// what a command addresses.
+    conversation: Option<PaneRef>,
     /// Index `i` holds the task `/task start {i + 1}` names. The last
     /// `/task` listing's, apart from `rows` so neither listing renumbers the
     /// other.
@@ -81,6 +87,7 @@ impl Default for CommandState {
             rows: Vec::new(),
             generation: uuid::Uuid::new_v4().as_u128() as u64,
             selected: None,
+            conversation: None,
             task_rows: Vec::new(),
         }
     }
@@ -142,6 +149,12 @@ impl CommandState {
 
     pub(crate) fn select(&mut self, target: Option<PaneRef>) {
         self.selected = target;
+        self.conversation = target;
+    }
+
+    /// A pane spoke to the phone, so the user's next plain message answers it.
+    pub(crate) fn note_ping(&mut self, pane: PaneRef) {
+        self.conversation = Some(pane);
     }
 
     pub(crate) fn selected(&self) -> Option<PaneRef> {
@@ -155,17 +168,20 @@ impl CommandState {
         if self.selected == Some(target) {
             self.selected = None;
         }
+        if self.conversation == Some(target) {
+            self.conversation = None;
+        }
     }
 
-    /// Where a message with no command goes. An explicit act beats an implicit
-    /// one: replying names a pane on purpose, selecting names one on purpose,
-    /// and `last_pinged` is only whoever spoke last.
+    /// Where a message with no command goes. Replying names a pane outright;
+    /// otherwise the latest of a pick and a pane speaking up; `last_pinged`
+    /// only when neither happened — it alone also counts the orchestrator.
     pub(crate) fn plain_text_target(
         &self,
         reply_to: Option<PaneRef>,
         last_pinged: Option<PaneRef>,
     ) -> Option<PaneRef> {
-        reply_to.or(self.selected).or(last_pinged)
+        reply_to.or(self.conversation).or(last_pinged)
     }
 
     /// Callback data for the button at `ordinal`.
@@ -409,11 +425,28 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn selection_beats_last_pinged() {
+    fn a_selection_made_after_the_last_ping_wins() {
+        let (b, c) = (pane(20), pane(30));
+        let mut state = CommandState::default();
+        state.note_ping(c);
+        state.select(Some(b));
+        assert_eq!(state.plain_text_target(None, Some(c)), Some(b));
+    }
+
+    /// The regression: a `/use` from earlier kept every later plain message,
+    /// even one answering a different pane that had just spoken.
+    #[test]
+    fn a_ping_after_the_selection_takes_the_plain_text() {
         let (b, c) = (pane(20), pane(30));
         let mut state = CommandState::default();
         state.select(Some(b));
-        assert_eq!(state.plain_text_target(None, Some(c)), Some(b));
+        state.note_ping(c);
+        assert_eq!(state.plain_text_target(None, Some(c)), Some(c));
+        assert_eq!(
+            state.selected(),
+            Some(b),
+            "a bare /stop still means the pane the user picked"
+        );
     }
 
     #[test]

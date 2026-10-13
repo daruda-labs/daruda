@@ -151,8 +151,9 @@ pub(super) fn spawn_poll_task(cx: &mut App) {
                 } = cx.update(|cx| cx.global_mut::<TelegramBridge>().core.route(update));
                 trace::delivery("routed", || {
                     format!(
-                        "update_id={update_id} action={} answers_callback={}",
+                        "update_id={update_id} action={} target={} answers_callback={}",
                         trace::action_name(&action),
+                        trace::opt(trace::action_target(&action).map(trace::pane)),
                         answer_callback_id.is_some()
                     )
                 });

@@ -243,7 +243,31 @@ impl<M: Eq + std::hash::Hash + Clone> RoutingCore<M> {
         }
     }
 
+    /// Record a delivered ping from `pane`, letting it take the plain-text
+    /// target unless it is the orchestrator's — see [`Self::record_bystander_sent`].
+    pub fn record_delivered(
+        &mut self,
+        message_id: M,
+        pane: PaneRef,
+        orchestrator: Option<PaneRef>,
+    ) {
+        if orchestrator == Some(pane) {
+            self.record_bystander_sent(message_id, pane);
+        } else {
+            self.record_sent(message_id, pane);
+        }
+    }
+
+    /// Record a delivered ping, making `pane` where the next plain message goes.
     pub fn record_sent(&mut self, message_id: M, pane: PaneRef) {
+        self.command_state.note_ping(pane);
+        self.record_bystander_sent(message_id, pane);
+    }
+
+    /// Record a ping that stays reply-able but does not take the plain-text
+    /// target — the orchestrator reporting on a chat it just pointed the
+    /// phone at must not pull the phone back to itself.
+    pub fn record_bystander_sent(&mut self, message_id: M, pane: PaneRef) {
         self.last_pinged = Some(pane);
         self.sent_pings.insert(message_id.clone(), pane);
         self.sent_pings_order.push_back(message_id);
