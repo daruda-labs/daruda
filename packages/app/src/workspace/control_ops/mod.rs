@@ -218,7 +218,7 @@ impl Workspace {
             .collect();
         // Name first so the listing reads alphabetically, then id so two
         // projects sharing a basename stay apart instead of interleaving
-        // their worktrees — the same key `control::exec::collect_rows` sorts
+        // their worktrees — the same key `control::exec::listing::collect_rows` sorts
         // its chat rows by, for the same reason.
         lanes.sort_by(|a, b| {
             a.1.project

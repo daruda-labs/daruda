@@ -92,7 +92,7 @@ impl ToolbarControls {
 /// Raw is always available, Preview only for Markdown, Changes only when the
 /// file carries a git status. The live mode is kept regardless of that filter
 /// so the strip always marks exactly one segment — a restored pane keeps its
-/// persisted mode but not its `live_status` (see `persistence.rs`).
+/// persisted mode but not its `live_status` (see `persistence/rebuild.rs`).
 fn mode_options(fv: &PaneFileView) -> Vec<FileViewMode> {
     [
         (FileViewMode::Raw, true),

@@ -39,7 +39,7 @@ fn two_terminals(
 #[gpui::test]
 async fn menu_focus_tracks_right_clicked_pane_without_click_side_effects(cx: &mut TestAppContext) {
     // The terminal swallows the right-click (`cx.stop_propagation()` in
-    // `view/mouse.rs`) before any ancestor handler runs, so the menu entry
+    // `view/mouse/mod.rs`) before any ancestor handler runs, so the menu entry
     // point cannot lean on the click-to-focus path — it must move the model
     // focus itself. Without this, Split from a non-focused terminal's menu
     // splits whichever pane happened to be focused.

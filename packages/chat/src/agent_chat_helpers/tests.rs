@@ -1,6 +1,8 @@
+use super::diff::diff_stat_from_hunks;
 use super::*;
 use crate::rows::collect_foldable_keys;
-use daruda_acp::{ChatItem, ModeStateView, SessionModeView, ToolCallItem};
+use daruda_acp::{ChatItem, DiffView, ModeStateView, SessionModeView, ToolCallItem};
+use daruda_ui::diff_editor::DiffColors;
 
 fn asst(text: &str) -> ChatItem {
     ChatItem::AssistantText {

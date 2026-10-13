@@ -14,9 +14,9 @@
 //!   (`project_palette_ops::on_new_group`,
 //!   `on_move_active_project_to_group`).
 //! - `toggle_group_collapse` — left-dock group accordion header
-//!   (`lanes/rows.rs`).
+//!   (`projects/rows/headers.rs`).
 //! - `rename_group` / `recolor_group` / `delete_group` — left-dock
-//!   group context menu (`lanes/group_menu.rs`).
+//!   group context menu (`projects/group_menu.rs`).
 
 use daruda_store::project::{GroupId, ProjectId, SerializedGroup};
 use gpui::Context;

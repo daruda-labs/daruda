@@ -25,7 +25,7 @@ TerminalView's GPUI rendering, input handling, and event dispatch.
 |------|----------------|
 | `input.rs` | `on_key_down`, `EntityInputHandler` (IME), Hangul jamo re-composition |
 | `keybindings.rs` | GPUI-free keystroke → PTY-byte keymap (Natural Text Editing remap) |
-| `mouse.rs` | mouse click / drag / scroll, URL hover, SGR mouse reporting |
+| `mouse/` | mouse click / drag / scroll, URL hover, SGR mouse reporting |
 | `actions.rs` | Copy / Paste / SelectAll / Zoom / Fullscreen + Search / PromptJump / CommandJump actions |
 | `jamo.rs` | Hangul jamo composition table + client-side re-composition |
 
@@ -218,7 +218,7 @@ before it belongs in the helper. Reach for `snap_to_bottom*` only on
 force-to-bottom intents (End, ScrollToBottom, PTY input), never a relative
 scroll — the helper rationale lives in the `reanchor_and_refresh` doc comment.
 
-**Sanctioned exception:** selection-drag autoscroll (`mouse.rs`) interleaves
+**Sanctioned exception:** selection-drag autoscroll (`mouse/motion.rs`) interleaves
 a selection-endpoint update between `reanchor_viewport_lock` and
 `schedule_viewport_refresh`, so it calls the two steps directly instead of
 `reanchor_and_refresh`. That is the only split, and it is split because a

@@ -15,11 +15,9 @@
 //! Workspace state; self-notifying pane entities are the sanctioned CLAUDE.md
 //! rule #10 exception also used by `TerminalView` and `ToastLayer`.
 
-use std::collections::{HashMap, HashSet, VecDeque};
+use std::collections::{HashMap, HashSet};
 
-use daruda_acp::{
-    AcpSessionHandle, ChatItem, ConnectPhase, PlanEntryView, SessionCapabilitiesView, UsageView,
-};
+use daruda_acp::{ChatItem, ConnectPhase, PlanEntryView, SessionCapabilitiesView, UsageView};
 use daruda_content::link_target::{self, LinkTarget};
 use daruda_core::process_env;
 use daruda_store::project::PaneCwd;
@@ -31,9 +29,6 @@ use gpui::{
 use super::fold::FoldState;
 use super::pane_choice::PaneChoice;
 use super::phone_turn::{FirstResponseOutcome, PhoneTurn};
-use super::render::{
-    DiffEditors, DiffStats, MermaidImages, OutputEditors, ResourceImages, ToolImages,
-};
 use super::rows::tail::TailWindow;
 use super::rows::{FilterMatchIndex, LiveSubagentUnits, RenderRow};
 use super::session_config::SessionConfig;
@@ -239,167 +234,6 @@ impl Replay {
     }
 }
 
-/// The pane's busy span, as of the last `reconcile_activity` tick. `Busy`
-/// carries the wall-clock start instant so the enum can't represent "busy with
-/// no start time" or "idle with one" — the level and the anchor move together
-/// on every edge, which is the only way they are ever written.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
-pub(crate) enum ActivitySpan {
-    #[default]
-    Idle,
-    Busy {
-        started_at: std::time::Instant,
-    },
-}
-
-impl ActivitySpan {
-    /// The edge-detection memory: whether the pane was busy at the last tick.
-    pub(crate) fn is_busy(self) -> bool {
-        matches!(self, Self::Busy { .. })
-    }
-
-    /// How long the current span has been running, or `None` when idle.
-    fn elapsed(self) -> Option<std::time::Duration> {
-        match self {
-            Self::Idle => None,
-            Self::Busy { started_at } => Some(started_at.elapsed()),
-        }
-    }
-}
-
-/// What one settled turn cost, keyed by the run it belongs to.
-///
-/// The three values come from three places and none of them survives on its
-/// own: the duration lives only while the span is `Busy`, the wall clock has no
-/// source at all (the pane measures with a monotonic clock, which cannot name a
-/// time of day), and the token count arrives on the turn's reply. They are
-/// recorded together at the busy→idle settle edge — the one point that answers
-/// "when did this finish" for everything else in the pane.
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub(super) struct TurnRecord {
-    pub(super) worked_for: std::time::Duration,
-    pub(super) finished_at: chrono::DateTime<chrono::Local>,
-    /// `None` for an agent that reports no usage.
-    pub(super) output_tokens: Option<u64>,
-}
-
-/// Terminal outcome of an activity span, captured when the turn/session ends
-/// but fired (notification + backing-task done) only when the pane actually
-/// settles busy→idle (which may trail `end_turn` while subagents finish).
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub enum TurnOutcome {
-    Completed,
-    Errored,
-    Stopped,
-}
-
-/// The pane's derived activity, the single source consumed by the working
-/// indicator, the lane badge, and the status-pulse gate.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum ActivityState {
-    Idle,
-    Working,
-    AwaitingPermission,
-}
-
-/// How a tool-group summary names each category: `Compact` is the icon and
-/// its count, `Labeled` adds the category's words ("3 commands").
-///
-/// No `Default`, for the reason [`ChatContentWidth`] has none: the starting
-/// value is `agent.tool_summary_labels`'s answer.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum ToolSummaryStyle {
-    Compact,
-    Labeled,
-}
-
-impl ToolSummaryStyle {
-    pub(crate) fn from_config(tool_summary_labels: bool) -> Self {
-        if tool_summary_labels {
-            Self::Labeled
-        } else {
-            Self::Compact
-        }
-    }
-
-    /// One segment's text: the bare count, or `labeled`'s words for it.
-    pub(crate) fn segment(self, count: usize, labeled: impl FnOnce(usize) -> String) -> String {
-        match self {
-            Self::Compact => count.to_string(),
-            Self::Labeled => labeled(count),
-        }
-    }
-}
-
-/// AgentChat conversation content-column width mode. `Reading` constrains each
-/// row to the configured reading width; `Full` spends the whole pane.
-///
-/// Deliberately no `Default`: which one a pane starts on is `agent
-/// .use_reading_width`'s answer, and a type-level default would be a second
-/// place to state it.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum ChatContentWidth {
-    Full,
-    Reading,
-}
-
-impl ChatContentWidth {
-    pub(crate) fn from_config(use_reading_width: bool) -> Self {
-        if use_reading_width {
-            Self::Reading
-        } else {
-            Self::Full
-        }
-    }
-
-    pub(crate) fn is_reading(self) -> bool {
-        matches!(self, Self::Reading)
-    }
-
-    pub(super) fn toggle(self) -> Self {
-        match self {
-            Self::Full => Self::Reading,
-            Self::Reading => Self::Full,
-        }
-    }
-}
-
-/// Stable identity of a queued prompt, minted per pane. Lets the strip target
-/// an entry for removal independent of its position, which shifts as earlier
-/// entries drain.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub struct PromptId(u64);
-
-impl std::fmt::Display for PromptId {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", self.0)
-    }
-}
-
-/// Where a prompt came from — the bottom-dock composer, or a phone-relayed
-/// Telegram reply. Only the latter arms the Telegram first-response watch on
-/// dispatch; an in-app prompt never does.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum PromptOrigin {
-    InApp,
-    Telegram,
-}
-
-/// Whether a send put the prompt on the wire immediately or only queued it
-/// behind an in-flight turn — the Telegram relay needs this to decide whether
-/// a "queued" notice is owed.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum PromptDispatch {
-    ReadOnly,
-    SentNow,
-    Queued,
-    /// The pane is already holding `QUEUE_DEPTH_MAX` prompts, so this one was
-    /// not taken. A named outcome rather than a silent drop: every producer
-    /// (an agent's tool call, a phone `/say`, a person typing) has something
-    /// to tell whoever sent it.
-    QueueFull,
-}
-
 /// A Telegram-origin turn's first-response watch side effect, returned by
 /// [`AgentChatView::apply_event`] so the Workspace event pump can relay exactly
 /// one phone-visible acknowledgement.
@@ -408,80 +242,6 @@ pub enum PhoneAckEffect {
     None,
     Relay(FirstResponseOutcome),
     Fallback,
-}
-
-/// Which Telegram watch action `apply_event`'s tail owes, decided once per
-/// event arm so the three lifecycle methods (clear/check/finish) each have
-/// exactly one call site instead of being duplicated at every arm.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
-enum PhoneTurnAction {
-    #[default]
-    None,
-    /// A Stop's cancel-ack landed — the turn is over and no relay is owed.
-    Clear,
-    /// A permission card interrupted the turn. The card itself was relayed
-    /// as the phone's first sign of life (before this fold), so the wait is
-    /// answered — but the turn is still the phone's, and its completion is
-    /// still owed.
-    Answer,
-    /// New conversation content arrived — check whether it resolves the
-    /// armed watch.
-    CheckUpdate,
-    /// The turn or session settled — resolve the watch to its terminal
-    /// effect.
-    Finish,
-}
-
-/// A prompt submitted while a turn was in flight, held in the queue until it
-/// can be dispatched. Not echoed into the transcript — lives only here (and
-/// the queued-prompt strip) until drained and echoed as a `UserText`.
-#[derive(Debug, Clone)]
-pub struct QueuedPrompt {
-    pub(crate) id: PromptId,
-    pub(crate) text: String,
-    pub(crate) attachments: Vec<daruda_acp::PromptAttachment>,
-    pub(crate) origin: PromptOrigin,
-}
-
-impl QueuedPrompt {
-    pub fn id(&self) -> PromptId {
-        self.id
-    }
-
-    pub fn text(&self) -> &str {
-        &self.text
-    }
-
-    pub fn attachments(&self) -> &[daruda_acp::PromptAttachment] {
-        &self.attachments
-    }
-}
-
-/// What the Escape shortcut resolved to for a focused Agent chat pane. Returned
-/// so the `Workspace` shim fires the settle-edge completion only when a turn
-/// was actually cancelled.
-pub enum EscapeOutcome {
-    /// Cancelled an in-flight turn (or trailing background-subagent work) — the
-    /// caller must run `reconcile_activity` + `fire_activity_completion`.
-    Cancelled,
-    /// Discarded a parked queue (the "Esc twice clears the queue" gesture); no
-    /// turn was running, so there is no completion to fire.
-    ClearedQueue,
-    /// Nothing to act on — the caller reports not-handled so Escape propagates.
-    Ignored,
-}
-
-/// What an empty-composer submit resolved to for a focused Agent chat pane.
-/// The `Workspace` shim needs the distinction only for tests today; the strip
-/// reads `resume_armed()` instead. Shaped after [`EscapeOutcome`], the gesture
-/// on the other side of the same parked queue.
-pub enum EmptySubmitOutcome {
-    /// First Enter — the strip now asks for a second one before resuming.
-    Armed,
-    /// Second Enter — the parked queue went back to the front of the live one.
-    Resumed,
-    /// Nothing parked, so the gesture has nothing to act on.
-    Ignored,
 }
 
 /// Prompt-send sequencing: the buffered/parked queues plus the in-flight-turn
@@ -516,93 +276,6 @@ pub struct PromptQueue {
     /// activity signal — external code must read `is_busy` / `activity_state`
     /// / `activity_elapsed` instead. Tests use the `#[cfg(test)]` hooks.
     turn: Turn,
-}
-
-/// Async-built rendering artifacts derived from the conversation: read-only
-/// diff editors, read-only verbatim tool-output editors, rasterized mermaid
-/// diagrams, and decoded tool-output images. Each cache is filled by its own
-/// reconciler in `reconcile.rs`; `render/` only ever reads them by reference.
-/// One field instead of nine, with one [`Self::clear`] wiping all of them on a
-/// session reset.
-#[derive(Default)]
-pub(crate) struct AssetCache {
-    /// Read-only diff editor entities for tool-call file edits, keyed by
-    /// `"{tool_call_id}#{diff_index}"`. Built by `reconcile_diff_editors`;
-    /// `render` only embeds them, never creates one.
-    pub(crate) diff_editors: DiffEditors,
-    /// Fingerprint each `diff_editors` entry was built from. Lets
-    /// `reconcile_diff_editors` detect a replaced diff (streaming growth from
-    /// a partial snapshot) and rebuild instead of leaving it stale.
-    pub(super) diff_editor_sources: HashMap<String, u64>,
-    /// Added/removed line counts per tool-call diff, same keys as
-    /// `diff_editors`. Runtime cache; never serialized.
-    pub(super) diff_stats: DiffStats,
-    /// Read-only editor entities for verbatim tool-output blocks, keyed by
-    /// `"{tool_call_id}#{block_index}"`. Built by `reconcile_output_editors`;
-    /// `render` only embeds them, never creates one.
-    pub(crate) output_editors: OutputEditors,
-    /// Fingerprint each `output_editors` entry was built from, so a streamed
-    /// output that grew is rebuilt rather than left frozen on a partial
-    /// snapshot.
-    pub(super) output_editor_sources: HashMap<String, u64>,
-    /// Rendered mermaid diagrams by fence-source hash, filled async by
-    /// `reconcile_mermaid`. Shared `Arc<Mutex<…>>` so gpui's texture cache
-    /// hits instead of re-uploading the bitmap every frame.
-    pub(super) mermaid_images: MermaidImages,
-    /// Source hashes with a rasterization currently spawned, so
-    /// `reconcile_mermaid` doesn't re-spawn while one is still rendering.
-    pub(super) mermaid_inflight: HashSet<u64>,
-    /// Decoded tool-output images by content hash. `Some` = decoded; `None` =
-    /// cached decode failure (renders a label once, never re-spawned). Filled
-    /// async by `reconcile_tool_images`.
-    pub(super) tool_images: ToolImages,
-    /// Content hashes with a decode currently spawned, so
-    /// `reconcile_tool_images` doesn't re-spawn one still decoding.
-    pub(super) tool_image_inflight: HashSet<u64>,
-    /// Decoded local image resources by `"{tool_call_id}#{block_index}"`.
-    pub(super) resource_images: ResourceImages,
-    /// Fingerprint of the resource URI + MIME currently represented by each
-    /// cache entry, so a replaced streamed block invalidates the old bitmap.
-    pub(super) resource_image_sources: HashMap<String, u64>,
-    /// Least-recently reconciled to most-recently reconciled resource keys.
-    /// Keeps the decoded cache bounded even when a transcript contains many
-    /// expanded image-producing tools.
-    pub(super) resource_image_order: VecDeque<String>,
-    /// Fingerprint currently being read for each resource block. Storing the
-    /// value as well as the key prevents a late old task overwriting a newer
-    /// source at the same block index.
-    pub(super) resource_image_inflight: HashMap<String, u64>,
-}
-
-impl AssetCache {
-    /// Wipe every cache in place — same `Arc`s, contents cleared — so a live
-    /// render-side clone of the shared image caches (cloned fresh per render;
-    /// see `render/blocks.rs`) stays attached rather than orphaned.
-    fn clear(&mut self) {
-        self.diff_editors.clear();
-        self.diff_editor_sources.clear();
-        self.diff_stats.clear();
-        self.output_editors.clear();
-        self.output_editor_sources.clear();
-        self.clear_mermaid();
-        self.tool_image_inflight.clear();
-        if let Ok(mut m) = self.tool_images.lock() {
-            m.clear();
-        }
-        self.resource_image_sources.clear();
-        self.resource_image_order.clear();
-        self.resource_image_inflight.clear();
-        if let Ok(mut m) = self.resource_images.lock() {
-            m.clear();
-        }
-    }
-
-    pub(crate) fn clear_mermaid(&mut self) {
-        self.mermaid_inflight.clear();
-        if let Ok(mut m) = self.mermaid_images.lock() {
-            m.clear();
-        }
-    }
 }
 
 /// The pane's activity bookkeeping: whether it's busy, since when, and what
@@ -933,7 +606,23 @@ pub struct AgentChatView {
 }
 
 pub use event::AgentChatEvent;
+mod activity_types;
+pub(crate) use activity_types::{ActivitySpan, ToolSummaryStyle, TurnRecord};
+pub use activity_types::{ActivityState, ChatContentWidth, TurnOutcome};
+mod asset_cache;
+pub(crate) use asset_cache::AssetCache;
+mod construct;
+mod display_ops;
+mod fold_ops;
+mod prompt_types;
+use prompt_types::PhoneTurnAction;
+pub use prompt_types::{
+    EmptySubmitOutcome, EscapeOutcome, PromptDispatch, PromptId, PromptOrigin, QueuedPrompt,
+};
+mod session_access;
 pub use pane_choices::ChatPaneChoices;
+pub use session_access::LoadIntent;
+pub(crate) use session_access::Session;
 mod activity_ops;
 mod agent_default_ops;
 pub use activity_ops::RunSummary;
@@ -947,6 +636,8 @@ pub(super) mod list_sync;
 mod pane_choices;
 mod queue_ops;
 pub use attachments::display_prompt;
+#[cfg(feature = "devtools")]
+mod seed_ops;
 mod session_ops;
 #[cfg(feature = "screenshot")]
 mod shot_ops;
@@ -973,263 +664,6 @@ impl AgentChatView {
             Some(PaneCwd::Local(cwd)) => link_target::classify_resource(uri, mime, Some(cwd)),
             None => link_target::classify_resource(uri, mime, None),
         }
-    }
-}
-
-impl AgentChatView {
-    /// Build a fresh view. The session is *not* started here — the Workspace
-    /// connects it lazily on first focus (`maybe_connect_agent_chat`), so cold
-    /// restore doesn't spin up an agent process per pane. `status` is decided
-    /// by the caller (Idle when a cwd is present, Error otherwise).
-    #[allow(clippy::too_many_arguments)] // Restore/create seed values — bundling them into a struct only wraps callers.
-    pub fn new(
-        pane_id: PaneId,
-        window_handle: AnyWindowHandle,
-        cwd: Option<PaneCwd>,
-        status: AgentSessionStatus,
-        session_id: Option<String>,
-        agent: AgentIdentity,
-        title: Option<String>,
-        defaults: TranscriptDefaults,
-        syntax_theme: String,
-        agent_default_writer: AgentDefaultWriter,
-        cx: &mut Context<Self>,
-    ) -> Self {
-        // Re-rasterize mermaid diagrams when the UI theme changes. The chat
-        // surface/foreground come from the terminal mirror, but the host
-        // profile still uses UI semantic colors for notes/status accents.
-        let theme_observer = cx.observe_global::<daruda_ui::theme::DarudaTheme>(|this, cx| {
-            this.assets.clear_mermaid();
-            let dark = Self::host_is_dark(cx);
-            this.reconcile_mermaid(dark, cx);
-            // A theme swap invalidates the whole conversation's cached artifacts,
-            // not one call's — the only correct scope here is the full pass.
-            this.reconcile_tool_images(&super::reconcile::ReconcileScope::All, cx);
-            // Diff embeds bake their palette in and cannot re-theme themselves.
-            this.reconcile_embeds_after_theme_change(cx);
-        });
-        Self {
-            pane_id,
-            session: Session::Interactive(None),
-            window_handle,
-            focus_handle: cx.focus_handle(),
-            cwd,
-            status,
-            session_id,
-            // Both picks are patched in by session restore right after
-            // construction — see `Workspace::rebuild_layout`.
-            picked_mode_id: None,
-            picked_model_id: None,
-            agent_id: agent.id,
-            agent_program: None,
-            agent_vocabulary_source: None,
-            agent_name: agent.name,
-            agent_icon: agent.icon,
-            // A restored pane connects lazily; the resume decision (and the
-            // replay gate that coalesces it) is made at connect time by
-            // `maybe_connect_agent_chat`, not here.
-            replay: Replay::Live,
-            items: Vec::new(),
-            queue: PromptQueue::default(),
-            briefing: None,
-            _event_pump: None,
-            pending_permissions: HashSet::new(),
-            permissions_told_to_phone: HashSet::new(),
-            phone_turn_state: None,
-            activity: ActivityTracker::default(),
-            assets: AssetCache::default(),
-            fold: FoldState::with_mode(defaults.fold_mode),
-            fold_editor: FoldEditorState::default(),
-            filter_editor: FilterEditorState::default(),
-            activity_options_tab: ActivityOptionsTab::Fold,
-            #[cfg(feature = "screenshot")]
-            screenshot_filter_open: false,
-            #[cfg(feature = "screenshot")]
-            screenshot_fold_open: false,
-            #[cfg(feature = "screenshot")]
-            screenshot_options_open: false,
-            content_width: defaults.content_width,
-            content_width_chosen: false,
-            tail_steps: PaneChoice::Seeded(defaults.tail.steps),
-            tail_calls: PaneChoice::Seeded(defaults.tail.calls),
-            display_filter: PaneChoice::Seeded(defaults.filter),
-            defaults,
-            list_state: {
-                // Starts empty; `sync_list_after` splices items in as events
-                // arrive. `Top` alignment + `Tail` follow = scroll history up
-                // freely, auto-stick to the bottom while streaming.
-                let state = ListState::new(
-                    0,
-                    ListAlignment::Top,
-                    px(daruda_ui::theme::AGENT_CHAT_LIST_OVERDRAW),
-                );
-                state.set_follow_mode(FollowMode::Tail);
-                state
-            },
-            rows: Vec::new(),
-            rows_activity: ActivityState::Idle,
-            live_units: LiveSubagentUnits::default(),
-            filter_matches: FilterMatchIndex::default(),
-            command_analysis: CommandAnalysisIndex::default(),
-            turn_boundary: Default::default(),
-            syntax_theme,
-            preferred_editor: String::new(),
-            agent_default_writer,
-            activity_title: None,
-            session_config: SessionConfig::default(),
-            session_capabilities: SessionCapabilitiesView::default(),
-            draft_attachments: Vec::new(),
-            session_usage: None,
-            plan: Vec::new(),
-            // Seed the persisted title so a restored dormant pane shows its
-            // label before the session loads; the agent replaces it on the
-            // first `SessionInfoChanged` after resume. An empty string is
-            // treated as absent, matching the tab-label seed in
-            // `create_agent_chat_pane` so the header and tab agree.
-            session_title: title.filter(|t| !t.is_empty()),
-            session_updated_at: None,
-            plan_collapsed: false,
-            warned_dropped_terminal_output: false,
-            plan_scroll: ScrollHandle::new(),
-            list_bounds: None,
-            pane_width: None,
-            autoscroll_task: None,
-            selection_drag_active: false,
-            dim_amount: 0.0,
-            _theme_observer: theme_observer,
-            #[cfg(any(test, feature = "test-support"))]
-            render_count: std::cell::Cell::new(0),
-        }
-    }
-
-    /// The resolved activity-bar title, or `None` when the session has neither
-    /// an agent-supplied title nor a user prompt yet (the caller falls back to
-    /// the pane's agent name).
-    pub fn activity_title(&self) -> Option<&str> {
-        self.activity_title.as_deref()
-    }
-
-    /// Seed the agent-supplied title the way a `SessionInfoChanged` would,
-    /// including the `rebuild_rows` that derives `activity_title` from it —
-    /// writing the field alone leaves the derived cache stale.
-    #[cfg(any(test, feature = "test-support"))]
-    pub fn set_session_title_for_test(&mut self, title: &str) {
-        self.session_title = Some(title.to_string());
-        self.rebuild_rows();
-    }
-
-    /// The Workspace-resolved syntax theme id this pane's diff embeds are built
-    /// against. Always set — see the field's doc for why it is a construction
-    /// seed rather than something the first event fills in.
-    pub fn syntax_theme(&self) -> &str {
-        &self.syntax_theme
-    }
-
-    /// Record the Workspace-resolved syntax theme id. Single update site for
-    /// `syntax_theme`; `apply_event` writes the value the Workspace passes it
-    /// each event, and the config-reload path writes the new palette name
-    /// directly — an idle pane gets no events, so waiting for one would leave the
-    /// diff embeds fingerprinted against a palette the user already left.
-    pub fn set_preferred_editor(&mut self, editor: &str) {
-        if self.preferred_editor != editor {
-            self.preferred_editor = editor.to_owned();
-        }
-    }
-
-    pub fn preferred_editor(&self) -> &str {
-        &self.preferred_editor
-    }
-
-    pub fn set_syntax_theme(&mut self, theme: &str) {
-        if self.syntax_theme != theme {
-            self.syntax_theme = theme.to_owned();
-        }
-    }
-
-    /// Set the inactive-pane dim (`0.0` = focused, `> 0.0` = unfocused split
-    /// leaf). No `cx.notify` here — the caller notifies only the views whose
-    /// amount changed, mirroring `TerminalView::set_dim_amount`.
-    pub fn set_dim_amount(&mut self, amount: f32) {
-        self.dim_amount = amount.clamp(0.0, 1.0);
-    }
-
-    /// Enter the `Connecting` status and repaint. Self-notifying so the event
-    /// pump can't advance the connection state without dirtying the pane.
-    pub fn set_connecting(&mut self, cx: &mut Context<Self>) {
-        self.status = AgentSessionStatus::Connecting;
-        cx.notify();
-    }
-
-    /// Enter `Connecting` for a connect that is about to be spawned, arming the
-    /// replay gate from that connect's own resume target: `Some(id)` asks for
-    /// `session/load` of `id`, `None` for a fresh `session/new`.
-    ///
-    /// Taking the resume target as the argument is the point — the gate and the
-    /// request cannot disagree, because there is no way to open one without
-    /// naming the other. Distinct from [`Self::set_connecting`], which only
-    /// downgrades the status banner and must leave a live replay alone.
-    pub fn begin_connect(&mut self, resume: Option<String>, cx: &mut Context<Self>) {
-        self.replay = Replay::for_connect(resume);
-        self.status = AgentSessionStatus::Connecting;
-        cx.notify();
-    }
-
-    /// True while a `session/load` replay is still streaming — rows are being
-    /// accumulated rather than projected. The gate is module-private, so this is
-    /// how a test outside `view/` observes it (same shape as `turn_is_idle`).
-    #[cfg(any(test, feature = "test-support"))]
-    pub fn is_replaying(&self) -> bool {
-        self.replay.is_loading()
-    }
-
-    /// Enter the `Error` status carrying `message` and repaint. Self-notifying
-    /// so the event pump can't surface a failure without dirtying the pane.
-    ///
-    /// Callers that hold a classified failure pass its
-    /// [`remedy`](daruda_acp::AcpFailure::remedy); a locally-raised error with
-    /// nothing to offer passes
-    /// [`Remedy::NoneAvailable`](daruda_acp::Remedy::NoneAvailable).
-    pub fn set_error(
-        &mut self,
-        message: String,
-        remedy: daruda_acp::Remedy,
-        cx: &mut Context<Self>,
-    ) {
-        self.settle_mirror_intent();
-        self.status = AgentSessionStatus::Error { message, remedy };
-        cx.notify();
-    }
-
-    /// Enter the `PreparingRuntime` status at `phase` and repaint.
-    /// Self-notifying so the runtime-progress drain can't advance the banner
-    /// without dirtying the pane.
-    pub fn set_preparing(&mut self, phase: RuntimePrepPhase, cx: &mut Context<Self>) {
-        self.status = AgentSessionStatus::PreparingRuntime(phase);
-        cx.notify();
-    }
-
-    /// Enter the `Handshaking` status at `phase` and repaint. Called from
-    /// `apply_event` only while still `Connecting`/`Handshaking` — a
-    /// `ConnectProgress` arriving after `Connected`/`Error` is stale and must
-    /// not resurrect the connecting banner.
-    pub(super) fn set_handshaking(&mut self, phase: ConnectPhase, cx: &mut Context<Self>) {
-        self.status = AgentSessionStatus::Handshaking(phase);
-        cx.notify();
-    }
-
-    /// Blend `c` toward gray by the current dim amount, alpha preserved. The
-    /// render wraps every color it applies with this so an unfocused pane
-    /// grays like an inactive terminal while keeping window translucency.
-    pub(super) fn dim(&self, c: gpui::Hsla) -> gpui::Hsla {
-        daruda_ui::theme::dim_toward_gray(c, self.dim_amount)
-    }
-
-    /// Whether the agent-chat paint surface is currently dark. This follows the
-    /// terminal-mirrored chat background, not the surrounding UI theme, so a
-    /// light UI shell with a dark terminal preset still gets dark-surface
-    /// Mermaid colors and cache keys.
-    pub(super) fn host_is_dark(cx: &App) -> bool {
-        !daruda_ui::theme::agent_chat_syntax_is_light(cx)
     }
 }
 
@@ -1303,136 +737,3 @@ mod turn_tests {
 
 #[cfg(test)]
 pub(super) mod tests;
-
-/// What the pane holds of its ACP session and what it may do with it. The
-/// handle is `None` until connect resolves or after a terminal error; dropping
-/// it closes the command channel. A `Mirror` shows a CLI task run read-only:
-/// its handle carries the `session/load` replay and nothing the user does may
-/// reach it, which [`AgentChatView::live_handle`] enforces by construction.
-pub(crate) enum Session {
-    Interactive(Option<AcpSessionHandle>),
-    Mirror {
-        run: daruda_store::tasks::ExecutionRef,
-        intent: LoadIntent,
-        handle: Option<AcpSessionHandle>,
-    },
-}
-
-/// Why a mirror is loading its session: to show the history again, or to
-/// take the conversation over once the CLI is confirmed gone.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub enum LoadIntent {
-    #[default]
-    Snapshot,
-    Continue,
-}
-
-impl AgentChatView {
-    /// The persisted form of the pane's session — interactive, or a mirror.
-    pub fn access(&self) -> daruda_store::tasks::AgentChatAccess {
-        match &self.session {
-            Session::Interactive(_) => daruda_store::tasks::AgentChatAccess::Interactive,
-            Session::Mirror { run, .. } => {
-                daruda_store::tasks::AgentChatAccess::CliSnapshot(run.clone())
-            }
-        }
-    }
-
-    pub fn is_read_only(&self) -> bool {
-        matches!(self.session, Session::Mirror { .. })
-    }
-
-    /// The run a mirror shows; `None` for an interactive pane.
-    pub fn mirrored_run(&self) -> Option<&daruda_store::tasks::ExecutionRef> {
-        match &self.session {
-            Session::Interactive(_) => None,
-            Session::Mirror { run, .. } => Some(run),
-        }
-    }
-
-    /// The handle behind the pane, whatever its access — only for the replay
-    /// bookkeeping a mirror still owes the adapter (cancelling permissions).
-    /// User input goes through `live_handle`.
-    pub fn any_handle(&self) -> Option<&AcpSessionHandle> {
-        match &self.session {
-            Session::Interactive(handle) | Session::Mirror { handle, .. } => handle.as_ref(),
-        }
-    }
-
-    /// The handle user input may reach: an interactive pane's, never a
-    /// mirror's. Every send in this module goes through here.
-    pub(super) fn live_handle(&self) -> Option<&AcpSessionHandle> {
-        match &self.session {
-            Session::Interactive(handle) => handle.as_ref(),
-            Session::Mirror { .. } => None,
-        }
-    }
-
-    /// Store a resolved connection; the access mode is untouched.
-    pub fn attach_handle(&mut self, next: AcpSessionHandle) {
-        match &mut self.session {
-            Session::Interactive(handle) | Session::Mirror { handle, .. } => *handle = Some(next),
-        }
-    }
-
-    /// Let go of the connection; the access mode is untouched.
-    pub fn detach_handle(&mut self) {
-        match &mut self.session {
-            Session::Interactive(handle) | Session::Mirror { handle, .. } => *handle = None,
-        }
-    }
-
-    /// Restore the persisted access mode. A mirror keeps whatever handle is
-    /// held, so this is safe before and after connect — but only on a pane
-    /// with nothing in flight: the read-only guarantee rests on a mirror
-    /// never holding a live turn, a pending permission or a queued prompt.
-    pub fn set_access(&mut self, access: daruda_store::tasks::AgentChatAccess) {
-        debug_assert!(
-            !access.is_read_only()
-                || (matches!(self.queue.turn, Turn::Idle)
-                    && self.pending_permissions.is_empty()
-                    && self.queued_prompt_count() == 0),
-            "a mirror is set on a quiescent pane"
-        );
-        let handle = self.detach_handle_value();
-        self.session = match access {
-            daruda_store::tasks::AgentChatAccess::Interactive => Session::Interactive(handle),
-            daruda_store::tasks::AgentChatAccess::CliSnapshot(run) => Session::Mirror {
-                run,
-                intent: LoadIntent::Snapshot,
-                handle,
-            },
-        };
-    }
-
-    /// A continue that completed: the same session, now the user's.
-    pub fn make_interactive(&mut self) {
-        let handle = self.detach_handle_value();
-        self.session = Session::Interactive(handle);
-    }
-
-    pub fn load_intent(&self) -> Option<LoadIntent> {
-        match &self.session {
-            Session::Interactive(_) => None,
-            Session::Mirror { intent, .. } => Some(*intent),
-        }
-    }
-
-    pub fn set_load_intent(&mut self, next: LoadIntent) {
-        if let Session::Mirror { intent, .. } = &mut self.session {
-            *intent = next;
-        }
-    }
-
-    /// A load has settled, one way or the other; the next one starts as a
-    /// plain snapshot.
-    pub fn settle_mirror_intent(&mut self) {
-        self.set_load_intent(LoadIntent::Snapshot);
-    }
-
-    fn detach_handle_value(&mut self) -> Option<AcpSessionHandle> {
-        match &mut self.session {
-            Session::Interactive(handle) | Session::Mirror { handle, .. } => handle.take(),
-        }
-    }
-}

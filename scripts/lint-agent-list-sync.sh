@@ -40,7 +40,8 @@ ADAPTER="$PANE/view/list_sync.rs"
 
 # Files allowed to mutate `items` structurally, with what each is.
 STRUCTURAL_ALLOW=(
-    "$PANE/view/session_ops.rs" # settle_stop_marker (remove+push), teardown (clear), seed
+    "$PANE/view/session_ops.rs" # settle_stop_marker (remove+push), teardown (clear)
+    "$PANE/view/seed_ops.rs" # seed
 )
 
 status=0

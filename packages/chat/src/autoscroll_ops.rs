@@ -8,7 +8,7 @@
 //! block, so scrolling is clamped at the selected block's top/bottom edges.
 //!
 //! Mirrors the terminal's `start_autoscroll` / `autoscroll_poll_with_pos`
-//! (`daruda_terminal/src/view/mouse.rs`): a 50 ms `background_executor().timer`
+//! (`daruda_terminal/src/view/mouse/motion.rs`): a 50 ms `background_executor().timer`
 //! loop that reads `window.mouse_position()` (works even when the cursor is
 //! outside the window frame *and* held stationary — why polling beats
 //! mouse-move events), scrolls, then re-extends the selection endpoint.
@@ -144,7 +144,7 @@ impl AgentChatView {
     }
 
     /// List-container mouse-move handler. Mirrors the terminal's `on_mouse_move`
-    /// re-entry check (`mouse.rs`): if a drag is still marked active but the left
+    /// re-entry check (`mouse/motion.rs`): if a drag is still marked active but the left
     /// button is no longer held, the button was released off-window where the
     /// container's `on_mouse_up` never fires (`hitbox.is_hovered` is false out of
     /// bounds). Treat re-entry without the button as an implicit mouse-up and end

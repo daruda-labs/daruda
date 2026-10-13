@@ -1,7 +1,7 @@
 //! How a snapshot field takes part in the notify-on-change diff.
 //!
 //! A dock snapshot is compared against the previous frame's to decide whether
-//! to dirty the cached dock view (see `render/mod.rs` and CLAUDE.md pitfall
+//! to dirty the cached dock view (see `render/docks.rs` and CLAUDE.md pitfall
 //! #10). Most fields are content and must be compared; a few must not be, for
 //! reasons that differ. Spelling that out as a wrapper type at the field, not
 //! as a line in a hand-written comparison, is what makes the default safe:
@@ -48,7 +48,7 @@ impl<T> Deref for Handle<T> {
 /// frame and repaint forever.
 ///
 /// This is sound only because staging assigns the snapshot unconditionally and
-/// lets the diff gate the repaint alone (`render/mod.rs`). Gate the assignment
+/// lets the diff gate the repaint alone (`render/docks.rs`). Gate the assignment
 /// too and a `PerFrame` field freezes at whatever frame last changed something
 /// else — drawn, but stale.
 ///

@@ -387,7 +387,7 @@ impl Workspace {
 
     /// Recompute and apply the bottom dock height to match the current
     /// line count of the shared bottom input. Called from the
-    /// `InputEvent::Change` subscription in `workspace/mod.rs`.
+    /// `InputEvent::Change` subscription in `bottom_dock/input_dock.rs`.
     ///
     /// Height formula: `DOCK_BOTTOM_ROW_PRESET_1_H` covers the 1-row
     /// base (tab bar + padding + one text line); each additional line

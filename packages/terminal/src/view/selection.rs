@@ -203,7 +203,7 @@ impl ScreenPos {
         }
         // Live viewport row — fall back to byte-offset storage.
         // SILENT-OK: anchor_at's only production caller
-        // (`mouse_position_to_screen_pos` in view/mouse.rs) has already
+        // (`mouse_position_to_screen_pos` in view/mouse/hit_test.rs) has already
         // located `abs_screen_row` inside the unified frame before
         // delegating, so `dump_screen_row` only fails for rows the
         // caller manufactured out of bounds — in which case byte=0 is a

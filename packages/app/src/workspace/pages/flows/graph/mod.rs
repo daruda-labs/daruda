@@ -17,6 +17,7 @@ mod frame;
 pub(in crate::workspace) mod model;
 mod node_ids;
 mod overlay;
+mod pin_ops;
 pub(super) mod pins;
 mod policy;
 mod port_drag;
@@ -25,6 +26,7 @@ mod renderer;
 mod run_states;
 mod selection;
 mod space_pan;
+mod test_hooks;
 
 pub(in crate::workspace) use pins::PinSet;
 /// The toolbar's test selectors keep their old path: a test names this module,
@@ -40,8 +42,6 @@ pub(in crate::workspace) use render::toolbar::{
 pub(in crate::workspace) use renderer::CARDS_DRAWN;
 pub(in crate::workspace) use selection::Selection;
 
-#[cfg(test)]
-use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 use gpui::{App, AppContext, Context, Entity, EventEmitter, FocusHandle, Focusable, Window};
@@ -50,7 +50,7 @@ use daruda_flow::NodeId;
 
 use self::build::{build_graph_state, read_flow};
 use self::commands::StampCards;
-use self::model::{FlowGraphModel, GraphNodeKind, NodeRunState};
+use self::model::{FlowGraphModel, NodeRunState};
 use self::node_ids::NodeIds;
 use self::renderer::card_for;
 
@@ -568,83 +568,6 @@ impl FlowGraphView {
 }
 
 impl FlowGraphView {
-    /// What one press of the pin button would do, given what is selected.
-    pub(in crate::workspace) fn pin_action(&self, cx: &App) -> pins::PinAction {
-        self.pins.action_for(self.reusable_selection(cx))
-    }
-
-    /// Every pinned node, for the run about to be submitted.
-    pub(in crate::workspace) fn pinned_nodes(&self) -> Vec<NodeId> {
-        self.pins.to_vec()
-    }
-
-    /// Pin the selection, or unpin it, and write the cards again so the graph
-    /// says which. A run's colours are not put back here — the caller does
-    /// that, exactly as it does after a reload, because the run's state lives
-    /// on the workspace and not on this view.
-    /// Forget pins the run could not honour.
-    ///
-    /// A pin whose source run has been swept is gone for good, so leaving it
-    /// set drew the card as reused on every later press while the node was
-    /// quietly paid for again. The one warning that said so is long dismissed
-    /// by then; the card is the only thing still on screen.
-    pub(in crate::workspace) fn drop_pins(&mut self, nodes: &[NodeId], cx: &mut Context<Self>) {
-        let before = self.pins.clone();
-        for node in nodes {
-            self.pins.remove(node);
-        }
-        if self.pins == before {
-            return;
-        }
-        // Said on the card for the same reason an edit's drop is: the toast is
-        // gone in a moment and the node is on screen the whole time.
-        self.unpinned = nodes
-            .iter()
-            .filter(|node| before.contains(node))
-            .map(|node| (node.clone(), pins::PinDropped::SourceGone))
-            .collect();
-        {}
-        let FlowGraphState::Graph { model, .. } = &self.state else {
-            return;
-        };
-        let model = model.clone();
-        self.restamp(&model, cx);
-        cx.notify();
-    }
-
-    pub(in crate::workspace) fn toggle_pins(&mut self, cx: &mut Context<Self>) {
-        let nodes = self.reusable_selection(cx);
-        if nodes.is_empty() {
-            return;
-        }
-        self.pins.toggle(&nodes);
-        let FlowGraphState::Graph { model, .. } = &self.state else {
-            return;
-        };
-        let model = model.clone();
-        self.restamp(&model, cx);
-        cx.notify();
-    }
-
-    /// The selected nodes that have an output to reuse — the agent ones. A gate
-    /// writes nothing, so pinning one would name a file that does not exist and
-    /// the engine would refuse the whole run over it.
-    fn reusable_selection(&self, cx: &App) -> Vec<NodeId> {
-        let FlowGraphState::Graph { model, .. } = &self.state else {
-            return Vec::new();
-        };
-        let selected = self.selected_nodes(cx);
-        model
-            .nodes
-            .iter()
-            .filter(|node| matches!(node.kind, GraphNodeKind::Agent { .. }))
-            .map(|node| node.id.clone())
-            .filter(|id| selected.contains(id))
-            .collect()
-    }
-}
-
-impl FlowGraphView {
     /// Follow the file to its new name. The pane wrapper renames its tab; this
     /// is the other half, so the next reload reads the file that now exists.
     pub(in crate::workspace) fn repoint(
@@ -680,139 +603,5 @@ impl FlowGraphView {
         self.text = None;
         self.form = None;
         cx.notify();
-    }
-}
-
-impl FlowGraphView {
-    /// The canvas entity, for tests that assert where the graph ended up on
-    /// screen. `None` when the flow did not load.
-    #[cfg(test)]
-    pub(in crate::workspace) fn canvas_for_test(&self) -> Option<&Entity<FlowCanvas>> {
-        match &self.state {
-            FlowGraphState::Graph { canvas, .. } => Some(canvas),
-            FlowGraphState::Unreadable(_) => None,
-        }
-    }
-
-    #[cfg(test)]
-    pub(in crate::workspace) fn set_name_for_test(
-        &self,
-        name: &str,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
-        self.name_input
-            .update(cx, |input, cx| input.set_value(name, window, cx));
-    }
-
-    /// The flow's node ids in the order the file declares them — what a
-    /// scripted capture walks to put one card in each state.
-    #[cfg(feature = "screenshot")]
-    pub(in crate::workspace) fn node_ids_for_shot(&self) -> Vec<NodeId> {
-        match &self.state {
-            FlowGraphState::Graph { model, .. } => {
-                model.nodes.iter().map(|n| n.id.clone()).collect()
-            }
-            FlowGraphState::Unreadable(_) => Vec::new(),
-        }
-    }
-}
-
-#[cfg(test)]
-impl FlowGraphView {
-    /// A canvas notify with no key behind it — pan, zoom, run colouring.
-    pub(in crate::workspace) fn notified_for_test(
-        &mut self,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
-        self.on_canvas_notified(window, cx);
-    }
-
-    /// Move the pointer onto or off the canvas as far as the plugin gets.
-    pub(in crate::workspace) fn hover_canvas_for_test(
-        &mut self,
-        over: bool,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
-        self.pan_armed.set_hovering_for_test(over);
-        self.on_canvas_notified(window, cx);
-    }
-
-    /// Hold or release the pan key as far as the canvas plugin gets: it writes
-    /// the shared state and the next notify is what the view makes of it.
-    pub(in crate::workspace) fn hold_pan_key_for_test(
-        &mut self,
-        held: bool,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
-        self.pan_armed.set_held_for_test(held);
-        self.on_canvas_notified(window, cx);
-    }
-
-    /// What the pane would draw the pointer as.
-    pub(in crate::workspace) fn pan_cursor_for_test(
-        &self,
-    ) -> Option<crate::ui::cursor::CursorReach> {
-        self.pan_cursor_shown
-    }
-
-    /// Press Delete on the selected cards, as far as the canvas plugin gets:
-    /// it records the key and the next notify is what answers it.
-    pub(in crate::workspace) fn press_delete_for_test(
-        &mut self,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
-        self.delete_request.ask_for_test();
-        self.on_canvas_notified(window, cx);
-    }
-
-    /// Each node's card as the canvas actually holds it, keyed by flow node id
-    /// and reduced to the two fields a run changes. Reading it back through the
-    /// canvas is the point: it proves the stamp reached the graph the renderer
-    /// draws from, not just the states the workspace accumulated.
-    pub(in crate::workspace) fn cards_for_test(
-        &self,
-        cx: &App,
-    ) -> HashMap<NodeId, (String, String)> {
-        let FlowGraphState::Graph { canvas, ids, .. } = &self.state else {
-            return HashMap::new();
-        };
-        let graph = canvas.read(cx).graph();
-        ids.iter()
-            .filter_map(|(flow_id, node_id)| {
-                let node = graph.nodes().get(&node_id)?;
-                let card: renderer::CardData =
-                    serde_json::from_value(node.data_ref().clone()).ok()?;
-                Some((flow_id.clone(), (card.badge, format!("{:?}", card.accent))))
-            })
-            .collect()
-    }
-
-    /// How many rules each card says its node breaks.
-    pub(in crate::workspace) fn card_issues_for_test(&self, cx: &App) -> HashMap<NodeId, usize> {
-        let FlowGraphState::Graph { canvas, ids, .. } = &self.state else {
-            return HashMap::new();
-        };
-        let graph = canvas.read(cx).graph();
-        ids.iter()
-            .filter_map(|(flow_id, node_id)| {
-                let node = graph.nodes().get(&node_id)?;
-                let card: renderer::CardData =
-                    serde_json::from_value(node.data_ref().clone()).ok()?;
-                Some((flow_id.clone(), card.issues))
-            })
-            .collect()
-    }
-
-    /// Why the pane is showing prose instead of a graph. `None` when it drew.
-    pub(in crate::workspace) fn unreadable_for_test(&self) -> Option<&FlowGraphError> {
-        match &self.state {
-            FlowGraphState::Graph { .. } => None,
-            FlowGraphState::Unreadable(err) => Some(err),
-        }
     }
 }

@@ -26,7 +26,7 @@ pub(super) struct OutputEditorSource<'a> {
 /// a file's contents, or a `Text` block that is nothing but a single fenced code
 /// block (the shape the adapter's `markdownEscape` produces). Anything else keeps
 /// its markdown renderer: prose, several fences, and a `mermaid`-tagged fence,
-/// whose diagram card (`render/tool.rs`'s `mermaid_fence_element` hook) must keep
+/// whose diagram card (`render/tool/output.rs`'s `mermaid_fence_element` hook) must keep
 /// winning.
 ///
 /// Only the `Text` arm inspects the body, because only `Text` might really be

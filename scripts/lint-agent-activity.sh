@@ -36,7 +36,7 @@
 #       `AcpEvent::Error` match arms (view/apply_event.rs) must not call the
 #       completion sinks (`apply_agent_chat_task_ended` /
 #       `maybe_notify_agent_completed`) directly — completion must route out
-#       via `fire_activity_completion` at the settle edge. (agent_chat_ops.rs
+#       via `fire_activity_completion` at the settle edge. (agent_chat_ops/notify.rs
 #       legitimately owns those sinks behind `fire_activity_completion`, and
 #       uses only an `if let … = &event` on `AcpEvent::Error`, not a match
 #       arm, so it is never a candidate here.)
@@ -74,8 +74,7 @@ FAIL=0
 #
 # Scope: production `.rs` under the chat package, excluding the view/ module
 # tree (the owner — `Turn` is private to view/mod.rs's `PromptQueue`, and
-# view/{apply_event,queue_ops,session_ops,tests}.rs reach it only as view's
-# own descendants) and test files (which use the sanctioned test hooks). Comments are stripped (both a full-line `// …` and a trailing
+# view/'s submodules reach it only as view's own descendants) and test files (which use the sanctioned test hooks). Comments are stripped (both a full-line `// …` and a trailing
 # `// …` on a code line) before the match, so a doc-comment reference (e.g.
 # pane.rs mentioning `turn.is_in_flight()`) or a trailing comment mentioning
 # `turn`/`Turn::` does not false-positive.

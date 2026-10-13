@@ -2,7 +2,7 @@
 //! affordance, plus the sibling "drag a whole Tab onto a Pane half to merge
 //! it in" affordance (`TabDrag` payload, owned by `tab_drag_ops.rs`). The
 //! pure tree transforms live in `pane_tree.rs` (`rearrange_pane` /
-//! `compute_drop_half` / `collect_pane_rects`) and `tab_ops.rs`
+//! `compute_drop_half` / `collect_pane_rects`) and `tab_ops/pane_structure.rs`
 //! (`merge_tab_into_pane`); this file owns the drag payload, the floating
 //! ghost, and the Workspace methods the render closures dispatch to for
 //! both affordances — they share one hit-test core

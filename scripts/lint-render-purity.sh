@@ -57,7 +57,7 @@ if [ "$body" != "$expected" ]; then
 fi
 
 # 3. Staging. The build side runs from `fn build_frame(` to the free function
-#    that follows the impl block.
+#    that follows the impl block, plus the BUILD_FILES it delegates to.
 build=$(awk '
     /fn build_frame\(/ { inside = 1 }
     inside && /^fn root_key_context\(/ { exit }
@@ -68,6 +68,18 @@ if [ -z "$build" ]; then
     echo "update the region markers in this guard." >&2
     exit 1
 fi
+# The frame body build_frame delegates to lives in these files, all build side.
+BUILD_FILES=(
+    "packages/app/src/workspace/render/workspace_frame.rs"
+    "packages/app/src/workspace/render/tab_bar.rs"
+)
+for f in "${BUILD_FILES[@]}"; do
+    if [ ! -f "$f" ]; then
+        echo "lint-render-purity: $f is gone — update BUILD_FILES in this guard." >&2
+        exit 1
+    fi
+    build+=$'\n'"$(cat "$f")"
+done
 if echo "$build" | rg -n '\.stage\(|stage_docks\(' >&2; then
     echo "Dock staging belongs in prepare_frame, not the build side of the frame." >&2
     exit 1

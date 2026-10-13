@@ -243,7 +243,7 @@ pub(crate) struct TerminalViewState {
 
     /// Annotation overlay under the mouse pointer. Drives the
     /// hover-tint switch in the annotation paint pass. Updated by the
-    /// mouse-move hit test in `view/mouse.rs`; `None` when the cursor
+    /// mouse-move hit test in `view/mouse/motion.rs`; `None` when the cursor
     /// is not over any annotation box.
     pub(crate) hovered_annotation: Option<crate::session::interval_tree::MarkId>,
 

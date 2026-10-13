@@ -1,4 +1,4 @@
-//! Tests for `merge_tab_into_pane` (`tab_ops.rs`) — dropping a dragged tab
+//! Tests for `merge_tab_into_pane` (`tab_ops/pane_structure.rs`) — dropping a dragged tab
 //! onto another tab's pane to fold both into a single tab with a 2-leaf
 //! split. The drag-mechanics layer (`update_tab_merge_hover_from_move` /
 //! `drop_tab_onto_pane` in `pane_drag_ops.rs`) reads a `DragMoveEvent`,
