@@ -410,6 +410,3 @@ impl From<AgentSource> for AgentEntryRepr {
         }
     }
 }
-
-#[cfg(test)]
-mod tests;

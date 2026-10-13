@@ -1,4 +1,6 @@
-use super::*;
+//! Public API tests for agent entry.
+
+use daruda_config::{AgentDefinition, AgentEntry, AgentLaunch, AgentSource, PresetOverrides};
 
 /// The `codex-acp` preset — a registry entry daruda can launch as-is.
 fn codex_preset() -> AgentDefinition {

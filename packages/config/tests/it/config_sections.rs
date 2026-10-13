@@ -1,4 +1,6 @@
-use super::*;
+//! Public API tests for config sections.
+
+use daruda_config::*;
 
 // ---- Project layer (resolve / round-trip) ----
 
@@ -73,7 +75,7 @@ fn patch_config_file_round_trips_telegram_enabled_and_chat_id() {
     cfg.telegram.only_when_away = false;
     cfg.presence.away_grace_secs = 30;
     cfg.presence.away_idle_secs = 5;
-    crate::patch_config_file_to(&cfg, &path).unwrap();
+    daruda_config::patch_config_file_to(&cfg, &path).unwrap();
 
     let reloaded = Config::load_from(&path);
     assert!(reloaded.telegram.enabled);
@@ -83,7 +85,7 @@ fn patch_config_file_round_trips_telegram_enabled_and_chat_id() {
     assert_eq!(reloaded.presence.away_idle_secs, 5);
 
     cfg.presence.away_grace_secs = 0;
-    crate::patch_config_file_to(&cfg, &path).unwrap();
+    daruda_config::patch_config_file_to(&cfg, &path).unwrap();
     assert_eq!(Config::load_from(&path).presence.away_grace_secs, 0);
 }
 
@@ -102,7 +104,7 @@ fn patch_config_file_drops_the_superseded_telegram_timing_keys() {
 
     let mut cfg = Config::load_from(&path);
     cfg.presence.away_idle_secs = 90;
-    crate::patch_config_file_to(&cfg, &path).unwrap();
+    daruda_config::patch_config_file_to(&cfg, &path).unwrap();
 
     // Assert against the parsed `[telegram]` table, not the raw text: the new
     // `[presence]` section contains `away_grace_secs` as a substring, so a
@@ -141,7 +143,7 @@ fn loading_migrates_the_retired_telegram_timing_keys_into_their_new_homes() {
     assert_eq!(cfg.presence.away_idle_secs, 90);
 
     // Round-tripping keeps the migrated values and drops the old spellings.
-    crate::patch_config_file_to(&cfg, &path).unwrap();
+    daruda_config::patch_config_file_to(&cfg, &path).unwrap();
     let reloaded = Config::load_from(&path);
     assert!(!reloaded.telegram.only_when_away);
     assert_eq!(reloaded.presence.away_grace_secs, 30);
@@ -217,11 +219,11 @@ fn patch_config_file_clears_telegram_chat_id_when_none() {
     let mut cfg = Config::default();
     cfg.telegram.enabled = true;
     cfg.telegram.authorized_chat_id = Some(111);
-    crate::patch_config_file_to(&cfg, &path).unwrap();
+    daruda_config::patch_config_file_to(&cfg, &path).unwrap();
 
     // Unpair: authorized_chat_id goes back to None.
     cfg.telegram.authorized_chat_id = None;
-    crate::patch_config_file_to(&cfg, &path).unwrap();
+    daruda_config::patch_config_file_to(&cfg, &path).unwrap();
 
     let reloaded = Config::load_from(&path);
     assert_eq!(reloaded.telegram.authorized_chat_id, None);
@@ -236,7 +238,7 @@ fn patch_config_file_round_trips_language() {
 
     let mut cfg = Config::default();
     cfg.general.language = "ko".to_owned();
-    crate::patch_config_file_to(&cfg, &path).unwrap();
+    daruda_config::patch_config_file_to(&cfg, &path).unwrap();
 
     let reloaded = Config::load_from(&path);
     assert_eq!(reloaded.general.language, "ko");
@@ -249,7 +251,7 @@ fn patch_config_file_round_trips_preferred_editor() {
 
     let mut cfg = Config::default();
     cfg.editor.preferred = "vscode".to_owned();
-    crate::patch_config_file_to(&cfg, &path).unwrap();
+    daruda_config::patch_config_file_to(&cfg, &path).unwrap();
 
     let reloaded = Config::load_from(&path);
     assert_eq!(reloaded.editor.preferred, "vscode");

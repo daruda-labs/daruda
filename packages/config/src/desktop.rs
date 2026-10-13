@@ -14,12 +14,3 @@ pub struct DesktopConfig {
     /// Display sleep and the user's lid-close power policy remain unchanged.
     pub keep_awake_while_working: bool,
 }
-
-#[cfg(test)]
-mod tests {
-    #[test]
-    fn existing_configs_keep_previous_desktop_behavior() {
-        let config: super::DesktopConfig = toml::from_str("").unwrap();
-        assert!(!config.tray_enabled && !config.close_to_tray && !config.keep_awake_while_working);
-    }
-}

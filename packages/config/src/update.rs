@@ -14,13 +14,3 @@ impl Default for UpdateConfig {
         Self { auto_check: true }
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn default_auto_check_is_true() {
-        assert!(UpdateConfig::default().auto_check);
-    }
-}

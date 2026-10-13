@@ -1,4 +1,6 @@
-use super::*;
+//! Public API tests for config settings patch.
+
+use daruda_config::*;
 
 #[test]
 fn patch_config_file_preserves_unmanaged_sections() {
@@ -39,9 +41,11 @@ fn settings_patch_migrates_legacy_font_fields_without_losing_values() {
     )
     .unwrap();
 
-    let written =
-        crate::apply_settings_patch_to(&crate::SettingsPatch::TerminalFontSize(16.0), &path)
-            .expect("field patch");
+    let written = daruda_config::apply_settings_patch_to(
+        &daruda_config::SettingsPatch::TerminalFontSize(16.0),
+        &path,
+    )
+    .expect("field patch");
 
     assert_eq!(written.font.terminal.size, 16.0);
     assert_eq!(written.font.editor.size, 17.0);
@@ -63,9 +67,11 @@ fn settings_patch_updates_an_inline_table_in_place() {
     )
     .unwrap();
 
-    let written =
-        crate::apply_settings_patch_to(&crate::SettingsPatch::TerminalFontSize(16.0), &path)
-            .expect("inline field patch");
+    let written = daruda_config::apply_settings_patch_to(
+        &daruda_config::SettingsPatch::TerminalFontSize(16.0),
+        &path,
+    )
+    .expect("inline field patch");
 
     assert_eq!(written.font.terminal.size, 16.0);
     assert_eq!(written.font.editor.size, 17.0);
@@ -82,8 +88,8 @@ fn checked_settings_patch_rejects_a_same_field_disk_change() {
     let expected = Config::load_from(&path);
     std::fs::write(&path, "[font]\nsize = 20.0\n").unwrap();
 
-    let error = crate::apply_settings_patch_to_if_unchanged(
-        &crate::SettingsPatch::TerminalFontSize(16.0),
+    let error = daruda_config::apply_settings_patch_to_if_unchanged(
+        &daruda_config::SettingsPatch::TerminalFontSize(16.0),
         &expected,
         &path,
     )
@@ -91,7 +97,9 @@ fn checked_settings_patch_rejects_a_same_field_disk_change() {
 
     assert_eq!(
         error,
-        crate::SettingsPatchApplyError::Conflict(crate::SettingsFieldId::TerminalFontSize)
+        daruda_config::SettingsPatchApplyError::Conflict(
+            daruda_config::SettingsFieldId::TerminalFontSize
+        )
     );
     assert_eq!(Config::load_from(&path).font.terminal.size, 20.0);
 }
@@ -104,8 +112,8 @@ fn checked_settings_patch_keeps_an_unrelated_disk_change() {
     let expected = Config::load_from(&path);
     std::fs::write(&path, "[font]\nsize = 14.0\neditor_size = 17.0\n").unwrap();
 
-    let written = crate::apply_settings_patch_to_if_unchanged(
-        &crate::SettingsPatch::TerminalFontSize(16.0),
+    let written = daruda_config::apply_settings_patch_to_if_unchanged(
+        &daruda_config::SettingsPatch::TerminalFontSize(16.0),
         &expected,
         &path,
     )
@@ -126,8 +134,11 @@ fn settings_patch_preserves_a_config_symlink() {
     std::fs::write(&target, "[font]\nsize = 14.0\n").unwrap();
     symlink(&target, &path).unwrap();
 
-    crate::apply_settings_patch_to(&crate::SettingsPatch::TerminalFontSize(16.0), &path)
-        .expect("symlinked config patch");
+    daruda_config::apply_settings_patch_to(
+        &daruda_config::SettingsPatch::TerminalFontSize(16.0),
+        &path,
+    )
+    .expect("symlinked config patch");
 
     assert!(
         std::fs::symlink_metadata(&path)
@@ -145,9 +156,11 @@ fn settings_patch_refuses_to_replace_a_corrupt_document() {
     let corrupt = "[font\nsize = 14";
     std::fs::write(&path, corrupt).unwrap();
 
-    let error =
-        crate::apply_settings_patch_to(&crate::SettingsPatch::TerminalFontSize(16.0), &path)
-            .expect_err("corrupt config must block the write");
+    let error = daruda_config::apply_settings_patch_to(
+        &daruda_config::SettingsPatch::TerminalFontSize(16.0),
+        &path,
+    )
+    .expect_err("corrupt config must block the write");
 
     assert!(error.contains("parse error"), "{error}");
     assert_eq!(std::fs::read_to_string(path).unwrap(), corrupt);
@@ -176,8 +189,8 @@ fn settings_patch_round_trips_structural_session_hosts() {
         redirected_to: Some(host.id),
     };
 
-    let written = crate::apply_settings_patch_to(
-        &crate::SettingsPatch::SessionHosts {
+    let written = daruda_config::apply_settings_patch_to(
+        &daruda_config::SettingsPatch::SessionHosts {
             entries: vec![host.clone()],
             tombstones: vec![tombstone.clone()],
         },
@@ -194,7 +207,7 @@ fn settings_patch_writes_render_max_fps() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("config.toml");
 
-    crate::apply_settings_patch_to(&crate::SettingsPatch::RenderMaxFps(60), &path)
+    daruda_config::apply_settings_patch_to(&daruda_config::SettingsPatch::RenderMaxFps(60), &path)
         .expect("render patch");
 
     assert_eq!(Config::load_from(&path).render.max_fps, 60);
@@ -204,7 +217,7 @@ fn settings_patch_writes_render_max_fps() {
 /// through the real `toml_edit` writer, read back.
 #[test]
 fn settings_patch_round_trips_the_agent_and_flow_keys() {
-    use crate::SettingsPatch as P;
+    use daruda_config::SettingsPatch as P;
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("config.toml");
     for patch in [
@@ -215,7 +228,7 @@ fn settings_patch_round_trips_the_agent_and_flow_keys() {
         P::FlowMaxCost(2.5),
         P::FlowCostCurrency("EUR".to_string()),
     ] {
-        crate::apply_settings_patch_to(&patch, &path).expect("agent patch");
+        daruda_config::apply_settings_patch_to(&patch, &path).expect("agent patch");
     }
     let c = Config::load_from(&path);
     assert_eq!(c.agent.input_max_rows, 12);
@@ -230,7 +243,7 @@ fn settings_patch_round_trips_the_agent_and_flow_keys() {
 /// `toml_edit` writer, read back.
 #[test]
 fn settings_patch_round_trips_the_advanced_keys() {
-    use crate::SettingsPatch as P;
+    use daruda_config::SettingsPatch as P;
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("config.toml");
     for patch in [
@@ -246,7 +259,7 @@ fn settings_patch_round_trips_the_advanced_keys() {
         P::PresenceIdleSecs(45),
         P::PresenceIdleForegroundSecs(240),
     ] {
-        crate::apply_settings_patch_to(&patch, &path).expect("advanced patch");
+        daruda_config::apply_settings_patch_to(&patch, &path).expect("advanced patch");
     }
     let c = Config::load_from(&path);
     assert!(!c.update.auto_check);
@@ -266,15 +279,16 @@ fn settings_patch_round_trips_the_advanced_keys() {
 /// table and its other keys.
 #[test]
 fn resetting_a_field_removes_only_its_key() {
-    use crate::SettingsPatch as P;
+    use daruda_config::SettingsPatch as P;
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("config.toml");
-    crate::apply_settings_patch_to(&P::TerminalFontSize(20.0), &path).unwrap();
-    crate::apply_settings_patch_to(&P::TerminalLineHeight(1.5), &path).unwrap();
+    daruda_config::apply_settings_patch_to(&P::TerminalFontSize(20.0), &path).unwrap();
+    daruda_config::apply_settings_patch_to(&P::TerminalLineHeight(1.5), &path).unwrap();
     let before = Config::load_from(&path);
 
     let default = P::TerminalFontSize(Config::default().font.terminal.size);
-    let after = crate::reset_settings_field_to_if_unchanged(&default, &before, &path).unwrap();
+    let after =
+        daruda_config::reset_settings_field_to_if_unchanged(&default, &before, &path).unwrap();
 
     let text = std::fs::read_to_string(&path).unwrap();
     let doc: toml_edit::DocumentMut = text.parse().unwrap();
@@ -294,7 +308,7 @@ fn resetting_a_field_removes_only_its_key() {
 /// the way an older release did — the old spelling is carried away first.
 #[test]
 fn resetting_reaches_the_default_through_legacy_spellings() {
-    use crate::SettingsPatch as P;
+    use daruda_config::SettingsPatch as P;
     let d = Config::default();
     let cases: [(&str, P); 5] = [
         (
@@ -323,7 +337,7 @@ fn resetting_reaches_the_default_through_legacy_spellings() {
         let path = dir.path().join("config.toml");
         std::fs::write(&path, text).unwrap();
         let before = Config::load_from(&path);
-        crate::reset_settings_field_to_if_unchanged(&default, &before, &path).unwrap();
+        daruda_config::reset_settings_field_to_if_unchanged(&default, &before, &path).unwrap();
         let after = Config::load_from(&path);
         assert!(
             !default.field_changed_between(&after, &Config::default()),
@@ -337,13 +351,13 @@ fn resetting_reaches_the_default_through_legacy_spellings() {
 /// the editor on the family the user had chosen.
 #[test]
 fn resetting_a_shared_flat_font_key_keeps_the_other_domain() {
-    use crate::SettingsPatch as P;
+    use daruda_config::SettingsPatch as P;
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("config.toml");
     std::fs::write(&path, "[font]\nfamily = \"Iosevka\"\n").unwrap();
     let before = Config::load_from(&path);
     let default = P::TerminalFontFamily(Config::default().font.terminal.family.clone());
-    crate::reset_settings_field_to_if_unchanged(&default, &before, &path).unwrap();
+    daruda_config::reset_settings_field_to_if_unchanged(&default, &before, &path).unwrap();
     let after = Config::load_from(&path);
     assert_eq!(
         after.font.terminal.family,
@@ -356,14 +370,14 @@ fn resetting_a_shared_flat_font_key_keeps_the_other_domain() {
 /// stays unwritten and keeps following the default.
 #[test]
 fn a_font_edit_does_not_pin_a_reset_font_key() {
-    use crate::SettingsPatch as P;
+    use daruda_config::SettingsPatch as P;
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("config.toml");
-    crate::apply_settings_patch_to(&P::TerminalFontSize(20.0), &path).unwrap();
+    daruda_config::apply_settings_patch_to(&P::TerminalFontSize(20.0), &path).unwrap();
     let before = Config::load_from(&path);
     let default = P::TerminalFontSize(Config::default().font.terminal.size);
-    crate::reset_settings_field_to_if_unchanged(&default, &before, &path).unwrap();
-    crate::apply_settings_patch_to(&P::EditorFontSize(15.0), &path).unwrap();
+    daruda_config::reset_settings_field_to_if_unchanged(&default, &before, &path).unwrap();
+    daruda_config::apply_settings_patch_to(&P::EditorFontSize(15.0), &path).unwrap();
 
     let text = std::fs::read_to_string(&path).unwrap();
     let doc: toml_edit::DocumentMut = text.parse().unwrap();
@@ -375,34 +389,34 @@ fn a_font_edit_does_not_pin_a_reset_font_key() {
 /// A field that moved on disk since the window read it is not reset.
 #[test]
 fn resetting_a_field_changed_on_disk_is_a_conflict() {
-    use crate::SettingsPatch as P;
+    use daruda_config::SettingsPatch as P;
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("config.toml");
     let stale = Config::default();
-    crate::apply_settings_patch_to(&P::TerminalFontSize(20.0), &path).unwrap();
+    daruda_config::apply_settings_patch_to(&P::TerminalFontSize(20.0), &path).unwrap();
 
     let default = P::TerminalFontSize(Config::default().font.terminal.size);
     assert!(matches!(
-        crate::reset_settings_field_to_if_unchanged(&default, &stale, &path),
-        Err(crate::SettingsPatchApplyError::Conflict(_))
+        daruda_config::reset_settings_field_to_if_unchanged(&default, &stale, &path),
+        Err(daruda_config::SettingsPatchApplyError::Conflict(_))
     ));
 }
 
 /// The Workspace page's keys through the real `toml_edit` writer, read back.
 #[test]
 fn settings_patch_round_trips_the_workspace_keys() {
-    use crate::SettingsPatch as P;
+    use daruda_config::SettingsPatch as P;
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("config.toml");
 
     for patch in [
         P::LeftDefaultWidth(300.0),
         P::LeftCollapsedByDefault(true),
-        P::FileIconColorMode(crate::IconColorMode::Color),
+        P::FileIconColorMode(daruda_config::IconColorMode::Color),
         P::PreviewTab(false),
-        P::StatusBarHiddenItems(vec![crate::StatusBarItem::Ports]),
+        P::StatusBarHiddenItems(vec![daruda_config::StatusBarItem::Ports]),
     ] {
-        crate::apply_settings_patch_to(&patch, &path).expect("workspace patch");
+        daruda_config::apply_settings_patch_to(&patch, &path).expect("workspace patch");
     }
 
     let c = Config::load_from(&path);
@@ -410,10 +424,13 @@ fn settings_patch_round_trips_the_workspace_keys() {
     assert!(c.left_dock.left_collapsed_by_default);
     assert_eq!(
         c.left_dock.file_icon_color_mode,
-        crate::IconColorMode::Color
+        daruda_config::IconColorMode::Color
     );
     assert!(!c.file_viewer.preview_tab);
-    assert_eq!(c.status_bar.hidden_items, vec![crate::StatusBarItem::Ports]);
+    assert_eq!(
+        c.status_bar.hidden_items,
+        vec![daruda_config::StatusBarItem::Ports]
+    );
 }
 
 /// A shell program is written as a key, and clearing it removes the key
@@ -423,8 +440,8 @@ fn settings_patch_writes_and_clears_the_shell_program() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("config.toml");
 
-    crate::apply_settings_patch_to(
-        &crate::SettingsPatch::ShellProgram(Some("/bin/fish".to_string())),
+    daruda_config::apply_settings_patch_to(
+        &daruda_config::SettingsPatch::ShellProgram(Some("/bin/fish".to_string())),
         &path,
     )
     .expect("set program");
@@ -433,8 +450,11 @@ fn settings_patch_writes_and_clears_the_shell_program() {
         Some("/bin/fish")
     );
 
-    crate::apply_settings_patch_to(&crate::SettingsPatch::ShellProgram(None), &path)
-        .expect("clear program");
+    daruda_config::apply_settings_patch_to(
+        &daruda_config::SettingsPatch::ShellProgram(None),
+        &path,
+    )
+    .expect("clear program");
     assert_eq!(Config::load_from(&path).shell.program, None);
     assert!(!std::fs::read_to_string(&path).unwrap().contains("program"));
 }
@@ -444,7 +464,7 @@ fn settings_patch_writes_and_clears_the_shell_program() {
 /// written as an integer, all read back from disk.
 #[test]
 fn settings_patch_round_trips_every_notification_key() {
-    use crate::SettingsPatch as P;
+    use daruda_config::SettingsPatch as P;
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("config.toml");
 
@@ -460,7 +480,7 @@ fn settings_patch_round_trips_every_notification_key() {
         P::NotifyLongRunningThresholdSecs(45),
         P::TelegramOnlyWhenAway(false),
     ] {
-        crate::apply_settings_patch_to(&patch, &path).expect("notification patch");
+        daruda_config::apply_settings_patch_to(&patch, &path).expect("notification patch");
     }
 
     let n = Config::load_from(&path).notifications;
@@ -485,20 +505,22 @@ fn settings_patch_round_trips_every_orchestrator_key() {
     let path = dir.path().join("config.toml");
     let account = daruda_store::accounts::AccountId::new();
 
-    let written =
-        crate::apply_settings_patch_to(&crate::SettingsPatch::OrchestratorEnabled(true), &path)
-            .expect("enabled patch");
+    let written = daruda_config::apply_settings_patch_to(
+        &daruda_config::SettingsPatch::OrchestratorEnabled(true),
+        &path,
+    )
+    .expect("enabled patch");
     assert!(written.orchestrator.enabled);
 
-    let written = crate::apply_settings_patch_to(
-        &crate::SettingsPatch::OrchestratorAgentId(Some("codex-acp".to_string())),
+    let written = daruda_config::apply_settings_patch_to(
+        &daruda_config::SettingsPatch::OrchestratorAgentId(Some("codex-acp".to_string())),
         &path,
     )
     .expect("agent patch");
     assert_eq!(written.orchestrator.agent_id.as_deref(), Some("codex-acp"));
 
-    let written = crate::apply_settings_patch_to(
-        &crate::SettingsPatch::OrchestratorAccountId(Some(account)),
+    let written = daruda_config::apply_settings_patch_to(
+        &daruda_config::SettingsPatch::OrchestratorAccountId(Some(account)),
         &path,
     )
     .expect("account patch");
@@ -506,13 +528,17 @@ fn settings_patch_round_trips_every_orchestrator_key() {
 
     // Clearing both optional keys leaves `enabled` alone and removes them
     // rather than persisting a value that would resolve to nothing.
-    let written =
-        crate::apply_settings_patch_to(&crate::SettingsPatch::OrchestratorAgentId(None), &path)
-            .expect("agent clear");
+    let written = daruda_config::apply_settings_patch_to(
+        &daruda_config::SettingsPatch::OrchestratorAgentId(None),
+        &path,
+    )
+    .expect("agent clear");
     assert_eq!(written.orchestrator.agent_id, None);
-    let written =
-        crate::apply_settings_patch_to(&crate::SettingsPatch::OrchestratorAccountId(None), &path)
-            .expect("account clear");
+    let written = daruda_config::apply_settings_patch_to(
+        &daruda_config::SettingsPatch::OrchestratorAccountId(None),
+        &path,
+    )
+    .expect("account clear");
     assert_eq!(written.orchestrator.account_id, None);
     assert!(written.orchestrator.enabled);
 

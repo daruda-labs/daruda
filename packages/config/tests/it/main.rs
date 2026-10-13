@@ -1,0 +1,37 @@
+//! Integration tests that exercise only the public `daruda_config` API.
+
+mod account_env;
+mod agent;
+mod agent_assemble;
+mod agent_entry;
+mod agent_icon;
+mod agent_preset;
+mod agent_transcript_default;
+mod agent_vocabulary;
+mod claude_status;
+mod config_agent_catalog;
+mod config_defaults;
+mod config_sections;
+mod config_settings_patch;
+mod desktop;
+mod editor;
+mod env_lines;
+mod flow;
+mod general;
+mod git;
+mod logs;
+mod notifications;
+mod orchestrator;
+mod ports;
+mod presence;
+mod project;
+mod remote;
+mod render;
+mod session_host;
+mod settings_section;
+mod shell;
+mod status_bar;
+mod telegram;
+mod theme_presets;
+mod update;
+mod usage;

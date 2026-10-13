@@ -69,14 +69,6 @@ mod tests {
     use super::*;
 
     #[test]
-    fn defaults_match_spec() {
-        let c = ClaudeStatusConfig::default();
-        assert!(c.enable);
-        assert_eq!(c.stale_threshold_secs, 300);
-        assert_eq!(c.file_ttl_days, 7);
-    }
-
-    #[test]
     fn clamp_pulls_outliers_in_range() {
         let mut c = ClaudeStatusConfig {
             enable: true,
@@ -95,16 +87,5 @@ mod tests {
         c.clamp();
         assert_eq!(c.stale_threshold_secs, STALE_THRESHOLD_MAX);
         assert_eq!(c.file_ttl_days, FILE_TTL_MAX_DAYS);
-    }
-
-    #[test]
-    fn deserializes_partial_toml() {
-        // Empty section → defaults, missing fields → defaults.
-        let c: ClaudeStatusConfig = toml::from_str("").unwrap();
-        assert_eq!(c, ClaudeStatusConfig::default());
-
-        let c: ClaudeStatusConfig = toml::from_str("enable = false").unwrap();
-        assert!(!c.enable);
-        assert_eq!(c.stale_threshold_secs, 300);
     }
 }
