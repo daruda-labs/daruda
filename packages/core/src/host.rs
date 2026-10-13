@@ -56,14 +56,3 @@ mod imp {
         None
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn this_machine_has_a_name() {
-        let name = name().expect("the OS names this machine");
-        assert!(!name.contains('\0'));
-    }
-}

@@ -1,6 +1,9 @@
+//! Public API tests for process.
+
 use std::time::Duration;
 
-use super::*;
+use daruda_core::process::*;
+use std::ffi::OsStr;
 
 #[test]
 fn the_last_path_assignment_is_the_childs() {

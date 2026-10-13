@@ -178,6 +178,3 @@ pub fn is_alive(pid: u32) -> bool {
 pub fn has_descendants(pid: u32) -> std::io::Result<bool> {
     backend::has_descendants(pid)
 }
-
-#[cfg(test)]
-mod tests;
