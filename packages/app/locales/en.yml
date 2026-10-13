@@ -2017,6 +2017,9 @@ control:
   # rather than because they asked. Without it the next plain message goes
   # somewhere unexpected with no warning.
   selection_dropped: "That chat is gone, so the target was cleared."
+  # Said when the vanished chat had only been answering plain text, so plain
+  # text returns to the chat the user picked with /use.
+  selection_restored: "That chat is gone, so plain text goes back to the chat you picked."
   sent_delivered: "Sent."
   sent_queued: "Queued behind the current turn."
   # Said when the text was a local slash command the pane ran itself instead of

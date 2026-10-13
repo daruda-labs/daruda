@@ -69,6 +69,14 @@ impl TelegramBridge {
         self.core.command_state_mut()
     }
 
+    /// Stop aiming plain text at a pane found gone; see `RoutingCore::forget`.
+    pub(crate) fn forget_target(
+        &mut self,
+        pane: PaneRef,
+    ) -> crate::remote_channel::command::Absorbed {
+        self.core.routing.forget(pane)
+    }
+
     /// Whether a message can actually go out: the feature is on, someone has
     /// paired, and this daruda is the one serving the bot. The first two are
     /// the conditions `Workspace::telegram_bridge` asks, kept in one place so
@@ -85,8 +93,8 @@ impl TelegramBridge {
     }
 
     /// Introduce a chat the phone approved opening, and make it the phone's
-    /// target. A selection and not just a ping: the orchestrator's own
-    /// completion ping follows and would take `last_pinged` straight back.
+    /// target. A selection and not just a ping, so it also becomes what a bare
+    /// `/stop` means; the orchestrator's report that follows is a bystander.
     /// `false` when nothing can be sent, so the caller can record the drop.
     pub(crate) fn announce_chat(pane: PaneRef, header: String, tail: String, cx: &mut App) -> bool {
         if !Self::deliverable(cx) || cx.try_global::<TelegramBridge>().is_none() {

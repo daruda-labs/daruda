@@ -46,6 +46,37 @@ impl Target {
             }
         }
     }
+
+    /// Forget a gone pane on this recipient's routing, then hand back the
+    /// table the reply renders against.
+    fn forget<'a>(
+        &self,
+        pane: PaneRef,
+        cx: &'a mut App,
+    ) -> Option<(commands::Absorbed, &'a mut CommandState)> {
+        match self {
+            Self::Telegram => {
+                if !cx.has_global::<crate::telegram::global::TelegramBridge>() {
+                    return None;
+                }
+                let bridge = cx.global_mut::<crate::telegram::global::TelegramBridge>();
+                let absorbed = bridge.forget_target(pane);
+                Some((absorbed, bridge.command_state_mut()))
+            }
+            Self::Remote(id) => {
+                if !cx.has_global::<super::global::RemoteChannels>() {
+                    return None;
+                }
+                let core = &mut cx
+                    .global_mut::<super::global::RemoteChannels>()
+                    .connections
+                    .get_mut(id)?
+                    .core;
+                let absorbed = core.forget(pane);
+                Some((absorbed, core.command_state_mut()))
+            }
+        }
+    }
 }
 
 pub enum Effect {

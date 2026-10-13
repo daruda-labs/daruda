@@ -98,8 +98,8 @@ pub(super) fn persist_offset(cx: &mut gpui::AsyncApp) {
     }
 }
 
-/// Send a command reply. Deliberately does NOT call `record_sent`: that sets
-/// `last_pinged`, so a `/list` answer would silently become the next plain
+/// Send a command reply. Deliberately does NOT call `record_sent`: that moves
+/// the conversation, so a `/list` answer would silently become the next plain
 /// message's destination.
 pub(super) async fn send_command_reply(
     cx: &mut gpui::AsyncApp,

@@ -28,14 +28,22 @@ pub(crate) fn run_command(
         command::Resolution::Ask(text) => (
             cx.update(|cx| {
                 let (destination, connecting) = crate::orchestrator::destination(cx)?;
-                crate::control::exec::run(
+                let outcome = crate::control::exec::run(
                     crate::control::spec::ResolvedCommand::AskOrchestrator {
                         text,
                         destination,
                         connecting,
                     },
                     cx,
-                )
+                );
+                // Its answer arrives as a bystander ping, so asking is what
+                // makes the orchestrator the conversation; `/stop` keeps the pick.
+                if outcome.is_ok()
+                    && let Some(state) = target.state(cx)
+                {
+                    state.note_ping(destination);
+                }
+                outcome
             }),
             None,
         ),
@@ -114,11 +122,10 @@ pub(crate) fn report_target_gone(
     cx: &mut App,
 ) -> Option<command::RenderedReply> {
     trace::state("target.forgotten", || format!("pane={}", trace::pane(pane)));
-    let state = target.state(cx)?;
-    state.forget(pane);
+    let (absorbed, state) = target.forget(pane, cx)?;
     Some(command::render(
         &Err(crate::control::result::ControlError::TargetGone),
-        command::Absorbed::SelectionDropped,
+        absorbed,
         state,
     ))
 }

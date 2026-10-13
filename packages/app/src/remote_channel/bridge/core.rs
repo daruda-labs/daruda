@@ -71,6 +71,25 @@ impl<M: Eq + std::hash::Hash + Clone> RoutingCore<M> {
         &mut self.command_state
     }
 
+    /// Stop sending plain text to `target`, a pane found gone, including via
+    /// `last_pinged`. Says how the plain-text target moved so the reply can.
+    pub fn forget(&mut self, target: PaneRef) -> crate::remote_channel::command::Absorbed {
+        use crate::remote_channel::command::Absorbed;
+        let picked = self.command_state.selected() == Some(target);
+        let before = self.command_state.plain_text_target(None, self.last_pinged);
+        self.command_state.forget(target);
+        if self.last_pinged == Some(target) {
+            self.last_pinged = None;
+        }
+        let after = self.command_state.plain_text_target(None, self.last_pinged);
+        match after {
+            _ if picked => Absorbed::SelectionDropped,
+            _ if after == before => Absorbed::Nothing,
+            None => Absorbed::SelectionDropped,
+            Some(_) => Absorbed::SelectionRestored,
+        }
+    }
+
     /// Called only after the adapter authenticates both sender and conversation.
     pub fn route_text(&mut self, text: String, reply_to_message_id: Option<M>) -> Routed {
         // Parsing sits behind the gate on purpose: a listing names projects,

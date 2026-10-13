@@ -161,15 +161,15 @@ impl CommandState {
         self.selected
     }
 
-    /// Drop `target` from the selection. Called when a command reports the
-    /// pane is gone, so the next plain message is not answered with the same
-    /// error forever.
+    /// Drop a gone `target` from the pick and the conversation. A pane that
+    /// only held the conversation hands plain text back to the pick, so the
+    /// next message is not answered with the same error forever.
     pub(crate) fn forget(&mut self, target: PaneRef) {
         if self.selected == Some(target) {
             self.selected = None;
         }
         if self.conversation == Some(target) {
-            self.conversation = None;
+            self.conversation = self.selected;
         }
     }
 
@@ -333,14 +333,16 @@ pub(crate) fn absorb(
     }
 }
 
-/// A state change worth telling the user about, on top of the outcome itself.
-///
-/// Only one so far, and it earns the type: clearing the target silently would
-/// send their *next* plain message somewhere else with no warning.
+/// A state change worth telling the user about, on top of the outcome itself:
+/// moving the target silently would send their *next* plain message somewhere
+/// else with no warning.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Absorbed {
     Nothing,
+    /// The target is gone and nothing replaced it.
     SelectionDropped,
+    /// Plain text was answering a gone pane and returns to the user's pick.
+    SelectionRestored,
 }
 
 #[cfg(test)]
@@ -456,6 +458,18 @@ pub(crate) mod tests {
         state.select(Some(b));
         state.select(None);
         assert_eq!(state.plain_text_target(None, Some(c)), Some(c));
+    }
+
+    /// The pick outlives a pane that only held the conversation.
+    #[test]
+    fn a_vanished_conversation_falls_back_to_the_pick() {
+        let (b, c) = (pane(20), pane(30));
+        let mut state = CommandState::default();
+        state.select(Some(b));
+        state.note_ping(c);
+        state.forget(c);
+        assert_eq!(state.selected(), Some(b));
+        assert_eq!(state.plain_text_target(None, None), Some(b));
     }
 
     #[test]

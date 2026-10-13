@@ -54,9 +54,14 @@ pub(crate) fn render(
             keyboard: None,
         },
     };
-    if absorbed == Absorbed::SelectionDropped {
+    let note = match absorbed {
+        Absorbed::Nothing => None,
+        Absorbed::SelectionDropped => Some(s::control::selection_dropped()),
+        Absorbed::SelectionRestored => Some(s::control::selection_restored()),
+    };
+    if let Some(note) = note {
         reply.text.push('\n');
-        reply.text.push_str(&s::control::selection_dropped());
+        reply.text.push_str(&note);
     }
     reply
 }

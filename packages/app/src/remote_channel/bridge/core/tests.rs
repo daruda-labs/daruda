@@ -115,3 +115,40 @@ fn only_the_orchestrators_ping_is_a_bystander() {
     core.record_delivered("worker2".into(), pane(2), orchestrator);
     assert_eq!(injected_into(&mut core), Some(pane(2)));
 }
+
+/// A pane that spoke and then closed hands plain text back to the pick, not
+/// to itself through `last_pinged` — which would fail the same way forever.
+#[test]
+fn a_gone_pane_that_spoke_hands_plain_text_back_to_the_pick() {
+    use crate::remote_channel::command::Absorbed;
+    let mut core = RoutingCore::<String>::default();
+    core.command_state_mut().select(Some(pane(2)));
+    core.record_sent("m1".into(), pane(3));
+    assert_eq!(core.forget(pane(3)), Absorbed::SelectionRestored);
+    assert_eq!(injected_into(&mut core), Some(pane(2)));
+    assert_eq!(core.command_state_mut().selected(), Some(pane(2)));
+}
+
+/// With no pick to fall back to, nothing is the target — not the gone pane.
+#[test]
+fn a_gone_pane_with_no_pick_leaves_plain_text_unaimed() {
+    use crate::remote_channel::command::Absorbed;
+    let mut core = RoutingCore::<String>::default();
+    core.record_sent("m1".into(), pane(3));
+    assert_eq!(core.forget(pane(3)), Absorbed::SelectionDropped);
+    assert!(matches!(
+        core.route_text("carry on".into(), None),
+        Routed::NeedsTarget(_)
+    ));
+}
+
+/// A gone pane the plain text was not going to changes nothing worth saying.
+#[test]
+fn forgetting_a_pane_plain_text_was_not_aimed_at_moves_nothing() {
+    use crate::remote_channel::command::Absorbed;
+    let mut core = RoutingCore::<String>::default();
+    core.record_sent("m1".into(), pane(3));
+    core.record_sent("m2".into(), pane(4));
+    assert_eq!(core.forget(pane(3)), Absorbed::Nothing);
+    assert_eq!(injected_into(&mut core), Some(pane(4)));
+}

@@ -136,6 +136,53 @@ async fn a_daruda_prompt_reaches_the_live_orchestrator(cx: &mut TestAppContext) 
     });
 }
 
+/// Asking makes the orchestrator the plain-text target: its answer arrives as
+/// a bystander ping, so without this a follow-up would reach whichever worker
+/// spoke before the question.
+#[gpui::test]
+async fn asking_the_orchestrator_makes_it_the_conversation(cx: &mut TestAppContext) {
+    let worker = workspace_with_agent_chat(cx);
+    let orchestrator = crate::test_support::register_test_orchestrator(cx);
+    cx.update(crate::orchestrator::seed_control_surface_for_test);
+    enable_orchestrator(cx);
+    let _outbound = cx.update(|cx| crate::telegram::global::install_for_test(true, Some(42), cx));
+    let worker = PaneRef {
+        workspace: worker.workspace.read_with(cx, |ws, _| ws.uuid()),
+        pane: worker.pane(),
+    };
+    cx.update(|cx| {
+        cx.global_mut::<crate::telegram::global::TelegramBridge>()
+            .command_state_mut()
+            .note_ping(worker)
+    });
+
+    let mut async_cx = cx.to_async();
+    crate::remote_channel::dispatch::handle(
+        crate::remote_channel::dispatch::target::Aimed {
+            action: InboundAction::RunCommand {
+                command: ControlCommand::Ask {
+                    text: "what is left?".into(),
+                },
+            },
+            adopted: None,
+        },
+        &crate::remote_channel::dispatch::Target::Telegram,
+        &mut async_cx,
+    );
+
+    cx.update(|cx| {
+        let state = cx
+            .global_mut::<crate::telegram::global::TelegramBridge>()
+            .command_state_mut();
+        assert_eq!(state.plain_text_target(None, None), Some(orchestrator));
+        assert_eq!(
+            state.selected(),
+            None,
+            "asking does not change what /stop means"
+        );
+    });
+}
+
 /// With nothing configured, the prompt is refused up front — no window, and
 /// nothing sent to any of the user's panes.
 #[gpui::test]

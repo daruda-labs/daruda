@@ -1384,6 +1384,7 @@ control:
   selected: "대상: %{name}"
   selection_cleared: "대상을 해제했습니다."
   selection_dropped: "그 대화가 사라져서 대상을 해제했습니다."
+  selection_restored: "그 대화가 사라져서 일반 메시지는 직접 고른 대화로 다시 갑니다."
   sent_delivered: "보냈습니다."
   sent_queued: "진행 중인 턴 뒤에 대기시켰습니다."
   sent_handled_locally: "앱에서 처리했습니다 — 에이전트에 전달되지 않았습니다."
