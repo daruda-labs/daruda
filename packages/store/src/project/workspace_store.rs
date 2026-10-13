@@ -124,28 +124,3 @@ impl WorkspaceStore {
         persistence::refresh_recent_if_present_in(&self.root, uuid, name)
     }
 }
-
-#[cfg(test)]
-mod recovery_tests {
-    use super::*;
-    use crate::project::tests::new_schema_fixtures::{sample_project, sample_workspace};
-
-    #[test]
-    fn incomplete_workspace_is_preserved_instead_of_partially_restored() {
-        let dir = tempfile::tempdir().unwrap();
-        let store = WorkspaceStore::in_directory(dir.path());
-        let project = sample_project();
-        let workspace = sample_workspace(project.uuid);
-        store.save_workspace(&workspace).unwrap();
-        assert!(store.load_complete_workspace(workspace.uuid).is_err());
-        assert_eq!(
-            store.load_workspace(workspace.uuid),
-            Some(workspace.clone())
-        );
-        store.save_project(&project).unwrap();
-        assert_eq!(
-            store.load_complete_workspace(workspace.uuid).unwrap(),
-            Some((workspace, vec![project]))
-        );
-    }
-}

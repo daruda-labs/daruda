@@ -1,19 +1,18 @@
-//! Unit tests for `daruda_tasks`. Coverage target ≥ 21 cases mirrors
-//! `daruda_panels::tests` so persistence regressions surface fast.
+//! Task model, persistence, branch naming and prompt files.
 
 use std::path::PathBuf;
 
 use chrono::Utc;
 
-use super::branch::{branch_name_for, random_branch_name};
-use super::persistence::{load_tasks_in, save_tasks_in, tasks_path_in};
-use super::prompt_file::{
+use daruda_store::project::ProjectUuid;
+use daruda_store::tasks::branch::{branch_name_for, random_branch_name};
+use daruda_store::tasks::persistence::{load_tasks_in, save_tasks_in, tasks_path_in};
+use daruda_store::tasks::prompt_file::{
     PROMPT_DIR_NAME, build_claude_command, existing_prompt_file_path, prompt_file_path,
     render_task_prompt, write_prompt_file,
 };
-use crate::project::ProjectUuid;
 
-use super::task::{
+use daruda_store::tasks::task::{
     AgentType, SCHEMA_VERSION, SessionEndReason, SubTask, Task, TaskAgentSurface, TaskFilter,
     TaskRunIn, TaskScope, TaskState, TasksState,
 };
@@ -54,11 +53,11 @@ fn execution_identity_round_trips_and_legacy_tasks_have_none() {
             .execution
             .is_none()
     );
-    task.execution = Some(super::TaskExecution {
+    task.execution = Some(daruda_store::tasks::TaskExecution {
         source: Default::default(),
         id: "run-1".into(),
         agent_id: "claude".into(),
-        account_id: Some(crate::accounts::AccountId(uuid::Uuid::new_v4())),
+        account_id: Some(daruda_store::accounts::AccountId(uuid::Uuid::new_v4())),
         cwd: PathBuf::from("/repo/task"),
         session_id: Some("session-1".into()),
     });

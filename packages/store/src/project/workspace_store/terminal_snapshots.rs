@@ -57,24 +57,3 @@ fn validate(snapshots: &BTreeMap<u64, String>) -> io::Result<()> {
     }
     Ok(())
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn snapshot_history_is_workspace_scoped_and_intentional_deletion_is_final() {
-        let dir = tempfile::tempdir().unwrap();
-        let store = WorkspaceStore::in_directory(dir.path());
-        let a = WorkspaceUuid::new();
-        let b = WorkspaceUuid::new();
-        let snapshots = BTreeMap::from([(3, "한글🙂".into())]);
-        store.save_terminal_snapshots(a, &snapshots).unwrap();
-        store
-            .save_terminal_snapshots(a, &BTreeMap::from([(3, "next".into())]))
-            .unwrap();
-        assert!(store.load_terminal_snapshots(b).unwrap().is_empty());
-        store.delete_terminal_snapshots(a).unwrap();
-        assert!(store.load_terminal_snapshots(a).unwrap().is_empty());
-    }
-}

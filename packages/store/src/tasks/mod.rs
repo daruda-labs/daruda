@@ -25,9 +25,6 @@ pub mod prompt_file;
 pub use daruda_core::git::sanitize_branch_name;
 pub mod task;
 
-#[cfg(test)]
-mod tests;
-
 pub use branch::{branch_name_for, random_branch_name};
 pub use persistence::{load_tasks, load_tasks_in, save_tasks, save_tasks_in, tasks_path_in};
 pub use prompt_file::{

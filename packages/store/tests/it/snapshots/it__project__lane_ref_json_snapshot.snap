@@ -1,5 +1,5 @@
 ---
-source: packages/store/src/project/tests.rs
+source: packages/store/tests/it/project.rs
 expression: "serde_json::to_string_pretty(&r).unwrap()"
 ---
 {
