@@ -1,7 +1,9 @@
 //! Public API tests for path.
 
 use daruda_core::path::*;
-use std::path::{Path, PathBuf};
+use std::path::Path;
+#[cfg(unix)]
+use std::path::PathBuf;
 
 #[cfg(unix)]
 #[test]

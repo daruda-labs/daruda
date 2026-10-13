@@ -245,6 +245,7 @@ mod tests {
 
     /// The exact payload `claude auth status --json` produced for a
     /// subscription login.
+    #[cfg(unix)]
     const SUBSCRIPTION: &str = r#"{
         "loggedIn": true,
         "authMethod": "claude.ai",
