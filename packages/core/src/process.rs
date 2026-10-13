@@ -52,6 +52,18 @@ pub fn resolve_program(program: &OsStr, path: Option<&OsStr>) -> std::path::Path
     backend::resolve_program(program, path)
 }
 
+/// Whether `name` is a portable environment identifier: `[A-Za-z_][A-Za-z0-9_]*`.
+/// This validates shell assignments, not every name accepted by an OS.
+#[must_use]
+pub fn is_valid_env_name(name: &str) -> bool {
+    let mut bytes = name.bytes();
+    let Some(first) = bytes.next() else {
+        return false;
+    };
+    (first.is_ascii_alphabetic() || first == b'_')
+        && bytes.all(|c| c.is_ascii_alphanumeric() || c == b'_')
+}
+
 /// Compare native environment names without imposing Windows rules on Unix.
 pub fn env_name_eq(name: &OsStr, expected: &OsStr) -> bool {
     env_name_eq_for(name, expected, cfg!(windows))

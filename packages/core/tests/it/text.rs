@@ -2,6 +2,23 @@
 
 use daruda_core::text::*;
 
+#[test]
+fn prefixes_preserve_unicode_and_report_only_actual_truncation() {
+    for (text, limit, expected) in [
+        ("", 0, ("", false)),
+        ("abc", 0, ("", true)),
+        ("abc", 2, ("ab", true)),
+        ("abc", 3, ("abc", false)),
+        ("abc", usize::MAX, ("abc", false)),
+        ("한😀é", 2, ("한😀", true)),
+        ("한😀é", 3, ("한😀é", false)),
+        ("e\u{301}x", 1, ("e", true)),
+        ("a\0b", 2, ("a\0", true)),
+    ] {
+        assert_eq!(char_prefix(text, limit), expected, "{text:?}, {limit}");
+    }
+}
+
 /// Helper: char_at for a plain &str, byte-offset based.
 fn str_char_at(s: &str, byte_offset: usize) -> Option<char> {
     if byte_offset >= s.len() {

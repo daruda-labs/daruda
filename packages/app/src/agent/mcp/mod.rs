@@ -213,10 +213,13 @@ impl McpServer {
             McpTransport::Stdio => self.command.clone().unwrap_or_default(),
             McpTransport::Sse | McpTransport::Http => self.url.clone().unwrap_or_default(),
         };
-        if raw.chars().count() <= PREVIEW_MAX_CHARS {
+        let (prefix, truncated) = daruda_core::text::char_prefix(&raw, PREVIEW_MAX_CHARS);
+        if !truncated {
             raw
         } else {
-            let mut out: String = raw.chars().take(PREVIEW_MAX_CHARS - 1).collect();
+            let mut out = daruda_core::text::char_prefix(prefix, PREVIEW_MAX_CHARS - 1)
+                .0
+                .to_owned();
             out.push('…');
             out
         }

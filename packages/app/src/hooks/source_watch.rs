@@ -158,6 +158,7 @@ mod tests {
         wait_for_change(&watch, "link replacement");
     }
 
+    #[cfg(unix)]
     fn wait_for_change(watch: &SourceWatch, phase: &str) {
         let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
         while !watch.changed() {

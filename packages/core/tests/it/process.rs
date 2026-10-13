@@ -6,6 +6,18 @@ use daruda_core::process::*;
 use std::ffi::OsStr;
 
 #[test]
+fn portable_env_names_reject_shell_syntax_and_non_ascii() {
+    for name in ["A", "_", "_a0", "Path", "EXAMPLE_TEST"] {
+        assert!(is_valid_env_name(name), "{name:?}");
+    }
+    for name in [
+        "", "0A", "A=B", "A-B", "A B", "A;echo", "A\n", "A\0", "é", "한", "A１",
+    ] {
+        assert!(!is_valid_env_name(name), "{name:?}");
+    }
+}
+
+#[test]
 fn the_last_path_assignment_is_the_childs() {
     let env = [("HOME", "/h"), ("PATH", "/a"), ("X", "1"), ("PATH", "/b")];
     assert_eq!(

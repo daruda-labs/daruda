@@ -176,7 +176,7 @@ fn set_executable(_path: &Path) -> Result<(), InstallerError> {
 fn render_notify_script(exe: Option<&Path>) -> String {
     let quoted = exe.map_or_else(
         || "''".to_string(),
-        |exe| format!("'{}'", bash_path(exe).replace('\'', r"'\''")),
+        |exe| daruda_core::shell::single_quote_posix(&bash_path(exe)),
     );
     NOTIFY_SCRIPT.replace(INSTALLED_BIN_PLACEHOLDER, &quoted)
 }

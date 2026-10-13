@@ -321,8 +321,8 @@ pub fn body_preview(body: &str) -> String {
     let mut s = rest[..end].replace(['\n', '\r'], " ");
     s = s.split_whitespace().collect::<Vec<_>>().join(" ");
 
-    if s.chars().count() > PREVIEW_MAX_CHARS {
-        let trimmed: String = s.chars().take(PREVIEW_MAX_CHARS).collect();
+    let (trimmed, truncated) = daruda_core::text::char_prefix(&s, PREVIEW_MAX_CHARS);
+    if truncated {
         return format!("{trimmed}…");
     }
     s

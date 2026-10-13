@@ -110,24 +110,8 @@ pub(super) fn split_env_prefixed_tokens(command: &str) -> (Vec<(String, String)>
 }
 
 fn parse_env_assignment(token: &str) -> Option<(&str, &str)> {
-    let eq_pos = token.find('=')?;
-    if eq_pos == 0 {
-        return None;
-    }
-
-    let name = &token[..eq_pos];
-    let value = &token[eq_pos + 1..];
-
-    let mut chars = name.chars();
-    let first = chars.next()?;
-    if !first.is_ascii_alphabetic() && first != '_' {
-        return None;
-    }
-    if !chars.all(|c| c.is_ascii_alphanumeric() || c == '_') {
-        return None;
-    }
-
-    Some((name, value))
+    let (name, value) = token.split_once('=')?;
+    daruda_core::process::is_valid_env_name(name).then_some((name, value))
 }
 
 #[cfg(test)]

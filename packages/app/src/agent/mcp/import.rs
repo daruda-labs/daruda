@@ -257,11 +257,7 @@ fn contains_expansion(value: &Value) -> bool {
 }
 
 pub(crate) fn valid_variable(name: &str) -> bool {
-    !name.is_empty()
-        && name
-            .bytes()
-            .enumerate()
-            .all(|(i, c)| c == b'_' || c.is_ascii_alphabetic() || (i > 0 && c.is_ascii_digit()))
+    daruda_core::process::is_valid_env_name(name)
 }
 
 #[cfg(test)]

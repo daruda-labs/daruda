@@ -71,10 +71,9 @@ pub(super) fn summarize_raw_input(raw_input: Option<&serde_json::Value>) -> Opti
         let value = object.get(*key)?.as_str()?;
         (!value.is_empty()).then_some((*label, value))
     })?;
-    let char_count = value.chars().count();
-    let value = if char_count > RAW_INPUT_SUMMARY_MAX_CHARS {
-        let truncated: String = value.chars().take(RAW_INPUT_SUMMARY_MAX_CHARS).collect();
-        format!("{truncated}…")
+    let (prefix, truncated) = daruda_core::text::char_prefix(value, RAW_INPUT_SUMMARY_MAX_CHARS);
+    let value = if truncated {
+        format!("{prefix}…")
     } else {
         value.to_string()
     };

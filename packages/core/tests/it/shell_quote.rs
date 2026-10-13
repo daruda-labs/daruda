@@ -4,6 +4,20 @@ use daruda_core::shell::quote::*;
 use std::path::PathBuf;
 
 #[test]
+fn forced_posix_quotes_preserve_literal_values() {
+    for (value, expected) in [
+        ("", "''"),
+        ("abc-_/9", "'abc-_/9'"),
+        ("it's", "'it'\\''s'"),
+        ("한 $HOME\n\\`", "'한 $HOME\n\\`'"),
+        ("a\0b", "'a\0b'"),
+    ] {
+        assert_eq!(single_quote_posix(value), expected);
+    }
+    assert_eq!(quote_str("abc-_/9", Shell::Posix), "abc-_/9");
+}
+
+#[test]
 fn detect_shell_flavors() {
     let cases = [
         ("/bin/zsh", Shell::Posix),

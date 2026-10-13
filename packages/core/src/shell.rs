@@ -6,7 +6,7 @@
 
 pub mod quote;
 
-pub use quote::Shell;
+pub use quote::{Shell, single_quote_posix};
 
 /// Resolve a POSIX utility supplied by Git for Windows without requiring
 /// its private `usr/bin` directory on the GUI's PATH. Unix uses normal lookup.

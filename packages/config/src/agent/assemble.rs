@@ -34,7 +34,7 @@ pub enum LaunchTransport<'a> {
 /// expansion at all, so this is safe for a value containing `"`, `$`,
 /// backticks or `\`.
 fn shell_single_quote(value: &str) -> String {
-    format!("'{}'", value.replace('\'', r"'\''"))
+    daruda_core::shell::single_quote_posix(value)
 }
 
 /// Whether `name` is an environment-variable name daruda may put into a
@@ -54,12 +54,7 @@ fn shell_single_quote(value: &str) -> String {
 /// which is what lets the assembler treat it as a precondition.
 #[must_use]
 pub fn is_valid_env_name(name: &str) -> bool {
-    let mut chars = name.chars();
-    let Some(first) = chars.next() else {
-        return false;
-    };
-    (first.is_ascii_alphabetic() || first == '_')
-        && chars.all(|c| c.is_ascii_alphanumeric() || c == '_')
+    daruda_core::process::is_valid_env_name(name)
 }
 
 /// Build the command line that launches `adapter_command` through

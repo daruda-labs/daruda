@@ -77,10 +77,11 @@ fn changed_lines(diff: &DiffView) -> Vec<String> {
 }
 
 fn clip(line: &str) -> String {
-    if line.chars().count() <= LINE_CHARS {
+    let (prefix, truncated) = daruda_core::text::char_prefix(line, LINE_CHARS);
+    if !truncated {
         return line.to_string();
     }
-    let mut kept: String = line.chars().take(LINE_CHARS).collect();
+    let mut kept = prefix.to_owned();
     kept.push('…');
     kept
 }

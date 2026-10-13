@@ -1,10 +1,9 @@
 //! UTF-8 text navigation shared across the GPUI boundary.
 //!
 //! Byte-offset word and line expansion, plus the selection hit-test that
-//! turns a pixel span into "is this cell selected". Everything here takes
-//! `&str`-shaped input through a `char_at` closure rather than a concrete
-//! string type, so a `ropey::Rope`-backed editor and a plain `&str` reader
-//! share one implementation.
+//! turns a pixel span into "is this cell selected". Navigation takes a
+//! `char_at` closure so rope-backed editors and plain strings can share it.
+//! Plain string prefixes use [`char_prefix`].
 //!
 //! Deliberately *not* here: what counts as a word. The editor treats
 //! `foo/bar.txt` as three tokens while the terminal treats it as one path,
@@ -18,6 +17,16 @@
 //! callable; clippy's `incompatible_msrv` is what would say otherwise.
 
 use std::ops::Range;
+
+/// Return at most `max_chars` Unicode scalar values and whether text was cut.
+/// The prefix borrows from `text`; no ellipsis is added. A combining mark
+/// counts separately from its base character, as with [`str::chars`].
+pub fn char_prefix(text: &str, max_chars: usize) -> (&str, bool) {
+    match text.char_indices().nth(max_chars) {
+        Some((end, _)) => (&text[..end], true),
+        None => (text, false),
+    }
+}
 
 /// Category of a character for word-boundary detection.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

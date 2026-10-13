@@ -373,7 +373,7 @@ fn validate_command_required_for_stdio_only() {
 
 #[test]
 fn server_command_preview_truncates_with_ellipsis() {
-    let s = McpServer {
+    let mut s = McpServer {
         name: "n".into(),
         scope: McpScope::User,
         transport: McpTransport::Stdio,
@@ -389,6 +389,13 @@ fn server_command_preview_truncates_with_ellipsis() {
     let count = preview.chars().count();
     assert_eq!(count, super::PREVIEW_MAX_CHARS);
     assert!(preview.ends_with('…'));
+    s.command = Some("한".repeat(super::PREVIEW_MAX_CHARS));
+    assert_eq!(s.command_preview(), s.command.as_deref().unwrap());
+    s.command.as_mut().unwrap().push('😀');
+    assert_eq!(
+        s.command_preview(),
+        format!("{}…", "한".repeat(super::PREVIEW_MAX_CHARS - 1))
+    );
 }
 
 #[test]

@@ -633,16 +633,16 @@ fn skill_row(
 /// `RIGHT_PANEL_BODY_FONT_SIZE` changes meaningfully.
 const SKILL_DESCRIPTION_MAX_CHARS: usize = 80;
 
-/// Truncate `s` to at most `max_chars` Unicode characters and append
-/// `…` when truncation actually happens. `s.chars().count()` is O(n)
-/// but the inputs here are short (panel-row descriptions), so the
-/// cost is negligible compared to the layout pass.
+/// Reserve one character for `…` when truncation happens.
+/// A zero limit still produces `…` for nonempty input.
 fn truncate_with_ellipsis(s: &str, max_chars: usize) -> String {
-    let count = s.chars().count();
-    if count <= max_chars {
+    let (prefix, truncated) = daruda_core::text::char_prefix(s, max_chars);
+    if !truncated {
         return s.to_string();
     }
-    let mut out: String = s.chars().take(max_chars.saturating_sub(1)).collect();
+    let mut out = daruda_core::text::char_prefix(prefix, max_chars.saturating_sub(1))
+        .0
+        .to_owned();
     out.push('…');
     out
 }
@@ -674,6 +674,15 @@ fn count_unique_plugins(skills: &[Skill]) -> usize {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn description_truncation_keeps_its_ellipsis_budget() {
+        assert_eq!(truncate_with_ellipsis("", 0), "");
+        assert_eq!(truncate_with_ellipsis("한", 0), "…");
+        assert_eq!(truncate_with_ellipsis("한😀", 1), "…");
+        assert_eq!(truncate_with_ellipsis("한😀", 2), "한😀");
+        assert_eq!(truncate_with_ellipsis("한😀글", 2), "한…");
+    }
 
     fn check_actions(cx: &mut gpui::TestAppContext, scope: SkillScope, selectors: &[&'static str]) {
         let plugin = matches!(scope, SkillScope::Plugin);

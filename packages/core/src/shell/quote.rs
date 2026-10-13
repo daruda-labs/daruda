@@ -88,6 +88,13 @@ fn quote_posix(s: &str) -> String {
     if is_posix_safe(s) {
         return s.to_string();
     }
+    single_quote_posix(s)
+}
+
+/// Always wrap `s` in POSIX single quotes, escaping embedded quotes.
+/// Like [`quote_str`], this preserves input bytes, including NUL bytes;
+/// callers supplying process arguments must reject NUL separately.
+pub fn single_quote_posix(s: &str) -> String {
     let mut out = String::with_capacity(s.len() + 2);
     out.push('\'');
     for ch in s.chars() {
