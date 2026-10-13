@@ -20,8 +20,8 @@ use gpui::{
 };
 
 use crate::surface::strings as s;
+use crate::ui::ButtonVariants as _;
 use crate::ui::theme;
-use crate::ui::{ButtonVariants as _, Sizable as _};
 use crate::workspace::layout::{BottomDockSnapshot, Dock};
 
 /// Build the queued-prompt strip, or `None` when the focused pane has no queued
@@ -43,9 +43,8 @@ pub(super) fn render(snap: &BottomDockSnapshot, cx: &mut Context<Dock>) -> Optio
     // Header: "N queued" + Resume (only when a Stop parked prompts) + clear-all.
     let clear_all = {
         let workspace = snap.workspace.clone();
-        crate::ui::button("agent-queue-clear-all", s::bottom_dock::queue_clear_all())
+        crate::ui::button_compact("agent-queue-clear-all", s::bottom_dock::queue_clear_all())
             .ghost()
-            .xsmall()
             .on_click(cx.listener(move |_dock, _: &ClickEvent, window, cx| {
                 if let Some(ws) = workspace.upgrade() {
                     ws.update(cx, |ws, cx| ws.clear_queued_prompts(pane_id, window, cx));
@@ -60,13 +59,13 @@ pub(super) fn render(snap: &BottomDockSnapshot, cx: &mut Context<Dock>) -> Optio
     let armed = queue.resume_armed;
     let resume = has_paused.then(|| {
         let workspace = snap.workspace.clone();
-        let button = crate::ui::button("agent-queue-resume", s::bottom_dock::queue_resume())
-            .xsmall()
-            .on_click(cx.listener(move |_dock, _: &ClickEvent, _window, cx| {
-                if let Some(ws) = workspace.upgrade() {
-                    ws.update(cx, |ws, cx| ws.resume_queued_prompts(pane_id, cx));
-                }
-            }));
+        let button =
+            crate::ui::button_compact("agent-queue-resume", s::bottom_dock::queue_resume())
+                .on_click(cx.listener(move |_dock, _: &ClickEvent, _window, cx| {
+                    if let Some(ws) = workspace.upgrade() {
+                        ws.update(cx, |ws, cx| ws.resume_queued_prompts(pane_id, cx));
+                    }
+                }));
         if armed {
             button.primary()
         } else {

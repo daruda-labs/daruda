@@ -49,6 +49,7 @@ pub mod mermaid_palette;
 pub mod picker_row;
 pub mod placeholder;
 pub mod popover;
+pub mod popover_panel;
 pub mod progress;
 pub mod pulse_clock;
 pub mod radio;
@@ -69,12 +70,14 @@ pub mod test_support;
 pub use agent_icon::{agent_icon, agent_menu_icon};
 pub use badge::Badge;
 pub use button::{
-    Button, button, button_add_tile, button_bare, button_bare_on_surface, button_chip,
-    button_chip_on_surface, button_danger, button_edit_cancel_glyph, button_edit_glyph,
+    Button, button, button_add_tile, button_bare, button_bare_compact,
+    button_bare_compact_on_surface, button_bare_on_surface, button_chip, button_chip_on_surface,
+    button_compact, button_danger, button_edit_cancel_glyph, button_edit_glyph,
     button_header_action, button_icon, button_icon_danger, button_icon_glyph,
     button_icon_on_surface, button_on_surface, button_primary, button_status_pill,
     button_status_pill_bare, button_toggle_icon, button_window_control,
-    button_window_control_danger, button_with_icon,
+    button_window_control_danger, button_with_icon, button_with_surface, compact_button,
+    compact_icon_button, field_trigger,
 };
 pub use button_group::{ButtonGroup, button_group, button_group_on_surface, choice_variant};
 pub use cached_image::CachedImage;
@@ -88,7 +91,10 @@ pub use code_editor::{
 pub use dependent::dependent;
 pub use disclosure::{Disclosure, DisclosureAxis, disclosure};
 pub use divider::Divider;
-pub use form_helpers::{checkbox_row, field_column, field_row};
+pub use form_helpers::{
+    checkbox_row, field_column, field_row, form_actions, form_field, form_footer, form_label,
+    validated_field,
+};
 pub use group_box::{GroupBox, GroupBoxVariants, group_box};
 pub use input::{
     CompletionProvider, HistoryDir, InputEvent, InputGrowMode, InputPaste, InputState, Rope,
@@ -105,8 +111,9 @@ pub use menu::{
     DropdownMenu, PopupMenu, PopupMenuItem, menu_builder, popup_menu_deferred, stacked_menu_builder,
 };
 pub use picker_row::{picker_empty, picker_row};
-pub use placeholder::placeholder_text;
+pub use placeholder::{empty_message, message_line, placeholder_text};
 pub use popover::{Popover, PopoverState};
+pub use popover_panel::{PanelLimits, popover_panel};
 pub use progress::{Progress, progress};
 pub use pulse_clock::StatusPulseClock;
 pub use radio::{Radio, radio};

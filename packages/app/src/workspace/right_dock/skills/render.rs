@@ -20,13 +20,12 @@
 
 use crate::ui::theme;
 use crate::ui::theme::DarudaTheme;
-use gpui::{AnyElement, Context, IntoElement, MouseButton, SharedString, div, prelude::*, px};
+use gpui::{AnyElement, Context, IntoElement, SharedString, div, prelude::*, px};
 
 use super::super::super::layout::Dock;
 use super::super::super::layout::RightDockSnapshot;
 use crate::agent::skills::{Skill, SkillScope, SkillsSnapshot};
 use crate::surface::strings;
-use crate::ui::Sizable as _;
 use crate::workspace::Workspace;
 use crate::workspace::right_dock::section::DockSection;
 use crate::workspace::right_dock::section_view::{
@@ -175,37 +174,22 @@ fn filter_skills(skills: &[Skill], query_lower: &str) -> Vec<Skill> {
         .collect()
 }
 
-/// Search input row. Wraps `RightDockSnapshot::skill_search_input` in a
-/// relative container so the in-field `✕` button can sit absolutely on
-/// the trailing edge. The icon only renders while the query is
-/// non-empty — the row collapses back to a plain input at rest.
+/// Search chrome owns the clear slot; the workspace owns the query change.
 fn search_row(snap: &RightDockSnapshot, cx: &gpui::App) -> impl IntoElement {
     let has_query = !snap.skill_search_query.trim().is_empty();
     let workspace = snap.workspace.clone();
-    div()
-        .relative()
-        .flex()
-        .w_full()
-        .child(crate::ui::search_input(&snap.skill_search_input, cx, ()))
-        .when(has_query, |row| {
-            row.child(
-                crate::ui::button_icon("skill-search-clear", crate::ui::icons::CLOSE, cx)
-                    .tooltip(strings::common::search_clear())
-                    .absolute()
-                    .right(px(theme::PAD_XS))
-                    .top_0()
-                    .on_mouse_down(MouseButton::Left, move |_, window, cx| {
-                        // The mouse-down lands on the absolute overlay,
-                        // not on the Input, so propagation stop is
-                        // belt-and-braces — the input doesn't observe
-                        // this event anyway.
-                        cx.stop_propagation();
-                        if let Some(ws) = workspace.upgrade() {
-                            ws.update(cx, |ws, cx| ws.clear_skill_search(window, cx));
-                        }
-                    }),
-            )
-        })
+    crate::ui::list_page::search(
+        "skill-search-clear",
+        strings::common::search_clear().into(),
+        &snap.skill_search_input,
+        has_query,
+        move |window, cx| {
+            if let Some(ws) = workspace.upgrade() {
+                ws.update(cx, |ws, cx| ws.clear_skill_search(window, cx));
+            }
+        },
+        cx,
+    )
 }
 
 /// Body shown when a non-empty search yields zero matches across every
@@ -335,11 +319,8 @@ fn scope_body(
 
 /// Quiet one-line explanation for a scope with nothing to list.
 fn empty_hint(msg: impl Into<SharedString>, t: &DarudaTheme) -> AnyElement {
-    div()
+    crate::ui::message_line(msg, t)
         .pb(px(theme::DOCK_SECTION_HEADER_PAD_Y))
-        .text_size(px(theme::RIGHT_PANEL_LABEL_FONT_SIZE))
-        .text_color(t.text_subtle)
-        .child(msg.into())
         .into_any_element()
 }
 
@@ -470,7 +451,7 @@ fn skill_row(
     t: &DarudaTheme,
     cx: &gpui::App,
 ) -> AnyElement {
-    use crate::ui::{ButtonVariants as _, button, button_delete_glyph, button_icon};
+    use crate::ui::{ButtonVariants as _, button_delete_glyph, button_icon};
 
     let dir = s.dir.clone();
     let scope = s.scope;
@@ -510,8 +491,7 @@ fn skill_row(
     // Invocation remains a button; the secondary line gets the full row width.
     let skill_for_invoke = s.clone();
     let workspace_for_invoke = workspace.clone();
-    let name_button = button(name_btn_id, SharedString::from(display_name))
-        .xsmall()
+    let name_button = crate::ui::button_compact(name_btn_id, SharedString::from(display_name))
         .ghost()
         .p(px(0.))
         .max_w_full()

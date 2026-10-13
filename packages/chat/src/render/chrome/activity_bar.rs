@@ -32,8 +32,8 @@ use daruda_transcript::fold_mode::FoldMode;
 use daruda_ui::theme;
 use daruda_ui::theme::PaneSurfaceTokens;
 use daruda_ui::{
-    Disableable as _, Icon, IconName, Popover, Selectable as _, Sizable as _,
-    button_bare_on_surface, button_chip_on_surface, icons, tab_bar,
+    Disableable as _, Icon, IconName, Popover, Selectable as _, button_bare_compact_on_surface,
+    button_chip_on_surface, icons, tab_bar,
 };
 
 const ICON_EXPAND: &str = "icons/ui/expand.svg";
@@ -85,23 +85,21 @@ pub(in crate::render) fn activity_bar(
     // palette), which the UI theme's control colours know nothing about.
     let surface = PaneSurfaceTokens::agent_chat(cx).dimmed(props.dim);
 
-    let expand = button_bare_on_surface(
+    let expand = button_bare_compact_on_surface(
         ("agent-chat-expand-all", props.pane_id as usize),
         &surface,
         cx,
     )
-    .xsmall()
     .icon(Icon::empty().path(ICON_EXPAND))
     .tooltip(SharedString::from(s::agent_chat::expand_all()))
     .disabled(!props.has_items)
     .debug_selector(|| "agent-chat-expand-all".into())
     .on_click(cx.listener(move |this, _ev, window, cx| this.set_all_folds(true, window, cx)));
-    let collapse = button_bare_on_surface(
+    let collapse = button_bare_compact_on_surface(
         ("agent-chat-collapse-all", props.pane_id as usize),
         &surface,
         cx,
     )
-    .xsmall()
     .icon(Icon::empty().path(ICON_COMPRESS))
     .tooltip(SharedString::from(s::agent_chat::collapse_all()))
     .disabled(!props.has_items)
@@ -113,12 +111,11 @@ pub(in crate::render) fn activity_bar(
     } else {
         s::agent_chat::reading_width_on()
     };
-    let reading_width = button_bare_on_surface(
+    let reading_width = button_bare_compact_on_surface(
         ("agent-chat-reading-width", props.pane_id as usize),
         &surface,
         cx,
     )
-    .xsmall()
     .icon(Icon::empty().path(ICON_WIDTH_WIDE))
     .tooltip(SharedString::from(reading_tooltip))
     .selected(reading_selected)
@@ -254,7 +251,11 @@ fn view_options_chip(
     .p_0()
     .trigger(
         (if props.compact_options {
-            button_bare_on_surface(("agent-chat-view-options", pane_id as usize), surface, cx)
+            button_bare_compact_on_surface(
+                ("agent-chat-view-options", pane_id as usize),
+                surface,
+                cx,
+            )
         } else {
             button_chip_on_surface(
                 ("agent-chat-view-options", pane_id as usize),
@@ -264,7 +265,6 @@ fn view_options_chip(
             )
             .child(Icon::new(IconName::ChevronDown))
         })
-        .xsmall()
         .tab_stop(true)
         .icon(Icon::new(IconName::Settings2))
         .when(adjusted, |button| {

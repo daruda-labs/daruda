@@ -1,14 +1,11 @@
 //! Shared list-page chrome; callers own scope, filtering and state transitions.
 
 use gpui::{
-    AnyElement, App, Div, ElementId, Entity, FontWeight, IntoElement, MouseButton, SharedString,
-    Window, div, prelude::*, px,
+    AnyElement, App, Div, ElementId, Entity, FontWeight, IntoElement, SharedString, Window, div,
+    prelude::*, px,
 };
 
-use super::{
-    Button, ButtonVariants as _, InputState, button_bare, button_icon, disclosure, icons,
-    search_input, theme,
-};
+use super::{Button, ButtonVariants as _, InputState, button_bare, disclosure, theme};
 
 pub fn header(
     title: impl Into<SharedString>,
@@ -50,25 +47,17 @@ pub fn search(
     cx: &App,
 ) -> Div {
     div()
-        .relative()
         .flex()
         .w_full()
         .min_w_0()
-        .child(search_input(state, cx, ()))
-        .when(has_query, |row| {
-            row.child(
-                button_icon(clear_id, icons::CLOSE, cx)
-                    .debug_selector(move || clear_id.into())
-                    .tooltip(clear_tooltip)
-                    .absolute()
-                    .right(px(theme::PAD_XS))
-                    .top_0()
-                    .on_mouse_down(MouseButton::Left, move |_, window, cx| {
-                        cx.stop_propagation();
-                        on_clear(window, cx);
-                    }),
-            )
-        })
+        .child(crate::input::search_with_clear(
+            clear_id,
+            clear_tooltip,
+            state,
+            has_query,
+            on_clear,
+            cx,
+        ))
 }
 
 pub fn results(message: impl Into<SharedString>, clear: Option<AnyElement>, cx: &App) -> Div {
@@ -108,15 +97,13 @@ pub fn empty(message: impl Into<SharedString>, cx: &App) -> Div {
         .items_start()
         .gap(px(theme::GAP_STANDARD))
         .py(px(theme::DOCK_PAGE_PAD))
-        .text_size(px(theme::FONT_SIZE_MD))
-        .text_color(theme::current(cx).text_muted)
-        .child(message.into())
+        .child(crate::empty_message(message, cx))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use gpui::{Context, Render, TestAppContext, VisualTestContext};
+    use gpui::{Context, Focusable as _, Render, TestAppContext, VisualTestContext};
 
     struct Probe {
         input: Entity<InputState>,
@@ -144,6 +131,8 @@ mod tests {
                 },
                 cx,
             )
+            .w(px(240.))
+            .debug_selector(|| "search-field-probe".into())
         }
     }
 
@@ -152,20 +141,58 @@ mod tests {
         cx: &mut TestAppContext,
     ) {
         crate::test_support::init_gpui_component(cx);
-        let window = cx.add_window(|window, cx| Probe {
-            input: cx.new(|cx| {
-                let mut input = InputState::new(window, cx);
-                input.set_value("query", window, cx);
-                input
-            }),
-            cleared: 0,
+        let mut probe = None;
+        let window = cx.add_window(|window, cx| {
+            let entity = cx.new(|cx| Probe {
+                input: cx.new(|cx| {
+                    let mut input = InputState::new(window, cx);
+                    input.set_value(
+                        "A long query whose caret must stay clear of the close button",
+                        window,
+                        cx,
+                    );
+                    input
+                }),
+                cleared: 0,
+            });
+            probe = Some(entity.clone());
+            gpui_component::Root::new(entity, window, cx)
         });
+        let probe = probe.unwrap();
         let mut vcx = VisualTestContext::from_window(window.into(), cx);
         vcx.run_until_parked();
         let clear = vcx.debug_bounds("clear-query").unwrap();
+        let field = vcx.debug_bounds("search-field-probe").unwrap();
+        assert_eq!(field.size.height, px(28.));
+        assert_eq!(clear.center().y, field.center().y);
+        window
+            .update(&mut vcx, |_, _, cx| {
+                let probe = probe.read(cx);
+                let input = probe.input.read(cx);
+                let mut text = input.last_bounds().unwrap();
+                text.origin -= input.scroll_handle().offset();
+                assert!(
+                    text.right() <= clear.left(),
+                    "search text overlaps the clear action: {text:?}, {clear:?}"
+                );
+            })
+            .unwrap();
         vcx.simulate_click(clear.center(), Default::default());
         vcx.run_until_parked();
         assert!(vcx.debug_bounds("clear-query").is_none());
-        assert_eq!(window.read_with(&vcx, |probe, _| probe.cleared).unwrap(), 1);
+        assert_eq!(probe.read_with(&vcx, |probe, _| probe.cleared), 1);
+        assert_eq!(vcx.debug_bounds("search-field-probe").unwrap(), field);
+        window
+            .update(&mut vcx, |_, window, cx| {
+                assert!(
+                    probe
+                        .read(cx)
+                        .input
+                        .read(cx)
+                        .focus_handle(cx)
+                        .is_focused(window)
+                );
+            })
+            .unwrap();
     }
 }

@@ -4,9 +4,63 @@
 //! builder only if a real second/third axis appears.
 
 use crate::theme;
-use gpui::{IntoElement, SharedString, div, prelude::*, px};
+use gpui::{App, Div, IntoElement, SharedString, div, prelude::*, px};
 
 const LABEL_WIDTH: f32 = 120.0;
+
+pub fn form_label(text: impl Into<SharedString>, t: &theme::DarudaTheme) -> Div {
+    div()
+        .text_size(px(theme::FONT_SIZE_LG))
+        .font_weight(gpui::FontWeight::SEMIBOLD)
+        .text_color(t.text_body)
+        .child(text.into())
+}
+
+pub fn form_field(label: impl IntoElement, control: impl IntoElement) -> Div {
+    div()
+        .flex()
+        .flex_col()
+        .min_w_0()
+        .gap(px(theme::FORM_MODAL_FIELD_GAP))
+        .child(label)
+        .child(control)
+}
+
+pub fn form_footer(cx: &App) -> Div {
+    div()
+        .w_full()
+        .flex()
+        .flex_wrap()
+        .items_center()
+        .justify_end()
+        .gap(px(theme::GAP_LG))
+        .border_t_1()
+        .border_color(theme::current(cx).border)
+        .pt(px(theme::FORM_MODAL_FOOTER_PADDING))
+}
+
+pub fn form_actions(buttons: impl IntoElement, error: Option<&SharedString>) -> Div {
+    div()
+        .w_full()
+        .min_w_0()
+        .flex()
+        .flex_col()
+        .gap(px(theme::GAP_LG))
+        .children(error.map(|message| crate::alert::error("form-save-error", message.clone())))
+        .child(buttons)
+}
+
+pub fn validated_field(
+    id: impl Into<gpui::ElementId>,
+    control: impl IntoElement,
+    error: Option<&SharedString>,
+) -> Div {
+    div()
+        .flex()
+        .flex_col()
+        .child(control)
+        .children(error.map(|message| crate::alert::error(id, message.clone())))
+}
 
 /// Fixed-label form row; label colour flows through `gpui_component::Label`.
 pub fn field_row(label: impl Into<SharedString>, input: impl IntoElement) -> impl IntoElement {

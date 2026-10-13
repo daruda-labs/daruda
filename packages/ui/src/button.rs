@@ -18,9 +18,37 @@ use gpui_component::button::{ButtonCustomVariant, ButtonVariants as _};
 
 pub use gpui_component::button::Button;
 
+#[cfg(test)]
+#[path = "button/geometry_tests.rs"]
+mod geometry_tests;
+
 /// Default secondary button — `small()` + label, excluded from Tab.
 pub fn button(id: impl Into<ElementId>, label: impl Into<SharedString>) -> Button {
-    Button::new(id).small().label(label).tab_stop(false)
+    standard_button(Button::new(id).small().label(label).tab_stop(false))
+}
+
+fn standard_button(button: Button) -> Button {
+    button
+        .h(px(theme::BUTTON_HEIGHT))
+        .px(px(theme::BUTTON_STANDARD_PAD_X))
+        .py(px(theme::BUTTON_STANDARD_PAD_Y))
+        .text_size(px(theme::FONT_SIZE_MD))
+        .line_height(px(theme::INPUT_LINE_HEIGHT))
+}
+
+/// Pixel-sized compact text action; use [`compact_icon_button`] for icons.
+pub fn compact_button(button: Button) -> Button {
+    button
+        .xsmall()
+        .h(px(theme::BUTTON_COMPACT_HEIGHT))
+        .px(px(theme::BUTTON_COMPACT_PAD_X))
+        .py(px(theme::BUTTON_COMPACT_PAD_Y))
+        .text_size(px(theme::FONT_SIZE_MD))
+        .line_height(px(theme::BUTTON_COMPACT_LINE_HEIGHT))
+}
+
+pub fn button_compact(id: impl Into<ElementId>, label: impl Into<SharedString>) -> Button {
+    compact_button(button(id, label))
 }
 
 /// Primary variant.
@@ -36,7 +64,24 @@ pub fn button_danger(id: impl Into<ElementId>, label: impl Into<SharedString>) -
 /// Bare button (no label) — for icon-only buttons where the caller
 /// chains `.icon(...)`.
 pub fn button_bare(id: impl Into<ElementId>) -> Button {
-    Button::new(id).small().tab_stop(false)
+    Button::new(id)
+        .small()
+        .tab_stop(false)
+        .h(px(theme::CONTROL_TARGET_SIZE))
+        .text_size(px(theme::FONT_SIZE_MD))
+        .line_height(px(theme::INPUT_LINE_HEIGHT))
+}
+
+pub fn button_bare_compact(id: impl Into<ElementId>) -> Button {
+    compact_icon_button(button_bare(id))
+}
+
+/// Compact icon target with no text padding and pixel-sized vendor artwork.
+pub fn compact_icon_button(button: Button) -> Button {
+    compact_button(button)
+        .with_size(px(theme::CONTROL_ICON_SIZE))
+        .w(px(theme::BUTTON_COMPACT_HEIGHT))
+        .p(px(0.))
 }
 
 /// Labelled action with leading 16px artwork, independent of the button tier.
@@ -45,12 +90,9 @@ pub fn button_with_icon(
     label: impl Into<SharedString>,
     path: &'static str,
 ) -> Button {
-    button_bare(id).child(super::icons::icon(path)).child(
-        gpui::div()
-            .flex_none()
-            .line_height(gpui::relative(1.))
-            .child(label.into()),
-    )
+    standard_button(button_bare(id))
+        .child(super::icons::icon(path))
+        .child(label.into())
 }
 
 /// Ghost chrome with a fixed 24px hit target and independent 16px SVG.
@@ -134,6 +176,11 @@ pub(crate) fn surface_button_variant(surface: &PaneSurfaceTokens, cx: &App) -> B
         .active(surface.active_tint)
 }
 
+/// Apply pane-owned colours to an existing action without changing its geometry.
+pub fn button_with_surface(button: Button, surface: &PaneSurfaceTokens, cx: &App) -> Button {
+    button.custom(surface_button_variant(surface, cx))
+}
+
 /// Labelled button for a pane-local surface — the agent-chat activity bar's
 /// chips, and anything else sitting on a terminal-mirrored surface.
 ///
@@ -152,7 +199,7 @@ pub fn button_on_surface(
     surface: &PaneSurfaceTokens,
     cx: &App,
 ) -> Button {
-    button(id, label).custom(surface_button_variant(surface, cx))
+    button_with_surface(button(id, label), surface, cx)
 }
 
 /// A labelled chip for a pane-local surface, with an always-on hairline.
@@ -181,8 +228,7 @@ pub fn button_chip_on_surface(
     // `border_color` on top of the resolved style, so a caller's border would
     // survive at rest and vanish the moment the pointer touched the chip.
     let variant = surface_button_variant(surface, cx).border(surface.control_border);
-    button(id, label)
-        .xsmall()
+    button_compact(id, label)
         .custom(variant)
         .rounded(px(theme::RADIUS_SM))
 }
@@ -194,7 +240,44 @@ pub fn button_bare_on_surface(
     surface: &PaneSurfaceTokens,
     cx: &App,
 ) -> Button {
-    button_bare(id).custom(surface_button_variant(surface, cx))
+    button_with_surface(button_bare(id), surface, cx)
+}
+
+pub fn button_bare_compact_on_surface(
+    id: impl Into<ElementId>,
+    surface: &PaneSurfaceTokens,
+    cx: &App,
+) -> Button {
+    compact_icon_button(button_bare_on_surface(id, surface, cx))
+}
+
+/// Popover trigger whose value and trailing content align with standard fields.
+pub fn field_trigger(
+    id: impl Into<ElementId>,
+    value: impl Into<SharedString>,
+    trailing: impl gpui::IntoElement,
+    cx: &App,
+) -> Button {
+    let value = value.into();
+    crate::field_geometry::FieldGeometry::STANDARD
+        .apply(button_bare(id))
+        .outline()
+        .tab_stop(true)
+        .w_full()
+        .h(px(theme::INPUT_STANDARD_HEIGHT))
+        .flex_col()
+        .items_stretch()
+        .tooltip(value.clone())
+        .child(
+            gpui::div()
+                .flex_1()
+                .min_w_0()
+                .truncate()
+                .text_color(theme::current(cx).text_primary)
+                .child(value),
+        )
+        .child(trailing)
+        .child(crate::icons::icon(crate::icons::EXPAND_MORE))
 }
 
 /// Chip-style button — outlined, compact padding, `xsmall` text,
@@ -430,7 +513,6 @@ mod tests {
                 .child(
                     button_with_icon("new", "New", crate::icons::ADD)
                         .primary()
-                        .xsmall()
                         .debug_selector(|| "chrome-labelled".into()),
                 )
         }

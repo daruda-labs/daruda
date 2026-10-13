@@ -445,6 +445,8 @@ impl RenderOnce for Button {
         let is_disabled = self.disabled;
         let hoverable = self.hoverable();
         let normal_style = style.normal(self.outline, cx);
+        let label_font_size = self.style.text.font_size;
+        let label_line_height = self.style.text.line_height;
         let icon_size = match self.size {
             Size::Size(v) => Size::Size(v * 0.75),
             _ => self.size,
@@ -583,6 +585,10 @@ impl RenderOnce for Button {
                     .items_center()
                     .justify_center()
                     .button_text_size(self.size)
+                    .when_some(label_font_size, |this, font_size| this.text_size(font_size))
+                    .when_some(label_line_height, |this, line_height| {
+                        this.line_height(line_height)
+                    })
                     .map(|this| match self.size {
                         Size::XSmall => this.gap_1(),
                         Size::Small => this.gap_1(),
@@ -601,7 +607,12 @@ impl RenderOnce for Button {
                         )
                     })
                     .when_some(self.label, |this, label| {
-                        this.child(div().flex_none().line_height(relative(1.)).child(label))
+                        this.child(
+                            div()
+                                .flex_none()
+                                .line_height(label_line_height.unwrap_or(relative(1.).into()))
+                                .child(label),
+                        )
                     })
                     .children(self.children)
                     .when(self.dropdown_caret, |this| {

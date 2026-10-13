@@ -25,7 +25,7 @@ use crate::ui::Disableable as _;
 use crate::ui::WindowExt as _;
 use crate::ui::select::{self, SelectOption, SelectState};
 use crate::ui::theme;
-use crate::ui::{InputEvent, InputState, button, button_primary, input};
+use crate::ui::{InputEvent, InputState, button, button_primary, form_input};
 use crate::workspace::ModalView;
 use crate::workspace::Workspace;
 use daruda_config::SessionHostEntry;
@@ -358,7 +358,7 @@ impl Render for SessionHostModal {
             .flex_col()
             .gap(px(theme::FORM_MODAL_SECTION_GAP))
             .child(field_label(s::session_host::field_host(), &t))
-            .child(select::select(&self.registry_select, cx, 1_isize));
+            .child(select::form_select(&self.registry_select, cx, 1_isize));
 
         if self.catalog.is_empty() {
             body = body.child(
@@ -372,7 +372,7 @@ impl Render for SessionHostModal {
         if showing_session_path {
             body = body
                 .child(field_label(s::session_host::field_session_path(), &t))
-                .child(input(&self.session_path_input, cx, 2));
+                .child(form_input(&self.session_path_input, cx, 2));
         }
 
         let save_label = if submitting {

@@ -68,41 +68,40 @@ impl TextRoles {
 /// height stops at the window edge below the trigger, so the vendored snap
 /// does not lift the panel over the control that opened it.
 pub fn panel_root(window: &Window, state: &PopoverState) -> Div {
-    let viewport = window.viewport_size();
     let below = state
         .trigger_bounds()
-        .map(|bounds| f32::from(bounds.bottom()) + theme::TRANSCRIPT_EDITOR_TRIGGER_GAP);
-    let border = 2.0 * theme::TRANSCRIPT_EDITOR_PANEL_BORDER;
-    div()
+        .map(|bounds| bounds.bottom() + px(theme::TRANSCRIPT_EDITOR_TRIGGER_GAP));
+    daruda_ui::popover_panel(window, panel_limits(), below)
         .debug_selector(|| "transcript-editor-panel".into())
-        .w(px(panel_outer_w(f32::from(viewport.width)) - border))
-        .max_h(px(
-            panel_outer_max_h(f32::from(viewport.height), below) - border
-        ))
-        .overflow_hidden()
-        .flex()
-        .flex_col()
+}
+
+fn panel_limits() -> daruda_ui::PanelLimits {
+    daruda_ui::PanelLimits {
+        width: theme::TRANSCRIPT_EDITOR_RULES_PANEL_W,
+        max_height: theme::TRANSCRIPT_EDITOR_RULES_PANEL_MAX_H,
+        min_height: theme::TRANSCRIPT_EDITOR_MIN_PANEL_H,
+        margin: theme::TRANSCRIPT_EDITOR_WINDOW_MARGIN,
+        chrome: 2.0 * theme::TRANSCRIPT_EDITOR_PANEL_BORDER,
+    }
 }
 
 /// The outer width: the design width, or the window less both margins.
+#[cfg(test)]
 fn panel_outer_w(viewport_w: f32) -> f32 {
-    theme::TRANSCRIPT_EDITOR_RULES_PANEL_W
-        .min(viewport_w - 2.0 * theme::TRANSCRIPT_EDITOR_WINDOW_MARGIN)
-        .max(0.0)
+    panel_limits()
+        .outer_size(gpui::size(px(viewport_w), px(0.)), None)
+        .width
+        .into()
 }
 
 /// The outer height cap. `top` is where the panel opens; without one (the
 /// trigger has not painted yet) the whole window less its margins is the room.
+#[cfg(test)]
 fn panel_outer_max_h(viewport_h: f32, top: Option<f32>) -> f32 {
-    let margin = theme::TRANSCRIPT_EDITOR_WINDOW_MARGIN;
-    let room = match top {
-        Some(top) => viewport_h - top - margin,
-        None => viewport_h - 2.0 * margin,
-    };
-    let floor = theme::TRANSCRIPT_EDITOR_MIN_PANEL_H.min(viewport_h - 2.0 * margin);
-    theme::TRANSCRIPT_EDITOR_RULES_PANEL_MAX_H
-        .min(room.max(floor))
-        .max(0.0)
+    panel_limits()
+        .outer_size(gpui::size(px(0.), px(viewport_h)), top.map(px))
+        .height
+        .into()
 }
 
 /// Dismisses the popover a panel sits in — the header's close button.

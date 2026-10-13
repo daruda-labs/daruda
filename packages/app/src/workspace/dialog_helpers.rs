@@ -16,7 +16,7 @@ use gpui::{
 use crate::surface::strings as s;
 use crate::ui::WindowExt as _;
 use crate::ui::dialog::DialogButtonProps;
-use crate::ui::{InputState, input};
+use crate::ui::{InputState, form_input};
 use crate::workspace::Workspace;
 use crate::workspace::error::modal::ErrorReportModal;
 use crate::workspace::modal_view::ModalView;
@@ -56,7 +56,12 @@ pub(in crate::workspace) fn open_single_field_dialog<Cb>(
         let on_submit = on_submit.clone();
         dialog
             .title(title.clone())
-            .child(input(&state_for_body, cx, 0))
+            .child(
+                div()
+                    .id("single-modal-field")
+                    .debug_selector(|| "single-modal-field".into())
+                    .child(form_input(&state_for_body, cx, 0)),
+            )
             .confirm()
             .button_props(DialogButtonProps::default().ok_text(s::common::btn_ok()))
             .on_ok(move |_, window, app_cx| {
@@ -242,4 +247,27 @@ pub(in crate::workspace) fn open_error_report_dialog(
         window,
         cx,
     );
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[gpui::test]
+    fn group_creation_uses_authoring_field_geometry(cx: &mut gpui::TestAppContext) {
+        let (window, workspace) = crate::workspace::tests::build_workspace(cx);
+        let mut vcx = gpui::VisualTestContext::from_window(window.into(), cx);
+        vcx.update(|window, cx| {
+            workspace.update(cx, |ws, cx| {
+                ws.on_new_group(&crate::workspace::NewGroup, window, cx)
+            });
+        });
+        vcx.run_until_parked();
+        vcx.update(|window, _| window.refresh());
+        vcx.run_until_parked();
+        assert_eq!(
+            vcx.debug_bounds("single-modal-field").unwrap().size.height,
+            px(36.)
+        );
+    }
 }

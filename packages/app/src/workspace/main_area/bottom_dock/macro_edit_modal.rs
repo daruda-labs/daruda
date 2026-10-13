@@ -14,7 +14,7 @@ use gpui::{
 use crate::surface::strings as s;
 use crate::ui::WindowExt as _;
 use crate::ui::checkbox;
-use crate::ui::{InputEvent, InputState, button, button_primary, input};
+use crate::ui::{InputEvent, InputState, button, button_primary, form_input};
 use crate::workspace::ModalView;
 use crate::workspace::Workspace;
 
@@ -371,9 +371,9 @@ impl Render for MacroEditModal {
             .flex_col()
             .gap(px(theme::MODAL_PANEL_GAP))
             .child(field_label(s::bottom_dock::macro_field_label(), cx))
-            .child(input(&self.label_input, cx, 0))
+            .child(form_input(&self.label_input, cx, 0))
             .child(field_label(s::bottom_dock::macro_field_send(), cx))
-            .child(input(&self.send_input, cx, 1))
+            .child(form_input(&self.send_input, cx, 1))
             .child(
                 checkbox(
                     "macro-edit-auto-enter",
@@ -395,14 +395,18 @@ impl Render for MacroEditModal {
                 ),
             )
             .child(field_label(s::bottom_dock::macro_field_icon(), cx))
-            .child(input(&self.icon_input, cx, 4))
+            .child(form_input(&self.icon_input, cx, 4))
             .child(field_label(s::bottom_dock::macro_field_shortcut(), cx))
             .child(
                 div()
                     .flex()
                     .flex_row()
                     .gap(px(theme::MODAL_FOOTER_GAP))
-                    .child(div().flex_1().child(input(&self.shortcut_input, cx, 5)))
+                    .child(
+                        div()
+                            .flex_1()
+                            .child(form_input(&self.shortcut_input, cx, 5)),
+                    )
                     .child(self.record_button(cx)),
             );
 
@@ -469,11 +473,7 @@ fn has_any_modifier(ks: &Keystroke) -> bool {
 }
 
 fn field_label(text: impl Into<SharedString>, cx: &gpui::App) -> impl IntoElement {
-    let text = text.into();
-    div()
-        .text_size(px(theme::MODAL_BODY_FONT_SIZE))
-        .text_color(theme::current(cx).text_muted)
-        .child(text)
+    crate::ui::form_label(text, theme::current(cx))
 }
 
 #[cfg(test)]

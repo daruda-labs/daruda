@@ -16,13 +16,14 @@
 
 use super::StatusBarDensity;
 use crate::ui::theme;
-use crate::ui::{Divider, Popover, button_status_pill_bare};
+use crate::ui::{Divider, button_status_pill_bare};
 use crate::workspace::Workspace;
 use gpui::{AnyElement, App, IntoElement, SharedString, WeakEntity, div, prelude::*, px};
 
 const FLOW_PANEL_WIDTH: f32 = 300.0;
 const FLOW_SECTION_GAP: f32 = 4.0;
 const FLOW_ROW_GAP: f32 = 10.0;
+const FLOW_PANEL_MAX_HEIGHT: f32 = 360.0;
 
 // The row lives with the ops that build it: this segment and the Flows panel
 // read the same shape, and a type owned by one of its two consumers would make
@@ -47,7 +48,8 @@ pub(super) fn render(
     let rows = runs.to_vec();
     let t = theme::current(cx);
     Some(
-        Popover::new("status-flow-popover")
+        super::popover("status-flow-popover", cx)
+            .p(px(theme::POPOVER_PANEL_PAD))
             .trigger(
                 // Tinted only while a run is waiting on a person: this is
                 // the one surface a user cannot hide (Flow is not a
@@ -63,8 +65,8 @@ pub(super) fn render(
                         div().child(label)
                     }),
             )
-            .content(move |_, _window, cx| {
-                flow_panel(&rows, summary.clone(), workspace.clone(), cx)
+            .content(move |_, window, cx| {
+                flow_panel(&rows, summary.clone(), workspace.clone(), window, cx)
             }),
     )
 }
@@ -96,18 +98,23 @@ fn flow_panel(
     runs: &[FlowRunRow],
     summary: SharedString,
     workspace: WeakEntity<Workspace>,
+    window: &gpui::Window,
     cx: &App,
 ) -> AnyElement {
     let t = theme::current(cx);
-    div()
-        .flex()
-        .flex_col()
-        .w(px(FLOW_PANEL_WIDTH))
+    crate::ui::popover_panel(window, crate::ui::PanelLimits {
+        width: FLOW_PANEL_WIDTH + theme::POPOVER_DEFAULT_CHROME,
+        max_height: FLOW_PANEL_MAX_HEIGHT + theme::POPOVER_DEFAULT_CHROME,
+        min_height: 0.0,
+        margin: theme::POPOVER_WINDOW_MARGIN,
+        chrome: theme::POPOVER_DEFAULT_CHROME,
+    }, None)
         .gap(px(FLOW_SECTION_GAP))
         .text_size(px(theme::STATUS_BAR_FONT_SIZE))
-        .child(div().child(summary))
-        .child(Divider::horizontal())
-        .children(runs.iter().map(|run| {
+        .child(div().flex_none().child(summary))
+        .child(div().flex_none().child(Divider::horizontal()))
+        .child(crate::ui::scroll_area("status-flow-scroll", px(FLOW_PANEL_MAX_HEIGHT),
+            div().flex().flex_col().pr(px(theme::POPOVER_ACTION_GUTTER)).gap(px(FLOW_SECTION_GAP)).children(runs.iter().map(|run| {
             let workspace = workspace.clone();
             let reveal = workspace.clone();
             let lane = run.lane;
@@ -181,10 +188,11 @@ fn flow_panel(
                                 .build(),
                             ),
                         }
-                    }),
+                    })
+                    .debug_selector(move || format!("status-flow-stop-{}-{}", lane.project, lane.lane)),
                     ),
                 )
-        }))
+        }))).fill())
         .into_any_element()
 }
 
@@ -192,6 +200,49 @@ fn flow_panel(
 mod tests {
     use super::*;
     use daruda_store::project::LaneRef;
+
+    struct PanelProbe {
+        rows: Vec<FlowRunRow>,
+        workspace: WeakEntity<Workspace>,
+    }
+
+    impl gpui::Render for PanelProbe {
+        fn render(
+            &mut self,
+            window: &mut gpui::Window,
+            cx: &mut gpui::Context<Self>,
+        ) -> impl IntoElement {
+            flow_panel(
+                &self.rows,
+                "Running".into(),
+                self.workspace.clone(),
+                window,
+                cx,
+            )
+        }
+    }
+
+    #[gpui::test]
+    fn scrolling_flow_actions_clear_the_scrollbar_hit_strip(cx: &mut gpui::TestAppContext) {
+        let (_, workspace) = crate::workspace::tests::build_workspace(cx);
+        let workspace = workspace.downgrade();
+        let window = cx.add_window(move |_, _| PanelProbe {
+            rows: (0..40)
+                .map(|lane| FlowRunRow {
+                    lane: LaneRef { project: 1, lane },
+                    ..row("implement")
+                })
+                .collect(),
+            workspace,
+        });
+        let mut vcx = gpui::VisualTestContext::from_window(window.into(), cx);
+        vcx.run_until_parked();
+        let body = vcx.debug_bounds("status-flow-scroll-wrapper").unwrap();
+        let stop = vcx.debug_bounds("status-flow-stop-1-0").unwrap();
+        assert!(body.size.height > px(0.));
+        assert!(body.size.height <= px(FLOW_PANEL_MAX_HEIGHT));
+        assert!(stop.right() <= body.right() - px(theme::POPOVER_ACTION_GUTTER));
+    }
 
     fn row(doing: &str) -> FlowRunRow {
         FlowRunRow {

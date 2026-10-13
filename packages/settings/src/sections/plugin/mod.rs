@@ -77,10 +77,7 @@ fn plugin_subheading(label: impl Into<gpui::SharedString>, cx: &gpui::App) -> im
 }
 
 fn plugin_empty_hint(label: impl Into<gpui::SharedString>, cx: &gpui::App) -> impl IntoElement {
-    div()
-        .text_size(px(theme::MODAL_BODY_FONT_SIZE))
-        .text_color(theme::current(cx).text_body)
-        .child(label.into())
+    daruda_ui::empty_message(label, cx)
 }
 
 /// Two-column row used inside the detail pane: a fixed-width label on

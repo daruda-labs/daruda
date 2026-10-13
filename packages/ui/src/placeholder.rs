@@ -1,6 +1,22 @@
 //! Dock placeholder / empty-state message line.
 
-use gpui::{Div, SharedString, div, prelude::*};
+use crate::theme;
+use gpui::{App, Div, SharedString, div, prelude::*, px};
+
+/// Quiet text with explicit typography, foreground and wrapping width.
+pub fn message_line(msg: impl Into<SharedString>, t: &theme::DarudaTheme) -> Div {
+    div()
+        .w_full()
+        .min_w_0()
+        .text_size(px(theme::FONT_SIZE_MD))
+        .line_height(px(theme::INPUT_LINE_HEIGHT))
+        .text_color(t.text_subtle)
+        .child(msg.into())
+}
+
+pub fn empty_message(msg: impl Into<SharedString>, cx: &App) -> Div {
+    message_line(msg, theme::current(cx))
+}
 
 /// A placeholder or empty-state message line for a dock view. Pins the
 /// width (`w_full`) so a long sentence wraps onto multiple lines instead

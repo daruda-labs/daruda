@@ -9,6 +9,8 @@ use gpui::{App, Entity, Window, px};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum QuickEntryShot {
+    GroupCreate,
+    WorktreeCreate,
     McpPaste,
     McpReview,
     McpStdio,
@@ -74,6 +76,16 @@ pub(crate) fn drive(
     }
     let workspace = workspace.downgrade();
     match shot {
+        QuickEntryShot::GroupCreate => {
+            if let Some(workspace) = workspace.upgrade() {
+                workspace.update(cx, |ws, cx| {
+                    ws.on_new_group(&crate::workspace::NewGroup, window, cx)
+                });
+            }
+        }
+        QuickEntryShot::WorktreeCreate => {
+            crate::workspace::left_dock::projects::open_create_for_shot(workspace, window, cx)
+        }
         QuickEntryShot::McpSaved => super::tools::saved::open(
             "project-docs".into(),
             Some(crate::agent::configuration::Provider::Codex),

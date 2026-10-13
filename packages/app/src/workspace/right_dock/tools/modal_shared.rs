@@ -1,7 +1,6 @@
 //! Helpers shared by the AddMcpServerModal / EditMcpServerModal.
 
-use crate::ui::theme;
-use gpui::{IntoElement, SharedString, div, prelude::*, px};
+use gpui::SharedString;
 
 use crate::agent::mcp::{FieldError, McpScope, McpTransport};
 use crate::surface::strings;
@@ -90,16 +89,7 @@ pub(super) fn scope_options() -> Vec<(McpScope, String)> {
 
 /// Small label rendered above a form field in the modal stack-style
 /// layout (label-on-top instead of inline).
-pub(super) fn field_label(
-    text: impl Into<SharedString>,
-    t: &crate::ui::theme::DarudaTheme,
-) -> impl IntoElement {
-    div()
-        .text_size(px(theme::FONT_SIZE_LG))
-        .font_weight(gpui::FontWeight::SEMIBOLD)
-        .text_color(t.text_body)
-        .child(text.into())
-}
+pub(super) use crate::ui::form_label as field_label;
 
 /// Map a typed [`FieldError`] back to its localised banner string.
 pub(super) fn field_error_to_msg(e: FieldError) -> SharedString {

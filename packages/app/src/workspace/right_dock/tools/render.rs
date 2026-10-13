@@ -71,12 +71,7 @@ pub(in crate::workspace) fn render(snap: &RightDockSnapshot, cx: &mut Context<Do
                 McpScope::Project => strings::mcp::empty_project(),
                 McpScope::Local => strings::mcp::empty_local(),
             };
-            rows = rows.child(
-                div()
-                    .text_size(px(theme::RIGHT_PANEL_BODY_FONT_SIZE))
-                    .text_color(t.text_subtle)
-                    .child(message),
-            );
+            rows = rows.child(crate::ui::message_line(message, t));
         }
         use crate::workspace::right_dock::section::DockSection;
         let section = match target.scope {

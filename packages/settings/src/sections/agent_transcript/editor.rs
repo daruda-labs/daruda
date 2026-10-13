@@ -18,7 +18,7 @@ use daruda_transcript::editor::{
     ResetSpec, TextRoles, aux_icon, dismiss_press, panel_header, panel_root,
 };
 use daruda_ui::theme;
-use daruda_ui::{Icon, IconName, Popover, PopoverState, button_bare, icons};
+use daruda_ui::{Popover, PopoverState, icons};
 
 use super::super::super::{AgentCatalogRow, SettingsView};
 
@@ -79,39 +79,22 @@ fn row_source(overridden: bool) -> String {
 /// caret keep their place at the right edge, so a long value cannot push them.
 fn field_trigger(id: String, value: String, overridden: bool, cx: &gpui::App) -> daruda_ui::Button {
     let t = theme::current(cx);
-    button_bare(SharedString::from(id))
-        .outline()
-        .tab_stop(true)
-        .w_full()
-        // A column whose items stretch makes the vendored label row span the
-        // field, so the value can sit left and the source right.
-        .flex_col()
-        .items_stretch()
-        .tooltip(SharedString::from(value.clone()))
-        .child(
-            div()
-                .flex_1()
-                .min_w_0()
-                .overflow_hidden()
-                .whitespace_nowrap()
-                .text_ellipsis()
-                .text_color(t.text_primary)
-                .child(SharedString::from(value)),
-        )
-        .child(
-            div()
-                .flex_none()
-                .flex()
-                .items_center()
-                .gap(px(theme::GAP_SM))
-                .text_size(px(theme::FONT_SIZE_SM))
-                .text_color(t.text_muted)
-                .child(SharedString::from(row_source(overridden)))
-                .when(overridden, |source| {
-                    source.child(aux_icon(icons::PIN, theme::PRIMARY))
-                }),
-        )
-        .child(Icon::new(IconName::ChevronDown))
+    daruda_ui::field_trigger(
+        SharedString::from(id),
+        value,
+        div()
+            .flex_none()
+            .flex()
+            .items_center()
+            .gap(px(theme::GAP_SM))
+            .text_size(px(theme::FONT_SIZE_SM))
+            .text_color(t.text_muted)
+            .child(SharedString::from(row_source(overridden)))
+            .when(overridden, |source| {
+                source.child(aux_icon(icons::PIN, theme::PRIMARY))
+            }),
+        cx,
+    )
 }
 
 /// The header every Settings editor opens with: the axis it edits.

@@ -14,7 +14,7 @@ use gpui::{
 
 use crate::surface::strings as s;
 use crate::ui::theme;
-use crate::ui::{InputState, WindowExt as _, button, button_primary, input};
+use crate::ui::{InputState, WindowExt as _, button, button_primary, form_input};
 use crate::workspace::Workspace;
 use crate::workspace::dialog_helpers::open_form_modal;
 use crate::workspace::main_area::pane_tree::PaneId;
@@ -167,7 +167,7 @@ impl Render for AnnotationDialog {
             .track_focus(&self.panel_focus_handle)
             .tab_group()
             .gap(px(theme::MODAL_PANEL_GAP))
-            .child(input(&self.text_input, cx, 0_isize))
+            .child(form_input(&self.text_input, cx, 0_isize))
             .child(footer)
     }
 }

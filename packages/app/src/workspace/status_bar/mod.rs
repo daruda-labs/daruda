@@ -10,6 +10,8 @@ mod context_menu;
 mod flow_segment;
 pub(in crate::workspace) mod orchestrator_chip;
 mod ports_segment;
+#[cfg(feature = "screenshot")]
+pub(in crate::workspace) mod screenshot;
 mod usage_chip;
 
 pub(in crate::workspace) use account_slot::{AccountSlot, account_label};
@@ -28,6 +30,15 @@ const PROJECT_BRANCH_MAX_WIDTH: f32 = 220.0;
 const PROJECT_BRANCH_REDUCED_MAX_WIDTH: f32 = 150.0;
 const STATUS_BAR_ERROR_MAX_WIDTH: f32 = 240.0;
 const STATUS_BAR_ERROR_REDUCED_MAX_WIDTH: f32 = 140.0;
+
+fn popover(id: &'static str, cx: &App) -> crate::ui::Popover {
+    let popover = crate::ui::Popover::new(id);
+    #[cfg(feature = "screenshot")]
+    let popover = screenshot::open_for_shot(popover, id, cx);
+    #[cfg(not(feature = "screenshot"))]
+    let _ = cx;
+    popover
+}
 
 /// Responsive tier derived from the window's current width. The status
 /// bar has no horizontal scroll, so as the window narrows each tier
@@ -136,6 +147,8 @@ pub(super) struct StatusBar(pub(super) StatusBarData);
 impl RenderOnce for StatusBar {
     fn render(self, window: &mut Window, cx: &mut App) -> impl IntoElement {
         let data = self.0;
+        #[cfg(feature = "screenshot")]
+        let data = screenshot::seeded(data, cx);
         // Snapshot every theme slot once so the chain below reads each
         // colour through the live `DarudaTheme` Global; the four mid-render
         // `.text_color(t.text_muted)` etc. lookups stay consistent even if

@@ -24,7 +24,7 @@ use crate::surface::strings as s;
 use crate::ui::Disableable as _;
 use crate::ui::WindowExt as _;
 use crate::ui::select::{self, SelectOption, SelectState};
-use crate::ui::{InputEvent, InputState, button, button_primary, input};
+use crate::ui::{InputEvent, InputState, button, button_primary, form_input};
 use crate::workspace::ModalView;
 use crate::workspace::Workspace;
 use crate::workspace::lane_ops::CreateWorktreePlan;
@@ -134,7 +134,7 @@ impl CreateWorktreeModal {
         });
 
         // Tab order is fully driven by the `tab_index` argument to
-        // `crate::ui::input(&state, cx, N)` at render time — GPUI's
+        // `crate::ui::form_input(&state, cx, N)` at render time — GPUI's
         // tab system builds the cycle from `Input::tab_index` baked
         // on the rendered element, not from focus-handle mutations.
 
@@ -399,23 +399,33 @@ impl Render for CreateWorktreeModal {
                     .text_color(muted_text)
                     .child(s::create_lane::body_branch_name()),
             )
-            .child(input(&self.branch_input, cx, 0))
+            .child(
+                div()
+                    .id("worktree-branch-field")
+                    .debug_selector(|| "worktree-branch-field".into())
+                    .child(form_input(&self.branch_input, cx, 0)),
+            )
             .child(
                 div()
                     .text_size(px(theme::MODAL_BODY_FONT_SIZE))
                     .text_color(muted_text)
                     .child(s::create_lane::body_base_ref()),
             )
-            .child(input(&self.base_input, cx, 1))
+            .child(form_input(&self.base_input, cx, 1))
             .child(
                 div()
                     .text_size(px(theme::MODAL_BODY_FONT_SIZE))
                     .text_color(muted_text)
                     .child(s::create_lane::body_description()),
             )
-            .child(input(&self.description_input, cx, 2))
+            .child(form_input(&self.description_input, cx, 2))
             .child(field_label(s::session_host::field_host(), &t))
-            .child(select::select(&self.host_select, cx, 3_isize));
+            .child(
+                div()
+                    .id("worktree-host-field")
+                    .debug_selector(|| "worktree-host-field".into())
+                    .child(select::form_select(&self.host_select, cx, 3_isize)),
+            );
 
         if self.catalog.is_empty() {
             body = body.child(
@@ -429,7 +439,7 @@ impl Render for CreateWorktreeModal {
         if self.selected_entry(cx).is_some() {
             body = body
                 .child(field_label(s::session_host::field_session_path(), &t))
-                .child(input(&self.session_path_input, cx, 4));
+                .child(form_input(&self.session_path_input, cx, 4));
         }
 
         let create_disabled = self.submitting || self.branch_input.read(cx).value().is_empty();
@@ -586,6 +596,26 @@ mod tests {
         s: &str,
     ) {
         set_field(wh, modal, cx, |m| m.description_input.clone(), s);
+    }
+
+    #[gpui::test]
+    fn authoring_fields_keep_the_shared_modal_geometry(cx: &mut TestAppContext) {
+        let (wh, modal) = build_modal(cx, "/repo", vec![]);
+        let mut vcx = gpui::VisualTestContext::from_window(wh.into(), cx);
+        vcx.run_until_parked();
+        vcx.update(|window, _| window.refresh());
+        vcx.run_until_parked();
+        let branch = vcx.debug_bounds("worktree-branch-field").unwrap();
+        assert_eq!(branch.size.height, px(36.));
+        assert_eq!(
+            vcx.debug_bounds("worktree-host-field").unwrap().size.height,
+            px(36.)
+        );
+        let text = modal.read_with(&vcx, |modal, cx| {
+            modal.branch_input.read(cx).last_bounds().unwrap()
+        });
+        assert_eq!(text.left() - branch.left(), px(10.));
+        assert_eq!(text.top() - branch.top(), px(8.));
     }
 
     #[gpui::test]

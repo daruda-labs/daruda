@@ -60,6 +60,11 @@ jobs:
           bash ./scripts/lint-input-factories.sh --self-test
           bash ./scripts/lint-input-factories.sh
 
+      - name: Lint — authoring modal field profiles
+        run: |
+          bash ./scripts/lint-modal-fields.sh --self-test
+          bash ./scripts/lint-modal-fields.sh
+
       - name: Lint — ferrum_flow direct access
         run: ./scripts/lint-direct-ferrum-flow.sh
 

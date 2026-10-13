@@ -8,6 +8,30 @@ pub(super) mod agent_badges;
 pub(super) mod banner;
 pub(super) mod context_menu;
 pub(super) mod create_modal;
+
+#[cfg(feature = "screenshot")]
+pub(in crate::workspace) fn open_create_for_shot(
+    workspace: gpui::WeakEntity<crate::workspace::Workspace>,
+    window: &mut gpui::Window,
+    cx: &mut gpui::App,
+) {
+    crate::workspace::dialog_helpers::open_form_modal(
+        crate::surface::strings::create_lane::button_title(),
+        None,
+        move |window, cx| {
+            create_modal::CreateWorktreeModal::new(
+                workspace,
+                std::env::temp_dir().join("example-project"),
+                0,
+                Vec::new(),
+                window,
+                cx,
+            )
+        },
+        window,
+        cx,
+    );
+}
 pub(super) mod drag;
 pub(super) mod group_menu;
 pub(super) mod list;

@@ -23,8 +23,7 @@ use gpui::{Hsla, IntoElement, ParentElement as _, SharedString, Styled as _, px}
 use super::super::Workspace;
 use super::super::layout::RightDockSnapshot;
 use crate::surface::strings;
-use crate::ui::Sizable as _;
-use crate::ui::{DropdownMenu as _, PopupMenu, PopupMenuItem, button};
+use crate::ui::{DropdownMenu as _, PopupMenu, PopupMenuItem};
 
 /// Build the status-pill trigger + dropdown for a single task row.
 ///
@@ -47,9 +46,8 @@ pub(super) fn status_pill(
     let pill_id = SharedString::from(format!("task-pill-{}", task.id));
     let bg = pill_background(&state, cx);
 
-    button(pill_id, state_label)
+    crate::ui::button_compact(pill_id, state_label)
         .child(crate::ui::icons::icon(crate::ui::icons::EXPAND_MORE))
-        .xsmall()
         .w_full()
         .tab_stop(true)
         .tooltip(tooltip)

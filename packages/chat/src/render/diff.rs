@@ -13,7 +13,7 @@ use crate::fold::{FoldContext, FoldKey, FoldState};
 use crate::strings as s;
 use crate::view::{AgentChatEvent, AgentChatView};
 use daruda_ui::theme;
-use daruda_ui::{ButtonVariants as _, Icon, Sizable as _, button_bare, copy_button};
+use daruda_ui::{Icon, copy_button};
 
 const ICON_CONTENT_COPY: &str = "icons/ui/content-copy.svg";
 const ICON_CHECK: &str = "icons/ui/check.svg";
@@ -46,6 +46,7 @@ pub(super) fn diff_block(
     cx: &mut Context<AgentChatView>,
 ) -> AnyElement {
     let diff_key = diff_editor_key(tool_id, di);
+    let surface = theme::PaneSurfaceTokens::agent_chat(cx).dimmed(dim);
     let key = FoldKey::Diff(diff_key.clone());
     let expanded = fold.is_expanded(&key, context);
 
@@ -97,15 +98,11 @@ pub(super) fn diff_block(
         None => s::agent_chat::diff_open_externally(),
     };
     header = header.trailing(
-        button_bare(SharedString::from(format!(
-            "agent-chat-diff-open-externally-{diff_key}"
-        )))
-        // `button_bare`'s default `Secondary` variant fills with the UI theme's
-        // raised surface, which reads as a black chip sitting on this header's
-        // terminal-derived tint. `.ghost().xsmall()` is the icon-button chrome
-        // the pane's own activity bar already uses (`chrome.rs`).
-        .ghost()
-        .xsmall()
+        daruda_ui::button_bare_compact_on_surface(
+            SharedString::from(format!("agent-chat-diff-open-externally-{diff_key}")),
+            &surface,
+            cx,
+        )
         .icon(Icon::empty().path(ICON_OPEN_IN_NEW))
         .tooltip(open_externally_tooltip)
         .on_click(cx.listener(move |_this, _, _window, cx| {
@@ -119,19 +116,20 @@ pub(super) fn diff_block(
     // Copy-path action — always-visible trailing icon (this pane's diffs are
     // few, unlike the hover-gated markdown code-block copy button).
     header = header.trailing(
-        copy_button(
-            SharedString::from(format!("agent-chat-diff-copy-path-{diff_key}")),
-            SharedString::from(path_string),
-            Icon::empty().path(ICON_CONTENT_COPY),
-            SharedString::from(s::agent_chat::diff_copy_path()),
-            Icon::empty().path(ICON_CHECK),
-            SharedString::from(s::agent_chat::diff_path_copied()),
-            window,
+        daruda_ui::button_with_surface(
+            daruda_ui::compact_icon_button(copy_button(
+                SharedString::from(format!("agent-chat-diff-copy-path-{diff_key}")),
+                SharedString::from(path_string),
+                Icon::empty().path(ICON_CONTENT_COPY),
+                SharedString::from(s::agent_chat::diff_copy_path()),
+                Icon::empty().path(ICON_CHECK),
+                SharedString::from(s::agent_chat::diff_path_copied()),
+                window,
+                cx,
+            )),
+            &surface,
             cx,
         )
-        // Same chrome as the open-externally button above, for the same reason.
-        .ghost()
-        .xsmall()
         .into_any_element(),
     );
     // `+N −M` is right-anchored, so it is a trailing badge — not the stretch
