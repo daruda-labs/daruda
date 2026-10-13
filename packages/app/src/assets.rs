@@ -97,6 +97,7 @@ impl AssetSource for DarudaAssets {
             "icons/ui/history.svg" => icon!("ui/history.svg"),
             "icons/ui/visibility.svg" => icon!("ui/visibility.svg"),
             "icons/ui/add.svg" | "icons/plus.svg" => icon!("ui/add.svg"),
+            "icons/ui/attach-file.svg" => icon!("ui/attach-file.svg"),
             "icons/ui/minimize.svg" => icon!("ui/minimize.svg"),
             "icons/ui/crop-square.svg" => icon!("ui/crop-square.svg"),
             "icons/ui/filter-none.svg" => icon!("ui/filter-none.svg"),
@@ -319,6 +320,7 @@ mod tests {
     }
 
     const UI_ICON_PATHS: &[&str] = &[
+        "icons/ui/attach-file.svg",
         "icons/ui/block.svg",
         "icons/ui/check-circle.svg",
         "icons/ui/check.svg",

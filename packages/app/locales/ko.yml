@@ -419,7 +419,6 @@ agent_chat:
   attachment_add: "파일 첨부"
   attachment_remove: "%{name} 제거"
   attachment_clipboard_name: "클립보드 이미지"
-  attachment_paste: "이미지 또는 파일 붙여넣기"
   attachment_failed: "파일 또는 클립보드 내용을 첨부하지 못했습니다."
   queue_full: "그 대화에 이미 대기 중인 프롬프트가 너무 많습니다. 처리될 때까지 기다려 주세요."
   session_notice: "세션은 계속되지만 설정대로는 아닙니다"

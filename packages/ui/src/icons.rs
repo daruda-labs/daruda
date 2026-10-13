@@ -31,6 +31,7 @@ pub const EDIT: &str = "icons/ui/edit.svg";
 pub const UNDO: &str = "icons/ui/undo.svg";
 pub const SAVE: &str = "icons/ui/save.svg";
 pub const ADD: &str = "icons/ui/add.svg";
+pub const ATTACH_FILE: &str = "icons/ui/attach-file.svg";
 pub const MINIMIZE: &str = "icons/ui/minimize.svg";
 pub const MAXIMIZE: &str = "icons/ui/crop-square.svg";
 pub const RESTORE: &str = "icons/ui/filter-none.svg";

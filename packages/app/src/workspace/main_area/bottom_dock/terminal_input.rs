@@ -59,26 +59,11 @@ pub(super) fn render_body(snap: &BottomDockSnapshot, cx: &mut Context<Dock>) -> 
     if snap.attachment_draft.is_some() {
         let ws = snap.workspace.clone();
         chips.push(
-            crate::ui::button(
-                "attach-files",
-                crate::surface::strings::agent_chat::attachment_add(),
-            )
-            .on_click(move |_, _, cx| {
-                if let Some(ws) = ws.upgrade() {
-                    ws.update(cx, |ws, cx| ws.pick_composer_attachments(cx));
-                }
-            })
-            .into_any_element(),
-        );
-        let ws = snap.workspace.clone();
-        chips.push(
-            crate::ui::button_icon("paste-attachment", crate::ui::icons::ADD, cx)
-                .tooltip(crate::surface::strings::agent_chat::attachment_paste())
+            crate::ui::button_icon("attach-files", crate::ui::icons::ATTACH_FILE, cx)
+                .tooltip(crate::surface::strings::agent_chat::attachment_add())
                 .on_click(move |_, _, cx| {
                     if let Some(ws) = ws.upgrade() {
-                        ws.update(cx, |ws, cx| {
-                            ws.paste_composer_attachments(cx);
-                        });
+                        ws.update(cx, |ws, cx| ws.pick_composer_attachments(cx));
                     }
                 })
                 .into_any_element(),
@@ -103,7 +88,7 @@ pub(super) fn render_body(snap: &BottomDockSnapshot, cx: &mut Context<Dock>) -> 
         let mut row = div()
             .flex()
             .flex_row()
-            .items_end()
+            .items_center()
             .gap(gpui::px(theme::AGENT_CHAT_MSG_GAP));
         for chip in chips {
             row = row.child(chip);
@@ -120,13 +105,19 @@ pub(super) fn render_body(snap: &BottomDockSnapshot, cx: &mut Context<Dock>) -> 
     let mut cell = div()
         .flex_1()
         .flex()
-        .child(crate::ui::input_with_action_grow(
-            &state,
-            action,
-            cx,
-            0_isize,
-            crate::ui::InputGrowMode::AutoGrow,
-        ));
+        .child(
+            div()
+                .flex_1()
+                .min_h_0()
+                .flex()
+                .child(crate::ui::input_with_action_grow(
+                    &state,
+                    action,
+                    cx,
+                    0_isize,
+                    crate::ui::InputGrowMode::AutoGrow,
+                )),
+        );
     if let Some((pane, names)) = &snap.attachment_draft
         && !names.is_empty()
     {

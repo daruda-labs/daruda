@@ -496,7 +496,6 @@ agent_chat:
   attachment_add: "Attach files"
   attachment_remove: "Remove %{name}"
   attachment_clipboard_name: "Clipboard image"
-  attachment_paste: "Paste an image or files"
   attachment_failed: "Could not attach the file or clipboard contents."
   queue_full: "That chat already has too many prompts waiting. Wait for it to catch up."
   # Heading for an inline permission card.

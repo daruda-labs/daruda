@@ -28,6 +28,14 @@ impl Workspace {
         cx: &mut Context<Self>,
     ) {
         self.open_agent_chat_transcript_for_shot(window, cx);
+        // Leave spare editor space so attachment-induced collapse is visible.
+        self.set_bottom_dock_row_preset(
+            crate::workspace::layout::ops::bottom_dock_height_for_rows(usize::from(
+                self.mirrors.agent.input_max_rows,
+            )),
+            window,
+            cx,
+        );
         let pane = self.active_runtime().focused_pane_id;
         if let Some(view) = self.agent_chat_view(pane).cloned() {
             let result = view.update(cx, |view, cx| view.seed_attachment_draft_for_shot(cx));
