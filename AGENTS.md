@@ -191,6 +191,10 @@ credentials, app-launch PATH hydration, and PTY I/O have named separate gates.
 The complete API table, exceptions, and enforcement are in
 [Core](packages/core/AGENTS.md#platform-capability-boundary).
 
+**Platform-gated tests:** whatever only a `#[cfg(unix)]`/`#[cfg(windows)]`
+test uses (imports, constants, helpers) needs the same gate, or other OSes
+fail on unused items. Recheck this whenever tests move between modules.
+
 ### Errors and Environment
 
 - Daruda-owned environment names are registered in
@@ -221,6 +225,9 @@ The complete API table, exceptions, and enforcement are in
   a single domain over 300 lines. App-specific split guidance is in
   [G1](packages/app/src/AGENTS.md#g1--responsibility-driven-splits).
 - New modules include `#[cfg(test)] mod tests`.
+- Public-API-only tests of a library crate go in `tests/it/` (one binary,
+  one module per topic); tests that reach internals stay in `src`. Never widen
+  visibility to move a test. The app keeps all tests in `src`.
 - The file viewer and chat have independent Markdown parsers/renderers. Shared
   behavior must be implemented in both and covered by rendered conformance.
   Mermaid sources can opt out of host colors, but never the resvg-safe label
