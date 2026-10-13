@@ -16,6 +16,7 @@ use std::path::{Path, PathBuf};
 
 use daruda_flow::event::{FlowEvent, RunEnd};
 use daruda_store::observability::error_report::{ErrorReport, ErrorSeverity};
+use daruda_store::project::LaneRef;
 use gpui::{Context, Window};
 
 use super::Workspace;
@@ -162,10 +163,41 @@ impl Workspace {
         };
         // The report waits in the Flows page's past runs; nothing opens over
         // what the person is looking at. A worktree off screen is marked
-        // unread, the way an agent's finished turn marks it.
+        // unread, the way an agent's finished turn marks it; the one on
+        // screen, which no mark can reach, gets a toast instead.
         if self.settle_flow_run(lane_ref, end, cx).is_some() {
-            self.mark_lane_unread(lane_ref, cx);
+            if lane_ref == self.active {
+                self.toast_flow_run_end(lane_ref, end, cx);
+            } else {
+                self.mark_lane_unread(lane_ref, cx);
+            }
         }
+    }
+
+    /// Say a run in the worktree on screen ended, unless the Flows page is
+    /// already showing that worktree — its list or graph shows it there. A
+    /// run the person stopped needs no telling.
+    fn toast_flow_run_end(&mut self, lane: LaneRef, end: &RunEnd, cx: &mut Context<Self>) {
+        let on_page = self.active_page() == Some(super::pages::Page::Flows)
+            && match &self.pages.flows.detail {
+                Some(detail) => detail.lane == lane,
+                None => self.flow_browser_lane() == lane,
+            };
+        let (message, severity) = match end {
+            _ if on_page => return,
+            RunEnd::Done => (s::flow::run_finished_toast(), ErrorSeverity::Info),
+            RunEnd::Failed { .. } => (s::flow::run_failed_toast(), ErrorSeverity::Warning),
+            // Stopped by hand, or already toasted as a refusal.
+            _ => return,
+        };
+        self.report_error(
+            ErrorReport::new(message)
+                .severity(severity)
+                .at(file!(), line!())
+                .dedup("flow.run.ended_here")
+                .build(),
+            cx,
+        );
     }
 
     /// Move the run's reported stage along. One `cx.notify()` per node

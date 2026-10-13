@@ -5,7 +5,7 @@ use gpui::{Action, Context, SharedString, Window};
 
 use crate::workspace::Workspace;
 
-pub(super) enum MenuEntry {
+pub(in crate::workspace) enum MenuEntry {
     Item(MenuItemSpec),
     Separator,
     Submenu {
@@ -14,12 +14,13 @@ pub(super) enum MenuEntry {
     },
 }
 
-pub(super) type WorkspaceMenuOp = dyn Fn(&mut Workspace, &mut Window, &mut Context<Workspace>);
+pub(in crate::workspace) type WorkspaceMenuOp =
+    dyn Fn(&mut Workspace, &mut Window, &mut Context<Workspace>);
 
 /// An item either acts or explains why it cannot. Separate variants so a
 /// disabled item can never carry an [`Activate`] that will not run — the
 /// invalid pairing is unrepresentable rather than merely unused.
-pub(super) enum MenuItemSpec {
+pub(in crate::workspace) enum MenuItemSpec {
     Enabled {
         label: SharedString,
         activate: Activate,
@@ -32,13 +33,13 @@ pub(super) enum MenuItemSpec {
 
 #[allow(dead_code, reason = "label/is_disabled are the test-side accessors")]
 impl MenuItemSpec {
-    pub(super) fn label(&self) -> &SharedString {
+    pub(in crate::workspace) fn label(&self) -> &SharedString {
         match self {
             MenuItemSpec::Enabled { label, .. } | MenuItemSpec::Disabled { label, .. } => label,
         }
     }
 
-    pub(super) fn is_disabled(&self) -> bool {
+    pub(in crate::workspace) fn is_disabled(&self) -> bool {
         matches!(self, MenuItemSpec::Disabled { .. })
     }
 }
@@ -47,18 +48,18 @@ impl MenuItemSpec {
 /// and only the enablement varies (e.g. every Split item shares one op but is
 /// gated on lane access).
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub(super) enum ItemState {
+pub(in crate::workspace) enum ItemState {
     Enabled,
     Disabled(Option<SharedString>),
 }
 
-pub(super) enum Activate {
+pub(in crate::workspace) enum Activate {
     Op(Box<WorkspaceMenuOp>),
     Action(Box<dyn Action>),
     Clipboard(String),
 }
 
-pub(super) fn item(
+pub(in crate::workspace) fn item(
     label: impl Into<SharedString>,
     state: ItemState,
     activate: Activate,
@@ -77,7 +78,7 @@ pub(super) fn item(
 
 /// Explicitly-disabled item — for call sites that already branch and would
 /// otherwise have to invent a never-run [`Activate`].
-pub(super) fn disabled_item(
+pub(in crate::workspace) fn disabled_item(
     label: impl Into<SharedString>,
     reason: Option<SharedString>,
 ) -> MenuEntry {
@@ -87,7 +88,7 @@ pub(super) fn disabled_item(
     })
 }
 
-pub(super) fn state_if(enabled: bool, reason: Option<SharedString>) -> ItemState {
+pub(in crate::workspace) fn state_if(enabled: bool, reason: Option<SharedString>) -> ItemState {
     if enabled {
         ItemState::Enabled
     } else {
@@ -97,7 +98,7 @@ pub(super) fn state_if(enabled: bool, reason: Option<SharedString>) -> ItemState
 
 /// Collapse separators produced by conditionally-empty sections: no repeats,
 /// none leading or trailing, and an empty submenu drops entirely.
-pub(super) fn normalize_entries(entries: Vec<MenuEntry>) -> Vec<MenuEntry> {
+pub(in crate::workspace) fn normalize_entries(entries: Vec<MenuEntry>) -> Vec<MenuEntry> {
     let mut normalized = Vec::new();
     for entry in entries {
         match entry {

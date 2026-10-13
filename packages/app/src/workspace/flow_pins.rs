@@ -123,9 +123,9 @@ impl Workspace {
     /// Turn this lane's pins into outputs the engine can copy, and say what
     /// could not be honoured.
     ///
-    /// The history is read through the shared cache rather than freshly: it is
-    /// dropped whenever a run starts or settles, which is exactly when the
-    /// newest run changes.
+    /// Read at the Run that asks for it, beside the flow file it resolves
+    /// against — only the newest run directory's name, not the history the
+    /// panel lists.
     pub(in crate::workspace) fn resolve_flow_pins(
         &mut self,
         lane: daruda_store::project::LaneRef,
@@ -139,9 +139,9 @@ impl Workspace {
         }
         // `lane`'s own history, not the active worktree's: a pinned input is a
         // previous run's output, and runs belong to the worktree they ran in.
-        let newest = self
-            .flow_history_of(lane)
-            .and_then(|history| history.runs().first().map(|run| run.dir.clone()));
+        let newest = self.lane_for(lane).and_then(|l| {
+            super::flow_history::newest_run_dir(&super::flow_paths::runs_dir(&l.path))
+        });
         let text = std::fs::read_to_string(flow_path).unwrap_or_default();
         let resolved = resolve_in(pinned, &text, profile, newest.as_deref());
         if !resolved.unavailable.is_empty() {

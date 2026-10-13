@@ -48,12 +48,13 @@ async fn flow_browser_scope_filters_without_switching_the_active_worktree(cx: &m
     ws.update_in(&mut vcx, |ws, window, cx| {
         ws.open_page(Page::Flows, window, cx);
         ws.set_flow_scope(FlowScope::Worktree(target), cx);
-        let listed = ws.flow_list_for_panel();
-        assert!(listed.iter().any(|file| file.path == other_file));
-        assert!(!listed.iter().any(|file| file.path == original_file));
+        ws.flow_list_for_panel(cx);
         assert_eq!(ws.active, active);
     });
     vcx.run_until_parked();
+    let listed = ws.update(&mut vcx, |ws, cx| ws.flow_list_for_panel(cx));
+    assert!(listed.iter().any(|file| file.path == other_file));
+    assert!(!listed.iter().any(|file| file.path == original_file));
     let source = vcx
         .debug_bounds("flow-origin-1")
         .expect("repository filter");

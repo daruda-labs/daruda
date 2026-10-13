@@ -444,6 +444,19 @@ async fn a_run_ending_opens_no_tab_and_marks_its_worktree_unread(cx: &mut TestAp
                 ws.lane_for(active).is_some_and(|lane| !lane.is_unread),
                 "the one on screen is not"
             );
+            let toasted = |ws: &Workspace| {
+                ws.error_history()
+                    .iter()
+                    .filter(|r| r.title == crate::surface::strings::flow::run_finished_toast())
+                    .count()
+            };
+            assert_eq!(toasted(ws), 1, "it is told by a toast instead");
+
+            // With the Flows page on that worktree, its list already says so.
+            ws.show_page(crate::workspace::pages::Page::Flows, cx);
+            ws.seed_flow_run_for_test(active, here_run.clone());
+            ws.apply_flow_event_whole_for_test(active, &ended, cx);
+            assert_eq!(toasted(ws), 1, "no toast over the page showing it");
 
             assert_eq!(ws.active_runtime().panes.len(), before, "no tab opened");
             assert!(

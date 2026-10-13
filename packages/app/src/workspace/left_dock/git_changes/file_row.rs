@@ -3,7 +3,7 @@
 
 use std::path::PathBuf;
 
-use daruda_store::project::{LaneId, LaneRef};
+use daruda_store::project::LaneRef;
 use gpui::{
     AnyElement, ClickEvent, Context, ElementId, MouseButton, MouseDownEvent, div, prelude::*, px,
 };
@@ -27,7 +27,7 @@ pub(super) fn unified_file_row(
     entry: &UnifiedEntry,
     target: LaneRef,
     wt_paths: &LanePaths<'_>,
-    selected: Option<&(LaneId, PathBuf, DiffSource)>,
+    selected: Option<&(LaneRef, PathBuf, DiffSource)>,
     is_cursor: bool,
     snap: &LeftDockSnapshot,
     cx: &mut Context<Dock>,
@@ -42,7 +42,7 @@ pub(super) fn unified_file_row(
 
     // A range pane shows the same path from commits, not this row's change.
     let is_selected = selected.is_some_and(|(wt, p, source)| {
-        *wt == target.lane && *p == abs_path_for_open && source.is_live()
+        *wt == target && *p == abs_path_for_open && source.is_live()
     });
 
     // Renamed entries (`R` / `C` status) carry the original path —

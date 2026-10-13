@@ -403,8 +403,14 @@ impl Workspace {
 
     /// Permanent delete. The associated lane (if any) is *not*
     /// removed — the user takes care of that from the left dock so two
-    /// destructive actions never share one click. (D-1)
-    pub(in crate::workspace) fn delete_task(&mut self, task_id: &str, cx: &mut Context<Self>) {
+    /// destructive actions never share one click. (D-1) An editor showing
+    /// the task closes with it: it has nothing left to save into.
+    pub(in crate::workspace) fn delete_task(
+        &mut self,
+        task_id: &str,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         // Drop pending failure tallies before the task itself
         // disappears, otherwise the entries stay forever.
         let stale_sessions: Vec<String> = cx
@@ -416,6 +422,12 @@ impl Workspace {
             .forget_tool_use_failures(&stale_sessions);
         cx.update_global::<GlobalTasks, _>(|g, _| g.remove(task_id));
         self.save_tasks_dirty(cx);
+        if let Some(detail) = &self.pages.tasks.detail
+            && detail.editor.task_id.as_deref() == Some(task_id)
+        {
+            let id = crate::workspace::pages::detail::PageDetailId::TaskEditor(detail.id);
+            self.drop_gone_detail(id, window, cx);
+        }
         cx.notify();
     }
 
@@ -503,10 +515,10 @@ impl Workspace {
             body,
             crate::surface::strings::common::btn_delete(),
             ButtonVariant::Danger,
-            move |_, _window, app_cx| {
+            move |_, window, app_cx| {
                 if let Some(ws) = weak.upgrade() {
                     let id = id.clone();
-                    ws.update(app_cx, |ws, cx| ws.delete_task(&id, cx));
+                    ws.update(app_cx, |ws, cx| ws.delete_task(&id, window, cx));
                 }
             },
             window,

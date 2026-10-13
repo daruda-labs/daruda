@@ -4,7 +4,7 @@ use std::{path::PathBuf, time::SystemTime};
 
 use crate::workspace::flow_paths::{FlowSources, FoundFlow};
 
-#[derive(Default)]
+#[derive(Default, PartialEq)]
 pub(in crate::workspace) struct FlowListing {
     pub files: Vec<FoundFlow>,
     pub modified: Vec<(PathBuf, SystemTime)>,

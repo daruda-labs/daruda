@@ -477,6 +477,66 @@ impl Workspace {
         cx.notify();
     }
 
+    /// The project or lane set changed under the editor: refill its pickers
+    /// from what is open now. Picks that still exist stay. A draft whose
+    /// project closed moves to the active one, its lanes unpicked; a saved
+    /// task's editor closes with its project, as a Flow detail does with its
+    /// worktree — moving it would re-home the task on the next save.
+    pub(in crate::workspace) fn refresh_task_editor_choices(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(editor_id) = self.task_detail_id() else {
+            return;
+        };
+        let Some(te) = self.task_editor(editor_id) else {
+            return;
+        };
+        let kept = te
+            .project(cx)
+            .filter(|uuid| self.project_by_uuid(*uuid).is_some());
+        if kept.is_none() && te.task_id.is_some() {
+            let id = crate::workspace::pages::detail::PageDetailId::TaskEditor(editor_id);
+            self.drop_gone_detail(id, window, cx);
+            return;
+        }
+        let (project_select, base_select, lane_select) = (
+            te.project_select.clone(),
+            te.base_select.clone(),
+            te.lane_select.clone(),
+        );
+        let project = kept.or_else(|| self.active_project().map(|p| p.uuid));
+        let project_options = project_options(self);
+        project_select.update(cx, |state, cx| {
+            state.set_items(project_options, window, cx);
+            reselect(state, project.map(super::state::project_value), window, cx);
+        });
+        if kept.is_none() {
+            self.on_task_edit_project_changed(editor_id, window, cx);
+            return;
+        }
+        let base_options = base_lane_options(self, project);
+        let lane_options = super::run_in_ops::lane_options(self, project);
+        // The base's empty value is its "active base" option, so a vanished
+        // pick lands there rather than on nothing.
+        base_select.update(cx, |state, cx| {
+            let picked = state.selected_value().cloned();
+            state.set_items(base_options, window, cx);
+            state.set_selected_value(&picked.unwrap_or_default(), window, cx);
+            if state.selected_value().is_none() {
+                state.set_selected_value(&SharedString::default(), window, cx);
+            }
+        });
+        lane_select.update(cx, |state, cx| {
+            let picked = state.selected_value().cloned();
+            state.set_items(lane_options, window, cx);
+            reselect(state, picked, window, cx);
+        });
+        // A lane made or removed can take or free the typed branch.
+        self.on_task_edit_branch_typed(editor_id, cx);
+    }
+
     /// The editor named `id`, wherever it is held. Every editor lookup goes
     /// through this pair, so a window-close "Save all" reaches an editor that
     /// is not on screen, and a late callback for an editor that is gone finds
@@ -514,6 +574,21 @@ impl Workspace {
         {
             self.open_task_chat(&id, window, cx);
         }
+    }
+}
+
+/// Select `value` again after the options changed under it — the selection
+/// is held by index, so new items would otherwise shift it to a neighbour.
+/// A value no longer offered leaves nothing picked.
+fn reselect(
+    state: &mut crate::ui::select::SelectState,
+    value: Option<SharedString>,
+    window: &mut Window,
+    cx: &mut Context<crate::ui::select::SelectState>,
+) {
+    match value {
+        Some(value) => state.set_selected_value(&value, window, cx),
+        None => state.set_selected_index(None, window, cx),
     }
 }
 

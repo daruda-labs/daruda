@@ -58,8 +58,8 @@ impl Workspace {
     }
 
     /// Leave `page`'s detail, then run `next`. Unsaved edits ask first —
-    /// Save goes on only if the save landed, Discard drops them, Cancel
-    /// stays. Back, Escape, closing and opening another detail all come here.
+    /// Save goes on only if the save landed (a failed one says so and stays),
+    /// Discard drops them, Cancel stays. Back, Escape, closing and opening another detail all come here.
     pub(in crate::workspace) fn leave_page_detail_then(
         &mut self,
         page: Page,
@@ -97,7 +97,11 @@ impl Workspace {
                     return;
                 }
                 let leave = match answer {
-                    0 => ws.save_dirty_target(item.target, window, cx),
+                    0 => ws.commit_dirty_items_with_failure_toast(
+                        std::slice::from_ref(&item),
+                        window,
+                        cx,
+                    ),
                     1 => true,
                     _ => false,
                 };
@@ -141,6 +145,19 @@ impl Workspace {
         }
     }
 
+    /// The project or lane set changed: a detail naming what is gone drops,
+    /// and the Task editor's pickers refill. Called wherever a project opens
+    /// or closes, a lane is created or removed, or discovery replaces a
+    /// project's placeholder lanes.
+    pub(in crate::workspace) fn page_details_follow_projects(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.drop_flow_detail_of_gone_lane(window, cx);
+        self.refresh_task_editor_choices(window, cx);
+    }
+
     /// Drop detail `id` and give the keyboard back to the page: the focus
     /// was inside what is being dropped, and nothing else would take it.
     pub(in crate::workspace) fn leave_detail(
@@ -151,6 +168,22 @@ impl Workspace {
     ) {
         self.close_page_detail_now(id, cx);
         self.window_runtime.focus_handle.focus(window, cx);
+    }
+
+    /// Drop detail `id` because what it shows is gone. The keyboard comes back
+    /// to the page only if the page is on screen; otherwise focus stays where
+    /// the person is.
+    pub(in crate::workspace) fn drop_gone_detail(
+        &mut self,
+        id: PageDetailId,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if self.active_page() == Some(id.page()) {
+            self.leave_detail(id, window, cx);
+        } else {
+            self.close_page_detail_now(id, cx);
+        }
     }
 
     /// Drop detail `id` without asking. A stale id drops nothing.

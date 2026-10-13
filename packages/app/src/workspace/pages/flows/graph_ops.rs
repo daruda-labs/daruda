@@ -1,5 +1,5 @@
 //! The Flows page's graph: opening it, the bridge from its gestures to the
-//! writes in `flow_node_ops.rs`, reading its file again, and the one thing a
+//! writes in `node_ops.rs`, reading its file again, and the one thing a
 //! run has to say to it — what colour each card is.
 //!
 //! The graph is the page's detail: found by its [`FlowDetailId`], run in the
@@ -15,17 +15,17 @@ use daruda_flow::event::FlowEvent;
 use daruda_store::project::LaneRef;
 use gpui::{AppContext as _, Context, Entity, Focusable as _, Window};
 
-use super::Workspace;
-use super::command::flow_picker::FlowPurpose;
-use super::pages::Page;
-use super::pages::flows::detail::{FlowDetail, FlowDetailBody, FlowDetailId};
-use super::pages::flows::graph::{FlowGraphEvent, FlowGraphView};
+use super::detail::{FlowDetail, FlowDetailBody, FlowDetailId};
+use super::graph::{FlowGraphEvent, FlowGraphView};
 use crate::surface::strings as s;
+use crate::workspace::Workspace;
+use crate::workspace::command::flow_picker::FlowPurpose;
+use crate::workspace::pages::Page;
 
 impl Workspace {
     pub(in crate::workspace) fn on_show_flow_graph(
         &mut self,
-        _: &super::ShowFlowGraph,
+        _: &crate::workspace::ShowFlowGraph,
         _window: &mut Window,
         cx: &mut Context<Self>,
     ) {
@@ -40,7 +40,7 @@ impl Workspace {
     /// out of that. It is also what the tests drive.
     pub(in crate::workspace) fn on_reload_flow_graph(
         &mut self,
-        _: &super::ReloadFlowGraph,
+        _: &crate::workspace::ReloadFlowGraph,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
@@ -103,7 +103,7 @@ impl Workspace {
         // Pressing Run is the person having acted on whatever the cards were
         // saying about pins that went away.
         view.update(cx, |view, cx| view.forget_unpinned(cx));
-        let selection = super::flow_request::FlowSelection { until, pinned };
+        let selection = crate::workspace::flow_request::FlowSelection { until, pinned };
         // A refusal has already said so on screen — this caller is the graph's
         // ▶, and the person pressing it is looking at that toast.
         let _refused_on_screen =
@@ -213,7 +213,7 @@ impl Workspace {
     }
 
     /// What a press in graph `id` asks for. The inspector's buttons emit; the
-    /// writing happens in `flow_node_ops.rs`.
+    /// writing happens in `node_ops.rs`.
     fn handle_flow_graph_event(
         &mut self,
         id: FlowDetailId,
@@ -256,7 +256,7 @@ impl Workspace {
                     lane,
                     &path,
                     FlowPurpose::Validate,
-                    super::flow_request::FlowSelection::default(),
+                    crate::workspace::flow_request::FlowSelection::default(),
                     window,
                     cx,
                 );
@@ -364,7 +364,7 @@ impl Workspace {
         self.seed_flow_run_of_for_test(
             lane,
             run_dir,
-            super::flow_request::FlowSource::File(path.clone()),
+            crate::workspace::flow_request::FlowSource::File(path.clone()),
         );
 
         let nodes: Vec<NodeId> = self

@@ -117,4 +117,28 @@ mod tests {
             assert_eq!(ws.task_detail_id(), Some(draft), "nothing replaced it yet");
         });
     }
+
+    #[gpui::test]
+    fn deleting_the_task_on_screen_closes_its_editor(cx: &mut TestAppContext) {
+        let (window, ws) = build_workspace(cx);
+        cx.update_window(window.into(), |_, window, cx| {
+            ws.update(cx, |ws, cx| {
+                let shown = add_task("Shown", cx);
+                let other = add_task("Other", cx);
+                ws.open_task_editor(Some(shown.clone()), window, cx);
+                ws.delete_task(&other, window, cx);
+                assert!(
+                    ws.task_detail_id().is_some(),
+                    "another task's delete keeps it"
+                );
+                ws.delete_task(&shown, window, cx);
+                assert_eq!(ws.task_detail_id(), None, "nothing left to save into");
+            });
+        })
+        .unwrap();
+        assert!(
+            !cx.has_pending_prompt(),
+            "a deleted task's edits are not asked about"
+        );
+    }
 }

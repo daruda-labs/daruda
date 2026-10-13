@@ -45,16 +45,7 @@ impl Workspace {
         cx: &mut Context<Self>,
     ) {
         let id = FlowDetailId(self.alloc_id());
-        let started = self
-            .flow_history_of(lane)
-            .and_then(|history| {
-                history
-                    .runs()
-                    .iter()
-                    .find(|run| run.dir == dir)
-                    .map(|run| run.started.clone())
-            })
-            .unwrap_or_default();
+        let started = crate::workspace::flow_history::run_started_label(&dir);
         let report = dir.join(daruda_flow::record::RUN_REPORT_FILE);
         self.pages.flows.detail = Some(FlowDetail {
             id,

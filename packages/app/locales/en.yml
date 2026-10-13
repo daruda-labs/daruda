@@ -66,12 +66,12 @@ common:
   split_agent_chat_vertical: "Agent Chat — Split Vertically"
 
 # Wall-clock timestamp shapes (`chrono` patterns). en-US reads on a 12-hour
-# clock; see `surface::timestamp`.
+# clock.
 timestamp:
   # `chrono` pattern for a month, day and time — a timestamp whose year the
   # surrounding UI already implies. A pattern rather than plain copy: field
   # order, clock convention and the words around the numbers all differ per
-  # locale. Consumed by [`crate::surface::timestamp`], not at call sites.
+  # locale. Consumed by `strings::custom::flow`, not at call sites.
   month_day_and_time: "%b %-d, %-I:%M %p"
 
 # Command palette and quick switchers
@@ -344,9 +344,9 @@ task:
   error_write_prompt: "write prompt: %{error}"
   close_dirty_line: "• %{title}"
   close_dirty_line_draft: "• %{title} (new task)"
-  # Which panes the batch save could not write, under
-  # [`task_batch_save_failed_title`].
-  batch_save_failed_detail: "%{count} pane(s) were not saved and stay open: %{panes}"
+  # Which items — file panes, the Task editor, a flow graph — a save could
+  # not write, under [`task_batch_save_failed_title`].
+  batch_save_failed_detail: "%{count} item(s) were not saved and stay open: %{items}"
   # Sublabel daruda gives a worktree it created for a task — it shows on the
   # sidebar row wherever the user has not written their own description.
   lane_description: "task: %{title}"
@@ -435,10 +435,9 @@ task:
   batch_close_heading: "Save changes to the following before closing?"
   batch_save_all: "Save all"
   batch_discard_all: "Discard all"
-  # Title for the toast surfaced when one or more panes in a Save-all
-  # batch fail to commit because their branch input is invalid. The
-  # detail message lists the affected task titles.
-  batch_save_failed_title: "Some panes couldn't be saved"
+  # Title for the toast surfaced when a save asked for on leaving or closing
+  # — one item or a Save-all batch — does not land. The detail lists them.
+  batch_save_failed_title: "Some changes couldn't be saved"
   # Done end-reason flavour appended inline as `Done (<flavour>)`.
   done_flavour_stop: "Stop"
   done_flavour_prompt_input_exit: "Prompt Exit"
@@ -1888,6 +1887,10 @@ flow:
   budget_cost: "The run hit its cost limit"
   lock_held_detail: "Clear it by hand if the process is gone: %{path}"
   lock_held: "Another run (process %{pid}) already has this worktree"
+  # Toasted when a run in the worktree on screen ends while its Flows page is
+  # not showing — an off-screen worktree is marked unread instead.
+  run_finished_toast: "Flow run finished. Its report is on the Flows page."
+  run_failed_toast: "Flow run failed. Its report is on the Flows page."
   # Told to the phone when a run it asked for finished cleanly.
   # Stands in for the engine's own words when a run died without saying
   # anything — the only way `LastWord`'s guard has nothing to report.

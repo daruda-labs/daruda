@@ -1388,3 +1388,58 @@ async fn a_pane_in_a_background_lane_is_found_by_id(cx: &mut TestAppContext) {
         ws.main_area.runtimes.insert(active, runtime);
     });
 }
+
+/// An open Task editor offers the lanes discovery found, not only the
+/// placeholder it was built over — the state a restored editor starts in.
+#[gpui::test]
+fn the_task_editor_offers_lanes_discovery_found(cx: &mut TestAppContext) {
+    let config = daruda_config::Config::default();
+    let root = std::path::PathBuf::from("/tmp/test_discovered_lanes_editor");
+    let project = daruda_store::project::Project::from_path(&root);
+    let (wh, ws) = super::build_workspace_with(cx, &config, Some(project));
+    cx.run_until_parked();
+    let feat = std::path::PathBuf::from("/tmp/test_discovered_lanes_editor-feat");
+    let pick_feat = |ws: &gpui::Entity<Workspace>, cx: &mut TestAppContext| {
+        cx.update_window(wh.into(), |_, window, cx| {
+            ws.update(cx, |ws, cx| {
+                let editor = ws.task_detail_id().expect("the draft is open");
+                let select = ws.task_editor(editor).unwrap().lane_select.clone();
+                let value = gpui::SharedString::from(feat.to_string_lossy().into_owned());
+                select.update(cx, |state, cx| state.set_selected_value(&value, window, cx));
+                ws.task_editor(editor).unwrap().lane_value(cx)
+            })
+        })
+        .unwrap()
+    };
+    cx.update_window(wh.into(), |_, window, cx| {
+        ws.update(cx, |ws, cx| {
+            ws.open_task_editor(None, window, cx);
+            let discovered = vec![
+                crate::lane::Lane::git(
+                    0,
+                    root.clone(),
+                    Some("main".into()),
+                    root.clone(),
+                    root.clone(),
+                    0,
+                ),
+                crate::lane::Lane::git(
+                    1,
+                    feat.clone(),
+                    Some("feat".into()),
+                    root.clone(),
+                    feat.clone(),
+                    1,
+                ),
+            ];
+            ws.apply_discovered_lanes(0, discovered, cx);
+        });
+    })
+    .unwrap();
+    cx.run_until_parked();
+    assert_eq!(
+        pick_feat(&ws, cx),
+        feat.to_string_lossy(),
+        "a discovered lane is offered"
+    );
+}

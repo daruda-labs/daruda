@@ -7,7 +7,7 @@
 use std::path::PathBuf;
 
 use crate::ui::theme;
-use daruda_store::project::LaneId;
+use daruda_store::project::LaneRef;
 use gpui::{
     App, ClickEvent, Context, FocusHandle, Focusable, IntoElement, KeyDownEvent, Render,
     SharedString, WeakEntity, Window, div, prelude::*, px,
@@ -24,7 +24,9 @@ use crate::workspace::lane_ops::RemoveWorktreePlan;
 
 pub struct RemoveWorktreeModal {
     focus_handle: FocusHandle,
-    target_id: LaneId,
+    /// The lane to remove, with its own project — the row it was opened
+    /// from need not belong to the active project.
+    target: LaneRef,
     target_label: SharedString,
     target_path: SharedString,
     plan: RemoveWorktreePlan,
@@ -47,7 +49,7 @@ pub struct RemoveWorktreeModal {
 impl RemoveWorktreeModal {
     pub fn new(
         workspace: WeakEntity<Workspace>,
-        target_id: LaneId,
+        target: LaneRef,
         target_label: impl Into<SharedString>,
         target_path: impl Into<SharedString>,
         plan: RemoveWorktreePlan,
@@ -56,7 +58,7 @@ impl RemoveWorktreeModal {
     ) -> Self {
         Self {
             focus_handle: cx.focus_handle(),
-            target_id,
+            target,
             target_label: target_label.into(),
             target_path: target_path.into(),
             plan,
@@ -93,8 +95,8 @@ impl RemoveWorktreeModal {
         self.allow_force
     }
     #[cfg(test)]
-    pub(crate) fn target_id(&self) -> LaneId {
-        self.target_id
+    pub(crate) fn target(&self) -> LaneRef {
+        self.target
     }
     #[cfg(test)]
     pub(crate) fn delete_branch_too(&self) -> bool {
@@ -114,15 +116,7 @@ impl RemoveWorktreeModal {
         let path: PathBuf = self.plan.path.clone();
         let lock_dir = self.plan.lock_dir.clone();
         let force = self.allow_force;
-        let target_id = self.target_id;
-        let active_project = workspace
-            .upgrade()
-            .map(|w| w.read(cx).active_ref().project)
-            .unwrap_or_default();
-        let target_ref = daruda_store::project::LaneRef {
-            project: active_project,
-            lane: target_id,
-        };
+        let target_ref = self.target;
         // Branch deletion only fires when the user explicitly opted
         // in *and* the lane actually has a named branch.
         let branch_to_delete = if self.delete_branch_too {
@@ -328,7 +322,10 @@ mod tests {
         let wh = cx.add_window(|window, cx| {
             RemoveWorktreeModal::new(
                 WeakEntity::new_invalid(),
-                7,
+                LaneRef {
+                    project: 3,
+                    lane: 7,
+                },
                 "feat/sidebar",
                 "/tmp/repo-feat",
                 plan,
@@ -344,7 +341,13 @@ mod tests {
     fn modal_defaults_and_delete_branch_toggle_policy(cx: &mut TestAppContext) {
         let modal = build_modal(cx);
         modal.read_with(cx, |m, _| {
-            assert_eq!(m.target_id(), 7);
+            assert_eq!(
+                m.target(),
+                LaneRef {
+                    project: 3,
+                    lane: 7
+                }
+            );
             assert!(!m.allow_force());
             assert!(m.error.is_none());
             assert!(!m.submitting);

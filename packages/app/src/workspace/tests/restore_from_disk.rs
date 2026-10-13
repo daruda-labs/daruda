@@ -165,8 +165,14 @@ fn restore_into_empty_workspace_applies_dock_state(cx: &mut TestAppContext) {
         assert!(ws.docks.bottom.read(cx).is_open);
         assert_eq!(ws.docks.bottom.read(cx).size, 199.0);
         assert!(!ws.docks.right.read(cx).is_open);
-        assert_eq!(ws.mirrors.terminal_config.font_size, 17.0);
-        assert!((ws.mirrors.terminal_config.vertical_spacing - 1.25).abs() < f32::EPSILON);
+        // The saved font is what the config said then; the config is what
+        // it says now, and only it decides.
+        let configured = crate::workspace::config_ops::terminal_config_from(&config);
+        assert_eq!(ws.mirrors.terminal_config.font_size, configured.font_size);
+        assert_eq!(
+            ws.mirrors.terminal_config.vertical_spacing,
+            configured.vertical_spacing
+        );
         assert_eq!(ws.docks.left_view, LeftDockView::GitChanges);
         assert_eq!(ws.active_page(), Some(crate::workspace::pages::Page::Tasks));
         assert_eq!(ws.docks.right_view, RightDockView::Skills);

@@ -2,7 +2,7 @@
 //!
 //! Every method here turns one gesture on the graph — a field saved, a card
 //! added or taken away, a line drawn or cut — into a `FlowFile` mutation and
-//! hands it to [`Workspace::edit_flow`](super::Workspace::edit_flow). That is
+//! hands it to [`Workspace::edit_flow`](crate::workspace::Workspace::edit_flow). That is
 //! the whole of the writing done here: which text edits the mutation becomes,
 //! and whether they may land at all, is that function's business. Two gates
 //! stand in the way and the file is untouched unless both pass — the bytes on
@@ -15,7 +15,7 @@
 //! name, while a menu item or a dragged wire has no such place and takes a
 //! toast through `report_edit_refusal`.
 //!
-//! Split from `flow_graph_ops.rs`: that file owns the graph these gestures
+//! Split from `graph_ops.rs`: that file owns the graph these gestures
 //! arrive from, and writes nothing.
 
 use std::path::Path;
@@ -23,8 +23,8 @@ use std::path::Path;
 use daruda_flow::NodeId;
 use gpui::{Context, Window};
 
-use super::Workspace;
 use crate::surface::strings as s;
+use crate::workspace::Workspace;
 
 impl Workspace {
     /// Write the inspector's fields into the flow file.
@@ -38,7 +38,7 @@ impl Workspace {
     pub(in crate::workspace) fn save_node_form(
         &mut self,
         path: &Path,
-        view: gpui::Entity<super::pages::flows::graph::FlowGraphView>,
+        view: gpui::Entity<super::graph::FlowGraphView>,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
@@ -48,7 +48,7 @@ impl Workspace {
     pub(in crate::workspace) fn save_flow_editor(
         &mut self,
         path: &Path,
-        view: gpui::Entity<super::pages::flows::graph::FlowGraphView>,
+        view: gpui::Entity<super::graph::FlowGraphView>,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> bool {
@@ -88,17 +88,17 @@ impl Workspace {
                     file.name = Some(name);
                 }
                 if let Some((node, fields)) = node {
-                    super::pages::flows::graph::form::apply::node_fields(file, &node, &fields);
+                    super::graph::form::apply::node_fields(file, &node, &fields);
                 }
             },
             window,
             cx,
         );
         match outcome {
-            Ok(()) | Err(super::flow_file_ops::EditRefusal::NothingToDo) => return true,
+            Ok(()) | Err(crate::workspace::flow_file_ops::EditRefusal::NothingToDo) => return true,
             // Not about the edit: a permission or a disk failure is the same thing
             // wherever it happens, and the toast is where the app says it.
-            Err(refusal @ super::flow_file_ops::EditRefusal::Io(_)) => {
+            Err(refusal @ crate::workspace::flow_file_ops::EditRefusal::Io(_)) => {
                 view.update(cx, |view, cx| {
                     view.set_save_error(Some(refusal.message()), cx)
                 });
@@ -108,11 +108,11 @@ impl Workspace {
                 let message = refusal.message();
                 // The boxes the issues name, for the node this form is about.
                 let notes = match &refusal {
-                    super::flow_file_ops::EditRefusal::WouldNotLoad { issues, .. } => node_id
+                    crate::workspace::flow_file_ops::EditRefusal::WouldNotLoad {
+                        issues, ..
+                    } => node_id
                         .as_ref()
-                        .map(|node| {
-                            super::pages::flows::graph::form::notes::notes_for(issues, node)
-                        })
+                        .map(|node| super::graph::form::notes::notes_for(issues, node))
                         .unwrap_or_default(),
                     _ => Vec::new(),
                 };
@@ -129,7 +129,7 @@ impl Workspace {
     /// so the menu carries an id and nothing about flows.
     pub(in crate::workspace) fn add_node_in_graph(
         &mut self,
-        id: super::pages::flows::detail::FlowDetailId,
+        id: super::detail::FlowDetailId,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
@@ -141,7 +141,7 @@ impl Workspace {
 
     pub(in crate::workspace) fn delete_node_in_graph(
         &mut self,
-        id: super::pages::flows::detail::FlowDetailId,
+        id: super::detail::FlowDetailId,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
@@ -162,7 +162,7 @@ impl Workspace {
     pub(in crate::workspace) fn add_node(
         &mut self,
         path: &Path,
-        view: gpui::Entity<super::pages::flows::graph::FlowGraphView>,
+        view: gpui::Entity<super::graph::FlowGraphView>,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
@@ -178,8 +178,7 @@ impl Workspace {
             path,
             &base,
             move |file| {
-                *record.borrow_mut() =
-                    super::pages::flows::graph::form::apply::new_node(file, after.as_ref())
+                *record.borrow_mut() = super::graph::form::apply::new_node(file, after.as_ref())
             },
             window,
             cx,
@@ -205,7 +204,7 @@ impl Workspace {
     pub(in crate::workspace) fn connect_nodes(
         &mut self,
         path: &Path,
-        view: gpui::Entity<super::pages::flows::graph::FlowGraphView>,
+        view: gpui::Entity<super::graph::FlowGraphView>,
         out_of: &NodeId,
         into: &NodeId,
         window: &mut Window,
@@ -218,7 +217,7 @@ impl Workspace {
         let outcome = self.edit_flow(
             path,
             &base,
-            move |file| super::pages::flows::graph::form::apply::connect(file, &out_of, &into),
+            move |file| super::graph::form::apply::connect(file, &out_of, &into),
             window,
             cx,
         );
@@ -236,7 +235,7 @@ impl Workspace {
     pub(in crate::workspace) fn disconnect_nodes(
         &mut self,
         path: &Path,
-        view: gpui::Entity<super::pages::flows::graph::FlowGraphView>,
+        view: gpui::Entity<super::graph::FlowGraphView>,
         out_of: &NodeId,
         into: &NodeId,
         window: &mut Window,
@@ -249,7 +248,7 @@ impl Workspace {
         let outcome = self.edit_flow(
             path,
             &base,
-            move |file| super::pages::flows::graph::form::apply::disconnect(file, &out_of, &into),
+            move |file| super::graph::form::apply::disconnect(file, &out_of, &into),
             window,
             cx,
         );
@@ -262,7 +261,7 @@ impl Workspace {
     /// gesture Delete performs; the graph turns it into a `Disconnect`.
     pub(in crate::workspace) fn disconnect_selected_edge_in_graph(
         &mut self,
-        id: super::pages::flows::detail::FlowDetailId,
+        id: super::detail::FlowDetailId,
         cx: &mut Context<Self>,
     ) {
         let Some((_, view)) = self.flow_graph(id) else {
@@ -279,7 +278,7 @@ impl Workspace {
     pub(in crate::workspace) fn delete_nodes(
         &mut self,
         path: &Path,
-        view: gpui::Entity<super::pages::flows::graph::FlowGraphView>,
+        view: gpui::Entity<super::graph::FlowGraphView>,
         nodes: Vec<NodeId>,
         window: &mut Window,
         cx: &mut Context<Self>,
@@ -305,7 +304,7 @@ impl Workspace {
             &base,
             move |file| {
                 for node in &targets {
-                    super::pages::flows::graph::form::apply::remove_node(file, node);
+                    super::graph::form::apply::remove_node(file, node);
                 }
             },
             window,
@@ -321,7 +320,7 @@ impl Workspace {
     pub(in crate::workspace) fn confirm_delete_nodes(
         &mut self,
         path: &Path,
-        view: gpui::Entity<super::pages::flows::graph::FlowGraphView>,
+        view: gpui::Entity<super::graph::FlowGraphView>,
         nodes: Vec<NodeId>,
         window: &mut Window,
         cx: &mut Context<Self>,
@@ -358,14 +357,14 @@ impl Workspace {
     /// will change besides the node itself.
     fn dependents_outside(
         &self,
-        view: &gpui::Entity<super::pages::flows::graph::FlowGraphView>,
+        view: &gpui::Entity<super::graph::FlowGraphView>,
         going: &[NodeId],
         cx: &gpui::App,
     ) -> usize {
         view.read(cx)
             .text()
             .and_then(|text| daruda_flow::parse::parse_flow_file(text).ok())
-            .map(|file| super::pages::flows::graph::form::apply::dependents_outside(&file, going))
+            .map(|file| super::graph::form::apply::dependents_outside(&file, going))
             .unwrap_or(0)
     }
 
@@ -373,7 +372,7 @@ impl Workspace {
     pub(in crate::workspace) fn revert_node_form(
         &mut self,
         _path: &Path,
-        view: gpui::Entity<super::pages::flows::graph::FlowGraphView>,
+        view: gpui::Entity<super::graph::FlowGraphView>,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {

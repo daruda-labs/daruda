@@ -511,12 +511,6 @@ impl Workspace {
             }
         });
 
-        // Restore font settings.
-        self.mirrors.terminal_config.font_size = workspace.font_size;
-        self.mirrors.terminal_config.vertical_spacing = workspace.vertical_spacing;
-        self.mirrors.terminal_config.horizontal_spacing = workspace.horizontal_spacing;
-        self.mirrors.terminal_config.clamp_font_settings();
-
         // Adopt the persisted workspace UUID so subsequent saves land
         // on the same on-disk record.
         self.uuid = workspace.uuid;

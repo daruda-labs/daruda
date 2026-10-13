@@ -154,6 +154,9 @@ pub struct WorkspaceState {
 
     pub docks: DockStates,
     pub window: WindowState,
+    /// The terminal font when this was saved. Written so older builds, which
+    /// require it, can still read the file; never read back — the config
+    /// decides the font, and a saved copy would override a later edit.
     pub font_size: f32,
     pub vertical_spacing: f32,
     pub horizontal_spacing: f32,

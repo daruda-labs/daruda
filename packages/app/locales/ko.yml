@@ -65,7 +65,7 @@ common:
   split_agent_chat_horizontal: "에이전트 채팅 — 가로 분할"
   split_agent_chat_vertical: "에이전트 채팅 — 세로 분할"
 
-# 벽시계 시각 표기 (`chrono` 패턴). 한국어는 24시간제. `surface::timestamp` 참고.
+# 벽시계 시각 표기 (`chrono` 패턴). 한국어는 24시간제.
 timestamp:
   month_day_and_time: "%-m월 %-d일 %H:%M"
 
@@ -315,7 +315,7 @@ task:
   error_write_prompt: "프롬프트 파일 쓰기 실패: %{error}"
   close_dirty_line: "• %{title}"
   close_dirty_line_draft: "• %{title} (새 작업)"
-  batch_save_failed_detail: "%{count}개 패널을 저장하지 못해 열어 두었습니다: %{panes}"
+  batch_save_failed_detail: "%{count}개 항목을 저장하지 못해 열어 두었습니다: %{items}"
   lane_description: "작업: %{title}"
   picker_title_start: "작업 시작"
   picker_title_cancel: "작업 취소"
@@ -371,7 +371,7 @@ task:
   batch_close_heading: "닫기 전에 다음 항목의 변경 사항을 저장할까요?"
   batch_save_all: "모두 저장"
   batch_discard_all: "모두 버리기"
-  batch_save_failed_title: "일부 패널을 저장할 수 없습니다"
+  batch_save_failed_title: "일부 변경 사항을 저장할 수 없습니다"
   done_flavour_stop: "중지"
   done_flavour_prompt_input_exit: "프롬프트 종료"
   done_flavour_logout: "로그아웃"
@@ -1286,6 +1286,8 @@ flow:
   budget_cost: "실행이 비용 제한에 걸렸습니다"
   lock_held_detail: "해당 프로세스가 이미 없다면 직접 삭제하세요: %{path}"
   lock_held: "다른 실행(프로세스 %{pid})이 이미 이 worktree를 쓰고 있습니다"
+  run_finished_toast: "플로우 실행이 끝났습니다. 리포트는 플로우 페이지에 있습니다."
+  run_failed_toast: "플로우 실행이 실패했습니다. 리포트는 플로우 페이지에 있습니다."
   run_panicked: "실행이 예기치 않게 중단되었습니다"
   unprovisioned: "%{agent}을(를) 돌릴 런타임이 없습니다: %{message}"
   stalled: "할 일이 남은 채 실행이 멈췄습니다: %{nodes}의 폴더를 읽을 수 없습니다"

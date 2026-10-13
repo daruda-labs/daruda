@@ -450,12 +450,23 @@ async fn the_panel_reads_past_runs_off_disk_when_its_tab_is_showing(cx: &mut Tes
         // The tab has to be showing: a lane nobody is looking at must not
         // cost a directory listing.
         assert!(
-            ws.flow_history_for_panel().is_none(),
+            ws.flow_history_for_panel(cx).is_none(),
             "read the disk for a tab that is not open"
         );
+    });
+    cx.run_until_parked();
+    ws.update(cx, |ws, cx| {
+        let here = ws.flow_browser_lane();
+        assert!(ws.flows.history.get(here).is_none(), "nothing was read");
         ws.show_page(crate::workspace::pages::Page::Flows, cx);
-
-        let history = ws.flow_history_for_panel().expect("read");
+        assert!(
+            ws.flow_history_for_panel(cx).is_none(),
+            "listed off the main thread, not in render"
+        );
+    });
+    cx.run_until_parked();
+    ws.update(cx, |ws, cx| {
+        let history = ws.flow_history_for_panel(cx).expect("read");
         let statuses: Vec<_> = history.runs().iter().map(|r| r.status).collect();
         assert_eq!(
             statuses,
@@ -481,17 +492,21 @@ async fn the_panel_reads_past_runs_off_disk_when_its_tab_is_showing(cx: &mut Tes
 async fn only_a_run_leaving_setup_refreshes_the_history(cx: &mut TestAppContext) {
     let (lane, ws, _flow_path, _wh) = workspace_with_a_flow(cx, ONE_AGENT);
     std::fs::create_dir_all(crate::workspace::flow_paths::runs_dir(lane.path())).expect("runs dir");
+    let started = |node: &str| daruda_flow::event::FlowEvent::NodeStarted {
+        node: node.into(),
+        attempt: 1,
+    };
 
-    ws.update(cx, |ws, cx| {
+    let here = ws.update(cx, |ws, cx| {
         let here = ws.active;
         ws.show_page(crate::workspace::pages::Page::Flows, cx);
         ws.seed_flow_run_for_test(here, lane.path().join("run-here"));
-        ws.flow_history_for_panel().expect("primed");
-
-        let started = |node: &str| daruda_flow::event::FlowEvent::NodeStarted {
-            node: node.into(),
-            attempt: 1,
-        };
+        ws.flow_history_for_panel(cx);
+        here
+    });
+    cx.run_until_parked();
+    ws.update(cx, |ws, cx| {
+        ws.flow_history_for_panel(cx).expect("primed");
 
         // Leaving `Starting`: the sweep has happened, so the list is stale.
         ws.apply_flow_event_for_test(here, &started("design"), cx);
@@ -500,7 +515,11 @@ async fn only_a_run_leaving_setup_refreshes_the_history(cx: &mut TestAppContext)
             "a swept run would stay on screen for the length of the run"
         );
 
-        ws.flow_history_for_panel().expect("re-read");
+        ws.flow_history_for_panel(cx);
+    });
+    cx.run_until_parked();
+    ws.update(cx, |ws, cx| {
+        ws.flow_history_for_panel(cx).expect("re-read");
         // Every node after the first: the directory has not changed, and
         // re-reading it per node is the cost this cache exists to avoid.
         for node in ["test", "review"] {

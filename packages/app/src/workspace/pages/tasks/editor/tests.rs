@@ -301,6 +301,113 @@ fn leaving_with_save_keeps_an_unsubmitted_subtask(cx: &mut TestAppContext) {
     });
 }
 
+/// The project picker follows the window's projects while the editor is
+/// open: a project opened later is offered, a closed one is not, and a form
+/// that had picked the closed one falls back to the active project.
+#[gpui::test]
+fn the_project_picker_follows_projects_opening_and_closing(cx: &mut TestAppContext) {
+    use crate::workspace::pages::tasks::editor::state::project_value;
+    let (_a, window, ws) = build_workspace_with_project(cx);
+    let b_root = tempfile::tempdir().unwrap();
+    cx.update_window(window.into(), |_, window, cx| {
+        ws.update(cx, |ws, cx| {
+            let a = ws.projects[0].uuid;
+            ws.open_task_editor(None, window, cx);
+            let editor = ws.task_detail_id().expect("the draft opened");
+            ws.add_project(b_root.path().to_path_buf(), window, cx);
+            let b = ws.active_project().unwrap().uuid;
+            let select = ws.task_editor(editor).unwrap().project_select.clone();
+            select.update(cx, |state, cx| {
+                state.set_selected_value(&project_value(b), window, cx)
+            });
+            assert_eq!(
+                ws.task_editor(editor).unwrap().project(cx),
+                Some(b),
+                "a project opened after the editor is offered"
+            );
+            ws.close_active_project(window, cx);
+            let te = ws.task_editor(editor).unwrap();
+            assert_eq!(te.project(cx), Some(a), "a closed project gives way");
+            select.update(cx, |state, cx| {
+                state.set_selected_value(&project_value(b), window, cx)
+            });
+            assert_eq!(
+                ws.task_editor(editor).unwrap().project(cx),
+                None,
+                "a closed project is no longer offered"
+            );
+        });
+    })
+    .unwrap();
+}
+
+/// A saved task's editor closes with its project rather than moving the task
+/// to whichever project is left.
+#[gpui::test]
+fn a_saved_task_s_editor_closes_with_its_project(cx: &mut TestAppContext) {
+    let (_a, window, ws) = build_workspace_with_project(cx);
+    let b_root = tempfile::tempdir().unwrap();
+    cx.update_window(window.into(), |_, window, cx| {
+        ws.update(cx, |ws, cx| {
+            ws.add_project(b_root.path().to_path_buf(), window, cx);
+            let b = ws.active_project().unwrap().uuid;
+            let task = Task::new(b, "In B".into(), String::new(), None);
+            let id = task.id.clone();
+            cx.update_global::<GlobalTasks, _>(|g, _| {
+                g.add(task);
+            });
+            ws.open_task_editor(Some(id), window, cx);
+            assert!(ws.task_detail_id().is_some());
+            ws.close_active_project(window, cx);
+            assert_eq!(ws.task_detail_id(), None, "not re-homed into the survivor");
+        });
+    })
+    .unwrap();
+}
+
+/// Save in the leave prompt over a form that cannot save says so, and the
+/// editor stays with its edits.
+#[gpui::test]
+fn a_save_the_leave_prompt_cannot_land_is_reported(cx: &mut TestAppContext) {
+    let (_root, window, ws) = build_workspace_with_project(cx);
+    let editor = cx
+        .update_window(window.into(), |_, window, cx| {
+            ws.update(cx, |ws, cx| {
+                let task = Task::new(
+                    daruda_store::project::ProjectUuid::default(),
+                    "Titled".into(),
+                    String::new(),
+                    None,
+                );
+                let id = task.id.clone();
+                cx.update_global::<GlobalTasks, _>(|g, _| {
+                    g.add(task);
+                });
+                ws.open_task_editor(Some(id), window, cx);
+                let editor = ws.task_detail_id().expect("the editor opened");
+                let title = ws.task_editor(editor).unwrap().title_input.clone();
+                title.update(cx, |s, cx| s.set_value("", window, cx));
+                ws.leave_page_detail_then(
+                    crate::workspace::pages::Page::Tasks,
+                    window,
+                    cx,
+                    |_, _, _| {},
+                );
+                editor
+            })
+        })
+        .unwrap();
+    cx.simulate_prompt_answer(&crate::surface::strings::common::btn_save());
+    cx.run_until_parked();
+    ws.read_with(cx, |ws, _| {
+        assert_eq!(ws.task_detail_id(), Some(editor), "an unsaved form stays");
+        assert_eq!(
+            ws.error_history().first().map(|r| r.title.as_str()),
+            Some(crate::surface::strings::task::batch_save_failed_title().as_str()),
+        );
+    });
+}
+
 #[gpui::test]
 fn task_editor_save_reveals_task_without_switching_worktree(cx: &mut TestAppContext) {
     use crate::workspace::right_dock::tasks::{TaskGroupKey, TaskGrouping};

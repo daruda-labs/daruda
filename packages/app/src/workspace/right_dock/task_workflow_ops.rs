@@ -166,16 +166,8 @@ impl Workspace {
             return;
         }
 
-        let target_id = self
-            .active_lanes()
-            .iter()
-            .find(|w| w.path == path)
-            .map(|w| w.id);
-        if let Some(id) = target_id {
-            let target = daruda_store::project::LaneRef {
-                project: self.active.project,
-                lane: id,
-            };
+        // In any project: a task's lane need not be in the active one.
+        if let Some(target) = self.lane_ref_at(&path) {
             self.activate_lane(target, window, cx);
         }
     }

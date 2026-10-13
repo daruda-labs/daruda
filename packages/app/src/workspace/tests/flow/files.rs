@@ -24,15 +24,17 @@ async fn inline_flow_name_saves_without_moving_the_file(cx: &mut TestAppContext)
         assert!(ws.commit_dirty_items_with_failure_toast(&dirty, window, cx));
         assert!(ws.collect_dirty_items(cx).is_empty());
         ws.show_page(crate::workspace::pages::Page::Flows, cx);
-        let listed = ws.flow_list_for_panel();
-        assert_eq!(
-            listed.iter().find(|file| file.path == path).unwrap().name,
-            name
-        );
+        ws.flow_list_for_panel(cx);
         let (_, _, graph) = ws.open_graph().unwrap();
         assert_eq!(graph.read(cx).path(), path);
         assert_eq!(graph.read(cx).name(), name);
     });
+    vcx.run_until_parked();
+    let listed = ws.update(&mut vcx, |ws, cx| ws.flow_list_for_panel(cx));
+    assert_eq!(
+        listed.iter().find(|file| file.path == path).unwrap().name,
+        name
+    );
     let file =
         daruda_flow::parse::parse_flow_file(&std::fs::read_to_string(&path).unwrap()).unwrap();
     assert_eq!(file.name.as_deref(), Some(name));
@@ -179,17 +181,28 @@ async fn the_panel_lists_the_lane_s_flow_files_only_while_showing(cx: &mut TestA
 
     let hidden = ws.update(cx, |ws, cx| {
         ws.set_right_dock_view(daruda_store::project::RightDockView::Usage, cx);
-        ws.flow_list_for_panel()
+        ws.flow_list_for_panel(cx)
     });
+    cx.run_until_parked();
+    let read = ws.read_with(cx, |ws, _| {
+        ws.flows.list.shown(ws.flow_browser_lane()).is_some()
+    });
+    assert!(!read, "nothing was read for a tab that is not showing");
     assert!(
         hidden.is_empty(),
         "a tab that is not showing must not read the directory: {hidden:?}"
     );
 
-    let listed = ws.update(cx, |ws, cx| {
+    let pending = ws.update(cx, |ws, cx| {
         ws.show_page(crate::workspace::pages::Page::Flows, cx);
-        ws.flow_list_for_panel()
+        ws.flow_list_for_panel(cx)
     });
+    assert!(
+        pending.is_empty(),
+        "listed off the main thread, not in render"
+    );
+    cx.run_until_parked();
+    let listed = ws.update(cx, |ws, cx| ws.flow_list_for_panel(cx));
     let names: Vec<String> = listed
         .iter()
         .map(|found| {
@@ -223,10 +236,12 @@ async fn a_created_flow_is_listed_and_loads(cx: &mut TestAppContext) {
     // Warm the cache first, with the tab showing — the state the panel is in
     // when `[+]` is clicked. Reading it only afterwards passes even with the
     // invalidation deleted, because a hidden tab never fills the cache.
-    let before = ws.update(&mut vcx, |ws, cx| {
+    ws.update(&mut vcx, |ws, cx| {
         ws.show_page(crate::workspace::pages::Page::Flows, cx);
-        ws.flow_list_for_panel()
+        ws.flow_list_for_panel(cx);
     });
+    vcx.run_until_parked();
+    let before = ws.update(&mut vcx, |ws, cx| ws.flow_list_for_panel(cx));
     assert!(
         !before.iter().any(|f| f.name == "ship it"),
         "the warmed cache starts without it"
@@ -237,7 +252,7 @@ async fn a_created_flow_is_listed_and_loads(cx: &mut TestAppContext) {
     });
     vcx.run_until_parked();
 
-    let (drawn, listed) = ws.update(&mut vcx, |ws, cx| {
+    let drawn = ws.update(&mut vcx, |ws, cx| {
         let drawn = ws
             .open_graph()
             .map(|(_, _, view)| view.read(cx).path().to_path_buf());
@@ -245,8 +260,11 @@ async fn a_created_flow_is_listed_and_loads(cx: &mut TestAppContext) {
             crate::workspace::pages::detail::PageDetailId::Flow(ws.flow_detail_id().unwrap()),
             cx,
         );
-        (drawn, ws.flow_list_for_panel())
+        ws.flow_list_for_panel(cx);
+        drawn
     });
+    vcx.run_until_parked();
+    let listed = ws.update(&mut vcx, |ws, cx| ws.flow_list_for_panel(cx));
     let made = listed
         .iter()
         .find(|f| f.name == "ship it")
@@ -268,6 +286,65 @@ async fn a_created_flow_is_listed_and_loads(cx: &mut TestAppContext) {
 
     // And the graph creating it opened is of it.
     assert_eq!(drawn, Some(made.path.clone()));
+}
+
+/// Cancelling the leave prompt that making a flow raises writes nothing: the
+/// graph with unsaved edits stays, and no new file is left behind.
+#[gpui::test]
+async fn a_cancelled_new_flow_leaves_no_file(cx: &mut TestAppContext) {
+    let (_lane, ws, path, wh) = workspace_with_a_flow(cx, ONE_AGENT);
+    let mut vcx = gpui::VisualTestContext::from_window(wh.into(), cx);
+    let view = ws.update_in(&mut vcx, |ws, window, cx| {
+        ws.open_flow_graph(ws.active, &path, window, cx);
+        ws.open_graph().map(|(_, _, view)| view).unwrap()
+    });
+    view.update_in(&mut vcx, |view, window, cx| {
+        view.set_name_for_test("unsaved", window, cx)
+    });
+    let dir = ws.read_with(&vcx, |ws, _| {
+        let root = ws.active_project().unwrap().root.clone();
+        crate::workspace::flow_paths::project_flows_dir(&ws.data_dir, &root)
+    });
+    let files = || std::fs::read_dir(&dir).map(|d| d.count()).unwrap_or(0);
+    let before = files();
+
+    ws.update_in(&mut vcx, |ws, window, cx| {
+        ws.create_flow_in(ws.active, "never", window, cx)
+    });
+    assert!(vcx.has_pending_prompt(), "the unsaved graph is asked about");
+    vcx.simulate_prompt_answer(&crate::surface::strings::common::btn_cancel());
+    vcx.run_until_parked();
+
+    assert_eq!(files(), before, "nothing was written");
+    let still = ws.read_with(&vcx, |ws, cx| {
+        ws.open_graph()
+            .map(|(_, _, view)| view.read(cx).path().to_path_buf())
+    });
+    assert_eq!(still, Some(path), "the graph with edits stays");
+}
+
+/// A worktree the page browses that goes away takes its listing with it,
+/// though the cache still holds the last read.
+#[gpui::test]
+async fn a_removed_worktree_s_files_are_not_listed(cx: &mut TestAppContext) {
+    let (_lane, ws, _path, _wh) = workspace_with_a_flow(cx, ONE_AGENT);
+    ws.update(cx, |ws, cx| {
+        ws.show_page(crate::workspace::pages::Page::Flows, cx);
+        ws.flow_list_for_panel(cx);
+    });
+    cx.run_until_parked();
+    let listed = ws.update(cx, |ws, cx| {
+        assert_eq!(ws.flow_list_for_panel(cx).len(), 1, "read once");
+        let lane = ws.flow_browser_lane();
+        if let Some(project) = ws.projects.get_mut(lane.project) {
+            project.lanes.retain(|l| l.id != lane.lane);
+        }
+        ws.flow_list_for_panel(cx)
+    });
+    assert!(
+        listed.is_empty(),
+        "a gone worktree lists nothing: {listed:?}"
+    );
 }
 
 /// Renaming a flow follows it in the graph drawing it.

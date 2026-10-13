@@ -13,7 +13,8 @@
 //!
 //! [`classify`] is pure (no IO, takes timestamps as args) so unit tests
 //! cover every age boundary without monkey-patching the clock.
-//! [`run`] is the IO wrapper used at startup.
+//! [`run`] is the IO wrapper used once at startup; [`load`] is what a
+//! window opened later reads, touching nothing.
 
 use std::path::Path;
 use std::time::{Duration, SystemTime};
@@ -155,6 +156,17 @@ pub fn run(dir: &Path, policy: &ColdRestorePolicy) -> Result<Vec<StatusFile>, St
         }
     }
     Ok(loaded)
+}
+
+/// Read the status files as they stand, changing none of them — for a
+/// window opened after [`run`] already swept the directory. Sweeping again
+/// would rewrite the file of a session another window is following, and
+/// its watcher would read that rewrite as the session's own news.
+pub fn load(dir: &Path) -> Result<Vec<StatusFile>, StatusFileError> {
+    Ok(list_dir(dir)?
+        .into_iter()
+        .filter_map(|entry| read(&entry.path).ok().flatten())
+        .collect())
 }
 
 /// Delete `<dir>/*.lock` files older than `policy.file_ttl`. Silent
@@ -325,6 +337,33 @@ mod tests {
         assert_eq!(loaded[0].notification, None);
         let on_disk = read(&p).unwrap().unwrap();
         assert_eq!(on_disk.notification, None);
+    }
+
+    /// What a later window reads: every file as it is, stale ones included,
+    /// and nothing on disk touched.
+    #[test]
+    fn load_reads_without_resetting_or_deleting() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let stale = path_for(dir.path(), "stale");
+        let old = path_for(dir.path(), "old");
+        write_atomic(
+            &stale,
+            &file_aged(SessionStatus::Working, Duration::from_secs(600)),
+        )
+        .unwrap();
+        write_atomic(
+            &old,
+            &file_aged(SessionStatus::Idle, Duration::from_secs(8 * 24 * 60 * 60)),
+        )
+        .unwrap();
+
+        let loaded = load(dir.path()).unwrap();
+        assert_eq!(loaded.len(), 2);
+        assert_eq!(
+            read(&stale).unwrap().unwrap().status,
+            SessionStatus::Working
+        );
+        assert!(old.exists());
     }
 
     #[test]

@@ -45,9 +45,7 @@ pub(in crate::workspace) mod flow_cache;
 mod flow_context;
 mod flow_events;
 mod flow_file_ops;
-mod flow_graph_ops;
 pub(in crate::workspace) mod flow_history;
-mod flow_node_ops;
 mod flow_ops;
 mod flow_paths;
 mod flow_pins;
@@ -670,25 +668,7 @@ impl Workspace {
                 ..Default::default()
             },
             claude_sessions: claude_session_ops::ClaudeSessionState {
-                status: {
-                    // Cold restore: load any status files that survived a
-                    // previous run. TTL cleanup runs at the same time so
-                    // orphans from past crashes don't accumulate.
-                    let mut store = daruda_agent::ClaudeStatusStore::new();
-                    if config.claude_status.enable
-                        && let Ok(dir) = daruda_agent::hooks::status_file::default_dir()
-                    {
-                        let policy =
-                            daruda_agent::hooks::cold_restore::ColdRestorePolicy::from_config_secs(
-                                config.claude_status.stale_threshold_secs,
-                                config.claude_status.file_ttl_days,
-                            );
-                        if let Ok(initial) = daruda_agent::hooks::cold_restore::run(&dir, &policy) {
-                            store.load_initial(initial);
-                        }
-                    }
-                    store
-                },
+                status: claude_session_ops::initial_claude_status(config, cx),
                 hooks_installed: daruda_agent::hooks::installer::InstallerPaths::from_env()
                     .map(|p| daruda_agent::hooks::installer::is_installed(&p))
                     .unwrap_or(false),

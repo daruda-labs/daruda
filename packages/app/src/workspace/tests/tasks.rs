@@ -101,7 +101,7 @@ fn bump_tool_use_failure_thresholds_and_orphans(cx: &mut TestAppContext) {
 
 #[gpui::test]
 fn failure_counter_clears_when_task_leaves_running_or_session_ends(cx: &mut TestAppContext) {
-    let (_wh, workspace) = build_workspace(cx);
+    let (wh, workspace) = build_workspace(cx);
     let _task_id = seed_running_task(&workspace, cx, "sess-end");
 
     workspace.update(cx, |ws, cx| {
@@ -155,16 +155,19 @@ fn failure_counter_clears_when_task_leaves_running_or_session_ends(cx: &mut Test
     });
 
     let task_id = seed_running_task(&workspace, cx, "sess-delete");
-    workspace.update(cx, |ws, cx| {
-        ws.bump_tool_use_failure("sess-delete", cx);
-        ws.delete_task(&task_id, cx);
-        assert!(
-            !ws.claude_sessions
-                .tool_use_failure_counts
-                .contains_key("sess-delete"),
-            "delete_task must drop the failure counter"
-        );
-    });
+    cx.update_window(wh.into(), |_, window, cx| {
+        workspace.update(cx, |ws, cx| {
+            ws.bump_tool_use_failure("sess-delete", cx);
+            ws.delete_task(&task_id, window, cx);
+            assert!(
+                !ws.claude_sessions
+                    .tool_use_failure_counts
+                    .contains_key("sess-delete"),
+                "delete_task must drop the failure counter"
+            );
+        });
+    })
+    .unwrap();
 }
 
 #[test]
@@ -588,4 +591,39 @@ fn a_task_starts_in_its_own_project_while_another_is_active(cx: &mut TestAppCont
             task.state
         );
     });
+}
+
+/// Focusing a task's lane reaches it in whichever project holds it — the
+/// active project need not be the task's.
+#[gpui::test]
+fn focusing_a_task_lane_crosses_projects(cx: &mut TestAppContext) {
+    let a_root = tempfile::tempdir().unwrap();
+    let b_root = tempfile::tempdir().unwrap();
+    let config = daruda_config::Config::default();
+    let project = daruda_store::project::Project::from_path(a_root.path());
+    let (wh, workspace) = super::build_workspace_with(cx, &config, Some(project));
+    cx.update_window(wh.into(), |_, window, cx| {
+        workspace.update(cx, |ws, cx| {
+            let a = ws.active;
+            let a_path = ws.lane_for(a).unwrap().path.clone();
+            let mut task = Task::new(
+                ws.projects[0].uuid,
+                "elsewhere".to_string(),
+                String::new(),
+                None,
+            );
+            task.state = TaskState::Running {
+                worktree_path: a_path,
+            };
+            let id = task.id.clone();
+            cx.update_global::<crate::agent::tasks_global::GlobalTasks, _>(|g, _| {
+                g.add(task);
+            });
+            ws.add_project(b_root.path().to_path_buf(), window, cx);
+            assert_ne!(ws.active.project, a.project, "the other project is active");
+            ws.focus_task_lane(&id, window, cx);
+            assert_eq!(ws.active, a, "the task's own lane, in its own project");
+        });
+    })
+    .unwrap();
 }

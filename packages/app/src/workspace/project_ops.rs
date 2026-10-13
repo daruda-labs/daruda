@@ -62,7 +62,7 @@ impl Workspace {
         // default-ref entry so the "active runtime always present"
         // invariant holds for the Landing view that `render` paints next.
         self.main_area.runtimes.clear();
-        self.drop_flow_detail_of_gone_lane(window, cx);
+        self.page_details_follow_projects(window, cx);
         self.set_active(LaneRef::default());
         self.sync_settings_project(cx);
     }
@@ -143,6 +143,7 @@ impl Workspace {
             }
             self.activate_lane(t, window, cx);
         }
+        self.page_details_follow_projects(window, cx);
         self.sync_settings_project(cx);
         // Empty closure: see group_ops.rs:83 for rationale. `activate_lane`
         // consumes `&mut Window`, so the persist trigger has to land after
@@ -313,7 +314,6 @@ impl Workspace {
         self.lane_scoped.retain(|key, _| key.project != project_id);
 
         self.projects.retain(|p| p.id != project_id);
-        self.drop_flow_detail_of_gone_lane(window, cx);
 
         // No more projects — clear the active runtime fields and leave the
         // window standing on Landing. Persist the empty list (mirrors the
@@ -358,6 +358,8 @@ impl Workspace {
         self.main_area
             .runtimes
             .retain(|key, _| key.project != project_id);
+        // After the switch, so a detail falling back lands on the survivor.
+        self.page_details_follow_projects(window, cx);
         self.mutate_durable(cx, |_, _| {});
     }
 
@@ -473,7 +475,7 @@ impl Workspace {
                         // through the activate path.
                         if ws.active.project != project_id {
                             ws.projects.retain(|p| p.id != project_id);
-                            ws.drop_flow_detail_of_gone_lane(window, cx);
+                            ws.page_details_follow_projects(window, cx);
                             // Active is in a different project, so dropping
                             // every runtime keyed to `project_id` leaves the
                             // active runtime intact.
@@ -655,6 +657,22 @@ impl Workspace {
         // git lanes exist.
         self.reconcile_project_default_branches(cx);
         self.mutate_durable(cx, |_, _| {});
+        // The page details follow the lanes discovery found once the window
+        // is free — this runs inside the workspace's own update, with no
+        // window in hand.
+        let handle = self.window_runtime.handle;
+        let ws = cx.weak_entity();
+        cx.defer(move |cx| {
+            crate::windows::try_update_workspace_window(
+                handle,
+                cx,
+                "discovered_lanes_follow",
+                |window, cx| {
+                    // SILENT-OK: the workspace closes with its window; nothing left to refill
+                    let _ = ws.update(cx, |ws, cx| ws.page_details_follow_projects(window, cx));
+                },
+            );
+        });
     }
 
     /// Open the delete-project chooser for the active project, wiring

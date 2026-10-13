@@ -22,8 +22,8 @@ impl Workspace {
             workspace: cx.weak_entity(),
             flows: self.flow_rows_matching(|lane| lane == self.flow_browser_lane()),
             flow_lane: self.flow_browser_lane(),
-            flow_history: self.flow_history_for_panel(),
-            flow_files: self.flow_list_for_panel(),
+            flow_history: self.flow_history_for_panel(cx),
+            flow_files: self.flow_list_for_panel(cx),
             flow_browser: self.flow_browser_snapshot(cx),
         });
     }
@@ -49,9 +49,7 @@ impl Workspace {
             search: Handle(search.clone()),
             query: search.read(cx).value().to_string(),
             modified: self
-                .flows
-                .list
-                .get(self.flow_browser_lane())
+                .shown_flow_listing()
                 .map(|listing| listing.modified.clone())
                 .unwrap_or_default(),
         }

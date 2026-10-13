@@ -156,7 +156,7 @@ impl Workspace {
             return;
         }
         let id = crate::workspace::pages::detail::PageDetailId::Flow(detail.id);
-        self.leave_detail(id, window, cx);
+        self.drop_gone_detail(id, window, cx);
         self.respawn_flow_watcher(cx);
     }
 

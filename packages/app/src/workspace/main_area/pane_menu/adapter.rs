@@ -8,7 +8,7 @@ use crate::workspace::Workspace;
 
 use super::spec::{Activate, MenuEntry, MenuItemSpec};
 
-pub(super) fn build_popup_menu(
+pub(in crate::workspace) fn build_popup_menu(
     entries: Vec<MenuEntry>,
     action_context: Option<FocusHandle>,
     workspace: WeakEntity<Workspace>,

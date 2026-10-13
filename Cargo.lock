@@ -1839,7 +1839,6 @@ dependencies = [
  "toml 0.8.23",
  "toml_edit 0.22.27",
  "tray-icon",
- "tree-sitter-highlight",
  "tungstenite",
  "uds_windows",
  "unicode-segmentation",

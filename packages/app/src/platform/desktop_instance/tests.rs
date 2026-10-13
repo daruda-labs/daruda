@@ -25,10 +25,12 @@ fn second_launch_forwards_and_profile_lock_releases_on_exit() {
         Launch::Primary(_)
     ));
     drop(first);
-    assert!(matches!(
-        acquire(directory.path(), Request::default(), false).unwrap(),
-        Launch::Primary(_)
-    ));
+    // A sibling test's fork can hold the released lock for a moment.
+    let again = crate::test_support::once_released(
+        || acquire(directory.path(), Request::default(), false),
+        |attempt| !matches!(attempt, Ok(Launch::Primary(_))),
+    );
+    assert!(matches!(again.unwrap(), Launch::Primary(_)));
 }
 
 #[test]

@@ -133,7 +133,7 @@ pub(in crate::workspace) struct LeftDockSnapshot {
     /// or `None` when no file pane is focused. Dock rows render a
     /// "selected" background when this triple matches.
     pub focused_file_selection: Option<(
-        daruda_store::project::LaneId,
+        daruda_store::project::LaneRef,
         std::path::PathBuf,
         DiffSource,
     )>,

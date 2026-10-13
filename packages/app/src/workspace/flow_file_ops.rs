@@ -104,12 +104,6 @@ impl Workspace {
         let Some(root) = self.project_for(lane.project).map(|p| p.root.clone()) else {
             return;
         };
-        let dir = super::flow_paths::project_flows_dir(&self.data_dir, &root);
-        if let Err(e) = std::fs::create_dir_all(&dir) {
-            self.report_flow_file_error(s::flow::create_failed_title(), &dir, &e, cx);
-            return;
-        }
-        let path = dir.join(format!("flow-{}.yaml", uuid::Uuid::new_v4()));
         let Some(agent) = self.mirrors.agents.first() else {
             self.report_flow_no_agent(cx);
             return;
@@ -121,7 +115,38 @@ impl Workspace {
                 return;
             }
         };
-        if let Err(e) = write_new_file(&path, &starter) {
+        let dir = super::flow_paths::project_flows_dir(&self.data_dir, &root);
+        // Leave the detail on screen first: a Cancel there must not leave a
+        // new file behind.
+        self.leave_page_detail_then(
+            super::pages::Page::Flows,
+            window,
+            cx,
+            move |ws, window, cx| {
+                ws.write_new_flow(lane, &dir, &starter, window, cx);
+            },
+        );
+    }
+
+    /// Write a new flow file into `dir` and open its graph.
+    fn write_new_flow(
+        &mut self,
+        lane: daruda_store::project::LaneRef,
+        dir: &Path,
+        starter: &str,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        // The worktree may have gone while the leave prompt was up.
+        if self.lane_for(lane).is_none() {
+            return;
+        }
+        if let Err(e) = std::fs::create_dir_all(dir) {
+            self.report_flow_file_error(s::flow::create_failed_title(), dir, &e, cx);
+            return;
+        }
+        let path = dir.join(format!("flow-{}.yaml", uuid::Uuid::new_v4()));
+        if let Err(e) = write_new_file(&path, starter) {
             self.report_flow_file_error(s::flow::create_failed_title(), &path, &e, cx);
             return;
         }
@@ -188,8 +213,8 @@ impl Workspace {
         cx.notify();
     }
 
-    /// Drop the cached listing so the panel reads the directory again. One
-    /// assignment, like the run history's — the snapshot rebuilds it.
+    /// Mark the cached listing wrong so the panel reads the directory again;
+    /// the old one stays on screen until that read lands.
     pub(in crate::workspace) fn invalidate_flow_list(&mut self) {
         self.flows.list.invalidate();
     }
@@ -379,32 +404,55 @@ impl Workspace {
         })
     }
 
-    /// The browsed worktree's files, read only while Flows is visible.
-    /// Scope changes, file operations, and watcher events invalidate the cache.
+    /// The browsed worktree's files, read only while Flows is visible. Empty
+    /// until a read off the main thread lands; the old list stays while it is
+    /// read again. Scope changes, file operations, and watcher events
+    /// invalidate the cache.
     pub(in crate::workspace) fn flow_list_for_panel(
         &mut self,
+        cx: &Context<Self>,
     ) -> Vec<super::flow_paths::FoundFlow> {
         if self.active_page() != Some(super::pages::Page::Flows) {
             return Vec::new();
         }
-        let lane = self.flow_browser_lane();
-        if self.lane_for(lane).is_none() {
-            return Vec::new();
-        }
-        if self.flows.list.get(lane).is_none() {
-            let Some(sources) = self.flow_sources_for(lane) else {
-                return Vec::new();
-            };
-            self.flows.list.put(
-                lane,
-                super::flow_browser::listing::FlowListing::read(&sources),
-            );
-        }
-        self.flows
-            .list
-            .get(lane)
+        self.read_flow_list(self.flow_browser_lane(), cx);
+        self.shown_flow_listing()
             .map(|listing| listing.files.clone())
             .unwrap_or_default()
+    }
+
+    /// The listing to draw for the browsed worktree — nothing once that
+    /// worktree is gone, though the cache may still hold its last read.
+    pub(in crate::workspace) fn shown_flow_listing(
+        &self,
+    ) -> Option<&super::flow_browser::listing::FlowListing> {
+        let lane = self.flow_browser_lane();
+        self.lane_for(lane)?;
+        self.flows.list.shown(lane)
+    }
+
+    /// List `lane`'s flow files on the background executor and repaint once
+    /// they land — the same rule as the run history beside it.
+    fn read_flow_list(&mut self, lane: daruda_store::project::LaneRef, cx: &Context<Self>) {
+        let Some(sources) = self.flow_sources_for(lane) else {
+            return;
+        };
+        let Some(ticket) = self.flows.list.begin_read(lane) else {
+            return;
+        };
+        cx.spawn(async move |this, cx| {
+            let read = cx
+                .background_executor()
+                .spawn(async move { super::flow_browser::listing::FlowListing::read(&sources) })
+                .await;
+            // SILENT-OK: the window may close while the files are listed
+            let _ = this.update(cx, |ws, cx| {
+                if ws.flows.list.finish_read(lane, ticket, read) {
+                    cx.notify();
+                }
+            });
+        })
+        .detach();
     }
 }
 

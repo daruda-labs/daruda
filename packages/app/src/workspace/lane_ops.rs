@@ -350,7 +350,7 @@ impl Workspace {
         if let Some(project) = self.projects.get_mut(target.project) {
             project.lanes.retain(|w| w.id != target.lane);
         }
-        self.drop_flow_detail_of_gone_lane(window, cx);
+        self.page_details_follow_projects(window, cx);
         if let Some(path) = removed_path {
             use gpui::BorrowAppContext as _;
             cx.update_global::<crate::agent::skills::global::GlobalSkills, _>(|s, _| {
@@ -511,6 +511,7 @@ impl Workspace {
         };
         self.main_area.runtimes.insert(new_ref, runtime);
         self.activate_lane(new_ref, window, cx);
+        self.page_details_follow_projects(window, cx);
         // New cwd → new JSONL dir to watch.
         self.refresh_jsonl_watcher(cx);
         // New lane root → new project-skills directory to watch.
@@ -909,7 +910,6 @@ impl Workspace {
         if !Self::lane_removable(wt) {
             return;
         }
-        let target_id = wt.id;
         let label = gpui::SharedString::from(wt.display_name());
         let path = gpui::SharedString::from(wt.path.to_string_lossy().into_owned());
         let plan = match self.validate_remove_lane(target) {
@@ -943,7 +943,7 @@ impl Workspace {
             move |window, cx| {
                 super::left_dock::projects::remove_modal::RemoveWorktreeModal::new(
                     ws_for_modal.clone(),
-                    target_id,
+                    target,
                     label,
                     path,
                     plan,

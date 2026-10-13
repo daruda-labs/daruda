@@ -113,7 +113,7 @@ pub(super) fn base_file_row(
     ) {
         (Some(lane), Some(Ok(found)), Some((focused_lane, focused_path, focused_source))) => {
             let (abs, source) = range_pane_for(found, file, &lane.paths());
-            *focused_lane == lane_id && *focused_path == abs && *focused_source == source
+            *focused_lane == target && *focused_path == abs && *focused_source == source
         }
         _ => false,
     };

@@ -781,10 +781,12 @@ nodes:
 
     // Read the list once so there is a cache to invalidate — the state the
     // panel is in whenever the tab is up.
-    let listed = ws.update(&mut vcx, |ws, cx| {
+    ws.update(&mut vcx, |ws, cx| {
         ws.show_page(crate::workspace::pages::Page::Flows, cx);
-        ws.flow_list_for_panel()
+        ws.flow_list_for_panel(cx);
     });
+    vcx.run_until_parked();
+    let listed = ws.update(&mut vcx, |ws, cx| ws.flow_list_for_panel(cx));
     assert_eq!(listed.len(), 1, "one flow to start: {listed:?}");
 
     // Somebody else's editor: a new file, and an edit to the open one.
@@ -794,8 +796,10 @@ nodes:
 
     ws.update_in(&mut vcx, |ws, window, cx| ws.apply_flows_event(window, cx));
     vcx.run_until_parked();
+    ws.update(&mut vcx, |ws, cx| ws.flow_list_for_panel(cx));
+    vcx.run_until_parked();
 
-    let listed = ws.update(&mut vcx, |ws, _| ws.flow_list_for_panel());
+    let listed = ws.update(&mut vcx, |ws, cx| ws.flow_list_for_panel(cx));
     let mut names: Vec<String> = listed
         .iter()
         .filter_map(|f| f.path.file_name().map(|n| n.to_string_lossy().into_owned()))

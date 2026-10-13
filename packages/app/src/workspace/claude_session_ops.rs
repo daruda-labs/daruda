@@ -73,6 +73,44 @@ pub(in crate::workspace) struct ClaudeSessionState {
     pub(in crate::workspace) open_turns: daruda_agent::hooks::turn_end::OpenTurns,
 }
 
+/// Marks that this app has swept `~/.daruda/status/` once. A GPUI global
+/// rather than a process static, so each test app sweeps its own.
+struct ClaudeStatusSwept;
+
+impl gpui::Global for ClaudeStatusSwept {}
+
+/// The session statuses a new window starts from. The first window of the
+/// app runs the cold restore — resetting stale files and deleting orphans
+/// left by a past run; every later one only reads, since by then the files
+/// belong to sessions the open windows are following.
+pub(in crate::workspace) fn initial_claude_status(
+    config: &daruda_config::Config,
+    cx: &mut gpui::App,
+) -> daruda_agent::ClaudeStatusStore {
+    use daruda_agent::hooks::cold_restore;
+    let mut store = daruda_agent::ClaudeStatusStore::new();
+    if !config.claude_status.enable {
+        return store;
+    }
+    let Ok(dir) = daruda_agent::hooks::status_file::default_dir() else {
+        return store;
+    };
+    let initial = if cx.has_global::<ClaudeStatusSwept>() {
+        cold_restore::load(&dir)
+    } else {
+        cx.set_global(ClaudeStatusSwept);
+        let policy = cold_restore::ColdRestorePolicy::from_config_secs(
+            config.claude_status.stale_threshold_secs,
+            config.claude_status.file_ttl_days,
+        );
+        cold_restore::run(&dir, &policy)
+    };
+    if let Ok(initial) = initial {
+        store.load_initial(initial);
+    }
+    store
+}
+
 impl ClaudeSessionState {
     /// Drop the tool-use failure tallies of sessions a task let go of.
     /// Session ids are never reused, so a tally left behind is only dead

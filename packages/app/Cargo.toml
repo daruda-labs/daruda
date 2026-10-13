@@ -91,7 +91,6 @@ similar = "2"
 shell-words = "1"
 toml = "0.8"
 toml_edit = "0.22"
-tree-sitter-highlight = "0.25"
 unicode-segmentation = "1"
 url = "2"
 ureq = { version = "2", default-features = false, features = ["tls", "json"] }

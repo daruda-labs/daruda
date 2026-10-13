@@ -4,12 +4,14 @@
 
 use gpui::{Context, Pixels, Point, Window};
 
+use super::detail::FlowDetailId;
 use crate::surface::strings as s;
 use crate::workspace::Workspace;
-use crate::workspace::pages::flows::detail::FlowDetailId;
 
-use super::adapter::build_popup_menu;
-use super::spec::{Activate, ItemState, MenuEntry, disabled_item, item, normalize_entries};
+use crate::workspace::main_area::pane_menu::adapter::build_popup_menu;
+use crate::workspace::main_area::pane_menu::spec::{
+    Activate, ItemState, MenuEntry, disabled_item, item, normalize_entries,
+};
 
 /// What the graph had selected when the menu opened.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]

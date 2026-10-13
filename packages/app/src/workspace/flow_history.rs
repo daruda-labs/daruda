@@ -16,7 +16,7 @@ use std::path::{Path, PathBuf};
 
 use daruda_flow::marker::RunStatus;
 use daruda_store::project::LaneRef;
-use gpui::SharedString;
+use gpui::{Context, SharedString};
 
 use super::Workspace;
 
@@ -106,34 +106,51 @@ impl FlowHistory {
 
 impl Workspace {
     /// The browsed worktree's history, read only while Flows is visible.
-    /// The lane-keyed cache avoids disk reads until its scope changes or a
-    /// run transition invalidates it.
-    pub(in crate::workspace) fn flow_history_for_panel(&mut self) -> Option<FlowHistory> {
+    /// `None` until a read off the main thread lands; the lane-keyed cache
+    /// then holds it until its scope changes or a run transition
+    /// invalidates it, and shows the old one while it is read again.
+    pub(in crate::workspace) fn flow_history_for_panel(
+        &mut self,
+        cx: &Context<Self>,
+    ) -> Option<FlowHistory> {
         if self.active_page() != Some(super::pages::Page::Flows) {
             return None;
         }
-        self.flow_history_of(self.flow_browser_lane())
-    }
-
-    /// The same, for a worktree the caller named rather than the one on
-    /// screen. A run targeted elsewhere resolves its inputs against *its own*
-    /// past runs — reading this one's would feed it another worktree's
-    /// outputs.
-    pub(in crate::workspace) fn flow_history_of(
-        &mut self,
-        lane: daruda_store::project::LaneRef,
-    ) -> Option<FlowHistory> {
+        let lane = self.flow_browser_lane();
         self.lane_for(lane)?;
-        if self.flows.history.get(lane).is_none() {
-            let cwd = self.lane_for(lane).map(|l| l.path.clone())?;
-            let lock_dir = super::flow_paths::lane_lock_dir(&self.lock_root, &cwd);
-            let read = FlowHistory::read(&super::flow_paths::runs_dir(&cwd), lock_dir.as_deref());
-            self.flows.history.put(lane, read);
-        }
-        self.flows.history.get(lane).cloned()
+        self.read_flow_history(lane, cx);
+        self.flows.history.shown(lane).cloned()
     }
 
-    /// Drop the cached history so the next snapshot reads disk again.
+    /// List `lane`'s runs on the background executor and repaint once they
+    /// land. A read already under way, or one overtaken by an invalidation,
+    /// starts nothing and lands nothing.
+    fn read_flow_history(&mut self, lane: LaneRef, cx: &Context<Self>) {
+        let Some(cwd) = self.lane_for(lane).map(|l| l.path.clone()) else {
+            return;
+        };
+        let Some(ticket) = self.flows.history.begin_read(lane) else {
+            return;
+        };
+        let lock_dir = super::flow_paths::lane_lock_dir(&self.lock_root, &cwd);
+        let runs_dir = super::flow_paths::runs_dir(&cwd);
+        cx.spawn(async move |this, cx| {
+            let read = cx
+                .background_executor()
+                .spawn(async move { FlowHistory::read(&runs_dir, lock_dir.as_deref()) })
+                .await;
+            // SILENT-OK: the window may close while the runs are listed
+            let _ = this.update(cx, |ws, cx| {
+                if ws.flows.history.finish_read(lane, ticket, read) {
+                    cx.notify();
+                }
+            });
+        })
+        .detach();
+    }
+
+    /// Mark the cached history wrong so the next snapshot reads disk again;
+    /// the old one stays on screen until that read lands.
     /// Scoped to the lane it happened in — another lane's run says nothing
     /// about this lane's directory.
     pub(in crate::workspace) fn invalidate_flow_history(&mut self, lane: LaneRef) {
@@ -141,16 +158,32 @@ impl Workspace {
     }
 }
 
+/// The newest run directory under `runs_dir`, by the same ordering the
+/// history lists them in.
+pub(in crate::workspace) fn newest_run_dir(runs_dir: &Path) -> Option<PathBuf> {
+    std::fs::read_dir(runs_dir)
+        .into_iter()
+        .flatten()
+        .flatten()
+        .map(|entry| entry.path())
+        .filter(|path| path.is_dir())
+        .max()
+}
+
+/// When the run in `dir` started, worded, from its directory name alone.
+/// Empty when the name is not this host's scheme — better a missing time
+/// than a wrong one.
+pub(in crate::workspace) fn run_started_label(dir: &Path) -> SharedString {
+    dir.file_name()
+        .and_then(|name| super::flow_request::run_started_at(&name.to_string_lossy()))
+        .map(crate::surface::strings::flow::run_started_at)
+        .unwrap_or_default()
+        .into()
+}
+
 fn entry_for(dir: &Path, lock_dir: Option<&Path>) -> FlowRunEntry {
-    let name = dir
-        .file_name()
-        .map(|n| n.to_string_lossy().into_owned())
-        .unwrap_or_default();
     FlowRunEntry {
-        started: super::flow_request::run_started_at(&name)
-            .map(crate::surface::strings::flow::run_started_at)
-            .unwrap_or_default()
-            .into(),
+        started: run_started_label(dir),
         // `is_alive` is how a lock's pid is judged, and it is the same
         // predicate submission uses — a run this window is holding must
         // read as `Running`, not `Crashed`.

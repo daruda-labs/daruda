@@ -15,12 +15,14 @@
 //! selection / link / annotation state and *then* points the model's focused
 //! pane at the right-clicked one, so `split_focused_pane_kind` and friends
 //! act on the pane the user aimed at.
+//!
+//! `spec` and `adapter` are also how the Flows page's graph builds its menu
+//! (`pages/flows/graph_menu.rs`) — the graph is a page detail, not a pane.
 
-mod adapter;
+pub(in crate::workspace) mod adapter;
 mod context;
-mod flow_graph;
 mod ops;
 mod sections;
-mod spec;
+pub(in crate::workspace) mod spec;
 
 pub(in crate::workspace) use context::ResourceRightClick;

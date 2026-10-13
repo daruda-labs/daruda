@@ -24,4 +24,3 @@ pub mod glyphs;
 pub mod keybindings;
 pub mod shortcut_display;
 pub mod strings;
-pub mod timestamp;
