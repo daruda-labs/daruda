@@ -386,6 +386,8 @@ impl ScreenshotScenario {
         match name {
             "mcp-paste" => Some(Self::QuickEntry(QuickEntryShot::McpPaste)),
             "mcp-review" => Some(Self::QuickEntry(QuickEntryShot::McpReview)),
+            "mcp-stdio" => Some(Self::QuickEntry(QuickEntryShot::McpStdio)),
+            "mcp-error" => Some(Self::QuickEntry(QuickEntryShot::McpError)),
             "mcp-codex-tail" => Some(Self::QuickEntry(QuickEntryShot::McpCodexTail)),
             "mcp-codex-review" => Some(Self::QuickEntry(QuickEntryShot::McpCodexReview)),
             "library-claude" => Some(Self::QuickEntry(QuickEntryShot::LibraryClaude)),

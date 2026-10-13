@@ -414,7 +414,9 @@ impl RenderOnce for Dialog {
                                 cx.stop_propagation();
 
                                 if self.overlay_closable && event.button == MouseButton::Left {
-                                    on_cancel(&ClickEvent::default(), window, cx);
+                                    if !on_cancel(&ClickEvent::default(), window, cx) {
+                                        return;
+                                    }
                                     on_close(&ClickEvent::default(), window, cx);
                                     window.close_dialog(cx);
                                 }
@@ -501,7 +503,9 @@ impl RenderOnce for Dialog {
                                         let on_cancel = self.on_cancel.clone();
                                         let on_close = self.on_close.clone();
                                         move |_, window, cx| {
-                                            on_cancel(&ClickEvent::default(), window, cx);
+                                            if !on_cancel(&ClickEvent::default(), window, cx) {
+                                                return;
+                                            }
                                             on_close(&ClickEvent::default(), window, cx);
                                             window.close_dialog(cx);
                                         }

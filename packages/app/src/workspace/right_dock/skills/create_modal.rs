@@ -15,9 +15,8 @@ use crate::agent::skills::{
 };
 use crate::surface::strings;
 use crate::ui::Disableable as _;
-use crate::ui::Selectable as _;
 use crate::ui::WindowExt as _;
-use crate::ui::{InputEvent, InputState, button, button_group, button_primary, checkbox};
+use crate::ui::{InputEvent, InputState, button, button_primary, checkbox};
 use crate::workspace::ModalView;
 use crate::workspace::Workspace;
 use crate::workspace::right_dock::skills::modal_shared::field_label;
@@ -55,6 +54,7 @@ pub struct CreateSkillModal {
 
     scope: SkillScope,
     scope_options: Vec<SkillScope>,
+    scope_choice: super::super::form_layout::Choice<SkillScope>,
     user_invocable: bool,
     disable_model_invocation: bool,
 
@@ -132,6 +132,26 @@ impl CreateSkillModal {
                 }
             });
 
+        let scope_choice = super::super::form_layout::Choice::new(
+            scope_options
+                .iter()
+                .filter_map(|value| match value {
+                    SkillScope::Project => Some((*value, strings::common::section_project())),
+                    SkillScope::Personal => Some((*value, strings::common::section_personal())),
+                    SkillScope::Plugin => None,
+                })
+                .collect(),
+            scope,
+            window,
+            cx,
+            |this, value, cx| {
+                if !this.submitting {
+                    this.scope = value;
+                    this.clear_error(cx);
+                    cx.notify();
+                }
+            },
+        );
         let subs = vec![
             forward_body_editor(&paste_input, window, cx),
             forward_input(&invocation_input, window, cx),
@@ -165,6 +185,7 @@ impl CreateSkillModal {
             body_editor,
             scope,
             scope_options,
+            scope_choice,
             user_invocable: true,
             disable_model_invocation: false,
             project_root,
@@ -508,6 +529,9 @@ impl Focusable for CreateSkillModal {
 }
 
 impl ModalView for CreateSkillModal {
+    fn render_footer(&mut self, cx: &mut Context<Self>) -> Vec<gpui::AnyElement> {
+        vec![self.form_footer(cx)]
+    }
     fn fit_viewport(&self) -> bool {
         true
     }

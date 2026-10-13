@@ -116,9 +116,9 @@ pub(in crate::workspace) fn open_alert_dialog(
 /// validation banner, and footer buttons all live on the entity.
 ///
 /// Dialog supplies the outer chrome only (panel bg, border, padding,
-/// backdrop, Escape-to-close). `close_button(false)` and
-/// `overlay_closable(false)` suppress Dialog's own close / overlay
-/// dismiss; the entity controls when to dismiss via
+/// backdrop, Escape-to-close). Guarded forms route overlay dismissal through
+/// their close policy; unguarded forms retain their explicit-button policy.
+/// The entity controls when to dismiss via
 /// [`gpui_component::WindowExt::close_dialog`].
 ///
 /// `width` is forwarded to `Dialog::width(...)` when supplied — pass
@@ -148,22 +148,64 @@ pub(in crate::workspace) fn open_form_modal<E, B>(
                 }
             })
         });
+        let overlay_entity = entity.clone();
         let mut d = dialog
             .keyboard(!guarded)
             .child(body)
-            .close_button(false)
-            .overlay_closable(false);
+            .close_button(guarded)
+            .overlay_closable(guarded)
+            .when(guarded, |dialog| {
+                dialog.on_cancel(move |_, window, cx| {
+                    overlay_entity.update(cx, |modal, cx| modal.request_close(window, cx));
+                    false
+                })
+            });
         if entity.read(cx).fit_viewport() {
             let inset = crate::ui::dialog::window_paddings(window);
-            d = d.margin_top(px(theme::PAD_XL)).max_h(
-                window.viewport_size().height
-                    - inset.top
-                    - inset.bottom
-                    - px(theme::TITLE_BAR_HEIGHT + theme::PAD_XL + theme::PAD_XL),
-            );
+            let footer_entity = entity.clone();
+            d = d
+                .p(px(theme::FORM_MODAL_PADDING))
+                .footer(move |_, _, _window, cx| {
+                    let close_entity = footer_entity.clone();
+                    vec![
+                        div()
+                            .w_full()
+                            .on_key_down(move |event, window, cx| {
+                                if guarded && event.keystroke.key == "escape" {
+                                    cx.stop_propagation();
+                                    close_entity
+                                        .update(cx, |modal, cx| modal.request_close(window, cx));
+                                }
+                            })
+                            .children(
+                                footer_entity.update(cx, |modal, cx| modal.render_footer(cx)),
+                            ),
+                    ]
+                })
+                .margin_top(px(theme::PAD_XL))
+                .max_h(
+                    window.viewport_size().height
+                        - inset.top
+                        - inset.bottom
+                        - px(theme::TITLE_BAR_HEIGHT + theme::PAD_XL + theme::PAD_XL),
+                );
         }
         if !title.is_empty() {
-            d = d.title(title.clone());
+            d = if entity.read(cx).fit_viewport() {
+                d.title(
+                    div()
+                        .id("library-form-title")
+                        .debug_selector(|| "library-form-title".into())
+                        .w_full()
+                        .text_size(px(theme::FORM_MODAL_TITLE_FONT_SIZE))
+                        .pb(px(theme::FORM_MODAL_FOOTER_PADDING))
+                        .border_b_1()
+                        .border_color(theme::current(cx).border)
+                        .child(title.clone()),
+                )
+            } else {
+                d.title(title.clone())
+            };
         }
         if let Some(w) = width {
             let available = window.viewport_size().width - px(theme::PAD_XL + theme::PAD_XL);

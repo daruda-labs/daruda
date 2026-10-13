@@ -2,6 +2,69 @@ use super::*;
 use gpui::{TestAppContext, VisualTestContext};
 
 #[gpui::test]
+async fn quick_entry_reimport_requires_confirmation_and_cancel_keeps_edits(
+    cx: &mut TestAppContext,
+) {
+    let (window, workspace) = crate::workspace::tests::build_workspace(cx);
+    let mut vcx = VisualTestContext::from_window(window.into(), cx);
+    let modal = vcx.update(|window, cx| {
+        cx.new(|cx| {
+            AddMcpServerModal::new(
+                workspace.downgrade(),
+                AddMcpInitial {
+                    targets: Vec::new(),
+                    config: None,
+                    default_scope: McpScope::User,
+                    project_root: None,
+                    existing_names: Vec::new(),
+                },
+                window,
+                cx,
+            )
+        })
+    });
+    vcx.update(|window, cx| {
+        modal.update(cx, |modal, cx| {
+            modal
+                .name_input
+                .update(cx, |input, cx| input.set_value("keep-my-edit", window, cx));
+            modal.paste_input.update(cx, |input, cx| {
+                input.set_value(
+                    r#"{"mcpServers":{"imported":{"command":"server"}}}"#,
+                    window,
+                    cx,
+                )
+            });
+            modal.review_paste(window, cx);
+        })
+    });
+    assert!(vcx.has_pending_prompt());
+    vcx.simulate_prompt_answer(&strings::common::btn_cancel());
+    vcx.run_until_parked();
+    assert_eq!(
+        modal.read_with(&vcx, |modal, cx| modal
+            .name_input
+            .read(cx)
+            .value()
+            .to_string()),
+        "keep-my-edit"
+    );
+    vcx.update(|window, cx| modal.update(cx, |modal, cx| modal.review_paste(window, cx)));
+    assert!(vcx.has_pending_prompt());
+    vcx.simulate_prompt_answer(&strings::common::btn_replace_fields());
+    vcx.run_until_parked();
+    assert_eq!(
+        modal.read_with(&vcx, |modal, cx| modal
+            .name_input
+            .read(cx)
+            .value()
+            .to_string()),
+        "imported"
+    );
+    assert!(!modal.read_with(&vcx, |modal, _| modal.pasting || modal.form.asking));
+}
+
+#[gpui::test]
 async fn quick_entry_mcp_import_preserves_hidden_values_and_dirty_guard(cx: &mut TestAppContext) {
     let (window, workspace) = crate::workspace::tests::build_workspace(cx);
     let mut vcx = VisualTestContext::from_window(window.into(), cx);
@@ -14,6 +77,8 @@ async fn quick_entry_mcp_import_preserves_hidden_values_and_dirty_guard(cx: &mut
             modal.review_paste(window,cx);
             assert!(!modal.pasting);
             assert!(!modal.advanced);
+            assert_eq!(modal.transport_choice.selected(cx), Some(modal.transport));
+            assert_eq!(modal.scope_choice.selected(cx), Some(modal.scope));
             let draft=modal.build_draft(cx).unwrap();
             assert_eq!(draft.headers["Authorization"],"Bearer secret");
             assert_eq!(draft.headers["X-Multiline"],"a\nb");

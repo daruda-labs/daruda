@@ -14,7 +14,8 @@ pub(super) fn field_label(
     t: &crate::ui::theme::DarudaTheme,
 ) -> impl IntoElement {
     div()
-        .text_size(px(theme::RIGHT_PANEL_LABEL_FONT_SIZE))
-        .text_color(t.text_muted)
+        .text_size(px(theme::FONT_SIZE_LG))
+        .font_weight(gpui::FontWeight::SEMIBOLD)
+        .text_color(t.text_body)
         .child(text.into())
 }

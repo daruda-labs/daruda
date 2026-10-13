@@ -20,9 +20,8 @@ use super::modal_shared::{
 use crate::agent::mcp::{McpScope, McpServerDraft, McpTransport, validate_command, validate_url};
 use crate::surface::strings;
 use crate::ui::Disableable as _;
-use crate::ui::Selectable as _;
 use crate::ui::WindowExt as _;
-use crate::ui::{InputEvent, InputState, button, button_group, button_primary, checkbox};
+use crate::ui::{InputEvent, InputState, button, button_primary, checkbox};
 use crate::workspace::ModalView;
 use crate::workspace::Workspace;
 use daruda_config::env_lines::format_env_lines;
@@ -99,6 +98,7 @@ pub struct EditMcpServerModal {
     initial: EditMcpInitial,
     advanced: bool,
     transport: McpTransport,
+    transport_choice: super::super::form_layout::Choice<McpTransport>,
     disabled: bool,
     auth: super::auth::Auth,
     codex_options: super::codex_options::CodexOptions,
@@ -160,6 +160,28 @@ impl EditMcpServerModal {
         ];
 
         let transport = initial.transport;
+        let transport_choice = super::super::form_layout::Choice::new(
+            transport_options()
+                .into_iter()
+                .filter(|(value, _)| {
+                    *value != McpTransport::Sse
+                        || initial.config.as_ref().is_none_or(|c| {
+                            c.provider == crate::agent::configuration::Provider::Claude
+                        })
+                })
+                .map(|(value, label)| (value, label.to_uppercase()))
+                .collect(),
+            transport,
+            window,
+            cx,
+            |this, value, cx| {
+                if !this.submitting {
+                    this.transport = value;
+                    this.clear_error(cx);
+                    cx.notify();
+                }
+            },
+        );
         codex_options.seed(&initial.extra, window, cx);
         let disabled = initial.disabled;
 
@@ -200,6 +222,7 @@ impl EditMcpServerModal {
             headers_input,
             initial,
             transport,
+            transport_choice,
             disabled,
             error: None,
             error_field: None,
@@ -317,7 +340,7 @@ impl EditMcpServerModal {
         let draft = match self.build_draft(cx) {
             Ok(d) => d,
             Err((field, msg)) => {
-                self.advanced = true;
+                self.advanced |= field < -1 || (field == 1 && self.transport.is_remote());
                 self.error_field = (field >= 0).then_some(field);
                 if field < -1 {
                     if let Some(input) = self.codex_options.inputs.get((-field - 2) as usize) {
@@ -532,6 +555,9 @@ impl Focusable for EditMcpServerModal {
 }
 
 impl ModalView for EditMcpServerModal {
+    fn render_footer(&mut self, cx: &mut Context<Self>) -> Vec<gpui::AnyElement> {
+        vec![self.form_footer(cx)]
+    }
     fn fit_viewport(&self) -> bool {
         true
     }

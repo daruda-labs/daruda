@@ -9,18 +9,15 @@ use gpui::{
     Subscription, WeakEntity, Window, div, prelude::*, px,
 };
 
-use super::modal_shared::{
-    field_error_to_msg, field_label, scope_options, split_args, transport_options,
-};
+use super::modal_shared::{field_error_to_msg, field_label, split_args, transport_options};
 use crate::agent::mcp::{
     McpScope, McpServerDraft, McpTransport, NameError, validate_command, validate_name,
     validate_url,
 };
 use crate::surface::strings;
 use crate::ui::Disableable as _;
-use crate::ui::Selectable as _;
 use crate::ui::WindowExt as _;
-use crate::ui::{InputEvent, InputState, button, button_group, button_primary, checkbox};
+use crate::ui::{InputEvent, InputState, button, button_primary, checkbox};
 use crate::workspace::ModalView;
 use crate::workspace::Workspace;
 use daruda_config::env_lines::format_env_lines;
@@ -61,6 +58,8 @@ pub struct AddMcpServerModal {
 
     scope: McpScope,
     scope_options: Vec<McpScope>,
+    scope_choice: super::super::form_layout::Choice<McpScope>,
+    transport_choice: super::super::form_layout::Choice<McpTransport>,
     transport: McpTransport,
     disabled: bool,
     auth: super::auth::Auth,
@@ -142,6 +141,44 @@ impl AddMcpServerModal {
             McpScope::User
         };
 
+        let scope_choice = super::super::form_layout::Choice::new(
+            super::modal_shared::scope_options()
+                .into_iter()
+                .filter(|(value, _)| scope_options.contains(value))
+                .collect(),
+            scope,
+            window,
+            cx,
+            |this, value, cx| {
+                if !this.submitting {
+                    this.scope = value;
+                    this.clear_error(cx);
+                    cx.notify();
+                }
+            },
+        );
+        let transport_choice = super::super::form_layout::Choice::new(
+            transport_options()
+                .into_iter()
+                .filter(|(value, _)| {
+                    *value != McpTransport::Sse
+                        || initial.config.as_ref().is_none_or(|c| {
+                            c.provider == crate::agent::configuration::Provider::Claude
+                        })
+                })
+                .map(|(value, label)| (value, label.to_uppercase()))
+                .collect(),
+            McpTransport::Stdio,
+            window,
+            cx,
+            |this, value, cx| {
+                if !this.submitting {
+                    this.transport = value;
+                    this.clear_error(cx);
+                    cx.notify();
+                }
+            },
+        );
         let mut subs = vec![
             forward_input(&auth.input, window, cx),
             forward_multi_input(&paste_input, window, cx),
@@ -190,6 +227,8 @@ impl AddMcpServerModal {
             headers_input,
             scope,
             scope_options,
+            scope_choice,
+            transport_choice,
             transport: McpTransport::Stdio,
             disabled: false,
             initial,
@@ -338,7 +377,7 @@ impl AddMcpServerModal {
         let draft = match self.build_draft(cx) {
             Ok(d) => d,
             Err((field, msg)) => {
-                self.advanced = true;
+                self.advanced |= field < -1 || (field == 2 && self.transport.is_remote());
                 self.error_field = (field >= 0).then_some(field);
                 if field < -1 {
                     if let Some(input) = self.codex_options.inputs.get((-field - 2) as usize) {
@@ -579,6 +618,9 @@ impl Focusable for AddMcpServerModal {
 }
 
 impl ModalView for AddMcpServerModal {
+    fn render_footer(&mut self, cx: &mut Context<Self>) -> Vec<gpui::AnyElement> {
+        vec![self.form_footer(cx)]
+    }
     fn fit_viewport(&self) -> bool {
         true
     }
@@ -668,6 +710,31 @@ mod tests;
 
 #[cfg(feature = "screenshot")]
 impl AddMcpServerModal {
+    pub(in crate::workspace) fn seed_stdio_for_shot(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.paste_input.update(cx, |input, cx| input.set_value(
+            r#"{"mcpServers":{"docs":{"command":"npx","args":["-y","@example/docs-mcp"],"env":{"DOCS_TOKEN":"example-token"}}}}"#,
+            window, cx));
+        self.review_paste(window, cx);
+    }
+
+    pub(in crate::workspace) fn seed_error_for_shot(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.seed_for_shot(true, window, cx);
+        self.name_input
+            .update(cx, |input, cx| input.set_value("", window, cx));
+        let modal = cx.entity();
+        window.defer(cx, move |window, cx| {
+            modal.update(cx, |modal, cx| modal.submit(window, cx));
+        });
+    }
+
     pub(in crate::workspace) fn seed_for_shot(
         &mut self,
         review: bool,

@@ -1,7 +1,7 @@
-//! Provider selection and honest on-disk status above configuration lists.
+//! Provider selection and actionable status above configuration lists.
 
 use crate::{
-    agent::configuration::{Provider, codex::Trust},
+    agent::configuration::Provider,
     surface::strings,
     ui::theme,
     workspace::layout::{Dock, RightDockSnapshot},
@@ -10,16 +10,16 @@ use gpui::{AnyElement, Context, IntoElement, prelude::*, px};
 
 pub(super) fn header(snap: &RightDockSnapshot, cx: &mut Context<Dock>) -> AnyElement {
     let view = &snap.library;
+    let choose_provider = view.config.is_none()
+        || snap.focused_agent_domain == crate::workspace::main_area::pane::AccountDomain::Any
+        || view.local_management;
+    if !choose_provider && !view.remote && !view.loading && view.error.is_none() {
+        return gpui::div().into_any_element();
+    }
     let t = theme::current(cx);
     let mut body = super::right_panel_body()
         .text_size(px(theme::RIGHT_PANEL_LABEL_FONT_SIZE))
         .text_color(t.text_muted);
-    if let Some(provider) = view.provider {
-        body = body.child(match provider {
-            Provider::Claude => strings::library::claude(),
-            Provider::Codex => strings::library::codex(),
-        });
-    }
     if view.config.is_none() && view.error.is_some() {
         body = body.child(strings::library::root_invalid());
     }
@@ -47,10 +47,7 @@ pub(super) fn header(snap: &RightDockSnapshot, cx: &mut Context<Dock>) -> AnyEle
             ),
         );
     }
-    if view.config.is_none()
-        || snap.focused_agent_domain == crate::workspace::main_area::pane::AccountDomain::Any
-        || view.local_management
-    {
+    if choose_provider {
         body = body.child(strings::library::choose());
         let mut choices = gpui::div().flex().gap(px(theme::PAD_XS));
         for (provider, label) in [
@@ -73,33 +70,7 @@ pub(super) fn header(snap: &RightDockSnapshot, cx: &mut Context<Dock>) -> AnyEle
         }
         body = body.child(choices);
     }
-    if let Some(config) = &view.config {
-        body = body.child(strings::library::account(
-            view.account_label
-                .clone()
-                .unwrap_or_else(strings::library::system_account),
-        ));
-        body = body.child(strings::library::source(config.user_file.display()));
-        if let Some(cwd) = &config.cwd {
-            body = body.child(cwd.display().to_string());
-        }
-        body = body.child(strings::library::configured());
-        if view.inventory.managed_exclusive {
-            body = body.child(strings::library::managed_exclusive());
-        }
-        if config.provider == Provider::Claude {
-            body = body.child(strings::library::approval_hint());
-        }
-        if config.provider == Provider::Codex && config.cwd.is_some() {
-            body = body.child(match view.inventory.trust {
-                Trust::Trusted => strings::library::trusted(),
-                Trust::Untrusted => strings::library::untrusted(),
-                Trust::Unknown => strings::library::trust_unknown(),
-            });
-        }
-        for (_, path) in &view.inventory.shared_paths {
-            body = body.child(strings::library::shared(path.display()));
-        }
+    if view.config.is_some() {
         if view.loading {
             body = body.child(strings::common::loading());
         }

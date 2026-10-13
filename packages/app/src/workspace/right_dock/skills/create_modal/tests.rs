@@ -2,6 +2,57 @@ use super::*;
 use gpui::{TestAppContext, VisualTestContext};
 
 #[gpui::test]
+async fn quick_entry_skill_reimport_cancel_preserves_body(cx: &mut TestAppContext) {
+    let (window, workspace) = crate::workspace::tests::build_workspace(cx);
+    let mut vcx = VisualTestContext::from_window(window.into(), cx);
+    let modal = vcx.update(|window, cx| {
+        cx.new(|cx| {
+            CreateSkillModal::new(
+                workspace.downgrade(),
+                None,
+                None,
+                SkillsSnapshot::default(),
+                window,
+                cx,
+            )
+        })
+    });
+    vcx.update(|window, cx| {
+        modal.update(cx, |modal, cx| {
+            modal.body_editor.update(cx, |input, cx| {
+                input.set_value("Keep this draft", window, cx)
+            });
+            modal
+                .paste_input
+                .update(cx, |input, cx| input.set_value("Replacement", window, cx));
+            modal.review_paste(window, cx);
+        })
+    });
+    assert!(vcx.has_pending_prompt());
+    vcx.simulate_prompt_answer(&strings::common::btn_cancel());
+    vcx.run_until_parked();
+    assert_eq!(
+        modal.read_with(&vcx, |modal, cx| modal
+            .body_editor
+            .read(cx)
+            .value()
+            .to_string()),
+        "Keep this draft"
+    );
+    vcx.update(|window, cx| modal.update(cx, |modal, cx| modal.review_paste(window, cx)));
+    vcx.simulate_prompt_answer(&strings::common::btn_replace_fields());
+    vcx.run_until_parked();
+    assert_eq!(
+        modal.read_with(&vcx, |modal, cx| modal
+            .body_editor
+            .read(cx)
+            .value()
+            .to_string()),
+        "Replacement"
+    );
+}
+
+#[gpui::test]
 async fn modal_safety_escape_and_cancel_share_draft_protection(cx: &mut TestAppContext) {
     let (window, workspace) = crate::workspace::tests::build_workspace(cx);
     let holder = std::rc::Rc::new(std::cell::RefCell::new(None));
@@ -30,12 +81,43 @@ async fn modal_safety_escape_and_cancel_share_draft_protection(cx: &mut TestAppC
     let modal: Entity<CreateSkillModal> = holder.borrow().clone().unwrap();
     vcx.update(|window, cx| {
         modal.update(cx, |modal, cx| {
+            modal.pasting = false;
+            modal.advanced = true;
             modal
                 .name_input
                 .update(cx, |input, cx| input.set_value("draft", window, cx));
+            window.focus(&modal.name_input.focus_handle(cx), cx);
         })
     });
     vcx.run_until_parked();
+    vcx.update(|window, _| window.refresh());
+    vcx.run_until_parked();
+    let footer = vcx.debug_bounds("library-form-footer").unwrap();
+    let title = vcx.debug_bounds("library-form-title").unwrap();
+    vcx.update(|window, cx| {
+        assert!(footer.bottom() <= window.viewport_size().height);
+        window.dispatch_event(
+            gpui::PlatformInput::ScrollWheel(gpui::ScrollWheelEvent {
+                position: gpui::point(footer.center().x, footer.top() - px(40.0)),
+                delta: gpui::ScrollDelta::Pixels(gpui::point(
+                    px(0.0),
+                    -window.viewport_size().height,
+                )),
+                modifiers: Default::default(),
+                touch_phase: gpui::TouchPhase::Moved,
+            }),
+            cx,
+        );
+    });
+    vcx.run_until_parked();
+    // Compare within the dialog while its entrance animation may still run.
+    let after = vcx.debug_bounds("library-form-footer").unwrap();
+    let title_after = vcx.debug_bounds("library-form-title").unwrap();
+    assert_eq!(footer.size, after.size);
+    assert_eq!(
+        footer.origin - title.origin,
+        after.origin - title_after.origin
+    );
     vcx.simulate_keystrokes("escape");
     vcx.run_until_parked();
     assert!(
@@ -44,6 +126,18 @@ async fn modal_safety_escape_and_cancel_share_draft_protection(cx: &mut TestAppC
     );
     vcx.simulate_prompt_answer(&strings::common::btn_cancel());
     vcx.run_until_parked();
+    let outside =
+        vcx.update(|window, _| gpui::point(px(4.0), window.viewport_size().height - px(40.0)));
+    vcx.simulate_click(outside, gpui::Modifiers::none());
+    vcx.run_until_parked();
+    assert!(
+        vcx.has_pending_prompt(),
+        "overlay clicks must protect drafts"
+    );
+    assert!(vcx.update(|window, cx| window.has_active_dialog(cx)));
+    vcx.simulate_prompt_answer(&strings::common::btn_cancel());
+    vcx.run_until_parked();
+    assert!(vcx.update(|window, cx| window.has_active_dialog(cx)));
     assert!(!modal.read_with(&vcx, |modal, _| modal.form.asking));
     assert_eq!(
         modal.read_with(&vcx, |modal, cx| modal
@@ -71,6 +165,21 @@ async fn modal_safety_escape_and_cancel_share_draft_protection(cx: &mut TestAppC
     );
     vcx.simulate_prompt_answer(&strings::common::btn_cancel());
     vcx.run_until_parked();
+    vcx.update(|_, cx| modal.update(cx, |modal, _| modal.submitting = true));
+    vcx.simulate_click(outside, gpui::Modifiers::none());
+    vcx.run_until_parked();
+    assert!(!vcx.has_pending_prompt());
+    assert!(vcx.update(|window, cx| window.has_active_dialog(cx)));
+    vcx.update(|_, cx| {
+        modal.update(cx, |modal, cx| {
+            modal.submitting = false;
+            modal.form.baseline = modal.values(cx);
+        });
+    });
+    vcx.simulate_click(outside, gpui::Modifiers::none());
+    vcx.run_until_parked();
+    assert!(!vcx.has_pending_prompt());
+    assert!(!vcx.update(|window, cx| window.has_active_dialog(cx)));
 }
 
 #[gpui::test]

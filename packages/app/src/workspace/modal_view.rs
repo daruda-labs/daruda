@@ -12,6 +12,14 @@ pub trait ModalView: Render + Focusable {
         false
     }
 
+    /// Actions outside the scrolling body of a viewport-fitted form.
+    fn render_footer(&mut self, _cx: &mut gpui::Context<Self>) -> Vec<gpui::AnyElement>
+    where
+        Self: Sized,
+    {
+        Vec::new()
+    }
+
     /// Opt-in close interception; existing modal lifecycles keep their policy.
     fn guards_close(&self) -> bool {
         false

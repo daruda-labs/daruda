@@ -1,6 +1,7 @@
 //! A small auth editor that preserves custom headers until explicitly changed.
 use crate::surface::strings;
 use crate::ui::{Disableable, InputState, Selectable, button, button_group, theme};
+use crate::workspace::right_dock::form_layout;
 use gpui::{App, Context, Entity, SharedString, Window, div, prelude::*, px};
 use std::collections::BTreeMap;
 
@@ -173,12 +174,11 @@ impl Auth {
         div()
             .flex()
             .flex_col()
-            .gap(px(theme::FORM_MODAL_SECTION_GAP))
-            .child(super::modal_shared::field_label(
-                strings::mcp::field_auth(),
-                theme::current(cx),
+            .gap(px(theme::FORM_MODAL_FIELD_SPACING))
+            .child(form_layout::field(
+                super::modal_shared::field_label(strings::mcp::field_auth(), theme::current(cx)),
+                group,
             ))
-            .child(group)
             .when(matches!(self.mode, Mode::Token | Mode::Variable), |body| {
                 body.child(crate::ui::input(&self.input, cx, 6))
             })

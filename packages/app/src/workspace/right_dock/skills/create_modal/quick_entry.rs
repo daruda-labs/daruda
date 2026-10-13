@@ -1,10 +1,11 @@
 use super::*;
 use crate::agent::skills::import;
+use crate::workspace::right_dock::form_layout;
 
 impl CreateSkillModal {
     pub(super) fn review_paste(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         match import::parse(&self.paste_input.read(cx).value()) {
-            Ok(imported) => self.apply_import(imported, window, cx),
+            Ok(imported) => self.request_import(imported, window, cx),
             Err(()) => {
                 self.error_field = None;
                 self.error = Some(strings::skills::import_error().into());
@@ -12,6 +13,33 @@ impl CreateSkillModal {
                 cx.notify();
             }
         }
+    }
+
+    fn request_import(
+        &mut self,
+        imported: import::ImportedSkill,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if self.submitting || self.form.asking {
+            return;
+        }
+        if !self.form.has_fields(&self.values(cx)) {
+            self.apply_import(imported, window, cx);
+            return;
+        }
+        super::super::super::form_state::confirm_replace(
+            &mut self.form,
+            window,
+            cx,
+            move |this, replace, window, cx| {
+                this.form.asking = false;
+                if replace {
+                    this.apply_import(imported, window, cx);
+                }
+                cx.notify();
+            },
+        );
     }
 
     pub(super) fn apply_import(
@@ -66,45 +94,43 @@ impl CreateSkillModal {
             .flex()
             .flex_col()
             .tab_group()
-            .gap(px(theme::FORM_MODAL_SECTION_GAP))
-            .child(field_label(
-                strings::skills::quick_hint(),
-                theme::current(cx),
-            ))
-            .child(crate::ui::input(&self.paste_input, cx, 0));
+            .gap(px(theme::FORM_MODAL_FIELD_SPACING))
+            .child(form_layout::field(
+                field_label(strings::skills::quick_hint(), theme::current(cx)),
+                crate::ui::input(&self.paste_input, cx, 0),
+            ));
         if let Some(error) = &self.error {
             body = body.child(crate::ui::alert::error("skill-import-error", error.clone()));
         }
-        body.child(
-            div()
-                .flex()
-                .justify_end()
-                .gap(px(theme::MODAL_FOOTER_GAP))
-                .child(
-                    button("paste-cancel", strings::common::btn_cancel())
-                        .tab_stop(true)
-                        .tab_index(1)
-                        .on_click(cx.listener(|this, _, w, cx| this.leave(w, cx))),
-                )
-                .child(
-                    button("paste-manual", strings::common::btn_manual())
-                        .tab_stop(true)
-                        .tab_index(2)
-                        .on_click(cx.listener(|this, _, w, cx| {
-                            this.pasting = false;
-                            this.error = None;
-                            w.focus(&this.body_editor.focus_handle(cx), cx);
-                            cx.notify();
-                        })),
-                )
-                .child(
-                    button_primary("paste-review", strings::common::btn_review())
-                        .tab_stop(true)
-                        .tab_index(3)
-                        .disabled(self.paste_input.read(cx).value().trim().is_empty())
-                        .on_click(cx.listener(|this, _, w, cx| this.review_paste(w, cx))),
-                ),
-        )
-        .into_any_element()
+        body.into_any_element()
+    }
+
+    pub(super) fn paste_footer(&self, cx: &mut Context<Self>) -> gpui::AnyElement {
+        form_layout::footer(cx)
+            .child(
+                button("paste-cancel", strings::common::btn_cancel())
+                    .tab_stop(true)
+                    .tab_index(1)
+                    .on_click(cx.listener(|this, _, w, cx| this.leave(w, cx))),
+            )
+            .child(
+                button("paste-manual", strings::common::btn_manual())
+                    .tab_stop(true)
+                    .tab_index(2)
+                    .on_click(cx.listener(|this, _, w, cx| {
+                        this.pasting = false;
+                        this.error = None;
+                        w.focus(&this.body_editor.focus_handle(cx), cx);
+                        cx.notify();
+                    })),
+            )
+            .child(
+                button_primary("paste-review", strings::common::btn_review())
+                    .tab_stop(true)
+                    .tab_index(3)
+                    .disabled(self.paste_input.read(cx).value().trim().is_empty())
+                    .on_click(cx.listener(|this, _, w, cx| this.review_paste(w, cx))),
+            )
+            .into_any_element()
     }
 }

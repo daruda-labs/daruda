@@ -9,6 +9,7 @@ use super::layout::RightDockSnapshot;
 
 pub(in crate::workspace) mod context;
 mod delete_modal;
+mod form_layout;
 mod form_state;
 pub(in crate::workspace) mod library;
 mod library_view;

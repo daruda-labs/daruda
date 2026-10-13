@@ -1,4 +1,5 @@
 //! Provider-native optional fields; unchanged values retain their original shape.
+use crate::workspace::right_dock::form_layout;
 use crate::{
     surface::strings,
     ui::{InputState, theme},
@@ -119,15 +120,12 @@ impl CodexOptions {
         let mut body = div()
             .flex()
             .flex_col()
-            .gap(px(theme::FORM_MODAL_SECTION_GAP));
+            .gap(px(theme::FORM_MODAL_FIELD_SPACING));
         for (index, label) in labels.into_iter().enumerate() {
-            body = body
-                .child(super::modal_shared::field_label(label, theme::current(cx)))
-                .child(crate::ui::input(
-                    &self.inputs[index],
-                    cx,
-                    13 + index as isize,
-                ));
+            body = body.child(form_layout::field(
+                super::modal_shared::field_label(label, theme::current(cx)),
+                crate::ui::input(&self.inputs[index], cx, 13 + index as isize),
+            ));
         }
         body
     }

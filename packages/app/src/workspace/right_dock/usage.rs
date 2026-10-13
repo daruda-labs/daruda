@@ -304,23 +304,28 @@ fn provider_section(
     let Some(activity) = activity else {
         return block;
     };
-    block
-        .child(chart_block(
-            DockSection::UsageTurns,
-            strings::usage::section_7day(),
-            activity,
-            |d| d.turns,
-            snap,
-            cx,
-        ))
-        .child(chart_block(
-            DockSection::UsageTokens,
-            strings::usage::section_tokens(),
-            activity,
-            |d| d.tokens,
-            snap,
-            cx,
-        ))
+    block.child(
+        div()
+            .flex()
+            .flex_col()
+            .gap(px(theme::RIGHT_PANEL_SECTION_GAP))
+            .child(chart_block(
+                DockSection::UsageTurns,
+                strings::usage::section_7day(),
+                activity,
+                |d| d.turns,
+                snap,
+                cx,
+            ))
+            .child(chart_block(
+                DockSection::UsageTokens,
+                strings::usage::section_tokens(),
+                activity,
+                |d| d.tokens,
+                snap,
+                cx,
+            )),
+    )
 }
 
 // ----------------------------------------------------------------
@@ -921,6 +926,63 @@ fn plan_badge_with_mult(base: &str, sub: &str, tier: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[gpui::test]
+    fn folded_usage_sections_have_equal_spacing(cx: &mut gpui::TestAppContext) {
+        use gpui::{Render, VisualTestContext, Window};
+
+        struct Probe {
+            snap: RightDockSnapshot,
+        }
+        impl Render for Probe {
+            fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+                let activity = ActivityStats {
+                    daily: vec![DayActivity {
+                        date: "2026-10-13".into(),
+                        turns: 1,
+                        tokens: 100,
+                    }],
+                    recent_sessions: Vec::new(),
+                };
+                super::super::right_panel_body()
+                    .w(px(240.))
+                    .child(provider_section(
+                        &section(AccountRecipeId::Claude),
+                        Some(&activity),
+                        &self.snap,
+                        cx,
+                    ))
+                    .child(recent_sessions_block(&[], false, &self.snap.workspace, cx))
+            }
+        }
+
+        let (_, workspace) = crate::workspace::tests::build_workspace(cx);
+        let snap = workspace.update(cx, |ws, cx| {
+            let mut snap = ws.prepare_right_dock_snapshot(cx);
+            for section in [DockSection::UsageTurns, DockSection::UsageTokens] {
+                if snap.sections.is_open(section) {
+                    snap.sections.toggle(section);
+                }
+            }
+            snap
+        });
+        let window = cx.add_window(|_, _| Probe { snap });
+        let mut vcx = VisualTestContext::from_window(window.into(), cx);
+        vcx.run_until_parked();
+        vcx.update(|window, _| window.refresh());
+        vcx.run_until_parked();
+        let turns = vcx.debug_bounds("dock-section-UsageTurns").unwrap();
+        let tokens = vcx.debug_bounds("dock-section-UsageTokens").unwrap();
+        let recent = vcx
+            .debug_bounds("dock-section-UsageRecentSessions")
+            .unwrap();
+        assert_eq!(turns.size.height, tokens.size.height);
+        assert_eq!(tokens.size.height, recent.size.height);
+        assert_eq!(
+            tokens.top() - turns.bottom(),
+            recent.top() - tokens.bottom()
+        );
+    }
 
     #[gpui::test]
     fn restore_action_fits_the_session_row(cx: &mut gpui::TestAppContext) {

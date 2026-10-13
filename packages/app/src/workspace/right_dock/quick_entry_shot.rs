@@ -11,6 +11,8 @@ use gpui::{App, Entity, Window, px};
 pub(crate) enum QuickEntryShot {
     McpPaste,
     McpReview,
+    McpStdio,
+    McpError,
     McpCodexReview,
     McpCodexTail,
     LibraryClaude,
@@ -80,6 +82,8 @@ pub(crate) fn drive(
         QuickEntryShot::LibraryClaude | QuickEntryShot::LibraryCodex => unreachable!(),
         QuickEntryShot::McpPaste
         | QuickEntryShot::McpReview
+        | QuickEntryShot::McpStdio
+        | QuickEntryShot::McpError
         | QuickEntryShot::McpCodexReview
         | QuickEntryShot::McpCodexTail => {
             dialog_helpers::open_form_modal(
@@ -117,6 +121,10 @@ pub(crate) fn drive(
                         QuickEntryShot::McpCodexReview | QuickEntryShot::McpCodexTail
                     ) {
                         modal.seed_codex_for_shot(window, cx);
+                    } else if shot == QuickEntryShot::McpStdio {
+                        modal.seed_stdio_for_shot(window, cx);
+                    } else if shot == QuickEntryShot::McpError {
+                        modal.seed_error_for_shot(window, cx);
                     } else {
                         modal.seed_for_shot(shot == QuickEntryShot::McpReview, window, cx);
                     }

@@ -1,4 +1,5 @@
 //! Stable native rows backed by the form's draft input. No shell execution.
+use crate::ui::{Disableable as _, Selectable as _};
 use crate::{
     surface::strings,
     ui::{InputEvent, InputState, theme},
@@ -16,6 +17,7 @@ struct Row {
     id: usize,
     key: Entity<InputState>,
     value: Option<Entity<InputState>>,
+    masked: bool,
     _subscriptions: Vec<Subscription>,
 }
 pub(super) struct Rows {
@@ -26,7 +28,6 @@ pub(super) struct Rows {
     serialized: String,
     _source_subscription: Subscription,
     _disabled_subscription: Subscription,
-    masked: bool,
 }
 impl Rows {
     pub fn new(
@@ -59,7 +60,6 @@ impl Rows {
             serialized: String::new(),
             _source_subscription: subscription,
             _disabled_subscription: disabled_subscription,
-            masked: matches!(kind, Kind::Pairs),
         };
         this.load(window, cx);
         this
@@ -95,12 +95,20 @@ impl Rows {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let input = cx.new(|cx| InputState::new(window, cx).default_value(key));
+        let input = cx.new(|cx| {
+            let input = InputState::new(window, cx).default_value(key);
+            if matches!(self.kind, Kind::Pairs) {
+                input.placeholder(strings::mcp::field_key())
+            } else {
+                input
+            }
+        });
         let value = value.map(|value| {
             cx.new(|cx| {
                 InputState::new(window, cx)
                     .default_value(value)
-                    .masked(self.masked)
+                    .placeholder(strings::mcp::field_value())
+                    .masked(true)
             })
         });
         let subscriptions = std::iter::once(&input)
@@ -117,6 +125,7 @@ impl Rows {
             id: self.next_id,
             key: input,
             value,
+            masked: true,
             _subscriptions: subscriptions,
         });
         self.next_id += 1;
@@ -212,15 +221,21 @@ impl Rows {
 }
 impl Render for Rows {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let mut body = div().flex().flex_col().gap(px(theme::GAP_SM));
+        let disabled = self.source.read(cx).is_disabled();
+        let mut body = div().flex().flex_col().gap(px(theme::GAP_LG));
         for row in &self.rows {
             let id = row.id;
-            let mut line = div().id(id).flex().gap(px(theme::GAP_SM)).child(
-                div()
-                    .flex_1()
-                    .min_w_0()
-                    .child(crate::ui::input(&row.key, cx, 8)),
-            );
+            let mut line = div()
+                .id(id)
+                .flex()
+                .items_center()
+                .gap(px(theme::GAP_LG))
+                .child(
+                    div()
+                        .flex_1()
+                        .min_w_0()
+                        .child(crate::ui::input(&row.key, cx, 8)),
+                );
             if let Some(value) = &row.value {
                 line = line.child(
                     div()
@@ -228,9 +243,29 @@ impl Render for Rows {
                         .min_w_0()
                         .child(crate::ui::input(value, cx, 8)),
                 );
+                line = line.child(
+                    crate::ui::button_icon(("reveal-row", id), crate::ui::icons::VISIBILITY, cx)
+                        .tooltip(strings::mcp::reveal_values())
+                        .selected(!row.masked)
+                        .disabled(disabled)
+                        .tab_stop(true)
+                        .tab_index(8)
+                        .on_click(cx.listener(move |this, _, window, cx| {
+                            if let Some(row) = this.rows.iter_mut().find(|row| row.id == id) {
+                                row.masked = !row.masked;
+                                if let Some(value) = &row.value {
+                                    value.update(cx, |input, cx| {
+                                        input.set_masked(row.masked, window, cx)
+                                    });
+                                }
+                                cx.notify();
+                            }
+                        })),
+                );
             }
             line = line.child(
                 crate::ui::button_delete_glyph(("remove-row", id), cx)
+                    .disabled(disabled)
                     .tooltip(strings::common::btn_delete())
                     .tab_stop(true)
                     .tab_index(8)
@@ -251,43 +286,32 @@ impl Render for Rows {
             body = body.child(line);
         }
         body = body.child(
-            crate::ui::button("add-row", strings::library::add_row())
-                .tab_stop(true)
-                .tab_index(8)
-                .on_click(cx.listener(|this, _, window, cx| {
-                    if this.source.read(cx).is_disabled() {
-                        return;
-                    }
-                    this.push(
-                        "",
-                        matches!(this.kind, Kind::Pairs).then_some(""),
-                        window,
-                        cx,
-                    );
-                    this.sync(window, cx);
-                    if let Some(row) = this.rows.last() {
-                        window.focus(&row.key.focus_handle(cx), cx);
-                    }
-                })),
+            crate::ui::button_with_icon(
+                "add-row",
+                strings::library::add_row(),
+                crate::ui::icons::ADD,
+            )
+            .disabled(disabled)
+            .border_1()
+            .border_color(theme::current(cx).border)
+            .tab_stop(true)
+            .tab_index(8)
+            .on_click(cx.listener(|this, _, window, cx| {
+                if this.source.read(cx).is_disabled() {
+                    return;
+                }
+                this.push(
+                    "",
+                    matches!(this.kind, Kind::Pairs).then_some(""),
+                    window,
+                    cx,
+                );
+                this.sync(window, cx);
+                if let Some(row) = this.rows.last() {
+                    window.focus(&row.key.focus_handle(cx), cx);
+                }
+            })),
         );
-        if matches!(self.kind, Kind::Pairs) {
-            body = body.child(
-                crate::ui::button("reveal-rows", strings::mcp::reveal_values())
-                    .tab_stop(true)
-                    .tab_index(8)
-                    .on_click(cx.listener(|this, _, window, cx| {
-                        this.masked = !this.masked;
-                        for row in &this.rows {
-                            if let Some(value) = &row.value {
-                                value.update(cx, |input, cx| {
-                                    input.set_masked(this.masked, window, cx)
-                                });
-                            }
-                        }
-                        cx.notify();
-                    })),
-            );
-        }
         body
     }
 }

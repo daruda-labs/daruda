@@ -13,6 +13,39 @@ impl FormState {
     pub fn is_dirty(&self, values: &[String]) -> bool {
         self.baseline != values
     }
+
+    /// The first value is the paste buffer, not an already reviewed field.
+    pub fn has_fields(&self, values: &[String]) -> bool {
+        self.baseline.get(1..) != values.get(1..)
+    }
+}
+
+pub(super) fn confirm_replace<E: 'static>(
+    state: &mut FormState,
+    window: &mut Window,
+    cx: &mut Context<E>,
+    next: impl FnOnce(&mut E, bool, &mut Window, &mut Context<E>) + 'static,
+) {
+    if state.asking {
+        return;
+    }
+    state.asking = true;
+    let receiver = window.prompt(
+        gpui::PromptLevel::Warning,
+        &strings::common::replace_form_title(),
+        Some(&strings::common::replace_form_body()),
+        &[
+            strings::common::btn_cancel().as_str(),
+            strings::common::btn_replace_fields().as_str(),
+        ],
+        cx,
+    );
+    cx.spawn_in(window, async move |this, cx| {
+        let replace = matches!(receiver.await, Ok(1));
+        // SILENT-OK: a closed window has no remaining draft to replace.
+        let _ = this.update_in(cx, |this, window, cx| next(this, replace, window, cx));
+    })
+    .detach();
 }
 
 #[derive(Clone, Copy)]
@@ -65,17 +98,6 @@ pub(super) fn freeze_inputs(inputs: &[Entity<crate::ui::InputState>], frozen: bo
     for input in inputs {
         input.update(cx, |input, cx| input.set_disabled(frozen, cx));
     }
-}
-
-/// An input and its diagnostic share a tab position and an error identity.
-pub(super) fn field_input(
-    input: &Entity<crate::ui::InputState>,
-    cx: &App,
-    index: isize,
-    error_field: Option<isize>,
-    error: Option<&gpui::SharedString>,
-) -> impl gpui::IntoElement {
-    ordered_field_input(input, cx, index, index, error_field, error)
 }
 
 /// A field keeps its validation identity when optional controls alter tab order.

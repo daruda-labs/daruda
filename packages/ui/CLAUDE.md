@@ -343,6 +343,9 @@ access, ask first whether the access belongs in `ui/` instead.
 
 ## Vendor patches in `vendor/gpui-component/gpui_component/`
 
+Dialog overlay and close-button dismissal honor the `on_cancel` veto, just
+like its Cancel button. Guarded app forms use it to retain unsaved drafts.
+
 Small patches over upstream `longbridge/gpui-component` v0.5.1
 keep daruda's theme propagation + modal tab containment + tab font /
 gap / height control + agent-chat markdown chrome working. Re-apply on

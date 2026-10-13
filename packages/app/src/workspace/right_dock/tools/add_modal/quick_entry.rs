@@ -1,5 +1,6 @@
 use super::*;
 use crate::agent::mcp::import;
+use crate::workspace::right_dock::form_layout;
 use daruda_config::env_lines::format_env_lines;
 
 impl AddMcpServerModal {
@@ -8,7 +9,9 @@ impl AddMcpServerModal {
             &self.paste_input.read(cx).value(),
             self.initial.config.as_ref().map(|c| c.provider),
         ) {
-            Ok(mut drafts) if drafts.len() == 1 => self.apply_import(drafts.remove(0), window, cx),
+            Ok(mut drafts) if drafts.len() == 1 => {
+                self.request_import(drafts.remove(0), window, cx)
+            }
             Ok(drafts) => {
                 self.candidates = drafts;
                 self.error = None;
@@ -21,6 +24,33 @@ impl AddMcpServerModal {
                 cx.notify();
             }
         }
+    }
+
+    fn request_import(
+        &mut self,
+        draft: McpServerDraft,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if self.submitting || self.form.asking {
+            return;
+        }
+        if !self.form.has_fields(&self.values(cx)) {
+            self.apply_import(draft, window, cx);
+            return;
+        }
+        super::super::super::form_state::confirm_replace(
+            &mut self.form,
+            window,
+            cx,
+            move |this, replace, window, cx| {
+                this.form.asking = false;
+                if replace {
+                    this.apply_import(draft, window, cx);
+                }
+                cx.notify();
+            },
+        );
     }
 
     pub(super) fn apply_import(
@@ -61,6 +91,7 @@ impl AddMcpServerModal {
             .update(cx, |rows, cx| rows.seed_pairs(&draft.headers, window, cx));
         self.codex_options.seed(&draft.extra, window, cx);
         self.transport = draft.transport;
+        self.transport_choice.set(draft.transport, window, cx);
         self.disabled = draft.disabled;
         self.imported = Some(draft);
         self.pasting = false;
@@ -105,9 +136,11 @@ impl AddMcpServerModal {
         let mut body = div()
             .flex()
             .flex_col()
-            .gap(px(theme::FORM_MODAL_SECTION_GAP))
-            .child(field_label(strings::mcp::quick_hint(), theme::current(cx)))
-            .child(crate::ui::input(&self.paste_input, cx, 0));
+            .gap(px(theme::FORM_MODAL_FIELD_SPACING))
+            .child(form_layout::field(
+                field_label(strings::mcp::quick_hint(), theme::current(cx)),
+                crate::ui::input(&self.paste_input, cx, 0),
+            ));
         if !self.candidates.is_empty() {
             body = body.child(field_label(
                 strings::mcp::choose_server(),
@@ -120,7 +153,7 @@ impl AddMcpServerModal {
                         .tab_stop(true)
                         .tab_index(ix as isize + 1)
                         .on_click(cx.listener(move |this, _, window, cx| {
-                            this.apply_import(draft.clone(), window, cx)
+                            this.request_import(draft.clone(), window, cx)
                         })),
                 );
             }
@@ -128,37 +161,35 @@ impl AddMcpServerModal {
         if let Some(error) = &self.error {
             body = body.child(crate::ui::alert::error("import-error", error.clone()));
         }
-        body.child(
-            div()
-                .flex()
-                .justify_end()
-                .gap(px(theme::MODAL_FOOTER_GAP))
-                .child(
-                    button("import-cancel", strings::common::btn_cancel())
-                        .tab_stop(true)
-                        .tab_index(100)
-                        .on_click(cx.listener(|this, _, w, cx| this.leave(w, cx))),
-                )
-                .child(
-                    button("import-manual", strings::common::btn_manual())
-                        .tab_stop(true)
-                        .tab_index(101)
-                        .on_click(cx.listener(|this, _, w, cx| {
-                            this.pasting = false;
-                            this.error = None;
-                            w.focus(&this.name_input.focus_handle(cx), cx);
-                            cx.notify();
-                        })),
-                )
-                .child(
-                    button_primary("import-review", strings::common::btn_review())
-                        .tab_stop(true)
-                        .tab_index(102)
-                        .disabled(self.paste_input.read(cx).value().trim().is_empty())
-                        .on_click(cx.listener(|this, _, w, cx| this.review_paste(w, cx))),
-                ),
-        )
-        .tab_group()
-        .into_any_element()
+        body.into_any_element()
+    }
+
+    pub(super) fn paste_footer(&self, cx: &mut Context<Self>) -> gpui::AnyElement {
+        form_layout::footer(cx)
+            .child(
+                button("import-cancel", strings::common::btn_cancel())
+                    .tab_stop(true)
+                    .tab_index(100)
+                    .on_click(cx.listener(|this, _, w, cx| this.leave(w, cx))),
+            )
+            .child(
+                button("import-manual", strings::common::btn_manual())
+                    .tab_stop(true)
+                    .tab_index(101)
+                    .on_click(cx.listener(|this, _, w, cx| {
+                        this.pasting = false;
+                        this.error = None;
+                        w.focus(&this.name_input.focus_handle(cx), cx);
+                        cx.notify();
+                    })),
+            )
+            .child(
+                button_primary("import-review", strings::common::btn_review())
+                    .tab_stop(true)
+                    .tab_index(102)
+                    .disabled(self.paste_input.read(cx).value().trim().is_empty())
+                    .on_click(cx.listener(|this, _, w, cx| this.review_paste(w, cx))),
+            )
+            .into_any_element()
     }
 }

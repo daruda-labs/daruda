@@ -611,6 +611,9 @@ impl Focusable for EditSkillModal {
 }
 
 impl ModalView for EditSkillModal {
+    fn render_footer(&mut self, cx: &mut Context<Self>) -> Vec<gpui::AnyElement> {
+        vec![self.form_footer(cx)]
+    }
     fn fit_viewport(&self) -> bool {
         true
     }
