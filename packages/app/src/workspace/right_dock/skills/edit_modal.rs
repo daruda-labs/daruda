@@ -23,7 +23,7 @@ use crate::agent::skills::{
 use crate::surface::strings;
 use crate::ui::Disableable as _;
 use crate::ui::WindowExt as _;
-use crate::ui::{InputEvent, InputState, button, button_primary, checkbox, input};
+use crate::ui::{InputEvent, InputState, button, button_primary, checkbox};
 use crate::workspace::ModalView;
 use crate::workspace::Workspace;
 use crate::workspace::right_dock::skills::modal_shared::field_label;

@@ -180,7 +180,7 @@ impl Auth {
                 group,
             ))
             .when(matches!(self.mode, Mode::Token | Mode::Variable), |body| {
-                body.child(crate::ui::input(&self.input, cx, 6))
+                body.child(form_layout::input(&self.input, cx, 6))
             })
             .when(self.mode == Mode::Custom, |body| {
                 body.child(super::modal_shared::field_label(

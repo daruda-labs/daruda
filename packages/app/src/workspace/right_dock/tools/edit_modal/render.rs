@@ -6,6 +6,10 @@ impl Render for EditMcpServerModal {
         let t = crate::ui::theme::current(cx).clone();
         let panel_focus = self.panel_focus_handle.clone();
         let submitting = self.submitting;
+        let has_advanced = super::super::modal_shared::has_advanced_settings(
+            self.initial.config.as_ref().map(|config| config.provider),
+            self.transport,
+        );
 
         let transport_chip = self.transport_choice.render(submitting, 2, cx);
 
@@ -22,11 +26,11 @@ impl Render for EditMcpServerModal {
             .child(form_layout::pair(
                 form_layout::field(
                     field_label(strings::common::field_scope(), &t),
-                    form_layout::source(scope_label(self.initial.scope), cx),
+                    form_layout::readonly_value(scope_label(self.initial.scope), cx),
                 ),
                 form_layout::field(
                     field_label(strings::common::field_name(), &t),
-                    form_layout::source(self.initial.name.clone(), cx),
+                    form_layout::readonly_value(self.initial.name.clone(), cx),
                 ),
                 window,
             ))
@@ -80,17 +84,19 @@ impl Render for EditMcpServerModal {
             field_label(strings::mcp::field_env(), &t),
             self.env_rows.clone(),
         ));
-        body = body.child(
-            form_layout::advanced("advanced", self.advanced)
-                .disabled(submitting)
-                .tab_stop(true)
-                .tab_index(7)
-                .on_click(cx.listener(|this, _, _, cx| {
-                    this.advanced = !this.advanced;
-                    cx.notify();
-                })),
-        );
-        if self.advanced {
+        body = body.when(has_advanced, |body| {
+            body.child(
+                form_layout::advanced("advanced", self.advanced)
+                    .disabled(submitting)
+                    .tab_stop(true)
+                    .tab_index(7)
+                    .on_click(cx.listener(|this, _, _, cx| {
+                        this.advanced = !this.advanced;
+                        cx.notify();
+                    })),
+            )
+        });
+        if self.advanced && has_advanced {
             if self.transport.is_remote() {
                 body = body
                     .child(field_label(strings::mcp::field_headers(), &t))

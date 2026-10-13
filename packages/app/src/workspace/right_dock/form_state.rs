@@ -113,7 +113,7 @@ pub(super) fn ordered_field_input(
     div()
         .flex()
         .flex_col()
-        .child(crate::ui::input(input, cx, tab))
+        .child(super::form_layout::input(input, cx, tab))
         .when(error_field == Some(index), |field| {
             field.children(error.map(|message| {
                 crate::ui::alert::error(

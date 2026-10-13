@@ -96,14 +96,26 @@ pub(crate) fn drive(
                             targets: Vec::new(),
                             config: (matches!(
                                 shot,
-                                QuickEntryShot::McpCodexReview | QuickEntryShot::McpCodexTail
+                                QuickEntryShot::McpCodexReview
+                                    | QuickEntryShot::McpCodexTail
+                                    | QuickEntryShot::McpStdio
                             ))
                             .then(|| {
                                 std::sync::Arc::new(
                                     crate::agent::configuration::Configuration::resolve(
-                                        crate::agent::configuration::Provider::Codex,
+                                        if shot == QuickEntryShot::McpStdio {
+                                            crate::agent::configuration::Provider::Claude
+                                        } else {
+                                            crate::agent::configuration::Provider::Codex
+                                        },
                                         Some(std::env::temp_dir()),
-                                        Some(std::env::temp_dir().join("example-codex-account")),
+                                        Some(std::env::temp_dir().join(
+                                            if shot == QuickEntryShot::McpStdio {
+                                                "example-claude-account"
+                                            } else {
+                                                "example-codex-account"
+                                            },
+                                        )),
                                         Some(std::env::temp_dir().join("example-project")),
                                     )
                                     .unwrap(),

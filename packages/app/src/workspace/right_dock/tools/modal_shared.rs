@@ -6,6 +6,14 @@ use gpui::{IntoElement, SharedString, div, prelude::*, px};
 use crate::agent::mcp::{FieldError, McpScope, McpTransport};
 use crate::surface::strings;
 
+pub(super) fn has_advanced_settings(
+    provider: Option<crate::agent::configuration::Provider>,
+    transport: McpTransport,
+) -> bool {
+    // Remote transports have headers; non-Claude forms also expose disabled/options.
+    transport.is_remote() || provider != Some(crate::agent::configuration::Provider::Claude)
+}
+
 /// Quotes group arguments; backslashes are literal on every platform.
 /// A doubled matching quote inside a quoted argument represents one quote.
 pub(super) fn split_args(s: &str) -> Result<Vec<String>, SharedString> {
@@ -106,6 +114,24 @@ pub(super) fn field_error_to_msg(e: FieldError) -> SharedString {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn advanced_settings_require_at_least_one_applicable_field() {
+        use crate::agent::configuration::Provider;
+        for provider in [None, Some(Provider::Claude), Some(Provider::Codex)] {
+            for transport in [McpTransport::Stdio, McpTransport::Http, McpTransport::Sse] {
+                let expected = !matches!(
+                    (provider, transport),
+                    (Some(Provider::Claude), McpTransport::Stdio)
+                );
+                assert_eq!(
+                    has_advanced_settings(provider, transport),
+                    expected,
+                    "{provider:?} {transport:?}"
+                );
+            }
+        }
+    }
 
     /// The parser records which line it choked on; the banner has to spend it.
     /// A message that only says "one of these must be KEY=VALUE" leaves the

@@ -139,7 +139,7 @@ impl AddMcpServerModal {
             .gap(px(theme::FORM_MODAL_FIELD_SPACING))
             .child(form_layout::field(
                 field_label(strings::mcp::quick_hint(), theme::current(cx)),
-                crate::ui::input(&self.paste_input, cx, 0),
+                form_layout::input(&self.paste_input, cx, 0),
             ));
         if !self.candidates.is_empty() {
             body = body.child(field_label(

@@ -9,6 +9,10 @@ impl Render for AddMcpServerModal {
         let t = crate::ui::theme::current(cx).clone();
         let panel_focus = self.panel_focus_handle.clone();
         let submitting = self.submitting;
+        let has_advanced = super::super::modal_shared::has_advanced_settings(
+            self.initial.config.as_ref().map(|config| config.provider),
+            self.transport,
+        );
 
         let scope_chip =
             self.scope_choice
@@ -88,17 +92,19 @@ impl Render for AddMcpServerModal {
             field_label(strings::mcp::field_env(), &t),
             self.env_rows.clone(),
         ));
-        body = body.child(
-            form_layout::advanced("advanced", self.advanced)
-                .disabled(submitting)
-                .tab_stop(true)
-                .tab_index(7)
-                .on_click(cx.listener(|this, _, _, cx| {
-                    this.advanced = !this.advanced;
-                    cx.notify();
-                })),
-        );
-        if self.advanced {
+        body = body.when(has_advanced, |body| {
+            body.child(
+                form_layout::advanced("advanced", self.advanced)
+                    .disabled(submitting)
+                    .tab_stop(true)
+                    .tab_index(7)
+                    .on_click(cx.listener(|this, _, _, cx| {
+                        this.advanced = !this.advanced;
+                        cx.notify();
+                    })),
+            )
+        });
+        if self.advanced && has_advanced {
             if self.transport.is_remote() {
                 body = body
                     .child(field_label(strings::mcp::field_headers(), &t))

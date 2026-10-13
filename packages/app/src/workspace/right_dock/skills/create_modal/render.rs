@@ -42,7 +42,7 @@ impl Render for CreateSkillModal {
             ))
             .child(form_layout::field(
                 field_label(strings::skills::invocation_name(), &t),
-                crate::ui::input(&self.invocation_input, cx, 2),
+                form_layout::input(&self.invocation_input, cx, 2),
             ))
             .child(form_layout::field(
                 field_label(strings::skills::field_description(), &t),
@@ -57,7 +57,7 @@ impl Render for CreateSkillModal {
             ))
             .child(form_layout::field(
                 field_label(strings::skills::field_body(), &t),
-                crate::ui::input(&self.body_editor, cx, 4),
+                form_layout::input(&self.body_editor, cx, 4),
             ));
         left = left.when(!codex, |left| {
             left.child(

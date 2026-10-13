@@ -6,6 +6,32 @@ use gpui::{
     App, Context, Div, Entity, IntoElement, SharedString, Subscription, Window, div, prelude::*, px,
 };
 
+const CONTROL_HEIGHT: f32 = 36.0;
+const CONTROL_PAD_X: f32 = 9.0;
+const CONTROL_PAD_Y: f32 = 7.0;
+const CONTROL_LINE_HEIGHT: f32 = 20.0;
+
+pub(super) fn input(
+    state: &Entity<crate::ui::InputState>,
+    cx: &App,
+    tab: isize,
+) -> crate::ui::Input {
+    use crate::ui::Sizable as _;
+    crate::ui::Input::new(state)
+        .small()
+        .disabled(state.read(cx).is_disabled())
+        .bordered(true)
+        .w_full()
+        .h_auto()
+        .min_h(px(CONTROL_HEIGHT))
+        .px(px(CONTROL_PAD_X))
+        .py(px(CONTROL_PAD_Y))
+        .text_size(px(theme::FONT_SIZE_MD))
+        .line_height(px(CONTROL_LINE_HEIGHT))
+        .bg(theme::current(cx).modal_input_bg)
+        .tab_index(tab)
+}
+
 pub(super) fn field(label: impl IntoElement, control: impl IntoElement) -> Div {
     div()
         .flex()
@@ -14,6 +40,22 @@ pub(super) fn field(label: impl IntoElement, control: impl IntoElement) -> Div {
         .gap(px(theme::FORM_MODAL_FIELD_GAP))
         .child(label)
         .child(control)
+}
+
+pub(super) fn readonly_value(value: impl Into<SharedString>, cx: &App) -> Div {
+    let t = theme::current(cx);
+    div()
+        .min_h(px(CONTROL_HEIGHT))
+        .px(px(CONTROL_PAD_X))
+        .py(px(CONTROL_PAD_Y))
+        .text_size(px(theme::FONT_SIZE_MD))
+        .line_height(px(CONTROL_LINE_HEIGHT))
+        .rounded(px(theme::MODAL_BUTTON_RADIUS))
+        .bg(t.modal_input_bg)
+        .border_1()
+        .border_color(t.border)
+        .text_color(t.text_primary)
+        .child(value.into())
 }
 
 pub(super) fn footer(cx: &App) -> gpui::Stateful<Div> {
@@ -119,6 +161,11 @@ impl<V: Copy + PartialEq + 'static> Choice<V> {
     pub fn render(&self, disabled: bool, tab: isize, cx: &App) -> gpui::AnyElement {
         crate::ui::select::select(&self.state, cx, tab)
             .w_full()
+            .h(px(CONTROL_HEIGHT))
+            .px(px(CONTROL_PAD_X))
+            .py(px(CONTROL_PAD_Y))
+            .text_size(px(theme::FONT_SIZE_MD))
+            .line_height(px(CONTROL_LINE_HEIGHT))
             .disabled(disabled)
             .into_any_element()
     }
@@ -152,4 +199,94 @@ pub(super) fn actions(buttons: impl IntoElement, error: Option<&SharedString>) -
         .gap(px(theme::GAP_LG))
         .children(error.map(|message| crate::ui::alert::error("form-save-error", message.clone())))
         .child(buttons)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use gpui::{Render, TestAppContext, VisualTestContext};
+
+    struct Probe {
+        single: Entity<crate::ui::InputState>,
+        multi: Entity<crate::ui::InputState>,
+        choice: Choice<bool>,
+    }
+
+    impl Render for Probe {
+        fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+            div()
+                .w(px(400.))
+                .flex()
+                .flex_col()
+                .child(
+                    div()
+                        .id("single")
+                        .debug_selector(|| "single".into())
+                        .child(input(&self.single, cx, 0)),
+                )
+                .child(
+                    div()
+                        .id("multi")
+                        .debug_selector(|| "multi".into())
+                        .child(input(&self.multi, cx, 1)),
+                )
+                .child(
+                    div()
+                        .id("choice")
+                        .debug_selector(|| "choice".into())
+                        .child(self.choice.render(false, 2, cx)),
+                )
+                .child(
+                    div()
+                        .id("readonly")
+                        .debug_selector(|| "readonly".into())
+                        .child(readonly_value("Project", cx)),
+                )
+        }
+    }
+
+    #[gpui::test]
+    fn form_controls_share_height_and_text_insets(cx: &mut TestAppContext) {
+        let _ = crate::workspace::tests::build_workspace(cx);
+        let window = cx.add_window(|window, cx| Probe {
+            single: cx.new(|cx| crate::ui::InputState::new(window, cx).default_value("Name")),
+            multi: cx.new(|cx| {
+                crate::ui::InputState::new(window, cx)
+                    .auto_grow(2, 4)
+                    .default_value("First\nSecond")
+            }),
+            choice: Choice::new(
+                vec![(true, "Project".into())],
+                true,
+                window,
+                cx,
+                |_, _, _| {},
+            ),
+        });
+        let mut vcx = VisualTestContext::from_window(window.into(), cx);
+        vcx.run_until_parked();
+        vcx.update(|window, _| window.refresh());
+        vcx.run_until_parked();
+        let single = vcx.debug_bounds("single").unwrap();
+        let multi = vcx.debug_bounds("multi").unwrap();
+        assert_eq!(single.size.height, px(CONTROL_HEIGHT));
+        assert_eq!(
+            vcx.debug_bounds("choice").unwrap().size.height,
+            single.size.height
+        );
+        assert_eq!(
+            vcx.debug_bounds("readonly").unwrap().size.height,
+            single.size.height
+        );
+        window
+            .update(&mut vcx, |probe, _, cx| {
+                for (state, outer) in [(&probe.single, single), (&probe.multi, multi)] {
+                    let text = state.read(cx).last_bounds().unwrap();
+                    assert_eq!(text.left() - outer.left(), px(CONTROL_PAD_X + 1.));
+                    assert_eq!(text.top() - outer.top(), px(CONTROL_PAD_Y + 1.));
+                    assert_eq!(outer.bottom() - text.bottom(), px(CONTROL_PAD_Y + 1.));
+                }
+            })
+            .unwrap();
+    }
 }

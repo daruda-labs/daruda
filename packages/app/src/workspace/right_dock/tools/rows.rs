@@ -234,14 +234,14 @@ impl Render for Rows {
                     div()
                         .flex_1()
                         .min_w_0()
-                        .child(crate::ui::input(&row.key, cx, 8)),
+                        .child(super::super::form_layout::input(&row.key, cx, 8)),
                 );
             if let Some(value) = &row.value {
                 line = line.child(
                     div()
                         .flex_1()
                         .min_w_0()
-                        .child(crate::ui::input(value, cx, 8)),
+                        .child(super::super::form_layout::input(value, cx, 8)),
                 );
                 line = line.child(
                     crate::ui::button_icon(("reveal-row", id), crate::ui::icons::VISIBILITY, cx)

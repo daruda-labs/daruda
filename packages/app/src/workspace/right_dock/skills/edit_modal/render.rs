@@ -1,5 +1,6 @@
 use super::*;
 use crate::workspace::right_dock::form_layout;
+use crate::workspace::right_dock::form_layout::{input, readonly_value};
 
 impl Render for EditSkillModal {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
@@ -40,7 +41,7 @@ impl Render for EditSkillModal {
             ))
             .child(form_layout::field(
                 field_label(strings::skills::invocation_name(), &t),
-                crate::ui::input(&self.invocation_input, cx, 0),
+                input(&self.invocation_input, cx, 0),
             ))
             .child(form_layout::field(
                 field_label(strings::skills::field_description(), &t),
@@ -150,20 +151,6 @@ impl Render for EditSkillModal {
             .gap(px(theme::MODAL_PANEL_GAP))
             .child(body)
     }
-}
-
-fn readonly_value(value: impl Into<SharedString>, cx: &App) -> impl IntoElement {
-    let t = theme::current(cx);
-    div()
-        .px(px(theme::MODAL_INPUT_PAD))
-        .py(px(theme::MODAL_INPUT_PAD))
-        .rounded(px(theme::MODAL_BUTTON_RADIUS))
-        .bg(t.modal_input_bg)
-        .border_1()
-        .border_color(t.border)
-        .text_size(px(theme::MODAL_BODY_FONT_SIZE))
-        .text_color(t.text_primary)
-        .child(value.into())
 }
 
 impl EditSkillModal {
