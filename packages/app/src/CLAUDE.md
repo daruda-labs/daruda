@@ -177,7 +177,7 @@ Runtime `Lane` model (id / path / status / `base_ref` / description) plus a GPUI
 | Save/restore logic | `workspace/persistence/` |
 | App-global action | `main.rs` (`on_action`) |
 | Window lifecycle | `windows.rs` |
-| Settings section / field | `packages/settings/src/sections/` + a `spec.rs` row; opened and closed in `workspace/settings_ops.rs` |
+| Settings section / field | `packages/settings/src/sections/` + a `spec/` row; opened and closed in `workspace/settings_ops.rs` |
 | Menu bar | `menus.rs` |
 | Key-binding string | `surface/keybindings.rs` |
 | Keybinding-override arm | `surface/action_map.rs` |
