@@ -8,7 +8,7 @@
 
 use super::StatusBarDensity;
 use crate::ui::theme;
-use crate::ui::{Divider, Popover, button_status_pill};
+use crate::ui::{Divider, button_status_pill};
 use crate::workspace::sync::ports::{PortEntry, PortKind, PortScanStatus};
 use gpui::{AnyElement, App, ClipboardItem, IntoElement, SharedString, div, prelude::*, px};
 use std::collections::BTreeMap;
@@ -47,14 +47,32 @@ pub(super) fn render(
     let external_count = external.len();
     let label = SharedString::from(trigger_label(workspace_count, density));
     let summary = SharedString::from(summary_label(status, workspace_count, external_count));
-    Popover::new("status-ports-popover")
+    super::popover("status-ports-popover", cx)
+        .p(px(theme::POPOVER_PANEL_PAD))
         .trigger(
             button_status_pill("status-ports", label, cx)
                 .text_size(px(theme::STATUS_BAR_FONT_SIZE))
                 .debug_selector(|| "status-ports-trigger".into())
                 .tooltip(summary.clone()),
         )
-        .content(move |_, _window, cx| ports_panel(status, &groups, &external, summary.clone(), cx))
+        .content(move |_, window, cx| {
+            crate::ui::popover_panel(
+                window,
+                crate::ui::PanelLimits {
+                    width: PORT_TABLE_WIDTH
+                        + theme::SCROLL_AREA_GUTTER
+                        + theme::POPOVER_DEFAULT_CHROME,
+                    max_height: PORT_MENU_SCROLL_MAX_H
+                        + theme::POPOVER_HEADER_BUDGET
+                        + theme::POPOVER_DEFAULT_CHROME,
+                    min_height: 0.0,
+                    margin: theme::POPOVER_WINDOW_MARGIN,
+                    chrome: theme::POPOVER_DEFAULT_CHROME,
+                },
+                None,
+            )
+            .child(ports_panel(status, &groups, &external, summary.clone(), cx))
+        })
 }
 
 /// Dropdown panel body: summary line, divider, then — once the scan has
@@ -68,12 +86,14 @@ fn ports_panel(
 ) -> AnyElement {
     let t = theme::current(cx);
     let panel = div()
+        .flex_1()
+        .min_h_0()
         .flex()
         .flex_col()
         .gap(px(PORT_SECTION_GAP))
         .text_size(px(theme::STATUS_BAR_FONT_SIZE))
-        .child(div().child(summary))
-        .child(Divider::horizontal());
+        .child(div().flex_none().child(summary))
+        .child(div().flex_none().child(Divider::horizontal()));
     match status {
         PortScanStatus::Pending => panel
             .child(status_row(
@@ -94,7 +114,13 @@ fn ports_panel(
             ))
             .into_any_element(),
         PortScanStatus::Available => panel
-            .child(div().text_color(t.text_subtle).child(table_header()))
+            .child(
+                div()
+                    .flex_none()
+                    .pr(px(theme::SCROLL_AREA_GUTTER))
+                    .text_color(t.text_subtle)
+                    .child(table_header()),
+            )
             .child(port_scroll_body(groups, external, cx))
             .into_any_element(),
     }
@@ -182,7 +208,8 @@ fn port_scroll_body(
         .flex()
         .flex_col()
         .gap(px(PORT_SECTION_GAP))
-        .w(px(PORT_TABLE_WIDTH))
+        .w_full()
+        .pr(px(theme::SCROLL_AREA_GUTTER))
         .text_size(px(theme::STATUS_BAR_FONT_SIZE));
     let mut row_ix = 0usize;
 
@@ -217,7 +244,10 @@ fn port_scroll_body(
         }
     }
 
-    crate::ui::scroll_area("ports-scroll", px(PORT_MENU_SCROLL_MAX_H), content).into_any_element()
+    crate::ui::scroll_area("ports-scroll", px(PORT_MENU_SCROLL_MAX_H), content)
+        .fill()
+        .max_h(px(PORT_MENU_SCROLL_MAX_H))
+        .into_any_element()
 }
 
 fn section_label(label: impl Into<SharedString>, cx: &App) -> impl IntoElement {
@@ -230,10 +260,7 @@ fn section_label(label: impl Into<SharedString>, cx: &App) -> impl IntoElement {
 
 fn status_row(label: impl Into<SharedString>, cx: &App) -> impl IntoElement {
     let t = theme::current(cx);
-    div()
-        .w(px(PORT_TABLE_WIDTH))
-        .text_color(t.text_subtle)
-        .child(label.into())
+    div().w_full().text_color(t.text_subtle).child(label.into())
 }
 
 fn port_click_row(row_ix: usize, entry: &PortEntry, cx: &App) -> AnyElement {
@@ -241,6 +268,7 @@ fn port_click_row(row_ix: usize, entry: &PortEntry, cx: &App) -> AnyElement {
     let address = entry.address.clone();
     div()
         .id(("ports-menu-row", row_ix))
+        .debug_selector(move || format!("ports-table-row-{row_ix}"))
         .rounded(px(PORT_ROW_RADIUS))
         .cursor_pointer()
         .hover(|this| this.bg(t.status_bar_account_hover_bg))
@@ -257,6 +285,8 @@ fn table_header() -> AnyElement {
         crate::surface::strings::settings::status_bar_ports_table_process(),
         crate::surface::strings::settings::status_bar_ports_table_address(),
     )
+    .debug_selector(|| "ports-table-header".into())
+    .into_any_element()
 }
 
 fn table_row(entry: &PortEntry) -> AnyElement {
@@ -265,19 +295,20 @@ fn table_row(entry: &PortEntry) -> AnyElement {
         entry.process.clone(),
         entry.address.clone(),
     )
+    .into_any_element()
 }
 
 fn port_table_row(
     port: impl Into<SharedString>,
     process: impl Into<SharedString>,
     address: impl Into<SharedString>,
-) -> AnyElement {
+) -> gpui::Div {
     div()
         .flex()
         .flex_row()
         .items_center()
         .gap(px(PORT_TABLE_GAP))
-        .w(px(PORT_TABLE_WIDTH))
+        .w_full()
         .text_size(px(theme::STATUS_BAR_FONT_SIZE))
         .child(port_table_cell(PORT_TABLE_PORT_W, port))
         .child(
@@ -289,7 +320,6 @@ fn port_table_row(
                 .child(process.into()),
         )
         .child(port_table_cell(PORT_TABLE_ADDRESS_W, address))
-        .into_any_element()
 }
 
 fn port_table_cell(width: f32, text: impl Into<SharedString>) -> impl IntoElement {
@@ -546,6 +576,10 @@ mod tests {
             "scrollbar overlay is not pinned to the scroll wrapper — \
              the thumb will paint outside the dropdown"
         );
+        let header = cx.debug_bounds("ports-table-header").unwrap();
+        let row = cx.debug_bounds("ports-table-row-0").unwrap();
+        assert_eq!(header.left(), row.left());
+        assert_eq!(header.size.width, row.size.width);
     }
 
     /// The panel is a [`Popover`], so a click inside it (a row's

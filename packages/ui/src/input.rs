@@ -10,9 +10,9 @@ use crate::field_geometry::FieldGeometry;
 use crate::theme as d;
 use gpui::{
     AnyElement, App, Element as _, Entity, Focusable as _, InteractiveElement as _, IntoElement,
-    ParentElement as _, SharedString, Styled as _, div, px,
+    MouseButton, ParentElement as _, SharedString, Styled as _, Window, div, px,
 };
-use gpui_component::Sizable as _;
+use gpui_component::{Disableable as _, Sizable as _};
 
 use gpui_component::input::Input;
 pub use gpui_component::input::Paste as InputPaste;
@@ -111,6 +111,48 @@ pub fn search_input<T: InputTabSpec>(
     tab: T,
 ) -> impl IntoElement {
     input(state, cx, tab)
+}
+
+/// A clear action in a reserved suffix slot, with the same outer field size.
+pub fn search_with_clear(
+    clear_id: &'static str,
+    tooltip: SharedString,
+    state: &Entity<InputState>,
+    has_query: bool,
+    on_clear: impl Fn(&mut Window, &mut App) + 'static,
+    cx: &App,
+) -> impl IntoElement {
+    let input = field_input(
+        state,
+        d::current(cx).modal_input_bg,
+        FieldGeometry::STANDARD,
+        cx,
+        (),
+    );
+    if !has_query {
+        return input;
+    }
+    let focus = state.read(cx).focus_handle(cx);
+    let disabled = state.read(cx).is_disabled();
+    input.suffix(
+        div()
+            .relative()
+            .w(px(d::CONTROL_TARGET_SIZE))
+            .h(px(d::INPUT_LINE_HEIGHT))
+            .child(
+                crate::button_icon(clear_id, crate::icons::CLOSE, cx)
+                    .disabled(disabled)
+                    .debug_selector(move || clear_id.into())
+                    .tooltip(tooltip)
+                    .absolute()
+                    .top(px(d::SEARCH_CLEAR_OFFSET_Y))
+                    .on_mouse_down(MouseButton::Left, move |_, window, cx| {
+                        cx.stop_propagation();
+                        on_clear(window, cx);
+                        window.focus(&focus, cx);
+                    }),
+            ),
+    )
 }
 
 /// Borderless search inside a pane-owned search toolbar.

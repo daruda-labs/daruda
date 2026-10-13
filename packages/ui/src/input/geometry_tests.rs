@@ -63,6 +63,23 @@ impl Render for Probe {
         }
         column
             .child(
+                crate::button("standard-action", "Save")
+                    .debug_selector(|| "standard-action".into()),
+            )
+            .child(
+                crate::button_compact("compact-action", "Fetch")
+                    .debug_selector(|| "compact-action".into()),
+            )
+            .child(
+                crate::field_trigger(
+                    "field-trigger",
+                    "A long field value that must leave room for its source",
+                    div().flex_none().child("Default"),
+                    cx,
+                )
+                .debug_selector(|| "field-trigger".into()),
+            )
+            .child(
                 div()
                     .id("standard-select")
                     .debug_selector(|| "standard-select".into())
@@ -244,6 +261,9 @@ fn verify_geometry(cx: &mut TestAppContext, light: bool) {
         })
         .unwrap();
     for (selector, height) in [
+        ("standard-action", 28.),
+        ("compact-action", 20.),
+        ("field-trigger", 28.),
         ("standard-select", 28.),
         ("standard-value", 28.),
         ("form-select", 36.),

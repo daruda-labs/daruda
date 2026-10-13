@@ -23,7 +23,7 @@ use crate::agent::skills::SkillScope;
 use crate::surface::strings;
 use crate::ui::Disableable as _;
 use crate::ui::WindowExt as _;
-use crate::ui::{InputEvent, InputState, button, button_primary, input};
+use crate::ui::{InputEvent, InputState, button, button_primary, form_input};
 use crate::workspace::ModalView;
 use crate::workspace::Workspace;
 use crate::workspace::main_area::pane_input_ops::{PaneTextInput, PaneTextIntent};
@@ -235,7 +235,7 @@ impl Render for SkillInvocationModal {
                 div()
                     .flex()
                     .min_h(px(theme::MODAL_NOTES_TEXTAREA_MIN_H))
-                    .child(input(&self.input, cx, 0)),
+                    .child(form_input(&self.input, cx, 0)),
             );
 
         let footer = div()

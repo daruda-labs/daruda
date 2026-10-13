@@ -21,6 +21,12 @@ pub const RADIUS_LG: f32 = 8.0;
 /// Standard chrome artwork and its square interaction target (px).
 pub const CONTROL_ICON_SIZE: f32 = 16.0;
 pub const CONTROL_TARGET_SIZE: f32 = 24.0;
+pub const BUTTON_STANDARD_PAD_X: f32 = 12.0;
+pub const BUTTON_STANDARD_PAD_Y: f32 = 3.0;
+pub const BUTTON_COMPACT_HEIGHT: f32 = 20.0;
+pub const BUTTON_COMPACT_PAD_X: f32 = 4.0;
+pub const BUTTON_COMPACT_PAD_Y: f32 = 1.0;
+pub const BUTTON_COMPACT_LINE_HEIGHT: f32 = 16.0;
 
 /// Field geometry is pixel-based and independent of the vendor size tier.
 pub const INPUT_STANDARD_HEIGHT: f32 = 28.0;
@@ -32,6 +38,15 @@ pub const INPUT_STANDARD_PAD_Y: f32 =
     (INPUT_STANDARD_HEIGHT - INPUT_LINE_HEIGHT) / 2.0 - INPUT_BORDER_WIDTH;
 pub const INPUT_FORM_PAD_Y: f32 =
     (INPUT_FORM_HEIGHT - INPUT_LINE_HEIGHT) / 2.0 - INPUT_BORDER_WIDTH;
+pub const SEARCH_CLEAR_OFFSET_Y: f32 = (INPUT_LINE_HEIGHT - CONTROL_TARGET_SIZE) / 2.0;
+pub const POPOVER_WINDOW_MARGIN: f32 = 12.0;
+pub const POPOVER_PANEL_PAD: f32 = 12.0;
+pub const POPOVER_DEFAULT_CHROME: f32 = 2.0 * (POPOVER_PANEL_PAD + INPUT_BORDER_WIDTH);
+pub const POPOVER_HEADER_BUDGET: f32 = 48.0;
+/// Clears the scrollbar's full clickable strip, not just its visible thumb.
+pub const POPOVER_ACTION_GUTTER: f32 = 16.0;
+pub const DIFF_SURFACE_ROW_ALPHA: f32 = 0.12;
+pub const DIFF_SURFACE_WORD_ALPHA: f32 = 0.24;
 
 #[cfg(test)]
 mod tests {

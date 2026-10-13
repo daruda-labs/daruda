@@ -145,10 +145,26 @@ elements so callers cannot override height or padding. `readonly_input` and
 The private `field_geometry` module owns the recipe and `theme::metrics`
 owns its values. Do not copy the recipe into a screen-specific wrapper.
 
+Authoring modals use `form_input` and `select::form_select`, including
+single-field dialogs. Search queries keep the standard search profile in any
+host. `list_page::search` delegates suffix placement and focus restoration to
+`input::search_with_clear`; do not overlay clear buttons over full-width text.
+
+Standard action buttons use pixel metrics. Compact actions use named compact
+factories or `compact_button` for composed text buttons. Icon-only actions use
+`button_bare_compact` / `compact_icon_button`, which own square targets and
+zero padding; chaining `xsmall` alone
+does not change explicit pixel geometry. Popover field triggers use
+`field_trigger`, which shares standard Input/Select geometry. `form_helpers`
+owns authoring labels, stacked fields, validation and footer bands.
+`empty_message` / `message_line` supply themed quiet text. `popover_panel`
+owns viewport sizing; set `PanelLimits.chrome` to the actual outer insets.
+
 Composers go through `input_with_action_grow` or `InputPanel`, whose text
 metrics share one internal factory. Prose and code editors use the editor
 factories and keep their configured font, line height and row/scroll behavior.
 `scripts/lint-input-factories.sh` prevents raw construction in other packages;
+it also covers raw Button/Select construction, including type aliases.
 `input::geometry_tests` checks rendered dimensions and text insets in both
 themes, including disabled, masked, capped multi-line and focused fields.
 
@@ -380,6 +396,7 @@ rev bump (the table below is the full list):
 | Dialog reads the float slot | `src/dialog.rs` (`RenderOnce::render`) | `bg(theme().background)` → `bg(theme().popover)`. `background` is the app canvas (`surface-1` on daruda), which put a dialog on the same rung as the docks it covers and one step *below* the popovers floating above it. `Theme::popover` is upstream's only float-surface slot and `popover_style` already routes every menu, tooltip and popover through it; daruda maps it to `float_panel_bg` (`surface-4`) so all eight floating surfaces agree. |
 | Tooltip radius reads the theme | `src/tooltip.rs` | `rounded(px(6.))` → `rounded(cx.theme().radius)`, so a tooltip and an adjacent popover stop disagreeing on their corners (6px vs 4px). Upstream's only hard-coded radius among the float surfaces. |
 | Button hover text color | `src/button/button.rs` (`RenderOnce::render`) | replace `text_color(crate::red_400())` with `text_color(hover_style.fg)` in the `.hover(...)` closure — upstream accidentally left a debug red literal instead of the theme foreground color, making all button text turn red on hover. |
+| Button explicit text metrics | `src/button/button.rs` (`RenderOnce::render`) | When the host supplies font size or line height, propagate those metrics to the internal label row and native label. Without an explicit value, preserve the upstream size-tier defaults. This prevents rem-based label styling from overriding pixel-sized action geometry. Guarded by `button::geometry_tests::button_text_and_icon_targets_are_pixel_sized` in daruda_ui. |
 | PopupMenu small size | `src/menu/popup_menu.rs` (`PopupMenu::small` + `render_menu_item`) | change `pub(crate)` to `pub`; also wire `Size::Small` into the font — `text_xs` for small, `text_sm` otherwise (upstream only shrank item height to 20 px but left font at `text_sm`). |
 | PopupMenuItem hover tooltip | `src/menu/popup_menu.rs` (`PopupMenuItem::Item.tooltip` field + `.tooltip()`), `src/menu/menu_item.rs` (`MenuItemElement.tooltip` field + render wiring) | The vendored `PopupMenu` had no hover-tooltip affordance — daruda uses it to explain *why* a disabled menu item is disabled (e.g. "Commit first" on a disabled merge action); daruda's own now-removed `ContextMenuItem` already had it. Same `.tooltip(text)` builder shape as `Switch`/`Button`; renders independent of the disabled-gated click handler, so it survives disabled state. |
 | GroupBox compact padding + gap | `src/group_box.rs` (`RenderOnce::render`) | content padding `p_4`→`p_2` (16→8px) and child spacing `gap_4`→`gap_1` (16→4px) so `.fill()`/`.outline()`/`.normal()` cards stay compact in the narrow right dock (Usage tab gauge bars + 3-up stat grid). Upstream's 16px overflows the 3-column stat row and over-spaces the gauge bar. |

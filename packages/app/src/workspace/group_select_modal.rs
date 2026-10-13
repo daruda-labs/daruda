@@ -175,7 +175,7 @@ impl Render for GroupSelectModal {
                 }
             }))
             .gap(px(theme::MODAL_PANEL_GAP))
-            .child(select::select(&self.select_state, cx, 0_isize))
+            .child(select::form_select(&self.select_state, cx, 0_isize))
             .child(footer)
     }
 }

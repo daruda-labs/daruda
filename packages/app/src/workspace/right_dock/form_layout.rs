@@ -6,29 +6,12 @@ use gpui::{
     App, Context, Div, Entity, IntoElement, SharedString, Subscription, Window, div, prelude::*, px,
 };
 
-pub(super) fn field(label: impl IntoElement, control: impl IntoElement) -> Div {
-    div()
-        .flex()
-        .flex_col()
-        .min_w_0()
-        .gap(px(theme::FORM_MODAL_FIELD_GAP))
-        .child(label)
-        .child(control)
-}
+pub(super) use crate::ui::{form_actions as actions, form_field as field};
 
 pub(super) fn footer(cx: &App) -> gpui::Stateful<Div> {
-    div()
+    crate::ui::form_footer(cx)
         .id("library-form-footer")
         .debug_selector(|| "library-form-footer".into())
-        .w_full()
-        .flex()
-        .flex_wrap()
-        .items_center()
-        .justify_end()
-        .gap(px(theme::GAP_LG))
-        .border_t_1()
-        .border_color(theme::current(cx).border)
-        .pt(px(theme::FORM_MODAL_FOOTER_PADDING))
 }
 
 pub(super) fn source(text: impl Into<SharedString>, cx: &App) -> Div {
@@ -141,17 +124,6 @@ pub(super) fn advanced(id: &'static str, open: bool) -> crate::ui::Button {
 pub(super) fn back(cx: &App) -> crate::ui::Button {
     crate::ui::button_icon("paste-back", crate::ui::icons::BACK, cx)
         .tooltip(crate::surface::strings::common::btn_back())
-}
-
-pub(super) fn actions(buttons: impl IntoElement, error: Option<&SharedString>) -> Div {
-    div()
-        .w_full()
-        .min_w_0()
-        .flex()
-        .flex_col()
-        .gap(px(theme::GAP_LG))
-        .children(error.map(|message| crate::ui::alert::error("form-save-error", message.clone())))
-        .child(buttons)
 }
 
 #[cfg(test)]

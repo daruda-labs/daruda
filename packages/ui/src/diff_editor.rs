@@ -70,23 +70,35 @@ impl DiffColors {
     }
 
     /// `from_theme`'s agent-chat variant. The add/del/word-diff
-    /// colours stay the git-convention palette shared with the File viewer
-    /// (unchanged semantics, not a surface colour) — only the hunk-header row
-    /// (`@@ -a,b +c,d @@`) switches from the fixed UI `BG_RAISED` surface to
-    /// the same terminal-preset-derived tint the rest of the diff embed's
-    /// chrome uses (header row, editor background — see `render/diff.rs`),
-    /// so the header row blends with its own card instead of standing out as
-    /// a UI-theme island.
+    /// colours keep their semantic hues. Hunk headers follow the pane tint;
+    /// opposite UI/pane themes use translucent add/remove backgrounds so the
+    /// pane's syntax foreground remains readable.
     pub fn from_agent_chat_surface(
         t: &crate::theme::DarudaTheme,
         surface: PaneSurfaceTokens,
     ) -> Self {
-        Self {
+        let mut colors = Self {
             hunk_bg: surface.tint,
             hunk_text: surface.foreground,
             hunk_ctx_text: surface.foreground_muted,
             ..Self::from_theme(t)
+        };
+        if t.is_dark() == surface.syntax_is_light {
+            // Syntax follows the pane, so an opaque opposite-theme row can hide it.
+            colors.add_bg = t
+                .file_diff_add_text
+                .opacity(crate::theme::DIFF_SURFACE_ROW_ALPHA);
+            colors.del_bg = t
+                .file_diff_del_text
+                .opacity(crate::theme::DIFF_SURFACE_ROW_ALPHA);
+            colors.word_add_bg = t
+                .file_diff_add_text
+                .opacity(crate::theme::DIFF_SURFACE_WORD_ALPHA);
+            colors.word_del_bg = t
+                .file_diff_del_text
+                .opacity(crate::theme::DIFF_SURFACE_WORD_ALPHA);
         }
+        colors
     }
 
     /// Every colour channel this palette carries, so a caller can fingerprint the
@@ -311,6 +323,33 @@ pub fn build_diff_editor_model(
 
 #[cfg(test)]
 mod tests {
+    #[gpui::test]
+    fn opposite_ui_and_pane_themes_keep_diff_rows_translucent(cx: &mut gpui::TestAppContext) {
+        crate::test_support::init_gpui_component(cx);
+        let light = crate::theme::DarudaTheme::from_json(include_str!(
+            "../../../assets/themes/daruda_light.json"
+        ))
+        .unwrap();
+        let dark = crate::theme::DarudaTheme::default();
+        cx.update(|cx| {
+            for (t, pane_is_light) in [(&light, false), (&dark, true)] {
+                let mut surface = crate::theme::PaneSurfaceTokens::agent_chat(cx);
+                surface.syntax_is_light = pane_is_light;
+                let colors = super::DiffColors::from_agent_chat_surface(t, surface);
+                assert_eq!(colors.add_bg.a, crate::theme::DIFF_SURFACE_ROW_ALPHA);
+                assert_eq!(colors.del_bg.a, crate::theme::DIFF_SURFACE_ROW_ALPHA);
+                assert_eq!(colors.word_add_bg.a, crate::theme::DIFF_SURFACE_WORD_ALPHA);
+                let matching = super::DiffColors::from_agent_chat_surface(
+                    t,
+                    crate::theme::PaneSurfaceTokens {
+                        syntax_is_light: !pane_is_light,
+                        ..surface
+                    },
+                );
+                assert_eq!(matching.add_bg, t.file_diff_add_bg);
+            }
+        });
+    }
     use super::*;
     use daruda_content::diff::{HighlightedSpan, WordChange};
 

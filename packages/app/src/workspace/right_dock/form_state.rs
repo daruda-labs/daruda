@@ -109,17 +109,9 @@ pub(super) fn ordered_field_input(
     error_field: Option<isize>,
     error: Option<&gpui::SharedString>,
 ) -> impl gpui::IntoElement {
-    use gpui::{div, prelude::*};
-    div()
-        .flex()
-        .flex_col()
-        .child(crate::ui::form_input(input, cx, tab))
-        .when(error_field == Some(index), |field| {
-            field.children(error.map(|message| {
-                crate::ui::alert::error(
-                    gpui::SharedString::from(format!("field-error-{index}")),
-                    message.clone(),
-                )
-            }))
-        })
+    crate::ui::validated_field(
+        gpui::SharedString::from(format!("field-error-{index}")),
+        crate::ui::form_input(input, cx, tab),
+        error.filter(|_| error_field == Some(index)),
+    )
 }

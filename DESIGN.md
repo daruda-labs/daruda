@@ -243,6 +243,27 @@ Composers and prose editors use 12px horizontal / 8px vertical padding;
 prose and code editors follow the configured editor font and line height.
 Screen code owns width and spacing between fields, never inner padding.
 
+All creation/editing dialogs, including one-field group dialogs and worktree
+creation, use `form_input` / `form_select` at 36px. Settings, inline editors
+and searches use the 28px standard profile. A picker query remains a search
+even when the picker is hosted in a modal. `lint-modal-fields.sh` gates this
+semantic choice separately from the raw-constructor boundary.
+
+Standard action buttons use 28px height, 12px text and explicit pixel padding.
+Compact text actions use `button_compact` / `compact_button` at 20px. Compact
+icon actions use `button_bare_compact` / `compact_icon_button` at 20px square
+with zero padding; standard icon actions retain their 24px targets. Labelled
+actions with artwork use the same 28px profile as text-only actions.
+Do not resize a standard action via `xsmall()`.
+Search clear actions occupy a suffix slot, so text and its caret cannot run
+under them. Form labels, validation messages, footer bands and quiet messages
+come from `daruda_ui`; hosts own their strings, state and callbacks.
+
+Popover panels constrain their dimensions to the viewport with `PanelLimits`.
+Their sizing includes the host popover's border and padding. Status-bar panels
+pin their padding in pixels; transcript editors retain their band-specific
+insets. Headers stay outside the scrollable body.
+
 ---
 
 ## Elevation & Depth

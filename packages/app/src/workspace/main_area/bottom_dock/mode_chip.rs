@@ -14,9 +14,7 @@ use daruda_acp::ModeStateView;
 use gpui::{IntoElement, ParentElement as _, SharedString, Styled as _, WeakEntity, px};
 
 use crate::surface::strings;
-use crate::ui::{
-    ButtonVariants as _, DropdownMenu as _, PopupMenu, PopupMenuItem, Sizable as _, button, theme,
-};
+use crate::ui::{ButtonVariants as _, DropdownMenu as _, PopupMenu, PopupMenuItem, button, theme};
 use crate::workspace::Workspace;
 use crate::workspace::main_area::pane_tree::PaneId;
 
@@ -60,7 +58,6 @@ pub(in crate::workspace) fn mode_chip(
     button(chip_id, label)
         .child(crate::ui::icons::icon(crate::ui::icons::EXPAND_MORE))
         .ghost()
-        .xsmall()
         .h(px(theme::BUTTON_HEIGHT))
         .rounded(px(theme::RADIUS_MD))
         .tooltip(tooltip)

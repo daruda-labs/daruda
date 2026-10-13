@@ -19,7 +19,7 @@ use gpui::{
 };
 
 use crate::surface::strings as app_strings;
-use crate::ui::{SectionHeader, Sizable as _, button};
+use crate::ui::{SectionHeader, button};
 use crate::workspace::layout::Dock;
 use crate::workspace::layout::LeftDockSnapshot;
 use unified_list::{
@@ -258,28 +258,29 @@ fn view_header(
     let header_actions = header_actions.child(refresh_icon);
 
     let remote_btn = match remote_primary_action(behind) {
-        RemotePrimaryAction::Fetch => button("git-fetch", app_strings::git::fetch_btn())
-            .xsmall()
-            .loading(in_flight)
-            .disabled(in_flight)
-            .on_click(cx.listener(move |_dock, _: &ClickEvent, _window, cx| {
-                if let Some(ws) = workspace_remote.upgrade() {
-                    ws.update(cx, |ws, cx| ws.on_fetch(cx));
-                }
-            })),
-        RemotePrimaryAction::Pull => button("git-pull", app_strings::git::pull_btn())
-            .xsmall()
-            .loading(in_flight)
-            .disabled(in_flight)
-            .on_click(cx.listener(move |_dock, _: &ClickEvent, _window, cx| {
-                if let Some(ws) = workspace_remote.upgrade() {
-                    ws.update(cx, |ws, cx| ws.on_pull(cx));
-                }
-            })),
+        RemotePrimaryAction::Fetch => {
+            crate::ui::button_compact("git-fetch", app_strings::git::fetch_btn())
+                .loading(in_flight)
+                .disabled(in_flight)
+                .on_click(cx.listener(move |_dock, _: &ClickEvent, _window, cx| {
+                    if let Some(ws) = workspace_remote.upgrade() {
+                        ws.update(cx, |ws, cx| ws.on_fetch(cx));
+                    }
+                }))
+        }
+        RemotePrimaryAction::Pull => {
+            crate::ui::button_compact("git-pull", app_strings::git::pull_btn())
+                .loading(in_flight)
+                .disabled(in_flight)
+                .on_click(cx.listener(move |_dock, _: &ClickEvent, _window, cx| {
+                    if let Some(ws) = workspace_remote.upgrade() {
+                        ws.update(cx, |ws, cx| ws.on_pull(cx));
+                    }
+                }))
+        }
     };
 
-    let push_btn = button("git-push", app_strings::git::push_btn())
-        .xsmall()
+    let push_btn = crate::ui::button_compact("git-push", app_strings::git::push_btn())
         .loading(in_flight)
         .disabled(in_flight)
         .on_click(cx.listener(move |_dock, _: &ClickEvent, window, cx| {

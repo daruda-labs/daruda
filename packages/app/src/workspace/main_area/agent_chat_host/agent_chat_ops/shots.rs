@@ -194,6 +194,27 @@ impl Workspace {
         );
     }
 
+    #[cfg(feature = "screenshot")]
+    pub(in crate::workspace) fn open_agent_chat_diff_for_shot(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.open_agent_chat_pane_seeded(
+            None,
+            |v, window, cx| {
+                let mut items = vec![daruda_acp::ChatItem::UserText("Show the proposed change".into())];
+                items.extend(daruda_chat::shot_transcript::sample_transcript().into_iter().filter(
+                    |item| matches!(item, daruda_acp::ChatItem::ToolCall(call) if !call.diffs.is_empty()),
+                ));
+                v.seed_transcript(items, window, cx);
+                v.set_all_folds(true, window, cx);
+            },
+            window,
+            cx,
+        );
+    }
+
     /// Open the seeded transcript with a Stop marker closing its run — the one
     /// shape no settled seed reaches, since the marker is pushed by the Stop
     /// path rather than by anything the agent sends.
