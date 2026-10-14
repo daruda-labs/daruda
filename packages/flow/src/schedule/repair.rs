@@ -114,8 +114,11 @@ impl Run<'_> {
             .accounted_call(|| self.runner.run_agent(&fix_ctx, agent, &text))
             .await;
         // The fix never reaches `drive_inner` or `judge`, so its fate is
-        // sealed here instead.
-        let recorded = if self.cancel.is_canceled() {
+        // sealed here instead. A clean turn whose own billed report stopped
+        // the run finished its edits: record it as such, then stop anyway.
+        let stopped_here = result.stopped_the_run && result.outcome.is_ok();
+        let interrupted = self.cancel.is_canceled() && !stopped_here;
+        let recorded = if interrupted {
             AttemptOutcome::Canceled
         } else {
             match &result.outcome {
@@ -132,7 +135,7 @@ impl Run<'_> {
         // Like any node: a cancel that interrupted the session is not a
         // failure of it, and reporting one would be wrong about why the run
         // stopped. The fix owes no output, so there is nothing to archive.
-        if self.cancel.is_canceled() {
+        if interrupted {
             // No `FixEnded`: a stop is not an ending the fix reached, and
             // `failure: None` would say it succeeded. `RunEnded` follows and
             // says why — the same rule an interrupted node follows.
@@ -142,6 +145,10 @@ impl Run<'_> {
             gate: ctx.node_id.clone(),
             failure: result.outcome.as_ref().err().cloned(),
         });
+        // Re-deriving the gate would bill again, which is what the stop is for.
+        if stopped_here {
+            return Err(RunOutcome::Canceled { node: None });
+        }
         match result.outcome {
             Ok(()) => Ok(()),
             Err(failure) => Err(RunOutcome::Failed {

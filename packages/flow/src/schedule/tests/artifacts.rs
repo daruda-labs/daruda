@@ -247,6 +247,46 @@ fn last_run_end(events: &[FlowEvent]) -> RunEnd {
         .expect("the run ended")
 }
 
+/// A fix whose own billed report stopped the run had finished its edits, so
+/// it ends as a fix (recorded passed, `FixEnded` with no failure) rather than
+/// as an interrupted one — and the gate is still not re-derived, since that
+/// would bill again.
+#[test]
+fn a_fix_its_own_overage_stopped_ends_passed_without_re_deriving() {
+    let runner = FakeRunner::new().stops_run_at("__fix__", 1).script(
+        "gate",
+        vec![Step::fail(NodeFailure::Exit { code: Some(1) })],
+    );
+    let (report, events, _dir) = run_watched(GATED, &runner, Budget::unlimited());
+
+    assert!(
+        matches!(report.outcome, RunOutcome::Canceled { node: None }),
+        "{:?}",
+        report.outcome
+    );
+    assert_eq!(
+        runner.ids(),
+        vec!["implement", "review", "gate", "__fix__"],
+        "nothing is re-derived after the stop"
+    );
+    let fix = report.node(FIX_SESSION_ID).expect("a fix ran");
+    assert!(matches!(
+        fix.attempts[0].outcome,
+        crate::record::AttemptOutcome::Passed
+    ));
+    assert!(
+        events.iter().any(|event| matches!(
+            event,
+            FlowEvent::FixEnded { gate, failure: None } if gate == "gate"
+        )),
+        "the fix reached its end: {events:?}"
+    );
+    assert!(matches!(
+        last_run_end(&events),
+        RunEnd::Canceled { node: None }
+    ));
+}
+
 /// The stream has to explain the repair path on its own — a host that only
 /// saw NodeStarted/NodeFailed would show `review` passing, then silently
 /// starting again with no reason given.
