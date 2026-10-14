@@ -24,16 +24,20 @@ from two different repos, and each release note names only its own line:
 
 | Line | Where | daruda integration |
 |---|---|---|
-| SDK crate `agent-client-protocol` | <https://github.com/agentclientprotocol/rust-sdk> | `2.2.0` |
-| Schema crate `agent-client-protocol-schema` | <https://github.com/agentclientprotocol/agent-client-protocol> (tags `vX.Y.Z`, "Rust Crate") | `1.9.1` |
+| SDK crate `agent-client-protocol` | <https://github.com/agentclientprotocol/rust-sdk> | `3.3.0` |
+| Schema crate `agent-client-protocol-schema` | <https://github.com/agentclientprotocol/agent-client-protocol> (tags `vX.Y.Z`, "Rust Crate") | `1.11.0` |
 | JSON spec | same repo (tags `schema-vX.Y.Z`) | v1 protocol types under `schema::v1` |
 
-- The SDK **exact-pins** the schema crate (`= 1.9.1` at SDK 2.2.0), so the
+- The SDK **exact-pins** the schema crate (`= 1.11.0` at SDK 3.3.0), so the
   schema line cannot be advanced on its own — it moves only when the SDK
   releases against a newer one.
-- Keep current: `"2.2"` in the workspace `Cargo.toml` is a caret requirement (`>=2.2.0,
-  <3.0.0`), so `cargo update -p agent-client-protocol` picks up patch and minor
+- Keep current: `"3.3"` in the workspace `Cargo.toml` is a caret requirement (`>=3.3.0,
+  <4.0.0`), so `cargo update -p agent-client-protocol` picks up patch and minor
   releases; edit the version string only when a new major lands.
+- SDK 3.x enables no default features. `process` supplies `AcpAgent`,
+  `AcpAgentConfig`, and wire-tap `LineDirection`; daruda does not use the
+  separate `Stdio` adapter or require its `stdio` feature. `connect_with`
+  owns the SDK connection driver and shutdown drain.
 - Authentication methods are stable in this integration; do not restore the
   removed `unstable_auth_methods` feature. Per-turn token usage still uses
   `unstable_end_turn_token_usage` and needs its protocol regression tests.

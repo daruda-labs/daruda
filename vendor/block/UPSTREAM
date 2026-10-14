@@ -1,0 +1,5 @@
+https://github.com/SSheldon/rust-block
+642ea4a4a5853a21b55b05c34832a5f1bb1af61c
+block 0.1.6 (MIT, as declared by the upstream Cargo.toml)
+Retained: Cargo.toml, README.md, src/, test_utils/, tests-ios/
+Local patch: ../../patches/block-inhabited-class.patch

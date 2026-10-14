@@ -1,0 +1,140 @@
+--- a/Cargo.toml
++++ b/Cargo.toml
+@@ -1,6 +1,7 @@
+ [package]
+ name = "block"
+ version = "0.1.6"
++edition = "2015"
+ authors = ["Steven Sheldon"]
+
+ description = "Rust interface for Apple's C language extension of blocks."
+--- a/src/lib.rs
++++ b/src/lib.rs
+@@ -54,13 +54,15 @@
+ use std::os::raw::{c_int, c_ulong, c_void};
+ use std::ptr;
+
+-enum Class { }
++// Only the class address is used; an empty enum makes the foreign static uninhabited.
++#[repr(C)]
++struct Class { _private: [u8; 0] }
+
+ #[cfg_attr(any(target_os = "macos", target_os = "ios"),
+            link(name = "System", kind = "dylib"))]
+ #[cfg_attr(not(any(target_os = "macos", target_os = "ios")),
+            link(name = "BlocksRuntime", kind = "dylib"))]
+-extern {
++extern "C" {
+     static _NSConcreteStackBlock: Class;
+
+     fn _Block_copy(block: *const c_void) -> *mut c_void;
+@@ -80,7 +82,7 @@
+     ($($a:ident : $t:ident),*) => (
+         impl<$($t),*> BlockArguments for ($($t,)*) {
+             unsafe fn call_block<R>(self, block: *mut Block<Self, R>) -> R {
+-                let invoke: unsafe extern fn(*mut Block<Self, R> $(, $t)*) -> R = {
++                let invoke: unsafe extern "C" fn(*mut Block<Self, R> $(, $t)*) -> R = {
+                     let base = block as *mut BlockBase<Self, R>;
+                     mem::transmute((*base).invoke)
+                 };
+@@ -110,7 +112,7 @@
+     isa: *const Class,
+     flags: c_int,
+     _reserved: c_int,
+-    invoke: unsafe extern fn(*mut Block<A, R>, ...) -> R,
++    invoke: unsafe extern "C" fn(*mut Block<A, R>, ...) -> R,
+ }
+
+ /// An Objective-C block that takes arguments of `A` when called and
+@@ -200,7 +202,7 @@
+             type Ret = R;
+
+             fn into_concrete_block(self) -> ConcreteBlock<($($t,)*), R, X> {
+-                unsafe extern fn $f<$($t,)* R, X>(
++                unsafe extern "C" fn $f<$($t,)* R, X>(
+                         block_ptr: *mut ConcreteBlock<($($t,)*), R, X>
+                         $(, $a: $t)*) -> R
+                         where X: Fn($($t,)*) -> R {
+@@ -208,7 +210,7 @@
+                     (block.closure)($($a),*)
+                 }
+
+-                let f: unsafe extern fn(*mut ConcreteBlock<($($t,)*), R, X> $(, $a: $t)*) -> R = $f;
++                let f: unsafe extern "C" fn(*mut ConcreteBlock<($($t,)*), R, X> $(, $a: $t)*) -> R = $f;
+                 unsafe {
+                     ConcreteBlock::with_invoke(mem::transmute(f), self)
+                 }
+@@ -254,7 +256,7 @@
+     /// Constructs a `ConcreteBlock` with the given invoke function and closure.
+     /// Unsafe because the caller must ensure the invoke function takes the
+     /// correct arguments.
+-    unsafe fn with_invoke(invoke: unsafe extern fn(*mut Self, ...) -> R,
++    unsafe fn with_invoke(invoke: unsafe extern "C" fn(*mut Self, ...) -> R,
+             closure: F) -> Self {
+         ConcreteBlock {
+             base: BlockBase {
+@@ -308,12 +310,12 @@
+     }
+ }
+
+-unsafe extern fn block_context_dispose<B>(block: &mut B) {
++unsafe extern "C" fn block_context_dispose<B>(block: &mut B) {
+     // Read the block onto the stack and let it drop
+     ptr::read(block);
+ }
+
+-unsafe extern fn block_context_copy<B>(_dst: &mut B, _src: &B) {
++unsafe extern "C" fn block_context_copy<B>(_dst: &mut B, _src: &B) {
+     // The runtime memmoves the src block into the dst block, nothing to do
+ }
+
+@@ -321,8 +323,8 @@
+ struct BlockDescriptor<B> {
+     _reserved: c_ulong,
+     block_size: c_ulong,
+-    copy_helper: unsafe extern fn(&mut B, &B),
+-    dispose_helper: unsafe extern fn(&mut B),
++    copy_helper: unsafe extern "C" fn(&mut B, &B),
++    dispose_helper: unsafe extern "C" fn(&mut B),
+ }
+
+ impl<B> BlockDescriptor<B> {
+--- a/test_utils/Cargo.toml
++++ b/test_utils/Cargo.toml
+@@ -1,6 +1,7 @@
+ [package]
+ name = "objc_test_utils"
+ version = "0.0.2"
++edition = "2015"
+ authors = ["Steven Sheldon"]
+
+ description = "Utilities for testing Objective-C interop."
+@@ -15,4 +16,4 @@
+ path = "lib.rs"
+
+ [build-dependencies]
+-gcc = "0.3"
++cc = "1"
+--- a/test_utils/build.rs
++++ b/test_utils/build.rs
+@@ -1,7 +1,7 @@
+-extern crate gcc;
++extern crate cc;
+
+ fn main() {
+-    gcc::Config::new()
++    cc::Build::new()
+         .compiler("clang")
+         .file("block_utils.c")
+         .flag("-fblocks")
+--- a/test_utils/lib.rs
++++ b/test_utils/lib.rs
+@@ -8,7 +8,7 @@
+ /// `int32_t (^)(int32_t)`.
+ pub enum AddBlock { }
+
+-extern {
++extern "C" {
+     /// Returns a pointer to a global `IntBlock` that returns 7.
+     pub fn get_int_block() -> *mut IntBlock;
+     /// Returns a pointer to a copied `IntBlock` that returns `i`.

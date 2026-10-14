@@ -19,9 +19,10 @@ test-support = []
 
 [dependencies]
 daruda_core = { workspace = true }
+# Subprocess launch and wire-tap LineDirection require process; Stdio is unused.
 # Authentication methods are part of the stable schema. Per-turn usage still
 # requires its opt-in feature to retain token accounting on prompt responses.
-agent-client-protocol = { workspace = true, features = ["unstable_end_turn_token_usage"] }
+agent-client-protocol = { workspace = true, features = ["process", "unstable_end_turn_token_usage"] }
 anyhow = { workspace = true }
 futures = { workspace = true }
 semver = { workspace = true }

@@ -1,0 +1,11 @@
+diff --git a/Cargo.toml b/Cargo.toml
+--- a/Cargo.toml
++++ b/Cargo.toml
+@@ -29,6 +29,6 @@ rand = "0.9"
+ regex = "1.5"
+ slotmap = "1.0.6"
+-stacksafe = "0.1"
++stacksafe = "1.0.3"
+ thiserror = "2.0.12"
+ unicode-segmentation = "1.10"
+ url = "2.2"

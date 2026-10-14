@@ -10,6 +10,7 @@ const PATCHES: &[&str] = &[
     "gpui-text-wrap-cache.patch",
     "gpui-test-window-handle.patch",
     "gpui-nested-deferred-reuse.patch",
+    "gpui-stacksafe-1.patch",
 ];
 
 fn run(command: &mut Command) -> Result<()> {

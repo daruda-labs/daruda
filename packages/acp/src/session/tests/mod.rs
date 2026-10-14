@@ -1,5 +1,6 @@
 mod connection;
 mod dispatch;
+mod lifecycle;
 mod protocol;
 
 use super::*;

@@ -13,6 +13,33 @@ conditions. `chrono` and `notify` explicitly opt into defaults where upstream
 used them; the shared entries disable defaults for narrower first-party users.
 The dependency policy checks these declarations in addition to retained patches.
 
+## Compiler Compatibility Dependencies
+
+`gpui-stacksafe-1.patch` raises the generated GPUI workspace's `stacksafe`
+requirement to `1.0.3`. This removes the retired `proc-macro-error2` and
+`proc-macro-error-attr2` dependencies, including the private `proc_macro`
+re-export rejected by future Rust versions. GPUI uses `StackSafe::new` and
+`#[stacksafe]` in `elements/div.rs` and `taffy.rs`; those APIs and the stack
+growth behavior are retained. The removed optional `derive-visitor` integration
+is unused. Regenerate with `tools/vendor_gpui`, just like the other GPUI patches.
+
+`block-inhabited-class.patch` fixes `block 0.1.6`'s uninhabited foreign static
+without changing its public API. The class is an opaque `repr(C)` struct rather
+than an empty enum. Only its address is used as the block header's class pointer;
+the foreign allocation is never read as a Rust value. Cargo selects the patched
+copy under `vendor/block` for every consumer, including Cocoa and Metal.
+The patch also spells out the existing C ABI, explicitly retains edition 2015,
+and replaces the test helper's retired `gcc` build dependency with `cc`.
+The exact source revision and retained files are recorded in `vendor/block/UPSTREAM`.
+Upstream declares MIT in its manifest and provides no separate license file.
+
+To refresh that copy, export the retained paths from the recorded revision,
+apply `patches/block-inhabited-class.patch` from the copy's root, and preserve
+`UPSTREAM`. Compare the result with `vendor/block`; do not edit Cargo's registry
+cache. On macOS, `cargo test --manifest-path vendor/block/Cargo.toml` exercises
+the upstream C interop, stack-to-heap copy, and captured-value drop tests.
+Remove this override when a compatible upstream release fixes the declaration.
+
 ## GPUI patches — `gpui-*.patch`
 
 GPUI compiles from `vendor/zed/crates/gpui`, a pristine copy of the
