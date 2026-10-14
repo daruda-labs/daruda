@@ -264,6 +264,7 @@ jobs:
 
   windows:
     name: Windows — build and test
+    needs: dependency-changes
     runs-on: windows-latest
     # Slower than either other runner and building the ghostty Zig static lib
     # from scratch on top. Raise rather than let a real failure read as a
@@ -281,21 +282,13 @@ jobs:
         with:
           cache-key: windows
 
-      - name: Build native application
-        run: ./scripts/build-windows.ps1
+      - name: Clippy
+        shell: bash
+        run: bash ./scripts/ci-cargo.sh clippy --keep-going
 
       - name: Clippy (all app features)
         shell: bash
         run: bash ./scripts/ci-cargo.sh app-features
-
-      # The one thing a build and a unit test cannot answer: whether gpui's
-      # platform layer comes up on a runner with no GPU, where D3D11 falls
-      # back to a software device. Exits non-zero if no window is drawn.
-      - name: Smoke-test the GUI
-        # A window that never comes up should fail here, not eat the job's
-        # hour: the check itself settles in seconds.
-        timeout-minutes: 5
-        run: cargo run --locked -p daruda -- --smoke
 
       - name: Add Git shell tools for runtime fixtures
         shell: pwsh
@@ -307,14 +300,21 @@ jobs:
           }
           Add-Content $env:GITHUB_PATH $tools
 
-      - name: Test native build contracts
-        run: cargo test --locked -p ghostty_vt -p ghostty_vt_sys -p vendor_gpui -p test_process
+      - name: Test
+        shell: bash
+        run: bash ./scripts/ci-cargo.sh test --no-fail-fast
 
-      - name: Test Windows platform adapters
-        run: 'cargo test --locked -p daruda platform::'
+      - name: Build native application
+        run: ./scripts/build-windows.ps1
 
-      - name: Test MCP transport and protocol
-        run: 'cargo test --locked -p daruda control::mcp::'
+      # The one thing a build and a unit test cannot answer: whether gpui's
+      # platform layer comes up on a runner with no GPU, where D3D11 falls
+      # back to a software device. Exits non-zero if no window is drawn.
+      - name: Smoke-test the GUI
+        # A window that never comes up should fail here, not eat the job's
+        # hour: the check itself settles in seconds.
+        timeout-minutes: 5
+        run: cargo run --locked -p daruda -- --smoke
 
       # Runs the packaging the release workflow depends on — the PE
       # architecture check and the MSVC redist lookup — without keeping the
@@ -326,10 +326,33 @@ jobs:
       - name: Verify Windows package versions
         run: ./scripts/test-windows-package-version.ps1
 
-      - name: Clippy
-        shell: bash
-        run: bash ./scripts/ci-cargo.sh clippy --keep-going
+  # ARM64 shares every source path with x86_64; what differs is the native
+  # toolchain, the ghostty Zig target, and the arch-specific packaging. Only a
+  # packaging-relevant change can break those, so only such a change runs it.
+  windows-arm64:
+    name: Windows ARM64 — build and package
+    needs: dependency-changes
+    if: needs.dependency-changes.outputs.packaging == 'true'
+    runs-on: windows-11-arm
+    timeout-minutes: 60
 
-      - name: Test
-        shell: bash
-        run: bash ./scripts/ci-cargo.sh test --no-fail-fast
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          submodules: recursive
+
+      - name: Set up the build toolchain
+        uses: ./.github/actions/setup-build
+        with:
+          cache-key: windows-arm64
+
+      - name: Build native application
+        run: ./scripts/build-windows.ps1
+
+      - name: Smoke-test the GUI
+        timeout-minutes: 5
+        run: cargo run --locked -p daruda -- --smoke
+
+      - name: Verify Windows packaging
+        run: ./scripts/package-windows.ps1 -Profile debug -SkipBuild

@@ -413,7 +413,8 @@ MSRVs retain their independent policy. Its self-test runs in the Lint job.
 For dependency and native-packaging changes, macOS CI also verifies a signed
 debug `.app` and starts its bundled binary. Linux CI builds the debug tarball
 and deb from the already checked binary, installs the deb, and smoke-tests both
-payloads. [check-packaging-changes.sh](scripts/check-packaging-changes.sh) owns
+payloads. A Windows ARM64 job builds, smoke-tests, and packages natively.
+[check-packaging-changes.sh](scripts/check-packaging-changes.sh) owns
 the path selection and its self-test. A manual CI run always includes these
 checks. Release-profile packaging, installers, and disk images remain release
 gates; debug packaging is never published.
