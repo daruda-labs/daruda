@@ -99,6 +99,18 @@ incremental = true
 codegen-units = 16
 debug = "limited"
 
+# Mirror the dev settings for build scripts and proc-macros; otherwise every
+# crate shared between host and target compiles twice.
+[profile.dev.build-override]
+codegen-units = 16
+split-debuginfo = "unpacked"
+debug = false
+
+[profile.dev.package."*"]
+# Dependency debug info dominates target/ size; workspace crates keep theirs,
+# and backtraces still name dependency frames through the symbol table.
+debug = false
+
 [profile.dev.package]
 # proc-macro and build-time-heavy crates compile at opt-level 3 even in dev.
 gpui_macros = { opt-level = 3 }
