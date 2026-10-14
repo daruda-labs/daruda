@@ -55,21 +55,10 @@ pub(super) fn render(
                 .tooltip(summary.clone()),
         )
         .content(move |_, window, cx| {
-            crate::ui::popover_panel(
+            super::menu::panel(
                 window,
-                crate::ui::PanelLimits {
-                    width: PORT_TABLE_WIDTH
-                        + theme::SCROLL_AREA_GUTTER
-                        + super::menu::PANEL_BODY_INSET
-                        + super::menu::PANEL_CHROME,
-                    max_height: PORT_MENU_SCROLL_MAX_H
-                        + theme::POPOVER_HEADER_BUDGET
-                        + super::menu::PANEL_CHROME,
-                    min_height: 0.0,
-                    margin: theme::POPOVER_WINDOW_MARGIN,
-                    chrome: super::menu::PANEL_CHROME,
-                },
-                None,
+                PORT_TABLE_WIDTH + theme::SCROLL_AREA_GUTTER,
+                PORT_MENU_SCROLL_MAX_H,
             )
             .child(ports_panel(status, &groups, &external, summary.clone(), cx))
         })

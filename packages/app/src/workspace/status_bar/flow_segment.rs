@@ -118,13 +118,7 @@ fn flow_panel(
 ) -> AnyElement {
     let t = theme::current(cx);
     let (state, tone) = header_state(runs);
-    crate::ui::popover_panel(window, crate::ui::PanelLimits {
-        width: FLOW_PANEL_WIDTH + super::menu::PANEL_BODY_INSET + super::menu::PANEL_CHROME,
-        max_height: FLOW_PANEL_MAX_HEIGHT + theme::POPOVER_HEADER_BUDGET + super::menu::PANEL_CHROME,
-        min_height: 0.0,
-        margin: theme::POPOVER_WINDOW_MARGIN,
-        chrome: super::menu::PANEL_CHROME,
-    }, None)
+    super::menu::panel(window, FLOW_PANEL_WIDTH, FLOW_PANEL_MAX_HEIGHT)
         .gap(px(FLOW_SECTION_GAP))
         .text_size(px(theme::STATUS_BAR_FONT_SIZE))
         .child(super::menu::panel_header(

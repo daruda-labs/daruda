@@ -23,6 +23,17 @@ const ROW_INSET: f32 = EDGE_PAD + theme::PAD_STANDARD;
 pub(super) const PANEL_CHROME: f32 = 2.0 * theme::INPUT_BORDER_WIDTH;
 /// A scrolling panel body's left inset; its right side is the scrollbar's.
 pub(super) const PANEL_BODY_INSET: f32 = ROW_INSET;
+/// The vendored `Popover`'s gap between chip and popup (`bottom_1`) and its
+/// window-edge snap margin; both track the vendor values.
+const ANCHOR_GAP: f32 = theme::PAD_XS;
+const SNAP_MARGIN: f32 = theme::PAD_STANDARD;
+
+/// The tallest popup that fits between the window's top snap margin and the
+/// bar; a taller one is snapped back down over the chip.
+fn room_above_bar(window: &Window) -> f32 {
+    let viewport_h = f32::from(window.viewport_size().height);
+    (viewport_h - super::STATUS_BAR_HEIGHT - ANCHOR_GAP - SNAP_MARGIN).max(0.0)
+}
 
 /// A chip's dropdown menu, opened above the chip. `shot_id` names it to the
 /// screenshot harness, which opens it without a click.
@@ -32,6 +43,11 @@ pub(super) fn dropdown(
     builder: impl Fn(PopupMenu, &mut Window, &mut Context<PopupMenu>) -> PopupMenu + 'static,
     cx: &App,
 ) -> AnyElement {
+    // Past the room above the bar the menu scrolls rather than covering it.
+    let builder = move |menu, window: &mut Window, cx: &mut Context<PopupMenu>| {
+        let max_h = (room_above_bar(window) - PANEL_CHROME).max(0.0);
+        builder(menu, window, cx).max_h(px(max_h)).scrollable(true)
+    };
     #[cfg(feature = "screenshot")]
     if super::screenshot::menu_open(shot_id, cx) {
         return super::screenshot::open_menu(shot_id, trigger, builder);
@@ -52,6 +68,24 @@ pub(super) fn popover(id: &'static str, cx: &App) -> Popover {
     #[cfg(not(feature = "screenshot"))]
     let _ = cx;
     popover
+}
+
+/// A panel's sized column: `content_width` wide inside the body inset and
+/// chrome, its body at most `body_max` tall, the whole within the room above
+/// the bar so a short window scrolls the body instead of covering the chip.
+pub(super) fn panel(window: &Window, content_width: f32, body_max: f32) -> Div {
+    let natural = body_max + theme::POPOVER_HEADER_BUDGET + PANEL_CHROME;
+    crate::ui::popover_panel(
+        window,
+        crate::ui::PanelLimits {
+            width: content_width + PANEL_BODY_INSET + PANEL_CHROME,
+            max_height: natural.min(room_above_bar(window)),
+            min_height: 0.0,
+            margin: theme::POPOVER_WINDOW_MARGIN,
+            chrome: PANEL_CHROME,
+        },
+        None,
+    )
 }
 
 /// How a header's state reads. Resolved at render: a menu is built once per
@@ -256,9 +290,19 @@ mod tests {
     use super::*;
     use gpui::{Bounds, Modifiers, TestAppContext, VisualTestContext, point, size};
 
-    /// A chip at the window's bottom-right corner, the way the bar places it.
+    /// What the probe chip opens.
+    #[derive(Clone, Copy)]
+    enum Popup {
+        Menu,
+        Panel,
+        /// A panel whose body holds far more rows than any window shows.
+        TallPanel,
+    }
+
+    /// A chip in a bar-high strip at the window's bottom-right corner, the way
+    /// the bar places it.
     struct CornerProbe {
-        menu: bool,
+        popup: Popup,
     }
 
     impl gpui::Render for CornerProbe {
@@ -266,22 +310,39 @@ mod tests {
             let trigger = crate::ui::button_status_pill_bare("probe-chip", cx)
                 .child("chip")
                 .debug_selector(|| "probe-chip".into());
-            let popup = if self.menu {
-                dropdown(
+            let popup = match self.popup {
+                Popup::Menu => dropdown(
                     "probe-menu",
                     trigger,
                     crate::ui::menu_builder(|menu, _window, _cx| {
                         menu.item(menu_header("Title", Some("State".into()), Tone::Plain))
                     }),
                     cx,
-                )
-            } else {
-                popover("probe-panel", cx)
+                ),
+                Popup::Panel => popover("probe-panel", cx)
                     .trigger(trigger)
                     .content(|_, _window, cx| {
                         panel_header("Title", Some("State".into()), Tone::Plain, cx)
                     })
-                    .into_any_element()
+                    .into_any_element(),
+                Popup::TallPanel => popover("probe-tall-panel", cx)
+                    .trigger(trigger)
+                    .content(|_, window, cx| {
+                        let rows = div()
+                            .flex()
+                            .flex_col()
+                            .children((0..80).map(|ix| panel_row(format!("row {ix}"))));
+                        panel(window, 200.0, 360.0)
+                            .debug_selector(|| "probe-popup".into())
+                            .child(panel_header("Title", None, Tone::Plain, cx))
+                            .child(panel_separator())
+                            .child(panel_body(
+                                crate::ui::scroll_area("probe-scroll", px(360.0), rows)
+                                    .fill()
+                                    .max_h(px(360.0)),
+                            ))
+                    })
+                    .into_any_element(),
             };
             div()
                 .size_full()
@@ -289,47 +350,66 @@ mod tests {
                 .flex_col()
                 .justify_end()
                 .items_end()
-                .child(popup)
+                .child(
+                    div()
+                        .h(px(super::super::STATUS_BAR_HEIGHT))
+                        .flex()
+                        .items_center()
+                        .child(popup),
+                )
         }
     }
 
     fn open_at_corner(
         cx: &mut TestAppContext,
-        menu: bool,
-    ) -> (Bounds<gpui::Pixels>, Bounds<gpui::Pixels>) {
+        popup: Popup,
+        window_h: f32,
+    ) -> (Bounds<gpui::Pixels>, VisualTestContext) {
         crate::test_support::init_gpui_component(cx);
         let opts = gpui::WindowOptions {
             window_bounds: Some(gpui::WindowBounds::Windowed(Bounds::new(
                 point(px(0.), px(0.)),
-                size(px(800.), px(600.)),
+                size(px(800.), px(window_h)),
             ))),
             ..Default::default()
         };
         let window = cx
-            .update(|cx| cx.open_window(opts, |_, cx| cx.new(|_| CornerProbe { menu })))
+            .update(|cx| cx.open_window(opts, |_, cx| cx.new(|_| CornerProbe { popup })))
             .unwrap();
         let mut vcx = VisualTestContext::from_window(window.into(), cx);
         vcx.run_until_parked();
         let chip = vcx.debug_bounds("probe-chip").expect("chip painted");
         vcx.simulate_click(chip.center(), Modifiers::none());
         vcx.run_until_parked();
-        let header = vcx
-            .debug_bounds("status-menu-header")
-            .expect("popup opened");
-        (chip, header)
+        (chip, vcx)
     }
 
     /// A menu at the bottom edge opens upward instead of being snapped back
     /// over the chip that opened it.
     #[gpui::test]
     fn a_menu_opens_above_its_chip(cx: &mut TestAppContext) {
-        let (chip, header) = open_at_corner(cx, true);
+        let (chip, mut vcx) = open_at_corner(cx, Popup::Menu, 600.0);
+        let header = vcx.debug_bounds("status-menu-header").expect("opened");
         assert!(header.bottom() <= chip.top(), "{header:?} covers {chip:?}");
     }
 
     #[gpui::test]
     fn a_panel_opens_above_its_chip(cx: &mut TestAppContext) {
-        let (chip, header) = open_at_corner(cx, false);
+        let (chip, mut vcx) = open_at_corner(cx, Popup::Panel, 600.0);
+        let header = vcx.debug_bounds("status-menu-header").expect("opened");
         assert!(header.bottom() <= chip.top(), "{header:?} covers {chip:?}");
+    }
+
+    /// A full panel is taller than the room above the bar in a short window;
+    /// it scrolls its body and keeps clear of both the chip and the top edge.
+    #[gpui::test]
+    fn a_tall_panel_stays_above_its_chip_in_a_short_window(cx: &mut TestAppContext) {
+        let (chip, mut vcx) = open_at_corner(cx, Popup::TallPanel, 400.0);
+        let popup = vcx.debug_bounds("probe-popup").expect("opened");
+        assert!(popup.bottom() <= chip.top(), "{popup:?} covers {chip:?}");
+        assert!(
+            popup.top() >= px(SNAP_MARGIN),
+            "{popup:?} runs into the window's top edge"
+        );
     }
 }
