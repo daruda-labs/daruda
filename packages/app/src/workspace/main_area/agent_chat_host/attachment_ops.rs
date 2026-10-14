@@ -1,4 +1,4 @@
-//! Acquire bounded attachment snapshots off the UI thread, bound to their pane.
+//! Acquire path references and bounded clipboard images, bound to their pane.
 
 use super::super::pane_tree::PaneId;
 use crate::{surface::strings as s, workspace::Workspace};
@@ -7,12 +7,12 @@ use daruda_acp::{AttachmentContent, PromptAttachment};
 use daruda_chat::view::{AgentChatView, PromptDispatch};
 use daruda_store::observability::{error_report::ErrorReport, log_writer::LogWriter};
 use gpui::{ClipboardEntry, Context, WeakEntity, Window};
-use std::{io::Read as _, path::PathBuf};
+use std::path::PathBuf;
 
 const FILE_LIMIT: usize = 8 * 1024 * 1024;
 
 enum Source {
-    File(PathBuf),
+    Path(PathBuf),
     Image(Vec<u8>),
 }
 
@@ -61,22 +61,36 @@ impl Workspace {
         let pane = self.active_runtime().focused_pane_id;
         if let Some(view) = self.agent_chat_view(pane).cloned() {
             self.load_attachments(
+                pane,
                 view.downgrade(),
-                paths.into_iter().map(Source::File).collect(),
+                paths.into_iter().map(Source::Path).collect(),
                 cx,
             );
         } else {
-            let shell = self
-                .mirrors
-                .shell_program
-                .as_deref()
-                .map(daruda_core::shell::quote::Shell::detect_from_program)
-                .unwrap_or_default();
-            let quoted = daruda_core::shell::quote::format_paths_for_drop(&paths, shell);
-            self.input_dock
-                .input
-                .update(cx, |state, cx| state.insert(quoted, window, cx));
+            self.insert_composer_paths(&paths, window, cx);
         }
+    }
+
+    fn insert_composer_paths(
+        &mut self,
+        paths: &[PathBuf],
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let quoted = self.composer_paths_text(paths);
+        self.input_dock
+            .input
+            .update(cx, |state, cx| state.insert(quoted, window, cx));
+    }
+
+    fn composer_paths_text(&self, paths: &[PathBuf]) -> String {
+        let shell = self
+            .mirrors
+            .shell_program
+            .as_deref()
+            .map(daruda_core::shell::quote::Shell::detect_from_program)
+            .unwrap_or_default();
+        daruda_core::shell::quote::format_paths_for_drop(paths, shell)
     }
 
     pub(in crate::workspace) fn pick_composer_attachments(&mut self, cx: &mut Context<Self>) {
@@ -87,16 +101,19 @@ impl Workspace {
         let target = view.downgrade();
         let selection = cx.prompt_for_paths(gpui::PathPromptOptions {
             files: true,
-            directories: false,
+            directories: true,
             multiple: true,
             prompt: Some(s::agent_chat::attachment_add().into()),
         });
         cx.spawn(async move |ws, cx| {
             let result = selection.await;
             if let Err(error) = ws.update(cx, |ws, cx| match result {
-                Ok(Ok(Some(paths))) => {
-                    ws.load_attachments(target, paths.into_iter().map(Source::File).collect(), cx)
-                }
+                Ok(Ok(Some(paths))) => ws.load_attachments(
+                    pane,
+                    target,
+                    paths.into_iter().map(Source::Path).collect(),
+                    cx,
+                ),
                 Ok(Err(error)) => ws.attachment_error(error.to_string(), cx),
                 _ => {}
             }) {
@@ -123,61 +140,90 @@ impl Workspace {
         let Some(item) = cx.read_from_clipboard() else {
             return false;
         };
+        let entries: Vec<_> = item.into_entries().collect();
+        let paths: Vec<_> = entries
+            .iter()
+            .filter_map(|entry| match entry {
+                ClipboardEntry::ExternalPaths(paths) => Some(paths.paths()),
+                _ => None,
+            })
+            .flatten()
+            .cloned()
+            .map(Source::Path)
+            .collect();
+        // File copies can include an image preview; the original paths take precedence.
+        if !paths.is_empty() {
+            self.load_attachments(pane, view.downgrade(), paths, cx);
+            return true;
+        }
         let mut sources = Vec::new();
-        for entry in item.into_entries() {
-            match entry {
-                ClipboardEntry::Image(image) => {
-                    if image.bytes().len() > FILE_LIMIT {
-                        self.attachment_error(
-                            daruda_chat::labels::attachment_limit().to_string(),
-                            cx,
-                        );
-                        return true;
-                    }
-                    sources.push(Source::Image(image.bytes().to_vec()));
+        for entry in entries {
+            if let ClipboardEntry::Image(image) = entry {
+                if image.bytes().len() > FILE_LIMIT {
+                    self.attachment_error(daruda_chat::labels::attachment_limit().to_string(), cx);
+                    return true;
                 }
-                ClipboardEntry::ExternalPaths(paths) => {
-                    sources.extend(paths.paths().iter().cloned().map(Source::File))
-                }
-                _ => {}
+                sources.push(Source::Image(image.bytes().to_vec()));
             }
         }
         if sources.is_empty() {
             return false;
         }
-        self.load_attachments(view.downgrade(), sources, cx);
+        self.load_attachments(pane, view.downgrade(), sources, cx);
         true
     }
 
     fn load_attachments(
         &mut self,
+        pane: PaneId,
         target: WeakEntity<AgentChatView>,
         sources: Vec<Source>,
         cx: &mut Context<Self>,
     ) {
-        if sources.len() > 8 {
-            self.attachment_error(daruda_chat::labels::attachment_limit().to_string(), cx);
-            return;
-        }
+        let fallback_paths: Vec<_> = sources
+            .iter()
+            .filter_map(|source| match source {
+                Source::Path(path) => Some(path.clone()),
+                Source::Image(_) => None,
+            })
+            .collect();
         cx.spawn(async move |ws, cx| {
             let result = cx
                 .background_executor()
-                .spawn(async move {
-                    sources
-                        .into_iter()
-                        .map(load)
-                        .collect::<anyhow::Result<Vec<_>>>()
-                })
+                .spawn(async move { load_sources(sources) })
                 .await;
-            if let Err(error) = ws.update(cx, |ws, cx| {
+            if let Err(error) = ws.update_in(cx, |ws, window, cx| {
                 let Some(view) = target.upgrade() else {
                     return;
                 };
-                let outcome = result
-                    .map_err(|e| e.to_string())
-                    .and_then(|a| view.update(cx, |v, cx| v.add_attachments(a, cx)));
+                let outcome = result.map_err(|e| e.to_string()).and_then(|attachments| {
+                    view.update(cx, |v, cx| v.add_attachments(attachments, cx))
+                });
                 if let Err(error) = outcome {
-                    ws.attachment_error(error, cx);
+                    if !fallback_paths.is_empty() {
+                        if ws.input_dock.owner == Some(pane) {
+                            ws.insert_composer_paths(&fallback_paths, window, cx);
+                        } else {
+                            // Preserve the original pane's draft if focus changed during loading.
+                            let text = ws.composer_paths_text(&fallback_paths);
+                            let draft = ws.input_dock.drafts.entry(pane).or_default();
+                            if !draft.is_empty() {
+                                draft.push(' ');
+                            }
+                            draft.push_str(&text);
+                        }
+                        LogWriter::log(
+                            ErrorReport::new("Attachment paths inserted as text")
+                                .message(error)
+                                .severity(
+                                    daruda_store::observability::error_report::ErrorSeverity::Info,
+                                )
+                                .at(file!(), line!())
+                                .build(),
+                        );
+                    } else {
+                        ws.attachment_error(error, cx);
+                    }
                 }
                 ws.composer_attachments_changed(cx);
             }) {
@@ -246,39 +292,32 @@ impl Workspace {
     }
 }
 
+fn load_sources(sources: Vec<Source>) -> anyhow::Result<Vec<PromptAttachment>> {
+    anyhow::ensure!(
+        sources.len() <= 8,
+        "{}",
+        daruda_chat::labels::attachment_limit()
+    );
+    sources.into_iter().map(load).collect()
+}
+
 fn load(source: Source) -> anyhow::Result<PromptAttachment> {
     match source {
         Source::Image(bytes) => image_attachment(
             s::agent_chat::attachment_clipboard_name().to_string(),
             &bytes,
         ),
-        Source::File(path) => {
-            let file = std::fs::File::open(&path)?;
-            anyhow::ensure!(
-                file.metadata()?.is_file(),
-                "Only regular files can be attached"
-            );
-            let mut bytes = Vec::new();
-            file.take((FILE_LIMIT + 1) as u64).read_to_end(&mut bytes)?;
-            anyhow::ensure!(bytes.len() <= FILE_LIMIT, "Attachment exceeds 8 MiB");
-            let name = path
-                .file_name()
-                .ok_or_else(|| anyhow::anyhow!("File has no name"))?
-                .to_string_lossy()
-                .into_owned();
-            if image::guess_format(&bytes).is_ok() {
-                return image_attachment(name, &bytes);
-            }
-            let text = String::from_utf8(bytes)?;
-            anyhow::ensure!(
-                !text.contains('\0'),
-                "Binary attachments are not supported by the agent protocol"
-            );
+        Source::Path(path) => {
             let uri = daruda_core::file_url::from_local_path(&path)
                 .ok_or_else(|| anyhow::anyhow!("Attachment path must be absolute"))?;
+            let name = path
+                .file_name()
+                .unwrap_or(path.as_os_str())
+                .to_string_lossy()
+                .into_owned();
             Ok(PromptAttachment {
                 name,
-                content: AttachmentContent::TextFile { text, uri },
+                content: AttachmentContent::ResourceLink { uri },
             })
         }
     }
@@ -313,19 +352,24 @@ mod tests {
     use super::*;
 
     #[test]
-    fn queued_file_contents_are_snapshots_and_oversized_files_are_refused() {
+    fn local_paths_are_references_without_reading_file_contents() {
         let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("note.txt");
-        std::fs::write(&path, "original").unwrap();
-        let attachment = load(Source::File(path.clone())).unwrap();
-        std::fs::write(&path, "changed").unwrap();
-        assert!(
-            matches!(attachment.content, AttachmentContent::TextFile { text, .. } if text == "original")
-        );
-        std::fs::File::create(&path)
+        let folder = dir.path().join("folder with spaces");
+        std::fs::create_dir(&folder).unwrap();
+        let file = dir.path().join("binary.dat");
+        std::fs::File::create(&file)
             .unwrap()
             .set_len((FILE_LIMIT + 1) as u64)
             .unwrap();
-        assert!(load(Source::File(path)).is_err());
+        let missing = dir.path().join("missing.txt");
+        for path in [folder, file, missing, dir.path().to_path_buf()] {
+            let attachment = load(Source::Path(path.clone())).unwrap();
+            assert_eq!(
+                attachment.content,
+                AttachmentContent::ResourceLink {
+                    uri: daruda_core::file_url::from_local_path(&path).unwrap(),
+                }
+            );
+        }
     }
 }

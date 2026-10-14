@@ -1,9 +1,9 @@
-//! Prompt attachments are immutable snapshots, retained with their queued turn.
+//! Prompt attachments retain path references or content snapshots with their queued turn.
 
 use crate::SessionCapabilitiesView;
 use agent_client_protocol::schema::v1::{
-    ContentBlock, EmbeddedResource, EmbeddedResourceResource, ImageContent, TextContent,
-    TextResourceContents,
+    ContentBlock, EmbeddedResource, EmbeddedResourceResource, ImageContent, ResourceLink,
+    TextContent, TextResourceContents,
 };
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -16,11 +16,13 @@ pub struct PromptAttachment {
 pub enum AttachmentContent {
     Image { data: String, mime_type: String },
     TextFile { text: String, uri: String },
+    ResourceLink { uri: String },
 }
 
 impl PromptAttachment {
     pub fn supported_by(&self, capabilities: SessionCapabilitiesView) -> bool {
         match self.content {
+            AttachmentContent::ResourceLink { .. } => true,
             AttachmentContent::Image { .. } => capabilities.images,
             AttachmentContent::TextFile { .. } => capabilities.embedded_context,
         }
@@ -28,6 +30,7 @@ impl PromptAttachment {
 
     pub fn encoded_size(&self) -> usize {
         match &self.content {
+            AttachmentContent::ResourceLink { uri } => uri.len(),
             AttachmentContent::Image { data, .. } => data.len(),
             AttachmentContent::TextFile { text, .. } => text.len(),
         }
@@ -35,6 +38,9 @@ impl PromptAttachment {
 
     fn into_block(self) -> ContentBlock {
         match self.content {
+            AttachmentContent::ResourceLink { uri } => {
+                ContentBlock::ResourceLink(ResourceLink::new(self.name, uri))
+            }
             AttachmentContent::Image { data, mime_type } => {
                 ContentBlock::Image(ImageContent::new(data, mime_type))
             }
@@ -85,6 +91,27 @@ impl PromptInput {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn path_references_send_only_the_uri_without_optional_capabilities() {
+        let attachment = PromptAttachment {
+            name: "note.txt".into(),
+            content: AttachmentContent::ResourceLink {
+                uri: "file:///tmp/folder%20with%20spaces/note.txt".into(),
+            },
+        };
+        assert!(attachment.supported_by(SessionCapabilitiesView::default()));
+        let blocks = PromptInput {
+            text: "inspect".into(),
+            attachments: vec![attachment],
+        }
+        .into_blocks();
+        let ContentBlock::ResourceLink(link) = &blocks[1] else {
+            panic!("local files must be references, never embedded contents");
+        };
+        assert_eq!(link.name, "note.txt");
+        assert_eq!(link.uri, "file:///tmp/folder%20with%20spaces/note.txt");
+    }
 
     #[test]
     fn attachments_keep_protocol_types_and_advertised_capability_gates() {

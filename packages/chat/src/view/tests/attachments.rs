@@ -106,3 +106,28 @@ fn editing_after_building_a_draft_cannot_exceed_the_prompt_limit(cx: &mut gpui::
         })
         .unwrap();
 }
+
+#[gpui::test]
+fn path_references_survive_queue_edits_without_embedded_context(cx: &mut gpui::TestAppContext) {
+    make_test_view(cx)
+        .update(cx, |view, _window, cx| {
+            view.status = AgentSessionStatus::Connected;
+            let reference = PromptAttachment {
+                name: "folder".into(),
+                content: AttachmentContent::ResourceLink {
+                    uri: "file:///tmp/folder".into(),
+                },
+            };
+            view.add_attachments(vec![reference.clone()], cx).unwrap();
+            assert_eq!(
+                view.send_composer_prompt("inspect".into(), cx).unwrap(),
+                PromptDispatch::Queued
+            );
+            let id = view.queue.pending_prompts[0].id;
+            view.begin_edit(id, cx);
+            view.send_composer_prompt("inspect carefully".into(), cx)
+                .unwrap();
+            assert_eq!(view.queue.pending_prompts[0].attachments, vec![reference]);
+        })
+        .unwrap();
+}

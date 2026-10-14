@@ -8,7 +8,6 @@ use gpui::Context;
 impl AgentChatView {
     #[cfg(feature = "screenshot")]
     pub fn seed_attachment_draft_for_shot(&mut self, cx: &mut Context<Self>) -> Result<(), String> {
-        self.session_capabilities.embedded_context = true;
         let attachments = [
             "implementation-notes.txt",
             "configuration-for-the-windows-release.txt",
@@ -18,8 +17,7 @@ impl AgentChatView {
         .into_iter()
         .map(|name| PromptAttachment {
             name: name.into(),
-            content: daruda_acp::AttachmentContent::TextFile {
-                text: "Capture fixture".into(),
+            content: daruda_acp::AttachmentContent::ResourceLink {
                 uri: format!("urn:screenshot:{name}"),
             },
         })

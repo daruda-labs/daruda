@@ -731,3 +731,175 @@ async fn empty_composer_enter_never_reaches_a_focused_terminal(cx: &mut TestAppC
     })
     .unwrap();
 }
+
+#[gpui::test]
+async fn path_paste_and_drop_use_references_or_fall_back_to_text(cx: &mut TestAppContext) {
+    let (window_handle, workspace) = build_workspace(cx);
+    cx.run_until_parked();
+    let dir = tempfile::tempdir().unwrap();
+    let folder = dir.path().join("folder with spaces");
+    std::fs::create_dir(&folder).unwrap();
+    let file = dir.path().join("binary.dat");
+    std::fs::write(&file, [0, 255, 0]).unwrap();
+    let pane_id = cx
+        .update_window(window_handle.into(), |_, window, cx| {
+            workspace.update(cx, |ws, cx| {
+                let pane = ws.create_agent_chat_pane(
+                    Some(PaneCwd::Local(dir.path().into())),
+                    None,
+                    daruda_config::AgentDefinition::claude_default().id,
+                    None,
+                    window,
+                    cx,
+                );
+                let id = pane.id;
+                ws.active_runtime_mut().panes.push(pane);
+                ws.set_focused_pane(id, window, cx);
+                id
+            })
+        })
+        .unwrap();
+
+    for (connected, paths, fallback) in [
+        (false, vec![folder.clone(), file.clone()], true),
+        (true, vec![folder.clone(), file.clone()], false),
+        (true, vec![file.clone(); 9], true),
+        (true, vec![std::path::PathBuf::from("relative.txt")], true),
+    ] {
+        for paste in [true, false] {
+            cx.update_window(window_handle.into(), |_, window, cx| {
+                workspace.update(cx, |ws, cx| {
+                    agent_view(ws, pane_id).update(cx, |v, cx| {
+                        while !v.draft_attachments().is_empty() {
+                            v.remove_attachment(0, cx);
+                        }
+                        v.set_status_for_test(if connected {
+                            AgentSessionStatus::Connected
+                        } else {
+                            AgentSessionStatus::Idle
+                        });
+                    });
+                    ws.input_dock
+                        .input
+                        .update(cx, |s, cx| s.set_value("", window, cx));
+                    if paste {
+                        cx.write_to_clipboard(gpui::ClipboardItem {
+                            entries: vec![gpui::ClipboardEntry::ExternalPaths(
+                                gpui::ExternalPaths(paths.clone().into()),
+                            )],
+                        });
+                        assert!(ws.paste_composer_attachments(cx));
+                    } else {
+                        ws.composer_drop(paths.clone(), window, cx);
+                    }
+                });
+            })
+            .unwrap();
+            cx.run_until_parked();
+            workspace.read_with(cx, |ws, cx| {
+                let view = agent_view(ws, pane_id);
+                let attachments = view.read(cx).draft_attachments();
+                if fallback {
+                    let shell = ws
+                        .mirrors
+                        .shell_program
+                        .as_deref()
+                        .map(daruda_core::shell::quote::Shell::detect_from_program)
+                        .unwrap_or_default();
+                    assert_eq!(
+                        ws.input_dock.input.read(cx).value().as_str(),
+                        daruda_core::shell::quote::format_paths_for_drop(&paths, shell),
+                    );
+                    assert!(attachments.is_empty());
+                } else {
+                    assert!(ws.input_dock.input.read(cx).value().is_empty());
+                    assert_eq!(attachments.len(), paths.len());
+                    for (attachment, path) in attachments.iter().zip(&paths) {
+                        assert_eq!(
+                            attachment.content,
+                            daruda_acp::AttachmentContent::ResourceLink {
+                                uri: daruda_core::file_url::from_local_path(path).unwrap(),
+                            }
+                        );
+                    }
+                }
+            });
+        }
+    }
+
+    cx.update_window(window_handle.into(), |_, window, cx| {
+        workspace.update(cx, |ws, cx| {
+            agent_view(ws, pane_id).update(cx, |v, cx| {
+                v.set_status_for_test(AgentSessionStatus::Connected);
+                v.add_attachments(
+                    vec![
+                        daruda_acp::PromptAttachment {
+                            name: "existing".into(),
+                            content: daruda_acp::AttachmentContent::ResourceLink {
+                                uri: "urn:test:existing".into(),
+                            },
+                        };
+                        8
+                    ],
+                    cx,
+                )
+                .unwrap();
+            });
+            ws.input_dock
+                .input
+                .update(cx, |s, cx| s.set_value("inspect ", window, cx));
+            ws.composer_drop(vec![file.clone()], window, cx);
+        });
+    })
+    .unwrap();
+    cx.run_until_parked();
+    workspace.read_with(cx, |ws, cx| {
+        assert_eq!(
+            agent_view(ws, pane_id).read(cx).draft_attachments().len(),
+            8
+        );
+        let text = ws.input_dock.input.read(cx).value();
+        assert!(text.contains("inspect ") && text.contains("binary.dat"));
+    });
+
+    cx.update_window(window_handle.into(), |_, window, cx| {
+        workspace.update(cx, |ws, cx| {
+            agent_view(ws, pane_id)
+                .update(cx, |v, _| v.set_status_for_test(AgentSessionStatus::Idle));
+            ws.input_dock
+                .input
+                .update(cx, |s, cx| s.set_value("", window, cx));
+            ws.composer_drop(vec![file.clone()], window, cx);
+            let other = ws.create_agent_chat_pane(
+                Some(PaneCwd::Local(dir.path().into())),
+                None,
+                daruda_config::AgentDefinition::claude_default().id,
+                None,
+                window,
+                cx,
+            );
+            let other_id = other.id;
+            ws.active_runtime_mut().panes.push(other);
+            ws.set_focused_pane(other_id, window, cx);
+        });
+    })
+    .unwrap();
+    cx.run_until_parked();
+    cx.update_window(window_handle.into(), |_, window, cx| {
+        workspace.update(cx, |ws, cx| {
+            assert!(
+                ws.input_dock.input.read(cx).value().is_empty(),
+                "fallback must not leak into another pane"
+            );
+            assert!(
+                ws.input_dock
+                    .drafts
+                    .get(&pane_id)
+                    .is_some_and(|draft| draft.contains("binary.dat"))
+            );
+            ws.set_focused_pane(pane_id, window, cx);
+            assert!(ws.input_dock.input.read(cx).value().contains("binary.dat"));
+        });
+    })
+    .unwrap();
+}
