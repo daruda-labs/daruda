@@ -117,25 +117,6 @@ impl Workspace {
             has_project_config,
         }
     }
-
-    /// Whether the active project's config layer changes the resolved config.
-    /// Parsing is a read + canonicalize, and a frame can be requested on every
-    /// animation tick, so the answer is memoized per project root;
-    /// `store_mirrors` clears it on config reload.
-    pub(in crate::workspace) fn project_layer_overrides(&mut self) -> bool {
-        let Some(root) = self.active_project().map(|p| p.root.clone()) else {
-            return false;
-        };
-        if let Some((cached_root, overrides)) = &self.cached_project_config
-            && *cached_root == root
-        {
-            return *overrides;
-        }
-        let overrides =
-            daruda_config::ProjectConfig::load_in(&self.data_dir, &root).overrides_anything();
-        self.cached_project_config = Some((root, overrides));
-        overrides
-    }
 }
 
 impl Render for Workspace {

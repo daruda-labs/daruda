@@ -195,7 +195,7 @@ fn test_sibling_close_pattern_no_reentrant_panic(cx: &mut TestAppContext) {
 fn test_reload_config_resolves_project_layer_shell_override(cx: &mut TestAppContext) {
     // `reload_config` must apply the project layer on top of the user config.
     // Materialises a real project config file at the `project_config_path`
-    // location so the resolve goes through the actual `ProjectConfig::load_for`
+    // location so the resolve goes through the actual `ProjectConfig::load_in`
     // lookup rather than a hand-assembled merge.
     let temp = tempfile::tempdir().unwrap();
     let project_path = temp.path().to_path_buf();

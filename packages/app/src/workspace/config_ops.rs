@@ -4,14 +4,12 @@ use crate::surface::strings as s;
 use crate::workspace::Workspace;
 
 impl Workspace {
-    /// Re-resolve the live store with this workspace's project overlay and
+    /// Re-resolve the live store with this workspace's project layer and
     /// apply it — the one path both a settings change and an OS appearance
     /// flip take into `apply_config`.
     pub(crate) fn apply_store_config(&mut self, cx: &mut Context<Self>) {
-        let store = crate::settings_store::SettingsStore::global(cx);
-        let lane = self.active_project().map(|p| p.root.as_path());
-        let effective = store.effective_for(lane);
-        self.apply_config(&effective, cx);
+        let user = crate::settings_store::SettingsStore::global(cx).user_arc();
+        self.apply_resolved(&user, cx);
     }
 
     /// An OS light / dark flip. The theme state decides whether that repaints
@@ -31,16 +29,42 @@ impl Workspace {
         }
     }
 
-    /// Reload config from the live store. Only wired up in tests —
-    /// production goes through the `observe_global::<SettingsStore>`
-    /// subscription installed in `new_with_project`.
+    /// [`Self::apply_store_config`] with `user` in place of the store's layer.
+    /// Test-only: production goes through the `SettingsStore` observer.
     #[cfg(test)]
     pub fn reload_config(&mut self, user: &daruda_config::Config, cx: &mut Context<Self>) {
-        let proj = self
-            .active_project()
-            .map(|p| daruda_store::project::Project::from_path(p.root.clone()));
-        let effective = effective_config_for(proj.as_ref(), user, &self.data_dir);
+        self.apply_resolved(user, cx);
+    }
+
+    /// Re-read the active project's layer — the watcher that fires a store
+    /// change covers the project files too — and apply it over `user`.
+    fn apply_resolved(&mut self, user: &daruda_config::Config, cx: &mut Context<Self>) {
+        self.project_layer = None;
+        let effective = effective_config_for(self.active_project_layer(), user);
         self.apply_config(&effective, cx);
+    }
+
+    /// The active project's parsed layer, memoized per root: the same value
+    /// the applied config was resolved from, so the status-bar dot cannot
+    /// disagree with it. A frame can ask on every animation tick.
+    fn active_project_layer(&mut self) -> &daruda_config::ProjectConfig {
+        let root = self.active_project().map(|p| p.root.clone());
+        let stale = self.project_layer.as_ref().map(|(r, _)| r) != root.as_ref();
+        if stale {
+            self.project_layer = root.map(|root| {
+                let layer = project_layer_for(Some(&root), &self.data_dir);
+                (root, layer)
+            });
+        }
+        self.project_layer
+            .as_ref()
+            .map_or(&EMPTY_PROJECT_LAYER, |(_, layer)| layer)
+    }
+
+    /// Whether the active project's layer changes the resolved config — the
+    /// status-bar dot.
+    pub(in crate::workspace) fn project_layer_overrides(&mut self) -> bool {
+        self.active_project_layer().overrides_anything()
     }
 
     /// Apply a reloaded config to all running panes — through
@@ -258,17 +282,27 @@ impl Workspace {
     }
 }
 
-/// Layer the project-local override on top of the user-global config
-/// and return the resolved [`daruda_config::Config`].
-pub(in crate::workspace) fn effective_config_for(
-    project: Option<&daruda_store::project::Project>,
-    user: &daruda_config::Config,
+/// The layer a window with no active project resolves against.
+static EMPTY_PROJECT_LAYER: daruda_config::ProjectConfig =
+    daruda_config::ProjectConfig { shell: None };
+
+/// Read the project layer for `root` from this profile's data directory;
+/// empty when there is no project.
+pub(in crate::workspace) fn project_layer_for(
+    root: Option<&std::path::Path>,
     data_dir: &std::path::Path,
+) -> daruda_config::ProjectConfig {
+    root.map(|root| daruda_config::ProjectConfig::load_in(data_dir, root))
+        .unwrap_or_default()
+}
+
+/// Layer `project` on top of the user-global config — the one resolver both
+/// window construction and every later settings change go through.
+pub(in crate::workspace) fn effective_config_for(
+    project: &daruda_config::ProjectConfig,
+    user: &daruda_config::Config,
 ) -> daruda_config::Config {
-    let project_cfg = project
-        .map(|p| daruda_config::ProjectConfig::load_in(data_dir, &p.root))
-        .unwrap_or_default();
-    user.clone().resolve(&project_cfg)
+    user.clone().resolve(project)
 }
 
 /// The terminal crate cannot see `daruda_config`, so the shape crosses here.

@@ -152,12 +152,6 @@ impl Workspace {
             cx.update_global::<crate::agent::mcp::McpState, _>(|s, _| {
                 s.forget_lane(&path);
             });
-            // Drop the per-lane slice from `SettingsStore` so its
-            // BTreeMap doesn't grow unbounded (AGENTS.md §"GPUI
-            // shared-state convention — Cleanup rule").
-            cx.update_global::<crate::settings_store::SettingsStore, _>(|s, _| {
-                s.forget_lane(&path);
-            });
         }
         // Watcher pair list is fixed at spawn, so removing a lane leaves
         // a dead JSONL subscription — re-spawn to match the live lane set.

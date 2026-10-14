@@ -86,9 +86,6 @@ impl Workspace {
     /// Installs the new mirrors. No side effects: the passes after this one
     /// read the new values.
     pub(super) fn store_mirrors(&mut self, mirrors: ConfigMirrors) {
-        // A reload may create or remove the active project's config layer;
-        // drop the memo so the status-bar dot re-stats on the next render.
-        self.cached_project_config = None;
         self.mirrors = mirrors;
     }
 

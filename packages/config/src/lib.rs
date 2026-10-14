@@ -97,10 +97,7 @@ pub use orchestrator::OrchestratorConfig;
 pub use panels::PanelsConfig;
 pub use ports::PortsConfig;
 pub use presence::PresenceConfig;
-pub use project::{
-    ProjectConfig, project_config_dir, project_config_dir_in, project_config_path,
-    project_config_path_in, project_id,
-};
+pub use project::{ProjectConfig, project_config_dir_in, project_config_path_in, project_id};
 pub use render::{ALLOWED_MAX_FPS, RenderConfig};
 pub use scrollback::ScrollbackConfig;
 pub use session_host::{SessionHostEntry, SessionHostKind, SessionHostTombstone};
@@ -354,7 +351,8 @@ impl Config {
     /// sections absent from `project` keep the user value. Only
     /// `[shell]` is honoured today.
     pub fn resolve(mut self, project: &ProjectConfig) -> Self {
-        if let Some(shell) = project.shell.clone() {
+        let ProjectConfig { shell } = project;
+        if let Some(shell) = shell.clone() {
             self.shell = shell;
         }
         self

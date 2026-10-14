@@ -960,7 +960,6 @@ settings:
   update_available_toast: "New version %{version} is available — see Settings › About."
   # Status-bar / error-banner copy for the project-config flow.
   project_config_no_project: "Open a project first — project config has nowhere to live."
-  project_config_no_dir: "Cannot resolve project config directory."
   # Hover text on the small status-bar dot that indicates a
   # project-layer config file exists for the active project.
   status_bar_project_config_tooltip: "Project config active — this workspace's [shell] section is overridden."

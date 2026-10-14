@@ -146,15 +146,7 @@ impl Workspace {
             self.report_error(report, cx);
             return;
         };
-        let Some(path) = daruda_config::project_config_path(&project_root) else {
-            let report = ErrorReport::new(s::settings::project_config_no_dir())
-                .severity(ErrorSeverity::Info)
-                .at(file!(), line!())
-                .dedup("config.no_dir")
-                .build();
-            self.report_error(report, cx);
-            return;
-        };
+        let path = daruda_config::project_config_path_in(&self.data_dir, &project_root);
 
         if let Some(parent) = path.parent()
             && let Err(e) = std::fs::create_dir_all(parent)

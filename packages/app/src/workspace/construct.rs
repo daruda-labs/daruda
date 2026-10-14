@@ -86,10 +86,12 @@ impl Workspace {
         cx: &mut Context<Self>,
         for_test: bool,
     ) -> Self {
-        // Layer the project-local override (currently `[shell]` only)
-        // on top of the user-global config so the workspace boots with
-        // the right shell program for its project.
-        let effective = config_ops::effective_config_for(project.as_ref(), config, &data_dir);
+        // Boot with the project layer applied; the parsed layer seeds the memo
+        // later resolutions and the status-bar dot read.
+        let root = project.as_ref().map(|p| p.root.clone());
+        let layer = config_ops::project_layer_for(root.as_deref(), &data_dir);
+        let effective = config_ops::effective_config_for(&layer, config);
+        let project_layer = root.map(|root| (root, layer));
         let config = &effective;
 
         // Ensure app-wide Globals exist before any constructor code
@@ -222,7 +224,7 @@ impl Workspace {
             #[cfg(test)]
             error_history: Vec::new(),
             toast_layer,
-            cached_project_config: None,
+            project_layer,
             last_agent_id: None,
             agent_pulse_prev: Vec::new(),
             git: left_dock::git_ops::context::GitContext::new(&ws_weak, window, cx),

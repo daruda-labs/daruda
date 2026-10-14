@@ -4,9 +4,8 @@
 pub use daruda_settings::store::*;
 
 use crate::config_watcher;
-use daruda_config::project;
 use gpui::{App, BorrowAppContext as _};
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 /// Spawn the `config.toml` watcher and refresh the global on debounced reloads.
 /// Must run once after [`SettingsStore::init`]; the moved handle keeps the OS
@@ -35,12 +34,4 @@ pub fn spawn_file_watch(cx: &mut App) {
 /// `daruda_config::store::*` don't need a second `use`.
 pub fn user_config_path() -> PathBuf {
     daruda_config::config_path()
-}
-
-/// Convenience: probe the per-lane config path. Mirrors
-/// [`project::project_config_path`]; returns `None` when the
-/// lane resides outside the user's home or otherwise has no
-/// resolvable XDG-aligned project dir.
-pub fn lane_config_path(lane: &Path) -> Option<PathBuf> {
-    project::project_config_path(lane)
 }

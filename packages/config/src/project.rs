@@ -33,41 +33,52 @@ pub struct ProjectConfig {
 }
 
 impl ProjectConfig {
-    /// Read the project layer for `repo_root`, returning the default
-    /// (all-`None`) when no file exists or it fails to parse — same
-    /// permissive policy as [`crate::Config::load_from`].
-    pub fn load_for(repo_root: &Path) -> Self {
-        let Some(path) = project_config_path(repo_root) else {
-            return Self::default();
-        };
-        Self::load_from(&path)
-    }
-
-    /// Read the project layer using an explicit profile data directory.
+    /// Read the project layer for `repo_root` under the profile `data_dir`.
     pub fn load_in(data_dir: &Path, repo_root: &Path) -> Self {
         Self::load_from(&project_config_path_in(data_dir, repo_root))
     }
 
-    /// Read from an explicit path. Useful for tests that don't go
-    /// through `dirs::config_dir()`.
+    /// Read from an explicit path; the default (all-`None`) when the file is
+    /// missing or malformed. A parse error is logged, since nothing else says
+    /// why the project's overrides stopped applying.
     pub fn load_from(path: &Path) -> Self {
-        match std::fs::read_to_string(path) {
-            Ok(text) => toml::from_str(&text).unwrap_or_default(),
-            Err(_) => Self::default(),
-        }
+        let Ok(text) = std::fs::read_to_string(path) else {
+            return Self::default();
+        };
+        toml::from_str(&text).unwrap_or_else(|error| {
+            report_parse_error(path, &error);
+            Self::default()
+        })
     }
 
     /// True when this layer changes anything [`crate::Config::resolve`]
     /// produces. A file holding only the commented template overrides nothing.
     pub fn overrides_anything(&self) -> bool {
-        self.shell.is_some()
+        let Self { shell } = self;
+        shell.is_some()
     }
 }
 
+/// The NDJSON-log half of a malformed project layer: config load has no toast
+/// to reach, and the layer silently falls back to the user's values.
+fn report_parse_error(path: &Path, error: &toml::de::Error) {
+    use daruda_store::observability::error_report::{ErrorReport, ErrorSeverity};
+    use daruda_store::observability::log_writer::LogWriter;
+    use daruda_store::observability::system_info::redact_home;
+    LogWriter::log(
+        ErrorReport::new("Project config could not be parsed")
+            .severity(ErrorSeverity::Warning)
+            .message(error.to_string())
+            .with_context("path", redact_home(path))
+            .at(file!(), line!())
+            .dedup("config.project.parse")
+            .build(),
+    );
+}
+
 /// Initial contents of a freshly-created
-/// `<data dir>/projects/<repo>-<hash>/config.toml`. The user
-/// edits this file directly; daruda re-reads it on the next config
-/// reload (via the recursive watcher under the user config dir).
+/// `<data dir>/projects/<repo>-<hash>/config.toml`. The user edits it
+/// directly; the recursive config watcher re-applies it on save.
 pub const PROJECT_CONFIG_TEMPLATE: &str = "\
 # daruda project-local config.
 #
@@ -76,7 +87,7 @@ pub const PROJECT_CONFIG_TEMPLATE: &str = "\
 # daruda windows.
 # Sections you don't write keep their user-layer values.
 #
-# Phase 1 supports the [shell] section only.
+# Only the [shell] section is supported.
 
 # [shell]
 # program = \"/usr/local/bin/zsh\"
@@ -95,29 +106,9 @@ pub fn project_id(repo_root: &Path) -> String {
     format!("{:016x}", fnv1a_64(bytes.as_bytes()))
 }
 
-/// `<profile-scoped data dir>/projects/<basename>-<hash>/` — same
-/// profile-scoped base as [`crate::config_path`], so a debug/test run's
-/// project layer never lands in (or overwrites) a real release
-/// project's config. `Option` is kept for signature stability even
-/// though `daruda_store::persistence::default_data_dir` is effectively
-/// infallible (it falls back to `./daruda` with a logged warning rather
-/// than failing).
-pub fn project_config_dir(repo_root: &Path) -> Option<PathBuf> {
-    Some(project_config_dir_in(
-        &daruda_store::persistence::default_data_dir(),
-        repo_root,
-    ))
-}
-
-/// `<project_config_dir>/config.toml`.
-pub fn project_config_path(repo_root: &Path) -> Option<PathBuf> {
-    Some(project_config_path_in(
-        &daruda_store::persistence::default_data_dir(),
-        repo_root,
-    ))
-}
-
-/// `<profile-scoped data dir>/projects/<basename>-<hash>/`.
+/// `<profile-scoped data dir>/projects/<basename>-<hash>/` — under the same
+/// profile-scoped base as [`crate::config_path`], so a debug run's project
+/// layer never lands in a release profile's.
 pub fn project_config_dir_in(data_dir: &Path, repo_root: &Path) -> PathBuf {
     data_dir.join("projects").join(project_dir_name(repo_root))
 }

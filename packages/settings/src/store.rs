@@ -1,21 +1,20 @@
-//! GPUI `Global` carrying user config plus per-lane project overlays.
+//! GPUI `Global` carrying the user config layer.
 //!
 //! Mirrors zed's settings-store shape: consumers subscribe via
 //! `cx.observe_global::<SettingsStore>` and mutations go through
-//! `cx.update_global` so observers fire on return. `init` stays idempotent and
-//! removed lanes must call [`SettingsStore::forget_lane`] (AGENTS.md
-//! GPUI shared-state cleanup rule).
+//! `cx.update_global` so observers fire on return. Each window resolves its
+//! own project layer on top (`Workspace::apply_store_config`).
 
-use daruda_config::{Config, ProjectConfig, SettingsPatch};
+use daruda_config::{Config, SettingsPatch};
 use gpui::{App, Global};
-use std::collections::BTreeMap;
-use std::path::{Path, PathBuf};
+#[cfg(any(test, feature = "test-support"))]
+use std::path::Path;
+use std::path::PathBuf;
 use std::sync::Arc;
 
-/// Parsed user config plus per-lane overlays keyed by absolute lane path.
+/// Parsed user config and the writer that persists it.
 pub struct SettingsStore {
     user: Arc<Config>,
-    project: BTreeMap<PathBuf, Arc<ProjectConfig>>,
     writer: ConfigWriter,
 }
 
@@ -78,7 +77,6 @@ impl Default for SettingsStore {
     fn default() -> Self {
         Self {
             user: Arc::new(fresh_user_config()),
-            project: BTreeMap::new(),
             writer: ConfigWriter::default(),
         }
     }
@@ -126,26 +124,6 @@ impl SettingsStore {
     /// Replace the cached user layer with a fresh config from disk.
     pub fn reload_user(&mut self) {
         self.user = Arc::new(Config::load_from(&self.writer.path));
-    }
-
-    /// Resolve owned effective config for a lane by applying its overlay.
-    pub fn effective_for(&self, lane: Option<&Path>) -> Config {
-        let base = (*self.user).clone();
-        match lane.and_then(|w| self.project.get(w)) {
-            Some(overlay) => base.resolve(overlay),
-            None => base,
-        }
-    }
-
-    /// Load or refresh the project overlay for `lane`.
-    pub fn load_project_layer(&mut self, lane: &Path) {
-        let cfg = ProjectConfig::load_for(lane);
-        self.project.insert(lane.to_path_buf(), Arc::new(cfg));
-    }
-
-    /// Drop an overlay when a lane is removed (AGENTS.md cleanup rule).
-    pub fn forget_lane(&mut self, lane: &Path) {
-        self.project.remove(lane);
     }
 
     /// Persist one field or structural catalog against the latest TOML, then
@@ -289,37 +267,6 @@ mod tests {
                 sentinel,
                 "second init() must not clobber the existing global"
             );
-        });
-    }
-
-    /// `effective_for(None)` returns the user layer unchanged.
-    #[gpui::test]
-    fn effective_for_none_returns_user(cx: &mut TestAppContext) {
-        cx.update(|cx| {
-            SettingsStore::init(cx);
-            let user = SettingsStore::global(cx).user().clone();
-            let effective = SettingsStore::global(cx).effective_for(None);
-            assert_eq!(
-                effective.shell.close_pane_on_exit,
-                user.shell.close_pane_on_exit
-            );
-        });
-    }
-
-    /// `forget_lane` drops the per-lane slice.
-    #[gpui::test]
-    fn forget_worktree_removes_entry(cx: &mut TestAppContext) {
-        cx.update(|cx| {
-            SettingsStore::init(cx);
-            let path = PathBuf::from("/tmp/daruda-test-lane");
-            cx.update_global::<SettingsStore, _>(|store, _| {
-                store
-                    .project
-                    .insert(path.clone(), Arc::new(ProjectConfig::default()));
-                assert!(store.project.contains_key(&path));
-                store.forget_lane(&path);
-                assert!(!store.project.contains_key(&path));
-            });
         });
     }
 

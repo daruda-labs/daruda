@@ -28,10 +28,11 @@ fn project_id_canonicalizes_dot_segments() {
 }
 
 #[test]
-fn load_for_returns_default_when_path_missing() {
-    let temp = tempfile::tempdir().unwrap();
-    // No config.toml written — load_for must yield default.
-    let cfg = ProjectConfig::load_for(temp.path());
+fn load_in_returns_default_when_path_missing() {
+    let data_dir = tempfile::tempdir().unwrap();
+    let repo = tempfile::tempdir().unwrap();
+    // No config.toml written — load_in must yield default.
+    let cfg = ProjectConfig::load_in(data_dir.path(), repo.path());
     assert!(cfg.shell.is_none());
 }
 

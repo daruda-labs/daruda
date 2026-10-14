@@ -393,10 +393,11 @@ pub struct Workspace {
     /// a toast change triggers only the toast layer's repaint, not a
     /// full Workspace repaint.
     pub(in crate::workspace) toast_layer: gpui::Entity<toast_layer::ToastLayer>,
-    /// Memoized status-bar "project config layer overrides something" flag,
-    /// keyed by the active project root; see `project_layer_overrides`.
-    /// `reload_config` clears it so an edited layer surfaces immediately.
-    pub(in crate::workspace) cached_project_config: Option<(std::path::PathBuf, bool)>,
+    /// The active project's parsed config layer, keyed by its root — what the
+    /// applied config was resolved from and the status-bar dot reads; see
+    /// `config_ops::active_project_layer`.
+    pub(in crate::workspace) project_layer:
+        Option<(std::path::PathBuf, daruda_config::ProjectConfig)>,
     /// The agent the user most recently opened a chat pane under (session-local,
     /// not persisted). A fresh pane defaults to this so switching agents "sticks"
     /// for the window; falls back to the catalog default when unset or stale.
