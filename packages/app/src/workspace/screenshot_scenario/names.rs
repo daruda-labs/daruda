@@ -15,6 +15,7 @@ const NAME_LANE_SWITCHER: &str = "lane-switcher";
 const NAME_ERROR_MODAL: &str = "error-modal";
 /// CLI token for the error-toast scenario.
 const NAME_TOAST: &str = "toast";
+const NAME_SESSION_NOTICES: &str = "session-notices";
 const NAME_SCRATCH_TAB: &str = "scratch-tab";
 /// CLI token for the Landing view — a workspace emptied of its projects.
 const NAME_LANDING: &str = "landing";
@@ -189,6 +190,7 @@ impl ScreenshotScenario {
             NAME_CLIENT_CHROME => Some(Self::ClientChrome),
             NAME_ERROR_MODAL => Some(Self::ErrorModal),
             NAME_TOAST => Some(Self::Toast),
+            NAME_SESSION_NOTICES => Some(Self::SessionNotices),
             NAME_SCRATCH_TAB => Some(Self::ScratchTab),
             NAME_LANDING => Some(Self::Landing),
             NAME_SETTINGS => Some(Self::Settings(BuiltinSection::default())),

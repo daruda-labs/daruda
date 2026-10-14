@@ -94,6 +94,8 @@ pub(crate) enum ScreenshotScenario {
     ErrorModal,
     /// Push a synthetic error toast.
     Toast,
+    /// Protocol advisories through the chat host's reporting path.
+    SessionNotices,
     /// Two file tabs side by side — one committed, one the replaceable
     /// scratch tab. The scratch one renders in italics, which is the whole
     /// affordance and the one thing a unit test cannot see.
@@ -396,6 +398,22 @@ pub(crate) fn drive(
         }
         ScreenshotScenario::Toast => {
             workspace.update(cx, |ws, cx| ws.report_error(sample_report(), cx));
+        }
+        ScreenshotScenario::SessionNotices => {
+            workspace.update(cx, |ws, cx| {
+                ws.open_agent_chat_transcript_for_shot(window, cx);
+                let pane_id = ws.active_runtime().focused_pane_id;
+                for notice in sample_session_notices() {
+                    ws.report_agent_notice(
+                        pane_id,
+                        &daruda_acp::AcpEvent::SessionNotice {
+                            session_id: "screenshot-session".into(),
+                            notice,
+                        },
+                        cx,
+                    );
+                }
+            });
         }
         ScreenshotScenario::Landing => {
             workspace.update(cx, |ws, cx| ws.empty_workspace_for_shot(window, cx));
@@ -705,6 +723,31 @@ fn sample_report() -> ErrorReport {
         .with_context("scenario", "error-modal")
         .dedup("screenshot.scenario.error_modal")
         .build()
+}
+
+fn sample_session_notices() -> [daruda_acp::SessionNoticeView; 3] {
+    use daruda_acp::{NoticeSeverityView, SessionNoticeView};
+    [
+        SessionNoticeView {
+            severity: NoticeSeverityView::Warning,
+            title: "Optional integration unavailable".into(),
+            description: Some(
+                "Continuing with the tools already available in this session.".into(),
+            ),
+        },
+        SessionNoticeView {
+            severity: NoticeSeverityView::Error,
+            title: "An auxiliary service could not be reached".into(),
+            description: Some(
+                "The agent is continuing its work.\nThis notice does not end the turn.".into(),
+            ),
+        },
+        SessionNoticeView {
+            severity: NoticeSeverityView::Other("_provider/update".into()),
+            title: "**Plain-text** provider notice".into(),
+            description: None,
+        },
+    ]
 }
 
 #[cfg(test)]

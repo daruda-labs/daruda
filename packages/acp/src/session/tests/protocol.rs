@@ -32,6 +32,7 @@ fn required_resume_wire_never_sends_session_new() {
                 methods
             });
             let result = run_connection(
+                ClientCapabilitiesView::default(),
                 transport,
                 PathBuf::from("."),
                 None,
@@ -96,6 +97,7 @@ fn transport_eof_during_initialize_or_prompt_terminates_without_turn_failed() {
                 let resume =
                     (close_method == "session/load").then(|| SessionId::from("saved-session"));
                 run_connection(
+                    ClientCapabilitiesView::default(),
                     transport,
                     PathBuf::from("."),
                     None,
@@ -281,7 +283,8 @@ fn client_capabilities_withhold_terminal_output_and_the_terminal_methods() {
     // confirms the three-notification sequence the parser was written
     // against. `terminal` must stay off too: claiming it promises the
     // `terminal/*` methods this client does not implement.
-    let json = serde_json::to_value(client_capabilities()).expect("caps serialize");
+    let json = serde_json::to_value(client_capabilities(ClientCapabilitiesView::default()))
+        .expect("caps serialize");
     assert_eq!(
         json.get("_meta").and_then(|m| m.get("terminal_output")),
         None,
@@ -309,7 +312,8 @@ fn client_capabilities_claim_native_subagent_sessions_in_the_shape_the_gate_read
     // least 1 and an array `capabilities` containing the key. A shape that
     // merely looks right is silently ignored, and the symptom is an
     // invisible subagent rather than an error.
-    let json = serde_json::to_value(client_capabilities()).expect("caps serialize");
+    let json = serde_json::to_value(client_capabilities(ClientCapabilitiesView::default()))
+        .expect("caps serialize");
     let air = &json["_meta"]["jetbrains"]["air"];
     assert_eq!(air["version"], serde_json::json!(1));
     assert_eq!(
@@ -320,7 +324,8 @@ fn client_capabilities_claim_native_subagent_sessions_in_the_shape_the_gate_read
 
 #[test]
 fn client_capabilities_claim_terminal_auth_without_claiming_terminal_methods() {
-    let json = serde_json::to_value(client_capabilities()).expect("caps serialize");
+    let json = serde_json::to_value(client_capabilities(ClientCapabilitiesView::default()))
+        .expect("caps serialize");
     assert_eq!(
         json.get("auth").and_then(|a| a.get("terminal")),
         Some(&serde_json::Value::Bool(true)),

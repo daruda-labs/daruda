@@ -90,6 +90,13 @@ use crate::native_subagents::{NativeSubagentRouter, Routed};
 /// handler once the host calls [`AcpSessionHandle::respond_permission`].
 type PermissionParks = Arc<Mutex<HashMap<u64, oneshot::Sender<PermissionDecision>>>>;
 
+/// Optional presentation contracts fulfilled by the host consuming this session.
+/// Headless consumers retain agent-message fallbacks unless they opt in.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct ClientCapabilitiesView {
+    pub notices: bool,
+}
+
 /// Whether failing to restore may create a different conversation.
 pub enum SessionResume {
     Fresh,
@@ -325,6 +332,12 @@ pub enum AcpEvent {
     /// daruda-authored advice is its own variant so the host can translate
     /// it — see [`AcpEvent::LegacyDelegation`].
     Notice(String),
+    /// A live protocol notice. Even error severity is advisory, never a turn
+    /// failure. Present outside the transcript; do not replay it as history.
+    SessionNotice {
+        session_id: String,
+        notice: crate::model::SessionNoticeView,
+    },
     /// The agent delegated through its legacy collaboration tools, so the
     /// subagent's own tool calls will never be sent and its work cannot
     /// appear. Advisory, like [`AcpEvent::Notice`], but carries no text: the
@@ -525,6 +538,31 @@ pub fn connect_prepared_session(
     agent_id: &str,
     mcp_servers: Vec<McpServer>,
 ) -> Result<(AcpSessionHandle, UnboundedReceiver<AcpEvent>), AcpClientError> {
+    connect_prepared_session_with_capabilities(
+        prepared,
+        cwd,
+        initial_model,
+        initial_modes,
+        resume,
+        agent_id,
+        mcp_servers,
+        ClientCapabilitiesView::default(),
+    )
+}
+
+/// Connect with host-supported presentation capabilities. Only opt in when
+/// the event consumer can present the corresponding events to the user.
+#[allow(clippy::too_many_arguments)]
+pub fn connect_prepared_session_with_capabilities(
+    prepared: crate::PreparedAdapter,
+    cwd: PathBuf,
+    initial_model: Option<String>,
+    initial_modes: Vec<String>,
+    resume: impl Into<SessionResume>,
+    agent_id: &str,
+    mcp_servers: Vec<McpServer>,
+    capabilities: ClientCapabilitiesView,
+) -> Result<(AcpSessionHandle, UnboundedReceiver<AcpEvent>), AcpClientError> {
     let resume = resume.into();
     let agent = prepared
         .agent()
@@ -544,6 +582,7 @@ pub fn connect_prepared_session(
         // Protect files even if the host drops its handle before ACP shuts down.
         let _installation = prepared;
         if let Err(err) = run_connection(
+            capabilities,
             agent,
             cwd,
             initial_model,

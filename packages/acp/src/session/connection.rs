@@ -63,6 +63,7 @@ pub(super) async fn with_connect_timeout<T>(
 // Internal connection state threaded through one call — bundling wraps callers more than it saves.
 #[allow(clippy::too_many_arguments)]
 pub(super) async fn run_connection(
+    capabilities: ClientCapabilitiesView,
     agent: impl ConnectTo<Client> + 'static,
     cwd: PathBuf,
     initial_model: Option<String>,
@@ -125,11 +126,23 @@ pub(super) async fn run_connection(
                         if legacy_delegation {
                             let _ = notif_tx.unbounded_send(AcpEvent::LegacyDelegation);
                         }
-                        forward_session_update(*update, rate_limit, &notif_mode_tracker, &notif_tx);
+                        forward_session_update(
+                            &notification.session_id,
+                            *update,
+                            rate_limit,
+                            &notif_mode_tracker,
+                            &notif_tx,
+                        );
                     }
                     Routed::Normalized(updates) => {
                         for update in updates {
-                            forward_session_update(update, None, &notif_mode_tracker, &notif_tx);
+                            forward_session_update(
+                                &notification.session_id,
+                                update,
+                                None,
+                                &notif_mode_tracker,
+                                &notif_tx,
+                            );
                         }
                     }
                     // An update kind this build does not know is reported and
@@ -196,7 +209,7 @@ pub(super) async fn run_connection(
                     let init = connection
                         .send_request(
                             InitializeRequest::new(ProtocolVersion::V1)
-                                .client_capabilities(client_capabilities()),
+                                .client_capabilities(client_capabilities(capabilities)),
                         )
                         .block_task()
                         .await?;

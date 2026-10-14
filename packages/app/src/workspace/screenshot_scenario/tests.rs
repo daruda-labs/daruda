@@ -1,6 +1,14 @@
 use super::*;
 
 #[test]
+fn session_notice_scenario_has_a_cli_name() {
+    assert_eq!(
+        ScreenshotScenario::from_cli_name("session-notices"),
+        Some(ScreenshotScenario::SessionNotices)
+    );
+}
+
+#[test]
 fn command_palette_name_maps_to_scenario() {
     assert_eq!(
         ScreenshotScenario::from_cli_name("command-palette"),

@@ -51,6 +51,15 @@ as a select and the boolean path was simply unreachable. `client_capabilities()`
 in `session/requests.rs` is the single place this is declared; advertise a capability only
 once the host actually renders it.
 
+`session.notices` is advertised only by hosts opting into
+`connect_prepared_session_with_capabilities`. The chat host presents
+`AcpEvent::SessionNotice` through its toast/reporting path, preserving severity,
+title, and optional description. Root and child notices retain their originating
+session ID in host diagnostics. Unknown severity strings remain available in
+diagnostics with generic presentation. Notices never enter conversation history
+or change turn/activity state. The default connection API, including Flow's
+headless runner, does not advertise notices and retains agent-message fallbacks.
+
 **Implemented but not advertised: `_meta.terminal_output`.** A vendor-private,
 non-standard claude-agent-acp flag. Setting it makes a Bash result *content-less*
 (`content: [{type:"terminal"}]`) and moves the bytes to

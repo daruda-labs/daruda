@@ -136,6 +136,14 @@ fn main() {
                 AcpEvent::Notice(msg) => {
                     eprintln!("[notice] {msg}");
                 }
+                AcpEvent::SessionNotice { session_id, notice } => {
+                    println!(
+                        "[notice:{}][session:{session_id}] {}: {}",
+                        notice.severity.as_str(),
+                        notice.title,
+                        notice.description.as_deref().unwrap_or_default()
+                    );
+                }
                 AcpEvent::TurnFailed(msg) => {
                     // A per-turn failure (e.g. session/usage limit): the session
                     // stays alive, so the user could re-prompt.

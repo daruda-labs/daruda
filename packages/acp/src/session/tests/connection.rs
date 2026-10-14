@@ -113,6 +113,7 @@ fn initial_model_settles_before_mode_and_connected() {
 
     smol::block_on(async {
         let connection = smol::spawn(run_connection(
+            ClientCapabilitiesView::default(),
             agent,
             PathBuf::from("."),
             Some("opus".to_string()),
@@ -234,6 +235,7 @@ fn a_resumed_session_applies_the_requested_mode() {
 
     smol::block_on(async {
         let connection = smol::spawn(run_connection(
+            ClientCapabilitiesView::default(),
             agent,
             PathBuf::from("."),
             None,
@@ -315,6 +317,7 @@ fn first_usage_from(agent: impl ConnectTo<Client> + 'static) -> crate::model::Us
     let permission_parks: PermissionParks = Arc::new(Mutex::new(HashMap::new()));
     smol::block_on(async {
         let connection = smol::spawn(run_connection(
+            ClientCapabilitiesView::default(),
             agent,
             PathBuf::from("."),
             None,

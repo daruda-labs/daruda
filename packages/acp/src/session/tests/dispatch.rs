@@ -13,6 +13,7 @@ fn a_resume_replays_a_subagent_before_the_session_is_connected() {
 
     smol::block_on(async move {
         let connection = smol::spawn(run_connection(
+            ClientCapabilitiesView::default(),
             native_subagent_resume_agent(),
             PathBuf::from("."),
             None,
@@ -73,6 +74,7 @@ fn a_native_subagent_arrives_as_a_launch_card_with_its_child() {
 
     smol::block_on(async move {
         let connection = smol::spawn(run_connection(
+            ClientCapabilitiesView::default(),
             native_subagent_agent(),
             PathBuf::from("."),
             None,
@@ -139,6 +141,7 @@ fn a_legacy_delegation_is_reported_once_even_behind_an_untypable_update() {
 
     smol::block_on(async move {
         let connection = smol::spawn(run_connection(
+            ClientCapabilitiesView::default(),
             legacy_delegation_agent(),
             PathBuf::from("."),
             None,
@@ -207,6 +210,7 @@ fn a_parked_permission_request_does_not_stall_update_dispatch() {
 
     smol::block_on(async move {
         let connection = smol::spawn(run_connection(
+            ClientCapabilitiesView::default(),
             permission_then_update_agent(),
             PathBuf::from("."),
             None,
@@ -290,6 +294,7 @@ fn connected_carries_the_program_the_agent_reported() {
 
     smol::block_on(async move {
         let connection = smol::spawn(run_connection(
+            ClientCapabilitiesView::default(),
             self_identifying_agent(),
             PathBuf::from("."),
             None,
@@ -335,6 +340,7 @@ fn the_program_arrives_before_any_update() {
 
     smol::block_on(async move {
         let connection = smol::spawn(run_connection(
+            ClientCapabilitiesView::default(),
             self_identifying_agent(),
             PathBuf::from("."),
             None,
@@ -394,6 +400,7 @@ fn connected_carries_the_agents_advertised_login_methods() {
 
     smol::block_on(async move {
         let connection = smol::spawn(run_connection(
+            ClientCapabilitiesView::default(),
             login_advertising_agent(),
             PathBuf::from("."),
             None,

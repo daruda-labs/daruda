@@ -83,6 +83,7 @@ async fn start_session() -> Session {
         permission_parks: permission_parks.clone(),
     };
     let task = smol::spawn(run_connection(
+        ClientCapabilitiesView::default(),
         agent,
         PathBuf::from("."),
         None,

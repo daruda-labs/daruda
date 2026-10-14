@@ -60,6 +60,25 @@ async fn drive_toast_pushes_a_toast(cx: &mut TestAppContext) {
 }
 
 #[gpui::test]
+async fn drive_session_notices_uses_the_host_reporting_path(cx: &mut TestAppContext) {
+    let (window_handle, workspace) = build_workspace(cx);
+    cx.update_window(window_handle.into(), |_, window, cx| {
+        drive(ScreenshotScenario::SessionNotices, &workspace, window, cx);
+    })
+    .unwrap();
+    workspace.read_with(cx, |ws, cx| {
+        let toasts: Vec<_> = ws.error_toasts(cx).iter().collect();
+        assert_eq!(toasts.len(), 3);
+        assert!(
+            toasts
+                .iter()
+                .all(|toast| toast.report.context.contains_key("acp_notice_severity"))
+        );
+        assert!(ws.last_error.is_none());
+    });
+}
+
+#[gpui::test]
 async fn drive_pane_context_menu_deploys_the_menu(cx: &mut TestAppContext) {
     let (window_handle, workspace) = build_workspace(cx);
 

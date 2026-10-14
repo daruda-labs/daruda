@@ -166,6 +166,89 @@ async fn a_session_notice_surfaces_as_a_toast(cx: &mut TestAppContext) {
     });
 }
 
+#[gpui::test]
+async fn protocol_notices_preserve_fields_and_unknown_severity(cx: &mut TestAppContext) {
+    use daruda_acp::{AcpEvent, NoticeSeverityView, SessionNoticeView};
+    let (_window, workspace) = build_workspace(cx);
+    for (severity, expected) in [
+        (NoticeSeverityView::Info, ErrorSeverity::Info),
+        (NoticeSeverityView::Warning, ErrorSeverity::Warning),
+        (NoticeSeverityView::Error, ErrorSeverity::Error),
+        (
+            NoticeSeverityView::Other("_custom".into()),
+            ErrorSeverity::Info,
+        ),
+    ] {
+        workspace.update(cx, |ws, cx| {
+            let notice = SessionNoticeView {
+                severity: severity.clone(),
+                title: "**Agent title** <literal>".into(),
+                description: Some("First line\nSecond line".into()),
+            };
+            ws.report_agent_notice(
+                7,
+                &AcpEvent::SessionNotice {
+                    session_id: "child-session".into(),
+                    notice,
+                },
+                cx,
+            );
+        });
+        workspace.read_with(cx, |ws, cx| {
+            let report = &ws.error_history()[0];
+            assert_eq!(report.title, "**Agent title** <literal>");
+            assert_eq!(report.message, "First line\nSecond line");
+            assert_eq!(report.severity, expected);
+            assert_eq!(report.context["acp_notice_severity"], severity.as_str());
+            assert_eq!(report.context["acp_session_id"], "child-session");
+            assert_eq!(report.context["pane_id"], "7");
+            assert!(
+                ws.error_toasts(cx)
+                    .iter()
+                    .any(|toast| toast.report.timestamp == report.timestamp)
+            );
+            assert!(
+                ws.last_error.is_none(),
+                "advisories do not pin a session failure"
+            );
+        });
+    }
+}
+
+#[gpui::test]
+async fn repeated_protocol_notices_remain_independent_and_dismiss_locally(cx: &mut TestAppContext) {
+    use daruda_acp::{AcpEvent, NoticeSeverityView, SessionNoticeView};
+    let (_window, workspace) = build_workspace(cx);
+    workspace.update(cx, |ws, cx| {
+        for _ in 0..2 {
+            ws.report_agent_notice(
+                7,
+                &AcpEvent::SessionNotice {
+                    session_id: "root-session".into(),
+                    notice: SessionNoticeView {
+                        severity: NoticeSeverityView::Info,
+                        title: "Ready".into(),
+                        description: None,
+                    },
+                },
+                cx,
+            );
+        }
+    });
+    let first = workspace.read_with(cx, |ws, cx| {
+        let toasts: Vec<_> = ws.error_toasts(cx).iter().collect();
+        assert_eq!(toasts.len(), 2);
+        assert_ne!(toasts[0].id, toasts[1].id);
+        assert!(toasts.iter().all(|toast| toast.report.message.is_empty()));
+        assert!(toasts.iter().all(|toast| toast.repeat_count == 1));
+        toasts[0].id
+    });
+    workspace.update(cx, |ws, cx| ws.dismiss_error_toast(first, cx));
+    workspace.read_with(cx, |ws, cx| {
+        assert_eq!(ws.error_toasts(cx).iter().count(), 1);
+    });
+}
+
 /// The one advisory daruda writes itself carries no text on the wire — the
 /// wording is a locale key, so the host has to supply it. An arm that forwards
 /// the event without doing so drops the notice silently: the session stays

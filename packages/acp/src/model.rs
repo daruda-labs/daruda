@@ -10,10 +10,12 @@ use std::path::PathBuf;
 use crate::failure::AcpFailure;
 
 mod config_option;
+mod notice;
 pub use config_option::{
     ConfigChoiceView, ConfigOptionCategoryView, ConfigOptionKindView, ConfigOptionView,
     ConfigValueView, DEFAULT_MODEL_CHOICE, resolved_default_model,
 };
+pub use notice::{NoticeSeverityView, SessionNoticeView};
 
 /// One renderable item in the agent conversation, in arrival order.
 #[derive(Debug, Clone, PartialEq)]

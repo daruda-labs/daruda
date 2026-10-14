@@ -53,18 +53,19 @@ pub use mapping::{
 pub use model::{
     ChatItem, CommandExit, ConfigChoiceView, ConfigOptionCategoryView, ConfigOptionKindView,
     ConfigOptionView, ConfigValueView, CostView, DEFAULT_MODEL_CHOICE, DiffView, ModeStateView,
-    PermissionChoice, PermissionItem, PermissionKindView, PermissionResolution, PlanEntryView,
-    PlanPriority, PlanStatus, RateLimitView, RateLimitWindow, SessionCapabilitiesView,
-    SessionModeView, SlashCommand, SlashCommandInput, ToolCallItem, ToolKindView, ToolOutputBlock,
-    ToolStatusView, UsageView, resolved_default_model,
+    NoticeSeverityView, PermissionChoice, PermissionItem, PermissionKindView, PermissionResolution,
+    PlanEntryView, PlanPriority, PlanStatus, RateLimitView, RateLimitWindow,
+    SessionCapabilitiesView, SessionModeView, SessionNoticeView, SlashCommand, SlashCommandInput,
+    ToolCallItem, ToolKindView, ToolOutputBlock, ToolStatusView, UsageView, resolved_default_model,
 };
 pub use native_subagents::{NativeSubagentRouter, Routed};
 pub use node::{NodeError, NodeProgress, NodeRuntime, command_diagnostic, ensure_node};
 #[cfg(any(test, feature = "test-support"))]
 pub use session::HandleProbe;
 pub use session::{
-    AcpEvent, AcpSessionHandle, ConnectPhase, InfoFieldChange, PermissionDecision, SessionResume,
-    connect_agent_session, connect_agent_session_with_model, connect_prepared_session,
-    connect_session, stdio_mcp_server,
+    AcpEvent, AcpSessionHandle, ClientCapabilitiesView, ConnectPhase, InfoFieldChange,
+    PermissionDecision, SessionResume, connect_agent_session, connect_agent_session_with_model,
+    connect_prepared_session, connect_prepared_session_with_capabilities, connect_session,
+    stdio_mcp_server,
 };
 pub use wire_log::{Replay, ReplayError, agent_id_from_path, replay_log};

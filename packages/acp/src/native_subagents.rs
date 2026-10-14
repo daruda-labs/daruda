@@ -358,6 +358,9 @@ impl NativeSubagentRouter {
         };
         let parent = child.tool_id.clone();
         match update {
+            // Notices are live advisories, not child transcript state. The
+            // connection preserves their originating session for the host.
+            SessionUpdate::Notice(notice) => vec![SessionUpdate::Notice(notice)],
             SessionUpdate::ToolCall(mut call) => {
                 call.tool_call_id = child_tool_id_of(child_session, &call.tool_call_id.0).into();
                 call.meta = Some(with_parent_tool_id(call.meta, &parent));

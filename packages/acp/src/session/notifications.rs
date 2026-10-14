@@ -34,6 +34,7 @@ pub(super) struct CompatSessionNotification {
 /// agent's take. `rate_limit` is the caller's dialect-aware read of a root
 /// `UsageUpdate`'s `_meta`; every other update ignores it.
 pub(super) fn forward_session_update(
+    session_id: &SessionId,
     update: SessionUpdate,
     rate_limit: Option<crate::model::RateLimitView>,
     mode_tracker: &ModeTracker,
@@ -63,6 +64,10 @@ pub(super) fn forward_session_update(
         other => other,
     };
     let event = match update {
+        SessionUpdate::Notice(notice) => AcpEvent::SessionNotice {
+            session_id: session_id.to_string(),
+            notice: notice.into(),
+        },
         SessionUpdate::AvailableCommandsUpdate(u) => AcpEvent::AvailableCommandsChanged(
             u.available_commands
                 .iter()

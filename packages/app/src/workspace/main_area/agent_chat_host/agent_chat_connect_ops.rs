@@ -188,6 +188,26 @@ impl Workspace {
         event: &daruda_acp::AcpEvent,
         cx: &mut Context<Self>,
     ) {
+        if let daruda_acp::AcpEvent::SessionNotice { session_id, notice } = event {
+            use daruda_acp::NoticeSeverityView;
+            let severity = match &notice.severity {
+                NoticeSeverityView::Info | NoticeSeverityView::Other(_) => ErrorSeverity::Info,
+                NoticeSeverityView::Warning => ErrorSeverity::Warning,
+                NoticeSeverityView::Error => ErrorSeverity::Error,
+            };
+            self.report_error(
+                ErrorReport::new(notice.title.clone())
+                    .message(notice.description.clone().unwrap_or_default())
+                    .severity(severity)
+                    .with_context("acp_notice_severity", notice.severity.as_str())
+                    .with_context("acp_session_id", session_id)
+                    .with_context("pane_id", pane_id.to_string())
+                    .at(file!(), line!())
+                    .build(),
+                cx,
+            );
+            return;
+        }
         let message = match event {
             // The adapter's own diagnostic, not authored copy — the same
             // treatment a captured login failure gets.

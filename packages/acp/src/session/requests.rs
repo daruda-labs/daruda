@@ -62,7 +62,7 @@ pub(super) fn build_load_session_request(
 /// RPC behind it — the entries are a recipe the host runs in a terminal it
 /// already owns. Without it `authMethods` comes back empty and the host is left
 /// deriving the login command itself.
-pub(super) fn client_capabilities() -> ClientCapabilities {
+pub(super) fn client_capabilities(presentation: ClientCapabilitiesView) -> ClientCapabilities {
     // Vendor-private companion to `auth.terminal`: with it the agent attaches
     // `_meta["terminal-auth"]` to each login method, carrying the resolved
     // interpreter path and full argv. Without it only `args` arrives and the
@@ -90,9 +90,18 @@ pub(super) fn client_capabilities() -> ClientCapabilities {
     ClientCapabilities::new()
         .meta(meta)
         .auth(AuthCapabilities::new().terminal(true))
-        .session(ClientSessionCapabilities::new().config_options(
-            SessionConfigOptionsCapabilities::new().boolean(BooleanConfigOptionCapabilities::new()),
-        ))
+        .session(
+            ClientSessionCapabilities::new()
+                .notices(
+                    presentation
+                        .notices
+                        .then(agent_client_protocol::schema::v1::NoticeCapabilities::new),
+                )
+                .config_options(
+                    SessionConfigOptionsCapabilities::new()
+                        .boolean(BooleanConfigOptionCapabilities::new()),
+                ),
+        )
 }
 
 /// Fold a full option set through the mode tracker and emit what the host

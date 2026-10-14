@@ -10,7 +10,9 @@ use crate::workspace::Workspace;
 use crate::workspace::main_area::agent_chat_host::agent_chat_event_ops::PumpStep;
 use crate::workspace::main_area::pane_tree::PaneId;
 use daruda_acp::preparation::PreparationCancellation;
-use daruda_acp::{NodeProgress, connect_prepared_session};
+use daruda_acp::{
+    ClientCapabilitiesView, NodeProgress, connect_prepared_session_with_capabilities,
+};
 use daruda_chat::view::AgentSessionStatus;
 use daruda_store::observability::error_report::{ErrorReport, ErrorSeverity};
 use daruda_store::project::PaneCwd;
@@ -215,7 +217,7 @@ impl Workspace {
                     )?;
                     // `Some` resumes the persisted session (`session/load`);
                     // `None` starts a fresh session (`session/new`).
-                    connect_prepared_session(
+                    connect_prepared_session_with_capabilities(
                         adapter,
                         connect_cwd,
                         initial_model,
@@ -223,6 +225,7 @@ impl Workspace {
                         session_resume(resume, strict_restore),
                         &agent_id,
                         mcp_servers,
+                        ClientCapabilitiesView { notices: true },
                     )
                 })
                 .await;
