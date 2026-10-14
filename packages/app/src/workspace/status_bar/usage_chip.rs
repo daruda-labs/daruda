@@ -49,6 +49,7 @@ pub(super) fn render(
     let parts = chip_parts(&chip, density);
     let percent_color = row_color(&chip);
     let menu_rows = rows.clone();
+    let header = (menu_state(&chip, outcome.is_stale()), percent_color);
     let t = theme::current(cx);
     // The brand mark is what tells two chips apart once the percentages are
     // all that's left of them at the narrowest density.
@@ -100,7 +101,14 @@ pub(super) fn render(
                 }),
         );
     let builder = menu_builder(move |menu, _window, _cx| {
-        build_menu(recipe, &menu_rows, stop_on_overage, workspace.clone(), menu)
+        build_menu(
+            recipe,
+            &header,
+            &menu_rows,
+            stop_on_overage,
+            workspace.clone(),
+            menu,
+        )
     });
     Some(super::menu::dropdown("status-usage", trigger, builder, cx))
 }
@@ -173,18 +181,27 @@ fn chip_parts(row: &WindowRow, density: StatusBarDensity) -> ChipParts {
     }
 }
 
-/// The binding window — the one closest to its limit. The menu header shows
-/// it, since that is the number that stops work first.
-fn binding_row(rows: &[WindowRow]) -> Option<&WindowRow> {
-    rows.iter()
-        .max_by(|a, b| a.utilization.total_cmp(&b.utilization))
+/// The menu header's state: the chip's window and percentage, so the menu
+/// opens on the number the chip shows, and the stale marker the chip carries.
+fn menu_state(chip: &WindowRow, stale: bool) -> String {
+    let pct = percent(chip.utilization);
+    if stale {
+        strings::settings::status_bar_usage_menu_state_stale(
+            &chip.label,
+            pct,
+            strings::usage::stale_marker(),
+        )
+    } else {
+        strings::settings::status_bar_usage_menu_state(&chip.label, pct)
+    }
 }
 
-/// Header naming the domain with its binding percentage, one gauge row per
-/// window, then a jump to the Usage tab. The gauge rows carry no click
-/// handler — there is nothing to act on per window.
+/// Header naming the domain with the chip's reading (`header`: its text and
+/// severity colour), one gauge row per window, then a jump to the Usage tab.
+/// The gauge rows carry no click handler — there is nothing to act on per window.
 fn build_menu(
     recipe: AccountRecipeId,
+    header: &(String, Hsla),
     rows: &[WindowRow],
     stop_on_overage: bool,
     workspace: WeakEntity<Workspace>,
@@ -195,17 +212,13 @@ fn build_menu(
     let title = strings::settings::status_bar_usage_menu_title(
         daruda_settings::labels::account_recipe_label(recipe),
     );
-    let (state, tone) = match binding_row(rows) {
-        Some(row) => (
-            Some(SharedString::from(
-                strings::settings::status_bar_usage_chip_percent(percent(row.utilization)),
-            )),
-            super::menu::Tone::Fixed(row_color(row)),
-        ),
-        None => (None, super::menu::Tone::Plain),
-    };
+    let (state, color) = header;
     let menu = menu
-        .item(super::menu::menu_header(title, state, tone))
+        .item(super::menu::menu_header(
+            title,
+            Some(SharedString::from(state.clone())),
+            super::menu::Tone::Fixed(*color),
+        ))
         .separator();
     let menu = rows.iter().fold(menu, |menu, row| {
         let row = row.clone();
@@ -261,9 +274,8 @@ fn overage_menu_item(recipe: AccountRecipeId, stop_on_overage: bool) -> Option<(
 }
 
 /// One dropdown row — header line, gauge bar, reset countdown: the Usage
-/// tab's `gauge_card` shape at status-bar scale. The shared menu width keeps
-/// every bar on one scale. `AnyElement` because `PopupMenuItem::element`'s
-/// builder is `'static`.
+/// tab's `gauge_card` at status-bar scale, at the shared menu width so every
+/// bar shares one scale.
 fn gauge_row(row: &WindowRow, cx: &App) -> AnyElement {
     let t = theme::current(cx);
     let color = row_color(row);
@@ -368,12 +380,17 @@ mod tests {
         assert_eq!(rows[1].label, "7d · Opus");
     }
 
-    /// The header names the window closest to its limit, not the first one.
+    /// The header repeats the chip's window and percentage — the headline
+    /// window, not the one closest to its limit — and its stale marker.
     #[test]
-    fn the_menu_header_names_the_binding_window() {
-        let rows = [row("5h", 12.0), row("7d", 81.0), row("7d · Opus", 40.0)];
-        assert_eq!(binding_row(&rows).map(|r| r.label.as_str()), Some("7d"));
-        assert_eq!(binding_row(&[]), None);
+    fn the_menu_header_reads_like_the_chip() {
+        let usage = usage(vec![
+            win(FIVE_HOURS, 12.0, None),
+            win(SEVEN_DAYS, 81.0, None),
+        ]);
+        let chip = window_row(usage.headline_window().unwrap(), now());
+        assert_eq!(menu_state(&chip, false), "5h · 12%");
+        assert_eq!(menu_state(&chip, true), "5h · 12% ⚠");
     }
 
     #[test]

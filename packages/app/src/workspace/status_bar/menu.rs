@@ -1,7 +1,6 @@
 //! Shared chrome for the status bar's chip popups: each opens above the bar
 //! and reads header, separator, body, then — for menus — a footer action.
-//! Panels (`popover`) stay open and carry the menu's padding in their content,
-//! so their separators run border to border like a menu's.
+//! Panels carry the menu's padding in their content, separators edge to edge.
 
 use crate::ui::theme;
 use crate::ui::{Button, Divider, DropdownMenu as _, Popover, PopupMenu, PopupMenuItem};
@@ -15,7 +14,8 @@ use gpui::{
 /// pushed back over the bar by the window-edge snap.
 pub(super) const ANCHOR: Anchor = Anchor::BottomRight;
 
-/// The `PopupMenu` edge padding (`p_1`), reproduced inside panels.
+/// The `PopupMenu` edge padding (`p_1`), reproduced inside panels; tracks
+/// the vendored value.
 const EDGE_PAD: f32 = theme::PAD_XS;
 /// Where a menu item's text starts: the edge padding plus the item's own.
 const ROW_INSET: f32 = EDGE_PAD + theme::PAD_STANDARD;
@@ -49,7 +49,7 @@ pub(super) fn dropdown(
         builder(menu, window, cx).max_h(px(max_h)).scrollable(true)
     };
     #[cfg(feature = "screenshot")]
-    if super::screenshot::menu_open(shot_id, cx) {
+    if super::screenshot::is_open(shot_id, cx) {
         return super::screenshot::open_menu(shot_id, trigger, builder);
     }
     #[cfg(not(feature = "screenshot"))]

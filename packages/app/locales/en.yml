@@ -1029,8 +1029,14 @@ settings:
   # the Usage tab, where the same numbers are shown as gauges.
   status_bar_usage_open_panel: "Open Usage panel"
   # Usage menu header naming whose limits these are; `agent` is the auth
-  # domain's label. The binding window's percentage sits right.
+  # domain's label.
   status_bar_usage_menu_title: "%{agent} usage"
+  # Usage menu header state: the chip's own window and percentage, so the
+  # menu opens on the number the chip shows.
+  status_bar_usage_menu_state: "%{window} · %{pct}%"
+  # The same, when a failed refresh left the numbers on screen; `marker` is
+  # `usage.stale_marker`.
+  status_bar_usage_menu_state_stale: "%{window} · %{pct}% %{marker}"
   # Placeholder for an account with no captured email (shouldn't happen
   # once login captures `oauthAccount`, but the field is `Option` today).
   accounts_unknown_email: "Unknown"

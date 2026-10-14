@@ -64,7 +64,7 @@ pub(super) fn render(
         })
 }
 
-/// Dropdown panel body: the shared header (title, scan summary), a
+/// Dropdown panel body: the shared header (title, the scan's counts), a
 /// separator, then — once the scan has data — the column header and the
 /// scrollable port table.
 fn ports_panel(
@@ -84,7 +84,7 @@ fn ports_panel(
         .text_size(px(theme::STATUS_BAR_FONT_SIZE))
         .child(super::menu::panel_header(
             crate::surface::strings::settings::status_bar_ports_menu_title(),
-            Some(summary),
+            header_state(status, summary),
             super::menu::Tone::Plain,
             cx,
         ))
@@ -112,6 +112,12 @@ fn ports_panel(
             ))),
     }
     .into_any_element()
+}
+
+/// The header's state: the counts once the scan has them. While it scans or
+/// cannot, the body says so and the header stays quiet rather than repeat it.
+fn header_state(status: PortScanStatus, summary: SharedString) -> Option<SharedString> {
+    matches!(status, PortScanStatus::Available).then_some(summary)
 }
 
 fn summary_label(status: PortScanStatus, workspace_count: usize, external_count: usize) -> String {
@@ -458,6 +464,20 @@ mod tests {
         ] {
             assert!(!trigger_label(3, density).contains(chevron));
         }
+    }
+
+    #[test]
+    fn the_header_shows_counts_only_once_the_scan_has_them() {
+        let summary = SharedString::from("summary");
+        assert_eq!(header_state(PortScanStatus::Pending, summary.clone()), None);
+        assert_eq!(
+            header_state(PortScanStatus::Unavailable, summary.clone()),
+            None
+        );
+        assert_eq!(
+            header_state(PortScanStatus::Available, summary.clone()),
+            Some(summary)
+        );
     }
 
     #[test]

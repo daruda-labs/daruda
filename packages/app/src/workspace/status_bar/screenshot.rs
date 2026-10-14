@@ -44,7 +44,7 @@ fn shot_popup(shot: StatusBarShot) -> &'static str {
     }
 }
 
-fn is_open(id: &str, cx: &App) -> bool {
+pub(super) fn is_open(id: &str, cx: &App) -> bool {
     cx.try_global::<StatusBarShot>()
         .is_some_and(|shot| shot_popup(*shot) == id)
 }
@@ -55,10 +55,6 @@ pub(super) fn open_for_shot(popover: Popover, id: &str, cx: &App) -> Popover {
     } else {
         popover
     }
-}
-
-pub(super) fn menu_open(id: &str, cx: &App) -> bool {
-    is_open(id, cx)
 }
 
 /// The chip's menu, open. A dropdown menu cannot be opened from outside, so

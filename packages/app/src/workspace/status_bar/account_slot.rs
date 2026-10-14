@@ -216,6 +216,16 @@ fn trigger_icon(domain: AccountDomain, density: super::StatusBarDensity) -> Opti
     }
 }
 
+/// The menu header's state: the auth domain a pinned pane signs into. The
+/// account itself is on the pill already; a pane open to every domain (or
+/// none) has its sections, or its note, say that instead.
+fn header_state(domain: AccountDomain) -> Option<SharedString> {
+    match domain {
+        AccountDomain::Exactly(recipe) => Some(account_recipe_label(recipe).into()),
+        AccountDomain::Any | AccountDomain::Unsupported => None,
+    }
+}
+
 /// Render the account slot's dropdown trigger button.
 pub(super) fn render(
     slot: &AccountSlot,
@@ -284,7 +294,7 @@ fn build_account_menu(slot: &AccountSlot, menu: PopupMenu) -> PopupMenu {
     let menu = menu
         .item(super::menu::menu_header(
             crate::surface::strings::settings::status_bar_account_menu_title(),
-            Some(slot.label.clone()),
+            header_state(slot.domain),
             super::menu::Tone::Plain,
         ))
         .separator();
@@ -414,6 +424,17 @@ mod tests {
     use crate::workspace::status_bar::StatusBarDensity;
     use daruda_store::accounts::AccountId;
     use std::path::PathBuf;
+
+    /// The header names the domain, not the account the pill already shows.
+    #[test]
+    fn the_menu_header_names_a_pinned_domain_only() {
+        assert_eq!(
+            header_state(AccountDomain::Exactly(AccountRecipeId::Claude)),
+            Some(account_recipe_label(AccountRecipeId::Claude).into())
+        );
+        assert_eq!(header_state(AccountDomain::Any), None);
+        assert_eq!(header_state(AccountDomain::Unsupported), None);
+    }
 
     fn account(email: &str, recipe: AccountRecipeId) -> ManagedAccount {
         ManagedAccount {

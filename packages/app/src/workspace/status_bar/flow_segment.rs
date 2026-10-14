@@ -280,6 +280,23 @@ mod tests {
         }
     }
 
+    /// The header counts runs while none waits, and questions — a run's own
+    /// plus the ones its parallel nodes hold — in the attention tone once any does.
+    #[test]
+    fn the_header_counts_runs_until_someone_waits() {
+        let (state, tone) = header_state(&[row("verdict"), row("implement")]);
+        assert_eq!(state, crate::surface::strings::flow::menu_running(2));
+        assert!(matches!(tone, super::super::menu::Tone::Plain));
+
+        let parallel = FlowRunRow {
+            also_waiting: 2,
+            ..waiting_row()
+        };
+        let (state, tone) = header_state(&[row("verdict"), parallel]);
+        assert_eq!(state, crate::surface::strings::flow::menu_waiting(3));
+        assert!(matches!(tone, super::super::menu::Tone::Themed(_)));
+    }
+
     /// A run waiting on a person outranks whatever the others are doing,
     /// at any density. Work finishes on its own; a question does not, and
     /// the chip is the only surface a user cannot hide.
