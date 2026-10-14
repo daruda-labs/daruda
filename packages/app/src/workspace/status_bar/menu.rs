@@ -1,5 +1,6 @@
 //! Shared chrome for the status bar's chip popups: each opens above the bar
 //! and reads header, separator, body, then — for menus — a footer action.
+//! A popup taller than the room above the bar scrolls only its body.
 //! Panels carry the menu's padding in their content, separators edge to edge.
 
 use crate::ui::theme;
@@ -140,8 +141,21 @@ fn header_line(
         .debug_selector(|| "status-menu-header".into())
 }
 
+/// Opens a menu with its header and separator, kept above the body when an
+/// overflowing menu scrolls.
+pub(super) fn with_header(
+    menu: PopupMenu,
+    title: impl Into<SharedString>,
+    state: Option<SharedString>,
+    state_tone: Tone,
+) -> PopupMenu {
+    menu.item(menu_header(title, state, state_tone))
+        .separator()
+        .pin_head()
+}
+
 /// A menu's header item: inert, at the shared menu width.
-pub(super) fn menu_header(
+fn menu_header(
     title: impl Into<SharedString>,
     state: Option<SharedString>,
     state_tone: Tone,
@@ -155,13 +169,15 @@ pub(super) fn menu_header(
     .disabled(true)
 }
 
-/// The separator and the single footer action that close every menu.
+/// The separator and the single footer action that close every menu, kept
+/// below the body when an overflowing menu scrolls.
 pub(super) fn with_footer(
     menu: PopupMenu,
     label: impl Into<SharedString>,
     on_click: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
 ) -> PopupMenu {
-    menu.separator()
+    menu.pin_foot()
+        .separator()
         .item(PopupMenuItem::new(label.into()).on_click(on_click))
 }
 
@@ -317,11 +333,32 @@ mod tests {
         popup: Popup,
         /// The chip's last hover report; a popup covering the chip occludes it.
         chip_hovered: Rc<Cell<bool>>,
+        /// The menu item a click last activated.
+        clicked: Rc<Cell<Option<&'static str>>>,
+    }
+
+    /// A body row at the shared menu width; only the first carries the
+    /// selector and reports its click.
+    fn probe_row(ix: usize, clicked: &Rc<Cell<Option<&'static str>>>) -> PopupMenuItem {
+        let clicked = clicked.clone();
+        PopupMenuItem::element(move |_window, _cx| {
+            div()
+                .w(px(theme::STATUS_BAR_MENU_WIDTH))
+                .child(format!("row {ix}"))
+                .when(ix == 0, |row| row.debug_selector(|| "probe-row-0".into()))
+                .into_any_element()
+        })
+        .on_click(move |_, _, _| {
+            if ix == 0 {
+                clicked.set(Some("row 0"));
+            }
+        })
     }
 
     impl gpui::Render for CornerProbe {
         fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
             let chip_hovered = self.chip_hovered.clone();
+            let clicked = self.clicked.clone();
             let trigger = crate::ui::button_status_pill_bare("probe-chip", cx)
                 .child("chip")
                 .on_hover(move |hovered, _, _| chip_hovered.set(*hovered))
@@ -330,20 +367,25 @@ mod tests {
                 Popup::Menu => dropdown(
                     "probe-menu",
                     trigger,
-                    crate::ui::menu_builder(|menu, _window, _cx| {
-                        menu.item(menu_header("Title", Some("State".into()), Tone::Plain))
+                    crate::ui::menu_builder({
+                        let clicked = clicked.clone();
+                        move |menu, _window, _cx| {
+                            let menu =
+                                with_header(menu, "Title", Some("State".into()), Tone::Plain);
+                            with_footer(menu.item(probe_row(0, &clicked)), "Footer", |_, _, _| {})
+                        }
                     }),
                     cx,
                 ),
                 Popup::LongMenu => dropdown(
                     "probe-long-menu",
                     trigger,
-                    crate::ui::menu_builder(|menu, _window, _cx| {
-                        let menu = menu.item(menu_header("Title", None, Tone::Plain));
-                        let menu = (0..40).fold(menu.separator(), |menu, ix| {
-                            menu.item(PopupMenuItem::new(format!("account {ix}")))
-                        });
-                        with_footer(menu, "Footer", |_, _, _| {})
+                    crate::ui::menu_builder(move |menu, _window, _cx| {
+                        let menu = with_header(menu, "Title", None, Tone::Plain);
+                        let menu =
+                            (0..40).fold(menu, |menu, ix| menu.item(probe_row(ix, &clicked)));
+                        let clicked = clicked.clone();
+                        with_footer(menu, "Footer", move |_, _, _| clicked.set(Some("footer")))
                     }),
                     cx,
                 ),
@@ -408,6 +450,7 @@ mod tests {
                     cx.new(|_| CornerProbe {
                         popup,
                         chip_hovered,
+                        clicked: Rc::default(),
                     })
                 })
             })
@@ -462,20 +505,27 @@ mod tests {
         );
     }
 
-    /// Wheels the menu down over its header and reports where the header
-    /// lands.
-    fn scroll_menu_from(
-        vcx: &mut VisualTestContext,
-        header: Bounds<gpui::Pixels>,
-    ) -> Bounds<gpui::Pixels> {
+    /// Wheels the menu down over its first body row.
+    fn scroll_menu_body(vcx: &mut VisualTestContext) {
+        let row = vcx.debug_bounds("probe-row-0").expect("opened");
         vcx.simulate_event(ScrollWheelEvent {
-            position: header.center(),
+            position: row.center(),
             delta: ScrollDelta::Pixels(point(px(0.), px(-100.))),
             modifiers: Modifiers::default(),
             touch_phase: TouchPhase::Started,
         });
         vcx.run_until_parked();
-        vcx.debug_bounds("status-menu-header").expect("still open")
+    }
+
+    /// Clicks just inside the menu's bottom edge, where its last item sits:
+    /// the popup ends the anchor gap above the chip, inside its border and
+    /// edge padding.
+    fn click_last_menu_item(vcx: &mut VisualTestContext, chip: Bounds<gpui::Pixels>) {
+        let header = vcx.debug_bounds("status-menu-header").expect("opened");
+        let inset = ANCHOR_GAP + PANEL_CHROME / 2.0 + EDGE_PAD + theme::PAD_SM;
+        let position = point(header.center().x, chip.top() - px(inset));
+        vcx.simulate_click(position, Modifiers::none());
+        vcx.run_until_parked();
     }
 
     /// A menu taller than the room above the bar in a short window scrolls
@@ -489,11 +539,49 @@ mod tests {
             "{header:?} runs into the window's top edge"
         );
         assert!(chip_reachable(&mut vcx, chip), "the menu covers {chip:?}");
-        let after = scroll_menu_from(&mut vcx, header);
-        assert!(
-            after.top() < header.top(),
-            "the rows past the room do not scroll"
+    }
+
+    /// Only the body of an overflowing menu scrolls: the header keeps naming
+    /// the menu and the footer action is reachable without scrolling.
+    #[gpui::test]
+    fn a_long_menu_keeps_its_header_and_footer_in_view(cx: &mut TestAppContext) {
+        let (chip, mut vcx) = open_at_corner(cx, Popup::LongMenu, 400.0);
+        let header = vcx.debug_bounds("status-menu-header").expect("opened");
+        let row = vcx.debug_bounds("probe-row-0").expect("opened");
+        scroll_menu_body(&mut vcx);
+        let row_after = vcx.debug_bounds("probe-row-0").expect("still open");
+        assert!(row_after.top() < row.top(), "the body does not scroll");
+        let header_after = vcx.debug_bounds("status-menu-header").expect("still open");
+        assert_eq!(header, header_after, "the header scrolled with the body");
+
+        let clicked = probe_clicks(&mut vcx);
+        click_last_menu_item(&mut vcx, chip);
+        assert_eq!(
+            clicked.get(),
+            Some("footer"),
+            "the footer is not at the menu's end"
         );
+    }
+
+    /// The scrollbar of an overflowing menu sits in the rows' trailing
+    /// padding: a press at the end of a row's content picks that row instead
+    /// of jumping the scroll.
+    #[gpui::test]
+    fn a_long_menus_scrollbar_leaves_its_rows_pressable(cx: &mut TestAppContext) {
+        let (_, mut vcx) = open_at_corner(cx, Popup::LongMenu, 400.0);
+        let row = vcx.debug_bounds("probe-row-0").expect("opened");
+        let clicked = probe_clicks(&mut vcx);
+        let position = point(row.right() - px(1.), row.center().y);
+        vcx.simulate_click(position, Modifiers::none());
+        vcx.run_until_parked();
+        assert_eq!(clicked.get(), Some("row 0"), "the scrollbar took the press");
+    }
+
+    fn probe_clicks(vcx: &mut VisualTestContext) -> Rc<Cell<Option<&'static str>>> {
+        vcx.update(|window, cx| {
+            let probe = window.root::<CornerProbe>().flatten().expect("probe root");
+            probe.read(cx).clicked.clone()
+        })
     }
 
     /// The cap follows the window: shrinking it under an open menu keeps the
@@ -517,8 +605,9 @@ mod tests {
     #[gpui::test]
     fn a_menu_that_fits_does_not_scroll(cx: &mut TestAppContext) {
         let (chip, mut vcx) = open_at_corner(cx, Popup::Menu, 600.0);
-        let before = vcx.debug_bounds("status-menu-header").expect("opened");
-        let after = scroll_menu_from(&mut vcx, before);
+        let before = vcx.debug_bounds("probe-row-0").expect("opened");
+        scroll_menu_body(&mut vcx);
+        let after = vcx.debug_bounds("probe-row-0").expect("still open");
         assert_eq!(before, after, "a menu that fits scrolled");
         assert!(chip_reachable(&mut vcx, chip), "the menu covers {chip:?}");
     }

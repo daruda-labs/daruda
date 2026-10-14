@@ -213,13 +213,12 @@ fn build_menu(
         daruda_settings::labels::account_recipe_label(recipe),
     );
     let (state, color) = header;
-    let menu = menu
-        .item(super::menu::menu_header(
-            title,
-            Some(SharedString::from(state.clone())),
-            super::menu::Tone::Fixed(*color),
-        ))
-        .separator();
+    let menu = super::menu::with_header(
+        menu,
+        title,
+        Some(SharedString::from(state.clone())),
+        super::menu::Tone::Fixed(*color),
+    );
     let menu = rows.iter().fold(menu, |menu, row| {
         let row = row.clone();
         menu.item(PopupMenuItem::element(move |_window, cx| {

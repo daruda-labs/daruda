@@ -32,6 +32,8 @@ use serde::{Deserialize, Serialize};
 
 /// The width of the scrollbar (THUMB_ACTIVE_INSET * 2 + THUMB_ACTIVE_WIDTH)
 const WIDTH: Pixels = px(4. * 2. + 8.);
+/// daruda: the hitbox width a scrolling container keeps clear of its content.
+pub(crate) const SCROLLBAR_WIDTH: Pixels = WIDTH;
 const MIN_THUMB_SIZE: f32 = 48.;
 
 // Visible thumb is 4px to match daruda's app-side custom scrollbar

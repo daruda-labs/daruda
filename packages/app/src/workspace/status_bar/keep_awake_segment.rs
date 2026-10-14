@@ -187,13 +187,12 @@ fn build_menu(
     } else {
         super::menu::Tone::Plain
     };
-    let menu = menu
-        .item(super::menu::menu_header(
-            s::keep_awake::menu_title(),
-            Some(menu_status(view).into()),
-            tone,
-        ))
-        .separator();
+    let menu = super::menu::with_header(
+        menu,
+        s::keep_awake::menu_title(),
+        Some(menu_status(view).into()),
+        tone,
+    );
     let menu = MODES.into_iter().fold(menu, |menu, mode| {
         let workspace = workspace.clone();
         let current = mode == view.mode;

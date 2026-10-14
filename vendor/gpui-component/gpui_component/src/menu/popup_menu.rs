@@ -1,7 +1,7 @@
 use crate::actions::{Cancel, Confirm, SelectDown, SelectUp};
 use crate::actions::{SelectLeft, SelectRight};
 use crate::menu::menu_item::MenuItemElement;
-use crate::scroll::ScrollableElement;
+use crate::scroll::{SCROLLBAR_WIDTH, ScrollableElement};
 use crate::{ActiveTheme, Icon, IconName, Sizable as _, h_flex, v_flex};
 use crate::{Side, Size, StyledExt, kbd::Kbd};
 use gpui::{
@@ -315,6 +315,10 @@ pub struct PopupMenu {
     /// The parent menu of this menu, if this is a submenu
     parent_menu: Option<WeakEntity<Self>>,
     scrollable: bool,
+    /// daruda: items before this index stay above a scrolling body.
+    pinned_head: usize,
+    /// daruda: items from this index stay below a scrolling body.
+    pinned_foot: Option<usize>,
     external_link_icon: bool,
     scroll_handle: ScrollHandle,
     // This will update on render
@@ -338,6 +342,8 @@ impl PopupMenu {
             check_side: Side::Left,
             bounds: Bounds::default(),
             scrollable: false,
+            pinned_head: 0,
+            pinned_foot: None,
             scroll_handle: ScrollHandle::default(),
             external_link_icon: true,
             size: Size::default(),
@@ -402,6 +408,27 @@ impl PopupMenu {
     pub fn scrollable(mut self, scrollable: bool) -> Self {
         self.scrollable = scrollable;
         self
+    }
+
+    /// Keep the items added so far above the body when a `scrollable` menu
+    /// overflows, so only the items between the pinned ends scroll.
+    pub fn pin_head(mut self) -> Self {
+        self.pinned_head = self.menu_items.len();
+        self
+    }
+
+    /// Keep the items added after this below the body when a `scrollable`
+    /// menu overflows.
+    pub fn pin_foot(mut self) -> Self {
+        self.pinned_foot = Some(self.menu_items.len());
+        self
+    }
+
+    /// The items between the pinned ends: the ones a `scrollable` menu scrolls.
+    fn body_range(&self) -> std::ops::Range<usize> {
+        let len = self.menu_items.len();
+        let start = self.pinned_head.min(len);
+        start..self.pinned_foot.unwrap_or(len).clamp(start, len)
     }
 
     /// Set the side to show check icon, default is `Side::Left`.
@@ -821,7 +848,11 @@ impl PopupMenu {
     fn set_selected_index(&mut self, ix: usize, cx: &mut Context<Self>) {
         if self.selected_index != Some(ix) {
             self.selected_index = Some(ix);
-            self.scroll_handle.scroll_to_item(ix);
+            // The scroll handle tracks only the body's items.
+            let body = self.body_range();
+            if body.contains(&ix) {
+                self.scroll_handle.scroll_to_item(ix - body.start);
+            }
             cx.notify();
         }
     }
@@ -1057,6 +1088,21 @@ impl PopupMenu {
         };
     }
 
+    /// Renders the items in `range`, dropping a trailing separator.
+    fn render_items(
+        &self,
+        range: std::ops::Range<usize>,
+        options: RenderOptions,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Vec<MenuItemElement> {
+        let items_count = self.menu_items.len();
+        range
+            .filter(|ix| !(*ix + 1 == items_count && self.menu_items[*ix].is_separator()))
+            .map(|ix| self.render_item(ix, &self.menu_items[ix], options, window, cx))
+            .collect()
+    }
+
     fn render_item(
         &self,
         ix: usize,
@@ -1075,7 +1121,7 @@ impl PopupMenu {
 
         let selected = self.selected_index == Some(ix);
         const EDGE_PADDING: Pixels = px(4.);
-        const INNER_PADDING: Pixels = px(8.);
+        const INNER_PADDING: Pixels = ITEM_INNER_PADDING;
 
         let is_submenu = matches!(item, PopupMenuItem::Submenu { .. });
         let group_name = format!("popup-menu-item-{}", ix);
@@ -1091,6 +1137,7 @@ impl PopupMenu {
             .when(!use_text_xs, |el| el.text_sm())
             .py_0()
             .px(INNER_PADDING)
+            .pr(options.trailing_pad)
             .rounded(radius)
             .items_center()
             .selected(selected)
@@ -1267,11 +1314,17 @@ impl Focusable for PopupMenu {
     }
 }
 
+/// An item's horizontal padding.
+const ITEM_INNER_PADDING: Pixels = px(8.);
+
 #[derive(Clone, Copy)]
 struct RenderOptions {
     has_left_icon: bool,
     check_side: Side,
     radius: Pixels,
+    /// daruda: the item's trailing padding; the scrolling body widens it to
+    /// the scrollbar's hitbox so the bar never covers an item's content.
+    trailing_pad: Pixels,
 }
 
 impl Render for PopupMenu {
@@ -1279,7 +1332,6 @@ impl Render for PopupMenu {
         self.update_submenu_menu_anchor(window);
 
         let view = cx.entity().clone();
-        let items_count = self.menu_items.len();
 
         let max_height = match &self.max_height {
             Some(MaxHeight::Fixed(height)) => *height,
@@ -1300,7 +1352,22 @@ impl Render for PopupMenu {
             has_left_icon,
             check_side: self.check_side,
             radius: cx.theme().radius.min(px(8.)),
+            trailing_pad: ITEM_INNER_PADDING,
         };
+        let body_options = RenderOptions {
+            trailing_pad: ITEM_INNER_PADDING.max(SCROLLBAR_WIDTH),
+            ..options
+        };
+
+        let body_range = self.body_range();
+        let head = self.render_items(0..body_range.start, options, window, cx);
+        let body_options = if self.scrollable {
+            body_options
+        } else {
+            options
+        };
+        let body = self.render_items(body_range.clone(), body_options, window, cx);
+        let foot = self.render_items(body_range.end..self.menu_items.len(), options, window, cx);
 
         v_flex()
             .id("popup-menu")
@@ -1339,19 +1406,35 @@ impl Render for PopupMenu {
                     .min_w(rems(8.))
                     .when_some(self.min_width, |this, min_width| this.min_w(min_width))
                     .max_w(max_width)
-                    .when(self.scrollable, |this| {
-                        this.max_h(max_height)
-                            .overflow_y_scroll()
-                            .track_scroll(&self.scroll_handle)
+                    .when(self.scrollable, |this| this.max_h(max_height))
+                    .children(head)
+                    // daruda: only the body scrolls, with its scrollbar beside
+                    // it, so pinned ends stay in view of an overflowing menu.
+                    .map(|this| {
+                        if self.scrollable && !body.is_empty() {
+                            // TODO: When the menu is limited by `overflow_y_scroll`, the sub-menu will cannot be displayed.
+                            this.child(
+                                div()
+                                    .relative()
+                                    .flex()
+                                    .flex_col()
+                                    .min_h_0()
+                                    .child(
+                                        v_flex()
+                                            .id("items-body")
+                                            .min_h_0()
+                                            .gap_y_0p5()
+                                            .overflow_y_scroll()
+                                            .track_scroll(&self.scroll_handle)
+                                            .children(body),
+                                    )
+                                    .vertical_scrollbar(&self.scroll_handle),
+                            )
+                        } else {
+                            this.children(body)
+                        }
                     })
-                    .children(
-                        self.menu_items
-                            .iter()
-                            .enumerate()
-                            // Ignore last separator
-                            .filter(|(ix, item)| !(*ix + 1 == items_count && item.is_separator()))
-                            .map(|(ix, item)| self.render_item(ix, item, options, window, cx)),
-                    ),
+                    .children(foot),
             )
             // daruda: the bounds probe sits outside the scrolling `items`. As
             // their child it counted as content spanning their padded box, so
@@ -1363,10 +1446,6 @@ impl Render for PopupMenu {
                 )
                 .absolute()
                 .size_full()
-            })
-            .when(self.scrollable, |this| {
-                // TODO: When the menu is limited by `overflow_y_scroll`, the sub-menu will cannot be displayed.
-                this.vertical_scrollbar(&self.scroll_handle)
             })
     }
 }

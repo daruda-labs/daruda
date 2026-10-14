@@ -291,13 +291,12 @@ fn agent_mark(recipe: AccountRecipeId, cx: &App) -> AnyElement {
 /// section per auth domain, then add-account rows — or the in-progress login
 /// and Cancel — and the "manage accounts" footer. Items are one-line dispatches.
 fn build_account_menu(slot: &AccountSlot, menu: PopupMenu) -> PopupMenu {
-    let menu = menu
-        .item(super::menu::menu_header(
-            crate::surface::strings::settings::status_bar_account_menu_title(),
-            header_state(slot.domain),
-            super::menu::Tone::Plain,
-        ))
-        .separator();
+    let menu = super::menu::with_header(
+        menu,
+        crate::surface::strings::settings::status_bar_account_menu_title(),
+        header_state(slot.domain),
+        super::menu::Tone::Plain,
+    );
     let menu = {
         let workspace = slot.workspace.clone();
         let pane_id = slot.pane_id;

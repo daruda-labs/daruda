@@ -715,55 +715,71 @@ embed stayed at the logical height) and
 
 ---
 
-## `vendor/gpui-component/gpui_component/src/menu/popup_menu.rs` — vendored, **a capped menu scrolls only when it overflows**
+## `vendor/gpui-component/gpui_component/src/menu/popup_menu.rs` — vendored, **a capped menu scrolls only its body, only when it overflows**
 
 Applied in place, on the same terms as the sections above.
 
 ### Why
 
-`PopupMenu::render` recorded its bounds with an absolutely positioned
-`canvas(..).size_full()` placed inside the `items` column — the column that
-`scrollable(true)` turns into the scroll container. GPUI's `Div::prepaint`
-measures a scroll container's content as the union of its children's bounds
-and then adds the container's padding (`elements/div.rs`, `padded_content_size`).
-The canvas already spans the padded box, so the padding was counted twice:
-every scrollable menu had a `max_offset` of the `items` padding (`p_1`, 8px
-in total) even when its rows fit. The scrollbar shows whenever the content
-exceeds its box, so a menu that fit still painted a scrollbar and scrolled 8px
-under the wheel. The probe also scrolled with the rows, so the recorded bounds
-drifted once the menu was scrolled.
-
 daruda caps every status-bar chip menu at the room above the bar
 (`workspace/status_bar/menu.rs`, `dropdown`), which makes them scrollable; a
 long account list in a short window otherwise snaps down over the bar.
+Upstream's scrollable menu had four problems once every chip menu scrolled:
 
-That cap also has to follow the window. `max_h` takes a fixed value, and a
-menu's builder runs once when it opens, so a cap computed there went stale
-when the window shrank under an open menu, and the snap pushed the menu back
-over the bar.
+- **A menu that fit still scrolled.** `PopupMenu::render` recorded its bounds
+  with an absolutely positioned `canvas(..).size_full()` inside the scroll
+  container. GPUI's `Div::prepaint` measures a scroll container's content as
+  the union of its children's bounds and then adds the container's padding
+  (`elements/div.rs`, `padded_content_size`). The canvas already spans the
+  padded box, so the padding was counted twice: every scrollable menu had a
+  `max_offset` of 8px, scrolled under the wheel, and painted a scrollbar (it
+  shows whenever content exceeds its box). The probe also scrolled with the
+  rows, so the recorded bounds drifted.
+- **The cap went stale.** `max_h` takes a fixed value, and a menu's builder
+  runs once when it opens, so a cap computed there outlived a window resize
+  and the snap pushed the menu back over the bar.
+- **Everything scrolled.** The whole item column scrolled, so an overflowing
+  menu lost its header on the first wheel and started with its footer action
+  out of view.
+- **The scrollbar took presses on items.** The bar's hitbox is 16px wide
+  (`scroll/scrollbar.rs`, `WIDTH`, kept wide so the 4px thumb is easy to grab)
+  and overlays the items, which reserve only 8px of trailing padding. A left
+  press in the bar stops propagation and jumps the scroll, so the last 8px of
+  every item's content was dead.
 
 ### What diverges
 
-1. The canvas moves from the `items` column to the outer `popup-menu` column,
-   which is `relative` and never scrolls. Its readers — the submenu anchor and
-   the parent-menu hit test in `on_mouse_down_out` — now see the menu's outer
-   box, which differs from the old value by the 1px border.
-2. `max_height` becomes a private `MaxHeight` enum: `Fixed` (what `max_h`
-   sets, upstream behaviour) or `Window`, set by the added
+1. The bounds canvas sits in the outer `popup-menu` column, which never
+   scrolls. Its readers — the submenu anchor and the parent-menu hit test in
+   `on_mouse_down_out` — see the menu's outer box, 1px of border wider.
+2. `max_height` is a private `MaxHeight` enum: `Fixed` (what `max_h` sets,
+   upstream behaviour) or `Window`, set by the added
    `max_h_in_window(Fn(&Window) -> Pixels)` and resolved in every render.
    Unset keeps upstream's half-window default.
+3. `pin_head()` / `pin_foot()` mark the items added before / after the call
+   as pinned. A `scrollable` menu lays out pinned head, body, pinned foot in
+   the padded `items` column under the cap; only the body is the scroll
+   container (`items-body`, tracked by `scroll_handle`) and carries the
+   scrollbar. `set_selected_index` scrolls only to body items, offset by the
+   head. Without pins the body is every item.
+4. Items in a scrolling body take `RenderOptions::trailing_pad` of the
+   scrollbar's hitbox width (`scroll::SCROLLBAR_WIDTH`, a `pub(crate)` alias
+   of `WIDTH`) instead of the 8px inner padding, so the bar lies over padding.
+   Non-scrollable menus and pinned items keep the 8px.
 
 ### Re-vendor procedure
 
 Copy upstream `menu/popup_menu.rs` in, re-apply the other `PopupMenu` rows in
 [UI vendor patches](../packages/ui/REFERENCE.md#vendor-patches-in-vendorgpui-componentgpui_component),
-move the canvas out of `items` again, and re-add `MaxHeight` with
-`max_h_in_window`. The paired tests in
+then re-apply the four changes above and the `SCROLLBAR_WIDTH` alias in
+`scroll/scrollbar.rs`. The paired tests in
 `packages/app/src/workspace/status_bar/menu.rs` fail loudly if you forget:
-`a_menu_that_fits_does_not_scroll` (it scrolls 8px with the canvas back in
-`items`), `a_long_menu_stays_above_its_chip_in_a_short_window`, and
-`an_open_menu_stays_above_its_chip_when_the_window_shrinks`. Dropping
-`max_h_in_window` fails to compile at `dropdown`.
+`a_menu_that_fits_does_not_scroll` (it scrolls 8px with the canvas inside the
+scroll container), `a_long_menu_stays_above_its_chip_in_a_short_window`,
+`an_open_menu_stays_above_its_chip_when_the_window_shrinks`,
+`a_long_menu_keeps_its_header_and_footer_in_view`, and
+`a_long_menus_scrollbar_leaves_its_rows_pressable`. Dropping
+`max_h_in_window`, `pin_head` or `pin_foot` fails to compile in that module.
 
 ---
 
