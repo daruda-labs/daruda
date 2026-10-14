@@ -1,29 +1,62 @@
-//! Keep system sleep inhibited only while configured work is actually active.
+//! Windows' sleep lease, and the resume subscription that re-applies it:
+//! the thread execution state does not survive a suspend.
 
+use super::{PowerError, SleepLease};
 use gpui::{App, Global};
 use std::sync::atomic::{AtomicBool, Ordering};
 use windows_sys::Win32::System::Power::*;
 use windows_sys::Win32::UI::WindowsAndMessaging::PBT_APMRESUMEAUTOMATIC;
 
+/// Set by the OS callback on its own thread; drained on the GUI thread.
 static RESUMED: AtomicBool = AtomicBool::new(false);
 
-struct Power {
+/// Keeps the resume subscription registered for the process lifetime.
+struct ResumeSubscription {
     registration: HPOWERNOTIFY,
-    active: bool,
 }
-impl Global for Power {}
+impl Global for ResumeSubscription {}
 
-impl Drop for Power {
+impl Drop for ResumeSubscription {
     fn drop(&mut self) {
-        // SAFETY: this Global is dropped on the same GUI thread that acquired
-        // the execution state. The callback refers only to a static atomic.
+        // SAFETY: the callback refers only to a static atomic, so nothing it
+        // touches outlives the registration.
         unsafe {
-            if self.active {
-                SetThreadExecutionState(ES_CONTINUOUS);
-            }
             if self.registration != 0 {
                 PowerUnregisterSuspendResumeNotification(self.registration);
             }
+        }
+    }
+}
+
+/// Thread execution state; the API has no query, so the held flag is tracked.
+/// Must be driven from the GUI thread, which owns the execution state.
+#[derive(Default)]
+pub(super) struct ExecutionStateLease {
+    held: bool,
+}
+
+impl SleepLease for ExecutionStateLease {
+    fn set_active(&mut self, active: bool) -> Result<(), PowerError> {
+        // SAFETY: called consistently on the UI thread. No display or
+        // global power-plan changes are requested.
+        if unsafe { SetThreadExecutionState(execution_flags(active)) } == 0 {
+            return Err(PowerError::Os(std::io::Error::last_os_error()));
+        }
+        self.held = active;
+        Ok(())
+    }
+
+    fn is_held(&mut self) -> bool {
+        self.held
+    }
+}
+
+impl Drop for ExecutionStateLease {
+    fn drop(&mut self) {
+        if self.held {
+            // SAFETY: the lease is dropped on the same GUI thread that
+            // acquired the execution state.
+            unsafe { SetThreadExecutionState(ES_CONTINUOUS) };
         }
     }
 }
@@ -64,48 +97,25 @@ pub(super) fn install(cx: &mut App) {
             &std::io::Error::from_raw_os_error(status as i32),
         );
     }
-    cx.set_global(Power {
+    cx.set_global(ResumeSubscription {
         registration: registration as HPOWERNOTIFY,
-        active: false,
     });
+    // Only an atomic swap per tick; the lease itself belongs to keep-awake.
     crate::watcher_pumps::spawn_periodic_pump(
         std::time::Duration::from_secs(2),
         |cx| {
-            let mut working = false;
-            crate::window_registry::WindowRegistry::for_each_workspace(cx, |ws, _, cx| {
-                working |= ws.has_active_desktop_work(cx);
-            });
-            let enabled = crate::settings_store::SettingsStore::global(cx)
-                .user()
-                .desktop
-                .keep_awake_while_working;
-            let resumed = RESUMED.swap(false, Ordering::AcqRel);
-            let desired = enabled && working;
-            let power = cx.global_mut::<Power>();
-            if power.active != desired || resumed {
-                let flags = execution_flags(desired);
-                // SAFETY: called consistently on the UI thread. No display or
-                // global power-plan changes are requested.
-                if unsafe { SetThreadExecutionState(flags) } == 0 {
-                    super::super::report_error(
-                        "desktop.power.lease",
-                        "Power execution state update failed",
-                        &std::io::Error::last_os_error(),
-                    );
-                } else {
-                    power.active = desired;
-                }
+            if !RESUMED.swap(false, Ordering::AcqRel) {
+                return;
             }
-            if resumed {
-                crate::app_presence::observe(cx);
-                if crate::settings_store::SettingsStore::global(cx)
-                    .user()
-                    .update
-                    .auto_check
-                    && let Some(updater) = crate::update::Updater::get(cx)
-                {
-                    updater.update(cx, |updater, cx| updater.check(cx));
-                }
+            crate::keep_awake::reassert(cx);
+            crate::app_presence::observe(cx);
+            if crate::settings_store::SettingsStore::global(cx)
+                .user()
+                .update
+                .auto_check
+                && let Some(updater) = crate::update::Updater::get(cx)
+            {
+                updater.update(cx, |updater, cx| updater.check(cx));
             }
         },
         cx,

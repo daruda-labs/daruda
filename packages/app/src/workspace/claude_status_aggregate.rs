@@ -120,6 +120,27 @@ fn pane_session(
         .map(|&status| (format!("acp:{pane_id}"), status))
 }
 
+/// Every distinct session among `pane_ids`, `(session id, status)`, in pane
+/// order. A session bound to two panes counts once, as in
+/// [`aggregate_over_panes`], but window-wide rather than per lane.
+pub(in crate::workspace) fn distinct_sessions(
+    pane_ids: impl IntoIterator<Item = PaneId>,
+    bindings: &HashMap<PaneId, PtyBinding>,
+    store: &daruda_agent::ClaudeStatusStore,
+    acp_statuses: &[(PaneId, SessionStatus)],
+) -> Vec<(String, SessionStatus)> {
+    let acp: HashMap<PaneId, SessionStatus> = acp_statuses.iter().copied().collect();
+    let mut sessions: Vec<(String, SessionStatus)> = Vec::new();
+    for pane_id in pane_ids {
+        if let Some((id, status)) = pane_session(pane_id, bindings, store, &acp)
+            && !sessions.iter().any(|(seen, _)| *seen == id)
+        {
+            sessions.push((id, status));
+        }
+    }
+    sessions
+}
+
 /// The status a tab shows: the most urgent session among its panes.
 pub(in crate::workspace) fn tab_session_status(
     pane_ids: &[PaneId],
@@ -187,6 +208,19 @@ impl Workspace {
             }
         }
         index
+    }
+
+    /// Every agent session in this window with its status — the same sources
+    /// as the lane indicator, so keep-awake and the badges never disagree.
+    pub(crate) fn session_statuses(&self, cx: &gpui::App) -> Vec<(String, SessionStatus)> {
+        distinct_sessions(
+            self.pane_lane_index()
+                .into_iter()
+                .map(|(pane_id, _)| pane_id),
+            &self.claude_sessions.pty_bindings,
+            &self.claude_sessions.status,
+            &self.agent_chat_statuses(cx),
+        )
     }
 
     /// `(pane_id, status)` for every AgentChat (ACP) pane across **all**

@@ -60,6 +60,8 @@
   "md_table_row_bg_odd": "#eaecf0",
   "right_panel_scrollbar_thumb_hover": "#00000080",
   "right_panel_task_running_color": "#3aa05a",
+  "keep_awake_active": "#3aa05a",
+  "keep_awake_failed": "#a03030",
   "gauge_track_bg": "#e4e6ec",
   "task_edit_branch_invalid_border": "#a03030",
   "terminal_bg": "#f1f2f4",

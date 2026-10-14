@@ -19,6 +19,9 @@ pub enum StatusBarItem {
     ClaudeUsage,
     /// Flow runs this window started — what each is doing, and a Stop.
     Flow,
+    /// The keep-awake mode, whether it is holding the computer awake now,
+    /// and a menu to switch it.
+    KeepAwake,
 }
 
 impl StatusBarItem {
@@ -33,6 +36,7 @@ impl StatusBarItem {
         Self::Ports,
         Self::ClaudeUsage,
         Self::Flow,
+        Self::KeepAwake,
     ];
 }
 
@@ -57,7 +61,7 @@ pub struct StatusBarConfig {
 /// Segments that did not exist while `visible_items` was the format. A
 /// file written back then cannot have opted out of one it never saw, so
 /// the migration must not read their absence as a choice.
-const ADDED_AFTER_OPT_IN: &[StatusBarItem] = &[StatusBarItem::Flow];
+const ADDED_AFTER_OPT_IN: &[StatusBarItem] = &[StatusBarItem::Flow, StatusBarItem::KeepAwake];
 
 impl StatusBarConfig {
     /// Fold a legacy `visible_items` into `hidden_items`, once.
@@ -139,6 +143,27 @@ mod tests {
         cfg.toggle(StatusBarItem::Ports);
         cfg.clamp();
         assert!(!cfg.is_visible(StatusBarItem::Ports));
+    }
+
+    #[test]
+    fn keep_awake_is_listed_and_spelled_in_snake_case() {
+        assert!(StatusBarItem::ALL.contains(&StatusBarItem::KeepAwake));
+        let cfg = StatusBarConfig {
+            hidden_items: vec![StatusBarItem::KeepAwake],
+            ..Default::default()
+        };
+        let serialized = toml::to_string(&cfg).unwrap();
+        assert!(serialized.contains("\"keep_awake\""), "{serialized}");
+    }
+
+    /// Like `Flow`, the segment postdates the opt-in list, so a legacy file
+    /// cannot have chosen to hide it.
+    #[test]
+    fn a_legacy_file_shows_keep_awake() {
+        let toml = r#"visible_items = ["project_branch", "ports"]"#;
+        let mut cfg: StatusBarConfig = toml::from_str(toml).unwrap();
+        cfg.clamp();
+        assert!(cfg.is_visible(StatusBarItem::KeepAwake));
     }
 
     #[test]

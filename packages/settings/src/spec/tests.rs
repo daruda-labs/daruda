@@ -169,7 +169,9 @@ fn coverage_of(patch: &SettingsPatch) -> Coverage {
         | SettingsPatch::TelegramEnabled(_)
         | SettingsPatch::OrchestratorEnabled(_)
         | SettingsPatch::OrchestratorAgentId(_)
-        | SettingsPatch::OrchestratorAccountId(_) => Coverage::Row,
+        | SettingsPatch::OrchestratorAccountId(_)
+        | SettingsPatch::KeepAwake(_)
+        | SettingsPatch::KeepAwakeApprovalWaitMinutes(_) => Coverage::Row,
         SettingsPatch::AgentCatalog(_)
         | SettingsPatch::SessionHosts { .. }
         | SettingsPatch::RemoteChannels(_)
@@ -232,4 +234,25 @@ fn a_bool_value_round_trips_through_show_and_patch() {
             spec.setting
         );
     }
+}
+
+/// Each mode survives the select's value and patch directions, so a pick
+/// writes the variant it names and reads back as the same option.
+#[test]
+fn every_keep_awake_mode_round_trips_through_its_select_row() {
+    use daruda_config::KeepAwakeMode;
+    let spec = select_spec(SelectSetting::KeepAwakeMode);
+    let mut config = Config::default();
+    for (value, mode) in [
+        ("off", KeepAwakeMode::Off),
+        ("agent", KeepAwakeMode::Agent),
+        ("on", KeepAwakeMode::On),
+    ] {
+        let patch = (spec.read)(value).expect("a known option");
+        assert_eq!(format!("{patch:?}"), format!("KeepAwake({mode:?})"));
+        patch.apply_to(&mut config);
+        assert_eq!(config.desktop.keep_awake, mode);
+        assert_eq!((spec.show)(&config).as_ref(), value);
+    }
+    assert!((spec.read)("sometimes").is_none());
 }

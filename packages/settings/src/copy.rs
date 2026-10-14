@@ -130,6 +130,10 @@ pub(super) fn text(setting: TextSetting) -> RowCopy {
             label: s::settings::label_logs_max_size,
             hint: s::settings::hint_logs_max_size,
         },
+        TextSetting::KeepAwakeApprovalWaitMinutes => RowCopy {
+            label: s::settings::label_keep_awake_wait,
+            hint: s::settings::hint_keep_awake_wait,
+        },
         TextSetting::PresenceGraceSecs => RowCopy {
             label: s::settings::label_presence_grace,
             hint: s::settings::hint_presence_grace,
@@ -174,6 +178,10 @@ pub(super) fn select(setting: SelectSetting) -> RowCopy {
         SelectSetting::CursorStyle => RowCopy {
             label: s::settings::label_cursor_style,
             hint: s::settings::hint_cursor_style,
+        },
+        SelectSetting::KeepAwakeMode => RowCopy {
+            label: s::settings::label_keep_awake_mode,
+            hint: s::settings::hint_keep_awake_mode,
         },
         SelectSetting::RenderMaxFps => RowCopy {
             label: s::settings::label_max_fps,

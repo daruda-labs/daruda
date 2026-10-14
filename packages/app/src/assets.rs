@@ -77,6 +77,7 @@ impl AssetSource for DarudaAssets {
 
             // ── UI controls ───────────────────────────────────────────────
             "icons/ui/settings.svg" => icon!("ui/settings.svg"),
+            "icons/ui/coffee.svg" => icon!("ui/coffee.svg"),
             "icons/ui/terminal.svg" => icon!("ui/terminal.svg"),
             "icons/ui/text-fields.svg" => icon!("ui/text-fields.svg"),
             "icons/ui/cursor.svg" => icon!("ui/cursor.svg"),
@@ -325,6 +326,7 @@ mod tests {
         "icons/ui/check-circle.svg",
         "icons/ui/check.svg",
         "icons/ui/chrome-reader-mode.svg",
+        "icons/ui/coffee.svg",
         "icons/ui/code.svg",
         "icons/ui/compress.svg",
         "icons/ui/content-copy.svg",
@@ -408,6 +410,7 @@ mod tests {
             DIFFERENCE,
             UNFOLD_LESS,
             CHECK_CIRCLE,
+            KEEP_AWAKE,
             TASKS,
             FLOWS,
             FOLDER,

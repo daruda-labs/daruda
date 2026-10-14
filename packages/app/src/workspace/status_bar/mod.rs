@@ -8,6 +8,7 @@
 mod account_slot;
 mod context_menu;
 mod flow_segment;
+mod keep_awake_segment;
 pub(in crate::workspace) mod orchestrator_chip;
 mod ports_segment;
 #[cfg(feature = "screenshot")]
@@ -15,6 +16,7 @@ pub(in crate::workspace) mod screenshot;
 mod usage_chip;
 
 pub(in crate::workspace) use account_slot::{AccountSlot, account_label};
+pub(in crate::workspace) use keep_awake_segment::KeepAwakeView;
 
 use crate::ui::theme;
 use crate::workspace::Workspace;
@@ -52,8 +54,8 @@ enum StatusBarDensity {
     /// word); account slot label unchanged.
     Compact,
     /// Narrowest tier. Same abbreviated project/branch and bare port
-    /// count as `Compact`; segments keep their labels and shed only
-    /// inter-word padding, so the name is historical.
+    /// count as `Compact`; keep-awake sheds its mode word, the other
+    /// segments keep their labels and shed only inter-word padding.
     IconOnly,
 }
 
@@ -131,6 +133,8 @@ pub(super) struct StatusBarData {
     /// first poll hasn't landed — contributes nothing, so the usage area is
     /// empty for a user with no AI provider configured.
     pub usage: Vec<(AccountRecipeId, daruda_agent::UsageOutcome)>,
+    /// The keep-awake mode and what the policy is doing with it.
+    pub keep_awake: KeepAwakeView,
     /// Which segments the user has toggled on, via the status bar's
     /// right-click menu. Mirrors `daruda_config::StatusBarConfig`;
     /// `title` / `error` / the project-config dot are not user-toggleable.
@@ -265,8 +269,8 @@ impl RenderOnce for StatusBar {
                 el.child(
                     div()
                         .id("status-project-config")
-                        .w(px(theme::STATUS_BAR_PROJECT_DOT_SIZE))
-                        .h(px(theme::STATUS_BAR_PROJECT_DOT_SIZE))
+                        .w(px(theme::STATUS_BAR_DOT_SIZE))
+                        .h(px(theme::STATUS_BAR_DOT_SIZE))
                         .rounded_full()
                         .bg(project_dot)
                         .tooltip(crate::ui::tooltip::text(
@@ -297,6 +301,14 @@ impl RenderOnce for StatusBar {
                 el.children(data.usage.iter().filter_map(|(recipe, outcome)| {
                     usage_chip::render(*recipe, outcome, density, data.workspace.clone(), cx)
                 }))
+            })
+            .when(data.visible.is_visible(StatusBarItem::KeepAwake), |el| {
+                el.child(keep_awake_segment::render(
+                    data.keep_awake,
+                    density,
+                    data.workspace.clone(),
+                    cx,
+                ))
             })
             .when(show_account, |el| {
                 el.children(

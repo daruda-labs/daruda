@@ -44,6 +44,8 @@ pub enum SettingsFieldId {
     PresenceGraceSecs,
     PresenceIdleSecs,
     PresenceIdleForegroundSecs,
+    KeepAwake,
+    KeepAwakeApprovalWaitMinutes,
     AgentInputMaxRows,
     AgentReadingWidth,
     FlowTimeoutMinutes,
@@ -126,6 +128,8 @@ impl SettingsFieldId {
             Self::PresenceGraceSecs => "presence.away_grace_secs",
             Self::PresenceIdleSecs => "presence.away_idle_secs",
             Self::PresenceIdleForegroundSecs => "presence.away_idle_foreground_secs",
+            Self::KeepAwake => "desktop.keep_awake",
+            Self::KeepAwakeApprovalWaitMinutes => "desktop.keep_awake_approval_wait_minutes",
             Self::AgentInputMaxRows => "agent.input_max_rows",
             Self::AgentReadingWidth => "agent.reading_width",
             Self::FlowTimeoutMinutes => "flow.timeout_minutes",
@@ -214,6 +218,8 @@ pub enum SettingsPatch {
     PresenceGraceSecs(u64),
     PresenceIdleSecs(u64),
     PresenceIdleForegroundSecs(u64),
+    KeepAwake(crate::KeepAwakeMode),
+    KeepAwakeApprovalWaitMinutes(u64),
     AgentInputMaxRows(u8),
     AgentReadingWidth(f32),
     FlowTimeoutMinutes(u32),
@@ -302,6 +308,8 @@ impl SettingsPatch {
             Self::PresenceGraceSecs(_) => SettingsFieldId::PresenceGraceSecs,
             Self::PresenceIdleSecs(_) => SettingsFieldId::PresenceIdleSecs,
             Self::PresenceIdleForegroundSecs(_) => SettingsFieldId::PresenceIdleForegroundSecs,
+            Self::KeepAwake(_) => SettingsFieldId::KeepAwake,
+            Self::KeepAwakeApprovalWaitMinutes(_) => SettingsFieldId::KeepAwakeApprovalWaitMinutes,
             Self::AgentInputMaxRows(_) => SettingsFieldId::AgentInputMaxRows,
             Self::AgentReadingWidth(_) => SettingsFieldId::AgentReadingWidth,
             Self::FlowTimeoutMinutes(_) => SettingsFieldId::FlowTimeoutMinutes,
@@ -398,6 +406,10 @@ impl SettingsPatch {
             Self::PresenceIdleSecs(value) => config.presence.away_idle_secs = *value,
             Self::PresenceIdleForegroundSecs(value) => {
                 config.presence.away_idle_foreground_secs = *value
+            }
+            Self::KeepAwake(value) => config.desktop.keep_awake = *value,
+            Self::KeepAwakeApprovalWaitMinutes(value) => {
+                config.desktop.keep_awake_approval_wait_minutes = *value
             }
             Self::AgentInputMaxRows(value) => config.agent.input_max_rows = *value,
             Self::AgentReadingWidth(value) => config.agent.reading_width = *value,
@@ -530,6 +542,11 @@ impl SettingsPatch {
             }
             Self::PresenceIdleForegroundSecs(_) => {
                 left.presence.away_idle_foreground_secs != right.presence.away_idle_foreground_secs
+            }
+            Self::KeepAwake(_) => left.desktop.keep_awake != right.desktop.keep_awake,
+            Self::KeepAwakeApprovalWaitMinutes(_) => {
+                left.desktop.keep_awake_approval_wait_minutes
+                    != right.desktop.keep_awake_approval_wait_minutes
             }
             Self::AgentInputMaxRows(_) => left.agent.input_max_rows != right.agent.input_max_rows,
             Self::AgentReadingWidth(_) => left.agent.reading_width != right.agent.reading_width,

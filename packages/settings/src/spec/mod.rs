@@ -101,6 +101,14 @@ pub(super) const SELECT_SETTINGS: &[SelectSpec] = &[
         load: SelectLoad::Value,
     },
     SelectSpec {
+        setting: SelectSetting::KeepAwakeMode,
+        field: |w| &w.keep_awake_mode_select,
+        read: |v| keep_awake_from_option(v).map(SettingsPatch::KeepAwake),
+        current: |c| SettingsPatch::KeepAwake(c.desktop.keep_awake),
+        show: |c| keep_awake_option(c.desktop.keep_awake).into(),
+        load: SelectLoad::Value,
+    },
+    SelectSpec {
         setting: SelectSetting::RenderMaxFps,
         field: |w| &w.max_fps_select,
         read: |v| v.parse::<u32>().ok().map(SettingsPatch::RenderMaxFps),
@@ -158,9 +166,20 @@ pub(super) const SELECT_SETTINGS: &[SelectSpec] = &[
     },
 ];
 
+/// The select option string for a keep-awake mode: its config spelling.
+pub(crate) fn keep_awake_option(mode: daruda_config::KeepAwakeMode) -> &'static str {
+    mode.as_str()
+}
+
+fn keep_awake_from_option(value: &str) -> Option<daruda_config::KeepAwakeMode> {
+    use daruda_config::KeepAwakeMode::{Agent, Off, On};
+    [Off, Agent, On]
+        .into_iter()
+        .find(|&mode| keep_awake_option(mode) == value)
+}
+
 /// The option string the cursor-style picker uses for `style`. Paired with
-/// [`cursor_style_from_option`]; the two were previously written out
-/// separately in `persist_select_setting` and `load_settings_patch`.
+/// [`cursor_style_from_option`].
 fn cursor_style_option(style: daruda_config::CursorStyle) -> &'static str {
     match style {
         daruda_config::CursorStyle::Block => "block",

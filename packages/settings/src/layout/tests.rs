@@ -57,3 +57,17 @@ fn a_parent_switch_precedes_its_rows() {
         }
     }
 }
+
+#[test]
+fn the_agent_page_places_both_keep_awake_rows() {
+    let agent: Vec<Target> = placed()
+        .into_iter()
+        .filter(|(section, _, _)| *section == Section::Agent)
+        .filter_map(|(_, _, p)| match p {
+            Placed::Setting(t) => Some(t),
+            _ => None,
+        })
+        .collect();
+    assert!(agent.contains(&Target::Select(S::KeepAwakeMode)));
+    assert!(agent.contains(&Target::Text(T::KeepAwakeApprovalWaitMinutes)));
+}

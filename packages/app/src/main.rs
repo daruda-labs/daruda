@@ -22,6 +22,7 @@ pub mod files;
 mod fuzzy;
 mod globals;
 mod hooks;
+mod keep_awake;
 pub use daruda_project::lane;
 pub(crate) mod menus;
 mod orchestrator;

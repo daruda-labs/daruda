@@ -157,6 +157,7 @@ pub(super) fn migrate_legacy_keys(doc: &mut toml_edit::DocumentMut, field: Setti
             &["presence"],
             "away_grace_secs",
         ),
+        F::KeepAwake | F::KeepAwakeApprovalWaitMinutes => migrate_legacy_keep_awake(doc),
         F::TerminalFontFamily
         | F::TerminalFontSize
         | F::TerminalLineHeight
@@ -187,6 +188,23 @@ fn move_key(doc: &mut toml_edit::DocumentMut, from: &str, key: &str, to: &[&str]
             t.insert(new_key, item);
         }
     });
+}
+
+/// Fold the old `keep_awake_while_working` flag into `keep_awake`. As on
+/// load, an explicit `keep_awake` wins and `false` is the default.
+fn migrate_legacy_keep_awake(doc: &mut toml_edit::DocumentMut) {
+    let Some(desktop) = doc
+        .get_mut("desktop")
+        .and_then(toml_edit::Item::as_table_like_mut)
+    else {
+        return;
+    };
+    let Some(legacy) = desktop.remove("keep_awake_while_working") else {
+        return;
+    };
+    if legacy.as_bool() == Some(true) && !desktop.contains_key("keep_awake") {
+        desktop.insert("keep_awake", toml_edit::value("agent"));
+    }
 }
 
 fn migrate_flat_font_keys(doc: &mut toml_edit::DocumentMut) {

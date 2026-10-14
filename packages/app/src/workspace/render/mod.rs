@@ -399,6 +399,7 @@ impl Workspace {
             flows,
             ports_status: self.ports.status,
             usage,
+            keep_awake: self.keep_awake_view(cx),
             visible: self.mirrors.status_bar.clone(),
             workspace: weak_workspace.clone(),
         };

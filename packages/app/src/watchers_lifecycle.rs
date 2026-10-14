@@ -1,8 +1,9 @@
 //! App-wide watcher pumps spawned once at launch.
 //!
 //! Covers Claude status, attention demotion, status animation, deferred
-//! Telegram flushes, and panels reload. Config reload lives with
-//! `SettingsStore` because workspaces already subscribe to that global.
+//! Telegram flushes, panels reload, and keep-awake expiry. Config reload
+//! lives with `SettingsStore` because workspaces already subscribe to that
+//! global.
 
 use crate::ui::StatusPulseClock;
 use crate::ui::theme;
@@ -33,6 +34,24 @@ pub(crate) fn spawn_all(cx: &mut App) {
     spawn_status_pulse(cx);
     spawn_presence_and_telegram_pump(cx);
     spawn_panels_reload(cx);
+    spawn_keep_awake_expiry(cx);
+}
+
+/// Re-decide keep-awake while it is on or failed: a session's time cap runs
+/// out with no status event to say so, and a failed or lost lease (a failed
+/// release under `Off` included) needs a retry.
+fn spawn_keep_awake_expiry(cx: &mut App) {
+    watcher_pumps::spawn_periodic_pump(
+        std::time::Duration::from_secs(15),
+        |cx: &mut App| {
+            if crate::keep_awake::mode(cx) != daruda_config::KeepAwakeMode::Off
+                || crate::keep_awake::status(cx) == crate::keep_awake::KeepAwakeStatus::Failed
+            {
+                crate::keep_awake::refresh(cx);
+            }
+        },
+        cx,
+    );
 }
 
 fn spawn_claude_status(cx: &mut App) {

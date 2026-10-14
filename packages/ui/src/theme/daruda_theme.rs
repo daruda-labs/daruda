@@ -164,6 +164,11 @@ daruda_theme_fields! {
     orchestrator_working => SIGNAL_GREEN,
     orchestrator_permission => SIGNAL_ORANGE,
     orchestrator_failed => SIGNAL_RED,
+    // The status bar's keep-awake segment: green while it holds the computer
+    // awake, and the bar's failure red when the OS refused — orange already
+    // means "waiting for approval" there.
+    keep_awake_active => SIGNAL_GREEN,
+    keep_awake_failed => SIGNAL_RED,
     task_edit_branch_invalid_border => ERROR,
     badge_bg => BG_HOVER,
     gauge_track_bg => BG_HOVER,

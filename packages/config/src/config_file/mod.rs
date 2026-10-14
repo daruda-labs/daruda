@@ -314,6 +314,7 @@ pub fn patch_config_file_to(config: &Config, path: &std::path::Path) -> Result<(
                 StatusBarItem::Ports => "ports",
                 StatusBarItem::ClaudeUsage => "claude_usage",
                 StatusBarItem::Flow => "flow",
+                StatusBarItem::KeepAwake => "keep_awake",
             };
             arr.push(slug);
         }

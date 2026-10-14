@@ -35,6 +35,7 @@ pub(crate) enum TextSetting {
     LeftDefaultWidth,
     ShellProgram,
     NotifyLongRunningThresholdSecs,
+    KeepAwakeApprovalWaitMinutes,
 }
 
 /// Select values for `left_dock.file_icon_color_mode`, matching its
@@ -72,6 +73,7 @@ pub(crate) enum SelectSetting {
     FileIconColorMode,
     OrchestratorAgent,
     OrchestratorAccount,
+    KeepAwakeMode,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -113,7 +115,7 @@ pub(crate) enum BoolSetting {
 // click of the new widget.
 impl TextSetting {
     #[cfg(test)]
-    pub(crate) const ALL: [Self; 32] = [
+    pub(crate) const ALL: [Self; 33] = [
         Self::TerminalFontSize,
         Self::TerminalLineHeight,
         Self::TerminalCellWidth,
@@ -146,6 +148,7 @@ impl TextSetting {
         Self::LeftDefaultWidth,
         Self::ShellProgram,
         Self::NotifyLongRunningThresholdSecs,
+        Self::KeepAwakeApprovalWaitMinutes,
     ];
 
     /// Compile-time guard for `ALL`: this match is exhaustive, so a new
@@ -185,13 +188,14 @@ impl TextSetting {
             Self::LeftDefaultWidth => (),
             Self::ShellProgram => (),
             Self::NotifyLongRunningThresholdSecs => (),
+            Self::KeepAwakeApprovalWaitMinutes => (),
         }
     }
 }
 
 impl SelectSetting {
     #[cfg(test)]
-    pub(crate) const ALL: [Self; 13] = [
+    pub(crate) const ALL: [Self; 14] = [
         Self::Language,
         Self::TerminalPreset,
         Self::UiPreset,
@@ -205,6 +209,7 @@ impl SelectSetting {
         Self::FileIconColorMode,
         Self::OrchestratorAgent,
         Self::OrchestratorAccount,
+        Self::KeepAwakeMode,
     ];
 
     /// Compile-time guard for `ALL`: this match is exhaustive, so a new
@@ -225,6 +230,7 @@ impl SelectSetting {
             Self::FileIconColorMode => (),
             Self::OrchestratorAgent => (),
             Self::OrchestratorAccount => (),
+            Self::KeepAwakeMode => (),
         }
     }
 }

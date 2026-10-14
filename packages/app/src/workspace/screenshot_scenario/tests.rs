@@ -228,6 +228,22 @@ fn tab_indicators_name_maps_to_scenario() {
 }
 
 #[test]
+fn keep_awake_name_maps_to_scenario() {
+    assert_eq!(
+        ScreenshotScenario::from_cli_name("keep-awake"),
+        Some(ScreenshotScenario::StatusBar(
+            crate::workspace::status_bar::screenshot::StatusBarShot::KeepAwake
+        ))
+    );
+    assert_eq!(
+        ScreenshotScenario::from_cli_name("keep-awake-failed"),
+        Some(ScreenshotScenario::StatusBar(
+            crate::workspace::status_bar::screenshot::StatusBarShot::KeepAwakeFailed
+        ))
+    );
+}
+
+#[test]
 fn toast_name_maps_to_scenario() {
     assert_eq!(
         ScreenshotScenario::from_cli_name("toast"),

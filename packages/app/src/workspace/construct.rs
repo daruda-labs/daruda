@@ -408,16 +408,18 @@ impl Workspace {
         let window_handle = window.window_handle();
         crate::window_registry::WindowRegistry::register(window_handle, weak.clone(), cx);
         // A restored workspace can open with unread worktrees and no status
-        // change yet to recount them.
+        // change yet to recount them, and agent sessions keep-awake counts.
         Self::refresh_dock_badge(cx);
+        crate::keep_awake::refresh(cx);
         cx.on_release(move |ws: &mut Workspace, cx: &mut gpui::App| {
             // Before deregistering: a login this window owned can no longer be
             // finished by anyone, and the process-wide slot it holds would
             // block every other window until the login timed out.
             ws.release_pending_login_on_close(cx);
             crate::window_registry::WindowRegistry::deregister(&weak, cx);
-            // This window's worktrees leave the Dock badge's count.
+            // This window's worktrees and sessions leave both counts.
             Workspace::refresh_dock_badge(cx);
+            crate::keep_awake::refresh(cx);
         })
         .detach();
 

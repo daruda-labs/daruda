@@ -736,6 +736,7 @@ settings:
   status_bar_toggle_flow: "플로우"
   status_bar_toggle_ports: "포트"
   status_bar_toggle_claude_usage: "Claude 사용량"
+  status_bar_toggle_keep_awake: "절전 방지"
   status_bar_usage_chip_percent: "%{pct}%"
   status_bar_usage_chip_reset: "· %{reset}"
   status_bar_usage_open_panel: "사용량 패널 열기"
@@ -1005,6 +1006,7 @@ error:
   skill_delete_failed: "스킬 삭제 실패"
   skill_invocation_failed: "스킬 실행 실패"
   skill_rename_failed: "스킬 이름 변경 실패"
+  keep_awake_save_failed: "절전 방지 모드 저장 실패"
   status_bar_save_failed: "상태바 토글 저장 실패"
   tasks_require_git_repo: "작업에는 Git 저장소가 필요합니다"
   task_lane_missing: "이 작업이 실행될 worktree가 열려 있지 않습니다"
@@ -1360,6 +1362,26 @@ orchestrator:
   not_started: "오케스트레이터: 시작되지 않음 — 눌러서 시작"
   label: "오케스트레이터"
   tab_unavailable: "이 워크트리에서는 오케스트레이터 탭을 열 수 없습니다. 세션은 계속 실행 중입니다."
+
+# Status bar keep-awake segment — the pill, its tooltip and its menu
+keep_awake:
+  # The pill's tooltip, one per state; mode names come from Settings.
+  status_off: "컴퓨터 절전 방지: 꺼짐"
+  status_idle: "컴퓨터 절전 방지: %{mode} · 비활성"
+  status_always: "절전 방지 중 (항상)"
+  status_working: "절전 방지 중 · 작업 중 %{working}개"
+  status_waiting: "절전 방지 중 · 승인 대기 %{waiting}개"
+  status_working_waiting: "절전 방지 중 · 작업 중 %{working}개 · 승인 대기 %{waiting}개"
+  status_failed: "컴퓨터 절전 방지에 실패했습니다 — 로그를 확인하세요"
+  menu_title: "컴퓨터 절전 방지"
+  menu_status: "%{mode} · %{state}"
+  state_active: "활성"
+  state_inactive: "비활성"
+  state_failed: "실패"
+  desc_off: "시스템 기본 절전 동작 허용"
+  desc_agent: "에이전트 작업·승인 대기 중에만 절전 방지"
+  desc_on: "항상 절전 모드로 전환되지 않도록 유지"
+  menu_settings: "설정…"
 
 # External control surface — the command replies sent back to a phone
 control:

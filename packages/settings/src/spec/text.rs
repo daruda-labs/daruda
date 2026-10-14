@@ -496,4 +496,22 @@ pub(crate) const TEXT_SETTINGS: &[TextSpec] = &[
             .map(SettingsPatch::NotifyLongRunningThresholdSecs)
         },
     },
+    TextSpec {
+        setting: TextSetting::KeepAwakeApprovalWaitMinutes,
+        placeholder: || s::settings::placeholder_example("30"),
+        field: |w| &w.keep_awake_approval_wait_input,
+        show: |c| c.desktop.keep_awake_approval_wait_minutes.to_string(),
+        current: |c| {
+            SettingsPatch::KeepAwakeApprovalWaitMinutes(c.desktop.keep_awake_approval_wait_minutes)
+        },
+        parse: |input, cx| {
+            bounded(
+                input,
+                1..=daruda_config::desktop::MAX_APPROVAL_WAIT_MINUTES,
+                || s::settings::err_keep_awake_wait().into(),
+                cx,
+            )
+            .map(SettingsPatch::KeepAwakeApprovalWaitMinutes)
+        },
+    },
 ];

@@ -469,6 +469,7 @@ after settle and forces a repaint before capture.
 | Agent catalog | `agent-catalog-expanded`, `agent-catalog-editor[:<fold\|filter\|range>]` |
 | Window chrome | `client-chrome` forces app-drawn controls; native macOS traffic lights still cover the left inset, so assess the right edge and spacing |
 | Tab status | `tab-indicators` seeds each status dot; inspect its color |
+| Status bar | `status-ports`, `status-flows`, `keep-awake` (the keep-awake menu open over a seeded hold) |
 | Agent chat | `agent-chat`, `agent-chat-working`, `agent-chat-empty`, `agent-chat-failure` |
 | Chat interaction | `agent-chat-fold`, `agent-chat-interrupted`, `agent-chat-options[:<tab>]`, `agent-chat-queue-parked`, `agent-chat-queue-armed` |
 | Chat details | `agent-chat-running-tool`, `agent-chat-plan[-stopped]`, `agent-chat-thoughts[-working\|-only]`, `agent-chat-sole-reply` |
@@ -612,20 +613,23 @@ marked as previous output and control sequences are filtered. A fresh shell
 starts; the snapshot does not preserve a process, colours, or full scrollback.
 Disable the setting to remove stored snapshots on the next workspace save.
 
-Windows desktop preferences can be set in the profile's `config.toml`:
+Desktop preferences can be set in the profile's `config.toml`:
 
 ```toml
 [desktop]
-tray_enabled = true
-close_to_tray = true
-keep_awake_while_working = true
+tray_enabled = true                   # Windows
+close_to_tray = true                  # Windows
+keep_awake = "agent"                  # "off" (default) | "agent" | "on"
+keep_awake_approval_wait_minutes = 30
 ```
 
 Tray creation takes effect on the next launch. Closing a window then hides it;
 the tray or a second launch restores it. Explicit Quit retains the running-work
-and unsaved-edits prompts. The optional sleep lease covers active agent turns
-and terminal work reported by shell integration; it does not keep the display
-awake or change the lid-close policy. Defaults preserve existing behavior.
+and unsaved-edits prompts. `keep_awake` holds off system sleep on every
+platform: `agent` while an agent chat or Claude terminal works (at most 2 hours
+per stretch) or waits for approval (at most the configured minutes), `on`
+always. The display may still sleep, and closing the lid follows the device's
+power settings.
 Help > Export Diagnostics writes a ZIP with version/platform information and
 bounded error metadata, excluding raw messages, personal paths, prompts, and transcripts.
 Windows toast clicks reveal the originating pane while the app is running.

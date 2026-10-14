@@ -1011,6 +1011,7 @@ settings:
   status_bar_toggle_flow: "Flows"
   status_bar_toggle_ports: "Ports"
   status_bar_toggle_claude_usage: "Claude usage"
+  status_bar_toggle_keep_awake: "Keep awake"
   # Claude-usage percentage — the one span that carries the severity
   # colour, in both the status-bar chip and its dropdown gauge rows.
   status_bar_usage_chip_percent: "%{pct}%"
@@ -1436,6 +1437,7 @@ error:
   skill_delete_failed: "Skill delete failed"
   skill_invocation_failed: "Skill invocation failed"
   skill_rename_failed: "Skill rename failed"
+  keep_awake_save_failed: "Failed to save the keep-awake mode"
   status_bar_save_failed: "Failed to save status bar toggle"
   tasks_require_git_repo: "Tasks require a git repo"
   task_lane_missing: "The worktree this task runs in is not open"
@@ -1970,6 +1972,28 @@ orchestrator:
   not_started: "Orchestrator: not started — click to start"
   label: "Orchestrator"
   tab_unavailable: "The orchestrator tab cannot open in this worktree. The session is still running."
+
+# Status bar keep-awake segment — the pill, its tooltip and its menu
+keep_awake:
+  # The pill's tooltip, one per state; mode names come from Settings.
+  status_off: "Keep computer awake: Off"
+  status_idle: "Keep computer awake: %{mode} · not active"
+  status_always: "Keeping awake (always)"
+  status_working: "Keeping awake · %{working} working"
+  status_waiting: "Keeping awake · %{waiting} waiting for approval"
+  status_working_waiting: "Keeping awake · %{working} working · %{waiting} waiting for approval"
+  status_failed: "Could not keep the computer awake — see the log"
+  # Menu header: the title, then the mode and its state on the right.
+  menu_title: "Keep computer awake"
+  menu_status: "%{mode} · %{state}"
+  state_active: "Active"
+  state_inactive: "Inactive"
+  state_failed: "Failed"
+  # The muted line under each mode's name in the menu.
+  desc_off: "Allow normal system sleep"
+  desc_agent: "Stay awake while agents work or wait for your approval"
+  desc_on: "Keep this computer awake continuously"
+  menu_settings: "Settings…"
 
 # External control surface — the command replies sent back to a phone
 control:

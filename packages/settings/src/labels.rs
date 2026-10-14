@@ -17,6 +17,15 @@ pub fn agent_model_choice_label(value: &str, name: &str, description: Option<&st
     s::agent_chat::agent_model_choice_label(value, name, description)
 }
 
+/// A keep-awake mode's name, shared by the Settings picker and the status bar.
+pub fn keep_awake_mode_label(mode: daruda_config::KeepAwakeMode) -> String {
+    match mode {
+        daruda_config::KeepAwakeMode::Off => s::settings::keep_awake_off(),
+        daruda_config::KeepAwakeMode::Agent => s::settings::keep_awake_agent(),
+        daruda_config::KeepAwakeMode::On => s::settings::keep_awake_on(),
+    }
+}
+
 /// Why a session host is refused.
 pub fn host_error(err: SessionHostError) -> String {
     s::session_host::host_error(err)

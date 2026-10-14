@@ -42,6 +42,9 @@ fn toggle_label(item: StatusBarItem) -> SharedString {
         }
         StatusBarItem::Ports => crate::surface::strings::settings::status_bar_toggle_ports(),
         StatusBarItem::Flow => crate::surface::strings::settings::status_bar_toggle_flow(),
+        StatusBarItem::KeepAwake => {
+            crate::surface::strings::settings::status_bar_toggle_keep_awake()
+        }
         StatusBarItem::ClaudeUsage => {
             crate::surface::strings::settings::status_bar_toggle_claude_usage()
         }

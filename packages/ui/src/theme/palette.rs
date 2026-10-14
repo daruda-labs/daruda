@@ -169,7 +169,9 @@ pub const STATUS_BAR_GAP: f32 = GAP_LG;
 pub const STATUS_BAR_COMPACT_WIDTH: f32 = 720.0;
 pub const STATUS_BAR_ICON_ONLY_WIDTH: f32 = 480.0;
 pub const STATUS_BAR_PROJECT_DOT: Hsla = hsla(180.0, 0.55, 0.55, 1.0);
-pub const STATUS_BAR_PROJECT_DOT_SIZE: f32 = 6.0;
+/// Every status-bar dot: the project-config marker, the keep-awake hold and
+/// the keep-awake menu's current mode.
+pub const STATUS_BAR_DOT_SIZE: f32 = 6.0;
 pub const STATUS_BAR_DETACHED_BG: Hsla = with_lightness(WARNING, 0.22);
 pub const STATUS_BAR_DETACHED_TEXT: Hsla = with_lightness(WARNING, 0.72);
 pub const STATUS_BAR_DETACHED_FONT_SIZE: f32 = FONT_SIZE_XS;
@@ -184,6 +186,9 @@ pub const STATUS_BAR_USAGE_CHIP_GAP: f32 = GAP_SM;
 // Fixed so the dropdown's gauges share one scale; `PopupMenu` sizes to content.
 pub const STATUS_BAR_USAGE_ROW_WIDTH: f32 = 180.0;
 pub const STATUS_BAR_USAGE_ROW_GAP: f32 = GAP_XS;
+// Keep-awake menu: a fixed width so each mode's description wraps to one or
+// two lines at most.
+pub const STATUS_BAR_KEEP_AWAKE_MENU_WIDTH: f32 = 280.0;
 
 // ── Docks ───────────────────────────────────────────────────────────────────
 

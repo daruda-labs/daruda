@@ -159,3 +159,13 @@ fn a_hand_drawn_card_groups_under_its_heading() {
         .expect("slack entry");
     assert_eq!(slack.card, s::settings::group_integrations());
 }
+
+#[test]
+fn searching_awake_finds_the_keep_awake_mode_on_the_agent_page() {
+    let results = query("awake");
+    let mode = results
+        .iter()
+        .find(|d| d.target == Hit::Setting(Target::Select(crate::SelectSetting::KeepAwakeMode)))
+        .expect("the mode row");
+    assert_eq!(mode.section, Section::Agent);
+}

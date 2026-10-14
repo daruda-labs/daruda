@@ -166,6 +166,26 @@ fn aggregate_counts_a_session_once_per_lane() {
 }
 
 #[test]
+fn distinct_sessions_count_a_session_once_across_lanes_and_keep_chat_panes() {
+    let bindings: HashMap<PaneId, PtyBinding> =
+        [binding(10, "s"), binding(20, "s"), binding(30, "gone")]
+            .into_iter()
+            .collect();
+    let store = store_with(vec![entry("s", "/x", SessionStatus::ExecutingTool)]);
+    let acp = [(40u64, SessionStatus::NeedsAttention)];
+
+    let sessions = distinct_sessions([10, 20, 30, 40, 50], &bindings, &store, &acp);
+
+    assert_eq!(
+        sessions,
+        vec![
+            ("s".to_owned(), SessionStatus::ExecutingTool),
+            ("acp:40".to_owned(), SessionStatus::NeedsAttention),
+        ]
+    );
+}
+
+#[test]
 fn aggregate_dedup_keeps_first_pane_position() {
     // A duplicate binding later in layout order neither reorders
     // nor duplicates the sub-row entry for its session.

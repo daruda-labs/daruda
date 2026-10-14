@@ -593,6 +593,16 @@
       "$ref": "#/$defs/Rgba",
       "default": "#ff4a3dff"
     },
+    "keep_awake_active": {
+      "description": "Maps to `palette::SIGNAL_GREEN`.",
+      "$ref": "#/$defs/Rgba",
+      "default": "#33c758ff"
+    },
+    "keep_awake_failed": {
+      "description": "Maps to `palette::SIGNAL_RED`.",
+      "$ref": "#/$defs/Rgba",
+      "default": "#ff4a3dff"
+    },
     "task_edit_branch_invalid_border": {
       "description": "Maps to `palette::ERROR`.",
       "$ref": "#/$defs/Rgba",

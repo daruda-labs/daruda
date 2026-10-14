@@ -67,10 +67,11 @@ impl Workspace {
     /// Refresh both dock badges after an agent session-status change.
     /// One notify re-stages both snapshots; each dock's staging diff
     /// repaints it only on a real change. The app's Dock badge is recounted
-    /// with them.
+    /// with them, and keep-awake re-decides.
     pub(crate) fn notify_status_docks(&self, cx: &mut Context<Self>) {
         cx.notify();
         Self::refresh_dock_badge(cx);
+        crate::keep_awake::refresh(cx);
     }
 
     /// Drive the AgentChat status pulse and paint one final settled frame

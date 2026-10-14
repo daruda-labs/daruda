@@ -188,6 +188,7 @@ for OS leaves; `cfg!()` still compiles both branches. Gate platform-only imports
 functions, constants, and generated-string overrides with their callers.
 App-owned desktop capabilities live in `packages/app/src/platform/`;
 credentials, app-launch PATH hydration, and PTY I/O have named separate gates.
+System-sleep inhibition is `app/src/platform/power`'s `SleepLease`, per OS.
 The complete API table, exceptions, and enforcement are in
 [Core](packages/core/AGENTS.md#platform-capability-boundary).
 

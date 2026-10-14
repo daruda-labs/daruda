@@ -58,6 +58,8 @@ pub const VISIBILITY: &str = "icons/ui/visibility.svg";
 pub const DIFFERENCE: &str = "icons/ui/difference.svg";
 pub const UNFOLD_LESS: &str = "icons/ui/unfold-less.svg";
 pub const CHECK_CIRCLE: &str = "icons/ui/check-circle.svg";
+pub const KEEP_AWAKE: &str = "icons/ui/coffee.svg";
+pub const WARNING: &str = "icons/ui/warning.svg";
 // Lucide outlines, redrawn at one lighter stroke; the app's asset tests
 // check every file.
 pub const TASKS: &str = "icons/lucide/list-checks.svg";

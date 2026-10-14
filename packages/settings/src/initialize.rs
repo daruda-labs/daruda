@@ -376,6 +376,13 @@ impl SettingsView {
             cx,
             &mut input_subscriptions,
         );
+        let keep_awake_approval_wait_input = Self::new_text_field(
+            TextSetting::KeepAwakeApprovalWaitMinutes,
+            &config,
+            window,
+            cx,
+            &mut input_subscriptions,
+        );
         // Never pre-filled with the real token (`default_value`) — a stored
         // secret is never re-displayed in a text field, so this field can't
         // go through `new_text_field` (which always sets a default value).
@@ -401,6 +408,28 @@ impl SettingsView {
             daruda_config::CursorStyle::Underline => "underline".into(),
             daruda_config::CursorStyle::Bar => "bar".into(),
         };
+        let keep_awake_str: SharedString =
+            crate::spec::keep_awake_option(config.desktop.keep_awake).into();
+        let keep_awake_mode_select = cx.new(|cx| {
+            select::state_with_options(
+                [
+                    daruda_config::KeepAwakeMode::Off,
+                    daruda_config::KeepAwakeMode::Agent,
+                    daruda_config::KeepAwakeMode::On,
+                ]
+                .into_iter()
+                .map(|mode| {
+                    SelectOption::new(
+                        crate::spec::keep_awake_option(mode),
+                        crate::labels::keep_awake_mode_label(mode),
+                    )
+                })
+                .collect(),
+                Some(&keep_awake_str),
+                window,
+                cx,
+            )
+        });
         let cursor_style_select = cx.new(|cx| {
             select::state_with_options(
                 vec![
@@ -480,6 +509,7 @@ impl SettingsView {
                 SelectSetting::AgentChatFontFamily,
             ),
             (&cursor_style_select, SelectSetting::CursorStyle),
+            (&keep_awake_mode_select, SelectSetting::KeepAwakeMode),
             (&max_fps_select, SelectSetting::RenderMaxFps),
             (&syntax_theme_select, SelectSetting::SyntaxTheme),
             (&editor_select, SelectSetting::PreferredEditor),
@@ -582,6 +612,8 @@ impl SettingsView {
             agent_chat_font_size_input,
             agent_chat_line_height_input,
             cursor_style_select,
+            keep_awake_mode_select,
+            keep_awake_approval_wait_input,
             agent_catalog_search,
             agent_use_modifier_to_send: config.agent.use_modifier_to_send,
             agent_use_reading_width: config.agent.use_reading_width,

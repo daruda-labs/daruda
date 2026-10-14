@@ -81,6 +81,7 @@ pub(crate) fn clamp_or(value: f32, min: f32, max: f32, fallback: f32) -> f32 {
     }
 }
 pub use cursor::{CursorConfig, CursorStyle};
+pub use desktop::KeepAwakeMode;
 pub use editor::{
     EditorConfig, ExternalEditorPreset, PRESETS as EXTERNAL_EDITOR_PRESETS,
     preset as external_editor_preset,
@@ -288,6 +289,7 @@ impl Config {
         self.agent.clamp();
         self.status_bar.clamp();
         self.presence.clamp();
+        self.desktop.clamp();
         // A missing `[[agents]]` is handled by the serde field default, and the
         // manual `Config::default()` (used on load errors) seeds the Claude
         // default directly (since a232e44). This guard exists for the remaining

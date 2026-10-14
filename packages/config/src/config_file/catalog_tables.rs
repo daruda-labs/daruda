@@ -87,6 +87,7 @@ pub(super) fn status_bar_item_slug(item: StatusBarItem) -> &'static str {
         StatusBarItem::Ports => "ports",
         StatusBarItem::ClaudeUsage => "claude_usage",
         StatusBarItem::Flow => "flow",
+        StatusBarItem::KeepAwake => "keep_awake",
     }
 }
 

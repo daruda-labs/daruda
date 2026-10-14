@@ -27,6 +27,7 @@ mod git_changes_virtualized;
 mod git_commit_flow;
 mod git_discard;
 mod git_remote;
+mod keep_awake;
 mod lane_unread;
 mod left_dock_pulse;
 mod lifecycle;

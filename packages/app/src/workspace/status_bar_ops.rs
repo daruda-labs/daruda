@@ -2,11 +2,12 @@
 //! `status_bar/context_menu.rs` builds the menu and dispatches here;
 //! this file owns the `StatusBarConfig` persistence call chain.
 
-use daruda_config::StatusBarItem;
+use daruda_config::{KeepAwakeMode, StatusBarItem};
 use daruda_store::observability::error_report::{ErrorReport, ErrorSeverity};
 use gpui::{BorrowAppContext as _, Context};
 
 use crate::workspace::Workspace;
+use crate::workspace::status_bar::KeepAwakeView;
 
 impl Workspace {
     /// Flip `item`'s membership in `StatusBarConfig::hidden_items` and
@@ -36,6 +37,38 @@ impl Workspace {
                     .message(msg)
                     .at(file!(), line!())
                     .dedup("status_bar.toggle_item")
+                    .build(),
+                cx,
+            );
+        }
+    }
+
+    /// The keep-awake segment's snapshot; the status bar decides whether
+    /// to draw it, like every other segment.
+    pub(in crate::workspace) fn keep_awake_view(&self, cx: &gpui::App) -> KeepAwakeView {
+        KeepAwakeView {
+            mode: crate::keep_awake::mode(cx),
+            status: crate::keep_awake::status(cx),
+        }
+    }
+
+    /// Persist the keep-awake mode the status-bar menu picked. The policy
+    /// observes the settings store, so it re-decides on its own.
+    pub(in crate::workspace) fn set_keep_awake_mode(
+        &mut self,
+        mode: KeepAwakeMode,
+        cx: &mut Context<Self>,
+    ) {
+        let result = cx.update_global::<crate::settings_store::SettingsStore, _>(|store, _| {
+            store.apply_patch(daruda_config::SettingsPatch::KeepAwake(mode))
+        });
+        if let Err(msg) = result {
+            self.report_error(
+                ErrorReport::new(crate::surface::strings::error::keep_awake_save_failed())
+                    .severity(ErrorSeverity::Warning)
+                    .message(msg)
+                    .at(file!(), line!())
+                    .dedup("status_bar.keep_awake_mode")
                     .build(),
                 cx,
             );

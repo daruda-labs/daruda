@@ -12,7 +12,6 @@ pub(crate) mod installer_update;
 pub(crate) mod local_socket;
 pub mod notifications;
 pub(crate) mod ports;
-#[cfg(windows)]
 pub(crate) mod power;
 pub mod presence;
 pub(crate) mod startup_failure;

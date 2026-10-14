@@ -258,6 +258,8 @@ fn settings_patch_round_trips_the_advanced_keys() {
         P::PresenceGraceSecs(5),
         P::PresenceIdleSecs(45),
         P::PresenceIdleForegroundSecs(240),
+        P::KeepAwake(daruda_config::KeepAwakeMode::On),
+        P::KeepAwakeApprovalWaitMinutes(45),
     ] {
         daruda_config::apply_settings_patch_to(&patch, &path).expect("advanced patch");
     }
@@ -273,6 +275,69 @@ fn settings_patch_round_trips_the_advanced_keys() {
     assert_eq!(c.presence.away_grace_secs, 5);
     assert_eq!(c.presence.away_idle_secs, 45);
     assert_eq!(c.presence.away_idle_foreground_secs, 240);
+    assert_eq!(c.desktop.keep_awake, daruda_config::KeepAwakeMode::On);
+    assert_eq!(c.desktop.keep_awake_approval_wait_minutes, 45);
+}
+
+/// Writing the mode carries the old flag away, so the file never holds two
+/// keys that disagree.
+#[test]
+fn writing_keep_awake_drops_the_legacy_flag() {
+    use daruda_config::{KeepAwakeMode, SettingsPatch as P};
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("config.toml");
+    std::fs::write(
+        &path,
+        "[desktop]\ntray_enabled = true\nkeep_awake_while_working = true\n",
+    )
+    .unwrap();
+    assert_eq!(
+        Config::load_from(&path).desktop.keep_awake,
+        KeepAwakeMode::Agent
+    );
+    daruda_config::apply_settings_patch_to(&P::KeepAwake(KeepAwakeMode::On), &path).unwrap();
+    let text = std::fs::read_to_string(&path).unwrap();
+    assert!(!text.contains("keep_awake_while_working"), "{text}");
+    assert!(text.contains("keep_awake = \"on\""), "{text}");
+    assert!(text.contains("tray_enabled = true"), "{text}");
+    let c = Config::load_from(&path);
+    assert_eq!(c.desktop.keep_awake, KeepAwakeMode::On);
+    assert!(c.desktop.tray_enabled);
+}
+
+/// The minutes patch is a `[desktop]` keep-awake save too, so it also carries
+/// the old flag away, folding `true` into the new key.
+#[test]
+fn writing_keep_awake_minutes_drops_the_legacy_flag() {
+    use daruda_config::{KeepAwakeMode, SettingsPatch as P};
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("config.toml");
+    std::fs::write(&path, "[desktop]\nkeep_awake_while_working = true\n").unwrap();
+    daruda_config::apply_settings_patch_to(&P::KeepAwakeApprovalWaitMinutes(10), &path).unwrap();
+    let text = std::fs::read_to_string(&path).unwrap();
+    assert!(!text.contains("keep_awake_while_working"), "{text}");
+    assert!(text.contains("keep_awake = \"agent\""), "{text}");
+    assert_eq!(
+        Config::load_from(&path).desktop.keep_awake,
+        KeepAwakeMode::Agent
+    );
+}
+
+/// The approval-wait patch writes its key and is clamped like a load.
+#[test]
+fn keep_awake_approval_wait_patch_is_clamped() {
+    use daruda_config::SettingsPatch as P;
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("config.toml");
+    daruda_config::apply_settings_patch_to(&P::KeepAwakeApprovalWaitMinutes(0), &path).unwrap();
+    let text = std::fs::read_to_string(&path).unwrap();
+    assert!(
+        text.contains("keep_awake_approval_wait_minutes = 1"),
+        "{text}"
+    );
+    let mut config = Config::default();
+    P::KeepAwakeApprovalWaitMinutes(12).apply_to(&mut config);
+    assert_eq!(config.desktop.keep_awake_approval_wait_minutes, 12);
 }
 
 /// Reset deletes the key rather than writing the default, and keeps the
@@ -310,7 +375,7 @@ fn resetting_a_field_removes_only_its_key() {
 fn resetting_reaches_the_default_through_legacy_spellings() {
     use daruda_config::SettingsPatch as P;
     let d = Config::default();
-    let cases: [(&str, P); 5] = [
+    let cases: [(&str, P); 6] = [
         (
             "[theme]\npreset = \"dracula\"\n",
             P::TerminalPreset(d.theme.terminal_preset.clone()),
@@ -330,6 +395,10 @@ fn resetting_reaches_the_default_through_legacy_spellings() {
         (
             "[telegram]\naway_grace_secs = 99\n",
             P::PresenceGraceSecs(d.presence.away_grace_secs),
+        ),
+        (
+            "[desktop]\nkeep_awake_while_working = true\n",
+            P::KeepAwake(d.desktop.keep_awake),
         ),
     ];
     for (text, default) in cases {

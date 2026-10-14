@@ -242,6 +242,8 @@ pub struct SettingsView {
     agent_chat_line_height_input: Entity<InputState>,
     // Cursor
     cursor_style_select: Entity<SelectState>,
+    keep_awake_mode_select: Entity<SelectState>,
+    keep_awake_approval_wait_input: Entity<InputState>,
     /// Whether a fresh agent-chat pane holds its prose to the reading column.
     /// On the General page beside the themes: it is a reading preference, not
     /// an agent one, and applies to every agent.

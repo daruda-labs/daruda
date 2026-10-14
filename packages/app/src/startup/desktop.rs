@@ -35,6 +35,7 @@ pub(super) fn run() {
         platform::desktop_instance::install(instance, cx);
         platform::notifications::install(cx);
         platform::desktop::install(cx);
+        crate::keep_awake::install(cx);
         bind_keys::register_static_bindings(cx);
 
         // SettingsStore is the single source of truth — read the

@@ -177,6 +177,7 @@ const WORKSPACE: &[Card] = &[
             item(Item::Ports),
             item(Item::ClaudeUsage),
             item(Item::Flow),
+            item(Item::KeepAwake),
         ],
     },
     Card::Rows {
@@ -217,12 +218,20 @@ const AGENT: &[Card] = &[
             t(T::FlowCostCurrency),
         ],
     },
+    Card::Rows {
+        title: s::settings::card_keep_awake,
+        rows: &[sel(S::KeepAwakeMode)],
+    },
     Card::Custom(CustomCard::AgentCatalog),
     Card::Rows {
         title: s::settings::section_claude_status,
         rows: &[b(B::ClaudeStatusEnabled)],
     },
-    Card::Advanced(&[t(T::ClaudeStatusStaleSecs), t(T::ClaudeStatusFileTtlDays)]),
+    Card::Advanced(&[
+        t(T::ClaudeStatusStaleSecs),
+        t(T::ClaudeStatusFileTtlDays),
+        t(T::KeepAwakeApprovalWaitMinutes),
+    ]),
 ];
 
 const ORCHESTRATOR: &[Card] = &[

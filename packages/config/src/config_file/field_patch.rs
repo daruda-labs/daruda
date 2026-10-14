@@ -231,6 +231,18 @@ pub(super) fn patch_settings_document(
                 toml_edit::value(config.presence.away_idle_foreground_secs as i64),
             );
         }),
+        SettingsPatch::KeepAwake(_) => patch_section(doc, "desktop", |t| {
+            t.insert(
+                "keep_awake",
+                toml_edit::value(config.desktop.keep_awake.as_str()),
+            );
+        }),
+        SettingsPatch::KeepAwakeApprovalWaitMinutes(_) => patch_section(doc, "desktop", |t| {
+            t.insert(
+                "keep_awake_approval_wait_minutes",
+                toml_edit::value(config.desktop.keep_awake_approval_wait_minutes as i64),
+            );
+        }),
         SettingsPatch::AgentInputMaxRows(_) => patch_section(doc, "agent", |t| {
             t.insert(
                 "input_max_rows",

@@ -12,6 +12,7 @@ pub(crate) fn status_bar_item_label(item: daruda_config::StatusBarItem) -> Strin
         I::Ports => s::settings::status_bar_toggle_ports(),
         I::ClaudeUsage => s::settings::status_bar_toggle_claude_usage(),
         I::Flow => s::settings::status_bar_toggle_flow(),
+        I::KeepAwake => s::settings::status_bar_toggle_keep_awake(),
     }
 }
 
