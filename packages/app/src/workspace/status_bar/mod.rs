@@ -9,6 +9,7 @@ mod account_slot;
 mod context_menu;
 mod flow_segment;
 mod keep_awake_segment;
+mod menu;
 pub(in crate::workspace) mod orchestrator_chip;
 mod ports_segment;
 #[cfg(feature = "screenshot")]
@@ -32,15 +33,6 @@ const PROJECT_BRANCH_MAX_WIDTH: f32 = 220.0;
 const PROJECT_BRANCH_REDUCED_MAX_WIDTH: f32 = 150.0;
 const STATUS_BAR_ERROR_MAX_WIDTH: f32 = 240.0;
 const STATUS_BAR_ERROR_REDUCED_MAX_WIDTH: f32 = 140.0;
-
-fn popover(id: &'static str, cx: &App) -> crate::ui::Popover {
-    let popover = crate::ui::Popover::new(id);
-    #[cfg(feature = "screenshot")]
-    let popover = screenshot::open_for_shot(popover, id, cx);
-    #[cfg(not(feature = "screenshot"))]
-    let _ = cx;
-    popover
-}
 
 /// Responsive tier derived from the window's current width. The status
 /// bar has no horizontal scroll, so as the window narrows each tier

@@ -469,7 +469,7 @@ after settle and forces a repaint before capture.
 | Agent catalog | `agent-catalog-expanded`, `agent-catalog-editor[:<fold\|filter\|range>]` |
 | Window chrome | `client-chrome` forces app-drawn controls; native macOS traffic lights still cover the left inset, so assess the right edge and spacing |
 | Tab status | `tab-indicators` seeds each status dot; inspect its color |
-| Status bar | `status-ports`, `status-flows`, `keep-awake` (the keep-awake menu open over a seeded hold) |
+| Status bar | `status-ports`, `status-flows`, `status-usage`, `status-account`, `keep-awake`, `keep-awake-failed` — each chip's popup open over seeded data |
 | Agent chat | `agent-chat`, `agent-chat-working`, `agent-chat-empty`, `agent-chat-failure` |
 | Chat interaction | `agent-chat-fold`, `agent-chat-interrupted`, `agent-chat-options[:<tab>]`, `agent-chat-queue-parked`, `agent-chat-queue-armed` |
 | Chat details | `agent-chat-running-tool`, `agent-chat-plan[-stopped]`, `agent-chat-thoughts[-working\|-only]`, `agent-chat-sole-reply` |

@@ -3,13 +3,13 @@
 //! switching between managed accounts.
 
 use crate::ui::theme;
-use crate::ui::{DropdownMenu as _, PopupMenu, PopupMenuItem, button_status_pill_bare, spinner};
+use crate::ui::{PopupMenu, PopupMenuItem, button_status_pill_bare, spinner};
 use crate::workspace::main_area::pane::AccountDomain;
 use crate::workspace::main_area::pane_tree::PaneId;
 use crate::workspace::{AddManagedAccount, OpenSettings, Workspace};
 use daruda_settings::labels::account_recipe_label;
 use daruda_store::accounts::{AccountRecipeId, AccountSelection, AccountsState, ManagedAccount};
-use gpui::{App, IntoElement, SharedString, WeakEntity, div, prelude::*, px};
+use gpui::{AnyElement, App, IntoElement, SharedString, WeakEntity, div, prelude::*, px};
 
 const ACCOUNT_SLOT_MAX_WIDTH: f32 = 220.0;
 const ACCOUNT_SLOT_COMPACT_MAX_WIDTH: f32 = 150.0;
@@ -233,7 +233,7 @@ pub(super) fn render(
     };
     let tooltip = slot.tooltip.clone();
     let slot = slot.clone();
-    button_status_pill_bare("status-account", cx)
+    let trigger = button_status_pill_bare("status-account", cx)
         .max_w(px(max_width))
         .overflow_hidden()
         .text_size(px(theme::STATUS_BAR_FONT_SIZE))
@@ -261,71 +261,88 @@ pub(super) fn render(
                         .child(label),
                 )
                 .child(crate::ui::icons::icon(crate::ui::icons::EXPAND_MORE)),
-        )
-        .dropdown_menu(crate::ui::menu_builder(move |menu, _window, _cx| {
-            build_account_menu(&slot, menu)
-        }))
+        );
+    let builder =
+        crate::ui::menu_builder(move |menu, _window, _cx| build_account_menu(&slot, menu));
+    super::menu::dropdown("status-account", trigger, builder, cx)
 }
 
-/// Build the account slot's dropdown menu from the resolved slot: the
-/// domain-named "System default" entry (always present so a managed-account
-/// pane can always be reverted), then one headed section per auth domain
-/// with a checkmark on the pane's current override, then either the
-/// add-account block or — while a headless login runs (`login_pending`) —
-/// an in-progress row + Cancel in its place, and finally a "manage
-/// accounts" entry that opens Settings. Each item is a one-line dispatch
-/// into a `Workspace` method or action (render purity; no logic here).
+/// An agent's mark at the gutter's scale, for section headings and add rows.
+fn agent_mark(recipe: AccountRecipeId, cx: &App) -> AnyElement {
+    crate::ui::agent_icon(
+        Some(daruda_config::agent::icon::icon_for_recipe(recipe)),
+        px(theme::STATUS_BAR_AGENT_ICON_SIZE),
+        theme::current(cx).text_muted,
+    )
+    .into_any_element()
+}
+
+/// Header, the "System" choice (always there, so a pane can be reverted), one
+/// section per auth domain, then add-account rows — or the in-progress login
+/// and Cancel — and the "manage accounts" footer. Items are one-line dispatches.
 fn build_account_menu(slot: &AccountSlot, menu: PopupMenu) -> PopupMenu {
+    let menu = menu
+        .item(super::menu::menu_header(
+            crate::surface::strings::settings::status_bar_account_menu_title(),
+            Some(slot.label.clone()),
+            super::menu::Tone::Plain,
+        ))
+        .separator();
     let menu = {
         let workspace = slot.workspace.clone();
         let pane_id = slot.pane_id;
-        let is_current = slot.current == AccountSelection::SystemDefault;
+        let selected = slot.current == AccountSelection::SystemDefault;
+        let name = SharedString::from(system_label(slot.domain));
         menu.item(
-            PopupMenuItem::new(SharedString::from(system_label(slot.domain)))
-                .checked(is_current)
+            PopupMenuItem::element(move |_window, cx| {
+                super::menu::choice_row(name.clone(), None, selected, cx)
+            })
+            .on_click(move |_, window, app| {
+                if let Some(ws) = workspace.upgrade() {
+                    ws.update(app, |ws, cx| {
+                        ws.switch_pane_account(pane_id, AccountSelection::SystemDefault, window, cx)
+                    });
+                }
+            }),
+        )
+    };
+    let menu = slot.sections.iter().fold(menu, |menu, section| {
+        // The mark rides the section heading rather than each row: every row
+        // under it shares the domain, and the gutter is the selection dot's.
+        let recipe = section.recipe;
+        let heading = section.label.clone();
+        let menu = menu.separator().item(
+            PopupMenuItem::element(move |_window, cx| {
+                super::menu::section_row(Some(agent_mark(recipe, cx)), heading.clone(), cx)
+            })
+            .disabled(true),
+        );
+        section.accounts.iter().fold(menu, |m, account| {
+            let workspace = slot.workspace.clone();
+            let pane_id = slot.pane_id;
+            let account_id = account.id;
+            let selected = slot.current == AccountSelection::Managed(account_id);
+            let name = SharedString::from(
+                account_label(account.email.as_deref(), None)
+                    .unwrap_or_else(crate::surface::strings::settings::accounts_unknown_email),
+            );
+            let organization = account.organization.clone().map(SharedString::from);
+            m.item(
+                PopupMenuItem::element(move |_window, cx| {
+                    super::menu::choice_row(name.clone(), organization.clone(), selected, cx)
+                })
                 .on_click(move |_, window, app| {
                     if let Some(ws) = workspace.upgrade() {
                         ws.update(app, |ws, cx| {
                             ws.switch_pane_account(
                                 pane_id,
-                                AccountSelection::SystemDefault,
+                                AccountSelection::Managed(account_id),
                                 window,
                                 cx,
                             )
                         });
                     }
                 }),
-        )
-    };
-    let menu = slot.sections.iter().fold(menu, |menu, section| {
-        let menu = menu.separator().label(section.label.clone()).separator();
-        // The section header carries no icon slot (`PopupMenuItem::Label`), so
-        // the mark rides each row — which is also what disambiguates a mixed
-        // list once more than one domain has accounts.
-        let icon = daruda_config::agent::icon::icon_for_recipe(section.recipe);
-        section.accounts.iter().fold(menu, |m, account| {
-            let workspace = slot.workspace.clone();
-            let pane_id = slot.pane_id;
-            let account_id = account.id;
-            let is_current = slot.current == AccountSelection::Managed(account_id);
-            let label = account_label(account.email.as_deref(), account.organization.as_deref())
-                .unwrap_or_else(crate::surface::strings::settings::accounts_unknown_email);
-            m.item(
-                PopupMenuItem::new(SharedString::from(label))
-                    .icon(crate::ui::agent_menu_icon(Some(icon)))
-                    .checked(is_current)
-                    .on_click(move |_, window, app| {
-                        if let Some(ws) = workspace.upgrade() {
-                            ws.update(app, |ws, cx| {
-                                ws.switch_pane_account(
-                                    pane_id,
-                                    AccountSelection::Managed(account_id),
-                                    window,
-                                    cx,
-                                )
-                            });
-                        }
-                    }),
             )
         })
     });
@@ -333,29 +350,21 @@ fn build_account_menu(slot: &AccountSlot, menu: PopupMenu) -> PopupMenu {
     let menu = if slot.login_pending {
         menu.item(
             PopupMenuItem::element(|_window, _cx| {
-                div()
-                    .flex()
-                    .flex_row()
-                    .items_center()
-                    .gap(px(theme::STATUS_BAR_GAP))
-                    .child(spinner())
-                    .child(SharedString::from(
-                        crate::surface::strings::settings::accounts_login_in_progress(),
-                    ))
+                super::menu::action_row(
+                    Some(spinner().into_any_element()),
+                    crate::surface::strings::settings::accounts_login_in_progress().into(),
+                )
             })
             .disabled(true),
         )
         .item(
-            PopupMenuItem::new(SharedString::from(
-                crate::surface::strings::common::btn_cancel(),
-            ))
+            PopupMenuItem::element(|_window, _cx| {
+                super::menu::action_row(None, crate::surface::strings::common::btn_cancel().into())
+            })
             .on_click(move |_, _window, app| {
                 // Whichever window owns the attempt, not necessarily this one:
-                // the slot is process-wide, and a cancel that only reached the
-                // local window would leave the other windows' refusals with no
-                // remedy. A window holding nothing is a no-op. Safe to fan out
-                // from here — this handler runs on `App`, outside any
-                // Workspace lease.
+                // the slot is process-wide, so a cancel must reach every
+                // window. Safe to fan out — this runs outside any lease.
                 crate::window_registry::WindowRegistry::for_each_workspace(
                     app,
                     |ws, _window, cx| ws.cancel_pending_login(cx),
@@ -366,29 +375,36 @@ fn build_account_menu(slot: &AccountSlot, menu: PopupMenu) -> PopupMenu {
         slot.add_rows.iter().fold(menu, |m, row| match row {
             AddAccountRow::Add { recipe, label } => {
                 let recipe = *recipe;
+                let label = label.clone();
                 m.item(
-                    PopupMenuItem::new(label.clone())
-                        .icon(crate::ui::agent_menu_icon(Some(
-                            daruda_config::agent::icon::icon_for_recipe(recipe),
-                        )))
-                        .on_click(move |_, window, app| {
-                            window.dispatch_action(Box::new(AddManagedAccount(recipe)), app);
-                        }),
+                    PopupMenuItem::element(move |_window, cx| {
+                        super::menu::action_row(Some(agent_mark(recipe, cx)), label.clone())
+                    })
+                    .on_click(move |_, window, app| {
+                        window.dispatch_action(Box::new(AddManagedAccount(recipe)), app);
+                    }),
                 )
             }
-            AddAccountRow::Inert(label) => m.item(PopupMenuItem::new(label.clone()).disabled(true)),
+            AddAccountRow::Inert(label) => {
+                let label = label.clone();
+                m.item(
+                    PopupMenuItem::element(move |_window, _cx| {
+                        super::menu::action_row(None, label.clone())
+                    })
+                    .disabled(true),
+                )
+            }
         })
     };
-    menu.item(
-        PopupMenuItem::new(SharedString::from(
-            crate::surface::strings::settings::status_bar_manage_accounts(),
-        ))
-        .on_click(|_, window, app| {
+    super::menu::with_footer(
+        menu,
+        crate::surface::strings::settings::status_bar_manage_accounts(),
+        |_, window, app| {
             window.dispatch_action(
                 Box::new(OpenSettings(daruda_config::BuiltinSection::Accounts)),
                 app,
             );
-        }),
+        },
     )
 }
 

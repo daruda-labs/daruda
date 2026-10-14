@@ -183,12 +183,10 @@ pub const STATUS_BAR_ACCOUNT_PAD_X: f32 = 6.0;
 pub const STATUS_BAR_ACCOUNT_RADIUS: f32 = RADIUS_XS;
 pub const STATUS_BAR_AGENT_ICON_SIZE: f32 = 12.0;
 pub const STATUS_BAR_USAGE_CHIP_GAP: f32 = GAP_SM;
-// Fixed so the dropdown's gauges share one scale; `PopupMenu` sizes to content.
-pub const STATUS_BAR_USAGE_ROW_WIDTH: f32 = 180.0;
 pub const STATUS_BAR_USAGE_ROW_GAP: f32 = GAP_XS;
-// Keep-awake menu: a fixed width so each mode's description wraps to one or
-// two lines at most.
-pub const STATUS_BAR_KEEP_AWAKE_MENU_WIDTH: f32 = 280.0;
+// Every status-bar list menu's width. `PopupMenu` sizes to content, so a fixed
+// width keeps descriptions to one or two lines and gauges on one scale.
+pub const STATUS_BAR_MENU_WIDTH: f32 = 280.0;
 
 // ── Docks ───────────────────────────────────────────────────────────────────
 

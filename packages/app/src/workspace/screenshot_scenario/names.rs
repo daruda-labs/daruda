@@ -132,6 +132,12 @@ impl ScreenshotScenario {
             "keep-awake-failed" => Some(Self::StatusBar(
                 super::super::status_bar::screenshot::StatusBarShot::KeepAwakeFailed,
             )),
+            "status-usage" => Some(Self::StatusBar(
+                super::super::status_bar::screenshot::StatusBarShot::Usage,
+            )),
+            "status-account" => Some(Self::StatusBar(
+                super::super::status_bar::screenshot::StatusBarShot::Account,
+            )),
             "group-create" => Some(Self::QuickEntry(QuickEntryShot::GroupCreate)),
             "worktree-create" => Some(Self::QuickEntry(QuickEntryShot::WorktreeCreate)),
             "mcp-paste" => Some(Self::QuickEntry(QuickEntryShot::McpPaste)),

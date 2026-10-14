@@ -15,8 +15,8 @@
 //! by clicking away. Clicking a row goes to the lane that owns it.
 
 use super::StatusBarDensity;
+use crate::ui::button_status_pill_bare;
 use crate::ui::theme;
-use crate::ui::{Divider, button_status_pill_bare};
 use crate::workspace::Workspace;
 use gpui::{AnyElement, App, IntoElement, SharedString, WeakEntity, div, prelude::*, px};
 
@@ -48,8 +48,7 @@ pub(super) fn render(
     let rows = runs.to_vec();
     let t = theme::current(cx);
     Some(
-        super::popover("status-flow-popover", cx)
-            .p(px(theme::POPOVER_PANEL_PAD))
+        super::menu::popover("status-flow-popover", cx)
             .trigger(
                 // Tinted only while a run is waiting on a person: this is
                 // the one surface a user cannot hide (Flow is not a
@@ -65,24 +64,41 @@ pub(super) fn render(
                         div().child(label)
                     }),
             )
-            .content(move |_, window, cx| {
-                flow_panel(&rows, summary.clone(), workspace.clone(), window, cx)
-            }),
+            .content(move |_, window, cx| flow_panel(&rows, workspace.clone(), window, cx)),
     )
+}
+
+/// Waiting questions across every run — what the chip and the panel header
+/// put first, since work finishes on its own and a question does not.
+fn waiting_count(runs: &[FlowRunRow]) -> usize {
+    // Questions, not runs: one run can hold several once its nodes run
+    // together.
+    runs.iter()
+        .map(|run| usize::from(run.asking.is_some()) + run.also_waiting)
+        .sum()
+}
+
+/// The panel header's state and its tone: the waiting count, tinted, while
+/// anyone is waiting; otherwise how many runs are going.
+fn header_state(runs: &[FlowRunRow]) -> (String, super::menu::Tone) {
+    match waiting_count(runs) {
+        0 => (
+            crate::surface::strings::flow::menu_running(runs.len()),
+            super::menu::Tone::Plain,
+        ),
+        waiting => (
+            crate::surface::strings::flow::menu_waiting(waiting),
+            super::menu::Tone::Themed(|cx| theme::current(cx).flow_attention),
+        ),
+    }
 }
 
 /// One run names what it is doing; several name only how many, because a
 /// status bar has no room for two and the dropdown is one click away.
 fn trigger_label(runs: &[FlowRunRow], density: StatusBarDensity) -> String {
-    // A waiting run outranks a working one however many there are: work
-    // finishes on its own, a question does not.
-    // Questions, not runs: one run can hold several once its nodes run
-    // together, and a chip saying "1" over two unanswered questions is the
-    // reason somebody would leave one of them sitting.
-    let waiting: usize = runs
-        .iter()
-        .map(|run| usize::from(run.asking.is_some()) + run.also_waiting)
-        .sum();
+    // A waiting run outranks a working one however many there are; a chip
+    // saying "1" over two unanswered questions would leave one sitting.
+    let waiting = waiting_count(runs);
     if waiting > 0 {
         return crate::surface::strings::flow::chip_asking(waiting);
     }
@@ -96,24 +112,29 @@ fn trigger_label(runs: &[FlowRunRow], density: StatusBarDensity) -> String {
 
 fn flow_panel(
     runs: &[FlowRunRow],
-    summary: SharedString,
     workspace: WeakEntity<Workspace>,
     window: &gpui::Window,
     cx: &App,
 ) -> AnyElement {
     let t = theme::current(cx);
+    let (state, tone) = header_state(runs);
     crate::ui::popover_panel(window, crate::ui::PanelLimits {
-        width: FLOW_PANEL_WIDTH + theme::POPOVER_DEFAULT_CHROME,
-        max_height: FLOW_PANEL_MAX_HEIGHT + theme::POPOVER_DEFAULT_CHROME,
+        width: FLOW_PANEL_WIDTH + super::menu::PANEL_BODY_INSET + super::menu::PANEL_CHROME,
+        max_height: FLOW_PANEL_MAX_HEIGHT + theme::POPOVER_HEADER_BUDGET + super::menu::PANEL_CHROME,
         min_height: 0.0,
         margin: theme::POPOVER_WINDOW_MARGIN,
-        chrome: theme::POPOVER_DEFAULT_CHROME,
+        chrome: super::menu::PANEL_CHROME,
     }, None)
         .gap(px(FLOW_SECTION_GAP))
         .text_size(px(theme::STATUS_BAR_FONT_SIZE))
-        .child(div().flex_none().child(summary))
-        .child(div().flex_none().child(Divider::horizontal()))
-        .child(crate::ui::scroll_area("status-flow-scroll", px(FLOW_PANEL_MAX_HEIGHT),
+        .child(super::menu::panel_header(
+            crate::surface::strings::flow::menu_title(),
+            Some(state.into()),
+            tone,
+            cx,
+        ))
+        .child(super::menu::panel_separator())
+        .child(super::menu::panel_body(crate::ui::scroll_area("status-flow-scroll", px(FLOW_PANEL_MAX_HEIGHT),
             div().flex().flex_col().pr(px(theme::POPOVER_ACTION_GUTTER)).gap(px(FLOW_SECTION_GAP)).children(runs.iter().map(|run| {
             let workspace = workspace.clone();
             let reveal = workspace.clone();
@@ -192,7 +213,7 @@ fn flow_panel(
                     .debug_selector(move || format!("status-flow-stop-{}-{}", lane.project, lane.lane)),
                     ),
                 )
-        }))).fill())
+        }))).fill().max_h(px(FLOW_PANEL_MAX_HEIGHT))))
         .into_any_element()
 }
 
@@ -212,13 +233,7 @@ mod tests {
             window: &mut gpui::Window,
             cx: &mut gpui::Context<Self>,
         ) -> impl IntoElement {
-            flow_panel(
-                &self.rows,
-                "Running".into(),
-                self.workspace.clone(),
-                window,
-                cx,
-            )
+            flow_panel(&self.rows, self.workspace.clone(), window, cx)
         }
     }
 

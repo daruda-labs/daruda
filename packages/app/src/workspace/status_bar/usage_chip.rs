@@ -6,9 +6,7 @@
 use super::StatusBarDensity;
 use crate::surface::strings;
 use crate::ui::theme;
-use crate::ui::{
-    DropdownMenu as _, PopupMenu, PopupMenuItem, button_status_pill_bare, menu_builder, progress,
-};
+use crate::ui::{PopupMenu, PopupMenuItem, button_status_pill_bare, menu_builder, progress};
 use crate::workspace::Workspace;
 use crate::workspace::right_dock::usage::severity_color;
 use crate::workspace::usage_labels::{percent, window_label};
@@ -58,52 +56,51 @@ pub(super) fn render(
         t.text_muted,
     );
     let label = daruda_settings::labels::account_recipe_label(recipe);
-    Some(
-        button_status_pill_bare(SharedString::from(format!("status-usage-{label}")), cx)
-            .text_size(px(theme::STATUS_BAR_FONT_SIZE))
-            .tooltip(SharedString::from(label))
-            .child(
-                div()
-                    .flex()
-                    .flex_row()
-                    .items_center()
-                    .gap(px(theme::STATUS_BAR_USAGE_CHIP_GAP))
-                    // Only the percentage takes the severity colour; the icon,
-                    // window name and countdown stay muted like every other
-                    // status-bar label, so the colour reads as a gauge on one
-                    // number instead of tinting the whole pill.
-                    .child(icon)
-                    .children(
-                        parts
-                            .window
-                            .map(|window| div().child(SharedString::from(window))),
-                    )
-                    .child(
+    let trigger = button_status_pill_bare(SharedString::from(format!("status-usage-{label}")), cx)
+        .text_size(px(theme::STATUS_BAR_FONT_SIZE))
+        .tooltip(SharedString::from(label))
+        .child(
+            div()
+                .flex()
+                .flex_row()
+                .items_center()
+                .gap(px(theme::STATUS_BAR_USAGE_CHIP_GAP))
+                // Only the percentage takes the severity colour; the icon,
+                // window name and countdown stay muted like every other
+                // status-bar label, so the colour reads as a gauge on one
+                // number instead of tinting the whole pill.
+                .child(icon)
+                .children(
+                    parts
+                        .window
+                        .map(|window| div().child(SharedString::from(window))),
+                )
+                .child(
+                    div()
+                        .text_color(percent_color)
+                        .child(SharedString::from(parts.percent)),
+                )
+                // No dropdown chevron: this is a reading, not a control,
+                // and the pill's hover state already says it is clickable.
+                .children(
+                    parts
+                        .reset
+                        .map(|reset| div().child(SharedString::from(reset))),
+                )
+                // A refresh that failed keeps the last numbers on screen;
+                // this is what says they are no longer current.
+                .when(outcome.is_stale(), |row| {
+                    row.child(
                         div()
-                            .text_color(percent_color)
-                            .child(SharedString::from(parts.percent)),
+                            .text_color(t.text_subtle)
+                            .child(SharedString::from(strings::usage::stale_marker())),
                     )
-                    // No dropdown chevron: this is a reading, not a control,
-                    // and the pill's hover state already says it is clickable.
-                    .children(
-                        parts
-                            .reset
-                            .map(|reset| div().child(SharedString::from(reset))),
-                    )
-                    // A refresh that failed keeps the last numbers on screen;
-                    // this is what says they are no longer current.
-                    .when(outcome.is_stale(), |row| {
-                        row.child(
-                            div()
-                                .text_color(t.text_subtle)
-                                .child(SharedString::from(strings::usage::stale_marker())),
-                        )
-                    }),
-            )
-            .dropdown_menu(menu_builder(move |menu, _window, _cx| {
-                build_menu(recipe, &menu_rows, workspace.clone(), menu)
-            })),
-    )
+                }),
+        );
+    let builder = menu_builder(move |menu, _window, _cx| {
+        build_menu(recipe, &menu_rows, workspace.clone(), menu)
+    });
+    Some(super::menu::dropdown("status-usage", trigger, builder, cx))
 }
 
 /// The severity colour for a row's utilization — the same buckets and
@@ -174,20 +171,39 @@ fn chip_parts(row: &WindowRow, density: StatusBarDensity) -> ChipParts {
     }
 }
 
-/// Section header, one gauge row per window, then a jump to the Usage
-/// tab. The gauge rows carry no click handler — there is nothing to act
-/// on per window, and `PopupMenu` dismisses on any click regardless.
+/// The binding window — the one closest to its limit. The menu header shows
+/// it, since that is the number that stops work first.
+fn binding_row(rows: &[WindowRow]) -> Option<&WindowRow> {
+    rows.iter()
+        .max_by(|a, b| a.utilization.total_cmp(&b.utilization))
+}
+
+/// Header naming the domain with its binding percentage, one gauge row per
+/// window, then a jump to the Usage tab. The gauge rows carry no click
+/// handler — there is nothing to act on per window.
 fn build_menu(
     recipe: AccountRecipeId,
     rows: &[WindowRow],
     workspace: WeakEntity<Workspace>,
     menu: PopupMenu,
 ) -> PopupMenu {
-    // Named after the domain, not "PLAN USAGE": with a pill per provider the
-    // dropdown has to say whose limits these are.
-    let menu = menu.label(SharedString::from(
+    // Named after the domain: with a pill per provider the menu has to say
+    // whose limits these are.
+    let title = strings::settings::status_bar_usage_menu_title(
         daruda_settings::labels::account_recipe_label(recipe),
-    ));
+    );
+    let (state, tone) = match binding_row(rows) {
+        Some(row) => (
+            Some(SharedString::from(
+                strings::settings::status_bar_usage_chip_percent(percent(row.utilization)),
+            )),
+            super::menu::Tone::Fixed(row_color(row)),
+        ),
+        None => (None, super::menu::Tone::Plain),
+    };
+    let menu = menu
+        .item(super::menu::menu_header(title, state, tone))
+        .separator();
     let menu = rows.iter().fold(menu, |menu, row| {
         let row = row.clone();
         menu.item(PopupMenuItem::element(move |_window, cx| {
@@ -197,25 +213,23 @@ fn build_menu(
     // Reveals the panel (opens the dock, then selects the tab) rather
     // than dispatching the tab-switch action, which does nothing when
     // the dock is closed or Usage is already the selected view.
-    menu.separator().item(
-        PopupMenuItem::new(SharedString::from(
-            strings::settings::status_bar_usage_open_panel(),
-        ))
-        .on_click(move |_, _window, app| {
+    super::menu::with_footer(
+        menu,
+        strings::settings::status_bar_usage_open_panel(),
+        move |_, _window, app| {
             if let Some(ws) = workspace.upgrade() {
                 ws.update(app, |ws, cx| {
                     ws.reveal_right_dock_view(daruda_store::project::RightDockView::Usage, cx)
                 });
             }
-        }),
+        },
     )
 }
 
 /// One dropdown row — header line, gauge bar, reset countdown: the Usage
-/// tab's `gauge_card` shape at status-bar scale. The width is fixed
-/// (`PopupMenu` sizes to content) so every bar shares one scale rather than
-/// tracking its own label's length. `AnyElement` because
-/// `PopupMenuItem::element`'s builder is `'static`.
+/// tab's `gauge_card` shape at status-bar scale. The shared menu width keeps
+/// every bar on one scale. `AnyElement` because `PopupMenuItem::element`'s
+/// builder is `'static`.
 fn gauge_row(row: &WindowRow, cx: &App) -> AnyElement {
     let t = theme::current(cx);
     let color = row_color(row);
@@ -223,7 +237,8 @@ fn gauge_row(row: &WindowRow, cx: &App) -> AnyElement {
     div()
         .flex()
         .flex_col()
-        .w(px(theme::STATUS_BAR_USAGE_ROW_WIDTH))
+        .w(px(theme::STATUS_BAR_MENU_WIDTH))
+        .py(px(theme::PAD_SM))
         .gap(px(theme::STATUS_BAR_USAGE_ROW_GAP))
         .child(
             div()
@@ -302,6 +317,14 @@ mod tests {
         assert_eq!(rows[0].label, "5h");
         assert_eq!(rows[0].utilization, 10.0);
         assert_eq!(rows[1].label, "7d · Opus");
+    }
+
+    /// The header names the window closest to its limit, not the first one.
+    #[test]
+    fn the_menu_header_names_the_binding_window() {
+        let rows = [row("5h", 12.0), row("7d", 81.0), row("7d · Opus", 40.0)];
+        assert_eq!(binding_row(&rows).map(|r| r.label.as_str()), Some("7d"));
+        assert_eq!(binding_row(&[]), None);
     }
 
     #[test]

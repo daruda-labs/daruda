@@ -988,6 +988,8 @@ settings:
   # Status-bar account dropdown entry that opens the Settings window
   # directly on the Accounts section.
   status_bar_manage_accounts: "Manage accounts…"
+  # Status-bar account menu header; the active account's label sits right.
+  status_bar_account_menu_title: "Account"
   # Status-bar Ports segment's dropdown trigger label — the count of
   # workspace-owned listening TCP ports found by the last scan.
   status_bar_ports_label: "Ports: %{count}"
@@ -1004,6 +1006,8 @@ settings:
   status_bar_ports_table_port: "Port"
   status_bar_ports_table_process: "Process"
   status_bar_ports_table_address: "Address"
+  # Ports popover header; the scan summary sits right.
+  status_bar_ports_menu_title: "Ports"
   # Status bar's right-click toggle menu — one checkable entry per
   # [`daruda_config::StatusBarItem`], in `StatusBarItem::ALL` order.
   status_bar_toggle_project_branch: "Project / branch"
@@ -1021,6 +1025,9 @@ settings:
   # Last entry in the Claude-usage dropdown — switches the right dock to
   # the Usage tab, where the same numbers are shown as gauges.
   status_bar_usage_open_panel: "Open Usage panel"
+  # Usage menu header naming whose limits these are; `agent` is the auth
+  # domain's label. The binding window's percentage sits right.
+  status_bar_usage_menu_title: "%{agent} usage"
   # Placeholder for an account with no captured email (shouldn't happen
   # once login captures `oauthAccount`, but the field is `Option` today).
   accounts_unknown_email: "Unknown"
@@ -1882,6 +1889,11 @@ flow:
   # The chip while a run is waiting on a person. A count rather than a name:
   # the row underneath says which, and this has to fit a status bar.
   chip_asking: "Flow: %{waiting} waiting on you"
+  # The status-bar flow panel's header: the title, then how many runs are
+  # going — or, while anyone is waiting, how many questions are.
+  menu_title: "Flows"
+  menu_running: "%{n} running"
+  menu_waiting: "%{n} waiting on you"
   # Waiting on a person. Names the tool because "waiting for approval" with
   # no object is not something a user can act on from the row alone.
   stage_asking: "%{node} is waiting on you — %{tool}"

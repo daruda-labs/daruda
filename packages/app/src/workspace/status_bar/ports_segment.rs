@@ -7,8 +7,8 @@
 //! stay fixed while the port list body scrolls inside the window.
 
 use super::StatusBarDensity;
+use crate::ui::button_status_pill;
 use crate::ui::theme;
-use crate::ui::{Divider, button_status_pill};
 use crate::workspace::sync::ports::{PortEntry, PortKind, PortScanStatus};
 use gpui::{AnyElement, App, ClipboardItem, IntoElement, SharedString, div, prelude::*, px};
 use std::collections::BTreeMap;
@@ -47,8 +47,7 @@ pub(super) fn render(
     let external_count = external.len();
     let label = SharedString::from(trigger_label(workspace_count, density));
     let summary = SharedString::from(summary_label(status, workspace_count, external_count));
-    super::popover("status-ports-popover", cx)
-        .p(px(theme::POPOVER_PANEL_PAD))
+    super::menu::popover("status-ports-popover", cx)
         .trigger(
             button_status_pill("status-ports", label, cx)
                 .text_size(px(theme::STATUS_BAR_FONT_SIZE))
@@ -61,13 +60,14 @@ pub(super) fn render(
                 crate::ui::PanelLimits {
                     width: PORT_TABLE_WIDTH
                         + theme::SCROLL_AREA_GUTTER
-                        + theme::POPOVER_DEFAULT_CHROME,
+                        + super::menu::PANEL_BODY_INSET
+                        + super::menu::PANEL_CHROME,
                     max_height: PORT_MENU_SCROLL_MAX_H
                         + theme::POPOVER_HEADER_BUDGET
-                        + theme::POPOVER_DEFAULT_CHROME,
+                        + super::menu::PANEL_CHROME,
                     min_height: 0.0,
                     margin: theme::POPOVER_WINDOW_MARGIN,
-                    chrome: theme::POPOVER_DEFAULT_CHROME,
+                    chrome: super::menu::PANEL_CHROME,
                 },
                 None,
             )
@@ -75,8 +75,9 @@ pub(super) fn render(
         })
 }
 
-/// Dropdown panel body: summary line, divider, then — once the scan has
-/// data — the column header and the scrollable port table.
+/// Dropdown panel body: the shared header (title, scan summary), a
+/// separator, then — once the scan has data — the column header and the
+/// scrollable port table.
 fn ports_panel(
     status: PortScanStatus,
     groups: &[(String, Vec<PortEntry>)],
@@ -92,38 +93,36 @@ fn ports_panel(
         .flex_col()
         .gap(px(PORT_SECTION_GAP))
         .text_size(px(theme::STATUS_BAR_FONT_SIZE))
-        .child(div().flex_none().child(summary))
-        .child(div().flex_none().child(Divider::horizontal()));
+        .child(super::menu::panel_header(
+            crate::surface::strings::settings::status_bar_ports_menu_title(),
+            Some(summary),
+            super::menu::Tone::Plain,
+            cx,
+        ))
+        .child(super::menu::panel_separator());
+    let status_line = |label: String| super::menu::panel_body(status_row(label, cx));
     match status {
-        PortScanStatus::Pending => panel
-            .child(status_row(
-                crate::surface::strings::settings::status_bar_ports_scanning(),
-                cx,
-            ))
-            .into_any_element(),
-        PortScanStatus::Unavailable => panel
-            .child(status_row(
-                crate::surface::strings::settings::status_bar_ports_scan_unavailable(),
-                cx,
-            ))
-            .into_any_element(),
-        PortScanStatus::Available if groups.is_empty() && external.is_empty() => panel
-            .child(status_row(
-                crate::surface::strings::settings::status_bar_ports_no_workspace(),
-                cx,
-            ))
-            .into_any_element(),
+        PortScanStatus::Pending => panel.child(status_line(
+            crate::surface::strings::settings::status_bar_ports_scanning(),
+        )),
+        PortScanStatus::Unavailable => panel.child(status_line(
+            crate::surface::strings::settings::status_bar_ports_scan_unavailable(),
+        )),
+        PortScanStatus::Available if groups.is_empty() && external.is_empty() => panel.child(
+            status_line(crate::surface::strings::settings::status_bar_ports_no_workspace()),
+        ),
+        // The column header clears the scrollbar the way the rows do.
         PortScanStatus::Available => panel
             .child(
-                div()
-                    .flex_none()
+                super::menu::panel_row(table_header())
                     .pr(px(theme::SCROLL_AREA_GUTTER))
-                    .text_color(t.text_subtle)
-                    .child(table_header()),
+                    .text_color(t.text_subtle),
             )
-            .child(port_scroll_body(groups, external, cx))
-            .into_any_element(),
+            .child(super::menu::panel_body(port_scroll_body(
+                groups, external, cx,
+            ))),
     }
+    .into_any_element()
 }
 
 fn summary_label(status: PortScanStatus, workspace_count: usize, external_count: usize) -> String {

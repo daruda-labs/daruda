@@ -5,14 +5,10 @@ use super::StatusBarDensity;
 use crate::keep_awake::KeepAwakeStatus;
 use crate::surface::strings as s;
 use crate::ui::theme;
-use crate::ui::{DropdownMenu as _, PopupMenu, PopupMenuItem, button_status_pill_bare};
+use crate::ui::{PopupMenu, PopupMenuItem, button_status_pill_bare};
 use crate::workspace::{OpenSettings, Workspace};
 use daruda_config::{BuiltinSection, KeepAwakeMode};
-use gpui::{Anchor, AnyElement, App, IntoElement, SharedString, WeakEntity, div, prelude::*, px};
-
-/// The bar is the window's bottom edge, so the menu grows up and left from
-/// the pill rather than being pushed back over it.
-pub(super) const MENU_ANCHOR: Anchor = Anchor::BottomRight;
+use gpui::{AnyElement, App, SharedString, WeakEntity, div, prelude::*, px};
 
 /// Snapshot the segment renders from: the configured mode and what the
 /// policy is doing with it.
@@ -138,13 +134,7 @@ pub(super) fn render(
         );
     let builder =
         crate::ui::menu_builder(move |menu, _window, _cx| build_menu(view, &workspace, menu));
-    #[cfg(feature = "screenshot")]
-    if super::screenshot::keep_awake_menu_open(cx) {
-        return super::screenshot::open_menu(trigger, builder);
-    }
-    trigger
-        .dropdown_menu_with_anchor(MENU_ANCHOR, builder)
-        .into_any_element()
+    super::menu::dropdown("status-keep-awake", trigger, builder, cx)
 }
 
 /// The menu's modes, top to bottom.
@@ -191,91 +181,41 @@ fn build_menu(
     workspace: &WeakEntity<Workspace>,
     menu: PopupMenu,
 ) -> PopupMenu {
+    // A failure takes its own colour so it is not read past.
+    let tone = if menu_state(view.status) == MenuState::Failed {
+        super::menu::Tone::Themed(|cx| theme::current(cx).keep_awake_failed)
+    } else {
+        super::menu::Tone::Plain
+    };
     let menu = menu
-        .item(PopupMenuItem::element(move |_window, cx| header_row(view, cx)).disabled(true))
+        .item(super::menu::menu_header(
+            s::keep_awake::menu_title(),
+            Some(menu_status(view).into()),
+            tone,
+        ))
         .separator();
     let menu = MODES.into_iter().fold(menu, |menu, mode| {
         let workspace = workspace.clone();
         let current = mode == view.mode;
         menu.item(
-            PopupMenuItem::element(move |_window, cx| mode_row(mode, current, cx)).on_click(
-                move |_, _window, app| {
-                    if let Some(ws) = workspace.upgrade() {
-                        ws.update(app, |ws, cx| ws.set_keep_awake_mode(mode, cx));
-                    }
-                },
-            ),
+            PopupMenuItem::element(move |_window, cx| {
+                super::menu::choice_row(
+                    mode_label(mode).into(),
+                    Some(mode_description(mode).into()),
+                    current,
+                    cx,
+                )
+            })
+            .on_click(move |_, _window, app| {
+                if let Some(ws) = workspace.upgrade() {
+                    ws.update(app, |ws, cx| ws.set_keep_awake_mode(mode, cx));
+                }
+            }),
         )
     });
-    menu.separator().item(
-        PopupMenuItem::new(SharedString::from(s::keep_awake::menu_settings())).on_click(
-            |_, window, app| {
-                window.dispatch_action(Box::new(OpenSettings(BuiltinSection::Agent)), app);
-            },
-        ),
-    )
-}
-
-/// Title on the left, mode and state on the right. The disabled item mutes
-/// both; a failure takes its own colour so it is not read past.
-fn header_row(view: KeepAwakeView, cx: &App) -> AnyElement {
-    let t = theme::current(cx);
-    let failed = menu_state(view.status) == MenuState::Failed;
-    div()
-        .flex()
-        .flex_row()
-        .items_center()
-        .justify_between()
-        .w(px(theme::STATUS_BAR_KEEP_AWAKE_MENU_WIDTH))
-        .text_size(px(theme::FONT_SIZE_SM))
-        .child(SharedString::from(s::keep_awake::menu_title()))
-        .child(
-            div()
-                .when(failed, |el| el.text_color(t.keep_awake_failed))
-                .child(SharedString::from(menu_status(view))),
-        )
-        .into_any_element()
-}
-
-/// One mode: the dot gutter, then its name directly over a muted, wrapping
-/// description. Every row reserves the gutter so the names align.
-fn mode_row(mode: KeepAwakeMode, current: bool, cx: &App) -> AnyElement {
-    let t = theme::current(cx);
-    div()
-        .flex()
-        .flex_row()
-        .items_center()
-        .w(px(theme::STATUS_BAR_KEEP_AWAKE_MENU_WIDTH))
-        .py(px(theme::PAD_SM))
-        .child(
-            div()
-                .flex_none()
-                .w(px(theme::CONTROL_ICON_SIZE))
-                .when(current, |el| {
-                    el.child(
-                        div()
-                            .w(px(theme::STATUS_BAR_DOT_SIZE))
-                            .h(px(theme::STATUS_BAR_DOT_SIZE))
-                            .rounded_full()
-                            .bg(t.text_primary),
-                    )
-                }),
-        )
-        .child(
-            div()
-                .flex_1()
-                .min_w_0()
-                .flex()
-                .flex_col()
-                .child(SharedString::from(mode_label(mode)))
-                .child(
-                    div()
-                        .text_size(px(theme::FONT_SIZE_SM))
-                        .text_color(t.text_muted)
-                        .child(SharedString::from(mode_description(mode))),
-                ),
-        )
-        .into_any_element()
+    super::menu::with_footer(menu, s::keep_awake::menu_settings(), |_, window, app| {
+        window.dispatch_action(Box::new(OpenSettings(BuiltinSection::Agent)), app);
+    })
 }
 
 #[cfg(test)]

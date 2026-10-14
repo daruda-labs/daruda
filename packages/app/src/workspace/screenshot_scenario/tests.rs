@@ -244,6 +244,23 @@ fn keep_awake_name_maps_to_scenario() {
 }
 
 #[test]
+fn status_menu_names_map_to_scenarios() {
+    use crate::workspace::status_bar::screenshot::StatusBarShot;
+    for (name, shot) in [
+        ("status-ports", StatusBarShot::Ports),
+        ("status-flows", StatusBarShot::Flows),
+        ("status-usage", StatusBarShot::Usage),
+        ("status-account", StatusBarShot::Account),
+    ] {
+        assert_eq!(
+            ScreenshotScenario::from_cli_name(name),
+            Some(ScreenshotScenario::StatusBar(shot)),
+            "{name}"
+        );
+    }
+}
+
+#[test]
 fn toast_name_maps_to_scenario() {
     assert_eq!(
         ScreenshotScenario::from_cli_name("toast"),
