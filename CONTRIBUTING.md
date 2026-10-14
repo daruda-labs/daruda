@@ -452,7 +452,7 @@ target/debug/daruda --screenshot /tmp/s.png --screenshot-theme light,dark   # ba
 ```
 
 Two more capture knobs (compose with everything above):
-- `--screenshot-size WxH` — fix the captured window size (e.g. `1280x800`) instead of the restored bounds; for stable doc / pixel-regression shots.
+- `--screenshot-size WxH` — fix the captured window size (e.g. `1280x800`) instead of the restored bounds; for stable doc / pixel-regression shots. The resize lands before `--screenshot-scenario` opens its overlay, so the overlay is laid out at the captured size.
 - `DARUDA_SCREENSHOT_SETTLE_MS=<ms>` — override the 2 s post-launch settle (raise on slow CI / big workspaces, lower for quick local shots).
 
 **Tier 2 — persisted state under `DARUDA_DATA_DIR` (layout & structure):** `state/workspace/workspaces/<uuid>.json` (`WorkspaceState`: dock open/size, window bounds, active project+lane, `active_dock_view`, `active_right_panel_view`, focused pane, groups), `state/workspace/projects/<uuid>.json` (`ProjectState`: lanes, tabs, pane split tree, file-pane path + view_mode), `panels.json` (macro grid), `tasks.json` (task list). (Schemas in `daruda_store::project::{WorkspaceState,ProjectState}`.) **Easiest seeding: set `DARUDA_DATA_DIR`, drive the app by hand to the scenario once, quit, re-run with `--screenshot` against the same dir** — no schema guessing.

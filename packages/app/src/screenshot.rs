@@ -194,6 +194,14 @@ pub(crate) fn schedule_capture(
         let settle = process_env::read_millis_or(process_env::SCREENSHOT_SETTLE_MS, SETTLE_DELAY);
         cx.background_executor().timer(settle).await;
 
+        // Resize before the scenario: an overlay sizes itself against the
+        // window it opens in, so opening it first would capture the restored
+        // size's layout in the fixed-size window.
+        if let Some(win_size) = win_size {
+            cx.update(|cx| resize_target(win_size, cx));
+            cx.background_executor().timer(SCENARIO_RENDER_DELAY).await;
+        }
+
         // The scenario is applied once; the theme loop then re-themes the open
         // overlay in place (a capture override repaints every window), so a
         // batch never needs to tear down and re-open the overlay between shots.
@@ -222,10 +230,7 @@ pub(crate) fn schedule_capture(
                     );
                 });
             }
-            if let Some(win_size) = win_size {
-                cx.update(|cx| resize_target(win_size, cx));
-            }
-            // Let the theme swap / resize / scenario overlay paint before
+            // Let the theme swap / scenario overlay paint before
             // capture (`render_to_image` reads the last painted frame).
             cx.background_executor().timer(SCENARIO_RENDER_DELAY).await;
             // Then one more, so anything that only settles on the frame after
