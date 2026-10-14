@@ -16,10 +16,10 @@ daruda_config = { workspace = true }
 daruda_ui = { workspace = true }
 gpui = { workspace = true }
 rust-i18n = { workspace = true }
-shell-words = "1"
-tree-sitter = "0.25"
-tree-sitter-bash = "0.25.1"
-tree-sitter-python = "0.25.0"
+shell-words = { workspace = true }
+tree-sitter = { workspace = true }
+tree-sitter-bash = { workspace = true }
+tree-sitter-python = { workspace = true }
 
 [build-dependencies]
 strings_gen = { workspace = true }
@@ -27,5 +27,5 @@ strings_gen = { workspace = true }
 [dev-dependencies]
 daruda_ui = { workspace = true, features = ["test-support"] }
 gpui = { workspace = true, features = ["test-support"] }
-serde_json = "1"
+serde_json = { workspace = true }
 strings_gen = { workspace = true }

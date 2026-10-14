@@ -42,20 +42,20 @@ replay = ["devtools"]
 
 [dependencies]
 daruda_core = { workspace = true }
-anyhow = "1"
-base64 = "0.22"
-chrono = { version = "0.4", features = ["serde"] }
-dirs = "6"
-fs4 = "0.13"
-sha2 = "0.10"
+anyhow = { workspace = true }
+base64 = { workspace = true }
+chrono = { workspace = true, default-features = true, features = ["serde"] }
+dirs = { workspace = true }
+fs4 = { workspace = true }
+sha2 = { workspace = true }
 # Flow node cards say a timeout in the vocabulary the flow file uses.
-humantime = "2"
-futures = "0.3"
-serde = { version = "1", features = ["derive"] }
-serde_json = "1"
-yaml_serde = "0.10"
+humantime = { workspace = true }
+futures = { workspace = true }
+serde = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true }
+yaml_serde = { workspace = true }
 ghostty_vt = { workspace = true }
-image = { version = "0.25", default-features = false, features = ["png", "jpeg", "gif", "webp", "bmp"] }
+image = { workspace = true, default-features = false, features = ["png", "jpeg", "gif", "webp", "bmp"] }
 daruda_acp = { workspace = true }
 daruda_agent = { workspace = true }
 daruda_store = { workspace = true }
@@ -77,25 +77,25 @@ gpui_component = { workspace = true }
 gpui_component_assets = { workspace = true }
 ignore = "0.4"
 lsp-types = { workspace = true }
-portable-pty = "0.9"
-pulldown-cmark = { version = "0.13", default-features = false }
+portable-pty = { workspace = true }
+pulldown-cmark = { workspace = true, default-features = false }
 rust-i18n = { workspace = true }
-semver = "1"
+semver = { workspace = true }
 sys-locale = "0.3"
 # Named directly, not inherited: a flow run's `FlowEvent` channel is built
 # here, and a transitive dependency has no name in Rust source.
 smol = { workspace = true }
-sysinfo = "0.32"
-tempfile = "3"
-similar = "2"
-shell-words = "1"
-toml = "0.8"
-toml_edit = "0.22"
-unicode-segmentation = "1"
-url = "2"
-ureq = { version = "2", default-features = false, features = ["tls", "json"] }
+sysinfo = { workspace = true }
+tempfile = { workspace = true }
+similar = { workspace = true }
+shell-words = { workspace = true }
+toml = { workspace = true }
+toml_edit = { workspace = true }
+unicode-segmentation = { workspace = true }
+url = { workspace = true }
+ureq = { workspace = true, default-features = false, features = ["tls", "json"] }
 tungstenite = { version = "0.30", features = ["rustls-tls-webpki-roots"] }
-uuid = { version = "1.10", features = ["v4"] }
+uuid = { workspace = true, features = ["v4"] }
 open = "5.3.5"
 nucleo-matcher = "0.3.1"
 
@@ -109,8 +109,8 @@ nucleo-matcher = "0.3.1"
 gpui_macos = { workspace = true }
 objc2-app-kit = { version = "0.3", default-features = false, features = ["NSApplication", "NSButton", "NSCell", "NSControl", "NSDockTile", "NSResponder", "NSView", "NSWindow"] }
 objc2-foundation = { version = "0.3", default-features = false, features = ["NSString", "NSThread"] }
-raw-window-handle = "0.6"
-notify = { version = "7", default-features = false, features = ["macos_fsevent"] }
+raw-window-handle = { workspace = true }
+notify = { workspace = true, default-features = false, features = ["macos_fsevent"] }
 
 [target.'cfg(target_os = "linux")'.dependencies]
 # `screensaver` is the X11 extension attention.rs queries for system idle time
@@ -121,14 +121,14 @@ x11rb = { version = "0.13.1", features = ["screensaver", "allow-unsafe-code"] }
 # No Linux-specific feature needed — notify's inotify backend is unconditional;
 # `macos_fsevent` is the only opt-in OS backend (default-enabled upstream,
 # hence disabling default-features + opting back in only on macOS above).
-notify = { version = "7", default-features = false }
+notify = { workspace = true, default-features = false }
 
 [target.'cfg(target_os = "windows")'.dependencies]
 tray-icon = { version = "0.21.3", default-features = false }
-raw-window-handle = "0.6"
+raw-window-handle = { workspace = true }
 windows_api = { package = "windows", version = "0.61.3", features = ["Data_Xml_Dom", "UI_Notifications", "Foundation", "Win32_System_Com", "Win32_System_Com_StructuredStorage", "Win32_System_Variant", "Win32_System_WinRT", "Win32_UI_Shell", "Win32_UI_Shell_PropertiesSystem", "Win32_Storage_EnhancedStorage", "Win32_Storage_FileSystem", "Win32_UI_WindowsAndMessaging"] }
 uds_windows = "1.2.1"
-windows-sys = { version = "0.61", features = [
+windows-sys = { workspace = true, features = [
     "Win32_Foundation", "Win32_Security_Authorization", "Win32_Security_Credentials",
     "Win32_Security_Cryptography", "Win32_Security_Cryptography_Catalog",
     "Win32_Security_Cryptography_Sip", "Win32_Security_WinTrust",
@@ -140,7 +140,7 @@ windows-sys = { version = "0.61", features = [
 # Same reasoning as Linux: ReadDirectoryChangesW is unconditional, so there is
 # no feature to opt into — only `macos_fsevent` is gated. Without this section
 # the app has no `notify` at all on Windows and does not compile.
-notify = { version = "7", default-features = false }
+notify = { workspace = true, default-features = false }
 
 [build-dependencies]
 strings_gen = { workspace = true }
@@ -149,7 +149,7 @@ embed-resource = "3.0"
 [dev-dependencies]
 strings_gen = { workspace = true }
 test_process = { workspace = true }
-agent-client-protocol = "2.0"
+agent-client-protocol = { workspace = true }
 # `test-support` swaps the PTY spawn for a stub. Declared here rather than on
 # the normal dependency so only test targets get it: a workspace test that
 # opens a tab would otherwise fork a real login shell.
@@ -166,7 +166,7 @@ daruda_chat = { workspace = true, features = ["test-support"] }
 daruda_settings = { workspace = true, features = ["test-support"] }
 daruda_ui = { workspace = true, features = ["test-support"] }
 gpui = { workspace = true, features = ["test-support"] }
-serde_json = "1"
+serde_json = { workspace = true }
 
 [target.'cfg(target_os = "macos")'.dev-dependencies]
 gpui_macos = { workspace = true, features = ["test-support"] }

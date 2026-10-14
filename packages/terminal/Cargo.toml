@@ -13,14 +13,14 @@ workspace = true
 test-support = []
 
 [dependencies]
-base64 = "0.22"
+base64 = { workspace = true }
 daruda_core = { workspace = true }
 daruda_store = { workspace = true }
-dirs = "6"
+dirs = { workspace = true }
 ghostty_vt = { workspace = true }
 gpui = { workspace = true }
-portable-pty = "0.9"
-regex = "1.10"
+portable-pty = { workspace = true }
+regex = { workspace = true }
 rust-i18n = { workspace = true }
 serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }
@@ -30,10 +30,10 @@ unicode-width = "0.2"
 
 [dev-dependencies]
 criterion = { version = "0.5", features = ["html_reports"] }
-tempfile = "3"
+tempfile = { workspace = true }
 
 [target.'cfg(windows)'.dev-dependencies]
-windows-sys = { version = "0.61", features = ["Win32_System_Console", "Win32_Foundation"] }
+windows-sys = { workspace = true, features = ["Win32_System_Console", "Win32_Foundation"] }
 
 [[bench]]
 name = "render"

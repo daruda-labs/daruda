@@ -11,8 +11,8 @@ description = "Generates a crate's locale string functions from locales/en.yml a
 workspace = true
 
 [dependencies]
-yaml_serde = "0.10"
-syn = { version = "2", features = ["full"] }
+yaml_serde = { workspace = true }
+syn = { workspace = true, features = ["full"] }
 
 [dev-dependencies]
-tempfile = "3"
+tempfile = { workspace = true }

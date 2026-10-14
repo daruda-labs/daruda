@@ -24,14 +24,14 @@ daruda_terminal = { workspace = true }
 ferrum_flow = { workspace = true }
 gpui = { workspace = true }
 gpui_component = { workspace = true }
-image = { version = "0.25", default-features = false }
+image = { workspace = true, default-features = false }
 schemars = { workspace = true }
-serde = { version = "1", features = ["derive"] }
-serde_json = "1"
-tree-sitter = "0.25"
-tree-sitter-bash = "0.25.1"
+serde = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true }
+tree-sitter = { workspace = true }
+tree-sitter-bash = { workspace = true }
 tree-sitter-highlight = "0.25"
-tree-sitter-python = "0.25.0"
+tree-sitter-python = { workspace = true }
 
 [dev-dependencies]
 gpui = { workspace = true, features = ["test-support"] }

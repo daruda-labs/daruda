@@ -27,10 +27,10 @@ daruda_transcript = { workspace = true }
 daruda_ui = { workspace = true }
 gpui = { workspace = true }
 rust-i18n = { workspace = true }
-tempfile = { version = "3", optional = true }
-uuid = "1.10"
+tempfile = { workspace = true, optional = true }
+uuid = { workspace = true }
 # Whether an agent command resolves on PATH, for the catalog's warning.
-which = "6"
+which = { workspace = true }
 
 [build-dependencies]
 strings_gen = { workspace = true }
@@ -41,4 +41,4 @@ daruda_chat = { workspace = true, features = ["test-support"] }
 daruda_ui = { workspace = true, features = ["test-support"] }
 gpui = { workspace = true, features = ["test-support"] }
 strings_gen = { workspace = true }
-tempfile = "3"
+tempfile = { workspace = true }

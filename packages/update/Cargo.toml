@@ -12,11 +12,11 @@ workspace = true
 
 [dependencies]
 daruda_core = { workspace = true }
-fs4 = "0.13"
-semver = "1"
+fs4 = { workspace = true }
+semver = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
-sha2 = "0.10"
-tempfile = "3"
-thiserror = "2"
-ureq = { version = "2", default-features = false, features = ["tls"] }
+sha2 = { workspace = true }
+tempfile = { workspace = true }
+thiserror = { workspace = true }
+ureq = { workspace = true, default-features = false, features = ["tls"] }

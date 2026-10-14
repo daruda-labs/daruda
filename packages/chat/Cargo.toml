@@ -20,9 +20,9 @@ screenshot = ["devtools", "gpui/test-support"]
 test-support = ["gpui/test-support", "daruda_ui/test-support"]
 
 [dependencies]
-anyhow = "1"
-base64 = "0.22"
-chrono = "0.4"
+anyhow = { workspace = true }
+base64 = { workspace = true }
+chrono = { workspace = true, default-features = true }
 daruda_acp = { workspace = true }
 daruda_config = { workspace = true }
 daruda_content = { workspace = true }
@@ -31,17 +31,17 @@ daruda_store = { workspace = true }
 daruda_transcript = { workspace = true }
 daruda_ui = { workspace = true }
 gpui = { workspace = true }
-image = { version = "0.25", default-features = false, features = ["png", "jpeg", "gif", "webp", "bmp"] }
-pulldown-cmark = { version = "0.13", default-features = false }
+image = { workspace = true, default-features = false, features = ["png", "jpeg", "gif", "webp", "bmp"] }
+pulldown-cmark = { workspace = true, default-features = false }
 rust-i18n = { workspace = true }
-serde_json = "1"
+serde_json = { workspace = true }
 
 [build-dependencies]
 strings_gen = { workspace = true }
 
 [dev-dependencies]
-agent-client-protocol = "2.0"
+agent-client-protocol = { workspace = true }
 daruda_ui = { workspace = true, features = ["test-support"] }
 gpui = { workspace = true, features = ["test-support"] }
 strings_gen = { workspace = true }
-tempfile = "3"
+tempfile = { workspace = true }

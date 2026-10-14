@@ -22,19 +22,21 @@ config-options example below).
 **Three separate version lines live here — do not conflate them.** They come
 from two different repos, and each release note names only its own line:
 
-| Line | Where | Latest as of 2026-07-30 | daruda |
-|---|---|---|---|
-| SDK crate `agent-client-protocol` | <https://github.com/agentclientprotocol/rust-sdk> | `2.0.0` | `2.0.0` |
-| Schema crate `agent-client-protocol-schema` | <https://github.com/agentclientprotocol/agent-client-protocol> (tags `vX.Y.Z`, "Rust Crate") | `1.6.0` | `1.5.0` |
-| JSON spec | same repo (tags `schema-vX.Y.Z`) | `schema-v1.20.0` | `~v1.19.1` |
+| Line | Where | daruda integration |
+|---|---|---|
+| SDK crate `agent-client-protocol` | <https://github.com/agentclientprotocol/rust-sdk> | `2.2.0` |
+| Schema crate `agent-client-protocol-schema` | <https://github.com/agentclientprotocol/agent-client-protocol> (tags `vX.Y.Z`, "Rust Crate") | `1.9.1` |
+| JSON spec | same repo (tags `schema-vX.Y.Z`) | v1 protocol types under `schema::v1` |
 
-- The SDK **exact-pins** the schema crate (`= 1.5.0` at SDK 2.0.0), so the
+- The SDK **exact-pins** the schema crate (`= 1.9.1` at SDK 2.2.0), so the
   schema line cannot be advanced on its own — it moves only when the SDK
-  releases against a newer one. No SDK release consumes schema `1.6.0` /
-  `schema-v1.20.0` yet.
-- Keep current: `"2.0"` in `Cargo.toml` is a caret requirement (`>=2.0.0,
+  releases against a newer one.
+- Keep current: `"2.2"` in the workspace `Cargo.toml` is a caret requirement (`>=2.2.0,
   <3.0.0`), so `cargo update -p agent-client-protocol` picks up patch and minor
   releases; edit the version string only when a new major lands.
+- Authentication methods are stable in this integration; do not restore the
+  removed `unstable_auth_methods` feature. Per-turn token usage still uses
+  `unstable_end_turn_token_usage` and needs its protocol regression tests.
 
 **Capabilities are opt-in, and silence costs features.** An agent may only use a
 feature the client advertises at `initialize`. `session.configOptions.boolean`

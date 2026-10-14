@@ -12,7 +12,7 @@ workspace = true
 
 [dependencies]
 daruda_flow = { workspace = true }
-tree-sitter = "0.25"
+tree-sitter = { workspace = true }
 # Node kinds in `locate` are measured against this grammar version.
-tree-sitter-yaml = "0.7"
-yaml_serde = "0.10"
+tree-sitter-yaml = { workspace = true }
+yaml_serde = { workspace = true }

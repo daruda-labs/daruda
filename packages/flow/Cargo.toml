@@ -15,7 +15,7 @@ daruda_acp = { workspace = true }
 daruda_core = { workspace = true }
 # The record says when each attempt settled. Already in the tree through
 # `humantime-serde`; taken directly for `format_rfc3339_seconds`.
-humantime = "2"
+humantime = { workspace = true }
 humantime-serde = "1.1"
 petgraph = "0.8"
 # Two output paths differing only in Unicode normalisation are one file on
@@ -30,13 +30,13 @@ shlex = "1.3"
 # A retry's `wait` is a timer the scheduler itself awaits, so this is a
 # runtime dependency, not just a test harness.
 smol = { workspace = true }
-thiserror = "2"
-yaml_serde = "0.10"
+thiserror = { workspace = true }
+yaml_serde = { workspace = true }
 
 [dev-dependencies]
-tempfile = "3"
+tempfile = { workspace = true }
 
 # Only for the example's SIGINT handler — a demo binary wanting Ctrl+C, not
 # a capability. Everything else goes through `daruda_core::process`.
 [target.'cfg(unix)'.dev-dependencies]
-libc = "0.2"
+libc = { workspace = true }

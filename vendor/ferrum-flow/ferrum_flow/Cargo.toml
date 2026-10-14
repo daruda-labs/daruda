@@ -43,8 +43,6 @@ log = { workspace = true }
 serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }
 smallvec = { workspace = true }
-# Not in workspace.dependencies — declared locally at the versions already
-# resolved in Cargo.lock, the way gpui_component declares its own uuid.
-futures = { version = "0.3", features = ["std"] }
-image = { version = "0.25", default-features = false }
-uuid = { version = "1.10", features = ["v4"] }
+futures = { workspace = true, features = ["std"] }
+image = { workspace = true, default-features = false }
+uuid = { workspace = true, features = ["v4"] }

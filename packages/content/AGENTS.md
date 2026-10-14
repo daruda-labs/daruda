@@ -8,6 +8,12 @@ and agent chat. The host resolves visual tokens; this package processes content.
 `merman` is a normal crates.io dependency (MIT/Apache-2.0), validated against
 upstream Mermaid.js SVG baselines. It has no daruda-side vendor patch.
 
+The alpha integration exact-pins merman, dugong, and manatee. Stable layout
+releases removed APIs used by the alpha renderer, and stable merman replaces
+the host-theme and text-measurement APIs. Upgrade this family in one migration,
+including conformance tests and PNG inspection; remove the temporary direct
+layout dependencies and Dependabot exclusions when that migration passes.
+
 - Host theming uses renderer-level site config, not a document directive.
   `mermaid_host_theme` builds a profile from `MermaidPalette`; the UI resolves
   those palette values in `daruda_ui::mermaid_palette`.

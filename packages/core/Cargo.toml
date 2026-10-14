@@ -11,18 +11,18 @@ description = "Shared utilities and core logic for daruda — usable from both t
 workspace = true
 
 [dependencies]
-dirs = "6"
+dirs = { workspace = true }
 percent-encoding = "2"
-url = "2"
+url = { workspace = true }
 
 [target.'cfg(unix)'.dependencies]
-libc = "0.2"
+libc = { workspace = true }
 
 [target.'cfg(windows)'.dependencies]
 dunce = "1"
-which = "6"
-windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Security", "Win32_Storage_FileSystem", "Win32_System_Diagnostics_ToolHelp", "Win32_System_JobObjects", "Win32_System_SystemInformation", "Win32_System_Threading"] }
+which = { workspace = true }
+windows-sys = { workspace = true, features = ["Win32_Foundation", "Win32_Security", "Win32_Storage_FileSystem", "Win32_System_Diagnostics_ToolHelp", "Win32_System_JobObjects", "Win32_System_SystemInformation", "Win32_System_Threading"] }
 
 [dev-dependencies]
-tempfile = "3"
+tempfile = { workspace = true }
 test_process = { workspace = true }
