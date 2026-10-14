@@ -4,6 +4,15 @@ Tracked diffs against external sources. Two distinct flavours live
 here — they serve different goals and have different application
 flows.
 
+## Shared Widget Dependencies
+
+The vendored widget manifests inherit shared registry requirements from the
+root `[workspace.dependencies]`. Keep these `workspace = true` declarations
+when re-vendoring, preserving per-package features, optional flags, and target
+conditions. `chrono` and `notify` explicitly opt into defaults where upstream
+used them; the shared entries disable defaults for narrower first-party users.
+The dependency policy checks these declarations in addition to retained patches.
+
 ## GPUI patches — `gpui-*.patch`
 
 GPUI compiles from `vendor/zed/crates/gpui`, a pristine copy of the
@@ -703,6 +712,58 @@ if you forget — `output_layout::long_output_lines_wrap_to_the_embed_width`
 (its "after a streamed update" stage is the exact repro: a rebuilt editor whose
 embed stayed at the logical height) and
 `diff_layout::long_diff_lines_wrap_to_the_embed_width`.
+
+---
+
+## `vendor/gpui-component/gpui_component/src/menu/popup_menu.rs` — vendored, **a capped menu scrolls only when it overflows**
+
+Applied in place, on the same terms as the sections above.
+
+### Why
+
+`PopupMenu::render` recorded its bounds with an absolutely positioned
+`canvas(..).size_full()` placed inside the `items` column — the column that
+`scrollable(true)` turns into the scroll container. GPUI's `Div::prepaint`
+measures a scroll container's content as the union of its children's bounds
+and then adds the container's padding (`elements/div.rs`, `padded_content_size`).
+The canvas already spans the padded box, so the padding was counted twice:
+every scrollable menu had a `max_offset` of the `items` padding (`p_1`, 8px
+in total) even when its rows fit. The scrollbar shows whenever the content
+exceeds its box, so a menu that fit still painted a scrollbar and scrolled 8px
+under the wheel. The probe also scrolled with the rows, so the recorded bounds
+drifted once the menu was scrolled.
+
+daruda caps every status-bar chip menu at the room above the bar
+(`workspace/status_bar/menu.rs`, `dropdown`), which makes them scrollable; a
+long account list in a short window otherwise snaps down over the bar.
+
+That cap also has to follow the window. `max_h` takes a fixed value, and a
+menu's builder runs once when it opens, so a cap computed there went stale
+when the window shrank under an open menu, and the snap pushed the menu back
+over the bar.
+
+### What diverges
+
+1. The canvas moves from the `items` column to the outer `popup-menu` column,
+   which is `relative` and never scrolls. Its readers — the submenu anchor and
+   the parent-menu hit test in `on_mouse_down_out` — now see the menu's outer
+   box, which differs from the old value by the 1px border.
+2. `max_height` becomes a private `MaxHeight` enum: `Fixed` (what `max_h`
+   sets, upstream behaviour) or `Window`, set by the added
+   `max_h_in_window(Fn(&Window) -> Pixels)` and resolved in every render.
+   Unset keeps upstream's half-window default.
+
+### Re-vendor procedure
+
+Copy upstream `menu/popup_menu.rs` in, re-apply the other `PopupMenu` rows in
+[UI vendor patches](../packages/ui/REFERENCE.md#vendor-patches-in-vendorgpui-componentgpui_component),
+move the canvas out of `items` again, and re-add `MaxHeight` with
+`max_h_in_window`. The paired tests in
+`packages/app/src/workspace/status_bar/menu.rs` fail loudly if you forget:
+`a_menu_that_fits_does_not_scroll` (it scrolls 8px with the canvas back in
+`items`), `a_long_menu_stays_above_its_chip_in_a_short_window`, and
+`an_open_menu_stays_above_its_chip_when_the_window_shrinks`. Dropping
+`max_h_in_window` fails to compile at `dropdown`.
 
 ---
 

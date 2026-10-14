@@ -287,6 +287,14 @@ impl PopupMenuItem {
     }
 }
 
+/// daruda: a menu's height cap, fixed or resolved against the window each
+/// render so a resize under an open menu re-caps it.
+#[derive(Clone)]
+enum MaxHeight {
+    Fixed(Pixels),
+    Window(Rc<dyn Fn(&Window) -> Pixels>),
+}
+
 pub struct PopupMenu {
     pub(crate) focus_handle: FocusHandle,
     pub(crate) menu_items: Vec<PopupMenuItem>,
@@ -295,7 +303,7 @@ pub struct PopupMenu {
     selected_index: Option<usize>,
     min_width: Option<Pixels>,
     max_width: Option<Pixels>,
-    max_height: Option<Pixels>,
+    max_height: Option<MaxHeight>,
     /// Fill and edge replacing the float chrome — for a menu opened over
     /// another float, where the shared chrome is indistinguishable from it.
     /// Resolved each render, so a theme change repaints an open menu.
@@ -377,7 +385,14 @@ impl PopupMenu {
 
     /// Set max height of the popup menu, default is half of the window height
     pub fn max_h(mut self, height: impl Into<Pixels>) -> Self {
-        self.max_height = Some(height.into());
+        self.max_height = Some(MaxHeight::Fixed(height.into()));
+        self
+    }
+
+    /// Set max height of the popup menu from the window, re-read on every
+    /// render so it follows a resize while the menu is open.
+    pub fn max_h_in_window(mut self, height: impl Fn(&Window) -> Pixels + 'static) -> Self {
+        self.max_height = Some(MaxHeight::Window(Rc::new(height)));
         self
     }
 
@@ -1266,10 +1281,14 @@ impl Render for PopupMenu {
         let view = cx.entity().clone();
         let items_count = self.menu_items.len();
 
-        let max_height = self.max_height.unwrap_or_else(|| {
-            let window_half_height = window.window_bounds().get_bounds().size.height * 0.5;
-            window_half_height.min(px(450.))
-        });
+        let max_height = match &self.max_height {
+            Some(MaxHeight::Fixed(height)) => *height,
+            Some(MaxHeight::Window(height)) => height(window),
+            None => {
+                let window_half_height = window.window_bounds().get_bounds().size.height * 0.5;
+                window_half_height.min(px(450.))
+            }
+        };
 
         let has_left_icon = self
             .menu_items
@@ -1332,16 +1351,19 @@ impl Render for PopupMenu {
                             // Ignore last separator
                             .filter(|(ix, item)| !(*ix + 1 == items_count && item.is_separator()))
                             .map(|(ix, item)| self.render_item(ix, item, options, window, cx)),
-                    )
-                    .child({
-                        canvas(
-                            move |bounds, _, cx| view.update(cx, |r, _| r.bounds = bounds),
-                            |_, _, _, _| {},
-                        )
-                        .absolute()
-                        .size_full()
-                    }),
+                    ),
             )
+            // daruda: the bounds probe sits outside the scrolling `items`. As
+            // their child it counted as content spanning their padded box, so
+            // a menu that fit could still scroll by its own padding.
+            .child({
+                canvas(
+                    move |bounds, _, cx| view.update(cx, |r, _| r.bounds = bounds),
+                    |_, _, _, _| {},
+                )
+                .absolute()
+                .size_full()
+            })
             .when(self.scrollable, |this| {
                 // TODO: When the menu is limited by `overflow_y_scroll`, the sub-menu will cannot be displayed.
                 this.vertical_scrollbar(&self.scroll_handle)

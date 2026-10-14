@@ -28,8 +28,9 @@ pub(super) const PANEL_BODY_INSET: f32 = ROW_INSET;
 const ANCHOR_GAP: f32 = theme::PAD_XS;
 const SNAP_MARGIN: f32 = theme::PAD_STANDARD;
 
-/// The tallest panel that fits between the window's top snap margin and the
-/// bar; a taller one runs off the top edge.
+/// The tallest popup that fits between the window's top snap margin and the
+/// bar; a taller panel runs off the top edge, a taller menu is snapped back
+/// down over the bar.
 fn room_above_bar(window: &Window) -> f32 {
     let viewport_h = f32::from(window.viewport_size().height);
     (viewport_h - super::STATUS_BAR_HEIGHT - ANCHOR_GAP - SNAP_MARGIN).max(0.0)
@@ -43,6 +44,14 @@ pub(super) fn dropdown(
     builder: impl Fn(PopupMenu, &mut Window, &mut Context<PopupMenu>) -> PopupMenu + 'static,
     cx: &App,
 ) -> AnyElement {
+    // Past the room above the bar the menu scrolls rather than covering it;
+    // a menu that fits has nothing to scroll and shows no scrollbar. The room
+    // is re-read each render, so a resize under an open menu re-caps it.
+    let builder = move |menu, window: &mut Window, cx: &mut Context<PopupMenu>| {
+        builder(menu, window, cx)
+            .max_h_in_window(|window| px((room_above_bar(window) - PANEL_CHROME).max(0.0)))
+            .scrollable(true)
+    };
     #[cfg(feature = "screenshot")]
     if super::screenshot::is_open(shot_id, cx) {
         return super::screenshot::open_menu(shot_id, trigger, builder);
@@ -283,12 +292,20 @@ pub(super) fn section_row(mark: Option<AnyElement>, label: SharedString, cx: &Ap
 #[cfg(test)]
 mod tests {
     use super::*;
-    use gpui::{Bounds, Modifiers, TestAppContext, VisualTestContext, point, size};
+    use gpui::{
+        Bounds, Modifiers, ScrollDelta, ScrollWheelEvent, TestAppContext, TouchPhase,
+        VisualTestContext, point, size,
+    };
+    use std::cell::Cell;
+    use std::rc::Rc;
 
     /// What the probe chip opens.
     #[derive(Clone, Copy)]
     enum Popup {
         Menu,
+        /// A menu with far more rows than any window shows, like a long
+        /// account list.
+        LongMenu,
         Panel,
         /// A panel whose body holds far more rows than any window shows.
         TallPanel,
@@ -298,12 +315,16 @@ mod tests {
     /// the bar places it.
     struct CornerProbe {
         popup: Popup,
+        /// The chip's last hover report; a popup covering the chip occludes it.
+        chip_hovered: Rc<Cell<bool>>,
     }
 
     impl gpui::Render for CornerProbe {
         fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+            let chip_hovered = self.chip_hovered.clone();
             let trigger = crate::ui::button_status_pill_bare("probe-chip", cx)
                 .child("chip")
+                .on_hover(move |hovered, _, _| chip_hovered.set(*hovered))
                 .debug_selector(|| "probe-chip".into());
             let popup = match self.popup {
                 Popup::Menu => dropdown(
@@ -311,6 +332,18 @@ mod tests {
                     trigger,
                     crate::ui::menu_builder(|menu, _window, _cx| {
                         menu.item(menu_header("Title", Some("State".into()), Tone::Plain))
+                    }),
+                    cx,
+                ),
+                Popup::LongMenu => dropdown(
+                    "probe-long-menu",
+                    trigger,
+                    crate::ui::menu_builder(|menu, _window, _cx| {
+                        let menu = menu.item(menu_header("Title", None, Tone::Plain));
+                        let menu = (0..40).fold(menu.separator(), |menu, ix| {
+                            menu.item(PopupMenuItem::new(format!("account {ix}")))
+                        });
+                        with_footer(menu, "Footer", |_, _, _| {})
                     }),
                     cx,
                 ),
@@ -368,8 +401,16 @@ mod tests {
             ))),
             ..Default::default()
         };
+        let chip_hovered = Rc::default();
         let window = cx
-            .update(|cx| cx.open_window(opts, |_, cx| cx.new(|_| CornerProbe { popup })))
+            .update(|cx| {
+                cx.open_window(opts, |_, cx| {
+                    cx.new(|_| CornerProbe {
+                        popup,
+                        chip_hovered,
+                    })
+                })
+            })
             .unwrap();
         let mut vcx = VisualTestContext::from_window(window.into(), cx);
         vcx.run_until_parked();
@@ -377,6 +418,19 @@ mod tests {
         vcx.simulate_click(chip.center(), Modifiers::none());
         vcx.run_until_parked();
         (chip, vcx)
+    }
+
+    /// Whether the pointer reaches the chip at `chip`'s centre, or an open
+    /// popup occludes it.
+    fn chip_reachable(vcx: &mut VisualTestContext, chip: Bounds<gpui::Pixels>) -> bool {
+        let hovered = vcx.update(|window, cx| {
+            let probe = window.root::<CornerProbe>().flatten().expect("probe root");
+            probe.read(cx).chip_hovered.clone()
+        });
+        vcx.simulate_mouse_move(point(px(1.), px(1.)), None, Modifiers::none());
+        vcx.simulate_mouse_move(chip.center(), None, Modifiers::none());
+        vcx.run_until_parked();
+        hovered.get()
     }
 
     /// A menu at the bottom edge opens upward instead of being snapped back
@@ -406,5 +460,66 @@ mod tests {
             popup.top() >= px(SNAP_MARGIN),
             "{popup:?} runs into the window's top edge"
         );
+    }
+
+    /// Wheels the menu down over its header and reports where the header
+    /// lands.
+    fn scroll_menu_from(
+        vcx: &mut VisualTestContext,
+        header: Bounds<gpui::Pixels>,
+    ) -> Bounds<gpui::Pixels> {
+        vcx.simulate_event(ScrollWheelEvent {
+            position: header.center(),
+            delta: ScrollDelta::Pixels(point(px(0.), px(-100.))),
+            modifiers: Modifiers::default(),
+            touch_phase: TouchPhase::Started,
+        });
+        vcx.run_until_parked();
+        vcx.debug_bounds("status-menu-header").expect("still open")
+    }
+
+    /// A menu taller than the room above the bar in a short window scrolls
+    /// instead of being snapped down over the bar and the chip.
+    #[gpui::test]
+    fn a_long_menu_stays_above_its_chip_in_a_short_window(cx: &mut TestAppContext) {
+        let (chip, mut vcx) = open_at_corner(cx, Popup::LongMenu, 400.0);
+        let header = vcx.debug_bounds("status-menu-header").expect("opened");
+        assert!(
+            header.top() >= px(SNAP_MARGIN),
+            "{header:?} runs into the window's top edge"
+        );
+        assert!(chip_reachable(&mut vcx, chip), "the menu covers {chip:?}");
+        let after = scroll_menu_from(&mut vcx, header);
+        assert!(
+            after.top() < header.top(),
+            "the rows past the room do not scroll"
+        );
+    }
+
+    /// The cap follows the window: shrinking it under an open menu keeps the
+    /// menu above the chip instead of leaving the taller cap it opened with.
+    #[gpui::test]
+    fn an_open_menu_stays_above_its_chip_when_the_window_shrinks(cx: &mut TestAppContext) {
+        let (_, mut vcx) = open_at_corner(cx, Popup::LongMenu, 600.0);
+        vcx.simulate_resize(size(px(800.), px(400.)));
+        vcx.run_until_parked();
+        let chip = vcx.debug_bounds("probe-chip").expect("chip painted");
+        let header = vcx.debug_bounds("status-menu-header").expect("still open");
+        assert!(
+            header.top() >= px(SNAP_MARGIN),
+            "{header:?} runs into the window's top edge"
+        );
+        assert!(chip_reachable(&mut vcx, chip), "the menu covers {chip:?}");
+    }
+
+    /// A menu that fits has nothing to scroll: the scrollbar shows only while
+    /// the content overflows its box, so no scroll means no scrollbar.
+    #[gpui::test]
+    fn a_menu_that_fits_does_not_scroll(cx: &mut TestAppContext) {
+        let (chip, mut vcx) = open_at_corner(cx, Popup::Menu, 600.0);
+        let before = vcx.debug_bounds("status-menu-header").expect("opened");
+        let after = scroll_menu_from(&mut vcx, before);
+        assert_eq!(before, after, "a menu that fits scrolled");
+        assert!(chip_reachable(&mut vcx, chip), "the menu covers {chip:?}");
     }
 }
