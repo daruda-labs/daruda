@@ -172,7 +172,17 @@ fn every_result_variant_round_trips_through_json() {
         },
         ControlResult::Answer {
             target,
-            answer: PaneAnswer::Interrupted,
+            answer: PaneAnswer::Interrupted {
+                cause: InterruptCause::User,
+            },
+        },
+        ControlResult::Answer {
+            target,
+            answer: PaneAnswer::Interrupted {
+                cause: InterruptCause::ExtraUsage {
+                    resets_at: Some(1_791_340_200),
+                },
+            },
         },
         ControlResult::Answer {
             target,
@@ -308,4 +318,32 @@ fn error_round_trips_through_json() {
     let json = serde_json::to_string(&error).expect("serialize");
     let back: ControlError = serde_json::from_str(&json).expect("deserialize");
     assert_eq!(back, error);
+}
+
+/// An `interrupted` written before the cause existed, or by a caller that
+/// leaves it out, still reads as a person's stop; the auto-stop's shape is
+/// what the MCP tool description tells the model to look for.
+#[test]
+fn an_interrupted_answer_names_its_cause_on_the_wire() {
+    let legacy: PaneAnswer =
+        serde_json::from_str(r#"{"state":"interrupted"}"#).expect("legacy shape reads");
+    assert_eq!(
+        legacy,
+        PaneAnswer::Interrupted {
+            cause: InterruptCause::User
+        }
+    );
+    let json = serde_json::to_value(PaneAnswer::Interrupted {
+        cause: InterruptCause::ExtraUsage {
+            resets_at: Some(1_791_340_200),
+        },
+    })
+    .expect("serialize");
+    assert_eq!(
+        json,
+        serde_json::json!({
+            "state": "interrupted",
+            "cause": { "by": "extra_usage", "resets_at": 1_791_340_200 }
+        })
+    );
 }

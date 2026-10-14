@@ -165,12 +165,30 @@ impl Workspace {
         // agent said.
         let answer = match outcome {
             TurnOutcome::Errored => crate::control::result::PaneAnswer::Failed,
-            TurnOutcome::Stopped => crate::control::result::PaneAnswer::Interrupted,
+            TurnOutcome::Stopped => crate::control::result::PaneAnswer::Interrupted {
+                cause: self.interrupt_cause(pane_id, cx),
+            },
             TurnOutcome::Completed => match said {
                 Some(text) => crate::control::result::PaneAnswer::Text { text },
                 None => crate::control::result::PaneAnswer::NoAnswer,
             },
         };
         crate::control::ask::resolve(target, answer, cx);
+    }
+
+    /// The pane's overage banner is still up when its stop settles — the
+    /// notice is cleared only by the next prompt — so it names the cause.
+    fn interrupt_cause(
+        &self,
+        pane_id: PaneId,
+        cx: &Context<Self>,
+    ) -> crate::control::result::InterruptCause {
+        let notice = self
+            .agent_chat_view(pane_id)
+            .and_then(|view| view.read(cx).overage_notice().map(|n| n.resets_at));
+        match notice {
+            Some(resets_at) => crate::control::result::InterruptCause::ExtraUsage { resets_at },
+            None => crate::control::result::InterruptCause::User,
+        }
     }
 }

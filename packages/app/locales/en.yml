@@ -2151,6 +2151,8 @@ control:
   answer_none: "It finished without saying anything."
   answer_failed: "That run ended in an error."
   answer_interrupted: "That was stopped before it answered."
+  answer_interrupted_overage: "Stopped to avoid extra usage — the plan limit ran out. Don't resend until it resets."
+  answer_interrupted_overage_resets: "Stopped to avoid extra usage — the plan limit ran out. Don't resend before %{time}."
   answer_still_working: "Still working. I'll have the answer once it finishes."
   flow_stop_already_idle: "No flow was running there."
   error_approval_refused: "Refused."

@@ -137,13 +137,32 @@ pub enum PaneAnswer {
     /// Its own state rather than `Text`: the transcript *does* hold whatever
     /// had been written by then, and handing that back as the reply would
     /// present a cut-off sentence as the agent's answer.
-    Interrupted,
+    Interrupted {
+        /// Absent on the wire means a person or another surface stopped it.
+        #[serde(default)]
+        cause: InterruptCause,
+    },
     /// The prompt went behind a turn already in flight, so this call is not
     /// the one that will see its reply. Read it later.
     Queued,
     /// The turn outlived the wait and is still going. Not a failure — read it
     /// later.
     StillWorking,
+}
+
+/// Who cut an interrupted turn. A caller that sees `ExtraUsage` should not
+/// re-send to that chat: the next reply would bill and be stopped again.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "by", rename_all = "snake_case")]
+pub enum InterruptCause {
+    /// A person at the desk, or another surface.
+    #[default]
+    User,
+    /// daruda's extra-usage auto-stop: the plan limit ran out.
+    ExtraUsage {
+        /// When the limit resets, in unix seconds, when the agent said.
+        resets_at: Option<i64>,
+    },
 }
 
 /// What became of a `/daruda` prompt. The answer arrives later from the

@@ -359,7 +359,10 @@ static TABLE: &[Tool] = &[
         description: "Send a prompt to one agent chat and wait for the reply, in one call. \
                       Answers `text` with what the turn said; `no_answer` if it only ran \
                       tools; `failed` if it errored; `interrupted` if somebody stopped it \
-                      before it answered; `queued` if the chat was already busy, so this \
+                      before it answered — with `cause.by` `extra_usage` when daruda \
+                      stopped it because the plan limit ran out, in which case do not \
+                      re-send to that chat before `cause.resets_at`; `queued` if the chat \
+                      was already busy, so this \
                       is not the call that will see the reply; `still_working` if the turn \
                       outran the wait. The last two are not failures — daruda_chat_read \
                       gets the reply afterwards. Cancelling this call stops the waiting, \

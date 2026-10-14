@@ -208,7 +208,7 @@ async fn an_ordinal_with_no_listing_behind_it_is_refused(cx: &mut TestAppContext
 /// calling the tee, because the edge detection is the part under test.
 mod ask {
     use super::*;
-    use crate::control::result::PaneAnswer;
+    use crate::control::result::{InterruptCause, PaneAnswer};
     use daruda_acp::ChatItem;
 
     /// How the turn under test ended. Three outcomes, and `completed_normally`
@@ -219,6 +219,8 @@ mod ask {
         /// A Stop — from the desk or from another surface.
         Cancelled,
         Failed,
+        /// The extra-usage auto-stop cut it.
+        Overage,
     }
 
     fn said(text: &str) -> ChatItem {
@@ -274,6 +276,16 @@ mod ask {
                                 false,
                                 cx,
                             );
+                        });
+                    }
+                    TurnEnd::Overage => {
+                        let limit = daruda_acp::RateLimitView {
+                            window: Some(daruda_acp::RateLimitWindow::FiveHour),
+                            resets_at: Some(1_791_340_200),
+                            is_using_overage: true,
+                        };
+                        view.update(cx, |v, cx| {
+                            assert!(v.stop_for_overage(limit, cx), "a live turn is cut");
                         });
                     }
                     // The error arm stashes its own outcome, so it is reached
@@ -383,7 +395,23 @@ mod ask {
     async fn a_stopped_turn_answers_interrupted_not_its_partial_text(cx: &mut TestAppContext) {
         assert_eq!(
             answer_after_a_turn(vec![said("half an ans")], TurnEnd::Cancelled, cx),
-            Some(PaneAnswer::Interrupted)
+            Some(PaneAnswer::Interrupted {
+                cause: InterruptCause::User
+            })
+        );
+    }
+
+    /// An auto-stop says so, so an orchestrator does not re-send into a chat
+    /// whose next reply would bill and be stopped again.
+    #[gpui::test]
+    async fn an_overage_stop_answers_interrupted_by_extra_usage(cx: &mut TestAppContext) {
+        assert_eq!(
+            answer_after_a_turn(vec![said("half an ans")], TurnEnd::Overage, cx),
+            Some(PaneAnswer::Interrupted {
+                cause: InterruptCause::ExtraUsage {
+                    resets_at: Some(1_791_340_200)
+                }
+            })
         );
     }
 

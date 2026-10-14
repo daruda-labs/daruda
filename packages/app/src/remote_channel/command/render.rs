@@ -9,8 +9,8 @@
 use super::{Absorbed, CommandState, ListingRow};
 use crate::control::result::{
     Activity, AskDisposition, ChatSummary, ControlError, ControlOutcome, ControlResult,
-    FlowOriginKind, Health, Listing, PaneAnswer, SendDisposition, StopDisposition, TaskEntry,
-    TaskProject, TaskStatus,
+    FlowOriginKind, Health, InterruptCause, Listing, PaneAnswer, SendDisposition, StopDisposition,
+    TaskEntry, TaskProject, TaskStatus,
 };
 use crate::control::spec::{Ordinal, ParseError};
 use crate::remote_channel::bridge::InlineKeyboard;
@@ -175,7 +175,17 @@ fn render_result(result: &ControlResult, state: &CommandState) -> RenderedReply 
             PaneAnswer::Text { text } => text.clone(),
             PaneAnswer::NoAnswer => s::control::answer_none(),
             PaneAnswer::Failed => s::control::answer_failed(),
-            PaneAnswer::Interrupted => s::control::answer_interrupted(),
+            PaneAnswer::Interrupted { cause } => match cause {
+                InterruptCause::User => s::control::answer_interrupted(),
+                InterruptCause::ExtraUsage { resets_at } => {
+                    match resets_at.and_then(|secs| chrono::DateTime::from_timestamp(secs, 0)) {
+                        Some(at) => s::control::answer_interrupted_overage_resets(
+                            s::flow::overage_reset_at(at),
+                        ),
+                        None => s::control::answer_interrupted_overage(),
+                    }
+                }
+            },
             PaneAnswer::Queued => s::control::sent_queued(),
             PaneAnswer::StillWorking => s::control::answer_still_working(),
         }),
