@@ -5,7 +5,7 @@
 use gpui::Context;
 
 use super::super::rows::RowKind;
-use super::{ActivityOptionsTab, AgentChatView};
+use super::{ActivityOptionsTab, AgentChatView, OverageNotice};
 
 impl AgentChatView {
     /// The first conclusion's item index.
@@ -43,6 +43,25 @@ impl AgentChatView {
     pub fn pin_fold_editor_for_shot(&mut self, cx: &mut Context<Self>) {
         self.set_activity_options_tab(ActivityOptionsTab::Fold, cx);
         self.screenshot_fold_open = true;
+    }
+
+    /// Raise the banner an overage stop leaves, as if the 5-hour window had
+    /// just run out, and relabel the seeded stop marker to match. The reset
+    /// moment is fixed so captures stay stable.
+    pub fn seed_overage_stop_for_shot(&mut self, cx: &mut Context<Self>) {
+        const SHOT_RESETS_AT: i64 = 1_791_340_200;
+        self.overage_notice = Some(OverageNotice {
+            window: Some(daruda_acp::RateLimitWindow::FiveHour),
+            resets_at: Some(SHOT_RESETS_AT),
+        });
+        if let Some(ix) = self
+            .items
+            .iter()
+            .rposition(|item| matches!(item, daruda_acp::ChatItem::Interrupted))
+        {
+            self.overage_stop_markers.insert(ix);
+        }
+        cx.notify();
     }
 
     /// Leave the filter on its tab but its popover shut, so the chip on

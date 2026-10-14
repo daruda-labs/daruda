@@ -131,6 +131,9 @@ pub(super) struct StatusBarData {
     /// right-click menu. Mirrors `daruda_config::StatusBarConfig`;
     /// `title` / `error` / the project-config dot are not user-toggleable.
     pub visible: daruda_config::StatusBarConfig,
+    /// `[usage] stop_on_overage`, the checked state of the Claude usage
+    /// dropdown's auto-stop item.
+    pub stop_on_overage: bool,
     /// Dispatch target for the right-click toggle menu's clicks
     /// (`Workspace::toggle_status_bar_item`).
     pub workspace: WeakEntity<Workspace>,
@@ -291,7 +294,14 @@ impl RenderOnce for StatusBar {
                 // by side is the case daruda exists for, so both readings stay
                 // visible rather than following focus.
                 el.children(data.usage.iter().filter_map(|(recipe, outcome)| {
-                    usage_chip::render(*recipe, outcome, density, data.workspace.clone(), cx)
+                    usage_chip::render(
+                        *recipe,
+                        outcome,
+                        density,
+                        data.stop_on_overage,
+                        data.workspace.clone(),
+                        cx,
+                    )
                 }))
             })
             .when(data.visible.is_visible(StatusBarItem::KeepAwake), |el| {

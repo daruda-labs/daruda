@@ -316,6 +316,13 @@ pub(super) const BOOL_SETTINGS: &[BoolSpec] = &[
         show: |c| c.notifications.long_running_enabled,
     },
     BoolSpec {
+        setting: BoolSetting::StopOnOverage,
+        get: |w| w.stop_on_overage,
+        set: |w, v| w.stop_on_overage = v,
+        patch: SettingsPatch::UsageStopOnOverage,
+        show: |c| c.usage.stop_on_overage,
+    },
+    BoolSpec {
         setting: BoolSetting::NotifySkipFocusedPane,
         get: |w| w.notify_skip_focused_pane,
         set: |w, v| w.notify_skip_focused_pane = v,

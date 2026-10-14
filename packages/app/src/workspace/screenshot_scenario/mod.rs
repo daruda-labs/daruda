@@ -187,6 +187,9 @@ pub(crate) enum ScreenshotScenario {
     /// it — and it is the one row whose whole job is to read as an edge rather
     /// than a message, which only a capture can confirm.
     AgentChatInterrupted,
+    /// The interrupted transcript under the banner an overage stop raises —
+    /// reached only by a live billed `usage_update` with the setting on.
+    AgentChatOverageStopped,
     /// A Terminal task's conversation mirrored read-only while its CLI runs:
     /// the composer gives way to a status row with only a refresh control.
     AgentChatCliRunning,
@@ -581,6 +584,11 @@ pub(crate) fn drive(
         ScreenshotScenario::AgentChatInterrupted => {
             workspace.update(cx, |ws, cx| {
                 ws.open_agent_chat_interrupted_transcript_for_shot(window, cx)
+            });
+        }
+        ScreenshotScenario::AgentChatOverageStopped => {
+            workspace.update(cx, |ws, cx| {
+                ws.open_agent_chat_overage_stopped_for_shot(window, cx)
             });
         }
         ScreenshotScenario::AgentChatCliRunning => {

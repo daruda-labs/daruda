@@ -107,6 +107,7 @@ impl Workspace {
         crate::agent::mcp::global::init(cx);
         crate::ui::theme::DarudaTheme::init(cx);
         crate::settings_store::SettingsStore::init(cx);
+        crate::overage_policy::OveragePolicy::sync(cx);
 
         let ws_weak = cx.entity().downgrade();
         let toast_layer = cx.new(|_| toast_layer::ToastLayer::new(ws_weak.clone()));

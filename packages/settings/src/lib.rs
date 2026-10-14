@@ -328,6 +328,7 @@ pub struct SettingsView {
     notify_osc777: bool,
     notify_attention: bool,
     notify_long_running: bool,
+    stop_on_overage: bool,
     notify_skip_focused_pane: bool,
     clipboard_copy_on_select: bool,
     git_confirm_commit: bool,

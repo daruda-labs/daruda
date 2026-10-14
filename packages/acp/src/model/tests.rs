@@ -485,11 +485,13 @@ fn a_report_without_cost_carries_the_previous_one() {
             amount: 1.5,
             currency: "USD".to_owned(),
         }),
+        rate_limit: None,
     };
     let unpriced = UsageView {
         used: 20,
         size: 100,
         cost: None,
+        rate_limit: None,
     };
     let carried = unpriced.clone().carrying_cost_from(Some(&priced));
     assert_eq!(carried.used, 20);
@@ -507,4 +509,60 @@ fn a_report_without_cost_carries_the_previous_one() {
         repriced.clone().carrying_cost_from(Some(&priced)).cost,
         repriced.cost
     );
+}
+
+fn rate_limit(is_using_overage: bool) -> RateLimitView {
+    RateLimitView {
+        window: Some(RateLimitWindow::FiveHour),
+        resets_at: Some(1_791_340_200),
+        is_using_overage,
+    }
+}
+
+#[test]
+fn only_the_overage_flag_bills_extra_usage() {
+    assert!(rate_limit(true).bills_overage());
+    assert!(!rate_limit(false).bills_overage());
+}
+
+#[test]
+fn rate_limit_window_keeps_an_unknown_value() {
+    assert_eq!(
+        RateLimitWindow::from_wire("five_hour"),
+        RateLimitWindow::FiveHour
+    );
+    assert_eq!(
+        RateLimitWindow::from_wire("seven_day"),
+        RateLimitWindow::SevenDay
+    );
+    assert_eq!(
+        RateLimitWindow::from_wire("seven_day_opus"),
+        RateLimitWindow::Other("seven_day_opus".to_owned())
+    );
+}
+
+/// A report without a rate limit says nothing about overage, so the previous
+/// report's standing must not leak into it the way its cost does.
+#[test]
+fn a_report_without_a_rate_limit_does_not_carry_the_previous_one() {
+    let billed = UsageView {
+        used: 10,
+        size: 100,
+        cost: None,
+        rate_limit: Some(rate_limit(true)),
+    };
+    let silent = UsageView {
+        used: 20,
+        size: 100,
+        cost: None,
+        rate_limit: None,
+    };
+    assert_eq!(silent.carrying_cost_from(Some(&billed)).rate_limit, None);
+}
+
+#[test]
+fn the_protocol_usage_update_carries_no_rate_limit() {
+    use agent_client_protocol::schema::v1::UsageUpdate;
+    let update = UsageUpdate::new(5, 50);
+    assert_eq!(UsageView::from(&update).rate_limit, None);
 }

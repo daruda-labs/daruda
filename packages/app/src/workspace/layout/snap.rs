@@ -339,6 +339,8 @@ pub(in crate::workspace) struct RightDockSnapshot {
     /// Mirrors `AgentUsageState::usage_domain_override` — the switcher's last
     /// manual pick, read-only from this side.
     pub usage_domain_override: Option<daruda_store::accounts::AccountRecipeId>,
+    /// `[usage] stop_on_overage`, shown as the Claude section's switch.
+    pub stop_on_overage: bool,
     /// Locally aggregated activity (7-day turns + tokens charts), one entry
     /// per domain in `usage` that has any — a domain with no activity log
     /// (or none aggregated yet) is simply absent, not zeroed.

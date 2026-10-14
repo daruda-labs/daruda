@@ -90,6 +90,7 @@ mod toast_layer;
 mod unseen_outcomes;
 mod update_ops;
 mod usage_labels;
+mod usage_settings_ops;
 mod window_close_ops;
 mod window_runtime;
 

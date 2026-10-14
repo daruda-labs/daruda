@@ -106,6 +106,8 @@ impl AgentChatView {
             session_capabilities: SessionCapabilitiesView::default(),
             draft_attachments: Vec::new(),
             session_usage: None,
+            overage_notice: None,
+            overage_stop_markers: BTreeSet::new(),
             plan: Vec::new(),
             // Seed the persisted title so a restored dormant pane shows its
             // label before the session loads; the agent replaces it on the

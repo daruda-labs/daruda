@@ -14,7 +14,7 @@ use std::path::{Path, PathBuf};
 
 use daruda_flow::NodeId;
 use daruda_flow::event::FlowEvent;
-use daruda_flow::runner::CancelToken;
+use daruda_flow::runner::{CancelToken, OverageStop};
 use daruda_store::project::LaneRef;
 
 use super::flow_request::FlowSource;
@@ -26,6 +26,9 @@ use crate::surface::strings as s;
 /// without asking the engine.
 pub(in crate::workspace) struct RunHandle {
     pub cancel: CancelToken,
+    /// The run's overage switch, read when the run ends to say why it was
+    /// canceled.
+    overage: OverageStop,
     pub run_dir: PathBuf,
     /// What the run is doing right now, as its own stream reports it.
     pub doing: RunStage,
@@ -114,6 +117,7 @@ impl RunHandle {
     /// can tell a finished run from a wedged one without asking the engine.
     pub(in crate::workspace) fn started(
         cancel: CancelToken,
+        overage: OverageStop,
         run_dir: PathBuf,
         source: FlowSource,
         nodes_at_start: Vec<NodeId>,
@@ -121,6 +125,7 @@ impl RunHandle {
     ) -> Self {
         Self {
             cancel,
+            overage,
             run_dir,
             doing: RunStage::Starting,
             source,
@@ -152,6 +157,7 @@ impl RunHandle {
         };
         Self {
             cancel: CancelToken::default(),
+            overage: OverageStop::default(),
             run_dir,
             doing,
             source,
@@ -278,6 +284,27 @@ impl FlowRuns {
         self.runs
             .get(&lane)
             .is_some_and(|handle| handle.answers_telegram)
+    }
+
+    /// The billed report that stopped `lane`'s run, if one did. Asked before
+    /// [`Self::retire`], which drops the handle that knows.
+    pub(in crate::workspace) fn overage_stop(
+        &self,
+        lane: LaneRef,
+    ) -> Option<daruda_acp::RateLimitView> {
+        self.runs.get(&lane)?.overage.tripped().cloned()
+    }
+
+    /// Stop `lane`'s run for `limit` as its engine would, without one.
+    #[cfg(test)]
+    pub(in crate::workspace) fn trip_overage_for_test(
+        &mut self,
+        lane: LaneRef,
+        limit: &daruda_acp::RateLimitView,
+    ) {
+        let handle = self.runs.get_mut(&lane).expect("a seeded run");
+        handle.overage = OverageStop::new(std::sync::Arc::new(true.into()));
+        assert!(handle.overage.trip(limit));
     }
 
     pub(in crate::workspace) fn iter(&self) -> impl Iterator<Item = (LaneRef, &RunHandle)> {

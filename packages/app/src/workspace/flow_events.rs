@@ -161,33 +161,63 @@ impl Workspace {
             self.advance_flow_stage(lane_ref, event, cx);
             return;
         };
+        // Read before settling, which retires the handle that knows.
+        let overage = self.flows.runs.overage_stop(lane_ref);
+        let report = self.settle_flow_run(lane_ref, end, overage.as_ref(), cx);
+        // Whichever lane is on screen: the Flows list shows only "canceled",
+        // which reads like a Stop by hand.
+        if let (RunEnd::Canceled { .. }, Some(limit)) = (end, &overage) {
+            self.toast_flow_overage_stop(limit, cx);
+        }
+        if report.is_none() {
+            return;
+        }
         // The report waits in the Flows page's past runs; nothing opens over
         // what the person is looking at. A worktree off screen is marked
-        // unread, the way an agent's finished turn marks it; the one on
-        // screen, which no mark can reach, gets a toast instead.
-        if self.settle_flow_run(lane_ref, end, cx).is_some() {
-            if lane_ref == self.active {
-                self.toast_flow_run_end(lane_ref, end, cx);
-            } else {
-                self.mark_lane_unread(lane_ref, cx);
-            }
+        // unread, the way an agent's finished turn marks it — which is also
+        // what says *where* an overage stop landed; the one on screen, which
+        // no mark can reach, gets a toast instead.
+        if lane_ref == self.active {
+            self.toast_flow_run_end(lane_ref, end, cx);
+        } else {
+            self.mark_lane_unread(lane_ref, cx);
         }
     }
 
+    /// Say a run was stopped for extra usage. A limit is account-wide, so
+    /// runs trip together: one key of its own merges them into one toast
+    /// with a repeat count, never into a "finished" toast.
+    fn toast_flow_overage_stop(
+        &mut self,
+        limit: &daruda_acp::RateLimitView,
+        cx: &mut Context<Self>,
+    ) {
+        self.report_error(
+            ErrorReport::new(overage_stopped(limit))
+                .severity(ErrorSeverity::Warning)
+                .at(file!(), line!())
+                .dedup("flow.run.overage_stopped")
+                .build(),
+            cx,
+        );
+    }
+
     /// Say a run in the worktree on screen ended, unless the Flows page is
-    /// already showing that worktree — its list or graph shows it there. A
-    /// run the person stopped needs no telling.
+    /// already showing that worktree — its list or graph shows it there.
     fn toast_flow_run_end(&mut self, lane: LaneRef, end: &RunEnd, cx: &mut Context<Self>) {
         let on_page = self.active_page() == Some(super::pages::Page::Flows)
             && match &self.pages.flows.detail {
                 Some(detail) => detail.lane == lane,
                 None => self.flow_browser_lane() == lane,
             };
+        if on_page {
+            return;
+        }
         let (message, severity) = match end {
-            _ if on_page => return,
             RunEnd::Done => (s::flow::run_finished_toast(), ErrorSeverity::Info),
             RunEnd::Failed { .. } => (s::flow::run_failed_toast(), ErrorSeverity::Warning),
-            // Stopped by hand, or already toasted as a refusal.
+            // Stopped by hand, toasted above as an overage stop, or already
+            // toasted as a refusal.
             _ => return,
         };
         self.report_error(
@@ -226,11 +256,13 @@ impl Workspace {
     }
 
     /// Retire the run `lane_ref` was holding and say what it left to read:
-    /// which lane is released, and what the user is told.
+    /// which lane is released, and what the user is told. `overage` is the
+    /// billed report that stopped it, read by the caller before retiring.
     pub(in crate::workspace) fn settle_flow_run(
         &mut self,
         lane_ref: daruda_store::project::LaneRef,
         end: &RunEnd,
+        overage: Option<&daruda_acp::RateLimitView>,
         cx: &mut Context<Self>,
     ) -> Option<PathBuf> {
         // Asked before `retire`, which drops the handle that knows.
@@ -265,7 +297,7 @@ impl Workspace {
         // report and the toast above both stay on a desktop the caller is
         // not at, which is what left a `/flow` answer looking like a hang.
         if owes_remote_answer {
-            self.relay_notice_to_telegram(flow_outcome_notice(end, refusal), cx);
+            self.relay_notice_to_telegram(flow_outcome_notice(end, refusal, overage), cx);
         }
         cx.notify();
         run_dir.as_deref().and_then(|dir| report_to_open(end, dir))
@@ -335,7 +367,11 @@ fn report_to_open(end: &RunEnd, run_dir: &Path) -> Option<PathBuf> {
 /// the phone and the desktop say the same thing about the same outcome. The
 /// three outcomes it has no wording for are the ones a person reads the run
 /// report for, so those get a one-line verdict and a pointer to it.
-fn flow_outcome_notice(end: &RunEnd, refusal: Option<String>) -> String {
+fn flow_outcome_notice(
+    end: &RunEnd,
+    refusal: Option<String>,
+    overage: Option<&daruda_acp::RateLimitView>,
+) -> String {
     if let Some(message) = refusal {
         return s::control::flow_refused_notice(clamp_notice_reason(&message));
     }
@@ -344,7 +380,9 @@ fn flow_outcome_notice(end: &RunEnd, refusal: Option<String>) -> String {
     // wording here must be a compile error and not a confident "failed".
     match end {
         RunEnd::Done => s::control::flow_finished_notice(),
-        RunEnd::Canceled { .. } => s::control::flow_canceled_notice(),
+        RunEnd::Canceled { .. } => {
+            overage.map_or_else(s::control::flow_canceled_notice, overage_stopped)
+        }
         RunEnd::Failed { .. } => s::control::flow_failed_notice(),
         // Every one of these produced a refusal above, so they are unreachable
         // here — named anyway so the compiler, not a reader, checks that.
@@ -354,6 +392,18 @@ fn flow_outcome_notice(end: &RunEnd, refusal: Option<String>) -> String {
         | RunEnd::Invalid { .. }
         | RunEnd::Unprovisioned { .. }
         | RunEnd::Stalled { .. } => s::control::flow_failed_notice(),
+    }
+}
+
+/// Why a run was canceled for extra usage, with the reset moment when the
+/// report carried one. One wording for the toast and the phone.
+fn overage_stopped(limit: &daruda_acp::RateLimitView) -> String {
+    match limit
+        .resets_at
+        .and_then(|secs| chrono::DateTime::from_timestamp(secs, 0))
+    {
+        Some(at) => s::flow::overage_stopped_resets(s::flow::overage_reset_at(at)),
+        None => s::flow::overage_stopped(),
     }
 }
 
@@ -403,8 +453,8 @@ mod tests {
     /// translation of it.
     #[test]
     fn every_outcome_has_its_own_notice() {
-        let done = flow_outcome_notice(&RunEnd::Done, None);
-        let canceled = flow_outcome_notice(&RunEnd::Canceled { node: None }, None);
+        let done = flow_outcome_notice(&RunEnd::Done, None, None);
+        let canceled = flow_outcome_notice(&RunEnd::Canceled { node: None }, None, None);
         assert_eq!(done, s::control::flow_finished_notice());
         assert_eq!(canceled, s::control::flow_canceled_notice());
         assert_ne!(done, canceled, "finished must not read as stopped");
@@ -416,12 +466,45 @@ mod tests {
         };
         let end = RunEnd::LockHeld { holder };
         let refusal = end_refusal(&end).expect("a held lock is a refusal");
-        let notice = flow_outcome_notice(&end, Some(refusal.clone()));
+        let notice = flow_outcome_notice(&end, Some(refusal.clone()), None);
         assert!(
             notice.contains(&refusal),
             "the desktop's wording must reach the phone verbatim: {notice}"
         );
         assert!(notice.contains("4321"), "the detail survives: {notice}");
+    }
+
+    fn billed(resets_at: Option<i64>) -> daruda_acp::RateLimitView {
+        daruda_acp::RateLimitView {
+            window: Some(daruda_acp::RateLimitWindow::FiveHour),
+            resets_at,
+            is_using_overage: true,
+        }
+    }
+
+    /// A run the overage switch stopped is told apart from one a person
+    /// stopped, with the reset moment when the report carried one.
+    #[test]
+    fn a_run_stopped_for_extra_usage_says_so() {
+        let canceled = RunEnd::Canceled { node: None };
+        assert_eq!(
+            flow_outcome_notice(&canceled, None, None),
+            s::control::flow_canceled_notice()
+        );
+        assert_eq!(
+            flow_outcome_notice(&canceled, None, Some(&billed(None))),
+            s::flow::overage_stopped()
+        );
+        let at = chrono::DateTime::from_timestamp(1_791_340_200, 0).expect("valid");
+        assert_eq!(
+            flow_outcome_notice(&canceled, None, Some(&billed(Some(1_791_340_200)))),
+            s::flow::overage_stopped_resets(s::flow::overage_reset_at(at))
+        );
+        // Only a cancel is the switch's to explain.
+        assert_eq!(
+            flow_outcome_notice(&RunEnd::Done, None, Some(&billed(None))),
+            s::control::flow_finished_notice()
+        );
     }
 
     /// `end_refusal` can hand back a whole validation report, and the notice
@@ -431,7 +514,7 @@ mod tests {
     #[test]
     fn a_long_refusal_is_bounded_before_it_is_interpolated() {
         let huge = "x".repeat(10_000);
-        let notice = flow_outcome_notice(&RunEnd::Done, Some(huge));
+        let notice = flow_outcome_notice(&RunEnd::Done, Some(huge), None);
         assert!(
             notice.chars().count() < 500,
             "{} chars",

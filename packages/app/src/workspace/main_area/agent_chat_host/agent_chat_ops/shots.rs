@@ -238,6 +238,29 @@ impl Workspace {
         );
     }
 
+    /// Open the interrupted transcript under the banner an overage stop
+    /// leaves — set only by a live billed `usage_update`, so no seed reaches it.
+    #[cfg(feature = "screenshot")]
+    pub(in crate::workspace) fn open_agent_chat_overage_stopped_for_shot(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.open_agent_chat_pane_seeded(
+            None,
+            |v, window, cx| {
+                v.seed_transcript(
+                    daruda_chat::shot_transcript::interrupted_transcript(),
+                    window,
+                    cx,
+                );
+                v.seed_overage_stop_for_shot(cx);
+            },
+            window,
+            cx,
+        );
+    }
+
     /// Open the interrupted transcript with the queue that Stop parked, either
     /// waiting or with the resume gesture armed. The strip's key hint and its
     /// confirmation sentence share a line with the Resume button and the count,

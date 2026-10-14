@@ -68,6 +68,12 @@ pub(crate) fn run_started_at(at: chrono::DateTime<chrono::Utc>) -> String {
     month_day_time_in(at, &chrono::Local)
 }
 
+/// When a rate limit that stopped a run resets, in local time. A date as well
+/// as the time: the notice may be read hours later, on a phone.
+pub(crate) fn overage_reset_at(at: chrono::DateTime<chrono::Utc>) -> String {
+    month_day_time_in(at, &chrono::Local)
+}
+
 /// Month, day and time in `tz`, shaped by the locale's `chrono` pattern —
 /// field order and clock convention differ per locale. The zone is explicit
 /// so the tests can pin one.

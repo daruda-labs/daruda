@@ -13,9 +13,11 @@ use daruda_acp::{
 };
 use smol::stream::{Stream, StreamExt};
 mod another_turn;
+mod overage;
 mod settings;
 mod tools;
 mod transcript;
+pub use overage::OverageStop;
 use settings::{Announcement, announced, check_mode};
 use transcript::Transcript;
 
@@ -39,6 +41,10 @@ struct Recording<'a> {
     turns: &'a Cell<u32>,
     /// What the turn reached for, folded as the updates arrive.
     tools: &'a RefCell<tools::ToolTrace>,
+    /// The runner's overage switch, which `drain` trips on a billed report.
+    overage: &'a OverageStop,
+    /// Whether this call's trip is what stopped the run, for the scheduler.
+    stopped_the_run: &'a Cell<bool>,
 }
 
 use std::cell::{Cell, RefCell};
@@ -70,6 +76,7 @@ pub struct AcpRunner {
     grace: Duration,
     settings_budget: Duration,
     prepared: RefCell<HashMap<String, PreparedAdapter>>,
+    overage: OverageStop,
 }
 
 impl AcpRunner {
@@ -113,6 +120,7 @@ impl AcpRunner {
             grace: CANCEL_GRACE,
             settings_budget: SETTINGS_BUDGET,
             prepared: RefCell::new(HashMap::new()),
+            overage: OverageStop::default(),
         }
     }
 
@@ -120,6 +128,13 @@ impl AcpRunner {
     /// dropped. Only a test has reason to shorten `CANCEL_GRACE`.
     pub fn with_grace(mut self, grace: Duration) -> Self {
         self.grace = grace;
+        self
+    }
+
+    /// Stop the run once a node's session bills extra usage. Without one the
+    /// runner never stops for it.
+    pub fn with_overage_stop(mut self, stop: OverageStop) -> Self {
+        self.overage = stop;
         self
     }
 
@@ -180,6 +195,7 @@ impl AcpRunner {
         let park = Park::default();
         let turns = Cell::new(1);
         let traced = RefCell::new(tools::ToolTrace::default());
+        let stopped_the_run = Cell::new(false);
         let rec = Recording {
             usage: &usage,
             log: &log,
@@ -187,6 +203,8 @@ impl AcpRunner {
             started,
             turns: &turns,
             tools: &traced,
+            overage: &self.overage,
+            stopped_the_run: &stopped_the_run,
         };
 
         // Scoped so the losing future releases the stream before the wind-down
@@ -232,6 +250,7 @@ impl AcpRunner {
             waiting: park.waiting(Instant::now()),
             turns: turns.get(),
             tools: traced.into_inner().finish(),
+            stopped_the_run: stopped_the_run.get(),
         }
     }
 
@@ -445,7 +464,19 @@ async fn drain(
             return Err(NodeFailure::SessionError(ENDED_EARLY.to_string()));
         };
         match event {
-            AcpEvent::UsageChanged(reported) => *rec.usage.borrow_mut() = Some(reported),
+            AcpEvent::UsageChanged(reported) => {
+                // Through the run-wide token, so every node winds down and the
+                // run ends `Canceled`. Recorded even mid-Stop, since money was
+                // at stake; the stop is this call's only if nothing came first.
+                if let Some(limit) = &reported.rate_limit
+                    && rec.overage.trip(limit)
+                {
+                    rec.log.borrow_mut().stopped_for_overage();
+                    rec.stopped_the_run.set(!ctx.cancel.is_canceled());
+                    ctx.cancel.cancel();
+                }
+                *rec.usage.borrow_mut() = Some(reported);
+            }
             AcpEvent::PermissionRequested { id, request } => {
                 let tool = request
                     .tool_call
@@ -606,6 +637,7 @@ fn failed(message: String) -> RunResult {
         // Nothing opened, so nothing waited and nothing was corrected.
         waiting: Waiting::default(),
         turns: 0,
+        stopped_the_run: false,
     }
 }
 

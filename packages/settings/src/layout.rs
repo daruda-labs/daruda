@@ -219,6 +219,10 @@ const AGENT: &[Card] = &[
         ],
     },
     Card::Rows {
+        title: s::settings::card_usage_limits,
+        rows: &[b(B::StopOnOverage)],
+    },
+    Card::Rows {
         title: s::settings::card_keep_awake,
         rows: &[sel(S::KeepAwakeMode)],
     },

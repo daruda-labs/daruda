@@ -107,6 +107,7 @@ fn reported_usage_reaches_the_run_result() {
                 amount: 0.25,
                 currency: "USD".to_string(),
             }),
+            rate_limit: None,
         })
     );
 }

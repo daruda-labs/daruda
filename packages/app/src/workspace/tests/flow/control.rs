@@ -472,6 +472,101 @@ async fn a_run_ending_opens_no_tab_and_marks_its_worktree_unread(cx: &mut TestAp
     .expect("window is live");
 }
 
+/// A run the overage switch stopped is toasted even over the Flows page,
+/// which shows it only as canceled; a run a person stopped is not.
+#[gpui::test]
+async fn a_run_stopped_for_extra_usage_is_toasted(cx: &mut TestAppContext) {
+    let (here_dir, ws, _path, wh) = workspace_with_a_flow(cx, COMMAND_ONLY);
+    let canceled = daruda_flow::event::FlowEvent::RunEnded {
+        end: daruda_flow::event::RunEnd::Canceled { node: None },
+    };
+    let run_dir = here_dir.path().join("run-billed");
+    std::fs::create_dir_all(&run_dir).expect("run dir");
+    std::fs::write(run_dir.join(daruda_flow::record::RUN_REPORT_FILE), "# Run").expect("report");
+    let limit = billed_limit();
+
+    cx.update_window(wh.into(), |_, _window, cx| {
+        ws.update(cx, |ws, cx| {
+            let active = ws.active;
+            ws.show_page(crate::workspace::pages::Page::Flows, cx);
+
+            ws.seed_flow_run_for_test(active, run_dir.clone());
+            ws.apply_flow_event_whole_for_test(active, &canceled, cx);
+            assert_eq!(overage_toasts(ws), 0, "a Stop by hand needs no telling");
+
+            ws.seed_flow_run_for_test(active, run_dir.clone());
+            ws.flows.runs.trip_overage_for_test(active, &limit);
+            ws.apply_flow_event_whole_for_test(active, &canceled, cx);
+            assert_eq!(
+                overage_toasts(ws),
+                1,
+                "the switch's stop is said, page or not"
+            );
+        });
+    })
+    .expect("window is live");
+}
+
+/// Runs off screen that the overage switch stopped are toasted too — their
+/// Flows list would read like a manual Stop — and still marked unread, which
+/// is what says where. A limit trips runs together, so the toasts merge into
+/// one with a repeat count.
+#[gpui::test]
+async fn runs_stopped_for_extra_usage_off_screen_are_toasted_once(cx: &mut TestAppContext) {
+    let (_here_dir, ws, _path, wh) = workspace_with_a_flow(cx, COMMAND_ONLY);
+    let (one_dir, one) = add_lane_with_a_flow(&ws, wh, cx, "one.yaml", COMMAND_ONLY);
+    let (two_dir, two) = add_lane_with_a_flow(&ws, wh, cx, "two.yaml", COMMAND_ONLY);
+    let canceled = daruda_flow::event::FlowEvent::RunEnded {
+        end: daruda_flow::event::RunEnd::Canceled { node: None },
+    };
+    let run_in = |root: &std::path::Path| {
+        let dir = root.join("run-billed");
+        std::fs::create_dir_all(&dir).expect("run dir");
+        std::fs::write(dir.join(daruda_flow::record::RUN_REPORT_FILE), "# Run").expect("report");
+        dir
+    };
+    let limit = billed_limit();
+
+    cx.update_window(wh.into(), |_, _window, cx| {
+        ws.update(cx, |ws, cx| {
+            assert!(one != ws.active && two != ws.active);
+            for (lane, root) in [(one, one_dir.path()), (two, two_dir.path())] {
+                ws.seed_flow_run_for_test(lane, run_in(root));
+                ws.flows.runs.trip_overage_for_test(lane, &limit);
+                ws.apply_flow_event_whole_for_test(lane, &canceled, cx);
+                assert!(
+                    ws.lane_for(lane).is_some_and(|lane| lane.is_unread),
+                    "the stopped worktree is marked"
+                );
+            }
+            assert_eq!(overage_toasts(ws), 2, "each stop is said");
+            let merged: Vec<u32> = ws
+                .error_toasts(cx)
+                .iter()
+                .filter(|t| t.report.title == crate::surface::strings::flow::overage_stopped())
+                .map(|t| t.repeat_count)
+                .collect();
+            assert_eq!(merged, [2], "in one toast with a count");
+        });
+    })
+    .expect("window is live");
+}
+
+fn billed_limit() -> daruda_acp::RateLimitView {
+    daruda_acp::RateLimitView {
+        window: Some(daruda_acp::RateLimitWindow::FiveHour),
+        resets_at: None,
+        is_using_overage: true,
+    }
+}
+
+fn overage_toasts(ws: &Workspace) -> usize {
+    ws.error_history()
+        .iter()
+        .filter(|r| r.title == crate::surface::strings::flow::overage_stopped())
+        .count()
+}
+
 /// The worktree has to survive the picker's *second* question. A flow that
 /// declares profiles is dispatched only after the profile is answered, and
 /// that answer arrives long after `run_flow_at` was told where to run — so
@@ -701,7 +796,7 @@ async fn a_desktop_started_run_stays_off_the_phone(cx: &mut TestAppContext) {
         let lane_ref = ws.active_ref();
         // Seeded, i.e. not marked as owing anyone an answer.
         ws.seed_flow_run_for_test(lane_ref, lane.path().join("run"));
-        let _ = ws.settle_flow_run(lane_ref, &daruda_flow::event::RunEnd::Done, cx);
+        let _ = ws.settle_flow_run(lane_ref, &daruda_flow::event::RunEnd::Done, None, cx);
     });
 
     assert!(

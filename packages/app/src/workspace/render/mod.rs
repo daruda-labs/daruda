@@ -383,6 +383,7 @@ impl Workspace {
             usage,
             keep_awake: self.keep_awake_view(cx),
             visible: self.mirrors.status_bar.clone(),
+            stop_on_overage: crate::overage_policy::stop_on_overage_enabled(cx),
             workspace: weak_workspace.clone(),
         };
         status_bar::StatusBar(status_data)

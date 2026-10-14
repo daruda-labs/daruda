@@ -137,8 +137,8 @@ struct ChildSession {
 /// One instance per connection: it holds the session graph for that connection
 /// and nothing outlives it.
 pub struct NativeSubagentRouter {
-    /// Reads the vendor `_meta` this router has to interpret — today only which
-    /// role a child's streamed message plays.
+    /// The session's dialect: which role a child's streamed message plays, and
+    /// the rate-limit report on the root's usage updates.
     adapter: Box<dyn AcpAdapter>,
     /// Child session id → its synthetic call. Membership is the whole test for
     /// "is this a subagent's traffic": a session is a child only once it has
@@ -176,6 +176,12 @@ impl NativeSubagentRouter {
     /// read under the right dialect.
     pub fn set_adapter(&mut self, adapter: Box<dyn AcpAdapter>) {
         self.adapter = adapter;
+    }
+
+    /// The rate-limit report in a root usage update's `_meta`, read under the
+    /// dialect [`Self::set_adapter`] installed.
+    pub fn rate_limit(&self, meta: &Option<Meta>) -> Option<crate::model::RateLimitView> {
+        self.adapter.rate_limit(meta)
     }
 
     /// Whether this session is a subagent's child rather than a conversation of

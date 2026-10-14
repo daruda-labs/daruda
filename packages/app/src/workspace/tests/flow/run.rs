@@ -332,7 +332,7 @@ async fn a_run_ending_settles_its_own_lane_and_leaves_the_others_alone(cx: &mut 
         ws.seed_flow_run_for_test(elsewhere, dir_elsewhere.clone());
 
         // The run in the *other* lane ends while this one is active.
-        let report = ws.settle_flow_run(elsewhere, &daruda_flow::event::RunEnd::Done, cx);
+        let report = ws.settle_flow_run(elsewhere, &daruda_flow::event::RunEnd::Done, None, cx);
 
         assert_eq!(
             report.as_deref(),

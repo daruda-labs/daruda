@@ -252,6 +252,7 @@ fn settings_patch_round_trips_the_advanced_keys() {
         P::ClaudeStatusFileTtlDays(14),
         P::UsageLimitsPollSecs(0),
         P::UsageStatusPollSecs(120),
+        P::UsageStopOnOverage(true),
         P::PortsPollSecs(9),
         P::LogsRetentionDays(7),
         P::LogsMaxFileSizeMb(20),
@@ -269,6 +270,7 @@ fn settings_patch_round_trips_the_advanced_keys() {
     assert_eq!(c.claude_status.file_ttl_days, 14);
     assert_eq!(c.usage.poll.limits_secs, 0);
     assert_eq!(c.usage.poll.status_secs, 120);
+    assert!(c.usage.stop_on_overage);
     assert_eq!(c.ports.poll_secs, 9);
     assert_eq!(c.logs.retention_days, 7);
     assert_eq!(c.logs.max_file_size_mb, 20);

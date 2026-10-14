@@ -6,6 +6,7 @@ mod activity;
 mod attachments;
 mod diff_layout;
 mod output_layout;
+mod overage;
 mod pane_choices;
 mod projection;
 mod queue;

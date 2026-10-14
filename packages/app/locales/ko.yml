@@ -438,6 +438,8 @@ agent_chat:
   diff_remote_path_unsupported: "원격 세션의 파일은 로컬에서 열 수 없습니다."
   link_file_missing: "링크된 파일이 더 이상 존재하지 않습니다"
   clear_command_desc: "대화를 지우고 새 세션 시작"
+  overage_stopped: "%{window} 한도 소진 — 초과 과금 방지로 에이전트 채팅을 중단했습니다"
+  overage_stopped_resets: "%{window} 한도 소진 — 초과 과금 방지로 에이전트 채팅을 중단했습니다 · %{time} 초기화"
 
 # Generic UI
 ui:
@@ -894,6 +896,7 @@ mcp:
 
 # Usage tab
 usage:
+  stop_on_overage_caption: "첫 응답 1회분은 과금될 수 있습니다"
   reset_in: "%{time} 후 초기화"
   reset_now: "지금 초기화"
   reset_short_days: "%{days}일 %{hours}시간"
@@ -1010,6 +1013,7 @@ error:
   skill_rename_failed: "스킬 이름 변경 실패"
   keep_awake_save_failed: "절전 방지 모드 저장 실패"
   status_bar_save_failed: "상태바 토글 저장 실패"
+  usage_save_failed: "초과 과금 자동 중단 저장 실패"
   tasks_require_git_repo: "작업에는 Git 저장소가 필요합니다"
   task_lane_missing: "이 작업이 실행될 worktree가 열려 있지 않습니다"
   task_project_not_open: "이 작업의 프로젝트가 이 창에 열려 있지 않습니다"
@@ -1307,6 +1311,8 @@ flow:
   lock_held: "다른 실행(프로세스 %{pid})이 이미 이 worktree를 쓰고 있습니다"
   run_finished_toast: "플로우 실행이 끝났습니다. 리포트는 플로우 페이지에 있습니다."
   run_failed_toast: "플로우 실행이 실패했습니다. 리포트는 플로우 페이지에 있습니다."
+  overage_stopped: "초과 과금 방지로 플로우를 중단했습니다"
+  overage_stopped_resets: "초과 과금 방지로 플로우를 중단했습니다 · %{time} 초기화"
   run_panicked: "실행이 예기치 않게 중단되었습니다"
   unprovisioned: "%{agent}을(를) 돌릴 런타임이 없습니다: %{message}"
   stalled: "할 일이 남은 채 실행이 멈췄습니다: %{nodes}의 폴더를 읽을 수 없습니다"

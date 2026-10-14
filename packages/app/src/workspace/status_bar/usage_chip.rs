@@ -10,6 +10,7 @@ use crate::ui::{PopupMenu, PopupMenuItem, button_status_pill_bare, menu_builder,
 use crate::workspace::Workspace;
 use crate::workspace::right_dock::usage::severity_color;
 use crate::workspace::usage_labels::{percent, window_label};
+use crate::workspace::usage_settings_ops::offers_overage_stop;
 use daruda_agent::{LimitSeverity, ProviderUsage, UsageWindow};
 use daruda_store::accounts::AccountRecipeId;
 use gpui::{AnyElement, App, Hsla, IntoElement, SharedString, WeakEntity, div, prelude::*, px};
@@ -37,6 +38,7 @@ pub(super) fn render(
     recipe: AccountRecipeId,
     outcome: &daruda_agent::UsageOutcome,
     density: StatusBarDensity,
+    stop_on_overage: bool,
     workspace: WeakEntity<Workspace>,
     cx: &App,
 ) -> Option<impl IntoElement> {
@@ -98,7 +100,7 @@ pub(super) fn render(
                 }),
         );
     let builder = menu_builder(move |menu, _window, _cx| {
-        build_menu(recipe, &menu_rows, workspace.clone(), menu)
+        build_menu(recipe, &menu_rows, stop_on_overage, workspace.clone(), menu)
     });
     Some(super::menu::dropdown("status-usage", trigger, builder, cx))
 }
@@ -184,6 +186,7 @@ fn binding_row(rows: &[WindowRow]) -> Option<&WindowRow> {
 fn build_menu(
     recipe: AccountRecipeId,
     rows: &[WindowRow],
+    stop_on_overage: bool,
     workspace: WeakEntity<Workspace>,
     menu: PopupMenu,
 ) -> PopupMenu {
@@ -210,6 +213,26 @@ fn build_menu(
             gauge_row(&row, cx)
         }))
     });
+    let menu = if let Some((label, checked)) = overage_menu_item(recipe, stop_on_overage) {
+        let workspace = workspace.clone();
+        menu.separator().item(
+            PopupMenuItem::element(move |_window, cx| {
+                super::menu::choice_row(
+                    label.clone().into(),
+                    Some(strings::usage::stop_on_overage_caption().into()),
+                    checked,
+                    cx,
+                )
+            })
+            .on_click(move |_, _window, app| {
+                if let Some(ws) = workspace.upgrade() {
+                    ws.update(app, |ws, cx| ws.set_stop_on_overage(!checked, cx));
+                }
+            }),
+        )
+    } else {
+        menu
+    };
     // Reveals the panel (opens the dock, then selects the tab) rather
     // than dispatching the tab-switch action, which does nothing when
     // the dock is closed or Usage is already the selected view.
@@ -224,6 +247,17 @@ fn build_menu(
             }
         },
     )
+}
+
+/// The overage toggle `recipe`'s menu offers — its label and checked state —
+/// or `None` for a provider whose replies carry no overage flag.
+fn overage_menu_item(recipe: AccountRecipeId, stop_on_overage: bool) -> Option<(String, bool)> {
+    offers_overage_stop(recipe).then(|| {
+        (
+            daruda_settings::labels::stop_on_overage_label(),
+            stop_on_overage,
+        )
+    })
 }
 
 /// One dropdown row — header line, gauge bar, reset countdown: the Usage
@@ -270,6 +304,21 @@ mod tests {
     use super::*;
     use daruda_agent::WindowScope;
     use daruda_store::accounts::AccountRecipeId;
+
+    #[test]
+    fn only_claude_offers_the_overage_toggle_checked_as_set() {
+        let label = daruda_settings::labels::stop_on_overage_label();
+        assert_eq!(
+            overage_menu_item(AccountRecipeId::Claude, true),
+            Some((label.clone(), true))
+        );
+        assert_eq!(
+            overage_menu_item(AccountRecipeId::Claude, false),
+            Some((label, false))
+        );
+        assert_eq!(overage_menu_item(AccountRecipeId::Codex, true), None);
+        assert_eq!(overage_menu_item(AccountRecipeId::Codex, false), None);
+    }
 
     const FIVE_HOURS: u64 = 5 * 3600;
     const SEVEN_DAYS: u64 = 7 * 24 * 3600;

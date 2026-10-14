@@ -261,3 +261,116 @@ fn a_resumed_session_applies_the_requested_mode() {
         let _ = connection.await;
     });
 }
+
+/// Fake agent that answers the handshake as `program` (or anonymously) and,
+/// on `session/prompt`, sends one `usage_update` carrying `meta` before
+/// ending the turn.
+fn usage_update_agent(
+    program: Option<&'static str>,
+    meta: serde_json::Value,
+) -> impl ConnectTo<Client> {
+    use agent_client_protocol::schema::v1::{
+        Implementation, InitializeResponse, NewSessionResponse, PromptResponse, UsageUpdate,
+    };
+    let meta = meta.as_object().cloned();
+    Agent
+        .builder()
+        .on_receive_request(
+            async move |_req: InitializeRequest, responder, _conn| {
+                let response = InitializeResponse::new(ProtocolVersion::V1);
+                responder.respond(match program {
+                    Some(name) => response.agent_info(Implementation::new(name, "0.0.0")),
+                    None => response,
+                })
+            },
+            agent_client_protocol::on_receive_request!(),
+        )
+        .on_receive_request(
+            async |_req: NewSessionRequest, responder, _conn| {
+                responder.respond(NewSessionResponse::new("sess-usage-test"))
+            },
+            agent_client_protocol::on_receive_request!(),
+        )
+        .on_receive_request(
+            async move |req: PromptRequest, responder, conn| {
+                conn.send_notification(SessionNotification::new(
+                    req.session_id,
+                    SessionUpdate::UsageUpdate(
+                        UsageUpdate::new(33_813, 1_000_000).meta(meta.clone()),
+                    ),
+                ))?;
+                responder.respond(PromptResponse::new(StopReason::EndTurn))
+            },
+            agent_client_protocol::on_receive_request!(),
+        )
+}
+
+/// The first `UsageChanged` a session against `agent` emits for one prompt.
+fn first_usage_from(agent: impl ConnectTo<Client> + 'static) -> crate::model::UsageView {
+    let (command_tx, command_rx) = unbounded::<Command>();
+    command_tx
+        .unbounded_send(Command::Prompt("hi".into()))
+        .unwrap();
+    let (event_tx, mut event_rx) = unbounded::<AcpEvent>();
+    let permission_parks: PermissionParks = Arc::new(Mutex::new(HashMap::new()));
+    smol::block_on(async {
+        let connection = smol::spawn(run_connection(
+            agent,
+            PathBuf::from("."),
+            None,
+            Vec::new(),
+            None,
+            Vec::new(),
+            command_rx,
+            event_tx,
+            permission_parks,
+        ));
+        let usage = loop {
+            match next_event_within(&mut event_rx).await {
+                Some(AcpEvent::UsageChanged(usage)) => break usage,
+                Some(_) => {}
+                None => panic!("the usage update never reached the host"),
+            }
+        };
+        drop(command_tx);
+        let _ = connection.await;
+        usage
+    })
+}
+
+/// The wire-captured `_meta` of a usage update billed as overage.
+fn billed_usage_meta() -> serde_json::Value {
+    serde_json::json!({
+        "_claude/rateLimit": {
+            "status": "rejected",
+            "resetsAt": 1791340200,
+            "rateLimitType": "five_hour",
+            "overageStatus": "allowed",
+            "isUsingOverage": true
+        },
+        "_claude/model": "claude-opus-5-5"
+    })
+}
+
+#[test]
+fn a_claude_usage_update_reports_overage_billing() {
+    let usage = first_usage_from(usage_update_agent(
+        Some("@agentclientprotocol/claude-agent-acp"),
+        billed_usage_meta(),
+    ));
+    assert_eq!((usage.used, usage.size), (33_813, 1_000_000));
+    let rate_limit = usage.rate_limit.expect("the session read the rate limit");
+    assert!(rate_limit.bills_overage());
+    assert_eq!(
+        rate_limit.window,
+        Some(crate::model::RateLimitWindow::FiveHour)
+    );
+}
+
+/// The report is read under the program's dialect, so the same `_meta` from
+/// codex carries no standing.
+#[test]
+fn a_codex_usage_update_carries_no_rate_limit() {
+    let usage = first_usage_from(usage_update_agent(Some("codex-acp"), billed_usage_meta()));
+    assert_eq!(usage.rate_limit, None);
+}

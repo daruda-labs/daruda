@@ -181,6 +181,7 @@ struct Fixture {
     reserve: Box<dyn Fn() -> bool>,
     grace: Duration,
     settings_budget: Duration,
+    overage: OverageStop,
 }
 
 impl Fixture {
@@ -229,6 +230,7 @@ impl Fixture {
             reserve: Box::new(|| true),
             grace: CANCEL_GRACE,
             settings_budget: SETTINGS_BUDGET,
+            overage: OverageStop::default(),
             _dir: dir,
         }
     }
@@ -322,6 +324,7 @@ impl Fixture {
         )
         .with_grace(self.grace)
         .with_settings_budget(self.settings_budget)
+        .with_overage_stop(self.overage.clone())
     }
 
     /// One run, bounded: a runner that never returns fails this as a
@@ -468,5 +471,6 @@ fn probe(name: &str) -> (tempfile::TempDir, PathBuf) {
 
 mod control;
 mod correction;
+mod overage;
 mod settings;
 mod turns;

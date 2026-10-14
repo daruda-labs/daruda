@@ -51,6 +51,12 @@ pub(crate) fn local_time<T: TimeZone>(when: DateTime<T>) -> String {
     in_zone(when, &Local, Shape::TimeOnly)
 }
 
+/// Date and time in the local zone, for a moment the user may not be able to
+/// place from context alone (a reset days away).
+pub(crate) fn local_date_time<T: TimeZone>(when: DateTime<T>) -> String {
+    in_zone(when, &Local, Shape::DateAndTime)
+}
+
 /// Render an instant in `tz`. The zone is explicit so the tests can pin one
 /// instead of inheriting whatever the build machine is set to.
 fn in_zone<T, Z>(when: DateTime<T>, tz: &Z, format: Shape) -> String

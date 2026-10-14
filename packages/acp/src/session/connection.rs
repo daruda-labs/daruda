@@ -99,14 +99,23 @@ pub(super) async fn run_connection(
                 // asked for on the arm that emits it: `first_legacy_delegation`
                 // spends a once-per-session slot, so asking anywhere else
                 // costs the notice without reporting it.
-                let (routed, legacy_delegation) = {
+                // The rate limit is read here, under the session's dialect, and
+                // only off root traffic: a child's usage is not the account's.
+                let (routed, legacy_delegation, rate_limit) = {
                     let mut router = notif_router
                         .lock()
                         .expect("native subagent router mutex poisoned");
                     let routed = router.route(&notification.session_id.0, &notification.update);
                     let legacy = matches!(routed, Routed::Standard(_))
                         && router.first_legacy_delegation(&notification.update);
-                    (routed, legacy)
+                    let rate_limit = match &routed {
+                        Routed::Standard(update) => match update.as_ref() {
+                            SessionUpdate::UsageUpdate(u) => router.rate_limit(&u.meta),
+                            _ => None,
+                        },
+                        _ => None,
+                    };
+                    (routed, legacy, rate_limit)
                 };
                 match routed {
                     Routed::Standard(update) => {
@@ -116,11 +125,11 @@ pub(super) async fn run_connection(
                         if legacy_delegation {
                             let _ = notif_tx.unbounded_send(AcpEvent::LegacyDelegation);
                         }
-                        forward_session_update(*update, &notif_mode_tracker, &notif_tx);
+                        forward_session_update(*update, rate_limit, &notif_mode_tracker, &notif_tx);
                     }
                     Routed::Normalized(updates) => {
                         for update in updates {
-                            forward_session_update(update, &notif_mode_tracker, &notif_tx);
+                            forward_session_update(update, None, &notif_mode_tracker, &notif_tx);
                         }
                     }
                     // An update kind this build does not know is reported and

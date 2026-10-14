@@ -26,6 +26,7 @@ mod keep_awake;
 pub use daruda_project::lane;
 pub(crate) mod menus;
 mod orchestrator;
+mod overage_policy;
 mod panels_watcher;
 pub(crate) mod path_ext;
 mod platform;

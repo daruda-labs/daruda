@@ -104,7 +104,7 @@ use blocks::{
     MarkdownRender, assistant_markdown, conclusion_block, failure_block, group_thought_block,
     thinking_block, user_bubble,
 };
-use chrome::{ActivityBarProps, activity_bar, status_banner, working_indicator};
+use chrome::{ActivityBarProps, activity_bar, overage_banner, status_banner, working_indicator};
 use fold_header::{FoldHeader, FoldRow, SummaryLine, interrupted_row, rollup_glyph};
 use links::AgentChatMarkdownLinks;
 use plan::plan_region;
@@ -150,6 +150,7 @@ pub(super) fn render(view: &AgentChatView, cx: &mut Context<AgentChatView>) -> i
     };
 
     let status_banner = status_banner(&content.status, pane_id, content.cwd.is_some(), &t, cx);
+    let overage_banner = overage_banner(content.overage_notice(), &t, cx);
 
     // Activity bar: title left, fold buttons right. Title resolves to the
     // session title, else the first prompt, else the configured agent name.
@@ -310,6 +311,7 @@ pub(super) fn render(view: &AgentChatView, cx: &mut Context<AgentChatView>) -> i
                 .opacity(daruda_ui::theme::background_alpha(cx)),
         )
         .children(status_banner)
+        .children(overage_banner)
         .child(bar)
         .child(body)
         // The plan region is a flex-none sibling below the `flex_1` body, so it

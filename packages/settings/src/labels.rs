@@ -11,6 +11,11 @@ pub fn account_recipe_label(recipe: AccountRecipeId) -> String {
     s::settings::account_recipe_label(recipe)
 }
 
+/// The `[usage] stop_on_overage` toggle's name.
+pub fn stop_on_overage_label() -> String {
+    s::settings::label_stop_on_overage()
+}
+
 /// A model choice's display label; the default entry names the model it
 /// resolves to.
 pub fn agent_model_choice_label(value: &str, name: &str, description: Option<&str>) -> String {

@@ -272,6 +272,10 @@ pub(super) fn bool(setting: BoolSetting) -> RowCopy {
             label: s::settings::label_notify_long_running,
             hint: s::settings::hint_notify_long_running,
         },
+        BoolSetting::StopOnOverage => RowCopy {
+            label: s::settings::label_stop_on_overage,
+            hint: s::settings::hint_stop_on_overage,
+        },
         BoolSetting::NotifySkipFocusedPane => RowCopy {
             label: s::settings::label_notify_skip_focused,
             hint: s::settings::hint_notify_skip_focused,

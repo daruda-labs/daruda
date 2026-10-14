@@ -1,8 +1,11 @@
-//! Right-panel Usage tab configuration: API poll cadence.
+//! Usage configuration: API poll cadence and the extra-usage auto-stop.
 //!
 //! Sample `config.toml`:
 //!
 //! ```toml
+//! [usage]
+//! stop_on_overage = false   # stop agent chat turns and flow runs on extra usage
+//!
 //! [usage.poll]
 //! limits_secs = 300   # 5 min — Anthropic OAuth /api/oauth/usage
 //! status_secs = 300   # 5 min — status.claude.com service indicator
@@ -22,6 +25,10 @@ use serde::{Deserialize, Serialize};
 #[serde(default)]
 pub struct UsageConfig {
     pub poll: PollConfig,
+    /// Stop a running agent-chat turn or flow run once Claude reports the
+    /// reply as billed to extra usage. The billed reply itself has already
+    /// happened by then, so this bounds the spend rather than preventing it.
+    pub stop_on_overage: bool,
 }
 
 /// Background-poll cadence for the two endpoints feeding the Usage
@@ -87,5 +94,20 @@ mod tests {
         let c: UsageConfig = toml::from_str(toml).unwrap();
         assert_eq!(c.poll.limits_secs, 0);
         assert_eq!(c.poll.status_secs, DEFAULT_STATUS_SECS);
+    }
+
+    #[test]
+    fn stop_on_overage_defaults_off() {
+        assert!(!UsageConfig::default().stop_on_overage);
+        let c: UsageConfig = toml::from_str("").unwrap();
+        assert!(!c.stop_on_overage);
+    }
+
+    #[test]
+    fn stop_on_overage_round_trips_through_toml() {
+        let c: UsageConfig = toml::from_str("stop_on_overage = true").unwrap();
+        assert!(c.stop_on_overage);
+        let back: UsageConfig = toml::from_str(&toml::to_string(&c).unwrap()).unwrap();
+        assert_eq!(back, c);
     }
 }

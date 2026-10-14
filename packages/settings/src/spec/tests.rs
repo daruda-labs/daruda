@@ -129,6 +129,7 @@ fn coverage_of(patch: &SettingsPatch) -> Coverage {
         | SettingsPatch::ClaudeStatusFileTtlDays(_)
         | SettingsPatch::UsageLimitsPollSecs(_)
         | SettingsPatch::UsageStatusPollSecs(_)
+        | SettingsPatch::UsageStopOnOverage(_)
         | SettingsPatch::PortsPollSecs(_)
         | SettingsPatch::LogsRetentionDays(_)
         | SettingsPatch::LogsMaxFileSizeMb(_)

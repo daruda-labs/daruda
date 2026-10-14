@@ -13,15 +13,65 @@ use super::super::agent_chat_helpers::{cancel_pending_permission, permission_car
 use super::super::reconcile::ReconcileScope;
 use super::super::session_config::SessionConfig;
 use super::super::session_config::model_select;
-use super::{ActivitySpan, AgentChatView, Turn, TurnOutcome};
+use super::{ActivitySpan, AgentChatView, OverageNotice, Turn, TurnOutcome};
+use crate::strings as s;
+
+/// Who asked for a Stop; decides how its transcript marker reads.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum StopCause {
+    User,
+    Overage,
+}
 
 impl AgentChatView {
+    /// Stop the running turn because Claude reported the reply as billed to
+    /// extra usage. Whether to do so is the host's policy; this is the
+    /// behaviour. At most once per turn, and a no-op on an idle pane or one
+    /// the user already stopped. Returns whether it stopped anything.
+    #[must_use]
+    pub fn stop_for_overage(
+        &mut self,
+        limit: daruda_acp::RateLimitView,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        // Trailing subagents can keep a stopped pane busy; a late billed
+        // update must not relabel that Stop. A newly dispatched turn is fair
+        // game: the stale `Stopped` clears only at the busy→idle edge.
+        let user_stopped = self.queue.turn.awaiting_cancel_ack()
+            || (!self.queue.turn.is_in_flight()
+                && self.activity.pending_completion == Some(TurnOutcome::Stopped));
+        if self.overage_notice.is_some() || !self.is_busy() || user_stopped {
+            return false;
+        }
+        self.overage_notice = Some(OverageNotice::from(&limit));
+        self.cancel_turn_with(StopCause::Overage, cx);
+        true
+    }
+
+    /// The limit the last overage stop reported, while its banner is up.
+    pub fn overage_notice(&self) -> Option<&OverageNotice> {
+        self.overage_notice.as_ref()
+    }
+
     /// Stop the active turn: send `session/cancel` *and* end the turn locally
     /// right now, without waiting for the agent's stop reason. `cancel` is
     /// only cooperative — a hung/dead agent may never send the `Cancelled`
     /// `TurnEnded`, leaving the turn pulsing forever otherwise. A later
     /// `TurnEnded` for this turn is idempotent.
     pub fn cancel_turn(&mut self, cx: &mut Context<Self>) {
+        self.cancel_turn_with(StopCause::User, cx);
+    }
+
+    /// How the stop marker at item `ix` reads: who cut the run.
+    pub(crate) fn stop_marker_label(&self, ix: usize) -> String {
+        if self.overage_stop_markers.contains(&ix) {
+            s::agent_chat::interrupted_overage()
+        } else {
+            s::agent_chat::interrupted()
+        }
+    }
+
+    fn cancel_turn_with(&mut self, cause: StopCause, cx: &mut Context<Self>) {
         if let Some(handle) = self.live_handle() {
             handle.cancel();
         }
@@ -55,6 +105,9 @@ impl AgentChatView {
             // the turn already idle, and that is a real cancel that records no
             // entry. Marking it would invent a row the replay cannot reproduce.
             self.items.push(ChatItem::Interrupted);
+            if cause == StopCause::Overage {
+                self.overage_stop_markers.insert(self.items.len() - 1);
+            }
         }
         self.settle_turn();
         // Stop can be the only terminal transition a live resource link gets;
@@ -105,7 +158,8 @@ impl AgentChatView {
     /// thing that can already point there is a fold the user opened on that
     /// content while the ack was outstanding; it lands on the neighbouring key
     /// and self-corrects on the next toggle. Everything else is keyed by id
-    /// (permissions, subagents) or recomputed by `rebuild_rows`.
+    /// (permissions, subagents), recomputed by `rebuild_rows`, or — the overage
+    /// marker set — remapped below.
     ///
     /// [`agent_run`]: super::super::agent_chat_helpers::agent_run
     pub(super) fn settle_stop_marker(&mut self) {
@@ -121,6 +175,10 @@ impl AgentChatView {
         };
         self.items.remove(ix);
         self.items.push(ChatItem::Interrupted);
+        // `ix` is the last marker, so no other recorded index sits past it.
+        if self.overage_stop_markers.remove(&ix) {
+            self.overage_stop_markers.insert(self.items.len() - 1);
+        }
     }
 
     /// End the current turn locally and settle every still-live item. Model-only
@@ -318,6 +376,7 @@ impl AgentChatView {
         self.detach_handle();
         self._event_pump = None;
         self.items.clear();
+        self.overage_stop_markers.clear();
         self.queue.pending_prompts.clear();
         self.queue.paused_prompts.clear();
         self.queue.editing_prompt = None;
@@ -336,6 +395,7 @@ impl AgentChatView {
         // hang the previous conversation's numbers on the new rows.
         self.activity.turn_records.clear();
         self.session_usage = None;
+        self.overage_notice = None;
         self.assets.clear();
         self.fold.clear_overrides();
         self.session_config = SessionConfig::default();

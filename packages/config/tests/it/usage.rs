@@ -59,8 +59,22 @@ fn round_trips_through_toml() {
             limits_secs: 600,
             status_secs: 0,
         },
+        stop_on_overage: true,
     };
     let serialized = toml::to_string(&original).unwrap();
     let back: UsageConfig = toml::from_str(&serialized).unwrap();
     assert_eq!(back, original);
+}
+
+#[test]
+fn stop_on_overage_patch_applies_and_reports_its_field() {
+    use daruda_config::{Config, SettingsFieldId, SettingsPatch};
+    let mut config = Config::default();
+    let patch = SettingsPatch::UsageStopOnOverage(true);
+    let before = config.clone();
+    patch.apply_to(&mut config);
+    assert!(config.usage.stop_on_overage);
+    assert!(patch.field_changed_between(&before, &config));
+    assert_eq!(patch.field(), SettingsFieldId::UsageStopOnOverage);
+    assert_eq!(patch.field().path(), "usage.stop_on_overage");
 }

@@ -87,6 +87,7 @@ pub(crate) fn init_all(cx: &mut App) {
         updater.update(cx, |u, cx| u.check(cx));
     }
 
+    crate::overage_policy::OveragePolicy::sync(cx);
     register_settings_observer(cx);
     crate::settings_store::spawn_file_watch(cx);
 }
@@ -108,6 +109,7 @@ fn register_settings_observer(cx: &mut App) {
         crate::menus::refresh_recent_menu(cx);
         crate::surface::action_map::apply_keybinding_overrides(&user.keybindings.bindings, cx);
         ui::theme::set_configured_ui_preset(&user.theme.ui_preset, cx);
+        crate::overage_policy::OveragePolicy::sync(cx);
         let appearance = window_background_for(&user);
         WindowRegistry::for_each_workspace(cx, |_ws, window, _cx| {
             window.set_background_appearance(appearance);

@@ -146,6 +146,9 @@ impl AgentChatView {
                     self.session_updated_at = None;
                     self.plan_collapsed = false;
                     self.session_usage = None;
+                    // The markers stay: they index `items`, which a fresh
+                    // session keeps.
+                    self.overage_notice = None;
                     self.activity.subagent_last_activity.clear();
                     // Reset the activity-span tracker so a prior session's edge
                     // state / captured outcome can't leak into the fresh one.

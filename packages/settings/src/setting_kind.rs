@@ -105,6 +105,7 @@ pub(crate) enum BoolSetting {
     GitDefaultCommitMessage,
     TelegramEnabled,
     OrchestratorEnabled,
+    StopOnOverage,
 }
 
 // Rust has no reflection over enum variants, and the `spec` tables are looked
@@ -237,7 +238,7 @@ impl SelectSetting {
 
 impl BoolSetting {
     #[cfg(test)]
-    pub(crate) const ALL: [Self; 27] = [
+    pub(crate) const ALL: [Self; 28] = [
         Self::AgentUseModifierToSend,
         Self::AgentUseReadingWidth,
         Self::AgentToolSummaryLabels,
@@ -265,6 +266,7 @@ impl BoolSetting {
         Self::ClaudeStatusEnabled,
         Self::TelegramEnabled,
         Self::OrchestratorEnabled,
+        Self::StopOnOverage,
     ];
 
     /// Compile-time guard for `ALL`: this match is exhaustive, so a new
@@ -299,6 +301,7 @@ impl BoolSetting {
             Self::ClaudeStatusEnabled => (),
             Self::TelegramEnabled => (),
             Self::OrchestratorEnabled => (),
+            Self::StopOnOverage => (),
         }
     }
 }

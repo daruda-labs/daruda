@@ -198,6 +198,12 @@ pub(super) fn patch_settings_document(
                 );
             })
         }
+        SettingsPatch::UsageStopOnOverage(_) => patch_section(doc, "usage", |t| {
+            t.insert(
+                "stop_on_overage",
+                toml_edit::value(config.usage.stop_on_overage),
+            );
+        }),
         SettingsPatch::PortsPollSecs(_) => patch_section(doc, "ports", |t| {
             t.insert("poll_secs", toml_edit::value(config.ports.poll_secs as i64));
         }),

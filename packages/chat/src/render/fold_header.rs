@@ -24,7 +24,6 @@ use gpui::{
 
 use crate::agent_chat_helpers::{Rollup, summary_preview_line};
 use crate::fold::FoldKey;
-use crate::strings as s;
 use crate::view::AgentChatView;
 use daruda_ui::theme;
 use daruda_ui::{Disclosure, DisclosureAxis, disclosure};
@@ -560,7 +559,11 @@ pub(super) fn window_boundary_row(
 /// carrying no chevron and no click: nothing is folded away here, so there is
 /// nothing to open. Lives beside [`window_boundary_row`] so the two cannot
 /// drift apart on rule colour or label tone.
-pub(super) fn interrupted_row(dim: f32, cx: &mut Context<AgentChatView>) -> AnyElement {
+pub(super) fn interrupted_row(
+    label: String,
+    dim: f32,
+    cx: &mut Context<AgentChatView>,
+) -> AnyElement {
     let rule_color = theme::dim_toward_gray(theme::agent_chat_border_tint(cx), dim);
     let rule = move || div().flex_1().border_t_1().border_color(rule_color);
     div()
@@ -576,7 +579,7 @@ pub(super) fn interrupted_row(dim: f32, cx: &mut Context<AgentChatView>) -> AnyE
                 .flex_none()
                 .text_color(theme::dim_toward_gray(theme::agent_chat_fg_muted(cx), dim))
                 .text_size(px(theme::agent_chat_font_size(cx)))
-                .child(SharedString::from(s::agent_chat::interrupted())),
+                .child(SharedString::from(label)),
         )
         .child(rule())
         .into_any_element()

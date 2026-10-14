@@ -267,6 +267,13 @@ pub(crate) async fn run_flow(inputs: RunInputs<'_>, runner: &dyn NodeRunner) -> 
                 // failures ends the run does not depend on which agent was
                 // slower.
                 Err(stopped) if matches!(outcome, RunOutcome::Done) => outcome = stopped,
+                // A node kept by its own stop is `node: None`; the sibling
+                // it interrupted names where the run was actually cut.
+                Err(stopped @ RunOutcome::Canceled { node: Some(_) })
+                    if matches!(outcome, RunOutcome::Canceled { node: None }) =>
+                {
+                    outcome = stopped;
+                }
                 Err(_) => {}
             }
         }
@@ -415,7 +422,10 @@ impl<'a> Run<'a> {
                 // failure would fire its `on_fail` policy and re-run the
                 // node the user just stopped. Its output goes aside too —
                 // everything left live has to be a completed node's.
-                if self.cancel.is_canceled() {
+                // The exception is a clean turn whose own report stopped the
+                // run: it is judged and kept, and the run ends after it.
+                let stopped_here = result.stopped_the_run && result.outcome.is_ok();
+                if self.cancel.is_canceled() && !stopped_here {
                     return Err(self.settle_cancel(&ctx, id, output.as_deref(), &result));
                 }
                 let artifacts = result.artifacts.clone();
@@ -441,6 +451,9 @@ impl<'a> Run<'a> {
                         if !executed.contains(id) {
                             executed.push(id.clone());
                         }
+                        if stopped_here {
+                            return Err(RunOutcome::Canceled { node: None });
+                        }
                         return Ok(());
                     }
                     Err(failure) => failure,
@@ -456,8 +469,9 @@ impl<'a> Run<'a> {
 
                 let policy = self.policy_of(node);
                 // A refusal cannot be argued with, and a node with no retry
-                // policy has nothing to try.
-                if failure.forbids_retry() || attempt >= policy.max_attempts {
+                // policy has nothing to try. A run this node stopped retries
+                // nothing either; it ends `Canceled`.
+                if stopped_here || failure.forbids_retry() || attempt >= policy.max_attempts {
                     // This returns before any invalidation set is computed,
                     // so the attempt that ends the run archives nothing.
                     self.record(
@@ -466,6 +480,9 @@ impl<'a> Run<'a> {
                         Invalidation::default(),
                         reported.clone(),
                     );
+                    if stopped_here {
+                        return Err(RunOutcome::Canceled { node: None });
+                    }
                     return Err(RunOutcome::Failed {
                         node: id.clone(),
                         failure,

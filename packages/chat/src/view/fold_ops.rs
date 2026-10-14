@@ -31,6 +31,7 @@ impl AgentChatView {
             used: 53_000,
             size: 200_000,
             cost: None,
+            rate_limit: None,
         });
         cx.notify();
     }

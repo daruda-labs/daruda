@@ -29,7 +29,9 @@ pub(super) fn render_row(
             }
             _ => gpui::Empty.into_any_element(),
         },
-        RowKind::Interrupted(_) => interrupted_row(this.dim_amount, cx),
+        RowKind::Interrupted(ix) => {
+            interrupted_row(this.stop_marker_label(*ix), this.dim_amount, cx)
+        }
         RowKind::ResponseHeader {
             run_start,
             categories,

@@ -527,6 +527,7 @@ impl Workspace {
             usage: usage_sections,
             focused_agent_domain: pane_domain,
             usage_domain_override: self.agent_usage.usage_domain_override,
+            stop_on_overage: crate::overage_policy::stop_on_overage_enabled(cx),
             activity,
             recent_sessions,
             usage_refresh_in_flight: self.agent_usage.usage_refresh_in_flight,

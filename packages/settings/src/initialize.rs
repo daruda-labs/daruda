@@ -664,6 +664,7 @@ impl SettingsView {
             notify_osc777: config.notifications.osc777_enabled,
             notify_attention: config.notifications.attention_enabled,
             notify_long_running: config.notifications.long_running_enabled,
+            stop_on_overage: config.usage.stop_on_overage,
             notify_skip_focused_pane: config.notifications.skip_focused_pane,
             clipboard_copy_on_select: config.clipboard.copy_on_select,
             git_confirm_commit: config.git.confirm_commit,

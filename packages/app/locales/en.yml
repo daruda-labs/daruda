@@ -570,6 +570,10 @@ agent_chat:
   # completion menu's detail column when the connected agent doesn't advertise
   # its own `clear` command.
   clear_command_desc: "Clear conversation and start a new session"
+  # Toast and phone notice when `[usage] stop_on_overage` stopped a chat turn.
+  # `window` is the chat banner's limit label; `time` the local reset moment.
+  overage_stopped: "%{window} limit reached — agent chat stopped to avoid extra usage"
+  overage_stopped_resets: "%{window} limit reached — agent chat stopped to avoid extra usage · resets %{time}"
 
 # Generic UI
 ui:
@@ -1286,6 +1290,7 @@ mcp:
 
 # Usage tab
 usage:
+  stop_on_overage_caption: "The first response may still be billed"
   reset_in: "Resets in %{time}"
   reset_now: "Resets now"
   reset_short_days: "%{days}d %{hours}h"
@@ -1445,6 +1450,7 @@ error:
   skill_rename_failed: "Skill rename failed"
   keep_awake_save_failed: "Failed to save the keep-awake mode"
   status_bar_save_failed: "Failed to save status bar toggle"
+  usage_save_failed: "Failed to save extra-usage auto-stop"
   tasks_require_git_repo: "Tasks require a git repo"
   task_lane_missing: "The worktree this task runs in is not open"
   task_project_not_open: "This task's project is not open in this window"
@@ -1916,6 +1922,10 @@ flow:
   # not showing — an off-screen worktree is marked unread instead.
   run_finished_toast: "Flow run finished. Its report is on the Flows page."
   run_failed_toast: "Flow run failed. Its report is on the Flows page."
+  # Toast and phone notice for a run stopped by `[usage] stop_on_overage`.
+  # `time` is the limit's reset moment in local time.
+  overage_stopped: "Flow stopped to avoid extra usage"
+  overage_stopped_resets: "Flow stopped to avoid extra usage · resets %{time}"
   # Told to the phone when a run it asked for finished cleanly.
   # Stands in for the engine's own words when a run died without saying
   # anything — the only way `LastWord`'s guard has nothing to report.

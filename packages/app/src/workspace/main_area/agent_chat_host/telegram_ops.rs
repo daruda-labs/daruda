@@ -460,7 +460,7 @@ impl Workspace {
     /// long as the activity span the phone started, so a desk prompt queued
     /// behind it shares that span and its delivery — the span settles once,
     /// and the phone hears how it ended.
-    fn phone_turn_open(&self, pane_id: PaneId, cx: &Context<Self>) -> bool {
+    pub(super) fn phone_turn_open(&self, pane_id: PaneId, cx: &Context<Self>) -> bool {
         self.agent_chat_view(pane_id)
             .is_some_and(|view| view.read(cx).phone_turn().is_some())
     }

@@ -38,6 +38,7 @@ pub enum SettingsFieldId {
     ClaudeStatusFileTtlDays,
     UsageLimitsPollSecs,
     UsageStatusPollSecs,
+    UsageStopOnOverage,
     PortsPollSecs,
     LogsRetentionDays,
     LogsMaxFileSizeMb,
@@ -122,6 +123,7 @@ impl SettingsFieldId {
             Self::ClaudeStatusFileTtlDays => "claude_status.file_ttl_days",
             Self::UsageLimitsPollSecs => "usage.poll.limits_secs",
             Self::UsageStatusPollSecs => "usage.poll.status_secs",
+            Self::UsageStopOnOverage => "usage.stop_on_overage",
             Self::PortsPollSecs => "ports.poll_secs",
             Self::LogsRetentionDays => "logs.retention_days",
             Self::LogsMaxFileSizeMb => "logs.max_file_size_mb",
@@ -212,6 +214,7 @@ pub enum SettingsPatch {
     ClaudeStatusFileTtlDays(u32),
     UsageLimitsPollSecs(u64),
     UsageStatusPollSecs(u64),
+    UsageStopOnOverage(bool),
     PortsPollSecs(u64),
     LogsRetentionDays(u32),
     LogsMaxFileSizeMb(u32),
@@ -302,6 +305,7 @@ impl SettingsPatch {
             Self::ClaudeStatusFileTtlDays(_) => SettingsFieldId::ClaudeStatusFileTtlDays,
             Self::UsageLimitsPollSecs(_) => SettingsFieldId::UsageLimitsPollSecs,
             Self::UsageStatusPollSecs(_) => SettingsFieldId::UsageStatusPollSecs,
+            Self::UsageStopOnOverage(_) => SettingsFieldId::UsageStopOnOverage,
             Self::PortsPollSecs(_) => SettingsFieldId::PortsPollSecs,
             Self::LogsRetentionDays(_) => SettingsFieldId::LogsRetentionDays,
             Self::LogsMaxFileSizeMb(_) => SettingsFieldId::LogsMaxFileSizeMb,
@@ -399,6 +403,7 @@ impl SettingsPatch {
             Self::ClaudeStatusFileTtlDays(value) => config.claude_status.file_ttl_days = *value,
             Self::UsageLimitsPollSecs(value) => config.usage.poll.limits_secs = *value,
             Self::UsageStatusPollSecs(value) => config.usage.poll.status_secs = *value,
+            Self::UsageStopOnOverage(value) => config.usage.stop_on_overage = *value,
             Self::PortsPollSecs(value) => config.ports.poll_secs = *value,
             Self::LogsRetentionDays(value) => config.logs.retention_days = *value,
             Self::LogsMaxFileSizeMb(value) => config.logs.max_file_size_mb = *value,
@@ -530,6 +535,9 @@ impl SettingsPatch {
             }
             Self::UsageStatusPollSecs(_) => {
                 left.usage.poll.status_secs != right.usage.poll.status_secs
+            }
+            Self::UsageStopOnOverage(_) => {
+                left.usage.stop_on_overage != right.usage.stop_on_overage
             }
             Self::PortsPollSecs(_) => left.ports.poll_secs != right.ports.poll_secs,
             Self::LogsRetentionDays(_) => left.logs.retention_days != right.logs.retention_days,

@@ -103,6 +103,10 @@ fn agent_chat_names_map_to_their_scenarios() {
         Some(ScreenshotScenario::AgentChatWorking)
     );
     assert_eq!(
+        ScreenshotScenario::from_cli_name("agent-chat-overage-stopped"),
+        Some(ScreenshotScenario::AgentChatOverageStopped)
+    );
+    assert_eq!(
         ScreenshotScenario::from_cli_name("agent-chat-queue-parked"),
         Some(ScreenshotScenario::AgentChatQueueParked)
     );

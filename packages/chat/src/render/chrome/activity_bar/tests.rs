@@ -37,6 +37,7 @@ fn context_meter_derives_label_and_tooltip() {
             amount: 1.25,
             currency: "USD".to_owned(),
         }),
+        rate_limit: None,
     };
     let meter = context_meter(&priced);
     assert_eq!(meter.label, "53k / 200k \u{b7} 1.25 USD");
@@ -61,6 +62,7 @@ fn context_meter_survives_a_zero_size_window() {
         used: 0,
         size: 0,
         cost: None,
+        rate_limit: None,
     });
     assert_eq!(meter.label, "0 / 0");
     assert!(meter.tooltip.contains("(0%)"));

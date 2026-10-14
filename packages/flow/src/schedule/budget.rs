@@ -333,6 +333,7 @@ mod tests {
                 answers: Vec::new(),
             },
             turns: 1,
+            stopped_the_run: false,
         }
     }
 

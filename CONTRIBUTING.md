@@ -471,7 +471,7 @@ after settle and forces a repaint before capture.
 | Tab status | `tab-indicators` seeds each status dot; inspect its color |
 | Status bar | `status-ports`, `status-flows`, `status-usage`, `status-account`, `keep-awake`, `keep-awake-failed` — each chip's popup open over seeded data |
 | Agent chat | `agent-chat`, `agent-chat-working`, `agent-chat-empty`, `agent-chat-failure` |
-| Chat interaction | `agent-chat-fold`, `agent-chat-interrupted`, `agent-chat-options[:<tab>]`, `agent-chat-queue-parked`, `agent-chat-queue-armed` |
+| Chat interaction | `agent-chat-fold`, `agent-chat-interrupted`, `agent-chat-overage-stopped`, `agent-chat-options[:<tab>]`, `agent-chat-queue-parked`, `agent-chat-queue-armed` |
 | Chat details | `agent-chat-running-tool`, `agent-chat-plan[-stopped]`, `agent-chat-thoughts[-working\|-only]`, `agent-chat-sole-reply` |
 | Transcript boundaries | `agent-chat-tail[-open]`, `agent-chat-group-tail[-open]`, `agent-chat-subagent-tail[-open]` |
 | CLI transcript | `agent-chat-cli-running`, `agent-chat-cli-ended` |

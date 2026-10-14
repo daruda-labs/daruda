@@ -395,6 +395,7 @@ fn an_attempt_says_what_its_own_session_cost() {
             amount: 0.1234,
             currency: "USD".to_string(),
         }),
+        rate_limit: None,
     });
     let mut out = String::new();
     push_attempt_lines(&mut out, &attempt, Path::new("/run"));

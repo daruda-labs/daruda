@@ -59,6 +59,7 @@ fn right_fixture(window: &mut Window, cx: &mut gpui::App) -> RightDockSnapshot {
         usage: Vec::new(),
         focused_agent_domain: crate::workspace::main_area::pane::AccountDomain::Any,
         usage_domain_override: None,
+        stop_on_overage: false,
         activity: Vec::new(),
         recent_sessions: Vec::new(),
         usage_refresh_in_flight: false,

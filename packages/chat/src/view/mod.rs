@@ -15,7 +15,7 @@
 //! Workspace state; self-notifying pane entities are the sanctioned AGENTS.md
 //! rule #10 exception also used by `TerminalView` and `ToastLayer`.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeSet, HashMap, HashSet};
 
 use daruda_acp::{ChatItem, ConnectPhase, PlanEntryView, SessionCapabilitiesView, UsageView};
 use daruda_content::link_target::{self, LinkTarget};
@@ -556,6 +556,13 @@ pub struct AgentChatView {
     /// context meter — distinct from the cumulative Usage tab. Cleared on a
     /// fresh session.
     pub(super) session_usage: Option<UsageView>,
+    /// Set when this turn was stopped because Claude reported extra-usage
+    /// billing; cleared when the next prompt dispatches.
+    pub(super) overage_notice: Option<OverageNotice>,
+    /// Indices of the `ChatItem::Interrupted` markers an overage stop pushed,
+    /// so they read as such. A restored pane shows "Stopped by user" for them:
+    /// the replayed entry carries no stop reason.
+    pub(super) overage_stop_markers: BTreeSet<usize>,
     /// The agent's live execution plan (`PlanChanged`); full-replaced each
     /// update. Runtime-only; never serialized.
     pub(super) plan: Vec<PlanEntryView>,
@@ -636,8 +643,10 @@ pub(super) mod list_sync;
 mod pane_choices;
 mod queue_ops;
 pub use attachments::display_prompt;
+mod overage_notice;
 #[cfg(feature = "devtools")]
 mod seed_ops;
+pub use overage_notice::OverageNotice;
 mod session_ops;
 #[cfg(feature = "screenshot")]
 mod shot_ops;

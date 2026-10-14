@@ -149,7 +149,7 @@ impl AgentChatView {
             if let Some(handle) = self.live_handle() {
                 handle.send_prompt_with_attachments(wire, attachments.clone());
             }
-            self.queue.turn.start(std::time::Instant::now());
+            self.start_dispatched_turn();
             self.echo_attached_prompt(text, &attachments, cx);
             self.arm_phone_turn_if(origin);
             PromptDispatch::SentNow
@@ -173,6 +173,13 @@ impl AgentChatView {
         };
         cx.notify();
         dispatch
+    }
+
+    /// Mark a prompt that just reached the wire as the turn in flight. A new
+    /// turn retires the previous turn's overage banner.
+    fn start_dispatched_turn(&mut self) {
+        self.queue.turn.start(std::time::Instant::now());
+        self.overage_notice = None;
     }
 
     /// Arms the Telegram turn ledger the instant a Telegram-origin prompt
@@ -476,7 +483,7 @@ impl AgentChatView {
         if self.queue.editing_prompt == Some(qp.id) {
             self.queue.editing_prompt = None;
         }
-        self.queue.turn.start(std::time::Instant::now());
+        self.start_dispatched_turn();
         let text = qp.text;
         self.echo_attached_prompt(text.clone(), &qp.attachments, cx);
         self.arm_phone_turn_if(qp.origin);

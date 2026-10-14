@@ -117,6 +117,12 @@ impl Transcript {
         self.write(&format!("\n**{said}**\n\n"));
     }
 
+    /// The run is being stopped because this reply was billed as extra usage
+    /// — said in this attempt's transcript, the evidence `run.md` links to.
+    pub(super) fn stopped_for_overage(&mut self) {
+        self.write("\n**stopped: Claude would bill extra usage**\n");
+    }
+
     /// How the turn ended, in the runner's own words — the stop reason, a
     /// failure, or the fact that it was cancelled.
     pub(super) fn ended(&mut self, how: &str) {

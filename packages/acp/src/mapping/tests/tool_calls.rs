@@ -36,6 +36,13 @@ fn apply_update_with_routes_parent_id_through_adapter() {
     // regardless of the (empty) meta.
     struct StubAdapter;
     impl AcpAdapter for StubAdapter {
+        fn rate_limit(
+            &self,
+            _meta: &Option<agent_client_protocol::schema::v1::Meta>,
+        ) -> Option<crate::model::RateLimitView> {
+            None
+        }
+
         fn message_phase(
             &self,
             _meta: &Option<agent_client_protocol::schema::v1::Meta>,

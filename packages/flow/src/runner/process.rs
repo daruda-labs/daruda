@@ -111,6 +111,8 @@ impl ProcessRunner {
             waiting: crate::runner::Waiting::default(),
             // A command runs its line once; there is no turn to spend.
             turns: 1,
+            // A command reports no usage, so nothing here can stop the run.
+            stopped_the_run: false,
         }
     }
 
@@ -164,6 +166,7 @@ fn failed(artifacts: Vec<PathBuf>, message: String) -> RunResult {
         usage: None,
         waiting: crate::runner::Waiting::default(),
         turns: 0,
+        stopped_the_run: false,
     }
 }
 

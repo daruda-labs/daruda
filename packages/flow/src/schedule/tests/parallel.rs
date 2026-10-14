@@ -338,3 +338,36 @@ nodes:
         "a symlink let two nodes into one directory at once: {trace:?}"
     );
 }
+
+/// A stop raised by one node's own report keeps only that node's turn. Its
+/// sibling, interrupted mid-call by the same token, is cancelled as usual.
+#[test]
+fn a_siblings_overage_stop_cancels_the_node_it_interrupts() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    for sub in ["a", "b"] {
+        std::fs::create_dir_all(dir.path().join(sub)).expect("mkdir");
+    }
+    let runner = Interleaving {
+        inner: FakeRunner::new().stops_run_at("left", 1),
+        log: Rc::new(RefCell::new(Vec::new())),
+    };
+    let report = execute(
+        &request_for(FORK_AND_JOIN, dir.path()),
+        &runner,
+        &CancelToken::default(),
+    );
+
+    assert!(
+        matches!(&report.outcome, RunOutcome::Canceled { node: Some(n) } if n.as_str() == "right"),
+        "the outcome names the interrupted sibling: {:?}",
+        report.outcome
+    );
+    let left = report.node("left").expect("left ran");
+    assert!(matches!(left.attempts[0].outcome, AttemptOutcome::Passed));
+    let right = report.node("right").expect("right ran");
+    assert!(matches!(
+        right.attempts[0].outcome,
+        AttemptOutcome::Canceled
+    ));
+    assert!(report.node("join").is_none(), "nothing runs after the stop");
+}

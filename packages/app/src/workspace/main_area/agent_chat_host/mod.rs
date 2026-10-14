@@ -22,4 +22,5 @@ mod agent_default_writer;
 mod attachment_ops;
 mod host_event_ops;
 pub(in crate::workspace) mod lane_status;
+mod overage_stop;
 pub(in crate::workspace) mod telegram_ops;

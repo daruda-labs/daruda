@@ -28,6 +28,7 @@ use crate::surface::strings;
 use crate::ui::{Disableable as _, SectionHeader, tab, tab_bar};
 use crate::workspace::Workspace;
 use crate::workspace::main_area::pane::AccountDomain;
+use crate::workspace::usage_settings_ops::offers_overage_stop;
 
 mod gauges;
 use gauges::{chart_block, gauges_block};
@@ -304,6 +305,15 @@ fn provider_section(
                 .child(status_pill(section.service_status.as_ref(), cx)),
         )
         .child(gauges_block(section.outcome.snapshot(), stale, cx));
+    let block = if offers_overage_stop(section.recipe) {
+        block.child(stop_on_overage_row(
+            snap.workspace.clone(),
+            snap.stop_on_overage,
+            cx,
+        ))
+    } else {
+        block
+    };
 
     let Some(activity) = activity else {
         return block;
@@ -330,6 +340,51 @@ fn provider_section(
                 cx,
             )),
     )
+}
+
+/// Switch + caption for `[usage] stop_on_overage`. The label column takes
+/// the slack and wraps so the switch never leaves the dock.
+fn stop_on_overage_row(
+    workspace: WeakEntity<Workspace>,
+    stop_on_overage: bool,
+    cx: &gpui::App,
+) -> impl IntoElement {
+    let t = theme::current(cx);
+    div()
+        .flex()
+        .flex_row()
+        .items_start()
+        .w_full()
+        .min_w_0()
+        .gap(px(theme::RIGHT_PANEL_ROW_GAP))
+        .child(
+            div()
+                .flex()
+                .flex_col()
+                .flex_1()
+                .min_w_0()
+                .child(
+                    div()
+                        .text_size(px(theme::RIGHT_PANEL_BODY_FONT_SIZE))
+                        .text_color(t.text_body)
+                        .child(daruda_settings::labels::stop_on_overage_label()),
+                )
+                .child(
+                    div()
+                        .text_size(px(theme::RIGHT_PANEL_LABEL_FONT_SIZE))
+                        .text_color(t.text_muted)
+                        .child(strings::usage::stop_on_overage_caption()),
+                ),
+        )
+        .child(div().flex_none().child(
+            crate::ui::switch_compact("usage-stop-on-overage", stop_on_overage, cx).on_click(
+                move |_, _window, cx| {
+                    if let Some(ws) = workspace.upgrade() {
+                        ws.update(cx, |ws, cx| ws.set_stop_on_overage(!stop_on_overage, cx));
+                    }
+                },
+            ),
+        ))
 }
 
 // ----------------------------------------------------------------

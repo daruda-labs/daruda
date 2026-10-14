@@ -5,7 +5,7 @@
 pub mod acp;
 pub mod process;
 
-pub use acp::AcpRunner;
+pub use acp::{AcpRunner, OverageStop};
 pub use process::ProcessRunner;
 
 use crate::NodeId;
@@ -535,6 +535,9 @@ pub struct RunResult {
     /// What tools the turn used, in the order it reached for them. A
     /// diagnostic aid, not a decision input — nothing in the engine reads it.
     pub tools: Vec<ToolUse>,
+    /// Whether this call's own report is what stopped the run — an overage
+    /// stop. A turn that still ended cleanly is then judged and kept.
+    pub stopped_the_run: bool,
 }
 
 /// One attempt at one node. Async because a real runner has to race the

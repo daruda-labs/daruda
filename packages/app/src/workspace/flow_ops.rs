@@ -22,7 +22,7 @@ use crate::agent::launch_resolve::ConnectCommandError;
 use std::path::{Path, PathBuf};
 
 use daruda_flow::event::{FlowEvent, RunEnd};
-use daruda_flow::runner::{AcpRunner, CancelToken, ProcessRunner, Runners};
+use daruda_flow::runner::{AcpRunner, CancelToken, OverageStop, ProcessRunner, Runners};
 use daruda_store::observability::error_report::{ErrorReport, ErrorSeverity};
 use gpui::{Context, Window};
 
@@ -431,6 +431,7 @@ impl Workspace {
             asks,
         } = submission;
         let cancel = CancelToken::default();
+        let overage = crate::overage_policy::OveragePolicy::stop_for_run(cx);
         let run_dir = request.run_dir.clone();
         let run_dir_for_asks = run_dir.clone();
         // Before the thread takes the request.
@@ -447,8 +448,9 @@ impl Workspace {
 
         let thread = {
             let cancel = cancel.clone();
+            let overage = overage.clone();
             std::thread::spawn(move || {
-                let runners = runners_for(&request, node_install_dir);
+                let runners = runners_for(&request, node_install_dir, overage);
                 // A run the engine refuses before it starts — a lock another
                 // process holds, a runs directory it cannot create — takes
                 // nothing, so it rightly emits neither `RunStarted` nor
@@ -475,7 +477,7 @@ impl Workspace {
         };
         self.flows.runs.insert(
             lane_ref,
-            RunHandle::started(cancel, run_dir, source, nodes_at_start, thread),
+            RunHandle::started(cancel, overage, run_dir, source, nodes_at_start, thread),
         );
         self.watch_flow_events(lane_ref, events, cx);
         self.watch_flow_asks(lane_ref, run_dir_for_asks, asks, cx);
@@ -613,10 +615,14 @@ impl Drop for LastWord {
 /// not the ACP account credentials, and the runner only
 /// unsets what the host hands it: `Vec::new()` here is a silent leak into
 /// every shell line a committed flow file names, with no other symptom.
-fn runners_for(request: &daruda_flow::request::RunRequest, node_install_dir: PathBuf) -> Runners {
+fn runners_for(
+    request: &daruda_flow::request::RunRequest,
+    node_install_dir: PathBuf,
+    overage: OverageStop,
+) -> Runners {
     Runners {
         command: ProcessRunner::new(union_strip_env(&request.agents)),
-        agent: AcpRunner::new(request.agents.clone(), node_install_dir),
+        agent: AcpRunner::new(request.agents.clone(), node_install_dir).with_overage_stop(overage),
     }
 }
 
@@ -708,7 +714,11 @@ nodes:
     #[test]
     fn the_command_runner_is_handed_the_credentials_to_strip() {
         let request = request_with(&["ANTHROPIC_API_KEY"]);
-        let runners = runners_for(&request, PathBuf::from("/data/node"));
+        let runners = runners_for(
+            &request,
+            PathBuf::from("/data/node"),
+            OverageStop::default(),
+        );
         assert_eq!(runners.command.strip_env(), ["ANTHROPIC_API_KEY"]);
     }
 

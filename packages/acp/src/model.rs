@@ -505,6 +505,46 @@ pub struct UsageView {
     pub size: u64,
     /// Cumulative session cost, when the agent reports it.
     pub cost: Option<CostView>,
+    /// The account's rate-limit standing, when the agent reports it. Only the
+    /// session's own adapter can read it, so the protocol `From` leaves it unset.
+    pub rate_limit: Option<RateLimitView>,
+}
+
+/// The account rate-limit report riding on a usage update (claude-agent-acp's
+/// `_meta["_claude/rateLimit"]`, the SDK's `SDKRateLimitInfo`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RateLimitView {
+    /// The limit window this report is about.
+    pub window: Option<RateLimitWindow>,
+    /// When `window` resets, in unix seconds.
+    pub resets_at: Option<i64>,
+    pub is_using_overage: bool,
+}
+
+impl RateLimitView {
+    /// The reply is being billed as extra usage.
+    pub fn bills_overage(&self) -> bool {
+        self.is_using_overage
+    }
+}
+
+/// Which limit a report is about. `Other` keeps a window this build does not
+/// know verbatim: the set grows with the plans on offer.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum RateLimitWindow {
+    FiveHour,
+    SevenDay,
+    Other(String),
+}
+
+impl RateLimitWindow {
+    pub fn from_wire(window: &str) -> Self {
+        match window {
+            "five_hour" => Self::FiveHour,
+            "seven_day" => Self::SevenDay,
+            other => Self::Other(other.to_owned()),
+        }
+    }
 }
 
 /// Session cost carried by an [`UsageView`] (mirror of the protocol's `Cost`).
@@ -536,6 +576,7 @@ impl From<&agent_client_protocol::schema::v1::UsageUpdate> for UsageView {
                 amount: c.amount,
                 currency: c.currency.clone(),
             }),
+            rate_limit: None,
         }
     }
 }

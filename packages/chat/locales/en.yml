@@ -58,6 +58,13 @@ agent_chat:
   runtime_extracting: "Setting up the agent runtime — extracting…"
   # Prefix for the connection-error status line.
   error_prefix: "Connection error:"
+  # Banner after the pane stopped a turn because Claude reported extra-usage
+  # billing (`[usage] stop_on_overage`). `window` is one of the labels below.
+  overage_stopped: "%{window} limit reached — stopped to avoid extra usage"
+  overage_stopped_resets: "%{window} limit reached — stopped to avoid extra usage · resets %{time}"
+  overage_window_five_hour: "5-hour"
+  overage_window_seven_day: "7-day"
+  overage_window_generic: "Usage"
   transport_closed: "The connection to the agent was closed. Retry to reconnect."
   adapter_install_failed: "Could not prepare the agent package. Check the error details, then retry."
   adapter_setup_required: "Could not prepare the agent package. Check the error details and correct the package or runtime configuration before reconnecting."
@@ -223,6 +230,8 @@ agent_chat:
   # something the user typed. Names the actor, because the alternative reading
   # — the agent stopped on its own — is the one worth ruling out.
   interrupted: "Stopped by user"
+  # The same marker when `[usage] stop_on_overage` cut the run, not the user.
+  interrupted_overage: "Stopped to avoid extra usage"
   tail_more_show_one: "Show 1 earlier step"
   tail_more_show: "Show %{count} earlier steps"
   tail_more_collapse_one: "Collapse to the last step"

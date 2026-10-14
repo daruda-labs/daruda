@@ -31,9 +31,11 @@ pub(super) struct CompatSessionNotification {
 /// The two mode-bearing updates go through the tracker (0..2 events out); the
 /// rest map 1:1. Shared by root traffic and by the native subagent router's
 /// normalized output, so a subagent's tool calls take exactly the path the main
-/// agent's take.
+/// agent's take. `rate_limit` is the caller's dialect-aware read of a root
+/// `UsageUpdate`'s `_meta`; every other update ignores it.
 pub(super) fn forward_session_update(
     update: SessionUpdate,
+    rate_limit: Option<crate::model::RateLimitView>,
     mode_tracker: &ModeTracker,
     tx: &UnboundedSender<AcpEvent>,
 ) {
@@ -85,7 +87,10 @@ pub(super) fn forward_session_update(
         // mode / plan / config) rather than raw `Update` so the host renders a
         // context meter without parsing protocol types. Distinct from the CLI's
         // cumulative Usage tab: this is the current context fill.
-        SessionUpdate::UsageUpdate(u) => AcpEvent::UsageChanged(crate::model::UsageView::from(&u)),
+        SessionUpdate::UsageUpdate(u) => AcpEvent::UsageChanged(crate::model::UsageView {
+            rate_limit,
+            ..crate::model::UsageView::from(&u)
+        }),
         update => AcpEvent::Update(Box::new(update)),
     };
     let _ = tx.unbounded_send(event);
