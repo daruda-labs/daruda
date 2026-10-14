@@ -28,8 +28,8 @@ pub(super) const PANEL_BODY_INSET: f32 = ROW_INSET;
 const ANCHOR_GAP: f32 = theme::PAD_XS;
 const SNAP_MARGIN: f32 = theme::PAD_STANDARD;
 
-/// The tallest popup that fits between the window's top snap margin and the
-/// bar; a taller one is snapped back down over the chip.
+/// The tallest panel that fits between the window's top snap margin and the
+/// bar; a taller one runs off the top edge.
 fn room_above_bar(window: &Window) -> f32 {
     let viewport_h = f32::from(window.viewport_size().height);
     (viewport_h - super::STATUS_BAR_HEIGHT - ANCHOR_GAP - SNAP_MARGIN).max(0.0)
@@ -43,11 +43,6 @@ pub(super) fn dropdown(
     builder: impl Fn(PopupMenu, &mut Window, &mut Context<PopupMenu>) -> PopupMenu + 'static,
     cx: &App,
 ) -> AnyElement {
-    // Past the room above the bar the menu scrolls rather than covering it.
-    let builder = move |menu, window: &mut Window, cx: &mut Context<PopupMenu>| {
-        let max_h = (room_above_bar(window) - PANEL_CHROME).max(0.0);
-        builder(menu, window, cx).max_h(px(max_h)).scrollable(true)
-    };
     #[cfg(feature = "screenshot")]
     if super::screenshot::is_open(shot_id, cx) {
         return super::screenshot::open_menu(shot_id, trigger, builder);
