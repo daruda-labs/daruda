@@ -393,11 +393,9 @@ pub struct Workspace {
     /// a toast change triggers only the toast layer's repaint, not a
     /// full Workspace repaint.
     pub(in crate::workspace) toast_layer: gpui::Entity<toast_layer::ToastLayer>,
-    /// Memoized status-bar "project config layer exists" flag, keyed by the
-    /// active project root. `render()` runs every frame, so statting per
-    /// render burned syscalls; recompute only when the root changes.
-    /// `reload_config` clears it so a freshly created layer surfaces
-    /// immediately.
+    /// Memoized status-bar "project config layer overrides something" flag,
+    /// keyed by the active project root; see `project_layer_overrides`.
+    /// `reload_config` clears it so an edited layer surfaces immediately.
     pub(in crate::workspace) cached_project_config: Option<(std::path::PathBuf, bool)>,
     /// The agent the user most recently opened a chat pane under (session-local,
     /// not persisted). A fresh pane defaults to this so switching agents "sticks"

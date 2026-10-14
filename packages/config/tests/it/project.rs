@@ -64,3 +64,19 @@ fn load_from_corrupt_toml_falls_back_to_default() {
     let cfg = ProjectConfig::load_from(&path);
     assert!(cfg.shell.is_none(), "corrupt files must not panic");
 }
+
+#[test]
+fn the_template_alone_overrides_nothing() {
+    let temp = tempfile::tempdir().unwrap();
+    let path = temp.path().join("config.toml");
+    std::fs::write(&path, PROJECT_CONFIG_TEMPLATE).unwrap();
+    assert!(!ProjectConfig::load_from(&path).overrides_anything());
+}
+
+#[test]
+fn a_shell_section_is_an_override() {
+    let temp = tempfile::tempdir().unwrap();
+    let path = temp.path().join("config.toml");
+    std::fs::write(&path, "[shell]\nprogram = \"/bin/zsh\"\n").unwrap();
+    assert!(ProjectConfig::load_from(&path).overrides_anything());
+}

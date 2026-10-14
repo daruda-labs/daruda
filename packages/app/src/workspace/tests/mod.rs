@@ -43,6 +43,7 @@ mod ports;
 mod lanes;
 #[cfg(any())]
 mod persistence;
+mod project_config;
 mod projects;
 mod pure_ops;
 mod regression_namespace;

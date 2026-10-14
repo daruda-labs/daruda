@@ -109,9 +109,9 @@ pub(super) struct StatusBarData {
     /// shows in the right section so the user actually notices the
     /// failure.
     pub error: Option<SharedString>,
-    /// True when the workspace's project layer has a config.toml on
-    /// disk. Drives a small dot in the right section so the user sees
-    /// at a glance that some user-global keys are being shadowed.
+    /// True when the active project's config layer overrides a user-global
+    /// key. Drives a small dot in the right section; a file holding only the
+    /// commented template does not count.
     pub has_project_config: bool,
     /// The focused pane's resolved account slot. `None` when the focused
     /// pane doesn't track an account (File / flow panes) — hides the

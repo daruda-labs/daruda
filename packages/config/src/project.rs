@@ -56,6 +56,12 @@ impl ProjectConfig {
             Err(_) => Self::default(),
         }
     }
+
+    /// True when this layer changes anything [`crate::Config::resolve`]
+    /// produces. A file holding only the commented template overrides nothing.
+    pub fn overrides_anything(&self) -> bool {
+        self.shell.is_some()
+    }
 }
 
 /// Initial contents of a freshly-created

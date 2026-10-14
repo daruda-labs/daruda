@@ -66,7 +66,8 @@ thread_local! {
 /// two apart rather than a convention someone has to remember.
 struct FramePrep {
     body: FrameBody,
-    /// Whether the active project carries a config layer (status-bar dot).
+    /// Whether the active project's config layer overrides anything
+    /// (status-bar dot).
     has_project_config: bool,
 }
 
@@ -109,31 +110,31 @@ impl Workspace {
             None => FrameBody::Workspace(self.stage_docks(cx)),
         };
 
-        // `project_config_path` (canonicalize) + `Path::exists` are filesystem
-        // stats, and a frame can be requested on every animation tick (status
-        // badges ask for one without `cx.notify`). Memoize the flag keyed by the
-        // active project root so the stat only fires when the active project
-        // changes; `reload_config` clears the memo so a freshly created project
-        // layer surfaces immediately.
-        let has_project_config = match self.active_project().map(|p| p.root.clone()) {
-            Some(root) => {
-                if self.cached_project_config.as_ref().map(|(r, _)| r) != Some(&root) {
-                    let exists = daruda_config::project_config_path(&root)
-                        .is_some_and(|path: std::path::PathBuf| path.exists());
-                    self.cached_project_config = Some((root, exists));
-                }
-                self.cached_project_config
-                    .as_ref()
-                    .map(|(_, exists)| *exists)
-                    .unwrap_or(false)
-            }
-            None => false,
-        };
+        let has_project_config = self.project_layer_overrides();
 
         FramePrep {
             body,
             has_project_config,
         }
+    }
+
+    /// Whether the active project's config layer changes the resolved config.
+    /// Parsing is a read + canonicalize, and a frame can be requested on every
+    /// animation tick, so the answer is memoized per project root;
+    /// `store_mirrors` clears it on config reload.
+    pub(in crate::workspace) fn project_layer_overrides(&mut self) -> bool {
+        let Some(root) = self.active_project().map(|p| p.root.clone()) else {
+            return false;
+        };
+        if let Some((cached_root, overrides)) = &self.cached_project_config
+            && *cached_root == root
+        {
+            return *overrides;
+        }
+        let overrides =
+            daruda_config::ProjectConfig::load_in(&self.data_dir, &root).overrides_anything();
+        self.cached_project_config = Some((root, overrides));
+        overrides
     }
 }
 
