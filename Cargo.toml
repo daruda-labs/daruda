@@ -74,7 +74,9 @@ fs4 = "0.13"
 futures = "0.3.34"
 humantime = "2"
 image = { version = "0.25", default-features = false }
-libc = "0.2"
+# WORKAROUND: GPUI's async-tar -> xattr 0.2.3 uses Linux ENOATTR, removed in
+# libc 0.2.190. Keep this pin until the upstream dependency is upgraded.
+libc = "=0.2.189"
 log = "0.4"
 lsp-types = { version = "0.97.0", features = ["proposed"] }
 notify = { version = "7.0.0", default-features = false }
