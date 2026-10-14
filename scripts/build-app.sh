@@ -4,17 +4,37 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT_DIR"
 
+PROFILE=release
+SKIP_BUILD=0
+while [ $# -gt 0 ]; do
+    case "$1" in
+        --profile) PROFILE="${2:?--profile requires release or debug}"; shift 2 ;;
+        --skip-build) SKIP_BUILD=1; shift ;;
+        *) echo "usage: $0 [--profile release|debug] [--skip-build]" >&2; exit 2 ;;
+    esac
+done
+case "$PROFILE" in release | debug) ;; *) echo "unknown profile: $PROFILE" >&2; exit 2 ;; esac
+
 DARUDA_VERSION=$(./scripts/version.sh)
+TARGET_DIR=$(cargo metadata --locked --no-deps --format-version 1 | jq -er '.target_directory')
 
-echo "Building daruda ${DARUDA_VERSION} (release)..."
-cargo build --locked -p daruda --release
+if [ "$SKIP_BUILD" -eq 0 ]; then
+    echo "Building daruda ${DARUDA_VERSION} ($PROFILE)..."
+    if [ "$PROFILE" = release ]; then
+        cargo build --locked -p daruda --release
+    else
+        cargo build --locked -p daruda
+    fi
+fi
+BINARY="$TARGET_DIR/$PROFILE/daruda"
+[ -x "$BINARY" ] || { echo "Build output is missing: $BINARY" >&2; exit 1; }
 
-APP_DIR="target/release/daruda.app"
+APP_DIR="$TARGET_DIR/$PROFILE/daruda.app"
 rm -rf "$APP_DIR"
 mkdir -p "$APP_DIR/Contents/MacOS"
 mkdir -p "$APP_DIR/Contents/Resources"
 
-cp target/release/daruda "$APP_DIR/Contents/MacOS/daruda"
+cp "$BINARY" "$APP_DIR/Contents/MacOS/daruda"
 
 ICON_SRC="$ROOT_DIR/assets/icon.icns"
 if [ -f "$ICON_SRC" ]; then
@@ -37,4 +57,6 @@ echo "Version: $DARUDA_VERSION"
 echo "Size:    $(du -sh "$APP_DIR" | cut -f1)"
 echo ""
 echo "Run:     open $APP_DIR"
-echo "DMG:     ./scripts/build-dmg.sh"
+if [ "$PROFILE" = release ]; then
+    echo "DMG:     ./scripts/build-dmg.sh"
+fi

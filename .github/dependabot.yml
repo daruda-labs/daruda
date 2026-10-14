@@ -1,0 +1,55 @@
+version: 2
+updates:
+  - package-ecosystem: cargo
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+      time: "09:00"
+      timezone: Asia/Seoul
+    versioning-strategy: lockfile-only
+    allow:
+      - dependency-type: all
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: chore
+    ignore:
+      - dependency-name: "gpui*"
+      - dependency-name: sum_tree
+      # The alpha renderer's API migration includes its layout engines.
+      - dependency-name: "merman*"
+      - dependency-name: dugong
+      - dependency-name: manatee
+    groups:
+      acp:
+        patterns:
+          - "agent-client-protocol*"
+      rendering:
+        patterns:
+          - "tree-sitter*"
+          - image
+          - resvg
+          - usvg
+          - tiny-skia
+          - fontdb
+          - rustybuzz
+          - ttf-parser
+          - read-fonts
+          - skrifa
+      cargo-lock:
+        patterns: ["*"]
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+      time: "09:30"
+      timezone: Asia/Seoul
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: ci
+    groups:
+      actions:
+        patterns: ["*"]
+        update-types: [minor, patch]

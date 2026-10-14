@@ -1,0 +1,61 @@
+name: Dependency policy
+
+on:
+  workflow_dispatch:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+  schedule:
+    - cron: "27 21 * * *"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: dependencies-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  targets:
+    name: Supported dependency targets
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      matrix: ${{ steps.targets.outputs.matrix }}
+      rust-version: ${{ steps.rust.outputs.version }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+      - name: Read and verify the Rust floor
+        id: rust
+        run: |
+          version=$(bash scripts/rust-version.sh)
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+      - name: Read supported targets
+        id: targets
+        run: |
+          matrix=$(bash scripts/check-dependencies.sh --list-targets | jq -R . | jq -sc .)
+          echo "matrix=$matrix" >> "$GITHUB_OUTPUT"
+
+  check:
+    name: Dependency policy (${{ matrix.target }})
+    needs: targets
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        target: ${{ fromJSON(needs.targets.outputs.matrix) }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Check advisories, licenses, bans, and sources
+        uses: EmbarkStudios/cargo-deny-action@3c6349835b2b7b196a839186cb8b78e02f7b5f25 # v2.1.1, cargo-deny 0.20.2
+        with:
+          rust-version: ${{ needs.targets.outputs.rust-version }}
+          arguments: --locked --all-features --target ${{ matrix.target }}
+          command: check
+          # Retired transitive crates remain visible without accepting vulnerabilities.
+          command-arguments: --hide-inclusion-graph --warn unmaintained

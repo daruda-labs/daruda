@@ -18,6 +18,29 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  dependency-changes:
+    name: Select dependency packaging checks
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      packaging: ${{ steps.changes.outputs.packaging }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+      - name: Select changed dependency and packaging paths
+        id: changes
+        env:
+          BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
+        run: |
+          if [ -z "$BASE" ] || [ "$BASE" = "0000000000000000000000000000000000000000" ]; then
+            packaging=true
+          else
+            packaging=$(git diff --name-only --no-renames "$BASE" HEAD | bash scripts/check-packaging-changes.sh)
+          fi
+          echo "packaging=$packaging" >> "$GITHUB_OUTPUT"
+
   lint:
     name: Lint
     # Track the latest GitHub-hosted image for each platform.
@@ -34,10 +57,18 @@ jobs:
         # and the scans below never leave `packages/`, the vendored
         # `vendor/gpui-component/` and `vendor/ferrum-flow/`, and `scripts/`.
 
+      - name: Verify dependency maintenance scripts and Rust floor
+        id: rust
+        run: |
+          bash scripts/rust-version.sh --self-test
+          bash scripts/check-packaging-changes.sh --self-test
+          version=$(bash scripts/rust-version.sh)
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
         with:
-          toolchain: "1.95"
+          toolchain: ${{ steps.rust.outputs.version }}
           components: rustfmt
 
       - name: Format
@@ -93,6 +124,7 @@ jobs:
 
   macos:
     name: macOS — build and test
+    needs: dependency-changes
     runs-on: macos-latest  # Apple Silicon runner
     # Cold builds need time for test compilation after Clippy and doc checks.
     timeout-minutes: 45
@@ -125,8 +157,23 @@ jobs:
         shell: bash
         run: bash ./scripts/ci-cargo.sh test
 
+      - name: Build and verify the macOS bundle
+        if: needs.dependency-changes.outputs.packaging == 'true'
+        timeout-minutes: 10
+        run: |
+          ./scripts/build-app.sh --profile debug
+          target=$(cargo metadata --locked --no-deps --format-version 1 | jq -er '.target_directory')
+          app="$target/debug/daruda.app"
+          plutil -lint "$app/Contents/Info.plist"
+          codesign --verify --deep --strict "$app"
+          test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$app/Contents/Info.plist")" = "$(bash scripts/version.sh)"
+          test -x "$app/Contents/MacOS/daruda"
+          data=$(mktemp -d)
+          DARUDA_DATA_DIR="$data" "$app/Contents/MacOS/daruda" --smoke
+
   linux:
     name: Linux — build and test
+    needs: dependency-changes
     runs-on: ubuntu-latest
     # Cold, and building the same tree the macOS job does on a slower
     # runner. Raise rather than let a real failure look like a timeout.
@@ -186,6 +233,34 @@ jobs:
       - name: Smoke-test the window (Wayland)
         timeout-minutes: 5
         run: ./scripts/linux/smoke.sh wayland target/debug/daruda
+
+      - name: Install Linux packaging dependencies
+        if: needs.dependency-changes.outputs.packaging == 'true'
+        run: ./scripts/linux/apt-install.sh imagemagick dpkg-dev desktop-file-utils jq
+
+      - name: Build Linux packages from the checked binary
+        if: needs.dependency-changes.outputs.packaging == 'true'
+        id: package
+        run: |
+          desktop-file-validate scripts/linux/daruda.desktop
+          ./scripts/package-linux.sh --profile debug --skip-build
+
+      - name: Verify the installed deb and extracted archive
+        if: needs.dependency-changes.outputs.packaging == 'true'
+        timeout-minutes: 5
+        env:
+          DEB: ${{ steps.package.outputs.deb }}
+          ARCHIVE: ${{ steps.package.outputs.archive }}
+        run: |
+          sudo apt-get install -y "$DEB"
+          data=$(mktemp -d)
+          DARUDA_DATA_DIR="$data" ./scripts/linux/smoke.sh x11 /usr/bin/daruda
+          out=$(mktemp -d)
+          tar -xzf "$ARCHIVE" -C "$out"
+          bin=$(find "$out" -type f -name daruda | head -1)
+          test -n "$bin"
+          data=$(mktemp -d)
+          DARUDA_DATA_DIR="$data" ./scripts/linux/smoke.sh x11 "$bin"
 
   windows:
     name: Windows — build and test

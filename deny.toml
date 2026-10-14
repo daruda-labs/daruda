@@ -1,0 +1,62 @@
+[graph]
+all-features = true
+
+[advisories]
+unmaintained = "all"
+unsound = "all"
+yanked = "warn"
+
+[bans]
+multiple-versions = "warn"
+# Generated GPUI dependencies omit versions but pin their Git revisions.
+wildcards = "warn"
+allow-wildcard-paths = true
+
+[bans.workspace-dependencies]
+duplicates = "deny"
+unused = "warn"
+
+[licenses]
+allow = [
+    "0BSD",
+    "AGPL-3.0-only",
+    "Apache-2.0",
+    "Apache-2.0 WITH LLVM-exception",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "CC0-1.0",
+    "CDLA-Permissive-2.0",
+    "ISC",
+    "MIT",
+    "MPL-2.0",
+    "NCSA",
+    "Unicode-3.0",
+    "Zlib",
+    "bzip2-1.0.6",
+]
+
+# These GPL crates are part of the pinned Zed dependency graph.
+[[licenses.exceptions]]
+crate = "zlog@0.1.0"
+allow = ["GPL-3.0-or-later"]
+
+[[licenses.exceptions]]
+crate = "ztracing@0.1.0"
+allow = ["GPL-3.0-or-later"]
+
+[[licenses.exceptions]]
+crate = "ztracing_macro@0.1.0"
+allow = ["GPL-3.0-or-later"]
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"
+required-git-spec = "rev"
+allow-git = [
+    "https://github.com/proptest-rs/proptest",
+    "https://github.com/zed-industries/font-kit",
+    "https://github.com/zed-industries/scap",
+    "https://github.com/zed-industries/wgpu",
+    "https://github.com/zed-industries/xim-rs",
+    "https://github.com/zed-industries/zed",
+]

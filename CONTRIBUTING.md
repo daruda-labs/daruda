@@ -14,6 +14,7 @@ daruda locally. For a short product overview and first run instructions, see
 - [Storage locations](#storage-locations)
 - [Local Checks](#local-checks)
 - [Tests and CI](#tests-and-ci)
+- [Dependency Maintenance](#dependency-maintenance)
 - [Visual Verification](#visual-verification)
 - [Packaging](#packaging)
 - [Project Structure](#project-structure)
@@ -38,7 +39,7 @@ daruda locally. For a short product overview and first run instructions, see
 Rust uses edition 2024. The minimum version is declared once in
 `[workspace.package]`; first-party crates inherit `rust-version.workspace = true`.
 CI pins the floor exactly, while local development can use newer toolchains.
-The vendored `gpui_component*` manifests remain unchanged for re-vendoring;
+The vendored `gpui_component*` manifests retain upstream's Rust version policy;
 `ferrum_flow` declares the floor to enable `clippy::incompatible_msrv`.
 
 Zig can be bootstrapped with `scripts/bootstrap-zig.sh` on macOS/Linux or
@@ -324,6 +325,10 @@ bash scripts/ci-cargo.sh test
 bash scripts/ci-cargo.sh doc
 cargo test -p daruda --features screenshot
 cargo run -p gen_acp_presets -- --check
+bash scripts/check-dependencies.sh
+bash scripts/rust-version.sh
+bash scripts/rust-version.sh --self-test
+bash scripts/check-packaging-changes.sh --self-test
 ```
 
 The lint checklist includes CI checks and additional local checks.
@@ -400,11 +405,88 @@ Linux dependencies live in `scripts/linux/{build,smoke}-deps.txt`;
 Linux checks both X11 and Wayland startup/paint; Windows checks native
 builds, startup, platform adapters, and packaging.
 
+CI reads the Rust floor through [rust-version.sh](scripts/rust-version.sh),
+using Cargo metadata rather than a second toolchain version literal. The reader
+rejects differing first-party and `ferrum_flow` declarations; upstream widget
+MSRVs retain their independent policy. Its self-test runs in the Lint job.
+
+For dependency and native-packaging changes, macOS CI also verifies a signed
+debug `.app` and starts its bundled binary. Linux CI builds the debug tarball
+and deb from the already checked binary, installs the deb, and smoke-tests both
+payloads. [check-packaging-changes.sh](scripts/check-packaging-changes.sh) owns
+the path selection and its self-test. A manual CI run always includes these
+checks. Release-profile packaging, installers, and disk images remain release
+gates; debug packaging is never published.
+
 A local pass establishes only the host's compiled branches. Platform changes
 require default and all-feature Clippy on all three OSes; report other OS
 results as pending until CI passes. For rendering, IME, and window state,
 tests alone are insufficient: use the capture workflow below and report
 remaining desktop checks.
+
+---
+
+## Dependency Maintenance
+
+Shared registry requirements live in `[workspace.dependencies]`. Members inherit
+them with `workspace = true`, keeping their own features, optional flags, and
+target conditions. Different incompatible requirements, such as the app's
+`toml 0.8` and the GPUI vendor tool's `toml 0.9`, stay separate. Resolver 3
+prefers dependencies compatible with the declared Rust floor; the Rust 1.95
+CI jobs and `--locked` Cargo gates remain the compatibility check.
+
+When an upstream fix is required for correctness, raise the dependency's
+manifest lower bound to its fixed release, not just its lockfile entry. For
+example, `futures >=0.3.34` retains the cloned `FuturesUnordered` waker identity
+fix ([futures-rs#3032](https://github.com/rust-lang/futures-rs/pull/3032)). Keep
+compatible patch/minor updates allowed; reserve exact pins for documented
+integration constraints.
+
+Install the policy checker with:
+
+```bash
+cargo install cargo-deny --locked --version 0.20.2
+```
+
+The [dependency workflow](.github/workflows/dependencies.yml) uses that same
+version on PRs, main pushes, and daily against the current advisory DB.
+It checks all features with [deny.toml](deny.toml), separately for every target
+listed by [check-dependencies.sh](scripts/check-dependencies.sh). Checking
+targets independently avoids combining Windows-only tray dependencies with
+their unused Linux GTK backend. Vulnerabilities, unsound dependencies,
+disallowed licenses, unexpected Git sources, and duplicate workspace declarations
+fail the check. Duplicate resolved versions,
+retired dependencies, and yanked versions remain visible as warnings. Do not
+suppress a vulnerability to make an update pass; fix it or document a narrowly
+scoped, reviewed exception with its upstream tracking issue.
+
+Dependency updates are reviewed independently of feature work. Use
+`cargo update --dry-run` to inspect compatible changes and
+`cargo update -p <crate>` to isolate a problematic update. Run the complete
+local checklist and all three platform CI jobs before accepting a broad lock
+refresh. ACP updates also exercise authentication, session lifecycle, cancellation, and usage
+reporting; Mermaid or text-rendering updates require visual verification.
+
+[Dependabot](.github/dependabot.yml) opens weekly Cargo lock-only PRs, including
+indirect dependencies, in separate ACP, rendering, and general groups. GitHub
+Actions updates have their own schedule and group. Manifest range changes and
+integration pins require a separate migration; review available incompatible
+updates monthly. Security alerts and security update settings are managed in
+GitHub separately. Updates are not automatically merged: reviewers require the
+dependency policy and platform CI jobs, plus any local-only checklist items.
+After the configuration reaches main, inspect the first update job and PR to
+confirm indirect updates and unchanged Git revisions; `lockfile-only` does not
+promise the same complete refresh as `cargo update`.
+
+The merman alpha integration pins its `dugong` and `manatee` layout dependencies:
+their stable releases removed APIs the alpha renderer still calls. Keep these
+pins and bot exclusions until the stable renderer's theme and measurement API
+migration passes the rendered conformance suite and visual verification.
+
+The Zed revision, generated GPUI tree, and retained patches are upgraded as one
+integration. Ghostty submodule updates require their terminal and FFI checks.
+Follow [the patch workflow](patches/README.md); do not let a dependency bot
+independently rewrite generated vendor manifests or advance those pins.
 
 ---
 

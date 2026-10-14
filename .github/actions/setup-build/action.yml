@@ -1,7 +1,7 @@
 name: Set up the build toolchain
 description: >-
-  Rust 1.95 with clippy, the pinned Zig, locked dependencies, and the vendored
-  GPUI check — the setup every building job shares. Checkout stays in the job.
+  The declared Rust floor with clippy, the pinned Zig, locked dependencies,
+  and the vendored GPUI check. Checkout stays in the job.
 inputs:
   cache-key:
     description: Swatinem/rust-cache key; jobs building different trees keep separate caches.
@@ -10,16 +10,23 @@ inputs:
 runs:
   using: composite
   steps:
+    - name: Read and verify the Rust floor
+      id: rust
+      shell: bash
+      run: |
+        version=$(bash scripts/rust-version.sh)
+        echo "version=$version" >> "$GITHUB_OUTPUT"
+
     - name: Cache rustup toolchain
       uses: actions/cache@v5
       with:
         path: ~/.rustup/toolchains
-        key: rustup-1.95-${{ runner.os }}-${{ runner.arch }}
+        key: rustup-${{ steps.rust.outputs.version }}-${{ runner.os }}-${{ runner.arch }}
 
     - name: Install Rust
       uses: dtolnay/rust-toolchain@stable
       with:
-        toolchain: "1.95"
+        toolchain: ${{ steps.rust.outputs.version }}
         components: clippy
 
     - name: Cache Rust build
