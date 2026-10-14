@@ -111,3 +111,44 @@ fn a_template_only_layer_keeps_the_user_shell_and_no_dot(cx: &mut TestAppContext
         assert!(!ws.project_layer_overrides());
     });
 }
+
+/// Switching to another project re-resolves the config: new terminals take the
+/// incoming project's shell, not the one the window last applied.
+#[gpui::test]
+fn switching_projects_follows_the_incoming_projects_shell(cx: &mut TestAppContext) {
+    let with_layer = tempfile::tempdir().unwrap();
+    let without_layer = tempfile::tempdir().unwrap();
+    let ws = workspace_with_layer(
+        cx,
+        with_layer.path(),
+        "[shell]\nprogram = \"/bin/project-shell\"\n",
+    );
+    let window = cx.windows()[0];
+
+    let added = cx
+        .update_window(window, |_, window, cx| {
+            ws.update(cx, |ws, cx| {
+                ws.add_project(without_layer.path().to_path_buf(), window, cx)
+            })
+        })
+        .unwrap()
+        .expect("add_project returns the new lane");
+    ws.update(cx, |ws, _| {
+        assert_eq!(ws.active, added);
+        assert_eq!(ws.mirrors.shell_program.as_deref(), Some("/bin/user-shell"));
+        assert!(!ws.project_layer_overrides());
+    });
+
+    let first = daruda_store::project::LaneRef::default();
+    cx.update_window(window, |_, window, cx| {
+        ws.update(cx, |ws, cx| ws.activate_lane(first, window, cx))
+    })
+    .unwrap();
+    ws.update(cx, |ws, _| {
+        assert_eq!(
+            ws.mirrors.shell_program.as_deref(),
+            Some("/bin/project-shell")
+        );
+        assert!(ws.project_layer_overrides());
+    });
+}

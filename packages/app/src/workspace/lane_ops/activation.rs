@@ -84,6 +84,11 @@ impl Workspace {
         // Both runtimes live in the single `runtimes` map — nothing to swap;
         // a lane never activated gets an empty one.
         self.set_active(target);
+        // The project layer is per project, so another project means another
+        // effective config — what new panes spawn with and the dot reports.
+        if previous.project != target.project {
+            self.apply_store_config(cx);
+        }
         // Seen now. Persisted by the `mutate_durable` each branch below ends on.
         if let Some(lane) = self.lane_for_mut(target)
             && std::mem::take(&mut lane.is_unread)
