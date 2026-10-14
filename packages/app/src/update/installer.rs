@@ -4,8 +4,6 @@ use std::path::{Path, PathBuf};
 
 use daruda_update::UpdateError;
 
-pub(super) const ASSET_SUFFIX: &str = "-windows-x86_64-setup.exe";
-
 /// A managed installation, with a verified installer only after preparation.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct InstallerTarget {

@@ -8,6 +8,7 @@ $ErrorActionPreference = 'Stop'
 $archivePath = (Resolve-Path -LiteralPath $Archive).Path
 $name = [IO.Path]::GetFileNameWithoutExtension($archivePath)
 $version = Get-DarudaPackageVersion -Name $name
+$arch = Get-DarudaPackageArch -Name $name
 $outputRoot = Split-Path $archivePath -Parent
 $stage = Join-Path $outputRoot ('.installer-' + [Guid]::NewGuid().ToString('N'))
 New-Item -ItemType Directory -Path $stage | Out-Null
@@ -43,7 +44,7 @@ try {
         $lines.Add('RMDir "$INSTDIR\' + $relative + '"')
     }
     $lines | Set-Content -LiteralPath $manifest -Encoding utf8
-    $definitions = @("/DBUNDLE=$bundle", "/DOUTPUT=$output", "/DVERSION=$version", "/DUNINSTALL_MANIFEST=$manifest", "/DFILE_CHECKS=$(Join-Path $stage 'file-checks.nsh')")
+    $definitions = @("/DBUNDLE=$bundle", "/DOUTPUT=$output", "/DVERSION=$version", "/DARCH=$arch", "/DUNINSTALL_MANIFEST=$manifest", "/DFILE_CHECKS=$(Join-Path $stage 'file-checks.nsh')")
     if ($CertificateThumbprint) {
         if ($CertificateThumbprint -notmatch '^[A-Fa-f0-9]{40}$') { throw 'Invalid certificate thumbprint' }
         $signer = Join-Path $PSScriptRoot 'sign-windows.ps1'

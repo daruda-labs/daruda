@@ -64,8 +64,23 @@ fn asset_suffix_for(os: &str, arch: &str) -> Option<&'static str> {
     match (os, arch) {
         ("macos", _) => Some(".dmg"),
         ("windows", "x86_64") => Some("-windows-x86_64.zip"),
+        ("windows", "aarch64") => Some("-windows-aarch64.zip"),
         // The tar.gz rather than the .deb: Linux is announced, not replaced.
         ("linux", "x86_64") => Some("-linux-x86_64.tar.gz"),
+        _ => None,
+    }
+}
+
+/// The NSIS setup that replaces an installer-owned Windows deployment. Only
+/// Windows ships one, so the OS is implied; `None` for an arch without one.
+pub fn installer_asset_suffix() -> Option<&'static str> {
+    installer_asset_suffix_for(std::env::consts::ARCH)
+}
+
+fn installer_asset_suffix_for(arch: &str) -> Option<&'static str> {
+    match arch {
+        "x86_64" => Some("-windows-x86_64-setup.exe"),
+        "aarch64" => Some("-windows-aarch64-setup.exe"),
         _ => None,
     }
 }
@@ -206,13 +221,49 @@ mod tests {
         assert_eq!(asset_suffix_for("freebsd", "x86_64"), None);
     }
 
-    /// Only x86_64 is built for Windows and Linux; an arm64 build offered the
-    /// x86_64 package would install something it cannot run.
+    /// Linux builds only x86_64; an arm64 build offered the x86_64 package
+    /// would install something it cannot run.
     #[test]
     fn an_arch_without_a_package_is_not_offered_another() {
         assert_eq!(asset_suffix_for("linux", "aarch64"), None);
-        assert_eq!(asset_suffix_for("windows", "aarch64"), None);
         assert_eq!(asset_suffix_for("macos", "aarch64"), Some(".dmg"));
+    }
+
+    /// Both Windows arches ship, and neither may take the other's package:
+    /// the suffixes share no ending, so a release missing one is an error.
+    #[test]
+    fn each_windows_arch_takes_its_own_packages() {
+        let json = r#"{"tag_name":"v0.3.0","assets":[
+            {"name":"daruda-0.3.0-windows-x86_64.zip","browser_download_url":"https://github.com/x64"},
+            {"name":"daruda-0.3.0-windows-x86_64-setup.exe","browser_download_url":"https://github.com/x64-setup"},
+            {"name":"daruda-0.3.0-windows-aarch64.zip","browser_download_url":"https://github.com/arm64"},
+            {"name":"daruda-0.3.0-windows-aarch64-setup.exe","browser_download_url":"https://github.com/arm64-setup"},
+            {"name":"SHA256SUMS.txt","browser_download_url":"https://github.com/checksums"}
+        ]}"#;
+        let current = semver::Version::new(0, 2, 0);
+        let url = |suffix: Option<&'static str>| {
+            parse_release_with_suffix(json, &current, suffix.unwrap())
+                .unwrap()
+                .unwrap()
+                .asset_url
+        };
+        assert_eq!(
+            url(asset_suffix_for("windows", "x86_64")),
+            "https://github.com/x64"
+        );
+        assert_eq!(
+            url(asset_suffix_for("windows", "aarch64")),
+            "https://github.com/arm64"
+        );
+        assert_eq!(
+            url(installer_asset_suffix_for("x86_64")),
+            "https://github.com/x64-setup"
+        );
+        assert_eq!(
+            url(installer_asset_suffix_for("aarch64")),
+            "https://github.com/arm64-setup"
+        );
+        assert_eq!(installer_asset_suffix_for("riscv64"), None);
     }
 
     /// The suffix must not match the other platform's file: `.dmg` and

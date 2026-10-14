@@ -43,7 +43,7 @@ The vendored `gpui_component*` manifests retain upstream's Rust version policy;
 `ferrum_flow` declares the floor to enable `clippy::incompatible_msrv`.
 
 Zig can be bootstrapped with `scripts/bootstrap-zig.sh` on macOS/Linux or
-`scripts/bootstrap-zig.ps1` on Windows x86_64; alternatively set `ZIG` or put
+`scripts/bootstrap-zig.ps1` on Windows x86_64 or ARM64; alternatively set `ZIG` or put
 it on PATH. macOS is the primary desktop-verified target. Linux and Windows
 have CI build/test/startup gates; real input, IME, menus, tray behavior, and
 Windows transitions between monitors with different DPI need desktop checks.
@@ -630,14 +630,16 @@ Windows builds embed `assets/icon.ico` into `daruda.exe`; the installer and
 uninstaller use the same icon. After changing `assets/icon.png`, regenerate
 the committed ICO with `./scripts/make-icon.ps1` on Windows before building.
 
-Build a portable Windows x86_64 ZIP (including MSVC runtime DLLs):
+Build a portable Windows ZIP (including MSVC runtime DLLs) for the host
+architecture, x86_64 or ARM64:
 
 ```powershell
 ./scripts/bootstrap-zig.ps1
 ./scripts/package-windows.ps1
 ```
 
-The package is written to `target/packages/daruda-<version>-windows-x86_64.zip`.
+The package is written to `target/packages/daruda-<version>-windows-<arch>.zip`,
+where `<arch>` is `x86_64` or `aarch64`.
 Extract the entire archive and run `daruda.exe`; keep its DLLs beside it.
 This is an unsigned portable build, with experimental Windows GUI support.
 To package an existing debug build for testing, use

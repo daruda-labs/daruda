@@ -30,10 +30,17 @@ ShowUninstDetails show
 !insertmacro MUI_LANGUAGE "English"
 
 Function .onInit
+!if "${ARCH}" == "aarch64"
+  ${IfNot} ${IsNativeARM64}
+    MessageBox MB_ICONSTOP "This daruda installer is for ARM64 Windows. Download the x86_64 installer instead."
+    Abort
+  ${EndIf}
+!else
   ${IfNot} ${RunningX64}
     MessageBox MB_ICONSTOP "daruda requires 64-bit Windows."
     Abort
   ${EndIf}
+!endif
   SetShellVarContext current
   ; The updater starts this installer before quitting, so hold a process handle.
   ${GetOptions} $CMDLINE "/WAITPID=" $0

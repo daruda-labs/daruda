@@ -77,9 +77,18 @@ jobs:
           compression-level: 0
 
   build-windows:
-    name: Build Windows x86_64 ZIP and installer
+    name: Build Windows ${{ matrix.arch }} ZIP and installer
     needs: metadata
-    runs-on: windows-latest
+    # Each arch builds natively so the smoke and install checks run the bytes that ship.
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: x86_64
+            runner: windows-latest
+          - arch: aarch64
+            runner: windows-11-arm
+    runs-on: ${{ matrix.runner }}
     timeout-minutes: 90
     outputs:
       signed: ${{ steps.signing.outputs.signed }}
@@ -92,7 +101,7 @@ jobs:
       - name: Set up the build toolchain
         uses: ./.github/actions/setup-build
         with:
-          cache-key: release-windows
+          cache-key: release-windows-${{ matrix.arch }}
 
       - name: Prepare Windows signing identity
         id: signing
@@ -167,7 +176,7 @@ jobs:
       - name: Upload Windows package
         uses: actions/upload-artifact@v7
         with:
-          name: release-windows
+          name: release-windows-${{ matrix.arch }}
           path: |
             ${{ steps.package.outputs.archive }}
             ${{ steps.installer.outputs.installer }}
@@ -265,6 +274,8 @@ jobs:
             packages/daruda-${{ needs.metadata.outputs.version }}.dmg
             packages/daruda-${{ needs.metadata.outputs.version }}-windows-x86_64.zip
             packages/daruda-${{ needs.metadata.outputs.version }}-windows-x86_64-setup.exe
+            packages/daruda-${{ needs.metadata.outputs.version }}-windows-aarch64.zip
+            packages/daruda-${{ needs.metadata.outputs.version }}-windows-aarch64-setup.exe
             packages/daruda-${{ needs.metadata.outputs.version }}-linux-x86_64.deb
             packages/daruda-${{ needs.metadata.outputs.version }}-linux-x86_64.tar.gz
             packages/SHA256SUMS.txt
@@ -276,9 +287,10 @@ jobs:
             First launch: right-click daruda.app and select Open.
             If macOS still refuses, run `xattr -cr /Applications/daruda.app`.
 
-            ## Windows (x86_64)
+            ## Windows (x86_64 and ARM64)
 
-            Download `daruda-${{ needs.metadata.outputs.version }}-windows-x86_64-setup.exe`
+            Download `daruda-${{ needs.metadata.outputs.version }}-windows-x86_64-setup.exe`,
+            or `daruda-${{ needs.metadata.outputs.version }}-windows-aarch64-setup.exe` on ARM64 PCs,
             for a per-user installation with Start Menu and desktop shortcuts.
             Administrator permission is not required. Uninstalling preserves app data.
             Windows Authenticode signing enabled for this release: `${{ needs.build-windows.outputs.signed }}`.

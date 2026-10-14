@@ -1,6 +1,6 @@
 function Get-DarudaPackageVersion {
     param([Parameter(Mandatory)][string]$Name)
-    if ($Name -notmatch '^daruda-(?<version>.+)-windows-x86_64(?:-debug)?$') {
+    if ($Name -notmatch '^daruda-(?<version>.+)-windows-(?:x86_64|aarch64)(?:-debug)?$') {
         throw 'Unsupported package name'
     }
     $version = $Matches.version
@@ -12,4 +12,12 @@ function Get-DarudaPackageVersion {
         throw 'Unsupported package version'
     }
     return $version
+}
+
+function Get-DarudaPackageArch {
+    param([Parameter(Mandatory)][string]$Name)
+    if ($Name -notmatch '-windows-(?<arch>x86_64|aarch64)(?:-debug)?$') {
+        throw 'Unsupported package architecture'
+    }
+    return $Matches.arch
 }

@@ -11,8 +11,8 @@ nearby when a shell is still the right tool.
 
 daruda is built on [GPUI](https://github.com/zed-industries/zed/tree/main/crates/gpui)
 and [ghostty_vt](https://ghostty.org). macOS 12+ is the primary supported
-desktop target. Native Windows x86_64 builds are also available, with
-experimental GUI support.
+desktop target. Native Windows x86_64 and ARM64 builds are also available,
+with experimental GUI support.
 
 ---
 
@@ -72,7 +72,7 @@ cargo run -p daruda
 
 ### Windows Requirements
 
-- Windows x86_64
+- Windows x86_64 or ARM64
 - Git for Windows
 - Rust 1.95+ (MSVC toolchain)
 - Visual Studio 2022 Build Tools with the C++ workload and Windows SDK
@@ -99,7 +99,7 @@ see [CONTRIBUTING.md](CONTRIBUTING.md).
 |---|---|
 | macOS runtime | Primary supported target, Apple Silicon and Intel |
 | Linux | x86_64 `.deb` and tar.gz; CI builds, tests, and opens the window under Xvfb and sway; a real desktop (input, IME, menus) is still unverified |
-| Windows | Native x86_64 ZIP and installer; experimental GUI support with CI build, test, and smoke checks |
+| Windows | Native x86_64 and ARM64 ZIP and installer; experimental GUI support with CI build, test, and smoke checks |
 | ACP chat sessions | Shipped for configured ACP agents |
 | Claude Code integration | Status, usage, skills, tools, and task launching shipped |
 | Other agent integrations | Ongoing as each CLI exposes stable metadata |

@@ -13,22 +13,24 @@ if (Test-Path -LiteralPath $executable) {
     return
 }
 
-if ([Runtime.InteropServices.RuntimeInformation]::OSArchitecture -ne 'X64') {
-    throw 'This installer supports Windows x86_64. Install Zig manually on other architectures.'
+# Archive checksums from https://ziglang.org/download/index.json.
+$archive = switch ([Runtime.InteropServices.RuntimeInformation]::OSArchitecture) {
+    'X64' { @{ Arch = 'x86_64'; Sha256 = '554f5378228923ffd558eac35e21af020c73789d87afeabf4bfd16f2e6feed2c' } }
+    'Arm64' { @{ Arch = 'aarch64'; Sha256 = 'b5aac0ccc40dd91e8311b1f257717d8e3903b5fefb8f659de6d65a840ad1d0e7' } }
+    default { throw 'This installer supports Windows x86_64 and ARM64. Install Zig manually on other architectures.' }
 }
 
 $temporaryRoot = [IO.Path]::GetFullPath([IO.Path]::GetTempPath())
 $staging = Join-Path $temporaryRoot ("daruda-zig-" + [Guid]::NewGuid().ToString('N'))
 New-Item -ItemType Directory -Path $staging | Out-Null
 try {
-    $archiveName = "zig-x86_64-windows-$version"
-    $archive = Join-Path $staging 'zig.zip'
-    Invoke-WebRequest -Uri "https://ziglang.org/download/$version/$archiveName.zip" -OutFile $archive
-    $expected = '554f5378228923ffd558eac35e21af020c73789d87afeabf4bfd16f2e6feed2c'
-    if ((Get-FileHash -LiteralPath $archive -Algorithm SHA256).Hash.ToLowerInvariant() -ne $expected) {
+    $archiveName = "zig-$($archive.Arch)-windows-$version"
+    $zip = Join-Path $staging 'zig.zip'
+    Invoke-WebRequest -Uri "https://ziglang.org/download/$version/$archiveName.zip" -OutFile $zip
+    if ((Get-FileHash -LiteralPath $zip -Algorithm SHA256).Hash.ToLowerInvariant() -ne $archive.Sha256) {
         throw 'Zig archive SHA256 mismatch'
     }
-    Expand-Archive -LiteralPath $archive -DestinationPath $staging
+    Expand-Archive -LiteralPath $zip -DestinationPath $staging
     $extracted = [IO.Path]::GetFullPath((Join-Path $staging $archiveName))
     if (-not $extracted.StartsWith($staging + [IO.Path]::DirectorySeparatorChar) -or
         -not (Test-Path -LiteralPath (Join-Path $extracted 'zig.exe'))) {

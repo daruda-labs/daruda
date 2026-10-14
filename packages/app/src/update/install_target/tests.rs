@@ -72,10 +72,7 @@ fn managed_windows_installations_use_setup_instead_of_zip() {
     let gate = InstallGate::for_host(&exe, Some(Host::Windows));
     let target = gate.target().unwrap();
     assert!(target.uses_installer());
-    assert_eq!(
-        target.asset_suffix(),
-        Some(super::super::installer::ASSET_SUFFIX)
-    );
+    assert!(target.asset_suffix().unwrap().ends_with("-setup.exe"));
 }
 
 /// Both the deb's `/usr/bin` and an extracted tar.gz are announced, not

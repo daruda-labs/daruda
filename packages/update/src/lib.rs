@@ -12,7 +12,7 @@ pub mod verify;
 
 pub use check::{check_latest, download_verified};
 pub use install::{install_dmg, relaunch};
-pub use release::{ReleaseInfo, asset_suffix, parse_release};
+pub use release::{ReleaseInfo, asset_suffix, installer_asset_suffix, parse_release};
 pub use swap::{
     AWAIT_EXIT_SUBCOMMAND, install_zip, install_zip_verified, recover_update, relaunch_from,
     sweep_aside,

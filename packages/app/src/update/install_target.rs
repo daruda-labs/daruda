@@ -112,10 +112,7 @@ pub enum InstallTarget {
 impl InstallTarget {
     pub(super) fn asset_suffix(&self) -> Option<&'static str> {
         match self {
-            // Setup ships for the same arches the portable package does.
-            Self::Installer(_) => {
-                daruda_update::asset_suffix().map(|_| super::installer::ASSET_SUFFIX)
-            }
+            Self::Installer(_) => daruda_update::installer_asset_suffix(),
             _ => daruda_update::asset_suffix(),
         }
     }

@@ -24,26 +24,30 @@ try {
         $reader.BaseStream.Position = 0x3c
         $peOffset = $reader.ReadInt32()
         $reader.BaseStream.Position = $peOffset
-        if ($reader.ReadUInt32() -ne 0x00004550 -or $reader.ReadUInt16() -ne 0x8664) {
-            throw 'Windows packaging requires an x86_64 PE executable'
+        if ($reader.ReadUInt32() -ne 0x00004550) { throw 'Build output is not a PE executable' }
+        # The executable's machine names the package and its matching runtime.
+        $target = switch ($reader.ReadUInt16()) {
+            0x8664 { @{ Arch = 'x86_64'; Redist = 'x64'; Tools = 'Microsoft.VisualStudio.Component.VC.Tools.x86.x64' } }
+            0xAA64 { @{ Arch = 'aarch64'; Redist = 'arm64'; Tools = 'Microsoft.VisualStudio.Component.VC.Tools.ARM64' } }
+            default { throw 'Windows packaging requires an x86_64 or ARM64 PE executable' }
         }
     } finally { $reader.Dispose() }
 
     # App-local CRT deployment lets the ZIP run without a Visual Studio install.
     $vswhere = Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio/Installer/vswhere.exe'
-    $installation = & $vswhere -latest -products '*' -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
+    $installation = & $vswhere -latest -products '*' -requires $target.Tools -property installationPath
     if ($LASTEXITCODE -ne 0 -or -not $installation) { throw 'Visual Studio C++ tools are required for packaging' }
     $redistVersion = (Get-Content -LiteralPath (Join-Path $installation 'VC/Auxiliary/Build/Microsoft.VCRedistVersion.default.txt') -Raw).Trim()
-    $crt = @(Get-ChildItem -LiteralPath (Join-Path $installation "VC/Redist/MSVC/$redistVersion/x64") -Directory |
+    $crt = @(Get-ChildItem -LiteralPath (Join-Path $installation "VC/Redist/MSVC/$redistVersion/$($target.Redist)") -Directory |
         Where-Object Name -Like 'Microsoft.VC*.CRT')
-    if ($crt.Count -ne 1) { throw 'Cannot identify the x86_64 MSVC runtime directory' }
+    if ($crt.Count -ne 1) { throw "Cannot identify the $($target.Arch) MSVC runtime directory" }
     $runtime = @(Get-ChildItem -LiteralPath $crt[0].FullName -Filter '*.dll' -File)
     if (-not ($runtime.Name -contains 'vcruntime140.dll')) { throw 'MSVC runtime DLLs are missing' }
 
     $outputRoot = [IO.Path]::GetFullPath((Join-Path $metadata.target_directory 'packages'))
     New-Item -ItemType Directory -Force -Path $outputRoot | Out-Null
     $suffix = if ($Profile -eq 'debug') { '-debug' } else { '' }
-    $name = "daruda-$version-windows-x86_64$suffix"
+    $name = "daruda-$version-windows-$($target.Arch)$suffix"
     $stage = Join-Path $outputRoot ('.staging-' + [Guid]::NewGuid().ToString('N'))
     $bundle = Join-Path $stage $name
     New-Item -ItemType Directory -Path $bundle | Out-Null
@@ -57,7 +61,7 @@ try {
         foreach ($dll in $runtime) { Copy-Item -LiteralPath $dll.FullName -Destination $bundle }
         $signing = if ($CertificateThumbprint) { 'Authenticode signed and timestamped' } else { 'Unsigned' }
         @"
-daruda $version ($Profile, Windows x86_64)
+daruda $version ($Profile, Windows $($target.Arch))
 
 Extract the entire ZIP, then run daruda.exe. Keep the runtime DLLs beside it.
 Portable build: $signing. Windows GUI support is experimental.
