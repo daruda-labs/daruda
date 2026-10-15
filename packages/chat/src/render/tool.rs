@@ -40,7 +40,7 @@ use daruda_ui::theme;
 use daruda_ui::{Icon, IconName, IconNamed as _, Sizable as _};
 
 mod labels;
-mod output;
+pub(super) mod output;
 mod permission;
 use labels::{
     command_tags, exit_badge_label, tool_header_label, tool_status_badge, tool_title_summary,

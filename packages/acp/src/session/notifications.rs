@@ -41,6 +41,14 @@ pub(super) fn forward_session_update(
     tx: &UnboundedSender<AcpEvent>,
 ) {
     let update = match update {
+        update
+        @ (SessionUpdate::CompactionUpdate(_) | SessionUpdate::CompactionSummaryChunk(_)) => {
+            let _ = tx.unbounded_send(AcpEvent::Compaction {
+                session_id: session_id.to_string(),
+                update: Box::new(update),
+            });
+            return;
+        }
         SessionUpdate::CurrentModeUpdate(u) => {
             if let Some(state) = mode_tracker.apply_current_mode(u.current_mode_id.to_string()) {
                 let _ = tx.unbounded_send(AcpEvent::ModeChanged { state });

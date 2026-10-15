@@ -17,8 +17,10 @@
 use std::collections::HashSet;
 
 use daruda_acp::ChatItem;
+use daruda_acp::ToolOutputBlock;
 use daruda_store::observability::error_report::{ErrorReport, ErrorSeverity};
 use gpui::Context;
+use std::borrow::Cow;
 
 use super::agent_chat_helpers::{
     DiffStat, TurnBoundary, build_diff_view_model, chat_item_mermaid_texts, create_diff_editor,
@@ -80,6 +82,14 @@ impl ReconcileScope {
 
 mod tool_images;
 
+fn output_content(item: &ChatItem) -> Option<(Cow<'_, str>, &[ToolOutputBlock])> {
+    match item {
+        ChatItem::ToolCall(tc) => Some((Cow::Borrowed(&tc.id), &tc.output)),
+        ChatItem::Compaction(c) => Some((Cow::Owned(c.output_key()), &c.summary)),
+        _ => None,
+    }
+}
+
 impl AgentChatView {
     /// Whether `tc`'s card body is on screen, and so whether its embed editors
     /// need to exist at all.
@@ -104,10 +114,11 @@ impl AgentChatView {
     /// `boundary` is resolved once per reconcile pass by the caller: deriving it
     /// per item would make a pass over `items` cost a scan of `items` each time.
     fn tool_body_on_screen(&self, ix: usize, item: &ChatItem, boundary: TurnBoundary) -> bool {
-        let ChatItem::ToolCall(tc) = item else {
-            return false;
+        let key = match item {
+            ChatItem::ToolCall(tc) => tool_fold_key(tc),
+            ChatItem::Compaction(_) => crate::fold::FoldKey::Compaction(ix),
+            _ => return false,
         };
-        let key = tool_fold_key(tc);
         self.fold.is_expanded(
             &key,
             fold_context_at(&key, ix, &self.items, boundary, &self.live_units),
@@ -346,17 +357,17 @@ impl AgentChatView {
         let mut live: HashSet<String> = HashSet::new();
         let boundary = TurnBoundary::of(&self.items);
         for (ix, item) in self.items.iter().enumerate() {
-            let ChatItem::ToolCall(tc) = item else {
+            let Some((id, output)) = output_content(item) else {
                 continue;
             };
-            if !scope.covers(&tc.id) || !self.tool_body_on_screen(ix, item, boundary) {
+            if !scope.covers(&id) || !self.tool_body_on_screen(ix, item, boundary) {
                 continue;
             }
-            for (bi, block) in tc.output.iter().enumerate() {
+            for (bi, block) in output.iter().enumerate() {
                 let Some(src) = output_editor_source(block) else {
                     continue;
                 };
-                let key = output_editor_key(&tc.id, bi);
+                let key = output_editor_key(&id, bi);
                 let fingerprint = output_source_fingerprint(&src);
                 // Owning the body is what costs — up to the 64 KiB output cap —
                 // so it happens only past the skip. A key that is merely
@@ -396,8 +407,8 @@ impl AgentChatView {
         // A tool card just changed height (an embed appeared, grew, or was
         // dropped), and the touched call may sit mid-list (a `ToolCallUpdate` to
         // an earlier call), so `sync_list_after`'s tail-only remeasure isn't
-        // enough — do a full one. Once per output-bearing event.
-        self.apply_list_sync(ListSync::EveryRow, "output-embed");
+        // enough. Preserve the reader's pixel offset when content grows.
+        self.resync_all_row_heights("output-embed");
     }
 
     /// Rasterize every ` ```mermaid ` fence in the conversation that does not
@@ -474,7 +485,7 @@ impl AgentChatView {
                         // cached height is stale — remeasure before repainting or
                         // it clips. Index is unknown here, so this is a full
                         // remeasure, but it's one-shot per landed raster.
-                        view.apply_list_sync(ListSync::EveryRow, "mermaid-raster");
+                        view.resync_all_row_heights("mermaid-raster");
                         cx.notify();
                     }
                 });

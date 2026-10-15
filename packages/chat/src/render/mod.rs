@@ -8,6 +8,7 @@ mod axis_chip;
 mod bars;
 mod blocks;
 mod chrome;
+mod compaction;
 mod diff;
 /// The height-capped editor embed. Reachable from `view/tests` so the layout
 /// probe measures the shipped builder rather than a copy of it.

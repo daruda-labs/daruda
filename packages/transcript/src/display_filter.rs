@@ -481,6 +481,7 @@ impl DisplayFilter {
             ChatItem::UserText(_)
             | ChatItem::Permission(_)
             | ChatItem::Failure(_)
+            | ChatItem::Compaction(_)
             | ChatItem::Interrupted => true,
             ChatItem::Thinking { .. } => self.thinking,
             ChatItem::AssistantText { phase, .. } => match self.prose {

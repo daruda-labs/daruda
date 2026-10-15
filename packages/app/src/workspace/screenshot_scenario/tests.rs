@@ -1,6 +1,14 @@
 use super::*;
 
 #[test]
+fn compaction_scenario_has_a_cli_name() {
+    assert_eq!(
+        ScreenshotScenario::from_cli_name("agent-chat-compaction"),
+        Some(ScreenshotScenario::AgentChatCompaction)
+    );
+}
+
+#[test]
 fn session_notice_scenario_has_a_cli_name() {
     assert_eq!(
         ScreenshotScenario::from_cli_name("session-notices"),

@@ -4,11 +4,11 @@
 use super::*;
 
 #[derive(Clone)]
-pub(super) struct OutputBlockContext<'a> {
-    pub(super) assets: RenderAssets<'a>,
-    pub(super) t: &'a theme::DarudaTheme,
-    pub(super) dim: f32,
-    pub(super) links: AgentChatMarkdownLinks,
+pub(in crate::render) struct OutputBlockContext<'a> {
+    pub(in crate::render) assets: RenderAssets<'a>,
+    pub(in crate::render) t: &'a theme::DarudaTheme,
+    pub(in crate::render) dim: f32,
+    pub(in crate::render) links: AgentChatMarkdownLinks,
 }
 
 /// Flush plain-monospace text: no markdown pass, no code-block chrome, just
@@ -78,7 +78,7 @@ fn output_truncated_from(block: &ToolOutputBlock) -> Option<usize> {
 /// optional local image preview plus open button. The ACP spec says clients
 /// SHOULD render tool text as Markdown; code blocks keep their own monospace +
 /// syntax highlight.
-pub(super) fn output_block_view(
+pub(in crate::render) fn output_block_view(
     tool_id: &str,
     ix: usize,
     block: &ToolOutputBlock,

@@ -329,6 +329,13 @@ impl<'items, 'rows> RunProjector<'items, 'rows> {
                 k += 1;
                 continue;
             }
+            // A compaction belongs to this prompt's timeline but has its own
+            // disclosure, independent of response, history and tail folds.
+            if matches!(items[k], ChatItem::Compaction(_)) {
+                out.push(RowKind::AgentItem(k), false, false, 0);
+                k += 1;
+                continue;
+            }
             // A live covered run stays surfaced through a shut boundary, so the
             // window's range decides the fold and the boundary's state gates it.
             let covered = k < window.window_start;

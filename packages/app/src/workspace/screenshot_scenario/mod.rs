@@ -171,6 +171,8 @@ pub(crate) enum ScreenshotScenario {
     /// controls, and whether a group bar's rollup says anything about what it
     /// folded.
     AgentChat,
+    /// Stable compaction boundaries, with one retained summary disclosed.
+    AgentChatCompaction,
     AgentChatAttachments,
     /// The transcript mid-turn: the agent has run tools and written the
     /// preamble in front of them, but not yet the answer. The run's last prose
@@ -573,6 +575,26 @@ pub(crate) fn drive(
         ScreenshotScenario::AgentChat => {
             workspace.update(cx, |ws, cx| {
                 ws.open_agent_chat_transcript_for_shot(window, cx)
+            });
+        }
+        ScreenshotScenario::AgentChatCompaction => {
+            workspace.update(cx, |ws, cx| {
+                ws.open_agent_chat_pane_seeded(
+                    None,
+                    |view, window, cx| {
+                        let items = daruda_chat::shot_transcript::compaction_transcript();
+                        view.seed_transcript(items, window, cx);
+                        view.set_session_id_for_shot("main");
+                        view.set_fold_for_shot(
+                            daruda_chat::fold::FoldKey::Compaction(1),
+                            true,
+                            window,
+                            cx,
+                        );
+                    },
+                    window,
+                    cx,
+                );
             });
         }
         ScreenshotScenario::AgentChatAttachments => {

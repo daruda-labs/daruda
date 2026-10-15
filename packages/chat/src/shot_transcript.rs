@@ -245,6 +245,43 @@ pub fn sample_transcript() -> Vec<ChatItem> {
     items
 }
 
+/// A retained summary and every compaction state, without a live adapter.
+pub fn compaction_transcript() -> Vec<ChatItem> {
+    use daruda_acp::{CompactionItem, CompactionStatusView, ToolOutputBlock};
+    let mut retained = CompactionItem::new("main", "retained-context");
+    retained.status = CompactionStatusView::Completed;
+    retained.summary = vec![
+        ToolOutputBlock::Text {
+            text: "## Retained context\n\nThe ACP upgrade is complete. Preserve the session FIFO contract and continue with the compaction timeline.\n\n- Keep the original conversation available\n- Apply summaries in receive order\n\n```rust\nlet key = (session_id, compaction_id);\n```".into(),
+            truncated_from: None,
+        },
+        ToolOutputBlock::ResourceLink {
+            uri: "README.md".into(), name: "Project reference".into(), mime: Some("text/markdown".into()),
+        },
+    ];
+    let mut items = vec![
+        ChatItem::UserText("Continue with the retained context.".into()),
+        ChatItem::Compaction(Box::new(retained)),
+    ];
+    for (id, status) in [
+        ("running", CompactionStatusView::InProgress),
+        ("failed", CompactionStatusView::Failed),
+        ("cancelled", CompactionStatusView::Cancelled),
+        (
+            "unknown",
+            CompactionStatusView::Other("_provider/paused".into()),
+        ),
+    ] {
+        let mut item = CompactionItem::new("worker", id);
+        item.status = status;
+        if item.status == CompactionStatusView::Failed {
+            item.error = Some("The provider could not produce a retained summary.".into());
+        }
+        items.push(ChatItem::Compaction(Box::new(item)));
+    }
+    items
+}
+
 /// A conversation of prose-only replies — the `/usage` shape: one prompt, one
 /// long answer, no tool call and no reasoning between them. Two turns, because
 /// the reply's own fold is the thing under review and one turn can only show it

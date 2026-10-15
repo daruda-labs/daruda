@@ -46,17 +46,18 @@ pub use connection::{AcpClientError, AdapterCommand, LaunchSpec, SpikeEvent, run
 pub use failure::{AcpFailure, FailureKind, Remedy, RuntimeKind};
 pub use login_method::{LoginMethod, LoginMethodKind, TerminalCommand, parse_login_methods};
 pub use mapping::{
-    SubagentActivity, UpdateEffect, apply_update, apply_update_with, cancel_pending_plan_entries,
-    cancel_pending_tools, finalize_streaming, kind_of, permission_item, status_of,
-    subagent_activity, touched_tool_id,
+    SubagentActivity, UpdateEffect, apply_compaction_update, apply_update, apply_update_with,
+    cancel_pending_plan_entries, cancel_pending_tools, finalize_streaming, kind_of,
+    permission_item, status_of, subagent_activity, touched_tool_id,
 };
 pub use model::{
-    ChatItem, CommandExit, ConfigChoiceView, ConfigOptionCategoryView, ConfigOptionKindView,
-    ConfigOptionView, ConfigValueView, CostView, DEFAULT_MODEL_CHOICE, DiffView, ModeStateView,
-    NoticeSeverityView, PermissionChoice, PermissionItem, PermissionKindView, PermissionResolution,
-    PlanEntryView, PlanPriority, PlanStatus, RateLimitView, RateLimitWindow,
-    SessionCapabilitiesView, SessionModeView, SessionNoticeView, SlashCommand, SlashCommandInput,
-    ToolCallItem, ToolKindView, ToolOutputBlock, ToolStatusView, UsageView, resolved_default_model,
+    ChatItem, CommandExit, CompactionItem, CompactionStatusView, ConfigChoiceView,
+    ConfigOptionCategoryView, ConfigOptionKindView, ConfigOptionView, ConfigValueView, CostView,
+    DEFAULT_MODEL_CHOICE, DiffView, ModeStateView, NoticeSeverityView, PermissionChoice,
+    PermissionItem, PermissionKindView, PermissionResolution, PlanEntryView, PlanPriority,
+    PlanStatus, RateLimitView, RateLimitWindow, SessionCapabilitiesView, SessionModeView,
+    SessionNoticeView, SlashCommand, SlashCommandInput, ToolCallItem, ToolKindView,
+    ToolOutputBlock, ToolStatusView, UsageView, resolved_default_model,
 };
 pub use native_subagents::{NativeSubagentRouter, Routed};
 pub use node::{NodeError, NodeProgress, NodeRuntime, command_diagnostic, ensure_node};

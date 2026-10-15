@@ -5,11 +5,13 @@
 //! that drive the conversation view; plan, slash-command, mode, config, info,
 //! and usage updates are intentionally ignored.
 
+mod compaction;
 mod content;
 mod messages;
 mod permissions;
 mod tools;
 
+pub use compaction::apply_compaction_update;
 use messages::{StreamKind, append_streaming, append_user_chunk, msg_id, text_of};
 pub use permissions::permission_item;
 use tools::{apply_tool_call_update, upsert_tool_call};

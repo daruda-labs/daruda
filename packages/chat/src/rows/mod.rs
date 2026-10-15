@@ -357,6 +357,12 @@ pub(super) fn project_with_filter_index<'a>(
     // pins to the tail without asking which branch put it there.
     let mut tail_indent = 0u8;
     while i < items.len() {
+        if matches!(&items[i], ChatItem::Compaction(_)) {
+            rows.push(RenderRow::at(RowKind::AgentItem(i), false, 0));
+            i += 1;
+            tail_indent = 0;
+            continue;
+        }
         // The marker ends a run (`agent_run`), so it is never inside one and
         // gets its own top-level row. Handled before the user check because
         // the run that follows it starts at the next item, not at this one.
@@ -378,7 +384,10 @@ pub(super) fn project_with_filter_index<'a>(
             .clone()
             .filter(|&k| matches!(items[k], ChatItem::ToolCall(_)))
             .count();
-        let blocks = run.clone().filter(|&k| !is_bodyless(&items[k])).count();
+        let blocks = run
+            .clone()
+            .filter(|&k| !is_bodyless(&items[k]) && !matches!(items[k], ChatItem::Compaction(_)))
+            .count();
         let last_prose = LastProse::of(items, run.clone());
         let filter_key = FoldKey::Filtered(run.start);
         let filter_revealed = fold.is_expanded(

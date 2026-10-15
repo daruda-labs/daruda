@@ -95,6 +95,7 @@ type PermissionParks = Arc<Mutex<HashMap<u64, oneshot::Sender<PermissionDecision
 #[derive(Debug, Clone, Copy, Default)]
 pub struct ClientCapabilitiesView {
     pub notices: bool,
+    pub compaction: bool,
 }
 
 /// Whether failing to restore may create a different conversation.
@@ -270,6 +271,12 @@ pub enum AcpEvent {
     /// A `session/update` notification arrived. The host folds it into its
     /// chat model via [`crate::mapping::apply_update`].
     Update(Box<SessionUpdate>),
+    /// ID-addressed compaction content. Session identity is part of its key;
+    /// fold through [`crate::mapping::apply_compaction_update`].
+    Compaction {
+        session_id: String,
+        update: Box<SessionUpdate>,
+    },
     /// The agent reported live token/context accounting (`UsageUpdate`): the
     /// current context-window fill and optional cumulative cost. Full
     /// replacement of the host's cached usage.

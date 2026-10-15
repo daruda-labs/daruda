@@ -1,3 +1,4 @@
+mod compaction;
 mod connection;
 mod dispatch;
 mod lifecycle;

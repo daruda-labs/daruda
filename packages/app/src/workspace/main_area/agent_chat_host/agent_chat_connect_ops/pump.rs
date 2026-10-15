@@ -225,7 +225,10 @@ impl Workspace {
                         session_resume(resume, strict_restore),
                         &agent_id,
                         mcp_servers,
-                        ClientCapabilitiesView { notices: true },
+                        ClientCapabilitiesView {
+                            notices: true,
+                            compaction: true,
+                        },
                     )
                 })
                 .await;

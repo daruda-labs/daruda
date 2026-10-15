@@ -9,8 +9,10 @@ use std::path::PathBuf;
 
 use crate::failure::AcpFailure;
 
+mod compaction;
 mod config_option;
 mod notice;
+pub use compaction::{CompactionItem, CompactionStatusView};
 pub use config_option::{
     ConfigChoiceView, ConfigOptionCategoryView, ConfigOptionKindView, ConfigOptionView,
     ConfigValueView, DEFAULT_MODEL_CHOICE, resolved_default_model,
@@ -52,6 +54,8 @@ pub enum ChatItem {
     },
     /// A tool invocation and its evolving status/output.
     ToolCall(ToolCallItem),
+    /// Context compaction anchored at the first update or summary chunk.
+    Compaction(Box<CompactionItem>),
     /// A pending or resolved tool-permission request.
     Permission(PermissionItem),
     /// A surfaced failure (connection, protocol, or runtime), carrying its

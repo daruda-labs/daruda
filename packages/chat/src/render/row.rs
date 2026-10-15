@@ -196,6 +196,7 @@ fn render_agent_item(
             t,
             this.dim_amount,
             this.preferred_editor(),
+            this.session_id(),
             window,
             cx,
         ),
@@ -228,6 +229,7 @@ fn render_item(
     t: &theme::DarudaTheme,
     dim: f32,
     preferred_editor: &str,
+    session_id: Option<&str>,
     window: &mut Window,
     cx: &mut Context<AgentChatView>,
 ) -> AnyElement {
@@ -274,6 +276,23 @@ fn render_item(
         .into_any_element(),
         ChatItem::Permission(card) => permission_card(ix, card, t, dim, cx).into_any_element(),
         ChatItem::Failure(failure) => failure_block(ix, failure, t, cx).into_any_element(),
+        ChatItem::Compaction(item) => {
+            let key = FoldKey::Compaction(ix);
+            let expanded =
+                fold.is_expanded(&key, fold_context_at(&key, ix, items, boundary, live_units));
+            super::compaction::compaction_block(
+                ix,
+                item,
+                key,
+                expanded,
+                fold.compaction_summary_is_full(ix),
+                super::compaction::source_label(item, items, session_id),
+                assets,
+                t,
+                dim,
+                cx,
+            )
+        }
         // Owns a top-level row (`RowKind::Interrupted`), so it never reaches
         // the per-item dispatch.
         ChatItem::Interrupted => gpui::Empty.into_any_element(),

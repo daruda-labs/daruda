@@ -4,8 +4,11 @@ use agent_client_protocol::schema::v1::{InitializeResponse, NewSessionResponse, 
 #[test]
 fn notices_are_opt_in_without_enabling_other_presentation_contracts() {
     for notices in [false, true] {
-        let caps =
-            serde_json::to_value(client_capabilities(ClientCapabilitiesView { notices })).unwrap();
+        let caps = serde_json::to_value(client_capabilities(ClientCapabilitiesView {
+            notices,
+            ..Default::default()
+        }))
+        .unwrap();
         assert_eq!(caps["session"]["notices"].is_object(), notices);
         assert!(caps["session"].get("compaction").is_none());
         assert!(caps.get("subagents").is_none());
@@ -84,7 +87,10 @@ fn protocol_notices_preserve_delivery_order_without_ending_the_turn() {
         let (commands, command_rx) = unbounded();
         let (event_tx, mut events) = unbounded();
         let task = smol::spawn(run_connection(
-            ClientCapabilitiesView { notices: true },
+            ClientCapabilitiesView {
+                notices: true,
+                ..Default::default()
+            },
             agent,
             PathBuf::from("."),
             None,

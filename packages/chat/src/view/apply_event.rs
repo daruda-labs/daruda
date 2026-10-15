@@ -54,6 +54,7 @@ impl AgentChatView {
         // these; every other event leaves both false.
         let mut touched_tool = false;
         let mut touched_text = false;
+        let mut compaction_index = None;
         // Which tool calls the reconciles below must revisit. A streamed update
         // names the single call it replaced, so the default is the whole
         // conversation and the `Update` arm narrows it.
@@ -170,6 +171,16 @@ impl AgentChatView {
             }
             AcpEvent::ModeChanged { state } => {
                 self.session_config.modes = Some(state);
+            }
+            AcpEvent::Compaction { session_id, update } => {
+                compaction_index =
+                    daruda_acp::apply_compaction_update(&mut self.items, &session_id, &update);
+                touched_text = true;
+                if let Some(ChatItem::Compaction(c)) =
+                    compaction_index.and_then(|ix| self.items.get(ix))
+                {
+                    reconcile_scope = ReconcileScope::Tool(c.output_key());
+                }
             }
             AcpEvent::Update(update) => {
                 // Fold protocol traffic through this pane's per-agent strategy
@@ -474,6 +485,11 @@ impl AgentChatView {
             // images above, so the same gate applies.
             self.reconcile_output_editors(&reconcile_scope, &mut access, cx);
         }
+        if compaction_index.is_some() {
+            let mut access = WindowAccess::ByHandle(self.window_handle);
+            self.reconcile_tool_images(&reconcile_scope, cx);
+            self.reconcile_output_editors(&reconcile_scope, &mut access, cx);
+        }
         // A turn may finish without a final tool update, and a replay closes
         // with no `TurnEnded` at all. Either settle changes Pending/InProgress
         // calls to terminal, making their resource images eligible for the
@@ -505,6 +521,11 @@ impl AgentChatView {
         // Reproject rows + sync the virtualized list. `FollowMode::Tail` keeps
         // the bottom pinned while streaming — no manual scroll needed.
         self.rebuild_rows();
+        if let Some(row) =
+            compaction_index.and_then(|ix| super::super::rows::item_row(&self.rows, ix))
+        {
+            self.apply_list_sync(ListSync::Rows(row..row + 1), "compaction-update");
+        }
         // A tool update can mutate a non-tail card in place (status, output,
         // raw-output fallback, diff body, or a nested subagent child rendered
         // inside its parent). `rebuild_rows` only knows row slots, not which

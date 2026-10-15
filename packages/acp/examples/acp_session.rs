@@ -88,6 +88,9 @@ fn main() {
                 AcpEvent::Update(update) => {
                     eprintln!("[update] {update:?}");
                 }
+                AcpEvent::Compaction { session_id, update } => {
+                    println!("[compaction:{session_id}] {update:?}");
+                }
                 AcpEvent::UsageChanged(usage) => {
                     eprintln!("[usage] {usage:?}");
                 }

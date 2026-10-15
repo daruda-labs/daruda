@@ -64,6 +64,7 @@ pub(crate) fn fold_context_at(
 fn fold_key_index(key: &FoldKey, items: &[daruda_acp::ChatItem]) -> Option<usize> {
     match key {
         FoldKey::Assistant(ix)
+        | FoldKey::Compaction(ix)
         | FoldKey::Thinking(ix)
         | FoldKey::ThinkingGroup(ix)
         | FoldKey::Response(ix)
@@ -150,6 +151,7 @@ fn fold_active_at(
                 .any(is_active)
         }),
         FoldKey::Tail(_)
+        | FoldKey::Compaction(_)
         | FoldKey::ToolGroupTail(_)
         | FoldKey::SubagentTail(_)
         | FoldKey::Filtered(_) => false,
@@ -175,7 +177,7 @@ pub(crate) fn fold_key_item_index(key: &FoldKey, items: &[daruda_acp::ChatItem])
         TranscriptStructure::new(items, &hierarchy).owning_item(id)
     };
     match key {
-        FoldKey::Assistant(ix) | FoldKey::Thinking(ix) => Some(*ix),
+        FoldKey::Assistant(ix) | FoldKey::Thinking(ix) | FoldKey::Compaction(ix) => Some(*ix),
         // `SubagentTail` belongs with these: its reveal changes which child
         // cards the parent's body holds — a height change in place, with no
         // `RenderRow::hidden` flip for the diff to see.

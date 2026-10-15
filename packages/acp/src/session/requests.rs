@@ -92,6 +92,11 @@ pub(super) fn client_capabilities(presentation: ClientCapabilitiesView) -> Clien
         .auth(AuthCapabilities::new().terminal(true))
         .session(
             ClientSessionCapabilities::new()
+                .compaction(
+                    presentation
+                        .compaction
+                        .then(agent_client_protocol::schema::v1::CompactionCapabilities::new),
+                )
                 .notices(
                     presentation
                         .notices

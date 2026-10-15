@@ -610,6 +610,11 @@ pub const AGENT_CHAT_HOVER_TINT_ALPHA: f32 = 0.03;
 pub const AGENT_CHAT_CARD_BORDER_ALPHA: f32 = 0.12;
 pub const PANE_LINK_MIN_L_ON_DARK: f32 = 0.74;
 pub const PANE_LINK_MAX_L_ON_LIGHT: f32 = 0.34;
+/// Error text sits directly on the terminal-derived pane, without a banner fill.
+pub const PANE_ERROR_MIN_L_ON_DARK: f32 = 0.74;
+pub const PANE_ERROR_MAX_L_ON_LIGHT: f32 = 0.34;
+/// A compaction preview should leave the next response visible in the timeline.
+pub const AGENT_CHAT_COMPACTION_PREVIEW_ROWS: usize = 6;
 pub const AGENT_CHAT_PAD_X: f32 = PAD_STANDARD;
 pub const AGENT_CHAT_PAD_Y: f32 = PAD_XS;
 pub const AGENT_CHAT_MSG_GAP: f32 = GAP_XS;

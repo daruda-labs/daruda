@@ -47,6 +47,7 @@ pub(super) fn is_active(item: &ChatItem) -> bool {
         ChatItem::UserText(_)
         | ChatItem::Permission(_)
         | ChatItem::Failure(_)
+        | ChatItem::Compaction(_)
         | ChatItem::Interrupted => false,
     }
 }

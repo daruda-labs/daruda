@@ -15,6 +15,20 @@ use super::list_sync::ListSync;
 use daruda_transcript::fold_mode::{FoldMode, FoldPreset, TurnPosition};
 
 impl AgentChatView {
+    pub(crate) fn toggle_compaction_summary(&mut self, ix: usize, cx: &mut Context<Self>) {
+        if !matches!(
+            self.items.get(ix),
+            Some(daruda_acp::ChatItem::Compaction(_))
+        ) {
+            return;
+        }
+        self.fold.toggle_compaction_summary(ix);
+        if let Some(row) = item_row(&self.rows, ix) {
+            self.apply_list_sync(ListSync::Rows(row..row + 1), "compaction-summary");
+        }
+        cx.notify();
+    }
+
     /// Put `key` in a known state instead of flipping whatever it is in.
     ///
     /// `toggle_fold` reads the *visible* state, so a capture that toggles
@@ -77,6 +91,10 @@ impl AgentChatView {
         // response and group folds only flip row visibility, leaving each card's
         // own state (and its embeds) untouched.
         let embed_scope = match &key {
+            FoldKey::Compaction(ix) => match self.items.get(*ix) {
+                Some(daruda_acp::ChatItem::Compaction(c)) => Some(ReconcileScope::Tool(c.output_key())),
+                _ => None,
+            },
             FoldKey::Tool(id) | FoldKey::Subagent(id) => Some(ReconcileScope::Tool(id.clone())),
             FoldKey::Assistant(_)
             | FoldKey::Thinking(_)

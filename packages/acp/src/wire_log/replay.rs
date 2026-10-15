@@ -183,7 +183,9 @@ fn replay_capture(log: &str, payloads: &HashMap<u64, String>, catalog_id: &str) 
                     Routed::Unknown { .. } => Vec::new(),
                 };
                 for su in updates {
-                    mapping::apply_update_with(&mut out.items, &su, adapter.as_ref());
+                    if mapping::apply_compaction_update(&mut out.items, session, &su).is_none() {
+                        mapping::apply_update_with(&mut out.items, &su, adapter.as_ref());
+                    }
                 }
             }
             _ => {}
@@ -548,6 +550,58 @@ mod tests {
         let err = replay_log(&path, "").expect_err("no updates");
 
         assert!(matches!(err, ReplayError::NoUpdates { .. }), "got {err:?}");
+    }
+
+    #[test]
+    fn compaction_replay_preserves_positions_patches_and_child_identity() {
+        let updates = [
+            (
+                "root",
+                serde_json::json!({"sessionUpdate":"agent_message_chunk", "content":{"type":"text", "text":"before"}}),
+            ),
+            (
+                "root",
+                serde_json::json!({"sessionUpdate":"compaction_summary_chunk", "compactionId":"same", "content":{"type":"text", "text":"retained"}}),
+            ),
+            (
+                "root",
+                serde_json::json!({"sessionUpdate":"agent_message_chunk", "content":{"type":"text", "text":"after"}}),
+            ),
+            (
+                "root",
+                serde_json::json!({"sessionUpdate":"subagent_spawned", "subagentSessionId":"child"}),
+            ),
+            (
+                "child",
+                serde_json::json!({"sessionUpdate":"compaction_update", "compactionId":"same", "status":"failed", "error":"child detail"}),
+            ),
+            (
+                "root",
+                serde_json::json!({"sessionUpdate":"compaction_update", "compactionId":"same", "status":"completed"}),
+            ),
+            (
+                "root",
+                serde_json::json!({"sessionUpdate":"compaction_summary_chunk", "compactionId":"same", "content":{"type":"text", "text":" tail"}}),
+            ),
+        ];
+        let log = updates.into_iter().map(|(session, update)| {
+            serde_json::json!({"method":"session/update", "params":{"sessionId":session, "update":update}}).to_string()
+        }).collect::<Vec<_>>().join("\n");
+        let replay = replay_capture(&log, &HashMap::new(), "");
+        assert_eq!(assistant_text(&replay.items), vec!["before", "after"]);
+        let ChatItem::Compaction(root) = &replay.items[1] else {
+            panic!("anchored compaction")
+        };
+        assert_eq!(root.status, crate::CompactionStatusView::Completed);
+        assert!(
+            matches!(&root.summary[..], [crate::ToolOutputBlock::Text { text, .. }] if text == "retained tail")
+        );
+        let ChatItem::Compaction(child) = replay.items.last().unwrap() else {
+            panic!("child")
+        };
+        assert_eq!(child.session_id, "child");
+        assert_eq!(child.error.as_deref(), Some("child detail"));
+        assert_eq!(replay.sessions, 1);
     }
 
     #[test]

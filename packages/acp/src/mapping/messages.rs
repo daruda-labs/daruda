@@ -118,8 +118,13 @@ pub(super) fn streaming_body<'a>(
             // The three kinds that can be appended while a message streams. The
             // walk stops at everything else, so it is bounded by what arrived
             // during this message rather than by the conversation.
-            (ChatItem::ToolCall(_) | ChatItem::Permission(_) | ChatItem::Failure(_), _)
-                if message_id.is_some() => {}
+            (
+                ChatItem::ToolCall(_)
+                | ChatItem::Permission(_)
+                | ChatItem::Failure(_)
+                | ChatItem::Compaction(_),
+                _,
+            ) if message_id.is_some() => {}
             _ => return None,
         }
     }

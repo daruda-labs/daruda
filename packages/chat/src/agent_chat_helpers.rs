@@ -195,7 +195,10 @@ impl Rollup {
                 // neither an outcome nor progress. A stop marker ends the run
                 // rather than sitting in it (`agent_run`), so it reaches here
                 // only through a whole-conversation scan.
-                ChatItem::UserText(_) | ChatItem::Permission(_) | ChatItem::Interrupted => {}
+                ChatItem::UserText(_)
+                | ChatItem::Permission(_)
+                | ChatItem::Interrupted
+                | ChatItem::Compaction(_) => {}
             }
         }
         if running {
@@ -334,6 +337,14 @@ pub(super) fn chat_item_mermaid_texts(item: &daruda_acp::ChatItem) -> Vec<&str> 
                 _ => None,
             })
             .chain(tc.subagent_prompt())
+            .collect(),
+        daruda_acp::ChatItem::Compaction(c) => c
+            .summary
+            .iter()
+            .filter_map(|block| match block {
+                daruda_acp::ToolOutputBlock::Text { text, .. } => Some(text.as_str()),
+                _ => None,
+            })
             .collect(),
         daruda_acp::ChatItem::Permission(_)
         | daruda_acp::ChatItem::Failure(_)

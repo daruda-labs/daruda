@@ -1,5 +1,16 @@
 # Agent chat pane (ACP)
 agent_chat:
+  compaction_running: "Compacting context"
+  compaction_completed: "Context compacted"
+  compaction_failed: "Context compaction failed"
+  compaction_cancelled: "Context compaction cancelled"
+  compaction_other: "Context compaction"
+  compaction_no_summary: "No retained summary provided"
+  compaction_source: "Session: %{session}"
+  compaction_child: "Subagent: %{name}"
+  compaction_child_unknown: "Subagent"
+  compaction_show_full: "View full summary"
+  compaction_show_preview: "Back to preview"
   close: "Close"
   edit: "Edit"
   read: "Read"

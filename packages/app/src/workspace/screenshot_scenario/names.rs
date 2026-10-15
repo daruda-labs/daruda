@@ -60,6 +60,7 @@ const NAME_AGENT_CHAT_PACKAGE_INVALID: &str = "agent-chat-package-invalid";
 const NAME_AGENT_CHAT_EMPTY: &str = "agent-chat-empty";
 /// CLI token for the settled-transcript scenario.
 const NAME_AGENT_CHAT: &str = "agent-chat";
+const NAME_AGENT_CHAT_COMPACTION: &str = "agent-chat-compaction";
 const NAME_AGENT_CHAT_ATTACHMENTS: &str = "agent-chat-attachments";
 const NAME_ORCHESTRATOR_CHIP: &str = "orchestrator-chip";
 const NAME_ORCHESTRATOR_TAB: &str = "orchestrator-tab";
@@ -219,6 +220,7 @@ impl ScreenshotScenario {
             )),
             NAME_AGENT_CHAT_EMPTY => Some(Self::AgentChatEmpty),
             NAME_AGENT_CHAT => Some(Self::AgentChat),
+            NAME_AGENT_CHAT_COMPACTION => Some(Self::AgentChatCompaction),
             NAME_AGENT_CHAT_ATTACHMENTS => Some(Self::AgentChatAttachments),
             NAME_AGENT_CHAT_WORKING => Some(Self::AgentChatWorking),
             NAME_AGENT_CHAT_NARROWED => Some(Self::AgentChatNarrowed),

@@ -16,8 +16,7 @@ use gpui::Context;
 use super::super::agent_chat_helpers::{TurnBoundary, tool_image_key};
 use super::super::output_editor::output_editor_key;
 use super::super::view::AgentChatView;
-use super::super::view::list_sync::ListSync;
-use super::{ReconcileScope, stale_keys};
+use super::{ReconcileScope, output_content, stale_keys};
 
 /// Local resource previews are a fallback for adapter-emitted file links, not
 /// a general URI fetcher. Keep reads bounded before bytes reach an image
@@ -103,13 +102,13 @@ impl AgentChatView {
         // live.
         let mut pending: Vec<(u64, String)> = Vec::new();
         for item in &self.items {
-            let ChatItem::ToolCall(tc) = item else {
+            let Some((id, output)) = output_content(item) else {
                 continue;
             };
-            if !scope.covers(&tc.id) {
+            if !scope.covers(&id) {
                 continue;
             }
-            for block in &tc.output {
+            for block in output {
                 let ToolOutputBlock::Image { data, .. } = block else {
                     continue;
                 };
@@ -134,23 +133,23 @@ impl AgentChatView {
         if let Some(cwd) = local_cwd.as_ref() {
             let boundary = TurnBoundary::of(&self.items);
             for (item_ix, item) in self.items.iter().enumerate() {
-                let ChatItem::ToolCall(tc) = item else {
+                let Some((id, output)) = output_content(item) else {
                     continue;
                 };
-                if !scope.covers(&tc.id)
-                    || tc.status.is_live()
+                if !scope.covers(&id)
+                    || matches!(item, ChatItem::ToolCall(tc) if tc.status.is_live())
                     || !self.tool_body_on_screen(item_ix, item, boundary)
                 {
                     continue;
                 }
-                for (ix, block) in tc.output.iter().enumerate() {
+                for (ix, block) in output.iter().enumerate() {
                     let ToolOutputBlock::ResourceLink { uri, mime, .. } = block else {
                         continue;
                     };
                     let Some(path) = resource_image_path(uri, mime.as_deref(), cwd) else {
                         continue;
                     };
-                    let key = output_editor_key(&tc.id, ix);
+                    let key = output_editor_key(&id, ix);
                     let source = resource_image_source(uri, mime.as_deref());
                     resource_candidates.push((key, source, path, cwd.clone()));
                 }
@@ -256,7 +255,7 @@ impl AgentChatView {
                     // is stale — remeasure before repainting or it clips.
                     // Index is unknown here, so this is a full remeasure, but
                     // it's one-shot per landed decode.
-                    view.apply_list_sync(ListSync::EveryRow, "tool-image");
+                    view.resync_all_row_heights("tool-image");
                     cx.notify();
                 });
             })
@@ -302,7 +301,7 @@ impl AgentChatView {
                             .lock()
                             .unwrap()
                             .insert(key, cached);
-                        view.apply_list_sync(ListSync::EveryRow, "resource-image");
+                        view.resync_all_row_heights("resource-image");
                         cx.notify();
                     }
                     // Fill the next queued preview now that one of the bounded

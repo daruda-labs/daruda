@@ -60,6 +60,13 @@ diagnostics with generic presentation. Notices never enter conversation history
 or change turn/activity state. The default connection API, including Flow's
 headless runner, does not advertise notices and retains agent-message fallbacks.
 
+`session.compaction` follows the same host opt-in. The chat timeline keeps one
+`ChatItem::Compaction` per `(session_id, compaction_id)`, anchored by its first
+update or chunk. Omitted patches preserve values; null clears and concrete
+values replace. Later summary chunks append even after terminal status.
+Compaction never infers token usage, deletes history, or settles a prompt.
+Wire-log replay uses the same reducer, including child-session identity.
+
 **Implemented but not advertised: `_meta.terminal_output`.** A vendor-private,
 non-standard claude-agent-acp flag. Setting it makes a Bash result *content-less*
 (`content: [{type:"terminal"}]`) and moves the bytes to

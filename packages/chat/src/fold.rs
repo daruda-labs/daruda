@@ -3,7 +3,7 @@
 // Item-index keys require append-only item order. Clear FoldState before
 // removing or reordering items.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use super::pane_choice::PaneChoice;
 use super::rows::tail::TailLevel;
@@ -15,6 +15,8 @@ use daruda_transcript::tool_category::ToolCategory;
 pub enum FoldKey {
     Assistant(usize),
     Thinking(usize),
+    /// Retained context is disclosed independently of response fold rules.
+    Compaction(usize),
     Tool(String),
     Diff(String),
     ToolRawInput(String),
@@ -48,6 +50,7 @@ impl FoldKey {
             FoldKey::ThinkingGroup(_) => Some(FoldBlock::ThinkingGroup),
             FoldKey::Response(_) => Some(FoldBlock::Response),
             FoldKey::Tail(_)
+            | FoldKey::Compaction(_)
             | FoldKey::ToolGroupTail(_)
             | FoldKey::SubagentTail(_)
             | FoldKey::Filtered(_) => None,
@@ -101,6 +104,8 @@ pub(crate) struct FoldState {
     /// Present = an explicit user choice; absent = the mode's rule decides.
     /// Nothing but a user gesture writes here.
     overrides: HashMap<FoldKey, bool>,
+    /// Full-summary choices survive closing a compaction, but not a transcript reset.
+    full_compaction_summaries: HashSet<usize>,
     /// The one response a prompt send froze open so the prose being read is not
     /// yanked away. Machine-written, so it stays out of `overrides` and holds
     /// only the newest run start — see [`Self::hold_response`].
@@ -112,6 +117,7 @@ impl FoldState {
     pub(crate) fn with_mode(mode: FoldMode) -> Self {
         Self {
             overrides: HashMap::new(),
+            full_compaction_summaries: HashSet::new(),
             held_response: None,
             mode: PaneChoice::Seeded(mode),
         }
@@ -208,8 +214,19 @@ impl FoldState {
 
     pub(super) fn clear_overrides(&mut self) {
         self.overrides.clear();
+        self.full_compaction_summaries.clear();
         // The anchor is an item index, invalid once the conversation is dropped.
         self.held_response = None;
+    }
+
+    pub(super) fn compaction_summary_is_full(&self, ix: usize) -> bool {
+        self.full_compaction_summaries.contains(&ix)
+    }
+
+    pub(super) fn toggle_compaction_summary(&mut self, ix: usize) {
+        if !self.full_compaction_summaries.remove(&ix) {
+            self.full_compaction_summaries.insert(ix);
+        }
     }
 
     /// The reveals one level of the recent-steps axis granted: the step level
@@ -246,6 +263,19 @@ impl FoldState {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn compaction_full_summary_choice_survives_a_fold_but_not_a_transcript_reset() {
+        let mut state = FoldState::default();
+        let key = FoldKey::Compaction(3);
+        let context = FoldContext::last(false);
+        state.toggle_compaction_summary(3);
+        state.toggle(key.clone(), context);
+        state.toggle(key, context);
+        assert!(state.compaction_summary_is_full(3));
+        state.clear_overrides();
+        assert!(!state.compaction_summary_is_full(3));
+    }
 
     #[test]
     fn assistant_is_always_expanded_by_default() {
