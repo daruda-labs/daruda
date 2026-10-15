@@ -2,6 +2,26 @@ use super::*;
 use daruda_config::remote::{ChannelKind, RemoteRecipient};
 use futures::{FutureExt, StreamExt};
 
+fn ready_bot() -> Arc<BotSession> {
+    let root = tempfile::tempdir().unwrap().keep();
+    let lease = daruda_store::inbox::InboxLease::try_acquire(
+        &root,
+        &crate::remote_channel::lock::digest_of("fixture-bot"),
+    )
+    .unwrap()
+    .unwrap();
+    let inbox =
+        daruda_store::inbox::InboxStore::open(lease, "test", || Ok(Default::default())).unwrap();
+    Arc::new(BotSession::new(
+        Arc::new(crate::remote_channel::transport::Credentials {
+            bot: "fake".into(),
+            app: Some("fake".into()),
+        }),
+        Arc::new(inbox),
+        Default::default(),
+    ))
+}
+
 fn setup(cx: &mut App) -> futures::channel::mpsc::UnboundedReceiver<Pending> {
     SettingsStore::init(cx);
     let mut config = daruda_config::Config::default();
@@ -27,15 +47,11 @@ fn setup(cx: &mut App) -> futures::channel::mpsc::UnboundedReceiver<Pending> {
         connections: HashMap::new(),
         events,
         outbound,
-        state: Default::default(),
         applied: None,
     });
     reconcile(cx);
     for connection in cx.global_mut::<RemoteChannels>().connections.values_mut() {
-        connection.credentials = Some(Arc::new(Credentials {
-            bot: "fake".into(),
-            app: Some("fake".into()),
-        }));
+        connection.bot = Some(ready_bot());
     }
     receiver
 }
@@ -50,6 +66,88 @@ fn ping() -> BridgePing {
         tail: super::super::bridge::MessageTail::Plain("done".into()),
         permission: None,
     }
+}
+
+#[gpui::test]
+fn credential_suspension_survives_removal_invalid_config_and_absent_rows(
+    cx: &mut gpui::TestAppContext,
+) {
+    cx.update(|cx| {
+        let _outgoing = setup(cx);
+        let config = cx.global::<RemoteChannels>().connections["work"]
+            .config
+            .clone();
+        RemoteChannels::suspend(config.clone(), cx);
+        let mut user = SettingsStore::global(cx).user().clone();
+        user.remote.channels.clear();
+        cx.global_mut::<SettingsStore>()
+            .set_user_for_testing(user.clone());
+        reconcile(cx);
+        assert!(matches!(
+            cx.global::<RemoteChannels>().connections["work"].worker,
+            WorkerState::UpdatingCredential { .. }
+        ));
+        user.remote.channels = vec![config.clone(), config.clone()];
+        cx.global_mut::<SettingsStore>()
+            .set_user_for_testing(user.clone());
+        reconcile(cx);
+        assert!(matches!(
+            cx.global::<RemoteChannels>().connections["work"].worker,
+            WorkerState::UpdatingCredential { .. }
+        ));
+        let mut absent = ChannelConfig::new("new-row".into(), ChannelKind::Slack);
+        RemoteChannels::suspend(absent.clone(), cx);
+        absent.enabled = true;
+        user.remote.channels = vec![absent];
+        cx.global_mut::<SettingsStore>().set_user_for_testing(user);
+        reconcile(cx);
+        let connection = &cx.global::<RemoteChannels>().connections["new-row"];
+        assert!(matches!(
+            connection.worker,
+            WorkerState::UpdatingCredential { .. }
+        ));
+        assert!(connection.bot.is_none());
+        RemoteChannels::restart("new-row", cx);
+        let connection = &cx.global::<RemoteChannels>().connections["new-row"];
+        assert!(matches!(connection.worker, WorkerState::Idle));
+        assert!(connection.config.enabled);
+        assert!(connection.bot.is_none());
+    });
+}
+
+#[gpui::test]
+fn overlapping_credential_writes_resume_only_after_both_complete(cx: &mut gpui::TestAppContext) {
+    cx.update(|cx| {
+        let _outgoing = setup(cx);
+        let channel = cx.global::<RemoteChannels>().connections["work"]
+            .config
+            .clone();
+        RemoteChannels::suspend(channel.clone(), cx);
+        RemoteChannels::suspend(channel.clone(), cx);
+        RemoteChannels::restart("work", cx);
+        let connection = &cx.global::<RemoteChannels>().connections["work"];
+        assert!(matches!(
+            connection.worker,
+            WorkerState::UpdatingCredential { pending: 1 }
+        ));
+        assert!(connection.bot.is_none());
+        let mut user = SettingsStore::global(cx).user().clone();
+        user.remote.channels.clear();
+        cx.global_mut::<SettingsStore>()
+            .set_user_for_testing(user.clone());
+        reconcile(cx);
+        assert!(matches!(
+            cx.global::<RemoteChannels>().connections["work"].worker,
+            WorkerState::UpdatingCredential { pending: 1 }
+        ));
+        user.remote.channels.push(channel);
+        cx.global_mut::<SettingsStore>().set_user_for_testing(user);
+        reconcile(cx);
+        RemoteChannels::restart("work", cx);
+        let connection = &cx.global::<RemoteChannels>().connections["work"];
+        assert!(matches!(connection.worker, WorkerState::Idle));
+        assert!(connection.bot.is_none());
+    });
 }
 
 /// A worker that gave up holds no claim either, and the bot it let go is the
@@ -112,6 +210,30 @@ fn presence_is_per_connection_and_revocation_cancels_queued_work(cx: &mut gpui::
         config.remote.channels[1].recipient = None;
         cx.global_mut::<SettingsStore>()
             .set_user_for_testing(config);
+        assert!(outbound::prepare(&pending, cx).is_none());
+    });
+}
+
+#[gpui::test]
+fn a_queued_message_cannot_move_to_a_replacement_session_with_the_same_config(
+    cx: &mut gpui::TestAppContext,
+) {
+    cx.update(|cx| {
+        let mut receiver = setup(cx);
+        assert!(RemoteChannels::send_ping(
+            ping(),
+            Delivery::Presence { away: false },
+            cx
+        ));
+        let pending = receiver.next().now_or_never().flatten().unwrap();
+        assert!(outbound::prepare(&pending, cx).is_some());
+        let connection = cx
+            .global_mut::<RemoteChannels>()
+            .connections
+            .get_mut("personal")
+            .unwrap();
+        connection.bot.as_ref().unwrap().revoke();
+        connection.bot = Some(ready_bot());
         assert!(outbound::prepare(&pending, cx).is_none());
     });
 }
@@ -222,7 +344,6 @@ fn disabled_or_revoked_connections_cannot_deliver(cx: &mut gpui::TestAppContext)
             connections: HashMap::new(),
             events,
             outbound,
-            state: Default::default(),
             applied: None,
         });
         reconcile(cx);
@@ -231,10 +352,7 @@ fn disabled_or_revoked_connections_cannot_deliver(cx: &mut gpui::TestAppContext)
             .connections
             .get_mut("work")
             .unwrap();
-        connection.credentials = Some(Arc::new(Credentials {
-            bot: "fake".into(),
-            app: Some("fake".into()),
-        }));
+        connection.bot = Some(ready_bot());
         assert!(RemoteChannels::has_recipient(cx));
         config.remote.channels[0].enabled = false;
         cx.global_mut::<SettingsStore>()

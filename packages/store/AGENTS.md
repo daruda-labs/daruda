@@ -42,13 +42,24 @@ contributor-facing directory map.
 ## Deliberately Shared Resources
 
 Application state is profile-scoped; claims on resources outside daruda are
-shared. Three persistence APIs are deliberately profile-independent:
+shared. Four persistence APIs are deliberately profile-independent:
 
 | API | Reason |
 |---|---|
 | `node_install_dir()` | One pinned Node runtime has the same bytes for all profiles. |
 | `flow_lock_root()` | A working-tree mutex must exclude flows from every profile. |
 | `remote_lock_root()` | A bot-account claim must exclude competing Telegram pollers or Slack socket routing tables across profiles. |
+| `inbox_dir()` | Recorded commands are part of the shared bot claim, so changing profiles cannot execute an inbound command again. |
+
+Inbox history is stored beside the bot lock, not in a profile's data root.
+Removing a profile's local channel configuration must not clear shared history;
+`ChannelRemoved` is reserved for an explicit external-stream reset. Initialization
+imports all legacy claims atomically and marks even an empty import complete.
+The profile-scoped `telegram_inbox_migration_dir()` journal freezes the legacy
+cursor and first current bot before inbox initialization, even when another
+profile already initialized that bot's inbox. Zero/missing sources are captured
+too, so an older build cannot later make the same source eligible again.
+The caller holds primary desktop ownership and serializes Telegram startup.
 
 Each exception is named with its reason in persistence. Adding another
 requires updating `clippy.toml`'s allow reasoning too.

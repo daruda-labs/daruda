@@ -197,7 +197,7 @@ fn paired_with_phone(cx: &mut TestAppContext) -> (daruda_config::Config, Outbox)
     (config, outbound)
 }
 
-type Outbox = futures::channel::mpsc::UnboundedReceiver<crate::telegram::bridge::Outbound>;
+type Outbox = crate::telegram::global::TestOutbox;
 
 fn drained_plain_texts(outbound: &mut Outbox) -> Vec<String> {
     use futures::{FutureExt as _, StreamExt as _};

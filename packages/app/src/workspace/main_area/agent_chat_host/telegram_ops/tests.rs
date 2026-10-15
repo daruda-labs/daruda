@@ -937,6 +937,8 @@ async fn permission_delivery_history_tracks_recipient_and_connection(
             (Some(84), true),
         ] {
             config.telegram.authorized_chat_id = recipient;
+            cx.global_mut::<crate::settings_store::SettingsStore>()
+                .set_user_for_testing(config.clone());
             ws.apply_config(&config, cx);
             ws.relay_outstanding_permissions(cx);
             assert_eq!(
@@ -949,6 +951,8 @@ async fn permission_delivery_history_tracks_recipient_and_connection(
         }
 
         config.telegram.only_when_away = true;
+        cx.global_mut::<crate::settings_store::SettingsStore>()
+            .set_user_for_testing(config.clone());
         ws.apply_config(&config, cx);
         for reconnect in [false, true] {
             view.update(cx, |v, cx| {

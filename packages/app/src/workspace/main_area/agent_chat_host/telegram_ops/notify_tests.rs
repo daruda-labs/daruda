@@ -9,7 +9,7 @@ use crate::telegram::bridge::{Outbound, TelegramTail};
 use crate::workspace::main_area::pane_tree::PaneId;
 use daruda_acp::{ChatItem, PermissionChoice, PermissionKindView};
 
-type Outbox = futures::channel::mpsc::UnboundedReceiver<Outbound>;
+type Outbox = crate::telegram::global::TestOutbox;
 
 /// A paired bridge that sends whatever the presence gate would, and one agent
 /// chat pane.

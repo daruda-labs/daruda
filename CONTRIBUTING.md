@@ -262,6 +262,20 @@ Task edits and app-quit flushing write only the run log. Older builds still
 read the preserved, potentially stale legacy file; automatic downgrade
 synchronization is not supported.
 
+Remote commands use a shared per-bot inbox under
+`remote_lock_root()/bot-<credential-digest>/inbox/`. A durable claim precedes
+execution; a duplicate is ignored without replaying its reply. A crash between
+claim and effect intentionally drops the command (at-most-once delivery).
+Telegram uses a monotonic watermark; Slack and Discord retain the newest 256
+event ids. Local channel removal does not erase this shared history.
+
+`telegram.json` and `remote_channels.json` are read-only migration inputs.
+The profile's `telegram-inbox-migration/` run log captures the legacy next-fetch
+cursor and its first current bot, including an empty source, before opening the
+bot inbox. This compatibility attribution is durable across token changes and
+restarts; later bots cannot inherit an earlier bot's cursor. The inbox imports
+its complete legacy seed in one event, including an empty-import marker.
+
 New logs use native local storage:
 
 | Platform | Default log directory |

@@ -270,6 +270,14 @@ impl ChannelSettings {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        let Some(config) = self
+            .rows
+            .iter()
+            .find(|row| row.config.id == id)
+            .map(|row| row.config.clone())
+        else {
+            return;
+        };
         let Some(input) = self.input_mut(id, secret) else {
             return;
         };
@@ -281,6 +289,7 @@ impl ChannelSettings {
             return;
         }
         input.busy = true;
+        RemoteChannels::suspend(config, cx);
         let id = id.to_owned();
         let app = cx.to_async();
         cx.notify();
@@ -296,9 +305,7 @@ impl ChannelSettings {
                     }
                 })
                 .await;
-            if result.is_ok() {
-                app.update(|cx| RemoteChannels::restart(&id, cx));
-            }
+            app.update(|cx| RemoteChannels::restart(&id, cx));
             if let Err(error) = this.update_in(cx, |this, window, cx| {
                 if let Some(input) = this.input_mut(&id, secret) {
                     input.busy = false;

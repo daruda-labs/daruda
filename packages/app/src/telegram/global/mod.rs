@@ -11,24 +11,23 @@
 use futures::channel::mpsc::{UnboundedSender, unbounded};
 use gpui::{App, Global};
 
-use daruda_store::observability::error_report::{ErrorReport, ErrorSeverity};
-use daruda_store::observability::log_writer::LogWriter;
-
 use super::bridge::{BridgeCore, BridgePing, Outbound, PaneRef, TelegramTail};
 use super::trace;
-use crate::remote_channel::lock::Claim;
 use crate::settings_store::SettingsStore;
 use crate::surface::strings as s;
 
 mod backoff;
+mod bot;
 mod control;
 mod inbound;
 mod outbound;
 
 use inbound::spawn_poll_task;
-use outbound::spawn_send_task;
+#[cfg(test)]
+pub(crate) use outbound::TestOutbox;
+use outbound::{QueuedOutbound, spawn_send_task};
 
-use daruda_store::persistence;
+use bot::Ownership;
 
 /// Telegram long-poll duration per `getUpdates` call. Telegram
 /// recommends keeping this well under typical proxy/firewall idle
@@ -44,20 +43,10 @@ const IDLE_RECHECK: std::time::Duration = std::time::Duration::from_secs(30);
 /// Process-wide Telegram bridge state.
 pub struct TelegramBridge {
     core: BridgeCore,
-    /// Last `update_offset` written to disk. Kept beside the core rather than
-    /// read back from the file so the guard against a redundant write costs
-    /// nothing on an idle poll.
-    persisted_offset: i64,
     // `Workspace::relay_to_telegram` sends into this via
     // `cx.try_global::<TelegramBridge>()`.
-    outbound_tx: UnboundedSender<Outbound>,
-    /// Whether this daruda is the one serving the bot. Taken and refreshed by
-    /// the poll loop, read here by everything that would send: Telegram hands
-    /// `getUpdates` to one poller per token, so a second instance that kept
-    /// sending would put its pings in a conversation it cannot hear the
-    /// answers to. Starts [`Claim::Unavailable`] — serving — because until the
-    /// loop has asked, no other instance is known to be.
-    claim: Claim,
+    outbound_tx: UnboundedSender<QueuedOutbound>,
+    bot: Ownership,
 }
 
 impl Global for TelegramBridge {}
@@ -89,7 +78,7 @@ impl TelegramBridge {
             && cfg.telegram.authorized_chat_id.is_some()
             && cx
                 .try_global::<TelegramBridge>()
-                .is_some_and(|bridge| bridge.claim.serves())
+                .is_some_and(|bridge| bridge.bot.serves())
     }
 
     /// Introduce a chat the phone approved opening, and make it the phone's
@@ -100,14 +89,18 @@ impl TelegramBridge {
         if !Self::deliverable(cx) || cx.try_global::<TelegramBridge>().is_none() {
             return false;
         }
-        let bridge = cx.global_mut::<TelegramBridge>();
-        bridge.command_state_mut().select(Some(pane));
-        bridge.send(BridgePing {
-            pane,
-            header,
-            tail: TelegramTail::Plain(tail),
-            permission: None,
-        });
+        cx.global_mut::<TelegramBridge>()
+            .command_state_mut()
+            .select(Some(pane));
+        cx.global::<TelegramBridge>().send(
+            BridgePing {
+                pane,
+                header,
+                tail: TelegramTail::Plain(tail),
+                permission: None,
+            },
+            cx,
+        );
         true
     }
     /// Queue a notice that answers the phone. `false` when nothing can send.
@@ -118,13 +111,13 @@ impl TelegramBridge {
         let Some(bridge) = cx.try_global::<TelegramBridge>() else {
             return false;
         };
-        bridge.send_notice(text);
+        bridge.send_notice(text, cx);
         true
     }
 
     /// Queue a pane-attributed ping for the outbound send loop.
-    pub(crate) fn send(&self, ping: BridgePing) {
-        if !self.claim.serves() {
+    pub(crate) fn send(&self, ping: BridgePing, cx: &App) {
+        if !self.bot.serves() {
             trace::delivery("send.dropped", || {
                 format!("reason=bot_held_elsewhere pane={}", trace::pane(ping.pane))
             });
@@ -132,7 +125,7 @@ impl TelegramBridge {
         }
         let (pane, permission) = (ping.pane, ping.permission.is_some());
         let text = trace::is_on().then(|| trace::tail_digest(&ping.tail));
-        match self.outbound_tx.unbounded_send(Outbound::Ping(ping)) {
+        match self.enqueue(Outbound::Ping(ping), cx) {
             Ok(()) => trace::delivery("queue.ping", || {
                 format!(
                     "{} pane={} permission={permission} text={}",
@@ -152,20 +145,38 @@ impl TelegramBridge {
 
     /// Queue a standalone notice — text owed to a command the phone sent,
     /// belonging to no pane. See [`Outbound`] for why the distinction matters.
-    pub(crate) fn send_notice(&self, text: String) {
-        if !self.claim.serves() {
+    pub(crate) fn send_notice(&self, text: String, cx: &App) {
+        if !self.bot.serves() {
             trace::delivery("send.dropped", || {
                 "reason=bot_held_elsewhere kind=notice".to_string()
             });
             return;
         }
         let digest = trace::is_on().then(|| trace::digest(&text));
-        match self.outbound_tx.unbounded_send(Outbound::Notice(text)) {
+        match self.enqueue(Outbound::Notice(text), cx) {
             Ok(()) => trace::delivery("queue.notice", || {
                 format!("{} text={}", trace::enqueue_slot(), trace::opt(digest))
             }),
             Err(_) => trace::delivery("queue.closed", || "kind=notice".to_string()),
         }
+    }
+
+    fn enqueue(&self, outbound: Outbound, cx: &App) -> Result<(), ()> {
+        let bot = self.bot.ready().filter(|_| self.bot.serves()).ok_or(())?;
+        let config = SettingsStore::global(cx).user_arc();
+        let chat_id = config
+            .telegram
+            .enabled
+            .then_some(config.telegram.authorized_chat_id)
+            .flatten()
+            .ok_or(())?;
+        self.outbound_tx
+            .unbounded_send(QueuedOutbound {
+                bot: bot.clone(),
+                chat_id,
+                outbound,
+            })
+            .map_err(|_| ())
     }
 
     /// Mint an approval card's callback tokens, build it, and queue it.
@@ -204,9 +215,9 @@ impl TelegramBridge {
         };
         trace::state("approval.tokens", || format!("id={id:?} minted=2"));
         let digest = trace::is_on().then(|| trace::digest(&prompt.summary));
-        match bridge
-            .outbound_tx
-            .unbounded_send(Outbound::Approval(prompt))
+        match cx
+            .global::<TelegramBridge>()
+            .enqueue(Outbound::Approval(prompt), cx)
         {
             Ok(()) => trace::delivery("queue.approval", || {
                 format!(
@@ -229,46 +240,38 @@ impl TelegramBridge {
     /// it. Dropping first is load-bearing rather than tidy — `flock` is per
     /// open file description, so asking again while our own descriptor still
     /// holds the lock answers `Theirs` about ourselves.
-    pub(crate) fn reclaim(&mut self, lock_root: &std::path::Path, token: &str) -> bool {
-        if self.claim.holds(token) {
+    #[cfg(test)]
+    fn reclaim(&mut self, lock_root: &std::path::Path, token: &str) -> bool {
+        if self.bot.ready().is_some_and(|bot| bot.token.token == token) {
             return true;
         }
         self.release_claim();
-        self.claim = crate::remote_channel::lock::claim(lock_root, token);
-        trace::state("bot.claim", || format!("state={}", self.claim.label()));
-        if matches!(self.claim, Claim::Theirs) {
-            // The Settings row says this too, but only while Settings is open;
-            // a relay that goes quiet for a whole session needs a line someone
-            // can find afterwards.
-            LogWriter::log(
-                ErrorReport::new("Telegram bot held by another daruda")
-                    .severity(ErrorSeverity::Warning)
-                    .message(
-                        "Another running daruda holds this bot, so this one neither polls it \
-                         nor sends through it. Quit the other instance to take it over.",
-                    )
-                    .at(file!(), line!())
-                    .dedup("telegram.bot_held_elsewhere")
-                    .build(),
-            );
-        }
-        self.claim.serves()
+        self.bot = bot::open(
+            lock_root,
+            &lock_root.join("profile"),
+            super::keychain::TokenSnapshot {
+                token: token.into(),
+                revision: super::keychain::revision(),
+            },
+        )
+        .unwrap();
+        self.bot.serves()
     }
 
     /// Whether another daruda is the one serving the bot, for the Settings row
     /// that would otherwise read "enabled, paired" over a silent relay.
     pub(crate) fn bot_held_elsewhere(cx: &App) -> bool {
         cx.try_global::<Self>()
-            .is_some_and(|bridge| matches!(bridge.claim, Claim::Theirs))
+            .is_some_and(|bridge| matches!(bridge.bot, Ownership::HeldElsewhere))
     }
 
     /// Let the bot go, so it is free for whichever daruda is still configured
     /// for it.
     pub(crate) fn release_claim(&mut self) {
-        if matches!(self.claim, Claim::Ours { .. }) {
+        if matches!(self.bot, Ownership::Ready(_)) {
             trace::state("bot.claim", || "state=released".to_string());
         }
-        self.claim = Claim::Unavailable;
+        self.bot = Ownership::Idle;
     }
 
     /// Drop an approval's callback tokens once it has been decided.
@@ -300,7 +303,7 @@ impl TelegramBridge {
 /// only state the poll loop reaches by asking the filesystem.
 #[cfg(test)]
 pub(crate) fn hold_bot_elsewhere_for_test(cx: &mut App) {
-    cx.global_mut::<TelegramBridge>().claim = crate::remote_channel::lock::Claim::Theirs;
+    cx.global_mut::<TelegramBridge>().bot = Ownership::HeldElsewhere;
 }
 
 #[cfg(test)]
@@ -308,20 +311,37 @@ pub(crate) fn install_for_test(
     enabled: bool,
     authorized_chat_id: Option<i64>,
     cx: &mut App,
-) -> futures::channel::mpsc::UnboundedReceiver<Outbound> {
+) -> TestOutbox {
     assert!(
         !cx.has_global::<TelegramBridge>(),
         "TelegramBridge test global must be installed once per test app"
     );
+    SettingsStore::init(cx);
+    let mut config = SettingsStore::global(cx).user().clone();
+    config.telegram.enabled = enabled;
+    config.telegram.authorized_chat_id = authorized_chat_id;
+    cx.global_mut::<SettingsStore>()
+        .set_user_for_testing(config);
     let core = BridgeCore::new(enabled, authorized_chat_id, 0);
     let (outbound_tx, outbound_rx) = unbounded();
+    let root = tempfile::tempdir().unwrap().keep();
+    let bot = bot::open(
+        &root,
+        &root.join("profile"),
+        super::keychain::TokenSnapshot {
+            token: "fixture-telegram".into(),
+            revision: super::keychain::revision(),
+        },
+    )
+    .unwrap();
     cx.set_global(TelegramBridge {
         core,
-        persisted_offset: 0,
         outbound_tx,
-        claim: Claim::Unavailable,
+        bot,
     });
-    outbound_rx
+    TestOutbox {
+        receiver: outbound_rx,
+    }
 }
 
 /// How many approval tokens the bridge is still holding. Lets a test assert
@@ -345,19 +365,13 @@ pub fn install(cx: &mut App) {
     }
 
     let cfg = SettingsStore::global(cx).user_arc();
-    let core = BridgeCore::new(
-        cfg.telegram.enabled,
-        cfg.telegram.authorized_chat_id,
-        daruda_store::telegram::load_telegram_state_in(&persistence::default_data_dir())
-            .update_offset,
-    );
+    let core = BridgeCore::new(cfg.telegram.enabled, cfg.telegram.authorized_chat_id, 0);
     let (outbound_tx, outbound_rx) = unbounded();
 
     cx.set_global(TelegramBridge {
-        persisted_offset: core.current_offset(),
         core,
         outbound_tx,
-        claim: Claim::Unavailable,
+        bot: Ownership::Idle,
     });
 
     spawn_poll_task(cx);
@@ -419,7 +433,13 @@ mod tests {
                 "the newly paired bot is free, so it is ours"
             );
             assert!(
-                matches!(lock::claim(dir.path(), "bot-one"), Claim::Ours { .. }),
+                matches!(
+                    crate::test_support::once_released(
+                        || lock::claim(dir.path(), "bot-one"),
+                        |claim| matches!(claim, Claim::Theirs)
+                    ),
+                    Claim::Ours { .. }
+                ),
                 "and the bot we left is free for whoever is still configured for it"
             );
         });
@@ -440,13 +460,17 @@ mod tests {
                 pane: 7,
             };
 
-            cx.global::<TelegramBridge>().send(BridgePing {
-                pane,
-                header: "daruda/main".into(),
-                tail: TelegramTail::Plain("done".into()),
-                permission: None,
-            });
-            cx.global::<TelegramBridge>().send_notice("hello".into());
+            cx.global::<TelegramBridge>().send(
+                BridgePing {
+                    pane,
+                    header: "daruda/main".into(),
+                    tail: TelegramTail::Plain("done".into()),
+                    permission: None,
+                },
+                cx,
+            );
+            cx.global::<TelegramBridge>()
+                .send_notice("hello".into(), cx);
 
             assert!(
                 outbound.next().now_or_never().is_none(),

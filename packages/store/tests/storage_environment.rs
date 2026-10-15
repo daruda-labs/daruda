@@ -53,6 +53,19 @@ fn storage_snapshot_child() {
         persistence::remote_lock_root(),
         expected.join("remote-locks")
     );
+    let bot = "0123456789abcdef0123456789abcdef";
+    let inbox = persistence::inbox_dir(bot).unwrap();
+    assert_eq!(
+        inbox,
+        expected
+            .join("remote-locks")
+            .join(format!("bot-{bot}/inbox"))
+    );
+    assert!(!inbox.exists());
+    assert_eq!(
+        persistence::telegram_inbox_migration_dir(),
+        expected.join("telegram-inbox-migration")
+    );
     assert_eq!(log_writer::log_dir(), Some(expected.join("logs")));
     assert_eq!(log_writer::log_profile(), "preview");
     let report = daruda_store::observability::error_report::ErrorReport::new("test panic").build();

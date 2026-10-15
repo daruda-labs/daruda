@@ -14,6 +14,7 @@
 
 pub mod accounts;
 pub mod agent_vocabulary;
+pub mod inbox;
 pub mod marks;
 pub mod observability;
 pub mod panels;

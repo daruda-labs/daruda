@@ -9,13 +9,11 @@
 //! global and the bot token: they read different state, fail differently, and
 //! neither one's changes should conflict with the other's.
 
-use crate::remote_channel::dispatch::{
-    self,
-    target::{aim, compose_edit_body},
-};
+use crate::remote_channel::dispatch::{self, target::compose_edit_body};
 use futures::StreamExt as _;
 use futures::channel::mpsc::{UnboundedSender, unbounded};
 use gpui::App;
+use std::sync::Arc;
 
 use daruda_store::observability::error_report::{ErrorReport, ErrorSeverity};
 use daruda_store::observability::log_writer::LogWriter;
@@ -25,7 +23,8 @@ use super::super::client;
 use super::super::keychain;
 use super::super::trace;
 use super::backoff::ErrorBackoff;
-use super::control::{answer_only, log_unauthorized_inbound, persist_offset, send_command_reply};
+use super::bot::{self, Ownership, ReadyBot};
+use super::control::{answer_only, log_unauthorized_inbound, send_command_reply};
 use super::{IDLE_RECHECK, POLL_TIMEOUT_SECS, TelegramBridge};
 use crate::platform::attention::is_app_active;
 use crate::settings_store::SettingsStore;
@@ -42,20 +41,19 @@ pub(super) fn spawn_poll_task(cx: &mut App) {
         let lock_root = daruda_store::persistence::remote_lock_root();
         let mut backoff = ErrorBackoff::new();
         loop {
-            let (enabled, chat_id, token, offset) = cx.update(|cx| {
+            let (enabled, chat_id) = cx.update(|cx| {
                 let cfg = SettingsStore::global(cx).user_arc();
                 let bridge = cx.global_mut::<TelegramBridge>();
                 bridge.core.set_enabled(cfg.telegram.enabled);
                 bridge
                     .core
                     .set_authorized_chat_id(cfg.telegram.authorized_chat_id);
-                (
-                    bridge.core.is_enabled(),
-                    cfg.telegram.authorized_chat_id,
-                    keychain::read_token(),
-                    bridge.core.current_offset(),
-                )
+                (bridge.core.is_enabled(), cfg.telegram.authorized_chat_id)
             });
+            let token = cx
+                .background_executor()
+                .spawn(async { keychain::snapshot() })
+                .await;
             // Why an idle bridge writes no line of its own: the gate is
             // resynced every iteration, so only its transitions are traced.
             trace::gate_change(enabled, chat_id, token.is_some());
@@ -76,11 +74,23 @@ pub(super) fn spawn_poll_task(cx: &mut App) {
             // them with — the reply lands on whatever chat it happens to be
             // showing. Asked every iteration rather than once, so the claim is
             // picked up when the holder quits.
-            if !claim_bot(&lock_root, &token, cx) {
+            let Some(bot) = claim_bot(&lock_root, token, chat_id, cx).await else {
                 backoff.reset();
                 cx.background_executor().timer(IDLE_RECHECK).await;
                 continue;
-            }
+            };
+            let offset = bot
+                .inbox
+                .snapshot()
+                .maximum(&daruda_store::inbox::ChannelKey::new("telegram"))
+                .unwrap_or(-1)
+                .saturating_add(1);
+            let offset = cx.update(|cx| {
+                let bridge = cx.global_mut::<TelegramBridge>();
+                bridge.core.set_offset(offset);
+                bridge.core.current_offset()
+            });
+            let token = bot.token.token.clone();
 
             // Run the blocking `ureq` long-poll off the foreground thread —
             // it can hang for up to POLL_TIMEOUT_SECS and must never stall
@@ -139,6 +149,9 @@ pub(super) fn spawn_poll_task(cx: &mut App) {
             // — routing is the only step that touches `BridgeCore` directly.
             for update in updates {
                 let update_id = update.update_id;
+                if !claim_update(&bot, update_id, chat_id, cx, keychain::revision).await {
+                    continue;
+                }
                 trace::delivery("inbound", || {
                     format!(
                         "update_id={update_id} kind={} chat_id={} app_active={} \
@@ -149,86 +162,47 @@ pub(super) fn spawn_poll_task(cx: &mut App) {
                         trace::update_payload(&update.kind)
                     )
                 });
-                let RouteResult {
-                    action,
-                    answer_callback_id,
-                    callback_edit,
-                } = cx.update(|cx| cx.global_mut::<TelegramBridge>().core.route(update));
-                trace::delivery("routed", || {
-                    format!(
-                        "update_id={update_id} action={} target={} answers_callback={}",
-                        trace::action_name(&action),
-                        trace::opt(trace::action_target(&action).map(trace::pane)),
-                        answer_callback_id.is_some()
-                    )
-                });
-                let aimed = aim(action, cx);
-
-                if let InboundAction::Paired { chat_id } = aimed.action {
-                    cx.update(|cx| {
-                        if let Err(error) = cx.global_mut::<SettingsStore>().apply_patch(
-                            daruda_config::SettingsPatch::TelegramAuthorizedChatId(Some(chat_id)),
-                        ) {
-                            crate::remote_channel::log_error(
-                                "Telegram pairing failed to persist",
-                                &error,
-                                "telegram.pair.persist",
-                            );
-                        }
-                    });
-                } else {
-                    if matches!(aimed.action, InboundAction::Ignore) && answer_callback_id.is_none()
-                    {
-                        log_unauthorized_inbound();
-                    }
-                    // A command that waits on a task commit is settled here,
-                    // so the next update sees what it changed.
-                    let effect = dispatch::handle(aimed, &dispatch::Target::Telegram, cx)
-                        .settled()
-                        .await;
-                    // Queued, not awaited: this loop is the only thing listening
-                    // for the next message, and one queue keeps the answers in
-                    // the order the messages came.
-                    let answer = match (answer_callback_id, effect) {
-                        (
-                            Some(callback_id),
-                            dispatch::Effect::Feedback {
-                                label,
-                                edit: dispatch::Edit::ConsumeButtons,
-                            },
-                        ) => Some(Answer::AckAndEdit {
-                            callback_id,
-                            edit: callback_edit,
+                let dispatched = cx.update(|cx| dispatch_update(&bot, chat_id, update, cx));
+                let Some((effect, answer_callback_id, callback_edit)) = dispatched else {
+                    continue;
+                };
+                let effect = effect.settled().await;
+                // Queued, not awaited: this loop is the only thing listening
+                // for the next message, and one queue keeps the answers in
+                // the order the messages came.
+                let answer = match (answer_callback_id, effect) {
+                    (
+                        Some(callback_id),
+                        dispatch::Effect::Feedback {
                             label,
-                        }),
-                        (Some(callback_id), dispatch::Effect::Feedback { label, .. }) => {
-                            Some(Answer::Ack { callback_id, label })
-                        }
-                        // An unknown or already-consumed token. Answered *and*
-                        // edited: leaving the buttons on invites the user to keep
-                        // tapping a decision that can no longer land.
-                        (Some(callback_id), _) => Some(Answer::AckAndEdit {
-                            callback_id,
-                            edit: callback_edit,
-                            label: s::notification::telegram_permission_stale(),
-                        }),
-                        (None, dispatch::Effect::Reply(reply)) => Some(Answer::Reply(reply)),
-                        _ => None,
-                    };
-                    if let Some(answer) = answer
-                        && answers.unbounded_send((token.clone(), answer)).is_err()
-                    {
-                        trace::delivery("answer.dropped", || "reason=queue_closed".to_string());
+                            edit: dispatch::Edit::ConsumeButtons,
+                        },
+                    ) => Some(Answer::AckAndEdit {
+                        callback_id,
+                        edit: callback_edit,
+                        label,
+                    }),
+                    (Some(callback_id), dispatch::Effect::Feedback { label, .. }) => {
+                        Some(Answer::Ack { callback_id, label })
                     }
+                    // An unknown or already-consumed token. Answered *and*
+                    // edited: leaving the buttons on invites the user to keep
+                    // tapping a decision that can no longer land.
+                    (Some(callback_id), _) => Some(Answer::AckAndEdit {
+                        callback_id,
+                        edit: callback_edit,
+                        label: s::notification::telegram_permission_stale(),
+                    }),
+                    (None, dispatch::Effect::Reply(reply)) => Some(Answer::Reply(reply)),
+                    _ => None,
+                };
+                if let Some(answer) = answer
+                    && answers
+                        .unbounded_send((bot.clone(), chat_id, answer))
+                        .is_err()
+                {
+                    trace::delivery("answer.dropped", || "reason=queue_closed".to_string());
                 }
-
-                // After acting, not before: a crash in between re-delivers
-                // this one update rather than losing it, and writing first
-                // would drop the command outright. Per update rather than per
-                // batch so the replay is bounded to one. The queued answer is
-                // owed to the phone, but the action the offset records has
-                // already happened.
-                persist_offset(cx);
             }
 
             // No extra sleep on success — the long-poll `timeout_s` itself
@@ -255,20 +229,28 @@ enum Answer {
 
 /// One task sends every answer in arrival order, so a reply to an earlier
 /// message never lands after a later one and a backlog cannot fan out.
-fn spawn_answer_task(cx: &mut App) -> UnboundedSender<(String, Answer)> {
-    let (sender, mut queue) = unbounded::<(String, Answer)>();
+fn spawn_answer_task(cx: &mut App) -> UnboundedSender<(Arc<ReadyBot>, Option<i64>, Answer)> {
+    let (sender, mut queue) = unbounded::<(Arc<ReadyBot>, Option<i64>, Answer)>();
     cx.spawn(async move |cx| {
-        while let Some((token, answer)) = queue.next().await {
+        while let Some((bot, chat_id, answer)) = queue.next().await {
+            if !cx.update(|cx| live_bot(&bot, chat_id, keychain::revision(), cx)) {
+                continue;
+            }
+            let token = &bot.token.token;
             match answer {
-                Answer::Reply(reply) => send_command_reply(cx, &token, reply).await,
+                Answer::Reply(reply) => {
+                    if let Some(chat_id) = chat_id {
+                        send_command_reply(cx, token, chat_id, reply).await;
+                    }
+                }
                 Answer::Ack { callback_id, label } => {
-                    answer_only(cx, &token, callback_id, &label).await
+                    answer_only(cx, token, callback_id, &label).await
                 }
                 Answer::AckAndEdit {
                     callback_id,
                     edit,
                     label,
-                } => answer_and_edit(cx, &token, callback_id, edit, &label).await,
+                } => answer_and_edit(cx, token, callback_id, edit, &label).await,
             }
         }
     })
@@ -276,10 +258,172 @@ fn spawn_answer_task(cx: &mut App) -> UnboundedSender<(String, Answer)> {
     sender
 }
 
-/// Take or renew this daruda's claim on the bot. See
-/// [`TelegramBridge::reclaim`] for why it is keyed on the token.
-fn claim_bot(lock_root: &std::path::Path, token: &str, cx: &mut gpui::AsyncApp) -> bool {
-    cx.update(|cx| cx.global_mut::<TelegramBridge>().reclaim(lock_root, token))
+/// Reuse the original writer for the same token; a changed bot must acquire
+/// its own lease before opening a writable inbox.
+async fn claim_bot(
+    lock_root: &std::path::Path,
+    token: keychain::TokenSnapshot,
+    chat_id: Option<i64>,
+    cx: &mut gpui::AsyncApp,
+) -> Option<Arc<ReadyBot>> {
+    let existing = cx.update(|cx| {
+        cx.global::<TelegramBridge>()
+            .bot
+            .ready()
+            .filter(|bot| bot.token.token == token.token)
+            .cloned()
+    });
+    let ownership = if let Some(existing) = existing {
+        if existing.token.revision == token.revision {
+            return Some(existing);
+        }
+        Ownership::Ready(Arc::new(ReadyBot {
+            token,
+            inbox: existing.inbox.clone(),
+            generation: uuid::Uuid::new_v4(),
+        }))
+    } else {
+        release_bot(cx);
+        let lock_root = lock_root.to_owned();
+        let opened = cx
+            .background_executor()
+            .spawn(async move {
+                bot::open(
+                    &lock_root,
+                    &daruda_store::persistence::default_data_dir(),
+                    token,
+                )
+            })
+            .await;
+        match opened {
+            Ok(ownership) => ownership,
+            Err(error) => {
+                crate::remote_channel::log_error(
+                    "Telegram inbox could not open",
+                    &error,
+                    "telegram.inbox.open",
+                );
+                return None;
+            }
+        }
+    };
+    cx.update(|cx| {
+        let cfg = SettingsStore::global(cx).user_arc();
+        if !cfg.telegram.enabled || cfg.telegram.authorized_chat_id != chat_id {
+            return None;
+        }
+        if let Ownership::Ready(bot) = &ownership
+            && bot.token.revision != keychain::revision()
+        {
+            return None;
+        }
+        let result = ownership.ready().cloned();
+        if matches!(ownership, Ownership::HeldElsewhere) {
+            LogWriter::log(
+                ErrorReport::new("Telegram bot held by another daruda")
+                    .severity(ErrorSeverity::Warning)
+                    .at(file!(), line!())
+                    .dedup("telegram.bot_held_elsewhere")
+                    .build(),
+            );
+        }
+        cx.global_mut::<TelegramBridge>().bot = ownership;
+        result
+    })
+}
+
+pub(super) fn live_bot(bot: &Arc<ReadyBot>, chat_id: Option<i64>, revision: u64, cx: &App) -> bool {
+    let cfg = SettingsStore::global(cx).user_arc();
+    bot.token.revision == revision
+        && cfg.telegram.enabled
+        && cfg.telegram.authorized_chat_id == chat_id
+        && cx
+            .global::<TelegramBridge>()
+            .bot
+            .ready()
+            .is_some_and(|current| {
+                current.generation == bot.generation && Arc::ptr_eq(current, bot)
+            })
+}
+
+fn dispatch_update(
+    bot: &Arc<ReadyBot>,
+    chat_id: Option<i64>,
+    update: client::Update,
+    cx: &mut App,
+) -> Option<(dispatch::Effect, Option<String>, Option<CallbackEdit>)> {
+    if !live_bot(bot, chat_id, keychain::revision(), cx) {
+        return None;
+    }
+    let config = SettingsStore::global(cx).user_arc();
+    let core = &mut cx.global_mut::<TelegramBridge>().core;
+    core.set_enabled(config.telegram.enabled);
+    core.set_authorized_chat_id(config.telegram.authorized_chat_id);
+    let update_id = update.update_id;
+    let RouteResult {
+        action,
+        answer_callback_id,
+        callback_edit,
+    } = core.route(update);
+    trace::delivery("routed", || {
+        format!(
+            "update_id={update_id} action={} target={} answers_callback={}",
+            trace::action_name(&action),
+            trace::opt(trace::action_target(&action).map(trace::pane)),
+            answer_callback_id.is_some()
+        )
+    });
+    let aimed = dispatch::target::aim_in_app(action, cx);
+    let effect = if let InboundAction::Paired { chat_id } = aimed.action {
+        if let Err(error) = cx.global_mut::<SettingsStore>().apply_patch(
+            daruda_config::SettingsPatch::TelegramAuthorizedChatId(Some(chat_id)),
+        ) {
+            crate::remote_channel::log_error(
+                "Telegram pairing failed to persist",
+                &error,
+                "telegram.pair.persist",
+            );
+        }
+        dispatch::Effect::None
+    } else {
+        if matches!(aimed.action, InboundAction::Ignore) && answer_callback_id.is_none() {
+            log_unauthorized_inbound();
+        }
+        dispatch::handle_in_app(aimed, &dispatch::Target::Telegram, cx)
+    };
+    Some((effect, answer_callback_id, callback_edit))
+}
+
+async fn claim_update(
+    bot: &Arc<ReadyBot>,
+    update_id: i64,
+    chat_id: Option<i64>,
+    cx: &mut gpui::AsyncApp,
+    revision: impl Fn() -> u64,
+) -> bool {
+    if !cx.update(|cx| live_bot(bot, chat_id, revision(), cx)) {
+        return false;
+    }
+    let claimed = crate::runs::RunsHost::claim_inbound(
+        &bot.inbox,
+        daruda_store::inbox::ChannelKey::new("telegram"),
+        daruda_store::inbox::InboxId::Monotonic(update_id),
+    )
+    .await;
+    match claimed {
+        Ok(_) => cx.update(|cx| live_bot(bot, chat_id, revision(), cx)),
+        Err(daruda_store::inbox::CommitError::Rejected(
+            daruda_store::inbox::InboxRejected::Duplicate { .. },
+        )) => false,
+        Err(error) => {
+            crate::remote_channel::log_error(
+                "Telegram command claim failed",
+                &error,
+                "telegram.inbox.claim",
+            );
+            false
+        }
+    }
 }
 
 fn release_bot(cx: &mut gpui::AsyncApp) {
@@ -352,3 +496,6 @@ async fn answer_and_edit(
         );
     }
 }
+
+#[cfg(test)]
+mod tests;

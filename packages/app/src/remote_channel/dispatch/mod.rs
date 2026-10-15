@@ -108,7 +108,12 @@ pub enum Edit {
     ConsumeButtons,
 }
 
+#[cfg(test)]
 pub fn handle(aimed: Aimed, target: &Target, cx: &mut gpui::AsyncApp) -> Effect {
+    cx.update(|cx| handle_in_app(aimed, target, cx))
+}
+
+pub(crate) fn handle_in_app(aimed: Aimed, target: &Target, cx: &mut App) -> Effect {
     let Aimed { action, adopted } = aimed;
     match action {
         InboundAction::RunCommand { command: requested } => {
@@ -117,9 +122,10 @@ pub fn handle(aimed: Aimed, target: &Target, cx: &mut gpui::AsyncApp) -> Effect 
         InboundAction::ReportParseError { error } => {
             Effect::Reply(commands::render_parse_error(&error))
         }
-        InboundAction::NoTarget => cx
-            .update(|cx| command::render_outcome(&Err(ControlError::NoTargetSelected), target, cx))
-            .map_or(Effect::None, Effect::Reply),
+        InboundAction::NoTarget => {
+            command::render_outcome(&Err(ControlError::NoTargetSelected), target, cx)
+                .map_or(Effect::None, Effect::Reply)
+        }
         InboundAction::InjectPrompt { pane, text } => {
             deliver_prompt(pane, text, adopted, target, cx)
         }
@@ -143,17 +149,15 @@ pub fn handle(aimed: Aimed, target: &Target, cx: &mut gpui::AsyncApp) -> Effect 
             }
         }
         InboundAction::UnclaimedSlash { name, suggestion } => {
-            let ours = cx.update(|cx| crate::control::resolve::slash_claim(cx, &name).rules_out());
+            let ours = crate::control::resolve::slash_claim(cx, &name).rules_out();
             if ours {
                 Effect::Reply(commands::render_parse_error(&ParseError::Unknown {
                     input: name,
                     suggestion,
                 }))
             } else {
-                cx.update(|cx| {
-                    command::render_outcome(&Err(ControlError::NoTargetSelected), target, cx)
-                })
-                .map_or(Effect::None, Effect::Reply)
+                command::render_outcome(&Err(ControlError::NoTargetSelected), target, cx)
+                    .map_or(Effect::None, Effect::Reply)
             }
         }
         InboundAction::RespondPermission {
@@ -170,14 +174,16 @@ pub fn handle(aimed: Aimed, target: &Target, cx: &mut gpui::AsyncApp) -> Effect 
                 edit: Edit::ConsumeButtons,
             }
         }
-        InboundAction::SelectTarget { pane } => cx
-            .update(|cx| command::select_target(pane, target, cx))
-            .map_or(Effect::None, |label| Effect::Feedback {
-                label,
-                edit: Edit::KeepButtons,
-            }),
+        InboundAction::SelectTarget { pane } => {
+            command::select_target(pane, target, cx).map_or(Effect::None, |label| {
+                Effect::Feedback {
+                    label,
+                    edit: Edit::KeepButtons,
+                }
+            })
+        }
         InboundAction::ResolveApproval { id, choice } => {
-            let applied = cx.update(|cx| crate::control::approval::resolve(id, choice, cx));
+            let applied = crate::control::approval::resolve(id, choice, cx);
             let label = match (applied, choice) {
                 (false, _) => s::control::approval_already_answered(),
                 (true, crate::control::approval::ApprovalChoice::Approved) => {
@@ -213,16 +219,14 @@ fn deliver_prompt(
     text: String,
     adopted: Option<PaneRef>,
     target: &Target,
-    cx: &mut gpui::AsyncApp,
+    cx: &mut App,
 ) -> Effect {
     let mut delivered = false;
     dispatch_to_workspace(cx, pane.workspace, |ws, cx| {
         delivered = ws.inject_bot_reply(pane.pane, text.clone(), cx);
     });
     if !delivered {
-        return cx
-            .update(|cx| command::report_target_gone(pane, target, cx))
-            .map_or(Effect::None, Effect::Reply);
+        return command::report_target_gone(pane, target, cx).map_or(Effect::None, Effect::Reply);
     }
     adopted
         .and_then(|lent| target::lent_target_reply(lent, cx))

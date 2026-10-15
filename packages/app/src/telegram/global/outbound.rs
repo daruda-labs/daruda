@@ -1,5 +1,6 @@
-//! The outbound send loop: drains queued pings and posts each one to the
-//! Bot API off the foreground thread.
+//! Queue ownership and the off-foreground Telegram send loop.
+
+use std::sync::Arc;
 
 use futures::StreamExt as _;
 use gpui::App;
@@ -8,204 +9,82 @@ use daruda_store::observability::error_report::{ErrorReport, ErrorSeverity};
 use daruda_store::observability::log_writer::LogWriter;
 
 use crate::settings_store::SettingsStore;
-use crate::telegram::bridge::{Outbound, OutboundMsg};
-use crate::telegram::client;
-use crate::telegram::keychain;
-use crate::telegram::trace;
+use crate::telegram::bridge::{Outbound, OutboundMsg, PaneRef};
+use crate::telegram::{client, keychain, trace};
 
+use super::bot::ReadyBot;
 use super::{TelegramBridge, html_body, plain_body};
 
-/// The outbound send loop. Drains `outbound_rx` (moved in at spawn
-/// time — never stored on the struct) and posts each ping via
-/// `client::send_message`, off the foreground thread.
-pub(super) fn spawn_send_task(
-    mut outbound_rx: futures::channel::mpsc::UnboundedReceiver<Outbound>,
-    cx: &mut App,
-) {
-    cx.spawn(async move |cx| {
-        while let Some(outbound) = outbound_rx.next().await {
-            trace::delivery("queue.drained", || {
-                format!(
-                    "{} kind={}",
-                    trace::drain_slot(),
-                    trace::outbound_kind(&outbound)
-                )
-            });
-            // Check for a token BEFORE touching `BridgeCore` state —
-            // `build_ping` registers permission tokens as a side effect;
-            // if the message that would let the phone redeem them is
-            // never actually sent (token cleared mid-flight, e.g. the
-            // user clicks "Clear" in Settings between a permission
-            // request firing and this loop draining it), those tokens
-            // would otherwise be permanently orphaned in
-            // `pending_permissions`.
-            let token = cx.update(|_cx| keychain::read_token());
-            let Some(token) = token else {
-                trace::delivery("send.dropped", || "reason=no_token".to_string());
-                // The caller only builds a ping when the feature is on and a
-                // chat is paired, so reaching here means the config says
-                // "paired" while the Keychain has no token — the relay is dead
-                // and nothing else on this path would say so. Every other
-                // failure in this file is logged; without this one the symptom
-                // is a bridge that looks configured and silently sends nothing.
-                LogWriter::log(
-                    ErrorReport::new("Telegram ping dropped: no bot token")
-                        .severity(ErrorSeverity::Warning)
-                        .message(
-                            "Telegram is enabled and paired, but no bot token is stored in the \
-                             Keychain. Re-pair from Settings to restore the relay.",
-                        )
-                        .at(file!(), line!())
-                        .dedup("telegram.missing_token")
-                        .build(),
-                );
-                continue;
-            };
+pub(super) struct QueuedOutbound {
+    pub bot: Arc<ReadyBot>,
+    pub chat_id: i64,
+    pub outbound: Outbound,
+}
 
-            // Resync from live config *before* addressing the message, not
-            // just at the top of the poll loop. That resync only runs once the
-            // previous blocking `get_updates` returns, so `BridgeCore`'s copy
-            // can be up to `POLL_TIMEOUT_SECS` stale — long enough for an
-            // agent response queued before an unpair to be addressed to the
-            // chat the user just revoked. Config is the single source of
-            // truth for where a ping may go; this is where it is asked.
-            let (enabled, chat_id, serving) = cx.update(|cx| {
-                let cfg = SettingsStore::global(cx).user_arc();
-                let bridge = cx.global_mut::<TelegramBridge>();
-                bridge.core.set_enabled(cfg.telegram.enabled);
-                bridge
-                    .core
-                    .set_authorized_chat_id(cfg.telegram.authorized_chat_id);
-                (
-                    cfg.telegram.enabled,
-                    cfg.telegram.authorized_chat_id,
-                    bridge.claim.serves(),
-                )
-            });
-            // The last gate, for the same reason config is re-read here: a
-            // message queued while this daruda still held the bot must not go
-            // out after another one took it over.
-            if !serving {
-                trace::delivery("send.dropped", || {
-                    "reason=bot_held_elsewhere stage=drain".to_string()
-                });
-                continue;
-            }
-            // A token is in hand by here, so `has_token` is not in question —
-            // shares the poll loop's dedup slot, which reports the real value.
-            trace::gate_change(enabled, chat_id, true);
-            let Some(live_chat_id) = enabled.then_some(chat_id).flatten() else {
-                // Disabled or unpaired since this was queued. Dropped rather
-                // than held: its context is gone, and the chat it was meant
-                // for may no longer be the user's.
-                trace::delivery("send.dropped", || {
-                    format!(
-                        "reason=gate enabled={enabled} chat_id={}",
-                        trace::opt(chat_id)
-                    )
-                });
-                continue;
-            };
+#[cfg(test)]
+pub(crate) struct TestOutbox {
+    pub(super) receiver: futures::channel::mpsc::UnboundedReceiver<QueuedOutbound>,
+}
 
-            // A notice belongs to no pane, so it skips `build_ping` (which
-            // would register permission tokens it has none of) and skips
-            // `record_sent` below (which would make some pane the next plain
-            // message's destination).
-            let ping = match outbound {
-                Outbound::Ping(ping) => ping,
-                // Like a notice, this belongs to no pane — so it skips
-                // `build_ping` and `record_sent`. Unlike one, it carries
-                // buttons, and a card the user cannot answer is worse than no
-                // card: the tool call would wait out the whole timeout.
-                Outbound::Approval(prompt) => {
-                    let summary = trace::is_on().then(|| trace::digest(&prompt.summary));
-                    let approval_token = token;
-                    let keyboard = client::InlineKeyboard {
-                        rows: vec![prompt.buttons.to_vec()],
-                    };
-                    let sent = cx
-                        .background_executor()
-                        .spawn(async move {
-                            client::send_message(
-                                &approval_token,
-                                live_chat_id,
-                                &prompt.summary,
-                                None,
-                                Some(keyboard),
-                            )
-                        })
-                        .await;
-                    trace::delivery("send.approval", || {
-                        format!(
-                            "chat_id={live_chat_id} ok={} text={}",
-                            sent.is_ok(),
-                            trace::opt(summary)
-                        )
-                    });
-                    if let Err(e) = sent {
-                        LogWriter::log(
-                            ErrorReport::new("Telegram approval card failed to send")
-                                .severity(ErrorSeverity::Warning)
-                                .from_error(&e)
-                                .at(file!(), line!())
-                                .dedup("telegram.approval")
-                                .build(),
-                        );
-                    }
-                    continue;
-                }
-                Outbound::Notice(text) => {
-                    let notice = trace::is_on().then(|| trace::digest(&text));
-                    let notice_token = token;
-                    let sent = cx
-                        .background_executor()
-                        .spawn(async move {
-                            client::send_message(&notice_token, live_chat_id, &text, None, None)
-                        })
-                        .await;
-                    trace::delivery("send.notice", || {
-                        format!(
-                            "chat_id={live_chat_id} ok={} text={}",
-                            sent.is_ok(),
-                            trace::opt(notice)
-                        )
-                    });
-                    if let Err(e) = sent {
-                        // Warning, not Info: a command reply is missed the
-                        // instant it fails because the user is looking at the
-                        // chat, but a flow outcome dropped an hour later is
-                        // invisible outside this log — and something was
-                        // promised it would arrive.
-                        LogWriter::log(
-                            ErrorReport::new("Telegram notice failed to send")
-                                .severity(ErrorSeverity::Warning)
-                                .from_error(&e)
-                                .at(file!(), line!())
-                                .dedup("telegram.notice")
-                                .build(),
-                        );
-                    }
-                    continue;
-                }
-            };
+#[cfg(test)]
+impl futures::Stream for TestOutbox {
+    type Item = Outbound;
 
-            // Captured before `build_ping` consumes `ping` by value —
-            // `OutboundMsg` does not carry the pane back.
+    fn poll_next(
+        self: std::pin::Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<Option<Outbound>> {
+        self.get_mut()
+            .receiver
+            .poll_next_unpin(cx)
+            .map(|queued| queued.map(|queued| queued.outbound))
+    }
+}
+
+#[cfg(test)]
+impl TestOutbox {
+    pub(crate) fn try_recv(&mut self) -> Result<Outbound, futures::channel::mpsc::TryRecvError> {
+        self.receiver.try_recv().map(|queued| queued.outbound)
+    }
+}
+
+enum Body {
+    Ping(OutboundMsg),
+    Plain {
+        text: String,
+        keyboard: Option<client::InlineKeyboard>,
+    },
+}
+
+struct Prepared {
+    bot: Arc<ReadyBot>,
+    chat_id: i64,
+    pane: Option<PaneRef>,
+    body: Body,
+}
+
+fn live(queued: &QueuedOutbound, cx: &App) -> bool {
+    super::inbound::live_bot(&queued.bot, Some(queued.chat_id), keychain::revision(), cx)
+}
+
+fn prepare(queued: QueuedOutbound, cx: &mut App) -> Option<Prepared> {
+    if !live(&queued, cx) {
+        return None;
+    }
+    let cfg = SettingsStore::global(cx).user_arc();
+    let bridge = cx.global_mut::<TelegramBridge>();
+    bridge.core.set_enabled(cfg.telegram.enabled);
+    bridge
+        .core
+        .set_authorized_chat_id(cfg.telegram.authorized_chat_id);
+    let (pane, body) = match queued.outbound {
+        Outbound::Ping(ping) => {
             let pane = ping.pane;
-
-            let msg = cx.update(|cx| cx.global_mut::<TelegramBridge>().core.build_ping(ping));
-
-            let OutboundMsg {
-                chat_id,
-                header,
-                tail,
-                keyboard,
-            } = msg;
-            // One token per button, so the keyboard's width *is* what
-            // `build_ping` just registered in `pending_permissions`.
-            let buttons: usize = keyboard
+            let message = bridge.core.build_ping(ping);
+            let buttons: usize = message
+                .keyboard
                 .as_ref()
-                .map_or(0, |k| k.rows.iter().map(Vec::len).sum());
+                .map_or(0, |keyboard| keyboard.rows.iter().map(Vec::len).sum());
             if buttons > 0 {
                 trace::state("permission.tokens", || {
                     format!("pane={} registered={buttons}", trace::pane(pane))
@@ -213,82 +92,155 @@ pub(super) fn spawn_send_task(
             }
             trace::delivery("send.ping", || {
                 format!(
-                    "chat_id={chat_id} pane={} buttons={buttons} text={}",
+                    "chat_id={} pane={} buttons={buttons} text={}",
+                    queued.chat_id,
                     trace::pane(pane),
-                    trace::tail_digest(&tail)
+                    trace::tail_digest(&message.tail)
                 )
             });
-            // Computed up front (not inside the spawn below), since both
-            // `header` and `tail` get moved into the closure next.
-            let plain_text = plain_body(&header, &tail);
-            // Try the HTML-formatted body first; on ANY failure (a
-            // conversion edge case, or Telegram rejecting the tags) fall
-            // back to sending `plain_text` verbatim with no `parse_mode`
-            // rather than losing the notification outright — a failed send
-            // here is only logged below, never surfaced to the user, so
-            // this retry is the only thing standing between a formatting
-            // bug and a silently-dropped ping. Formatting itself runs
-            // inside the background-executor spawn below, alongside the
-            // blocking HTTP call, rather than on this foreground async
-            // loop — a full CommonMark parse of a response up to
-            // `TELEGRAM_PREVIEW_HEAD_CHARS` + `_TAIL_CHARS` is real work that
-            // shouldn't run on the GPUI thread (mirrors
-            // `daruda_acp::node`'s "blocking work stays off the
-            // foreground executor" convention).
-            let sent = cx
-                .background_executor()
-                .spawn(async move {
-                    let html = html_body(&header, &tail);
-                    match client::send_message(
-                        &token,
-                        chat_id,
-                        &html,
-                        Some("HTML"),
-                        keyboard.clone(),
-                    ) {
-                        Ok(id) => Ok(id),
-                        Err(e) => {
-                            // The only place this error is ever named: the
-                            // fallback below discards it by design.
-                            trace::delivery("send.html_rejected", || {
-                                format!("chat_id={chat_id} error={e}")
-                            });
-                            client::send_message(&token, chat_id, &plain_text, None, keyboard)
-                        }
-                    }
-                })
-                .await;
+            (Some(pane), Body::Ping(message))
+        }
+        Outbound::Notice(text) => (
+            None,
+            Body::Plain {
+                text,
+                keyboard: None,
+            },
+        ),
+        Outbound::Approval(prompt) => (
+            None,
+            Body::Plain {
+                text: prompt.summary,
+                keyboard: Some(client::InlineKeyboard {
+                    rows: vec![prompt.buttons.to_vec()],
+                }),
+            },
+        ),
+    };
+    Some(Prepared {
+        bot: queued.bot,
+        chat_id: queued.chat_id,
+        pane,
+        body,
+    })
+}
 
-            match sent {
-                Ok(message_id) => {
-                    trace::state("sent_pings", || {
-                        format!(
-                            "message_id={message_id} pane={} last_pinged=true",
-                            trace::pane(pane)
-                        )
+fn send(prepared: Prepared) -> Result<Option<i64>, client::ClientError> {
+    if prepared.bot.token.revision != keychain::revision() {
+        return Ok(None);
+    }
+    let token = &prepared.bot.token.token;
+    let sent = match prepared.body {
+        Body::Plain { text, keyboard } => {
+            let event = if keyboard.is_some() {
+                "send.approval"
+            } else {
+                "send.notice"
+            };
+            let sent = client::send_message(token, prepared.chat_id, &text, None, keyboard);
+            trace::delivery(event, || {
+                format!(
+                    "chat_id={} ok={} text={}",
+                    prepared.chat_id,
+                    sent.is_ok(),
+                    trace::digest(&text)
+                )
+            });
+            sent
+        }
+        Body::Ping(OutboundMsg {
+            chat_id,
+            header,
+            tail,
+            keyboard,
+        }) => {
+            let html = html_body(&header, &tail);
+            match client::send_message(token, chat_id, &html, Some("HTML"), keyboard.clone()) {
+                Ok(id) => Ok(id),
+                Err(error) => {
+                    trace::delivery("send.html_rejected", || {
+                        format!("chat_id={chat_id} error={error}")
                     });
-                    cx.update(|cx| {
-                        let orchestrator = crate::orchestrator::pane(cx);
-                        cx.global_mut::<TelegramBridge>().core.record_delivered(
-                            message_id,
-                            pane,
-                            orchestrator,
-                        );
-                    });
+                    client::send_message(
+                        token,
+                        chat_id,
+                        &plain_body(&header, &tail),
+                        None,
+                        keyboard,
+                    )
                 }
-                Err(e) => {
-                    trace::delivery("send.failed", || format!("chat_id={chat_id} error={e}"));
-                    LogWriter::log(
-                        ErrorReport::new("Telegram sendMessage failed")
-                            .severity(ErrorSeverity::Info)
-                            .from_error(&e)
-                            .at(file!(), line!())
-                            .dedup("telegram.send_message")
-                            .build(),
-                    );
+            }
+        }
+    };
+    sent.map(Some)
+}
+
+pub(super) fn spawn_send_task(
+    mut outbound_rx: futures::channel::mpsc::UnboundedReceiver<QueuedOutbound>,
+    cx: &mut App,
+) {
+    cx.spawn(async move |cx| {
+        while let Some(queued) = outbound_rx.next().await {
+            trace::delivery("queue.drained", || {
+                format!(
+                    "{} kind={}",
+                    trace::drain_slot(),
+                    trace::outbound_kind(&queued.outbound)
+                )
+            });
+            let Some(prepared) = cx.update(|cx| prepare(queued, cx)) else {
+                trace::delivery("send.dropped", || {
+                    "reason=owner_or_recipient_changed".into()
+                });
+                continue;
+            };
+            let bot = prepared.bot.clone();
+            let chat_id = prepared.chat_id;
+            let pane = prepared.pane;
+            match cx
+                .background_executor()
+                .spawn(async move { send(prepared) })
+                .await
+            {
+                Ok(Some(message_id)) => {
+                    if let Some(pane) = pane {
+                        cx.update(|cx| {
+                            if super::inbound::live_bot(
+                                &bot,
+                                Some(chat_id),
+                                keychain::revision(),
+                                cx,
+                            ) {
+                                trace::state("sent_pings", || {
+                                    format!(
+                                        "message_id={message_id} pane={} last_pinged=true",
+                                        trace::pane(pane)
+                                    )
+                                });
+                                let orchestrator = crate::orchestrator::pane(cx);
+                                cx.global_mut::<TelegramBridge>().core.record_delivered(
+                                    message_id,
+                                    pane,
+                                    orchestrator,
+                                );
+                            }
+                        });
+                    }
                 }
+                Ok(None) => {}
+                Err(error) => LogWriter::log(
+                    ErrorReport::new("Telegram message failed to send")
+                        .severity(ErrorSeverity::Warning)
+                        .from_error(&error)
+                        .at(file!(), line!())
+                        .dedup("telegram.send_message")
+                        .build(),
+                ),
             }
         }
     })
     .detach();
 }
+
+#[cfg(test)]
+mod tests;

@@ -1,12 +1,10 @@
-//! Bounded event deduplication history, isolated by profile and connection.
+//! Read-only legacy event history, keyed by profile-local connection ids.
 
-use crate::persistence::{LoadOutcome, load_json_file, save_json_atomic};
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, VecDeque};
 use std::path::Path;
 
-const FILE_NAME: &str = "remote_channels.json";
-const EVENTS_PER_CHANNEL: usize = 256;
+pub(crate) const FILE_NAME: &str = "remote_channels.json";
 
 #[derive(Debug, Default, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default)]
@@ -15,35 +13,22 @@ pub struct RemoteChannelState {
 }
 
 impl RemoteChannelState {
+    pub(crate) fn events(&self, channel: &str) -> impl Iterator<Item = &str> {
+        self.processed
+            .get(channel)
+            .into_iter()
+            .flatten()
+            .map(String::as_str)
+    }
+
     pub fn contains(&self, channel: &str, event: &str) -> bool {
         self.processed
             .get(channel)
             .is_some_and(|events| events.iter().any(|id| id == event))
     }
 
-    pub fn record(&mut self, channel: &str, event: String) {
-        let events = self.processed.entry(channel.to_owned()).or_default();
-        if !events.contains(&event) {
-            events.push_back(event);
-        }
-        while events.len() > EVENTS_PER_CHANNEL {
-            events.pop_front();
-        }
-    }
-
-    pub fn retain_channels(&mut self, ids: &[String]) {
-        self.processed.retain(|id, _| ids.contains(id));
-    }
-
     pub fn load_in(dir: &Path) -> Self {
-        match load_json_file("remote_channels", &dir.join(FILE_NAME)) {
-            LoadOutcome::Parsed(state) => state,
-            LoadOutcome::Missing | LoadOutcome::Corrupt => Self::default(),
-        }
-    }
-
-    pub fn save_in(&self, dir: &Path) -> std::io::Result<()> {
-        save_json_atomic(dir, &dir.join(FILE_NAME), self)
+        crate::inbox::migrate::read_legacy(&dir.join(FILE_NAME))
     }
 }
 
@@ -52,13 +37,10 @@ mod tests {
     use super::*;
 
     #[test]
-    fn deduplication_is_bounded_and_namespaced() {
-        let mut state = RemoteChannelState::default();
-        for n in 0..=EVENTS_PER_CHANNEL {
-            state.record("slack", n.to_string());
-        }
-        assert!(!state.contains("slack", "0"));
-        assert!(state.contains("slack", "1"));
+    fn legacy_history_retains_its_config_namespaces() {
+        let state: RemoteChannelState =
+            serde_json::from_slice(br#"{"processed":{"slack":["1"]}}"#).unwrap();
+        assert_eq!(state.processed["slack"], VecDeque::from(["1".to_owned()]));
         assert!(!state.contains("discord", "1"));
     }
 }

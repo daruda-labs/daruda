@@ -15,13 +15,13 @@ use gpui::App;
 pub(crate) fn run_command(
     command: ControlCommand,
     target: &super::Target,
-    cx: &mut gpui::AsyncApp,
+    cx: &mut App,
 ) -> super::Effect {
     trace::delivery("command", || format!("{command:?}"));
-    let step = cx.update(|cx| {
+    let step = (|| {
         let state = target.state(cx)?;
         Some(command::resolve_command(command, state))
-    });
+    })();
     let Some(step) = step else {
         return super::Effect::None;
     };
@@ -29,7 +29,7 @@ pub(crate) fn run_command(
         command::Resolution::Answer(outcome) => (outcome, None),
         // Fill in the one target no listing can name, then run like any other.
         command::Resolution::Ask(text) => (
-            cx.update(|cx| {
+            (|| {
                 let (destination, connecting) = crate::orchestrator::destination(cx)?;
                 let outcome = crate::control::exec::run(
                     crate::control::spec::ResolvedCommand::AskOrchestrator {
@@ -47,13 +47,13 @@ pub(crate) fn run_command(
                     state.note_ping(destination);
                 }
                 outcome
-            }),
+            })(),
             None,
         ),
         // Same shape as `Ask`: pick the target the text did not name, then
         // run like any other command.
         command::Resolution::RunFlow(name) => (
-            cx.update(|cx| {
+            (|| {
                 let lane = crate::control::exec::first_lane_offering(&name, cx)?;
                 crate::control::exec::run(
                     crate::control::spec::ResolvedCommand::Flow(
@@ -61,30 +61,36 @@ pub(crate) fn run_command(
                     ),
                     cx,
                 )
-            }),
+            })(),
             None,
         ),
         command::Resolution::StartTask(task) => (start_task(task, cx), None),
         // Answered once the cancel is in the task log, so a listing sent
         // right after the reply no longer shows the task running.
         command::Resolution::StopTask(task) => {
+            let started = crate::control::exec::run_waiting(
+                crate::control::spec::ResolvedCommand::TaskStop { task },
+                cx,
+            );
+            let deferred = match started {
+                crate::control::exec::Dispatch::Ready(outcome) => {
+                    return render_reply(&outcome, None, target, cx)
+                        .map_or(super::Effect::None, super::Effect::Reply);
+                }
+                crate::control::exec::Dispatch::Deferred { outcome, .. } => outcome,
+            };
             let target = target.clone();
             return super::Effect::Later(cx.spawn(async move |cx| {
-                let outcome = crate::control::exec::stop_task(task, cx).await;
+                let outcome = deferred.recv().await.ok().flatten()?;
                 cx.update(|cx| render_reply(&outcome, None, &target, cx))
             }));
         }
-        command::Resolution::OpenTask(task) => (
-            cx.update(|cx| crate::control::exec::open_task(task, cx)),
-            None,
-        ),
-        command::Resolution::Run(resolved, addressed) => (
-            cx.update(|cx| crate::control::exec::run(resolved, cx)),
-            addressed,
-        ),
+        command::Resolution::OpenTask(task) => (crate::control::exec::open_task(task, cx), None),
+        command::Resolution::Run(resolved, addressed) => {
+            (crate::control::exec::run(resolved, cx), addressed)
+        }
     };
-    cx.update(|cx| render_reply(&outcome, addressed, target, cx))
-        .map_or(super::Effect::None, super::Effect::Reply)
+    render_reply(&outcome, addressed, target, cx).map_or(super::Effect::None, super::Effect::Reply)
 }
 
 fn render_reply(
@@ -101,9 +107,9 @@ fn render_reply(
 /// Start a task for the phone. The reply says whether it was accepted; once
 /// git and the agent are up, the outcome follows as its own message — a
 /// chat announced as the new target, or a notice.
-fn start_task(task: String, cx: &mut gpui::AsyncApp) -> ControlOutcome {
-    let pending = cx.update(|cx| crate::control::exec::begin_task_start(task, cx))?;
-    if let Some(outcome) = cx.update(|cx| pending.try_finish(cx)) {
+fn start_task(task: String, cx: &mut App) -> ControlOutcome {
+    let pending = crate::control::exec::begin_task_start(task, cx)?;
+    if let Some(outcome) = pending.try_finish(cx) {
         return outcome;
     }
     let accepted = ControlResult::TaskStarting {

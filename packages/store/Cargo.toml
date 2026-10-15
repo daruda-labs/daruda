@@ -26,7 +26,7 @@ uuid = { workspace = true, features = ["v4", "serde"] }
 zip = { version = "9", default-features = false, features = ["deflate"] }
 
 [dev-dependencies]
-# The machine-law and crash harness for `TaskMachine`.
+# The machine-law and crash harness for `TaskMachine` and `InboxMachine`.
 daruda_runlog = { workspace = true, features = ["test-support"] }
 insta = "1"
 tempfile = { workspace = true }

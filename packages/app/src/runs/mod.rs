@@ -8,6 +8,7 @@
 mod cli;
 mod delivery;
 mod effects;
+mod inbox;
 mod intent;
 #[cfg(any(test, feature = "screenshot"))]
 pub(crate) mod seed;

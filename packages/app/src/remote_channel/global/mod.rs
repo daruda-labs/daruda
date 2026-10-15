@@ -2,8 +2,7 @@
 
 use super::bridge::{ApprovalPrompt, BridgePing, MessageTail, Outbound, PaneRef, RoutingCore};
 use super::pairing::Pairing;
-use super::runtime::{self, Status, Worker, WorkerEvent};
-use super::transport::Credentials;
+use super::runtime::{self, BotSession, Status, Worker, WorkerEvent};
 use crate::settings_store::SettingsStore;
 use crate::surface::strings as s;
 use daruda_config::remote::ChannelConfig;
@@ -21,16 +20,21 @@ pub struct Connection {
     pub generation: uuid::Uuid,
     pub core: RoutingCore<String>,
     pub status: Status,
-    pub credentials: Option<Arc<Credentials>>,
+    pub bot: Option<Arc<BotSession>>,
     pairing: Option<Pairing>,
-    _worker: Option<Worker>,
+    worker: WorkerState,
+}
+
+enum WorkerState {
+    Idle,
+    Running { _worker: Worker },
+    UpdatingCredential { pending: usize },
 }
 
 pub struct RemoteChannels {
     pub(crate) connections: HashMap<String, Connection>,
     events: UnboundedSender<WorkerEvent>,
     outbound: UnboundedSender<Pending>,
-    state: daruda_store::remote_channels::RemoteChannelState,
     applied: Option<Vec<ChannelConfig>>,
 }
 
@@ -54,7 +58,17 @@ impl Connection {
     /// them only after taking the bot, so a connection that has never held it
     /// cannot send on the strength of its starting status.
     pub(crate) fn can_send(&self) -> bool {
-        self.credentials.is_some() && self.config.recipient.is_some() && self.status.holds_claim()
+        self.bot.as_ref().is_some_and(|bot| bot.is_live())
+            && self.config.recipient.is_some()
+            && self.status.holds_claim()
+    }
+}
+
+impl Drop for Connection {
+    fn drop(&mut self) {
+        if let Some(bot) = &self.bot {
+            bot.revoke();
+        }
     }
 }
 
@@ -177,9 +191,18 @@ impl RemoteChannels {
         if !connection.can_send() {
             return false;
         }
+        let Some((bot, recipient)) = connection
+            .bot
+            .clone()
+            .zip(connection.config.recipient.clone())
+        else {
+            return false;
+        };
         let result = self.outbound.unbounded_send(Pending {
             id: connection.config.id.clone(),
             generation: connection.generation,
+            bot,
+            recipient,
             outbound,
         });
         if let Err(error) = &result {
@@ -212,10 +235,19 @@ impl RemoteChannels {
             let Some(connection) = bridge.connections.get_mut(&key) else {
                 continue;
             };
+            let Some((bot, recipient)) = connection
+                .bot
+                .clone()
+                .zip(connection.config.recipient.clone())
+            else {
+                continue;
+            };
             let (allow, refuse) = connection.core.record_pending_approval(id);
             let pending = Pending {
                 id: key,
                 generation: connection.generation,
+                bot,
+                recipient,
                 outbound: Outbound::Approval(ApprovalPrompt {
                     summary: summary.clone(),
                     buttons: [
@@ -261,9 +293,46 @@ impl RemoteChannels {
             return;
         }
         let bridge = cx.global_mut::<Self>();
+        if let Some(connection) = bridge.connections.get_mut(id)
+            && let WorkerState::UpdatingCredential { pending } = &mut connection.worker
+            && *pending > 1
+        {
+            *pending -= 1;
+            return;
+        }
         bridge.connections.remove(id);
         bridge.applied = None;
         reconcile(cx);
+    }
+
+    pub(crate) fn suspend(config: ChannelConfig, cx: &mut App) {
+        if !cx.has_global::<Self>() {
+            return;
+        }
+        let bridge = cx.global_mut::<Self>();
+        let connection = bridge
+            .connections
+            .entry(config.id.clone())
+            .or_insert_with(|| Connection {
+                config: config.clone(),
+                generation: uuid::Uuid::new_v4(),
+                core: RoutingCore::default(),
+                status: Status::Connecting,
+                bot: None,
+                pairing: None,
+                worker: WorkerState::Idle,
+            });
+        connection.generation = uuid::Uuid::new_v4();
+        connection.config = config;
+        if let Some(bot) = connection.bot.take() {
+            bot.revoke();
+        }
+        let pending = match connection.worker {
+            WorkerState::UpdatingCredential { pending } => pending + 1,
+            WorkerState::Idle | WorkerState::Running { .. } => 1,
+        };
+        connection.worker = WorkerState::UpdatingCredential { pending };
+        connection.status = Status::Connecting;
     }
 }
 
@@ -273,18 +342,10 @@ pub fn install(cx: &mut App) {
     }
     let (events, incoming) = unbounded();
     let (outbound, outgoing) = unbounded();
-    let state = if cfg!(test) {
-        Default::default()
-    } else {
-        daruda_store::remote_channels::RemoteChannelState::load_in(
-            &daruda_store::persistence::default_data_dir(),
-        )
-    };
     cx.set_global(RemoteChannels {
         connections: HashMap::new(),
         events,
         outbound,
-        state,
         applied: None,
     });
     inbound::spawn(incoming, cx);
@@ -304,7 +365,9 @@ pub(crate) fn reconcile(cx: &mut App) {
     }
     bridge.applied = Some(config.remote.channels.clone());
     if let Err(error) = config.remote.validate() {
-        bridge.connections.clear();
+        bridge.connections.retain(|_, connection| {
+            matches!(connection.worker, WorkerState::UpdatingCredential { .. })
+        });
         super::log_error(
             "Invalid remote channel configuration",
             &error,
@@ -312,18 +375,17 @@ pub(crate) fn reconcile(cx: &mut App) {
         );
         return;
     }
-    bridge
-        .connections
-        .retain(|id, _| config.remote.channels.iter().any(|c| c.id == *id));
-    bridge.state.retain_channels(
-        &config
-            .remote
-            .channels
-            .iter()
-            .map(|c| c.id.clone())
-            .collect::<Vec<_>>(),
-    );
+    bridge.connections.retain(|id, connection| {
+        matches!(connection.worker, WorkerState::UpdatingCredential { .. })
+            || config.remote.channels.iter().any(|c| c.id == *id)
+    });
     for config in &config.remote.channels {
+        if let Some(connection) = bridge.connections.get_mut(&config.id)
+            && matches!(connection.worker, WorkerState::UpdatingCredential { .. })
+        {
+            connection.config = config.clone();
+            continue;
+        }
         if let Some(connection) = bridge.connections.get_mut(&config.id)
             && connection.config.kind == config.kind
             && connection.config.enabled == config.enabled
@@ -343,18 +405,18 @@ pub(crate) fn reconcile(cx: &mut App) {
         let generation = uuid::Uuid::new_v4();
         let worker = if config.enabled && !cfg!(test) {
             match runtime::start(config.clone(), generation, bridge.events.clone()) {
-                Ok(worker) => Some(worker),
+                Ok(worker) => WorkerState::Running { _worker: worker },
                 Err(error) => {
                     super::log_error(
                         "Remote gateway worker could not start",
                         &error,
                         "remote.worker.start",
                     );
-                    None
+                    WorkerState::Idle
                 }
             }
         } else {
-            None
+            WorkerState::Idle
         };
         let status = if config.enabled {
             Status::Connecting
@@ -368,9 +430,9 @@ pub(crate) fn reconcile(cx: &mut App) {
                 generation,
                 core: RoutingCore::default(),
                 status,
-                credentials: None,
+                bot: None,
                 pairing: None,
-                _worker: worker,
+                worker,
             },
         );
     }

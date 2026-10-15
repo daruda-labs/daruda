@@ -183,3 +183,17 @@ pub fn flow_lock_root() -> PathBuf {
 pub fn remote_lock_root() -> PathBuf {
     StorageLayout::current().remote_locks()
 }
+
+/// A bot's durable command claims beside its shared connection lock.
+/// Unlike profile state, this history follows the external bot across
+/// profiles. `bot` is the lock's opaque digest, never its credential.
+/// Resolving the path creates nothing and honors `DARUDA_DATA_DIR`.
+pub fn inbox_dir(bot: &str) -> std::io::Result<PathBuf> {
+    StorageLayout::current().inbox(bot)
+}
+
+/// Profile-scoped attribution of the legacy Telegram cursor to its first bot.
+/// This is source migration metadata, unlike the shared per-bot claim history.
+pub fn telegram_inbox_migration_dir() -> PathBuf {
+    StorageLayout::current().telegram_inbox_migration()
+}

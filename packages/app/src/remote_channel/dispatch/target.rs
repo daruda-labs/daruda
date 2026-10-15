@@ -46,20 +46,27 @@ pub(crate) fn compose_edit_body(original_text: &str, label: &str) -> String {
 /// caller (`inject_bot_reply` returns `false`, `respond_bot_permission`
 /// returns `Gone`), which then answers the phone rather than going quiet.
 pub(crate) fn dispatch_to_workspace(
-    cx: &mut gpui::AsyncApp,
+    cx: &mut gpui::App,
     workspace: daruda_store::project::WorkspaceUuid,
     mut on_match: impl FnMut(&mut Workspace, &mut gpui::Context<Workspace>),
 ) {
-    cx.update(|cx| {
-        WindowRegistry::for_each_workspace(cx, |ws, _window, cx| {
-            if ws.uuid() == workspace {
-                on_match(ws, cx);
-            }
-        });
+    WindowRegistry::for_each_workspace(cx, |ws, _window, cx| {
+        if ws.uuid() == workspace {
+            on_match(ws, cx);
+        }
     });
 }
 
-/// What [`aim`] settled: the action to carry out, and whether the target in
+#[cfg(test)]
+fn dispatch_to_workspace_async(
+    cx: &mut gpui::AsyncApp,
+    workspace: daruda_store::project::WorkspaceUuid,
+    on_match: impl FnMut(&mut Workspace, &mut gpui::Context<Workspace>),
+) {
+    cx.update(|cx| dispatch_to_workspace(cx, workspace, on_match));
+}
+
+/// What [`aim_in_app`] settled: the action to carry out, and whether the target in
 /// it was the message's own or one this layer had to supply.
 ///
 /// The second half is not a detail of how the answer was reached. A message
@@ -69,7 +76,7 @@ pub(crate) fn dispatch_to_workspace(
 /// so out loud.
 pub(crate) struct Aimed {
     pub action: InboundAction,
-    /// The pane [`aim`] supplied because nothing named one. `None` when the
+    /// The pane [`aim_in_app`] supplied because nothing named one. `None` when the
     /// message, the selection, or a prior ping already did.
     pub adopted: Option<PaneRef>,
 }
@@ -92,7 +99,7 @@ impl Aimed {
     }
 }
 
-/// Name the chat [`aim`] lent a message, for the answer that tells the sender
+/// Name the chat [`aim_in_app`] lent a message, for the answer that tells the sender
 /// where it went.
 ///
 /// Read from the pane rather than the ordinal table on purpose: a sender who
@@ -101,7 +108,7 @@ impl Aimed {
 /// already answering with a target-gone reply of its own.
 pub(crate) fn lent_target_reply(
     pane: PaneRef,
-    cx: &mut gpui::AsyncApp,
+    cx: &mut gpui::App,
 ) -> Option<crate::remote_channel::command::RenderedReply> {
     let mut label = None;
     dispatch_to_workspace(cx, pane.workspace, |ws, cx| {
@@ -134,12 +141,17 @@ pub(crate) fn lent_target_reply(
 /// is not one the sender did. Without one, both become their terminal answer,
 /// and the message body they were carrying is recorded as lost here rather
 /// than dropped by whichever arm happened to receive it.
+#[cfg(test)]
 pub(crate) fn aim(routed: Routed, cx: &mut gpui::AsyncApp) -> Aimed {
+    cx.update(|cx| aim_in_app(routed, cx))
+}
+
+pub(crate) fn aim_in_app(routed: Routed, cx: &mut gpui::App) -> Aimed {
     let unaimed = match routed {
         Routed::Ready(action) => return Aimed::named(action),
         Routed::NeedsTarget(unaimed) => unaimed,
     };
-    match (cx.update(control_resolve::sole_active_agent_chat), unaimed) {
+    match (control_resolve::sole_active_agent_chat(cx), unaimed) {
         (Some(pane), Unaimed::Text { text }) => {
             trace::delivery("target.fallback", || {
                 format!("pane={} kind=text", trace::pane(pane))
@@ -240,12 +252,12 @@ mod tests {
         let mut async_cx = cx.to_async();
 
         let mut reached = Vec::new();
-        dispatch_to_workspace(&mut async_cx, target_uuid, |ws, _| reached.push(ws.uuid()));
+        dispatch_to_workspace_async(&mut async_cx, target_uuid, |ws, _| reached.push(ws.uuid()));
         assert_eq!(reached, [target_uuid], "exactly the named window, once");
 
         reached.clear();
         let closed = daruda_store::project::WorkspaceUuid::new();
-        dispatch_to_workspace(&mut async_cx, closed, |ws, _| reached.push(ws.uuid()));
+        dispatch_to_workspace_async(&mut async_cx, closed, |ws, _| reached.push(ws.uuid()));
         assert!(
             reached.is_empty(),
             "a window that is not open is reached by nothing"

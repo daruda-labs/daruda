@@ -3,13 +3,116 @@ use crate::remote_channel::{
     self,
     dispatch::{self, Edit, Effect},
     pairing::pair_code,
-    runtime::{WorkerEvent, WorkerPayload},
+    runtime::{BotSession, WorkerEvent, WorkerPayload, channel_key},
     transport::{self, IncomingKind, Message},
 };
 use crate::settings_store::SettingsStore;
 use crate::surface::strings as s;
 use futures::{StreamExt, channel::mpsc::UnboundedReceiver};
 use gpui::App;
+use std::sync::Arc;
+
+fn live_session(id: &str, generation: uuid::Uuid, bot: &Arc<BotSession>, cx: &App) -> bool {
+    bot.is_live()
+        && cx
+            .global::<RemoteChannels>()
+            .live(id, cx)
+            .is_some_and(|connection| {
+                connection.generation == generation
+                    && connection
+                        .bot
+                        .as_ref()
+                        .is_some_and(|current| Arc::ptr_eq(current, bot))
+            })
+}
+
+async fn claim_incoming(
+    id: &str,
+    generation: uuid::Uuid,
+    event_id: &str,
+    cx: &mut gpui::AsyncApp,
+) -> Option<Arc<BotSession>> {
+    let (bot, config) = cx.update(|cx| {
+        let connection = cx.global::<RemoteChannels>().live(id, cx)?;
+        let bot = connection.bot.clone()?;
+        (connection.generation == generation && bot.is_live())
+            .then(|| (bot, connection.config.clone()))
+    })?;
+    let claimed = crate::runs::RunsHost::claim_inbound(
+        &bot.inbox,
+        channel_key(config.kind),
+        daruda_store::inbox::InboxId::Opaque(event_id.into()),
+    );
+    finish_claim(id, generation, bot, config, claimed, cx).await
+}
+
+async fn finish_claim(
+    id: &str,
+    generation: uuid::Uuid,
+    bot: Arc<BotSession>,
+    config: daruda_config::remote::ChannelConfig,
+    claimed: impl Future<
+        Output = Result<
+            daruda_store::inbox::Committed<daruda_store::inbox::InboxMachine>,
+            daruda_store::inbox::CommitError<daruda_store::inbox::InboxRejected>,
+        >,
+    >,
+    cx: &mut gpui::AsyncApp,
+) -> Option<Arc<BotSession>> {
+    let claimed = claimed.await;
+    match claimed {
+        Ok(_) => {}
+        Err(daruda_store::inbox::CommitError::Rejected(
+            daruda_store::inbox::InboxRejected::Duplicate { .. },
+        )) => return None,
+        Err(error) => {
+            remote_channel::log_error("Remote command claim failed", &error, "remote.inbox.claim");
+            return None;
+        }
+    }
+    cx.update(|cx| {
+        (live_session(id, generation, &bot, cx)
+            && cx
+                .global::<RemoteChannels>()
+                .live(id, cx)
+                .is_some_and(|connection| connection.config == config))
+        .then_some(bot)
+    })
+}
+
+fn dispatch_claimed(
+    id: &str,
+    generation: uuid::Uuid,
+    bot: &Arc<BotSession>,
+    incoming: &transport::Incoming,
+    cx: &mut App,
+) -> Option<Effect> {
+    if !live_session(id, generation, bot, cx) {
+        return None;
+    }
+    let connection = cx.global::<RemoteChannels>().live(id, cx)?;
+    if !connection.config.accepts(&incoming.sender) {
+        return None;
+    }
+    let connection = cx.global_mut::<RemoteChannels>().connections.get_mut(id)?;
+    let routed = match &incoming.kind {
+        IncomingKind::Message { text, reply_to } => {
+            let text = text
+                .strip_prefix('!')
+                .map_or_else(|| text.clone(), |command| format!("/{command}"));
+            connection.core.route_text(text, reply_to.clone())
+        }
+        IncomingKind::Callback { data, .. } => crate::remote_channel::bridge::Routed::Ready(
+            connection.core.route_callback(data.clone()),
+        ),
+    };
+    let aimed = dispatch::target::aim_in_app(routed, cx);
+    Some(dispatch::handle_in_app(
+        aimed,
+        &dispatch::Target::Remote(id.into()),
+        cx,
+    ))
+}
 
 pub(super) fn spawn(mut receiver: UnboundedReceiver<WorkerEvent>, cx: &mut App) {
     cx.spawn(async move |cx| {
@@ -24,39 +127,58 @@ pub(super) fn spawn(mut receiver: UnboundedReceiver<WorkerEvent>, cx: &mut App) 
             let incoming = match event.payload {
                 WorkerPayload::Status(status) => {
                     cx.update(|cx| {
+                        if !cx
+                            .global::<RemoteChannels>()
+                            .live(&event.id, cx)
+                            .is_some_and(|connection| connection.generation == event.generation)
+                        {
+                            return;
+                        }
                         if let Some(connection) = cx
                             .global_mut::<RemoteChannels>()
                             .connections
                             .get_mut(&event.id)
                         {
                             connection.status = status;
+                            if !status.holds_claim()
+                                && let Some(bot) = connection.bot.take()
+                            {
+                                bot.revoke();
+                            }
                         }
                     });
                     continue;
                 }
-                WorkerPayload::Credentials(credentials) => {
+                WorkerPayload::Ready(bot) => {
                     cx.update(|cx| {
+                        if !cx
+                            .global::<RemoteChannels>()
+                            .live(&event.id, cx)
+                            .is_some_and(|connection| connection.generation == event.generation)
+                        {
+                            return;
+                        }
                         if let Some(connection) = cx
                             .global_mut::<RemoteChannels>()
                             .connections
                             .get_mut(&event.id)
                         {
-                            connection.credentials = Some(credentials);
+                            connection.bot = Some(bot);
                         }
                     });
                     continue;
                 }
                 WorkerPayload::Incoming(incoming) => incoming,
             };
-            let duplicate = cx.update(|cx| {
-                cx.global::<RemoteChannels>()
-                    .state
-                    .contains(&event.id, &incoming.event_id)
-            });
-            if duplicate {
+            let Some(bot) =
+                claim_incoming(&event.id, event.generation, &incoming.event_id, cx).await
+            else {
                 continue;
-            }
+            };
             let pairing = cx.update(|cx| {
+                if !live_session(&event.id, event.generation, &bot, cx) {
+                    return None;
+                }
                 let connection = cx
                     .global_mut::<RemoteChannels>()
                     .connections
@@ -71,13 +193,14 @@ pub(super) fn spawn(mut receiver: UnboundedReceiver<WorkerEvent>, cx: &mut App) 
                     .pairing
                     .as_mut()
                     .is_some_and(|pairing| pairing.matches(text));
-                matched
-                    .then(|| (connection.config.kind, connection.credentials.clone()))
-                    .and_then(|(kind, credentials)| Some((kind, credentials?)))
+                matched.then_some(connection.config.kind)
             });
-            if let Some((kind, credentials)) = pairing {
+            if let Some(kind) = pairing {
                 let recipient = incoming.sender.clone();
                 let persisted = cx.update(|cx| {
+                    if !live_session(&event.id, event.generation, &bot, cx) {
+                        return false;
+                    }
                     let mut channels = SettingsStore::global(cx).user().remote.channels.clone();
                     let Some(channel) = channels.iter_mut().find(|channel| channel.id == event.id)
                     else {
@@ -109,9 +232,9 @@ pub(super) fn spawn(mut receiver: UnboundedReceiver<WorkerEvent>, cx: &mut App) 
                     let message = Message::plain(s::remote_channel::pair_success(), None);
                     let result = cx
                         .background_executor()
-                        .spawn(
-                            async move { transport::send(kind, &credentials, &recipient, message) },
-                        )
+                        .spawn(async move {
+                            transport::send(kind, &bot.credentials, &recipient, message)
+                        })
                         .await;
                     if let Err(error) = result {
                         remote_channel::log_error(
@@ -121,7 +244,6 @@ pub(super) fn spawn(mut receiver: UnboundedReceiver<WorkerEvent>, cx: &mut App) 
                         );
                     }
                 }
-                remember(cx, &event.id, incoming.event_id).await;
                 continue;
             }
             // Every pairing attempt stops here, matched or not. A gateway
@@ -130,55 +252,29 @@ pub(super) fn spawn(mut receiver: UnboundedReceiver<WorkerEvent>, cx: &mut App) 
             if let IncomingKind::Message { text, .. } = &incoming.kind
                 && pair_code(text).is_some()
             {
-                remember(cx, &event.id, incoming.event_id).await;
                 continue;
             }
-            let routed = cx.update(|cx| {
-                let bridge = cx.global::<RemoteChannels>();
-                let connection = bridge.live(&event.id, cx)?;
-                if !connection.config.accepts(&incoming.sender) {
-                    return None;
-                }
-                let connection = cx
-                    .global_mut::<RemoteChannels>()
-                    .connections
-                    .get_mut(&event.id)?;
-                Some(match &incoming.kind {
-                    IncomingKind::Message { text, reply_to } => {
-                        let text = text
-                            .strip_prefix('!')
-                            .map_or_else(|| text.clone(), |command| format!("/{command}"));
-                        connection.core.route_text(text, reply_to.clone())
-                    }
-                    IncomingKind::Callback { data, .. } => {
-                        crate::remote_channel::bridge::Routed::Ready(
-                            connection.core.route_callback(data.clone()),
-                        )
-                    }
-                })
-            });
-            let Some(routed) = routed else {
+            let effect =
+                cx.update(|cx| dispatch_claimed(&event.id, event.generation, &bot, &incoming, cx));
+            let Some(effect) = effect else {
                 continue;
             };
-            let action = dispatch::target::aim(routed, cx);
-            let effect = dispatch::handle(action, &dispatch::Target::Remote(event.id.clone()), cx)
-                .settled()
-                .await;
-            // Executed effects are remembered before sending their feedback; a
-            // failed send must not re-run a command.
-            remember(cx, &event.id, incoming.event_id).await;
+            let effect = effect.settled().await;
             let delivery = cx.update(|cx| {
+                if !live_session(&event.id, event.generation, &bot, cx) {
+                    return None;
+                }
                 let connection = cx.global::<RemoteChannels>().live(&event.id, cx)?;
                 if connection.generation != event.generation {
                     return None;
                 }
                 Some((
                     connection.config.kind,
-                    connection.credentials.clone()?,
+                    bot.clone(),
                     connection.config.recipient.clone()?,
                 ))
             });
-            let Some((kind, credentials, recipient)) = delivery else {
+            let Some((kind, bot, recipient)) = delivery else {
                 continue;
             };
             let result = cx
@@ -187,7 +283,7 @@ pub(super) fn spawn(mut receiver: UnboundedReceiver<WorkerEvent>, cx: &mut App) 
                     match feedback_for(effect, incoming.kind) {
                         Feedback::Nothing => Ok(()),
                         Feedback::Send(message) => {
-                            transport::send(kind, &credentials, &recipient, message).map(|_| ())
+                            transport::send(kind, &bot.credentials, &recipient, message).map(|_| ())
                         }
                         Feedback::Edit {
                             message_id,
@@ -195,7 +291,7 @@ pub(super) fn spawn(mut receiver: UnboundedReceiver<WorkerEvent>, cx: &mut App) 
                             label,
                         } => transport::edit(
                             kind,
-                            &credentials,
+                            &bot.credentials,
                             &recipient,
                             &message_id,
                             &original,
@@ -214,26 +310,6 @@ pub(super) fn spawn(mut receiver: UnboundedReceiver<WorkerEvent>, cx: &mut App) 
         }
     })
     .detach();
-}
-
-/// Remember one handled event so a gateway redelivery cannot run it twice.
-async fn remember(cx: &mut gpui::AsyncApp, id: &str, event_id: String) {
-    let state = cx.update(|cx| {
-        let bridge = cx.global_mut::<RemoteChannels>();
-        bridge.state.record(id, event_id);
-        bridge.state.clone()
-    });
-    let persisted = cx
-        .background_executor()
-        .spawn(async move { state.save_in(&daruda_store::persistence::default_data_dir()) })
-        .await;
-    if let Err(error) = persisted {
-        remote_channel::log_error(
-            "Remote event history failed to persist",
-            &error,
-            "remote.history.persist",
-        );
-    }
 }
 
 /// What one handled effect owes the sender.

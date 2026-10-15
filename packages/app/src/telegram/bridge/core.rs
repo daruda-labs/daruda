@@ -66,10 +66,8 @@ pub struct BridgeCore {
 
 impl BridgeCore {
     /// Constructs the routing core from `TelegramConfig`'s persisted
-    /// settings — called at startup and again on config reload.
-    /// `update_offset` is seeded from the persisted high-water mark so a
-    /// restart does not re-deliver, and re-run, a command that was already
-    /// processed.
+    /// settings. The poll loop refreshes `update_offset` from the durable
+    /// inbox's committed watermark before fetching the next batch.
     pub fn new(enabled: bool, authorized_chat_id: Option<i64>, update_offset: i64) -> Self {
         Self {
             enabled,
@@ -101,18 +99,8 @@ impl BridgeCore {
     /// for the pairing-success path — this setter is for the poll
     /// loop's per-iteration config resync (`global.rs`).
     ///
-    /// Known asymmetry: pairing (`route()`'s `Paired` branch) takes
-    /// effect immediately, in-process, the instant a `/pair` message
-    /// is routed. Revocation via this setter does not have the same
-    /// immediacy — `global.rs`'s poll loop only calls this at the TOP
-    /// of each loop iteration, before starting the next `get_updates`
-    /// long-poll, so it only runs once the PREVIOUS iteration's
-    /// blocking `get_updates` call returns. An unpair click in
-    /// Settings can therefore lag by up to `POLL_TIMEOUT_SECS` (~25-30s)
-    /// before it actually stops this `BridgeCore` from routing updates
-    /// for the revoked chat. This is accepted as low-risk for this
-    /// feature's scope (pairing/unpairing is a rare, deliberate action)
-    /// — do not assume revocation is as immediate as pairing.
+    /// The adapter also checks live Settings before claiming and dispatching
+    /// each update, so a stale poll snapshot cannot authorize revoked chats.
     pub fn set_authorized_chat_id(&mut self, chat_id: Option<i64>) {
         self.authorized_chat_id = chat_id;
     }
@@ -121,6 +109,10 @@ impl BridgeCore {
     /// `client::get_updates` call.
     pub fn current_offset(&self) -> i64 {
         self.update_offset
+    }
+
+    pub(crate) fn set_offset(&mut self, offset: i64) {
+        self.update_offset = offset;
     }
 
     /// Generates a fresh 6-character uppercase hex pairing code,
@@ -148,7 +140,7 @@ impl BridgeCore {
     ///    regardless of the resulting action — otherwise the phone
     ///    shows a stuck loading spinner on the tapped button.
     pub fn route(&mut self, update: Update) -> RouteResult {
-        self.update_offset = self.update_offset.max(update.update_id + 1);
+        self.update_offset = self.update_offset.max(update.update_id.saturating_add(1));
 
         // Handled before the `enabled` gate, and before anything else: the
         // offset advanced above, which is the entire reason an update the

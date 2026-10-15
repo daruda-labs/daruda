@@ -5,3 +5,6 @@ disallowed-methods = [
     { path = "dirs::data_local_dir", reason = "bypasses storage policy — OS roots are discovered only in daruda_core::path::directories" },
     { path = "dirs::state_dir", reason = "bypasses storage policy — OS roots are discovered only in daruda_core::path::directories" },
 ]
+
+# `inbox_dir` deliberately shares the external bot's lock namespace: durable
+# command claims must survive profile handoffs, not follow local channel config.

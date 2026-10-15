@@ -5,6 +5,7 @@ mod accounts_persistence;
 mod agent_vocabulary;
 mod diagnostics;
 mod error_report;
+mod inbox;
 mod lane;
 mod log_writer;
 mod marks;

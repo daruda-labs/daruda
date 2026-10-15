@@ -8,15 +8,11 @@
 //!
 //! Everything here is `pub(super)`: the poll loop is the only caller.
 
-use daruda_store::observability::error_report::{ErrorReport, ErrorSeverity};
-use daruda_store::observability::log_writer::LogWriter;
-use daruda_store::persistence;
-
-use super::TelegramBridge;
-use crate::settings_store::SettingsStore;
 use crate::telegram::client;
 use crate::telegram::command;
 use crate::telegram::trace;
+use daruda_store::observability::error_report::{ErrorReport, ErrorSeverity};
+use daruda_store::observability::log_writer::LogWriter;
 
 /// How long one "unauthorized inbound" line suppresses the next.
 ///
@@ -57,71 +53,15 @@ pub(super) fn log_unauthorized_inbound() {
     );
 }
 
-/// Write the routing core's high-water mark to its state file.
-///
-/// Deliberately not a `SettingsPatch`: mutating the `SettingsStore` global
-/// notifies app-wide observers that rebuild the native menu bar and call
-/// `cx.refresh_windows()`, which the root `AGENTS.md` (pitfall 10) reserves for
-/// genuinely global invalidation — driving it at message rate is exactly the
-/// ban. See `daruda_store::telegram` for why `config.toml` is also the wrong
-/// file to keep this in.
-///
-/// Guarded on a real change so an idle long-poll, which returns nothing every
-/// [`super::POLL_TIMEOUT_SECS`], does not rewrite the file.
-pub(super) fn persist_offset(cx: &mut gpui::AsyncApp) {
-    let offset = cx.update(|cx| {
-        let bridge = cx.global_mut::<TelegramBridge>();
-        let offset = bridge.core.current_offset();
-        (bridge.persisted_offset != offset).then(|| {
-            bridge.persisted_offset = offset;
-            offset
-        })
-    });
-    let Some(offset) = offset else {
-        return;
-    };
-    trace::state("offset", || format!("persisted={offset}"));
-    let state = daruda_store::telegram::TelegramState {
-        update_offset: offset,
-    };
-    if let Err(e) =
-        daruda_store::telegram::save_telegram_state_in(&persistence::default_data_dir(), &state)
-    {
-        LogWriter::log(
-            ErrorReport::new("Telegram update offset failed to persist")
-                .severity(ErrorSeverity::Info)
-                .from_error(&e)
-                .at(file!(), line!())
-                .dedup("telegram.offset.persist")
-                .build(),
-        );
-    }
-}
-
 /// Send a command reply. Deliberately does NOT call `record_sent`: that moves
 /// the conversation, so a `/list` answer would silently become the next plain
 /// message's destination.
 pub(super) async fn send_command_reply(
     cx: &mut gpui::AsyncApp,
     token: &str,
+    chat_id: i64,
     reply: command::RenderedReply,
 ) {
-    // Addressed from live config, not from `BridgeCore`'s copy: that copy is
-    // only resynced at the top of a poll iteration, so a reply composed just
-    // before an unpair could otherwise still be sent to the revoked chat.
-    let chat_id = cx.update(|cx| {
-        let cfg = SettingsStore::global(cx).user_arc();
-        cfg.telegram
-            .enabled
-            .then_some(cfg.telegram.authorized_chat_id)
-            .flatten()
-    });
-    let Some(chat_id) = chat_id else {
-        trace::delivery("reply.dropped", || {
-            format!("reason=gate text={}", trace::preview(&reply.text))
-        });
-        return;
-    };
     let text = trace::is_on().then(|| trace::preview(&reply.text));
     let buttons: usize = reply
         .keyboard

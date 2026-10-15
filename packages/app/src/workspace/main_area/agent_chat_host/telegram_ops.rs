@@ -535,15 +535,18 @@ impl Workspace {
                 trace::tail_digest(&tail)
             )
         });
-        bridge.send(crate::telegram::bridge::BridgePing {
-            pane: crate::telegram::bridge::PaneRef {
-                workspace: self.uuid(),
-                pane: pane_id,
+        bridge.send(
+            crate::telegram::bridge::BridgePing {
+                pane: crate::telegram::bridge::PaneRef {
+                    workspace: self.uuid(),
+                    pane: pane_id,
+                },
+                header,
+                tail,
+                permission,
             },
-            header,
-            tail,
-            permission,
-        });
+            cx,
+        );
     }
 
     /// The live bridge, or `None` when nothing may be sent — the feature is
@@ -580,7 +583,7 @@ impl Workspace {
             });
             return;
         };
-        bridge.send_notice(text);
+        bridge.send_notice(text, cx);
     }
 
     /// Relay an unsolicited, pane-less notice under each channel's presence
@@ -615,7 +618,7 @@ impl Workspace {
             });
             return;
         }
-        bridge.send_notice(text);
+        bridge.send_notice(text, cx);
     }
 
     /// The ping a turn that ended in an error sends: the usual who-is-this

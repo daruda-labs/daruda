@@ -117,6 +117,37 @@ impl StorageLayout {
         self.shared.join("remote-locks")
     }
 
+    pub(crate) fn inbox(&self, bot: &str) -> std::io::Result<PathBuf> {
+        Self::inbox_at(&self.remote_locks(), bot)
+    }
+
+    pub(crate) fn inbox_at(remote_locks: &Path, bot: &str) -> std::io::Result<PathBuf> {
+        Self::validate_bot(bot)?;
+        Ok(remote_locks.join(format!("bot-{bot}")).join("inbox"))
+    }
+
+    pub(crate) fn validate_bot(bot: &str) -> std::io::Result<()> {
+        if bot.len() != 32
+            || !bot
+                .bytes()
+                .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+        {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                "a bot identity must be a 32-character lowercase hexadecimal digest",
+            ));
+        }
+        Ok(())
+    }
+
+    pub(crate) fn telegram_inbox_migration(&self) -> PathBuf {
+        Self::telegram_inbox_migration_at(&self.data)
+    }
+
+    pub(crate) fn telegram_inbox_migration_at(data: &Path) -> PathBuf {
+        data.join("telegram-inbox-migration")
+    }
+
     pub(crate) fn logs(&self) -> Option<PathBuf> {
         self.logs.clone()
     }

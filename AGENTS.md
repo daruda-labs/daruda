@@ -162,9 +162,12 @@ The deliberate shared-resource exceptions are:
 | `node_install_dir()` | One pinned runtime has identical bytes across profiles. |
 | `flow_lock_root()` | All profiles must share the mutex on the user's working tree. |
 | `remote_lock_root()` | All profiles must share the claim on the same bot account. |
+| `inbox_dir()` | Durable command claims follow that shared bot across profile handoffs. |
 
 An application-state record is profile-scoped; a claim on an external resource
-must exclude competing profiles. New exceptions require documented reasoning
+must exclude competing profiles. Inbox history is part of the bot's claim,
+not a profile's channel configuration: removing local config must not erase it.
+New exceptions require documented reasoning
 and the corresponding `clippy.toml` allowance. Review credential service names
 manually: path-literal checks do not detect a hardcoded Keychain identifier.
 Detailed contracts and enforcement: [Store](packages/store/AGENTS.md).

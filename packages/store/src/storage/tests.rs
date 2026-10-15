@@ -28,6 +28,30 @@ fn data_and_resource_locations_remain_backward_compatible() {
 }
 
 #[test]
+fn inbox_history_follows_the_bot_lock_across_profiles() {
+    let bot = "0123456789abcdef0123456789abcdef";
+    let release = layout("release", None);
+    let debug = layout("debug", None);
+    assert_eq!(release.inbox(bot).unwrap(), debug.inbox(bot).unwrap());
+    assert_ne!(
+        release.telegram_inbox_migration(),
+        debug.telegram_inbox_migration()
+    );
+    assert_eq!(
+        release.inbox(bot).unwrap(),
+        release.remote_locks().join(format!("bot-{bot}/inbox"))
+    );
+    let isolated = layout("debug", Some("isolated".into()));
+    assert_eq!(
+        isolated.inbox(bot).unwrap(),
+        isolated.remote_locks().join(format!("bot-{bot}/inbox"))
+    );
+    for invalid in ["", "../escape", "/absolute", "UPPERCASE", "bot-token"] {
+        assert!(release.inbox(invalid).is_err());
+    }
+}
+
+#[test]
 fn override_contains_all_logs_without_reading_default_logs() {
     for profile in ["release", "debug", "preview"] {
         let storage = layout(profile, Some("portable".into()));

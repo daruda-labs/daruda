@@ -131,16 +131,6 @@ pub(crate) fn run(cmd: ResolvedCommand, cx: &mut App) -> ControlOutcome {
     }
 }
 
-/// Cancel `task` and answer once the cancel is in the task log, so the
-/// caller's next listing no longer shows it running.
-pub(crate) async fn stop_task(task: String, cx: &mut gpui::AsyncApp) -> ControlOutcome {
-    let pending = cx.update(|cx| {
-        in_task_window(&task, cx, |ws, _window, cx| ws.control_task_stop(&task, cx))
-    })?;
-    pending.await?;
-    Ok(ControlResult::TaskStopped { task })
-}
-
 /// Every task, grouped by project — by name, the projects no window has
 /// open last — and newest first within one.
 fn task_list(cx: &mut App) -> Vec<TaskEntry> {

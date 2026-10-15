@@ -20,7 +20,7 @@ use crate::workspace::flow_paths;
 /// subprocess — one `run_until_parked` only proves gpui has nothing left to
 /// do, not that `true` has exited, and under a loaded test machine it has not.
 fn outcome_reaches_the_phone(
-    outbound: &mut futures::channel::mpsc::UnboundedReceiver<crate::telegram::bridge::Outbound>,
+    outbound: &mut crate::telegram::global::TestOutbox,
     cx: &mut TestAppContext,
 ) -> Option<crate::telegram::bridge::Outbound> {
     // The engine runs on a thread of its own and wakes this app from it,

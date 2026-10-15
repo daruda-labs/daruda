@@ -12,6 +12,10 @@ use std::sync::{
 };
 use std::time::Duration;
 
+mod session;
+use session::SessionOwner;
+pub(crate) use session::{BotSession, channel_key};
+
 const RETRY_DELAY: Duration = Duration::from_secs(30);
 const CANCEL_CHECK: Duration = Duration::from_millis(250);
 
@@ -49,7 +53,7 @@ pub struct WorkerEvent {
 }
 
 pub enum WorkerPayload {
-    Credentials(Arc<Credentials>),
+    Ready(Arc<BotSession>),
     Status(Status),
     Incoming(Incoming),
 }
@@ -85,6 +89,8 @@ pub fn start(
                         .is_ok()
             };
             let lock_root = daruda_store::persistence::remote_lock_root();
+            let data = daruda_store::persistence::default_data_dir();
+            let mut serving: Option<SessionOwner> = None;
             let mut gateway = transport::discord::Gateway::default();
             while !cancelled.load(Ordering::Relaxed) {
                 let service = keychain::channel_service(&config.id);
@@ -97,6 +103,7 @@ pub fn start(
                         Arc::new(Credentials { bot, app })
                     }
                     _ => {
+                        serving = None;
                         if !emit(WorkerPayload::Status(Status::MissingCredentials)) {
                             return;
                         }
@@ -104,21 +111,74 @@ pub fn start(
                         continue;
                     }
                 };
-                // One daruda per bot, or Slack splits the user's replies
-                // between whichever sockets happen to be open. Asked every
-                // iteration rather than once at startup, so the claim is
-                // picked up when the holder quits.
-                let claim = lock::claim(&lock_root, &credentials.bot);
-                if !claim.serves() {
-                    if !emit(WorkerPayload::Status(Status::HeldElsewhere)) {
-                        return;
-                    }
-                    wait(&cancelled);
-                    continue;
+                let unchanged = serving.as_ref().is_some_and(|owner| {
+                    owner.0.is_live()
+                        && owner.0.credentials.bot == credentials.bot
+                        && owner.0.credentials.app == credentials.app
+                });
+                if !unchanged {
+                    let inbox = serving
+                        .as_ref()
+                        .filter(|owner| owner.0.credentials.bot == credentials.bot)
+                        .map(|owner| owner.0.inbox.clone());
+                    serving = None;
+                    let inbox = match inbox {
+                        Some(inbox) => inbox,
+                        None => match lock::claim(&lock_root, &credentials.bot) {
+                            lock::Claim::Ours { _lock: lease, .. } => {
+                                let seed = || {
+                                    daruda_store::inbox::migrate::remote(
+                                        &data,
+                                        &config.id,
+                                        channel_key(config.kind),
+                                    )
+                                };
+                                match daruda_store::inbox::InboxStore::open(
+                                    lease,
+                                    env!("CARGO_PKG_VERSION"),
+                                    seed,
+                                ) {
+                                    Ok(inbox) => Arc::new(inbox),
+                                    Err(error) => {
+                                        super::log_error(
+                                            "Remote inbox could not open",
+                                            &error,
+                                            "remote.inbox.open",
+                                        );
+                                        if !emit(WorkerPayload::Status(Status::Failed)) {
+                                            return;
+                                        }
+                                        wait(&cancelled);
+                                        continue;
+                                    }
+                                }
+                            }
+                            claim => {
+                                let status = if matches!(claim, lock::Claim::Theirs) {
+                                    Status::HeldElsewhere
+                                } else {
+                                    Status::Failed
+                                };
+                                if !emit(WorkerPayload::Status(status)) {
+                                    return;
+                                }
+                                wait(&cancelled);
+                                continue;
+                            }
+                        },
+                    };
+                    serving = Some(SessionOwner(Arc::new(BotSession::new(
+                        credentials.clone(),
+                        inbox,
+                        cancelled.clone(),
+                    ))));
                 }
-                // Published after the claim, never before: the foreground
-                // reads their presence as proof this process holds the bot.
-                if !emit(WorkerPayload::Credentials(credentials.clone()))
+                let session = serving
+                    .as_ref()
+                    .expect("a ready worker owns its bot")
+                    .0
+                    .clone();
+                if !emit(WorkerPayload::Ready(session))
                     || !emit(WorkerPayload::Status(Status::Connecting))
                 {
                     return;
@@ -167,11 +227,7 @@ pub fn start(
                 if !emit(WorkerPayload::Status(Status::Retrying)) {
                     return;
                 }
-                // Held across the wait, not just the session: `Retrying` still
-                // sends over HTTP, and a bot let go here is one another daruda
-                // can take while this one keeps talking into it.
                 wait(&cancelled);
-                drop(claim);
             }
         })?;
     Ok(Worker { stop })

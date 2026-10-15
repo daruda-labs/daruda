@@ -1,7 +1,8 @@
 use super::RemoteChannels;
 use crate::remote_channel::{
     bridge::{InlineKeyboard, Outbound, PaneRef},
-    transport::{self, Credentials, Message},
+    runtime::BotSession,
+    transport::{self, Message},
 };
 use daruda_config::remote::{ChannelKind, RemoteRecipient};
 use futures::{
@@ -14,12 +15,14 @@ use std::{collections::HashMap, sync::Arc};
 pub(crate) struct Pending {
     pub id: String,
     pub generation: uuid::Uuid,
+    pub bot: Arc<BotSession>,
+    pub recipient: RemoteRecipient,
     pub outbound: Outbound,
 }
 
 pub(super) struct Prepared {
     kind: ChannelKind,
-    credentials: Arc<Credentials>,
+    bot: Arc<BotSession>,
     recipient: RemoteRecipient,
     message: Message,
     pane: Option<PaneRef>,
@@ -27,12 +30,17 @@ pub(super) struct Prepared {
 
 pub(super) fn prepare(pending: &Pending, cx: &mut App) -> Option<Prepared> {
     let connection = cx.global::<RemoteChannels>().live(&pending.id, cx)?;
-    if connection.generation != pending.generation || !connection.can_send() {
+    if connection.generation != pending.generation
+        || !connection.can_send()
+        || connection.config.recipient.as_ref() != Some(&pending.recipient)
+        || !connection
+            .bot
+            .as_ref()
+            .is_some_and(|bot| Arc::ptr_eq(bot, &pending.bot))
+    {
         return None;
     }
-    let recipient = connection.config.recipient.clone()?;
     let kind = connection.config.kind;
-    let credentials = connection.credentials.clone()?;
     let connection = cx
         .global_mut::<RemoteChannels>()
         .connections
@@ -53,8 +61,8 @@ pub(super) fn prepare(pending: &Pending, cx: &mut App) -> Option<Prepared> {
     };
     Some(Prepared {
         kind,
-        credentials,
-        recipient,
+        bot: pending.bot.clone(),
+        recipient: pending.recipient.clone(),
         message,
         pane,
     })
@@ -93,9 +101,12 @@ fn spawn_connection(mut receiver: UnboundedReceiver<Pending>, cx: &mut App) {
                 .background_executor()
                 .spawn(async move {
                     let mut sent = Vec::new();
+                    if !prepared.bot.is_live() {
+                        return (sent, Ok(Vec::new()));
+                    }
                     let result = transport::send_recording(
                         prepared.kind,
-                        &prepared.credentials,
+                        &prepared.bot.credentials,
                         &prepared.recipient,
                         prepared.message,
                         |id| sent.push(id.to_owned()),
@@ -111,6 +122,10 @@ fn spawn_connection(mut receiver: UnboundedReceiver<Pending>, cx: &mut App) {
                     .connections
                     .get_mut(&pending.id)
                     && connection.generation == pending.generation
+                    && connection
+                        .bot
+                        .as_ref()
+                        .is_some_and(|bot| Arc::ptr_eq(bot, &pending.bot))
                     && let Some(pane) = pane
                 {
                     for id in ids {
