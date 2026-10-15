@@ -1965,6 +1965,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "daruda_runlog"
+version = "0.2.18"
+dependencies = [
+ "daruda_core",
+ "daruda_runlog",
+ "serde",
+ "serde_json",
+ "sha2 0.11.1",
+ "tempfile",
+ "thiserror 2.0.21",
+]
+
+[[package]]
 name = "daruda_settings"
 version = "0.2.18"
 dependencies = [

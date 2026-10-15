@@ -1,0 +1,31 @@
+[package]
+name = "daruda_runlog"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish = false
+license.workspace = true
+description = "Append-only, event-sourced run log that restores consistently after a crash (GPUI-free)"
+
+[lints]
+workspace = true
+
+[features]
+# The fault-injecting backend and the machine/crash harness, for the tests of
+# every crate that implements a `Machine`. Never a shipping default.
+test-support = []
+
+[dependencies]
+daruda_core = { workspace = true }
+serde = { workspace = true }
+# `raw_value` lets a snapshot's checksum cover the exact state bytes on disk:
+# re-serializing a parsed value can reorder map keys.
+serde_json = { workspace = true, features = ["raw_value"] }
+sha2 = { workspace = true }
+thiserror = { workspace = true }
+
+[dev-dependencies]
+# The public-API tests in `tests/it` drive the harness; enabling the feature
+# here keeps them running under a plain `cargo test`.
+daruda_runlog = { path = ".", features = ["test-support"] }
+tempfile = { workspace = true }

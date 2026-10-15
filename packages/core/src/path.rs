@@ -126,6 +126,24 @@ pub fn open_owner_only(
     }
 }
 
+/// Flush `dir`'s entries, so a rename or a new file inside it survives a
+/// power cut.
+///
+/// Windows: a no-op. A directory handle needs `GENERIC_WRITE` and
+/// `FILE_FLAG_BACKUP_SEMANTICS`, and Microsoft does not document that flushing
+/// it persists a rename; callers must stay correct without directory durability.
+pub fn sync_dir(dir: &Path) -> io::Result<()> {
+    #[cfg(unix)]
+    {
+        std::fs::File::open(dir)?.sync_all()
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = dir;
+        Ok(())
+    }
+}
+
 /// Create `link` pointing at `target`, which need not exist yet.
 ///
 /// Windows fixes file-or-directory at creation and cannot change its mind, so
@@ -193,5 +211,14 @@ mod tests {
 
         let mode = std::fs::metadata(&dir).unwrap().permissions().mode();
         assert_eq!(mode & 0o777, OWNER_ONLY_DIR);
+    }
+
+    #[test]
+    fn syncing_a_directory_succeeds_and_a_missing_one_fails() {
+        let temp = tempfile::tempdir().unwrap();
+        std::fs::write(temp.path().join("entry"), b"x").unwrap();
+
+        sync_dir(temp.path()).unwrap();
+        assert!(sync_dir(&temp.path().join("missing")).is_err());
     }
 }

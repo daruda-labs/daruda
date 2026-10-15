@@ -17,7 +17,7 @@ packages=(
     ghostty_vt ghostty_vt_sys daruda_terminal daruda daruda_config
     daruda_store daruda_agent daruda_update daruda_acp daruda_core
     daruda_flow daruda_project daruda_ui daruda_control_types daruda_content
-    daruda_flow_edit daruda_transcript daruda_chat daruda_settings ferrum_flow vendor_gpui test_process strings_gen
+    daruda_flow_edit daruda_transcript daruda_chat daruda_settings daruda_runlog ferrum_flow vendor_gpui test_process strings_gen
 )
 
 case "$gate" in
@@ -29,7 +29,7 @@ case "$gate" in
     doc)
         command=(cargo doc --locked "$@" --no-deps)
         packages=(daruda_flow daruda_project daruda_ui daruda_control_types daruda_content
-            daruda_flow_edit daruda_transcript daruda_chat daruda_settings daruda_core daruda_update ghostty_vt_sys ghostty_vt daruda_agent)
+            daruda_flow_edit daruda_transcript daruda_chat daruda_settings daruda_runlog daruda_core daruda_update ghostty_vt_sys ghostty_vt daruda_agent)
         export RUSTDOCFLAGS="${RUSTDOCFLAGS:+$RUSTDOCFLAGS }-D warnings"
         ;;
     *) echo "Unknown Cargo gate: $gate" >&2; exit 2 ;;

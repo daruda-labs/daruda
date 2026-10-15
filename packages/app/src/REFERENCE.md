@@ -209,6 +209,7 @@ daruda (app)  →  daruda_terminal  →  ghostty_vt  →  ghostty_vt_sys
              →  gpui, gpui_component, merman, portable-pty
 
 gpui_component  →  daruda_core                         # vendored; shares the text primitives
+daruda_runlog   →  daruda_core                         # GPUI-free run log; no dependents yet
 ```
 
 The app can reach every package; GPUI-free packages cannot reach the app.

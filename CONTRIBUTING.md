@@ -749,6 +749,7 @@ daruda/
 │   ├── flow/                   # daruda_flow: declarative ACP flow engine
 │   ├── flow-edit/              # daruda_flow_edit: source-preserving flow-file edits
 │   ├── project/                # daruda_project: runtime Project/Lane model, git ops
+│   ├── runlog/                 # daruda_runlog: crash-consistent event-sourced run log
 │   ├── store/                  # daruda_store: persistence and observability
 │   ├── terminal/               # daruda_terminal: terminal emulation, GPUI rendering
 │   ├── transcript/             # daruda_transcript: transcript presentation model + editors

@@ -49,6 +49,7 @@ daruda_core = { path = "packages/core" }
 daruda_flow = { path = "packages/flow" }
 daruda_flow_edit = { path = "packages/flow-edit" }
 daruda_project = { path = "packages/project" }
+daruda_runlog = { path = "packages/runlog" }
 daruda_settings = { path = "packages/settings" }
 daruda_store = { path = "packages/store" }
 daruda_terminal = { path = "packages/terminal" }
