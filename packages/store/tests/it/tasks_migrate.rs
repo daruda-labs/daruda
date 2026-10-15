@@ -3,13 +3,15 @@
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
-use daruda_runlog::{AfterCommit, Body, CatchUp, Machine as _};
+use daruda_runlog::{AfterCommit, Body, CatchUp, CommitError, Machine as _};
 use daruda_store::project::ProjectUuid;
-use daruda_store::tasks::machine::{ErrorCause, InterruptCause, Lifecycle, TaskMachine, TasksBook};
+use daruda_store::tasks::machine::{
+    ErrorCause, InterruptCause, Lifecycle, TaskMachine, TaskRejected, TasksBook,
+};
 use daruda_store::tasks::migrate::LEGACY_EXECUTION_ID;
 use daruda_store::tasks::{
-    ExecutionRef, SessionEndReason, SubTask, Task, TaskExecution, TaskState, TaskStore, TasksState,
-    save_tasks_in, tasks_path_in,
+    ExecutionRef, SessionEndReason, SubTask, Task, TaskEvent, TaskExecution, TaskState, TaskStore,
+    TasksState, save_tasks_in, tasks_path_in,
 };
 
 const BUILD: &str = "daruda_store-test";
@@ -106,6 +108,14 @@ fn a_v2_tasks_file_imports_once_and_running_becomes_interrupted() {
     let (book, events) = contents(&store);
     assert_eq!(events, 1, "one Imported event");
     assert_eq!(book.len(), legacy.tasks.len());
+    for record in book.records() {
+        if record.lifecycle == Lifecycle::Backlog {
+            assert!(record.execution.is_none(), "backlog carries no execution");
+        }
+        if record.lifecycle.is_terminal() {
+            assert!(record.session_ids.is_empty(), "terminal row has sessions");
+        }
+    }
 
     let by_title = |title: &str| {
         book.records()
@@ -130,7 +140,10 @@ fn a_v2_tasks_file_imports_once_and_running_becomes_interrupted() {
         }
     );
     assert_eq!(imported.execution, running.execution);
-    assert_eq!(imported.session_ids, running.session_ids);
+    assert!(
+        imported.session_ids.is_empty(),
+        "a finished row has no live sessions"
+    );
     assert_eq!(imported.subtasks, running.subtasks);
     assert_eq!(imported.spec.notes, "keep me");
     assert_eq!(imported.spec.created_at, running.created_at);
@@ -239,4 +252,101 @@ fn no_legacy_directory_opens_an_empty_store() {
     let logs = tempfile::tempdir().unwrap();
     let store = TaskStore::in_directory(logs.path(), None, BUILD, no_hook()).unwrap();
     assert_eq!(contents(&store).1, 0);
+}
+
+fn imported_book(legacy: &TasksState) -> (TaskStore, TasksBook) {
+    let (logs, data) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
+    save_tasks_in(data.path(), legacy).unwrap();
+    let store = open(logs.path(), data.path());
+    let book = contents(&store).0;
+    // The tempdirs must outlive the store's use; leak them to the process.
+    std::mem::forget((logs, data));
+    (store, book)
+}
+
+fn run_of(session: &str) -> TaskExecution {
+    let mut run = TaskExecution::begin(Default::default(), "claude".into(), None, wt("a"));
+    run.session_id = Some(session.into());
+    run
+}
+
+#[test]
+fn an_imported_backlog_row_carries_no_execution() {
+    let mut backlog = legacy_task("backlog", TaskState::Backlog);
+    backlog.execution = Some(run_of("s1"));
+    let (_store, book) = imported_book(&TasksState {
+        tasks: vec![backlog],
+        ..TasksState::default()
+    });
+    let record = book.records().next().unwrap();
+    assert_eq!(record.lifecycle, Lifecycle::Backlog);
+    assert_eq!(record.execution, None);
+}
+
+#[test]
+fn an_imported_finished_row_has_no_live_sessions() {
+    let mut done = legacy_task(
+        "done",
+        TaskState::Done {
+            worktree_path: wt("b"),
+            end_reason: SessionEndReason::Stop,
+        },
+    );
+    done.execution = Some(run_of("s1"));
+    done.session_ids = vec!["s1".into()];
+    let mut running = legacy_task(
+        "running",
+        TaskState::Running {
+            worktree_path: wt("a"),
+        },
+    );
+    running.execution = Some(run_of("s2"));
+    running.session_ids = vec!["s2".into()];
+    let (_store, book) = imported_book(&TasksState {
+        tasks: vec![done.clone(), running.clone()],
+        ..TasksState::default()
+    });
+    for (task, kind) in [(&done, "done"), (&running, "interrupted")] {
+        let record = book.get(&task.id).unwrap();
+        assert!(record.session_ids.is_empty(), "{kind} keeps no sessions");
+        assert_eq!(
+            record.execution, task.execution,
+            "{kind} keeps its execution"
+        );
+    }
+    assert!(matches!(
+        book.get(&running.id).unwrap().lifecycle,
+        Lifecycle::Interrupted { .. }
+    ));
+}
+
+#[test]
+fn todo_merge_into_an_imported_finished_row_is_rejected() {
+    let mut done = legacy_task(
+        "done",
+        TaskState::Done {
+            worktree_path: wt("b"),
+            end_reason: SessionEndReason::Stop,
+        },
+    );
+    done.session_ids = vec!["s1".into()];
+    let id = done.id.clone();
+    let (store, _book) = imported_book(&TasksState {
+        tasks: vec![done],
+        ..TasksState::default()
+    });
+    let merge = TaskEvent::TodoMerged {
+        id,
+        session_id: "s1".into(),
+        items: Vec::new(),
+        at: chrono::Utc::now(),
+    };
+    let outcome = smol::block_on(store.propose(merge));
+    assert!(
+        matches!(
+            outcome,
+            Err(CommitError::Rejected(TaskRejected::UnknownSession { .. }))
+        ),
+        "a finished row owns no session to merge from"
+    );
 }

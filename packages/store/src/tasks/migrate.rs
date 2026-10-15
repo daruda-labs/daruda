@@ -2,7 +2,9 @@
 
 use std::collections::HashSet;
 
-use super::machine::{ErrorCause, InterruptCause, Lifecycle, TaskEvent, TaskRecord, TaskSpec};
+use super::machine::{
+    ErrorCause, InterruptCause, Lifecycle, LifecycleKind, TaskEvent, TaskRecord, TaskSpec,
+};
 use super::{ExecutionRef, Task, TaskState, TasksState};
 
 /// The execution id given to a finished legacy row that recorded none, so
@@ -64,6 +66,19 @@ fn migrate_task(task: &Task) -> TaskRecord {
             worktree: Some(worktree_path.clone()),
         },
     };
+    // The machine never produces a Backlog row with an execution or a
+    // terminal row with live sessions; importing either would let events
+    // (e.g. `TodoMerged`) act on a run that is over.
+    let execution = if lifecycle.kind() == LifecycleKind::Backlog {
+        None
+    } else {
+        task.execution.clone()
+    };
+    let session_ids = if lifecycle.is_terminal() {
+        Vec::new()
+    } else {
+        task.session_ids.clone()
+    };
     TaskRecord {
         spec: TaskSpec {
             id: task.id.clone(),
@@ -80,8 +95,8 @@ fn migrate_task(task: &Task) -> TaskRecord {
             created_at: task.created_at,
         },
         lifecycle,
-        execution: task.execution.clone(),
-        session_ids: task.session_ids.clone(),
+        execution,
+        session_ids,
         subtasks: task.subtasks.clone(),
         updated_at: task.updated_at,
         finished_at: task.finished_at,
