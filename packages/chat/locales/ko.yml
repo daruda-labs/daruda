@@ -1,4 +1,5 @@
 agent_chat:
+  collapse_card: "접기"
   compaction_running: "컨텍스트 압축 중"
   compaction_completed: "컨텍스트 압축 완료"
   compaction_failed: "컨텍스트 압축 실패"
@@ -8,8 +9,6 @@ agent_chat:
   compaction_source: "세션: %{session}"
   compaction_child: "하위 에이전트: %{name}"
   compaction_child_unknown: "하위 에이전트"
-  compaction_show_full: "전체 요약 보기"
-  compaction_show_preview: "미리보기로 돌아가기"
   close: "닫기"
   edit: "편집"
   read: "읽기"

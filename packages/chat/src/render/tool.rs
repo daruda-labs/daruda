@@ -449,7 +449,7 @@ pub(super) fn tool_card(
         body.into_any_element()
     };
 
-    let block = FoldRow::block(
+    let block = FoldRow::card(
         SharedString::from(format!("agent-chat-tool-{}", tc.id)),
         key,
         expanded,
@@ -459,29 +459,13 @@ pub(super) fn tool_card(
     .toggle_on_chevron()
     .render(dim, cx);
 
-    // Card chrome (border + bg) wraps the fold assembly.
-    div()
-        .w_full()
-        .px(px(theme::AGENT_CHAT_INPUT_INNER_PAD_X))
-        .py(px(theme::AGENT_CHAT_INPUT_INNER_PAD_Y))
-        .rounded(px(theme::AGENT_CHAT_INPUT_RADIUS))
-        // Background-derived tint (not a fixed surface): a translucent lift
-        // over the pane background so the card sits one step above it on any
-        // background color / theme / opacity. Border is the same overlay one
-        // step stronger, so the edge tracks the background too.
-        .bg(theme::dim_toward_gray(theme::agent_chat_tint(cx), dim))
-        .border_1()
-        // A failed tool call gets an error-tinted dashed border so it reads as
-        // failed at a glance, not just via the badge (mirrors zed's dashed
-        // failure card). `t.banner_error_text` is already dimmed (t is the
-        // dimmed theme); the normal border tint is a global-read, so it is
-        // dim-wrapped here.
-        .border_color(if failed {
-            t.banner_error_text
-        } else {
-            theme::dim_toward_gray(theme::agent_chat_border_tint(cx), dim)
-        })
-        .when(failed, |d| d.border_dashed())
+    let tone = if failed {
+        super::card_frame::CardTone::Error
+    } else {
+        super::card_frame::CardTone::Standard
+    };
+    super::card_frame::CardFrame::new(tone)
+        .render(dim, cx)
         .child(block)
 }
 

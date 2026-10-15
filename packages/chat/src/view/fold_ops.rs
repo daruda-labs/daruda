@@ -11,34 +11,41 @@ use super::super::rows::tail::{StepWindow, TailLevel, TailWindow};
 use super::super::rows::{collect_foldable_keys, item_row};
 use super::super::window_access::WindowAccess;
 use super::AgentChatView;
-use super::list_sync::ListSync;
+use super::list_sync::{CollapseAnchor, ListSync};
 use daruda_transcript::fold_mode::{FoldMode, FoldPreset, TurnPosition};
 
 impl AgentChatView {
-    pub(crate) fn toggle_compaction_summary(&mut self, ix: usize, cx: &mut Context<Self>) {
-        if !matches!(
-            self.items.get(ix),
-            Some(daruda_acp::ChatItem::Compaction(_))
-        ) {
+    /// Collapse from a card footer and recover its owning transcript row.
+    pub(crate) fn collapse_card(
+        &mut self,
+        key: FoldKey,
+        anchor: CollapseAnchor,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let context = fold_context(&key, &self.items, &self.live_units);
+        if !self.fold.is_expanded(&key, context) {
             return;
         }
-        self.fold.toggle_compaction_summary(ix);
-        if let Some(row) = item_row(&self.rows, ix) {
-            self.apply_list_sync(ListSync::Rows(row..row + 1), "compaction-summary");
+        let item = fold_key_item_index(&key, &self.items);
+        let row_top = item
+            .and_then(|ix| item_row(&self.rows, ix))
+            .and_then(|row| self.list_state.bounds_for_item(row))
+            .map(|bounds| bounds.origin.y);
+        let offset = anchor.offset_to_reveal(row_top, self.list_state.viewport_bounds().origin.y);
+        self.set_fold_expanded(key, false, window, cx);
+        if let Some(row) = item.and_then(|ix| item_row(&self.rows, ix))
+            && let Some(offset_in_item) = offset
+            && self.list_state.logical_scroll_top().item_ix >= row
+        {
+            self.list_state.scroll_to(gpui::ListOffset {
+                item_ix: row,
+                offset_in_item,
+            });
         }
-        cx.notify();
     }
 
-    /// Put `key` in a known state instead of flipping whatever it is in.
-    ///
-    /// `toggle_fold` reads the *visible* state, so a capture that toggles
-    /// blindly shoots the inverse whenever a user's fold matrix already put the
-    /// block the other way — and a screenshot has no way to report that it did.
-    /// Reads the same source `toggle_fold` reads, so it is exact rather than a
-    /// guess about the configured default.
-    /// Put a context-window reading on the bar, as the first `UsageUpdate`
-    /// would — the meter sits beside the View trigger, and a seeded transcript
-    /// carries no session to report one.
+    /// Seed the context meter for a transcript without a live session.
     #[cfg(feature = "screenshot")]
     pub fn seed_usage_for_shot(&mut self, cx: &mut Context<Self>) {
         self.session_usage = Some(daruda_acp::UsageView {
@@ -50,6 +57,7 @@ impl AgentChatView {
         cx.notify();
     }
 
+    /// Set a deterministic capture state independent of the configured defaults.
     #[cfg(feature = "screenshot")]
     pub fn set_fold_for_shot(
         &mut self,
@@ -58,13 +66,7 @@ impl AgentChatView {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if self
-            .fold
-            .is_expanded(&key, fold_context(&key, &self.items, &self.live_units))
-            != expanded
-        {
-            self.toggle_fold(key, window, cx);
-        }
+        self.set_fold_expanded(key, expanded, window, cx);
     }
 
     pub(crate) fn toggle_fold(
@@ -73,18 +75,25 @@ impl AgentChatView {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        // Resolve the context via the shared `fold_context` — the same source
-        // `rows::project` uses to derive the default collapsed state — so the
-        // first click flips the *visible* state rather than a stale re-derivation.
+        let context = fold_context(&key, &self.items, &self.live_units);
+        let expanded = !self.fold.is_expanded(&key, context);
+        self.set_fold_expanded(key, expanded, window, cx);
+    }
+
+    pub(crate) fn set_fold_expanded(
+        &mut self,
+        key: FoldKey,
+        expanded: bool,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        // Projection and user actions resolve the same effective defaults.
         let ctx = fold_context(&key, &self.items, &self.live_units);
-        // Resolve before the key moves into `fold.toggle` below: a nested fold
-        // (a tool card's own body, one of its diffs, its raw-input disclosure,
-        // or a nested subagent card) only changes its *owning row's* rendered
-        // height in place — no `RenderRow::hidden` flip anywhere — so
-        // `rebuild_rows`'s hidden-range diff can't see it and falls back to
-        // remeasuring the tail, leaving that row's cached height stale (content
-        // clips or overlaps the next row). Remeasure it explicitly whenever we
-        // can resolve which row owns the toggled key.
+        if !self.fold.set_expanded(key.clone(), expanded, ctx) {
+            return;
+        }
+        // Nested folds change their owning row's height without flipping any
+        // row's hidden flag. Name that row so remeasurement cannot miss it.
         let item_ix = fold_key_item_index(&key, &self.items);
         // A card's own fold decides whether its body — and so its embed editors —
         // is on screen at all. Narrow the follow-up reconcile to that card;
@@ -114,7 +123,6 @@ impl AgentChatView {
             | FoldKey::SubagentTail(_)
             | FoldKey::ToolRawInput(_) => None,
         };
-        self.fold.toggle(key, ctx);
         let reconciled = embed_scope.is_some();
         if let Some(scope) = embed_scope {
             self.reconcile_embeds_after_fold(&scope, &mut WindowAccess::Live(window), cx);

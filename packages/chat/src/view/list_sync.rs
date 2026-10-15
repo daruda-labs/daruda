@@ -16,6 +16,30 @@ use std::ops::Range;
 
 use super::AgentChatView;
 
+/// Header geometry captured in window coordinates, before its card collapses.
+#[derive(Clone, Copy, Default)]
+pub(crate) enum CollapseAnchor {
+    #[default]
+    Unmeasured,
+    WindowTop(gpui::Pixels),
+}
+
+impl CollapseAnchor {
+    /// Only an off-screen header needs navigation; nested cards retain their
+    /// offset within the owning list row instead of jumping to their parent.
+    pub(crate) fn offset_to_reveal(
+        self,
+        row_top: Option<gpui::Pixels>,
+        viewport_top: gpui::Pixels,
+    ) -> Option<gpui::Pixels> {
+        match self {
+            Self::WindowTop(top) if top >= viewport_top => None,
+            Self::WindowTop(top) => Some((top - row_top.unwrap_or(top)).max(gpui::px(0.))),
+            Self::Unmeasured => Some(gpui::px(0.)),
+        }
+    }
+}
+
 /// The change a mutation made, in the terms the list needs.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) enum ListSync {
@@ -76,6 +100,23 @@ impl AgentChatView {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn collapse_anchor_keeps_nested_offset_and_leaves_visible_headers_alone() {
+        use gpui::px;
+        assert_eq!(
+            CollapseAnchor::WindowTop(px(-200.)).offset_to_reveal(Some(px(-500.)), px(50.)),
+            Some(px(300.))
+        );
+        assert_eq!(
+            CollapseAnchor::WindowTop(px(80.)).offset_to_reveal(Some(px(-500.)), px(50.)),
+            None
+        );
+        assert_eq!(
+            CollapseAnchor::Unmeasured.offset_to_reveal(None, px(50.)),
+            Some(px(0.))
+        );
+    }
 
     /// The three cases are distinct values, so a caller cannot express "rows
     /// changed" and get the layout anchor by accident.

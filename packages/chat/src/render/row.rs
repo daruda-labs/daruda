@@ -285,7 +285,6 @@ fn render_item(
                 item,
                 key,
                 expanded,
-                fold.compaction_summary_is_full(ix),
                 super::compaction::source_label(item, items, session_id),
                 assets,
                 t,

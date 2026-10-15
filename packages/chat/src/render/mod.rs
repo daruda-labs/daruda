@@ -7,6 +7,7 @@
 mod axis_chip;
 mod bars;
 mod blocks;
+mod card_frame;
 mod chrome;
 mod compaction;
 mod diff;

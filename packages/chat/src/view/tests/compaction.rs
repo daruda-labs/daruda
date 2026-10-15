@@ -1,4 +1,5 @@
 use super::*;
+use crate::view::list_sync::CollapseAnchor;
 use daruda_acp::{AcpEvent, ChatItem, CompactionStatusView};
 use serde_json::json;
 
@@ -147,62 +148,51 @@ fn compaction_does_not_create_a_second_response_or_conclusion(cx: &mut gpui::Tes
 }
 
 #[gpui::test]
-fn expanded_summary_has_a_bounded_scrollbar_over_the_shipped_body(cx: &mut gpui::TestAppContext) {
+fn compaction_expands_without_a_height_cap_and_footer_recovers_header(
+    cx: &mut gpui::TestAppContext,
+) {
     let window = make_test_view(cx);
-    let cap = window
+    window
         .update(cx, |view, window, cx| {
             let mut value = update("completed");
             value["summary"] =
-                json!([{"type":"text", "text":"Retained paragraph.\n\n".repeat(200)}]);
+                json!([{"type":"text", "text":"Retained paragraph.\n\n".repeat(40)}]);
             view.apply_event(event("root", value), "", false, cx);
             view.toggle_fold(crate::fold::FoldKey::Compaction(0), window, cx);
-            view.toggle_compaction_summary(0, cx);
-            daruda_ui::theme::agent_chat_font_size(cx)
-                * daruda_ui::theme::MD_VIEW_LINE_HEIGHT
-                * daruda_ui::theme::AGENT_CHAT_EMBED_MAX_ROWS as f32
         })
         .unwrap();
     let mut visual = gpui::VisualTestContext::from_window(window.into(), cx);
     visual.run_until_parked();
-    let wrapper = visual
-        .debug_bounds("agent-chat-compaction-summary-0-wrapper")
+    let body = visual
+        .debug_bounds("agent-chat-compaction-summary-0")
         .expect("summary painted");
-    let bar = visual
-        .debug_bounds("agent-chat-compaction-summary-0-scrollbar-layer")
-        .expect("scrollbar painted");
-    assert!(wrapper.size.height > gpui::px(0.));
-    assert!(wrapper.size.height <= gpui::px(cap));
-    assert_eq!(bar, wrapper, "scrollbar stays inside the summary region");
-}
-
-#[gpui::test]
-fn preview_is_bounded_without_an_inner_scrollbar(cx: &mut gpui::TestAppContext) {
-    let window = make_test_view(cx);
-    let cap = window
-        .update(cx, |view, window, cx| {
-            let mut value = update("completed");
-            value["summary"] =
-                json!([{"type":"text", "text":"Retained paragraph.\n\n".repeat(200)}]);
-            view.apply_event(event("root", value), "", false, cx);
-            view.toggle_fold(crate::fold::FoldKey::Compaction(0), window, cx);
-            daruda_ui::theme::agent_chat_font_size(cx)
-                * daruda_ui::theme::MD_VIEW_LINE_HEIGHT
-                * daruda_ui::theme::AGENT_CHAT_COMPACTION_PREVIEW_ROWS as f32
+    assert!(body.size.height > gpui::px(800.));
+    window
+        .update(&mut visual, |view, window, cx| {
+            let key = crate::fold::FoldKey::Compaction(0);
+            let row = crate::rows::item_row(&view.rows, 0).unwrap();
+            view.list_state.scroll_to(gpui::ListOffset {
+                item_ix: row,
+                offset_in_item: gpui::px(600.),
+            });
+            view.collapse_card(key.clone(), CollapseAnchor::Unmeasured, window, cx);
+            assert!(
+                !view
+                    .fold
+                    .is_expanded(&key, crate::fold::FoldContext::last(false))
+            );
+            assert_eq!(
+                view.list_state.logical_scroll_top().offset_in_item,
+                gpui::px(0.)
+            );
+            view.collapse_card(key.clone(), CollapseAnchor::Unmeasured, window, cx);
+            assert!(
+                !view
+                    .fold
+                    .is_expanded(&key, crate::fold::FoldContext::last(false))
+            );
         })
         .unwrap();
-    let mut visual = gpui::VisualTestContext::from_window(window.into(), cx);
-    visual.run_until_parked();
-    let preview = visual
-        .debug_bounds("agent-chat-compaction-preview-0")
-        .expect("preview painted");
-    assert!(preview.size.height > gpui::px(0.));
-    // GPUI snaps the fractional line budget to physical pixel edges.
-    assert!(preview.size.height <= gpui::px(cap.ceil()));
-    assert!(
-        visual
-            .debug_bounds("agent-chat-compaction-summary-0-scrollbar-layer")
-            .is_none()
-    );
 }
 
 #[gpui::test]
@@ -231,4 +221,45 @@ fn failure_without_summary_is_passive_and_shows_its_reason(cx: &mut gpui::TestAp
             .debug_bounds("agent-chat-compaction-error-0")
             .is_some()
     );
+}
+
+#[gpui::test]
+fn compaction_footer_click_recovers_the_rendered_header(cx: &mut gpui::TestAppContext) {
+    let window = make_test_view(cx);
+    window
+        .update(cx, |view, window, cx| {
+            let mut value = update("completed");
+            value["summary"] =
+                json!([{"type":"text", "text":"Retained paragraph.\n\n".repeat(40)}]);
+            view.apply_event(event("root", value), "", false, cx);
+            view.toggle_fold(FoldKey::Compaction(0), window, cx);
+            view.list_state.scroll_to_end();
+        })
+        .unwrap();
+    let mut visual = gpui::VisualTestContext::from_window(window.into(), cx);
+    visual.run_until_parked();
+    let footer = visual
+        .debug_bounds("fold-footer-Compaction(0)")
+        .expect("footer painted");
+    let click = gpui::point(footer.left() + gpui::px(12.), footer.center().y);
+    visual.simulate_mouse_move(click, None, Default::default());
+    visual.simulate_mouse_down(click, gpui::MouseButton::Left, Default::default());
+    visual.simulate_mouse_up(click, gpui::MouseButton::Left, Default::default());
+    visual.run_until_parked();
+    window
+        .update(&mut visual, |view, _, _| {
+            assert!(
+                !view
+                    .fold
+                    .is_expanded(&FoldKey::Compaction(0), FoldContext::last(false))
+            );
+            let row = crate::rows::item_row(&view.rows, 0).unwrap();
+            let bounds = view
+                .list_state
+                .bounds_for_item(row)
+                .expect("collapsed card visible");
+            assert!(bounds.bottom() > view.list_state.viewport_bounds().top());
+            assert!(view.list_state.logical_scroll_top().offset_in_item < gpui::px(50.));
+        })
+        .unwrap();
 }

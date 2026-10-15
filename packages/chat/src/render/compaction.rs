@@ -1,10 +1,10 @@
 //! A stable compaction boundary with a locally disclosed retained summary.
 
+use super::card_frame::{CardFrame, CardTone};
 use super::fold_header::{FoldHeader, FoldRow};
 use super::tool::output::{OutputBlockContext, output_block_view};
 use super::*;
 use daruda_acp::{CompactionItem, CompactionStatusView};
-use gpui::{App, Hsla};
 
 fn status_label(status: &CompactionStatusView) -> String {
     match status {
@@ -14,21 +14,6 @@ fn status_label(status: &CompactionStatusView) -> String {
         CompactionStatusView::Cancelled => s::agent_chat::compaction_cancelled(),
         CompactionStatusView::Other(_) => s::agent_chat::compaction_other(),
     }
-}
-
-fn status_color(status: &CompactionStatusView, cx: &App) -> Hsla {
-    if *status != CompactionStatusView::Failed {
-        return theme::agent_chat_fg_muted(cx);
-    }
-    // UI and terminal presets are independent. Resolve the error hue against
-    // the pane itself, and let the caller apply inactive-pane dimming once.
-    let mut color = theme::current(cx).banner_error_text;
-    color.l = if theme::agent_chat_syntax_is_light(cx) {
-        color.l.min(theme::PANE_ERROR_MAX_L_ON_LIGHT)
-    } else {
-        color.l.max(theme::PANE_ERROR_MIN_L_ON_DARK)
-    };
-    color
 }
 
 pub(super) fn source_label(
@@ -58,14 +43,19 @@ pub(super) fn compaction_block(
     item: &CompactionItem,
     key: FoldKey,
     expanded: bool,
-    full_summary: bool,
     source: Option<String>,
     assets: RenderAssets<'_>,
     t: &theme::DarudaTheme,
     dim: f32,
     cx: &mut Context<AgentChatView>,
 ) -> AnyElement {
-    let color = theme::dim_toward_gray(status_color(&item.status, cx), dim);
+    let tone = if item.status == CompactionStatusView::Failed {
+        CardTone::Error
+    } else {
+        CardTone::Standard
+    };
+    let frame = CardFrame::new(tone);
+    let color = frame.status_color(dim, cx);
     let muted = theme::dim_toward_gray(theme::agent_chat_fg_muted(cx), dim);
     let mut details = s::agent_chat::compaction_source(&item.session_id);
     if let CompactionStatusView::Other(value) = &item.status {
@@ -84,126 +74,65 @@ pub(super) fn compaction_block(
         })
         .child(SharedString::from(status_label(&item.status)));
     let has_summary = !item.summary.is_empty();
-    let content =
-        if has_summary {
-            let header = match source.as_ref() {
-                Some(source) => FoldHeader::with_title(
-                    div()
-                        .text_size(px(theme::agent_chat_font_size(cx)))
-                        .text_color(muted)
-                        .child(SharedString::from(source.clone()))
-                        .into_any_element(),
-                ),
-                None => FoldHeader::bare(),
-            }
-            .leading(leading.into_any_element());
-            let output_key = item.output_key();
-            let context = OutputBlockContext {
-                assets,
-                t,
-                dim,
-                links: AgentChatMarkdownLinks::new(cx.weak_entity()),
-            };
-            FoldRow::block(("agent-chat-compaction", ix), key, expanded, header, |cx| {
-                let body = div()
-                    .id(("agent-chat-compaction-summary", ix))
-                    .w_full()
-                    .min_w_0()
-                    .flex()
-                    .flex_col()
-                    .gap(px(theme::GAP_SM))
+    let content = if has_summary {
+        let header = match source.as_ref() {
+            Some(source) => FoldHeader::with_title(
+                div()
                     .text_size(px(theme::agent_chat_font_size(cx)))
                     .text_color(muted)
-                    .children(item.summary.iter().enumerate().map(|(bi, block)| {
-                        output_block_view(&output_key, bi, block, context.clone(), cx)
-                    }));
-                let line_height = theme::agent_chat_font_size(cx) * theme::MD_VIEW_LINE_HEIGHT;
-                let summary = if full_summary {
-                    daruda_ui::scroll_area(
-                        SharedString::from(format!("agent-chat-compaction-summary-{ix}")),
-                        px(line_height * theme::AGENT_CHAT_EMBED_MAX_ROWS as f32),
-                        body,
-                    )
-                    .w_full()
-                    .min_w_0()
-                    .into_any_element()
-                } else {
-                    div()
-                        .id(("agent-chat-compaction-preview", ix))
-                        .debug_selector(|| format!("agent-chat-compaction-preview-{ix}"))
-                        .w_full()
-                        .min_w_0()
-                        .max_h(px(
-                            line_height * theme::AGENT_CHAT_COMPACTION_PREVIEW_ROWS as f32
-                        ))
-                        .overflow_hidden()
-                        .child(body)
-                        .into_any_element()
-                };
-                div()
-                    .w_full()
-                    .min_w_0()
-                    .flex()
-                    .flex_col()
-                    .gap(px(theme::GAP_SM))
-                    .child(summary)
-                    .child(
-                        div().flex().child(
-                            daruda_ui::button_on_surface(
-                                SharedString::from(format!("agent-chat-compaction-full-{ix}")),
-                                if full_summary {
-                                    s::agent_chat::compaction_show_preview()
-                                } else {
-                                    s::agent_chat::compaction_show_full()
-                                },
-                                &theme::PaneSurfaceTokens::agent_chat(cx).dimmed(dim),
-                                cx,
-                            )
-                            .on_click(cx.listener(
-                                move |view, _, _, cx| view.toggle_compaction_summary(ix, cx),
-                            )),
-                        ),
-                    )
-                    .into_any_element()
-            })
-            .render(dim, cx)
-        } else {
-            div()
-                .id(("agent-chat-compaction-passive", ix))
-                .debug_selector(|| format!("agent-chat-compaction-passive-{ix}"))
+                    .child(SharedString::from(source.clone()))
+                    .into_any_element(),
+            ),
+            None => FoldHeader::bare(),
+        }
+        .leading(leading.into_any_element());
+        let output_key = item.output_key();
+        let context = OutputBlockContext {
+            assets,
+            t,
+            dim,
+            links: AgentChatMarkdownLinks::new(cx.weak_entity()),
+        };
+        FoldRow::card(("agent-chat-compaction", ix), key, expanded, header, |cx| {
+            let body = div()
+                .id(("agent-chat-compaction-summary", ix))
+                .debug_selector(move || format!("agent-chat-compaction-summary-{ix}"))
                 .w_full()
                 .min_w_0()
                 .flex()
-                .items_center()
-                .gap(px(theme::GAP_STANDARD))
+                .flex_col()
+                .gap(px(theme::GAP_SM))
                 .text_size(px(theme::agent_chat_font_size(cx)))
                 .text_color(muted)
-                .child(leading)
-                .children(source.map(SharedString::from))
-                .when(item.status == CompactionStatusView::Completed, |row| {
-                    row.child(SharedString::from(s::agent_chat::compaction_no_summary()))
-                })
-                .into_any_element()
-        };
-    div()
-        .w_full()
-        .min_w_0()
+                .children(item.summary.iter().enumerate().map(|(bi, block)| {
+                    output_block_view(&output_key, bi, block, context.clone(), cx)
+                }));
+            body.into_any_element()
+        })
+        .render(dim, cx)
+    } else {
+        div()
+            .id(("agent-chat-compaction-passive", ix))
+            .debug_selector(|| format!("agent-chat-compaction-passive-{ix}"))
+            .w_full()
+            .min_w_0()
+            .flex()
+            .items_center()
+            .gap(px(theme::GAP_STANDARD))
+            .text_size(px(theme::agent_chat_font_size(cx)))
+            .text_color(muted)
+            .child(leading)
+            .children(source.map(SharedString::from))
+            .when(item.status == CompactionStatusView::Completed, |row| {
+                row.child(SharedString::from(s::agent_chat::compaction_no_summary()))
+            })
+            .into_any_element()
+    };
+    frame
+        .render(dim, cx)
         .flex()
         .flex_col()
         .gap(px(theme::GAP_SM))
-        .px(px(theme::AGENT_CHAT_INPUT_INNER_PAD_X))
-        .py(px(theme::AGENT_CHAT_INPUT_INNER_PAD_Y))
-        .rounded(px(theme::AGENT_CHAT_INPUT_RADIUS))
-        .bg(theme::dim_toward_gray(theme::agent_chat_tint(cx), dim))
-        .border_1()
-        .border_color(if item.status == CompactionStatusView::Failed {
-            color
-        } else {
-            theme::dim_toward_gray(theme::agent_chat_border_tint(cx), dim)
-        })
-        .when(item.status == CompactionStatusView::Failed, |card| {
-            card.border_dashed()
-        })
         .child(content)
         .when_some(
             item.error.as_ref().filter(|error| !error.trim().is_empty()),
@@ -262,34 +191,5 @@ mod tests {
     fn unknown_status_is_presented_without_becoming_a_known_lifecycle() {
         let status = CompactionStatusView::Other("_provider/paused".into());
         assert_eq!(status_label(&status), s::agent_chat::compaction_other());
-    }
-
-    #[gpui::test]
-    fn failed_status_is_readable_across_ui_and_terminal_presets(cx: &mut gpui::TestAppContext) {
-        cx.update(|cx| {
-            theme::init_if_missing(cx);
-            for ui in ["daruda_light", "daruda_dark"] {
-                assert!(theme::apply_ui_theme(ui, cx));
-                for preset in daruda_config::theme_presets::PRESETS {
-                    let Some(colors) = daruda_config::theme_presets::colors_for_preset(preset.name)
-                    else {
-                        continue;
-                    };
-                    let bg = colors.background;
-                    theme::set_agent_chat_bg(cx, bg.r, bg.g, bg.b);
-                    let color = status_color(&CompactionStatusView::Failed, cx);
-                    let background = theme::agent_chat_bg(cx).blend(theme::agent_chat_tint(cx));
-                    let ratio = theme::contrast_ratio(color, background);
-                    assert!(ratio >= 4.5, "{ui} / {}: {ratio:.2}:1", preset.name);
-                }
-                for (r, g, b) in [(250, 250, 250), (224, 228, 240)] {
-                    theme::set_agent_chat_bg(cx, r, g, b);
-                    let color = status_color(&CompactionStatusView::Failed, cx);
-                    let background = theme::agent_chat_bg(cx).blend(theme::agent_chat_tint(cx));
-                    let ratio = theme::contrast_ratio(color, background);
-                    assert!(ratio >= 4.5, "{ui} / light pane: {ratio:.2}:1");
-                }
-            }
-        });
     }
 }

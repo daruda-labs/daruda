@@ -7,7 +7,7 @@
 # (the single slot that eats the leftover width), `trailing` (fixed,
 # right-anchored). That grammar lives in exactly one place:
 #
-#   packages/chat/src/render/fold_header.rs
+#   packages/chat/src/render/fold_header/
 #
 # It used to be two free `AnyElement` parameters on `foldable_block`, so each of
 # the seven headers re-derived the geometry and picked its own two of the three
@@ -20,15 +20,15 @@
 # This script enforces the three invariants that make that class of drift
 # unreachable:
 #
-#   (a) `AGENT_CHAT_SUMMARY_GAP` is read only by fold_header.rs (its definition
+#   (a) `AGENT_CHAT_SUMMARY_GAP` is read only by fold_header/ (its definition
 #       in the palette aside). The label→summary gap has one application site.
 #
-#   (b) `summary_preview_line` is called only by fold_header.rs — i.e. only
+#   (b) `summary_preview_line` is called only by fold_header/ — i.e. only
 #       through `SummaryLine::from_markdown`. No header can hand-roll a
 #       first-line extraction that skips the markdown flattening.
 #
 #   (c) No header inside the chat package builds its own disclosure chevron.
-#       `disclosure(` / `Disclosure` belong to fold_header.rs, so a new
+#       `disclosure(` / `Disclosure` belong to fold_header/, so a new
 #       collapsible header cannot bypass the grammar by starting from scratch.
 #       There is no exemption: the plan region's collapse lives on a view flag
 #       rather than a `FoldKey`, and it reaches the same assembly through
@@ -65,10 +65,10 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
 
 PANE_DIR="packages/chat/src"
-OWNER="$PANE_DIR/render/fold_header.rs"
+OWNER="$PANE_DIR/render/fold_header/"
 SCAN_DIRS=(packages/app/src packages/ui/src packages/transcript/src packages/chat/src packages/settings/src)
 
-if [[ ! -f "$OWNER" ]]; then
+if [[ ! -d "$OWNER" ]]; then
     echo "lint-fold-header: $OWNER not found — run from the repo root, or update" >&2
     echo "  this lint if the fold-header assembly moved." >&2
     exit 2
@@ -83,7 +83,7 @@ strip_comments() { sed -E 's#//.*##'; }
 # ── (a) the label→summary gap has one application site ──────────────────────
 HITS_A=$(
     grep -rn 'AGENT_CHAT_SUMMARY_GAP' "${SCAN_DIRS[@]}" \
-        | grep -v "^$OWNER:" \
+        | grep -v "^$OWNER" \
         | grep -v '^packages/ui/src/theme/palette.rs:' \
         | strip_comments \
         | grep 'AGENT_CHAT_SUMMARY_GAP' \
@@ -100,13 +100,13 @@ if [[ -n "$HITS_A" ]]; then
     echo "  the margin — that is exactly how the response bar drifted 6 px." >&2
     FAIL=1
 else
-    echo "✓ AGENT_CHAT_SUMMARY_GAP applied in fold_header.rs only."
+    echo "✓ AGENT_CHAT_SUMMARY_GAP applied in fold_header/ only."
 fi
 
 # ── (b) markdown previews go through SummaryLine::from_markdown ─────────────
 HITS_B=$(
     grep -rn 'summary_preview_line' "${SCAN_DIRS[@]}" \
-        | grep -v "^$OWNER:" \
+        | grep -v "^$OWNER" \
         | grep -v "^$PANE_DIR/agent_chat_helpers.rs:" \
         | grep -v "^$PANE_DIR/agent_chat_helpers/tests.rs:" \
         | strip_comments \
@@ -129,7 +129,7 @@ fi
 # ── (c) no second disclosure scaffold inside the pane ───────────────────────
 HITS_C=$(
     grep -rnE '\bdisclosure\(|\bDisclosure\b' "$PANE_DIR" \
-        | grep -v "^$OWNER:" \
+        | grep -v "^$OWNER" \
         | strip_comments \
         | grep -E '\bdisclosure\(|\bDisclosure\b' \
         || true
@@ -146,7 +146,7 @@ if [[ -n "$HITS_C" ]]; then
     echo "  chevron re-opens the drift this module exists to prevent." >&2
     FAIL=1
 else
-    echo "✓ No disclosure scaffold outside fold_header.rs."
+    echo "✓ No disclosure scaffold outside fold_header/."
 fi
 
 # ── (d) trailing badges are not gated on fold state ─────────────────────────
