@@ -24,6 +24,13 @@ pub struct Committed<M: Machine> {
     pub state_after: M::State,
 }
 
+/// A committed event with the envelope fields its record was written with.
+pub(crate) struct Applied<E> {
+    pub seq: u64,
+    pub at_ms: u64,
+    pub event: E,
+}
+
 /// What a reader that last saw some seq needs to catch up.
 pub enum CatchUp<M: Machine> {
     Records(Vec<Record<M::Event>>),
@@ -169,23 +176,30 @@ impl<M: Machine, B: LogBackend> RunLog<M, B> {
 
     /// Check, number, persist, then apply `event`. In-memory state changes
     /// only after the record is durable; a failed write closes the log.
-    pub fn commit(
+    pub fn commit(&mut self, event: M::Event) -> Result<Committed<M>, CommitError<M::Rejected>> {
+        let applied = self.commit_applied(event)?;
+        Ok(Committed {
+            seq: applied.seq,
+            event: applied.event,
+            state_after: self.state.clone(),
+        })
+    }
+
+    /// [`Self::commit`] without cloning the state, keeping the record's time.
+    pub(crate) fn commit_applied(
         &mut self,
         mut event: M::Event,
-    ) -> Result<Committed<M>, CommitError<M::Rejected>> {
+    ) -> Result<Applied<M::Event>, CommitError<M::Rejected>> {
         if self.closed {
             return Err(CommitError::Closed);
         }
         M::check(&self.state, &event).map_err(CommitError::Rejected)?;
         M::assign(&self.state, &mut event);
-        let line = self.encode(Body::Event { event: &event })?;
+        let at_ms = now_ms();
+        let line = self.encode_at(at_ms, Body::Event { event: &event })?;
         let seq = self.write(&line)?;
         M::apply(&mut self.state, &event);
-        Ok(Committed {
-            seq,
-            event,
-            state_after: self.state.clone(),
-        })
+        Ok(Applied { seq, at_ms, event })
     }
 
     /// Records after `seq`, or the current state if some were compacted away.
@@ -242,6 +256,11 @@ impl<M: Machine, B: LogBackend> RunLog<M, B> {
         self.backend.drop_generation(previous)
     }
 
+    /// Whether a failed write closed the log.
+    pub(crate) fn is_closed(&self) -> bool {
+        self.closed
+    }
+
     pub fn should_compact(&self) -> bool {
         self.log_records > COMPACT_AFTER_RECORDS || self.log_bytes > COMPACT_AFTER_BYTES
     }
@@ -260,10 +279,14 @@ impl<M: Machine, B: LogBackend> RunLog<M, B> {
 
     /// One newline-terminated record carrying the next seq.
     fn encode<E: Serialize>(&self, body: Body<E>) -> io::Result<Vec<u8>> {
+        self.encode_at(now_ms(), body)
+    }
+
+    fn encode_at<E: Serialize>(&self, at_ms: u64, body: Body<E>) -> io::Result<Vec<u8>> {
         let record = Record {
             v: FORMAT_VERSION,
             seq: self.last_seq + 1,
-            at_ms: now_ms(),
+            at_ms,
             body,
         };
         let mut line = serde_json::to_vec(&record)

@@ -18,6 +18,26 @@ seq advances. Nothing else may change machine state.
   every later commit returns `CommitError::Closed`. In-memory state never
   runs ahead of disk.
 
+## Committer
+
+`Committer` owns a `RunLog` on its own thread and handles requests strictly
+in arrival order. Per commit: `RunLog` commit (durable) -> `after_commit`
+hook -> live subscribers -> the proposer's future resolves. So a proposer
+that reads a hook-updated projection after its await sees its own commit,
+and no subscriber sees a record the disk lacks. A rejection emits nothing.
+
+- `subscribe(after_seq)` reads the catch-up and registers the live sender
+  between two commits: no gap, no duplicate. Every record with a greater seq
+  is delivered, `opened` records included (only in catch-ups, since a live
+  committer never opens). Behind a compaction it gets the snapshot instead.
+- After an `Io` error every later proposal is `Closed`; after a panic in the
+  machine or the hook, `Poisoned` (the panicking event may be durable). Both
+  end every live stream; `flush` and later requests answer at once.
+- `flush(deadline)` waits until every request queued before it is answered.
+- Dropping the last handle drains the queue, then joins the thread.
+- Never block on the committer from inside the hook: `subscribe` refuses,
+  `flush` times out.
+
 ## Fresh State Comes Only From Replay
 
 Construct state only through `RunLog::open`. Do not seed a machine's state

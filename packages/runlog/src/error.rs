@@ -12,6 +12,31 @@ pub enum CommitError<R> {
     Io(#[from] io::Error),
     #[error("run log is closed after an earlier write failure")]
     Closed,
+    /// Only from a [`Committer`](crate::Committer): a panic stopped it. The
+    /// proposal that panicked may be durable; every later one gets this too.
+    #[error("run log committer stopped after a panic")]
+    Poisoned,
+}
+
+/// Why [`Committer::subscribe`](crate::Committer::subscribe) has no stream.
+#[derive(Debug, thiserror::Error)]
+pub enum SubscribeError {
+    #[error("run log could not be read: {0}")]
+    Io(#[from] io::Error),
+    /// The log closed after a write failure, or the committer panicked.
+    #[error("run log committer has stopped")]
+    Stopped,
+    /// From the after-commit hook: the committer would wait on itself.
+    #[error("run log subscribe was called on its own committer thread")]
+    OnCommitterThread,
+}
+
+/// Proposals queued before a [`Committer::flush`](crate::Committer::flush)
+/// were still unanswered when its deadline passed.
+#[derive(Debug, thiserror::Error)]
+#[error("run log commits were still queued after {deadline:?}")]
+pub struct FlushTimedOut {
+    pub deadline: std::time::Duration,
 }
 
 #[derive(Debug, thiserror::Error)]

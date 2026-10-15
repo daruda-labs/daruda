@@ -109,7 +109,9 @@ where
                 stopped.resume_at = index;
                 break;
             }
-            Err(CommitError::Closed) => panic!("{fault:?}: closed before an Io error"),
+            Err(CommitError::Closed | CommitError::Poisoned) => {
+                panic!("{fault:?}: closed before an Io error")
+            }
         }
     }
     assert_eq!(

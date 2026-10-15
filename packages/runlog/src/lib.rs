@@ -5,6 +5,7 @@
 //! single-writer lock.
 
 pub mod backend;
+pub mod committer;
 pub mod error;
 pub mod log;
 pub mod machine;
@@ -16,7 +17,8 @@ mod snapshot;
 pub mod testing;
 
 pub use backend::{FileBackend, Generation, LogBackend};
-pub use error::{CommitError, OpenError};
+pub use committer::{AfterCommit, Committer};
+pub use error::{CommitError, FlushTimedOut, OpenError, SubscribeError};
 pub use log::{CatchUp, Committed, RunLog};
 pub use machine::Machine;
 pub use record::{Body, FORMAT_VERSION, Record};

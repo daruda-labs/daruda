@@ -22,6 +22,9 @@ serde = { workspace = true }
 # re-serializing a parsed value can reorder map keys.
 serde_json = { workspace = true, features = ["raw_value"] }
 sha2 = { workspace = true }
+# Commit futures and subscriber streams that any executor, or a `!Send`
+# future under `smol::block_on`, can await.
+smol = { workspace = true }
 thiserror = { workspace = true }
 
 [dev-dependencies]
